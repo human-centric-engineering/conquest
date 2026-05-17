@@ -89,6 +89,15 @@ export interface ExecutionInfo {
   startedAt: string | null;
   completedAt: string | null;
   createdAt: string;
+  /**
+   * Supervisor verdict from the `supervisor` step (in-workflow) or the
+   * retroactive `/executions/:id/review` endpoint. Null when no
+   * supervisor has run on this execution yet.
+   */
+  supervisorVerdict?: string | null;
+  supervisorScore?: number | null;
+  supervisorReport?: unknown;
+  supervisorReviewedAt?: string | null;
 }
 
 /** Same shape as `TraceCostEntry`, but carries the `stepId` link from the API. */
@@ -124,6 +133,44 @@ const STATUS_BADGE: Record<string, 'default' | 'secondary' | 'outline' | 'destru
   paused_for_approval: 'outline',
   pending: 'outline',
 };
+
+// ─── Supervisor verdict badge ───────────────────────────────────────────────
+
+const VERDICT_BADGE: Record<string, 'default' | 'secondary' | 'outline' | 'destructive'> = {
+  pass: 'secondary',
+  concerns: 'outline',
+  fail: 'destructive',
+  inconclusive: 'outline',
+};
+
+const VERDICT_LABEL: Record<string, string> = {
+  pass: 'Pass',
+  concerns: 'Concerns',
+  fail: 'Fail',
+  inconclusive: 'Inconclusive',
+};
+
+function SupervisorVerdictBadge({
+  verdict,
+  score,
+}: {
+  verdict: string | null;
+  score: number | null;
+}): React.ReactElement {
+  if (!verdict) {
+    return <span className="text-muted-foreground text-lg">—</span>;
+  }
+  return (
+    <div className="flex flex-col gap-1">
+      <Badge variant={VERDICT_BADGE[verdict] ?? 'outline'}>
+        {VERDICT_LABEL[verdict] ?? verdict}
+      </Badge>
+      {typeof score === 'number' && (
+        <span className="text-muted-foreground text-xs">score {score.toFixed(2)}</span>
+      )}
+    </div>
+  );
+}
 
 // ─── Collapsible JSON card ──────────────────────────────────────────────────
 
@@ -562,7 +609,7 @@ export function ExecutionDetailView({
       )}
 
       {/* Summary section */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
         <Card>
           <CardHeader className="pb-1">
             <CardTitle className="text-xs font-medium">
@@ -675,6 +722,29 @@ export function ExecutionDetailView({
           </CardHeader>
           <CardContent>
             <span className="text-lg font-bold">{duration ?? '—'}</span>
+          </CardContent>
+        </Card>
+        <Card data-testid="supervisor-verdict-card">
+          <CardHeader className="pb-1">
+            <CardTitle className="text-xs font-medium">
+              Supervisor{' '}
+              <FieldHelp title="Neutral supervisor verdict">
+                An independent judge model audits this execution&apos;s trace and produces an
+                honest, evidence-cited verdict — designed to catch problems the workflow&apos;s own
+                optimistic narrative would miss. <strong>Pass</strong>: every assertion is grounded
+                in the trace. <strong>Concerns</strong>: at least one weakness needs review.{' '}
+                <strong>Fail</strong>: critical issue — investigate before relying on the output.{' '}
+                <strong>Inconclusive</strong>: the supervisor ran but its output couldn&apos;t be
+                parsed (raw response preserved in <code>supervisorReport.parseFailure</code>). Null
+                means no supervisor has run on this execution yet.
+              </FieldHelp>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <SupervisorVerdictBadge
+              verdict={execution.supervisorVerdict ?? null}
+              score={execution.supervisorScore ?? null}
+            />
           </CardContent>
         </Card>
       </div>

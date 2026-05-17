@@ -41,7 +41,7 @@ import { ExecutorError } from '@/lib/orchestration/engine/errors';
 import { runLlmCall } from '@/lib/orchestration/engine/llm-runner';
 import { registerStepType } from '@/lib/orchestration/engine/executor-registry';
 import { JUDGE_MODEL } from '@/lib/orchestration/evaluations/judge-model';
-import { logger as rootLogger } from '@/lib/logging';
+import { logger } from '@/lib/logging';
 
 // ─── Truncation strategy ────────────────────────────────────────────────────
 // Phase 6 extracts this to `lib/orchestration/trace/truncate.ts` and shares it
@@ -438,8 +438,6 @@ function validateCitations(
 
 // ─── Executor ───────────────────────────────────────────────────────────────
 
-const supervisorLogger = rootLogger.child({ component: 'supervisor-executor' });
-
 export async function executeSupervisor(
   step: WorkflowStep,
   ctx: Readonly<ExecutionContext>
@@ -449,7 +447,7 @@ export async function executeSupervisor(
   // Run-time toggle. Default behaviour when key is absent: run.
   const respectOptOut = config.respectRuntimeOptOut ?? true;
   if (respectOptOut && ctx.inputData.__runSupervisor === false) {
-    supervisorLogger.info('supervisor skipped — __runSupervisor=false', {
+    logger.info('supervisor skipped — __runSupervisor=false', {
       executionId: ctx.executionId,
       stepId: step.id,
     });
@@ -515,7 +513,7 @@ export async function executeSupervisor(
     rawForFailure = first.content;
     parsed = tryParse(first.content);
     if (!parsed) {
-      supervisorLogger.warn('supervisor: first attempt malformed, retrying at temp=0', {
+      logger.warn('supervisor: first attempt malformed, retrying at temp=0', {
         executionId: ctx.executionId,
         stepId: step.id,
       });
@@ -559,6 +557,7 @@ export async function executeSupervisor(
       output: report,
       tokensUsed: totalTokens,
       costUsd: totalCost,
+      contextPatch: buildVerdictContextPatch(report),
     };
   }
 
@@ -585,6 +584,22 @@ export async function executeSupervisor(
     output: finalReport,
     tokensUsed: totalTokens,
     costUsd: totalCost,
+    contextPatch: buildVerdictContextPatch(finalReport),
+  };
+}
+
+/**
+ * Build the column-patch object lifted into the next checkpoint /
+ * finalize write. Kept here (not in the engine) so the engine doesn't
+ * grow knowledge of supervisor semantics — the engine's allowlist is
+ * the gate; the executor decides what to publish.
+ */
+function buildVerdictContextPatch(report: SupervisorReport): Record<string, unknown> {
+  return {
+    supervisorVerdict: report.verdict,
+    supervisorScore: report.score,
+    supervisorReport: report as unknown as Record<string, unknown>,
+    supervisorReviewedAt: new Date(),
   };
 }
 

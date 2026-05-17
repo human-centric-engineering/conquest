@@ -20,6 +20,7 @@ import {
   Bot,
   BrainCircuit,
   ClipboardCheck,
+  Eye,
   GitBranch,
   GitFork,
   Globe,
@@ -276,6 +277,31 @@ export const STEP_REGISTRY: readonly StepRegistryEntry[] = [
       timeoutMs: 120000,
     },
     estimatedDuration: '~30-120s',
+  },
+  {
+    type: 'supervisor',
+    label: 'Supervisor',
+    description:
+      'Independent post-hoc audit of the execution. A judge model reads the trace and emits an evidence-cited verdict (pass / concerns / fail).',
+    category: 'decision',
+    icon: Eye,
+    inputs: 1,
+    outputs: 1,
+    // Evaluation pattern. Same family as `evaluate`, but cross-step audit
+    // rather than single-output scoring.
+    relatedPatterns: [19],
+    defaultConfig: {
+      assessmentCriteria: '',
+      requireEvidenceCitations: true,
+      minWeaknesses: 1,
+      useJudgeModel: true,
+      temperature: 0.2,
+      failOnVerdict: 'never',
+      includeStepOutputs: 'auto',
+      defaultEnabled: true,
+      respectRuntimeOptOut: true,
+    },
+    estimatedDuration: '~5-15s',
   },
 ] as const;
 

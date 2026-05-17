@@ -571,6 +571,22 @@ export interface StepResult {
    * wins (failure-termination is the more specific signal).
    */
   failWorkflow?: string;
+  /**
+   * Generic mechanism for an executor to request that specific columns
+   * on the backing `AiWorkflowExecution` row be updated alongside the
+   * normal trace / token / cost write. The engine merges the patch into
+   * the data block of the next `checkpoint()` and `finalize()` Prisma
+   * update so writes stay lease-guarded.
+   *
+   * The supervisor step is the first user — it populates
+   * `{ supervisorVerdict, supervisorScore, supervisorReport,
+   *    supervisorReviewedAt }` so the verdict is queryable without
+   * parsing the trace.
+   *
+   * Allowed keys must correspond to columns the engine knows about; the
+   * engine filters unknown keys defensively before writing.
+   */
+  contextPatch?: Record<string, unknown>;
 }
 
 /** Minimal summary of a workflow execution row, for list views. */

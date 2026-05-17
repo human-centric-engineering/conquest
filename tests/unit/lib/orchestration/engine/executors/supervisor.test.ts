@@ -521,6 +521,45 @@ describe('executeSupervisor (end-to-end)', () => {
     });
   });
 
+  it('emits contextPatch with all four supervisor columns on the happy path', async () => {
+    vi.mocked(runLlmCall).mockResolvedValueOnce({
+      content: JSON.stringify(validReport()),
+      tokensUsed: 100,
+      costUsd: 0.005,
+      model: 'judge-model-id',
+    });
+    const ctx = makeCtx({ stepOutputs: { s1: 'applied 5 changes', s2: 'created new model' } });
+    const result = await executeSupervisor(step({ assessmentCriteria: 'r' }), ctx);
+    expect(result.contextPatch).toBeDefined();
+    expect(result.contextPatch).toMatchObject({
+      supervisorVerdict: 'pass',
+      supervisorScore: expect.any(Number),
+      supervisorReport: expect.any(Object),
+      supervisorReviewedAt: expect.any(Date),
+    });
+  });
+
+  it('emits contextPatch even when the verdict is inconclusive (parse failure)', async () => {
+    vi.mocked(runLlmCall).mockResolvedValue({
+      content: 'still not JSON',
+      tokensUsed: 50,
+      costUsd: 0.001,
+      model: 'judge-model-id',
+    });
+    const ctx = makeCtx({ stepOutputs: { s1: 'output' } });
+    const result = await executeSupervisor(step({ assessmentCriteria: 'r' }), ctx);
+    expect(result.contextPatch).toMatchObject({
+      supervisorVerdict: 'inconclusive',
+      supervisorScore: 0,
+    });
+  });
+
+  it('does NOT emit contextPatch when the step is run-time-skipped', async () => {
+    const ctx = makeCtx({ inputData: { __runSupervisor: false } });
+    const result = await executeSupervisor(step({ assessmentCriteria: 'r' }), ctx);
+    expect(result.contextPatch).toBeUndefined();
+  });
+
   it('explicit modelOverride beats JUDGE_MODEL', async () => {
     vi.mocked(runLlmCall).mockResolvedValueOnce({
       content: JSON.stringify(validReport()),

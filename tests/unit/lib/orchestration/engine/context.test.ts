@@ -92,6 +92,44 @@ describe('context helpers', () => {
     expect(snap.totalCostUsd).toBe(0);
   });
 
+  it('mergeStepResult accumulates contextPatch keys across steps', () => {
+    const ctx = makeCtx();
+    expect(ctx.pendingContextPatch).toBeUndefined();
+    mergeStepResult(ctx, 'step1', {
+      output: 'x',
+      tokensUsed: 0,
+      costUsd: 0,
+      contextPatch: { supervisorVerdict: 'pass', supervisorScore: 0.9 },
+    });
+    expect(ctx.pendingContextPatch).toEqual({
+      supervisorVerdict: 'pass',
+      supervisorScore: 0.9,
+    });
+    // Second step overwrites the same key — last writer wins.
+    mergeStepResult(ctx, 'step2', {
+      output: 'y',
+      tokensUsed: 0,
+      costUsd: 0,
+      contextPatch: { supervisorVerdict: 'concerns' },
+    });
+    expect(ctx.pendingContextPatch).toEqual({
+      supervisorVerdict: 'concerns',
+      supervisorScore: 0.9,
+    });
+  });
+
+  it('mergeStepResult leaves pendingContextPatch untouched when result has no patch', () => {
+    const ctx = makeCtx();
+    mergeStepResult(ctx, 'step1', {
+      output: 'x',
+      tokensUsed: 0,
+      costUsd: 0,
+      contextPatch: { supervisorVerdict: 'pass' },
+    });
+    mergeStepResult(ctx, 'step2', { output: 'y', tokensUsed: 0, costUsd: 0 });
+    expect(ctx.pendingContextPatch).toEqual({ supervisorVerdict: 'pass' });
+  });
+
   it('createContext with budgetLimitUsd: sets budgetLimitUsd on context', () => {
     // Arrange & Act
     const ctx = createContext({
