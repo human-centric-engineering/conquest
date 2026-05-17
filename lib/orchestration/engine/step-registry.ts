@@ -21,6 +21,7 @@ import {
   BrainCircuit,
   ClipboardCheck,
   Eye,
+  FileText,
   GitBranch,
   GitFork,
   Globe,
@@ -302,6 +303,24 @@ export const STEP_REGISTRY: readonly StepRegistryEntry[] = [
       respectRuntimeOptOut: true,
     },
     estimatedDuration: '~5-15s',
+  },
+  {
+    type: 'report',
+    label: 'Report',
+    description:
+      'Deterministic Markdown render of the trace — no LLM. Output feeds into downstream notification or download.',
+    category: 'output',
+    icon: FileText,
+    inputs: 1,
+    outputs: 1,
+    relatedPatterns: [],
+    defaultConfig: {
+      format: 'markdown',
+      includeStepOutputs: 'auto',
+      defaultEnabled: true,
+      respectRuntimeOptOut: true,
+    },
+    estimatedDuration: '<1s',
   },
 ] as const;
 

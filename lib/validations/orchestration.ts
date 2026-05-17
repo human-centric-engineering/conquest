@@ -2570,6 +2570,24 @@ export const supervisorConfigSchema = stepErrorConfigSchema.extend({
   respectRuntimeOptOut: z.boolean().optional(),
 });
 
+/**
+ * `report` — deterministic human-readable Markdown render of the trace.
+ *
+ * No LLM. Reads the trace and emits a structured Markdown document
+ * suitable for inclusion in a notification email or for download. The
+ * companion download endpoint (`GET /executions/:id/report.md`) uses
+ * the same renderer over the persisted execution row.
+ */
+export const reportConfigSchema = stepErrorConfigSchema.extend({
+  /** Reserved for future formats; only 'markdown' is supported today. */
+  format: z.literal('markdown').optional(),
+  includeStepOutputs: z.enum(['auto', 'all', 'terminal-only']).optional(),
+  /** Pre-checked state of the "Generate execution report" run-dialog checkbox. */
+  defaultEnabled: z.boolean().optional(),
+  /** When true (default), `inputData.__generateReport === false` skips the step. */
+  respectRuntimeOptOut: z.boolean().optional(),
+});
+
 /** Response transformation config for external-call steps. */
 export const responseTransformSchema = z.object({
   /** Transformation type. `jmespath` for structured extraction. `template` for string templates. */

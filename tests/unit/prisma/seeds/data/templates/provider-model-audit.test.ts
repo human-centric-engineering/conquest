@@ -28,9 +28,15 @@ describe('provider-model-audit template — supervisor wiring', () => {
     expect(() => supervisorConfigSchema.parse(step.config)).not.toThrow();
   });
 
-  it('supervisor step is positioned between compile_report and notify_complete', () => {
+  it('supervisor and report steps flow into notify_complete', () => {
+    // compile_report → supervisor_review → report_render → notify_complete.
+    // The report step renders the trace up to (but not including) itself
+    // — placing it after supervisor_review means the report can include
+    // the supervisor verdict block.
     expect(byId['compile_report'].nextSteps).toEqual([{ targetStepId: 'supervisor_review' }]);
-    expect(byId['supervisor_review'].nextSteps).toEqual([{ targetStepId: 'notify_complete' }]);
+    expect(byId['supervisor_review'].nextSteps).toEqual([{ targetStepId: 'report_render' }]);
+    expect(byId['report_render'].nextSteps).toEqual([{ targetStepId: 'notify_complete' }]);
+    expect(byId['report_render'].type).toBe('report');
   });
 
   it('supervisor step opts in to errorStrategy=skip so judge-model failures cannot flip status', () => {

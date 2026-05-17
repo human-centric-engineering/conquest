@@ -563,6 +563,44 @@ describe('AuditModelsDialog', () => {
       expect(body.inputData.__runSupervisor).toBe(true);
     });
 
+    it('defaults __generateReport=true in the submitted inputData', async () => {
+      const { apiClient } = await import('@/lib/api/client');
+      vi.mocked(apiClient.get).mockResolvedValue([
+        { id: 'wf-123', slug: 'tpl-provider-model-audit' },
+      ]);
+      const user = userEvent.setup();
+      render(<AuditModelsDialog {...DEFAULT_PROPS} />);
+      await user.click(screen.getByRole('button', { name: /audit 2 models/i }));
+      await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      const body = JSON.parse(init.body as string) as {
+        inputData: { __generateReport: boolean };
+      };
+      expect(body.inputData.__generateReport).toBe(true);
+    });
+
+    it('unchecking "Generate execution report" sets __generateReport=false on submit', async () => {
+      const { apiClient } = await import('@/lib/api/client');
+      vi.mocked(apiClient.get).mockResolvedValue([
+        { id: 'wf-123', slug: 'tpl-provider-model-audit' },
+      ]);
+      const user = userEvent.setup();
+      render(<AuditModelsDialog {...DEFAULT_PROPS} />);
+      const reportCheckbox = screen.getByRole('checkbox', {
+        name: /generate execution report/i,
+      });
+      expect(reportCheckbox).toBeChecked();
+      await user.click(reportCheckbox);
+      expect(reportCheckbox).not.toBeChecked();
+      await user.click(screen.getByRole('button', { name: /audit 2 models/i }));
+      await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      const body = JSON.parse(init.body as string) as {
+        inputData: { __generateReport: boolean };
+      };
+      expect(body.inputData.__generateReport).toBe(false);
+    });
+
     it('unchecking "Run neutral supervisor review" sets __runSupervisor=false on submit', async () => {
       const { apiClient } = await import('@/lib/api/client');
       vi.mocked(apiClient.get).mockResolvedValue([

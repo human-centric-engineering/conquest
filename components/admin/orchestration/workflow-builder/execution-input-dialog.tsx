@@ -52,6 +52,14 @@ export interface ExecutionInputDialogProps {
    */
   hasSupervisorStep?: boolean;
   supervisorDefaultEnabled?: boolean;
+  /**
+   * Parallel to the supervisor toggle — when the DAG contains a
+   * `report` step, the dialog renders a "Generate execution report"
+   * checkbox. Default state from the step's `defaultEnabled` config.
+   * On submit, the dialog injects `__generateReport: <boolean>`.
+   */
+  hasReportStep?: boolean;
+  reportDefaultEnabled?: boolean;
 }
 
 export function ExecutionInputDialog({
@@ -61,6 +69,8 @@ export function ExecutionInputDialog({
   workflowId,
   hasSupervisorStep,
   supervisorDefaultEnabled,
+  hasReportStep,
+  reportDefaultEnabled,
 }: ExecutionInputDialogProps) {
   const [raw, setRaw] = useState('{\n  "query": ""\n}');
   const [budget, setBudget] = useState('');
@@ -68,6 +78,7 @@ export function ExecutionInputDialog({
   const [dryRunning, setDryRunning] = useState(false);
   const [dryRunResult, setDryRunResult] = useState<DryRunResult | null>(null);
   const [runSupervisor, setRunSupervisor] = useState<boolean>(supervisorDefaultEnabled ?? true);
+  const [generateReport, setGenerateReport] = useState<boolean>(reportDefaultEnabled ?? true);
 
   function parseInput(): { inputData: Record<string, unknown>; budgetLimitUsd?: number } | null {
     let parsed: Record<string, unknown>;
@@ -99,6 +110,9 @@ export function ExecutionInputDialog({
     // dead weight in the inputData snapshot.
     if (hasSupervisorStep) {
       parsed.__runSupervisor = runSupervisor;
+    }
+    if (hasReportStep) {
+      parsed.__generateReport = generateReport;
     }
 
     setError(null);
@@ -200,6 +214,34 @@ export function ExecutionInputDialog({
                 </label>
                 <p className="text-muted-foreground mt-0.5 text-xs">
                   Independent post-hoc audit of execution quality.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {hasReportStep && (
+            <div className="bg-muted/30 flex items-start gap-3 rounded-md border px-3 py-2">
+              <Checkbox
+                id="execution-generate-report"
+                checked={generateReport}
+                onCheckedChange={(next) => setGenerateReport(next === true)}
+                className="mt-0.5"
+              />
+              <div className="flex-1">
+                <label
+                  htmlFor="execution-generate-report"
+                  className="flex cursor-pointer items-center gap-2 text-sm font-medium"
+                >
+                  Generate execution report
+                  <FieldHelp title="Execution report">
+                    This workflow includes a <code>report</code> step — a deterministic Markdown
+                    render of every step in the execution. No LLM cost. The download button on the
+                    execution detail page works regardless. Sets{' '}
+                    <code>inputData.__generateReport</code> on the execution.
+                  </FieldHelp>
+                </label>
+                <p className="text-muted-foreground mt-0.5 text-xs">
+                  Step-by-step Markdown report. No LLM cost.
                 </p>
               </div>
             </div>

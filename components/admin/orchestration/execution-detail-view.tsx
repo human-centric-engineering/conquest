@@ -17,6 +17,7 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
+  Download,
   Eye,
   Loader2,
   RotateCcw,
@@ -636,6 +637,22 @@ export function ExecutionDetailView({
             >
               <Eye className="mr-2 h-4 w-4" />
               {execution.supervisorVerdict ? 'Re-review' : 'Review this execution'}
+            </Button>
+          )}
+          {canReview && (
+            <Button
+              size="sm"
+              variant="outline"
+              asChild
+              data-testid="execution-download-report-button"
+            >
+              <a
+                href={API.ADMIN.ORCHESTRATION.executionReportMarkdown(execution.id)}
+                download={`execution-${execution.id}.md`}
+              >
+                <Download className="mr-2 h-4 w-4" />
+                Download report
+              </a>
             </Button>
           )}
         </div>

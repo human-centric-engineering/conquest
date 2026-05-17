@@ -883,10 +883,35 @@ For each rejection in your verdict, quote the exact array entry the proposal fai
           errorStrategy: 'skip',
           expectedSkip: false,
         },
+        nextSteps: [{ targetStepId: 'report_render' }],
+      },
+
+      // ─── Step 15: report (deterministic Markdown render) ──────────
+      // No LLM. Walks the trace and produces a structured Markdown
+      // report — header, supervisor verdict block (when present),
+      // per-step timeline with inputs/outputs/duration/cost, footer.
+      // Output lives on `report_render.output.markdown` so the
+      // downstream notification interpolates it directly.
+      //
+      // Run-time toggle: when inputData.__generateReport is false,
+      // this step short-circuits with expectedSkip. The notification
+      // template handles the missing value gracefully (the markdown
+      // section reads as empty).
+      {
+        id: 'report_render',
+        name: 'Render human-readable report',
+        type: 'report',
+        config: {
+          format: 'markdown',
+          includeStepOutputs: 'auto',
+          defaultEnabled: true,
+          respectRuntimeOptOut: true,
+          errorStrategy: 'skip',
+        },
         nextSteps: [{ targetStepId: 'notify_complete' }],
       },
 
-      // ─── Step 15: send_notification ───────────────────────────────
+      // ─── Step 16: send_notification ───────────────────────────────
       // Tests: Email/webhook notification output, bodyTemplate
       // interpolation with step references.
       // NOTE: `to` is a placeholder — admins should edit this workflow
@@ -912,7 +937,7 @@ For each rejection in your verdict, quote the exact array entry the proposal fai
           to: 'admin@example.com',
           subject: 'Provider Model Audit Complete',
           bodyTemplate:
-            'The provider model audit has completed.\n\n## NEUTRAL SUPERVISOR ASSESSMENT\n\nVerdict: {{supervisor_review.output.verdict}} (score {{supervisor_review.output.score}})\n\n{{supervisor_review.output.summary}}\n\n### Top weaknesses\n{{supervisor_review.output.weaknesses}}\n\n### Areas the supervisor could not verify\n{{supervisor_review.output.unverifiedAreas}}\n\n---\n\n## REPORT\n\n{{compile_report.output}}\n\n---\nView the full execution trace in the admin dashboard.',
+            'The provider model audit has completed.\n\n## NEUTRAL SUPERVISOR ASSESSMENT\n\nVerdict: {{supervisor_review.output.verdict}} (score {{supervisor_review.output.score}})\n\n{{supervisor_review.output.summary}}\n\n### Top weaknesses\n{{supervisor_review.output.weaknesses}}\n\n### Areas the supervisor could not verify\n{{supervisor_review.output.unverifiedAreas}}\n\n---\n\n## NARRATIVE REPORT (agent-authored)\n\n{{compile_report.output}}\n\n---\n\n## STRUCTURED REPORT (deterministic step-by-step)\n\n{{report_render.output.markdown}}\n\n---\nView the full execution trace in the admin dashboard.',
           errorStrategy: 'skip',
         },
         nextSteps: [],

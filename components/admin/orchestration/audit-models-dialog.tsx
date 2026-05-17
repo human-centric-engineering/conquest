@@ -158,6 +158,10 @@ export function AuditModelsDialog({
   // its own work. Operators who want to skip the judge-model bill (e.g.
   // tight-budget dev environments) can uncheck.
   const [runSupervisor, setRunSupervisor] = useState<boolean>(true);
+  // Default ON — the report adds context to the notification email
+  // without an LLM cost. Operators on tight notification-body budgets
+  // (long emails) can uncheck.
+  const [generateReport, setGenerateReport] = useState<boolean>(true);
 
   // Post-submission state — when set, the dialog body swaps from the
   // model-picker form to the live progress panel. Persists across the
@@ -261,6 +265,7 @@ export function AuditModelsDialog({
           schemaCompatible: m.schemaCompatible,
         })),
         __runSupervisor: runSupervisor,
+        __generateReport: generateReport,
       };
 
       // Execute the workflow. The endpoint returns SSE — not a JSON
@@ -294,7 +299,7 @@ export function AuditModelsDialog({
       setError(err instanceof Error ? err.message : 'Failed to start audit');
       setSubmitting(false);
     }
-  }, [selected, models, runSupervisor, setInFlight]);
+  }, [selected, models, runSupervisor, generateReport, setInFlight]);
 
   const allFilteredSelected = filtered.every((m) => selected.has(m.id));
 
@@ -498,6 +503,36 @@ export function AuditModelsDialog({
                   </label>
                   <p className="text-muted-foreground mt-0.5 text-xs">
                     Independent post-hoc assessment of audit quality. Adds ~one LLM call.
+                  </p>
+                </div>
+              </div>
+
+              {/* Run-time report toggle — opts the `report_render` step
+                  in/out per-execution. Default ON (no LLM cost; just
+                  formatting). When unchecked, inputData.__generateReport
+                  is set to false and the executor short-circuits. */}
+              <div className="bg-muted/30 flex items-start gap-3 rounded-md border px-3 py-2">
+                <Checkbox
+                  id="audit-generate-report"
+                  checked={generateReport}
+                  onCheckedChange={(next) => setGenerateReport(next === true)}
+                  className="mt-0.5"
+                />
+                <div className="flex-1">
+                  <label
+                    htmlFor="audit-generate-report"
+                    className="flex cursor-pointer items-center gap-2 text-sm font-medium"
+                  >
+                    Generate execution report
+                    <FieldHelp title="Execution report">
+                      Generates a deterministic Markdown report of every step in the audit — inputs,
+                      outputs, durations, costs — and attaches it to the notification email. No LLM
+                      cost (the trace already has all the data; this just renders it). The download
+                      button on the execution detail page works regardless of this toggle.
+                    </FieldHelp>
+                  </label>
+                  <p className="text-muted-foreground mt-0.5 text-xs">
+                    Step-by-step Markdown report. No LLM cost — purely formatting.
                   </p>
                 </div>
               </div>

@@ -194,6 +194,15 @@ function WorkflowBuilderInner({
     return { hasSupervisorStep: true, supervisorDefaultEnabled: def };
   }, [nodes]);
 
+  // Parallel toggle plumbing for the `report` step.
+  const reportInfo = useMemo(() => {
+    const node = nodes.find((n) => n.data.type === 'report');
+    if (!node) return { hasReportStep: false, reportDefaultEnabled: true };
+    const config = node.data.config as Record<string, unknown> | undefined;
+    const def = typeof config?.defaultEnabled === 'boolean' ? config.defaultEnabled : true;
+    return { hasReportStep: true, reportDefaultEnabled: def };
+  }, [nodes]);
+
   // Live validation state.
   const [validationErrors, setValidationErrors] = useState<CombinedError[]>([]);
   const summaryPanelRef = useRef<HTMLDivElement | null>(null);
@@ -780,6 +789,8 @@ function WorkflowBuilderInner({
         workflowId={workflow?.id ?? ''}
         hasSupervisorStep={supervisorInfo.hasSupervisorStep}
         supervisorDefaultEnabled={supervisorInfo.supervisorDefaultEnabled}
+        hasReportStep={reportInfo.hasReportStep}
+        reportDefaultEnabled={reportInfo.reportDefaultEnabled}
       />
 
       <WorkflowDetailsDialog
