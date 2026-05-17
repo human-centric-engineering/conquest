@@ -6,7 +6,7 @@
  * Lets admins select a subset of provider models and trigger the
  * Provider Model Audit workflow. This is both a genuinely useful
  * feature (keeps the model registry accurate) and a framework
- * reference implementation that exercises 10 of 15 orchestration
+ * reference implementation that exercises 13 of 17 orchestration
  * step types end-to-end.
  *
  * On submit, creates a workflow execution and swaps the dialog body
@@ -365,8 +365,8 @@ export function AuditModelsDialog({
               title="Framework Reference Implementation"
               contentClassName="w-96 max-h-80 overflow-y-auto"
             >
-              This dialog triggers the Provider Model Audit workflow — a 13-step DAG that exercises
-              10 of 15 orchestration step types. It tests prompt chaining, routing, parallelisation,
+              This dialog triggers the Provider Model Audit workflow — a 19-step DAG that exercises
+              13 of 17 orchestration step types. It tests prompt chaining, routing, parallelisation,
               reflection, tool use, guardrails, evaluation, human-in-the-loop approval, RAG
               retrieval, and notifications. Selected model IDs become the workflow&apos;s{' '}
               <code>inputData</code>, testing the engine&apos;s input parameter passing and template

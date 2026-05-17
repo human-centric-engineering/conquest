@@ -33,6 +33,9 @@ export function executeReport(
 ): Promise<StepResult> {
   const config = reportConfigSchema.parse(step.config);
 
+  // Strict `=== false` is intentional — see the matching note in
+  // supervisor.ts. Only the literal boolean false opts out; non-dialog
+  // callers passing the wrong type get the report (safe-by-default).
   const respectOptOut = config.respectRuntimeOptOut ?? true;
   if (respectOptOut && ctx.inputData.__generateReport === false) {
     logger.info('report skipped — __generateReport=false', {
@@ -48,11 +51,24 @@ export function executeReport(
     });
   }
 
-  // Synthesise a `RenderExecutionInfo` from the engine context. The
-  // executor doesn't have access to the full DB row (the engine
-  // doesn't pass it through), so a few fields are unset and the
-  // renderer's defaults take over. The on-demand download endpoint
-  // (Phase 6 GET handler) passes a richer object.
+  // Synthesise a `RenderExecutionInfo` from the engine context.
+  //
+  // **Intentional asymmetry vs the download endpoint**: the executor
+  // doesn't have access to the persisted DB row, so workflowName,
+  // startedAt/completedAt, errorMessage, and crucially the four
+  // `supervisor*` columns are not available here. The rendered Markdown
+  // therefore omits the supervisor verdict block at the top.
+  //
+  // If a workflow places `supervisor` upstream of `report`, the
+  // supervisor's *output* still shows up as a step entry in the timeline
+  // (because it's in `ctx.stepOutputs`), but the headed verdict-summary
+  // block belongs only to the download endpoint
+  // (`GET /executions/:id/report.md`), which reads the persisted
+  // `execution.supervisorReport`. Templates that want the verdict block
+  // inline in their notification should interpolate
+  // `{{supervisor_review.output}}` directly into the notification
+  // bodyTemplate (alongside `{{report_render.output.markdown}}`), as the
+  // provider-model-audit template does.
   const renderInfo = {
     id: ctx.executionId,
     workflowId: ctx.workflowId,

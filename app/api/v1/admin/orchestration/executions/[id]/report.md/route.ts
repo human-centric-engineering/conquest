@@ -17,7 +17,7 @@
 
 import { withAdminAuth } from '@/lib/auth/guards';
 import { prisma } from '@/lib/db/client';
-import { NotFoundError, ValidationError } from '@/lib/api/errors';
+import { ConflictError, NotFoundError, ValidationError } from '@/lib/api/errors';
 import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 import { getClientIP } from '@/lib/security/ip';
 import { cuidSchema } from '@/lib/validations/common';
@@ -26,7 +26,19 @@ import {
   renderExecutionMarkdown,
   type RenderExecutionInfo,
 } from '@/lib/orchestration/trace/render-markdown';
-import type { SupervisorReport } from '@/types/orchestration';
+import { WorkflowStatus, type SupervisorReport } from '@/types/orchestration';
+
+/**
+ * Terminal statuses on which a report can safely be rendered. A running
+ * or paused-for-approval execution would produce a half-finished
+ * Markdown that looks complete but reflects only the steps so far —
+ * worse than no report. Block with 409.
+ */
+const TERMINAL_STATUSES = new Set<string>([
+  WorkflowStatus.COMPLETED,
+  WorkflowStatus.FAILED,
+  WorkflowStatus.CANCELLED,
+]);
 
 export const GET = withAdminAuth<{ id: string }>(async (request, session, { params }) => {
   const clientIP = getClientIP(request);
@@ -46,6 +58,12 @@ export const GET = withAdminAuth<{ id: string }>(async (request, session, { para
   });
   if (!execution || execution.userId !== session.user.id) {
     throw new NotFoundError(`Execution ${id} not found`);
+  }
+
+  if (!TERMINAL_STATUSES.has(execution.status)) {
+    throw new ConflictError(
+      `Execution is ${execution.status}. Reports are only generated for terminal executions (completed, failed, or cancelled).`
+    );
   }
 
   const trace = executionTraceSchema.parse(execution.executionTrace);

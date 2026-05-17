@@ -187,6 +187,47 @@ describe('GET /api/v1/admin/orchestration/executions/:id/report.md', () => {
     expect(res.headers.get('cache-control')).toBe('no-store');
   });
 
+  it('returns 409 when the execution is still running (non-terminal)', async () => {
+    vi.mocked(prisma.aiWorkflowExecution.findUnique).mockResolvedValue({
+      ...happyExecution(),
+      status: 'running',
+    } as never);
+    const res = await GET(makeRequest(), makeContext());
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toContain('terminal');
+  });
+
+  it('returns 409 when the execution is paused_for_approval', async () => {
+    vi.mocked(prisma.aiWorkflowExecution.findUnique).mockResolvedValue({
+      ...happyExecution(),
+      status: 'paused_for_approval',
+    } as never);
+    const res = await GET(makeRequest(), makeContext());
+    expect(res.status).toBe(409);
+  });
+
+  it('returns 200 on a failed execution (failed is terminal)', async () => {
+    vi.mocked(prisma.aiWorkflowExecution.findUnique).mockResolvedValue({
+      ...happyExecution(),
+      status: 'failed',
+      errorMessage: 'something broke',
+    } as never);
+    const res = await GET(makeRequest(), makeContext());
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('something broke');
+  });
+
+  it('returns 200 on a cancelled execution (cancelled is terminal)', async () => {
+    vi.mocked(prisma.aiWorkflowExecution.findUnique).mockResolvedValue({
+      ...happyExecution(),
+      status: 'cancelled',
+    } as never);
+    const res = await GET(makeRequest(), makeContext());
+    expect(res.status).toBe(200);
+  });
+
   it('returns 429 when the admin rate limiter denies the request', async () => {
     const { adminLimiter } = await import('@/lib/security/rate-limit');
     vi.mocked(adminLimiter.check).mockReturnValueOnce({ success: false } as never);
@@ -194,12 +235,13 @@ describe('GET /api/v1/admin/orchestration/executions/:id/report.md', () => {
     expect(res.status).toBe(429);
   });
 
-  it('handles executions whose startedAt/completedAt are null', async () => {
+  it('handles executions whose startedAt/completedAt are null (cancelled before start)', async () => {
     // Exercises the optional-chain `.toISOString() ?? null` branches in
-    // the renderInfo builder. A pending execution row has these unset.
+    // the renderInfo builder. A workflow that was cancelled immediately
+    // (terminal but never started) has these unset.
     vi.mocked(prisma.aiWorkflowExecution.findUnique).mockResolvedValue({
       ...happyExecution(),
-      status: 'pending',
+      status: 'cancelled',
       startedAt: null,
       completedAt: null,
     } as never);

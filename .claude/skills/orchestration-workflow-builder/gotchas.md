@@ -208,11 +208,34 @@ The supervisor is **advisory by default** (`failOnVerdict: 'never'`) — it does
 
 Provider-model-audit places the supervisor _after_ its capability dispatches (`apply_changes`, `add_new_models`, `deactivate_models`) for exactly this reason — the verdict can audit whether changes actually applied, not just whether proposals looked good.
 
+## In-workflow `report` step omits the supervisor block at the top
+
+The `report` step executor synthesises a `RenderExecutionInfo` from `ctx`. It does **not** read the persisted `AiWorkflowExecution.supervisorReport` column (the executor has no DB access, and the column may not be written yet by the time the step runs — the supervisor's `contextPatch` only lands on the next checkpoint). So the in-workflow rendered Markdown has no "Neutral supervisor assessment" block at the top — even when the workflow has a supervisor step upstream.
+
+The supervisor's verdict still appears as a step output entry in the timeline (it's in `ctx.stepOutputs`), but the headed verdict block is download-endpoint-only.
+
+If you want the verdict visible at the top of a notification email, interpolate `{{supervisor_review.output}}` (or its sub-fields) directly into the `bodyTemplate` of your `send_notification` step alongside `{{report_render.output.markdown}}`. The provider-model-audit template demonstrates the pattern.
+
+The on-demand download endpoint `GET /executions/:id/report.md` reads the persisted row and **does** render the supervisor block, so end-users hitting the download button see the full picture.
+
 ## Report step renders the trace up to its own entry
 
 The `report` step reads `ctx.stepOutputs`, which only contains steps that completed **before** the report step starts. So the report cannot describe itself, and it cannot describe any downstream step.
 
 Practical consequence: if you want the report to include the supervisor's verdict block, order the steps `... → supervisor → report → notify_complete`, not the reverse. The on-demand download endpoint (`GET /executions/:id/report.md`) reads the persisted trace _after_ finalize and so includes every step including the report step itself.
+
+## `failOnVerdict: 'fail'` + `errorStrategy: 'skip'` silently swallows the verdict
+
+The supervisor's `failOnVerdict: 'fail'` makes a `'fail'` verdict throw `ExecutorError`. The engine then consults the step's `errorStrategy`:
+
+- `'fail'` (default): workflow terminates → operator sees the verdict in the error.
+- `'retry'`: engine re-runs the step (the supervisor's own retry budget eats the cost; rarely useful).
+- `'fallback'`: engine routes to the fallback step → operator sees the verdict on the fallback path.
+- **`'skip'`: engine catches the throw and continues as if nothing happened → verdict is silently absorbed.**
+
+The provider-model-audit template uses `errorStrategy: 'skip'` on its supervisor step **deliberately** — but only because `failOnVerdict` is `'never'` (the supervisor is advisory there; a flaky judge model must not flip a successful audit to FAILED).
+
+**Rule**: if you set `failOnVerdict: 'fail'`, do not pair it with `errorStrategy: 'skip'`. Use `'fail'` (terminate the workflow on a fail verdict) or `'fallback'` (route to a rollback / notification step instead).
 
 ## Run-time toggles vs design-time enablement
 

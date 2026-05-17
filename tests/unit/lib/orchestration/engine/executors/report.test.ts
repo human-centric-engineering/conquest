@@ -78,6 +78,19 @@ describe('executeReport', () => {
     expect(result.skipped).toBeUndefined();
   });
 
+  it.each([
+    ['string "false"', 'false'],
+    ['number 0', 0],
+    ['null', null],
+  ])(
+    'does NOT skip when __generateReport is %s (only literal boolean false opts out)',
+    async (_label, value) => {
+      const ctx = makeCtx({ inputData: { __generateReport: value as never } });
+      const result = await executeReport(step(), ctx);
+      expect(result.skipped).toBeUndefined();
+    }
+  );
+
   it('ignores __generateReport=false when respectRuntimeOptOut=false', async () => {
     const ctx = makeCtx({ inputData: { __generateReport: false } });
     const result = await executeReport(step({ respectRuntimeOptOut: false }), ctx);

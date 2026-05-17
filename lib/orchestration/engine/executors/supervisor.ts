@@ -35,6 +35,14 @@ export async function executeSupervisor(
 
   // Run-time toggle — first action so the executor never bills the
   // judge-model when the operator explicitly opted out at trigger time.
+  //
+  // **Strict `=== false` is intentional.** Only the literal boolean
+  // `false` opts out. Absent / undefined / null / string "false" / 0
+  // all run the supervisor. This is safe-by-default: an external
+  // caller (webhook, MCP, API client) passing the wrong type doesn't
+  // accidentally suppress an audit — it gets one. Operators who genuinely
+  // want to skip from a non-dialog trigger must explicitly send
+  // `{ "__runSupervisor": false }` (boolean) in their payload.
   const respectOptOut = config.respectRuntimeOptOut ?? true;
   if (respectOptOut && ctx.inputData.__runSupervisor === false) {
     logger.info('supervisor skipped — __runSupervisor=false', {

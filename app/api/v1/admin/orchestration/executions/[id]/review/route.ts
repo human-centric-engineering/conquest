@@ -132,7 +132,7 @@ export const POST = withAdminAuth<{ id: string }>(async (request, session, { par
 
   if (Object.keys(stepOutputs).length === 0) {
     throw new ConflictError(
-      'Execution trace contains no completed steps to review. Re-run the workflow and try again.'
+      'Execution trace contains no completed steps to review — there is nothing for the supervisor to audit. This usually means the workflow failed before any step could complete (validation error, immediate budget exhaustion, etc.).'
     );
   }
 

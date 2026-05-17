@@ -105,6 +105,37 @@ describe('supervisorConfigSchema (via executor)', () => {
     await expect(executeSupervisor(step({}), makeCtx())).rejects.toThrow();
   });
 
+  it("rejects failOnVerdict='fail' paired with errorStrategy='skip' (silent-swallow trap)", async () => {
+    // Schema-level refinement: the engine's skip strategy would catch
+    // the ExecutorError thrown by a fail verdict, hiding the signal.
+    // Authoring this combination is a structural mistake — refuse it.
+    await expect(
+      executeSupervisor(
+        step({
+          assessmentCriteria: 'r',
+          failOnVerdict: 'fail',
+          errorStrategy: 'skip',
+        }),
+        makeCtx()
+      )
+    ).rejects.toThrow(/silently absorb|errorStrategy/i);
+  });
+
+  it("accepts failOnVerdict='fail' paired with errorStrategy='fail' (terminate)", async () => {
+    vi.mocked(runLlmCall).mockResolvedValueOnce({
+      content: JSON.stringify(validReport()),
+      tokensUsed: 100,
+      costUsd: 0.005,
+      model: 'judge-model-id',
+    });
+    const ctx = makeCtx({ stepOutputs: { s1: 'applied 5 changes', s2: 'created new model' } });
+    const result = await executeSupervisor(
+      step({ assessmentCriteria: 'r', failOnVerdict: 'fail', errorStrategy: 'fail' }),
+      ctx
+    );
+    expect((result.output as { verdict: string }).verdict).toBe('pass');
+  });
+
   it('accepts the minimal valid config', async () => {
     vi.mocked(runLlmCall).mockResolvedValueOnce({
       content: JSON.stringify(validReport()),
@@ -145,6 +176,31 @@ describe('run-time toggle (__runSupervisor)', () => {
     await executeSupervisor(step({ assessmentCriteria: 'r' }), ctx);
     expect(runLlmCall).toHaveBeenCalledOnce();
   });
+
+  it.each([
+    ['string "false"', 'false'],
+    ['string "true"', 'true'],
+    ['number 0', 0],
+    ['null', null],
+    ['empty string', ''],
+  ])(
+    'does NOT skip when __runSupervisor is %s (only literal boolean false opts out)',
+    async (_label, value) => {
+      vi.mocked(runLlmCall).mockResolvedValueOnce({
+        content: JSON.stringify(validReport()),
+        tokensUsed: 10,
+        costUsd: 0.001,
+        model: 'judge-model-id',
+      });
+      const ctx = makeCtx({
+        inputData: { __runSupervisor: value as never },
+        stepOutputs: { s1: 'applied 5 changes', s2: 'created new model' },
+      });
+      const result = await executeSupervisor(step({ assessmentCriteria: 'r' }), ctx);
+      expect(result.skipped).toBeUndefined();
+      expect(runLlmCall).toHaveBeenCalledOnce();
+    }
+  );
 
   it('ignores __runSupervisor=false when respectRuntimeOptOut=false', async () => {
     vi.mocked(runLlmCall).mockResolvedValueOnce({

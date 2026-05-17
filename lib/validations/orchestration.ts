@@ -2520,55 +2520,78 @@ export const evaluateConfigSchema = stepErrorConfigSchema.extend({
  * judge model, low temperature. See
  * `lib/orchestration/engine/executors/supervisor.ts`.
  */
-export const supervisorConfigSchema = stepErrorConfigSchema.extend({
-  /** Rubric of what "doing its job" means for this workflow. */
-  assessmentCriteria: z.string().min(1),
-  /** Explicit failure modes to look for. Defaults baked into the prompt. */
-  redTeamPrompts: z.array(z.string()).optional(),
-  /**
-   * When true (default), every claim must carry `evidenceStepId` +
-   * `evidenceQuote` matching the cited step's output. Stripped citations
-   * downgrade the verdict. Turning this off disables the citation
-   * validator — only do that if you accept unsourced verdicts.
-   */
-  requireEvidenceCitations: z.boolean().optional(),
-  /**
-   * Minimum number of entries the supervisor's `weaknesses[]` array
-   * must contain. If the supervisor genuinely finds none, it must
-   * declare "no defects found AND I verified the following steps:" with
-   * an explicit stepId list.
-   */
-  minWeaknesses: z.number().int().nonnegative().optional(),
-  /**
-   * When true (default), `modelOverride` falls through to the shared
-   * `JUDGE_MODEL` (see `@/lib/orchestration/evaluations/judge-model`).
-   * `modelOverride` set on this step beats the judge env var.
-   */
-  useJudgeModel: z.boolean().optional(),
-  modelOverride: z.string().optional(),
-  temperature: z.number().optional(),
-  /** Opt-in to making a `fail` verdict terminate the workflow. */
-  failOnVerdict: z.enum(['never', 'fail']).optional(),
-  /**
-   * Output-truncation strategy for the trace projection.
-   *  - `'auto'` (default): head + middle + tail samples for outputs > 4KB
-   *  - `'all'`: no truncation (author accepts the token bill)
-   *  - `'terminal-only'`: full output for the most recent step; 1KB head for earlier steps
-   */
-  includeStepOutputs: z.enum(['auto', 'all', 'terminal-only']).optional(),
-  /**
-   * Pre-checked state of the "Run supervisor" checkbox on the run dialog.
-   * Independent of whether the executor itself opts to run — see
-   * `respectRuntimeOptOut`.
-   */
-  defaultEnabled: z.boolean().optional(),
-  /**
-   * When true (default), `inputData.__runSupervisor === false` causes the
-   * step to short-circuit with `expectedSkip: true`. Set to false on a
-   * step that should always run regardless of the trigger payload.
-   */
-  respectRuntimeOptOut: z.boolean().optional(),
-});
+export const supervisorConfigSchema = stepErrorConfigSchema
+  .extend({
+    /** Rubric of what "doing its job" means for this workflow. */
+    assessmentCriteria: z.string().min(1),
+    /** Explicit failure modes to look for. Defaults baked into the prompt. */
+    redTeamPrompts: z.array(z.string()).optional(),
+    /**
+     * When true (default), every claim must carry `evidenceStepId` +
+     * `evidenceQuote` matching the cited step's output. Stripped citations
+     * downgrade the verdict. Turning this off disables the citation
+     * validator — only do that if you accept unsourced verdicts.
+     */
+    requireEvidenceCitations: z.boolean().optional(),
+    /**
+     * Minimum number of entries the supervisor's `weaknesses[]` array
+     * must contain. If the supervisor genuinely finds none, it must
+     * declare "no defects found AND I verified the following steps:" with
+     * an explicit stepId list.
+     */
+    minWeaknesses: z.number().int().nonnegative().optional(),
+    /**
+     * When true (default), `modelOverride` falls through to the shared
+     * `JUDGE_MODEL` (see `@/lib/orchestration/evaluations/judge-model`).
+     * `modelOverride` set on this step beats the judge env var.
+     */
+    useJudgeModel: z.boolean().optional(),
+    modelOverride: z.string().optional(),
+    temperature: z.number().optional(),
+    /**
+     * Opt-in to making a `fail` verdict terminate the workflow.
+     *
+     * **Trap to avoid:** when combined with `errorStrategy: 'skip'` on the
+     * same step, a `fail` verdict throws `ExecutorError` but the engine's
+     * skip strategy catches it and the workflow continues as if nothing
+     * happened — the verdict is silently absorbed. If you set
+     * `failOnVerdict: 'fail'`, the step's `errorStrategy` should be
+     * `'fail'` (default), `'retry'`, or `'fallback'` — never `'skip'`.
+     */
+    failOnVerdict: z.enum(['never', 'fail']).optional(),
+    /**
+     * Output-truncation strategy for the trace projection.
+     *  - `'auto'` (default): head + middle + tail samples for outputs > 4KB
+     *  - `'all'`: no truncation (author accepts the token bill)
+     *  - `'terminal-only'`: full output for the most recent step; 1KB head for earlier steps
+     */
+    includeStepOutputs: z.enum(['auto', 'all', 'terminal-only']).optional(),
+    /**
+     * Pre-checked state of the "Run supervisor" checkbox on the run dialog.
+     * Independent of whether the executor itself opts to run — see
+     * `respectRuntimeOptOut`.
+     */
+    defaultEnabled: z.boolean().optional(),
+    /**
+     * When true (default), `inputData.__runSupervisor === false` causes the
+     * step to short-circuit with `expectedSkip: true`. Set to false on a
+     * step that should always run regardless of the trigger payload.
+     */
+    respectRuntimeOptOut: z.boolean().optional(),
+  })
+  .refine(
+    // Structural rejection of the silent-swallow trap. When
+    // `failOnVerdict: 'fail'` throws ExecutorError, the engine's
+    // `errorStrategy: 'skip'` would catch it and continue as if nothing
+    // happened — the verdict is silently absorbed. Refuse the combination
+    // at validation time so a workflow author can't accidentally author it.
+    (cfg) => !(cfg.failOnVerdict === 'fail' && cfg.errorStrategy === 'skip'),
+    {
+      message:
+        "supervisor: failOnVerdict='fail' is incompatible with errorStrategy='skip' — the engine would silently absorb fail verdicts. Use errorStrategy='fail' (terminate), 'fallback' (route to rollback), or set failOnVerdict='never' (advisory).",
+      path: ['failOnVerdict'],
+    }
+  );
 
 /**
  * `report` — deterministic human-readable Markdown render of the trace.
