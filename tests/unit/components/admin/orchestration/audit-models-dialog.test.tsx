@@ -592,7 +592,7 @@ describe('AuditModelsDialog', () => {
       expect(body.inputData.__generateReport).toBe(false);
     });
 
-    it('checking "Generate execution report" sets __generateReport=true on submit', async () => {
+    it('checking "Include detailed report in notification email" sets __generateReport=true on submit', async () => {
       const { apiClient } = await import('@/lib/api/client');
       vi.mocked(apiClient.get).mockResolvedValue([
         { id: 'wf-123', slug: 'tpl-provider-model-audit' },
@@ -600,7 +600,7 @@ describe('AuditModelsDialog', () => {
       const user = userEvent.setup();
       render(<AuditModelsDialog {...DEFAULT_PROPS} />);
       const reportCheckbox = screen.getByRole('checkbox', {
-        name: /generate execution report/i,
+        name: /include detailed report in notification email/i,
       });
       // Starts unchecked (opt-in)
       expect(reportCheckbox).not.toBeChecked();

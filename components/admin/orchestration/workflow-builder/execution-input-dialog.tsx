@@ -54,9 +54,17 @@ export interface ExecutionInputDialogProps {
   supervisorDefaultEnabled?: boolean;
   /**
    * Parallel to the supervisor toggle — when the DAG contains a
-   * `report` step, the dialog renders a "Generate execution report"
-   * checkbox. Default state from the step's `defaultEnabled` config.
-   * On submit, the dialog injects `__generateReport: <boolean>`.
+   * `report` step, the dialog renders an "Include detailed report in
+   * notification email" checkbox. Default state from the step's
+   * `defaultEnabled` config. On submit, the dialog injects
+   * `__generateReport: <boolean>`.
+   *
+   * Important: this toggle only controls whether the rendered Markdown
+   * is embedded in the workflow's notification email (via
+   * `{{report_render.output.markdown}}` interpolation). The
+   * standalone GET /executions/:id/report.md endpoint is always
+   * available on terminal executions and renders the trace fresh on
+   * each request — that path is unaffected by this checkbox.
    */
   hasReportStep?: boolean;
   reportDefaultEnabled?: boolean;
@@ -235,19 +243,31 @@ export function ExecutionInputDialog({
                   htmlFor="execution-generate-report"
                   className="flex cursor-pointer items-center gap-2 text-sm font-medium"
                 >
-                  Generate execution report
+                  Include detailed report in notification email
                   <FieldHelp
-                    title="Execution report"
+                    title="Detailed report in email"
                     contentClassName="w-96 max-h-80 overflow-y-auto"
                   >
-                    This workflow includes a <code>report</code> step — a deterministic Markdown
-                    render of every step in the execution. No LLM cost. The download button on the
-                    execution detail page works regardless. Sets{' '}
-                    <code>inputData.__generateReport</code> on the execution.
+                    <p>
+                      When checked, the workflow&apos;s <code>report</code> step renders the full
+                      trace as Markdown and the notification email body embeds it inline (via{' '}
+                      <code>{'{{report_render.output.markdown}}'}</code> interpolation). Useful for
+                      recipients without admin access or for audit-trail forwarding.
+                    </p>
+                    <p className="mt-2">
+                      When unchecked, the email stays short. <strong>The Download Report</strong>{' '}
+                      button on the execution detail page still works — it renders the trace fresh
+                      from the persisted execution, independent of this toggle.
+                    </p>
+                    <p className="mt-2">
+                      No LLM cost either way. Sets <code>inputData.__generateReport</code> on the
+                      execution.
+                    </p>
                   </FieldHelp>
                 </label>
                 <p className="text-muted-foreground mt-0.5 text-xs">
-                  Step-by-step Markdown report. No LLM cost.
+                  Embeds the full step-by-step report inline in the email. Download button works
+                  regardless.
                 </p>
               </div>
             </div>

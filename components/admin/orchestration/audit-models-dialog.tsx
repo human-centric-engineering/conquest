@@ -516,9 +516,13 @@ export function AuditModelsDialog({
               </div>
 
               {/* Run-time report toggle — opts the `report_render` step
-                  in/out per-execution. Default ON (no LLM cost; just
-                  formatting). When unchecked, inputData.__generateReport
-                  is set to false and the executor short-circuits. */}
+                  in/out per-execution. Default OFF. When unchecked,
+                  inputData.__generateReport is set to false and the
+                  executor short-circuits; the notification email's
+                  {{report_render.output.markdown}} interpolation resolves
+                  to empty. The Download Report button on the execution
+                  detail page is unaffected — it renders the trace fresh
+                  on click regardless of this toggle. */}
               <div className="bg-muted/30 flex items-start gap-3 rounded-md border px-3 py-2">
                 <Checkbox
                   id="audit-generate-report"
@@ -531,19 +535,33 @@ export function AuditModelsDialog({
                     htmlFor="audit-generate-report"
                     className="flex cursor-pointer items-center gap-2 text-sm font-medium"
                   >
-                    Generate execution report
+                    Include detailed report in notification email
                     <FieldHelp
-                      title="Execution report"
+                      title="Detailed report in email"
                       contentClassName="w-96 max-h-80 overflow-y-auto"
                     >
-                      Generates a deterministic Markdown report of every step in the audit — inputs,
-                      outputs, durations, costs — and attaches it to the notification email. No LLM
-                      cost (the trace already has all the data; this just renders it). The download
-                      button on the execution detail page works regardless of this toggle.
+                      <p>
+                        When checked, the audit&apos;s notification email body includes a full
+                        step-by-step Markdown rendering of the trace — every step&apos;s inputs,
+                        outputs, durations, and costs. Useful for recipients who don&apos;t have
+                        admin access, audit-trail forwarding, or compliance archives.
+                      </p>
+                      <p className="mt-2">
+                        When unchecked, the email contains only the supervisor verdict (if enabled)
+                        and the agent-written executive summary. The email stays short.
+                      </p>
+                      <p className="mt-2">
+                        <strong>This setting does not gate access to the report.</strong> The
+                        <strong> Download report</strong> button on the execution detail page
+                        renders the same Markdown fresh from the trace on every click, regardless of
+                        whether this box was ticked at trigger time.
+                      </p>
+                      <p className="mt-2">No LLM cost either way — this is pure formatting.</p>
                     </FieldHelp>
                   </label>
                   <p className="text-muted-foreground mt-0.5 text-xs">
-                    Step-by-step Markdown report. No LLM cost — purely formatting.
+                    Embeds the full step-by-step report inline in the email. Download button works
+                    regardless.
                   </p>
                 </div>
               </div>
