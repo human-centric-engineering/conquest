@@ -71,11 +71,19 @@ export async function executeSupervisor(
     };
   }
 
+  // Model resolution: explicit step config > JUDGE_MODEL env var > undefined.
+  // When `modelOverride` is undefined, `runLlmCall` falls through to
+  // `getDefaultModelForTask('chat')` — the same path every other LLM step
+  // takes. This means a deployment with no Anthropic provider (e.g.
+  // OpenAI-only, OpenRouter, Ollama) gets a working supervisor automatically;
+  // the "independent judge ≥ subject" promise is best-effort and only fully
+  // realised when EVALUATION_JUDGE_MODEL is explicitly set to a stronger
+  // model than the workflow's primary chat model.
   const useJudgeModel = config.useJudgeModel ?? true;
   const modelOverride =
     config.modelOverride && config.modelOverride.length > 0
       ? config.modelOverride
-      : useJudgeModel
+      : useJudgeModel && JUDGE_MODEL !== null
         ? JUDGE_MODEL
         : undefined;
 

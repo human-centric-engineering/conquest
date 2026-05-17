@@ -195,7 +195,7 @@ After approval, the workflow continues:
 
 The audit ends with a `supervisor` step that audits the workflow's own execution and emits an honest, evidence-cited verdict. It exists to catch the failure mode where the optimistic `compile_report` narrative reads "everything went well" while the trace tells a different story (silent retries, validators that passed on bad data, capability dispatches that applied zero changes).
 
-**How it works.** A judge model independent of the audit's primary model (configured via `EVALUATION_JUDGE_MODEL` — defaults to `claude-sonnet-4-6`) reads the full step trace plus the workflow's input and produces a structured verdict:
+**How it works.** A judge model reads the full step trace plus the workflow's input and produces a structured verdict. Model resolution: `EVALUATION_JUDGE_MODEL` env var if set (the canonical "independent judge ≥ subject" setup) → otherwise `EVALUATION_DEFAULT_MODEL` env var if set → otherwise the system's configured chat default (the same model every other LLM step uses). For true independence in multi-provider deployments, set `EVALUATION_JUDGE_MODEL` to a model stronger than the audit's primary one.
 
 - **Verdict** — `pass` / `concerns` / `fail` / `inconclusive`. `inconclusive` means the judge ran but its response couldn't be parsed; the raw response is preserved for debugging.
 - **Score** — 0..1.

@@ -40,6 +40,13 @@ vi.mock('@/lib/orchestration/llm/provider-manager', () => ({
 vi.mock('@/lib/orchestration/llm/model-registry', () => ({
   getModel: vi.fn(),
 }));
+vi.mock('@/lib/orchestration/llm/settings-resolver', () => ({
+  // The route falls through to `getDefaultModelForTask('chat')` when
+  // JUDGE_MODEL is null (no EVALUATION_JUDGE_* env vars set in the
+  // test environment). Mock returns a fixed model so the route picks
+  // up a sensible default during the test.
+  getDefaultModelForTask: vi.fn(async () => 'judge-model-id'),
+}));
 vi.mock('@/lib/orchestration/llm/cost-tracker', () => ({
   calculateCost: vi.fn(() => ({ totalCostUsd: 0.001, isLocal: false })),
   logCost: vi.fn().mockResolvedValue(undefined),

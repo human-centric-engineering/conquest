@@ -35,6 +35,18 @@ vi.mock('@/lib/orchestration/llm/provider-manager', () => ({
   getProvider: vi.fn(),
 }));
 
+// The orphan-agent fallback and the judge-scoring fallback both now call
+// `resolveAgentProviderAndModel` when EVALUATION_DEFAULT_* / EVALUATION_JUDGE_*
+// env vars aren't set. Mock it to return a deterministic anthropic binding
+// (matching what the test fixtures expect from the old hard-coded fallback).
+vi.mock('@/lib/orchestration/llm/agent-resolver', () => ({
+  resolveAgentProviderAndModel: vi.fn(async () => ({
+    providerSlug: 'anthropic',
+    model: 'claude-sonnet-4-6',
+    fallbacks: [],
+  })),
+}));
+
 vi.mock('@/lib/orchestration/llm/cost-tracker', () => ({
   logCost: vi.fn(),
   calculateCost: vi.fn(() => ({

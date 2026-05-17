@@ -44,6 +44,7 @@ import {
 import { calculateCost, logCost } from '@/lib/orchestration/llm/cost-tracker';
 import { getProvider } from '@/lib/orchestration/llm/provider-manager';
 import { getModel } from '@/lib/orchestration/llm/model-registry';
+import { getDefaultModelForTask } from '@/lib/orchestration/llm/settings-resolver';
 import { JUDGE_MODEL } from '@/lib/orchestration/evaluations/judge-model';
 import { runSupervisorAssessment, type LlmCallShim } from '@/lib/orchestration/supervisor';
 
@@ -136,8 +137,12 @@ export const POST = withAdminAuth<{ id: string }>(async (request, session, { par
     );
   }
 
-  // Resolve the judge model + provider. modelOverride > JUDGE_MODEL.
-  const modelId = body.modelOverride ?? JUDGE_MODEL;
+  // Resolve the judge model + provider.
+  // Priority: explicit body override > EVALUATION_JUDGE_MODEL env > system
+  // default chat model. The final fallback ensures a deployment with no
+  // Anthropic provider (the previous hard-coded default) still gets a
+  // working retroactive review using whatever the operator configured.
+  const modelId = body.modelOverride ?? JUDGE_MODEL ?? (await getDefaultModelForTask('chat'));
   const modelInfo = getModel(modelId);
   if (!modelInfo) {
     throw new ValidationError('Unknown model', {
