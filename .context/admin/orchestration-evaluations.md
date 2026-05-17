@@ -2,6 +2,8 @@
 
 Admin list/create/run flows for `AiEvaluationSession`. Landed in Phase 7 Session 7.1, revised in 7.2.
 
+> **Scope note.** Evaluation **sessions** are for auditing an _agent's chat turns_ (faithfulness, groundedness, relevance — see `.context/orchestration/evaluation-metrics.md`). For auditing a _workflow execution_, use the `supervisor` step type or the retroactive review endpoint. Both share the same independent-judge-model env vars (`EVALUATION_JUDGE_PROVIDER` / `EVALUATION_JUDGE_MODEL` via `lib/orchestration/evaluations/judge-model.ts`); their scope and output shape differ. See `.context/admin/workflow-builder.md` (§ Supervisor step) and `.context/orchestration/patterns-and-steps.md` (§ `evaluate` vs `supervisor`).
+
 **Pages**
 
 | Route                                   | File                                                | Role                                   |
