@@ -193,6 +193,14 @@ But the real fix is still option above: deterministic validation. After two hall
 
 The dispatch cache is **on by default** for `tool_call`. Capabilities can opt out by setting `isIdempotent: true` when they handle re-run dedup naturally (e.g. an idempotent upstream API). Misconfiguring `isIdempotent: true` on a destructive capability is documented as the "you marked it idempotent" admin trade-off. When designing workflows with risky tool calls, leave the default alone unless you've explicitly verified the capability is rerun-safe.
 
+## Place the supervisor near the end, not the start
+
+The supervisor reads `ctx.stepOutputs` — the map of every completed step's output **so far**. Placing it as the FIRST step in a workflow means there is nothing to audit; the LLM is asked to evaluate an empty trace and will (correctly) return `concerns` or `inconclusive`, billing a judge-model call for no value.
+
+The natural position is the workflow's terminal step (immediately before `send_notification` or `report`). The provider-model-audit template demonstrates the pattern.
+
+The executor does NOT short-circuit on empty `stepOutputs` because some legitimate uses exist (a workflow whose body is one big `parallel` that converges into the supervisor — the supervisor still sees outputs through the branches). It's the author's responsibility to place the supervisor sensibly.
+
 ## Don't put a `supervisor` inside a `parallel` branch
 
 The supervisor reads the **entire** `ctx.stepOutputs` map and is meant to audit the workflow as a whole. Inside a `parallel` branch it only sees the steps that have completed at that point, so it will judge a still-incomplete workflow and report misleadingly that steps in other branches were never run. Place the supervisor **after** the parallel converges (downstream of the join), not inside one of the branches.

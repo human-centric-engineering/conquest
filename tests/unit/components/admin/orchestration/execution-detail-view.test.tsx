@@ -969,4 +969,260 @@ describe('ExecutionDetailView', () => {
       );
     });
   });
+
+  // ─── Supervisor verdict card + details panel ──────────────────────────────
+
+  describe('Supervisor verdict card', () => {
+    it('renders em-dash when no supervisor verdict has been produced', () => {
+      render(<ExecutionDetailView execution={makeExecution()} trace={[TRACE_ENTRY]} />);
+      const card = screen.getByTestId('supervisor-verdict-card');
+      // em-dash exists somewhere in the card (other cards also use em-dash;
+      // the lookup just confirms the absent-verdict path renders).
+      expect(card).toBeInTheDocument();
+    });
+
+    it('renders the verdict badge + score when set', () => {
+      render(
+        <ExecutionDetailView
+          execution={makeExecution({ supervisorVerdict: 'concerns', supervisorScore: 0.6 })}
+          trace={[TRACE_ENTRY]}
+        />
+      );
+      expect(screen.getByText('Concerns')).toBeInTheDocument();
+      expect(screen.getByText('score 0.60')).toBeInTheDocument();
+    });
+  });
+
+  describe('SupervisorDetailsPanel', () => {
+    const REPORT_BASE = {
+      verdict: 'concerns' as const,
+      score: 0.6,
+      summary: 'The audit had concerns about model X.',
+      strengths: [{ claim: 'Apply ran cleanly', evidenceStepId: 'step-1', evidenceQuote: 'done' }],
+      weaknesses: [
+        {
+          severity: 'medium' as const,
+          claim: 'Validator was lenient',
+          evidenceStepId: 'step-1',
+          evidenceQuote: 'done',
+          recommendation: 'Tighten the schema',
+        },
+      ],
+      anomalies: [{ stepId: 'step-1', observation: 'duration spike' }],
+      unverifiedAreas: ['downstream consumers'],
+      confidence: 'medium' as const,
+      triggeredBy: 'in_workflow' as const,
+    };
+
+    it('does NOT render when no supervisorReport is set', () => {
+      render(<ExecutionDetailView execution={makeExecution()} trace={[TRACE_ENTRY]} />);
+      expect(screen.queryByTestId('supervisor-details-panel')).not.toBeInTheDocument();
+    });
+
+    it('renders summary, weaknesses, anomalies and unverified areas when present', () => {
+      render(
+        <ExecutionDetailView
+          execution={makeExecution({
+            supervisorVerdict: 'concerns',
+            supervisorScore: 0.6,
+            supervisorReport: REPORT_BASE,
+          })}
+          trace={[TRACE_ENTRY]}
+        />
+      );
+      expect(screen.getByTestId('supervisor-details-panel')).toBeInTheDocument();
+      expect(screen.getByText('The audit had concerns about model X.')).toBeInTheDocument();
+      expect(screen.getByText(/Validator was lenient/)).toBeInTheDocument();
+      expect(screen.getByText(/duration spike/)).toBeInTheDocument();
+      expect(screen.getByText('downstream consumers')).toBeInTheDocument();
+    });
+
+    it('renders an invalidCitations note when the validator stripped citations', () => {
+      render(
+        <ExecutionDetailView
+          execution={makeExecution({
+            supervisorVerdict: 'concerns',
+            supervisorScore: 0.5,
+            supervisorReport: {
+              ...REPORT_BASE,
+              invalidCitations: [
+                {
+                  location: 'weakness',
+                  index: 0,
+                  reason: 'unknown_step_id',
+                  evidenceStepId: 'ghost',
+                  evidenceQuote: 'q',
+                },
+              ],
+            },
+          })}
+          trace={[TRACE_ENTRY]}
+        />
+      );
+      expect(screen.getByText(/citation validator stripped/)).toBeInTheDocument();
+    });
+
+    it('renders a parseFailure indicator on inconclusive verdicts', () => {
+      render(
+        <ExecutionDetailView
+          execution={makeExecution({
+            supervisorVerdict: 'inconclusive',
+            supervisorReport: {
+              verdict: 'inconclusive',
+              summary: 'unparseable',
+              strengths: [],
+              weaknesses: [],
+              anomalies: [],
+              unverifiedAreas: [],
+              confidence: 'low',
+              parseFailure: { rawResponse: 'not JSON', reason: 'schema failure' },
+            },
+          })}
+          trace={[TRACE_ENTRY]}
+        />
+      );
+      expect(screen.getByText(/couldn['’]t be parsed/i)).toBeInTheDocument();
+    });
+
+    it('renders prior verdicts archive when previousVerdicts is non-empty', () => {
+      render(
+        <ExecutionDetailView
+          execution={makeExecution({
+            supervisorVerdict: 'pass',
+            supervisorReport: {
+              ...REPORT_BASE,
+              verdict: 'pass',
+              previousVerdicts: [
+                { verdict: 'concerns', triggeredBy: 'in_workflow', reviewedAt: '2025-01-01' },
+                { verdict: 'fail', triggeredBy: 'retroactive', reviewedAt: '2025-01-02' },
+              ],
+            },
+          })}
+          trace={[TRACE_ENTRY]}
+        />
+      );
+      expect(screen.getByText(/Prior verdicts archived/)).toBeInTheDocument();
+      expect(screen.getByText(/concerns, fail/)).toBeInTheDocument();
+    });
+
+    it('renders citation as clickable button when evidenceStepId is in the trace', () => {
+      render(
+        <ExecutionDetailView
+          execution={makeExecution({
+            supervisorVerdict: 'concerns',
+            supervisorReport: REPORT_BASE,
+          })}
+          trace={[TRACE_ENTRY]}
+        />
+      );
+      // The citation buttons render with "(see step ...)"; verify the
+      // interactive button form is used when the step is reachable.
+      const button = screen.getByRole('button', { name: /see step.*step-1/i });
+      expect(button).toBeInTheDocument();
+    });
+
+    it('renders citation as plain text when evidenceStepId is NOT in the trace', () => {
+      render(
+        <ExecutionDetailView
+          execution={makeExecution({
+            supervisorVerdict: 'concerns',
+            supervisorReport: {
+              ...REPORT_BASE,
+              weaknesses: [
+                {
+                  severity: 'medium' as const,
+                  claim: 'Cites a ghost step',
+                  evidenceStepId: 'ghost-step',
+                  evidenceQuote: 'whatever',
+                  recommendation: 'fix',
+                },
+              ],
+            },
+          })}
+          trace={[TRACE_ENTRY]}
+        />
+      );
+      // No interactive jump button for the unreachable step
+      expect(
+        screen.queryByRole('button', { name: /see step.*ghost-step/i })
+      ).not.toBeInTheDocument();
+      // The cited stepId still appears (so the citation isn't silently dropped)
+      expect(screen.getByText(/cited step:/i)).toBeInTheDocument();
+      expect(screen.getByText('ghost-step')).toBeInTheDocument();
+    });
+  });
+
+  // ─── Retroactive review confirmation dialog ───────────────────────────────
+
+  describe('Review-this-execution confirmation dialog', () => {
+    it('clicking the review button opens the dialog and does NOT fire the API', async () => {
+      const user = userEvent.setup();
+      render(<ExecutionDetailView execution={makeExecution()} trace={[TRACE_ENTRY]} />);
+      const reviewButton = screen.getByTestId('execution-review-button');
+      await user.click(reviewButton);
+      // Dialog visible
+      expect(screen.getByText(/Review this execution\?/)).toBeInTheDocument();
+      // API NOT yet called — confirmation gates the action
+      expect(mockPost).not.toHaveBeenCalled();
+    });
+
+    it('Cancel button closes the dialog without firing the API', async () => {
+      const user = userEvent.setup();
+      render(<ExecutionDetailView execution={makeExecution()} trace={[TRACE_ENTRY]} />);
+      await user.click(screen.getByTestId('execution-review-button'));
+      await user.click(screen.getByRole('button', { name: /^cancel$/i }));
+      expect(mockPost).not.toHaveBeenCalled();
+    });
+
+    it('Confirm button fires the review API call', async () => {
+      mockPost.mockResolvedValueOnce({ verdict: 'pass', score: 0.9 });
+      const user = userEvent.setup();
+      render(<ExecutionDetailView execution={makeExecution()} trace={[TRACE_ENTRY]} />);
+      await user.click(screen.getByTestId('execution-review-button'));
+      await user.click(screen.getByTestId('execution-review-confirm'));
+      expect(mockPost).toHaveBeenCalledWith(
+        expect.stringContaining('/review'),
+        expect.objectContaining({ body: {} })
+      );
+    });
+
+    it('uses "Re-review" wording when supervisorVerdict is already set', async () => {
+      const user = userEvent.setup();
+      render(
+        <ExecutionDetailView
+          execution={makeExecution({ supervisorVerdict: 'concerns', supervisorScore: 0.5 })}
+          trace={[TRACE_ENTRY]}
+        />
+      );
+      // Button label
+      expect(screen.getByRole('button', { name: /^Re-review$/i })).toBeInTheDocument();
+      // Dialog body acknowledges the archive
+      await user.click(screen.getByTestId('execution-review-button'));
+      expect(screen.getByText(/Re-review this execution\?/)).toBeInTheDocument();
+      expect(screen.getByText(/previousVerdicts/)).toBeInTheDocument();
+    });
+
+    it('shows the cost estimate in the dialog body', async () => {
+      const user = userEvent.setup();
+      render(<ExecutionDetailView execution={makeExecution()} trace={[TRACE_ENTRY]} />);
+      await user.click(screen.getByTestId('execution-review-button'));
+      expect(screen.getByText(/\$0\.02–\$0\.10/)).toBeInTheDocument();
+    });
+  });
+
+  describe('Download report button', () => {
+    it('renders a link to the report.md endpoint with download attribute on terminal executions', () => {
+      render(<ExecutionDetailView execution={makeExecution()} trace={[TRACE_ENTRY]} />);
+      // `asChild` forwards the Button's className onto the <a>, so the
+      // element with the data-testid IS the anchor.
+      const link = screen.getByTestId('execution-download-report-button');
+      expect(link.getAttribute('href')).toMatch(/\/report\.md$/);
+      expect(link.getAttribute('download')).toMatch(/^execution-.+\.md$/);
+    });
+
+    it('does NOT render on a running execution (canReview is false)', () => {
+      render(<ExecutionDetailView execution={makeExecution({ status: 'running' })} trace={[]} />);
+      expect(screen.queryByTestId('execution-download-report-button')).not.toBeInTheDocument();
+    });
+  });
 });

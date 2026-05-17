@@ -14,6 +14,19 @@
  * supervisor" checkbox opts out per-execution without modifying the
  * template.
  *
+ * **Dispatch cache**: the supervisor step does NOT participate in
+ * `AiWorkflowStepDispatch` (it's an LLM call, same as `llm_call` /
+ * `evaluate` / `guard` / `reflect` / `agent_call` / `plan` /
+ * `orchestrator`). Only steps with external side-effects that
+ * shouldn't double-act on crash recovery cache through dispatch
+ * (`tool_call`, `external_call`, `send_notification`). The trade-off
+ * for the supervisor is: a lease handoff mid-step can re-bill the
+ * judge-model call. Acceptable because (a) lease windows are minutes,
+ * supervisor takes seconds; (b) the verdict columns are written via
+ * `contextPatch` only on a complete step result, so partial state is
+ * impossible — the worst case is one extra LLM bill, never an
+ * inconsistent row.
+ *
  * Platform-agnostic: no Next.js imports.
  */
 

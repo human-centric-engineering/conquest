@@ -205,12 +205,18 @@ function SupervisorDetailsPanel({
   report,
   reviewedAt,
   onJumpToStep,
+  reachableStepIds,
 }: {
   verdict: string;
   score: number | null;
   report: unknown;
   reviewedAt: string | null;
   onJumpToStep: (stepId: string) => void;
+  /** stepIds present in the visible trace — used to skip rendering a
+   *  click-to-jump affordance for citations the operator can't navigate to.
+   *  Cited steps not in this set still render as plain text so the citation
+   *  isn't lost; they just don't get an interactive button. */
+  reachableStepIds: ReadonlySet<string>;
 }): React.ReactElement | null {
   const r = asSupervisorReport(report);
   if (!r) return null;
@@ -232,7 +238,31 @@ function SupervisorDetailsPanel({
       data-testid="supervisor-details-panel"
     >
       <div className="mb-2 flex flex-wrap items-baseline gap-2">
-        <h3 className="text-base font-semibold">Neutral supervisor review</h3>
+        <h3 className="flex items-baseline gap-1 text-base font-semibold">
+          Neutral supervisor review{' '}
+          <FieldHelp title="What this panel shows" contentClassName="w-96 max-h-96 overflow-y-auto">
+            <p>
+              An independent judge model (configured via <code>EVALUATION_JUDGE_MODEL</code>)
+              audited this execution after it finished and produced this evidence-cited report. The
+              verdict comes in four shapes:
+            </p>
+            <p className="mt-2">
+              <strong>Pass</strong>: every assertion the workflow made is grounded in the trace.{' '}
+              <strong>Concerns</strong>: at least one weakness needs review. <strong>Fail</strong>:
+              a critical issue — investigate before relying on the output.{' '}
+              <strong>Inconclusive</strong>: the supervisor ran but its output couldn&apos;t be
+              parsed.
+            </p>
+            <p className="mt-2">
+              <strong>Weaknesses</strong> cite specific steps with verbatim quotes; the post-hoc
+              citation validator strips any quote that doesn&apos;t actually appear in the cited
+              step&apos;s output, and downgrades the verdict if the floor breaks.{' '}
+              <strong>Anomalies</strong> flag stepIds with unusual patterns.{' '}
+              <strong>Unverified areas</strong> are things the supervisor explicitly could not
+              assess — a feature, not a bug.
+            </p>
+          </FieldHelp>
+        </h3>
         <Badge variant={VERDICT_BADGE[verdict] ?? 'outline'}>
           {VERDICT_LABEL[verdict] ?? verdict}
         </Badge>
@@ -264,7 +294,7 @@ function SupervisorDetailsPanel({
                   [{w.severity?.toUpperCase() ?? 'LOW'}]
                 </span>{' '}
                 {w.claim}
-                {w.evidenceStepId && (
+                {w.evidenceStepId && reachableStepIds.has(w.evidenceStepId) && (
                   <button
                     type="button"
                     onClick={() => onJumpToStep(w.evidenceStepId as string)}
@@ -272,6 +302,14 @@ function SupervisorDetailsPanel({
                   >
                     (see step <code>{w.evidenceStepId}</code>)
                   </button>
+                )}
+                {w.evidenceStepId && !reachableStepIds.has(w.evidenceStepId) && (
+                  <span
+                    className="text-muted-foreground ml-1 text-xs"
+                    title="The cited step isn't in the current trace — the supervisor may have referenced a step that was renamed, filtered out, or never persisted."
+                  >
+                    (cited step: <code>{w.evidenceStepId}</code>)
+                  </span>
                 )}
                 {w.recommendation && (
                   <span className="text-muted-foreground"> — {w.recommendation}</span>
@@ -288,7 +326,7 @@ function SupervisorDetailsPanel({
           <ul className="space-y-1">
             {r.anomalies.map((a, i) => (
               <li key={i} className="text-sm">
-                {a.stepId && (
+                {a.stepId && reachableStepIds.has(a.stepId) && (
                   <button
                     type="button"
                     onClick={() => onJumpToStep(a.stepId as string)}
@@ -296,6 +334,14 @@ function SupervisorDetailsPanel({
                   >
                     {a.stepId}
                   </button>
+                )}
+                {a.stepId && !reachableStepIds.has(a.stepId) && (
+                  <span
+                    className="text-muted-foreground font-mono text-xs"
+                    title="The cited step isn't in the current trace."
+                  >
+                    {a.stepId}
+                  </span>
                 )}
                 {a.stepId && ': '}
                 {a.observation}
@@ -1019,6 +1065,7 @@ export function ExecutionDetailView({
           report={execution.supervisorReport}
           reviewedAt={execution.supervisorReviewedAt ?? null}
           onJumpToStep={handleSelectStep}
+          reachableStepIds={new Set(displayTrace.map((e) => e.stepId))}
         />
       )}
 
@@ -1195,7 +1242,14 @@ export function ExecutionDetailView({
           A confirmation gate prevents accidental clicks from racking up
           cost — every existing audit verdict is preserved in
           supervisorReport.previousVerdicts[]. */}
-      <AlertDialog open={reviewDialogOpen} onOpenChange={setReviewDialogOpen}>
+      <AlertDialog
+        open={reviewDialogOpen}
+        onOpenChange={(open) => {
+          // Only react to explicit close — matches the reject-dialog
+          // pattern and avoids a stale-handler race if Radix re-fires.
+          if (!open) setReviewDialogOpen(false);
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>

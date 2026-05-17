@@ -207,7 +207,11 @@ The audit ends with a `supervisor` step that audits the workflow's own execution
 
 **Run-time toggle.** The "Audit Models" dialog includes a **Run neutral supervisor review** checkbox, checked by default. Uncheck it on tight-budget environments where the extra judge-model call (~$0.02–$0.10 per audit) isn't worth the signal; the supervisor step shows `status: 'skipped'` and `expectedSkip: true` in the trace, and the notification body omits the verdict section.
 
-**Retroactive review.** Any past audit execution can be reviewed after the fact via the "Review this execution" button on the execution detail page — useful when you skipped the in-workflow supervisor at trigger time but later need an honest read on what happened.
+**Retroactive review.** Any past audit execution can be reviewed after the fact via the **Review this execution** button on the execution detail page. The button opens a confirmation dialog noting the cost (~$0.02–$0.10 for one judge-model call) before firing. When a prior verdict exists, the button reads **Re-review** and the dialog explains that the prior verdict is archived to `supervisorReport.previousVerdicts[]` (nothing is lost).
+
+When a verdict is present on an execution row — whether produced in-workflow or retroactively — the execution detail page renders a **Neutral supervisor review** panel below the summary cards row. The panel surfaces the summary, weaknesses (with click-to-jump-to-step links when the cited step is in the visible trace; plain-text citations otherwise), anomalies, areas the supervisor couldn't verify, an invalid-citation note when the validator stripped anything, and the prior-verdict history.
+
+**Download report.** Every terminal execution carries a **Download report** button next to the review controls. It hits `GET /api/v1/admin/orchestration/executions/:id/report.md` and serves a deterministic Markdown render of the trace — header, supervisor verdict (when present), input data, per-step timeline with inputs / outputs / duration / cost, errors, and output. No LLM cost; rendered fresh from the trace every click. The button works regardless of whether the workflow includes a `report` step in its DAG.
 
 ## How attribution works
 

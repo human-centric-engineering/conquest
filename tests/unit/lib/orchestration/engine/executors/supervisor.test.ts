@@ -616,6 +616,36 @@ describe('executeSupervisor (end-to-end)', () => {
     expect(result.contextPatch).toBeUndefined();
   });
 
+  it('runs cleanly when stepOutputs is empty (supervisor placed first — unusual but supported)', async () => {
+    // If a workflow places the supervisor as its first step, ctx.stepOutputs
+    // is empty. buildProjection returns no entries; the prompt asks the
+    // judge to audit "(no steps in trace yet)". The LLM might reasonably
+    // return inconclusive — but the executor must not throw.
+    vi.mocked(runLlmCall).mockResolvedValueOnce({
+      content: JSON.stringify({
+        ...(validReport() as object),
+        verdict: 'concerns',
+        weaknesses: [
+          {
+            severity: 'low',
+            claim: 'no defects found and the following steps were verified: (none)',
+            evidenceStepId: null,
+            evidenceQuote: null,
+            recommendation: 'Place supervisor at the end of the workflow, not the start.',
+          },
+        ],
+        unverifiedAreas: ['entire workflow — supervisor invoked before any steps completed'],
+      }),
+      tokensUsed: 50,
+      costUsd: 0.002,
+      model: 'judge-model-id',
+    });
+    const ctx = makeCtx({ stepOutputs: {} }); // explicitly empty
+    const result = await executeSupervisor(step({ assessmentCriteria: 'r' }), ctx);
+    expect((result.output as { verdict: string }).verdict).toBe('concerns');
+    expect(runLlmCall).toHaveBeenCalledOnce();
+  });
+
   it('explicit modelOverride beats JUDGE_MODEL', async () => {
     vi.mocked(runLlmCall).mockResolvedValueOnce({
       content: JSON.stringify(validReport()),
