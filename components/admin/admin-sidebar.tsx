@@ -34,6 +34,7 @@ import {
   ClipboardList,
   ShieldCheck,
   PlayCircle,
+  MessagesSquare,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { API } from '@/lib/api/endpoints';
@@ -155,6 +156,12 @@ const navSections: NavSection[] = [
             label: 'Executions',
             icon: PlayCircle,
             description: 'Runtime history',
+          },
+          {
+            href: '/admin/orchestration/conversations',
+            label: 'Conversations',
+            icon: MessagesSquare,
+            description: 'Chat history + audit',
           },
           {
             href: '/admin/orchestration/approvals',

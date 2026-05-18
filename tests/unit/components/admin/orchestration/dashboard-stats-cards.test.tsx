@@ -223,4 +223,29 @@ describe('DashboardStatsCards', () => {
       expect(errorValue.className).not.toContain('text-red-600');
     });
   });
+
+  // ── Link affordance ─────────────────────────────────────────────────────
+
+  describe('link affordance', () => {
+    it('each card link carries an aria-label describing the destination', () => {
+      render(
+        <DashboardStatsCards
+          agentsCount={12}
+          todayCostUsd={3.5}
+          todayRequests={1234}
+          errorRate={0.01}
+        />
+      );
+
+      const links = screen.getAllByRole('link');
+      // Aria-label includes the title + value + a "Open X page" hint so
+      // screen-reader users hear "this card is also a link" without
+      // depending on the visual chevron icon.
+      const labels = links.map((el) => el.getAttribute('aria-label') ?? '');
+      expect(labels.some((l) => l.includes('Agents: 12') && l.includes('Open agents page'))).toBe(
+        true
+      );
+      expect(labels.some((l) => l.includes("Today's requests"))).toBe(true);
+    });
+  });
 });

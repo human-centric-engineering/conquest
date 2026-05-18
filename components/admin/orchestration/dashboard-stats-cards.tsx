@@ -12,7 +12,7 @@
  */
 
 import Link from 'next/link';
-import { AlertTriangle, Bot, DollarSign, Zap } from 'lucide-react';
+import { AlertTriangle, ArrowUpRight, Bot, DollarSign, Zap } from 'lucide-react';
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
@@ -35,8 +35,17 @@ interface StatCardData {
 
 function StatCard({ title, value, description, icon, href, alert }: StatCardData) {
   return (
-    <Link href={href} className="group block h-full">
-      <Card className="group-hover:border-primary/40 h-full transition-colors">
+    <Link
+      href={href}
+      className="group focus-visible:ring-ring block h-full rounded-xl focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
+      aria-label={`${title}: ${value}. ${description}. Open ${title.toLowerCase()} page.`}
+    >
+      <Card
+        className={cn(
+          'h-full transition-all',
+          'group-hover:border-primary/60 group-hover:bg-accent/30 group-hover:-translate-y-0.5 group-hover:shadow-md'
+        )}
+      >
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <CardTitle className="text-sm font-medium">{title}</CardTitle>
           <div className="text-muted-foreground" aria-hidden="true">
@@ -47,7 +56,16 @@ function StatCard({ title, value, description, icon, href, alert }: StatCardData
           <div className={cn('text-2xl font-bold', alert && 'text-red-600 dark:text-red-400')}>
             {value}
           </div>
-          <p className="text-muted-foreground text-xs">{description}</p>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-muted-foreground text-xs">{description}</p>
+            {/* Affordance: signals that the card is a link. Visible by
+                default, brightens on hover. Aria-hidden because the
+                Link's aria-label already conveys "Open <title> page". */}
+            <ArrowUpRight
+              className="text-muted-foreground/60 group-hover:text-primary h-3.5 w-3.5 shrink-0 transition-colors"
+              aria-hidden="true"
+            />
+          </div>
         </CardContent>
       </Card>
     </Link>

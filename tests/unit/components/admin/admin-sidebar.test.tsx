@@ -47,7 +47,7 @@ describe('AdminSidebar', () => {
     expect(screen.getByText('System')).toBeInTheDocument();
   });
 
-  it('renders all 10 orchestration items with correct hrefs', () => {
+  it('renders the canonical orchestration items with correct hrefs', () => {
     render(<AdminSidebar />);
 
     const expected: Array<{ label: string; href: string }> = [
@@ -57,6 +57,7 @@ describe('AdminSidebar', () => {
       { label: 'Providers', href: '/admin/orchestration/providers' },
       { label: 'Workflows', href: '/admin/orchestration/workflows' },
       { label: 'Executions', href: '/admin/orchestration/executions' },
+      { label: 'Conversations', href: '/admin/orchestration/conversations' },
       { label: 'Knowledge Base', href: '/admin/orchestration/knowledge' },
       { label: 'Costs & Budget', href: '/admin/orchestration/costs' },
       { label: 'Learning', href: '/admin/orchestration/learn' },
