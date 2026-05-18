@@ -1840,6 +1840,26 @@ export const conversationExportQuerySchema = z.object({
 });
 
 /**
+ * Body for `POST /api/v1/chat/conversations/:id/share` — the
+ * end-user-facing consent grant for cross-user conversation access.
+ *
+ * - `reason` is optional free-text the owner supplied for context
+ *   ("complaint about refund X"). Capped at 500 chars to keep the audit
+ *   row compact. Always optional — the share itself is the consent;
+ *   the reason is just context for the admin.
+ * - `expiresInDays` defaults to 7 at the route level when omitted.
+ *   Capped at 90 so a share doesn't outlive a typical support cycle.
+ *   The route translates this to an absolute `expiresAt` timestamp
+ *   before writing. A future compliance-officer role may create
+ *   never-expiring shares directly via the model; that path doesn't
+ *   touch this user-facing schema.
+ */
+export const shareConversationSchema = z.object({
+  reason: z.string().trim().min(1).max(500).optional(),
+  expiresInDays: z.number().int().min(1).max(90).optional(),
+});
+
+/**
  * Clear conversations body (POST /admin/orchestration/conversations/clear).
  *
  * At least one of `olderThan` or `agentId` must be supplied — an empty
@@ -3044,8 +3064,9 @@ export const messageProvenanceSchema = z.object({
 export const messageMetadataSchema = z.object({
   tokenUsage: z
     .object({
-      input: z.number().optional(),
-      output: z.number().optional(),
+      inputTokens: z.number().optional(),
+      outputTokens: z.number().optional(),
+      totalTokens: z.number().optional(),
     })
     .optional(),
   latencyMs: z.number().optional(),
