@@ -166,6 +166,16 @@ The capture is best-effort everywhere it can be:
 
 Provenance is audit substrate, not a load-bearing primitive.
 
+### Persisted args + result previews are post-redaction
+
+`capabilityCalls[].arguments` and `capabilityCalls[].resultPreview` reflect the **redacted** form, not what the LLM actually saw. Each capability declares its PII stance (`processesPii: boolean`) and a `redactProvenance(args, result)` method on its class — the chat handler's `buildToolCallTrace` looks the capability up in the registry and calls the redactor before constructing the trace row. PII-handling capabilities (`call_external_api`, `escalate_to_human`, `run_workflow`, `read_user_memory`, `write_user_memory`, `upload_to_storage`) mask domain-specific fields and replace free-text bodies with sentinels; non-PII capabilities pass through verbatim.
+
+The LLM still sees the un-redacted result on its turn (the redactor's output is only used for the durable audit row). Provenance bundles are safe to hand to auditors without leaking the actual emails / phone numbers / file contents that flowed through the capability. See [`.context/security/pii-redaction.md`](../security/pii-redaction.md) for the contract.
+
+### Every provenance download is logged
+
+`GET /api/v1/admin/orchestration/conversations/[id]/provenance` and `/provenance.md` write an `AiAdminAuditLog` entry with `action: 'conversation.provenance_export'` on every successful response — admin id, conversation id, format, message count, IP, timestamp. Pulling a provenance bundle leaves a trace by design.
+
 ## The bundle endpoint
 
 `GET /api/v1/admin/orchestration/conversations/[id]/provenance` returns the typed bundle as JSON. The sibling `provenance.md` route returns the deterministic Markdown rendering. Both are admin-only, rate-limited (`adminLimiter`), and ownership-scoped to `session.user.id` — cross-user access returns 404 (matching the export-route posture, not 403, so an attacker can't enumerate other users).

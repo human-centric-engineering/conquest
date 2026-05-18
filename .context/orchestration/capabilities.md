@@ -108,9 +108,21 @@ export abstract class BaseCapability<TArgs = unknown, TData = unknown> {
   abstract readonly functionDefinition: CapabilityFunctionDefinition;
   protected abstract readonly schema?: CapabilitySchema<TArgs>;
 
+  /** PII declaration — set true if args or results carry personal data. */
+  readonly processesPii: boolean; // default: false
+
   abstract execute(args: TArgs, context: CapabilityContext): Promise<CapabilityResult<TData>>;
 
   validate(rawArgs: unknown): TArgs; // throws CapabilityValidationError
+  /**
+   * Write-time PII redaction for the audit trail. Default = passthrough.
+   * Required when processesPii === true; registry refuses to load otherwise.
+   */
+  redactProvenance(
+    args: TArgs,
+    result: CapabilityResult<TData>
+  ): { args: unknown; resultPreview: string };
+
   protected success<T extends TData>(
     data: T,
     opts?: { skipFollowup?: boolean }
@@ -122,6 +134,15 @@ export abstract class BaseCapability<TArgs = unknown, TData = unknown> {
 `validate()` _throws_ rather than returning a discriminated result — that way `execute()` can treat its args as already typed. The dispatcher catches `CapabilityValidationError` and emits `{ code: 'invalid_args' }`.
 
 Subclasses return results via `this.success(...)` / `this.error(...)` — never by hand-building a `CapabilityResult`.
+
+### PII redaction obligation
+
+If your capability handles emails, phone numbers, customer records, free-text user input, or auth tokens in its args or results, it **must** opt in to the explicit redaction contract:
+
+1. Set `readonly processesPii = true` on the class.
+2. Override `redactProvenance(args, result)`. The default implementation persists args verbatim and a 480-char JSON-truncated result preview — safe for non-PII capabilities, a PII leak for everything else.
+
+The registry refuses to register a capability that declares `processesPii = true` without an override — startup fails fast. Six built-ins ship with overrides today: `call_external_api`, `escalate_to_human`, `run_workflow`, `read_user_memory`, `write_user_memory`, `upload_to_storage`. See [`.context/security/pii-redaction.md`](../security/pii-redaction.md) for the full contract, a worked example, and the masking primitives in `lib/security/redact.ts`.
 
 ## Dispatch Pipeline
 

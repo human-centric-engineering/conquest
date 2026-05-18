@@ -124,6 +124,10 @@ Above the timeline, the viewer renders a `Download provenance` button group when
 
 A `FieldHelp` popover next to the group explains what the bundle contains: agent / workflow / model versions, KB chunks cited (with content hash at message time), capability calls, and workflow step sources.
 
+**Audit-of-audits.** Every successful download writes an `AiAdminAuditLog` entry with `action: 'conversation.provenance_export'`, the admin's user id, the conversation id, the format (`json` / `markdown`), the message count, and the client IP. Compliance can query "who exported this conversation's audit trail, when, in which format" from a single SQL on `ai_admin_audit_log`. Auth failures and cross-user 404s do not generate an entry.
+
+**Persisted args are post-redaction.** The `capabilityCalls[].arguments` and `resultPreview` fields in the bundle reflect each capability's `redactProvenance()` output, not what the LLM actually saw. Auth-style headers are masked, free-text bodies and file bytes are replaced with sentinels, and PII-handling capabilities (`call_external_api`, `escalate_to_human`, `run_workflow`, `read_user_memory`, `write_user_memory`, `upload_to_storage`) ship explicit redactors. See [`.context/security/pii-redaction.md`](../security/pii-redaction.md).
+
 ## Tagging
 
 ### Data model
