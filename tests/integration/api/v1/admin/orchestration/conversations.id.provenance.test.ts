@@ -35,10 +35,15 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
+vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({
+  logAdminAction: vi.fn(),
+}));
+
 // ─── Imports after mocks ─────────────────────────────────────────────────────
 
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
+import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { GET as GET_JSON } from '@/app/api/v1/admin/orchestration/conversations/[id]/provenance/route';
 import { GET as GET_MD } from '@/app/api/v1/admin/orchestration/conversations/[id]/provenance.md/route';
 
@@ -244,6 +249,45 @@ describe('GET /api/v1/admin/orchestration/conversations/:id/provenance (JSON)', 
       expect(body.data.messages[0]?.provenance).toBeNull();
     });
   });
+
+  describe('Audit-of-audits', () => {
+    it('writes a conversation.provenance_export audit entry on a successful JSON fetch', async () => {
+      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+      vi.mocked(prisma.aiConversation.findUnique).mockResolvedValue(
+        makeConversation({
+          messages: [makeMessage({ role: 'user' }), makeMessage({ role: 'assistant' })],
+        }) as never
+      );
+
+      await GET_JSON(makeJsonRequest(), makeParams(CONV_ID));
+
+      expect(vi.mocked(logAdminAction)).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: USER_ID,
+          action: 'conversation.provenance_export',
+          entityType: 'conversation',
+          entityId: CONV_ID,
+          entityName: 'Tenancy deposit advice',
+          metadata: expect.objectContaining({ format: 'json', messageCount: 2 }),
+        })
+      );
+    });
+
+    it('does not write an audit entry on auth failure', async () => {
+      vi.mocked(auth.api.getSession).mockResolvedValue(mockAuthenticatedUser('USER'));
+      await GET_JSON(makeJsonRequest(), makeParams(CONV_ID));
+      expect(vi.mocked(logAdminAction)).not.toHaveBeenCalled();
+    });
+
+    it('does not write an audit entry on a 404 (cross-user ownership miss)', async () => {
+      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+      vi.mocked(prisma.aiConversation.findUnique).mockResolvedValue(
+        makeConversation({ userId: OTHER_USER_ID }) as never
+      );
+      await GET_JSON(makeJsonRequest(), makeParams(CONV_ID));
+      expect(vi.mocked(logAdminAction)).not.toHaveBeenCalled();
+    });
+  });
 });
 
 // ─── Tests: Markdown route ────────────────────────────────────────────────────
@@ -307,5 +351,39 @@ describe('GET /api/v1/admin/orchestration/conversations/:id/provenance.md', () =
     expect(body).toContain(`# Conversation provenance — \`${CONV_ID}\``);
     expect(body).toContain('Tenant Advisor');
     expect(body).toContain('Model `claude-sonnet-4-6`');
+  });
+
+  it('writes a conversation.provenance_export audit entry on a successful Markdown fetch', async () => {
+    vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+    vi.mocked(prisma.aiConversation.findUnique).mockResolvedValue(
+      makeConversation({
+        messages: [makeMessage({ role: 'user' }), makeMessage({ role: 'assistant' })],
+      }) as never
+    );
+
+    await GET_MD(makeMdRequest(), makeParams(CONV_ID));
+
+    expect(vi.mocked(logAdminAction)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: USER_ID,
+        action: 'conversation.provenance_export',
+        entityType: 'conversation',
+        entityId: CONV_ID,
+        entityName: 'Tenancy deposit advice',
+        metadata: expect.objectContaining({ format: 'markdown', messageCount: 2 }),
+      })
+    );
+    // bytes metadata is populated from the rendered string length
+    const call = vi.mocked(logAdminAction).mock.calls[0]?.[0];
+    expect(call?.metadata?.bytes).toBeGreaterThan(0);
+  });
+
+  it('does not write an audit entry on a 404 (cross-user ownership miss)', async () => {
+    vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+    vi.mocked(prisma.aiConversation.findUnique).mockResolvedValue(
+      makeConversation({ userId: OTHER_USER_ID }) as never
+    );
+    await GET_MD(makeMdRequest(), makeParams(CONV_ID));
+    expect(vi.mocked(logAdminAction)).not.toHaveBeenCalled();
   });
 });

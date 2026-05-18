@@ -28,6 +28,7 @@ import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit
 import { getClientIP } from '@/lib/security/ip';
 import { cuidSchema } from '@/lib/validations/common';
 import { messageProvenanceSchema } from '@/lib/validations/orchestration';
+import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
 export const GET = withAdminAuth<{ id: string }>(async (request, session, { params }) => {
   const clientIP = getClientIP(request);
@@ -96,6 +97,20 @@ export const GET = withAdminAuth<{ id: string }>(async (request, session, { para
   log.info('Conversation provenance bundle fetched', {
     conversationId: id,
     messageCount: messages.length,
+  });
+
+  // Audit-of-audits: log every provenance download so an auditor can
+  // see who exported what and when. Fire-and-forget — never blocks the
+  // response. Pair endpoint: `/provenance.md` writes the same action
+  // type with `format: 'markdown'`.
+  logAdminAction({
+    userId: session.user.id,
+    action: 'conversation.provenance_export',
+    entityType: 'conversation',
+    entityId: id,
+    entityName: conversation.title,
+    metadata: { format: 'json', messageCount: messages.length },
+    clientIp: getClientIP(request),
   });
 
   return successResponse({

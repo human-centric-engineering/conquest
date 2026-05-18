@@ -30,6 +30,7 @@ import {
   renderConversationMarkdown,
   type RenderConversationMessage,
 } from '@/lib/orchestration/trace/render-conversation-markdown';
+import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
 export const GET = withAdminAuth<{ id: string }>(async (request, session, { params }) => {
   const clientIP = getClientIP(request);
@@ -106,6 +107,18 @@ export const GET = withAdminAuth<{ id: string }>(async (request, session, { para
     conversationId: id,
     messageCount: messages.length,
     bytes: markdown.length,
+  });
+
+  // Audit-of-audits: log every Markdown download. Pair endpoint:
+  // `/provenance` writes the same action type with `format: 'json'`.
+  logAdminAction({
+    userId: session.user.id,
+    action: 'conversation.provenance_export',
+    entityType: 'conversation',
+    entityId: id,
+    entityName: conversation.title,
+    metadata: { format: 'markdown', messageCount: messages.length, bytes: markdown.length },
+    clientIp: getClientIP(request),
   });
 
   return new Response(markdown, {
