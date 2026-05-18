@@ -18,6 +18,11 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { FieldHelp } from '@/components/ui/field-help';
+import {
+  ReasoningEffortSelect,
+  fromReasoningEffortFormValue,
+  toReasoningEffortFormValue,
+} from '@/components/admin/orchestration/reasoning-effort-select';
 
 import type { EditorProps } from '@/components/admin/orchestration/workflow-builder/block-editors/index';
 import type { AgentOption } from '@/components/admin/orchestration/workflow-builder/block-editors/index';
@@ -28,6 +33,7 @@ export interface AgentCallConfig extends Record<string, unknown> {
   maxToolIterations?: number;
   mode?: 'single-turn' | 'multi-turn';
   maxTurns?: number;
+  reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | null;
 }
 
 export function AgentCallEditor({
@@ -152,6 +158,30 @@ export function AgentCallEditor({
           />
         </div>
       )}
+
+      <ReasoningEffortSelect
+        id="agent-call-reasoning-effort"
+        label="Reasoning effort (step override)"
+        help={
+          <>
+            <p>
+              Overrides the selected agent&apos;s own <code>reasoningEffort</code> setting for THIS
+              step only. Leave on <code>Auto</code> to inherit whatever the agent is configured
+              with.
+            </p>
+            <p className="mt-2">
+              Use case: the agent is configured for everyday work (medium / auto) but this
+              particular workflow step needs the agent to think harder.
+            </p>
+            <p className="mt-2">
+              Honoured only by reasoning-capable models. Dropped silently on others. See the
+              agent&apos;s Model tab for the underlying mapping.
+            </p>
+          </>
+        }
+        value={toReasoningEffortFormValue(config.reasoningEffort)}
+        onChange={(v) => onChange({ reasoningEffort: fromReasoningEffortFormValue(v) })}
+      />
     </div>
   );
 }

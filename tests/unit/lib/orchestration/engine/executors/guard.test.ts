@@ -96,6 +96,20 @@ describe('executeGuard', () => {
     });
   });
 
+  it('LLM mode: forwards reasoningEffort from config to runLlmCall', async () => {
+    vi.mocked(runLlmCall).mockResolvedValue({
+      content: 'PASS\nok',
+      tokensUsed: 5,
+      costUsd: 0.005,
+      model: 'm',
+    });
+
+    await executeGuard(makeGuardStep({ reasoningEffort: 'medium' }), makeCtx());
+
+    const lastCall = vi.mocked(runLlmCall).mock.calls.at(-1)?.[1];
+    expect(lastCall?.reasoningEffort).toBe('medium');
+  });
+
   it('LLM mode: routes to fail edge when model returns FAIL', async () => {
     vi.mocked(runLlmCall).mockResolvedValue({
       content: 'FAIL\nContains PII.',

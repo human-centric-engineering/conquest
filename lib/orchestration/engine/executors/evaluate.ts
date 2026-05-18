@@ -47,6 +47,7 @@ export async function executeEvaluate(
     prompt,
     modelOverride: config.modelOverride,
     temperature: config.temperature ?? 0.3,
+    reasoningEffort: config.reasoningEffort ?? undefined,
   });
 
   const firstLine = result.content.trim().split('\n')[0].trim();

@@ -350,6 +350,11 @@ export async function executeOrchestrator(
         prompt: `${systemPrompt}\n\n${userPrompt}`,
         modelOverride: config.modelOverride,
         temperature: config.temperature ?? DEFAULT_TEMPERATURE,
+        // `reasoningEffort` applies to the PLANNER only — delegated
+        // agents continue to use their own `AiAgent.reasoningEffort`
+        // setting. Each delegation routes through `agent-call`'s
+        // executor independently.
+        reasoningEffort: config.reasoningEffort ?? undefined,
         responseFormat: { type: 'json_object' },
       });
     } catch (err) {
@@ -383,6 +388,7 @@ export async function executeOrchestrator(
           prompt: `${systemPrompt}\n\n${userPrompt}\n\nYour previous response was not valid JSON. Please respond with ONLY valid JSON matching the required schema.`,
           modelOverride: config.modelOverride,
           temperature: config.temperature ?? DEFAULT_TEMPERATURE,
+          reasoningEffort: config.reasoningEffort ?? undefined,
           responseFormat: { type: 'json_object' },
         });
         totalTokensUsed += retryResult.tokensUsed;

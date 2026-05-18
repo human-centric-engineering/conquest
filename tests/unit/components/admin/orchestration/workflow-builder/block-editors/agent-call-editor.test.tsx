@@ -147,9 +147,12 @@ describe('AgentCallEditor', () => {
     const onChange = vi.fn();
     render(<AgentCallEditor config={defaultConfig} onChange={onChange} agents={AGENTS} />);
 
-    // Act: open the mode select (last combobox) and pick "Multi-turn"
-    const comboboxes = screen.getAllByRole('combobox');
-    const modeSelect = comboboxes[comboboxes.length - 1];
+    // Act: open the mode select by its accessible name and pick "Multi-turn".
+    // Earlier this picked the last combobox in document order, but adding
+    // the reasoning-effort Select after the mode select made that brittle —
+    // resolve by name instead so further additions to this panel don't
+    // shift this test.
+    const modeSelect = screen.getByRole('combobox', { name: /conversation mode/i });
     await user.click(modeSelect);
     const option = await screen.findByRole('option', { name: /multi-turn/i });
     await user.click(option);

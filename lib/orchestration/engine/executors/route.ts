@@ -57,6 +57,7 @@ export async function executeRoute(
     prompt: instruction,
     modelOverride: config.modelOverride,
     temperature: config.temperature ?? 0.1,
+    reasoningEffort: config.reasoningEffort ?? undefined,
   });
 
   const chosen = result.content.trim().toLowerCase();

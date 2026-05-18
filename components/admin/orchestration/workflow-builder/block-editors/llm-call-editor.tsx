@@ -19,6 +19,11 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { FieldHelp } from '@/components/ui/field-help';
+import {
+  ReasoningEffortSelect,
+  fromReasoningEffortFormValue,
+  toReasoningEffortFormValue,
+} from '@/components/admin/orchestration/reasoning-effort-select';
 
 import type { EditorProps } from '@/components/admin/orchestration/workflow-builder/block-editors/index';
 
@@ -27,6 +32,7 @@ export interface LlmCallConfig extends Record<string, unknown> {
   modelOverride?: string;
   temperature?: number;
   maxTokens?: number;
+  reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | null;
   responseFormat?: 'text' | 'json';
 }
 
@@ -104,6 +110,12 @@ export function LlmCallEditor({ config, onChange }: EditorProps<LlmCallConfig>) 
           placeholder="Provider default"
         />
       </div>
+
+      <ReasoningEffortSelect
+        id="llm-reasoning-effort"
+        value={toReasoningEffortFormValue(config.reasoningEffort)}
+        onChange={(v) => onChange({ reasoningEffort: fromReasoningEffortFormValue(v) })}
+      />
 
       <div className="space-y-1.5">
         <Label htmlFor="llm-response-format" className="flex items-center text-xs">

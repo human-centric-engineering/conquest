@@ -49,6 +49,7 @@ import { AgentVersionHistoryTab } from '@/components/admin/orchestration/agent-v
 import { AgentTestCard } from '@/components/admin/orchestration/agent-test-card';
 import { EmbedConfigPanel } from '@/components/admin/orchestration/agents/embed-config-panel';
 import { KnowledgeAccessSection } from '@/components/admin/orchestration/knowledge-access-section';
+import { ReasoningEffortSelect } from '@/components/admin/orchestration/reasoning-effort-select';
 import { slugSchema } from '@/lib/validations/common';
 import type { EffectiveAgentDefaults, ModelOption } from '@/lib/orchestration/prefetch-helpers';
 import type { AiAgent, AiProviderConfig } from '@/types/prisma';
@@ -830,53 +831,11 @@ export function AgentForm({ mode, agent, providers, models, effectiveDefaults }:
             )}
           </div>
 
-          <div className="grid gap-2">
-            <Label htmlFor="reasoningEffort">
-              Reasoning effort{' '}
-              <FieldHelp title="How much the model thinks before answering">
-                <p>
-                  Controls how much internal reasoning the model does before producing visible
-                  output. Honoured only by reasoning-capable models:
-                </p>
-                <ul className="mt-2 list-disc space-y-1 pl-4">
-                  <li>
-                    <strong>OpenAI o-series / gpt-5</strong> — sends <code>reasoning_effort</code>{' '}
-                    with the chosen bucket.
-                  </li>
-                  <li>
-                    <strong>Anthropic Claude 4 Opus / Sonnet 4.5+</strong> — enables extended
-                    thinking with a token budget derived from the bucket (low ≈ 1k, medium ≈ 4k,
-                    high ≈ 16k tokens).
-                  </li>
-                  <li>
-                    <strong>All other models</strong> — the field is dropped silently. No 400.
-                  </li>
-                </ul>
-                <p className="mt-2">
-                  Higher effort = more tokens billed per turn. <code>Auto</code> means &ldquo;use
-                  the provider default&rdquo; — which on reasoning models is typically{' '}
-                  <code>medium</code>.
-                </p>
-              </FieldHelp>
-            </Label>
-            <Select
-              defaultValue={(agent?.reasoningEffort as string | null) ?? 'auto'}
-              onValueChange={(v) =>
-                setValue('reasoningEffort', v as AgentFormData['reasoningEffort'])
-              }
-            >
-              <SelectTrigger id="reasoningEffort">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="auto">Auto (provider default)</SelectItem>
-                <SelectItem value="minimal">Minimal</SelectItem>
-                <SelectItem value="low">Low</SelectItem>
-                <SelectItem value="medium">Medium</SelectItem>
-                <SelectItem value="high">High</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          <ReasoningEffortSelect
+            id="reasoningEffort"
+            value={watch('reasoningEffort')}
+            onChange={(v) => setValue('reasoningEffort', v, { shouldDirty: true })}
+          />
 
           <div className="grid gap-2">
             <Label htmlFor="monthlyBudgetUsd">

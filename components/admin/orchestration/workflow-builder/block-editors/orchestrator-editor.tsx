@@ -24,6 +24,11 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { FieldHelp } from '@/components/ui/field-help';
+import {
+  ReasoningEffortSelect,
+  fromReasoningEffortFormValue,
+  toReasoningEffortFormValue,
+} from '@/components/admin/orchestration/reasoning-effort-select';
 
 import type { EditorProps } from '@/components/admin/orchestration/workflow-builder/block-editors/index';
 import type { AgentOption } from '@/components/admin/orchestration/workflow-builder/block-editors/index';
@@ -36,6 +41,7 @@ export interface OrchestratorConfig extends Record<string, unknown> {
   maxDelegationsPerRound?: number;
   modelOverride?: string;
   temperature?: number;
+  reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | null;
   timeoutMs?: number;
   budgetLimitUsd?: number;
 }
@@ -268,6 +274,33 @@ export function OrchestratorEditor({
           }
         />
       </div>
+
+      <ReasoningEffortSelect
+        id="orchestrator-reasoning-effort"
+        label="Planner reasoning effort"
+        help={
+          <>
+            <p>
+              Applies to the <strong>planner LLM only</strong> — the LLM that decides which agents
+              to call each round. Each delegated agent continues to use its own configured reasoning
+              effort, not this value.
+            </p>
+            <p className="mt-2">
+              Use case: &ldquo;make the planner think harder about which agents to call&rdquo;
+              without affecting the cost of the delegations themselves.
+            </p>
+            <ul className="mt-2 list-disc space-y-1 pl-4">
+              <li>
+                Honoured by reasoning-capable planner models (OpenAI o-series / gpt-5, Anthropic
+                Claude 4 thinking).
+              </li>
+              <li>Dropped silently on planner models that don&apos;t support it.</li>
+            </ul>
+          </>
+        }
+        value={toReasoningEffortFormValue(config.reasoningEffort)}
+        onChange={(v) => onChange({ reasoningEffort: fromReasoningEffortFormValue(v) })}
+      />
     </div>
   );
 }

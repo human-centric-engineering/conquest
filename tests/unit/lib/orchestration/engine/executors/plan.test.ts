@@ -89,6 +89,20 @@ describe('executePlan', () => {
     expect(result.costUsd).toBe(0.02);
   });
 
+  it('forwards reasoningEffort from config to runLlmCall', async () => {
+    vi.mocked(runLlmCall).mockResolvedValue({
+      content: '1. Do A',
+      tokensUsed: 5,
+      costUsd: 0.005,
+      model: 'm',
+    });
+
+    await executePlan(makeStep({ reasoningEffort: 'high' }), makeCtx());
+
+    const lastCall = vi.mocked(runLlmCall).mock.calls.at(-1)?.[1];
+    expect(lastCall?.reasoningEffort).toBe('high');
+  });
+
   it('throws ExecutorError with code "missing_objective" when objective is absent', async () => {
     const step = makeStep({ objective: undefined });
 

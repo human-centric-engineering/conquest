@@ -2479,11 +2479,22 @@ export const llmResponseFormatSchema = z.discriminatedUnion('type', [
   }),
 ]);
 
+// Reasoning-effort bucket shared across every LLM-using step config.
+// See `lib/orchestration/llm/types.ts` for the per-provider mapping.
+// Step configs that already expose `temperature` / `maxTokens` get this
+// alongside — same surface area as the agent.reasoningEffort field.
+// Honoured by reasoning-capable models; silently dropped by others.
+const reasoningEffortConfigSchema = z
+  .enum(['minimal', 'low', 'medium', 'high'])
+  .nullable()
+  .optional();
+
 export const llmCallConfigSchema = stepErrorConfigSchema.extend({
   prompt: z.string().optional(),
   modelOverride: z.string().optional(),
   temperature: z.number().optional(),
   maxTokens: z.number().optional(),
+  reasoningEffort: reasoningEffortConfigSchema,
   responseFormat: llmResponseFormatSchema.optional(),
 });
 
@@ -2498,6 +2509,7 @@ export const routeConfigSchema = stepErrorConfigSchema.extend({
   routes: z.array(z.object({ label: z.unknown() })).optional(),
   modelOverride: z.string().optional(),
   temperature: z.number().optional(),
+  reasoningEffort: reasoningEffortConfigSchema,
 });
 
 export const reflectConfigSchema = stepErrorConfigSchema.extend({
@@ -2505,6 +2517,7 @@ export const reflectConfigSchema = stepErrorConfigSchema.extend({
   maxIterations: z.number().optional(),
   modelOverride: z.string().optional(),
   temperature: z.number().optional(),
+  reasoningEffort: reasoningEffortConfigSchema,
 });
 
 export const planConfigSchema = stepErrorConfigSchema.extend({
@@ -2512,6 +2525,7 @@ export const planConfigSchema = stepErrorConfigSchema.extend({
   maxSubSteps: z.number().optional(),
   modelOverride: z.string().optional(),
   temperature: z.number().optional(),
+  reasoningEffort: reasoningEffortConfigSchema,
 });
 
 /** Structured notification channel config for human_approval steps. */
@@ -2553,6 +2567,8 @@ export const guardConfigSchema = stepErrorConfigSchema.extend({
   failAction: z.enum(['block', 'flag']).optional(),
   modelOverride: z.string().optional(),
   temperature: z.number().optional(),
+  // Only meaningful in `mode: 'llm'`. Regex mode ignores it.
+  reasoningEffort: reasoningEffortConfigSchema,
 });
 
 export const evaluateConfigSchema = stepErrorConfigSchema.extend({
@@ -2562,6 +2578,7 @@ export const evaluateConfigSchema = stepErrorConfigSchema.extend({
   threshold: z.number().optional(),
   modelOverride: z.string().optional(),
   temperature: z.number().optional(),
+  reasoningEffort: reasoningEffortConfigSchema,
 });
 
 /**
@@ -2602,6 +2619,7 @@ export const supervisorConfigSchema = stepErrorConfigSchema
     useJudgeModel: z.boolean().optional(),
     modelOverride: z.string().optional(),
     temperature: z.number().optional(),
+    reasoningEffort: reasoningEffortConfigSchema,
     /**
      * Opt-in to making a `fail` verdict terminate the workflow.
      *
@@ -2854,6 +2872,13 @@ export const agentCallConfigSchema = stepErrorConfigSchema.extend({
   mode: z.enum(['single-turn', 'multi-turn']).optional(),
   /** Max conversation turns in multi-turn mode (default 3, max 10). */
   maxTurns: z.number().int().min(1).max(10).optional(),
+  /**
+   * Per-call reasoning-effort override. When set, this beats
+   * `AiAgent.reasoningEffort` for THIS step only. Leave null to inherit
+   * the agent's configured value. Use case: the agent is "auto" by
+   * default but this particular workflow step needs to think harder.
+   */
+  reasoningEffort: reasoningEffortConfigSchema,
 });
 
 // ---------- Orchestrator ─────────────────────────────────────────────────
@@ -2873,6 +2898,13 @@ export const orchestratorConfigSchema = stepErrorConfigSchema.extend({
   modelOverride: z.string().optional(),
   /** Temperature for the planner LLM (lower = more deterministic). */
   temperature: z.number().min(0).max(2).default(0.3),
+  /**
+   * Reasoning effort for the PLANNER only. Delegated agents use their
+   * own `AiAgent.reasoningEffort` setting. Use case: "make the planner
+   * think harder about which agents to call without affecting the
+   * delegations themselves".
+   */
+  reasoningEffort: reasoningEffortConfigSchema,
   /** Hard timeout for the entire orchestration step (ms). */
   timeoutMs: z.number().int().min(5000).max(600000).default(120000),
   /** Optional sub-budget for this orchestrator step (USD). */

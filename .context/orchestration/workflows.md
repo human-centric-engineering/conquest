@@ -269,6 +269,26 @@ If a new step type (`WorkflowStep.type`) carries required config, add the check 
 - Add a unit test in `tests/unit/lib/orchestration/workflows/validator.test.ts` that asserts on the new `code`, not on the message.
 - Never make the validator read from the DB or call `process.env`. If a check needs external data, it belongs in the engine, not the validator.
 
+## Reasoning effort on step configs
+
+Every step config that already exposes `temperature` / `maxTokens` also accepts an optional `reasoningEffort` (`'minimal' | 'low' | 'medium' | 'high' | null`). The runtime forwards it into `LlmOptions.reasoningEffort` when the executor calls `runLlmCall`. See [`llm-providers.md` § Reasoning-effort knob](./llm-providers.md) for the per-provider wire mapping.
+
+| Step type      | What it controls                                                                                                                            |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `llm`          | The single LLM call this step issues                                                                                                        |
+| `route_llm`    | The classification LLM call                                                                                                                 |
+| `reflect`      | All critique / revision LLM calls in the loop                                                                                               |
+| `plan`         | The planning LLM call                                                                                                                       |
+| `guard`        | Only when `mode: 'llm'` — the rule-check LLM call. `mode: 'regex'` ignores the field.                                                       |
+| `evaluate`     | The scoring LLM call                                                                                                                        |
+| `supervisor`   | Every LLM call the supervisor makes (judge, citation validator, rescoring). No per-call carve-out.                                          |
+| `agent_call`   | **Overrides the called agent's own `reasoningEffort`** for THIS step only. Falls back to the agent column if unset.                         |
+| `orchestrator` | The **planner LLM only**. Delegated agents continue to use their own `AiAgent.reasoningEffort`. By design — see `orchestratorConfigSchema`. |
+
+Honoured only by reasoning-capable models (OpenAI o-series / gpt-5, Anthropic Claude 4 thinking models). Dropped silently on others. Caller intent is recorded on the trace's `LlmRequestParamsSnapshot.reasoningEffort` either way, so a misconfigured step shows up in the execution detail view's request-envelope line.
+
+The admin UI surfaces this via `<ReasoningEffortSelect />` (one shared component at `components/admin/orchestration/reasoning-effort-select.tsx`) so the Select copy and help text stay aligned across the eight step-config panels plus the agent form.
+
 ## Step output conventions
 
 Step outputs are typed as `unknown` — the engine only requires that what a step emits is JSON-serialisable. Two opt-in conventions sit on top:

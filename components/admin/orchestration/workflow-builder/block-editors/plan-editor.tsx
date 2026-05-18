@@ -12,6 +12,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { FieldHelp } from '@/components/ui/field-help';
+import {
+  ReasoningEffortSelect,
+  fromReasoningEffortFormValue,
+  toReasoningEffortFormValue,
+} from '@/components/admin/orchestration/reasoning-effort-select';
 
 import type { EditorProps } from '@/components/admin/orchestration/workflow-builder/block-editors/index';
 
@@ -20,6 +25,7 @@ export interface PlanConfig extends Record<string, unknown> {
   maxSubSteps?: number;
   modelOverride?: string;
   temperature?: number;
+  reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | null;
 }
 
 export function PlanEditor({ config, onChange }: EditorProps<PlanConfig>) {
@@ -92,6 +98,12 @@ export function PlanEditor({ config, onChange }: EditorProps<PlanConfig>) {
           onChange={(e) => onChange({ temperature: Number(e.target.value) })}
         />
       </div>
+
+      <ReasoningEffortSelect
+        id="plan-reasoning-effort"
+        value={toReasoningEffortFormValue(config.reasoningEffort)}
+        onChange={(v) => onChange({ reasoningEffort: fromReasoningEffortFormValue(v) })}
+      />
     </div>
   );
 }

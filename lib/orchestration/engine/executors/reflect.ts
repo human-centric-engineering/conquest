@@ -105,6 +105,7 @@ export async function executeReflect(
       prompt,
       modelOverride: config.modelOverride,
       temperature: config.temperature ?? 0.3,
+      reasoningEffort: config.reasoningEffort ?? undefined,
     });
 
     totalTokens += result.tokensUsed;

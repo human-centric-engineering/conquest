@@ -97,6 +97,20 @@ describe('executeEvaluate', () => {
     });
   });
 
+  it('forwards reasoningEffort from config to runLlmCall', async () => {
+    vi.mocked(runLlmCall).mockResolvedValue({
+      content: '4\nGood.',
+      tokensUsed: 5,
+      costUsd: 0.005,
+      model: 'm',
+    });
+
+    await executeEvaluate(makeEvaluateStep({ reasoningEffort: 'low' }), makeCtx());
+
+    const lastCall = vi.mocked(runLlmCall).mock.calls.at(-1)?.[1];
+    expect(lastCall?.reasoningEffort).toBe('low');
+  });
+
   it('fails when score is below threshold', async () => {
     vi.mocked(runLlmCall).mockResolvedValue({
       content: '2\nLacks detail.',

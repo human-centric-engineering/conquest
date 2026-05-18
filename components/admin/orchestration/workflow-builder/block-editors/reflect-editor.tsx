@@ -12,6 +12,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { FieldHelp } from '@/components/ui/field-help';
+import {
+  ReasoningEffortSelect,
+  fromReasoningEffortFormValue,
+  toReasoningEffortFormValue,
+} from '@/components/admin/orchestration/reasoning-effort-select';
 
 import type { EditorProps } from '@/components/admin/orchestration/workflow-builder/block-editors/index';
 
@@ -20,6 +25,7 @@ export interface ReflectConfig extends Record<string, unknown> {
   maxIterations?: number;
   modelOverride?: string;
   temperature?: number;
+  reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | null;
 }
 
 export function ReflectEditor({ config, onChange }: EditorProps<ReflectConfig>) {
@@ -94,6 +100,12 @@ export function ReflectEditor({ config, onChange }: EditorProps<ReflectConfig>) 
           onChange={(e) => onChange({ temperature: Number(e.target.value) })}
         />
       </div>
+
+      <ReasoningEffortSelect
+        id="reflect-reasoning-effort"
+        value={toReasoningEffortFormValue(config.reasoningEffort)}
+        onChange={(v) => onChange({ reasoningEffort: fromReasoningEffortFormValue(v) })}
+      />
     </div>
   );
 }

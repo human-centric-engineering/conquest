@@ -102,6 +102,20 @@ describe('executeReflect', () => {
     });
   });
 
+  it('forwards reasoningEffort from config to runLlmCall', async () => {
+    vi.mocked(runLlmCall).mockResolvedValueOnce({
+      content: 'No further changes',
+      tokensUsed: 5,
+      costUsd: 0.005,
+      model: 'm',
+    });
+
+    await executeReflect(makeStep({ reasoningEffort: 'medium' }), makeCtx());
+
+    const lastCall = vi.mocked(runLlmCall).mock.calls.at(-1)?.[1];
+    expect(lastCall?.reasoningEffort).toBe('medium');
+  });
+
   it('throws ExecutorError with code "missing_critique_prompt" when critiquePrompt is absent', async () => {
     const step = makeStep({ critiquePrompt: undefined });
 

@@ -18,6 +18,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { FieldHelp } from '@/components/ui/field-help';
+import {
+  ReasoningEffortSelect,
+  fromReasoningEffortFormValue,
+  toReasoningEffortFormValue,
+} from '@/components/admin/orchestration/reasoning-effort-select';
 
 import type { EditorProps } from '@/components/admin/orchestration/workflow-builder/block-editors/index';
 
@@ -28,6 +33,7 @@ interface RouteBranch {
 export interface RouteConfig extends Record<string, unknown> {
   classificationPrompt: string;
   routes: RouteBranch[];
+  reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | null;
 }
 
 export function RouteEditor({ config, onChange }: EditorProps<RouteConfig>) {
@@ -104,6 +110,12 @@ export function RouteEditor({ config, onChange }: EditorProps<RouteConfig>) {
           </Button>
         </div>
       </div>
+
+      <ReasoningEffortSelect
+        id="route-reasoning-effort"
+        value={toReasoningEffortFormValue(config.reasoningEffort)}
+        onChange={(v) => onChange({ reasoningEffort: fromReasoningEffortFormValue(v) })}
+      />
     </div>
   );
 }

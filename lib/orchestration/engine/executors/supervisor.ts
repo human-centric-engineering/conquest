@@ -95,12 +95,18 @@ export async function executeSupervisor(
 
   // Engine-side LLM shim — bills cost, surfaces telemetry, forwards
   // the cancellation signal. The shared core treats it as opaque.
+  // `reasoningEffort` is captured from the step config in closure scope
+  // rather than threaded through the shim's `opts` contract — the
+  // supervisor's internal callers don't know about reasoning effort,
+  // but the step author does, and the step's setting should apply to
+  // every LLM call the supervisor makes.
   const llmCall: LlmCallShim = async (prompt, opts) => {
     const result = await runLlmCall(ctx, {
       stepId: step.id,
       prompt,
       modelOverride,
       temperature: opts.temperature,
+      reasoningEffort: config.reasoningEffort ?? undefined,
     });
     return { content: result.content, tokensUsed: result.tokensUsed, costUsd: result.costUsd };
   };

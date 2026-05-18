@@ -94,6 +94,20 @@ describe('executeRoute', () => {
     });
   });
 
+  it('forwards reasoningEffort from config to runLlmCall', async () => {
+    vi.mocked(runLlmCall).mockResolvedValue({
+      content: 'support',
+      tokensUsed: 5,
+      costUsd: 0.005,
+      model: 'm',
+    });
+
+    await executeRoute(makeRouteStep({ reasoningEffort: 'low' }), makeCtx());
+
+    const lastCall = vi.mocked(runLlmCall).mock.calls.at(-1)?.[1];
+    expect(lastCall?.reasoningEffort).toBe('low');
+  });
+
   it('throws ExecutorError with code "missing_routes" when routes array is empty', async () => {
     const step = makeRouteStep({ routes: [] });
 

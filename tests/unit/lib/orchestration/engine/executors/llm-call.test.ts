@@ -110,6 +110,24 @@ describe('executeLlmCall', () => {
     });
   });
 
+  it('forwards reasoningEffort from config to runLlmCall', async () => {
+    vi.mocked(runLlmCall).mockResolvedValue({
+      content: 'response',
+      tokensUsed: 5,
+      costUsd: 0.005,
+      model: 'gpt-5',
+    });
+
+    const step = makeStep({
+      prompt: 'think hard',
+      reasoningEffort: 'high',
+    });
+    await executeLlmCall(step, makeCtx());
+
+    const lastCall = vi.mocked(runLlmCall).mock.calls.at(-1)?.[1];
+    expect(lastCall?.reasoningEffort).toBe('high');
+  });
+
   it('throws ExecutorError with code "missing_prompt" when prompt is undefined', async () => {
     const step = makeStep({ prompt: undefined });
 

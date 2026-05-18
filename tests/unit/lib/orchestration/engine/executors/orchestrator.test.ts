@@ -153,6 +153,28 @@ describe('executeOrchestrator', () => {
     expect(executeAgentCall).not.toHaveBeenCalled();
   });
 
+  it('forwards reasoningEffort to the PLANNER LLM call only (delegations untouched)', async () => {
+    vi.mocked(runLlmCall).mockResolvedValueOnce(
+      makePlannerResponse({
+        finalAnswer: 'done',
+        reasoning: 'enough context',
+      })
+    );
+
+    await executeOrchestrator(makeStep({ reasoningEffort: 'high' }), makeCtx());
+
+    // The planner call is the only runLlmCall invocation here (no
+    // delegations were made because the planner returned a finalAnswer).
+    // It must carry the step's reasoningEffort.
+    const plannerCall = vi.mocked(runLlmCall).mock.calls.at(0)?.[1];
+    expect(plannerCall?.reasoningEffort).toBe('high');
+    // Delegations route through executeAgentCall, not runLlmCall, so the
+    // planner-only contract is satisfied structurally — the step config
+    // never reaches the agent path. We assert that path was not taken
+    // here so the assumption is visible.
+    expect(executeAgentCall).not.toHaveBeenCalled();
+  });
+
   it('multi-round: delegates in round 1, returns answer in round 2', async () => {
     // Round 1: planner delegates
     vi.mocked(runLlmCall).mockResolvedValueOnce(

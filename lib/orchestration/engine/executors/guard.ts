@@ -63,6 +63,7 @@ export async function executeGuard(
       prompt,
       modelOverride: config.modelOverride,
       temperature: config.temperature ?? 0.1,
+      reasoningEffort: config.reasoningEffort ?? undefined,
     });
 
     tokensUsed = result.tokensUsed;

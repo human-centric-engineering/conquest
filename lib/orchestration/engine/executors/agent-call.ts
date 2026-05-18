@@ -97,6 +97,14 @@ interface RunSingleTurnOptions {
    * right point. Optional — multi-turn mode passes undefined.
    */
   recordTurn?: (turn: AgentCallTurn) => Promise<void>;
+  /**
+   * Resolved reasoning-effort to use for THIS step's LLM calls. Step
+   * config (`agentCallConfigSchema.reasoningEffort`) beats the agent's
+   * own `AiAgent.reasoningEffort`; the executor resolves the precedence
+   * once at the entry point and passes the effective value here so the
+   * inner loop doesn't have to repeat the resolution per turn.
+   */
+  effectiveReasoningEffort?: ReasoningEffort;
 }
 
 /**
@@ -122,6 +130,7 @@ async function runSingleTurn(
     startCost = 0,
     startContent = '',
     recordTurn,
+    effectiveReasoningEffort,
   } = options;
   let totalTokensUsed = startTokens;
   let totalCostUsd = startCost;
@@ -152,8 +161,8 @@ async function runSingleTurn(
             model: model,
             ...(agent!.temperature !== null ? { temperature: agent!.temperature } : {}),
             ...(agent!.maxTokens !== null ? { maxTokens: agent!.maxTokens } : {}),
-            ...(agent!.reasoningEffort !== null
-              ? { reasoningEffort: agent!.reasoningEffort as ReasoningEffort }
+            ...(effectiveReasoningEffort !== undefined
+              ? { reasoningEffort: effectiveReasoningEffort }
               : {}),
             ...(toolDefinitions.length > 0 ? { tools: toolDefinitions } : {}),
             signal: ctx.signal,
@@ -178,9 +187,8 @@ async function runSingleTurn(
         const requestParams: LlmRequestParamsSnapshot = {};
         if (agent!.maxTokens !== null) requestParams.maxTokens = agent!.maxTokens;
         if (agent!.temperature !== null) requestParams.temperature = agent!.temperature;
-        if (agent!.reasoningEffort !== null) {
-          requestParams.reasoningEffort = agent!
-            .reasoningEffort as LlmRequestParamsSnapshot['reasoningEffort'];
+        if (effectiveReasoningEffort !== undefined) {
+          requestParams.reasoningEffort = effectiveReasoningEffort;
         }
         if (toolDefinitions.length > 0) requestParams.toolCount = toolDefinitions.length;
         ctx.stepTelemetry?.push({
@@ -364,6 +372,12 @@ export async function executeAgentCall(
     );
   }
 
+  // Resolve reasoning-effort precedence ONCE — step config beats the
+  // agent's own `reasoningEffort` column. When both are null/unset, the
+  // effective value is undefined and the provider sends nothing.
+  const effectiveReasoningEffort: ReasoningEffort | undefined =
+    config.reasoningEffort ?? (agent.reasoningEffort as ReasoningEffort | null) ?? undefined;
+
   // Interpolate the message template
   const interpolatedMessage = interpolatePrompt(message, ctx);
 
@@ -502,6 +516,7 @@ export async function executeAgentCall(
           // loop will exit immediately and return this as the output.
           startContent: lastPrior.assistantContent,
           recordTurn: ctx.recordTurn,
+          effectiveReasoningEffort,
         }
       );
     }
@@ -516,7 +531,10 @@ export async function executeAgentCall(
       usedSlug,
       resolvedModel,
       maxIterations,
-      ctx.recordTurn ? { recordTurn: ctx.recordTurn } : {}
+      {
+        ...(ctx.recordTurn ? { recordTurn: ctx.recordTurn } : {}),
+        effectiveReasoningEffort,
+      }
     );
   }
 
@@ -557,7 +575,8 @@ export async function executeAgentCall(
         provider,
         usedSlug,
         resolvedModel,
-        maxIterations
+        maxIterations,
+        { effectiveReasoningEffort }
       );
     } catch (err) {
       if (err instanceof ExecutorError) {

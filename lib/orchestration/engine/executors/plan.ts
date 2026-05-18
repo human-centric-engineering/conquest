@@ -47,6 +47,7 @@ export async function executePlan(
     prompt,
     modelOverride: config.modelOverride,
     temperature: config.temperature ?? 0.3,
+    reasoningEffort: config.reasoningEffort ?? undefined,
   });
 
   const plan = parseNumberedList(result.content).slice(0, maxSubSteps);

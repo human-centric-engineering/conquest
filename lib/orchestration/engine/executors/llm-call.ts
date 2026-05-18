@@ -32,6 +32,10 @@ export async function executeLlmCall(
     modelOverride: config.modelOverride,
     temperature: config.temperature,
     maxTokens: config.maxTokens,
+    // null on the config column means "not set" — translate to undefined
+    // so runLlmCall skips the field on the wire instead of forwarding a
+    // sentinel the provider class would have to special-case.
+    reasoningEffort: config.reasoningEffort ?? undefined,
     responseFormat: config.responseFormat,
   });
 
