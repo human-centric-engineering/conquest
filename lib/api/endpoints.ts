@@ -124,6 +124,8 @@ export const API = {
         `/api/v1/admin/orchestration/workflows/${id}/execute`,
       workflowExecuteStream: (id: string): string =>
         `/api/v1/admin/orchestration/workflows/${id}/execute-stream`,
+      workflowCostEstimate: (id: string): string =>
+        `/api/v1/admin/orchestration/workflows/${id}/cost-estimate`,
       workflowSaveAsTemplate: (id: string): string =>
         `/api/v1/admin/orchestration/workflows/${id}/save-as-template`,
       EXECUTIONS: '/api/v1/admin/orchestration/executions',
@@ -139,6 +141,10 @@ export const API = {
         `/api/v1/admin/orchestration/executions/${id}/cancel`,
       executionRetryStep: (id: string): string =>
         `/api/v1/admin/orchestration/executions/${id}/retry-step`,
+      executionReview: (id: string): string =>
+        `/api/v1/admin/orchestration/executions/${id}/review`,
+      executionReportMarkdown: (id: string): string =>
+        `/api/v1/admin/orchestration/executions/${id}/report.md`,
       APPROVALS_HISTORY: '/api/v1/admin/orchestration/approvals/history',
       workflowVersions: (id: string): string =>
         `/api/v1/admin/orchestration/workflows/${id}/versions`,

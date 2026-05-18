@@ -2,6 +2,8 @@
 
 Admin list/create/run flows for `AiEvaluationSession`. Landed in Phase 7 Session 7.1, revised in 7.2.
 
+> **Scope note.** Evaluation **sessions** are for auditing an _agent's chat turns_ (faithfulness, groundedness, relevance — see `.context/orchestration/evaluation-metrics.md`). For auditing a _workflow execution_, use the `supervisor` step type or the retroactive review endpoint. Both share the same independent-judge-model env vars (`EVALUATION_JUDGE_PROVIDER` / `EVALUATION_JUDGE_MODEL` via `lib/orchestration/evaluations/judge-model.ts`); their scope and output shape differ. See `.context/admin/workflow-builder.md` (§ Supervisor step) and `.context/orchestration/patterns-and-steps.md` (§ `evaluate` vs `supervisor`).
+
 **Pages**
 
 | Route                                   | File                                                | Role                                   |
@@ -169,16 +171,25 @@ queries.
 
 ### Judge model
 
-The judge model is independent of the agent under test. Two env vars (with
-fallbacks to the existing `EVALUATION_DEFAULT_PROVIDER` / `EVALUATION_DEFAULT_MODEL`):
+The judge model resolves through three layers:
 
 ```
-EVALUATION_JUDGE_PROVIDER=anthropic       # defaults to EVALUATION_DEFAULT_PROVIDER
-EVALUATION_JUDGE_MODEL=claude-sonnet-4-6  # defaults to EVALUATION_DEFAULT_MODEL
+EVALUATION_JUDGE_PROVIDER / EVALUATION_JUDGE_MODEL   # explicit judge (if set)
+       ↓ (fall through when unset)
+EVALUATION_DEFAULT_PROVIDER / EVALUATION_DEFAULT_MODEL   # shared eval default
+       ↓ (fall through when unset)
+System chat default (resolveAgentProviderAndModel('chat'))   # first active provider + configured default chat model
 ```
 
 Standard practice — judge ≥ subject — so a Haiku-powered agent gets judged by a
-stronger model.
+stronger model. Set `EVALUATION_JUDGE_MODEL` explicitly in multi-provider
+deployments where you want true independence. In single-provider deployments
+(OpenAI-only, OpenRouter-only, Ollama-only) the bottom layer ensures evaluation
+scoring works without any env-var configuration — the judge just uses whatever
+the system has configured for chat.
+
+Prior versions hard-coded `anthropic` / `claude-sonnet-4-6` as the bottom
+fallback, which broke deployments without an Anthropic provider configured.
 
 ### Failure posture
 

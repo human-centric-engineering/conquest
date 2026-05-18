@@ -102,9 +102,9 @@ interface StepRegistryEntry {
 
 Each entry carries an `estimatedDuration` hint displayed in the palette below the description (e.g. `"~2-5s"`, `"varies"`, `"manual"`).
 
-`relatedPatterns` lists the canonical Agentic Design Pattern numbers (1–21) the step is most strongly associated with. The relationship is many-to-many — see `.context/orchestration/patterns-and-steps.md`. An empty array (`external_call`, `send_notification`) is the truthful answer when no canonical pattern fits, and the palette renders no "Learn more" link in that case.
+`relatedPatterns` lists the canonical Agentic Design Pattern numbers (1–21) the step is most strongly associated with. The relationship is many-to-many — see `.context/orchestration/patterns-and-steps.md`. An empty array (`external_call`, `send_notification`, `report`) is the truthful answer when no canonical pattern fits, and the palette renders no "Learn more" link in that case.
 
-**Fifteen entries:**
+**Seventeen entries:**
 
 | Type                | Label             | Category      | Outputs | Related patterns |
 | ------------------- | ----------------- | ------------- | ------- | ---------------- |
@@ -123,6 +123,27 @@ Each entry carries an `estimatedDuration` hint displayed in the palette below th
 | `agent_call`        | Agent Call        | agent         | 1       | 7, 15            |
 | `send_notification` | Send Notification | output        | 1       | —                |
 | `orchestrator`      | Orchestrator      | orchestration | 1       | 6, 7             |
+| `supervisor`        | Supervisor        | decision      | 1       | 19               |
+| `report`            | Report            | output        | 1       | —                |
+
+### Supervisor step
+
+A `supervisor` step runs an **independent post-hoc audit** of the execution. A judge model (configurable via `EVALUATION_JUDGE_MODEL`) reads the full step trace plus the workflow's input + output and emits a structured verdict with evidence-cited strengths and weaknesses.
+
+Anti-optimism mechanics are structural:
+
+- Forced JSON output (`verdict`, `score`, `strengths[]`, `weaknesses[]`, `anomalies[]`, `unverifiedAreas[]`, `confidence`).
+- Post-hoc citation validator strips any citation whose `evidenceStepId` doesn't exist in the trace or whose `evidenceQuote` isn't a verbatim substring of the cited step's output. Stripped citations land in `supervisorReport.invalidCitations[]`.
+- Verdict downgrades when `minWeaknesses` floor breaks (pass → concerns → fail).
+- Independent judge model (judge ≥ subject is standard practice).
+- Mandatory `unverifiedAreas[]` makes blind spots first-class.
+- Temperature 0.2; one retry at temperature 0 on parse failure; double-failure produces `inconclusive` verdict (never throws).
+
+**Persisted columns** on `AiWorkflowExecution`: `supervisorVerdict`, `supervisorScore`, `supervisorReport`, `supervisorReviewedAt`. Written via the generic `StepResult.contextPatch` mechanism (allowlisted in `lib/orchestration/engine/orchestration-engine.ts:drainContextPatch`) so the supervisor and any future post-hoc audit step share one write path.
+
+**Run-time toggle.** The "Execute workflow" dialog renders a **"Run neutral supervisor review"** checkbox when the workflow contains a `supervisor` step. Pre-checked from the step's `defaultEnabled` config. On submit, the dialog injects `inputData.__runSupervisor: <boolean>`. When explicitly false, the executor short-circuits with `expectedSkip: true` — no judge-model tokens billed.
+
+**Retroactive review.** Any past terminal execution can be supervised on demand via the **"Review this execution"** button on `ExecutionDetailView` (POST `/api/v1/admin/orchestration/executions/:id/review`). Useful for workflows whose template doesn't include the step or runs where the operator skipped at trigger time.
 
 **Adding a new step type:** append an entry to `STEP_REGISTRY`. The palette, the `PatternNode`, and any future registry-driven consumer will pick it up automatically — no new component, no new JSX.
 

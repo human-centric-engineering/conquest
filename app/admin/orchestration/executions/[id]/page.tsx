@@ -36,6 +36,10 @@ interface ExecutionDetail {
   startedAt: string | null;
   completedAt: string | null;
   createdAt: string;
+  supervisorVerdict: string | null;
+  supervisorScore: number | null;
+  supervisorReport: unknown;
+  supervisorReviewedAt: string | null;
   workflow: { id: string; name: string };
 }
 

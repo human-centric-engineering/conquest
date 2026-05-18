@@ -2510,6 +2510,204 @@ export const evaluateConfigSchema = stepErrorConfigSchema.extend({
   temperature: z.number().optional(),
 });
 
+/**
+ * `supervisor` — independent post-hoc audit of the execution.
+ *
+ * Reads the full execution trace (compacted projection) and emits a
+ * calibrated verdict with evidence-cited weaknesses. Anti-optimism
+ * mechanics live in the executor: forced structured citations,
+ * post-hoc citation validator, `minWeaknesses` floor, independent
+ * judge model, low temperature. See
+ * `lib/orchestration/engine/executors/supervisor.ts`.
+ */
+export const supervisorConfigSchema = stepErrorConfigSchema
+  .extend({
+    /** Rubric of what "doing its job" means for this workflow. */
+    assessmentCriteria: z.string().min(1),
+    /** Explicit failure modes to look for. Defaults baked into the prompt. */
+    redTeamPrompts: z.array(z.string()).optional(),
+    /**
+     * When true (default), every claim must carry `evidenceStepId` +
+     * `evidenceQuote` matching the cited step's output. Stripped citations
+     * downgrade the verdict. Turning this off disables the citation
+     * validator — only do that if you accept unsourced verdicts.
+     */
+    requireEvidenceCitations: z.boolean().optional(),
+    /**
+     * Minimum number of entries the supervisor's `weaknesses[]` array
+     * must contain. If the supervisor genuinely finds none, it must
+     * declare "no defects found AND I verified the following steps:" with
+     * an explicit stepId list.
+     */
+    minWeaknesses: z.number().int().nonnegative().optional(),
+    /**
+     * When true (default), `modelOverride` falls through to the shared
+     * `JUDGE_MODEL` (see `@/lib/orchestration/evaluations/judge-model`).
+     * `modelOverride` set on this step beats the judge env var.
+     */
+    useJudgeModel: z.boolean().optional(),
+    modelOverride: z.string().optional(),
+    temperature: z.number().optional(),
+    /**
+     * Opt-in to making a `fail` verdict terminate the workflow.
+     *
+     * **Trap to avoid:** when combined with `errorStrategy: 'skip'` on the
+     * same step, a `fail` verdict throws `ExecutorError` but the engine's
+     * skip strategy catches it and the workflow continues as if nothing
+     * happened — the verdict is silently absorbed. If you set
+     * `failOnVerdict: 'fail'`, the step's `errorStrategy` should be
+     * `'fail'` (default), `'retry'`, or `'fallback'` — never `'skip'`.
+     */
+    failOnVerdict: z.enum(['never', 'fail']).optional(),
+    /**
+     * Output-truncation strategy for the trace projection.
+     *  - `'auto'` (default): head + middle + tail samples for outputs > 4KB
+     *  - `'all'`: no truncation (author accepts the token bill)
+     *  - `'terminal-only'`: full output for the most recent step; 1KB head for earlier steps
+     */
+    includeStepOutputs: z.enum(['auto', 'all', 'terminal-only']).optional(),
+    /**
+     * Pre-checked state of the "Run supervisor" checkbox on the run dialog.
+     * Independent of whether the executor itself opts to run — see
+     * `respectRuntimeOptOut`.
+     */
+    defaultEnabled: z.boolean().optional(),
+    /**
+     * When true (default), `inputData.__runSupervisor === false` causes the
+     * step to short-circuit with `expectedSkip: true`. Set to false on a
+     * step that should always run regardless of the trigger payload.
+     */
+    respectRuntimeOptOut: z.boolean().optional(),
+  })
+  .refine(
+    // Structural rejection of the silent-swallow trap. When
+    // `failOnVerdict: 'fail'` throws ExecutorError, the engine's
+    // `errorStrategy: 'skip'` would catch it and continue as if nothing
+    // happened — the verdict is silently absorbed. Refuse the combination
+    // at validation time so a workflow author can't accidentally author it.
+    (cfg) => !(cfg.failOnVerdict === 'fail' && cfg.errorStrategy === 'skip'),
+    {
+      message:
+        "supervisor: failOnVerdict='fail' is incompatible with errorStrategy='skip' — the engine would silently absorb fail verdicts. Use errorStrategy='fail' (terminate), 'fallback' (route to rollback), or set failOnVerdict='never' (advisory).",
+      path: ['failOnVerdict'],
+    }
+  );
+
+// ─── Supervisor report (persisted JSON) ─────────────────────────────────────
+//
+// Two schemas for the `AiWorkflowExecution.supervisorReport` column —
+// both used by code that reads the column back from Prisma. The cast-
+// without-validation pattern was caught in PR #195 review; promoting
+// these schemas to `lib/validations/orchestration.ts` lets every read
+// site validate identically.
+
+const supervisorVerdictEnum = z.enum(['pass', 'concerns', 'fail', 'inconclusive']);
+const supervisorSeverityEnum = z.enum(['low', 'medium', 'high']);
+const supervisorConfidenceEnum = z.enum(['low', 'medium', 'high']);
+const supervisorTriggeredByEnum = z.enum(['in_workflow', 'retroactive']);
+
+const supervisorStrengthSchema = z.object({
+  claim: z.string(),
+  evidenceStepId: z.string(),
+  evidenceQuote: z.string(),
+});
+
+const supervisorWeaknessSchema = z.object({
+  severity: supervisorSeverityEnum,
+  claim: z.string(),
+  evidenceStepId: z.string().nullable(),
+  evidenceQuote: z.string().nullable(),
+  recommendation: z.string(),
+});
+
+const supervisorAnomalySchema = z.object({
+  stepId: z.string(),
+  observation: z.string(),
+});
+
+const supervisorInvalidCitationSchema = z.object({
+  location: z.enum(['strength', 'weakness']),
+  index: z.number(),
+  reason: z.enum(['unknown_step_id', 'quote_not_found']),
+  evidenceStepId: z.string(),
+  evidenceQuote: z.string(),
+});
+
+/** A single entry in `supervisorReport.previousVerdicts[]`. */
+export const supervisorPreviousVerdictSchema = z.object({
+  verdict: supervisorVerdictEnum,
+  score: z.number().nullable(),
+  reviewedAt: z.string(),
+  triggeredBy: supervisorTriggeredByEnum,
+});
+
+/**
+ * Strict schema for a SupervisorReport JSON read back from
+ * `AiWorkflowExecution.supervisorReport`. Mirrors the `SupervisorReport`
+ * TypeScript interface in `types/orchestration.ts`. Used by the
+ * Markdown renderer, the UI panel, and any other read site that needs
+ * the full report shape.
+ *
+ * Callers MUST use `safeParse` and degrade gracefully on failure — a
+ * partial / legacy / hand-edited row should not crash the consumer.
+ * The Markdown renderer skips the supervisor block, the UI panel
+ * returns null, etc.
+ */
+export const supervisorReportSchema = z.object({
+  verdict: supervisorVerdictEnum,
+  score: z.number(),
+  summary: z.string(),
+  strengths: z.array(supervisorStrengthSchema),
+  weaknesses: z.array(supervisorWeaknessSchema),
+  anomalies: z.array(supervisorAnomalySchema),
+  unverifiedAreas: z.array(z.string()),
+  confidence: supervisorConfidenceEnum,
+  invalidCitations: z.array(supervisorInvalidCitationSchema).optional(),
+  previousVerdicts: z.array(supervisorPreviousVerdictSchema).optional(),
+  triggeredBy: supervisorTriggeredByEnum.optional(),
+  parseFailure: z
+    .object({
+      rawResponse: z.string(),
+      reason: z.string(),
+    })
+    .optional(),
+});
+
+/**
+ * Lenient schema used by the retroactive `review/route.ts` endpoint to
+ * lift the prior verdict into `previousVerdicts[]` on rerun. Older
+ * rows may have a non-numeric `score` or be missing optional fields;
+ * we only need a valid `verdict` to archive the prior entry, so
+ * everything else is optional and `score` is unknown (the call site
+ * does its own `typeof === 'number'` guard).
+ */
+export const priorSupervisorReportSchema = z.object({
+  verdict: supervisorVerdictEnum,
+  score: z.unknown().optional(),
+  triggeredBy: supervisorTriggeredByEnum.optional(),
+  previousVerdicts: z.array(supervisorPreviousVerdictSchema).optional(),
+});
+
+export type SupervisorReportParsed = z.infer<typeof supervisorReportSchema>;
+
+/**
+ * `report` — deterministic human-readable Markdown render of the trace.
+ *
+ * No LLM. Reads the trace and emits a structured Markdown document
+ * suitable for inclusion in a notification email or for download. The
+ * companion download endpoint (`GET /executions/:id/report.md`) uses
+ * the same renderer over the persisted execution row.
+ */
+export const reportConfigSchema = stepErrorConfigSchema.extend({
+  /** Reserved for future formats; only 'markdown' is supported today. */
+  format: z.literal('markdown').optional(),
+  includeStepOutputs: z.enum(['auto', 'all', 'terminal-only']).optional(),
+  /** Pre-checked state of the "Generate execution report" run-dialog checkbox. */
+  defaultEnabled: z.boolean().optional(),
+  /** When true (default), `inputData.__generateReport === false` skips the step. */
+  respectRuntimeOptOut: z.boolean().optional(),
+});
+
 /** Response transformation config for external-call steps. */
 export const responseTransformSchema = z.object({
   /** Transformation type. `jmespath` for structured extraction. `template` for string templates. */

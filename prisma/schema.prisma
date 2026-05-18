@@ -494,6 +494,16 @@ model AiWorkflowExecution {
   // the dispatch cache (`ai_workflow_step_dispatch`). See
   // `lib/orchestration/engine/orchestration-engine.ts` (recordStepTurn).
   currentStepTurns  Json?
+  // Supervisor verdict columns. Populated by any executor that emits
+  // `StepResult.contextPatch` — the supervisor step is the first user.
+  // Persisted on the row for fast querying ("which runs failed the
+  // neutral audit?") without parsing the trace JSON.
+  // Values: 'pass' | 'concerns' | 'fail' | 'inconclusive'. NULL means
+  // no supervisor has run on this execution.
+  supervisorVerdict    String?
+  supervisorScore      Float?
+  supervisorReport     Json?
+  supervisorReviewedAt DateTime?
   userId            String
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt

@@ -191,6 +191,36 @@ After approval, the workflow continues:
 2. Find the model you tampered with
 3. Confirm the field was corrected back to its proper value
 
+## Supervisor verdict
+
+The audit ends with a `supervisor` step that audits the workflow's own execution and emits an honest, evidence-cited verdict. It exists to catch the failure mode where the optimistic `compile_report` narrative reads "everything went well" while the trace tells a different story (silent retries, validators that passed on bad data, capability dispatches that applied zero changes).
+
+**How it works.** A judge model reads the full step trace plus the workflow's input and produces a structured verdict. Model resolution: `EVALUATION_JUDGE_MODEL` env var if set (the canonical "independent judge ≥ subject" setup) → otherwise `EVALUATION_DEFAULT_MODEL` env var if set → otherwise the system's configured chat default (the same model every other LLM step uses). For true independence in multi-provider deployments, set `EVALUATION_JUDGE_MODEL` to a model stronger than the audit's primary one.
+
+- **Verdict** — `pass` / `concerns` / `fail` / `inconclusive`. `inconclusive` means the judge ran but its response couldn't be parsed; the raw response is preserved for debugging.
+- **Score** — 0..1.
+- **Summary** — short paragraph stating the verdict and its load-bearing reason.
+- **Strengths** and **weaknesses** — every claim cites a specific `stepId` and a verbatim quote from that step's output. Citations that don't ground in the trace are stripped by a post-hoc validator, and if the strip rate breaks the `minWeaknesses` floor the verdict is automatically downgraded (`pass` → `concerns`, `concerns` → `fail`). This is the system's anti-optimism lever — the supervisor cannot deliver a clean pass while citing things that don't exist.
+- **Unverified areas** — what the supervisor could NOT assess, made first-class so blind spots are visible.
+
+**How to read it.** When `verdict: 'pass'` and `confidence: 'high'`, the audit can be trusted. When the verdict is `concerns`, treat the weakness list as a TODO before relying on the applied changes. When the verdict is `fail`, roll back manually and re-run after refining the analysis prompts — the supervisor is advisory (`failOnVerdict: 'never'`) so the workflow doesn't auto-terminate, but the verdict is the signal to investigate.
+
+**Run-time toggle.** The "Audit Models" dialog includes a **Run neutral supervisor review** checkbox, checked by default. Uncheck it on tight-budget environments where the extra judge-model call (~$0.02–$0.10 per audit) isn't worth the signal; the supervisor step shows `status: 'skipped'` and `expectedSkip: true` in the trace, and the notification body omits the verdict section.
+
+**Retroactive review.** Any past audit execution can be reviewed after the fact via the **Review this execution** button on the execution detail page. The button opens a confirmation dialog noting the cost (~$0.02–$0.10 for one judge-model call) before firing. When a prior verdict exists, the button reads **Re-review** and the dialog explains that the prior verdict is archived to `supervisorReport.previousVerdicts[]` (nothing is lost).
+
+When a verdict is present on an execution row — whether produced in-workflow or retroactively — the execution detail page renders a **Neutral supervisor review** panel below the summary cards row. The panel surfaces the summary, weaknesses (with click-to-jump-to-step links when the cited step is in the visible trace; plain-text citations otherwise), anomalies, areas the supervisor couldn't verify, an invalid-citation note when the validator stripped anything, and the prior-verdict history.
+
+**Download report.** Every terminal execution carries a **Download report** button next to the review controls. It hits `GET /api/v1/admin/orchestration/executions/:id/report.md` and serves a deterministic Markdown render of the trace — header, supervisor verdict (when present), input data, per-step timeline with inputs / outputs / duration / cost, errors, and output. No LLM cost; rendered fresh from the trace every click. The button works regardless of whether the workflow includes a `report` step in its DAG.
+
+## Cost estimate
+
+The "Audit Models" dialog renders an **Estimated cost** row above the trigger button as soon as anything is selected. It updates (with a 250ms debounce) when the operator toggles models or the supervisor checkbox, so the displayed number always reflects what the next click would actually run. The button label stays focused on the action — the cost lives in its own row with a ⓘ popover.
+
+**The estimator is a generic workflow service.** It auto-derives a heuristic from any workflow's published definition (counting LLM-producing steps + detecting whether there's a supervisor step) and switches to an empirical mode once ≥3 past runs are available. The audit dialog passes `itemCount = selected.size` so the per-model scaling factors in; other trigger UIs that wrap workflows without a scaling input simply omit it. The popover shows both models being priced — `modelUsed` for non-supervisor steps (the chat default) and `judgeModelUsed` for the supervisor (`EVALUATION_JUDGE_MODEL` env var if set, otherwise the chat default).
+
+See [`.context/orchestration/cost-estimation.md`](../orchestration/cost-estimation.md) for the full methodology, integration recipe, and calibration notes. The estimate is **planning-grade** — actual cost varies with prompt evolution, retry behaviour on the validation guard, and the agent's tool-use iterations in `discover_new_models`. The service lives in `lib/orchestration/cost-estimation/workflow-cost.ts`.
+
 ## How attribution works
 
 Each producer step (`analyse_chat`, `analyse_embedding`, `discover_new_models`) is required to attribute every claim it makes. The output JSON carries a `sources` array per change, per new model, and per deactivation:

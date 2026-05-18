@@ -85,6 +85,17 @@ export interface ExecutionContext {
    * any executor is no-op safe.
    */
   recordTurn?: (turn: TurnEntry) => Promise<void>;
+  /**
+   * Accumulated column patches from `StepResult.contextPatch`. The
+   * engine spreads this into the data block of the next checkpoint /
+   * finalize Prisma update so writes stay lease-guarded. Later patches
+   * shallow-overwrite earlier values for the same key — the most recent
+   * supervisor invocation wins.
+   *
+   * Not mutated by executors directly; only `mergeStepResult` writes
+   * here. Engine code reads + clears.
+   */
+  pendingContextPatch?: Record<string, unknown>;
 }
 
 /**
@@ -135,6 +146,9 @@ export function mergeStepResult(
   ctx.stepOutputs[stepId] = result.output;
   ctx.totalTokensUsed += result.tokensUsed;
   ctx.totalCostUsd += result.costUsd;
+  if (result.contextPatch) {
+    ctx.pendingContextPatch = { ...(ctx.pendingContextPatch ?? {}), ...result.contextPatch };
+  }
   return ctx;
 }
 

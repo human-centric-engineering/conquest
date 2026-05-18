@@ -86,6 +86,10 @@ function makeExecution(overrides: Record<string, unknown> = {}) {
     completedAt: null,
     createdAt: new Date('2025-01-01'),
     updatedAt: new Date('2025-01-01'),
+    supervisorVerdict: null,
+    supervisorScore: null,
+    supervisorReport: null,
+    supervisorReviewedAt: null,
     workflow: { id: WORKFLOW_ID, name: 'Test Workflow' },
     ...overrides,
   };
@@ -178,6 +182,63 @@ describe('GET /api/v1/admin/orchestration/executions/:id', () => {
     expect(data.data.trace[0].stepId).toBe('step1');
     // No cost logs configured for this case → empty costEntries.
     expect(data.data.costEntries).toEqual([]);
+  });
+
+  it('returns the four supervisor fields when populated on the row', async () => {
+    vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+    vi.mocked(prisma.aiWorkflowExecution.findUnique).mockResolvedValue(
+      makeExecution({
+        status: 'completed',
+        supervisorVerdict: 'concerns',
+        supervisorScore: 0.6,
+        supervisorReviewedAt: new Date('2025-01-01T01:00:00Z'),
+        supervisorReport: {
+          verdict: 'concerns',
+          score: 0.6,
+          summary: 'Some issues',
+          strengths: [],
+          weaknesses: [],
+          anomalies: [],
+          unverifiedAreas: [],
+          confidence: 'medium',
+          triggeredBy: 'in_workflow',
+        },
+      }) as never
+    );
+
+    const response = await GET(makeGetRequest(), makeParams(EXECUTION_ID));
+    expect(response.status).toBe(200);
+    const data = await parseJson<{
+      data: {
+        execution: {
+          supervisorVerdict: string | null;
+          supervisorScore: number | null;
+          supervisorReport: { verdict: string; summary: string } | null;
+          supervisorReviewedAt: string | null;
+        };
+      };
+    }>(response);
+    expect(data.data.execution.supervisorVerdict).toBe('concerns');
+    expect(data.data.execution.supervisorScore).toBe(0.6);
+    expect(data.data.execution.supervisorReport?.verdict).toBe('concerns');
+    expect(data.data.execution.supervisorReport?.summary).toBe('Some issues');
+    expect(data.data.execution.supervisorReviewedAt).toBeTruthy();
+  });
+
+  it('returns null for the supervisor fields when no supervisor has run', async () => {
+    vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+    vi.mocked(prisma.aiWorkflowExecution.findUnique).mockResolvedValue(makeExecution() as never);
+    const response = await GET(makeGetRequest(), makeParams(EXECUTION_ID));
+    const data = await parseJson<{
+      data: {
+        execution: {
+          supervisorVerdict: string | null;
+          supervisorReport: unknown;
+        };
+      };
+    }>(response);
+    expect(data.data.execution.supervisorVerdict).toBeNull();
+    expect(data.data.execution.supervisorReport).toBeNull();
   });
 
   it('returns currentStepDetails for a running execution with live columns set', async () => {

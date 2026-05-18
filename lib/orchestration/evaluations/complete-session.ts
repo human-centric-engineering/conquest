@@ -14,9 +14,12 @@
  *  - Sessions with zero logs throw `ValidationError` — there is nothing
  *    to analyse.
  *  - If the session's agent has been deleted (`session.agentId === null`),
- *    we fall back to the provider slug in `EVALUATION_DEFAULT_PROVIDER`
- *    (defaults to `'anthropic'`) with the model in
- *    `EVALUATION_DEFAULT_MODEL` (defaults to `'claude-sonnet-4-6'`).
+ *    we fall back to `EVALUATION_DEFAULT_PROVIDER` /
+ *    `EVALUATION_DEFAULT_MODEL` if set, otherwise to the system's
+ *    configured chat default via `resolveAgentProviderAndModel` — the
+ *    same path used by every other LLM step. (The previous version
+ *    hard-coded `'anthropic'` / `'claude-sonnet-4-6'` which broke
+ *    OpenAI-only / OpenRouter-only / Ollama-only deployments.)
  *  - Raw LLM output is never forwarded in error messages. If the model
  *    returns malformed JSON we retry once with a stricter prompt; on
  *    the second failure we throw a typed error with a sanitized message.
@@ -45,6 +48,12 @@ import {
   tryParseJson,
 } from '@/lib/orchestration/evaluations/parse-structured';
 import { scoreResponse } from '@/lib/orchestration/evaluations/score-response';
+import {
+  EVALUATION_DEFAULT_MODEL as DEFAULT_MODEL,
+  EVALUATION_DEFAULT_PROVIDER as DEFAULT_PROVIDER,
+  JUDGE_MODEL,
+  JUDGE_PROVIDER,
+} from '@/lib/orchestration/evaluations/judge-model';
 
 /** Maximum number of log events included in the analysis prompt. */
 const MAX_LOGS_IN_PROMPT = 50;
@@ -52,19 +61,6 @@ const MAX_LOGS_IN_PROMPT = 50;
 const ANALYSIS_TIMEOUT_MS = 10_000;
 const ANALYSIS_MAX_TOKENS = 1500;
 const ANALYSIS_TEMPERATURE = 0.2;
-
-const DEFAULT_PROVIDER = process.env.EVALUATION_DEFAULT_PROVIDER ?? 'anthropic';
-const DEFAULT_MODEL = process.env.EVALUATION_DEFAULT_MODEL ?? 'claude-sonnet-4-6';
-
-/**
- * Judge model used for the per-turn metric scorer (faithfulness,
- * groundedness, relevance). Independent of the agent under test so a
- * Haiku-powered agent can be judged by a stronger model. Falls through
- * to `EVALUATION_DEFAULT_PROVIDER` / `EVALUATION_DEFAULT_MODEL` when
- * the dedicated env vars aren't set.
- */
-const JUDGE_PROVIDER = process.env.EVALUATION_JUDGE_PROVIDER ?? DEFAULT_PROVIDER;
-const JUDGE_MODEL = process.env.EVALUATION_JUDGE_MODEL ?? DEFAULT_MODEL;
 
 interface EvaluationAnalysis {
   summary: string;
@@ -122,9 +118,20 @@ export async function completeEvaluationSession(
     );
     providerSlug = resolved.providerSlug;
     model = resolved.model;
-  } else {
+  } else if (DEFAULT_PROVIDER !== null && DEFAULT_MODEL !== null) {
+    // Operator explicitly set EVALUATION_DEFAULT_PROVIDER + _MODEL.
     providerSlug = DEFAULT_PROVIDER;
     model = DEFAULT_MODEL;
+  } else {
+    // No explicit eval default → fall through to whatever the system
+    // resolves for a chat task (first active provider + configured
+    // default chat model). Same path system-seeded agents take.
+    const resolved = await resolveAgentProviderAndModel(
+      { provider: '', model: '', fallbackProviders: [] },
+      'chat'
+    );
+    providerSlug = resolved.providerSlug;
+    model = resolved.model;
   }
 
   const provider = await getProvider(providerSlug);
@@ -392,7 +399,25 @@ interface ScoreLogsOptions {
  * single bad turn doesn't void the whole pass.
  */
 async function scoreEvaluationLogs(opts: ScoreLogsOptions): Promise<EvaluationMetricSummary> {
-  const judgeProvider = await getProvider(JUDGE_PROVIDER);
+  // Resolve the judge model + provider.
+  // Priority: EVALUATION_JUDGE_* env vars > EVALUATION_DEFAULT_* env vars >
+  // system default chat model. Drops the previous hard-coded anthropic
+  // fallback so deployments without an Anthropic provider get a working
+  // judge.
+  let judgeProviderSlug: string;
+  let judgeModelId: string;
+  if (JUDGE_PROVIDER !== null && JUDGE_MODEL !== null) {
+    judgeProviderSlug = JUDGE_PROVIDER;
+    judgeModelId = JUDGE_MODEL;
+  } else {
+    const resolved = await resolveAgentProviderAndModel(
+      { provider: '', model: '', fallbackProviders: [] },
+      'chat'
+    );
+    judgeProviderSlug = resolved.providerSlug;
+    judgeModelId = resolved.model;
+  }
+  const judgeProvider = await getProvider(judgeProviderSlug);
 
   const faithfulnessScores: number[] = [];
   const groundednessScores: number[] = [];
@@ -418,7 +443,7 @@ async function scoreEvaluationLogs(opts: ScoreLogsOptions): Promise<EvaluationMe
         aiResponse: log.content ?? '',
         citations,
         judgeProvider,
-        judgeModel: JUDGE_MODEL,
+        judgeModel: judgeModelId,
       });
       const { faithfulness, groundedness, relevance } = result.scores;
 
@@ -458,8 +483,8 @@ async function scoreEvaluationLogs(opts: ScoreLogsOptions): Promise<EvaluationMe
   // CostOperation enum value.
   if (scoredCount > 0) {
     const costParams: Parameters<typeof logCost>[0] = {
-      model: JUDGE_MODEL,
-      provider: JUDGE_PROVIDER,
+      model: judgeModelId,
+      provider: judgeProviderSlug,
       inputTokens: totalInputTokens,
       outputTokens: totalOutputTokens,
       operation: CostOperation.EVALUATION,
@@ -479,8 +504,8 @@ async function scoreEvaluationLogs(opts: ScoreLogsOptions): Promise<EvaluationMe
     avgGroundedness: average(groundednessScores),
     avgRelevance: average(relevanceScores),
     scoredLogCount: scoredCount,
-    judgeProvider: JUDGE_PROVIDER,
-    judgeModel: JUDGE_MODEL,
+    judgeProvider: judgeProviderSlug,
+    judgeModel: judgeModelId,
     scoredAt: new Date().toISOString(),
     totalScoringCostUsd: opts.previousScoringCostUsd + totalRunCostUsd,
   };

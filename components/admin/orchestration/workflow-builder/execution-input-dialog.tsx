@@ -15,6 +15,7 @@ import { useState } from 'react';
 import { AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
   DialogContent,
@@ -42,6 +43,31 @@ export interface ExecutionInputDialogProps {
   onConfirm: (input: { inputData: Record<string, unknown>; budgetLimitUsd?: number }) => void;
   /** Workflow ID — required for dry-run validation. */
   workflowId: string;
+  /**
+   * When true, render a "Run neutral supervisor review" checkbox. The
+   * caller passes this when the workflow's DAG contains a `supervisor`
+   * step. The initial state comes from `supervisorDefaultEnabled` (the
+   * step's `defaultEnabled` config). On submit, the dialog injects
+   * `__runSupervisor: <boolean>` into the resulting `inputData`.
+   */
+  hasSupervisorStep?: boolean;
+  supervisorDefaultEnabled?: boolean;
+  /**
+   * Parallel to the supervisor toggle — when the DAG contains a
+   * `report` step, the dialog renders an "Include detailed report in
+   * notification email" checkbox. Default state from the step's
+   * `defaultEnabled` config. On submit, the dialog injects
+   * `__generateReport: <boolean>`.
+   *
+   * Important: this toggle only controls whether the rendered Markdown
+   * is embedded in the workflow's notification email (via
+   * `{{report_render.output.markdown}}` interpolation). The
+   * standalone GET /executions/:id/report.md endpoint is always
+   * available on terminal executions and renders the trace fresh on
+   * each request — that path is unaffected by this checkbox.
+   */
+  hasReportStep?: boolean;
+  reportDefaultEnabled?: boolean;
 }
 
 export function ExecutionInputDialog({
@@ -49,12 +75,18 @@ export function ExecutionInputDialog({
   onOpenChange,
   onConfirm,
   workflowId,
+  hasSupervisorStep,
+  supervisorDefaultEnabled,
+  hasReportStep,
+  reportDefaultEnabled,
 }: ExecutionInputDialogProps) {
   const [raw, setRaw] = useState('{\n  "query": ""\n}');
   const [budget, setBudget] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [dryRunning, setDryRunning] = useState(false);
   const [dryRunResult, setDryRunResult] = useState<DryRunResult | null>(null);
+  const [runSupervisor, setRunSupervisor] = useState<boolean>(supervisorDefaultEnabled ?? true);
+  const [generateReport, setGenerateReport] = useState<boolean>(reportDefaultEnabled ?? true);
 
   function parseInput(): { inputData: Record<string, unknown>; budgetLimitUsd?: number } | null {
     let parsed: Record<string, unknown>;
@@ -78,6 +110,17 @@ export function ExecutionInputDialog({
         return null;
       }
       budgetLimitUsd = num;
+    }
+
+    // Inject the run-time supervisor toggle. Reserved key consumed by
+    // the `supervisor` step executor. Only set when the workflow
+    // actually has a supervisor step — otherwise the key would be
+    // dead weight in the inputData snapshot.
+    if (hasSupervisorStep) {
+      parsed.__runSupervisor = runSupervisor;
+    }
+    if (hasReportStep) {
+      parsed.__generateReport = generateReport;
     }
 
     setError(null);
@@ -154,6 +197,81 @@ export function ExecutionInputDialog({
               onChange={(e) => setBudget(e.target.value)}
             />
           </div>
+
+          {hasSupervisorStep && (
+            <div className="bg-muted/30 flex items-start gap-3 rounded-md border px-3 py-2">
+              <Checkbox
+                id="execution-run-supervisor"
+                checked={runSupervisor}
+                onCheckedChange={(next) => setRunSupervisor(next === true)}
+                className="mt-0.5"
+              />
+              <div className="flex-1">
+                <label
+                  htmlFor="execution-run-supervisor"
+                  className="flex cursor-pointer items-center gap-2 text-sm font-medium"
+                >
+                  Run neutral supervisor review
+                  <FieldHelp
+                    title="Neutral supervisor review"
+                    contentClassName="w-96 max-h-80 overflow-y-auto"
+                  >
+                    This workflow includes a <code>supervisor</code> step — an independent judge
+                    model that audits the execution after it completes and produces an
+                    evidence-cited verdict. Adds one judge-model LLM call to the run. Uncheck to
+                    skip on a tight budget. Sets <code>inputData.__runSupervisor</code> on the
+                    execution.
+                  </FieldHelp>
+                </label>
+                <p className="text-muted-foreground mt-0.5 text-xs">
+                  Independent post-hoc audit of execution quality.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {hasReportStep && (
+            <div className="bg-muted/30 flex items-start gap-3 rounded-md border px-3 py-2">
+              <Checkbox
+                id="execution-generate-report"
+                checked={generateReport}
+                onCheckedChange={(next) => setGenerateReport(next === true)}
+                className="mt-0.5"
+              />
+              <div className="flex-1">
+                <label
+                  htmlFor="execution-generate-report"
+                  className="flex cursor-pointer items-center gap-2 text-sm font-medium"
+                >
+                  Include detailed report in notification email
+                  <FieldHelp
+                    title="Detailed report in email"
+                    contentClassName="w-96 max-h-80 overflow-y-auto"
+                  >
+                    <p>
+                      When checked, the workflow&apos;s <code>report</code> step renders the full
+                      trace as Markdown and the notification email body embeds it inline (via{' '}
+                      <code>{'{{report_render.output.markdown}}'}</code> interpolation). Useful for
+                      recipients without admin access or for audit-trail forwarding.
+                    </p>
+                    <p className="mt-2">
+                      When unchecked, the email stays short. <strong>The Download Report</strong>{' '}
+                      button on the execution detail page still works — it renders the trace fresh
+                      from the persisted execution, independent of this toggle.
+                    </p>
+                    <p className="mt-2">
+                      No LLM cost either way. Sets <code>inputData.__generateReport</code> on the
+                      execution.
+                    </p>
+                  </FieldHelp>
+                </label>
+                <p className="text-muted-foreground mt-0.5 text-xs">
+                  Embeds the full step-by-step report inline in the email. Download button works
+                  regardless.
+                </p>
+              </div>
+            </div>
+          )}
 
           {error && (
             <p role="alert" className="text-sm text-red-600 dark:text-red-400">

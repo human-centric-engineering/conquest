@@ -136,13 +136,17 @@ Analytics can split summary spend from scoring spend by filtering on
 
 ## Configuration
 
-Two env vars, both optional, both falling through to the existing
-`EVALUATION_DEFAULT_*` defaults:
+Two env vars, both optional. When neither (nor their `EVALUATION_DEFAULT_*`
+shadows) is set, the judge resolves to whatever the system has configured for
+chat — the same fallback every other LLM step uses (`resolveAgentProviderAndModel`).
 
 ```bash
-EVALUATION_JUDGE_PROVIDER=anthropic       # defaults to EVALUATION_DEFAULT_PROVIDER
-EVALUATION_JUDGE_MODEL=claude-sonnet-4-6  # defaults to EVALUATION_DEFAULT_MODEL
+EVALUATION_JUDGE_PROVIDER=anthropic       # optional; falls through to EVALUATION_DEFAULT_PROVIDER
+EVALUATION_JUDGE_MODEL=claude-sonnet-4-6  # optional; falls through to EVALUATION_DEFAULT_MODEL
 ```
+
+Prior versions hard-coded `anthropic` / `claude-sonnet-4-6` as the bottom
+fallback, which broke any deployment without an Anthropic provider configured.
 
 Standard practice is **judge ≥ subject** — give a Haiku-powered agent a
 Sonnet judge, give a Sonnet-powered agent an Opus judge. Same-model

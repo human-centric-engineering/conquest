@@ -171,22 +171,26 @@ The Provider Model Audit is an AI-powered workflow that evaluates model entries 
 
 1. **Genuinely useful** — catches stale ratings, deprecated models, and inaccurate classifications by having an LLM evaluate each entry against its knowledge of current model capabilities. Also identifies new models from providers that are not yet in the registry and proposes them for addition, and detects deprecated/discontinued models for deactivation (all with human approval).
 
-2. **Framework reference implementation** — exercises 10 of 15 orchestration step types end-to-end, proving the engine, approval queue, capability dispatch, budget enforcement, and SSE streaming work together.
+2. **Framework reference implementation** — exercises 13 of 17 orchestration step types end-to-end (including the `supervisor` and `report` steps added on the `feat/workflow-supervisor` branch), proving the engine, approval queue, capability dispatch, budget enforcement, SSE streaming, and post-hoc audit work together.
 
 ### Step types exercised
 
-| Step Type           | Pattern         | What It Tests                                                                                    |
-| ------------------- | --------------- | ------------------------------------------------------------------------------------------------ |
-| `llm_call`          | Prompt Chaining | Structured JSON output, template interpolation                                                   |
-| `rag_retrieve`      | RAG             | Knowledge base search, similarity threshold                                                      |
-| `route`             | Routing         | LLM classification branching (chat/embedding/mixed)                                              |
-| `parallel`          | Parallelisation | Concurrent analysis + discovery branches                                                         |
-| `guard`             | Guardrails      | Enum value validation gate                                                                       |
-| `reflect`           | Reflection      | Draft-critique-revise loop                                                                       |
-| `evaluate`          | Evaluation      | Quality scoring against rubric                                                                   |
-| `human_approval`    | HITL            | Execution pause, approval queue, resume flow                                                     |
-| `tool_call`         | Tool Use        | `apply_audit_changes` + `add_provider_models` + `deactivate_provider_models` capability dispatch |
-| `send_notification` | —               | Email notification with template interpolation                                                   |
+| Step Type           | Pattern               | What It Tests                                                                                    |
+| ------------------- | --------------------- | ------------------------------------------------------------------------------------------------ |
+| `llm_call`          | Prompt Chaining       | Structured JSON output, template interpolation                                                   |
+| `rag_retrieve`      | RAG                   | Knowledge base search, similarity threshold                                                      |
+| `route`             | Routing               | LLM classification branching (chat/embedding/mixed)                                              |
+| `parallel`          | Parallelisation       | Concurrent analysis + discovery branches                                                         |
+| `guard`             | Guardrails            | Enum value validation gate                                                                       |
+| `reflect`           | Reflection            | Draft-critique-revise loop                                                                       |
+| `evaluate`          | Evaluation            | Quality scoring against rubric                                                                   |
+| `agent_call`        | Multi-Agent / A2A     | Delegation to `provider-model-auditor` + `audit-report-writer` agents                            |
+| `external_call`     | —                     | Optional Brave web search enrichment                                                             |
+| `human_approval`    | HITL                  | Execution pause, approval queue, resume flow                                                     |
+| `tool_call`         | Tool Use              | `apply_audit_changes` + `add_provider_models` + `deactivate_provider_models` capability dispatch |
+| `supervisor`        | Evaluation (post-hoc) | Independent judge audit of the executed workflow with evidence-cited verdict                     |
+| `report`            | —                     | Deterministic Markdown render of the trace for the notification body                             |
+| `send_notification` | —                     | Email notification with supervisor verdict + agent narrative + deterministic step report         |
 
 ### Trigger
 
@@ -200,7 +204,7 @@ The Provider Model Audit is an AI-powered workflow that evaluates model entries 
 
 | File                                                                    | Purpose                                                              |
 | ----------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| `prisma/seeds/data/templates/provider-model-audit.ts`                   | 13-step DAG template definition                                      |
+| `prisma/seeds/data/templates/provider-model-audit.ts`                   | 19-step DAG template definition                                      |
 | `prisma/seeds/010-model-auditor.ts`                                     | Agent seed with capability bindings                                  |
 | `lib/orchestration/capabilities/built-in/apply-audit-changes.ts`        | Capability that applies approved changes                             |
 | `lib/orchestration/capabilities/built-in/add-provider-models.ts`        | Capability that adds approved new models                             |

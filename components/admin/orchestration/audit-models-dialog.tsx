@@ -6,7 +6,7 @@
  * Lets admins select a subset of provider models and trigger the
  * Provider Model Audit workflow. This is both a genuinely useful
  * feature (keeps the model registry accurate) and a framework
- * reference implementation that exercises 10 of 15 orchestration
+ * reference implementation that exercises 13 of 17 orchestration
  * step types end-to-end.
  *
  * On submit, creates a workflow execution and swaps the dialog body
@@ -17,7 +17,7 @@
  * navigates to the canonical execution detail page.
  */
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ClipboardCheck } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -51,6 +51,7 @@ import { ExecutionProgressInline } from '@/components/admin/orchestration/execut
 import type { ExecutionLivePayload } from '@/lib/hooks/use-execution-live-poll';
 import { TIER_ROLE_META, type TierRole } from '@/types/orchestration';
 import type { ModelRow } from '@/components/admin/orchestration/provider-models-matrix';
+import type { WorkflowCostEstimate } from '@/lib/orchestration/cost-estimation/workflow-cost';
 
 interface AuditModelsDialogProps {
   open: boolean;
@@ -68,6 +69,17 @@ function formatAuditAge(iso: string): string {
   if (days < 30) return `${days}d ago`;
   const months = Math.floor(days / 30);
   return `${months}mo ago`;
+}
+
+/**
+ * Render a USD amount for the cost-estimate row. Sub-cent values
+ * collapse to "<$0.01" so the line doesn't read as "$0.00" (which the
+ * operator would read as "free").
+ */
+function formatUsd(usd: number): string {
+  if (!Number.isFinite(usd) || usd <= 0) return '$0.00';
+  if (usd < 0.01) return '<$0.01';
+  return `$${usd.toFixed(2)}`;
 }
 
 /**
@@ -150,10 +162,23 @@ export function AuditModelsDialog({
   models,
 }: AuditModelsDialogProps): React.ReactElement {
   const router = useRouter();
-  const [selected, setSelected] = useState<Set<string>>(new Set(models.map((m) => m.id)));
+  // Default to no models selected — operators opt in by ticking individual
+  // rows or clicking "Select all". Auditing every model on every open is
+  // expensive (one LLM call per model) and rarely what the operator wants.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [providerFilter, setProviderFilter] = useState<string>('all');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Default OFF — the audit dialog is the most frequent trigger for
+  // this workflow and the supervisor incurs a billable judge-model
+  // call (~$0.02–$0.10). Opt-in keeps cost predictable; operators
+  // who want the honest verdict tick the box.
+  const [runSupervisor, setRunSupervisor] = useState<boolean>(false);
+  // Default OFF — keeps notification emails compact unless the
+  // operator deliberately wants the full step-by-step report attached.
+  // (The Download report button on the execution detail page is still
+  // available regardless.)
+  const [generateReport, setGenerateReport] = useState<boolean>(false);
 
   // Post-submission state — when set, the dialog body swaps from the
   // model-picker form to the live progress panel. Persists across the
@@ -167,10 +192,92 @@ export function AuditModelsDialog({
   } | null>(null);
   const [terminalStatus, setTerminalStatus] = useState<string | null>(null);
 
+  // Audit workflow lookup. Done once on dialog-open so the cost-estimate
+  // endpoint and the submit handler both reuse it. The lookup-by-slug
+  // is cheap (single DB row) but redoing it on every keystroke would
+  // burn rate-limit budget. `null` until the first fetch resolves.
+  const [workflowMeta, setWorkflowMeta] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+
+  // Cost-estimate state — driven by selected.size + runSupervisor with
+  // a debounce so rapid checkbox toggles don't fan out a flurry of GETs.
+  // The estimate is only shown when something is selected; an empty
+  // selection has nothing useful to estimate.
+  const [estimate, setEstimate] = useState<WorkflowCostEstimate | null>(null);
+  const [estimateLoading, setEstimateLoading] = useState(false);
+
   const [, setInFlight, clearInFlight] = useLocalStorage<InFlightExecutionRef | null>(
     IN_FLIGHT_EXECUTION_STORAGE_KEY,
     null
   );
+
+  // Resolve the audit workflow id once when the dialog opens. Subsequent
+  // estimate calls + the eventual submit both use it.
+  useEffect(() => {
+    if (!open) return;
+    if (workflowMeta !== null) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const workflows = await apiClient.get<{ id: string; slug: string; name?: string }[]>(
+          API.ADMIN.ORCHESTRATION.WORKFLOWS,
+          { params: { slug: AUDIT_WORKFLOW_SLUG, limit: 1 } }
+        );
+        const workflow = Array.isArray(workflows)
+          ? workflows.find((w) => w.slug === AUDIT_WORKFLOW_SLUG)
+          : null;
+        if (cancelled) return;
+        if (workflow) {
+          setWorkflowMeta({ id: workflow.id, name: workflow.name ?? workflow.slug });
+        }
+      } catch {
+        // Estimate will stay null; submit handler retries the lookup.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, workflowMeta]);
+
+  // Refresh the estimate when the selection or supervisor toggle changes.
+  // Debounced so flicking through models doesn't fan out one GET per click.
+  // No-op when nothing is selected (button is disabled too).
+  useEffect(() => {
+    if (!workflowMeta || submittedExecution) {
+      setEstimate(null);
+      return;
+    }
+    if (selected.size === 0) {
+      setEstimate(null);
+      setEstimateLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setEstimateLoading(true);
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const data = await apiClient.get<WorkflowCostEstimate>(
+            API.ADMIN.ORCHESTRATION.workflowCostEstimate(workflowMeta.id),
+            { params: { itemCount: selected.size, supervisor: runSupervisor } }
+          );
+          if (!cancelled) setEstimate(data);
+        } catch {
+          // Estimate is best-effort — silently drop it; the submit path
+          // still works and the operator can click through.
+          if (!cancelled) setEstimate(null);
+        } finally {
+          if (!cancelled) setEstimateLoading(false);
+        }
+      })();
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [workflowMeta, submittedExecution, selected.size, runSupervisor]);
 
   const providers = useMemo(() => [...new Set(models.map((m) => m.providerSlug))].sort(), [models]);
 
@@ -213,17 +320,22 @@ export function AuditModelsDialog({
     setError(null);
 
     try {
-      // Find the audit workflow by slug. `name` is optional in the
-      // response type because older fixtures don't include it; the
-      // banner label falls back to the slug if the row was minimal.
-      const workflows = await apiClient.get<{ id: string; slug: string; name?: string }[]>(
-        API.ADMIN.ORCHESTRATION.WORKFLOWS,
-        { params: { slug: AUDIT_WORKFLOW_SLUG, limit: 1 } }
-      );
-
-      const workflow = Array.isArray(workflows)
-        ? workflows.find((w) => w.slug === AUDIT_WORKFLOW_SLUG)
-        : null;
+      // Prefer the cached metadata fetched on dialog open; fall back to
+      // a fresh lookup so a slow / failed initial fetch still lets the
+      // operator submit. `name` is optional in the API response because
+      // older fixtures don't include it; the banner label falls back to
+      // the slug when the row was minimal.
+      let workflow: { id: string; name: string } | null = workflowMeta;
+      if (!workflow) {
+        const workflows = await apiClient.get<{ id: string; slug: string; name?: string }[]>(
+          API.ADMIN.ORCHESTRATION.WORKFLOWS,
+          { params: { slug: AUDIT_WORKFLOW_SLUG, limit: 1 } }
+        );
+        const found = Array.isArray(workflows)
+          ? workflows.find((w) => w.slug === AUDIT_WORKFLOW_SLUG)
+          : null;
+        workflow = found ? { id: found.id, name: found.name ?? found.slug } : null;
+      }
 
       if (!workflow) {
         setError(
@@ -233,9 +345,12 @@ export function AuditModelsDialog({
         return;
       }
 
-      // Build input data with selected model details
+      // Build input data with selected model details. `__runSupervisor`
+      // is a reserved key consumed by the `supervisor` step executor —
+      // when explicitly false, the step short-circuits with expectedSkip
+      // and the audit produces no honest-audit verdict for this run.
       const selectedModels = models.filter((m) => selected.has(m.id));
-      const inputData = {
+      const inputData: Record<string, unknown> = {
         modelIds: selectedModels.map((m) => m.id),
         models: selectedModels.map((m) => ({
           id: m.id,
@@ -253,6 +368,8 @@ export function AuditModelsDialog({
           dimensions: m.dimensions,
           schemaCompatible: m.schemaCompatible,
         })),
+        __runSupervisor: runSupervisor,
+        __generateReport: generateReport,
       };
 
       // Execute the workflow. The endpoint returns SSE — not a JSON
@@ -270,7 +387,7 @@ export function AuditModelsDialog({
       }
 
       const startedAt = new Date().toISOString();
-      const label = workflow.name ?? workflow.slug;
+      const label = workflow.name;
       setSubmittedExecution({
         id: executionId,
         workflowName: label,
@@ -286,7 +403,7 @@ export function AuditModelsDialog({
       setError(err instanceof Error ? err.message : 'Failed to start audit');
       setSubmitting(false);
     }
-  }, [selected, models, setInFlight]);
+  }, [selected, models, runSupervisor, generateReport, setInFlight, workflowMeta]);
 
   const allFilteredSelected = filtered.every((m) => selected.has(m.id));
 
@@ -352,8 +469,8 @@ export function AuditModelsDialog({
               title="Framework Reference Implementation"
               contentClassName="w-96 max-h-80 overflow-y-auto"
             >
-              This dialog triggers the Provider Model Audit workflow — a 13-step DAG that exercises
-              10 of 15 orchestration step types. It tests prompt chaining, routing, parallelisation,
+              This dialog triggers the Provider Model Audit workflow — a 19-step DAG that exercises
+              13 of 17 orchestration step types. It tests prompt chaining, routing, parallelisation,
               reflection, tool use, guardrails, evaluation, human-in-the-loop approval, RAG
               retrieval, and notifications. Selected model IDs become the workflow&apos;s{' '}
               <code>inputData</code>, testing the engine&apos;s input parameter passing and template
@@ -460,6 +577,94 @@ export function AuditModelsDialog({
                 </div>
               </div>
 
+              {/* Run-time supervisor toggle — opts the supervisor_review
+                  step in/out per-execution. Default ON (the audit's
+                  primary value prop is honest assessment of its own
+                  work). When unchecked, inputData.__runSupervisor is
+                  set to false and the executor short-circuits with
+                  expectedSkip. */}
+              <div className="bg-muted/30 flex items-start gap-3 rounded-md border px-3 py-2">
+                <Checkbox
+                  id="audit-run-supervisor"
+                  checked={runSupervisor}
+                  onCheckedChange={(next) => setRunSupervisor(next === true)}
+                  className="mt-0.5"
+                />
+                <div className="flex-1">
+                  <label
+                    htmlFor="audit-run-supervisor"
+                    className="flex cursor-pointer items-center gap-2 text-sm font-medium"
+                  >
+                    Run neutral supervisor review
+                    <FieldHelp
+                      title="Neutral supervisor review"
+                      contentClassName="w-96 max-h-80 overflow-y-auto"
+                    >
+                      A separate judge model audits the workflow&apos;s execution after it completes
+                      — looking at every step&apos;s output, the validator&apos;s decisions, and the
+                      changes actually applied — and produces an evidence-cited verdict (pass /
+                      concerns / fail). Designed to catch problems that the workflow&apos;s own
+                      optimistic summary would miss. Adds one judge-model LLM call (typically
+                      $0.02–$0.10) to the audit&apos;s cost. Uncheck to skip on a tight budget.
+                    </FieldHelp>
+                  </label>
+                  <p className="text-muted-foreground mt-0.5 text-xs">
+                    Independent post-hoc assessment of audit quality. Adds ~one LLM call.
+                  </p>
+                </div>
+              </div>
+
+              {/* Run-time report toggle — opts the `report_render` step
+                  in/out per-execution. Default OFF. When unchecked,
+                  inputData.__generateReport is set to false and the
+                  executor short-circuits; the notification email's
+                  {{report_render.output.markdown}} interpolation resolves
+                  to empty. The Download Report button on the execution
+                  detail page is unaffected — it renders the trace fresh
+                  on click regardless of this toggle. */}
+              <div className="bg-muted/30 flex items-start gap-3 rounded-md border px-3 py-2">
+                <Checkbox
+                  id="audit-generate-report"
+                  checked={generateReport}
+                  onCheckedChange={(next) => setGenerateReport(next === true)}
+                  className="mt-0.5"
+                />
+                <div className="flex-1">
+                  <label
+                    htmlFor="audit-generate-report"
+                    className="flex cursor-pointer items-center gap-2 text-sm font-medium"
+                  >
+                    Include detailed report in notification email
+                    <FieldHelp
+                      title="Detailed report in email"
+                      contentClassName="w-96 max-h-80 overflow-y-auto"
+                    >
+                      <p>
+                        When checked, the audit&apos;s notification email body includes a full
+                        step-by-step Markdown rendering of the trace — every step&apos;s inputs,
+                        outputs, durations, and costs. Useful for recipients who don&apos;t have
+                        admin access, audit-trail forwarding, or compliance archives.
+                      </p>
+                      <p className="mt-2">
+                        When unchecked, the email contains only the supervisor verdict (if enabled)
+                        and the agent-written executive summary. The email stays short.
+                      </p>
+                      <p className="mt-2">
+                        <strong>This setting does not gate access to the report.</strong> The
+                        <strong> Download report</strong> button on the execution detail page
+                        renders the same Markdown fresh from the trace on every click, regardless of
+                        whether this box was ticked at trigger time.
+                      </p>
+                      <p className="mt-2">No LLM cost either way — this is pure formatting.</p>
+                    </FieldHelp>
+                  </label>
+                  <p className="text-muted-foreground mt-0.5 text-xs">
+                    Embeds the full step-by-step report inline in the email. Download button works
+                    regardless.
+                  </p>
+                </div>
+              </div>
+
               {error && (
                 <p className="text-sm text-red-600 dark:text-red-400" role="alert">
                   {error}
@@ -468,6 +673,63 @@ export function AuditModelsDialog({
             </>
           )}
         </div>
+
+        {!submittedExecution && selected.size > 0 && (estimateLoading || estimate) && (
+          <div
+            className="text-muted-foreground flex items-center justify-end gap-1.5 border-t pt-3 text-xs"
+            data-testid="audit-cost-estimate"
+          >
+            {estimate ? (
+              <>
+                <span>
+                  Estimated cost:{' '}
+                  <span className="text-foreground font-medium">~{formatUsd(estimate.midUsd)}</span>{' '}
+                  <span className="text-muted-foreground/70">
+                    (range {formatUsd(estimate.lowUsd)}–{formatUsd(estimate.highUsd)})
+                  </span>
+                </span>
+                <FieldHelp title="How the cost is estimated" contentClassName="w-80">
+                  <p>{estimate.notes}</p>
+                  <p className="mt-2">
+                    <strong>Model{estimate.judgeModelUsed ? 's' : ''}:</strong> non-supervisor steps
+                    priced against <code>{estimate.modelUsed}</code> (the configured chat default).
+                    {estimate.judgeModelUsed ? (
+                      <>
+                        {' '}
+                        Supervisor step priced against <code>{estimate.judgeModelUsed}</code>
+                        {estimate.judgeModelUsed === estimate.modelUsed ? (
+                          <>
+                            {' '}
+                            (same as the chat default — set <code>EVALUATION_JUDGE_MODEL</code> to
+                            give the supervisor an independent judge)
+                          </>
+                        ) : null}
+                        .
+                      </>
+                    ) : (
+                      '.'
+                    )}
+                  </p>
+                  <p className="mt-2">
+                    <strong>Source:</strong>{' '}
+                    {estimate.basedOn === 'empirical'
+                      ? `past run history (${estimate.sampleSize} match${
+                          estimate.sampleSize === 1 ? '' : 'es'
+                        })`
+                      : 'heuristic — fixed token assumptions repriced at the current model rates'}
+                    .
+                  </p>
+                  <p className="mt-2">
+                    Actual cost depends on prompt evolution, retry behaviour, and any agent tool-use
+                    iterations — treat this as planning-grade, not a quote.
+                  </p>
+                </FieldHelp>
+              </>
+            ) : (
+              <span>Estimating cost…</span>
+            )}
+          </div>
+        )}
 
         <DialogFooter>
           {submittedExecution ? (

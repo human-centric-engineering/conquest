@@ -42,13 +42,13 @@ describe('PatternPalette', () => {
     }
   });
 
-  it('renders exactly 15 palette blocks (one per step type)', () => {
+  it('renders exactly 17 palette blocks (one per step type)', () => {
     render(<PatternPalette />);
 
-    // STEP_REGISTRY has 15 entries (14 original + orchestrator)
-    expect(STEP_REGISTRY.length).toBe(15);
+    // STEP_REGISTRY has 17 entries (15 originals + supervisor + report)
+    expect(STEP_REGISTRY.length).toBe(17);
     const blocks = document.querySelectorAll('[data-testid^="palette-block-"]');
-    expect(blocks.length).toBe(15);
+    expect(blocks.length).toBe(17);
   });
 
   it('all palette blocks have draggable attribute', () => {
@@ -156,18 +156,19 @@ describe('PatternPalette', () => {
     });
 
     it('entries with no related patterns render NO Learn more button', () => {
-      // The complement of the previous assertion: external_call and
-      // send_notification are deliberately tagged `relatedPatterns: []` (see
-      // .context/orchestration/patterns-and-steps.md — they're step
-      // primitives that don't map to any of the 21 canonical patterns).
+      // The complement of the previous assertion: external_call,
+      // send_notification, and report are deliberately tagged
+      // `relatedPatterns: []` (see .context/orchestration/patterns-and-steps.md
+      // — they're step primitives that don't map to any of the 21 canonical
+      // patterns; report is deterministic rendering, not an agentic pattern).
       // Their palette blocks must show no "Learn more" link.
       render(<PatternPalette />);
 
       const emptyEntries = STEP_REGISTRY.filter((e) => e.relatedPatterns.length === 0);
-      // Lock in that the empty set is exactly external_call + send_notification —
-      // adding a third unmapped step would be a design decision worth surfacing.
+      // Lock in the empty set — adding a fourth unmapped step would be a
+      // design decision worth surfacing.
       expect(new Set(emptyEntries.map((e) => e.type))).toEqual(
-        new Set(['external_call', 'send_notification'])
+        new Set(['external_call', 'send_notification', 'report'])
       );
 
       for (const entry of emptyEntries) {
@@ -249,6 +250,8 @@ describe('PatternPalette', () => {
         agent_call: [7, 15], // Multi-Agent Collaboration + A2A
         send_notification: [], // delivery — not an agentic pattern
         orchestrator: [6, 7], // Planning + Multi-Agent Collaboration
+        supervisor: [19], // Evaluation & Monitoring (cross-step audit)
+        report: [], // deterministic rendering — not an agentic pattern
       };
 
       for (const entry of STEP_REGISTRY) {

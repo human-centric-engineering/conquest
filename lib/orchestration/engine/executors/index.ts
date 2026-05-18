@@ -24,3 +24,5 @@ import '@/lib/orchestration/engine/executors/external-call';
 import '@/lib/orchestration/engine/executors/agent-call';
 import '@/lib/orchestration/engine/executors/notification';
 import '@/lib/orchestration/engine/executors/orchestrator';
+import '@/lib/orchestration/engine/executors/supervisor';
+import '@/lib/orchestration/engine/executors/report';

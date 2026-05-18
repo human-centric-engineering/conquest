@@ -136,6 +136,10 @@ export const GET = withAdminAuth<{ id: string }>(async (request, session, { para
       startedAt: execution.startedAt,
       completedAt: execution.completedAt,
       createdAt: execution.createdAt,
+      supervisorVerdict: execution.supervisorVerdict,
+      supervisorScore: execution.supervisorScore,
+      supervisorReport: execution.supervisorReport,
+      supervisorReviewedAt: execution.supervisorReviewedAt,
       workflow: {
         id: execution.workflow.id,
         name: execution.workflow.name,

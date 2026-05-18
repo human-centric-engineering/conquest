@@ -2,7 +2,7 @@
  * AuditModelsDialog Component Tests
  *
  * Test Coverage:
- * - Renders all models as checkboxes (all selected by default)
+ * - Renders all models as checkboxes (NONE selected by default — opt-in via row click or "Select all")
  * - Provider filter dropdown filters the visible model list
  * - "Select all" / "Deselect all" toggle for the current filtered view
  * - Individual model checkbox toggles selection
@@ -160,19 +160,23 @@ describe('AuditModelsDialog', () => {
       ).toBeInTheDocument();
     });
 
-    it('all model checkboxes are checked by default', () => {
+    it('all model checkboxes are UNchecked by default (opt-in)', () => {
+      // Initial state: nothing selected. Operators tick individual rows or
+      // click "Select all" to opt in. Auditing every model by default is
+      // expensive (one LLM call per model) and rarely what the operator
+      // intends — the cost surface stays predictable.
       render(<AuditModelsDialog {...DEFAULT_PROPS} />);
 
-      const checkboxes = screen.getAllByRole('checkbox');
-      for (const checkbox of checkboxes) {
-        expect(checkbox).toBeChecked();
+      const modelCheckboxes = screen.getAllByRole('checkbox', { name: /select .* for audit/i });
+      for (const checkbox of modelCheckboxes) {
+        expect(checkbox).not.toBeChecked();
       }
     });
 
-    it('shows correct "N of M selected" count on initial render', () => {
+    it('shows correct "0 of M selected" count on initial render', () => {
       render(<AuditModelsDialog {...DEFAULT_PROPS} />);
 
-      expect(screen.getByText(/2 of 2 selected/)).toBeInTheDocument();
+      expect(screen.getByText(/0 of 2 selected/)).toBeInTheDocument();
     });
 
     it('shows the model name and provider/modelId in each row', () => {
@@ -264,12 +268,13 @@ describe('AuditModelsDialog', () => {
 
       const checkbox = screen.getByRole('checkbox', { name: /select gpt-5 for audit/i });
       const row = checkbox.closest('[role="button"]') as HTMLElement;
-      expect(checkbox).toBeChecked();
+      // Initial state: unchecked (opt-in).
+      expect(checkbox).not.toBeChecked();
 
       row.focus();
       await user.keyboard('{Enter}');
 
-      expect(checkbox).not.toBeChecked();
+      expect(checkbox).toBeChecked();
     });
 
     it('toggles model selection when Space is pressed on a row', async () => {
@@ -278,12 +283,12 @@ describe('AuditModelsDialog', () => {
 
       const checkbox = screen.getByRole('checkbox', { name: /select gpt-5 for audit/i });
       const row = checkbox.closest('[role="button"]') as HTMLElement;
-      expect(checkbox).toBeChecked();
+      expect(checkbox).not.toBeChecked();
 
       row.focus();
       await user.keyboard(' ');
 
-      expect(checkbox).not.toBeChecked();
+      expect(checkbox).toBeChecked();
     });
   });
 
@@ -327,54 +332,51 @@ describe('AuditModelsDialog', () => {
   // ── Select all / Deselect all ──────────────────────────────────────────────
 
   describe('select all / deselect all toggle', () => {
-    it('shows "Deselect all" when all filtered models are selected', () => {
+    it('shows "Select all" on initial render (nothing selected by default)', () => {
       render(<AuditModelsDialog {...DEFAULT_PROPS} />);
 
-      // All models are selected by default → button should say "Deselect all"
-      expect(screen.getByRole('button', { name: /deselect all/i })).toBeInTheDocument();
-    });
-
-    it('clicking "Deselect all" unchecks all visible checkboxes', async () => {
-      const user = userEvent.setup();
-      render(<AuditModelsDialog {...DEFAULT_PROPS} />);
-
-      await user.click(screen.getByRole('button', { name: /deselect all/i }));
-
-      const checkboxes = screen.getAllByRole('checkbox');
-      for (const checkbox of checkboxes) {
-        expect(checkbox).not.toBeChecked();
-      }
-    });
-
-    it('shows "Select all" after deselecting all models', async () => {
-      const user = userEvent.setup();
-      render(<AuditModelsDialog {...DEFAULT_PROPS} />);
-
-      await user.click(screen.getByRole('button', { name: /deselect all/i }));
-
+      // Initial state: empty selection → button reads "Select all"
       expect(screen.getByRole('button', { name: /^select all$/i })).toBeInTheDocument();
     });
 
-    it('clicking "Select all" re-checks all visible checkboxes', async () => {
+    it('clicking "Select all" checks every visible model checkbox', async () => {
       const user = userEvent.setup();
       render(<AuditModelsDialog {...DEFAULT_PROPS} />);
 
-      // First deselect, then re-select
-      await user.click(screen.getByRole('button', { name: /deselect all/i }));
       await user.click(screen.getByRole('button', { name: /^select all$/i }));
 
-      const checkboxes = screen.getAllByRole('checkbox');
-      for (const checkbox of checkboxes) {
+      const modelCheckboxes = screen.getAllByRole('checkbox', { name: /select .* for audit/i });
+      for (const checkbox of modelCheckboxes) {
         expect(checkbox).toBeChecked();
+      }
+    });
+
+    it('button flips to "Deselect all" once all filtered models are selected', async () => {
+      const user = userEvent.setup();
+      render(<AuditModelsDialog {...DEFAULT_PROPS} />);
+
+      await user.click(screen.getByRole('button', { name: /^select all$/i }));
+
+      expect(screen.getByRole('button', { name: /deselect all/i })).toBeInTheDocument();
+    });
+
+    it('clicking "Deselect all" unchecks every visible model checkbox', async () => {
+      const user = userEvent.setup();
+      render(<AuditModelsDialog {...DEFAULT_PROPS} />);
+
+      // Select first, then deselect — exercises the round-trip.
+      await user.click(screen.getByRole('button', { name: /^select all$/i }));
+      await user.click(screen.getByRole('button', { name: /deselect all/i }));
+
+      const modelCheckboxes = screen.getAllByRole('checkbox', { name: /select .* for audit/i });
+      for (const checkbox of modelCheckboxes) {
+        expect(checkbox).not.toBeChecked();
       }
     });
 
     it('"Select all" only affects the currently filtered models', async () => {
       const user = userEvent.setup();
       render(<AuditModelsDialog {...DEFAULT_PROPS} />);
-
-      // Deselect everything first
-      await user.click(screen.getByRole('button', { name: /deselect all/i }));
 
       // Filter to openai only
       const trigger = screen.getByRole('combobox');
@@ -403,7 +405,7 @@ describe('AuditModelsDialog', () => {
   // ── Individual model toggle ────────────────────────────────────────────────
 
   describe('individual model toggle', () => {
-    it('clicking the row div unchecks a checked model', async () => {
+    it('clicking the row div checks an unchecked model', async () => {
       const user = userEvent.setup();
       render(<AuditModelsDialog {...DEFAULT_PROPS} />);
 
@@ -412,37 +414,39 @@ describe('AuditModelsDialog', () => {
       // causing a double-toggle that leaves selection unchanged.
       const checkbox = screen.getByRole('checkbox', { name: /select gpt-5 for audit/i });
       const row = checkbox.closest('[role="button"]') as HTMLElement;
-      expect(checkbox).toBeChecked();
+      // Initial state: unchecked (opt-in).
+      expect(checkbox).not.toBeChecked();
 
       await user.click(row);
 
-      expect(checkbox).not.toBeChecked();
+      expect(checkbox).toBeChecked();
     });
 
-    it('clicking the row div re-checks an unchecked model', async () => {
+    it('clicking the row div twice unchecks a previously-checked model', async () => {
       const user = userEvent.setup();
       render(<AuditModelsDialog {...DEFAULT_PROPS} />);
 
       const checkbox = screen.getByRole('checkbox', { name: /select gpt-5 for audit/i });
       const row = checkbox.closest('[role="button"]') as HTMLElement;
 
-      // Click twice: uncheck then re-check
+      // Click once to check, click again to uncheck.
       await user.click(row);
+      expect(checkbox).toBeChecked();
       await user.click(row);
 
-      expect(checkbox).toBeChecked();
+      expect(checkbox).not.toBeChecked();
     });
 
     it('updates the selection count when a model row is clicked', async () => {
       const user = userEvent.setup();
       render(<AuditModelsDialog {...DEFAULT_PROPS} />);
 
-      // Initial state: 2 of 2 selected
+      // Initial state: 0 of 2 selected
       expect(
-        screen.getByText((_, el) => el?.textContent === '2 of 2 selected')
+        screen.getByText((_, el) => el?.textContent === '0 of 2 selected')
       ).toBeInTheDocument();
 
-      // Click the row div to deselect GPT-5
+      // Click the row div to select GPT-5
       const checkbox = screen.getByRole('checkbox', { name: /select gpt-5 for audit/i });
       const row = checkbox.closest('[role="button"]') as HTMLElement;
       await user.click(row);
@@ -456,9 +460,15 @@ describe('AuditModelsDialog', () => {
   // ── Submit button state ────────────────────────────────────────────────────
 
   describe('submit button state', () => {
-    it('submit button shows count of selected models', () => {
+    it('submit button shows count of selected models', async () => {
+      const user = userEvent.setup();
       render(<AuditModelsDialog {...DEFAULT_PROPS} />);
 
+      // Initial state: 0 selected → button reads "Audit 0 models"
+      expect(screen.getByRole('button', { name: /audit 0 models/i })).toBeInTheDocument();
+
+      // After selecting all, count flips to 2.
+      await user.click(screen.getByRole('button', { name: /^select all$/i }));
       expect(screen.getByRole('button', { name: /audit 2 models/i })).toBeInTheDocument();
     });
 
@@ -466,7 +476,7 @@ describe('AuditModelsDialog', () => {
       const user = userEvent.setup();
       render(<AuditModelsDialog {...DEFAULT_PROPS} />);
 
-      // Deselect Claude-4 via row click (row div fires toggleModel exactly once)
+      // Select only Claude-4 by ticking its row.
       const claudeCheckbox = screen.getByRole('checkbox', { name: /select claude-4 for audit/i });
       const claudeRow = claudeCheckbox.closest('[role="button"]') as HTMLElement;
       await user.click(claudeRow);
@@ -474,19 +484,17 @@ describe('AuditModelsDialog', () => {
       expect(screen.getByRole('button', { name: /audit 1 model$/i })).toBeInTheDocument();
     });
 
-    it('submit button is disabled when 0 models are selected', async () => {
-      const user = userEvent.setup();
+    it('submit button is disabled on initial render (0 models selected)', () => {
       render(<AuditModelsDialog {...DEFAULT_PROPS} />);
-
-      await user.click(screen.getByRole('button', { name: /deselect all/i }));
-
       const auditBtn = screen.getByRole('button', { name: /audit 0 models/i });
       expect(auditBtn).toBeDisabled();
     });
 
-    it('submit button is enabled when at least one model is selected', () => {
+    it('submit button is enabled after at least one model is selected', async () => {
+      const user = userEvent.setup();
       render(<AuditModelsDialog {...DEFAULT_PROPS} />);
 
+      await user.click(screen.getByRole('button', { name: /^select all$/i }));
       const auditBtn = screen.getByRole('button', { name: /audit 2 models/i });
       expect(auditBtn).not.toBeDisabled();
     });
@@ -504,6 +512,7 @@ describe('AuditModelsDialog', () => {
       const user = userEvent.setup();
       render(<AuditModelsDialog {...DEFAULT_PROPS} />);
 
+      await user.click(screen.getByRole('button', { name: /^select all$/i }));
       await user.click(screen.getByRole('button', { name: /audit 2 models/i }));
 
       await waitFor(() => {
@@ -529,6 +538,7 @@ describe('AuditModelsDialog', () => {
       const user = userEvent.setup();
       render(<AuditModelsDialog {...DEFAULT_PROPS} />);
 
+      await user.click(screen.getByRole('button', { name: /^select all$/i }));
       await user.click(screen.getByRole('button', { name: /audit 2 models/i }));
 
       await waitFor(() => {
@@ -543,6 +553,93 @@ describe('AuditModelsDialog', () => {
       expect(body.inputData.modelIds).toEqual(
         expect.arrayContaining([MODEL_OPENAI.id, MODEL_ANTHROPIC.id])
       );
+    });
+
+    it('defaults __runSupervisor=false in the submitted inputData (opt-in)', async () => {
+      // The audit dialog is the most common trigger; defaulting to OFF
+      // keeps the cost surface predictable. Operators who want the
+      // honest verdict opt in by ticking the box.
+      const { apiClient } = await import('@/lib/api/client');
+      vi.mocked(apiClient.get).mockResolvedValue([
+        { id: 'wf-123', slug: 'tpl-provider-model-audit' },
+      ]);
+      const user = userEvent.setup();
+      render(<AuditModelsDialog {...DEFAULT_PROPS} />);
+      await user.click(screen.getByRole('button', { name: /^select all$/i }));
+      await user.click(screen.getByRole('button', { name: /audit 2 models/i }));
+      await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      const body = JSON.parse(init.body as string) as {
+        inputData: { __runSupervisor: boolean };
+      };
+      expect(body.inputData.__runSupervisor).toBe(false);
+    });
+
+    it('defaults __generateReport=false in the submitted inputData (opt-in)', async () => {
+      const { apiClient } = await import('@/lib/api/client');
+      vi.mocked(apiClient.get).mockResolvedValue([
+        { id: 'wf-123', slug: 'tpl-provider-model-audit' },
+      ]);
+      const user = userEvent.setup();
+      render(<AuditModelsDialog {...DEFAULT_PROPS} />);
+      await user.click(screen.getByRole('button', { name: /^select all$/i }));
+      await user.click(screen.getByRole('button', { name: /audit 2 models/i }));
+      await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      const body = JSON.parse(init.body as string) as {
+        inputData: { __generateReport: boolean };
+      };
+      expect(body.inputData.__generateReport).toBe(false);
+    });
+
+    it('checking "Include detailed report in notification email" sets __generateReport=true on submit', async () => {
+      const { apiClient } = await import('@/lib/api/client');
+      vi.mocked(apiClient.get).mockResolvedValue([
+        { id: 'wf-123', slug: 'tpl-provider-model-audit' },
+      ]);
+      const user = userEvent.setup();
+      render(<AuditModelsDialog {...DEFAULT_PROPS} />);
+      const reportCheckbox = screen.getByRole('checkbox', {
+        name: /include detailed report in notification email/i,
+      });
+      // Starts unchecked (opt-in)
+      expect(reportCheckbox).not.toBeChecked();
+      await user.click(reportCheckbox);
+      expect(reportCheckbox).toBeChecked();
+      await user.click(screen.getByRole('button', { name: /^select all$/i }));
+      await user.click(screen.getByRole('button', { name: /audit 2 models/i }));
+      await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      const body = JSON.parse(init.body as string) as {
+        inputData: { __generateReport: boolean };
+      };
+      expect(body.inputData.__generateReport).toBe(true);
+    });
+
+    it('checking "Run neutral supervisor review" sets __runSupervisor=true on submit', async () => {
+      const { apiClient } = await import('@/lib/api/client');
+      vi.mocked(apiClient.get).mockResolvedValue([
+        { id: 'wf-123', slug: 'tpl-provider-model-audit' },
+      ]);
+      const user = userEvent.setup();
+      render(<AuditModelsDialog {...DEFAULT_PROPS} />);
+
+      // Tick the supervisor checkbox before submitting (opt-in default).
+      const supervisorCheckbox = screen.getByRole('checkbox', {
+        name: /run neutral supervisor review/i,
+      });
+      expect(supervisorCheckbox).not.toBeChecked();
+      await user.click(supervisorCheckbox);
+      expect(supervisorCheckbox).toBeChecked();
+
+      await user.click(screen.getByRole('button', { name: /^select all$/i }));
+      await user.click(screen.getByRole('button', { name: /audit 2 models/i }));
+      await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      const body = JSON.parse(init.body as string) as {
+        inputData: { __runSupervisor: boolean };
+      };
+      expect(body.inputData.__runSupervisor).toBe(true);
     });
 
     it('swaps the dialog body to live progress and does NOT auto-navigate after submit', async () => {
@@ -565,6 +662,7 @@ describe('AuditModelsDialog', () => {
         />
       );
 
+      await user.click(screen.getByRole('button', { name: /^select all$/i }));
       await user.click(screen.getByRole('button', { name: /audit 2 models/i }));
 
       await waitFor(() => {
@@ -597,6 +695,7 @@ describe('AuditModelsDialog', () => {
         />
       );
 
+      await user.click(screen.getByRole('button', { name: /^select all$/i }));
       await user.click(screen.getByRole('button', { name: /audit 2 models/i }));
       await waitFor(() => screen.getByTestId('audit-run-in-background'));
       await user.click(screen.getByTestId('audit-run-in-background'));
@@ -632,6 +731,7 @@ describe('AuditModelsDialog', () => {
         />
       );
 
+      await user.click(screen.getByRole('button', { name: /^select all$/i }));
       await user.click(screen.getByRole('button', { name: /audit 2 models/i }));
       await waitFor(() => screen.getByTestId('audit-view-full-details'));
       await user.click(screen.getByTestId('audit-view-full-details'));
@@ -652,6 +752,7 @@ describe('AuditModelsDialog', () => {
       const user = userEvent.setup();
       render(<AuditModelsDialog {...DEFAULT_PROPS} />);
 
+      await user.click(screen.getByRole('button', { name: /^select all$/i }));
       await user.click(screen.getByRole('button', { name: /audit 2 models/i }));
 
       await waitFor(() => {
@@ -684,10 +785,11 @@ describe('AuditModelsDialog', () => {
       const user = userEvent.setup();
       render(<AuditModelsDialog {...DEFAULT_PROPS} />);
 
-      // Deselect the Anthropic model via row click (avoids double-toggle from checkbox input bubble)
-      const claudeCheckbox = screen.getByRole('checkbox', { name: /select claude-4 for audit/i });
-      const claudeRow = claudeCheckbox.closest('[role="button"]') as HTMLElement;
-      await user.click(claudeRow);
+      // Initial state is empty; select only the OpenAI model via row click
+      // (avoids the double-toggle that would fire if we clicked the input).
+      const gptCheckbox = screen.getByRole('checkbox', { name: /select gpt-5 for audit/i });
+      const gptRow = gptCheckbox.closest('[role="button"]') as HTMLElement;
+      await user.click(gptRow);
       await user.click(screen.getByRole('button', { name: /audit 1 model$/i }));
 
       await waitFor(() => {
@@ -712,6 +814,7 @@ describe('AuditModelsDialog', () => {
       const user = userEvent.setup();
       render(<AuditModelsDialog {...DEFAULT_PROPS} />);
 
+      await user.click(screen.getByRole('button', { name: /^select all$/i }));
       await user.click(screen.getByRole('button', { name: /audit 2 models/i }));
 
       await waitFor(() => {
@@ -728,6 +831,7 @@ describe('AuditModelsDialog', () => {
       const user = userEvent.setup();
       render(<AuditModelsDialog {...DEFAULT_PROPS} />);
 
+      await user.click(screen.getByRole('button', { name: /^select all$/i }));
       await user.click(screen.getByRole('button', { name: /audit 2 models/i }));
 
       await waitFor(() => {
@@ -743,6 +847,7 @@ describe('AuditModelsDialog', () => {
       const user = userEvent.setup();
       render(<AuditModelsDialog {...DEFAULT_PROPS} />);
 
+      await user.click(screen.getByRole('button', { name: /^select all$/i }));
       await user.click(screen.getByRole('button', { name: /audit 2 models/i }));
 
       await waitFor(() => {
@@ -758,6 +863,7 @@ describe('AuditModelsDialog', () => {
       const user = userEvent.setup();
       render(<AuditModelsDialog {...DEFAULT_PROPS} />);
 
+      await user.click(screen.getByRole('button', { name: /^select all$/i }));
       await user.click(screen.getByRole('button', { name: /audit 2 models/i }));
 
       await waitFor(() => {
@@ -773,6 +879,7 @@ describe('AuditModelsDialog', () => {
       const user = userEvent.setup();
       render(<AuditModelsDialog {...DEFAULT_PROPS} />);
 
+      await user.click(screen.getByRole('button', { name: /^select all$/i }));
       await user.click(screen.getByRole('button', { name: /audit 2 models/i }));
 
       await waitFor(() => {
@@ -792,6 +899,7 @@ describe('AuditModelsDialog', () => {
       const user = userEvent.setup();
       render(<AuditModelsDialog {...DEFAULT_PROPS} />);
 
+      await user.click(screen.getByRole('button', { name: /^select all$/i }));
       await user.click(screen.getByRole('button', { name: /audit 2 models/i }));
 
       await waitFor(() => {
@@ -813,6 +921,7 @@ describe('AuditModelsDialog', () => {
       const user = userEvent.setup();
       render(<AuditModelsDialog {...DEFAULT_PROPS} />);
 
+      await user.click(screen.getByRole('button', { name: /^select all$/i }));
       await user.click(screen.getByRole('button', { name: /audit 2 models/i }));
 
       await waitFor(() => {
@@ -827,6 +936,7 @@ describe('AuditModelsDialog', () => {
       const user = userEvent.setup();
       render(<AuditModelsDialog {...DEFAULT_PROPS} />);
 
+      await user.click(screen.getByRole('button', { name: /^select all$/i }));
       await user.click(screen.getByRole('button', { name: /audit 2 models/i }));
 
       await waitFor(() => {
@@ -841,6 +951,7 @@ describe('AuditModelsDialog', () => {
       const user = userEvent.setup();
       render(<AuditModelsDialog {...DEFAULT_PROPS} />);
 
+      await user.click(screen.getByRole('button', { name: /^select all$/i }));
       await user.click(screen.getByRole('button', { name: /audit 2 models/i }));
 
       await waitFor(() => {
@@ -861,6 +972,132 @@ describe('AuditModelsDialog', () => {
       await user.click(screen.getByRole('button', { name: /cancel/i }));
 
       expect(onOpenChange).toHaveBeenCalledWith(false);
+    });
+  });
+
+  // ── Cost estimate ──────────────────────────────────────────────────────────
+
+  describe('cost estimate', () => {
+    /**
+     * Route apiClient.get by URL so the workflow lookup and the
+     * cost-estimate call can return different shapes. Without this the
+     * mock would feed the workflow array into setEstimate and render
+     * "$0.00" — fine for tests that don't look at the estimate but
+     * confusing here.
+     */
+    async function mockApiByUrl(estimate: unknown): Promise<void> {
+      const { apiClient } = await import('@/lib/api/client');
+      vi.mocked(apiClient.get).mockImplementation((path: string): Promise<unknown> => {
+        if (path.includes('/cost-estimate')) {
+          return Promise.resolve(estimate);
+        }
+        return Promise.resolve([{ id: 'wf-123', slug: 'tpl-provider-model-audit' }]);
+      });
+    }
+
+    it('hides the estimate row when nothing is selected', async () => {
+      // Dialog opens with no selection; the row should not be in the DOM.
+      render(<AuditModelsDialog {...DEFAULT_PROPS} />);
+      expect(screen.queryByTestId('audit-cost-estimate')).not.toBeInTheDocument();
+    });
+
+    it('renders the estimate row after selecting models', async () => {
+      await mockApiByUrl({
+        midUsd: 0.42,
+        lowUsd: 0.3,
+        highUsd: 0.6,
+        basedOn: 'empirical',
+        sampleSize: 7,
+        modelUsed: 'claude-sonnet-4-6',
+        judgeModelUsed: null,
+        notes: 'Calibrated from 7 past runs.',
+      });
+
+      const user = userEvent.setup();
+      render(<AuditModelsDialog {...DEFAULT_PROPS} />);
+
+      await user.click(screen.getByRole('button', { name: /^select all$/i }));
+
+      // The estimate row mounts immediately as "Estimating cost…" then
+      // swaps to the priced version after the debounced fetch resolves.
+      // Wait for the priced text, not the loading text.
+      await screen.findByText(/Estimated cost:/i, undefined, { timeout: 1500 });
+
+      const row = screen.getByTestId('audit-cost-estimate');
+      expect(row).toHaveTextContent('$0.42');
+      expect(row).toHaveTextContent('$0.30');
+      expect(row).toHaveTextContent('$0.60');
+    });
+
+    it('passes the selected model count and supervisor toggle to the estimate endpoint', async () => {
+      await mockApiByUrl({
+        midUsd: 0.5,
+        lowUsd: 0.4,
+        highUsd: 0.7,
+        basedOn: 'heuristic',
+        sampleSize: 0,
+        modelUsed: 'claude-sonnet-4-6',
+        judgeModelUsed: 'claude-sonnet-4-6',
+        notes: 'Rough heuristic.',
+      });
+      const { apiClient } = await import('@/lib/api/client');
+
+      const user = userEvent.setup();
+      render(<AuditModelsDialog {...DEFAULT_PROPS} />);
+
+      await user.click(screen.getByRole('button', { name: /^select all$/i }));
+      // Tick the supervisor box so the call includes supervisor=true.
+      await user.click(screen.getByRole('checkbox', { name: /run neutral supervisor review/i }));
+
+      await waitFor(
+        () => {
+          const supervisorCall = vi
+            .mocked(apiClient.get)
+            .mock.calls.find(
+              ([path, opts]) =>
+                typeof path === 'string' &&
+                path.includes('/cost-estimate') &&
+                (opts as { params?: Record<string, unknown> } | undefined)?.params?.supervisor ===
+                  true
+            );
+          expect(supervisorCall).toBeDefined();
+        },
+        { timeout: 1500 }
+      );
+
+      const [, opts] =
+        vi
+          .mocked(apiClient.get)
+          .mock.calls.find(
+            ([path]) => typeof path === 'string' && path.includes('/cost-estimate')
+          ) ?? [];
+      const params = (opts as { params?: { itemCount?: number; supervisor?: boolean } } | undefined)
+        ?.params;
+      expect(params?.itemCount).toBe(2);
+    });
+
+    it('falls back silently when the estimate endpoint errors', async () => {
+      const { apiClient } = await import('@/lib/api/client');
+      vi.mocked(apiClient.get).mockImplementation((path: string) => {
+        if (path.includes('/cost-estimate')) {
+          return Promise.reject(new Error('boom'));
+        }
+        return Promise.resolve([{ id: 'wf-123', slug: 'tpl-provider-model-audit' }]);
+      });
+
+      const user = userEvent.setup();
+      render(<AuditModelsDialog {...DEFAULT_PROPS} />);
+
+      await user.click(screen.getByRole('button', { name: /^select all$/i }));
+
+      // The estimate row should not be visible — the dialog stays usable
+      // even with a broken estimate endpoint.
+      await waitFor(
+        () => {
+          expect(screen.queryByTestId('audit-cost-estimate')).not.toBeInTheDocument();
+        },
+        { timeout: 1500 }
+      );
     });
   });
 });

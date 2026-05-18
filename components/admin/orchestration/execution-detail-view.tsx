@@ -17,6 +17,8 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
+  Download,
+  Eye,
   Loader2,
   RotateCcw,
   StopCircle,
@@ -72,6 +74,7 @@ import { getApprovalPrompt } from '@/lib/orchestration/trace/approval-prompt';
 import { buildInterpolationContextFromTrace } from '@/lib/orchestration/engine/interpolate-from-trace';
 import { ExecutionStatusSynopsis } from '@/components/admin/orchestration/execution-status-synopsis';
 import type { ExecutionTraceEntry } from '@/types/orchestration';
+import { supervisorReportSchema } from '@/lib/validations/orchestration';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -89,6 +92,15 @@ export interface ExecutionInfo {
   startedAt: string | null;
   completedAt: string | null;
   createdAt: string;
+  /**
+   * Supervisor verdict from the `supervisor` step (in-workflow) or the
+   * retroactive `/executions/:id/review` endpoint. Null when no
+   * supervisor has run on this execution yet.
+   */
+  supervisorVerdict?: string | null;
+  supervisorScore?: number | null;
+  supervisorReport?: unknown;
+  supervisorReviewedAt?: string | null;
 }
 
 /** Same shape as `TraceCostEntry`, but carries the `stepId` link from the API. */
@@ -124,6 +136,276 @@ const STATUS_BADGE: Record<string, 'default' | 'secondary' | 'outline' | 'destru
   paused_for_approval: 'outline',
   pending: 'outline',
 };
+
+// ─── Supervisor verdict badge ───────────────────────────────────────────────
+
+const VERDICT_BADGE: Record<string, 'default' | 'secondary' | 'outline' | 'destructive'> = {
+  pass: 'secondary',
+  concerns: 'outline',
+  fail: 'destructive',
+  inconclusive: 'outline',
+};
+
+const VERDICT_LABEL: Record<string, string> = {
+  pass: 'Pass',
+  concerns: 'Concerns',
+  fail: 'Fail',
+  inconclusive: 'Inconclusive',
+};
+
+function SupervisorVerdictBadge({
+  verdict,
+  score,
+}: {
+  verdict: string | null;
+  score: number | null;
+}): React.ReactElement {
+  if (!verdict) {
+    return <span className="text-muted-foreground text-lg">—</span>;
+  }
+  return (
+    <div className="flex flex-col gap-1">
+      <Badge variant={VERDICT_BADGE[verdict] ?? 'outline'}>
+        {VERDICT_LABEL[verdict] ?? verdict}
+      </Badge>
+      {typeof score === 'number' && (
+        <span className="text-muted-foreground text-xs">score {score.toFixed(2)}</span>
+      )}
+    </div>
+  );
+}
+
+// ─── Supervisor details panel ───────────────────────────────────────────────
+
+interface SupervisorReportLike {
+  verdict?: string;
+  score?: number;
+  summary?: string;
+  weaknesses?: Array<{
+    severity?: string;
+    claim?: string;
+    evidenceStepId?: string | null;
+    recommendation?: string;
+  }>;
+  anomalies?: Array<{ stepId?: string; observation?: string }>;
+  unverifiedAreas?: string[];
+  invalidCitations?: Array<unknown>;
+  parseFailure?: { rawResponse?: string; reason?: string };
+  triggeredBy?: string;
+  previousVerdicts?: Array<{ verdict?: string; reviewedAt?: string; triggeredBy?: string }>;
+}
+
+function asSupervisorReport(data: unknown): SupervisorReportLike | null {
+  if (data === null || typeof data === 'undefined') return null;
+  const parsed = supervisorReportSchema.safeParse(data);
+  // The Zod-inferred type is a stricter superset of `SupervisorReportLike`
+  // (which has every field optional for legacy UI defensiveness) — every
+  // required field of the loose type is guaranteed present, so the
+  // assignment is structurally safe and no cast is needed.
+  return parsed.success ? parsed.data : null;
+}
+
+function SupervisorDetailsPanel({
+  verdict,
+  score,
+  report,
+  reviewedAt,
+  onJumpToStep,
+  reachableStepIds,
+}: {
+  verdict: string;
+  score: number | null;
+  report: unknown;
+  reviewedAt: string | null;
+  onJumpToStep: (stepId: string) => void;
+  /** stepIds present in the visible trace — used to skip rendering a
+   *  click-to-jump affordance for citations the operator can't navigate to.
+   *  Cited steps not in this set still render as plain text so the citation
+   *  isn't lost; they just don't get an interactive button. */
+  reachableStepIds: ReadonlySet<string>;
+}): React.ReactElement | null {
+  const r = asSupervisorReport(report);
+  if (!r) return null;
+  const severityClass = {
+    high: 'text-red-700 dark:text-red-300',
+    medium: 'text-amber-700 dark:text-amber-300',
+    low: 'text-muted-foreground',
+  };
+  const verdictColour = {
+    pass: 'border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950/40',
+    concerns: 'border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/40',
+    fail: 'border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/40',
+    inconclusive: 'border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/40',
+  };
+  const bg = verdictColour[verdict as keyof typeof verdictColour] ?? verdictColour.inconclusive;
+  return (
+    <div
+      className={cn('rounded-md border px-4 py-3 text-sm', bg)}
+      data-testid="supervisor-details-panel"
+    >
+      <div className="mb-2 flex flex-wrap items-baseline gap-2">
+        <h3 className="flex items-baseline gap-1 text-base font-semibold">
+          Neutral supervisor review{' '}
+          <FieldHelp title="What this panel shows" contentClassName="w-96 max-h-96 overflow-y-auto">
+            <p>
+              An independent judge model (configured via <code>EVALUATION_JUDGE_MODEL</code>)
+              audited this execution after it finished and produced this evidence-cited report. The
+              verdict comes in four shapes:
+            </p>
+            <p className="mt-2">
+              <strong>Pass</strong>: every assertion the workflow made is grounded in the trace.{' '}
+              <strong>Concerns</strong>: at least one weakness needs review. <strong>Fail</strong>:
+              a critical issue — investigate before relying on the output.{' '}
+              <strong>Inconclusive</strong>: the supervisor ran but its output couldn&apos;t be
+              parsed.
+            </p>
+            <p className="mt-2">
+              <strong>Weaknesses</strong> cite specific steps with verbatim quotes; the post-hoc
+              citation validator strips any quote that doesn&apos;t actually appear in the cited
+              step&apos;s output, and downgrades the verdict if the floor breaks.{' '}
+              <strong>Anomalies</strong> flag stepIds with unusual patterns.{' '}
+              <strong>Unverified areas</strong> are things the supervisor explicitly could not
+              assess — a feature, not a bug.
+            </p>
+          </FieldHelp>
+        </h3>
+        <Badge variant={VERDICT_BADGE[verdict] ?? 'outline'}>
+          {VERDICT_LABEL[verdict] ?? verdict}
+        </Badge>
+        {typeof score === 'number' && (
+          <span className="text-muted-foreground text-xs">score {score.toFixed(2)}</span>
+        )}
+        {reviewedAt && (
+          <span className="text-muted-foreground ml-auto text-xs">
+            reviewed {new Date(reviewedAt).toLocaleString()}
+            {r.triggeredBy === 'retroactive' ? ' (retroactive)' : ''}
+          </span>
+        )}
+      </div>
+
+      {r.summary && <p className="mb-3">{r.summary}</p>}
+
+      {r.weaknesses && r.weaknesses.length > 0 && (
+        <div className="mb-3">
+          <p className="mb-1 text-xs font-medium tracking-wide uppercase">Weaknesses</p>
+          <ul className="space-y-1">
+            {r.weaknesses.map((w, i) => (
+              <li key={i} className="text-sm">
+                <span
+                  className={cn(
+                    'font-medium',
+                    severityClass[w.severity as keyof typeof severityClass]
+                  )}
+                >
+                  [{w.severity?.toUpperCase() ?? 'LOW'}]
+                </span>{' '}
+                {w.claim}
+                {w.evidenceStepId && reachableStepIds.has(w.evidenceStepId) && (
+                  <button
+                    type="button"
+                    onClick={() => onJumpToStep(w.evidenceStepId as string)}
+                    className="ml-1 underline hover:no-underline"
+                  >
+                    (see step <code>{w.evidenceStepId}</code>)
+                  </button>
+                )}
+                {w.evidenceStepId && !reachableStepIds.has(w.evidenceStepId) && (
+                  <span
+                    className="text-muted-foreground ml-1 text-xs"
+                    title="The cited step isn't in the current trace — the supervisor may have referenced a step that was renamed, filtered out, or never persisted."
+                  >
+                    (cited step: <code>{w.evidenceStepId}</code>)
+                  </span>
+                )}
+                {w.recommendation && (
+                  <span className="text-muted-foreground"> — {w.recommendation}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {r.anomalies && r.anomalies.length > 0 && (
+        <div className="mb-3">
+          <p className="mb-1 text-xs font-medium tracking-wide uppercase">Anomalies</p>
+          <ul className="space-y-1">
+            {r.anomalies.map((a, i) => (
+              <li key={i} className="text-sm">
+                {a.stepId && reachableStepIds.has(a.stepId) && (
+                  <button
+                    type="button"
+                    onClick={() => onJumpToStep(a.stepId as string)}
+                    className="font-mono text-xs underline hover:no-underline"
+                  >
+                    {a.stepId}
+                  </button>
+                )}
+                {a.stepId && !reachableStepIds.has(a.stepId) && (
+                  <span
+                    className="text-muted-foreground font-mono text-xs"
+                    title="The cited step isn't in the current trace."
+                  >
+                    {a.stepId}
+                  </span>
+                )}
+                {a.stepId && ': '}
+                {a.observation}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {r.unverifiedAreas && r.unverifiedAreas.length > 0 && (
+        <div className="mb-3">
+          <p className="mb-1 text-xs font-medium tracking-wide uppercase">
+            Areas the supervisor could not verify
+          </p>
+          <ul className="list-inside list-disc text-sm">
+            {r.unverifiedAreas.map((u, i) => (
+              <li key={i}>{u}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {r.invalidCitations && r.invalidCitations.length > 0 && (
+        <p className="text-muted-foreground text-xs italic">
+          The post-hoc citation validator stripped {r.invalidCitations.length} unsupported claim
+          {r.invalidCitations.length === 1 ? '' : 's'}; the verdict may have been downgraded.
+        </p>
+      )}
+
+      {r.parseFailure && (
+        <details className="mt-2 rounded-md border border-red-200 bg-red-50/60 px-3 py-2 dark:border-red-900 dark:bg-red-950/30">
+          <summary className="cursor-pointer text-xs font-medium text-red-700 dark:text-red-300">
+            Supervisor output couldn&apos;t be parsed — show raw response
+          </summary>
+          {r.parseFailure.reason && (
+            <p className="text-muted-foreground mt-2 text-xs">{r.parseFailure.reason}</p>
+          )}
+          <pre className="bg-background/60 mt-2 max-h-72 overflow-auto rounded border border-red-200 p-2 font-mono text-[11px] whitespace-pre-wrap dark:border-red-900">
+            {r.parseFailure.rawResponse ?? '(no raw response captured)'}
+          </pre>
+          <p className="text-muted-foreground mt-2 text-xs">
+            Tip: this is what the judge model returned after two attempts. Common failure modes are
+            prose around the JSON (&quot;Here&apos;s my assessment:&quot;), markdown headers instead
+            of a JSON object, or a top-level array. The parser is forgiving (strips fences and
+            extracts the first balanced <code>{'{ … }'}</code> from prose); seeing this section
+            means even those fallbacks failed.
+          </p>
+        </details>
+      )}
+
+      {r.previousVerdicts && r.previousVerdicts.length > 0 && (
+        <p className="text-muted-foreground mt-2 text-xs">
+          Prior verdicts archived: {r.previousVerdicts.map((p) => p.verdict).join(', ')}.
+        </p>
+      )}
+    </div>
+  );
+}
 
 // ─── Collapsible JSON card ──────────────────────────────────────────────────
 
@@ -418,6 +700,7 @@ export function ExecutionDetailView({
     }
   }, [execution.id, router]);
 
+  const [reviewDialogOpen, setReviewDialogOpen] = useState(false);
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
   const [rejectLoading, setRejectLoading] = useState(false);
@@ -472,12 +755,47 @@ export function ExecutionDetailView({
     [execution.id, router]
   );
 
+  // Retroactive supervisor review. Available on any terminal execution
+  // — refreshes the row on success so the verdict badge re-renders.
+  // Gated by a confirmation dialog because the action is billable
+  // (judge-model LLM call, typically $0.02–$0.10).
+  const handleReview = useCallback(async () => {
+    setReviewDialogOpen(false);
+    setActionLoading(true);
+    setActionResult(null);
+    try {
+      const result = await apiClient.post<{ verdict: string; score: number }>(
+        API.ADMIN.ORCHESTRATION.executionReview(execution.id),
+        { body: {} }
+      );
+      setActionResult({
+        type: 'success',
+        message: `Supervisor reviewed this execution — verdict: ${result.verdict} (score ${result.score.toFixed(2)}). Refreshing…`,
+      });
+      router.refresh();
+    } catch (err) {
+      setActionResult({
+        type: 'error',
+        message: err instanceof APIClientError ? err.message : 'Review failed',
+      });
+    } finally {
+      setActionLoading(false);
+    }
+  }, [execution.id, router]);
+
   const canCancel = liveSnap.status === 'running' || liveSnap.status === 'paused_for_approval';
   const canApprove = liveSnap.status === 'paused_for_approval';
   const canRetry = liveSnap.status === 'failed';
   const failedStepId = canRetry
     ? displayTrace.find((e) => e.status === 'failed')?.stepId
     : undefined;
+  // Retroactive review is available on any terminal execution — operators
+  // who skipped the supervisor at trigger time or whose template
+  // doesn't include the step can still get an honest verdict.
+  const canReview =
+    liveSnap.status === 'completed' ||
+    liveSnap.status === 'failed' ||
+    liveSnap.status === 'cancelled';
 
   // Extract approval prompt from awaiting trace entry
   const approvalPrompt = canApprove ? getApprovalPrompt(displayTrace) : null;
@@ -505,7 +823,7 @@ export function ExecutionDetailView({
       )}
 
       {/* Action buttons */}
-      {(canCancel || canApprove || (canRetry && failedStepId)) && (
+      {(canCancel || canApprove || (canRetry && failedStepId) || canReview) && (
         <div className="flex flex-wrap gap-2">
           {canApprove && (
             <Button size="sm" onClick={() => void handleApprove()} disabled={actionLoading}>
@@ -546,6 +864,43 @@ export function ExecutionDetailView({
               Retry Failed Step
             </Button>
           )}
+          {canReview && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setReviewDialogOpen(true)}
+              disabled={actionLoading}
+              data-testid="execution-review-button"
+            >
+              <Eye className="mr-2 h-4 w-4" />
+              {execution.supervisorVerdict ? 'Re-review' : 'Review this execution'}
+            </Button>
+          )}
+          {canReview && (
+            <div className="flex items-center gap-1">
+              <Button
+                size="sm"
+                variant="outline"
+                asChild
+                data-testid="execution-download-report-button"
+              >
+                <a
+                  href={API.ADMIN.ORCHESTRATION.executionReportMarkdown(execution.id)}
+                  download={`execution-${execution.id}.md`}
+                >
+                  <Download className="mr-2 h-4 w-4" />
+                  Download report
+                </a>
+              </Button>
+              <FieldHelp title="Execution report">
+                A deterministic Markdown render of this execution — header, supervisor verdict (if
+                one has been produced), input data, per-step timeline with inputs/outputs/duration/
+                cost, error details, and output. <strong>No LLM cost</strong>; the report is
+                generated fresh from the trace every time you click. Works on any terminal execution
+                regardless of whether the workflow includes a <code>report</code> step.
+              </FieldHelp>
+            </div>
+          )}
         </div>
       )}
 
@@ -562,7 +917,7 @@ export function ExecutionDetailView({
       )}
 
       {/* Summary section */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
         <Card>
           <CardHeader className="pb-1">
             <CardTitle className="text-xs font-medium">
@@ -677,6 +1032,29 @@ export function ExecutionDetailView({
             <span className="text-lg font-bold">{duration ?? '—'}</span>
           </CardContent>
         </Card>
+        <Card data-testid="supervisor-verdict-card">
+          <CardHeader className="pb-1">
+            <CardTitle className="text-xs font-medium">
+              Supervisor{' '}
+              <FieldHelp title="Neutral supervisor verdict">
+                An independent judge model audits this execution&apos;s trace and produces an
+                honest, evidence-cited verdict — designed to catch problems the workflow&apos;s own
+                optimistic narrative would miss. <strong>Pass</strong>: every assertion is grounded
+                in the trace. <strong>Concerns</strong>: at least one weakness needs review.{' '}
+                <strong>Fail</strong>: critical issue — investigate before relying on the output.{' '}
+                <strong>Inconclusive</strong>: the supervisor ran but its output couldn&apos;t be
+                parsed (raw response preserved in <code>supervisorReport.parseFailure</code>). Null
+                means no supervisor has run on this execution yet.
+              </FieldHelp>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <SupervisorVerdictBadge
+              verdict={execution.supervisorVerdict ?? null}
+              score={execution.supervisorScore ?? null}
+            />
+          </CardContent>
+        </Card>
       </div>
 
       {/* Status synopsis — the "what went wrong" panel. Renders the
@@ -694,6 +1072,22 @@ export function ExecutionDetailView({
         onJumpToStep={handleSelectStep}
         onRetry={canRetry ? (sid) => void handleRetryStep(sid) : undefined}
       />
+
+      {/* Supervisor details panel — full-width below the compact
+          verdict card. Renders the summary, top weaknesses, anomalies,
+          and unverified areas when a verdict is present. Without this
+          the operator would have to scroll to the supervisor step row
+          and expand it to learn why the verdict landed. */}
+      {execution.supervisorReport != null && execution.supervisorVerdict != null && (
+        <SupervisorDetailsPanel
+          verdict={execution.supervisorVerdict}
+          score={execution.supervisorScore ?? null}
+          report={execution.supervisorReport}
+          reviewedAt={execution.supervisorReviewedAt ?? null}
+          onJumpToStep={handleSelectStep}
+          reachableStepIds={new Set(displayTrace.map((e) => e.stepId))}
+        />
+      )}
 
       {/* Input / Output cards */}
       <div className="grid gap-4 lg:grid-cols-2">
@@ -858,6 +1252,66 @@ export function ExecutionDetailView({
                 <XCircle className="mr-2 h-4 w-4" />
               )}
               Reject
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* ─── Review confirmation dialog ────────────────────────────────────
+          Retroactive supervisor review is a billable judge-model LLM call.
+          A confirmation gate prevents accidental clicks from racking up
+          cost — every existing audit verdict is preserved in
+          supervisorReport.previousVerdicts[]. */}
+      <AlertDialog
+        open={reviewDialogOpen}
+        onOpenChange={(open) => {
+          // Only react to explicit close — matches the reject-dialog
+          // pattern and avoids a stale-handler race if Radix re-fires.
+          if (!open) setReviewDialogOpen(false);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {execution.supervisorVerdict ? 'Re-review this execution?' : 'Review this execution?'}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {execution.supervisorVerdict ? (
+                <>
+                  A new independent judge model will read the full trace and emit a fresh
+                  evidence-cited verdict. The current verdict (
+                  <strong>{execution.supervisorVerdict}</strong>) will be archived into{' '}
+                  <code>supervisorReport.previousVerdicts[]</code>; nothing is lost.
+                </>
+              ) : (
+                <>
+                  An independent judge model will read the full execution trace and emit an
+                  evidence-cited verdict (pass / concerns / fail). The verdict and full report
+                  persist on the execution row and surface on this page.
+                </>
+              )}
+              <br />
+              <br />
+              <strong>Cost:</strong> ~$0.02–$0.10 (one judge-model LLM call, depending on trace size
+              and the configured <code>EVALUATION_JUDGE_MODEL</code>).
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={actionLoading}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                void handleReview();
+              }}
+              disabled={actionLoading}
+              data-testid="execution-review-confirm"
+            >
+              {actionLoading ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Eye className="mr-2 h-4 w-4" />
+              )}
+              {execution.supervisorVerdict ? 'Re-review' : 'Review'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

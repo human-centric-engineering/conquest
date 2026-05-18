@@ -307,7 +307,7 @@ function ApprovalInlineCard({
               href="/admin/orchestration/approvals"
               className="text-muted-foreground ml-auto inline-flex items-center gap-1 text-xs hover:underline"
             >
-              Open in full view
+              View in Approval Queue
               <ExternalLink className="h-3 w-3" />
             </Link>
           </>

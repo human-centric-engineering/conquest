@@ -1968,6 +1968,7 @@ export class OrchestrationEngine {
     trace: ExecutionTraceEntry[]
   ): Promise<void> {
     const { executionId, token } = lease;
+    const contextPatchData = drainContextPatch(ctx);
     try {
       const result = await prisma.aiWorkflowExecution.updateMany({
         where: { id: executionId, leaseToken: token },
@@ -1977,6 +1978,7 @@ export class OrchestrationEngine {
           totalCostUsd: ctx.totalCostUsd,
           leaseExpiresAt: leaseExpiry(),
           lastHeartbeatAt: new Date(),
+          ...contextPatchData,
         },
       });
       if (result.count === 0) {
@@ -2100,6 +2102,7 @@ export class OrchestrationEngine {
     errorMessage: string | null
   ): Promise<boolean> {
     const { executionId, token } = lease;
+    const contextPatchData = drainContextPatch(ctx);
     try {
       const result = await prisma.aiWorkflowExecution.updateMany({
         where: { id: executionId, leaseToken: token },
@@ -2112,6 +2115,7 @@ export class OrchestrationEngine {
           errorMessage,
           outputData:
             status === WorkflowStatus.COMPLETED ? (ctx.stepOutputs as object) : Prisma.DbNull,
+          ...contextPatchData,
           // Clear the live-running metadata so the detail page doesn't render
           // a stale "Running" indicator for the last-entered step. `currentStep`
           // itself is left alone — pre-existing engine behaviour preserves it
@@ -2143,6 +2147,40 @@ export class OrchestrationEngine {
 // ================================================================
 // Helpers
 // ================================================================
+
+/**
+ * Columns that any executor may patch on `AiWorkflowExecution` via
+ * `StepResult.contextPatch`. Kept as an explicit allowlist so a
+ * malformed patch can't reach into engine-internal columns
+ * (`leaseToken`, `currentStep`, `status` etc.).
+ */
+const CONTEXT_PATCH_ALLOWLIST = new Set([
+  'supervisorVerdict',
+  'supervisorScore',
+  'supervisorReport',
+  'supervisorReviewedAt',
+]);
+
+/**
+ * Drain `ctx.pendingContextPatch` into a plain object suitable for the
+ * `data` block of a Prisma `updateMany`. Filters to columns in the
+ * allowlist; resets the pending patch so the next checkpoint doesn't
+ * re-write the same values.
+ */
+function drainContextPatch(ctx: ExecutionContext): Record<string, unknown> {
+  const pending = ctx.pendingContextPatch;
+  if (!pending) return {};
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(pending)) {
+    if (CONTEXT_PATCH_ALLOWLIST.has(key)) {
+      out[key] = value;
+    } else {
+      ctx.logger.warn('drainContextPatch: dropping non-allowlisted key', { key });
+    }
+  }
+  ctx.pendingContextPatch = undefined;
+  return out;
+}
 
 /** Sanitize an error for client-facing text. */
 function sanitizeError(err: ExecutorError): string {
