@@ -581,10 +581,11 @@ model AiConversation {
   updatedAt            DateTime @updatedAt
 
   // Relations
-  user     User        @relation("AiConversationUser", fields: [userId], references: [id])
-  agent    AiAgent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  user     User                 @relation("AiConversationUser", fields: [userId], references: [id])
+  agent    AiAgent              @relation(fields: [agentId], references: [id], onDelete: Cascade)
   messages AiMessage[]
   costLogs AiCostLog[]
+  share    AiConversationShare?
 
   @@index([userId])
   @@index([agentId])
@@ -592,6 +593,37 @@ model AiConversation {
   @@index([isActive])
   @@index([updatedAt])
   @@map("ai_conversation")
+}
+
+// Consent record for cross-user conversation access.
+//
+// End users own their conversations. An admin (or any other user) can view
+// another user's conversation only when the owner has explicitly created
+// an active share. The unique constraint on `conversationId` means a
+// conversation has at most one share row at a time — re-sharing after a
+// revoke updates the existing row (clear `revokedAt`, refresh `expiresAt`,
+// optionally update `reason`).
+//
+// "Active" means `revokedAt IS NULL AND (expiresAt IS NULL OR expiresAt > now())`.
+// Callers should use the `adminCanViewConversation` helper rather than
+// hand-rolling that predicate. The default time limit is 7 days, enforced
+// at the route layer (the schema allows null for never-expiring shares
+// which a future compliance-officer role may use).
+//
+// See `.context/security/conversation-access.md` for the consent posture.
+model AiConversationShare {
+  id             String   @id @default(cuid())
+  conversationId String   @unique
+  reason         String?  @db.Text
+  expiresAt      DateTime?
+  revokedAt      DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  conversation AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@map("ai_conversation_share")
 }
 
 // Individual messages
