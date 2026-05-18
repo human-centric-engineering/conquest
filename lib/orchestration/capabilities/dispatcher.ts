@@ -99,6 +99,16 @@ class CapabilityDispatcher {
     return this.handlers.has(slug);
   }
 
+  /**
+   * Look up a registered capability instance by slug. The chat handler
+   * uses this to call `redactProvenance()` before building the trace
+   * row that gets persisted onto the assistant message's audit bundle.
+   * Returns `undefined` if no handler is registered under that slug.
+   */
+  getHandler(slug: string): BaseCapability | undefined {
+    return this.handlers.get(slug);
+  }
+
   getRegistryEntry(slug: string): CapabilityRegistryEntry | undefined {
     return this.registry.get(slug);
   }

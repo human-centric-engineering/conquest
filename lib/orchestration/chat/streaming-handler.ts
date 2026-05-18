@@ -52,6 +52,7 @@ import { getOrchestrationSettings } from '@/lib/orchestration/settings';
 import { scanForInjection } from '@/lib/orchestration/chat/input-guard';
 import { scanCitations, scanOutput } from '@/lib/orchestration/chat/output-guard';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
+import type { CapabilityResult } from '@/lib/orchestration/capabilities/types';
 import { extractCitations } from '@/lib/orchestration/chat/citations';
 import type { ProvenanceItem } from '@/lib/orchestration/provenance/types';
 import { executionTraceSchema } from '@/lib/validations/orchestration';
@@ -154,25 +155,48 @@ function buildToolCallTrace(
       : null;
   const errorCode = typeof errorObj?.code === 'string' ? errorObj.code : undefined;
 
-  let resultPreview: string | undefined;
-  try {
-    const json = JSON.stringify(result);
-    if (json) resultPreview = json.length > 480 ? `${json.slice(0, 477)}...` : json;
-  } catch {
-    // Non-serialisable result (cyclic, BigInt) — skip preview rather than throw.
-  }
+  // Route args + resultPreview through the capability's redactor so the
+  // persisted audit row never carries raw PII. Capabilities that don't
+  // override `redactProvenance` get the default passthrough behavior;
+  // PII-handling capabilities mask domain-specific fields. See
+  // `lib/security/redact.ts` + `.context/security/pii-redaction.md`.
+  const handler = capabilityDispatcher.getHandler(slug);
+  const redacted = handler
+    ? handler.redactProvenance(args, result as CapabilityResult<unknown>)
+    : { args, resultPreview: defaultResultPreview(result) };
+
+  const resultPreview =
+    typeof redacted.resultPreview === 'string' && redacted.resultPreview.length > 0
+      ? redacted.resultPreview
+      : undefined;
 
   const sideEffectModel = extractSideEffectModel(result);
 
   return {
     slug,
-    arguments: args,
+    arguments: redacted.args,
     latencyMs,
     success,
     ...(errorCode ? { errorCode } : {}),
     ...(resultPreview ? { resultPreview } : {}),
     ...(sideEffectModel ? { sideEffectModel } : {}),
   };
+}
+
+/**
+ * Fallback preview formatter used when no capability handler is
+ * registered (e.g. dynamic capabilities loaded from the DB without a
+ * matching in-memory class). Mirrors the historical 480-char cap from
+ * before the redactor hook landed so the row size stays bounded.
+ */
+function defaultResultPreview(result: unknown): string {
+  try {
+    const json = JSON.stringify(result);
+    if (!json) return '';
+    return json.length > 480 ? `${json.slice(0, 477)}...` : json;
+  } catch {
+    return '';
+  }
 }
 
 /**

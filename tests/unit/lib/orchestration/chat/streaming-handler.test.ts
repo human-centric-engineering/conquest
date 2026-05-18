@@ -81,7 +81,15 @@ vi.mock('@/lib/orchestration/llm/budget-mutex', () => ({
 }));
 
 vi.mock('@/lib/orchestration/capabilities/dispatcher', () => ({
-  capabilityDispatcher: { dispatch: vi.fn() },
+  // `getHandler` is consulted by `buildToolCallTrace` to apply each
+  // capability's `redactProvenance()` before persistence. Tests don't
+  // exercise overrides directly, so returning `undefined` falls through
+  // to the default passthrough preview formatter — identical to the
+  // pre-redactor behavior these tests originally asserted against.
+  capabilityDispatcher: {
+    dispatch: vi.fn(),
+    getHandler: vi.fn().mockReturnValue(undefined),
+  },
 }));
 
 vi.mock('@/lib/orchestration/capabilities/registry', () => ({
