@@ -377,6 +377,59 @@ describe('AnthropicProvider.chat — extended thinking (reasoningEffort)', () =>
     expect(callArgs.thinking).toBeUndefined();
   });
 
+  // Regression: an earlier version clamped budget down to whatever fit
+  // inside `maxTokens - 1024`, which could fall BELOW Anthropic's
+  // 1024-token API minimum on intermediate maxTokens values like 1500.
+  // The fix is to require maxTokens ≥ 2048 (1024 min budget + 1024 floor)
+  // before enabling thinking at all — otherwise drop silently.
+  it.each([
+    [1024, 'maxTokens at the visible-output floor'],
+    [1500, 'maxTokens above the floor but below the threshold (would have sent 476)'],
+    [2047, 'maxTokens one below the 2048 threshold (would have sent 1023)'],
+  ])(
+    'drops thinking when maxTokens=%i (%s) so we never send budget_tokens < 1024',
+    async (maxTokens) => {
+      createMock.mockResolvedValue({
+        content: [{ type: 'text', text: 'ok' }],
+        usage: { input_tokens: 10, output_tokens: 3 },
+        model: 'claude-opus-4',
+        stop_reason: 'end_turn',
+      });
+
+      const provider = makeProvider();
+      await provider.chat([{ role: 'user', content: 'hi' }], {
+        model: 'claude-opus-4',
+        maxTokens,
+        reasoningEffort: 'medium',
+      });
+
+      const callArgs = createMock.mock.calls[0][0];
+      expect(callArgs.thinking).toBeUndefined();
+    }
+  );
+
+  it('enables thinking at exactly the 2048-token threshold with the minimum 1024 budget', async () => {
+    createMock.mockResolvedValue({
+      content: [{ type: 'text', text: 'ok' }],
+      usage: { input_tokens: 10, output_tokens: 3 },
+      model: 'claude-opus-4',
+      stop_reason: 'end_turn',
+    });
+
+    const provider = makeProvider();
+    // 2048 maxTokens leaves exactly 1024 of headroom — the Anthropic
+    // minimum. Even with `reasoningEffort: 'high'` (wants 16384), the
+    // clamp lands on 1024.
+    await provider.chat([{ role: 'user', content: 'hi' }], {
+      model: 'claude-opus-4',
+      maxTokens: 2048,
+      reasoningEffort: 'high',
+    });
+
+    const callArgs = createMock.mock.calls[0][0];
+    expect(callArgs.thinking).toEqual({ type: 'enabled', budget_tokens: 1024 });
+  });
+
   it('skips thinking blocks from the response content (caller sees only text)', async () => {
     createMock.mockResolvedValue({
       content: [

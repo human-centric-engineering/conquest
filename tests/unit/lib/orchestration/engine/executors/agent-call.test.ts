@@ -253,19 +253,17 @@ describe('executeAgentCall', () => {
     expect(mockChat.mock.calls[0][1].reasoningEffort).toBeUndefined();
   });
 
-  it('reasoningEffort: step config wins even when its value is the same bucket as the agent (no-op precedence still tracked)', async () => {
-    // Defensive: a future change might short-circuit "both are 'medium'"
-    // into "skip the override". This test pins the contract that the
-    // precedence resolution always selects the step value when set,
-    // regardless of equality.
+  it('reasoningEffort: step config beats the agent column in BOTH directions (high→low and low→high)', async () => {
+    // Bidirectional sanity check — one direction (low→high) on its own
+    // is consistent with "always pick the larger bucket"; the inverse
+    // direction confirms the resolution is genuinely "step value wins"
+    // and not some max() or precedence-by-magnitude.
     vi.mocked(prisma.aiAgent.findFirst).mockResolvedValue({
       ...MOCK_AGENT,
-      reasoningEffort: 'medium',
+      reasoningEffort: 'high',
     } as never);
-
-    await executeAgentCall(makeStep({ reasoningEffort: 'medium' }), makeCtx());
-
-    expect(mockChat.mock.calls[0][1].reasoningEffort).toBe('medium');
+    await executeAgentCall(makeStep({ reasoningEffort: 'low' }), makeCtx());
+    expect(mockChat.mock.calls[0][1].reasoningEffort).toBe('low');
   });
 
   it('interpolates the message template', async () => {

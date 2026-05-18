@@ -367,10 +367,27 @@ export class AnthropicProvider implements LlmProvider {
     ) {
       const rawBudget = anthropicThinkingBudget(options.reasoningEffort);
       if (rawBudget !== undefined) {
+        // Anthropic constraints:
+        //   - `budget_tokens` MUST be ≥ 1024 (Anthropic API minimum).
+        //   - `budget_tokens` MUST be < `max_tokens` (thinking + visible
+        //     output share the cap).
+        //   - We additionally insist on a 1024-token visible-output
+        //     floor so the model has room to actually answer after
+        //     thinking.
+        //
+        // Combined: send thinking only if `max_tokens >= 1024 (min budget)
+        // + 1024 (visible floor) = 2048`. Below that, drop silently —
+        // sending `budget_tokens < 1024` would be a guaranteed 400, and
+        // sending the bare minimum with no visible-output room would
+        // truncate the reply.
+        const MIN_THINKING_BUDGET = 1024;
         const VISIBLE_OUTPUT_FLOOR = 1024;
-        const headroom = maxTokens - VISIBLE_OUTPUT_FLOOR;
-        if (headroom > 0) {
-          const budget = Math.min(rawBudget, headroom);
+        const maxAllowedBudget = maxTokens - VISIBLE_OUTPUT_FLOOR;
+        if (maxAllowedBudget >= MIN_THINKING_BUDGET) {
+          // `rawBudget` is one of {1024, 4096, 16384} — all ≥ MIN_THINKING_BUDGET.
+          // `maxAllowedBudget` is ≥ MIN_THINKING_BUDGET by the branch
+          // guard. Their min is therefore ≥ MIN_THINKING_BUDGET too.
+          const budget = Math.min(rawBudget, maxAllowedBudget);
           // The Anthropic SDK type union narrows `thinking` to two
           // shapes; we cast through unknown so a future SDK version
           // that adds a field doesn't force a churn here.
@@ -380,9 +397,10 @@ export class AnthropicProvider implements LlmProvider {
           };
           thinkingEnabled = true;
         }
-        // headroom ≤ 0: max_tokens too small to fit any thinking budget
-        // alongside a visible reply. Drop thinking entirely rather than
-        // produce a request that's guaranteed to truncate.
+        // maxAllowedBudget < MIN_THINKING_BUDGET → max_tokens too small
+        // to fit Anthropic's minimum budget alongside the visible-output
+        // floor. Drop thinking entirely. The caller's intent is still
+        // visible on the trace's `requestParams.reasoningEffort`.
       }
       // rawBudget === undefined → reasoningEffort === 'minimal' on
       // Anthropic, which deliberately means "no extended thinking".

@@ -132,10 +132,16 @@ describe('supervisorConfigSchema (via executor)', () => {
 
     await executeSupervisor(step({ assessmentCriteria: 'r', reasoningEffort: 'high' }), ctx);
 
+    // Guard against vacuous pass — if the supervisor short-circuited
+    // before making any LLM calls, the loop below would assert nothing.
+    // The happy path must fire at least one runLlmCall via the shim.
+    const calls = vi.mocked(runLlmCall).mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+
     // Every call the supervisor made through the LlmCallShim should carry
     // the step's reasoningEffort — there's no "delegations have their own"
     // carve-out for supervisor, unlike orchestrator.
-    for (const call of vi.mocked(runLlmCall).mock.calls) {
+    for (const call of calls) {
       expect(call[1].reasoningEffort).toBe('high');
     }
   });
