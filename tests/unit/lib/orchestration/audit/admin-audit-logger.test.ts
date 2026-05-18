@@ -19,7 +19,11 @@ vi.mock('@/lib/logging', () => ({
 
 import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
-import { computeChanges, logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
+import {
+  computeChanges,
+  logAdminAction,
+  logConversationAccess,
+} from '@/lib/orchestration/audit/admin-audit-logger';
 
 function flushPromises() {
   return new Promise((r) => setTimeout(r, 0));
@@ -390,6 +394,106 @@ describe('logAdminAction', () => {
       safe: 'keep-me',
       headers: { authorization: 'Bearer x', 'x-trace': 'abc', apiKey: '[REDACTED]' },
       credentials: '[REDACTED]',
+    });
+  });
+});
+
+// ─── logConversationAccess ──────────────────────────────────────────────────
+
+describe('logConversationAccess', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('writes an audit row with accessBasis + conversationOwnerId when basis is shared', async () => {
+    vi.mocked(prisma.aiAdminAuditLog.create).mockResolvedValue({} as never);
+
+    logConversationAccess({
+      adminUserId: 'admin-1',
+      conversationId: 'conv-1',
+      conversationTitle: 'Refund discussion',
+      conversationOwnerId: 'user-2',
+      accessBasis: 'shared',
+      action: 'conversation.provenance_export',
+      extra: { format: 'json', messageCount: 12 },
+      clientIp: '203.0.113.7',
+    });
+    await flushPromises();
+
+    expect(prisma.aiAdminAuditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          userId: 'admin-1',
+          action: 'conversation.provenance_export',
+          entityType: 'conversation',
+          entityId: 'conv-1',
+          entityName: 'Refund discussion',
+          clientIp: '203.0.113.7',
+        }),
+      })
+    );
+    const call = vi.mocked(prisma.aiAdminAuditLog.create).mock.calls[0][0];
+    expect(call.data.metadata).toEqual({
+      accessBasis: 'shared',
+      conversationOwnerId: 'user-2',
+      format: 'json',
+      messageCount: 12,
+    });
+  });
+
+  it('is a no-op when basis is owner (routine self-access — would flood the log)', async () => {
+    vi.mocked(prisma.aiAdminAuditLog.create).mockResolvedValue({} as never);
+
+    logConversationAccess({
+      adminUserId: 'admin-1',
+      conversationId: 'conv-1',
+      conversationTitle: 'My own conversation',
+      conversationOwnerId: 'admin-1',
+      accessBasis: 'owner',
+      action: 'conversation.messages_viewed',
+    });
+    await flushPromises();
+
+    expect(prisma.aiAdminAuditLog.create).not.toHaveBeenCalled();
+  });
+
+  it('survives a null conversationTitle (entityName = null in the row)', async () => {
+    vi.mocked(prisma.aiAdminAuditLog.create).mockResolvedValue({} as never);
+
+    logConversationAccess({
+      adminUserId: 'admin-1',
+      conversationId: 'conv-1',
+      conversationTitle: null,
+      conversationOwnerId: 'user-2',
+      accessBasis: 'shared',
+      action: 'conversation.messages_viewed',
+    });
+    await flushPromises();
+
+    const call = vi.mocked(prisma.aiAdminAuditLog.create).mock.calls[0][0];
+    expect(call.data.entityName).toBeNull();
+  });
+
+  it('merges extra metadata alongside the access-basis keys', async () => {
+    vi.mocked(prisma.aiAdminAuditLog.create).mockResolvedValue({} as never);
+
+    logConversationAccess({
+      adminUserId: 'admin-1',
+      conversationId: 'conv-1',
+      conversationTitle: 't',
+      conversationOwnerId: 'user-2',
+      accessBasis: 'shared',
+      action: 'conversation.messages_viewed',
+      extra: { messageCount: 42, includesTools: true },
+    });
+    await flushPromises();
+
+    const call = vi.mocked(prisma.aiAdminAuditLog.create).mock.calls[0][0];
+    expect(call.data.metadata).toMatchObject({
+      accessBasis: 'shared',
+      conversationOwnerId: 'user-2',
+      messageCount: 42,
+      includesTools: true,
     });
   });
 });

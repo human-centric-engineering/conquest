@@ -138,3 +138,56 @@ export function logAdminAction(entry: AdminAuditEntry): void {
       });
     });
 }
+
+// ─── Conversation access helper ─────────────────────────────────────────────
+
+/**
+ * Convenience wrapper for logging conversation accesses with the
+ * consistent metadata shape that downstream queries depend on:
+ *
+ *   metadata.accessBasis           — 'owner' | 'shared'
+ *   metadata.conversationOwnerId   — the end user who owns the row
+ *
+ * Together with `userId` (the calling admin) these two keys answer the
+ * compliance-team question "which other users' conversations did admin
+ * X view this month?" via a single query — `WHERE action LIKE
+ * 'conversation.%' AND metadata->>'accessBasis' = 'shared'`.
+ *
+ * **Owner accesses skip logging by convention.** This helper writes a
+ * row only when `basis === 'shared'` — routine self-access would flood
+ * the audit log without adding signal. The function silently no-ops on
+ * `basis === 'owner'` so callers don't need a branch.
+ *
+ * The `extra` metadata object is merged into the persisted JSON
+ * alongside the access-basis keys; callers use it to carry route-
+ * specific context (e.g. `{ format: 'json', messageCount }` for the
+ * provenance routes).
+ */
+export function logConversationAccess(params: {
+  adminUserId: string;
+  conversationId: string;
+  conversationTitle: string | null;
+  conversationOwnerId: string;
+  /** `'owner'` accesses are intentionally not logged — see fn docstring. */
+  accessBasis: 'owner' | 'shared';
+  /** Route-level action name, e.g. `'conversation.messages_viewed'`. */
+  action: string;
+  /** Optional additional metadata — merged into the persisted JSON. */
+  extra?: Record<string, unknown>;
+  clientIp?: string | null;
+}): void {
+  if (params.accessBasis === 'owner') return;
+  logAdminAction({
+    userId: params.adminUserId,
+    action: params.action,
+    entityType: 'conversation',
+    entityId: params.conversationId,
+    entityName: params.conversationTitle,
+    metadata: {
+      accessBasis: params.accessBasis,
+      conversationOwnerId: params.conversationOwnerId,
+      ...params.extra,
+    },
+    clientIp: params.clientIp ?? null,
+  });
+}
