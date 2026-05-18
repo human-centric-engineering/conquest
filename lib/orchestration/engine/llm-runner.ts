@@ -17,6 +17,7 @@
 
 import { logger } from '@/lib/logging';
 import { CostOperation } from '@/types/orchestration';
+import type { LlmRequestParamsSnapshot } from '@/types/orchestration';
 import type { LlmResponseFormat } from '@/lib/orchestration/llm/types';
 import { calculateCost, logCost } from '@/lib/orchestration/llm/cost-tracker';
 import { getModel } from '@/lib/orchestration/llm/model-registry';
@@ -140,12 +141,17 @@ export async function runLlmCall(
       // `snapshotContext(ctx, telemetryOut)`; test harnesses that don't care
       // about telemetry leave the field undefined and the optional chain
       // silently no-ops.
+      const requestParams: LlmRequestParamsSnapshot = {};
+      if (params.maxTokens !== undefined) requestParams.maxTokens = params.maxTokens;
+      if (params.temperature !== undefined) requestParams.temperature = params.temperature;
+      if (params.responseFormat) requestParams.responseFormat = params.responseFormat.type;
       ctx.stepTelemetry?.push({
         model: modelId,
         provider: modelInfo.provider,
         inputTokens: response.usage.inputTokens,
         outputTokens: response.usage.outputTokens,
         durationMs: callDurationMs,
+        ...(Object.keys(requestParams).length > 0 ? { requestParams } : {}),
       });
 
       const cost = calculateCost(modelId, response.usage.inputTokens, response.usage.outputTokens);

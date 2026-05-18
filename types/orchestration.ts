@@ -431,6 +431,17 @@ export interface ExecutionTraceEntry {
    */
   llmDurationMs?: number;
   /**
+   * Request envelope from the final LLM turn this step issued. Rolled up
+   * from `stepTelemetry[]` by `rollupTelemetry()`. Surfaces what we sent
+   * to the provider (max-tokens cap, temperature, response shape, tool
+   * count) so a `400 Unsupported parameter` is self-diagnosing in the
+   * trace viewer instead of forcing an engine-log dive.
+   *
+   * Optional and last-turn-only — for parity with `model`/`provider`
+   * which also reflect the final turn on multi-turn executors.
+   */
+  requestParams?: LlmRequestParamsSnapshot;
+  /**
    * Bounded-retry events fired from this step. Each entry corresponds to one
    * `step_retry` event the engine yielded after the executor returned. When
    * `exhausted` is true the retry budget was spent and `targetStepId` points
@@ -513,6 +524,37 @@ export interface LlmTelemetryEntry {
   outputTokens: number;
   /** Wall-clock time spent inside `provider.chat()` for this turn, in ms. */
   durationMs: number;
+  /**
+   * Snapshot of the request envelope sent to the provider for this turn.
+   * Lets the execution detail view show exactly what was sent when a
+   * provider rejects a parameter (`400 Unsupported parameter: …`). The
+   * provider class may rewrite field names on the wire (e.g.
+   * `max_tokens` → `max_completion_tokens` for OpenAI reasoning models);
+   * the snapshot records the platform-neutral values we passed at the
+   * `LlmOptions` boundary, not the wire-level shape.
+   */
+  requestParams?: LlmRequestParamsSnapshot;
+}
+
+/**
+ * Caller-supplied request parameters captured on an `LlmTelemetryEntry`
+ * and rolled up onto the trace entry. All fields are optional — only
+ * fields with a meaningful value are persisted (undefined fields signal
+ * "caller didn't specify, provider default applied").
+ */
+export interface LlmRequestParamsSnapshot {
+  /** Token cap passed in `LlmOptions.maxTokens`. */
+  maxTokens?: number;
+  /** Temperature passed in `LlmOptions.temperature`. */
+  temperature?: number;
+  /**
+   * Shape of `response_format` when set. The full schema body, when
+   * applicable, lives in `ExecutionTraceEntry.input` (the step config
+   * snapshot) — we don't duplicate it here.
+   */
+  responseFormat?: 'json_object' | 'json_schema';
+  /** Count of tool definitions sent. Absent / 0 for non-tool calls. */
+  toolCount?: number;
 }
 
 /**

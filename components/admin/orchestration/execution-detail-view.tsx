@@ -1184,6 +1184,7 @@ export function ExecutionDetailView({
                   inputTokens={entry.inputTokens}
                   outputTokens={entry.outputTokens}
                   llmDurationMs={entry.llmDurationMs}
+                  requestParams={entry.requestParams}
                   costEntries={costEntriesByStep.get(entry.stepId)}
                   provenance={entry.provenance}
                   retries={entry.retries}

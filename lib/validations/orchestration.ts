@@ -2365,6 +2365,20 @@ export const executionTraceEntrySchema = z
     inputTokens: z.number().int().nonnegative().optional(),
     outputTokens: z.number().int().nonnegative().optional(),
     llmDurationMs: z.number().int().nonnegative().optional(),
+    // Request envelope from the final LLM turn. Rolled up by
+    // `rollupTelemetry()`. Absent on rows written before this field
+    // existed and on non-LLM steps. `.catch(() => undefined)` so a
+    // malformed snapshot never drops the surrounding entry (mirrors
+    // the `turns` / `provenance` defence below).
+    requestParams: z
+      .object({
+        maxTokens: z.number().int().positive().optional(),
+        temperature: z.number().optional(),
+        responseFormat: z.enum(['json_object', 'json_schema']).optional(),
+        toolCount: z.number().int().nonnegative().optional(),
+      })
+      .optional()
+      .catch(() => undefined),
     retries: z
       .array(
         z.object({

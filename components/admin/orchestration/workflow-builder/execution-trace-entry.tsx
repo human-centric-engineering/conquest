@@ -79,6 +79,13 @@ export interface ExecutionTraceEntryRowProps {
   inputTokens?: number;
   outputTokens?: number;
   llmDurationMs?: number;
+  /**
+   * Request envelope rolled up from the final LLM turn (`rollupTelemetry`).
+   * Surfaced inline next to model/provider/tokens so a `400 Unsupported
+   * parameter` 400 is self-diagnosing in the trace viewer. Absent for
+   * non-LLM steps and historical rows from before this field existed.
+   */
+  requestParams?: ExecutionTraceEntry['requestParams'];
   /** Cost-log rows attributed to this step, for the per-call breakdown. */
   costEntries?: TraceCostEntry[];
   /**
@@ -161,6 +168,7 @@ export function ExecutionTraceEntryRow({
   inputTokens,
   outputTokens,
   llmDurationMs,
+  requestParams,
   costEntries,
   provenance,
   retries,
@@ -274,6 +282,29 @@ export function ExecutionTraceEntryRow({
             ) : null}
             {costUsd > 0 && <span>${costUsd.toFixed(4)}</span>}
           </div>
+          {requestParams && (
+            <p
+              data-testid={`trace-entry-request-params-${stepId}`}
+              className="text-muted-foreground/80 mt-0.5 font-mono text-[11px]"
+              title="Request envelope sent to the LLM provider on the final turn of this step"
+            >
+              Request —{' '}
+              {[
+                typeof requestParams.maxTokens === 'number'
+                  ? `maxTokens: ${requestParams.maxTokens.toLocaleString()}`
+                  : null,
+                typeof requestParams.temperature === 'number'
+                  ? `temperature: ${requestParams.temperature}`
+                  : null,
+                requestParams.responseFormat ? `response: ${requestParams.responseFormat}` : null,
+                typeof requestParams.toolCount === 'number' && requestParams.toolCount > 0
+                  ? `tools: ${requestParams.toolCount}`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+            </p>
+          )}
           {/* Skipped steps surface their reason inline so the operator
               doesn't have to expand the row to see why the step was
               skipped. When the engine didn't capture an error (e.g.

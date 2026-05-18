@@ -13,7 +13,11 @@
  * implementation.
  */
 
-import type { ExecutionTraceEntry, LlmTelemetryEntry } from '@/types/orchestration';
+import type {
+  ExecutionTraceEntry,
+  LlmRequestParamsSnapshot,
+  LlmTelemetryEntry,
+} from '@/types/orchestration';
 
 /**
  * Roll a list of per-turn telemetry entries into the optional fields
@@ -21,8 +25,9 @@ import type { ExecutionTraceEntry, LlmTelemetryEntry } from '@/types/orchestrati
  *
  * - Returns an object with only the fields that have meaningful values.
  *   Empty input → `{}` so spreading into a trace entry is a no-op.
- * - `model` / `provider` come from the LAST turn — for multi-turn
- *   executors this is the model that produced the step's final output.
+ * - `model` / `provider` / `requestParams` come from the LAST turn — for
+ *   multi-turn executors this is the model that produced the step's final
+ *   output, and matches how `model`/`provider` already rolled up.
  * - Tokens and duration are summed across turns.
  */
 export function rollupTelemetry(entries: LlmTelemetryEntry[]): {
@@ -31,6 +36,7 @@ export function rollupTelemetry(entries: LlmTelemetryEntry[]): {
   inputTokens?: number;
   outputTokens?: number;
   llmDurationMs?: number;
+  requestParams?: LlmRequestParamsSnapshot;
 } {
   if (entries.length === 0) return {};
 
@@ -50,6 +56,7 @@ export function rollupTelemetry(entries: LlmTelemetryEntry[]): {
     inputTokens,
     outputTokens,
     llmDurationMs,
+    ...(last.requestParams ? { requestParams: last.requestParams } : {}),
   };
 }
 

@@ -18,7 +18,12 @@
 
 import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
-import type { AgentCallTurn, StepResult, WorkflowStep } from '@/types/orchestration';
+import type {
+  AgentCallTurn,
+  LlmRequestParamsSnapshot,
+  StepResult,
+  WorkflowStep,
+} from '@/types/orchestration';
 import { CostOperation } from '@/types/orchestration';
 import type { LlmMessage, LlmToolCall, LlmToolDefinition } from '@/lib/orchestration/llm/types';
 import type { LlmProvider } from '@/lib/orchestration/llm/provider';
@@ -162,12 +167,17 @@ async function runSingleTurn(
         }
         const turnDurationMs = Date.now() - turnStarted;
 
+        const requestParams: LlmRequestParamsSnapshot = {};
+        if (agent!.maxTokens !== null) requestParams.maxTokens = agent!.maxTokens;
+        if (agent!.temperature !== null) requestParams.temperature = agent!.temperature;
+        if (toolDefinitions.length > 0) requestParams.toolCount = toolDefinitions.length;
         ctx.stepTelemetry?.push({
           model: model,
           provider: usedSlug,
           inputTokens: response.usage.inputTokens,
           outputTokens: response.usage.outputTokens,
           durationMs: turnDurationMs,
+          ...(Object.keys(requestParams).length > 0 ? { requestParams } : {}),
         });
 
         const turnTokens = response.usage.inputTokens + response.usage.outputTokens;
