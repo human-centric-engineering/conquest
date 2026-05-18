@@ -1051,10 +1051,11 @@ export class StreamingChatHandler {
             assistantProvenance.citations = citations;
           }
           // Per-capability dispatch diagnostics on the terminal assistant
-          // message. Phase 3 drops the `includeTrace` gate so audit
-          // substrate is always-on; for now we preserve current behavior
-          // and route the data through `provenance` instead of `metadata`.
-          if (isTerminalTurn && request.includeTrace && turnToolCalls.length > 0) {
+          // message. Always-on — audit substrate is not an admin-only
+          // debug toggle. `includeTrace` still controls whether the SSE
+          // event surface streams the trace live, but the persisted
+          // record is unconditional.
+          if (isTerminalTurn && turnToolCalls.length > 0) {
             assistantProvenance.capabilityCalls = turnToolCalls;
           }
           // Surface every model that ran on this turn — not just the
@@ -1074,6 +1075,8 @@ export class StreamingChatHandler {
             conversationId: conversation.id,
             role: 'assistant',
             content: assistantText,
+            modelId: resolvedModel,
+            providerSlug: resolvedBinding.providerSlug,
             ...(Object.keys(assistantMetadata).length > 0 ? { metadata: assistantMetadata } : {}),
             ...(Object.keys(assistantProvenance).length > 0
               ? { provenance: assistantProvenance }
@@ -1294,16 +1297,21 @@ export class StreamingChatHandler {
           const augmentedResult = extracted.augmentedResult;
 
           const singleLatencyMs = Date.now() - dispatchStart;
-          const singleTrace = request.includeTrace
-            ? buildToolCallTrace(tc.name, tc.arguments, augmentedResult, singleLatencyMs)
-            : undefined;
-          if (singleTrace) turnToolCalls.push(singleTrace);
+          // Always build the trace — audit substrate is unconditional.
+          // `includeTrace` still gates the live SSE surface below.
+          const singleTrace = buildToolCallTrace(
+            tc.name,
+            tc.arguments,
+            augmentedResult,
+            singleLatencyMs
+          );
+          turnToolCalls.push(singleTrace);
 
           yield {
             type: 'capability_result',
             capabilitySlug: tc.name,
             result: augmentedResult,
-            ...(singleTrace ? { trace: singleTrace } : {}),
+            ...(request.includeTrace ? { trace: singleTrace } : {}),
           };
 
           await this.persistMessage({
@@ -1343,6 +1351,8 @@ export class StreamingChatHandler {
               conversationId: conversation.id,
               role: 'assistant',
               content: '',
+              modelId: resolvedModel,
+              providerSlug: resolvedBinding.providerSlug,
               metadata: { pendingApproval },
             });
             yield { type: 'approval_required', pendingApproval };
@@ -1443,14 +1453,14 @@ export class StreamingChatHandler {
 
           // Process skipped tools first
           for (const { tc, result } of skippedResults) {
-            const skippedTrace = request.includeTrace
-              ? buildToolCallTrace(tc.name, tc.arguments, result, 0)
-              : undefined;
-            if (skippedTrace) turnToolCalls.push(skippedTrace);
+            // Audit substrate is always-on; `includeTrace` only gates the
+            // SSE event surface.
+            const skippedTrace = buildToolCallTrace(tc.name, tc.arguments, result, 0);
+            turnToolCalls.push(skippedTrace);
             results.push({
               capabilitySlug: tc.name,
               result,
-              ...(skippedTrace ? { trace: skippedTrace } : {}),
+              ...(request.includeTrace ? { trace: skippedTrace } : {}),
             });
             await this.persistMessage({
               conversationId: conversation.id,
@@ -1521,14 +1531,19 @@ export class StreamingChatHandler {
             nextCitationMarker = extracted.nextMarker;
             const augmentedResult = extracted.augmentedResult;
 
-            const parallelTrace = request.includeTrace
-              ? buildToolCallTrace(tc.name, tc.arguments, augmentedResult, parallelDispatchEndMs)
-              : undefined;
-            if (parallelTrace) turnToolCalls.push(parallelTrace);
+            // Audit substrate is always-on; `includeTrace` only gates the
+            // SSE event surface.
+            const parallelTrace = buildToolCallTrace(
+              tc.name,
+              tc.arguments,
+              augmentedResult,
+              parallelDispatchEndMs
+            );
+            turnToolCalls.push(parallelTrace);
             results.push({
               capabilitySlug: tc.name,
               result: augmentedResult,
-              ...(parallelTrace ? { trace: parallelTrace } : {}),
+              ...(request.includeTrace ? { trace: parallelTrace } : {}),
             });
 
             await this.persistMessage({
@@ -1583,6 +1598,8 @@ export class StreamingChatHandler {
                 conversationId: conversation.id,
                 role: 'assistant',
                 content: '',
+                modelId: resolvedModel,
+                providerSlug: resolvedBinding.providerSlug,
                 metadata: { pendingApproval: pa },
               });
               yield { type: 'approval_required', pendingApproval: pa };
@@ -1673,6 +1690,11 @@ export class StreamingChatHandler {
             conversationId,
             role: 'assistant',
             content: '[An error occurred and the response could not be completed.]',
+            // Pin provider only — `resolvedModel` lives inside the try
+            // and isn't reliably in scope here. modelId stays null on
+            // error markers; the audit trail reads that as "model in
+            // effect at error time was ambiguous (possibly mid-fallback)".
+            ...(resolvedProviderSlug ? { providerSlug: resolvedProviderSlug } : {}),
             metadata: {
               error: true,
               errorCode: 'internal_error',

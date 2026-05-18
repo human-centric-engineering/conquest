@@ -336,6 +336,7 @@ async function runVectorOnlySearch({
       c."embeddingDimension",
       c."embeddedAt",
       d.name AS "documentName",
+      d."contentHash" AS "documentContentHash",
       (c.embedding <=> $1::vector) AS distance,
       CASE
         WHEN c.keywords IS NOT NULL
@@ -370,6 +371,7 @@ async function runVectorOnlySearch({
     Array<
       AiKnowledgeChunk & {
         documentName: string;
+        documentContentHash: string | null;
         distance: number;
         keyword_boost: number;
       }
@@ -390,6 +392,7 @@ async function runVectorOnlySearch({
       (1 - row.distance) * weights.vectorWeight + Math.abs(row.keyword_boost)
     ),
     documentName: row.documentName,
+    documentContentHash: row.documentContentHash ?? null,
   }));
 }
 
@@ -434,6 +437,7 @@ async function runHybridSearch({
         c."embeddingDimension",
         c."embeddedAt",
         d.name AS "documentName",
+        d."contentHash" AS "documentContentHash",
         (c.embedding <=> $1::vector) AS distance,
         GREATEST(0.0, 1.0 - (c.embedding <=> $1::vector)) AS vector_score,
         COALESCE(
@@ -460,6 +464,7 @@ async function runHybridSearch({
     Array<
       AiKnowledgeChunk & {
         documentName: string;
+        documentContentHash: string | null;
         distance: number;
         vector_score: number;
         keyword_score: number;
@@ -479,6 +484,7 @@ async function runHybridSearch({
     chunk: pickChunk(row),
     similarity: Math.min(1, Math.max(0, row.final_score)),
     documentName: row.documentName,
+    documentContentHash: row.documentContentHash ?? null,
     vectorScore: row.vector_score,
     keywordScore: row.keyword_score,
     finalScore: row.final_score,

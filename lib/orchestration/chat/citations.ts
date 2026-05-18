@@ -27,6 +27,7 @@ interface SearchResultItem {
   chunkId: string;
   documentId: string;
   documentName: string | null;
+  documentContentHash: string | null;
   content: string;
   patternNumber: number | null;
   patternName: string | null;
@@ -114,10 +115,14 @@ export function extractCitations(
       chunkId: raw.chunkId,
       documentId: raw.documentId,
       documentName: raw.documentName ?? null,
-      // Phase 3 stamps these from AiKnowledgeDocument at chunk-resolution
-      // time; until then they ship as null and the audit substrate
-      // treats null as "pre-snapshot".
-      contentHash: null,
+      // Snapshot the document's content hash at search time. Lets an
+      // auditor detect a silent re-ingestion of the same documentId: if
+      // today's `AiKnowledgeDocument.contentHash` differs from this,
+      // the chunk the LLM saw is no longer available verbatim.
+      contentHash: raw.documentContentHash ?? null,
+      // documentVersion lands when item 31 (KB freshness scanner)
+      // increments a monotonic counter on re-ingestion. Until then the
+      // hash alone carries the audit signal.
       documentVersion: null,
       section: raw.section ?? null,
       patternNumber: raw.patternNumber ?? null,

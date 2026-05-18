@@ -140,4 +140,23 @@ describe('extractCitations', () => {
     expect(c.patternNumber).toBe(null);
     expect(c.patternName).toBe(null);
   });
+
+  it('snapshots documentContentHash onto Citation.contentHash', () => {
+    const item = { ...baseItem, documentContentHash: 'sha256-abc123' };
+    const result = searchResult([item]);
+    const output = extractCitations('search_knowledge_base', result, 1);
+    expect(output.citations[0].contentHash).toBe('sha256-abc123');
+    // documentVersion stays null until item 31 (KB freshness scanner)
+    expect(output.citations[0].documentVersion).toBe(null);
+  });
+
+  it('falls back to null contentHash when the source omits it (legacy capability shape)', () => {
+    // Older or third-party capabilities that don't surface a hash must
+    // produce a valid Citation row with null contentHash, not a crash.
+    const item = { ...baseItem }; // no documentContentHash
+    const result = searchResult([item]);
+    const output = extractCitations('search_knowledge_base', result, 1);
+    expect(output.citations[0].contentHash).toBe(null);
+    expect(output.citations[0].documentVersion).toBe(null);
+  });
 });

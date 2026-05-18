@@ -37,6 +37,11 @@ interface ResultItem {
   chunkId: string;
   documentId: string;
   documentName: string | null;
+  /**
+   * Document content hash at search time. Forwarded to `Citation.contentHash`
+   * by the chat handler so audit trails detect silent re-ingestion.
+   */
+  documentContentHash: string | null;
   content: string;
   patternNumber: number | null;
   patternName: string | null;
@@ -146,6 +151,7 @@ export class SearchKnowledgeCapability extends BaseCapability<Args, Data> {
           chunkId: r.chunk.id,
           documentId: r.chunk.documentId,
           documentName: r.documentName ?? null,
+          documentContentHash: r.documentContentHash ?? null,
           content: r.chunk.content,
           patternNumber: r.chunk.patternNumber,
           patternName: r.chunk.patternName,

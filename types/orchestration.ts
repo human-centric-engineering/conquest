@@ -1381,6 +1381,12 @@ export interface KnowledgeSearchResult {
    */
   similarity: number;
   documentName?: string;
+  /**
+   * Hash of the underlying document's content at the time this chunk was
+   * ingested. Forwarded onto `Citation.contentHash` by the chat handler so
+   * an auditor can detect a silent re-ingestion of the same documentId.
+   */
+  documentContentHash?: string | null;
   /** Hybrid mode only: the (1 - cosine_distance) component before weighting. */
   vectorScore?: number;
   /** Hybrid mode only: the ts_rank_cd BM25-flavoured score before weighting. */
