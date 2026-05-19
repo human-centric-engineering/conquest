@@ -2561,36 +2561,24 @@ export const ragRetrieveConfigSchema = stepErrorConfigSchema.extend({
   filters: z.record(z.string(), z.unknown()).optional(),
 });
 
-export const guardConfigSchema = stepErrorConfigSchema
-  .extend({
-    rules: z.string().optional(),
-    mode: z.enum(['llm', 'regex', 'schema']).optional(),
-    failAction: z.enum(['block', 'flag']).optional(),
-    modelOverride: z.string().optional(),
-    temperature: z.number().optional(),
-    // Only meaningful in `mode: 'llm'`. Regex / schema modes ignore it.
-    reasoningEffort: reasoningEffortConfigSchema,
-    // Schema-mode fields. Both optional at the schema layer (config
-    // objects on disk pre-date these fields), but `schemaName` is
-    // required at execute time when `mode === 'schema'` — the executor
-    // surfaces a clear `missing_schema_name` ExecutorError in that case.
-    schemaName: z.string().min(1).max(100).optional(),
-    // Step id whose output is validated. When absent, schema mode falls
-    // back to validating `ctx.inputData` (matches regex-mode default).
-    inputStepId: z.string().min(1).max(100).optional(),
-  })
-  .refine(
-    // Belt and braces: catch the "mode set to schema, schemaName blank"
-    // case at parse time too so an admin filling in the builder sees a
-    // form-level error before saving. The executor's runtime check is
-    // the authoritative one — this just shifts the message earlier.
-    (cfg) =>
-      cfg.mode !== 'schema' || (typeof cfg.schemaName === 'string' && cfg.schemaName.length > 0),
-    {
-      message: 'schema mode requires a non-empty `schemaName`',
-      path: ['schemaName'],
-    }
-  );
+export const guardConfigSchema = stepErrorConfigSchema.extend({
+  rules: z.string().optional(),
+  mode: z.enum(['llm', 'regex', 'schema']).optional(),
+  failAction: z.enum(['block', 'flag']).optional(),
+  modelOverride: z.string().optional(),
+  temperature: z.number().optional(),
+  // Only meaningful in `mode: 'llm'`. Regex / schema modes ignore it.
+  reasoningEffort: reasoningEffortConfigSchema,
+  // Schema-mode fields. Both optional at the schema layer — the
+  // authoritative "schema mode requires schemaName" check lives in the
+  // executor so the operator sees a typed `missing_schema_name`
+  // ExecutorError in the trace rather than a generic ZodError. (A
+  // form-side check at save time is a separate improvement.)
+  schemaName: z.string().min(1).max(100).optional(),
+  // Step id whose output is validated. When absent, schema mode falls
+  // back to validating `ctx.inputData` (matches regex-mode default).
+  inputStepId: z.string().min(1).max(100).optional(),
+});
 
 export const evaluateConfigSchema = stepErrorConfigSchema.extend({
   rubric: z.string().optional(),
