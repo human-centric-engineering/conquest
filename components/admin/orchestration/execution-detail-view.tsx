@@ -1335,6 +1335,7 @@ export function ExecutionDetailView({
                   requestParams={entry.requestParams}
                   costEntries={costEntriesByStep.get(entry.stepId)}
                   provenance={entry.provenance}
+                  agent={entry.agent}
                   retries={entry.retries}
                   highlighted={highlightedStepId === entry.stepId}
                   forkNumber={parallelForkNumberByStepId.get(entry.stepId)}

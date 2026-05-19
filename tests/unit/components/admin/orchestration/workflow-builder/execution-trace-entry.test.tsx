@@ -855,4 +855,40 @@ describe('ExecutionTraceEntryRow', () => {
       expect(chip.className).toContain('bg-muted');
     });
   });
+
+  // ── Agent chip ──────────────────────────────────────────────────────────
+  // For `agent_call` trace entries the API loader resolves the step's
+  // slug to `{ id, slug, name }` and the row renders a chip next to the
+  // step-type pill that links to the agent's edit page. These tests
+  // pin the chip-only-when-set behaviour and the link target.
+  describe('agent chip', () => {
+    const AGENT = { id: 'agent-cuid-1', slug: 'researcher', name: 'Researcher' };
+
+    it('renders the chip with the agent name when the `agent` prop is set', () => {
+      render(<ExecutionTraceEntryRow {...BASE_PROPS} stepType="agent_call" agent={AGENT} />);
+      const chip = screen.getByTestId('trace-entry-agent-step-1');
+      expect(chip).toHaveTextContent(`Agent · ${AGENT.name}`);
+    });
+
+    it('links to the agent edit page in a new tab', () => {
+      render(<ExecutionTraceEntryRow {...BASE_PROPS} stepType="agent_call" agent={AGENT} />);
+      const chip = screen.getByTestId('trace-entry-agent-step-1');
+      expect(chip.getAttribute('href')).toBe(`/admin/orchestration/agents/${AGENT.id}`);
+      // `target="_blank"` so the operator doesn't lose the execution
+      // context when they click through to the agent edit page.
+      expect(chip.getAttribute('target')).toBe('_blank');
+    });
+
+    it('omits the chip when `agent` is undefined (non-agent_call steps)', () => {
+      render(<ExecutionTraceEntryRow {...BASE_PROPS} stepType="llm_call" />);
+      expect(screen.queryByTestId('trace-entry-agent-step-1')).not.toBeInTheDocument();
+    });
+
+    it('omits the chip on agent_call steps whose slug did not resolve to an active agent', () => {
+      // The API loader leaves `agent` absent when the slug isn't in the
+      // current registry — better than rendering a broken chip.
+      render(<ExecutionTraceEntryRow {...BASE_PROPS} stepType="agent_call" />);
+      expect(screen.queryByTestId('trace-entry-agent-step-1')).not.toBeInTheDocument();
+    });
+  });
 });

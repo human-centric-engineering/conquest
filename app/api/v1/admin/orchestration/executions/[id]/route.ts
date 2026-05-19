@@ -30,6 +30,11 @@ import { getClientIP } from '@/lib/security/ip';
 import { cuidSchema } from '@/lib/validations/common';
 import { executionTraceSchema } from '@/lib/validations/orchestration';
 import { overlayStepDescriptions } from '@/lib/orchestration/trace/overlay-descriptions';
+import {
+  collectAgentSlugsFromSnapshot,
+  overlayAgentInfo,
+  type AgentMeta,
+} from '@/lib/orchestration/trace/overlay-agents';
 
 // `executionTraceSchema` is `z.array(...).catch([])` — parsing always succeeds,
 // returning `[]` for malformed rows. Don't add a "trace corrupted" error path
@@ -85,9 +90,33 @@ export const GET = withAdminAuth<{ id: string }>(async (request, session, { para
   // were a thing — without this overlay their expanded rows would
   // show nothing. Entries that already carry a description keep it
   // (those are audit-honest pinned-in-time values).
-  const trace = overlayStepDescriptions({
+  const snapshotForOverlays = execution.version?.snapshot ?? null;
+  const traceWithDescriptions = overlayStepDescriptions({
     trace: parsedTrace,
-    snapshot: execution.version?.snapshot ?? null,
+    snapshot: snapshotForOverlays,
+  });
+
+  // Agent overlay: read agent_call slugs from the snapshot, batch-fetch
+  // matching agents once, then attach `{ id, slug, name }` to every
+  // `agent_call` trace entry. Resolved by SLUG against the current
+  // AiAgent registry — so a renamed agent still resolves and the chip
+  // shows the up-to-date display name. Trace viewer renders this as a
+  // chip with a link to the agent edit page.
+  const agentSlugs = collectAgentSlugsFromSnapshot(snapshotForOverlays);
+  const agentsBySlug = new Map<string, AgentMeta>();
+  if (agentSlugs.length > 0) {
+    const agents = await prisma.aiAgent.findMany({
+      where: { slug: { in: agentSlugs } },
+      select: { id: true, slug: true, name: true },
+    });
+    for (const a of agents) {
+      agentsBySlug.set(a.slug, { id: a.id, slug: a.slug, name: a.name });
+    }
+  }
+  const trace = overlayAgentInfo({
+    trace: traceWithDescriptions,
+    snapshot: snapshotForOverlays,
+    agentsBySlug,
   });
 
   // Pull every cost log attributed to this execution. Older rows in

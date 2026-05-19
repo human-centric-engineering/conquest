@@ -106,6 +106,15 @@ export interface ExecutionTraceEntryRowProps {
    */
   provenance?: ExecutionTraceEntry['provenance'];
   /**
+   * View-time enrichment for `agent_call` steps. The API loader resolves
+   * `config.agentSlug` against the AiAgent registry once per execution
+   * load and attaches the `{ id, slug, name }` here. Rendered as an
+   * "Agent · {name}" chip with a link to the agent's edit page on the
+   * collapsed row, next to the step-type pill. Absent for non-agent_call
+   * steps and for slugs that no longer resolve to an active agent.
+   */
+  agent?: ExecutionTraceEntry['agent'];
+  /**
    * Bounded-retry events emitted from this step. Rendered as amber
    * sub-rows so users can see at a glance which step looped, how many
    * attempts ran, and why each one failed.
@@ -181,6 +190,7 @@ export function ExecutionTraceEntryRow({
   requestParams,
   costEntries,
   provenance,
+  agent,
   retries,
   highlighted,
   onRetry,
@@ -244,6 +254,25 @@ export function ExecutionTraceEntryRow({
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-medium">{label}</span>
             <StepTypeChip stepId={stepId} stepType={stepType} />
+            {agent && (
+              // Agent chip — only renders for `agent_call` steps that
+              // resolved to a registered agent. Sits next to the step
+              // type pill so the operator sees which agent ran the
+              // step at a glance and can jump to its edit page. The
+              // anchor opens in a new tab so clicking doesn't lose
+              // the execution context.
+              <a
+                href={`/admin/orchestration/agents/${agent.id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                data-testid={`trace-entry-agent-${stepId}`}
+                title={`Agent slug: ${agent.slug}`}
+                className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-medium text-blue-800 hover:bg-blue-200 dark:bg-blue-950/60 dark:text-blue-200 dark:hover:bg-blue-900/60"
+              >
+                Agent · {agent.name}
+              </a>
+            )}
             {forkNumber !== undefined && (
               <span
                 data-testid={`trace-entry-fork-${stepId}`}

@@ -490,6 +490,20 @@ export interface ExecutionTraceEntry {
    * detail; it is the workflow-step analogue of chat citations.
    */
   provenance?: ProvenanceItem[];
+  /**
+   * View-time enrichment for `agent_call` steps. The API loader resolves
+   * the step's `config.agentSlug` against the current AiAgent registry
+   * (one batched lookup per execution-detail load) and attaches the
+   * resolved id + display name so the trace viewer can render an
+   * "Agent · {name}" chip with a link to `/admin/orchestration/agents/{id}`.
+   * Absent for non-agent_call steps and for agent_call steps whose
+   * slug no longer matches an active agent (renamed / archived).
+   */
+  agent?: {
+    id: string;
+    slug: string;
+    name: string;
+  };
 }
 
 /**
