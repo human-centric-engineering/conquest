@@ -14,16 +14,6 @@ vi.mock('@/lib/logging', () => ({
   logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-// `hydrateFromDb` lazy-imports the prisma client so the registry module
-// stays importable in non-server contexts. The mock has to be in place
-// before the registry's dynamic import resolves it.
-const mockFindMany = vi.fn();
-vi.mock('@/lib/db/client', () => ({
-  prisma: {
-    aiProviderModel: { findMany: mockFindMany },
-  },
-}));
-
 const registry = await import('@/lib/orchestration/llm/model-registry');
 
 const originalFetch = globalThis.fetch;
@@ -845,116 +835,52 @@ describe('refreshFromOpenRouter — catch preserves previously-cached state', ()
   });
 });
 
-describe('hydrateFromDb', () => {
-  beforeEach(() => {
-    mockFindMany.mockReset();
-  });
-
-  // Minimum field set the adapter needs to produce a ModelInfo. Mirrors
-  // the shape of an active AiProviderModel row without dragging in the
-  // whole Prisma type — the test only cares about the bridge behaviour.
-  function makeRow(overrides: Record<string, unknown> = {}) {
-    return {
-      id: 'cuid_test',
-      slug: 'openai-gpt-5',
-      providerSlug: 'openai',
-      modelId: 'gpt-5',
-      name: 'GPT-5',
-      description: '',
-      capabilities: ['chat'],
-      tierRole: 'thinking',
-      deploymentProfiles: ['hosted'],
-      paramProfile: null,
-      reasoningDepth: 'very_high',
-      latency: 'medium',
-      costEfficiency: 'medium',
-      contextLength: 'very_high',
-      toolUse: 'strong',
-      bestRole: '',
-      dimensions: null,
-      schemaCompatible: null,
-      costPerMillionTokens: null,
-      local: false,
-      quality: null,
-      strengths: null,
-      setup: null,
-      isDefault: false,
-      isActive: true,
-      metadata: null,
-      createdBy: 'user_test',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      ...overrides,
-    };
-  }
-
-  it('merges active DB rows into the in-memory registry so getModel resolves them', async () => {
-    // The motivating case: gpt-5 is in the operator's Model Matrix
-    // (aiProviderModel) but not in the hardcoded fallback. Without
-    // hydration, a step's `modelOverride: 'gpt-5'` semantic-validates
-    // to UNKNOWN_MODEL_OVERRIDE.
+describe('registerModels', () => {
+  it('merges externally-sourced models into the registry state', () => {
+    // Used by the server-only `model-registry-db-hydrate.ts` module to
+    // surface operator-curated rows (`AiProviderModel`) without
+    // requiring the registry itself to depend on Prisma.
     expect(registry.getModel('gpt-5')).toBeUndefined();
 
-    mockFindMany.mockResolvedValue([makeRow()]);
-    await registry.hydrateFromDb();
+    registry.registerModels([
+      {
+        id: 'gpt-5',
+        name: 'GPT-5',
+        provider: 'openai',
+        tier: 'frontier',
+        inputCostPerMillion: 0,
+        outputCostPerMillion: 0,
+        maxContext: 1_000_000,
+        supportsTools: true,
+      },
+    ]);
 
-    const model = registry.getModel('gpt-5');
-    expect(model).toBeDefined();
-    expect(model?.provider).toBe('openai');
-    expect(model?.supportsTools).toBe(true); // toolUse: 'strong' → true
+    expect(registry.getModel('gpt-5')?.provider).toBe('openai');
   });
 
-  it('only queries the DB once per TTL window', async () => {
-    mockFindMany.mockResolvedValue([]);
+  it('last-write-wins on key conflict — externally-sourced beats fallback', () => {
+    expect(registry.getModel('gpt-4o-mini')?.tier).toBe('budget');
 
-    await registry.hydrateFromDb();
-    await registry.hydrateFromDb();
-    await registry.hydrateFromDb();
-
-    expect(mockFindMany).toHaveBeenCalledTimes(1);
-  });
-
-  it('soft-fails when the DB query throws — registry retains prior state', async () => {
-    mockFindMany.mockRejectedValue(new Error('connection refused'));
-
-    // Should not throw — the validator surfaces a clearer error than a
-    // runtime crash if a DB-only model is missing.
-    await expect(registry.hydrateFromDb()).resolves.toBeUndefined();
-
-    // Fallback models still resolvable after the failed hydration.
-    expect(registry.getModel('gpt-4o-mini')).toBeDefined();
-    expect(registry.getModel('gpt-5')).toBeUndefined();
-  });
-
-  it('DB row overrides a same-id fallback entry — admin matrix beats hardcoded list', async () => {
-    // The operator may have repriced or re-tiered a model that ships in
-    // the fallback. The matrix is the authoritative truth.
-    mockFindMany.mockResolvedValue([
-      makeRow({
-        modelId: 'gpt-4o-mini',
-        slug: 'openai-gpt-4o-mini',
+    registry.registerModels([
+      {
+        id: 'gpt-4o-mini',
         name: 'GPT-4o Mini (Operator-curated)',
-        tierRole: 'thinking', // upgrade the tier from 'budget'
-      }),
+        provider: 'openai',
+        tier: 'frontier',
+        inputCostPerMillion: 0,
+        outputCostPerMillion: 0,
+        maxContext: 128_000,
+        supportsTools: true,
+      },
     ]);
-    await registry.hydrateFromDb();
 
-    const model = registry.getModel('gpt-4o-mini');
-    expect(model?.name).toBe('GPT-4o Mini (Operator-curated)');
-    expect(model?.tier).toBe('frontier'); // 'thinking' tierRole → 'frontier' tier
+    expect(registry.getModel('gpt-4o-mini')?.tier).toBe('frontier');
+    expect(registry.getModel('gpt-4o-mini')?.name).toBe('GPT-4o Mini (Operator-curated)');
   });
 
-  it('deduplicates concurrent calls — only one DB query for parallel callers', async () => {
-    // Without the `inflightDbHydrate` promise, two concurrent workflow
-    // executions could each fire their own SELECT.
-    mockFindMany.mockResolvedValue([]);
-
-    await Promise.all([
-      registry.hydrateFromDb(),
-      registry.hydrateFromDb(),
-      registry.hydrateFromDb(),
-    ]);
-
-    expect(mockFindMany).toHaveBeenCalledTimes(1);
+  it('no-op when called with an empty array', () => {
+    const before = registry.getAvailableModels().length;
+    registry.registerModels([]);
+    expect(registry.getAvailableModels().length).toBe(before);
   });
 });

@@ -55,13 +55,6 @@ interface RegistryState {
 let state: RegistryState = { models: buildFallbackMap(), fetchedAt: 0, failedAt: 0 };
 let inflightRefresh: Promise<void> | null = null;
 
-// Throttle DB hydration so a tight loop of workflow executions doesn't
-// hammer aiProviderModel — 60 s is short enough that newly-added models
-// surface quickly without doing a SELECT on every step transition.
-const DB_HYDRATE_TTL_MS = 60_000;
-let dbHydratedAt = 0;
-let inflightDbHydrate: Promise<void> | null = null;
-
 /**
  * Fetch the OpenRouter model catalogue and merge it into the registry.
  *
@@ -166,56 +159,24 @@ export async function refreshFromProvider(provider: LlmProvider): Promise<ModelI
 }
 
 /**
- * Merge active `AiProviderModel` rows into the in-memory registry.
+ * Sync merge of externally-sourced models into the registry state.
  *
- * The registry's hardcoded fallback map + OpenRouter feed don't include
- * operator-curated models (e.g. an admin adds `gpt-5` to the Model
- * Matrix before OpenRouter has indexed it). Without this hydration,
- * `getModel('gpt-5')` returns undefined and the semantic validator
- * emits `UNKNOWN_MODEL_OVERRIDE` for any step that references it — even
- * though the DB row is present and the agent_call path (which resolves
- * via `resolveAgentProviderAndModel`) finds it fine.
+ * Used by server-only hydration coordinators (see
+ * `model-registry-db-hydrate.ts`) to pull operator-curated rows from
+ * `AiProviderModel` into the in-memory map without forcing this module
+ * — which is reachable from client components via the validations
+ * barrel — to depend on the Prisma client (and transitively on `pg`,
+ * `dns`, etc., which break the browser bundle).
  *
- * Call at the entry boundary of any code path that might reference a
- * DB-only model — `prepareWorkflowExecution` and the admin Model
- * dropdown are the two we know about. Idempotent + throttled to one
- * SELECT per `DB_HYDRATE_TTL_MS` per process so back-to-back workflow
- * executions don't thrash the DB.
- *
- * Soft fail: a DB hiccup logs at warn but leaves the prior state in
- * place. Callers must NOT depend on this for correctness — a missing
- * model still surfaces as `UNKNOWN_MODEL_OVERRIDE` at validation time,
- * which is the right outcome.
+ * Last-write-wins on key conflict: passed-in entries override whatever
+ * the fallback map or OpenRouter feed produced. That matches the admin
+ * Model Matrix being the operator-authoritative source.
  */
-export async function hydrateFromDb(): Promise<void> {
-  if (Date.now() - dbHydratedAt < DB_HYDRATE_TTL_MS) return;
-  if (inflightDbHydrate) return inflightDbHydrate;
-  inflightDbHydrate = (async () => {
-    try {
-      // Lazy-imported to keep this module importable from non-server
-      // contexts (e.g. trace-replay tooling) — the prisma client pulls
-      // in env-var checks that aren't available there.
-      const { prisma } = await import('@/lib/db/client');
-      const { dbModelToModelInfo } = await import('@/lib/orchestration/llm/db-model-adapter');
-      const rows = await prisma.aiProviderModel.findMany({ where: { isActive: true } });
-      const merged = new Map(state.models);
-      for (const row of rows) {
-        const info = dbModelToModelInfo(row);
-        // DB row beats fallback/OpenRouter on key conflict — the admin
-        // matrix is the operator-authoritative truth for what's usable.
-        merged.set(info.id, info);
-      }
-      state = { ...state, models: merged };
-      dbHydratedAt = Date.now();
-    } catch (err) {
-      logger.warn('Model registry: hydrateFromDb failed', {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    } finally {
-      inflightDbHydrate = null;
-    }
-  })();
-  return inflightDbHydrate;
+export function registerModels(infos: ModelInfo[]): void {
+  if (infos.length === 0) return;
+  const merged = new Map(state.models);
+  for (const info of infos) merged.set(info.id, info);
+  state = { ...state, models: merged };
 }
 
 /** Return all models, optionally filtered to a single provider. */
@@ -256,8 +217,6 @@ export function getRegistryFetchedAt(): number {
 export function __resetForTests(): void {
   state = { models: buildFallbackMap(), fetchedAt: 0, failedAt: 0 };
   inflightRefresh = null;
-  dbHydratedAt = 0;
-  inflightDbHydrate = null;
 }
 
 // ---------------------------------------------------------------------------

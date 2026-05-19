@@ -29,12 +29,6 @@ vi.mock('@/lib/db/client', () => ({
     aiWorkflow: {
       findUnique: vi.fn(),
     },
-    // Hydration target — empty result keeps these unit tests free of
-    // model-matrix concerns. The hydration itself is exercised by the
-    // model-registry tests.
-    aiProviderModel: {
-      findMany: vi.fn(() => Promise.resolve([])),
-    },
   },
 }));
 
@@ -43,11 +37,10 @@ vi.mock('@/lib/orchestration/workflows', () => ({
   semanticValidateWorkflow: vi.fn(() => Promise.resolve({ ok: true, errors: [] })),
 }));
 
-// Soft-stub the registry so tests don't drift state across cases.
-vi.mock('@/lib/orchestration/llm', () => ({
-  modelRegistry: {
-    hydrateFromDb: vi.fn(() => Promise.resolve()),
-  },
+// Soft-stub the hydration coordinator so tests don't reach for prisma
+// (which would also drag `server-only` into the spec environment).
+vi.mock('@/lib/orchestration/llm/model-registry-db-hydrate', () => ({
+  hydrateFromDb: vi.fn(() => Promise.resolve()),
 }));
 
 // ─── Imports (after mocks) ────────────────────────────────────────────────────

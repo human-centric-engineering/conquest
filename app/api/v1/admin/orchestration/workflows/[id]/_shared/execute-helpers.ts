@@ -14,7 +14,7 @@ import { NotFoundError, ValidationError } from '@/lib/api/errors';
 import { validateWorkflow, semanticValidateWorkflow } from '@/lib/orchestration/workflows';
 import { workflowDefinitionSchema } from '@/lib/validations/orchestration';
 import { cuidSchema } from '@/lib/validations/common';
-import { modelRegistry } from '@/lib/orchestration/llm';
+import { hydrateFromDb as hydrateModelRegistryFromDb } from '@/lib/orchestration/llm/model-registry-db-hydrate';
 import type { WorkflowDefinition } from '@/types/orchestration';
 
 interface PrepareResult {
@@ -125,7 +125,12 @@ export async function prepareWorkflowExecution(
   // Matrix. The hydration is throttled per process (60 s TTL) so back-to-back
   // executions don't thrash the DB. Soft fail — a missing model still
   // surfaces as UNKNOWN_MODEL_OVERRIDE below, which is the right outcome.
-  await modelRegistry.hydrateFromDb();
+  //
+  // Lives in a separate server-only module rather than on the registry
+  // itself because the registry is reachable from client components via
+  // `lib/validations/orchestration.ts`; reaching for `prisma` from inside
+  // it pulls `pg` into the browser bundle.
+  await hydrateModelRegistryFromDb();
 
   const semantic = await semanticValidateWorkflow(definition);
   if (!semantic.ok) {
