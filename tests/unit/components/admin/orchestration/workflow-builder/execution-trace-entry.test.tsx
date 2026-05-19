@@ -870,13 +870,13 @@ describe('ExecutionTraceEntryRow', () => {
       expect(chip).toHaveTextContent(`Agent · ${AGENT.name}`);
     });
 
-    it('links to the agent edit page in a new tab', () => {
+    it('links to the agent edit page in the same tab', () => {
       render(<ExecutionTraceEntryRow {...BASE_PROPS} stepType="agent_call" agent={AGENT} />);
       const chip = screen.getByTestId('trace-entry-agent-step-1');
       expect(chip.getAttribute('href')).toBe(`/admin/orchestration/agents/${AGENT.id}`);
-      // `target="_blank"` so the operator doesn't lose the execution
-      // context when they click through to the agent edit page.
-      expect(chip.getAttribute('target')).toBe('_blank');
+      // Plain in-tab navigation — no `target="_blank"`. Operators
+      // can use middle-click or cmd-click if they want a new tab.
+      expect(chip.getAttribute('target')).toBeNull();
     });
 
     it('omits the chip when `agent` is undefined (non-agent_call steps)', () => {

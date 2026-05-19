@@ -258,13 +258,11 @@ export function ExecutionTraceEntryRow({
               // Agent chip — only renders for `agent_call` steps that
               // resolved to a registered agent. Sits next to the step
               // type pill so the operator sees which agent ran the
-              // step at a glance and can jump to its edit page. The
-              // anchor opens in a new tab so clicking doesn't lose
-              // the execution context.
+              // step at a glance and can jump to its edit page.
+              // `e.stopPropagation()` keeps the click from also
+              // toggling the row's expand affordance.
               <a
                 href={`/admin/orchestration/agents/${agent.id}`}
-                target="_blank"
-                rel="noopener noreferrer"
                 onClick={(e) => e.stopPropagation()}
                 data-testid={`trace-entry-agent-${stepId}`}
                 title={`Agent slug: ${agent.slug}`}
