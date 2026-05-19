@@ -264,6 +264,23 @@ describe('ExecutionDetailView', () => {
       expect(screen.getByTestId('trace-entry-step-3')).toBeInTheDocument();
     });
 
+    it('numbers each row sequentially from 1 in execution order', () => {
+      // Lets the operator reference rows by number ("step 3 failed").
+      // 1-indexed off the full displayTrace so the number is canonical
+      // — stays the same regardless of any later filtering.
+      const entries: ExecutionTraceEntry[] = [
+        { ...TRACE_ENTRY, stepId: 'step-1', label: 'Step One' },
+        { ...TRACE_ENTRY, stepId: 'step-2', label: 'Step Two' },
+        { ...TRACE_ENTRY, stepId: 'step-3', label: 'Step Three' },
+      ];
+
+      render(<ExecutionDetailView execution={makeExecution()} trace={entries} />);
+
+      expect(screen.getByTestId('trace-entry-step-number-step-1')).toHaveTextContent('#1');
+      expect(screen.getByTestId('trace-entry-step-number-step-2')).toHaveTextContent('#2');
+      expect(screen.getByTestId('trace-entry-step-number-step-3')).toHaveTextContent('#3');
+    });
+
     it('renders the "Step Timeline" section heading', () => {
       render(<ExecutionDetailView execution={makeExecution()} trace={[]} />);
 

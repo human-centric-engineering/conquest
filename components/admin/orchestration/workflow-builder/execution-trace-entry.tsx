@@ -129,6 +129,14 @@ export interface ExecutionTraceEntryRowProps {
    * `status === 'running'`; ignored on persisted/completed rows.
    */
   turnCount?: number;
+  /**
+   * 1-indexed position of this row in the trace as rendered. Shown as a
+   * small `#N` prefix on the label so the operator can reference a
+   * specific step by number ("scroll to step 7", "step 3 failed").
+   * Sequential in render order — during a `parallel` fan-out each
+   * branch gets its own number rather than sharing one.
+   */
+  stepNumber?: number;
   /** When true, render with a highlighted background (used by timeline-strip clicks). */
   highlighted?: boolean;
   /** Fires when the user clicks "Retry" on a failed step. */
@@ -202,6 +210,7 @@ export function ExecutionTraceEntryRow({
   agent,
   retries,
   turnCount,
+  stepNumber,
   highlighted,
   onRetry,
   forkNumber,
@@ -262,6 +271,15 @@ export function ExecutionTraceEntryRow({
         <Icon className={cn('mt-0.5 h-4 w-4 shrink-0', style.colour, animate)} />
         <div className="flex-1">
           <div className="flex flex-wrap items-center gap-2">
+            {typeof stepNumber === 'number' && (
+              <span
+                data-testid={`trace-entry-step-number-${stepId}`}
+                className="text-muted-foreground font-mono text-xs tabular-nums"
+                title={`Step ${stepNumber} in execution order`}
+              >
+                #{stepNumber}
+              </span>
+            )}
             <span className="font-medium">{label}</span>
             <StepTypeChip stepId={stepId} stepType={stepType} />
             {agent && (

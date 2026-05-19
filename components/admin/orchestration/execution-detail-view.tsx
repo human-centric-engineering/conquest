@@ -614,6 +614,18 @@ export function ExecutionDetailView({
     return map;
   }, [liveRunningSteps]);
 
+  // 1-indexed step number per trace entry, computed off the full
+  // `displayTrace` (not `filteredTrace`) so the number reflects
+  // canonical execution position and stays stable when the user filters
+  // rows out. Keyed on entry-object identity rather than stepId so that
+  // retries — which produce multiple entries with the same stepId — each
+  // get their own number rather than colliding on a Map<stepId, number>.
+  const stepNumberByEntry = useMemo(() => {
+    const map = new Map<ExecutionTraceEntry, number>();
+    displayTrace.forEach((entry, idx) => map.set(entry, idx + 1));
+    return map;
+  }, [displayTrace]);
+
   // Interpolation context for the per-row "Show resolved" toggle.
   // Re-derives the LLM input client-side from the trace; vars set by the
   // engine's retry path (e.g. `vars.__retryContext`) aren't persisted in
@@ -1354,6 +1366,7 @@ export function ExecutionDetailView({
                   agent={entry.agent}
                   retries={entry.retries}
                   turnCount={turnCountByStepId.get(entry.stepId)}
+                  stepNumber={stepNumberByEntry.get(entry)}
                   highlighted={highlightedStepId === entry.stepId}
                   forkNumber={parallelForkNumberByStepId.get(entry.stepId)}
                   parallelBranchOfNumber={parallelBranchOfByStepId.get(entry.stepId)}
