@@ -333,6 +333,88 @@ describe('executeGuard', () => {
       expect(vi.mocked(runLlmCall)).not.toHaveBeenCalled();
     });
 
+    // ── inputStepIds (compound mode) ───────────────────────────────────
+    // Compound mode lets one guard validate the combined output of
+    // several upstream parallel branches. Used by the audit workflow
+    // to schema-check `analyse_chat` + `analyse_embedding` +
+    // `discover_new_models` in a single step.
+    it('inputStepIds: builds a compound record and validates against the schema', async () => {
+      registerSchema(
+        'audit-shape',
+        z.object({
+          branch_a: z.object({ a: z.string() }),
+          branch_b: z.object({ b: z.number() }),
+        })
+      );
+      const step = makeGuardStep({
+        mode: 'schema',
+        schemaName: 'audit-shape',
+        inputStepIds: ['branch_a', 'branch_b'],
+        rules: undefined,
+      });
+      const ctx = makeCtx({
+        stepOutputs: {
+          branch_a: { a: 'ok' },
+          branch_b: { b: 42 },
+        },
+      });
+
+      const result = await executeGuard(step, ctx);
+
+      expect(result.output).toMatchObject({ passed: true, verdict: 'pass' });
+    });
+
+    it('inputStepIds: fails with issues when one branch is malformed', async () => {
+      registerSchema(
+        'audit-shape',
+        z.object({
+          branch_a: z.object({ a: z.string() }),
+          branch_b: z.object({ b: z.number() }),
+        })
+      );
+      const step = makeGuardStep({
+        mode: 'schema',
+        schemaName: 'audit-shape',
+        inputStepIds: ['branch_a', 'branch_b'],
+        rules: undefined,
+      });
+      const ctx = makeCtx({
+        stepOutputs: {
+          branch_a: { a: 'ok' },
+          branch_b: { b: 'not-a-number' }, // wrong type
+        },
+      });
+
+      const result = await executeGuard(step, ctx);
+
+      expect(result.output).toMatchObject({ passed: false, verdict: 'fail' });
+      const issues = (result.output as { issues?: Array<{ path: string[] }> }).issues;
+      // Issue path should include the failing branch's stepId so the
+      // retry context can quote precisely which producer to fix.
+      expect(issues?.[0]?.path).toContain('branch_b');
+    });
+
+    it('inputStepIds: throws input_step_not_found when any referenced step has not completed', async () => {
+      registerSchema('shape', z.object({}).passthrough());
+      const step = makeGuardStep({
+        mode: 'schema',
+        schemaName: 'shape',
+        inputStepIds: ['branch_a', 'branch_missing'],
+        rules: undefined,
+      });
+      const ctx = makeCtx({
+        stepOutputs: { branch_a: {} },
+      });
+
+      // Compound mode names every referenced step, so a missing one
+      // is a wiring bug, not a "we'll figure it out at parse time"
+      // situation. Fail fast with the offending stepId.
+      await expect(executeGuard(step, ctx)).rejects.toMatchObject({
+        name: 'ExecutorError',
+        code: 'input_step_not_found',
+      });
+    });
+
     it('flag mode: schema failure still routes to pass edge', async () => {
       registerSchema('strict', z.object({ required: z.string() }));
       const step = makeGuardStep({

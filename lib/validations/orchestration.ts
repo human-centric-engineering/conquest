@@ -2584,24 +2584,39 @@ export const ragRetrieveConfigSchema = stepErrorConfigSchema.extend({
   filters: z.record(z.string(), z.unknown()).optional(),
 });
 
-export const guardConfigSchema = stepErrorConfigSchema.extend({
-  rules: z.string().optional(),
-  mode: z.enum(['llm', 'regex', 'schema']).optional(),
-  failAction: z.enum(['block', 'flag']).optional(),
-  modelOverride: z.string().optional(),
-  temperature: z.number().optional(),
-  // Only meaningful in `mode: 'llm'`. Regex / schema modes ignore it.
-  reasoningEffort: reasoningEffortConfigSchema,
-  // Schema-mode fields. Both optional at the schema layer — the
-  // authoritative "schema mode requires schemaName" check lives in the
-  // executor so the operator sees a typed `missing_schema_name`
-  // ExecutorError in the trace rather than a generic ZodError. (A
-  // form-side check at save time is a separate improvement.)
-  schemaName: z.string().min(1).max(100).optional(),
-  // Step id whose output is validated. When absent, schema mode falls
-  // back to validating `ctx.inputData` (matches regex-mode default).
-  inputStepId: z.string().min(1).max(100).optional(),
-});
+export const guardConfigSchema = stepErrorConfigSchema
+  .extend({
+    rules: z.string().optional(),
+    mode: z.enum(['llm', 'regex', 'schema']).optional(),
+    failAction: z.enum(['block', 'flag']).optional(),
+    modelOverride: z.string().optional(),
+    temperature: z.number().optional(),
+    // Only meaningful in `mode: 'llm'`. Regex / schema modes ignore it.
+    reasoningEffort: reasoningEffortConfigSchema,
+    // Schema-mode fields. Both optional at the schema layer — the
+    // authoritative "schema mode requires schemaName" check lives in the
+    // executor so the operator sees a typed `missing_schema_name`
+    // ExecutorError in the trace rather than a generic ZodError. (A
+    // form-side check at save time is a separate improvement.)
+    schemaName: z.string().min(1).max(100).optional(),
+    // Single-input mode: when set, schema mode validates
+    // `ctx.stepOutputs[inputStepId]`. When both this and
+    // `inputStepIds` are absent, schema mode falls back to
+    // validating `ctx.inputData` (matches regex-mode default).
+    inputStepId: z.string().min(1).max(100).optional(),
+    // Compound-input mode: when set, schema mode validates a record
+    // `{ [stepId]: ctx.stepOutputs[stepId] }` against the named
+    // schema. Useful when one guard needs to validate the combined
+    // output of several upstream parallel branches (e.g. the audit
+    // workflow's three producer steps — `analyse_chat`,
+    // `analyse_embedding`, `discover_new_models`). Mutually
+    // exclusive with `inputStepId`.
+    inputStepIds: z.array(z.string().min(1).max(100)).max(20).optional(),
+  })
+  .refine((cfg) => !(cfg.inputStepId && cfg.inputStepIds), {
+    message: '`inputStepId` and `inputStepIds` are mutually exclusive — pick one.',
+    path: ['inputStepIds'],
+  });
 
 export const evaluateConfigSchema = stepErrorConfigSchema.extend({
   rubric: z.string().optional(),

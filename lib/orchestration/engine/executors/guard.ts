@@ -97,18 +97,33 @@ export async function executeGuard(
         `guard step references schema "${schemaName}" which is not registered. Register it via \`registerSchema\` in a feature module loaded on app start.`
       );
     }
-    // Source resolution. When `inputStepId` is set, validate that
-    // step's output (the common case — schema mode is normally used
-    // to validate an upstream step's structured output). When absent,
-    // fall back to the workflow input — matches the regex-mode
-    // default and is useful for validating the trigger payload at the
-    // top of a workflow.
+    // Source resolution. Three modes, in priority order:
+    //   1. `inputStepIds` (compound) → validate `{ [stepId]: output }`.
+    //      Used when one guard needs to validate the combined output
+    //      of several upstream parallel branches.
+    //   2. `inputStepId` (single)    → validate that step's output.
+    //   3. Neither                   → validate `ctx.inputData`.
+    // The Zod refine on guardConfigSchema rejects (1) + (2) together,
+    // so only one branch fires per step. Each variant surfaces a
+    // typed `input_step_not_found` ExecutorError if a referenced
+    // step has not completed — silent undefineds would mask wiring bugs.
+    const inputStepIds = config.inputStepIds;
     const inputStepId = config.inputStepId;
     let inputValue: unknown;
-    if (typeof inputStepId === 'string' && inputStepId.length > 0) {
-      // Surface a typed error when the named step has not completed
-      // (or doesn't exist) — silently passing `undefined` to the
-      // schema would mask the wiring bug.
+    if (Array.isArray(inputStepIds) && inputStepIds.length > 0) {
+      const compound: Record<string, unknown> = {};
+      for (const sid of inputStepIds) {
+        if (!(sid in ctx.stepOutputs)) {
+          throw new ExecutorError(
+            step.id,
+            'input_step_not_found',
+            `guard step references inputStepIds[*] "${sid}" but no such step has completed before this guard. Check the DAG wiring.`
+          );
+        }
+        compound[sid] = ctx.stepOutputs[sid];
+      }
+      inputValue = compound;
+    } else if (typeof inputStepId === 'string' && inputStepId.length > 0) {
       if (!(inputStepId in ctx.stepOutputs)) {
         throw new ExecutorError(
           step.id,
