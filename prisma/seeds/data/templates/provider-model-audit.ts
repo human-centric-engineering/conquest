@@ -554,6 +554,13 @@ RETRY CONTEXT: a previous attempt failed: {{vars.__retryContext.failureReason}}.
           failAction: 'block',
           maxRetries: 2,
           temperature: 0.1,
+          // Override the default chat model (gpt-4o-mini) with gpt-5. The
+          // smaller model confused the FAIL examples in the prompt with
+          // real producer output and reported example text back as the
+          // offending change — the retry context then asked the producer
+          // to fix a change that didn't exist. gpt-5 is reliable enough
+          // not to regurgitate few-shot example data as real input.
+          modelOverride: 'gpt-5',
         },
         nextSteps: [
           { targetStepId: 'refine_findings', condition: 'pass' },
