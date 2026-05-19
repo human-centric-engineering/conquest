@@ -1676,6 +1676,23 @@ export const executeWorkflowBodySchema = z.object({
     .optional(),
 });
 
+/**
+ * Rerun-execution request body (POST /executions/:id/rerun).
+ *
+ * Both fields optional. When `versionId` is absent the server uses
+ * the workflow's current `publishedVersionId`. When `budgetLimitUsd`
+ * is absent the server reuses the original execution's value
+ * (preserving the "same input parameters" semantics of a rerun).
+ */
+export const rerunExecutionBodySchema = z.object({
+  versionId: cuidSchema.optional(),
+  budgetLimitUsd: z
+    .number()
+    .positive('Budget limit must be positive')
+    .max(1000, 'Budget limit must be at most $1,000')
+    .optional(),
+});
+
 /** Approve execution request body (POST /executions/[id]/approve). */
 export const approveExecutionBodySchema = z.object({
   approvalPayload: z.record(z.string(), z.unknown()).optional(),
