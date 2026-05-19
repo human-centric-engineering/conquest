@@ -150,6 +150,16 @@ export interface ExecuteOptions {
    * `paused_for_approval` run.
    */
   resumeFromExecutionId?: string;
+  /**
+   * When set, the new `AiWorkflowExecution` row records this id as
+   * its `parentExecutionId` — the rerun-lineage link. Only meaningful
+   * on the fresh-run path; resumes don't create a new row so they
+   * ignore this field. Set by the rerun endpoint
+   * (`POST /executions/:id/rerun`) to point at the execution that
+   * was rerun from. Surfaces in the admin detail view as a "Re-run
+   * of execution X" breadcrumb.
+   */
+  parentExecutionId?: string;
 }
 
 export interface ExecuteWorkflowArg {
@@ -1822,6 +1832,10 @@ export class OrchestrationEngine {
         workflowId: workflow.id,
         versionId: workflow.versionId ?? null,
         userId: options.userId,
+        // Conditional spread keeps the field absent on the row when
+        // not set, matching how `versionId: null` is treated for
+        // legacy executions. Only the rerun endpoint passes it today.
+        ...(options.parentExecutionId ? { parentExecutionId: options.parentExecutionId } : {}),
         status: WorkflowStatus.RUNNING,
         inputData: inputData as object,
         executionTrace: [],
