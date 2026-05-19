@@ -210,14 +210,14 @@ describe('BlockConfigPanel', () => {
         'Drafts the user-facing reply using retrieved docs.'
       );
       render(<BlockConfigPanel node={node} {...DEFAULT_PROPS} />);
-      const textarea = screen.getByTestId('step-description-textarea');
+      const textarea = screen.getByTestId<HTMLTextAreaElement>('step-description-textarea');
       expect(textarea.value).toBe('Drafts the user-facing reply using retrieved docs.');
     });
 
     it('renders the textarea empty when the node has no description', () => {
       const node = makeNode('llm_call', { prompt: '' }, 'Pretty Name', 'step-1');
       render(<BlockConfigPanel node={node} {...DEFAULT_PROPS} />);
-      const textarea = screen.getByTestId('step-description-textarea');
+      const textarea = screen.getByTestId<HTMLTextAreaElement>('step-description-textarea');
       expect(textarea.value).toBe('');
     });
 
@@ -247,7 +247,7 @@ describe('BlockConfigPanel', () => {
     it('caps input at 500 chars via maxLength so authors hit the limit visibly', () => {
       const node = makeNode('llm_call', { prompt: '' });
       render(<BlockConfigPanel node={node} {...DEFAULT_PROPS} />);
-      const textarea = screen.getByTestId('step-description-textarea');
+      const textarea = screen.getByTestId<HTMLTextAreaElement>('step-description-textarea');
       // The Zod schema rejects > 500. The native `maxLength` here surfaces
       // that limit at typing time rather than at save time.
       expect(textarea.maxLength).toBe(500);
