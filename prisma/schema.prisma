@@ -41,6 +41,7 @@ model User {
 
   // Agent Orchestration relations
   aiAgents               AiAgent[]               @relation("AiAgentCreator")
+  aiAgentProfiles        AiAgentProfile[]        @relation("AiAgentProfileCreator")
   aiWorkflows            AiWorkflow[]            @relation("AiWorkflowCreator")
   aiWorkflowExecutions   AiWorkflowExecution[]   @relation("AiWorkflowExecutionUser")
   aiWorkflowSchedules    AiWorkflowSchedule[]    @relation("AiWorkflowScheduleCreator")
@@ -184,7 +185,17 @@ model AiAgent {
   metadata                  Json?
   knowledgeAccessMode       String   @default("full") // "full" = unrestricted KB access (default — preserves prior behaviour). "restricted" = effective doc set is (granted docs) ∪ (docs in any granted tag) ∪ (docs with scope = 'system').
   topicBoundaries           String[] @default([]) // forbidden topic keywords/phrases for output guard
-  brandVoiceInstructions    String?  @db.Text // brand voice prompt appended to system instructions
+  // Inheritable system-prompt sections — see lib/orchestration/agents/resolve-effective-prompt.ts
+  // Null/empty agent text => inherit from the linked AiAgentProfile (if any).
+  // When populated, the `<field>Mode` column decides whether the agent text
+  // replaces or is appended after the profile value.
+  persona                   String?  @db.Text // who the agent is (identity/role); inheritable from AiAgentProfile
+  brandVoiceInstructions    String?  @db.Text // tone/style; inheritable from AiAgentProfile
+  guardrails                String?  @db.Text // refusals/don'ts; inheritable from AiAgentProfile
+  personaMode               String   @default("override") // "override" | "append"
+  voiceMode                 String   @default("override") // "override" | "append"
+  guardrailsMode            String   @default("override") // "override" | "append"
+  profileId                 String?  // optional link to AiAgentProfile
   rateLimitRpm              Int? // per-agent rate limit (requests per minute); null = use global default
   inputGuardMode            String? // "log_only" | "warn_and_continue" | "block"; null = use global default
   outputGuardMode           String? // "log_only" | "warn_and_continue" | "block"; null = use global default
@@ -205,6 +216,7 @@ model AiAgent {
 
   // Relations
   creator          User                       @relation("AiAgentCreator", fields: [createdBy], references: [id])
+  profile          AiAgentProfile?            @relation(fields: [profileId], references: [id], onDelete: SetNull)
   capabilities     AiAgentCapability[]
   conversations    AiConversation[]
   userMemories     AiUserMemory[]
@@ -221,7 +233,37 @@ model AiAgent {
   @@index([createdBy])
   @@index([provider])
   @@index([isActive, visibility])
+  @@index([profileId])
   @@map("ai_agent")
+}
+
+// Library of reusable persona/voice/guardrails settings that agents can
+// inherit. Agents pick at most one profile; per-field mode columns on
+// AiAgent (personaMode, voiceMode, guardrailsMode) decide whether the
+// agent's own value (when set) overrides or appends to the profile value.
+// Composition order in the rendered system prompt is:
+//   [Persona] -> systemInstructions -> [Guardrails] -> [Brand Voice].
+// See lib/orchestration/agents/resolve-effective-prompt.ts for the rules.
+model AiAgentProfile {
+  id          String  @id @default(cuid())
+  name        String
+  slug        String  @unique
+  description String? @db.Text
+
+  persona                String? @db.Text
+  brandVoiceInstructions String? @db.Text
+  guardrails             String? @db.Text
+
+  isSystem  Boolean  @default(false)
+  createdBy String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  creator User      @relation("AiAgentProfileCreator", fields: [createdBy], references: [id])
+  agents  AiAgent[]
+
+  @@index([createdBy])
+  @@map("ai_agent_profile")
 }
 
 // Invite token for invite_only agent access
