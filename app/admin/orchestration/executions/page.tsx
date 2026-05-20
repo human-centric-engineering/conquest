@@ -1,19 +1,21 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 
-import { ExecutionsTable } from '@/components/admin/orchestration/executions-table';
+import { ExecutionsListView } from '@/components/admin/orchestration/executions-list-view';
 import { FieldHelp } from '@/components/ui/field-help';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { parsePaginationMeta } from '@/lib/validations/common';
 import { getOrchestrationSettings } from '@/lib/orchestration/settings';
 import { logger } from '@/lib/logging';
+import type { LiveEngineSnapshotView } from '@/components/admin/orchestration/live-engine-dashboard';
 import type { PaginationMeta } from '@/types/api';
 import type { ExecutionListItem } from '@/types/orchestration';
 
 export const metadata: Metadata = {
   title: 'Executions · AI Orchestration',
-  description: 'Browse and inspect past workflow executions.',
+  description:
+    'In-flight engine state plus past workflow execution runs. Counts auto-refresh while this tab is in the foreground.',
 };
 
 const EMPTY_META: PaginationMeta = {
@@ -21,6 +23,14 @@ const EMPTY_META: PaginationMeta = {
   limit: 25,
   total: 0,
   totalPages: 1,
+};
+
+const EMPTY_SNAPSHOT: LiveEngineSnapshotView = {
+  running: { count: 0, p95AgeMs: null, maxAgeMs: null },
+  queued: { count: 0, maxWaitMs: null },
+  orphaned: { count: 0 },
+  providers: [],
+  generatedAt: new Date(0).toISOString(),
 };
 
 interface PageProps {
@@ -49,17 +59,32 @@ async function getExecutions(
   }
 }
 
+async function getInitialSnapshot(): Promise<LiveEngineSnapshotView> {
+  try {
+    const res = await serverFetch(API.ADMIN.ORCHESTRATION.EXECUTIONS_LIVE_SNAPSHOT);
+    if (!res.ok) return EMPTY_SNAPSHOT;
+    const body = await parseApiResponse<LiveEngineSnapshotView>(res);
+    if (!body.success) return EMPTY_SNAPSHOT;
+    return body.data;
+  } catch (err) {
+    logger.error('executions list page: snapshot fetch failed', err);
+    return EMPTY_SNAPSHOT;
+  }
+}
+
 export default async function ExecutionsListPage({ searchParams }: PageProps) {
   const resolvedParams = await searchParams;
   const workflowId =
     typeof resolvedParams.workflowId === 'string' ? resolvedParams.workflowId : undefined;
   const initialStatus =
     typeof resolvedParams.status === 'string' ? resolvedParams.status : undefined;
-  // Threshold lives on the singleton settings row — fetch in parallel
-  // with the executions page so the table can highlight stuck rows
-  // without a separate client round-trip.
-  const [{ executions, meta }, settings] = await Promise.all([
+  // Three parallel reads: executions page, live-engine snapshot, and
+  // the settings singleton (for the stuck-step threshold). The
+  // snapshot and threshold are both required by the dashboard above
+  // the table; the page fans them all so the user sees one paint.
+  const [{ executions, meta }, snapshot, settings] = await Promise.all([
     getExecutions(workflowId, initialStatus),
+    getInitialSnapshot(),
     getOrchestrationSettings(),
   ]);
 
@@ -82,17 +107,19 @@ export default async function ExecutionsListPage({ searchParams }: PageProps) {
             </p>
             <p className="text-foreground mt-2 font-medium">This page</p>
             <p>
-              Browse past runs, filter by workflow or status, and click any row to inspect the
-              step-by-step trace.
+              The cards above the table show in-flight engine state and auto-refresh every 5 seconds
+              while this tab is in the foreground. The list below shows every execution — click any
+              row to inspect the step-by-step trace, or use the row menu to force-fail a stuck run.
             </p>
           </FieldHelp>
         </h1>
         <p className="text-muted-foreground text-sm">
-          Browse and inspect past workflow execution runs.
+          In-flight engine state plus past execution runs.
         </p>
       </header>
 
-      <ExecutionsTable
+      <ExecutionsListView
+        initialSnapshot={snapshot}
         initialExecutions={executions}
         initialMeta={meta}
         initialWorkflowId={workflowId}

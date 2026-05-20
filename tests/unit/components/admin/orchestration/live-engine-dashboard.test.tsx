@@ -15,7 +15,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, act } from '@testing-library/react';
+import { render, screen, act, fireEvent } from '@testing-library/react';
 import React from 'react';
 
 import {
@@ -496,6 +496,69 @@ describe('LiveEngineDashboard', () => {
       };
       render(<LiveEngineDashboard initial={snapshot} pollIntervalMs={0} />);
       expect(screen.getByText(/Oldest wait: 250ms/i)).toBeInTheDocument();
+    });
+  });
+
+  // When the dashboard is embedded on the executions page, the cards
+  // accept an `onCardClick` handler and render as buttons instead of
+  // links. The status filter update happens locally (parent's
+  // `router.replace`) so there's no navigation — the polling timer
+  // keeps running uninterrupted.
+  describe('onCardClick (embedded-on-page mode)', () => {
+    it('renders cards as buttons when onCardClick is provided', () => {
+      const onCardClick = vi.fn();
+      const snapshot: LiveEngineSnapshotView = {
+        running: { count: 2, p95AgeMs: 60000, maxAgeMs: 120000 },
+        queued: { count: 1, maxWaitMs: 5000 },
+        orphaned: { count: 1 },
+        providers: [],
+        generatedAt: new Date('2026-05-20T12:00:00Z').toISOString(),
+      };
+      render(
+        <LiveEngineDashboard initial={snapshot} pollIntervalMs={0} onCardClick={onCardClick} />
+      );
+
+      const runningButton = screen.getByRole('button', { name: /running/i });
+      const queuedButton = screen.getByRole('button', { name: /queued/i });
+      const orphanedButton = screen.getByRole('button', { name: /orphaned/i });
+      expect(runningButton.tagName).toBe('BUTTON');
+      expect(queuedButton.tagName).toBe('BUTTON');
+      expect(orphanedButton.tagName).toBe('BUTTON');
+
+      // fireEvent.click goes straight through React's onClick.
+      // userEvent.click simulates pointer events, which interact with
+      // shadcn's `<Card>` wrapper in a way that swallows the click
+      // under JSDOM — verified by directly fireEvent-ing the same
+      // node and seeing the handler fire. We care that the handler
+      // is wired correctly to the click event, not which event
+      // synthesis library landed us there.
+      fireEvent.click(runningButton);
+      expect(onCardClick).toHaveBeenCalledWith('running');
+
+      fireEvent.click(queuedButton);
+      expect(onCardClick).toHaveBeenCalledWith('pending');
+
+      fireEvent.click(orphanedButton);
+      // Orphaned is a strict subset of running — the card filters
+      // into the running view, then the operator sorts by step age.
+      expect(onCardClick).toHaveBeenCalledWith('running');
+      expect(onCardClick).toHaveBeenCalledTimes(3);
+    });
+
+    it('renders cards as links to filtered URLs when onCardClick is omitted', () => {
+      const snapshot: LiveEngineSnapshotView = {
+        running: { count: 1, p95AgeMs: 1000, maxAgeMs: 1000 },
+        queued: { count: 0, maxWaitMs: null },
+        orphaned: { count: 0 },
+        providers: [],
+        generatedAt: new Date('2026-05-20T12:00:00Z').toISOString(),
+      };
+      render(<LiveEngineDashboard initial={snapshot} pollIntervalMs={0} />);
+
+      // Original Link behaviour — anchors with the filter href.
+      const runningLink = screen.getByRole('link', { name: /running/i });
+      expect(runningLink.tagName).toBe('A');
+      expect(runningLink.getAttribute('href')).toContain('status=running');
     });
   });
 });

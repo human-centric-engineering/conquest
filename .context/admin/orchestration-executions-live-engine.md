@@ -1,16 +1,28 @@
 # Live Engine — admin surface for stuck-execution visibility
 
-URL: `/admin/orchestration/executions/live`
+URL: `/admin/orchestration/executions` (the dashboard cards render
+above the executions list on the same page).
+Legacy URL: `/admin/orchestration/executions/live` — preserved as a
+permanent 308 redirect to `/admin/orchestration/executions` so existing
+sidebar bookmarks, Slack alerts, and partner-shared links keep working.
 Role: any user with `role = 'admin'`
 Polling cadence: 5 seconds while the tab is in the foreground (paused on
 `document.hidden` via the shared `useAutoRefresh` hook).
 
-This page is the operator's first stop when a partner says "my workflow
-has been running for 20 minutes." It is paired with two changes on the
-existing executions list — a sortable **Step age** column with stuck-
-threshold highlighting, and a per-row **Force fail** action — and a
-**Lease inspector** drill-in surfacing the lease event history that PR
-#202 alone could not.
+This is the operator's first stop when a partner says "my workflow has
+been running for 20 minutes." It is paired with two changes on the
+executions list — a sortable **Step age** column with stuck-threshold
+highlighting, and a per-row **Force fail** action — and a **Lease
+inspector** drill-in surfacing the lease event history that PR #202
+alone could not.
+
+**Why on the executions page and not a separate route?** The cards
+summarise the rows below them and link into filter states. Keeping
+them adjacent removes the navigation step the original separate-page
+design required ("notice a stuck row on /live, click into /executions,
+find the row, force-fail"). Cards on the executions page push
+`?status=<X>` via `router.replace` (shallow, no nav) and the table
+listens for the change and refetches. One URL, one mental model.
 
 ## The four cards
 

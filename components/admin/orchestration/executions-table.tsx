@@ -10,7 +10,7 @@
  *   - Row links to /admin/orchestration/executions/:id for trace detail.
  */
 
-import { useCallback, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
@@ -177,6 +177,47 @@ export function ExecutionsTable({
     },
     [fetchExecutions, router, searchParams]
   );
+
+  // React to externally-driven `status` changes — e.g. the live-engine
+  // dashboard cards sitting above the table pushing `?status=running`
+  // via `router.replace`. Without this effect the URL would update but
+  // the table state and fetched rows would not, so clicking the
+  // Running card would silently do nothing.
+  //
+  // Two guards:
+  //  1. `mountedRef` skips the first render. `initialStatus` already
+  //     reflects the URL at SSR time (the page reads
+  //     `resolvedParams.status` and passes it down); re-reading
+  //     `searchParams` on mount and overwriting it would clobber a
+  //     server-rendered filter when `searchParams` is briefly empty
+  //     during hydration.
+  //  2. `urlStatus === statusFilter` short-circuits the case where
+  //     the in-table dropdown initiated the URL change itself
+  //     (`handleStatusChange` sets state AND pushes the URL).
+  const mountedRef = useRef(false);
+  // Depend on the stable string form (`searchParams.toString()`), NOT
+  // on `searchParams` itself. The Next.js mock in tests returns a
+  // fresh `URLSearchParams` instance per render — using the reference
+  // as a dep would fire this effect on every render and overwrite
+  // local state. In production `useSearchParams()` is stable across
+  // re-renders within the same URL, but the string is the
+  // value-equality form we actually care about either way.
+  const searchParamsKey = searchParams.toString();
+  useEffect(() => {
+    if (!mountedRef.current) {
+      mountedRef.current = true;
+      return;
+    }
+    const urlStatus = new URLSearchParams(searchParamsKey).get('status') ?? 'all';
+    if (urlStatus !== statusFilter) {
+      setStatusFilter(urlStatus);
+      void fetchExecutions(1, { status: urlStatus });
+    }
+    // `fetchExecutions` is stable per (limit, statusFilter, workflowId)
+    // — `statusFilter` is intentionally absent from the deps to avoid
+    // a feedback loop on the same render that sets it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParamsKey]);
 
   const handlePage = useCallback(
     (page: number) => {

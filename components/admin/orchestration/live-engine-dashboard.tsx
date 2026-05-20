@@ -57,6 +57,16 @@ export interface LiveEngineDashboardProps {
    * timer without waiting wall-clock seconds.
    */
   pollIntervalMs?: number;
+  /**
+   * Optional click handler for the three drill-in cards (Running,
+   * Queued, Orphaned). When provided, cards render as buttons that
+   * call the handler with the matching `status` value — used on the
+   * executions page where the cards sit above the list and clicking
+   * should update the filter in-place rather than navigate. When
+   * omitted, cards render as `<Link>` to `/executions?status=...`
+   * (used by any caller that embeds the dashboard outside the list).
+   */
+  onCardClick?: (status: 'running' | 'pending') => void;
 }
 
 const DEFAULT_POLL_MS = 5_000;
@@ -65,6 +75,7 @@ export function LiveEngineDashboard({
   initial,
   stuckThresholdMins = 5,
   pollIntervalMs = DEFAULT_POLL_MS,
+  onCardClick,
 }: LiveEngineDashboardProps): ReactElement {
   const [snapshot, setSnapshot] = useState<LiveEngineSnapshotView>(initial);
   const [error, setError] = useState<string | null>(null);
@@ -105,6 +116,7 @@ export function LiveEngineDashboard({
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <DrillInCard
           href={`/admin/orchestration/executions?status=running`}
+          onClick={onCardClick ? () => onCardClick('running') : undefined}
           icon={<Gauge className="h-5 w-5" aria-hidden />}
           title="Running"
           primary={snapshot.running.count.toLocaleString()}
@@ -117,6 +129,7 @@ export function LiveEngineDashboard({
         />
         <DrillInCard
           href={`/admin/orchestration/executions?status=pending`}
+          onClick={onCardClick ? () => onCardClick('pending') : undefined}
           icon={<Clock className="h-5 w-5" aria-hidden />}
           title="Queued"
           primary={snapshot.queued.count.toLocaleString()}
@@ -128,6 +141,7 @@ export function LiveEngineDashboard({
         />
         <DrillInCard
           href={`/admin/orchestration/executions?status=running`}
+          onClick={onCardClick ? () => onCardClick('running') : undefined}
           icon={<AlertTriangle className="h-5 w-5" aria-hidden />}
           title="Orphaned"
           primary={snapshot.orphaned.count.toLocaleString()}
@@ -151,6 +165,14 @@ export function LiveEngineDashboard({
 
 interface DrillInCardProps {
   href: string;
+  /**
+   * When provided, the card is rendered as a `<button>` and the
+   * handler is invoked on click — used when the dashboard is embedded
+   * on the executions page and clicks should update the filter in
+   * place rather than navigate. When omitted, the card renders as a
+   * `<Link href={href}>` and behaves as a route.
+   */
+  onClick?: () => void;
   icon: ReactNode;
   title: string;
   primary: string;
@@ -161,6 +183,7 @@ interface DrillInCardProps {
 
 function DrillInCard({
   href,
+  onClick,
   icon,
   title,
   primary,
@@ -168,31 +191,52 @@ function DrillInCard({
   hint,
   variant = 'default',
 }: DrillInCardProps): ReactElement {
-  return (
-    <Link
-      href={href}
-      className="group focus-visible:ring-ring rounded-lg focus-visible:ring-2 focus-visible:outline-none"
+  const wrapperClassName =
+    'group focus-visible:ring-ring rounded-lg focus-visible:ring-2 focus-visible:outline-none';
+  const cardBody = (
+    <Card
+      className={
+        variant === 'warning'
+          ? 'border-amber-300 transition-shadow hover:shadow-md dark:border-amber-700'
+          : 'transition-shadow hover:shadow-md'
+      }
     >
-      <Card
-        className={
-          variant === 'warning'
-            ? 'border-amber-300 transition-shadow hover:shadow-md dark:border-amber-700'
-            : 'transition-shadow hover:shadow-md'
-        }
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardTitle className="text-muted-foreground flex items-center gap-2 text-sm font-medium">
+          {icon}
+          {title}
+        </CardTitle>
+        <ArrowUpRight className="text-muted-foreground h-4 w-4 opacity-0 transition-opacity group-hover:opacity-100" />
+      </CardHeader>
+      <CardContent>
+        <div className="text-3xl font-semibold tabular-nums">{primary}</div>
+        <p className="text-muted-foreground mt-1 text-xs">{secondary}</p>
+        {hint && <p className="text-muted-foreground mt-1 text-xs italic">{hint}</p>}
+      </CardContent>
+    </Card>
+  );
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        // Stable accessible name = card title only. Without it the
+        // computed name pulls in the secondary copy too — and
+        // "Orphaned" cards say "Running rows whose lease has expired"
+        // in that copy, which would make `getByRole('button', { name:
+        // /running/i })` ambiguous in tests and confusing for screen
+        // readers.
+        aria-label={title}
+        className={`${wrapperClassName} block w-full text-left`}
       >
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle className="text-muted-foreground flex items-center gap-2 text-sm font-medium">
-            {icon}
-            {title}
-          </CardTitle>
-          <ArrowUpRight className="text-muted-foreground h-4 w-4 opacity-0 transition-opacity group-hover:opacity-100" />
-        </CardHeader>
-        <CardContent>
-          <div className="text-3xl font-semibold tabular-nums">{primary}</div>
-          <p className="text-muted-foreground mt-1 text-xs">{secondary}</p>
-          {hint && <p className="text-muted-foreground mt-1 text-xs italic">{hint}</p>}
-        </CardContent>
-      </Card>
+        {cardBody}
+      </button>
+    );
+  }
+  return (
+    <Link href={href} aria-label={title} className={wrapperClassName}>
+      {cardBody}
     </Link>
   );
 }

@@ -1,0 +1,86 @@
+'use client';
+
+/**
+ * ExecutionsListView — the executions page's client shell.
+ *
+ * Composes two things that used to live on separate routes:
+ *  - `<LiveEngineDashboard>` — auto-refreshing 4-card summary of the
+ *    engine's current state, formerly at `/executions/live`.
+ *  - `<ExecutionsTable>` — the per-row list (force-fail, lease
+ *    inspector, stuck-step column).
+ *
+ * The cards' "drill into status=X" links become local filter updates
+ * via `router.replace` (shallow, no scroll). The table listens for
+ * `searchParams.get('status')` changes and refetches — wired up in
+ * `ExecutionsTable`'s `useEffect` on `searchParams`. The result: one
+ * URL, one paint, both jobs first-class.
+ */
+
+import { useCallback, useRef, type ReactElement } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+
+import {
+  LiveEngineDashboard,
+  type LiveEngineSnapshotView,
+} from '@/components/admin/orchestration/live-engine-dashboard';
+import { ExecutionsTable } from '@/components/admin/orchestration/executions-table';
+import type { PaginationMeta } from '@/types/api';
+import type { ExecutionListItem } from '@/types/orchestration';
+
+export interface ExecutionsListViewProps {
+  initialSnapshot: LiveEngineSnapshotView;
+  initialExecutions: ExecutionListItem[];
+  initialMeta: PaginationMeta;
+  initialWorkflowId?: string;
+  initialStatus?: string;
+  stuckThresholdMins: number;
+}
+
+export function ExecutionsListView({
+  initialSnapshot,
+  initialExecutions,
+  initialMeta,
+  initialWorkflowId,
+  initialStatus,
+  stuckThresholdMins,
+}: ExecutionsListViewProps): ReactElement {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const tableSectionRef = useRef<HTMLDivElement>(null);
+
+  const handleCardClick = useCallback(
+    (status: 'running' | 'pending') => {
+      // Update the URL filter in place (shallow). The table listens
+      // to `searchParams` and refetches; we do NOT navigate, so
+      // there's no page reload and the dashboard's poll timer keeps
+      // ticking uninterrupted.
+      const params = new URLSearchParams(searchParams.toString());
+      params.set('status', status);
+      router.replace(`?${params.toString()}`, { scroll: false });
+      // The cards live above the table; scroll the table into view
+      // so the operator sees the filtered rows immediately rather
+      // than having to scroll past the cards.
+      tableSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    },
+    [router, searchParams]
+  );
+
+  return (
+    <div className="space-y-6">
+      <LiveEngineDashboard
+        initial={initialSnapshot}
+        stuckThresholdMins={stuckThresholdMins}
+        onCardClick={handleCardClick}
+      />
+      <div ref={tableSectionRef}>
+        <ExecutionsTable
+          initialExecutions={initialExecutions}
+          initialMeta={initialMeta}
+          initialWorkflowId={initialWorkflowId}
+          initialStatus={initialStatus}
+          stuckThresholdMins={stuckThresholdMins}
+        />
+      </div>
+    </div>
+  );
+}
