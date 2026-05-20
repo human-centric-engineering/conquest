@@ -343,7 +343,7 @@ export function ExecutionsTable({
               </TableHead>
               <TableHead>
                 <Tip
-                  label={`Time the running step has been in flight. Rows past ${stuckThresholdMins}m are highlighted amber but NOT auto-failed — use the row menu to force-fail if needed.`}
+                  label={`Time the running step has been in flight. Rows past ${stuckThresholdMins}m are highlighted amber but NOT auto-failed — use the row menu to force-fail if needed. Threshold is set in Settings → Limits.`}
                 >
                   <span>Step age</span>
                 </Tip>

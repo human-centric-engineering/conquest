@@ -573,10 +573,58 @@ export function SettingsForm({ initialSettings }: SettingsFormProps) {
           <div className="space-y-1.5">
             <Label htmlFor="stuckExecutionThresholdMins" className="flex items-center gap-1">
               Stuck execution threshold (minutes)
-              <FieldHelp title="Stuck execution threshold">
-                Rows on the executions list are flagged when the current step has been running
-                longer than this many minutes. The live engine dashboard uses the same number.
-                Default 5. Minimum 1, maximum 1440.
+              <FieldHelp
+                title="Stuck execution threshold"
+                contentClassName="w-96 max-h-[26rem] overflow-y-auto"
+              >
+                <p>
+                  <strong>
+                    This is a UI visibility flag only — it does not affect processing.
+                  </strong>{' '}
+                  Changing it does not cancel, retry, throttle, or time out a single LLM call,
+                  embedding request, external HTTP step, or anything else the engine is doing. No
+                  hooks fire, no notifications are sent.
+                </p>
+                <p className="mt-2">The only effects of this number are:</p>
+                <ul className="ml-4 list-disc space-y-1">
+                  <li>
+                    Rows on the executions list whose current step has been running longer than this
+                    get an amber background and a ⚠ in the Step age column.
+                  </li>
+                  <li>
+                    The live engine dashboard&apos;s Running card displays this number as its hint.
+                  </li>
+                </ul>
+                <p className="mt-2">
+                  Force-fail is a separate, manual action on the row menu — it works on any running
+                  row regardless of this threshold.
+                </p>
+                <p className="text-foreground mt-3 font-medium">Picking a value</p>
+                <p>
+                  This is <strong>one global number</strong> applied to every workflow — chat, RAG,
+                  multi-step chains, the lot. The trade-off:
+                </p>
+                <ul className="ml-4 list-disc space-y-1">
+                  <li>
+                    <strong>Lower</strong> → you spot hangs faster, but long-but-healthy workflows
+                    (RAG retrieval, large embeddings, slow vendor APIs) get flagged amber even
+                    though nothing is wrong.
+                  </li>
+                  <li>
+                    <strong>Higher</strong> → no false flags on your slow workflows, but a
+                    genuinely-hung chat run sits unnoticed for longer.
+                  </li>
+                </ul>
+                <p className="mt-2">
+                  Rule of thumb: set it just above the step time of your{' '}
+                  <em>slowest legitimate workflow</em>. If your longest RAG step normally takes 6
+                  minutes, set this to 8 — chat hangs still get flagged early, RAG runs do not get
+                  false-flagged.
+                </p>
+                <p className="mt-2">
+                  Default <strong>5</strong> suits apps where chat is the slowest workflow. Minimum
+                  1, maximum 1440 (24 hours).
+                </p>
               </FieldHelp>
             </Label>
             <Input

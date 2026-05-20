@@ -114,6 +114,83 @@ export function LiveEngineDashboard({
         </div>
       )}
 
+      <div className="flex items-center gap-1.5">
+        <h2 className="text-sm font-semibold">Live engine</h2>
+        <FieldHelp
+          title="What does 'stuck' mean?"
+          contentClassName="w-[26rem] max-h-[28rem] overflow-y-auto"
+          ariaLabel="What does stuck mean"
+        >
+          <p>
+            A running execution whose current step has been in flight longer than the{' '}
+            <strong>stuck threshold</strong> (currently {stuckThresholdMins} minute
+            {stuckThresholdMins === 1 ? '' : 's'}, set in{' '}
+            <Link
+              href="/admin/orchestration/settings#stuckExecutionThresholdMins"
+              className="text-foreground underline"
+            >
+              Settings → Limits
+            </Link>
+            ). Stuck rows get an amber background and a ⚠ in the <em>Step age</em> column of the
+            list below.
+          </p>
+          <p className="mt-2">
+            <strong>The threshold is a visibility flag, not a processing rule.</strong> The engine
+            does not auto-fail, cancel, retry, or time out a row that crosses it. LLM calls keep
+            streaming, external HTTP steps keep waiting, approval steps keep waiting on humans.
+            Force-fail is a separate manual action on the row menu.
+          </p>
+
+          <p className="text-foreground mt-3 font-medium">How executions get stuck</p>
+          <ul className="ml-4 list-disc space-y-1">
+            <li>
+              A provider call hangs — e.g. an OpenAI request that exceeded its HTTP timeout but the
+              connection is still open.
+            </li>
+            <li>An external HTTP step is waiting on a slow vendor API.</li>
+            <li>
+              A <code>paused_for_approval</code> step is waiting on a human in the Approvals queue.
+            </li>
+            <li>
+              The worker driving the run crashed mid-step (deploy, OOM, process exit). These also
+              show as <strong>Orphaned</strong>; the engine sweeps and re-claims them every ~60s.
+            </li>
+            <li>
+              The workflow genuinely takes that long — long RAG retrievals, large embeddings,
+              multi-step LLM chains. If this is normal for your workflows, raise the threshold in{' '}
+              <Link
+                href="/admin/orchestration/settings#stuckExecutionThresholdMins"
+                className="text-foreground underline"
+              >
+                Settings → Limits
+              </Link>
+              .
+            </li>
+          </ul>
+
+          <p className="text-foreground mt-3 font-medium">How to get an execution unstuck</p>
+          <ol className="ml-4 list-decimal space-y-1">
+            <li>
+              Click the row → <strong>View trace</strong> to see which step is hanging and why.
+            </li>
+            <li>
+              If a human approval is pending → action it on the <strong>Approvals</strong> page.
+            </li>
+            <li>
+              If the row is <strong>Orphaned</strong> → wait ~60s for the sweep to re-claim it, or
+              force-fail.
+            </li>
+            <li>
+              If it is genuinely hung → row menu → <strong>Force fail</strong>. This sets{' '}
+              <code>status=failed</code> immediately, emits the <code>workflow.failed</code> and{' '}
+              <code>execution.force_failed</code> hooks, and records the action with your reason in
+              the admin audit log. It does <strong>not</strong> roll back side-effects that already
+              ran (external API calls made, notifications sent).
+            </li>
+          </ol>
+        </FieldHelp>
+      </div>
+
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <DrillInCard
           href={`/admin/orchestration/executions?status=running`}
@@ -128,12 +205,30 @@ export function LiveEngineDashboard({
           }
           hint={`Stuck threshold: ${stuckThresholdMins}m`}
           info={
-            <p>
-              Executions actively being driven by the engine right now. The age numbers (p95 / max)
-              are time spent in the current step — for a parallel fan-out, the oldest in-flight
-              branch wins. Rows past the configured stuck threshold are highlighted amber in the
-              list below.
-            </p>
+            <>
+              <p>
+                Executions the engine is driving right now. The age numbers (p95 / max) measure time
+                spent in the <em>current</em> step, not total run time. For a parallel fan-out, the
+                oldest in-flight branch wins so the number reflects &quot;how long has this been
+                waiting&quot;, not &quot;how recently did something happen&quot;.
+              </p>
+              <p className="mt-2">
+                Rows past the stuck threshold ({stuckThresholdMins}m, set in{' '}
+                <Link
+                  href="/admin/orchestration/settings#stuckExecutionThresholdMins"
+                  className="text-foreground underline"
+                >
+                  Settings → Limits
+                </Link>
+                ) are highlighted amber in the list below. They are flagged for your attention, not
+                auto-failed — use the row menu to <strong>View trace</strong> or{' '}
+                <strong>Force fail</strong>.
+              </p>
+              <p className="mt-2">
+                Example: p95 = 12s, max = 47s on a chat workflow → healthy. p95 = 4m, max = 18m on
+                the same workflow → something is hanging; check the longest row.
+              </p>
+            </>
           }
         />
         <DrillInCard
@@ -148,12 +243,23 @@ export function LiveEngineDashboard({
               : `Oldest wait: ${formatMs(snapshot.queued.maxWaitMs)}`
           }
           info={
-            <p>
-              Executions waiting for the engine to pick them up. Steady-state should be 0 — a
-              sustained non-zero count means the engine isn&apos;t keeping up with the trigger rate.{' '}
-              <em>Oldest wait</em> shows how long the longest-waiting row has been sitting in the
-              queue.
-            </p>
+            <>
+              <p>
+                Executions triggered but not yet picked up by the engine.{' '}
+                <strong>Steady state should be 0</strong> — workflows are normally claimed within a
+                tick of being created.
+              </p>
+              <p className="mt-2">A sustained non-zero count usually means one of:</p>
+              <ul className="ml-4 list-disc space-y-1">
+                <li>The engine worker is not running (check the process).</li>
+                <li>A burst is queuing behind currently-running work.</li>
+                <li>Engine concurrency is set too low for current volume.</li>
+              </ul>
+              <p className="mt-2">
+                <em>Oldest wait</em> shows how long the longest-waiting row has been queued. A few
+                hundred ms is normal; minutes is not.
+              </p>
+            </>
           }
         />
         <DrillInCard
@@ -169,12 +275,23 @@ export function LiveEngineDashboard({
           }
           variant={snapshot.orphaned.count > 0 ? 'warning' : 'default'}
           info={
-            <p>
-              Running rows whose lease has expired — the host that was driving them has died or
-              stopped responding. The orphan sweep re-claims them on the next maintenance tick (~60
-              s). A persistent non-zero count here means the sweep isn&apos;t running or runs are
-              crashing faster than recovery can keep up.
-            </p>
+            <>
+              <p>
+                Running rows whose lease has expired — the worker that was driving them died or
+                stopped responding. Common causes: deploy rollover, OOM kill, process crash, network
+                partition.
+              </p>
+              <p className="mt-2">
+                The maintenance sweep re-claims these every ~60s, so a brief blip during a deploy is
+                expected and self-heals. A <strong>persistent</strong> non-zero count means either
+                the sweep is not running, or runs are crashing faster than recovery can keep up —
+                check worker logs.
+              </p>
+              <p className="mt-2">
+                To inspect one: open the row in the list below, then row menu →{' '}
+                <strong>View lease</strong> to see the lease event history (claim, renew, expire).
+              </p>
+            </>
           }
         />
         <ProviderCard providers={snapshot.providers} />
@@ -335,10 +452,20 @@ function ProviderCard({
       <div className="absolute top-2 right-2 z-10">
         <FieldHelp title="Provider in-flight" contentClassName="w-80">
           <p>
-            Live LLM / embedding / transcription calls per provider, counted in process memory.
-            Multi-process deployments show only the worker your admin tab hit — there is no per-user
-            attribution at the proxy boundary. Sustained counts past ~10 per provider warn of
-            saturation that may trip the circuit breaker.
+            Live LLM, embedding, and transcription calls per provider, counted in this worker&apos;s
+            process memory. Examples: <code>openai</code>, <code>anthropic</code>,{' '}
+            <code>google-vertex</code>.
+          </p>
+          <p className="mt-2">
+            In a multi-process deployment this only shows the worker your admin tab connected to —
+            there is no per-user attribution at the proxy boundary, so the count is &quot;how many
+            calls is this worker handling right now&quot;.
+          </p>
+          <p className="mt-2">
+            A sustained count above ~10 on one provider warns of saturation that may trip the
+            provider&apos;s rate limit or the circuit breaker. If you see this, check the
+            provider&apos;s rate limits in their dashboard and consider lowering concurrency on the
+            workflows driving it.
           </p>
         </FieldHelp>
       </div>
