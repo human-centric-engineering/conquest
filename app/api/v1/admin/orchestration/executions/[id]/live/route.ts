@@ -10,10 +10,14 @@
  *                              currentStep, errorMessage, tokens, cost, dates).
  *   - `trace`                — persisted step trace (steps that have terminated).
  *   - `costEntries`          — per-LLM-call cost rows attributed to this run.
- *   - `currentRunningSteps`  — array of `{ stepId, label, stepType, startedAt }`
- *                              for every step currently in flight. During a
- *                              `parallel` step's fan-out this carries one
- *                              entry per branch; empty array on terminal rows.
+ *   - `currentRunningSteps`  — array of `{ stepId, label, stepType, startedAt,
+ *                              completedAt }` for every step currently in
+ *                              flight. During a `parallel` step's fan-out this
+ *                              carries one entry per branch; empty array on
+ *                              terminal rows. `completedAt` is set on a branch
+ *                              that finished while siblings are still running
+ *                              (Phase 2 of the parallel-bar work) so the
+ *                              timeline can render a greyed wait segment.
  *
  * `currentRunningSteps` is read from `AiWorkflowRunningStep` (side table; one
  * row per in-flight step) so the detail view can render every branch
@@ -123,13 +127,26 @@ export const GET = withAdminAuth<{ id: string }>(async (request, session, { para
         await prisma.aiWorkflowRunningStep.findMany({
           where: { executionId: id },
           orderBy: { startedAt: 'asc' },
-          select: { stepId: true, label: true, stepType: true, startedAt: true, turns: true },
+          select: {
+            stepId: true,
+            label: true,
+            stepType: true,
+            startedAt: true,
+            completedAt: true,
+            turns: true,
+          },
         })
       ).map((row) => ({
         stepId: row.stepId,
         label: row.label,
         stepType: row.stepType,
         startedAt: row.startedAt.toISOString(),
+        // Set on a parallel branch that finished before its siblings.
+        // The detail view uses it to render a coloured processing
+        // portion plus a greyed wait portion on that branch's bar
+        // until the slowest sibling settles and the row is deleted.
+        // Null on still-running branches and on sequential steps.
+        completedAt: row.completedAt ? row.completedAt.toISOString() : null,
         // Progress indicator for multi-turn steps (`agent_call`,
         // `orchestrator`, `reflect`). Each `recordTurn` call adds an
         // entry, so on a long-running agent_call this ticks up as the

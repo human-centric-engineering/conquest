@@ -126,6 +126,7 @@ describe('ExecutionProgressInline', () => {
                 stepId: 'step-1',
                 label: 'Searching the web',
                 stepType: 'external_call',
+                completedAt: null,
                 startedAt: '2026-05-15T10:00:00.000Z',
                 turnCount: 0,
               },

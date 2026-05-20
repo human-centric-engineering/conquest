@@ -89,6 +89,10 @@ function makeRunningStepRow(overrides: Record<string, unknown> = {}) {
     label: 'Analyse models',
     stepType: 'llm_call',
     startedAt: new Date('2026-05-01T12:00:05Z'),
+    // Default `completedAt: null` — only set when a parallel branch
+    // finishes ahead of its siblings; sequential rows stay null until
+    // they're deleted.
+    completedAt: null,
     // Default `turns: null` — single-shot steps and freshly-started
     // multi-turn steps both surface as turnCount: 0 in the response.
     turns: null,
@@ -203,6 +207,7 @@ describe('GET /api/v1/admin/orchestration/executions/:id/live', () => {
         label: 'Analyse models',
         stepType: 'llm_call',
         startedAt: '2026-05-01T12:00:05.000Z',
+        completedAt: null,
         turnCount: 0,
       },
     ]);
@@ -302,6 +307,38 @@ describe('GET /api/v1/admin/orchestration/executions/:id/live', () => {
       'analyse_embedding',
       'discover_new_models',
     ]);
+  });
+
+  it('surfaces completedAt per branch when a parallel sibling has finished early', async () => {
+    // Phase 2 of the parallel-bar work: a branch that finishes ahead of
+    // its siblings stays in the running-step table with `completedAt`
+    // stamped, so the timeline can render the "done waiting" segment in
+    // real time. The endpoint must pass that field through verbatim.
+    vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+    vi.mocked(prisma.aiWorkflowExecution.findUnique).mockResolvedValue(makeExecutionRow() as never);
+    vi.mocked(prisma.aiWorkflowRunningStep.findMany).mockResolvedValue([
+      makeRunningStepRow({
+        stepId: 'branch_fast',
+        label: 'Fast branch',
+        startedAt: new Date('2026-05-01T12:00:05Z'),
+        completedAt: new Date('2026-05-01T12:00:07Z'),
+      }),
+      makeRunningStepRow({
+        stepId: 'branch_slow',
+        label: 'Slow branch',
+        startedAt: new Date('2026-05-01T12:00:05Z'),
+        completedAt: null,
+      }),
+    ] as never);
+
+    const response = await GET(makeRequest(), makeParams(EXECUTION_ID));
+    const body = await parseJson<{
+      data: { currentRunningSteps: Array<{ stepId: string; completedAt: string | null }> };
+    }>(response);
+
+    const byId = Object.fromEntries(body.data.currentRunningSteps.map((r) => [r.stepId, r]));
+    expect(byId.branch_fast?.completedAt).toBe('2026-05-01T12:00:07.000Z');
+    expect(byId.branch_slow?.completedAt).toBeNull();
   });
 
   it('attributes cost-log rows by stepId; drops rows without a stepId', async () => {

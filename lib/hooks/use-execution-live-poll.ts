@@ -61,12 +61,21 @@ export interface ExecutionLiveSnapshot {
  * `agent_call` / `orchestrator` / `reflect` as the model fires more
  * iterations. The detail view renders it as a small progress indicator
  * on the running row so long agent_calls don't look frozen.
+ *
+ * `completedAt` is set when a parallel branch finishes ahead of its
+ * siblings. The row stays alive until the batch settles so the live
+ * poll can surface a "done waiting for siblings" state — the detail
+ * view turns the bar into a coloured processing segment plus a greyed
+ * wait segment until the slowest sibling catches up. Null on still-
+ * running branches and on sequential steps (those rows are deleted on
+ * completion, not stamped).
  */
 export interface RunningStep {
   stepId: string;
   label: string;
   stepType: string;
   startedAt: string;
+  completedAt: string | null;
   turnCount: number;
 }
 
