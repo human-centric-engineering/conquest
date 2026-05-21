@@ -37,6 +37,7 @@ vi.mock('next/headers', () => ({
 vi.mock('@/lib/db/client', () => ({
   prisma: {
     aiWorkflow: { findUnique: vi.fn() },
+    aiOrchestrationSettings: { findUnique: vi.fn() },
   },
 }));
 
@@ -96,6 +97,7 @@ const SAMPLE_ESTIMATE = {
   ],
   workflowHasSupervisor: false,
   llmStepCount: 5,
+  perStep: [],
   notes: 'Calibrated from 7 past runs.',
 };
 
@@ -104,6 +106,12 @@ describe('GET /api/v1/admin/orchestration/workflows/:id/cost-estimate', () => {
     vi.clearAllMocks();
     vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
     vi.mocked(estimateWorkflowCost).mockResolvedValue(SAMPLE_ESTIMATE);
+    // resolveEffectiveCap reads the singleton settings row; default to
+    // no org-level cap configured so existing assertions don't need to
+    // care unless they specifically test the cap.
+    vi.mocked(prisma.aiOrchestrationSettings.findUnique).mockResolvedValue({
+      defaultMaxCostPerExecutionUsd: null,
+    } as never);
   });
 
   describe('Authentication & Authorization', () => {
@@ -195,7 +203,7 @@ describe('GET /api/v1/admin/orchestration/workflows/:id/cost-estimate', () => {
       expect(response.status).toBe(200);
       const body = await parseJson<{ success: boolean; data: typeof SAMPLE_ESTIMATE }>(response);
       expect(body.success).toBe(true);
-      expect(body.data).toEqual(SAMPLE_ESTIMATE);
+      expect(body.data).toEqual({ ...SAMPLE_ESTIMATE, effectiveCapUsd: null });
     });
 
     it('passes the parsed itemCount and supervisor flag to the estimator', async () => {
