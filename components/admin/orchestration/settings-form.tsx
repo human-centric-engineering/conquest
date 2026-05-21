@@ -1008,6 +1008,11 @@ export function SettingsForm({ initialSettings }: SettingsFormProps) {
                   />
                   Enable hybrid search (BM25 + vector)
                   <FieldHelp title="Enable hybrid search (BM25 + vector)">
+                    <strong>BM25</strong> stands for &ldquo;Best Match 25&rdquo; — a classic
+                    keyword-ranking algorithm (the &ldquo;BM&rdquo; is short for <em>Best Match</em>
+                    ).
+                    <br />
+                    <br />
                     When on, results are ranked by{' '}
                     <code>vectorWeight × vector_score + bm25Weight × keyword_score</code>, where{' '}
                     <code>keyword_score</code> is PostgreSQL&apos;s <code>ts_rank_cd</code> (a
