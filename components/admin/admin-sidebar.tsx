@@ -39,6 +39,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { API } from '@/lib/api/endpoints';
+import { executionCountsResponseSchema } from '@/lib/validations/orchestration';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 interface NavItem {
@@ -420,11 +421,12 @@ function useExecutionCounts(statuses: readonly string[]): Record<string, number>
           signal,
         });
         if (!res.ok) return;
-        const body = (await res.json()) as {
-          data?: { counts?: Record<string, number> };
-        } | null;
-        const next = body?.data?.counts;
-        if (!cancelled && !signal.aborted && next) setCounts(next);
+        const envelope: unknown = await res.json();
+        const data =
+          envelope && typeof envelope === 'object' ? (envelope as { data?: unknown }).data : null;
+        const parsed = executionCountsResponseSchema.safeParse(data);
+        if (!parsed.success) return;
+        if (!cancelled && !signal.aborted) setCounts(parsed.data.counts);
       } catch {
         // ignored — aborts and transient failures should not blank the badge
       }

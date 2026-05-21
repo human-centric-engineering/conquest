@@ -1776,6 +1776,33 @@ export const executionCountsQuerySchema = z.object({
 });
 
 /**
+ * Response body shape (the `data` field inside the standard envelope) for
+ * `GET /executions/counts`. Used client-side to validate the fetch body
+ * before reading `counts` — a malformed payload should keep the last-known
+ * badge value rather than silently rendering garbage.
+ *
+ * The response only contains the statuses requested in the query string
+ * (not all six), so keys are validated as a *subset* of the enum via
+ * `superRefine` rather than a fully-keyed `z.record(enum, …)` — the latter
+ * would require every enum value to be present.
+ */
+export const executionCountsResponseSchema = z.object({
+  counts: z.record(z.string(), z.number().int().nonnegative()).superRefine((counts, ctx) => {
+    for (const key of Object.keys(counts)) {
+      if (!executionStatusSchema.safeParse(key).success) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [key],
+          message: `Unknown status key: ${key}`,
+        });
+      }
+    }
+  }),
+});
+
+export type ExecutionCountsResponse = z.infer<typeof executionCountsResponseSchema>;
+
+/**
  * Query schema for the admin approval-history endpoint.
  *
  * `format=csv` switches the response to a CSV attachment and bypasses
