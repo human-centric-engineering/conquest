@@ -947,6 +947,14 @@ export function ChatInterface({
                 await ensureMinThinking();
                 setError(getUserFacingError(code));
                 return;
+              } else if (parsed.type === 'budget_exceeded_per_turn') {
+                // Discrete cap event — render the friendly cap message
+                // and exit. The handler already persisted the partial
+                // assistant message with `endedReason: 'budget_exceeded'`
+                // so a reload will show whatever was streamed.
+                await ensureMinThinking();
+                setError(getUserFacingError('budget_exceeded_per_turn'));
+                return;
               } else if (parsed.type === 'done') {
                 setWarning(null);
                 typing.flush();

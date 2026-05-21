@@ -207,6 +207,45 @@ describe('ChatInterface', () => {
     expect(document.body.textContent ?? '').not.toContain(SECRET);
   });
 
+  it('renders the cap message when a budget_exceeded_per_turn frame arrives', async () => {
+    // The streaming handler emits a discrete `budget_exceeded_per_turn`
+    // event (not the generic `error` event) when the per-turn cost cap
+    // is breached. The UI must convert it into the friendly cap copy —
+    // otherwise the stream ends silently or, worse, the user sees the
+    // scary "Something Went Wrong" default.
+    const user = userEvent.setup();
+    const capFrame =
+      `event: budget_exceeded_per_turn\n` +
+      `data: ${JSON.stringify({
+        code: 'budget_exceeded_per_turn',
+        message:
+          "This response stopped early to stay within the agent's per-turn cost limit ($0.0200).",
+        usedUsd: 0.03,
+        limitUsd: 0.02,
+      })}\n\n`;
+    const stream = makeSseStream([startFrame('conv-1', 'msg-1'), capFrame]);
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, body: stream }));
+
+    render(<ChatInterface agentSlug="test-agent" />);
+
+    const input = screen.getByPlaceholderText(/type a message/i);
+    await user.type(input, 'Hi');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(
+      () => {
+        // getUserFacingError('budget_exceeded_per_turn') → title is
+        // exactly "Response Cost Limit Reached".
+        expect(screen.queryAllByText(/Response Cost Limit Reached/i).length).toBeGreaterThan(0);
+      },
+      { timeout: 3000 }
+    );
+
+    // Should NOT fall back to internal_error.
+    expect(screen.queryByText(/something went wrong/i)).not.toBeInTheDocument();
+  });
+
   it('calls onCapabilityResult when capability_result event arrives', async () => {
     const user = userEvent.setup();
     const onCapabilityResult = vi.fn();
