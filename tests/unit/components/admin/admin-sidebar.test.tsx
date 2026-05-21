@@ -184,14 +184,56 @@ describe('AdminSidebar', () => {
     ]);
   });
 
-  it('handles counts fetch failure gracefully', async () => {
+  it('handles network errors gracefully', async () => {
+    // Arrange: simulate a rejected promise (network / CORS / abort)
     mockFetch.mockRejectedValue(new Error('Network error'));
 
+    // Act
     render(<AdminSidebar />);
 
+    // Assert: fetch was attempted, sidebar still renders, no badge appears
     await waitFor(() => {
       expect(mockFetch).toHaveBeenCalled();
     });
+    expect(screen.getByText('AI Orchestration')).toBeInTheDocument();
+  });
+
+  it('does not update badges when server returns a non-2xx response', async () => {
+    // Arrange: simulate a 429 Too Many Requests — the !res.ok guard should
+    // short-circuit before any JSON parsing, so badges must stay hidden.
+    mockFetch.mockResolvedValue(new Response(null, { status: 429 }));
+
+    // Act
+    render(<AdminSidebar />);
+
+    // Assert: fetch was called, but no numeric badge is rendered
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalled();
+    });
+    expect(screen.queryByText(/^\d+$/)).toBeNull();
+    expect(screen.getByText('AI Orchestration')).toBeInTheDocument();
+  });
+
+  it('does not update badges when the response body fails schema validation', async () => {
+    // Arrange: a 200 OK response whose `data.counts` contains an unknown status
+    // key — the superRefine in executionCountsResponseSchema.safeParse rejects
+    // it, so the badge must not render "99" or any garbage value.
+    mockFetch.mockResolvedValue(
+      new Response(JSON.stringify({ success: true, data: { counts: { not_a_real_status: 99 } } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+
+    // Act
+    render(<AdminSidebar />);
+
+    // Assert: fetch was called, the garbage value must never appear, sidebar
+    // keeps rendering normally.
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalled();
+    });
+    expect(screen.queryByText('99')).toBeNull();
     expect(screen.getByText('AI Orchestration')).toBeInTheDocument();
   });
 });
