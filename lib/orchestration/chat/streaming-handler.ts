@@ -406,17 +406,50 @@ export class StreamingChatHandler {
         return;
       }
 
-      // Resolve the effective per-turn cost cap once. The check itself
-      // runs inside the tool loop after every cost-emitting event
-      // (improvement #39 — runaway-loop guard for chat). `undefined`
+      // Resolve the effective per-turn cost cap lazily.
+      //
+      // Improvement #39 — runaway-loop guard for chat. The check itself
+      // runs inside the tool loop after every LLM cost. `undefined`
       // means "no per-turn cap" — the monthly budget above still
-      // applies. The settings singleton is upserted lazily; this read
-      // returns existing org-wide defaults without surprising creates.
-      const turnCapSettings = await getOrchestrationSettings();
-      const maxCostPerTurnUsd = resolveMaxCostPerTurn({
-        agentDefault: agent.maxCostPerTurnUsd,
-        settingsDefault: turnCapSettings.defaultMaxCostPerTurnUsd,
-      });
+      // applies.
+      //
+      // Lazy resolution: most turns have no cap to enforce, and the
+      // resolution requires reading the settings singleton. We defer
+      // that I/O until the first LLM cost is recorded, then cache
+      // the result for the rest of the loop. Agents that explicitly
+      // set their own cap skip the settings lookup entirely.
+      let maxCostPerTurnUsd: number | undefined | null = null; // null = "not yet resolved"
+      const resolvePerTurnCap = async (): Promise<number | undefined> => {
+        if (maxCostPerTurnUsd !== null) return maxCostPerTurnUsd;
+        if (agent.maxCostPerTurnUsd !== null && agent.maxCostPerTurnUsd !== undefined) {
+          maxCostPerTurnUsd = resolveMaxCostPerTurn({
+            agentDefault: agent.maxCostPerTurnUsd,
+            settingsDefault: null,
+          });
+          return maxCostPerTurnUsd;
+        }
+        // Settings lookup is best-effort. If it fails (DB hiccup,
+        // partial migration), treat as "no org cap" rather than
+        // killing the chat — the user's request shouldn't fail
+        // because the OPS table is briefly unavailable.
+        try {
+          const turnCapSettings = await getOrchestrationSettings();
+          maxCostPerTurnUsd = resolveMaxCostPerTurn({
+            agentDefault: null,
+            settingsDefault: turnCapSettings.defaultMaxCostPerTurnUsd,
+          });
+        } catch (err) {
+          log.warn(
+            'Failed to load orchestration settings for per-turn cost cap; proceeding uncapped',
+            {
+              agentId: agent.id,
+              error: err instanceof Error ? err.message : String(err),
+            }
+          );
+          maxCostPerTurnUsd = undefined;
+        }
+        return maxCostPerTurnUsd;
+      };
 
       // Attachment gate — fail fast before persisting a user message or
       // creating a conversation if the request carries attachments that
@@ -1350,15 +1383,16 @@ export class StreamingChatHandler {
         // stop" practically means "no more iterations" — the next
         // tool dispatch + LLM round-trip is skipped. Tools that were
         // already requested in this iteration are NOT dispatched.
-        if (maxCostPerTurnUsd !== undefined && turnCostUsd > maxCostPerTurnUsd) {
-          const userMessage = `This response stopped early to stay within the agent's per-turn cost limit ($${maxCostPerTurnUsd.toFixed(4)}). Try a more specific question or break the request into smaller steps.`;
+        const turnCap = await resolvePerTurnCap();
+        if (turnCap !== undefined && turnCostUsd > turnCap) {
+          const userMessage = `This response stopped early to stay within the agent's per-turn cost limit ($${turnCap.toFixed(4)}). Try a more specific question or break the request into smaller steps.`;
           log.warn('Chat per-turn cap exceeded — aborting tool loop', {
             agentId: agent.id,
             agentSlug: agent.slug,
             conversationId: conversation.id,
             iteration,
             turnCostUsd,
-            maxCostPerTurnUsd,
+            maxCostPerTurnUsd: turnCap,
           });
           // Persist the partial assistant message so a reload renders
           // what was streamed plus the cap-breach marker. assistantText
@@ -1376,7 +1410,7 @@ export class StreamingChatHandler {
               endedReason: 'budget_exceeded',
               budgetExceededDetail: {
                 usedUsd: turnCostUsd,
-                limitUsd: maxCostPerTurnUsd,
+                limitUsd: turnCap,
               },
               ...(turnUsage
                 ? {
@@ -1395,7 +1429,7 @@ export class StreamingChatHandler {
             agentSlug: agent.slug,
             conversationId: conversation.id,
             usedUsd: turnCostUsd,
-            limitUsd: maxCostPerTurnUsd,
+            limitUsd: turnCap,
             iteration,
           });
           yield {
@@ -1403,7 +1437,7 @@ export class StreamingChatHandler {
             code: 'budget_exceeded_per_turn',
             message: userMessage,
             usedUsd: turnCostUsd,
-            limitUsd: maxCostPerTurnUsd,
+            limitUsd: turnCap,
           };
           return;
         }

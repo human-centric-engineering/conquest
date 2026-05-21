@@ -156,6 +156,7 @@ const { scanOutput, scanCitations } = await import('@/lib/orchestration/chat/out
 const { getOrchestrationSettings } = await import('@/lib/orchestration/settings');
 const { summarizeMessages } = await import('@/lib/orchestration/chat/summarizer');
 const { withAgentBudgetLock } = await import('@/lib/orchestration/llm/budget-mutex');
+const { dispatchWebhookEvent } = await import('@/lib/orchestration/webhooks/dispatcher');
 // Ensure the model-registry mock is loaded (module itself is used by source via vi.mock above)
 await import('@/lib/orchestration/llm/model-registry');
 
@@ -2132,6 +2133,123 @@ describe('mid-loop budget re-check', () => {
       code: 'budget_exceeded',
     });
     expect(budgetCallCount).toBe(2);
+  });
+
+  it('yields budget_exceeded_per_turn when agent.maxCostPerTurnUsd is breached mid-loop', async () => {
+    // Improvement #39 runaway-loop guard. After each LLM iteration the
+    // handler increments a per-turn cost accumulator (via
+    // `calculateCost`) and checks against the agent's
+    // `maxCostPerTurnUsd`. On breach: emit the discrete event, persist a
+    // partial assistant message, fire the chat webhook, and return —
+    // without dispatching the requested tool.
+    (checkBudget as ReturnType<typeof vi.fn>).mockResolvedValue({
+      withinBudget: true,
+      spent: 0.1,
+      limit: 100,
+      remaining: 99.9,
+    });
+    // Default mock fixture returns `totalCostUsd: 0.03`. Set the cap to
+    // 0.02 so the first iteration's cost ($0.03) immediately crosses.
+    (prisma.aiAgent.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeAgent({ maxCostPerTurnUsd: 0.02 })
+    );
+
+    const provider = mockProvider([
+      [
+        { type: 'tool_call', toolCall: { id: 'tc1', name: 'search', arguments: {} } },
+        { type: 'done', usage: { inputTokens: 1000, outputTokens: 500 } },
+      ],
+    ]);
+    (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      provider,
+      usedSlug: 'anthropic',
+    });
+    (capabilityDispatcher.dispatch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      success: true,
+      data: 'result',
+    });
+
+    const events = await collect(streamChat(baseRequest));
+    const breach = events.find(
+      (e: unknown) => (e as Record<string, unknown>).type === 'budget_exceeded_per_turn'
+    );
+
+    expect(breach).toMatchObject({
+      type: 'budget_exceeded_per_turn',
+      code: 'budget_exceeded_per_turn',
+      usedUsd: 0.03,
+      limitUsd: 0.02,
+    });
+    expect((breach as { message: string }).message).toMatch(/per-turn cost limit/);
+
+    // Tool MUST NOT be dispatched — the cap fires AFTER the LLM cost
+    // is recorded but BEFORE the iteration's tools are dispatched.
+    expect(capabilityDispatcher.dispatch).not.toHaveBeenCalled();
+
+    // Fires the chat-specific webhook so partners can wire Slack /
+    // PagerDuty separately from the generic `budget_exceeded` event.
+    expect(dispatchWebhookEvent).toHaveBeenCalledWith(
+      'chat_budget_exceeded_per_turn',
+      expect.objectContaining({
+        agentId: 'agent-1',
+        agentSlug: 'helper',
+        usedUsd: 0.03,
+        limitUsd: 0.02,
+      })
+    );
+
+    // Persists a partial assistant message with the cap-breach marker
+    // so a reload renders the "stopped early" state correctly.
+    const persistedAssistant = vi
+      .mocked(prisma.aiMessage.create)
+      .mock.calls.find((call) => (call[0] as { data: { role: string } }).data.role === 'assistant');
+    expect(persistedAssistant).toBeDefined();
+    const persistedMeta = (persistedAssistant?.[0] as { data: { metadata: unknown } }).data
+      .metadata as {
+      endedReason?: string;
+      budgetExceededDetail?: { usedUsd: number; limitUsd: number };
+    };
+    expect(persistedMeta.endedReason).toBe('budget_exceeded');
+    expect(persistedMeta.budgetExceededDetail).toEqual({ usedUsd: 0.03, limitUsd: 0.02 });
+  });
+
+  it('does NOT enforce a per-turn cap when both agent + settings have no value set', async () => {
+    // Default makeAgent leaves `maxCostPerTurnUsd` unset; the global
+    // settings mock returns no `defaultMaxCostPerTurnUsd`. The cap
+    // resolver returns undefined, so the breach event must never
+    // fire and the tool loop proceeds as normal.
+    (checkBudget as ReturnType<typeof vi.fn>).mockResolvedValue({
+      withinBudget: true,
+      spent: 0.1,
+      limit: 100,
+      remaining: 99.9,
+    });
+
+    const provider = mockProvider([
+      [
+        { type: 'tool_call', toolCall: { id: 'tc1', name: 'search', arguments: {} } },
+        { type: 'done', usage: { inputTokens: 1000, outputTokens: 500 } },
+      ],
+      [
+        { type: 'text', content: 'Done.' },
+        { type: 'done', usage: { inputTokens: 50, outputTokens: 20 } },
+      ],
+    ]);
+    (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      provider,
+      usedSlug: 'anthropic',
+    });
+    (capabilityDispatcher.dispatch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      success: true,
+      data: 'result',
+    });
+
+    const events = await collect(streamChat(baseRequest));
+    const breach = events.find(
+      (e: unknown) => (e as Record<string, unknown>).type === 'budget_exceeded_per_turn'
+    );
+    expect(breach).toBeUndefined();
+    expect(capabilityDispatcher.dispatch).toHaveBeenCalledTimes(1);
   });
 
   it('acquires budget lock for mid-loop re-check (not just initial check)', async () => {

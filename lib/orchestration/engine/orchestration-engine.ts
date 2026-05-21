@@ -1131,12 +1131,19 @@ export class OrchestrationEngine {
         return { failed: false, paused: true, terminal: true, nextIds: [] };
       }
       if (err instanceof BudgetExceeded) {
-        yield workflowFailed('Budget exceeded', step.id);
+        // Executor-thrown `BudgetExceeded` carries its own used/limit
+        // pair (e.g., the `reflect` executor projects the next-iteration
+        // cost before committing it). Emit the specific event first so
+        // the webhook subscriber path is identical regardless of which
+        // of the four cap-check sites triggered the breach.
+        const reason = formatBudgetExceededReason(err.usedUsd, err.limitUsd);
+        yield workflowBudgetExceeded(err.usedUsd, err.limitUsd, step.id, lease.executionId);
+        yield workflowFailed(reason, step.id);
         return {
           failed: true,
           paused: false,
           terminal: true,
-          failureReason: 'Budget exceeded',
+          failureReason: reason,
           nextIds: [],
         };
       }
