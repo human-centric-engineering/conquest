@@ -283,6 +283,17 @@ export type ExecutionEvent =
   | { type: 'approval_required'; stepId: string; payload: unknown }
   | { type: 'budget_warning'; usedUsd: number; limitUsd: number }
   | {
+      // Fires before `workflow_failed` when the cause is the
+      // per-execution cap, so webhook subscribers can branch on the
+      // more-specific event (runaway-loop guard from improvement #39)
+      // without writing a string-match on `workflow_failed.error`.
+      // The terminal `workflow_failed` still follows.
+      type: 'workflow_budget_exceeded';
+      usedUsd: number;
+      limitUsd: number;
+      failedStepId: string;
+    }
+  | {
       type: 'workflow_completed';
       output: unknown;
       totalTokensUsed: number;
