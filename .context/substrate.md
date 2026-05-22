@@ -52,7 +52,7 @@ Entry point for the `.context/` documentation system. Load specific domains base
 | **Deploy to production**                            | `deployment/overview.md`                         | `environment/overview.md`                 |
 | **Add error handling**                              | `errors/overview.md`                             | `logging/overview.md`                     |
 | **Add logging**                                     | `logging/overview.md`                            | `logging/request-context.md`              |
-| **Add rate limiting**                               | `security/overview.md`                           | `auth/security.md`                        |
+| **Add rate limiting**                               | `security/rate-limiting.md`                      | `security/overview.md`                    |
 | **Write tests**                                     | `testing/patterns.md`                            | `testing/mocking.md`                      |
 | **Mock dependencies**                               | `testing/mocking.md`                             | `testing/async-testing.md`                |
 | **Add file uploads**                                | `storage/overview.md`                            | `security/overview.md`                    |

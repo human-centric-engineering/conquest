@@ -31,7 +31,7 @@ Instructions for Claude Code when working in this repository.
 
 ### Security
 
-- **Rate limit all mutating endpoints** — use limiters from `lib/security/rate-limit.ts`
+- **Rate limiting is automatic** — section caps are enforced by `proxy.ts` via the policy table at `lib/security/rate-limit-policy.ts`. New `/api/v1/**` routes inherit 100/min keyed on session-user with no handler work. Add per-flow sub-caps inside handlers only for expensive sub-flows (chat-stream, audio, image, upload, contact, etc.). Do not call section limiters (`adminLimiter`, `apiLimiter`, `authLimiter`) directly from route handlers — the middleware already did. See [`.context/security/rate-limiting.md`](./.context/security/rate-limiting.md).
 - **Use auth guards** — `withAuth()`, `withAdminAuth()` from `lib/auth/guards.ts`
 - **Run `/security-review`** before merging feature branches
 
@@ -124,18 +124,20 @@ import { FormError } from './form-error'; // ❌ no exception for siblings
 
 ### Key Utilities
 
-| Need          | Utility                                | Location                         |
-| ------------- | -------------------------------------- | -------------------------------- |
-| API responses | `successResponse()`, `errorResponse()` | `lib/api/responses.ts`           |
-| Auth guards   | `withAuth()`, `withAdminAuth()`        | `lib/auth/guards.ts`             |
-| Rate limiting | `authLimiter`, `apiLimiter`, etc.      | `lib/security/rate-limit.ts`     |
-| Client IP     | `getClientIP()`                        | `lib/security/ip.ts`             |
-| Sanitization  | `escapeHtml()`, `sanitizeUrl()`        | `lib/security/sanitize.ts`       |
-| Server fetch  | `serverFetch()`                        | `lib/api/server-fetch.ts`        |
-| Logging       | `logger.info()`, `logger.error()`      | `lib/logging/index.ts`           |
-| Local storage | `useLocalStorage()`                    | `lib/hooks/use-local-storage.ts` |
-| Wizard state  | `useWizard()`                          | `lib/hooks/use-wizard.ts`        |
-| ETag / 304    | `computeETag()`, `checkConditional()`  | `lib/api/etag.ts`                |
+| Need                  | Utility                                                              | Location                                |
+| --------------------- | -------------------------------------------------------------------- | --------------------------------------- |
+| API responses         | `successResponse()`, `errorResponse()`                               | `lib/api/responses.ts`                  |
+| Auth guards           | `withAuth()`, `withAdminAuth()`                                      | `lib/auth/guards.ts`                    |
+| Rate-limit policy     | `RATE_LIMIT_POLICY`, `findRateLimitRule()`                           | `lib/security/rate-limit-policy.ts`     |
+| Rate-limit dispatcher | `applyRateLimit()` (called from `proxy.ts`)                          | `lib/security/rate-limit-middleware.ts` |
+| Rate-limit primitives | `authLimiter`, `apiLimiter`, `chatLimiter`, etc. (per-flow sub-caps) | `lib/security/rate-limit.ts`            |
+| Client IP             | `getClientIP()`                                                      | `lib/security/ip.ts`                    |
+| Sanitization          | `escapeHtml()`, `sanitizeUrl()`                                      | `lib/security/sanitize.ts`              |
+| Server fetch          | `serverFetch()`                                                      | `lib/api/server-fetch.ts`               |
+| Logging               | `logger.info()`, `logger.error()`                                    | `lib/logging/index.ts`                  |
+| Local storage         | `useLocalStorage()`                                                  | `lib/hooks/use-local-storage.ts`        |
+| Wizard state          | `useWizard()`                                                        | `lib/hooks/use-wizard.ts`               |
+| ETag / 304            | `computeETag()`, `checkConditional()`                                | `lib/api/etag.ts`                       |
 
 ## Skills
 

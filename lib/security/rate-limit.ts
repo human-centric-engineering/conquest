@@ -220,17 +220,12 @@ export const verificationEmailLimiter = createRateLimiter({
 
 /**
  * Rate limiter for core admin endpoints (user management, logs, invitations, etc.)
- * Limit: 30 requests per minute per authenticated admin (keyed on user ID via
- * the `withAdminAuth` wrapper).
+ * Limit: 30 requests per minute. Override with `RATE_LIMIT_ADMIN`.
  *
- * Tighter than general API to limit admin abuse. Override with `RATE_LIMIT_ADMIN`.
- *
- * Prefer wiring via the wrapper:
- * ```ts
- * export const POST = withAdminAuth(handler, { rateLimit: 'admin' });
- * ```
- * Direct use is reserved for edge cases (background jobs, internal callers) that
- * sit outside the route-handler boundary.
+ * Wired into the middleware via `RATE_LIMIT_TIERS['admin']` and the
+ * `/api/v1/admin/` rule in `rate-limit-policy.ts`. Route handlers should
+ * NOT call `.check()` directly — the dispatcher already applied this cap.
+ * See `.context/security/rate-limiting.md` for the layered model.
  */
 export const adminLimiter = createRateLimiter({
   interval: SECURITY_CONSTANTS.RATE_LIMIT.DEFAULT_INTERVAL,
@@ -241,17 +236,15 @@ export const adminLimiter = createRateLimiter({
 /**
  * Rate limiter for admin/orchestration endpoints (agents, capabilities, workflows,
  * knowledge bases, executions, etc.).
- * Limit: 120 requests per minute per authenticated admin (keyed on user ID via
- * the `withAdminAuth` wrapper).
+ * Limit: 120 requests per minute. Override with `RATE_LIMIT_ORCH_ADMIN`.
  *
  * Looser than `adminLimiter` because the orchestration admin UI is chatty —
  * editing a workflow can fire many list/validate/preview calls in quick
- * succession. Override with `RATE_LIMIT_ORCH_ADMIN`.
+ * succession.
  *
- * Wire via the wrapper:
- * ```ts
- * export const GET = withAdminAuth(handler, { rateLimit: 'orchestration' });
- * ```
+ * Wired into the middleware via `RATE_LIMIT_TIERS['orchestration']` and the
+ * `/api/v1/admin/orchestration/` rule in `rate-limit-policy.ts`. Route handlers
+ * should NOT call `.check()` directly — the dispatcher already applied this cap.
  */
 export const orchestrationAdminLimiter = createRateLimiter({
   interval: SECURITY_CONSTANTS.RATE_LIMIT.DEFAULT_INTERVAL,
