@@ -129,6 +129,12 @@ export function withAuth(handler: (...args: any[]) => Response | Promise<Respons
  * - Passes the session to the handler
  * - Catches all errors via handleAPIError
  *
+ * Rate limiting is NOT applied here. The project enforces rate limits in
+ * `proxy.ts` via the central policy table at `lib/security/rate-limit-policy.ts`.
+ * Route handlers should not call limiters directly except for additive
+ * per-flow caps (e.g., `chatLimiter`, `audioLimiter`, `imageLimiter` for
+ * the chat-stream route's expensive sub-flows).
+ *
  * @example
  * ```typescript
  * // Admin-only route (no params)

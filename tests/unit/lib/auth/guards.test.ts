@@ -60,13 +60,17 @@ const createRequest = (url = 'http://localhost:3000/api/test'): NextRequest => {
 };
 
 /**
- * Create mock session matching AuthSession interface
+ * Create mock session matching AuthSession interface.
+ * Pass `id` to use a non-default user ID (e.g. for multi-user bucket tests).
  */
-function createMockSession(role: 'USER' | 'ADMIN' | null = 'USER'): AuthSession {
+function createMockSession(
+  role: 'USER' | 'ADMIN' | null = 'USER',
+  id = 'user_test123'
+): AuthSession {
   return {
     session: {
       id: 'session_test123',
-      userId: 'user_test123',
+      userId: id,
       token: 'mock_token',
       expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       ipAddress: '127.0.0.1',
@@ -75,7 +79,7 @@ function createMockSession(role: 'USER' | 'ADMIN' | null = 'USER'): AuthSession 
       updatedAt: new Date(),
     },
     user: {
-      id: 'user_test123',
+      id,
       name: 'Test User',
       email: 'test@example.com',
       emailVerified: true,

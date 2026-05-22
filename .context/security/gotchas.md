@@ -35,30 +35,45 @@ response.headers.set(
 
 ---
 
-### 2. Rate Limiting Without Proper Key Strategy
+### 2. Calling Section Limiters From Route Handlers
 
-**Problem:** Rate limiting by user ID alone allows unauthenticated brute force — the attacker never authenticates, so the key is `undefined` and the limit never applies.
+**Problem:** section rate limits (admin / orchestration / api / auth) are enforced centrally in `proxy.ts` via the policy table at `lib/security/rate-limit-policy.ts`. A redundant call inside the handler double-counts against the same bucket the middleware just consumed from, silently halving the user's real budget.
 
-**Wrong:**
-
-```typescript
-const key = session?.user?.id;
-if (!key) return { allowed: true }; // No rate limit for anonymous!
-const result = authLimiter.check(key);
-```
-
-**Correct:** key by IP when there's no session (auth endpoints, signup, contact forms). For authenticated endpoints where per-user abuse matters, key by user ID. Use both when an endpoint serves both states.
+**Wrong:** hand-rolling the section cap inside the handler.
 
 ```typescript
-import { authLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
+import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 import { getClientIP } from '@/lib/security/ip';
 
-const key = session?.user?.id ? `user:${session.user.id}` : `ip:${getClientIP(request)}`;
-const result = authLimiter.check(key);
-if (!result.success) return createRateLimitResponse(result);
+export const GET = withAdminAuth(async (request) => {
+  const ip = getClientIP(request);
+  const rl = adminLimiter.check(ip);
+  if (!rl.success) return createRateLimitResponse(rl); // ← redundant — middleware already did this
+  // ... handler body
+});
 ```
 
-**Why:** auth-endpoint abuse is, by definition, unauthenticated. Rate-limiting only authenticated requests on login is the same as not rate-limiting login at all.
+**Correct:** trust the middleware for the section cap; only add per-flow sub-caps for expensive sub-operations (chat streaming, audio transcription, image attachments, contact form submissions, etc.).
+
+```typescript
+export const GET = withAdminAuth(async (request) => {
+  // No section limiter call — middleware applied it via the policy table.
+  // ... handler body
+});
+
+// Per-flow sub-cap example — chat-stream layers chatLimiter (20/min user)
+// on top of the orchestration section tier (120/min user). Different
+// buckets, applied additively. The handler builds the token; key by
+// session user ID for authenticated flows, IP for unauthenticated.
+import { chatLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
+
+const subResult = chatLimiter.check(`user:${session.user.id}`);
+if (!subResult.success) return createRateLimitResponse(subResult);
+```
+
+**Adding a new section cap:** edit `lib/security/rate-limit-policy.ts` and add a rule. The dispatcher picks it up automatically. See [Rate Limiting → Adding a New Tier](./rate-limiting.md#adding-a-new-tier).
+
+**Why:** the wrapper-as-discipline pattern (`{ rateLimit: 'tier' }` on the auth guard) was tried and rejected — every new route author has to remember the annotation, and the policy scatters across 100+ handler files. Centralising in the policy table makes the right thing the default.
 
 ---
 
@@ -73,14 +88,14 @@ if (!result.success) return createRateLimitResponse(result);
 const ip = request.headers.get('x-forwarded-for')?.split(',')[0] ?? 'unknown';
 ```
 
-**Correct:** always go through `getClientIP` from `lib/security/ip.ts`. It picks the rightmost trusted hop, falls back to the connection IP, and validates that the result is a real IP.
+**Correct:** always go through `getClientIP` from `lib/security/ip.ts`. It reads `X-Forwarded-For` (leftmost value), falls back to `X-Real-IP`, then to `127.0.0.1`, validating that the result is a real IP at every step.
 
 ```typescript
 import { getClientIP } from '@/lib/security/ip';
 const ip = getClientIP(request);
 ```
 
-**Why:** the leftmost value in `X-Forwarded-For` is whatever the client sent — the rightmost is what the closest trusted proxy actually saw. `getClientIP` encodes that rule plus IP validation in one place so it cannot drift across the codebase.
+**Why:** the leftmost value in `X-Forwarded-For` is the original client IP **when the deployment guarantees its reverse proxy (nginx, Cloudflare, etc.) strips any client-set header and appends its own value before forwarding.** Sunrise's `getClientIP` makes this trust contract explicit (see the header comment in `lib/security/ip.ts`) and centralises the parse + validate logic so it can't drift. Without that proxy-trust guarantee, the leftmost value IS attacker-controlled and rate limits keyed on it can be bypassed by sending a fresh `X-Forwarded-For` per request — verify your edge proxy's behaviour before shipping to production.
 
 ---
 

@@ -27,6 +27,15 @@ process.env.NEXT_PUBLIC_APP_URL = 'http://localhost:3000';
 process.env.RESEND_API_KEY = '';
 process.env.EMAIL_FROM = 'test@example.com';
 
+// Rate-limit middleware disabled by default in tests. Unit and component
+// tests exercise route handlers directly, so the project-root middleware
+// (`middleware.ts`) doesn't normally run — but `applyRateLimit` is callable
+// from any test and respects this flag, so setting it makes any incidental
+// invocation a no-op. Tests that specifically exercise the rate-limit
+// middleware OR want to verify section-tier behaviour at the route layer
+// must clear this in their own `beforeEach` and reset bucket state per test.
+process.env.RATE_LIMIT_BYPASS = 'true';
+
 import '@testing-library/jest-dom';
 import { expect, vi, afterEach } from 'vitest';
 

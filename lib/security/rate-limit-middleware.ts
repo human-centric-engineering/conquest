@@ -1,0 +1,205 @@
+/**
+ * Rate-Limit Middleware Dispatcher
+ *
+ * Consumed by `proxy.ts` at the project root (Next.js 16 renamed the
+ * `middleware.ts` file convention to `proxy.ts`). Runs on every API request,
+ * looks up the matching tier from {@link RATE_LIMIT_POLICY}, identifies the
+ * caller, applies the section limiter, and returns a 429 response if the cap
+ * is exceeded — otherwise yields control back to the route handler.
+ *
+ * Route handlers must NOT call section limiters themselves. They MAY call
+ * tighter *per-flow* limiters (chatLimiter, audioLimiter, etc.) as additive
+ * checks on expensive sub-flows.
+ *
+ * **Test bypass.** Setting `RATE_LIMIT_BYPASS=true` makes `applyRateLimit`
+ * a no-op. `tests/setup.ts` sets this so the vast majority of unit tests
+ * never have to think about rate-limiting. Tests that explicitly exercise
+ * the middleware (or a section tier) unset the env var in their own
+ * `beforeEach` and reset the limiter state per test.
+ *
+ * @see lib/security/rate-limit-policy.ts — the policy table this consumes
+ * @see lib/security/rate-limit.ts — limiter primitives + the tier registry
+ * @see proxy.ts — project-root Next.js wiring
+ */
+
+import type { NextRequest } from 'next/server';
+import { auth } from '@/lib/auth/config';
+import { logger } from '@/lib/logging';
+import { getClientIP } from '@/lib/security/ip';
+import {
+  RATE_LIMIT_TIERS,
+  createRateLimitResponse,
+  type RateLimiter,
+} from '@/lib/security/rate-limit';
+import {
+  findRateLimitRule,
+  type RateLimitKey,
+  type RateLimitRule,
+} from '@/lib/security/rate-limit-policy';
+
+/**
+ * Apply the rate-limit policy to an incoming request.
+ *
+ * Returns a `Response` (status 429) when the cap is exceeded; the caller
+ * MUST return that response immediately and skip further middleware /
+ * handler execution. Returns `null` when the request is allowed to proceed.
+ *
+ * Order of operations:
+ *   1. Bypass check (`RATE_LIMIT_BYPASS=true` env var, used by the test suite).
+ *   2. Find the first matching policy rule. No match → no rate limit.
+ *   3. Run the rule's `skip` predicate (if any). True → no rate limit.
+ *   4. Build the rate-limit token via the rule's key strategy. Session
+ *      resolution happens only for `'session-user'` rules and falls back
+ *      to IP if there's no session.
+ *   5. Check the section limiter for that token. Allowed → return `null`.
+ *      Exceeded → return the standard 429 response with `Retry-After` and
+ *      `X-RateLimit-*` headers.
+ *
+ * Failure modes:
+ *   - If session resolution throws (better-auth outage, DB down) we DO NOT
+ *     fail-open: we fall back to IP keying so the request still gets a
+ *     bucket. The route handler will surface the underlying error.
+ *   - If the rule's tier isn't in `RATE_LIMIT_TIERS` (unreachable in
+ *     practice — the type system enforces this) we treat it as "no limit"
+ *     and log a warning. Open vs closed default here is open: a missing
+ *     tier should not break production traffic, only telemetry.
+ */
+export async function applyRateLimit(request: NextRequest): Promise<Response | null> {
+  if (isBypassEnabled()) return null;
+
+  const rule = findRateLimitRule(request.nextUrl.pathname);
+  if (!rule) return null;
+  if (rule.skip && rule.skip(request)) return null;
+
+  const limiter: RateLimiter | undefined = RATE_LIMIT_TIERS[rule.tier];
+  if (!limiter) {
+    // Unreachable under normal type-checked code. If it fires, the policy
+    // table references a tier name not in RATE_LIMIT_TIERS — surface it loudly
+    // so operators can fix the config drift instead of silently failing open.
+    logger.warn('Rate-limit policy references an unknown tier; skipping limiter', {
+      tier: rule.tier,
+      pathname: request.nextUrl.pathname,
+    });
+    return null;
+  }
+
+  const token = await buildToken(rule, request);
+  const result = limiter.check(token);
+  if (!result.success) {
+    return createRateLimitResponse(result);
+  }
+  return null;
+}
+
+/**
+ * Whether the test/dev bypass is active. Set `RATE_LIMIT_BYPASS=true` (or `1`)
+ * in the environment to short-circuit `applyRateLimit`. Used by
+ * `tests/setup.ts` so the vast majority of unit tests never have to think
+ * about rate-limiting.
+ *
+ * The check is intentionally strict — only the canonical `'true'` / `'1'`
+ * enable the bypass. Plausible-but-non-canonical strings (`'yes'`, `'on'`,
+ * `'TRUE'`) are treated as off, so a stray uppercase or shell-quoting
+ * accident in a CI config can't accidentally disable rate limiting.
+ *
+ * The first call in production logs an error if the bypass is somehow
+ * enabled (see {@link warnIfBypassActiveInProduction}).
+ */
+function isBypassEnabled(): boolean {
+  const raw = process.env.RATE_LIMIT_BYPASS;
+  const enabled = raw === 'true' || raw === '1';
+  if (enabled) warnIfBypassActiveInProduction();
+  return enabled;
+}
+
+/**
+ * Production safeguard. If `RATE_LIMIT_BYPASS` is on while `NODE_ENV` is
+ * `'production'`, log an error EVERY TIME the dispatcher would have run —
+ * this is a misconfiguration that disables a critical security control, and
+ * the only way an operator finds out is via the log stream. Logging once is
+ * not enough because production deploys often have multiple workers; one
+ * error per worker per request guarantees visibility without flooding (in
+ * the correctly-configured case the warning never fires).
+ *
+ * We do NOT throw or refuse to serve traffic: a hard fail would turn a
+ * config mistake into an outage, which is worse than running with bypass.
+ * The structured log is the alerting hook.
+ */
+function warnIfBypassActiveInProduction(): void {
+  if (process.env.NODE_ENV !== 'production') return;
+  logger.error('RATE_LIMIT_BYPASS=true is set in production — rate limiting is disabled', {
+    nodeEnv: process.env.NODE_ENV,
+    fix: 'Unset RATE_LIMIT_BYPASS in the production environment.',
+  });
+}
+
+/**
+ * Build the rate-limit token (LRU cache key) for a given rule + request.
+ *
+ * Tokens are namespaced by tier and key strategy so different sections
+ * don't share buckets, and so the middleware's section tokens don't
+ * collide with per-flow sub-limiter tokens that route handlers may build
+ * with their own conventions (e.g. `audio:user:...`).
+ *
+ * Format: `mw:${tier}:${key-strategy}:${identifier}`.
+ */
+async function buildToken(rule: RateLimitRule, request: NextRequest): Promise<string> {
+  const id = await resolveIdentifier(rule.key, request);
+  return `mw:${rule.tier}:${rule.key}:${id}`;
+}
+
+/**
+ * Resolve the per-request identifier for the chosen key strategy.
+ *
+ * - `'ip'` returns the client IP.
+ * - `'session-user'` resolves the better-auth session and returns the user
+ *   ID. Falls back to `ip:${IP}` if no session (typical for routes the
+ *   user hasn't authenticated to yet — they still get a per-IP bucket so
+ *   anonymous traffic can't grief authenticated buckets).
+ * - `'api-key'` extracts the API key hash from `Authorization: Bearer <key>`.
+ *   Falls back to IP if missing.
+ * - `'embed-token'` extracts the embed token from the `X-Embed-Token` header
+ *   (and combines with IP, mirroring the existing `embed:user:${token}:${ip}`
+ *   convention used by the embed chat limiter). Falls back to IP if missing.
+ *
+ * IP fallback exists because rate-limiting is best-effort defense in depth —
+ * if we can't identify the caller more precisely, we still want *some* bucket
+ * rather than letting the request through unlimited.
+ */
+async function resolveIdentifier(key: RateLimitKey, request: NextRequest): Promise<string> {
+  const ip = getClientIP(request);
+
+  switch (key) {
+    case 'ip':
+      return ip;
+
+    case 'session-user': {
+      try {
+        const session = await auth.api.getSession({ headers: request.headers });
+        if (session?.user?.id) return `user:${session.user.id}`;
+      } catch {
+        // Session resolution failed (auth provider hiccup, DB down). Fall
+        // back to IP so we still apply some cap instead of failing open.
+      }
+      return `ip:${ip}`;
+    }
+
+    case 'api-key': {
+      const header = request.headers.get('authorization');
+      if (header) {
+        // `Authorization: Bearer <key>` — use the key value as the bucket
+        // identifier. Hashing happens inside the API-key resolution layer;
+        // for rate-limiting we just need a stable per-key string.
+        const match = /^Bearer\s+(.+)$/i.exec(header.trim());
+        if (match?.[1]) return `key:${match[1]}`;
+      }
+      return `ip:${ip}`;
+    }
+
+    case 'embed-token': {
+      const token = request.headers.get('x-embed-token');
+      if (token) return `embed:${token}:${ip}`;
+      return `ip:${ip}`;
+    }
+  }
+}

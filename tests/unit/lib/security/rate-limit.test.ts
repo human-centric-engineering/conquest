@@ -15,6 +15,9 @@ import {
   authLimiter,
   apiLimiter,
   passwordResetLimiter,
+  adminLimiter,
+  orchestrationAdminLimiter,
+  RATE_LIMIT_TIERS,
   getRateLimitHeaders,
   createRateLimitResponse,
 } from '@/lib/security/rate-limit';
@@ -193,41 +196,47 @@ describe('Rate Limiter', () => {
       // Auth limiter: 5 requests per minute
       // Arrange: capture tokens upfront so check and reset use the same token
       const tokens = Array.from({ length: 6 }, (_, i) => `auth-test-${Date.now()}-${i}`);
-      const results = tokens.map((token) => authLimiter.check(token));
+      try {
+        const results = tokens.map((token) => authLimiter.check(token));
 
-      // Assert: First request should show limit of 5
-      expect(results[0].limit).toBe(5);
-
-      // Cleanup: reuse the same captured tokens
-      tokens.forEach((token) => authLimiter.reset(token));
+        // Assert: First request should show limit of 5
+        expect(results[0].limit).toBe(5);
+      } finally {
+        // Cleanup: reuse the same captured tokens
+        tokens.forEach((token) => authLimiter.reset(token));
+      }
     });
 
     it('apiLimiter should have correct configuration', () => {
       // Arrange: capture token so check and reset reference the same key
       const token = `api-test-${Date.now()}`;
 
-      // Act
-      const result = apiLimiter.check(token);
+      try {
+        // Act
+        const result = apiLimiter.check(token);
 
-      // Assert
-      expect(result.limit).toBe(100);
-
-      // Cleanup
-      apiLimiter.reset(token);
+        // Assert
+        expect(result.limit).toBe(100);
+      } finally {
+        // Cleanup
+        apiLimiter.reset(token);
+      }
     });
 
     it('passwordResetLimiter should have stricter limits', () => {
       // Arrange: capture token so check and reset reference the same key
       const token = `pwd-test-${Date.now()}`;
 
-      // Act
-      const result = passwordResetLimiter.check(token);
+      try {
+        // Act
+        const result = passwordResetLimiter.check(token);
 
-      // Assert
-      expect(result.limit).toBe(3);
-
-      // Cleanup
-      passwordResetLimiter.reset(token);
+        // Assert
+        expect(result.limit).toBe(3);
+      } finally {
+        // Cleanup
+        passwordResetLimiter.reset(token);
+      }
     });
   });
 
@@ -421,6 +430,31 @@ describe('Rate Limiter', () => {
       expect((await asyncLimiter.check(asyncToken)).success).toBe(true); // count→3 (3<=3)
       expect((await asyncLimiter.check(asyncToken)).success).toBe(false); // count→4 (4<=3 false)
     });
+
+    it('defaults to the configured global store when no store argument is provided', async () => {
+      // Arrange: no `store` arg → factory falls back to `getStore()` (the
+      // store-resolution branch at `store ?? getStore()`). The configured store
+      // in tests defaults to the in-memory MemoryRateLimitStore — same backing
+      // as the explicit-store path above — so the limiter must still function
+      // end-to-end.
+      const limiter = createAsyncRateLimiter({ interval: 60000, maxRequests: 2 });
+      const token = `async-default-store-${Date.now()}`;
+
+      // Act: exhaust + verify exhaustion (proves the default store is connected)
+      const first = await limiter.check(token);
+      const second = await limiter.check(token);
+      const third = await limiter.check(token);
+
+      // Assert: 2 succeed, 3rd blocked — full sliding-window contract works
+      // against the default-resolved store.
+      // test-review:accept tobe_true — structural assertion on rate limiter success field
+      expect(first.success).toBe(true);
+      expect(second.success).toBe(true);
+      expect(third.success).toBe(false);
+
+      // Cleanup
+      await limiter.reset(token);
+    });
   });
 
   describe('createAsyncDynamicLimiter', () => {
@@ -486,6 +520,28 @@ describe('Rate Limiter', () => {
       expect(blockedResult.success).toBe(false);
     });
 
+    it('defaults to the configured global store when no store argument is provided', async () => {
+      // Arrange: no `store` arg → factory falls back to `getStore()` (the
+      // store-resolution branch at `store ?? getStore()`). Mirrors the same
+      // gap-closure as the createAsyncRateLimiter equivalent above.
+      const limiter = createAsyncDynamicLimiter('test-default-store', 2);
+      const token = `async-dyn-default-store-${Date.now()}`;
+
+      // Act: exhaust + verify exhaustion against the resolved default store.
+      const first = await limiter.check(token);
+      const second = await limiter.check(token);
+      const third = await limiter.check(token);
+
+      // Assert
+      // test-review:accept tobe_true — structural assertion on rate limiter success field
+      expect(first.success).toBe(true);
+      expect(second.success).toBe(true);
+      expect(third.success).toBe(false);
+
+      // Cleanup
+      await limiter.reset(token);
+    });
+
     it('should reset a token', async () => {
       // Arrange: maxRequests=2, success = count <= maxRequests
       // Both requests succeed (counts 1,2), 3rd is blocked (3<=2 false)
@@ -505,6 +561,59 @@ describe('Rate Limiter', () => {
       // Assert
       // test-review:accept tobe_true — structural assertion on rate limiter success field
       expect(result.success).toBe(true);
+    });
+  });
+
+  describe('Tier registry (section tiers)', () => {
+    it('orchestrationAdminLimiter is configured with the orchestration tier limit (default 120)', () => {
+      // Arrange: unique token to avoid cross-test bucket contamination
+      const token = `orch-admin-test-${Date.now()}`;
+
+      try {
+        // Act: single check exercises the constant → config → instance integration path
+        const result = orchestrationAdminLimiter.check(token);
+
+        // Assert: result.limit is what the limiter was configured with — not a raw constant read
+        expect(result.limit).toBe(120);
+        // test-review:accept tobe_true — structural assertion verifying the limiter accepted the first request
+        expect(result.success).toBe(true);
+      } finally {
+        orchestrationAdminLimiter.reset(token);
+      }
+    });
+
+    it('RATE_LIMIT_TIERS resolves tier names to the correct singleton limiter instances', () => {
+      // Arrange: no setup needed — registry is module-level state
+
+      // Assert: reference identity — the registry must return the SAME instance, not a copy.
+      // toBe checks object identity: the registry must hand back the exact same singleton,
+      // not a copy. If any tier is missing or points to a different limiter, this fails.
+      expect(RATE_LIMIT_TIERS.admin).toBe(adminLimiter);
+      expect(RATE_LIMIT_TIERS.orchestration).toBe(orchestrationAdminLimiter);
+      expect(RATE_LIMIT_TIERS.api).toBe(apiLimiter);
+      expect(RATE_LIMIT_TIERS.auth).toBe(authLimiter);
+    });
+
+    it('RATE_LIMIT_TIERS.orchestration enforces its configured limit when the bucket is exhausted', () => {
+      // Arrange: unique token so exhaustion in this test cannot bleed into neighbours
+      const token = `tier-orch-exhaust-${Date.now()}`;
+
+      try {
+        // Act: exhaust the 120-request budget
+        for (let i = 0; i < 120; i++) {
+          const result = RATE_LIMIT_TIERS.orchestration.check(token);
+          // test-review:accept tobe_true — structural assertion verifying each of 120 allowed requests succeeds
+          expect(result.success).toBe(true);
+          expect(result.remaining).toBe(119 - i);
+        }
+
+        // Assert: 121st request must be denied — proves the registry entry actually rate-limits
+        const blocked = RATE_LIMIT_TIERS.orchestration.check(token);
+        expect(blocked.success).toBe(false);
+        expect(blocked.remaining).toBe(0);
+      } finally {
+        RATE_LIMIT_TIERS.orchestration.reset(token);
+      }
     });
   });
 

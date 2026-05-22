@@ -13,17 +13,22 @@ For authentication-specific security (password hashing, sessions, OAuth), see [A
 
 All security utilities are located in `lib/security/`:
 
-| File                 | Purpose                                       |
-| -------------------- | --------------------------------------------- |
-| `constants.ts`       | Security constants (rate limits, CORS config) |
-| `rate-limit.ts`      | Sliding window rate limiter (pluggable store) |
-| `rate-limit-stores/` | Backing stores: memory (LRU) and Redis        |
-| `headers.ts`         | CSP and security headers utilities            |
-| `sanitize.ts`        | XSS prevention and input sanitization         |
-| `cors.ts`            | CORS configuration and utilities              |
-| `ip.ts`              | Client IP extraction with validation          |
-| `safe-url.ts`        | SSRF guard for admin-settable outbound URLs   |
-| `index.ts`           | Module exports                                |
+| File                       | Purpose                                                   |
+| -------------------------- | --------------------------------------------------------- |
+| `constants.ts`             | Security constants (rate limits, CORS config)             |
+| `rate-limit.ts`            | Sliding window rate limiter primitives + tier registry    |
+| `rate-limit-policy.ts`     | Path-to-tier policy table (single source of truth)        |
+| `rate-limit-middleware.ts` | Dispatcher (`applyRateLimit`) consumed by `proxy.ts`      |
+| `rate-limit-stores/`       | Pluggable backing stores: memory (LRU, default) and Redis |
+| `headers.ts`               | CSP and security headers utilities                        |
+| `sanitize.ts`              | XSS prevention and input sanitization                     |
+| `cors.ts`                  | CORS configuration and utilities                          |
+| `ip.ts`                    | Client IP extraction with validation                      |
+| `redact.ts`                | PII redaction primitives ([details](./pii-redaction.md))  |
+| `safe-url.ts`              | SSRF guard for admin-settable outbound URLs               |
+| `index.ts`                 | Module exports                                            |
+
+The project-root `proxy.ts` (Next.js 16's renamed middleware) wires `applyRateLimit` into the request lifecycle. See [Rate Limiting](./rate-limiting.md) for the layered model.
 
 ## Security Headers
 
@@ -162,81 +167,13 @@ export async function POST(request: Request) {
 
 ## Rate Limiting
 
-**Implementation**: `lib/security/rate-limit.ts`, `lib/security/rate-limit-stores/`
+**Implementation**: `lib/security/rate-limit-policy.ts`, `lib/security/rate-limit-middleware.ts`, `lib/security/rate-limit.ts`, `lib/security/rate-limit-stores/`
 
-Sliding window rate limiter with a pluggable backing store. Defaults to in-memory LRU (no Redis required) for single-server deployments, with an optional Redis adapter for multi-server coordination.
+Section caps (admin / orchestration / api / auth) are enforced centrally in `proxy.ts` via a declarative policy table — every `/api/**` request consults it. Per-flow tighter caps (chat, audio, image, contact, upload, etc.) layer additively inside route handlers.
 
-### Pre-configured Limiters
+**Don't call section limiters from route handlers.** The middleware already did. The redundant call would double-count against the same bucket. Per-flow sub-caps are the only rate-limit work handlers should do.
 
-| Limiter                    | Limit        | Window     | Use Case                                    |
-| -------------------------- | ------------ | ---------- | ------------------------------------------- |
-| `authLimiter`              | 5 requests   | 1 minute   | Login, signup                               |
-| `apiLimiter`               | 100 requests | 1 minute   | General API routes                          |
-| `adminLimiter`             | 30 requests  | 1 minute   | Admin endpoints                             |
-| `passwordResetLimiter`     | 3 requests   | 15 minutes | Password reset                              |
-| `contactLimiter`           | 5 requests   | 1 hour     | Contact form submissions                    |
-| `verificationEmailLimiter` | 3 requests   | 15 minutes | Email verification requests                 |
-| `acceptInviteLimiter`      | 5 requests   | 15 minutes | Invitation acceptance                       |
-| `uploadLimiter`            | 10 requests  | 15 minutes | File uploads                                |
-| `inviteLimiter`            | 10 requests  | 15 minutes | Sending invitations                         |
-| `cspReportLimiter`         | 20 requests  | 1 minute   | CSP violation reports                       |
-| `audioLimiter`             | 10 requests  | 1 minute   | Audio transcription (voice)                 |
-| `imageLimiter`             | 20 requests  | 1 minute   | Chat turns carrying image / PDF attachments |
-
-### Usage
-
-```typescript
-import {
-  createRateLimiter,
-  authLimiter,
-  apiLimiter,
-  createRateLimitResponse,
-} from '@/lib/security/rate-limit';
-
-// Use pre-configured limiter
-const result = apiLimiter.check('user-ip');
-
-if (!result.success) {
-  return createRateLimitResponse(result); // Returns 429 with headers
-}
-
-// Create custom limiter
-const customLimiter = createRateLimiter({
-  interval: 60000, // 1 minute window
-  maxRequests: 10,
-});
-```
-
-### Rate Limit Headers
-
-All rate-limited responses include:
-
-- `X-RateLimit-Limit` - Maximum requests allowed
-- `X-RateLimit-Remaining` - Requests remaining in window
-- `X-RateLimit-Reset` - Unix timestamp when limit resets
-- `Retry-After` - Seconds until retry (on 429 responses)
-
-### Features
-
-- **Sliding window**: Accurate tracking across time boundaries
-- **LRU eviction**: Automatic cleanup (max 500 unique tokens, memory store)
-- **Peek without consume**: Check limits without incrementing
-- **Manual reset**: Clear limits for specific tokens
-- **Per-agent limits**: Agents can override global rate limits via `rateLimitRpm` field
-- **Dynamic limiters**: `createDynamicLimiter(namespace, defaultRpm)` supports per-key custom RPM
-
-```typescript
-// Check limit without consuming a request
-const status = limiter.peek(clientIP);
-if (status.remaining < 5) {
-  logger.warn('Rate limit approaching', { remaining: status.remaining });
-}
-
-// Add rate limit headers to custom response
-import { getRateLimitHeaders } from '@/lib/security/rate-limit';
-const headers = getRateLimitHeaders(result);
-return new Response(body, { headers: { ...headers, 'Content-Type': 'application/json' } });
-```
+See [Rate Limiting](./rate-limiting.md) for the full reference: the 9-rule policy table, four key strategies (`ip`, `session-user`, `api-key`, `embed-token`), the per-flow sub-cap catalogue, env-var overrides, the `RATE_LIMIT_BYPASS` test escape hatch, and the async/Redis variants for distributed deployments.
 
 ## Client IP Extraction
 
@@ -472,7 +409,7 @@ export async function POST(request: Request) {
 
 ### API Protection
 
-- [x] Rate limiting on API endpoints (`lib/security/rate-limit.ts`)
+- [x] Rate limiting on API endpoints — section caps via `lib/security/rate-limit-policy.ts` (applied by `proxy.ts`); per-flow caps via dedicated limiters in `lib/security/rate-limit.ts`
 - [x] CORS configuration (`lib/security/cors.ts`)
 - [x] Input validation on all user inputs (Zod schemas)
 - [x] Input sanitization utilities (`lib/security/sanitize.ts`)
@@ -489,6 +426,20 @@ export async function POST(request: Request) {
 - [ ] CSP violation monitoring (check `/api/csp-report` logs)
 
 ## Decision History
+
+### Rate Limiting: Centralised Policy Table + Middleware Dispatch
+
+**Decision**: Every rate-limit decision flows from a single declarative policy table at `lib/security/rate-limit-policy.ts`; the dispatcher (`applyRateLimit`) is called once from `proxy.ts` for every API request. Route handlers do not call section limiters.
+
+**Rationale**: a starter template that asks every developer to remember `{ rateLimit: '…' }` on every new route will eventually ship a route without it. The policy table makes the right thing the default — every new `/api/v1/**` route inherits 100/min keyed on session-user with zero handler work. Reviewing rate-limit policy = reading one file.
+
+**Rejected alternative**: a `{ rateLimit: 'tier' }` option on `withAdminAuth`. Wrapper-as-discipline is the foot-gun this design avoids — annotations get forgotten and policy scatters across 100+ handler files. Reverted before landing (commit `b4008770`).
+
+**Trade-off**: one extra proxy hop per request to consult the policy table and resolve the key. Negligible — the lookup is a regex test against ≤ 10 rules; session resolution piggybacks on the auth call the handler would make anyway.
+
+Per-flow sub-caps (chat, audio, image, contact, upload, etc.) still live in handlers because they're tighter per-operation protection layered on top of the section cap, not the section cap itself.
+
+See [Rate Limiting](./rate-limiting.md) for the full reference.
 
 ### Rate Limiting: Pluggable Store Architecture
 
@@ -526,7 +477,7 @@ interface RateLimitStore {
 
 If `RATE_LIMIT_STORE=redis` but `REDIS_URL` is unset, falls back to memory with a warning log.
 
-All existing limiter instances automatically use whichever store is configured — no code changes needed in route handlers.
+**Async vs sync limiters.** Only the async store-backed limiter factories (`createAsyncRateLimiter`, `createAsyncDynamicLimiter`) read from the configured store. The default sync limiters used by the policy table and per-flow caps run on their own in-process LRU caches — switch to the async variants when moving to multi-region deployments. See [Rate Limiting → Distributed Deployments](./rate-limiting.md#distributed-deployments).
 
 ### CSP: unsafe-inline for Styles
 
@@ -567,16 +518,25 @@ All existing limiter instances automatically use whichever store is configured �
 
 Available type exports from `@/lib/security`:
 
-| Type               | Description                             |
-| ------------------ | --------------------------------------- |
-| `RateLimitOptions` | Configuration for `createRateLimiter()` |
-| `RateLimitResult`  | Return value from `limiter.check()`     |
-| `RateLimiter`      | Rate limiter instance interface         |
-| `CSPConfig`        | CSP directive configuration object      |
-| `CORSOptions`      | CORS configuration options              |
+| Type                      | Description                                                                             |
+| ------------------------- | --------------------------------------------------------------------------------------- |
+| `RateLimitOptions`        | Configuration for `createRateLimiter()`                                                 |
+| `RateLimitResult`         | Return value from `limiter.check()`                                                     |
+| `RateLimiter`             | Sync rate limiter instance interface                                                    |
+| `AsyncRateLimiter`        | Async store-backed rate limiter instance interface                                      |
+| `DynamicRateLimiter`      | Dynamic (per-token RPM) sync rate limiter                                               |
+| `AsyncDynamicRateLimiter` | Dynamic (per-token RPM) async rate limiter                                              |
+| `RateLimitTier`           | Section-tier union (`'admin' \| 'orchestration' \| 'api' \| 'auth'`)                    |
+| `RateLimitKey`            | Caller-identification strategy (`'ip' \| 'session-user' \| 'api-key' \| 'embed-token'`) |
+| `RateLimitRule`           | One rule in `RATE_LIMIT_POLICY`                                                         |
+| `CSPConfig`               | CSP directive configuration object                                                      |
+| `CORSOptions`             | CORS configuration options                                                              |
+| `SafeUrlCheckOptions`     | Options for `checkSafeProviderUrl()`                                                    |
+| `SafeUrlCheckResult`      | Discriminated-union return shape from `checkSafeProviderUrl()`                          |
 
 ## Related Documentation
 
+- [Rate Limiting](./rate-limiting.md) - Policy table, dispatcher, key strategies, per-flow caps
 - [Security Gotchas](./gotchas.md) - Anti-patterns and the right way to use each primitive
 - [Auth Security](../auth/security.md) - Authentication-specific security
 - [API Headers](../api/headers.md) - HTTP headers and middleware

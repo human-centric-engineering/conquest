@@ -219,14 +219,36 @@ export const verificationEmailLimiter = createRateLimiter({
 });
 
 /**
- * Rate limiter for admin endpoints
- * Limit: 30 requests per minute per IP
+ * Rate limiter for core admin endpoints (user management, logs, invitations, etc.)
+ * Limit: 30 requests per minute. Override with `RATE_LIMIT_ADMIN`.
  *
- * Tighter than general API to limit admin abuse
+ * Wired into the middleware via `RATE_LIMIT_TIERS['admin']` and the
+ * `/api/v1/admin/` rule in `rate-limit-policy.ts`. Route handlers should
+ * NOT call `.check()` directly — the dispatcher already applied this cap.
+ * See `.context/security/rate-limiting.md` for the layered model.
  */
 export const adminLimiter = createRateLimiter({
   interval: SECURITY_CONSTANTS.RATE_LIMIT.DEFAULT_INTERVAL,
   maxRequests: SECURITY_CONSTANTS.RATE_LIMIT.LIMITS.ADMIN,
+  uniqueTokenPerInterval: SECURITY_CONSTANTS.RATE_LIMIT.MAX_UNIQUE_TOKENS,
+});
+
+/**
+ * Rate limiter for admin/orchestration endpoints (agents, capabilities, workflows,
+ * knowledge bases, executions, etc.).
+ * Limit: 120 requests per minute. Override with `RATE_LIMIT_ORCH_ADMIN`.
+ *
+ * Looser than `adminLimiter` because the orchestration admin UI is chatty —
+ * editing a workflow can fire many list/validate/preview calls in quick
+ * succession.
+ *
+ * Wired into the middleware via `RATE_LIMIT_TIERS['orchestration']` and the
+ * `/api/v1/admin/orchestration/` rule in `rate-limit-policy.ts`. Route handlers
+ * should NOT call `.check()` directly — the dispatcher already applied this cap.
+ */
+export const orchestrationAdminLimiter = createRateLimiter({
+  interval: SECURITY_CONSTANTS.RATE_LIMIT.DEFAULT_INTERVAL,
+  maxRequests: SECURITY_CONSTANTS.RATE_LIMIT.LIMITS.ORCH_ADMIN,
   uniqueTokenPerInterval: SECURITY_CONSTANTS.RATE_LIMIT.MAX_UNIQUE_TOKENS,
 });
 
@@ -354,6 +376,44 @@ export const inboundLimiter = createRateLimiter({
   maxRequests: 60,
   uniqueTokenPerInterval: SECURITY_CONSTANTS.RATE_LIMIT.MAX_UNIQUE_TOKENS,
 });
+
+// =============================================================================
+// Rate-Limit Tier Registry
+// =============================================================================
+
+/**
+ * Named tiers consumed by the rate-limit middleware
+ * (`lib/security/rate-limit-middleware.ts`) via the policy table at
+ * `lib/security/rate-limit-policy.ts`.
+ *
+ * Tiers are *section-level* caps. Each tier corresponds to one limiter
+ * instance and one rate. The middleware picks a tier for every API request
+ * based on the path; per-flow tighter caps (chat-stream, audio, image, upload,
+ * invite, password-reset) stay in the route handler as additive checks against
+ * their own dedicated limiters — they're not tiers.
+ *
+ * - `'admin'` — core admin endpoints (users, logs, invitations, feature flags, stats). 30/min.
+ * - `'orchestration'` — admin/orchestration UI (agents, workflows, knowledge, executions). 120/min.
+ * - `'api'` — general authenticated API + consumer surfaces. 100/min.
+ * - `'auth'` — authentication endpoints (login, signup, password reset). 5/min per IP.
+ *
+ * Add new tiers here, add a matching entry to {@link RATE_LIMIT_TIERS}, then
+ * reference the tier from `RATE_LIMIT_POLICY`.
+ */
+export type RateLimitTier = 'admin' | 'orchestration' | 'api' | 'auth';
+
+/**
+ * Resolve a tier name to its concrete limiter instance.
+ *
+ * Consumed by the rate-limit middleware. Route handlers should not read this
+ * directly — let the middleware do tier resolution from the policy table.
+ */
+export const RATE_LIMIT_TIERS: Record<RateLimitTier, RateLimiter> = {
+  admin: adminLimiter,
+  orchestration: orchestrationAdminLimiter,
+  api: apiLimiter,
+  auth: authLimiter,
+};
 
 // =============================================================================
 // Dynamic Rate Limiter Factory
