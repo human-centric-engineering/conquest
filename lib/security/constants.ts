@@ -6,8 +6,9 @@
  *
  * A few rate limits can be tuned via env vars (use in `.env.local` to
  * loosen them on dev without touching prod):
- *   - `RATE_LIMIT_API`   — overrides default 100/min for general API
- *   - `RATE_LIMIT_ADMIN` — overrides default 30/min for admin endpoints
+ *   - `RATE_LIMIT_API`        — overrides default 100/min for general API
+ *   - `RATE_LIMIT_ADMIN`      — overrides default 30/min for core admin endpoints
+ *   - `RATE_LIMIT_ORCH_ADMIN` — overrides default 120/min for admin/orchestration endpoints
  */
 
 function envInt(name: string, fallback: number): number {
@@ -35,6 +36,8 @@ export const SECURITY_CONSTANTS = {
       API: envInt('RATE_LIMIT_API', 100),
       /** Admin endpoints: 30 requests per minute (override with `RATE_LIMIT_ADMIN`) */
       ADMIN: envInt('RATE_LIMIT_ADMIN', 30),
+      /** Admin/orchestration endpoints: 120 requests per minute (override with `RATE_LIMIT_ORCH_ADMIN`) */
+      ORCH_ADMIN: envInt('RATE_LIMIT_ORCH_ADMIN', 120),
       /** Password reset: 3 attempts per 15 minutes */
       PASSWORD_RESET: 3,
       /** Password reset window: 15 minutes */

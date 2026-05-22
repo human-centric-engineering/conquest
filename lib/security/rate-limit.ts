@@ -219,16 +219,76 @@ export const verificationEmailLimiter = createRateLimiter({
 });
 
 /**
- * Rate limiter for admin endpoints
- * Limit: 30 requests per minute per IP
+ * Rate limiter for core admin endpoints (user management, logs, invitations, etc.)
+ * Limit: 30 requests per minute per authenticated admin (keyed on user ID via
+ * the `withAdminAuth` wrapper).
  *
- * Tighter than general API to limit admin abuse
+ * Tighter than general API to limit admin abuse. Override with `RATE_LIMIT_ADMIN`.
+ *
+ * Prefer wiring via the wrapper:
+ * ```ts
+ * export const POST = withAdminAuth(handler, { rateLimit: 'admin' });
+ * ```
+ * Direct use is reserved for edge cases (background jobs, internal callers) that
+ * sit outside the route-handler boundary.
  */
 export const adminLimiter = createRateLimiter({
   interval: SECURITY_CONSTANTS.RATE_LIMIT.DEFAULT_INTERVAL,
   maxRequests: SECURITY_CONSTANTS.RATE_LIMIT.LIMITS.ADMIN,
   uniqueTokenPerInterval: SECURITY_CONSTANTS.RATE_LIMIT.MAX_UNIQUE_TOKENS,
 });
+
+/**
+ * Rate limiter for admin/orchestration endpoints (agents, capabilities, workflows,
+ * knowledge bases, executions, etc.).
+ * Limit: 120 requests per minute per authenticated admin (keyed on user ID via
+ * the `withAdminAuth` wrapper).
+ *
+ * Looser than `adminLimiter` because the orchestration admin UI is chatty —
+ * editing a workflow can fire many list/validate/preview calls in quick
+ * succession. Override with `RATE_LIMIT_ORCH_ADMIN`.
+ *
+ * Wire via the wrapper:
+ * ```ts
+ * export const GET = withAdminAuth(handler, { rateLimit: 'orchestration' });
+ * ```
+ */
+export const orchestrationAdminLimiter = createRateLimiter({
+  interval: SECURITY_CONSTANTS.RATE_LIMIT.DEFAULT_INTERVAL,
+  maxRequests: SECURITY_CONSTANTS.RATE_LIMIT.LIMITS.ORCH_ADMIN,
+  uniqueTokenPerInterval: SECURITY_CONSTANTS.RATE_LIMIT.MAX_UNIQUE_TOKENS,
+});
+
+// =============================================================================
+// Admin Rate-Limit Tier Registry
+// =============================================================================
+
+/**
+ * Named tiers used by `withAdminAuth({ rateLimit: ... })`.
+ *
+ * - `'admin'` — core admin (users, logs, invitations, feature flags). 30/min.
+ *   Fail-safe default if no tier is specified.
+ * - `'orchestration'` — admin/orchestration UI (agents, workflows, knowledge,
+ *   executions). 120/min. Opt in explicitly.
+ *
+ * Extending: add a new tier here and update the {@link RATE_LIMIT_TIERS}
+ * registry below. Keep the union narrow — tier names should describe the
+ * *section* of the admin UI, not the specific endpoint. Per-endpoint caps
+ * (chat stream, audio, image, invite, upload, etc.) layer on top of the
+ * section tier via their own dedicated limiters.
+ */
+export type AdminRateLimitTier = 'admin' | 'orchestration';
+
+/**
+ * Resolve a tier name to its concrete limiter.
+ *
+ * Used by `withAdminAuth` — route handlers should not read this directly;
+ * declare the tier on the wrapper instead.
+ */
+export const RATE_LIMIT_TIERS: Record<AdminRateLimitTier, RateLimiter> = {
+  admin: adminLimiter,
+  orchestration: orchestrationAdminLimiter,
+};
 
 /**
  * Rate limiter for accept-invite endpoint
