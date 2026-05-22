@@ -7,7 +7,7 @@
  *
  * Key security assertions:
  * - Admin auth required (401/403 otherwise)
- * - Rate limited (adminLimiter)
+ * - Rate limiting enforced by proxy.ts (orchestration tier)
  * - Empty body rejected by Zod refine (at least one of olderThan/agentId required) —
  *   CRITICAL safety net preventing accidental "delete all conversations" calls.
  * - Default scope is `userId: session.user.id` (caller's own conversations).

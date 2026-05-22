@@ -7,7 +7,7 @@
  *
  * Key security assertions:
  * - Admin auth required (401/403 otherwise)
- * - Rate limited (adminLimiter)
+ * - Rate limiting enforced by proxy.ts (orchestration tier)
  * - Ownership enforced via findFirst({ where: { id, userId } })
  * - Cross-user access returns 404 (NOT 403)
  * - AiMessage rows cascade via Prisma FK — aiMessage.deleteMany is NOT

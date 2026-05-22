@@ -8,7 +8,7 @@
  *
  * Key security assertions:
  * - Admin auth required (401/403 otherwise)
- * - Rate limited on DELETE (adminLimiter)
+ * - Rate limiting enforced by proxy.ts (orchestration tier)
  * - Bad CUID returns 400
  * - Missing document returns 404
  *

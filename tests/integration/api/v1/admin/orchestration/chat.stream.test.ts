@@ -7,7 +7,9 @@
  *
  * Key security assertions:
  * - Admin auth required (401/403 otherwise)
- * - Rate limited (adminLimiter)
+ * - Rate limiting is enforced by the proxy (orchestration tier — see
+ *   `lib/security/rate-limit-policy.ts`); per-flow caps applied by
+ *   chatLimiter / agentChatLimiter inside the handler still hold.
  * - SSE bridge never leaks raw error messages to the client
  * - If the upstream streamChat iterable throws with a secret value,
  *   the wire output contains only the sanitized terminal frame.
@@ -37,7 +39,6 @@ vi.mock('@/lib/orchestration/chat', () => ({
 }));
 
 vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
   chatLimiter: { check: vi.fn(() => ({ success: true })) },
   agentChatLimiter: { check: vi.fn(() => ({ success: true })) },
   imageLimiter: { check: vi.fn(() => ({ success: true })) },

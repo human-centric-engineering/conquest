@@ -54,9 +54,6 @@ vi.mock('@/lib/auth/config', () => ({
 
 // Mock rate limiters
 vi.mock('@/lib/security/rate-limit', () => ({
-  apiLimiter: {
-    check: vi.fn(),
-  },
   consumerChatLimiter: {
     check: vi.fn(),
   },

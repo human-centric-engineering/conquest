@@ -15,7 +15,7 @@
  *
  * Key Behaviors:
  * - withAdminAuth wraps the handler; auth is mocked via auth.api.getSession
- * - adminLimiter.check is called before business logic
+ * - Rate limiting enforced by proxy.ts (orchestration tier)
  * - cuidSchema validates the URL :id param before confirmPreview is called
  * - body.documentId must equal the URL :id param
  * - confirmPreview receives (id, session.user.id, correctedContent, category)

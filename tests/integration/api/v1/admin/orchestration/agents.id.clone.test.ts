@@ -7,7 +7,7 @@
  *
  * Key security assertions:
  * - Admin auth required (401/403 otherwise)
- * - Rate limited (adminLimiter)
+ * - Rate limiting enforced by proxy.ts (orchestration tier)
  * - 201 on success: cloned agent returned
  * - 404 when source agent not found
  * - 400 when CUID is invalid

@@ -8,7 +8,7 @@
  *
  * Key security assertions:
  * - Admin auth required (401/403 otherwise)
- * - Rate limited on POST (adminLimiter)
+ * - Rate limiting enforced by proxy.ts (orchestration tier)
  * - File size limit enforced (50 MB; 413 FILE_TOO_LARGE)
  * - Extension whitelist enforced via `ALLOWED_EXTENSIONS` (400 INVALID_FILE_TYPE)
  * - Pre-parse Content-Length guard rejects oversize bodies before allocation

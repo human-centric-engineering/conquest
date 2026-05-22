@@ -7,7 +7,7 @@
  *
  * Key assertions:
  * - Admin auth required (401/403 otherwise)
- * - Rate limited (adminLimiter)
+ * - Rate limiting enforced by proxy.ts (orchestration tier)
  * - Returns correct counts: total, embedded, pending
  * - hasActiveProvider: true when active aiProviderConfig row exists
  * - hasActiveProvider: true via OPENAI_API_KEY env fallback

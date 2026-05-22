@@ -7,7 +7,7 @@
  *
  * Key security assertions:
  * - Admin auth required (401/403 otherwise)
- * - Rate limited (adminLimiter)
+ * - Rate limiting enforced by proxy.ts (orchestration tier)
  * - 200 on success: response body contains { session: CompleteEvaluationResult }
  * - 404 when handler throws NotFoundError
  * - 409 when handler throws ConflictError

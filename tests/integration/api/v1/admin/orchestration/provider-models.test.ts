@@ -50,14 +50,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  apiLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/orchestration/llm/provider-selector', () => ({
   invalidateModelCache: vi.fn(),
 }));
@@ -144,9 +136,6 @@ async function parseJson<T>(response: Response): Promise<T> {
 describe('GET /api/v1/admin/orchestration/provider-models', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // GET uses the broader apiLimiter (source route.ts:32). POST uses
-    // adminLimiter. Mocking the wrong limiter here means a future
-    // refactor that drops the limiter call would not be caught.
   });
 
   describe('Authentication & Authorization', () => {

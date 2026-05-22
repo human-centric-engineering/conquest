@@ -5,7 +5,7 @@
  *
  * Key security assertions:
  * - Admin auth required (401/403 otherwise)
- * - Rate limited (adminLimiter)
+ * - Rate limiting enforced by proxy.ts (orchestration tier)
  * - Scoped to calling user's own webhooks (createdBy filter)
  * - Bad CUID returns 400
  * - Missing signing secret returns 200 with a descriptive error payload

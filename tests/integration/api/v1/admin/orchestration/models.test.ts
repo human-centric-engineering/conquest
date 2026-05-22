@@ -10,7 +10,7 @@
  *     warm call may not reach the same module instance)
  *   - ?refresh=true calls refreshFromOpenRouter({ force: true })
  *   - ?refresh=true response includes refreshed: true
- *   - ?refresh=true is rate-limited (adminLimiter.check)
+ *   - ?refresh=true takes the orchestration tier cap from proxy.ts
  *
  * @see app/api/v1/admin/orchestration/models/route.ts
  */

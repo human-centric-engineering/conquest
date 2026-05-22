@@ -10,7 +10,7 @@
  * - Admin auth required (401/403 otherwise)
  * - GET: results ALWAYS scoped to session.user.id
  * - GET: optional filters (agentId, status, q) applied alongside userId scope
- * - POST: rate limited (adminLimiter)
+ * - POST: rate limiting enforced by proxy.ts (orchestration tier)
  * - POST: 404 when agent doesn't exist (agents are shared admin-wide)
  * - POST: 400 on invalid body (missing title)
  * - POST: 201 on success

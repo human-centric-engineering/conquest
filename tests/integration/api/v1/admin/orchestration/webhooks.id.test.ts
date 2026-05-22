@@ -9,7 +9,7 @@
  *
  * Key security assertions:
  * - Admin auth required (401/403 otherwise)
- * - Rate limited on PATCH and DELETE (adminLimiter)
+ * - Rate limiting enforced by proxy.ts (orchestration tier)
  * - Scoped to calling user's own subscriptions (createdBy)
  * - Bad CUID returns 400
  * - Missing or foreign webhook returns 404

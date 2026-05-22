@@ -7,7 +7,7 @@
  *
  * Key assertions:
  * - Admin auth required (401/403 otherwise)
- * - Rate limited (adminLimiter)
+ * - Rate limiting enforced by proxy.ts (orchestration tier)
  * - Invalid CUID returns 400
  * - Returns usage map keyed by capability slug for the last 60 seconds
  * - Rows without a slug are excluded from the usage map

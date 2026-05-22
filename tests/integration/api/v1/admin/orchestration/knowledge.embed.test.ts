@@ -7,7 +7,7 @@
  *
  * Key assertions:
  * - Admin auth required (401/403 otherwise)
- * - Rate limited (adminLimiter)
+ * - Rate limiting enforced by proxy.ts (orchestration tier)
  * - embedChunks is called once on success
  * - Response data matches embedChunks return value
  */

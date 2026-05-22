@@ -8,7 +8,7 @@
  *
  * Key assertions:
  *   - Admin auth required (401 unauthenticated, 403 non-admin)
- *   - Rate limited via adminLimiter
+ *   - Rate limiting enforced by proxy.ts (orchestration tier)
  *   - No params → all 9 models returned
  *   - schemaCompatibleOnly=true → only schema-compatible models
  *   - hasFreeTier=true → only free-tier models

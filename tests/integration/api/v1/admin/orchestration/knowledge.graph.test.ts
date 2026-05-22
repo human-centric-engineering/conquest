@@ -7,7 +7,7 @@
  *
  * Key assertions:
  * - Admin auth required (401/403 otherwise)
- * - Rate limited (adminLimiter)
+ * - Rate limiting enforced by proxy.ts (orchestration tier)
  * - Returns nodes, links, categories, and stats
  * - Scopes filter to "system" | "app" when provided
  * - view=embedded uses $queryRaw for embedded-only chunk aggregation

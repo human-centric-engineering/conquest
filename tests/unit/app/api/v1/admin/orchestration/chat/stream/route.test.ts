@@ -1,13 +1,16 @@
 /**
  * Unit Tests: POST /api/v1/admin/orchestration/chat/stream
  *
- * Tests the admin-facing SSE chat endpoint. Uses withAdminAuth guard
- * and two rate limiters (adminLimiter per IP, chatLimiter per user).
+ * Tests the admin-facing SSE chat endpoint. Uses withAdminAuth guard and
+ * three per-flow rate limiters in the handler (chatLimiter per user,
+ * agentChatLimiter per agent, imageLimiter for attachment-bearing requests).
+ * Section-level rate limiting (orchestration tier, 120/min) is enforced
+ * centrally by proxy.ts via the policy table.
  *
  * Test Coverage:
  * - Happy path: valid request → calls streamChat with correct args → SSE response
- * - Rate limit exceeded (admin IP limiter) → 429
  * - Rate limit exceeded (chat user limiter) → 429
+ * - Rate limit exceeded (per-agent limiter) → 429
  * - Invalid body: missing required fields → 400 VALIDATION_ERROR
  * - Attachments forwarded to streamChat
  * - Authentication: no session → 401 (delegated to withAdminAuth)
@@ -40,9 +43,6 @@ vi.mock('@/lib/auth/config', () => ({
 
 // Mock rate limiters
 vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: {
-    check: vi.fn(),
-  },
   chatLimiter: {
     check: vi.fn(),
   },

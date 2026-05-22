@@ -7,7 +7,7 @@
  *
  * Key security assertions:
  * - Admin auth required (401/403 otherwise)
- * - Rate limited (adminLimiter)
+ * - Rate limiting enforced by proxy.ts (orchestration tier)
  * - seedChunks is called with path ending in prisma/seeds/data/chunks/chunks.json
  * - Response contains { seeded: true }
  */

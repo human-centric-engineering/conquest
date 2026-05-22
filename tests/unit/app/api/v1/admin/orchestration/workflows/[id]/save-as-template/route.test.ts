@@ -194,8 +194,6 @@ describe('POST /api/v1/admin/orchestration/workflows/:id/save-as-template', () =
   beforeEach(() => {
     vi.clearAllMocks();
 
-    // Restore safe defaults — adminLimiter allows by default
-
     // Default: slug is unique (findUnique for slug returns null)
     vi.mocked(prisma.aiWorkflow.findUnique).mockImplementation((async (args: unknown) => {
       const { where } = args as { where: { id?: string; slug?: string } };
