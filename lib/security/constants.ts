@@ -9,6 +9,7 @@
  *   - `RATE_LIMIT_API`        — overrides default 100/min for general API
  *   - `RATE_LIMIT_ADMIN`      — overrides default 30/min for core admin endpoints
  *   - `RATE_LIMIT_ORCH_ADMIN` — overrides default 120/min for admin/orchestration endpoints
+ *   - `RATE_LIMIT_MCP`        — overrides default 300/min for the MCP transport endpoint
  */
 
 function envInt(name: string, fallback: number): number {
@@ -38,6 +39,17 @@ export const SECURITY_CONSTANTS = {
       ADMIN: envInt('RATE_LIMIT_ADMIN', 30),
       /** Admin/orchestration endpoints: 120 requests per minute (override with `RATE_LIMIT_ORCH_ADMIN`) */
       ORCH_ADMIN: envInt('RATE_LIMIT_ORCH_ADMIN', 120),
+      /**
+       * MCP transport endpoint: 300 requests per minute, keyed per API key
+       * (override with `RATE_LIMIT_MCP`).
+       *
+       * MCP is server-to-server traffic — LLM agents iterating through tool
+       * calls inside a conversation. The traffic shape is much burstier than
+       * human-driven API use, so the section cap is higher; per-customer
+       * budgets are enforced separately by `McpRateLimiter` against the
+       * `apiKey.rateLimit` field.
+       */
+      MCP: envInt('RATE_LIMIT_MCP', 300),
       /** Password reset: 3 attempts per 15 minutes */
       PASSWORD_RESET: 3,
       /** Password reset window: 15 minutes */

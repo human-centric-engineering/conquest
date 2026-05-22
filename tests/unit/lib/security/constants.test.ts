@@ -12,10 +12,12 @@
  * a fresh module instance with whatever env state the test arranges.
  *
  * Tests use `RATE_LIMIT_API` as the probe for paths 2 & 3 (avoiding ADMIN /
- * ORCH_ADMIN unless independence is the thing being verified). Default values:
+ * ORCH_ADMIN / MCP unless independence is the thing being verified). Default
+ * values:
  *   RATE_LIMIT_API        → 100
  *   RATE_LIMIT_ADMIN      → 30
  *   RATE_LIMIT_ORCH_ADMIN → 120
+ *   RATE_LIMIT_MCP        → 300
  *
  * @see lib/security/constants.ts
  */
@@ -27,11 +29,13 @@ describe('SECURITY_CONSTANTS.RATE_LIMIT.LIMITS — envInt env-var overrides', ()
   let savedApi: string | undefined;
   let savedAdmin: string | undefined;
   let savedOrchAdmin: string | undefined;
+  let savedMcp: string | undefined;
 
   beforeEach(() => {
     savedApi = process.env.RATE_LIMIT_API;
     savedAdmin = process.env.RATE_LIMIT_ADMIN;
     savedOrchAdmin = process.env.RATE_LIMIT_ORCH_ADMIN;
+    savedMcp = process.env.RATE_LIMIT_MCP;
   });
 
   afterEach(() => {
@@ -50,6 +54,11 @@ describe('SECURITY_CONSTANTS.RATE_LIMIT.LIMITS — envInt env-var overrides', ()
       delete process.env.RATE_LIMIT_ORCH_ADMIN;
     } else {
       process.env.RATE_LIMIT_ORCH_ADMIN = savedOrchAdmin;
+    }
+    if (savedMcp === undefined) {
+      delete process.env.RATE_LIMIT_MCP;
+    } else {
+      process.env.RATE_LIMIT_MCP = savedMcp;
     }
 
     // Always reset modules after each test so the next test's import is fresh.
@@ -129,13 +138,46 @@ describe('SECURITY_CONSTANTS.RATE_LIMIT.LIMITS — envInt env-var overrides', ()
     expect(SECURITY_CONSTANTS.RATE_LIMIT.LIMITS.API).toBe(100);
   });
 
-  // ── ADMIN and ORCH_ADMIN are overridden independently ────────────────────
+  // ── MCP default ──────────────────────────────────────────────────────────
 
-  it('applies the override independently to ADMIN and ORCH_ADMIN limits', async () => {
-    // Arrange: set distinct values for each of the three overrideable limits
+  it('uses the documented 300/min default for MCP when the env var is unset', async () => {
+    // Arrange: MCP defaults to 300 — a deliberate uplift over the api tier
+    // (100) because MCP is server-to-server agent traffic, not human-paced.
+    // This test pins the documented default so a stray edit to the constant
+    // is caught immediately.
+    delete process.env.RATE_LIMIT_MCP;
+    vi.resetModules();
+
+    // Act
+    const { SECURITY_CONSTANTS } = await import('@/lib/security/constants');
+
+    // Assert
+    expect(SECURITY_CONSTANTS.RATE_LIMIT.LIMITS.MCP).toBe(300);
+  });
+
+  it('applies the env override to MCP when set to a positive integer', async () => {
+    // Arrange
+    process.env.RATE_LIMIT_MCP = '1500';
+    vi.resetModules();
+
+    // Act
+    const { SECURITY_CONSTANTS } = await import('@/lib/security/constants');
+
+    // Assert: env var routes through the shared envInt() helper, so a positive
+    // integer is parsed exactly the same as for ADMIN / API / ORCH_ADMIN.
+    expect(SECURITY_CONSTANTS.RATE_LIMIT.LIMITS.MCP).toBe(1500);
+  });
+
+  // ── ADMIN, ORCH_ADMIN, and MCP are overridden independently ──────────────
+
+  it('applies the override independently to API, ADMIN, ORCH_ADMIN, and MCP limits', async () => {
+    // Arrange: set distinct values for each of the four overrideable limits.
+    // This guards against a future refactor accidentally sharing state across
+    // the envInt() invocations.
     process.env.RATE_LIMIT_API = '200';
     process.env.RATE_LIMIT_ADMIN = '60';
     process.env.RATE_LIMIT_ORCH_ADMIN = '240';
+    process.env.RATE_LIMIT_MCP = '600';
     vi.resetModules();
 
     // Act
@@ -145,16 +187,18 @@ describe('SECURITY_CONSTANTS.RATE_LIMIT.LIMITS — envInt env-var overrides', ()
     expect(SECURITY_CONSTANTS.RATE_LIMIT.LIMITS.API).toBe(200);
     expect(SECURITY_CONSTANTS.RATE_LIMIT.LIMITS.ADMIN).toBe(60);
     expect(SECURITY_CONSTANTS.RATE_LIMIT.LIMITS.ORCH_ADMIN).toBe(240);
+    expect(SECURITY_CONSTANTS.RATE_LIMIT.LIMITS.MCP).toBe(600);
   });
 
   // ── Constants not controlled by env vars remain unchanged ─────────────────
 
   it('leaves non-configurable constants (AUTH, PASSWORD_RESET, CONTACT) at their hardcoded values', async () => {
-    // Arrange: set all three overrideable vars to prove they don't bleed into
+    // Arrange: set all four overrideable vars to prove they don't bleed into
     // the hardcoded constants
     process.env.RATE_LIMIT_API = '999';
     process.env.RATE_LIMIT_ADMIN = '999';
     process.env.RATE_LIMIT_ORCH_ADMIN = '999';
+    process.env.RATE_LIMIT_MCP = '999';
     vi.resetModules();
 
     // Act

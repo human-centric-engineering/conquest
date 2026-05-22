@@ -17,6 +17,7 @@ import {
   passwordResetLimiter,
   adminLimiter,
   orchestrationAdminLimiter,
+  mcpLimiter,
   RATE_LIMIT_TIERS,
   getRateLimitHeaders,
   createRateLimitResponse,
@@ -582,6 +583,25 @@ describe('Rate Limiter', () => {
       }
     });
 
+    it('mcpLimiter is configured with the mcp tier limit (default 300)', () => {
+      // Arrange: unique token to avoid cross-test bucket contamination
+      const token = `mcp-test-${Date.now()}`;
+
+      try {
+        // Act: single check exercises the constant → config → instance integration path
+        const result = mcpLimiter.check(token);
+
+        // Assert: result.limit is what the limiter was configured with — not a raw constant read.
+        // The 300/min default is higher than other tiers because MCP traffic is server-to-server
+        // agent calls inside conversations, which is much chattier than human-driven REST.
+        expect(result.limit).toBe(300);
+        // test-review:accept tobe_true — structural assertion verifying the limiter accepted the first request
+        expect(result.success).toBe(true);
+      } finally {
+        mcpLimiter.reset(token);
+      }
+    });
+
     it('RATE_LIMIT_TIERS resolves tier names to the correct singleton limiter instances', () => {
       // Arrange: no setup needed — registry is module-level state
 
@@ -591,6 +611,7 @@ describe('Rate Limiter', () => {
       expect(RATE_LIMIT_TIERS.admin).toBe(adminLimiter);
       expect(RATE_LIMIT_TIERS.orchestration).toBe(orchestrationAdminLimiter);
       expect(RATE_LIMIT_TIERS.api).toBe(apiLimiter);
+      expect(RATE_LIMIT_TIERS.mcp).toBe(mcpLimiter);
       expect(RATE_LIMIT_TIERS.auth).toBe(authLimiter);
     });
 
@@ -613,6 +634,31 @@ describe('Rate Limiter', () => {
         expect(blocked.remaining).toBe(0);
       } finally {
         RATE_LIMIT_TIERS.orchestration.reset(token);
+      }
+    });
+
+    it('RATE_LIMIT_TIERS.mcp enforces its configured limit when the bucket is exhausted', () => {
+      // Arrange: unique token so exhaustion in this test cannot bleed into neighbours.
+      // Mirrors the orchestration-tier enforcement test above; the value is asserting
+      // that the mcp tier entry in the registry is a working limiter, not just a config
+      // dictionary lookup. 300/min is the documented mcp cap.
+      const token = `tier-mcp-exhaust-${Date.now()}`;
+
+      try {
+        // Act: exhaust the 300-request budget
+        for (let i = 0; i < 300; i++) {
+          const result = RATE_LIMIT_TIERS.mcp.check(token);
+          // test-review:accept tobe_true — structural assertion verifying each of 300 allowed requests succeeds
+          expect(result.success).toBe(true);
+          expect(result.remaining).toBe(299 - i);
+        }
+
+        // Assert: 301st request must be denied — proves the registry entry actually rate-limits
+        const blocked = RATE_LIMIT_TIERS.mcp.check(token);
+        expect(blocked.success).toBe(false);
+        expect(blocked.remaining).toBe(0);
+      } finally {
+        RATE_LIMIT_TIERS.mcp.reset(token);
       }
     });
   });

@@ -83,6 +83,41 @@ describe('rate-limit-policy', () => {
       expect(userRule?.key).toBe('session-user');
     });
 
+    it("MCP transport paths use the dedicated 'mcp' tier with 'api-key' keying", () => {
+      // Arrange — MCP is a distinct interface from the human-facing REST API:
+      // server-to-server, always API-key-authenticated, much chattier per
+      // session. It gets its own tier (300/min) keyed by API key so two
+      // customers sharing a NAT'd egress get independent buckets. This locks
+      // in that an MCP request does NOT fall through to the api catch-all,
+      // which would key on session-user and (since MCP has no session) fall
+      // back to IP — collapsing two customers behind the same egress.
+      const pathname = '/api/v1/mcp/anything';
+
+      // Act
+      const rule = findRateLimitRule(pathname);
+
+      // Assert — tier MUST be 'mcp', not 'api'; key MUST be 'api-key', not 'session-user'
+      expect(rule).not.toBeNull();
+      expect(rule?.tier).toBe('mcp');
+      expect(rule?.key).toBe('api-key');
+    });
+
+    it("the bare /api/v1/mcp path (no trailing slash) also resolves to the 'mcp' tier", () => {
+      // Arrange — the MCP rule uses `(\/|$)` boundary so the bare path matches.
+      // The Streamable HTTP transport accepts POST/GET/DELETE at /api/v1/mcp
+      // directly (no sub-path), and Next.js routes such requests to the same
+      // route handler. The rule MUST resolve regardless of trailing slash.
+      const pathname = '/api/v1/mcp';
+
+      // Act
+      const rule = findRateLimitRule(pathname);
+
+      // Assert
+      expect(rule).not.toBeNull();
+      expect(rule?.tier).toBe('mcp');
+      expect(rule?.key).toBe('api-key');
+    });
+
     it("webhook paths use the 'api' tier with 'api-key' keying", () => {
       // Arrange — webhook callers authenticate via Authorization: Bearer <key>,
       // not session cookies. Keying on the API key (instead of session-user or IP)
@@ -178,14 +213,17 @@ describe('rate-limit-policy', () => {
       expect(rule?.tier).not.toBe('admin');
     });
 
-    it('consumer-specific rules resolve before the api catch-all', () => {
-      // Arrange — each consumer rule (webhooks, embed, inbound, contact) needs to
-      // resolve to its own keying strategy, NOT fall through to the catch-all's
-      // 'session-user' key. If a consumer rule is accidentally moved below the
-      // catch-all, this test fails: the catch-all matches `/api/v1/anything` so
-      // it would silently swallow webhooks/embed/inbound/contact traffic with the
-      // wrong keying. That's a real security regression worth a dedicated guard.
+    it('MCP + consumer-specific rules resolve before the api catch-all', () => {
+      // Arrange — each non-session-keyed rule (mcp, webhooks, embed, inbound,
+      // contact) needs to resolve to its own keying strategy, NOT fall through
+      // to the catch-all's 'session-user' key. If any of these is accidentally
+      // moved below the catch-all, this test fails: the catch-all matches
+      // `/api/v1/anything` so it would silently swallow MCP / webhooks / embed /
+      // inbound / contact traffic with the wrong keying. That's a real security
+      // regression worth a dedicated guard.
       const cases: Array<[string, 'api-key' | 'embed-token' | 'ip']> = [
+        ['/api/v1/mcp', 'api-key'],
+        ['/api/v1/mcp/whatever', 'api-key'],
         ['/api/v1/webhooks/trigger', 'api-key'],
         ['/api/v1/embed/chat', 'embed-token'],
         ['/api/v1/inbound/slack/agent-slug', 'ip'],
@@ -219,19 +257,21 @@ describe('rate-limit-policy', () => {
       expect(RATE_LIMIT_POLICY[1].tier).toBe('admin');
       expect(RATE_LIMIT_POLICY[2].tier).toBe('auth'); // /api/v1/auth/
       expect(RATE_LIMIT_POLICY[3].tier).toBe('auth'); // /api/auth/ (better-auth routes)
+      // MCP transport — distinct interface, distinct tier, before the api consumer block.
+      expect(RATE_LIMIT_POLICY[4]).toMatchObject({ tier: 'mcp', key: 'api-key' }); // mcp
       // Consumer-specific rules — same tier ('api') but distinct keying.
-      expect(RATE_LIMIT_POLICY[4]).toMatchObject({ tier: 'api', key: 'api-key' }); // webhooks
-      expect(RATE_LIMIT_POLICY[5]).toMatchObject({ tier: 'api', key: 'embed-token' }); // embed
-      expect(RATE_LIMIT_POLICY[6]).toMatchObject({ tier: 'api', key: 'ip' }); // inbound
-      expect(RATE_LIMIT_POLICY[7]).toMatchObject({ tier: 'api', key: 'ip' }); // contact
+      expect(RATE_LIMIT_POLICY[5]).toMatchObject({ tier: 'api', key: 'api-key' }); // webhooks
+      expect(RATE_LIMIT_POLICY[6]).toMatchObject({ tier: 'api', key: 'embed-token' }); // embed
+      expect(RATE_LIMIT_POLICY[7]).toMatchObject({ tier: 'api', key: 'ip' }); // inbound
+      expect(RATE_LIMIT_POLICY[8]).toMatchObject({ tier: 'api', key: 'ip' }); // contact
       // Catch-all — must remain LAST so the consumer rules above it have a chance to match.
-      expect(RATE_LIMIT_POLICY[8]).toMatchObject({ tier: 'api', key: 'session-user' });
+      expect(RATE_LIMIT_POLICY[9]).toMatchObject({ tier: 'api', key: 'session-user' });
     });
 
-    it('has exactly 9 rules (catches unintended additions or deletions)', () => {
+    it('has exactly 10 rules (catches unintended additions or deletions)', () => {
       // A length change is a signal that the policy changed. This test surfaces
       // that signal without being prescriptive about what was added/removed.
-      expect(RATE_LIMIT_POLICY).toHaveLength(9);
+      expect(RATE_LIMIT_POLICY).toHaveLength(10);
     });
   });
 

@@ -60,28 +60,32 @@ Single source of truth. First match wins; rules are evaluated top to bottom.
 | 2   | `/api/v1/admin/`               | `admin`         | `session-user` | 30/min — core admin (users, logs, invitations, flags)  |
 | 3   | `/api/v1/auth/`                | `auth`          | `ip`           | 5/min — app-layer auth endpoints                       |
 | 4   | `/api/auth/`                   | `auth`          | `ip`           | 5/min — better-auth's own routes                       |
-| 5   | `/api/v1/webhooks/`            | `api`           | `api-key`      | 100/min keyed on `Authorization: Bearer <key>`         |
-| 6   | `/api/v1/embed/`               | `api`           | `embed-token`  | 100/min keyed on `X-Embed-Token` header + IP composite |
-| 7   | `/api/v1/inbound/`             | `api`           | `ip`           | 100/min — server-to-server (Slack, Postmark, etc.)     |
-| 8   | `/api/v1/contact`              | `api`           | `ip`           | 100/min — unauthenticated public submission            |
-| 9   | `/api/v1/` (catch-all)         | `api`           | `session-user` | 100/min — everything else                              |
+| 5   | `/api/v1/mcp/`                 | `mcp`           | `api-key`      | 300/min — LLM-agent transport keyed per api-key        |
+| 6   | `/api/v1/webhooks/`            | `api`           | `api-key`      | 100/min keyed on `Authorization: Bearer <key>`         |
+| 7   | `/api/v1/embed/`               | `api`           | `embed-token`  | 100/min keyed on `X-Embed-Token` header + IP composite |
+| 8   | `/api/v1/inbound/`             | `api`           | `ip`           | 100/min — server-to-server (Slack, Postmark, etc.)     |
+| 9   | `/api/v1/contact`              | `api`           | `ip`           | 100/min — unauthenticated public submission            |
+| 10  | `/api/v1/` (catch-all)         | `api`           | `session-user` | 100/min — everything else                              |
 
-**Order matters.** The orchestration rule (1) must come before the broader admin rule (2) — otherwise `/api/v1/admin/orchestration/agents` would match `/api/v1/admin/` first and land on the tighter 30/min admin tier. The consumer-specific rules (5–8) must come before the catch-all (9) — otherwise webhooks would key on session-user instead of api-key, and so on.
+**Order matters.** The orchestration rule (1) must come before the broader admin rule (2) — otherwise `/api/v1/admin/orchestration/agents` would match `/api/v1/admin/` first and land on the tighter 30/min admin tier. The MCP rule (5) and the consumer-specific rules (6–9) must come before the catch-all (10) — otherwise MCP would key on session-user (and fall back to IP, defeating the api-key keying), webhooks would key on session-user, and so on.
 
 Tests in `tests/unit/lib/security/rate-limit-policy.test.ts` lock the order in place.
 
 ## Section Tiers
 
-Four section tiers, each backed by a single limiter instance in [`RATE_LIMIT_TIERS`](../../lib/security/rate-limit.ts):
+Five section tiers, each backed by a single limiter instance in [`RATE_LIMIT_TIERS`](../../lib/security/rate-limit.ts):
 
 | Tier            | Cap     | Env override            | Limiter                     |
 | --------------- | ------- | ----------------------- | --------------------------- |
 | `admin`         | 30/min  | `RATE_LIMIT_ADMIN`      | `adminLimiter`              |
 | `orchestration` | 120/min | `RATE_LIMIT_ORCH_ADMIN` | `orchestrationAdminLimiter` |
 | `api`           | 100/min | `RATE_LIMIT_API`        | `apiLimiter`                |
+| `mcp`           | 300/min | `RATE_LIMIT_MCP`        | `mcpLimiter`                |
 | `auth`          | 5/min   | (none — security floor) | `authLimiter`               |
 
 Caps are per-window (1 minute) using the sliding-window algorithm from `lib/security/rate-limit.ts`. Bumps via env vars are intended for development; production should run on the defaults.
+
+**Why `mcp` is separate from `api`.** MCP is a distinct interface — server-to-server, always API-key-authenticated, much chattier per session than human-driven REST traffic (LLM agents iterate through tool calls inside a conversation). The 100/min `api` cap is too tight for legitimate agent workloads; the 300/min default leaves room for normal activity while still rate-limiting a runaway agent loop within ~5 seconds. Per-customer budgets are tunable separately via `McpRateLimiter` against the `apiKey.rateLimit` field; the section tier here is the coarse ceiling above that.
 
 ## Key Strategies
 
@@ -202,6 +206,7 @@ See [`tests/unit/lib/security/rate-limit-middleware.test.ts`](../../tests/unit/l
 | `RATE_LIMIT_ADMIN`      | Override the `admin` tier cap (per-minute)                     | `30`     |
 | `RATE_LIMIT_ORCH_ADMIN` | Override the `orchestration` tier cap (per-minute)             | `120`    |
 | `RATE_LIMIT_API`        | Override the `api` tier cap (per-minute)                       | `100`    |
+| `RATE_LIMIT_MCP`        | Override the `mcp` tier cap (per-minute)                       | `300`    |
 | `RATE_LIMIT_STORE`      | Backing store for the **async** limiter variants only          | `memory` |
 | `REDIS_URL`             | Redis connection string (required if `RATE_LIMIT_STORE=redis`) | —        |
 | `RATE_LIMIT_BYPASS`     | Test/dev escape hatch — `true` short-circuits the dispatcher   | unset    |
@@ -241,12 +246,13 @@ Three edits, in order:
 2. **Extend the registry**:
 
    ```typescript
-   export type RateLimitTier = 'admin' | 'orchestration' | 'api' | 'auth' | 'billing';
+   export type RateLimitTier = 'admin' | 'orchestration' | 'api' | 'mcp' | 'auth' | 'billing';
 
    export const RATE_LIMIT_TIERS: Record<RateLimitTier, RateLimiter> = {
      admin: adminLimiter,
      orchestration: orchestrationAdminLimiter,
      api: apiLimiter,
+     mcp: mcpLimiter,
      auth: authLimiter,
      billing: billingAdminLimiter,
    };

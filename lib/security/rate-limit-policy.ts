@@ -156,6 +156,21 @@ export const RATE_LIMIT_POLICY: readonly RateLimitRule[] = [
     skip: skipNonCredentialAuthRoutes,
   },
 
+  // ── MCP transport (LLM-agent interface) ──────────────────────────────────
+  // MCP is a distinct interface from the human-facing REST API: server-to-
+  // server, always API-key-authenticated, much chattier per session (agents
+  // iterate through tool calls inside a conversation). It gets its own tier
+  // (300/min by default — override with `RATE_LIMIT_MCP`) keyed by api-key
+  // so two customers sharing a NAT'd egress get independent buckets. The
+  // per-customer budget knob is `McpRateLimiter` inside the handler, sized
+  // from the `apiKey.rateLimit` field; this section tier is the coarse
+  // ceiling above it.
+  {
+    match: /^\/api\/v1\/mcp(\/|$)/,
+    tier: 'mcp',
+    key: 'api-key',
+  },
+
   // ── Consumer surfaces with non-session keying ────────────────────────────
   // These all use the `'api'` tier (100/min) for the section cap, but the
   // *keying* differs from the default `session-user` because the caller's
