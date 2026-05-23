@@ -309,6 +309,60 @@ describe('Webhook Subscription API', () => {
       expect(prisma.aiWebhookSubscription.create).not.toHaveBeenCalled();
     });
 
+    it('creates an email-channel subscription with emailAddress', async () => {
+      // Arrange
+      vi.mocked(prisma.aiWebhookSubscription.create).mockResolvedValue({
+        ...mockWebhook,
+        channel: 'email',
+        url: null,
+        secret: null,
+        emailAddress: 'alerts@example.com',
+      } as never);
+
+      // Act — no url/secret, just channel + emailAddress
+      const res = await POST(
+        makePostRequest({
+          channel: 'email',
+          emailAddress: 'alerts@example.com',
+          events: ['workflow_failed'],
+        })
+      );
+
+      // Assert
+      expect(res.status).toBe(201);
+      expect(prisma.aiWebhookSubscription.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            channel: 'email',
+            emailAddress: 'alerts@example.com',
+          }),
+        })
+      );
+    });
+
+    it('rejects an email-channel subscription with no emailAddress', async () => {
+      const res = await POST(
+        makePostRequest({
+          channel: 'email',
+          events: ['workflow_failed'],
+        })
+      );
+      expect(res.status).toBe(400);
+      expect(prisma.aiWebhookSubscription.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects an email-channel subscription with a malformed email', async () => {
+      const res = await POST(
+        makePostRequest({
+          channel: 'email',
+          emailAddress: 'not-an-email',
+          events: ['workflow_failed'],
+        })
+      );
+      expect(res.status).toBe(400);
+      expect(prisma.aiWebhookSubscription.create).not.toHaveBeenCalled();
+    });
+
     it('respects isActive=false when explicitly set', async () => {
       // Arrange
       vi.mocked(prisma.aiWebhookSubscription.create).mockResolvedValue({

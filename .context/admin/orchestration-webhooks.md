@@ -1,6 +1,23 @@
-# Webhook Management UI
+# Event Subscriptions UI
 
-Admin UI for managing webhook subscriptions. Full CRUD with delivery history, retry, and test ping.
+Admin UI for managing event subscriptions. Each subscription delivers
+matching events to **one** of two channels:
+
+- **Webhook** — HMAC-signed JSON POST to a URL you provide. Best for
+  programmatic receivers (your backend, Zapier / n8n, Slack's
+  incoming-webhook URL, etc.).
+- **Email** — formatted email via Resend, rendered from the same
+  payload a webhook receiver would have seen. Best for human
+  notifications.
+
+One subscription = one channel. Need both? Create two subscriptions.
+Both share the same retry policy, DLQ behaviour, and per-row audit
+trail (`AiWebhookDelivery`).
+
+Historically this surface was webhook-only — the model is still named
+`AiWebhookSubscription` and the routes are still under `/webhooks`
+for API compatibility. The `channel` column on the row discriminates
+which destination fields are used.
 
 **Route:** `/admin/orchestration/event-subscriptions` (page-level label is "Event Subscriptions" — the underlying mechanism is still webhooks)
 
@@ -76,6 +93,23 @@ Admin UI for managing webhook subscriptions. Full CRUD with delivery history, re
 - Status filter (all/delivered/pending/failed/exhausted)
 - Retry button for failed/exhausted deliveries
 - `lastError` column shows truncated error message for failed deliveries
+
+## Channel Behaviour
+
+| Aspect              | Webhook channel                          | Email channel                                                           |
+| ------------------- | ---------------------------------------- | ----------------------------------------------------------------------- |
+| Destination field   | `url` (validated by `isSafeProviderUrl`) | `emailAddress` (RFC-shape check)                                        |
+| Auth                | HMAC-SHA256 via `secret`                 | None — the channel is the auth                                          |
+| Payload             | JSON POST                                | React Email template (`emails/event-notification.tsx`)                  |
+| Retry semantics     | Per-subscription `maxAttempts` + DLQ     | Same (against Resend); Resend also retries on its side                  |
+| Audit row           | `AiWebhookDelivery`                      | `AiWebhookDelivery` (same table)                                        |
+| Config requirements | None                                     | `RESEND_API_KEY` + `EMAIL_FROM` must be set; otherwise marked exhausted |
+
+The generic email template renders the same `{ event, timestamp, data }`
+payload a webhook receiver would get — title from the event type, a
+key/value detail table for non-action fields, a `changes` block with
+from→to colouring, and Approve/Reject buttons when the payload
+includes `approveUrl` / `rejectUrl` (i.e. `approval_required`).
 
 ## API Endpoints
 

@@ -106,7 +106,11 @@ const workflowBackupSchema = z.object({
 });
 
 const webhookBackupSchema = z.object({
-  url: z.string(),
+  // `channel` defaults to `webhook` so backups written before the
+  // email-channel feature still round-trip cleanly.
+  channel: z.enum(['webhook', 'email']).default('webhook'),
+  url: z.string().nullable().optional(),
+  emailAddress: z.string().nullable().optional(),
   events: z.array(z.string()),
   description: z.string().nullable().optional(),
   secret: z.string().optional(), // excluded on export, optional on import

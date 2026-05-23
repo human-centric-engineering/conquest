@@ -74,7 +74,9 @@ export async function exportOrchestrationConfig(): Promise<BackupPayload> {
     }),
     prisma.aiWebhookSubscription.findMany({
       select: {
+        channel: true,
         url: true,
+        emailAddress: true,
         events: true,
         description: true,
         // Exclude secret — never export secrets
@@ -151,6 +153,15 @@ export async function exportOrchestrationConfig(): Promise<BackupPayload> {
     };
   });
 
+  // Narrow Prisma's `channel: string` to the literal union the backup
+  // schema expects. Rows with an unrecognised channel are coerced to
+  // `webhook` (matches the schema default) so a corrupted DB row can't
+  // make an export reject downstream.
+  const exportedWebhooks = webhooks.map((w) => ({
+    ...w,
+    channel: w.channel === 'email' ? ('email' as const) : ('webhook' as const),
+  }));
+
   return {
     schemaVersion: 2 as const,
     exportedAt: new Date().toISOString(),
@@ -158,7 +169,7 @@ export async function exportOrchestrationConfig(): Promise<BackupPayload> {
       agents: flattenedAgents,
       capabilities,
       workflows: flattenedWorkflows,
-      webhooks,
+      webhooks: exportedWebhooks,
       knowledgeTags,
       settings,
     },

@@ -3,17 +3,31 @@
 /**
  * WebhookForm
  *
- * Shared create / edit form for webhook subscriptions.
+ * Shared create / edit form for event subscriptions. The same row model
+ * carries either a webhook destination (URL + HMAC secret) or an email
+ * destination — the channel selector toggles which fields are required.
+ *
  * Follows the agent-form pattern: react-hook-form + zodResolver.
  */
 
 import { useState } from 'react';
-import { useForm } from 'react-hook-form';
+import { useForm, type Resolver } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { z } from 'zod';
-import { AlertCircle, Check, Copy, Eye, EyeOff, Loader2, Save, KeyRound } from 'lucide-react';
+import {
+  AlertCircle,
+  Check,
+  Copy,
+  Eye,
+  EyeOff,
+  Loader2,
+  Mail,
+  Save,
+  KeyRound,
+  Webhook,
+} from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { FieldHelp } from '@/components/ui/field-help';
@@ -33,8 +47,8 @@ import {
 
 // ─── Schema ────────────────────────────────────────────────────────────────
 
-const baseFields = {
-  url: z.string().url('Must be a valid URL').max(2000),
+const commonFields = {
+  channel: z.enum(['webhook', 'email']),
   events: z.array(z.string()).min(1, 'Select at least one event'),
   description: z.string().max(500).optional(),
   isActive: z.boolean(),
@@ -58,30 +72,78 @@ const baseFields = {
     ),
 };
 
-const createWebhookSchema = z
-  .object({
-    ...baseFields,
-    secret: z.string().min(16, 'Secret must be at least 16 characters').max(256),
-  })
-  .refine((data) => parseBackoffSeconds(data.retryBackoffSeconds).length >= data.maxAttempts - 1, {
-    message: 'Need at least (maxAttempts - 1) backoff values',
-    path: ['retryBackoffSeconds'],
-  });
+// The destination fields are always part of the form so React-Hook-Form's
+// register calls don't trip on a missing key when the user switches
+// channels. Per-channel requirements are enforced by `.refine` below.
+const destinationFields = {
+  url: z.string().max(2000).optional().or(z.literal('')),
+  secret: z.string().max(256).optional().or(z.literal('')),
+  emailAddress: z.string().max(320).optional().or(z.literal('')),
+};
 
-// In edit mode an empty secret means "keep the existing one" — onSubmit omits
-// the secret field from the PATCH body so it's never sent to the server.
-const editWebhookSchema = z
-  .object({
-    ...baseFields,
-    secret: z
-      .string()
-      .max(256)
-      .refine((v) => v === '' || v.length >= 16, 'Secret must be at least 16 characters'),
-  })
-  .refine((data) => parseBackoffSeconds(data.retryBackoffSeconds).length >= data.maxAttempts - 1, {
-    message: 'Need at least (maxAttempts - 1) backoff values',
-    path: ['retryBackoffSeconds'],
-  });
+function refineChannelFields<
+  T extends {
+    channel: 'webhook' | 'email';
+    url?: string;
+    secret?: string;
+    emailAddress?: string;
+    retryBackoffSeconds: string;
+    maxAttempts: number;
+  },
+>(schema: z.ZodType<T>, opts: { allowEmptySecret: boolean }): z.ZodType<T> {
+  return schema
+    .refine(
+      (data) => {
+        if (data.channel !== 'webhook') return true;
+        const url = data.url ?? '';
+        if (!url) return false;
+        try {
+          new URL(url);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      { message: 'Must be a valid URL', path: ['url'] }
+    )
+    .refine(
+      (data) => {
+        if (data.channel !== 'webhook') return true;
+        const secret = data.secret ?? '';
+        if (opts.allowEmptySecret && secret === '') return true;
+        return secret.length >= 16;
+      },
+      { message: 'Secret must be at least 16 characters', path: ['secret'] }
+    )
+    .refine(
+      (data) => {
+        if (data.channel !== 'email') return true;
+        const email = data.emailAddress ?? '';
+        // basic email check — server-side Zod uses z.string().email() which
+        // is stricter; this just catches the empty / clearly-wrong cases.
+        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+      },
+      { message: 'Must be a valid email address', path: ['emailAddress'] }
+    )
+    .refine(
+      (data) => parseBackoffSeconds(data.retryBackoffSeconds).length >= data.maxAttempts - 1,
+      {
+        message: 'Need at least (maxAttempts - 1) backoff values',
+        path: ['retryBackoffSeconds'],
+      }
+    );
+}
+
+const createWebhookSchema = refineChannelFields(
+  z.object({ ...commonFields, ...destinationFields }),
+  { allowEmptySecret: false }
+);
+
+// In edit mode an empty secret means "keep the existing one" — onSubmit
+// omits the secret field from the PATCH body so it's never sent.
+const editWebhookSchema = refineChannelFields(z.object({ ...commonFields, ...destinationFields }), {
+  allowEmptySecret: true,
+});
 
 type WebhookFormData = z.infer<typeof createWebhookSchema>;
 
@@ -98,7 +160,9 @@ export interface WebhookFormProps {
   mode: 'create' | 'edit';
   webhook?: {
     id: string;
-    url: string;
+    channel: 'webhook' | 'email';
+    url: string | null;
+    emailAddress: string | null;
     events: string[];
     isActive: boolean;
     description: string | null;
@@ -140,10 +204,18 @@ export function WebhookForm({ mode, webhook }: WebhookFormProps) {
     watch,
     formState: { errors },
   } = useForm<WebhookFormData>({
-    resolver: zodResolver(isEdit ? editWebhookSchema : createWebhookSchema),
+    // zodResolver's typing trips on our refined union (input is `unknown`).
+    // The disable-comment narrows the eslint scope to the cast itself —
+    // runtime behaviour is unchanged; the schema still drives validation.
+    resolver: zodResolver(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (isEdit ? editWebhookSchema : createWebhookSchema) as any
+    ) as Resolver<WebhookFormData>,
     defaultValues: {
+      channel: webhook?.channel ?? 'webhook',
       url: webhook?.url ?? '',
       secret: '',
+      emailAddress: webhook?.emailAddress ?? '',
       events: webhook?.events ?? [],
       description: webhook?.description ?? '',
       isActive: webhook?.isActive ?? true,
@@ -152,6 +224,7 @@ export function WebhookForm({ mode, webhook }: WebhookFormProps) {
     },
   });
 
+  const currentChannel = watch('channel');
   const currentEvents = watch('events');
   const currentIsActive = watch('isActive');
   const currentSecret = watch('secret');
@@ -189,13 +262,29 @@ export function WebhookForm({ mode, webhook }: WebhookFormProps) {
     setError(null);
     try {
       // Convert the seconds-string the form uses into the ms-array the API expects.
-      const { retryBackoffSeconds, ...rest } = data;
-      const retryBackoffMs = parseBackoffSeconds(retryBackoffSeconds).map((s) => s * 1000);
-      const payload: Record<string, unknown> = { ...rest, retryBackoffMs };
+      const retryBackoffMs = parseBackoffSeconds(data.retryBackoffSeconds).map((s) => s * 1000);
+
+      // Build a clean payload — only the destination fields that belong
+      // to the selected channel should reach the API. The form keeps the
+      // "other" channel's fields populated so a flip-back doesn't lose
+      // typed input, but we don't want to ship a stale URL when the user
+      // chose email (or vice versa).
+      const payload: Record<string, unknown> = {
+        channel: data.channel,
+        events: data.events,
+        description: data.description,
+        isActive: data.isActive,
+        maxAttempts: data.maxAttempts,
+        retryBackoffMs,
+      };
+      if (data.channel === 'webhook') {
+        payload.url = data.url;
+        if (data.secret) payload.secret = data.secret;
+      } else {
+        payload.emailAddress = data.emailAddress;
+      }
 
       if (isEdit && webhook) {
-        // Only send secret if the user typed a new one
-        if (!data.secret) delete payload.secret;
         await apiClient.patch(API.ADMIN.ORCHESTRATION.webhookById(webhook.id), {
           body: payload,
         });
@@ -210,7 +299,7 @@ export function WebhookForm({ mode, webhook }: WebhookFormProps) {
       setError(
         err instanceof APIClientError
           ? err.message
-          : 'Could not save webhook. Try again in a moment.'
+          : 'Could not save subscription. Try again in a moment.'
       );
     } finally {
       setSubmitting(false);
@@ -251,107 +340,189 @@ export function WebhookForm({ mode, webhook }: WebhookFormProps) {
         </div>
       )}
 
-      {/* URL */}
+      {/* Channel selector */}
       <div className="grid gap-2">
-        <Label htmlFor="url">
-          Endpoint URL{' '}
-          <FieldHelp title="Where to send events">
-            The URL of your external system that should receive event notifications (e.g. a Slack
-            integration, your backend API, or a service like Zapier). Sunrise will send a POST
-            request to this address each time a selected event fires. Must be publicly reachable
-            over HTTP or HTTPS — private IPs, localhost, and cloud metadata endpoints are blocked
-            for security.
+        <Label>
+          Delivery channel{' '}
+          <FieldHelp title="How notifications are delivered">
+            <p>Choose how Sunrise should send each matching event:</p>
+            <ul className="mt-2 list-disc space-y-1 pl-4">
+              <li>
+                <span className="font-medium">Webhook</span> — POSTs a signed JSON payload to a URL
+                you provide. Best for integrations with your own backend, Zapier, n8n, Slack&apos;s
+                incoming-webhook URL, etc.
+              </li>
+              <li>
+                <span className="font-medium">Email</span> — sends a formatted email to the address
+                you provide. Best for human notifications.
+              </li>
+            </ul>
+            <p className="mt-2 text-xs">
+              One subscription = one channel. Need both? Create two subscriptions.
+            </p>
           </FieldHelp>
         </Label>
-        <Input
-          id="url"
-          type="url"
-          {...register('url')}
-          placeholder="https://example.com/webhooks/sunrise"
-          className="font-mono"
-        />
-        {errors.url && <p className="text-destructive text-xs">{errors.url.message}</p>}
-        <p className="text-muted-foreground text-xs">
-          Private IPs, localhost, and cloud metadata endpoints are blocked.
-        </p>
+        <div className="grid grid-cols-2 gap-2">
+          {(
+            [
+              { value: 'webhook', label: 'Webhook', icon: Webhook },
+              { value: 'email', label: 'Email', icon: Mail },
+            ] as const
+          ).map(({ value, label, icon: Icon }) => {
+            const selected = currentChannel === value;
+            return (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setValue('channel', value, { shouldValidate: true })}
+                className={`flex items-center gap-2 rounded-md border p-3 text-sm transition-colors ${
+                  selected ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/40'
+                }`}
+              >
+                <Icon
+                  className={`h-4 w-4 ${selected ? 'text-primary' : 'text-muted-foreground'}`}
+                />
+                <span className={selected ? 'font-medium' : ''}>{label}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
-      {/* Secret */}
-      <div className="grid gap-2">
-        <Label htmlFor="secret">
-          Signing secret{' '}
-          <FieldHelp title="How signing works">
-            A shared secret between Sunrise and your endpoint, used to prove each delivery is
-            genuine. Sunrise hashes every request body with this secret and includes the result in
-            the <code>X-Webhook-Signature</code> header. Your endpoint re-computes the same hash —
-            if it matches, the request definitely came from Sunrise and hasn&apos;t been tampered
-            with. Must be at least 16 characters. Click the key icon to generate one automatically.
-          </FieldHelp>
-        </Label>
-        <div className="flex gap-2">
+      {/* Webhook-channel fields */}
+      {currentChannel === 'webhook' && (
+        <>
+          <div className="grid gap-2">
+            <Label htmlFor="url">
+              Endpoint URL{' '}
+              <FieldHelp title="Where to send events">
+                The URL of your external system that should receive event notifications (e.g. a
+                Slack integration, your backend API, or a service like Zapier). Sunrise will send a
+                POST request to this address each time a selected event fires. Must be publicly
+                reachable over HTTP or HTTPS — private IPs, localhost, and cloud metadata endpoints
+                are blocked for security.
+              </FieldHelp>
+            </Label>
+            <Input
+              id="url"
+              type="url"
+              {...register('url')}
+              placeholder="https://example.com/webhooks/sunrise"
+              className="font-mono"
+            />
+            {errors.url && <p className="text-destructive text-xs">{errors.url.message}</p>}
+            <p className="text-muted-foreground text-xs">
+              Private IPs, localhost, and cloud metadata endpoints are blocked.
+            </p>
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor="secret">
+              Signing secret{' '}
+              <FieldHelp title="How signing works">
+                A shared secret between Sunrise and your endpoint, used to prove each delivery is
+                genuine. Sunrise hashes every request body with this secret and includes the result
+                in the <code>X-Webhook-Signature</code> header. Your endpoint re-computes the same
+                hash — if it matches, the request definitely came from Sunrise and hasn&apos;t been
+                tampered with. Must be at least 16 characters. Click the key icon to generate one
+                automatically.
+              </FieldHelp>
+            </Label>
+            <div className="flex gap-2">
+              <Input
+                id="secret"
+                type={secretRevealed ? 'text' : 'password'}
+                {...register('secret')}
+                placeholder={
+                  isEdit ? 'Leave blank to keep current secret' : 'Enter or generate a secret'
+                }
+                className="font-mono"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                disabled={!hasSecretValue}
+                onClick={() => setSecretRevealed((v) => !v)}
+                title={secretRevealed ? 'Hide secret' : 'Reveal secret'}
+                aria-label={secretRevealed ? 'Hide secret' : 'Reveal secret'}
+              >
+                {secretRevealed ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={!hasSecretValue}
+                onClick={() => void copySecret()}
+                title="Copy secret to clipboard"
+                aria-label="Copy secret to clipboard"
+              >
+                {secretCopied ? (
+                  <Check className="h-4 w-4 text-green-600 dark:text-green-400" />
+                ) : (
+                  <Copy className="h-4 w-4" />
+                )}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setValue('secret', generateSecret(), { shouldValidate: true });
+                  setSecretRevealed(true);
+                }}
+                title="Generate a random secret"
+                aria-label="Generate a random secret"
+              >
+                <KeyRound className="h-4 w-4" />
+              </Button>
+            </div>
+            {hasSecretValue && (
+              <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-200">
+                Copy this secret now — Sunrise won&apos;t display it again after you save. Paste it
+                into your receiver so it can verify the <code>X-Webhook-Signature</code> header.
+              </p>
+            )}
+            {secretCopyError && <p className="text-destructive text-xs">{secretCopyError}</p>}
+            {errors.secret && <p className="text-destructive text-xs">{errors.secret.message}</p>}
+          </div>
+        </>
+      )}
+
+      {/* Email-channel fields */}
+      {currentChannel === 'email' && (
+        <div className="grid gap-2">
+          <Label htmlFor="emailAddress">
+            Email address{' '}
+            <FieldHelp title="Where to send the email">
+              The destination email address for event notifications. Sunrise renders a formatted
+              email with the same data a webhook receiver would get and sends it via the configured
+              email provider. Best for human notifications — alerts to an on-call team, copies to a
+              shared inbox, etc.
+            </FieldHelp>
+          </Label>
           <Input
-            id="secret"
-            type={secretRevealed ? 'text' : 'password'}
-            {...register('secret')}
-            placeholder={
-              isEdit ? 'Leave blank to keep current secret' : 'Enter or generate a secret'
-            }
+            id="emailAddress"
+            type="email"
+            {...register('emailAddress')}
+            placeholder="alerts@example.com"
             className="font-mono"
           />
-          <Button
-            type="button"
-            variant="outline"
-            disabled={!hasSecretValue}
-            onClick={() => setSecretRevealed((v) => !v)}
-            title={secretRevealed ? 'Hide secret' : 'Reveal secret'}
-            aria-label={secretRevealed ? 'Hide secret' : 'Reveal secret'}
-          >
-            {secretRevealed ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={!hasSecretValue}
-            onClick={() => void copySecret()}
-            title="Copy secret to clipboard"
-            aria-label="Copy secret to clipboard"
-          >
-            {secretCopied ? (
-              <Check className="h-4 w-4 text-green-600 dark:text-green-400" />
-            ) : (
-              <Copy className="h-4 w-4" />
-            )}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => {
-              setValue('secret', generateSecret(), { shouldValidate: true });
-              setSecretRevealed(true);
-            }}
-            title="Generate a random secret"
-            aria-label="Generate a random secret"
-          >
-            <KeyRound className="h-4 w-4" />
-          </Button>
-        </div>
-        {hasSecretValue && (
-          <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-200">
-            Copy this secret now — Sunrise won&apos;t display it again after you save. Paste it into
-            your receiver so it can verify the <code>X-Webhook-Signature</code> header.
+          {errors.emailAddress && (
+            <p className="text-destructive text-xs">{errors.emailAddress.message}</p>
+          )}
+          <p className="text-muted-foreground text-xs">
+            Requires <code>RESEND_API_KEY</code> and <code>EMAIL_FROM</code> to be configured on the
+            server.
           </p>
-        )}
-        {secretCopyError && <p className="text-destructive text-xs">{secretCopyError}</p>}
-        {errors.secret && <p className="text-destructive text-xs">{errors.secret.message}</p>}
-      </div>
+        </div>
+      )}
 
       {/* Description */}
       <div className="grid gap-2">
         <Label htmlFor="description">
           Description{' '}
           <FieldHelp title="Optional note">
-            A short note to help you remember what this webhook is for — e.g. &ldquo;Slack budget
-            alerts channel&rdquo; or &ldquo;PagerDuty circuit breaker&rdquo;.
+            A short note to help you remember what this subscription is for — e.g. &ldquo;Slack
+            budget alerts channel&rdquo; or &ldquo;On-call email&rdquo;.
           </FieldHelp>
         </Label>
         <Textarea id="description" rows={2} {...register('description')} placeholder="Optional" />
@@ -361,31 +532,26 @@ export function WebhookForm({ mode, webhook }: WebhookFormProps) {
       <div className="grid gap-2">
         <Label>
           Events{' '}
-          <FieldHelp title="Which events trigger this webhook" contentClassName="w-96">
+          <FieldHelp title="Which events trigger this subscription" contentClassName="w-96">
             <p>
-              Pick the events you care about. Each time one fires, Sunrise sends a POST with the
-              event type, timestamp, and relevant data to your endpoint.
+              Pick the events you care about. Each time one fires, Sunrise sends a notification via
+              the selected channel.
             </p>
             <p className="text-foreground mt-2 font-medium">Example use cases</p>
             <ul className="mt-1 list-disc space-y-1 pl-4">
               <li>
-                <span className="font-medium">Budget Exceeded</span> → post to a Slack channel so
-                your team knows an agent hit its spending limit
+                <span className="font-medium">Budget Exceeded</span> → email the finance owner so
+                they know an agent hit its spending limit
               </li>
               <li>
-                <span className="font-medium">Approval Required</span> → create a support ticket in
-                Zendesk or JIRA when an agent needs human approval
+                <span className="font-medium">Approval Required</span> → webhook to JIRA or Zendesk
+                to create a ticket
               </li>
               <li>
-                <span className="font-medium">Workflow Failed</span> → trigger a PagerDuty alert so
+                <span className="font-medium">Workflow Failed</span> → webhook to PagerDuty so
                 on-call engineers investigate
               </li>
             </ul>
-            <p className="text-muted-foreground mt-2 text-xs">
-              Tip: to send email, SMS, or WhatsApp notifications, point the webhook at an automation
-              platform (Zapier, Make, n8n) or a service like SendGrid/Twilio that accepts incoming
-              webhooks and routes to those channels.
-            </p>
           </FieldHelp>
         </Label>
         <div className="grid grid-cols-2 gap-2 rounded-md border p-3">
@@ -425,6 +591,13 @@ export function WebhookForm({ mode, webhook }: WebhookFormProps) {
           <p className="text-muted-foreground text-xs">
             How Sunrise handles delivery failures before giving up and moving the delivery into the
             Dead Letter Queue.
+            {currentChannel === 'email' && (
+              <>
+                {' '}
+                For email subscriptions this controls how often Sunrise retries against its own
+                provider; the email provider also handles its own retry semantics out-of-band.
+              </>
+            )}
           </p>
         </div>
 
@@ -478,7 +651,7 @@ export function WebhookForm({ mode, webhook }: WebhookFormProps) {
         <div className="space-y-0.5">
           <Label htmlFor="isActive">Active</Label>
           <p className="text-muted-foreground text-sm">
-            Inactive webhooks stop receiving deliveries but keep their configuration.
+            Inactive subscriptions stop receiving deliveries but keep their configuration.
           </p>
         </div>
         <Switch

@@ -29,7 +29,20 @@ vi.mock('@/lib/logging', () => ({
     warn: vi.fn(),
     error: vi.fn(),
     info: vi.fn(),
+    debug: vi.fn(),
   },
+}));
+
+// Email-channel delivery routes through Resend. Stub the client + the
+// React Email render so dispatcher tests stay hermetic.
+const mockResendSend = vi.fn();
+vi.mock('@/lib/email/client', () => ({
+  getResendClient: vi.fn(() => ({ emails: { send: mockResendSend } })),
+  getDefaultSender: vi.fn(() => 'Sunrise <noreply@example.com>'),
+  isEmailEnabled: vi.fn(() => true),
+}));
+vi.mock('@react-email/render', () => ({
+  render: vi.fn().mockResolvedValue('<html>rendered</html>'),
 }));
 
 import { prisma } from '@/lib/db/client';
@@ -48,8 +61,10 @@ vi.stubGlobal('fetch', mockFetch);
 function makeSub(overrides: Record<string, unknown> = {}) {
   return {
     id: 'sub-1',
+    channel: 'webhook',
     url: 'https://example.com/webhook',
     secret: 'test-secret-key-1234567890',
+    emailAddress: null,
     events: ['budget_exceeded', 'workflow_failed'],
     isActive: true,
     description: null,
@@ -60,6 +75,17 @@ function makeSub(overrides: Record<string, unknown> = {}) {
     updatedAt: new Date(),
     ...overrides,
   };
+}
+
+function makeEmailSub(overrides: Record<string, unknown> = {}) {
+  return makeSub({
+    id: 'sub-email',
+    channel: 'email',
+    url: null,
+    secret: null,
+    emailAddress: 'alerts@example.com',
+    ...overrides,
+  });
 }
 
 function makeDelivery(overrides: Record<string, unknown> = {}) {
@@ -679,5 +705,85 @@ describe('scheduleRetry (in-process timer-based retry)', () => {
       'Webhook scheduled retry error',
       expect.objectContaining({ error: 'DB connection lost' })
     );
+  });
+});
+
+// ─── Email-channel delivery ─────────────────────────────────────────────────
+
+describe('email-channel delivery', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(prisma.aiWebhookDelivery.create).mockResolvedValue(makeDelivery() as never);
+    vi.mocked(prisma.aiWebhookDelivery.update).mockResolvedValue(makeDelivery() as never);
+    vi.mocked(prisma.aiWebhookDelivery.findUnique).mockResolvedValue(makeDelivery() as never);
+    mockResendSend.mockResolvedValue({ data: { id: 'resend_msg_id' }, error: null });
+  });
+
+  it('routes email-channel subscriptions to Resend, not fetch', async () => {
+    vi.mocked(prisma.aiWebhookSubscription.findMany).mockResolvedValue([makeEmailSub()] as never);
+
+    await dispatchWebhookEvent('agent_updated', { agentName: 'Support Bot' });
+
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockResendSend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        from: 'Sunrise <noreply@example.com>',
+        to: 'alerts@example.com',
+        // Subject is built from the friendly event title + an identifier
+        // in the payload — "Support Bot" is the agentName here.
+        subject: expect.stringContaining('Agent updated'),
+        html: expect.stringContaining('rendered'),
+      })
+    );
+  });
+
+  it('marks email delivery as delivered when Resend returns no error', async () => {
+    vi.mocked(prisma.aiWebhookSubscription.findMany).mockResolvedValue([makeEmailSub()] as never);
+
+    await dispatchWebhookEvent('workflow_failed', { error: 'step exploded' });
+
+    expect(prisma.aiWebhookDelivery.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'delivered',
+          lastError: null,
+        }),
+      })
+    );
+  });
+
+  it('marks email delivery as failed when Resend returns an error', async () => {
+    vi.mocked(prisma.aiWebhookSubscription.findMany).mockResolvedValue([makeEmailSub()] as never);
+    mockResendSend.mockResolvedValue({ data: null, error: { message: 'Invalid recipient' } });
+
+    await dispatchWebhookEvent('workflow_failed', { error: 'step exploded' });
+
+    // First update from `create` sets status pending; second update flips
+    // to failed once the Resend error returns.
+    const failUpdate = vi
+      .mocked(prisma.aiWebhookDelivery.update)
+      .mock.calls.find((c) => (c[0]?.data as Record<string, unknown>)?.status === 'failed');
+    expect(failUpdate).toBeDefined();
+    expect((failUpdate?.[0]?.data as Record<string, unknown>).lastError).toBe('Invalid recipient');
+  });
+
+  it('marks email exhausted when email is not configured (RESEND_API_KEY missing)', async () => {
+    const { isEmailEnabled } = await import('@/lib/email/client');
+    vi.mocked(isEmailEnabled).mockReturnValueOnce(false);
+    vi.mocked(prisma.aiWebhookSubscription.findMany).mockResolvedValue([makeEmailSub()] as never);
+
+    await dispatchWebhookEvent('workflow_failed', { error: 'step exploded' });
+
+    // The "email not configured" branch marks the row exhausted directly —
+    // no retry would help against a permanently-broken config.
+    expect(prisma.aiWebhookDelivery.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'exhausted',
+          lastError: expect.stringContaining('Email is not configured'),
+        }),
+      })
+    );
+    expect(mockResendSend).not.toHaveBeenCalled();
   });
 });

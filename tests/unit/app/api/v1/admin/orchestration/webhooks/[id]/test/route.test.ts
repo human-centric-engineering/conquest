@@ -81,8 +81,10 @@ const WEBHOOK_SECRET = 'test-webhook-secret-key';
 function makeWebhook(overrides: Record<string, unknown> = {}) {
   return {
     id: WEBHOOK_ID,
+    channel: 'webhook',
     url: WEBHOOK_URL,
     secret: WEBHOOK_SECRET,
+    emailAddress: null,
     createdBy: ADMIN_ID,
     events: ['execution_completed'],
     isActive: true,

@@ -1263,11 +1263,19 @@ Paginated list of the caller's webhook subscriptions. Query: `page`, `limit`, `i
 
 ### `POST /webhooks`
 
-Create a webhook subscription. Body: `{ url: string, secret: string, events: string[], description?: string, isActive?: boolean, maxAttempts?: number, retryBackoffMs?: number[] }`. Secret is required (min 16 chars). `maxAttempts` 1–10 (default 3) and `retryBackoffMs` (each entry 1s–24h, length ≥ `maxAttempts - 1`) configure per-subscription retry behaviour. Returns `201` with the created subscription (secret is never returned in responses).
+Create an event subscription. Channel-discriminated body:
+
+- **Webhook channel** (default if `channel` is omitted):
+  `{ channel?: "webhook", url: string, secret: string, events: string[], description?, isActive?, maxAttempts?, retryBackoffMs? }`.
+  Secret is required (min 16 chars).
+- **Email channel**:
+  `{ channel: "email", emailAddress: string, events: string[], description?, isActive?, maxAttempts?, retryBackoffMs? }`.
+
+`maxAttempts` 1–10 (default 3) and `retryBackoffMs` (each entry 1s–24h, length ≥ `maxAttempts - 1`) configure per-subscription retry behaviour for either channel. Returns `201` with the created subscription (secret is never returned in responses).
 
 ### `GET / PATCH / DELETE /webhooks/:id`
 
-Standard CRUD for a single webhook subscription. Scoped to `session.user.id` — cross-user returns 404. `PATCH` body: `{ url?, secret?, events?, description?, isActive?, maxAttempts?, retryBackoffMs? }`. `DELETE` is a hard delete.
+Standard CRUD for a single event subscription. Scoped to `session.user.id` — cross-user returns 404. `PATCH` body: `{ channel?, url?, secret?, emailAddress?, events?, description?, isActive?, maxAttempts?, retryBackoffMs? }`. Channel coherence is enforced: if the patch flips the row's channel, the destination field for the new channel must be present (either in the patch or already on the row). `DELETE` is a hard delete.
 
 ### `DELETE /webhooks/deliveries/:id`
 

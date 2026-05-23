@@ -23,7 +23,9 @@ import { logAdminAction, computeChanges } from '@/lib/orchestration/audit/admin-
 
 const SAFE_SELECT = {
   id: true,
+  channel: true,
   url: true,
+  emailAddress: true,
   events: true,
   isActive: true,
   description: true,
@@ -63,6 +65,33 @@ export const PATCH = withAdminAuth<{ id: string }>(async (request, session, { pa
 
   const body = await validateRequestBody(request, updateWebhookSchema);
 
+  // The Zod union allows any subset of channel-specific fields on PATCH.
+  // Coherence check: if the patch flips the row's channel, the new
+  // channel's destination must be present (either in the patch or
+  // already on the row).
+  const nextChannel = body.channel ?? existing.channel;
+  if (nextChannel === 'webhook') {
+    const nextUrl = 'url' in body ? body.url : existing.url;
+    if (!nextUrl) {
+      throw new ValidationError('Webhook channel requires a url', { url: ['url is required'] });
+    }
+    // Secret is allowed to remain unchanged on PATCH (existing flow:
+    // empty `secret` = keep current). Only enforce presence on a fresh
+    // channel switch from email → webhook where no secret was ever set.
+    if (existing.channel !== 'webhook' && !('secret' in body)) {
+      throw new ValidationError('Switching to webhook channel requires a secret', {
+        secret: ['secret is required when changing channel to webhook'],
+      });
+    }
+  } else if (nextChannel === 'email') {
+    const nextEmail = 'emailAddress' in body ? body.emailAddress : existing.emailAddress;
+    if (!nextEmail) {
+      throw new ValidationError('Email channel requires an emailAddress', {
+        emailAddress: ['emailAddress is required'],
+      });
+    }
+  }
+
   const webhook = await prisma.aiWebhookSubscription.update({
     where: { id: parsed.data },
     data: body,
@@ -79,7 +108,7 @@ export const PATCH = withAdminAuth<{ id: string }>(async (request, session, { pa
     action: 'webhook_subscription.update',
     entityType: 'webhook_subscription',
     entityId: parsed.data,
-    entityName: webhook.url,
+    entityName: (webhook.channel === 'webhook' ? webhook.url : webhook.emailAddress) ?? webhook.id,
     changes: computeChanges(
       existing as unknown as Record<string, unknown>,
       webhook as unknown as Record<string, unknown>
@@ -114,7 +143,8 @@ export const DELETE = withAdminAuth<{ id: string }>(async (request, session, { p
     action: 'webhook_subscription.delete',
     entityType: 'webhook_subscription',
     entityId: parsed.data,
-    entityName: existing.url,
+    entityName:
+      (existing.channel === 'webhook' ? existing.url : existing.emailAddress) ?? parsed.data,
     clientIp: getClientIP(request),
   });
 
