@@ -31,6 +31,29 @@ vi.mock('@/lib/api/endpoints', () => ({
   },
 }));
 
+// DatePicker → plain native input so existing change-event drivers still work
+vi.mock('@/components/ui/date-picker', () => ({
+  DatePicker: ({
+    id,
+    value,
+    onChange,
+    className,
+  }: {
+    id?: string;
+    value: string;
+    onChange: (value: string) => void;
+    className?: string;
+  }) => (
+    <input
+      id={id}
+      type="date"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className={className}
+    />
+  ),
+}));
+
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
 function makeEntry(overrides: Record<string, unknown> = {}) {
