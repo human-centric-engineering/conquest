@@ -313,6 +313,9 @@ export function WebhookForm({ mode, webhook }: WebhookFormProps) {
   async function loadWorkflowOptions(query: string): Promise<MultiSelectOption[]> {
     const url = new URL(API.ADMIN.ORCHESTRATION.WORKFLOWS, window.location.origin);
     url.searchParams.set('limit', '50');
+    // Hide templates — they aren't instantiated runtime entities, so they
+    // never appear in event payloads and scoping a sub to one is a no-op.
+    url.searchParams.set('isTemplate', 'false');
     if (query.trim()) url.searchParams.set('q', query.trim());
     try {
       const workflows = await apiClient.get<Array<{ id: string; name: string; slug: string }>>(
