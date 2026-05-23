@@ -17,8 +17,11 @@
  */
 
 import { createHmac } from 'crypto';
+import { render } from '@react-email/render';
 import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
+import { getResendClient, getDefaultSender, isEmailEnabled } from '@/lib/email/client';
+import EventNotification from '@/emails/event-notification';
 
 const DISPATCH_TIMEOUT_MS = 5000;
 
@@ -43,6 +46,21 @@ interface RetryPolicy {
   retryBackoffMs: number[];
 }
 
+/**
+ * Subset of `AiWebhookSubscription` that the dispatcher actually reads.
+ * Lets callers pass a Prisma row or a hand-rolled fixture without
+ * coupling to the full Prisma type.
+ */
+interface SubscriptionLike {
+  id: string;
+  channel: string;
+  url: string | null;
+  secret: string | null;
+  emailAddress: string | null;
+  maxAttempts?: number | null;
+  retryBackoffMs?: number[] | null;
+}
+
 function resolveRetryPolicy(sub: {
   maxAttempts?: number | null;
   retryBackoffMs?: number[] | null;
@@ -54,6 +72,32 @@ function resolveRetryPolicy(sub: {
         ? sub.retryBackoffMs
         : DEFAULT_RETRY_BACKOFF_MS,
   };
+}
+
+/**
+ * Best-effort subject line for an email notification. Uses the friendly
+ * event title plus any human-readable identifier in the payload so the
+ * recipient's inbox shows something actionable.
+ */
+function buildEmailSubject(eventType: string, data: Record<string, unknown>): string {
+  const titles: Record<string, string> = {
+    budget_exceeded: 'Budget exceeded',
+    workflow_failed: 'Workflow failed',
+    approval_required: 'Approval required',
+    circuit_breaker_opened: 'Provider circuit breaker opened',
+    agent_updated: 'Agent updated',
+    execution_crashed: 'Workflow execution crashed',
+  };
+  const base = titles[eventType] ?? `Sunrise event: ${eventType}`;
+  const subject =
+    typeof data.agentName === 'string'
+      ? `${base} · ${data.agentName}`
+      : typeof data.workflowName === 'string'
+        ? `${base} · ${data.workflowName}`
+        : typeof data.providerSlug === 'string'
+          ? `${base} · ${data.providerSlug}`
+          : base;
+  return `[Sunrise] ${subject}`;
 }
 
 /**
@@ -97,7 +141,7 @@ export async function dispatchWebhookEvent(
           },
         });
 
-        await attemptDelivery(delivery.id, sub.url, sub.secret, body, resolveRetryPolicy(sub));
+        await attemptDelivery(delivery.id, sub, body, resolveRetryPolicy(sub));
       })
     );
   } catch (err) {
@@ -149,8 +193,7 @@ export async function retryDelivery(
 
   const attempt = attemptDelivery(
     deliveryId,
-    delivery.subscription.url,
-    delivery.subscription.secret,
+    delivery.subscription,
     body,
     resolveRetryPolicy(delivery.subscription)
   );
@@ -203,8 +246,7 @@ export async function processPendingRetries(): Promise<number> {
 
       await attemptDelivery(
         delivery.id,
-        delivery.subscription.url,
-        delivery.subscription.secret,
+        delivery.subscription,
         body,
         resolveRetryPolicy(delivery.subscription)
       );
@@ -218,82 +260,45 @@ export async function processPendingRetries(): Promise<number> {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Outcome shape returned by each per-channel adapter.
+ *
+ * `terminal: true` on a failure means the row should be marked exhausted
+ * immediately regardless of attempt count — config-level failures like a
+ * missing HMAC secret or unconfigured Resend can't be fixed by retrying.
+ * The adapters never write the audit row themselves; `attemptDelivery`
+ * owns every write so the state machine has a single source of truth.
+ */
+type DeliveryOutcome =
+  | { delivered: true; statusCode?: number }
+  | { delivered: false; error: string; statusCode?: number; terminal?: boolean };
+
 async function attemptDelivery(
   deliveryId: string,
-  url: string,
-  secret: string,
+  sub: SubscriptionLike,
   body: string,
   policy: RetryPolicy
 ): Promise<void> {
   const now = new Date();
-  let statusCode: number | undefined;
-  let error: string | undefined;
 
-  // Refuse to sign with an empty HMAC key: signatures would be forgeable by anyone who knows the URL.
-  // Mark the delivery exhausted so it does not get retried until an admin sets a secret.
-  if (!secret) {
+  const outcome: DeliveryOutcome =
+    sub.channel === 'email'
+      ? await attemptEmailDelivery(sub, body)
+      : await attemptWebhookDelivery(sub, body);
+
+  if (outcome.delivered) {
     await prisma.aiWebhookDelivery.update({
       where: { id: deliveryId },
       data: {
-        status: 'exhausted',
+        status: 'delivered',
         attempts: { increment: 1 },
         lastAttemptAt: now,
-        lastError: 'Subscription has no signing secret',
+        lastResponseCode: outcome.statusCode ?? null,
+        lastError: null,
         nextRetryAt: null,
       },
     });
-    logger.warn('Webhook delivery skipped: subscription has no signing secret', {
-      deliveryId,
-      url,
-    });
     return;
-  }
-
-  try {
-    const signature = createHmac('sha256', secret).update(body).digest('hex');
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), DISPATCH_TIMEOUT_MS);
-
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Webhook-Signature': signature,
-          'X-Webhook-Event': (() => {
-            const parsed = toJsonRecord(JSON.parse(body));
-            const event = parsed.event;
-            return typeof event === 'string' ? event : '';
-          })(),
-        },
-        body,
-        signal: controller.signal,
-      });
-
-      statusCode = res.status;
-
-      if (res.ok) {
-        await prisma.aiWebhookDelivery.update({
-          where: { id: deliveryId },
-          data: {
-            status: 'delivered',
-            attempts: { increment: 1 },
-            lastAttemptAt: now,
-            lastResponseCode: statusCode,
-            lastError: null,
-            nextRetryAt: null,
-          },
-        });
-        return;
-      }
-
-      error = `HTTP ${res.status}`;
-    } finally {
-      clearTimeout(timeout);
-    }
-  } catch (err) {
-    error = err instanceof Error ? err.message : String(err);
   }
 
   // Delivery failed — update record and maybe schedule retry
@@ -304,7 +309,8 @@ async function attemptDelivery(
   if (!delivery) return;
 
   const newAttempts = delivery.attempts + 1;
-  const exhausted = newAttempts >= policy.maxAttempts;
+  // `terminal` forces exhausted regardless of attempt count.
+  const exhausted = outcome.terminal === true || newAttempts >= policy.maxAttempts;
 
   // After attempt N fails, the next delay is policy.retryBackoffMs[N-1].
   // If the array is shorter than maxAttempts-1, fall back to the last
@@ -319,8 +325,8 @@ async function attemptDelivery(
       status: exhausted ? 'exhausted' : 'failed',
       attempts: newAttempts,
       lastAttemptAt: now,
-      lastResponseCode: statusCode ?? null,
-      lastError: error ?? null,
+      lastResponseCode: outcome.statusCode ?? null,
+      lastError: outcome.error,
       nextRetryAt,
     },
   });
@@ -331,13 +337,138 @@ async function attemptDelivery(
 
   logger.warn('Webhook delivery failed', {
     deliveryId,
-    url,
+    channel: sub.channel,
+    destination: sub.channel === 'email' ? sub.emailAddress : sub.url,
     attempt: newAttempts,
     maxAttempts: policy.maxAttempts,
     exhausted,
-    error,
-    statusCode,
+    terminal: outcome.terminal === true,
+    error: outcome.error,
+    statusCode: outcome.statusCode,
   });
+}
+
+/**
+ * HMAC-signed POST to a webhook subscriber. Returns the structured
+ * outcome that `attemptDelivery` uses to drive the shared retry / audit
+ * write — adapters never write the audit row themselves.
+ */
+async function attemptWebhookDelivery(
+  sub: SubscriptionLike,
+  body: string
+): Promise<DeliveryOutcome> {
+  // Refuse to sign with an empty HMAC key: signatures would be forgeable
+  // by anyone who knows the URL. Terminal — retrying won't conjure a
+  // secret, only admin action will.
+  if (!sub.secret) {
+    return {
+      delivered: false,
+      terminal: true,
+      error: 'Subscription has no signing secret',
+    };
+  }
+
+  if (!sub.url) {
+    return { delivered: false, terminal: true, error: 'Webhook subscription has no URL' };
+  }
+
+  try {
+    const signature = createHmac('sha256', sub.secret).update(body).digest('hex');
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), DISPATCH_TIMEOUT_MS);
+
+    try {
+      const res = await fetch(sub.url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Webhook-Signature': signature,
+          'X-Webhook-Event': (() => {
+            const parsed = toJsonRecord(JSON.parse(body));
+            const event = parsed.event;
+            return typeof event === 'string' ? event : '';
+          })(),
+        },
+        body,
+        signal: controller.signal,
+      });
+
+      if (res.ok) {
+        return { delivered: true, statusCode: res.status };
+      }
+      return { delivered: false, error: `HTTP ${res.status}`, statusCode: res.status };
+    } finally {
+      clearTimeout(timeout);
+    }
+  } catch (err) {
+    return { delivered: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * Render the `EventNotification` template and send it via Resend.
+ * The body parameter is the same JSON string used for webhook delivery
+ * (`{ event, timestamp, data }`) — we parse it and pass the fields
+ * into the template as props.
+ */
+async function attemptEmailDelivery(sub: SubscriptionLike, body: string): Promise<DeliveryOutcome> {
+  if (!sub.emailAddress) {
+    return {
+      delivered: false,
+      terminal: true,
+      error: 'Email subscription has no destination address',
+    };
+  }
+  if (!isEmailEnabled()) {
+    // No Resend key configured — terminal because the receiver retry
+    // loop can't fix a missing env var; only admin action can.
+    return {
+      delivered: false,
+      terminal: true,
+      error: 'Email is not configured (RESEND_API_KEY / EMAIL_FROM missing)',
+    };
+  }
+
+  let event: string;
+  let timestamp: string;
+  let data: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(body) as Record<string, unknown>;
+    event = typeof parsed.event === 'string' ? parsed.event : 'unknown';
+    timestamp = typeof parsed.timestamp === 'string' ? parsed.timestamp : new Date().toISOString();
+    data = toJsonRecord(parsed.data);
+  } catch (err) {
+    return {
+      delivered: false,
+      error: `Failed to parse stored payload: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+
+  const resend = getResendClient();
+  if (!resend) {
+    return { delivered: false, error: 'Resend client unavailable' };
+  }
+
+  try {
+    const html = await render(EventNotification({ event, timestamp, data }));
+    const subject = buildEmailSubject(event, data);
+
+    const result = await resend.emails.send({
+      from: getDefaultSender(),
+      to: sub.emailAddress,
+      subject,
+      html,
+    });
+
+    // Resend returns `{ data: { id }, error: null }` on success.
+    if (result.error) {
+      return { delivered: false, error: result.error.message ?? 'Resend rejected the email' };
+    }
+    return { delivered: true };
+  } catch (err) {
+    return { delivered: false, error: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 /**
@@ -374,7 +505,7 @@ function scheduleRetry(deliveryId: string, subscriptionId: string, delayMs: numb
             ...storedPayload,
             timestamp: new Date().toISOString(),
           });
-          await attemptDelivery(deliveryId, sub.url, sub.secret, body, resolveRetryPolicy(sub));
+          await attemptDelivery(deliveryId, sub, body, resolveRetryPolicy(sub));
         } catch (err) {
           logger.error('Webhook scheduled retry error', {
             deliveryId,

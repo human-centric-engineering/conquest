@@ -16,7 +16,9 @@ export const metadata: Metadata = {
 
 interface WebhookDetail {
   id: string;
-  url: string;
+  channel: 'webhook' | 'email';
+  url: string | null;
+  emailAddress: string | null;
   events: string[];
   isActive: boolean;
   description: string | null;

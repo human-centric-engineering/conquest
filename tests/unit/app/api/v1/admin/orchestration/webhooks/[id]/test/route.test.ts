@@ -51,15 +51,29 @@ vi.mock('@/lib/security/ip', () => ({
 const mockLogInfo = vi.fn();
 const mockLogError = vi.fn();
 
+const mockLogWarn = vi.fn();
+
 vi.mock('@/lib/api/context', () => ({
   getRouteLogger: vi.fn(() =>
     Promise.resolve({
       info: mockLogInfo,
       error: mockLogError,
-      warn: vi.fn(),
+      warn: mockLogWarn,
       debug: vi.fn(),
     })
   ),
+}));
+
+// Email-channel test pings render an email template and send via Resend.
+// Stub both so unit tests stay hermetic and assert routing/branches.
+const mockResendSend = vi.fn();
+vi.mock('@/lib/email/client', () => ({
+  getResendClient: vi.fn(() => ({ emails: { send: mockResendSend } })),
+  getDefaultSender: vi.fn(() => 'Sunrise <noreply@example.com>'),
+  isEmailEnabled: vi.fn(() => true),
+}));
+vi.mock('@react-email/render', () => ({
+  render: vi.fn().mockResolvedValue('<html>rendered</html>'),
 }));
 
 // ─── Imports after mocks ─────────────────────────────────────────────────────
@@ -81,8 +95,10 @@ const WEBHOOK_SECRET = 'test-webhook-secret-key';
 function makeWebhook(overrides: Record<string, unknown> = {}) {
   return {
     id: WEBHOOK_ID,
+    channel: 'webhook',
     url: WEBHOOK_URL,
     secret: WEBHOOK_SECRET,
+    emailAddress: null,
     createdBy: ADMIN_ID,
     events: ['execution_completed'],
     isActive: true,
@@ -168,6 +184,30 @@ describe('POST /api/v1/admin/orchestration/webhooks/:id/test', () => {
           }),
         })
       );
+    });
+  });
+
+  // ── Missing destination URL ─────────────────────────────────────────────
+
+  describe('Missing destination URL', () => {
+    it('returns success:false and does NOT call fetch when webhook channel has no URL', async () => {
+      // Arrange: webhook channel row with a secret but null url
+      vi.mocked(prisma.aiWebhookSubscription.findFirst).mockResolvedValue(
+        makeWebhook({ url: null }) as never
+      );
+
+      // Act
+      const response = await POST(makeRequest(), makeParams());
+      const body = await parseJson<{
+        data: { success: boolean; statusCode: null; durationMs: number; error: string };
+      }>(response);
+
+      expect(response.status).toBe(200);
+      expect(body.data.success).toBe(false);
+      expect(body.data.statusCode).toBeNull();
+      expect(body.data.durationMs).toBe(0);
+      expect(body.data.error).toBe('Webhook has no destination URL.');
+      expect(globalThis.fetch).not.toHaveBeenCalled();
     });
   });
 
@@ -324,6 +364,39 @@ describe('POST /api/v1/admin/orchestration/webhooks/:id/test', () => {
       expect(body.data.error).toBe('Request timed out after 5 seconds');
     });
 
+    it('fires the 5-second setTimeout abort callback when fetch never resolves', async () => {
+      // Drive the inline `setTimeout(() => controller.abort(), 5000)` arrow
+      // directly: hold fetch unresolved, advance fake timers past 5s, and
+      // resolve the request via the abort signal.
+      vi.useFakeTimers();
+      try {
+        vi.spyOn(globalThis, 'fetch').mockImplementation((_url, init) => {
+          return new Promise((_resolve, reject) => {
+            const signal = init?.signal;
+            signal?.addEventListener('abort', () => {
+              const err = new Error('The operation was aborted.');
+              err.name = 'AbortError';
+              reject(err);
+            });
+          });
+        });
+
+        const responsePromise = POST(makeRequest(), makeParams());
+
+        // Advance past the 5s controller timeout — this invokes the
+        // setTimeout callback, which calls controller.abort().
+        await vi.advanceTimersByTimeAsync(5001);
+
+        const response = await responsePromise;
+        const body = await parseJson<{ data: { success: boolean; error: string } }>(response);
+
+        expect(body.data.success).toBe(false);
+        expect(body.data.error).toBe('Request timed out after 5 seconds');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('returns the error message when fetch throws a generic Error', async () => {
       // Arrange
       vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('connect ECONNREFUSED'));
@@ -398,6 +471,196 @@ describe('POST /api/v1/admin/orchestration/webhooks/:id/test', () => {
           statusCode: 503,
           durationMs: expect.any(Number),
           success: false,
+        })
+      );
+    });
+  });
+
+  // ── Email channel ───────────────────────────────────────────────────────
+
+  describe('Email channel', () => {
+    const TEST_EMAIL = 'alerts@example.com';
+
+    function makeEmailWebhook(overrides: Record<string, unknown> = {}) {
+      return makeWebhook({
+        channel: 'email',
+        url: null,
+        secret: null,
+        emailAddress: TEST_EMAIL,
+        ...overrides,
+      });
+    }
+
+    beforeEach(() => {
+      mockResendSend.mockResolvedValue({ data: { id: 'resend_id' }, error: null });
+    });
+
+    it('returns success:true and routes to Resend (not fetch) for email-channel webhook', async () => {
+      vi.mocked(prisma.aiWebhookSubscription.findFirst).mockResolvedValue(
+        makeEmailWebhook() as never
+      );
+
+      const response = await POST(makeRequest(), makeParams());
+      const body = await parseJson<{
+        data: { success: boolean; statusCode: null; durationMs: number; error: null };
+      }>(response);
+
+      expect(response.status).toBe(200);
+      expect(body.data.success).toBe(true);
+      expect(body.data.statusCode).toBeNull();
+      expect(body.data.error).toBeNull();
+      expect(typeof body.data.durationMs).toBe('number');
+
+      // Outbound HTTP must NOT be used for email channel
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+
+      expect(mockResendSend).toHaveBeenCalledTimes(1);
+      expect(mockResendSend).toHaveBeenCalledWith(
+        expect.objectContaining({
+          from: 'Sunrise <noreply@example.com>',
+          to: TEST_EMAIL,
+          subject: '[Sunrise] Test event',
+          html: expect.stringContaining('rendered'),
+        })
+      );
+    });
+
+    it('returns success:false with destination-missing message when emailAddress is null', async () => {
+      vi.mocked(prisma.aiWebhookSubscription.findFirst).mockResolvedValue(
+        makeEmailWebhook({ emailAddress: null }) as never
+      );
+
+      const response = await POST(makeRequest(), makeParams());
+      const body = await parseJson<{
+        data: { success: boolean; statusCode: null; durationMs: number; error: string };
+      }>(response);
+
+      expect(response.status).toBe(200);
+      expect(body.data.success).toBe(false);
+      expect(body.data.error).toBe('Email subscription has no destination address.');
+      expect(body.data.durationMs).toBe(0);
+      expect(mockResendSend).not.toHaveBeenCalled();
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    });
+
+    it('returns success:false when email subsystem is not configured (isEmailEnabled false)', async () => {
+      const { isEmailEnabled } = await import('@/lib/email/client');
+      vi.mocked(isEmailEnabled).mockReturnValueOnce(false);
+      vi.mocked(prisma.aiWebhookSubscription.findFirst).mockResolvedValue(
+        makeEmailWebhook() as never
+      );
+
+      const response = await POST(makeRequest(), makeParams());
+      const body = await parseJson<{
+        data: { success: boolean; statusCode: null; durationMs: number; error: string };
+      }>(response);
+
+      expect(response.status).toBe(200);
+      expect(body.data.success).toBe(false);
+      expect(body.data.error).toBe(
+        'Email sending is not configured. Set RESEND_API_KEY and EMAIL_FROM.'
+      );
+      expect(body.data.durationMs).toBe(0);
+      expect(mockResendSend).not.toHaveBeenCalled();
+    });
+
+    it('returns success:false when getResendClient returns null', async () => {
+      const { getResendClient } = await import('@/lib/email/client');
+      vi.mocked(getResendClient).mockReturnValueOnce(null);
+      vi.mocked(prisma.aiWebhookSubscription.findFirst).mockResolvedValue(
+        makeEmailWebhook() as never
+      );
+
+      const response = await POST(makeRequest(), makeParams());
+      const body = await parseJson<{
+        data: { success: boolean; statusCode: null; durationMs: number; error: string };
+      }>(response);
+
+      expect(response.status).toBe(200);
+      expect(body.data.success).toBe(false);
+      // Error message comes from the catch block, surfaced via err.message
+      expect(body.data.error).toBe('Resend client unavailable');
+      expect(mockResendSend).not.toHaveBeenCalled();
+    });
+
+    it('returns success:false with Resend error message when send returns an error', async () => {
+      mockResendSend.mockResolvedValueOnce({
+        data: null,
+        error: { message: 'Invalid recipient address' },
+      });
+      vi.mocked(prisma.aiWebhookSubscription.findFirst).mockResolvedValue(
+        makeEmailWebhook() as never
+      );
+
+      const response = await POST(makeRequest(), makeParams());
+      const body = await parseJson<{
+        data: { success: boolean; statusCode: null; durationMs: number; error: string };
+      }>(response);
+
+      expect(response.status).toBe(200);
+      expect(body.data.success).toBe(false);
+      expect(body.data.error).toBe('Invalid recipient address');
+      expect(mockLogWarn).toHaveBeenCalledWith(
+        'Webhook test (email) rejected',
+        expect.objectContaining({
+          webhookId: WEBHOOK_ID,
+          error: 'Invalid recipient address',
+        })
+      );
+    });
+
+    it('falls back to "Resend rejected the email" when error has no message', async () => {
+      mockResendSend.mockResolvedValueOnce({ data: null, error: {} });
+      vi.mocked(prisma.aiWebhookSubscription.findFirst).mockResolvedValue(
+        makeEmailWebhook() as never
+      );
+
+      const response = await POST(makeRequest(), makeParams());
+      const body = await parseJson<{ data: { success: boolean; error: string } }>(response);
+
+      expect(body.data.success).toBe(false);
+      expect(body.data.error).toBe('Resend rejected the email');
+    });
+
+    it('returns success:false when Resend.send throws (network error)', async () => {
+      mockResendSend.mockRejectedValueOnce(new Error('ETIMEDOUT'));
+      vi.mocked(prisma.aiWebhookSubscription.findFirst).mockResolvedValue(
+        makeEmailWebhook() as never
+      );
+
+      const response = await POST(makeRequest(), makeParams());
+      const body = await parseJson<{ data: { success: boolean; error: string } }>(response);
+
+      expect(response.status).toBe(200);
+      expect(body.data.success).toBe(false);
+      expect(body.data.error).toBe('ETIMEDOUT');
+    });
+
+    it('returns "Unknown error" when Resend.send throws a non-Error value', async () => {
+      mockResendSend.mockRejectedValueOnce('oops');
+      vi.mocked(prisma.aiWebhookSubscription.findFirst).mockResolvedValue(
+        makeEmailWebhook() as never
+      );
+
+      const response = await POST(makeRequest(), makeParams());
+      const body = await parseJson<{ data: { success: boolean; error: string } }>(response);
+
+      expect(body.data.success).toBe(false);
+      expect(body.data.error).toBe('Unknown error');
+    });
+
+    it('logs success at info level after a successful email test', async () => {
+      vi.mocked(prisma.aiWebhookSubscription.findFirst).mockResolvedValue(
+        makeEmailWebhook() as never
+      );
+
+      await POST(makeRequest(), makeParams());
+
+      expect(mockLogInfo).toHaveBeenCalledWith(
+        'Webhook test sent (email)',
+        expect.objectContaining({
+          webhookId: WEBHOOK_ID,
+          durationMs: expect.any(Number),
         })
       );
     });

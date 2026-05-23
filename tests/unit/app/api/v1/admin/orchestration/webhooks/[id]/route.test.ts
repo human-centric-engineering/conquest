@@ -81,7 +81,9 @@ const WEBHOOK_ID = 'cmjbv4i3x00003wsloputgwu2';
 function makeWebhook(overrides: Record<string, unknown> = {}) {
   return {
     id: WEBHOOK_ID,
+    channel: 'webhook',
     url: 'https://example.com/webhook',
+    emailAddress: null,
     events: ['execution_completed'],
     isActive: true,
     description: 'Test webhook',
@@ -313,6 +315,257 @@ describe('PATCH /webhooks/:id', () => {
         userId: ADMIN_ID,
       })
     );
+  });
+
+  // ── Channel-coherence validation ────────────────────────────────────────
+  //
+  // PATCH allows partial updates including channel flips. The route must
+  // refuse a patch that would leave the row without the destination field
+  // its (next) channel requires.
+
+  describe('channel coherence', () => {
+    it('rejects webhook→email flip when emailAddress is absent on both patch and row', async () => {
+      const existing = makeWebhook({ channel: 'webhook', emailAddress: null });
+      vi.mocked(prisma.aiWebhookSubscription.findFirst).mockResolvedValue(existing as never);
+      vi.mocked(validateRequestBody).mockResolvedValue({ channel: 'email' } as never);
+
+      const response = await PATCH(makePatchRequest({ channel: 'email' }), makeParams(WEBHOOK_ID));
+      const body = await parseJson<{
+        success: boolean;
+        error: { code: string; message: string; details: Record<string, string[]> };
+      }>(response);
+
+      expect(response.status).toBe(400);
+      expect(body.success).toBe(false);
+      expect(body.error.code).toBe('VALIDATION_ERROR');
+      expect(body.error.message).toBe('Email channel requires an emailAddress');
+      expect(body.error.details.emailAddress).toContain('emailAddress is required');
+      expect(prisma.aiWebhookSubscription.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects email→webhook flip when url is absent on both patch and row', async () => {
+      const existing = makeWebhook({
+        channel: 'email',
+        url: null,
+        emailAddress: 'alerts@example.com',
+      });
+      vi.mocked(prisma.aiWebhookSubscription.findFirst).mockResolvedValue(existing as never);
+      vi.mocked(validateRequestBody).mockResolvedValue({
+        channel: 'webhook',
+        secret: 'new-secret-123456',
+      } as never);
+
+      const response = await PATCH(
+        makePatchRequest({ channel: 'webhook', secret: 'new-secret-123456' }),
+        makeParams(WEBHOOK_ID)
+      );
+      const body = await parseJson<{
+        success: boolean;
+        error: { code: string; message: string; details: Record<string, string[]> };
+      }>(response);
+
+      expect(response.status).toBe(400);
+      expect(body.error.message).toBe('Webhook channel requires a url');
+      expect(body.error.details.url).toContain('url is required');
+      expect(prisma.aiWebhookSubscription.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects email→webhook flip when patch omits the secret entirely', async () => {
+      // Flipping to webhook channel from email requires a fresh signing
+      // secret — the email row never had one to "keep".
+      const existing = makeWebhook({
+        channel: 'email',
+        url: null,
+        emailAddress: 'alerts@example.com',
+      });
+      vi.mocked(prisma.aiWebhookSubscription.findFirst).mockResolvedValue(existing as never);
+      vi.mocked(validateRequestBody).mockResolvedValue({
+        channel: 'webhook',
+        url: 'https://example.com/hook',
+      } as never);
+
+      const response = await PATCH(
+        makePatchRequest({ channel: 'webhook', url: 'https://example.com/hook' }),
+        makeParams(WEBHOOK_ID)
+      );
+      const body = await parseJson<{
+        error: { message: string; details: Record<string, string[]> };
+      }>(response);
+
+      expect(response.status).toBe(400);
+      expect(body.error.message).toBe('Switching to webhook channel requires a secret');
+      expect(body.error.details.secret).toContain(
+        'secret is required when changing channel to webhook'
+      );
+      expect(prisma.aiWebhookSubscription.update).not.toHaveBeenCalled();
+    });
+
+    it('accepts webhook→email flip when the patch supplies emailAddress', async () => {
+      const existing = makeWebhook({ channel: 'webhook' });
+      const updated = makeWebhook({
+        channel: 'email',
+        url: null,
+        emailAddress: 'alerts@example.com',
+      });
+      vi.mocked(prisma.aiWebhookSubscription.findFirst).mockResolvedValue(existing as never);
+      vi.mocked(prisma.aiWebhookSubscription.update).mockResolvedValue(updated as never);
+      vi.mocked(validateRequestBody).mockResolvedValue({
+        channel: 'email',
+        emailAddress: 'alerts@example.com',
+      } as never);
+
+      const response = await PATCH(
+        makePatchRequest({ channel: 'email', emailAddress: 'alerts@example.com' }),
+        makeParams(WEBHOOK_ID)
+      );
+
+      expect(response.status).toBe(200);
+      expect(prisma.aiWebhookSubscription.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            channel: 'email',
+            emailAddress: 'alerts@example.com',
+          }),
+        })
+      );
+    });
+
+    it('accepts email→webhook flip when patch supplies both url and secret', async () => {
+      const existing = makeWebhook({
+        channel: 'email',
+        url: null,
+        emailAddress: 'alerts@example.com',
+      });
+      const updated = makeWebhook({ channel: 'webhook' });
+      vi.mocked(prisma.aiWebhookSubscription.findFirst).mockResolvedValue(existing as never);
+      vi.mocked(prisma.aiWebhookSubscription.update).mockResolvedValue(updated as never);
+      vi.mocked(validateRequestBody).mockResolvedValue({
+        channel: 'webhook',
+        url: 'https://example.com/hook',
+        secret: 'new-secret-123456',
+      } as never);
+
+      const response = await PATCH(
+        makePatchRequest({
+          channel: 'webhook',
+          url: 'https://example.com/hook',
+          secret: 'new-secret-123456',
+        }),
+        makeParams(WEBHOOK_ID)
+      );
+
+      expect(response.status).toBe(200);
+      expect(prisma.aiWebhookSubscription.update).toHaveBeenCalled();
+    });
+
+    it('accepts a same-channel PATCH that does NOT flip the channel (no secret required)', async () => {
+      // Updating only isActive on an existing webhook-channel row should
+      // not trip the email→webhook secret requirement.
+      const existing = makeWebhook({ channel: 'webhook' });
+      const updated = makeWebhook({ channel: 'webhook', isActive: false });
+      vi.mocked(prisma.aiWebhookSubscription.findFirst).mockResolvedValue(existing as never);
+      vi.mocked(prisma.aiWebhookSubscription.update).mockResolvedValue(updated as never);
+      vi.mocked(validateRequestBody).mockResolvedValue({ isActive: false } as never);
+
+      const response = await PATCH(makePatchRequest({ isActive: false }), makeParams(WEBHOOK_ID));
+
+      expect(response.status).toBe(200);
+      expect(prisma.aiWebhookSubscription.update).toHaveBeenCalled();
+    });
+
+    it('accepts a webhook-channel PATCH that updates url alone (existing secret kept)', async () => {
+      // Same-channel update of url should not require secret in the patch.
+      const existing = makeWebhook({ channel: 'webhook' });
+      const updated = makeWebhook({ channel: 'webhook', url: 'https://new.example.com/hook' });
+      vi.mocked(prisma.aiWebhookSubscription.findFirst).mockResolvedValue(existing as never);
+      vi.mocked(prisma.aiWebhookSubscription.update).mockResolvedValue(updated as never);
+      vi.mocked(validateRequestBody).mockResolvedValue({
+        url: 'https://new.example.com/hook',
+      } as never);
+
+      const response = await PATCH(
+        makePatchRequest({ url: 'https://new.example.com/hook' }),
+        makeParams(WEBHOOK_ID)
+      );
+
+      expect(response.status).toBe(200);
+    });
+
+    it('rejects clearing url on a webhook-channel row (patch sets url:null)', async () => {
+      const existing = makeWebhook({ channel: 'webhook' });
+      vi.mocked(prisma.aiWebhookSubscription.findFirst).mockResolvedValue(existing as never);
+      // The 'url' key IS present on the patch, but its value is null —
+      // coherence check uses `'url' in body`, so this branch fires.
+      vi.mocked(validateRequestBody).mockResolvedValue({ url: null } as never);
+
+      const response = await PATCH(makePatchRequest({ url: null }), makeParams(WEBHOOK_ID));
+      const body = await parseJson<{ error: { message: string } }>(response);
+
+      expect(response.status).toBe(400);
+      expect(body.error.message).toBe('Webhook channel requires a url');
+      expect(prisma.aiWebhookSubscription.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects clearing emailAddress on an email-channel row (patch sets emailAddress:null)', async () => {
+      const existing = makeWebhook({
+        channel: 'email',
+        url: null,
+        emailAddress: 'alerts@example.com',
+      });
+      vi.mocked(prisma.aiWebhookSubscription.findFirst).mockResolvedValue(existing as never);
+      vi.mocked(validateRequestBody).mockResolvedValue({ emailAddress: null } as never);
+
+      const response = await PATCH(
+        makePatchRequest({ emailAddress: null }),
+        makeParams(WEBHOOK_ID)
+      );
+      const body = await parseJson<{ error: { message: string } }>(response);
+
+      expect(response.status).toBe(400);
+      expect(body.error.message).toBe('Email channel requires an emailAddress');
+      expect(prisma.aiWebhookSubscription.update).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── Audit entityName uses channel-appropriate destination ───────────────
+
+  describe('audit entityName', () => {
+    it('uses url as entityName for webhook channel', async () => {
+      const existing = makeWebhook({ channel: 'webhook' });
+      const updated = makeWebhook({ channel: 'webhook', url: 'https://example.com/webhook' });
+      vi.mocked(prisma.aiWebhookSubscription.findFirst).mockResolvedValue(existing as never);
+      vi.mocked(prisma.aiWebhookSubscription.update).mockResolvedValue(updated as never);
+      vi.mocked(validateRequestBody).mockResolvedValue({ isActive: false } as never);
+
+      await PATCH(makePatchRequest({ isActive: false }), makeParams(WEBHOOK_ID));
+
+      expect(logAdminAction).toHaveBeenCalledWith(
+        expect.objectContaining({ entityName: 'https://example.com/webhook' })
+      );
+    });
+
+    it('uses emailAddress as entityName for email channel', async () => {
+      const existing = makeWebhook({
+        channel: 'email',
+        url: null,
+        emailAddress: 'alerts@example.com',
+      });
+      const updated = makeWebhook({
+        channel: 'email',
+        url: null,
+        emailAddress: 'alerts@example.com',
+        isActive: false,
+      });
+      vi.mocked(prisma.aiWebhookSubscription.findFirst).mockResolvedValue(existing as never);
+      vi.mocked(prisma.aiWebhookSubscription.update).mockResolvedValue(updated as never);
+      vi.mocked(validateRequestBody).mockResolvedValue({ isActive: false } as never);
+
+      await PATCH(makePatchRequest({ isActive: false }), makeParams(WEBHOOK_ID));
+
+      expect(logAdminAction).toHaveBeenCalledWith(
+        expect.objectContaining({ entityName: 'alerts@example.com' })
+      );
+    });
   });
 });
 

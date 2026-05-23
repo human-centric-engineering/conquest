@@ -872,41 +872,116 @@ function refineBackoffLength<T extends { maxAttempts?: number; retryBackoffMs?: 
   );
 }
 
-export const createWebhookSchema = refineBackoffLength(
-  z.object({
-    url: z
-      .string()
-      .url('Must be a valid URL')
-      .max(2000)
-      .refine((url) => isSafeProviderUrl(url), 'URL is not allowed (private or internal address)'),
-    secret: z.string().min(16, 'Secret must be at least 16 characters').max(256),
-    events: z
-      .array(z.enum(WEBHOOK_EVENT_TYPES))
-      .min(1, 'At least one event type is required')
-      .max(WEBHOOK_EVENT_TYPES.length),
-    description: z.string().max(500).optional(),
-    isActive: z.boolean().optional(),
-    maxAttempts: retryPolicyFields.maxAttempts.optional(),
-    retryBackoffMs: retryPolicyFields.retryBackoffMs.optional(),
-  })
+/**
+ * Subscription delivery channels. `webhook` POSTs an HMAC-signed JSON
+ * payload; `email` sends a rendered React Email via Resend. Both feed
+ * off the same `events` array and the same per-row retry policy so an
+ * admin's mental model is identical across channels.
+ */
+export const SUBSCRIPTION_CHANNELS = ['webhook', 'email'] as const;
+export type SubscriptionChannel = (typeof SUBSCRIPTION_CHANNELS)[number];
+
+const eventsField = z
+  .array(z.enum(WEBHOOK_EVENT_TYPES))
+  .min(1, 'At least one event type is required')
+  .max(WEBHOOK_EVENT_TYPES.length);
+
+const commonFields = {
+  events: eventsField,
+  description: z.string().max(500).optional(),
+  isActive: z.boolean().optional(),
+  maxAttempts: retryPolicyFields.maxAttempts.optional(),
+  retryBackoffMs: retryPolicyFields.retryBackoffMs.optional(),
+};
+
+const webhookChannelFields = {
+  channel: z.literal('webhook'),
+  url: z
+    .string()
+    .url('Must be a valid URL')
+    .max(2000)
+    .refine((url) => isSafeProviderUrl(url), 'URL is not allowed (private or internal address)'),
+  secret: z.string().min(16, 'Secret must be at least 16 characters').max(256),
+};
+
+const emailChannelFields = {
+  channel: z.literal('email'),
+  emailAddress: z.string().email('Must be a valid email address').max(320),
+};
+
+/**
+ * Create-subscription body. Channel-discriminated so callers get a
+ * precise error when they mix channels (e.g. an email row with a URL).
+ *
+ * Defaults `channel` to `webhook` so existing API consumers that don't
+ * know about the new field keep working unchanged.
+ *
+ * Uses `z.union` rather than `z.discriminatedUnion` because the refined
+ * branches (backoff-length validation) don't satisfy the discriminated
+ * union's literal-property constraint — the inner refine wraps the
+ * object type. Practical impact: error messages on a mismatched
+ * `channel` value list both branches' failures rather than just the one
+ * that matched, which is fine here since there are only two.
+ */
+export const createWebhookSchema = z.preprocess(
+  (raw) => {
+    if (raw && typeof raw === 'object' && !('channel' in (raw as Record<string, unknown>))) {
+      return { ...(raw as Record<string, unknown>), channel: 'webhook' };
+    }
+    return raw;
+  },
+  z.union([
+    refineBackoffLength(z.object({ ...commonFields, ...webhookChannelFields })),
+    refineBackoffLength(z.object({ ...commonFields, ...emailChannelFields })),
+  ])
 );
 
-export const updateWebhookSchema = refineBackoffLength(
-  z.object({
-    url: z
-      .string()
-      .url('Must be a valid URL')
-      .max(2000)
-      .refine((url) => isSafeProviderUrl(url), 'URL is not allowed (private or internal address)')
-      .optional(),
-    secret: z.string().min(16).max(256).optional(),
-    events: z.array(z.enum(WEBHOOK_EVENT_TYPES)).min(1).max(WEBHOOK_EVENT_TYPES.length).optional(),
-    description: z.string().max(500).nullable().optional(),
-    isActive: z.boolean().optional(),
-    maxAttempts: retryPolicyFields.maxAttempts.optional(),
-    retryBackoffMs: retryPolicyFields.retryBackoffMs.optional(),
-  })
-);
+/**
+ * Patch-subscription body. Channel is optional on update — when omitted
+ * we keep whatever's already stored. When provided, the corresponding
+ * destination field becomes required (you can't flip a row from webhook
+ * to email without supplying an emailAddress, and vice versa).
+ */
+const updateCommonFields = {
+  events: eventsField.optional(),
+  description: z.string().max(500).nullable().optional(),
+  isActive: z.boolean().optional(),
+  maxAttempts: retryPolicyFields.maxAttempts.optional(),
+  retryBackoffMs: retryPolicyFields.retryBackoffMs.optional(),
+};
+
+const updateWebhookChannelFields = {
+  channel: z.literal('webhook').optional(),
+  url: z
+    .string()
+    .url('Must be a valid URL')
+    .max(2000)
+    .refine((url) => isSafeProviderUrl(url), 'URL is not allowed (private or internal address)')
+    .optional(),
+  secret: z.string().min(16).max(256).optional(),
+};
+
+const updateEmailChannelFields = {
+  channel: z.literal('email'),
+  emailAddress: z.string().email('Must be a valid email address').max(320).optional(),
+};
+
+export const updateWebhookSchema = z.union([
+  // No channel supplied → patch keeps the existing channel. Allow any of
+  // the channel-specific fields to come along (the API merges them onto
+  // the stored row and the dispatcher only reads the ones matching the
+  // current channel).
+  refineBackoffLength(
+    z.object({
+      ...updateCommonFields,
+      ...updateWebhookChannelFields,
+      emailAddress: z.string().email('Must be a valid email address').max(320).optional(),
+    })
+  ),
+  // Explicit email channel — emailAddress is the only required field and
+  // even that is optional on update (omitted means "keep current address").
+  refineBackoffLength(z.object({ ...updateCommonFields, ...updateEmailChannelFields })),
+]);
 
 export const listWebhooksQuerySchema = paginationQuerySchema.extend({
   isActive: queryBooleanSchema.optional(),

@@ -36,7 +36,9 @@ export const GET = withAdminAuth(async (request, session) => {
       take: limit,
       select: {
         id: true,
+        channel: true,
         url: true,
+        emailAddress: true,
         events: true,
         isActive: true,
         description: true,
@@ -59,20 +61,33 @@ export const POST = withAdminAuth(async (request, session) => {
   const log = await getRouteLogger(request);
   const body = await validateRequestBody(request, createWebhookSchema);
 
+  // The Zod schema is a discriminated-ish union: `webhook` branches
+  // carry url + secret, `email` branches carry emailAddress. Pull each
+  // channel's fields off the body with a type narrow rather than
+  // destructuring through a union shape.
+  const createData: Prisma.AiWebhookSubscriptionUncheckedCreateInput = {
+    channel: body.channel,
+    events: body.events,
+    description: body.description,
+    isActive: body.isActive ?? true,
+    maxAttempts: body.maxAttempts,
+    retryBackoffMs: body.retryBackoffMs,
+    createdBy: session.user.id,
+  };
+  if (body.channel === 'webhook') {
+    createData.url = body.url;
+    createData.secret = body.secret;
+  } else {
+    createData.emailAddress = body.emailAddress;
+  }
+
   const webhook = await prisma.aiWebhookSubscription.create({
-    data: {
-      url: body.url,
-      secret: body.secret,
-      events: body.events,
-      description: body.description,
-      isActive: body.isActive ?? true,
-      maxAttempts: body.maxAttempts,
-      retryBackoffMs: body.retryBackoffMs,
-      createdBy: session.user.id,
-    },
+    data: createData,
     select: {
       id: true,
+      channel: true,
       url: true,
+      emailAddress: true,
       events: true,
       isActive: true,
       description: true,
@@ -85,7 +100,8 @@ export const POST = withAdminAuth(async (request, session) => {
 
   log.info('Webhook created', {
     webhookId: webhook.id,
-    url: webhook.url,
+    channel: webhook.channel,
+    destination: webhook.channel === 'webhook' ? webhook.url : webhook.emailAddress,
     events: webhook.events,
     adminId: session.user.id,
   });
@@ -95,8 +111,8 @@ export const POST = withAdminAuth(async (request, session) => {
     action: 'webhook_subscription.create',
     entityType: 'webhook_subscription',
     entityId: webhook.id,
-    entityName: webhook.url,
-    metadata: { events: webhook.events },
+    entityName: (webhook.channel === 'webhook' ? webhook.url : webhook.emailAddress) ?? webhook.id,
+    metadata: { channel: webhook.channel, events: webhook.events },
     clientIp: clientIP,
   });
 

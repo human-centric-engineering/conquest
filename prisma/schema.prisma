@@ -1150,12 +1150,22 @@ model AiCostLog {
 // Webhook subscriptions for outbound event notifications
 model AiWebhookSubscription {
   id              String   @id @default(cuid())
-  url             String // destination URL (validated as safe)
-  secret          String // HMAC-SHA256 signing key
+  // Delivery channel — "webhook" routes to `url` with HMAC signing;
+  // "email" routes to `emailAddress` via the generic event-notification
+  // template. The model is kept as `AiWebhookSubscription` for
+  // backward-compat with API paths and migrations; the channel column
+  // discriminates which destination fields are required.
+  channel         String   @default("webhook")
+  url             String? // destination URL — required when channel = "webhook"
+  secret          String? // HMAC-SHA256 signing key — required when channel = "webhook"
+  emailAddress    String? // destination email — required when channel = "email"
   events          String[] // e.g. ["budget_exceeded","workflow_failed"]
   isActive        Boolean  @default(true)
   description     String?
   // Total delivery attempts before the delivery is marked `exhausted` (1–10).
+  // For email rows we still record attempts in AiWebhookDelivery for audit,
+  // but Resend handles its own retry semantics so the policy is effectively
+  // a soft cap on local retries triggered by us.
   maxAttempts     Int      @default(3)
   // Backoff delays in ms between successive attempts. Must contain at least
   // (maxAttempts - 1) entries; the dispatcher only reads the first
@@ -1170,6 +1180,7 @@ model AiWebhookSubscription {
 
   @@index([isActive])
   @@index([createdBy])
+  @@index([channel])
   @@map("ai_webhook_subscription")
 }
 

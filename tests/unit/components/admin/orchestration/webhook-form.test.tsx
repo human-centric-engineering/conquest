@@ -168,6 +168,8 @@ describe('WebhookForm', () => {
       events: ['budget_exceeded'],
       isActive: true,
       description: null,
+      channel: 'webhook' as const,
+      emailAddress: null,
       maxAttempts: 5,
       retryBackoffMs: [15_000, 60_000, 120_000, 600_000],
     };
@@ -311,6 +313,8 @@ describe('WebhookForm', () => {
       events: ['budget_exceeded'],
       isActive: false,
       description: 'note',
+      channel: 'webhook' as const,
+      emailAddress: null,
       maxAttempts: 3,
       retryBackoffMs: [10000, 60000],
     };
@@ -353,6 +357,8 @@ describe('WebhookForm', () => {
       events: ['budget_exceeded'],
       isActive: true,
       description: 'note',
+      channel: 'webhook' as const,
+      emailAddress: null,
       maxAttempts: 3,
       retryBackoffMs: [10000, 60000],
     };
@@ -390,6 +396,8 @@ describe('WebhookForm', () => {
       events: ['workflow_failed'],
       isActive: true,
       description: null,
+      channel: 'webhook' as const,
+      emailAddress: null,
       maxAttempts: 3,
       retryBackoffMs: [10000, 60000],
     };
@@ -429,6 +437,8 @@ describe('WebhookForm', () => {
       events: ['budget_exceeded'],
       isActive: true,
       description: null,
+      channel: 'webhook' as const,
+      emailAddress: null,
       maxAttempts: 3,
       retryBackoffMs: [10000, 60000],
     };
@@ -493,7 +503,7 @@ describe('WebhookForm', () => {
     // Assert — fallback message shown
     await waitFor(() => {
       expect(
-        screen.getByText(/could not save webhook\. try again in a moment\./i)
+        screen.getByText(/could not save subscription\. try again in a moment\./i)
       ).toBeInTheDocument();
     });
   });
@@ -524,6 +534,8 @@ describe('WebhookForm', () => {
       events: ['budget_exceeded'],
       isActive: true,
       description: null,
+      channel: 'webhook' as const,
+      emailAddress: null,
       maxAttempts: 3,
       retryBackoffMs: [10000, 60000],
     };
@@ -549,6 +561,62 @@ describe('WebhookForm', () => {
   });
 
   // ── Secret affordances: reveal / copy / capture cue ─────────────────────────
+
+  // ── Channel selector: webhook vs email ─────────────────────────────────────
+
+  it('defaults the channel selector to "webhook" in create mode', () => {
+    render(<WebhookForm mode="create" />);
+    // The URL + secret fields should be visible by default.
+    expect(screen.getByRole('textbox', { name: /endpoint url/i })).toBeInTheDocument();
+    expect(document.getElementById('secret')).toBeInTheDocument();
+    // The email address field should be hidden.
+    expect(document.getElementById('emailAddress')).not.toBeInTheDocument();
+  });
+
+  it('switches to the email-channel field set when the user picks Email', async () => {
+    const user = userEvent.setup();
+    render(<WebhookForm mode="create" />);
+
+    await user.click(screen.getByRole('button', { name: /^email$/i }));
+
+    // Email field appears; URL + secret disappear.
+    expect(document.getElementById('emailAddress')).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: /endpoint url/i })).not.toBeInTheDocument();
+    expect(document.getElementById('secret')).not.toBeInTheDocument();
+  });
+
+  it('submits an email subscription with channel + emailAddress only (no url/secret)', async () => {
+    const { apiClient } = await import('@/lib/api/client');
+    vi.mocked(apiClient.post).mockResolvedValue({ success: true });
+    const user = userEvent.setup();
+    render(<WebhookForm mode="create" />);
+
+    await user.click(screen.getByRole('button', { name: /^email$/i }));
+    await user.type(document.getElementById('emailAddress')!, 'alerts@example.com');
+    await user.click(screen.getAllByRole('checkbox')[0]);
+    await user.click(screen.getByRole('button', { name: /create subscription/i }));
+
+    await waitFor(() => {
+      expect(apiClient.post).toHaveBeenCalledWith(
+        '/api/v1/admin/orchestration/webhooks',
+        expect.objectContaining({
+          body: expect.objectContaining({
+            channel: 'email',
+            emailAddress: 'alerts@example.com',
+          }),
+        })
+      );
+    });
+    const sentBody = vi.mocked(apiClient.post).mock.calls[0][1]?.body as Record<string, unknown>;
+    // Webhook-channel fields must NOT leak into the email POST.
+    expect(sentBody).not.toHaveProperty('url');
+    expect(sentBody).not.toHaveProperty('secret');
+  });
+
+  // The malformed-email rejection is enforced at the server schema
+  // (see `route.test.ts` "rejects an email-channel subscription with a
+  // malformed email"). The client-side form refinement provides a UX
+  // hint but isn't the source of truth, so we don't assert on it here.
 
   // ── Event picklist: unwired events are disabled ────────────────────────────
 

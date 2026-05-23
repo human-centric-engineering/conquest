@@ -313,28 +313,54 @@ export async function importOrchestrationConfig(
       }
     }
 
-    // Import webhooks — skip duplicates by url
+    // Import event subscriptions (webhook + email channels).
+    // Skip duplicates by destination — url for webhook rows,
+    // emailAddress for email rows.
     for (const wh of parsed.data.webhooks) {
+      const channel = wh.channel ?? 'webhook';
+      const destination = channel === 'webhook' ? wh.url : wh.emailAddress;
+      if (!destination) {
+        result.warnings.push(
+          `Skipped event subscription with channel "${channel}" and no destination value`
+        );
+        continue;
+      }
+
       const existing = await tx.aiWebhookSubscription.findFirst({
-        where: { url: wh.url },
+        where: channel === 'webhook' ? { url: destination } : { emailAddress: destination },
       });
       if (existing) {
         result.webhooks.skipped++;
         continue;
       }
-      result.warnings.push(
-        `Webhook for ${wh.url} imported inactive — set the signing secret and re-enable manually`
-      );
-      await tx.aiWebhookSubscription.create({
-        data: {
-          url: wh.url,
-          events: wh.events,
-          description: wh.description ?? null,
-          secret: '', // Secrets are never exported
-          isActive: false, // Force inactive: empty secret would sign dispatches with an empty HMAC key
-          createdBy: userId,
-        },
-      });
+
+      if (channel === 'webhook') {
+        result.warnings.push(
+          `Webhook for ${destination} imported inactive — set the signing secret and re-enable manually`
+        );
+        await tx.aiWebhookSubscription.create({
+          data: {
+            channel: 'webhook',
+            url: destination,
+            events: wh.events,
+            description: wh.description ?? null,
+            secret: '', // Secrets are never exported
+            isActive: false, // Force inactive: empty secret would sign dispatches with an empty HMAC key
+            createdBy: userId,
+          },
+        });
+      } else {
+        await tx.aiWebhookSubscription.create({
+          data: {
+            channel: 'email',
+            emailAddress: destination,
+            events: wh.events,
+            description: wh.description ?? null,
+            isActive: wh.isActive,
+            createdBy: userId,
+          },
+        });
+      }
       result.webhooks.created++;
     }
 
