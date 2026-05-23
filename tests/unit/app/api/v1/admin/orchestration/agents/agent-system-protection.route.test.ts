@@ -288,25 +288,17 @@ describe('System agent protection', () => {
       );
       expect(response.status).toBe(200);
 
-      expect(emitHookEvent).toHaveBeenCalledWith(
-        'agent.updated',
-        expect.objectContaining({
-          agentId: AGENT_ID,
-          agentSlug: after.slug,
-          fieldsChanged: ['description'],
-        })
-      );
-      expect(dispatchWebhookEvent).toHaveBeenCalledWith(
-        'agent_updated',
-        expect.objectContaining({
-          agentId: AGENT_ID,
-          agentSlug: after.slug,
-          fieldsChanged: ['description'],
-        })
-      );
+      const expectedShape = expect.objectContaining({
+        agentId: AGENT_ID,
+        agentSlug: after.slug,
+        actorUserId: expect.any(String),
+        changes: { description: { from: 'old description', to: 'new description' } },
+      });
+      expect(emitHookEvent).toHaveBeenCalledWith('agent.updated', expectedShape);
+      expect(dispatchWebhookEvent).toHaveBeenCalledWith('agent_updated', expectedShape);
     });
 
-    it('fieldsChanged contains only the fields that actually changed value', async () => {
+    it('changes contains only fields that actually changed value, with from/to', async () => {
       // The form submits the entire record on save; the route must filter
       // down to fields whose value actually differs between before/after.
       // Object.keys(data) would over-report and ship `name` here even
@@ -314,25 +306,71 @@ describe('System agent protection', () => {
       const before = makeCustomAgent({
         name: 'Same Name',
         description: 'old',
+        isActive: true,
         model: 'claude-sonnet-4-6',
       });
-      const after = { ...before, description: 'new' }; // only description changed
+      const after = { ...before, description: 'new', isActive: false };
       mockFindUnique.mockResolvedValue(before);
       mockUpdate.mockResolvedValue(after);
 
       const response = await PATCH(
-        // PATCH body includes name (unchanged) AND description (changed).
-        makePatchRequest({ name: 'Same Name', description: 'new' }),
+        // PATCH body includes name (unchanged) plus two real edits.
+        makePatchRequest({ name: 'Same Name', description: 'new', isActive: false }),
         makeParams(AGENT_ID)
       );
       expect(response.status).toBe(200);
 
       const payload = vi.mocked(dispatchWebhookEvent).mock.calls[0][1] as {
-        fieldsChanged: string[];
+        changes: Record<string, { from: unknown; to: unknown }>;
       };
-      expect(payload.fieldsChanged).toEqual(['description']);
-      // Belt-and-braces: explicitly assert `name` did not slip through.
-      expect(payload.fieldsChanged).not.toContain('name');
+      expect(Object.keys(payload.changes).sort()).toEqual(['description', 'isActive']);
+      expect(payload.changes).toEqual({
+        description: { from: 'old', to: 'new' },
+        isActive: { from: true, to: false },
+      });
+      // Belt-and-braces: `name` (submitted but unchanged) is not in the diff.
+      expect(payload.changes).not.toHaveProperty('name');
+    });
+
+    it('truncates from/to values that exceed the per-field length cap', async () => {
+      // systemInstructions can run to tens of thousands of characters —
+      // sending the full before/after on every edit would blow through a
+      // typical webhook receiver's body-size limit.
+      const longBefore = 'a'.repeat(2_000);
+      const longAfter = 'b'.repeat(2_000);
+      const before = makeCustomAgent({ systemInstructions: longBefore });
+      const after = { ...before, systemInstructions: longAfter };
+      mockFindUnique.mockResolvedValue(before);
+      mockUpdate.mockResolvedValue(after);
+
+      await PATCH(makePatchRequest({ systemInstructions: longAfter }), makeParams(AGENT_ID));
+
+      const payload = vi.mocked(dispatchWebhookEvent).mock.calls[0][1] as {
+        changes: Record<string, { from: unknown; to: unknown }>;
+      };
+      const { from, to } = payload.changes.systemInstructions;
+      // Both values are capped; the truncation marker proves the truncation
+      // happened on purpose (versus the field somehow arriving short).
+      expect(from).toMatch(/\[truncated\]$/);
+      expect(to).toMatch(/\[truncated\]$/);
+      expect(String(from).length).toBeLessThan(longBefore.length);
+      expect(String(to).length).toBeLessThan(longAfter.length);
+    });
+
+    it('includes actorUserId for the admin who made the change', async () => {
+      const before = makeCustomAgent({ description: 'old' });
+      const after = { ...before, description: 'new' };
+      mockFindUnique.mockResolvedValue(before);
+      mockUpdate.mockResolvedValue(after);
+
+      await PATCH(makePatchRequest({ description: 'new' }), makeParams(AGENT_ID));
+
+      // mockAdminUser() returns a session with this fixed CUID — any change
+      // here means the auth fixture rotated.
+      const payload = vi.mocked(dispatchWebhookEvent).mock.calls[0][1] as {
+        actorUserId: string;
+      };
+      expect(payload.actorUserId).toBe('cmjbv4i3x00003wsloputgwul');
     });
 
     it('does not dispatch when the PATCH produced no actual changes', async () => {

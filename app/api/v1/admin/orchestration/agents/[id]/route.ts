@@ -42,6 +42,35 @@ function parseAgentId(raw: string): string {
   return parsed.data;
 }
 
+/**
+ * Cap on each string value inside an outbound `changes` payload. Agents'
+ * `systemInstructions` can be 50k+ chars and `metadata` is unbounded; we
+ * truncate so a single update doesn't blow through a typical receiver's
+ * body-size limit. Matches the spirit of the 200-char error truncation in
+ * `lib/orchestration/scheduling/scheduler.ts`.
+ */
+const WEBHOOK_FIELD_VALUE_MAX_LEN = 500;
+
+function truncateForWebhookPayload(value: unknown): unknown {
+  if (typeof value === 'string' && value.length > WEBHOOK_FIELD_VALUE_MAX_LEN) {
+    return `${value.slice(0, WEBHOOK_FIELD_VALUE_MAX_LEN)}… [truncated]`;
+  }
+  return value;
+}
+
+function truncateChangesForPayload(
+  changes: Record<string, { from: unknown; to: unknown }>
+): Record<string, { from: unknown; to: unknown }> {
+  const out: Record<string, { from: unknown; to: unknown }> = {};
+  for (const [field, { from, to }] of Object.entries(changes)) {
+    out[field] = {
+      from: truncateForWebhookPayload(from),
+      to: truncateForWebhookPayload(to),
+    };
+  }
+  return out;
+}
+
 export const GET = withAdminAuth<{ id: string }>(async (request, _session, { params }) => {
   const log = await getRouteLogger(request);
   const { id: rawId } = await params;
@@ -417,11 +446,19 @@ export const PATCH = withAdminAuth<{ id: string }>(async (request, session, { pa
 
     // Only notify subscribers when something actually changed. A no-op PATCH
     // (form save with no edits) shouldn't generate webhook traffic.
-    if (fieldsChanged.length > 0) {
+    if (changes) {
       const agentUpdatedPayload = {
         agentId: id,
         agentSlug: agent.slug,
-        fieldsChanged,
+        // Who initiated the change — matches `actorUserId` already used by
+        // `execution.force_failed` (see .context/orchestration/hooks.md).
+        actorUserId: session.user.id,
+        // `{ field: { from, to } }` matches GitHub's `changes` and Stripe's
+        // `previous_attributes` conventions. Large string values are
+        // truncated to keep payloads under receiver size limits — agents'
+        // `systemInstructions` can be 50k+ chars and would otherwise blow
+        // through a typical 1MB webhook receiver cap.
+        changes: truncateChangesForPayload(changes),
       };
 
       // Two distinct outbound subsystems — see .context/orchestration/hooks.md.
