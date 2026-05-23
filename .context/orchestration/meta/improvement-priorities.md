@@ -1013,35 +1013,33 @@ Items 37–39 are correctness — they prevent silent damage. Items 40–43 are 
 
 **Difficulty: Moderate.** One new table + one middleware module + two route-set applications + outbound webhook header + dispatcher extension + docs + one recipe. One sprint, well-bounded.
 
-### 38. Outbound webhook retry policy + dead-letter queue — ⚪ Not started
+### 38. Outbound webhook retry policy + dead-letter queue — ✅ Done
 
-**Why it matters.** `AiEventHookDelivery` tracks retries today, but the retry policy is hardcoded — `MAX_ATTEMPTS = 3`, `RETRY_DELAYS_MS = [10_000, 60_000, 300_000]` in `lib/orchestration/webhooks/dispatcher.ts` lines 31–35. When a partner's receiver is degraded for an hour, what does Sunrise do? Three attempts spread across ~6 minutes, then give up — and the failed deliveries sit in `AiEventHookDelivery` but the admin has no UI to inspect them, replay them, or hold-and-retry-later. For any production-shaped partner pilot, this is "we lost data and no one noticed."
+**Why it mattered.** `AiEventHookDelivery` tracked retries already, but the retry policy was hardcoded — `MAX_ATTEMPTS = 3`, `RETRY_DELAYS_MS = [10_000, 60_000, 300_000]` in `lib/orchestration/webhooks/dispatcher.ts`. When a partner's receiver was degraded for an hour, Sunrise gave up after ~6 minutes and the failed deliveries sat in `AiEventHookDelivery` with no admin UI to inspect, replay, or hold-and-retry-later. For any production-shaped partner pilot, this was "we lost data and no one noticed."
 
-**What exists today.** Hardcoded retry constants in `webhooks/dispatcher.ts`. `AiEventHookDelivery` records every attempt with status, error, latency. A `/deliveries` API route exists at `app/api/v1/admin/orchestration/webhooks/[id]/deliveries/route.ts`. The admin Event Subscriptions page (`app/admin/orchestration/event-subscriptions/page.tsx`) lists subscriptions but does not surface failed deliveries or expose any DLQ UI. `AiEventHook` schema has no `retryPolicy` column; retry behaviour is global.
+**Correction to the pre-PR framing.** The original proposal called for a JSON `retryPolicy` blob on `AiEventHook` and a new `dead-lettered` state on `AiEventHookDelivery`. The shipped implementation deviated for simplicity:
 
-**What we'd ship.**
+1. Retry policy stored as **two scalar columns** (`AiEventHook.maxAttempts Int?` + `retryBackoffMs Int[]?`) rather than a JSON blob — sufficient because the strategy space is small and Prisma typing is cleaner.
+2. **No new `dead-lettered` enum state.** The existing `AiEventHookDelivery.status` enum (`pending` / `delivered` / `failed` / `exhausted`) is sufficient — `exhausted` is the dead-letter state, and the DLQ UI filters on it.
 
-1. **Per-hook retry policy.** Add `AiEventHook.retryPolicy Json?` carrying `{ maxAttempts, backoffStrategy: 'exponential' | 'linear' | 'fixed', baseDelayMs, maxDelayMs, jitter }`. Default to the current hardcoded values when null so existing hooks are unaffected. Validate via Zod in `lib/validations/event-hooks.ts`.
-2. **Dead-letter state.** Add `AiEventHookDelivery.state` enum (`pending` / `succeeded` / `failed` / `dead-lettered` / `manually-replayed`) and `deadLetteredAt` timestamp. The dispatcher transitions `failed → dead-lettered` after `maxAttempts` is exhausted; nothing auto-retries dead-lettered deliveries.
-3. **DLQ admin UI.** New `app/admin/orchestration/event-subscriptions/[id]/dlq/page.tsx` (or a tab on the existing hook detail page) listing dead-lettered deliveries with payload preview, last error, status code, attempt timeline. Per-row "Replay" action that re-queues the delivery with attempt counter reset. Bulk-replay with confirmation.
-4. **Retry-policy UI.** New panel on the hook form with retry-policy fields and FieldHelp linking to a recipe explaining backoff curves and when to use each.
+**What shipped (PR #38 phases 1–4 plus follow-ups).**
 
-**Benefits.**
+1. **Per-subscription retry policy** (`fd8a4888`, phase 1). `AiEventHook.maxAttempts` + `retryBackoffMs` columns; dispatcher reads per-row policy with fallback to defaults (`DEFAULT_MAX_ATTEMPTS` / `DEFAULT_RETRY_BACKOFF_MS` in `webhooks/dispatcher.ts`). Hard cap at 20 attempts in the Zod validator.
+2. **DLQ admin page** (`0b08b4e4`, phase 2 → `c5b39c33`, refactored as a tab on the Event Subscriptions page rather than a separate `/[id]/dlq/page.tsx`). Lives at `app/admin/orchestration/event-subscriptions/dlq/page.tsx`. Lists exhausted deliveries with payload preview, last error, status code, attempt timeline. Per-row Replay action that re-queues with attempt counter reset.
+3. **DLQ depth metric endpoint** (`093686ec`, phase 3). New API route surfaces queue depth for monitoring.
+4. **Bulk replay + retention** (`e4a43217`, phase 4). Bulk-replay action with confirmation. Retention pruning respects `webhookRetentionDays` on the maintenance tick. Bulk replay throttles outbound HTTPS (`73e088bb`).
+5. **Dispatcher correctness** (`c37b4b08`). Dispatcher no longer overwrites `exhausted` with `delivered` on a late retry — terminal states stick.
+6. **Signing-secret UX** (`57dfa996`). Reveal / copy / capture-cue affordance on the signing secret field, encouraging admins to record it at create time.
 
-- **Production-grade reliability.** Hooks become tunable per partner — chatty receivers get aggressive retries, sensitive receivers get gentle ones.
-- **Operator confidence.** "We lost a webhook and no one noticed" stops being possible — DLQ surfaces every failed delivery.
-- **Composes with #37 (idempotency).** Aggressive retries (e.g. 10 attempts over 24h) are safe when receivers dedupe on `Idempotency-Key`.
-- **Reuses existing storage.** `AiEventHookDelivery` already records every attempt; the change is two new columns and a UI.
+**Benefits delivered.**
 
-**Risks.**
+- **Production-grade reliability.** Hooks tunable per partner — chatty receivers get aggressive retries, sensitive receivers get gentle ones.
+- **Operator confidence.** "We lost a webhook and no one noticed" stops being possible — DLQ tab surfaces every exhausted delivery.
+- **Composes with #37 (idempotency, still open).** Aggressive retries (e.g. 10 attempts over 24h) become safe when receivers can dedupe on `Idempotency-Key`.
 
-- **Configuration footgun.** Admins setting `maxAttempts: 50` could DoS their own receivers. Mitigation: hard cap at 20 attempts and 7-day max-retry-window in the Zod schema; admin form rejects beyond the cap.
-- **DLQ growth.** Dead-lettered deliveries accumulate indefinitely if no one replays them. Mitigation: respect `webhookRetentionDays` — dead-lettered rows older than retention are pruned by the maintenance tick.
-- **Replay safety.** Replaying a dead-lettered delivery weeks after the event may be wrong (state has moved on). Mitigation: replay panel shows event age + a "this event is N days old — sure?" confirmation for stale replays.
+**Priority justification.** Top-3 Tier 8 priority — landed early to unblock partner pilots. The current behaviour (configurable retries + visible DLQ) is now defensible in production conversations.
 
-**Priority justification.** Top-3 Tier 8 priority. Production-readiness gap; partners with real receivers will hit this within the first month of any pilot. The current behaviour (silently give up after 6 minutes) is not defensible in any production conversation. Schema is additive; backward-compatible.
-
-**Difficulty: Low–Moderate.** Two additive Prisma columns + dispatcher policy lookup + new admin page + retry-policy form panel. Half-to-one sprint.
+**Difficulty: Low–Moderate (as estimated).** Two additive Prisma columns + dispatcher policy lookup + DLQ tab + retry-policy form panel. Roughly one sprint across four phased PRs.
 
 ### 39. Per-execution hard cost cap (runaway-loop guard) — ✅ Done
 
@@ -1076,34 +1074,30 @@ Items 37–39 are correctness — they prevent silent damage. Items 40–43 are 
 
 **Difficulty: Low–Moderate.** Three Prisma fields + cap-resolver module + engine event + chat per-turn check + 7 execution-creation paths + three admin form panels + two new webhook event labels. Single PR; tests + docs included.
 
-### 40. Stuck-execution / live-engine admin surface — ⚪ Not started
+### 40. Stuck-execution / live-engine admin surface — ✅ Done
 
-**Why it matters.** Item 15 (checkpoint recovery) shipped a lease-based orphan sweep, and the executions admin page supports filtering by status. What's missing is the operational view that answers "what is the engine doing right now, and what's wrong with it?" When a partner reports "my workflow has been running for 20 minutes," today the answer is: open the trace viewer, click through each step, eyeball the timestamps. For partners running cron- or inbound-trigger-driven workflows, this is the first operational problem they hit.
+**Why it mattered.** Item 15 (checkpoint recovery) shipped a lease-based orphan sweep, and the executions admin page supported filtering by status. What was missing was the operational view that answered "what is the engine doing right now, and what's wrong with it?" When a partner reported "my workflow has been running for 20 minutes," the answer used to be: open the trace viewer, click through each step, eyeball the timestamps. For partners running cron- or inbound-trigger-driven workflows, this was the first operational problem they hit.
 
-**What exists today.** `app/admin/orchestration/executions/page.tsx` lists executions with status filter (`pending` / `running` / `completed` / `failed`); the `running` filter works. The page does not surface: time-stuck-in-current-step, queue-wait time, current lease holder, force-fail action. Lease-status and orphan-sweep state live in `lib/orchestration/engine/lease.ts` but are not exposed in any admin UI.
+**Correction to the pre-PR framing.** The original proposal called for a separate `app/admin/orchestration/executions/live` page. The shipped implementation **folded the live-engine surface into the existing executions page** (`app/admin/orchestration/executions/page.tsx`) so cards and rows share one URL — the standalone `/executions/live` route now `permanentRedirect`s into the unified page to preserve sidebar bookmarks and Slack-alert deep-links.
 
-**What we'd ship.**
+**What shipped.**
 
-1. **Live-engine page** at `app/admin/orchestration/executions/live`. Auto-refreshing dashboard (SSE push or 5-second poll) showing four cards: currently-running executions (count + p95 age), queued executions (count + max wait-time), orphaned executions (lease-expired, awaiting sweep), and provider-saturation indicators (per-provider in-flight call counts).
-2. **Per-execution stuck-state column.** A new computed field `timeInCurrentStepMs` (now - last cost-log timestamp for the execution) surfaced as a sortable column on the live page. Highlight rows where this exceeds a configurable threshold (default 5 minutes) as "stuck-looking."
-3. **Force-fail action.** Per-row admin action `POST /api/v1/admin/orchestration/executions/{id}/force-fail` that transitions a running execution to `failed` with an audit-log entry, fires the `workflow.failed` hook, and releases any held lease. Confirmation dialog with execution context.
-4. **Lease inspector drill-in.** Per-row panel showing current lease holder, lease expiry, and lease history. Helps debug "I keep seeing the same execution stuck — is the engine restarting?"
+1. **Live-engine cards** embedded above the executions list: currently-running (count + p95 age), queued, orphaned (lease-expired, awaiting sweep), and provider-saturation indicators. Auto-refreshes via the live route at `app/api/v1/admin/orchestration/executions/live/route.ts`.
+2. **Stuck-state highlighting.** Per-step lifecycle timestamps from the running-step side table (PR #202) drive a `timeInCurrentStepMs` derivation surfaced as a sortable column. Configurable stuck-threshold setting; rows exceeding it are highlighted.
+3. **Force-fail action.** `POST /api/v1/admin/orchestration/executions/[id]/force-fail/route.ts` transitions a running execution to `failed`, writes an `execution.force_failed` admin audit log entry, records an `execution.force_failed` lease event (visible in the inspector), and fires both `workflow.failed` and `execution.force_failed` hooks so consumers can distinguish admin intervention from organic failure. Confirmation dialog warns about partially completed side-effects.
+4. **Lease inspector drill-in.** Per-row panel showing current lease holder, lease expiry, and lease history — helps debug "I keep seeing the same execution stuck — is the engine restarting?"
+5. **Orphaned-executions card polish** (`81ea9673`). De-jargoned copy on the orphaned-executions card so non-engineer operators can act on it.
+6. **Doc** at `.context/admin/orchestration-executions-live-engine.md` linked from CLAUDE.md.
 
-**Benefits.**
+**Benefits delivered.**
 
-- **First debugging surface for operational issues.** Today this debugging is "read the trace viewer carefully"; tomorrow it's "open the live page."
-- **Composes with #41 (execution health dashboard).** Live page = "right now"; dashboard = "trend over time." Two complementary lenses.
-- **Reuses existing infrastructure.** Lease module, executions list, cost-log timestamps — all already there.
-- **Closes the obvious item 15 follow-on.** Lease-based sweep without admin visibility is half a feature.
+- **First debugging surface for operational issues.** "Open the live cards on the executions page" replaces "read the trace viewer carefully."
+- **Composes with #41 (execution health dashboard, still open).** Live cards = "right now"; future dashboard = "trend over time."
+- **Closes the item 15 follow-on.** Lease-based sweep now has admin visibility — orphan rows and force-fail are surfaced.
 
-**Risks.**
+**Priority justification.** Top-3 Tier 8 priority — landed quickly thanks to PR #202's running-step side table providing the data shape. Partner pilots hit "the workflow is stuck" within the first week of running anything non-trivial; this was the cheapest operational visibility win in Tier 8.
 
-- **Auto-refresh load.** A live page polling every 5 seconds across multiple admins could pressure Postgres. Mitigation: SSE push from a singleton in-process aggregator that materialises the snapshot once per tick; clients subscribe.
-- **Force-fail misuse.** An impatient admin force-fails a slow-but-legitimate execution. Mitigation: confirmation dialog warns about side-effects partially completed; audit-log captures actor and (optional) reason.
-
-**Priority justification.** Top-3 Tier 8 priority — **re-graded upward after PR #202.** The running-step side table that PR #202 introduced (per-step rows with stamped lifecycle timestamps, including per-branch `completedAt` for parallel branches) is exactly the data shape this page needs. `timeInCurrentStepMs` is now an indexed side-table read rather than a cost-log scan, and orphan detection is already wired through the reaper. The remaining work has shrunk to mostly UI + force-fail route. Partner pilots will hit "the workflow is stuck" within the first week of running anything non-trivial; this is the cheapest operational visibility win in Tier 8.
-
-**Difficulty: Low–Moderate (re-graded down from Moderate after PR #202).** New admin page + four cards + force-fail route + lease drill-in. The running-step side table eliminates the computed-field work the original framing implied. Roughly half a sprint.
+**Difficulty: Low–Moderate (as estimated).** Live cards + force-fail route + lease drill-in + threshold setting. Roughly half a sprint.
 
 ### 41. Workflow-execution health dashboard (operational, not quality) — ⚪ Not started
 
@@ -1378,7 +1372,7 @@ Sequenced for shortest path to a partner-defensible foundation, with #47 now rem
 
 The unifying property: every Tier 8 item answers "what makes the platform solid enough to build on?" rather than "what new thing does the platform do?" Pre-launch is the moment to spend on these. Retrofitting any of them after partner code is in production is strictly more expensive — and several (audit-chain back-fill in #46, idempotency shape in #37) carry a permanent "before vN / after vN" asterisk if deferred. Item #47 (per-message version pinning) was the canonical example of the retrofit-asterisk class — it was shipped pre-launch in PR #196 for exactly this reason.
 
-If the team has 1 sprint: **#37**. If 2–3 sprints: **#37 → #40 → #48**. If 4–6 sprints: **#37 → #40 → #38 → #39 → #48 → #44**. Beyond that, partner-pull and operational pressure dictate the order — the items are independent enough that any individual sprint pays off on its own.
+If the team has 1 sprint: **#37**. If 2–3 sprints: **#37 → #48 → #44**. If 4–6 sprints: **#37 → #48 → #44 → #46 → #41 → #42**. (#38, #39, #40, and #47 are already shipped.) Beyond that, partner-pull and operational pressure dictate the order — the items are independent enough that any individual sprint pays off on its own.
 
 ---
 
