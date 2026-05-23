@@ -45,18 +45,10 @@ vi.mock('@/lib/orchestration/evaluations', () => ({
   rescoreEvaluationSession: vi.fn(),
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '127.0.0.1') }));
 
 import { auth } from '@/lib/auth/config';
 import { rescoreEvaluationSession } from '@/lib/orchestration/evaluations';
-import { adminLimiter } from '@/lib/security/rate-limit';
 
 const SESSION_ID = 'cmjbv4i3x00003wsloputgwu3';
 const INVALID_ID = 'not-a-cuid';
@@ -103,7 +95,6 @@ async function parseJson<T>(response: Response): Promise<T> {
 describe('POST /api/v1/admin/orchestration/evaluations/:id/rescore', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   describe('Authentication & Authorization', () => {

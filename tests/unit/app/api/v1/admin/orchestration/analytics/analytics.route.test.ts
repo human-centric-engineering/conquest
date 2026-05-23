@@ -27,13 +27,6 @@ vi.mock('next/headers', () => ({
   headers: vi.fn(() => Promise.resolve(new Headers())),
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({
   getClientIP: vi.fn(() => '127.0.0.1'),
 }));
@@ -54,7 +47,6 @@ import { GET as getEngagement } from '@/app/api/v1/admin/orchestration/analytics
 import { GET as getGaps } from '@/app/api/v1/admin/orchestration/analytics/content-gaps/route';
 import { GET as getFeedback } from '@/app/api/v1/admin/orchestration/analytics/feedback/route';
 import { auth } from '@/lib/auth/config';
-import { adminLimiter } from '@/lib/security/rate-limit';
 import {
   getPopularTopics,
   getUnansweredQuestions,
@@ -80,7 +72,6 @@ describe('Analytics API', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   // ── Topics Endpoint ─────────────────────────────────────────────────────
@@ -120,19 +111,6 @@ describe('Analytics API', () => {
 
       expect(res.status).toBe(401);
     });
-
-    it('returns 429 when rate limited', async () => {
-      vi.mocked(adminLimiter.check).mockReturnValue({
-        success: false,
-        limit: 10,
-        remaining: 0,
-        reset: Date.now() + 60_000,
-      } as never);
-
-      const res = await getTopics(makeGetRequest());
-
-      expect(res.status).toBe(429);
-    });
   });
 
   // ── Unanswered Endpoint ─────────────────────────────────────────────────
@@ -163,19 +141,6 @@ describe('Analytics API', () => {
       const res = await getUnanswered(makeGetRequest());
 
       expect(res.status).toBe(401);
-    });
-
-    it('returns 429 when rate limited', async () => {
-      vi.mocked(adminLimiter.check).mockReturnValue({
-        success: false,
-        limit: 10,
-        remaining: 0,
-        reset: Date.now() + 60_000,
-      } as never);
-
-      const res = await getUnanswered(makeGetRequest());
-
-      expect(res.status).toBe(429);
     });
   });
 
@@ -238,19 +203,6 @@ describe('Analytics API', () => {
       expect(res.status).toBe(401);
     });
 
-    it('returns 429 when rate limited', async () => {
-      vi.mocked(adminLimiter.check).mockReturnValue({
-        success: false,
-        limit: 10,
-        remaining: 0,
-        reset: Date.now() + 60_000,
-      } as never);
-
-      const res = await getGaps(makeGetRequest());
-
-      expect(res.status).toBe(429);
-    });
-
     it('passes agentId query param to service', async () => {
       vi.mocked(getContentGaps).mockResolvedValue([]);
 
@@ -295,19 +247,6 @@ describe('Analytics API', () => {
       const res = await getFeedback(makeGetRequest());
 
       expect(res.status).toBe(401);
-    });
-
-    it('returns 429 when rate limited', async () => {
-      vi.mocked(adminLimiter.check).mockReturnValue({
-        success: false,
-        limit: 10,
-        remaining: 0,
-        reset: Date.now() + 60_000,
-      } as never);
-
-      const res = await getFeedback(makeGetRequest());
-
-      expect(res.status).toBe(429);
     });
 
     it('passes date range query params to feedback service', async () => {
@@ -366,19 +305,6 @@ describe('Analytics API', () => {
       const res = await getEngagement(makeGetRequest());
 
       expect(res.status).toBe(401);
-    });
-
-    it('returns 429 when rate limited', async () => {
-      vi.mocked(adminLimiter.check).mockReturnValue({
-        success: false,
-        limit: 10,
-        remaining: 0,
-        reset: Date.now() + 60_000,
-      } as never);
-
-      const res = await getEngagement(makeGetRequest());
-
-      expect(res.status).toBe(429);
     });
 
     it('passes date range query params to engagement service', async () => {

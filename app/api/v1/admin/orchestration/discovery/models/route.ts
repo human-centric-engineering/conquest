@@ -30,8 +30,6 @@ import { prisma } from '@/lib/db/client';
 import { errorResponse, successResponse } from '@/lib/api/responses';
 import { ValidationError } from '@/lib/api/errors';
 import { getRouteLogger } from '@/lib/api/context';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
-import { getClientIP } from '@/lib/security/ip';
 import { getProvider, isApiKeyEnvVarSet } from '@/lib/orchestration/llm/provider-manager';
 import { inferCapability, type Capability } from '@/lib/orchestration/llm/capability-inference';
 import { getModelsByProvider, refreshFromOpenRouter } from '@/lib/orchestration/llm/model-registry';
@@ -76,10 +74,6 @@ interface DiscoveryCandidate {
 }
 
 export const GET = withAdminAuth(async (request) => {
-  const clientIP = getClientIP(request);
-  const rateLimit = adminLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
-
   const log = await getRouteLogger(request);
   const url = new URL(request.url);
   const parsed = querySchema.safeParse({

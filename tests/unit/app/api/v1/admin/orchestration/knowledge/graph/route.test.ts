@@ -48,13 +48,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({
   getClientIP: vi.fn(() => '127.0.0.1'),
 }));
@@ -64,7 +57,6 @@ vi.mock('@/lib/security/ip', () => ({
 import { GET } from '@/app/api/v1/admin/orchestration/knowledge/graph/route';
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 import {
   mockAdminUser,
   mockUnauthenticatedUser,
@@ -157,7 +149,6 @@ describe('GET /api/v1/admin/orchestration/knowledge/graph', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser() as never);
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
 
     // Default: one document, three chunks (below 500 threshold)
     vi.mocked(prisma.aiKnowledgeDocument.findMany).mockResolvedValue([makeDocument()] as never);
@@ -566,19 +557,6 @@ describe('GET /api/v1/admin/orchestration/knowledge/graph', () => {
   });
 
   // ── Rate limiting ────────────────────────────────────────────────────────
-
-  it('returns 429 when rate limit is exceeded', async () => {
-    // Arrange
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-
-    // Act
-    const res = await GET(makeGetRequest());
-
-    // Assert: early return from rate limiter
-    expect(res.status).toBe(429);
-    expect(createRateLimitResponse).toHaveBeenCalled();
-    expect(prisma.aiKnowledgeDocument.findMany).not.toHaveBeenCalled();
-  });
 
   // ── Authentication ───────────────────────────────────────────────────────
 

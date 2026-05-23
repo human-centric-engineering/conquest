@@ -10,17 +10,12 @@ import { prisma } from '@/lib/db/client';
 import { successResponse } from '@/lib/api/responses';
 import { validateRequestBody } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 import { getClientIP } from '@/lib/security/ip';
 import { getMcpServerConfig, invalidateMcpConfigCache } from '@/lib/orchestration/mcp';
 import { logAdminAction, computeChanges } from '@/lib/orchestration/audit/admin-audit-logger';
 import { updateMcpSettingsSchema } from '@/lib/validations/mcp';
 
 export const GET = withAdminAuth(async (request) => {
-  const clientIP = getClientIP(request);
-  const rateLimit = adminLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
-
   const log = await getRouteLogger(request);
   const config = await getMcpServerConfig();
 
@@ -30,8 +25,6 @@ export const GET = withAdminAuth(async (request) => {
 
 export const PATCH = withAdminAuth(async (request, session) => {
   const clientIP = getClientIP(request);
-  const rateLimit = adminLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
 
   const log = await getRouteLogger(request);
   const body = await validateRequestBody(request, updateMcpSettingsSchema);

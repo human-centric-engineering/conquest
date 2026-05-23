@@ -53,18 +53,6 @@ vi.mock('@/lib/auth/config', () => ({
 }));
 
 // Mock rate limiters
-vi.mock('@/lib/security/rate-limit', () => ({
-  apiLimiter: {
-    check: vi.fn(),
-  },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json(
-      { success: false, error: { code: 'RATE_LIMIT_EXCEEDED', message: 'Too many requests.' } },
-      { status: 429 }
-    )
-  ),
-}));
-
 // Mock IP utility
 vi.mock('@/lib/security/ip', () => ({
   getClientIP: vi.fn(() => '127.0.0.1'),
@@ -73,7 +61,6 @@ vi.mock('@/lib/security/ip', () => ({
 // Import mocked modules
 import { prisma } from '@/lib/db/client';
 import { auth } from '@/lib/auth/config';
-import { apiLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 
 /**
  * Response type interfaces
@@ -120,18 +107,6 @@ function createRouteContext(id: string) {
 async function parseResponse<T>(response: Response): Promise<T> {
   const text = await response.text();
   return JSON.parse(text) as T;
-}
-
-/**
- * Helper: build a rate-limit result
- */
-function makeRateLimitResult(success: boolean) {
-  return {
-    success,
-    limit: 60,
-    remaining: success ? 59 : 0,
-    reset: Math.floor(Date.now() / 1000) + 3600,
-  };
 }
 
 /**
@@ -337,7 +312,6 @@ describe('DELETE /api/v1/chat/conversations/:id', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(auth.api.getSession).mockResolvedValue(createMockSession() as never);
-    vi.mocked(apiLimiter.check).mockReturnValue(makeRateLimitResult(true));
     vi.mocked(prisma.aiConversation.findFirst).mockResolvedValue(makeMockConversation() as never);
     vi.mocked(prisma.aiConversation.delete).mockResolvedValue({} as never);
   });
@@ -414,24 +388,6 @@ describe('DELETE /api/v1/chat/conversations/:id', () => {
   // ---------------------------------------------------------------------------
   // 3. Rate limiting
   // ---------------------------------------------------------------------------
-
-  describe('Rate limiting', () => {
-    it('should return 429 when the IP rate limit is exceeded', async () => {
-      // Arrange
-      vi.mocked(apiLimiter.check).mockReturnValue(makeRateLimitResult(false));
-      const request = createMockRequest();
-      const context = createRouteContext(VALID_CUID);
-
-      // Act
-      const response = await DELETE(request, context);
-
-      // Assert
-      expect(response.status).toBe(429);
-      expect(createRateLimitResponse).toHaveBeenCalledOnce();
-      expect(prisma.aiConversation.findFirst).not.toHaveBeenCalled(); // test-review:accept no_arg_called — error-path guard: function must not be called;
-      expect(prisma.aiConversation.delete).not.toHaveBeenCalled(); // test-review:accept no_arg_called — error-path guard: function must not be called;
-    });
-  });
 
   // ---------------------------------------------------------------------------
   // 4. Validation errors

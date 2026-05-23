@@ -34,16 +34,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json(
-      { success: false, error: { code: 'RATE_LIMITED', message: 'rate limited' } },
-      { status: 429 }
-    )
-  ),
-}));
-
 vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({
   logAdminAction: vi.fn(),
 }));
@@ -76,7 +66,6 @@ vi.mock('@/lib/orchestration/llm/circuit-breaker', () => {
 
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter } from '@/lib/security/rate-limit';
 import { getCircuitBreakerStatus } from '@/lib/orchestration/llm/circuit-breaker';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -190,12 +179,6 @@ describe('GET /api/v1/admin/orchestration/providers/:id/health', () => {
 describe('POST /api/v1/admin/orchestration/providers/:id/health', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({
-      success: true,
-      limit: 100,
-      remaining: 99,
-      reset: Date.now() + 60_000,
-    });
   });
 
   it('returns 401 when unauthenticated', async () => {
@@ -228,18 +211,5 @@ describe('POST /api/v1/admin/orchestration/providers/:id/health', () => {
     expect(body.success).toBe(true);
     expect(body.data.providerId).toBe(PROVIDER_ID);
     expect(body.data.slug).toBe('anthropic');
-  });
-
-  it('returns 429 when rate limited', async () => {
-    vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-    vi.mocked(adminLimiter.check).mockReturnValue({
-      success: false,
-      limit: 100,
-      remaining: 0,
-      reset: Date.now() + 60_000,
-    });
-
-    const res = await POST(makeRequest('POST'), makeParams());
-    expect(res.status).toBe(429);
   });
 });

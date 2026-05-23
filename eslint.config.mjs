@@ -22,6 +22,9 @@ export default tseslint.config(
       // and `tseslint.configs.recommendedTypeChecked` with `projectService: true`
       // would load every one, exhausting the ESLint heap.
       '.claude/worktrees/**',
+      // Throwaway scripts (one-shot codemods, scratch utilities). Gitignored
+      // but visible to eslint without this exclusion.
+      '.claude/tmp/**',
     ],
   },
 

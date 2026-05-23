@@ -6,12 +6,14 @@
  * DELETE /api/v1/mcp — Session termination
  *
  * Authentication: MCP API key (bearer token), not session cookies.
- * Rate limited at IP level via apiLimiter, then per-key via McpRateLimiter.
+ * Rate limiting is layered: the proxy applies the section-level `mcp` tier
+ * (300/min keyed per api-key — see `lib/security/rate-limit-policy.ts`),
+ * and `McpRateLimiter` inside the handler applies the per-key sub-cap
+ * configured on each `apiKey.rateLimit` row.
  */
 
 import { NextRequest } from 'next/server';
 import { handleAPIError } from '@/lib/api/errors';
-import { apiLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 import { getClientIP } from '@/lib/security/ip';
 import { sseResponse } from '@/lib/api/sse';
 import { logger } from '@/lib/logging';
@@ -38,11 +40,8 @@ export async function POST(request: NextRequest): Promise<Response> {
   try {
     const clientIp = getClientIP(request);
 
-    // 1. IP-level rate limit
-    const ipLimit = apiLimiter.check(clientIp);
-    if (!ipLimit.success) return createRateLimitResponse(ipLimit);
-
-    // 2. Authenticate bearer token
+    // Authenticate bearer token. Section-level rate limiting is enforced
+    // upstream by proxy.ts via the mcp tier (300/min keyed per api-key).
     const authHeader = request.headers.get('authorization') ?? '';
     const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
     const userAgent = request.headers.get('user-agent') ?? '';
@@ -59,7 +58,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       );
     }
 
-    // 3. Check MCP server is enabled
+    // 1. Check MCP server is enabled
     const serverState = await getMcpServerConfig();
     if (!serverState.isEnabled) {
       return Response.json(
@@ -72,7 +71,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       );
     }
 
-    // 4. Parse request body with size limit
+    // 2. Parse request body with size limit
     const contentLength = request.headers.get('content-length');
     if (contentLength && parseInt(contentLength, 10) > MAX_BODY_SIZE) {
       return Response.json(
@@ -99,7 +98,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       );
     }
 
-    // 5. Detect batch vs single request
+    // 3. Detect batch vs single request
     const isBatch = Array.isArray(rawBody);
     const rawArray = isBatch ? (rawBody as unknown[]) : null;
 
@@ -152,7 +151,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     const sessionManager = getMcpSessionManager();
     const rateLimiter = getMcpRateLimiter();
 
-    // 6. Session management
+    // 4. Session management
     const hasInitialize = validRequests.some((r) => r.method === 'initialize');
     const sessionId = request.headers.get(MCP_SESSION_HEADER);
     let session;
@@ -232,7 +231,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       );
     }
 
-    // 7. Dispatch each request
+    // 5. Dispatch each request
     const handlerContext = { auth, session, serverState, rateLimiter };
     const responses: (JsonRpcResponse | null)[] = [];
 
@@ -279,8 +278,6 @@ export async function POST(request: NextRequest): Promise<Response> {
 export async function GET(request: NextRequest): Promise<Response> {
   try {
     const clientIp = getClientIP(request);
-    const ipLimit = apiLimiter.check(clientIp);
-    if (!ipLimit.success) return createRateLimitResponse(ipLimit);
 
     const authHeader = request.headers.get('authorization') ?? '';
     const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
@@ -359,8 +356,6 @@ export async function GET(request: NextRequest): Promise<Response> {
 export async function DELETE(request: NextRequest): Promise<Response> {
   try {
     const clientIp = getClientIP(request);
-    const ipLimit = apiLimiter.check(clientIp);
-    if (!ipLimit.success) return createRateLimitResponse(ipLimit);
 
     const authHeader = request.headers.get('authorization') ?? '';
     const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';

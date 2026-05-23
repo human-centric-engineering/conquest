@@ -48,13 +48,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/orchestration/llm/provider-manager', () => ({
   isApiKeyEnvVarSet: vi.fn(() => false),
   clearCache: vi.fn(),
@@ -69,7 +62,6 @@ vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({
 
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter } from '@/lib/security/rate-limit';
 import { isApiKeyEnvVarSet, clearCache } from '@/lib/orchestration/llm/provider-manager';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -193,7 +185,6 @@ describe('GET /api/v1/admin/orchestration/providers/:id', () => {
 describe('PATCH /api/v1/admin/orchestration/providers/:id', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   describe('Authentication & Authorization', () => {
@@ -217,33 +208,6 @@ describe('PATCH /api/v1/admin/orchestration/providers/:id', () => {
       );
 
       expect(response.status).toBe(403);
-    });
-  });
-
-  describe('Rate limiting', () => {
-    it('calls adminLimiter.check on PATCH (mutating route)', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(prisma.aiProviderConfig.findUnique).mockResolvedValue(makeProvider() as never);
-      vi.mocked(prisma.aiProviderConfig.update).mockResolvedValue(
-        makeProvider({ name: 'Updated' }) as never
-      );
-
-      await PATCH(makeRequest('PATCH', { name: 'Updated' }), makeParams(PROVIDER_ID));
-
-      expect(vi.mocked(adminLimiter.check)).toHaveBeenCalledOnce();
-    });
-
-    it('returns 429 when rate limit exceeded on PATCH', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-
-      const response = await PATCH(
-        makeRequest('PATCH', { name: 'Updated' }),
-        makeParams(PROVIDER_ID)
-      );
-
-      expect(response.status).toBe(429);
-      expect(vi.mocked(prisma.aiProviderConfig.findUnique)).not.toHaveBeenCalled();
     });
   });
 
@@ -409,7 +373,6 @@ describe('PATCH /api/v1/admin/orchestration/providers/:id', () => {
 describe('DELETE /api/v1/admin/orchestration/providers/:id', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   describe('Authentication & Authorization', () => {
@@ -427,18 +390,6 @@ describe('DELETE /api/v1/admin/orchestration/providers/:id', () => {
       const response = await DELETE(makeRequest('DELETE'), makeParams(PROVIDER_ID));
 
       expect(response.status).toBe(403);
-    });
-  });
-
-  describe('Rate limiting', () => {
-    it('returns 429 when rate limit exceeded on DELETE', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-
-      const response = await DELETE(makeRequest('DELETE'), makeParams(PROVIDER_ID));
-
-      expect(response.status).toBe(429);
-      expect(vi.mocked(prisma.aiProviderConfig.findUnique)).not.toHaveBeenCalled();
     });
   });
 
@@ -502,7 +453,6 @@ describe('DELETE /api/v1/admin/orchestration/providers/:id?permanent=true', () =
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
     // Default to "no references found" — individual tests override.
     vi.mocked(prisma.aiAgent.count).mockResolvedValue(0);
     vi.mocked(prisma.aiCostLog.count).mockResolvedValue(0);

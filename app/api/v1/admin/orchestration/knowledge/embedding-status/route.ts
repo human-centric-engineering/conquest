@@ -11,15 +11,9 @@
 
 import { withAdminAuth } from '@/lib/auth/guards';
 import { successResponse } from '@/lib/api/responses';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
-import { getClientIP } from '@/lib/security/ip';
 import { prisma } from '@/lib/db/client';
 
-export const GET = withAdminAuth(async (request) => {
-  const clientIP = getClientIP(request);
-  const rateLimit = adminLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
-
+export const GET = withAdminAuth(async (_request) => {
   const [total, embeddedRows, hasProvider] = await Promise.all([
     prisma.aiKnowledgeChunk.count(),
     prisma.$queryRaw<[{ count: bigint }]>`

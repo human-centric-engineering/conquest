@@ -15,7 +15,6 @@ import { successResponse } from '@/lib/api/responses';
 import { NotFoundError } from '@/lib/api/errors';
 import { validateRequestBody } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 import { getClientIP } from '@/lib/security/ip';
 import { cuidSchema } from '@/lib/validations/common';
 import { updateWebhookSchema } from '@/lib/validations/orchestration';
@@ -32,11 +31,7 @@ const SAFE_SELECT = {
   updatedAt: true,
 } as const;
 
-export const GET = withAdminAuth<{ id: string }>(async (request, session, { params }) => {
-  const clientIP = getClientIP(request);
-  const rateLimit = adminLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
-
+export const GET = withAdminAuth<{ id: string }>(async (_request, session, { params }) => {
   const { id: rawId } = await params;
   const parsed = cuidSchema.safeParse(rawId);
   if (!parsed.success)
@@ -52,10 +47,6 @@ export const GET = withAdminAuth<{ id: string }>(async (request, session, { para
 });
 
 export const PATCH = withAdminAuth<{ id: string }>(async (request, session, { params }) => {
-  const clientIP = getClientIP(request);
-  const rateLimit = adminLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
-
   const log = await getRouteLogger(request);
   const { id: rawId } = await params;
   const parsed = cuidSchema.safeParse(rawId);
@@ -98,10 +89,6 @@ export const PATCH = withAdminAuth<{ id: string }>(async (request, session, { pa
 });
 
 export const DELETE = withAdminAuth<{ id: string }>(async (request, session, { params }) => {
-  const clientIP = getClientIP(request);
-  const rateLimit = adminLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
-
   const log = await getRouteLogger(request);
   const { id: rawId } = await params;
   const parsed = cuidSchema.safeParse(rawId);

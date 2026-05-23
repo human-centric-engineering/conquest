@@ -1,13 +1,16 @@
 /**
  * Unit Tests: POST /api/v1/admin/orchestration/chat/stream
  *
- * Tests the admin-facing SSE chat endpoint. Uses withAdminAuth guard
- * and two rate limiters (adminLimiter per IP, chatLimiter per user).
+ * Tests the admin-facing SSE chat endpoint. Uses withAdminAuth guard and
+ * three per-flow rate limiters in the handler (chatLimiter per user,
+ * agentChatLimiter per agent, imageLimiter for attachment-bearing requests).
+ * Section-level rate limiting (orchestration tier, 120/min) is enforced
+ * centrally by proxy.ts via the policy table.
  *
  * Test Coverage:
  * - Happy path: valid request → calls streamChat with correct args → SSE response
- * - Rate limit exceeded (admin IP limiter) → 429
  * - Rate limit exceeded (chat user limiter) → 429
+ * - Rate limit exceeded (per-agent limiter) → 429
  * - Invalid body: missing required fields → 400 VALIDATION_ERROR
  * - Attachments forwarded to streamChat
  * - Authentication: no session → 401 (delegated to withAdminAuth)
@@ -40,9 +43,6 @@ vi.mock('@/lib/auth/config', () => ({
 
 // Mock rate limiters
 vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: {
-    check: vi.fn(),
-  },
   chatLimiter: {
     check: vi.fn(),
   },
@@ -88,7 +88,6 @@ vi.mock('@/lib/logging/context', () => ({
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
 import {
-  adminLimiter,
   agentChatLimiter,
   chatLimiter,
   createRateLimitResponse,
@@ -161,7 +160,6 @@ describe('POST /api/v1/admin/orchestration/chat/stream', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(auth.api.getSession).mockResolvedValue(createAdminSession());
-    vi.mocked(adminLimiter.check).mockReturnValue(makeRateLimitResult(true));
     vi.mocked(chatLimiter.check).mockReturnValue(makeRateLimitResult(true));
     // Per-agent rate-limit lookup — return a generic agent row so the
     // route progresses to streamChat. Individual tests can override.
@@ -224,17 +222,6 @@ describe('POST /api/v1/admin/orchestration/chat/stream', () => {
         entityContext: { key: 'value' },
       })
     );
-  });
-
-  it('returns 429 when admin IP rate limit is exceeded', async () => {
-    vi.mocked(adminLimiter.check).mockReturnValue(makeRateLimitResult(false));
-
-    const req = createMockRequest(validPayload);
-    const response = await POST(req);
-
-    expect(response.status).toBe(429);
-    expect(createRateLimitResponse).toHaveBeenCalled();
-    expect(streamChat).not.toHaveBeenCalled();
   });
 
   it('returns 429 when chat user rate limit is exceeded', async () => {

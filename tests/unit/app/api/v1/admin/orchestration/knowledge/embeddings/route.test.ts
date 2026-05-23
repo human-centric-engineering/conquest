@@ -37,13 +37,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({
   getClientIP: vi.fn(() => '127.0.0.1'),
 }));
@@ -53,7 +46,6 @@ vi.mock('@/lib/security/ip', () => ({
 import { GET } from '@/app/api/v1/admin/orchestration/knowledge/embeddings/route';
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter } from '@/lib/security/rate-limit';
 import {
   mockAdminUser,
   mockUnauthenticatedUser,
@@ -141,7 +133,6 @@ describe('GET /api/v1/admin/orchestration/knowledge/embeddings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser() as never);
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   it('returns 401 when no session is present', async () => {
@@ -154,12 +145,6 @@ describe('GET /api/v1/admin/orchestration/knowledge/embeddings', () => {
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAuthenticatedUser() as never);
     const res = await GET(makeGetRequest());
     expect(res.status).toBe(403);
-  });
-
-  it('returns 429 when the rate-limit gate fires', async () => {
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: false, retryAfter: 30 } as never);
-    const res = await GET(makeGetRequest());
-    expect(res.status).toBe(429);
   });
 
   it('returns empty chunks and projectable=false when there are no embedded chunks', async () => {

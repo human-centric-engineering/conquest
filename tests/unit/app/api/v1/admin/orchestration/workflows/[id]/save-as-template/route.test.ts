@@ -59,15 +59,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: {
-    check: vi.fn(() => ({ success: true, limit: 100, remaining: 99, reset: 9999999999 })),
-  },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({
   getClientIP: vi.fn(() => '127.0.0.1'),
 }));
@@ -89,7 +80,6 @@ vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({
 
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter } from '@/lib/security/rate-limit';
 import {
   mockAdminUser,
   mockUnauthenticatedUser,
@@ -204,14 +194,6 @@ describe('POST /api/v1/admin/orchestration/workflows/:id/save-as-template', () =
   beforeEach(() => {
     vi.clearAllMocks();
 
-    // Restore safe defaults — adminLimiter allows by default
-    vi.mocked(adminLimiter.check).mockReturnValue({
-      success: true,
-      limit: 100,
-      remaining: 99,
-      reset: 9999999999,
-    });
-
     // Default: slug is unique (findUnique for slug returns null)
     vi.mocked(prisma.aiWorkflow.findUnique).mockImplementation((async (args: unknown) => {
       const { where } = args as { where: { id?: string; slug?: string } };
@@ -227,28 +209,6 @@ describe('POST /api/v1/admin/orchestration/workflows/:id/save-as-template', () =
   });
 
   // ─── Rate limiting ──────────────────────────────────────────────────
-
-  describe('rate limiting', () => {
-    it('should return 429 when adminLimiter.check indicates the limit is exceeded', async () => {
-      // Arrange: override the default (success=true) with a failed rate-limit check
-      vi.mocked(adminLimiter.check).mockReturnValueOnce({
-        success: false,
-        limit: 10,
-        remaining: 0,
-        reset: Date.now() + 60000,
-      });
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-
-      // Act
-      const response = await POST(makeRequest(), makeParams());
-      const body = await parseJson<ErrorBody>(response);
-
-      // Assert: createRateLimitResponse was called and returned a 429
-      expect(response.status).toBe(429);
-      expect(body.success).toBe(false);
-      expect(body.error.code).toBe('RATE_LIMITED');
-    });
-  });
 
   // ─── Authentication ─────────────────────────────────────────────────
 

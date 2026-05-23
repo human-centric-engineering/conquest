@@ -10,7 +10,6 @@
  * - Returns conversation with agent and _count includes
  * - Cross-user access returns 404 (NOT 403)
  * - Bad CUID returns 400
- * - No rate-limiting call on GET (only DELETE has adminLimiter)
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -50,13 +49,6 @@ vi.mock('@/lib/orchestration/access/conversation-access', () => ({
 
 vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({
   logConversationAccess: vi.fn(),
-}));
-
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
 }));
 
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '127.0.0.1') }));

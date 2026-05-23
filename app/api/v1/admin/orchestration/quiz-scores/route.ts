@@ -16,8 +16,6 @@ import { prisma } from '@/lib/db/client';
 import { successResponse } from '@/lib/api/responses';
 import { validateRequestBody } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
-import { getClientIP } from '@/lib/security/ip';
 import { saveQuizScoreSchema } from '@/lib/validations/orchestration';
 
 const quizMetadataSchema = z.object({
@@ -27,10 +25,6 @@ const quizMetadataSchema = z.object({
 const QUIZ_MASTER_SLUG = 'quiz-master';
 
 export const GET = withAdminAuth(async (request, session) => {
-  const clientIP = getClientIP(request);
-  const rateLimit = adminLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
-
   const log = await getRouteLogger(request);
 
   const sessions = await prisma.aiEvaluationSession.findMany({
@@ -64,10 +58,6 @@ export const GET = withAdminAuth(async (request, session) => {
 });
 
 export const POST = withAdminAuth(async (request, session) => {
-  const clientIP = getClientIP(request);
-  const rateLimit = adminLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
-
   const log = await getRouteLogger(request);
   const { correct, total } = await validateRequestBody(request, saveQuizScoreSchema);
 

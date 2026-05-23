@@ -44,20 +44,12 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '127.0.0.1') }));
 
 // ─── Imports after mocks ─────────────────────────────────────────────────────
 
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter } from '@/lib/security/rate-limit';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -115,7 +107,6 @@ async function parseJson<T>(response: Response): Promise<T> {
 describe('GET /api/v1/admin/orchestration/evaluations/:id', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   describe('Authentication & Authorization', () => {
@@ -179,7 +170,6 @@ describe('GET /api/v1/admin/orchestration/evaluations/:id', () => {
 describe('PATCH /api/v1/admin/orchestration/evaluations/:id', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   describe('Authentication & Authorization', () => {
@@ -293,17 +283,6 @@ describe('PATCH /api/v1/admin/orchestration/evaluations/:id', () => {
       const response = await PATCH(makePatchRequest({ title: 'Updated' }), makeParams(INVALID_ID));
 
       expect(response.status).toBe(400);
-    });
-  });
-
-  describe('Rate limiting', () => {
-    it('returns 429 when rate limit is hit on PATCH', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-
-      const response = await PATCH(makePatchRequest({ title: 'Updated' }), makeParams(SESSION_ID));
-
-      expect(response.status).toBe(429);
     });
   });
 });

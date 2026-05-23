@@ -10,16 +10,10 @@ import { prisma } from '@/lib/db/client';
 import { paginatedResponse, successResponse } from '@/lib/api/responses';
 import { validateQueryParams } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
-import { getClientIP } from '@/lib/security/ip';
 import { queryMcpAuditLogs, getMcpServerConfig } from '@/lib/orchestration/mcp';
 import { mcpAuditQuerySchema } from '@/lib/validations/mcp';
 
 export const GET = withAdminAuth(async (request) => {
-  const clientIP = getClientIP(request);
-  const rateLimit = adminLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
-
   const log = await getRouteLogger(request);
   const filters = validateQueryParams(new URL(request.url).searchParams, mcpAuditQuerySchema);
 
@@ -38,10 +32,6 @@ export const GET = withAdminAuth(async (request) => {
  * Uses `auditRetentionDays` from McpServerConfig. Returns 0 if retention is disabled (0 days).
  */
 export const DELETE = withAdminAuth(async (request, session) => {
-  const clientIP = getClientIP(request);
-  const rateLimit = adminLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
-
   const log = await getRouteLogger(request);
   const config = await getMcpServerConfig();
 

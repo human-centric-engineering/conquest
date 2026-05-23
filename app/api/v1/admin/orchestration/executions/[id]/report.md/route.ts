@@ -19,8 +19,6 @@ import { withAdminAuth } from '@/lib/auth/guards';
 import { prisma } from '@/lib/db/client';
 import { ConflictError, NotFoundError, ValidationError } from '@/lib/api/errors';
 import { logger } from '@/lib/logging';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
-import { getClientIP } from '@/lib/security/ip';
 import { cuidSchema } from '@/lib/validations/common';
 import { executionTraceSchema, supervisorReportSchema } from '@/lib/validations/orchestration';
 import {
@@ -41,11 +39,7 @@ const TERMINAL_STATUSES = new Set<string>([
   WorkflowStatus.CANCELLED,
 ]);
 
-export const GET = withAdminAuth<{ id: string }>(async (request, session, { params }) => {
-  const clientIP = getClientIP(request);
-  const rateLimit = adminLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
-
+export const GET = withAdminAuth<{ id: string }>(async (_request, session, { params }) => {
   const { id: rawId } = await params;
   const parsed = cuidSchema.safeParse(rawId);
   if (!parsed.success) {

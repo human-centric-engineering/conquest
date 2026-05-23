@@ -34,13 +34,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({
   getClientIP: vi.fn(() => '127.0.0.1'),
 }));
@@ -56,7 +49,6 @@ import { GET, POST } from '@/app/api/v1/admin/orchestration/agents/[id]/invite-t
 import { DELETE } from '@/app/api/v1/admin/orchestration/agents/[id]/invite-tokens/[tokenId]/route';
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter } from '@/lib/security/rate-limit';
 import { mockAdminUser, mockUnauthenticatedUser } from '@/tests/helpers/auth';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -100,7 +92,6 @@ describe('Invite Token Endpoints', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   // ── GET — List tokens ──────────────────────────────────────────────────
@@ -144,20 +135,6 @@ describe('Invite Token Endpoints', () => {
       const res = await GET(makeGetRequest(), makeAgentParams());
 
       expect(res.status).toBe(401);
-    });
-
-    it('returns 429 when rate limited on GET', async () => {
-      // Arrange: rate limit exceeded
-      vi.mocked(adminLimiter.check).mockReturnValue({
-        success: false,
-        limit: 10,
-        remaining: 0,
-        reset: Date.now() + 60_000,
-      } as never);
-
-      const res = await GET(makeGetRequest(), makeAgentParams());
-
-      expect(res.status).toBe(429);
     });
 
     it('returns 400 for invalid agent id (non-CUID) on GET', async () => {
@@ -215,20 +192,6 @@ describe('Invite Token Endpoints', () => {
       const res = await POST(makePostRequest({}), makeAgentParams());
 
       expect(res.status).toBe(404);
-    });
-
-    it('returns 429 when rate limited on POST', async () => {
-      // Arrange: rate limit exceeded
-      vi.mocked(adminLimiter.check).mockReturnValue({
-        success: false,
-        limit: 10,
-        remaining: 0,
-        reset: Date.now() + 60_000,
-      } as never);
-
-      const res = await POST(makePostRequest({}), makeAgentParams());
-
-      expect(res.status).toBe(429);
     });
 
     it('returns 400 for invalid agent id (non-CUID) on POST', async () => {
@@ -304,19 +267,6 @@ describe('Invite Token Endpoints', () => {
       const res = await DELETE(makeDeleteRequest(), makeTokenParams());
 
       expect(res.status).toBe(404);
-    });
-
-    it('returns 429 when rate limited', async () => {
-      vi.mocked(adminLimiter.check).mockReturnValue({
-        success: false,
-        limit: 10,
-        remaining: 0,
-        reset: Date.now() + 60_000,
-      } as never);
-
-      const res = await DELETE(makeDeleteRequest(), makeTokenParams());
-
-      expect(res.status).toBe(429);
     });
   });
 });

@@ -12,7 +12,6 @@ import { prisma } from '@/lib/db/client';
 import { NotFoundError, ValidationError } from '@/lib/api/errors';
 import { successResponse } from '@/lib/api/responses';
 import { validateRequestBody } from '@/lib/api/validation';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 import { getClientIP } from '@/lib/security/ip';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { cuidSchema } from '@/lib/validations/common';
@@ -39,11 +38,7 @@ async function resolveSchedule(rawId: string, rawScheduleId: string) {
   return schedule;
 }
 
-export const GET = withAdminAuth<Params>(async (request, _session, { params }) => {
-  const clientIP = getClientIP(request);
-  const rateLimit = adminLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
-
+export const GET = withAdminAuth<Params>(async (_request, _session, { params }) => {
   const { id, scheduleId } = await params;
   const schedule = await resolveSchedule(id, scheduleId);
 
@@ -52,8 +47,6 @@ export const GET = withAdminAuth<Params>(async (request, _session, { params }) =
 
 export const PATCH = withAdminAuth<Params>(async (request, session, { params }) => {
   const clientIP = getClientIP(request);
-  const rateLimit = adminLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
 
   const { id, scheduleId } = await params;
   const existing = await resolveSchedule(id, scheduleId);
@@ -99,8 +92,6 @@ export const PATCH = withAdminAuth<Params>(async (request, session, { params }) 
 
 export const DELETE = withAdminAuth<Params>(async (request, session, { params }) => {
   const clientIP = getClientIP(request);
-  const rateLimit = adminLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
 
   const { id, scheduleId } = await params;
   const existing = await resolveSchedule(id, scheduleId);

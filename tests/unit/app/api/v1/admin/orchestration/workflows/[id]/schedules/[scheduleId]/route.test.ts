@@ -46,13 +46,6 @@ vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({
   logAdminAction: vi.fn(),
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({
   getClientIP: vi.fn(() => '127.0.0.1'),
 }));
@@ -71,7 +64,6 @@ import {
 } from '@/app/api/v1/admin/orchestration/workflows/[id]/schedules/[scheduleId]/route';
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter } from '@/lib/security/rate-limit';
 import { mockAdminUser, mockUnauthenticatedUser } from '@/tests/helpers/auth';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -133,7 +125,6 @@ describe('GET /workflows/:id/schedules/:scheduleId', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
     vi.mocked(prisma.aiWorkflowSchedule.findFirst).mockResolvedValue(mockScheduleRecord as never);
   });
 
@@ -184,21 +175,6 @@ describe('GET /workflows/:id/schedules/:scheduleId', () => {
     expect(json.success).toBe(false);
   });
 
-  it('returns 429 when rate limit is exceeded', async () => {
-    // Arrange: rate limiter rejects
-    vi.mocked(adminLimiter.check).mockReturnValue({
-      success: false,
-      limit: 10,
-      remaining: 0,
-      reset: Date.now() + 60_000,
-    } as never);
-
-    const res = await getSchedule(makeGetRequest(), makeParams(VALID_WF_ID, VALID_SCHED_ID));
-
-    expect(res.status).toBe(429);
-    expect(prisma.aiWorkflowSchedule.findFirst).not.toHaveBeenCalled();
-  });
-
   it('returns 401 when request is unauthenticated', async () => {
     // Arrange: no session
     vi.mocked(auth.api.getSession).mockResolvedValue(mockUnauthenticatedUser());
@@ -213,7 +189,6 @@ describe('PATCH /workflows/:id/schedules/:scheduleId', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
     vi.mocked(prisma.aiWorkflowSchedule.findFirst).mockResolvedValue(mockScheduleRecord as never);
   });
 
@@ -337,24 +312,6 @@ describe('PATCH /workflows/:id/schedules/:scheduleId', () => {
     expect(prisma.aiWorkflowSchedule.update).not.toHaveBeenCalled();
   });
 
-  it('returns 429 when rate limit is exceeded', async () => {
-    // Arrange: rate limiter rejects
-    vi.mocked(adminLimiter.check).mockReturnValue({
-      success: false,
-      limit: 10,
-      remaining: 0,
-      reset: Date.now() + 60_000,
-    } as never);
-
-    const res = await updateSchedule(
-      makePatchRequest({ name: 'X' }),
-      makeParams(VALID_WF_ID, VALID_SCHED_ID)
-    );
-
-    expect(res.status).toBe(429);
-    expect(prisma.aiWorkflowSchedule.findFirst).not.toHaveBeenCalled();
-  });
-
   it('includes inputTemplate in update data when provided', async () => {
     // Arrange: body includes an inputTemplate value
     const newTemplate = { prompt: 'run daily report' };
@@ -394,7 +351,6 @@ describe('DELETE /workflows/:id/schedules/:scheduleId', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
     vi.mocked(prisma.aiWorkflowSchedule.findFirst).mockResolvedValue(mockScheduleRecord as never);
     vi.mocked(prisma.aiWorkflowSchedule.delete).mockResolvedValue(mockScheduleRecord as never);
   });
@@ -451,22 +407,6 @@ describe('DELETE /workflows/:id/schedules/:scheduleId', () => {
     // Assert: NotFoundError prevents double-delete
     expect(res.status).toBe(404);
     expect(json.success).toBe(false);
-    expect(prisma.aiWorkflowSchedule.delete).not.toHaveBeenCalled();
-  });
-
-  it('returns 429 when rate limit is exceeded', async () => {
-    // Arrange: rate limiter rejects
-    vi.mocked(adminLimiter.check).mockReturnValue({
-      success: false,
-      limit: 10,
-      remaining: 0,
-      reset: Date.now() + 60_000,
-    } as never);
-
-    const res = await deleteSchedule(makeDeleteRequest(), makeParams(VALID_WF_ID, VALID_SCHED_ID));
-
-    expect(res.status).toBe(429);
-    expect(prisma.aiWorkflowSchedule.findFirst).not.toHaveBeenCalled();
     expect(prisma.aiWorkflowSchedule.delete).not.toHaveBeenCalled();
   });
 

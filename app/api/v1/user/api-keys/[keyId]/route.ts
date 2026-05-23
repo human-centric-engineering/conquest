@@ -12,17 +12,11 @@ import type { AuthSession } from '@/lib/auth/guards';
 import { prisma } from '@/lib/db/client';
 import { successResponse } from '@/lib/api/responses';
 import { NotFoundError, ValidationError } from '@/lib/api/errors';
-import { apiLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
-import { getClientIP } from '@/lib/security/ip';
 import { cuidSchema } from '@/lib/validations/common';
 
 type Params = { keyId: string };
 
-export const DELETE = withAuth<Params>(async (request, session: AuthSession, { params }) => {
-  const clientIP = getClientIP(request);
-  const rateLimit = apiLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
-
+export const DELETE = withAuth<Params>(async (_request, session: AuthSession, { params }) => {
   const { keyId: rawKeyId } = await params;
   const parsed = cuidSchema.safeParse(rawKeyId);
   if (!parsed.success)

@@ -16,8 +16,6 @@ import { prisma } from '@/lib/db/client';
 import { successResponse } from '@/lib/api/responses';
 import { NotFoundError, ValidationError } from '@/lib/api/errors';
 import { cuidSchema } from '@/lib/validations/common';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
-import { getClientIP } from '@/lib/security/ip';
 
 const querySchema = z.object({
   agentIds: z
@@ -70,10 +68,6 @@ async function getAgentStats(agentId: string) {
 }
 
 export const GET = withAdminAuth(async (request) => {
-  const clientIP = getClientIP(request);
-  const rateLimit = adminLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
-
   const url = new URL(request.url);
   const parsed = querySchema.safeParse({ agentIds: url.searchParams.get('agentIds') ?? '' });
   if (!parsed.success) {

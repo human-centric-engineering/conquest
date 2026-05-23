@@ -9,9 +9,10 @@
  *       against the registry and invalidates the in-memory cache so the next chat
  *       turn picks up the change.
  *
- * Authentication: Admin role required. Both GET and PATCH are rate-limited via
- * the shared `adminLimiter` — GET performs an upsert-on-read, so it is a
- * mutating endpoint despite the HTTP verb.
+ * Authentication: Admin role required. Both GET and PATCH are rate-limited
+ * centrally by `proxy.ts` via the orchestration tier in the policy table at
+ * `lib/security/rate-limit-policy.ts`. GET performs an upsert-on-read, so it
+ * is a mutating endpoint despite the HTTP verb — the cap still applies.
  */
 
 import { Prisma } from '@prisma/client';
@@ -20,7 +21,6 @@ import { prisma } from '@/lib/db/client';
 import { successResponse, errorResponse } from '@/lib/api/responses';
 import { validateRequestBody } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 import { getClientIP } from '@/lib/security/ip';
 import { computeETag, checkConditional } from '@/lib/api/etag';
 import { computeDefaultModelMap } from '@/lib/orchestration/llm/model-registry';
@@ -37,10 +37,6 @@ import {
 import { TASK_TYPES, type TaskType } from '@/types/orchestration';
 
 export const GET = withAdminAuth(async (request) => {
-  const clientIP = getClientIP(request);
-  const rateLimit = adminLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
-
   const log = await getRouteLogger(request);
   const settings = await getOrchestrationSettings();
 
@@ -56,8 +52,6 @@ export const GET = withAdminAuth(async (request) => {
 
 export const PATCH = withAdminAuth(async (request, session) => {
   const clientIP = getClientIP(request);
-  const rateLimit = adminLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
 
   const log = await getRouteLogger(request);
   const body = await validateRequestBody(request, updateOrchestrationSettingsSchema);

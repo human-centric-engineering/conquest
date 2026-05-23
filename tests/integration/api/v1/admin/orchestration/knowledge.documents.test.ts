@@ -8,7 +8,7 @@
  *
  * Key security assertions:
  * - Admin auth required (401/403 otherwise)
- * - Rate limited on POST (adminLimiter)
+ * - Rate limiting enforced by proxy.ts (orchestration tier)
  * - File size limit enforced (50 MB; 413 FILE_TOO_LARGE)
  * - Extension whitelist enforced via `ALLOWED_EXTENSIONS` (400 INVALID_FILE_TYPE)
  * - Pre-parse Content-Length guard rejects oversize bodies before allocation
@@ -58,13 +58,6 @@ vi.mock('@/lib/orchestration/knowledge/document-manager', () => ({
   previewDocument: vi.fn(),
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '127.0.0.1') }));
 
 // ─── Imports after mocks ─────────────────────────────────────────────────────
@@ -76,7 +69,6 @@ import {
   uploadDocument,
   uploadDocumentFromBuffer,
 } from '@/lib/orchestration/knowledge/document-manager';
-import { adminLimiter } from '@/lib/security/rate-limit';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -206,7 +198,6 @@ describe('GET /api/v1/admin/orchestration/knowledge/documents', () => {
 describe('POST /api/v1/admin/orchestration/knowledge/documents', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   describe('Authentication & Authorization', () => {
@@ -447,33 +438,6 @@ describe('POST /api/v1/admin/orchestration/knowledge/documents', () => {
     });
   });
 
-  describe('Rate limiting', () => {
-    it('calls adminLimiter.check on POST', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(uploadDocument).mockResolvedValue(makeDocument() as never);
-      const formData = new FormData();
-      formData.append('file', new File(['# Hello'], 'hello.md', { type: 'text/markdown' }));
-
-      await POST(makePostRequestWithFormData(formData));
-
-      expect(vi.mocked(adminLimiter.check)).toHaveBeenCalledOnce();
-    });
-
-    it('returns 429 when adminLimiter rejects the POST', async () => {
-      // Verifies the 429 response shape end-to-end. The unit-level test
-      // covers the same case (route.test.ts) — this integration variant
-      // pins the contract through the wider auth + handler wiring.
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-      const formData = new FormData();
-      formData.append('file', new File(['# Hello'], 'hello.md', { type: 'text/markdown' }));
-
-      const response = await POST(makePostRequestWithFormData(formData));
-
-      expect(response.status).toBe(429);
-    });
-  });
-
   describe('Pre-parse body-size guard', () => {
     function makePostRequestWithContentLength(
       contentLength: string | null,
@@ -529,14 +493,6 @@ describe('POST /api/v1/admin/orchestration/knowledge/documents', () => {
       const response = await POST(makePostRequestWithContentLength('abc'));
 
       expect(response.status).toBe(201);
-    });
-
-    it('still consumes the rate limit budget on oversized rejections', async () => {
-      // Auth + rate-limit run before the body cap so an authenticated
-      // attacker still pays for their oversize attempts.
-      await POST(makePostRequestWithContentLength('1073741824'));
-
-      expect(adminLimiter.check).toHaveBeenCalled();
     });
   });
 });

@@ -22,13 +22,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  apiLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/env', () => ({
   env: {
     BETTER_AUTH_SECRET: 'test-secret-that-is-at-least-32-characters-long',
@@ -39,7 +32,6 @@ vi.mock('@/lib/env', () => ({
 // ─── Imports after mocks ────────────────────────────────────────────────────
 
 import { prisma } from '@/lib/db/client';
-import { apiLimiter } from '@/lib/security/rate-limit';
 import { generateApprovalToken } from '@/lib/orchestration/approval-tokens';
 
 // ─── Fixtures ───────────────────────────────────────────────────────────────
@@ -96,7 +88,6 @@ async function parseJson<T>(response: Response): Promise<T> {
 describe('POST /api/v1/orchestration/approvals/:id/approve (token auth)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(apiLimiter.check).mockReturnValue({ success: true } as never);
     vi.mocked(prisma.aiWorkflowExecution.updateMany).mockResolvedValue({ count: 1 } as never);
   });
 
@@ -148,13 +139,6 @@ describe('POST /api/v1/orchestration/approvals/:id/approve (token auth)', () => 
     const { token } = generateApprovalToken(INVALID_ID, 'approve', 60);
     const response = await POST(makeRequest(INVALID_ID, token), makeParams(INVALID_ID));
     expect(response.status).toBe(400);
-  });
-
-  it('returns 429 when rate limited', async () => {
-    vi.mocked(apiLimiter.check).mockReturnValue({ success: false } as never);
-    const { token } = generateApprovalToken(EXECUTION_ID, 'approve', 60);
-    const response = await POST(makeRequest(EXECUTION_ID, token), makeParams(EXECUTION_ID));
-    expect(response.status).toBe(429);
   });
 
   it('returns 409 when concurrent approval races (updateMany count === 0)', async () => {

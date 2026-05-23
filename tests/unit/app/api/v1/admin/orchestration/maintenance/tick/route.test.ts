@@ -33,13 +33,6 @@ vi.mock('next/headers', () => ({
   headers: vi.fn(() => Promise.resolve(new Headers())),
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({
   getClientIP: vi.fn(() => '127.0.0.1'),
 }));
@@ -77,7 +70,6 @@ vi.mock('@/lib/orchestration/retention', () => ({
 // ─── Imports ────────────────────────────────────────────────────────────────
 
 import { auth } from '@/lib/auth/config';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 import { logger } from '@/lib/logging';
 import {
   processDueSchedules,
@@ -153,11 +145,6 @@ describe('POST /api/v1/admin/orchestration/maintenance/tick', () => {
 
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
 
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
-    vi.mocked(createRateLimitResponse).mockReturnValue(
-      Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-    );
-
     vi.mocked(processDueSchedules).mockResolvedValue(DEFAULT_SCHEDULE_RESULT);
     vi.mocked(processPendingRetries).mockResolvedValue(DEFAULT_RETRY_RESULT);
     vi.mocked(processPendingHookRetries).mockResolvedValue(DEFAULT_HOOK_RETRY_RESULT);
@@ -191,32 +178,6 @@ describe('POST /api/v1/admin/orchestration/maintenance/tick', () => {
   });
 
   // ── Rate limiting ────────────────────────────────────────────────────────
-
-  it('returns 429 when rate limited', async () => {
-    vi.mocked(adminLimiter.check).mockReturnValue({
-      success: false,
-      limit: 10,
-      remaining: 0,
-      reset: Date.now() + 60_000,
-    } as never);
-
-    const response = await POST(makeRequest());
-
-    expect(response.status).toBe(429);
-  });
-
-  it('does not run tasks when rate limited', async () => {
-    vi.mocked(adminLimiter.check).mockReturnValue({
-      success: false,
-      limit: 10,
-      remaining: 0,
-      reset: Date.now() + 60_000,
-    } as never);
-
-    await POST(makeRequest());
-
-    expect(processDueSchedules).not.toHaveBeenCalled();
-  });
 
   // ── Happy path ───────────────────────────────────────────────────────────
 

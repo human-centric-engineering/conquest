@@ -7,7 +7,7 @@
  *
  * Key security assertions:
  * - Admin auth required (401/403 otherwise)
- * - Rate limited (adminLimiter)
+ * - Rate limiting enforced by proxy.ts (orchestration tier)
  * - Ownership enforced via findFirst({ where: { id, userId } })
  * - Cross-user access returns 404 (NOT 403)
  * - AiMessage rows cascade via Prisma FK — aiMessage.deleteMany is NOT
@@ -45,20 +45,12 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '127.0.0.1') }));
 
 // ─── Imports after mocks ─────────────────────────────────────────────────────
 
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter } from '@/lib/security/rate-limit';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -104,7 +96,6 @@ async function parseJson<T>(response: Response): Promise<T> {
 describe('DELETE /api/v1/admin/orchestration/conversations/:id', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   describe('Authentication & Authorization', () => {
@@ -190,18 +181,6 @@ describe('DELETE /api/v1/admin/orchestration/conversations/:id', () => {
       const response = await DELETE(makeRequest(), makeParams(INVALID_ID));
 
       expect(response.status).toBe(400);
-    });
-  });
-
-  describe('Rate limiting', () => {
-    it('calls adminLimiter.check on DELETE', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(prisma.aiConversation.findFirst).mockResolvedValue(makeConversation() as never);
-      vi.mocked(prisma.aiConversation.delete).mockResolvedValue(makeConversation() as never);
-
-      await DELETE(makeRequest(), makeParams(CONV_ID));
-
-      expect(vi.mocked(adminLimiter.check)).toHaveBeenCalledOnce();
     });
   });
 });

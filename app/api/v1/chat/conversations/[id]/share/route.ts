@@ -30,8 +30,6 @@ import { prisma } from '@/lib/db/client';
 import { successResponse } from '@/lib/api/responses';
 import { NotFoundError, ValidationError } from '@/lib/api/errors';
 import { getRouteLogger } from '@/lib/api/context';
-import { apiLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
-import { getClientIP } from '@/lib/security/ip';
 import { cuidSchema } from '@/lib/validations/common';
 import { shareConversationSchema } from '@/lib/validations/orchestration';
 
@@ -45,10 +43,6 @@ import { shareConversationSchema } from '@/lib/validations/orchestration';
 const DEFAULT_EXPIRES_IN_DAYS = 7;
 
 export const POST = withAuth<{ id: string }>(async (request, session, { params }) => {
-  const clientIP = getClientIP(request);
-  const rateLimit = apiLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
-
   const log = await getRouteLogger(request);
   const { id: rawId } = await params;
   const parsed = cuidSchema.safeParse(rawId);
@@ -107,10 +101,6 @@ export const POST = withAuth<{ id: string }>(async (request, session, { params }
 });
 
 export const DELETE = withAuth<{ id: string }>(async (request, session, { params }) => {
-  const clientIP = getClientIP(request);
-  const rateLimit = apiLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
-
   const log = await getRouteLogger(request);
   const { id: rawId } = await params;
   const parsed = cuidSchema.safeParse(rawId);

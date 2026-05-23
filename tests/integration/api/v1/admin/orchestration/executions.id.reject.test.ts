@@ -44,18 +44,10 @@ vi.mock('@/lib/db/client', () => {
   return { prisma };
 });
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 // ─── Imports after mocks ─────────────────────────────────────────────────────
 
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter } from '@/lib/security/rate-limit';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -118,7 +110,6 @@ async function parseJson<T>(response: Response): Promise<T> {
 describe('POST /api/v1/admin/orchestration/executions/:id/reject', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
     vi.mocked(prisma.aiWorkflowExecution.updateMany).mockResolvedValue({ count: 1 } as never);
   });
 
@@ -132,13 +123,6 @@ describe('POST /api/v1/admin/orchestration/executions/:id/reject', () => {
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAuthenticatedUser('USER'));
     const response = await POST(makePostRequest({ reason: 'No' }), makeParams(EXECUTION_ID));
     expect(response.status).toBe(403);
-  });
-
-  it('returns 429 when adminLimiter blocks the request', async () => {
-    vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-    const response = await POST(makePostRequest({ reason: 'No' }), makeParams(EXECUTION_ID));
-    expect(response.status).toBe(429);
   });
 
   it('returns 400 for invalid CUID param', async () => {

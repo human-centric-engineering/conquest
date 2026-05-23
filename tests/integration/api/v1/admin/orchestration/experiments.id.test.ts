@@ -37,13 +37,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({
   getClientIP: vi.fn(() => '127.0.0.1'),
 }));
@@ -63,7 +56,6 @@ vi.mock('@/lib/api/context', () => ({
 
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter } from '@/lib/security/rate-limit';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -173,7 +165,6 @@ describe('GET /api/v1/admin/orchestration/experiments/:id', () => {
 describe('PATCH /api/v1/admin/orchestration/experiments/:id', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
     vi.mocked(prisma.aiExperiment.findUnique).mockResolvedValue(makeExperiment() as never);
     vi.mocked(prisma.aiExperiment.update).mockResolvedValue(makeExperiment() as never);
   });
@@ -192,15 +183,6 @@ describe('PATCH /api/v1/admin/orchestration/experiments/:id', () => {
     const response = await PATCH(makePatchRequest({ name: 'New Name' }), makeContext());
 
     expect(response.status).toBe(403);
-  });
-
-  it('returns 429 when rate limited', async () => {
-    vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-
-    const response = await PATCH(makePatchRequest({ name: 'New Name' }), makeContext());
-
-    expect(response.status).toBe(429);
   });
 
   it('returns 400 when no fields are provided', async () => {
@@ -314,7 +296,6 @@ describe('PATCH /api/v1/admin/orchestration/experiments/:id', () => {
 describe('DELETE /api/v1/admin/orchestration/experiments/:id', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
     vi.mocked(prisma.aiExperiment.findUnique).mockResolvedValue(makeExperiment() as never);
     vi.mocked(prisma.aiExperiment.delete).mockResolvedValue(makeExperiment() as never);
   });
@@ -325,15 +306,6 @@ describe('DELETE /api/v1/admin/orchestration/experiments/:id', () => {
     const response = await DELETE(makeDeleteRequest(), makeContext());
 
     expect(response.status).toBe(401);
-  });
-
-  it('returns 429 when rate limited', async () => {
-    vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-
-    const response = await DELETE(makeDeleteRequest(), makeContext());
-
-    expect(response.status).toBe(429);
   });
 
   it('returns 404 when experiment not found', async () => {

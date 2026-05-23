@@ -44,8 +44,6 @@ import { prisma } from '@/lib/db/client';
 import { successResponse } from '@/lib/api/responses';
 import { validateQueryParams } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
-import { getClientIP } from '@/lib/security/ip';
 
 /**
  * Hard cap on how many chunks we'll project per request. Above this
@@ -129,10 +127,6 @@ interface RawChunkRow {
 }
 
 export const GET = withAdminAuth(async (request) => {
-  const clientIP = getClientIP(request);
-  const rateLimit = adminLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
-
   const log = await getRouteLogger(request);
   const { searchParams } = new URL(request.url);
   const { scope, limit, nNeighbors } = validateQueryParams(searchParams, querySchema);

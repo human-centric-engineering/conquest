@@ -36,13 +36,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({
   getClientIP: vi.fn(() => '127.0.0.1'),
 }));
@@ -62,7 +55,6 @@ vi.mock('@/lib/api/context', () => ({
 
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter } from '@/lib/security/rate-limit';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -186,7 +178,6 @@ describe('GET /api/v1/admin/orchestration/experiments', () => {
 describe('POST /api/v1/admin/orchestration/experiments', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   describe('Authentication & Authorization', () => {
@@ -204,17 +195,6 @@ describe('POST /api/v1/admin/orchestration/experiments', () => {
       const response = await POST(makePostRequest(VALID_BODY));
 
       expect(response.status).toBe(403);
-    });
-  });
-
-  describe('Rate limiting', () => {
-    it('returns 429 when rate limit exceeded', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-
-      const response = await POST(makePostRequest(VALID_BODY));
-
-      expect(response.status).toBe(429);
     });
   });
 

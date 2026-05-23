@@ -16,7 +16,6 @@ import { paginatedResponse, successResponse } from '@/lib/api/responses';
 import { ConflictError } from '@/lib/api/errors';
 import { validateQueryParams, validateRequestBody } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 import { getClientIP } from '@/lib/security/ip';
 import {
   isApiKeyEnvVarSet,
@@ -73,8 +72,6 @@ export const GET = withAdminAuth(async (request, _session) => {
 
 export const POST = withAdminAuth(async (request, session) => {
   const clientIP = getClientIP(request);
-  const rateLimit = adminLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
 
   const log = await getRouteLogger(request);
   const body = await validateRequestBody(request, providerConfigSchema);

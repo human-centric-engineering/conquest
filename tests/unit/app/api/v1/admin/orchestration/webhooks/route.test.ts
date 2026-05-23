@@ -37,13 +37,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({
   getClientIP: vi.fn(() => '127.0.0.1'),
 }));
@@ -65,7 +58,6 @@ vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({
 import { GET, POST } from '@/app/api/v1/admin/orchestration/webhooks/route';
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter } from '@/lib/security/rate-limit';
 import { mockAdminUser, mockUnauthenticatedUser } from '@/tests/helpers/auth';
 
 // ─── Fixtures ───────────────────────────────────────────────────────────────
@@ -106,7 +98,6 @@ describe('Webhook Subscription API', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   // ── GET — List webhooks ─────────────────────────────────────────────────
@@ -329,23 +320,6 @@ describe('Webhook Subscription API', () => {
 
       // Assert
       expect(res.status).toBe(401);
-    });
-
-    it('returns 429 when rate limited', async () => {
-      // Arrange
-      vi.mocked(adminLimiter.check).mockReturnValue({
-        success: false,
-        limit: 10,
-        remaining: 0,
-        reset: Date.now() + 60_000,
-      } as never);
-
-      // Act
-      const res = await POST(makePostRequest(validPayload));
-
-      // Assert
-      expect(res.status).toBe(429);
-      expect(prisma.aiWebhookSubscription.create).not.toHaveBeenCalled();
     });
   });
 });

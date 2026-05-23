@@ -46,13 +46,6 @@ vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({
   logAdminAction: vi.fn(),
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({
   getClientIP: vi.fn(() => '127.0.0.1'),
 }));
@@ -77,7 +70,6 @@ import {
 import { POST as tickScheduler } from '@/app/api/v1/admin/orchestration/schedules/tick/route';
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter } from '@/lib/security/rate-limit';
 import { processDueSchedules } from '@/lib/orchestration/scheduling';
 import { mockAdminUser, mockUnauthenticatedUser } from '@/tests/helpers/auth';
 
@@ -142,7 +134,6 @@ describe('Schedule CRUD API', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   // ── List Schedules ──────────────────────────────────────────────────────
@@ -333,21 +324,6 @@ describe('Schedule CRUD API', () => {
       const res = await tickScheduler(makePostRequest({}));
 
       expect(res.status).toBe(401);
-    });
-
-    it('returns 429 when rate limited', async () => {
-      // Arrange: rate limit exceeded
-      vi.mocked(adminLimiter.check).mockReturnValue({
-        success: false,
-        limit: 10,
-        remaining: 0,
-        reset: Date.now() + 60_000,
-      } as never);
-
-      const res = await tickScheduler(makePostRequest({}));
-
-      expect(res.status).toBe(429);
-      expect(processDueSchedules).not.toHaveBeenCalled();
     });
 
     it('returns partial results when some schedules fail', async () => {

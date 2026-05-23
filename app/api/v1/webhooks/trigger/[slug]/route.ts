@@ -20,7 +20,7 @@ import { z } from 'zod';
 import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
 import { successResponse, errorResponse } from '@/lib/api/responses';
-import { apiLimiter, apiKeyChatLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
+import { apiKeyChatLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 import { getClientIP } from '@/lib/security/ip';
 import { resolveApiKey, hasScope } from '@/lib/auth/api-keys';
 import { slugSchema } from '@/lib/validations/common';
@@ -34,8 +34,6 @@ export async function POST(
   { params }: { params: Promise<{ slug: string }> }
 ): Promise<Response> {
   const clientIP = getClientIP(request);
-  const rateLimit = apiLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
 
   // Authenticate via API key bearer token
   const resolved = await resolveApiKey(request);

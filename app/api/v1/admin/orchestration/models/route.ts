@@ -19,8 +19,6 @@ import { withAdminAuth } from '@/lib/auth/guards';
 import { successResponse } from '@/lib/api/responses';
 import { getRouteLogger } from '@/lib/api/context';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
-import { getClientIP } from '@/lib/security/ip';
 import { mergeDbModelsWithRegistry } from '@/lib/orchestration/llm/db-model-adapter';
 import {
   getAvailableModels,
@@ -34,9 +32,6 @@ export const GET = withAdminAuth(async (request, _session) => {
   const refresh = searchParams.get('refresh') === 'true';
 
   if (refresh) {
-    const clientIP = getClientIP(request);
-    const rateLimit = adminLimiter.check(clientIP);
-    if (!rateLimit.success) return createRateLimitResponse(rateLimit);
     await refreshFromOpenRouter({ force: true });
     log.info('Model registry refresh forced');
   } else {

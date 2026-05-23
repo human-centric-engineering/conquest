@@ -35,13 +35,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({
   getClientIP: vi.fn(() => '127.0.0.1'),
 }));
@@ -55,7 +48,6 @@ vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({
 
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter } from '@/lib/security/rate-limit';
 import { mockAdminUser, mockUnauthenticatedUser } from '@/tests/helpers/auth';
 import { GET as ListVersions } from '@/app/api/v1/admin/orchestration/agents/[id]/versions/route';
 import { GET as GetVersion } from '@/app/api/v1/admin/orchestration/agents/[id]/versions/[versionId]/route';
@@ -124,7 +116,6 @@ async function parseJson<T>(response: Response): Promise<T> {
 beforeEach(() => {
   vi.clearAllMocks();
   // Reset rate limiter to allow-by-default after each test
-  vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
 });
 
 describe('GET /agents/:id/versions (list)', () => {

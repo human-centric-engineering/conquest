@@ -7,7 +7,7 @@
  *
  * Key security assertions:
  * - Admin auth required (401/403 otherwise)
- * - Rate limited (adminLimiter)
+ * - Rate limiting enforced by proxy.ts (orchestration tier)
  * - Bad CUID returns 400
  * - Missing document returns 404
  * - Document not in "failed" state returns 409 (ConflictError)
@@ -61,13 +61,6 @@ vi.mock('@/lib/orchestration/knowledge/document-manager', () => ({
   rechunkDocument: vi.fn(),
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '127.0.0.1') }));
 
 vi.mock('@/lib/logging', () => ({
@@ -90,7 +83,6 @@ vi.mock('@/lib/logging', () => ({
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
 import { rechunkDocument } from '@/lib/orchestration/knowledge/document-manager';
-import { adminLimiter } from '@/lib/security/rate-limit';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -139,7 +131,6 @@ async function parseJson<T>(response: Response): Promise<T> {
 describe('POST /api/v1/admin/orchestration/knowledge/documents/:id/retry', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   describe('Authentication & Authorization', () => {
@@ -157,17 +148,6 @@ describe('POST /api/v1/admin/orchestration/knowledge/documents/:id/retry', () =>
       const response = await POST(makeRequest(), makeParams(DOC_ID));
 
       expect(response.status).toBe(403);
-    });
-  });
-
-  describe('Rate limiting', () => {
-    it('returns 429 when rate limit is exceeded', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-
-      const response = await POST(makeRequest(), makeParams(DOC_ID));
-
-      expect(response.status).toBe(429);
     });
   });
 

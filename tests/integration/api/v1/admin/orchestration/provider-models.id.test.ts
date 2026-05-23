@@ -54,13 +54,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/orchestration/llm/provider-selector', () => ({
   invalidateModelCache: vi.fn(),
 }));
@@ -69,7 +62,6 @@ vi.mock('@/lib/orchestration/llm/provider-selector', () => ({
 
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter } from '@/lib/security/rate-limit';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -193,7 +185,6 @@ describe('GET /api/v1/admin/orchestration/provider-models/:id', () => {
 describe('PATCH /api/v1/admin/orchestration/provider-models/:id', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   it('returns 404 when model not found', async () => {
@@ -251,17 +242,6 @@ describe('PATCH /api/v1/admin/orchestration/provider-models/:id', () => {
 
     const callArgs = vi.mocked(prisma.aiProviderModel.update).mock.calls[0][0];
     expect(callArgs.data).not.toHaveProperty('isDefault');
-  });
-
-  it('returns 429 when rate-limited', async () => {
-    vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-
-    const response = await PATCH(
-      makePatchRequest(MODEL_ID, { name: 'Updated' }),
-      routeContext(MODEL_ID)
-    );
-    expect(response.status).toBe(429);
   });
 
   // Single-field PATCH cases share an identical shape: mock findUnique
@@ -457,7 +437,6 @@ describe('PATCH /api/v1/admin/orchestration/provider-models/:id', () => {
 describe('DELETE /api/v1/admin/orchestration/provider-models/:id', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   it('returns 404 when model not found', async () => {
@@ -483,14 +462,6 @@ describe('DELETE /api/v1/admin/orchestration/provider-models/:id', () => {
     expect(prisma.aiProviderModel.delete).toHaveBeenCalledWith({ where: { id: MODEL_ID } });
     // Hard-delete must not silently fall back to a soft-delete update.
     expect(prisma.aiProviderModel.update).not.toHaveBeenCalled();
-  });
-
-  it('returns 429 when rate-limited', async () => {
-    vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-
-    const response = await DELETE(makeDeleteRequest(MODEL_ID), routeContext(MODEL_ID));
-    expect(response.status).toBe(429);
   });
 
   it('returns 409 with bound agents when an active agent uses the model', async () => {

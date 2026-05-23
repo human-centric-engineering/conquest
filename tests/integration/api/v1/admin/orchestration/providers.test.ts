@@ -42,13 +42,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/orchestration/llm/provider-manager', () => ({
   isApiKeyEnvVarSet: vi.fn(() => false),
   clearCache: vi.fn(),
@@ -63,7 +56,6 @@ vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({
 
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter } from '@/lib/security/rate-limit';
 import { isApiKeyEnvVarSet } from '@/lib/orchestration/llm/provider-manager';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -259,7 +251,6 @@ describe('GET /api/v1/admin/orchestration/providers', () => {
 describe('POST /api/v1/admin/orchestration/providers', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   describe('Authentication & Authorization', () => {
@@ -277,17 +268,6 @@ describe('POST /api/v1/admin/orchestration/providers', () => {
       const response = await POST(makePostRequest(VALID_PROVIDER));
 
       expect(response.status).toBe(403);
-    });
-  });
-
-  describe('Rate limiting', () => {
-    it('returns 429 when rate limit is exceeded', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-
-      const response = await POST(makePostRequest(VALID_PROVIDER));
-
-      expect(response.status).toBe(429);
     });
   });
 

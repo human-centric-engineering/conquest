@@ -19,13 +19,6 @@ vi.mock('next/headers', () => ({
   headers: vi.fn(() => Promise.resolve(new Headers())),
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({
   getClientIP: vi.fn(() => '127.0.0.1'),
 }));
@@ -59,7 +52,6 @@ vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({
 // ─── Imports ────────────────────────────────────────────────────────────────
 
 import { auth } from '@/lib/auth/config';
-import { adminLimiter } from '@/lib/security/rate-limit';
 import { prisma } from '@/lib/db/client';
 import { generateApiKey } from '@/lib/orchestration/mcp/auth';
 import {
@@ -117,7 +109,6 @@ describe('POST /api/v1/admin/orchestration/mcp/keys/:id/rotate', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
     vi.mocked(prisma.mcpApiKey.findUnique).mockResolvedValue(EXISTING_KEY as never);
     vi.mocked(prisma.mcpApiKey.update).mockResolvedValue(UPDATED_KEY as never);
   });
@@ -137,17 +128,6 @@ describe('POST /api/v1/admin/orchestration/mcp/keys/:id/rotate', () => {
   });
 
   // ── Rate limiting ─────────────────────────────────────────────────────
-
-  it('returns 429 when rate limit exceeded', async () => {
-    vi.mocked(adminLimiter.check).mockReturnValue({
-      success: false,
-      limit: 30,
-      remaining: 0,
-      reset: Date.now() + 60_000,
-    } as never);
-    const response = await POST(makeRequest(), { params: Promise.resolve({ id: VALID_ID }) });
-    expect(response.status).toBe(429);
-  });
 
   // ── Not found ─────────────────────────────────────────────────────────
 

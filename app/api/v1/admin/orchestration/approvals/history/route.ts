@@ -26,8 +26,6 @@ import { withAdminAuth } from '@/lib/auth/guards';
 import { prisma } from '@/lib/db/client';
 import { csvEscape } from '@/lib/api/csv';
 import { paginatedResponse } from '@/lib/api/responses';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
-import { getClientIP } from '@/lib/security/ip';
 import { getRouteLogger } from '@/lib/api/context';
 import { approvalHistoryQuerySchema } from '@/lib/validations/orchestration';
 import { executionTraceSchema } from '@/lib/validations/orchestration';
@@ -43,10 +41,6 @@ const MAX_EXECUTIONS_SCANNED = 1000;
 const MAX_CSV_ROWS = 5000;
 
 export const GET = withAdminAuth(async (request, session) => {
-  const ip = getClientIP(request);
-  const rl = adminLimiter.check(ip);
-  if (!rl.success) return createRateLimitResponse(rl);
-
   const log = await getRouteLogger(request);
   const { searchParams } = new URL(request.url);
 

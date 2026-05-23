@@ -43,13 +43,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({
   getClientIP: vi.fn(() => '127.0.0.1'),
 }));
@@ -62,7 +55,6 @@ vi.mock('@/lib/orchestration/llm/provider-manager', () => ({
 
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter } from '@/lib/security/rate-limit';
 import { getProvider } from '@/lib/orchestration/llm/provider-manager';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
@@ -122,7 +114,6 @@ async function parseJson<T>(response: Response): Promise<T> {
 describe('POST /api/v1/admin/orchestration/providers/:id/test-model', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   // ── Authentication & Authorization ─────────────────────────────────────────
@@ -444,30 +435,4 @@ describe('POST /api/v1/admin/orchestration/providers/:id/test-model', () => {
   });
 
   // ── Rate limiting ──────────────────────────────────────────────────────────
-
-  describe('Rate limiting', () => {
-    it('returns 429 when the rate limit is exceeded', async () => {
-      // Arrange
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-
-      // Act
-      const response = await POST(makePostRequest(), makeParams(PROVIDER_ID));
-
-      // Assert
-      expect(response.status).toBe(429);
-    });
-
-    it('does not query the database when rate-limited', async () => {
-      // Arrange
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-
-      // Act
-      await POST(makePostRequest(), makeParams(PROVIDER_ID));
-
-      // Assert: DB was not queried
-      expect(prisma.aiProviderConfig.findUnique).not.toHaveBeenCalled();
-    });
-  });
 });

@@ -47,13 +47,6 @@ vi.mock('@/lib/db/client', () => {
   return { prisma: mock };
 });
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({
   logAdminAction: vi.fn(),
   computeChanges: vi.fn(),
@@ -63,7 +56,6 @@ vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({
 
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter } from '@/lib/security/rate-limit';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -176,7 +168,6 @@ describe('GET /api/v1/admin/orchestration/agents/:id', () => {
 describe('PATCH /api/v1/admin/orchestration/agents/:id', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   describe('Authentication & Authorization', () => {
@@ -200,29 +191,6 @@ describe('PATCH /api/v1/admin/orchestration/agents/:id', () => {
       );
 
       expect(response.status).toBe(403);
-    });
-  });
-
-  describe('Rate limiting', () => {
-    it('calls adminLimiter.check on PATCH (mutating route)', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(prisma.aiAgent.findUnique).mockResolvedValue(makeAgent() as never);
-      vi.mocked(prisma.aiAgent.update).mockResolvedValue(makeAgent({ name: 'Updated' }) as never);
-
-      await PATCH(makeRequest('PATCH', { name: 'Updated' }), makeParams(AGENT_ID));
-
-      expect(vi.mocked(adminLimiter.check)).toHaveBeenCalledOnce();
-    });
-
-    it('returns 429 when rate limit exceeded on PATCH', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-
-      const response = await PATCH(makeRequest('PATCH', { name: 'Updated' }), makeParams(AGENT_ID));
-
-      expect(response.status).toBe(429);
-      // Prisma was not touched because the guard short-circuits
-      expect(vi.mocked(prisma.aiAgent.findUnique)).not.toHaveBeenCalled();
     });
   });
 
@@ -1120,7 +1088,6 @@ describe('PATCH /api/v1/admin/orchestration/agents/:id', () => {
 describe('PATCH /api/v1/admin/orchestration/agents/:id — system agent protections', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   it('returns 403 when trying to deactivate a system agent', async () => {
@@ -1207,7 +1174,6 @@ describe('PATCH /api/v1/admin/orchestration/agents/:id — system agent protecti
 describe('DELETE /api/v1/admin/orchestration/agents/:id', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   describe('Authentication & Authorization', () => {
@@ -1225,18 +1191,6 @@ describe('DELETE /api/v1/admin/orchestration/agents/:id', () => {
       const response = await DELETE(makeRequest('DELETE'), makeParams(AGENT_ID));
 
       expect(response.status).toBe(403);
-    });
-  });
-
-  describe('Rate limiting', () => {
-    it('returns 429 when rate limit exceeded on DELETE', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-
-      const response = await DELETE(makeRequest('DELETE'), makeParams(AGENT_ID));
-
-      expect(response.status).toBe(429);
-      expect(vi.mocked(prisma.aiAgent.findUnique)).not.toHaveBeenCalled();
     });
   });
 

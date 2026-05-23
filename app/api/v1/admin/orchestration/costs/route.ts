@@ -16,23 +16,19 @@
  * The schema enforces `dateTo >= dateFrom` and a 366-day maximum span
  * to prevent unbounded scans.
  *
- * Authentication: Admin role required. Rate-limited via `adminLimiter`.
+ * Authentication: Admin role required. Rate limiting is enforced centrally
+ * by `proxy.ts` via the policy table at `lib/security/rate-limit-policy.ts`
+ * (orchestration tier — see `.context/security/rate-limiting.md`).
  */
 
 import { withAdminAuth } from '@/lib/auth/guards';
 import { successResponse } from '@/lib/api/responses';
 import { validateQueryParams } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
-import { getClientIP } from '@/lib/security/ip';
 import { costBreakdownQuerySchema } from '@/lib/validations/orchestration';
 import { getCostBreakdown } from '@/lib/orchestration/llm/cost-reports';
 
 export const GET = withAdminAuth(async (request) => {
-  const clientIP = getClientIP(request);
-  const rateLimit = adminLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
-
   const log = await getRouteLogger(request);
   const { searchParams } = new URL(request.url);
   const params = validateQueryParams(searchParams, costBreakdownQuerySchema);

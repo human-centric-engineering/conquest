@@ -33,7 +33,6 @@ vi.mock('@/lib/auth/config', () => ({
 }));
 
 vi.mock('@/lib/security/rate-limit', () => ({
-  apiLimiter: { check: vi.fn(() => ({ success: true, limit: 100, remaining: 99, reset: 0 })) },
   consumerChatLimiter: {
     check: vi.fn(() => ({ success: true, limit: 20, remaining: 19, reset: 0 })),
   },

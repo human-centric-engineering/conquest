@@ -429,8 +429,9 @@ describe('applyRateLimit', () => {
     });
 
     it("'api-key' key extracts from Authorization: Bearer header", async () => {
-      // Arrange: inject a synthetic rule using the 'api-key' strategy.
-      // No real RATE_LIMIT_POLICY rule currently uses 'api-key', so we inject one.
+      // Arrange: inject a synthetic path so this test's bucket is isolated
+      // from the live mcp/webhooks rules — both use 'api-key' keying in the
+      // production policy and would otherwise share buckets with real traffic.
       const apiTierCap = 100; // api tier cap
       const keyA = 'my-test-key-alpha';
       const keyB = 'my-test-key-beta';

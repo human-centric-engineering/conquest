@@ -50,14 +50,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  apiLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/orchestration/llm/provider-selector', () => ({
   invalidateModelCache: vi.fn(),
 }));
@@ -77,7 +69,6 @@ vi.mock('@/lib/orchestration/settings', () => ({
 
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter, apiLimiter } from '@/lib/security/rate-limit';
 import { getOrchestrationSettings } from '@/lib/orchestration/settings';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -145,10 +136,6 @@ async function parseJson<T>(response: Response): Promise<T> {
 describe('GET /api/v1/admin/orchestration/provider-models', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // GET uses the broader apiLimiter (source route.ts:32). POST uses
-    // adminLimiter. Mocking the wrong limiter here means a future
-    // refactor that drops the limiter call would not be caught.
-    vi.mocked(apiLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   describe('Authentication & Authorization', () => {
@@ -162,19 +149,6 @@ describe('GET /api/v1/admin/orchestration/provider-models', () => {
       vi.mocked(auth.api.getSession).mockResolvedValue(mockAuthenticatedUser('USER'));
       const response = await GET(makeGetRequest());
       expect(response.status).toBe(403);
-    });
-
-    it('returns 429 when apiLimiter trips on GET', async () => {
-      // GET calls apiLimiter.check (source route.ts:32); a refactor
-      // that no-ops the limiter call would otherwise let infinite
-      // anonymous polling slip past. POST has its own 429 test at
-      // line 502; this is its GET counterpart.
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(apiLimiter.check).mockReturnValueOnce({ success: false } as never);
-
-      const response = await GET(makeGetRequest());
-      expect(response.status).toBe(429);
-      expect(prisma.aiProviderModel.findMany).not.toHaveBeenCalled();
     });
   });
 
@@ -515,7 +489,6 @@ describe('GET /api/v1/admin/orchestration/provider-models', () => {
 describe('POST /api/v1/admin/orchestration/provider-models', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   const validBody = {
@@ -581,13 +554,5 @@ describe('POST /api/v1/admin/orchestration/provider-models', () => {
     const body = await parseJson<{ success: boolean; error: { code: string } }>(response);
     expect(body.success).toBe(false);
     expect(body.error.code).toBe('CONFLICT');
-  });
-
-  it('returns 429 when rate-limited', async () => {
-    vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-
-    const response = await POST(makePostRequest(validBody));
-    expect(response.status).toBe(429);
   });
 });

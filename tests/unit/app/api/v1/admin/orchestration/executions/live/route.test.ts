@@ -23,13 +23,6 @@ vi.mock('next/headers', () => ({
   headers: vi.fn(() => Promise.resolve(new Headers())),
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: {
-    check: vi.fn(() => ({ success: true, limit: 100, remaining: 99, reset: 0 })),
-  },
-  createRateLimitResponse: vi.fn(() => new Response(null, { status: 429 })),
-}));
-
 vi.mock('@/lib/security/ip', () => ({
   getClientIP: vi.fn(() => '127.0.0.1'),
 }));
@@ -42,7 +35,6 @@ vi.mock('@/lib/orchestration/admin/live-engine-snapshot', () => ({
 
 import { GET } from '@/app/api/v1/admin/orchestration/executions/live/route';
 import { auth } from '@/lib/auth/config';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 import { getLiveEngineSnapshot } from '@/lib/orchestration/admin/live-engine-snapshot';
 import {
   mockAdminUser,
@@ -93,12 +85,6 @@ describe('GET /api/v1/admin/orchestration/executions/live', () => {
     vi.clearAllMocks();
     // Reset rate limiter to allow-by-default so individual tests only need
     // to override when testing the 429 path.
-    vi.mocked(adminLimiter.check).mockReturnValue({
-      success: true,
-      limit: 100,
-      remaining: 99,
-      reset: 0,
-    });
     vi.mocked(getLiveEngineSnapshot).mockResolvedValue(makeSnapshot());
   });
 
@@ -116,23 +102,6 @@ describe('GET /api/v1/admin/orchestration/executions/live', () => {
     const response = await GET(makeRequest());
 
     expect(response.status).toBe(403);
-  });
-
-  it('returns 429 when the rate limiter rejects the request', async () => {
-    vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser() as never);
-    vi.mocked(adminLimiter.check).mockReturnValue({
-      success: false,
-      limit: 100,
-      remaining: 0,
-      reset: Date.now() + 60_000,
-    });
-    vi.mocked(createRateLimitResponse).mockReturnValue(
-      new Response(null, { status: 429 }) as never
-    );
-
-    const response = await GET(makeRequest());
-
-    expect(response.status).toBe(429);
   });
 
   it('returns 200 with the snapshot wrapped in the success envelope', async () => {

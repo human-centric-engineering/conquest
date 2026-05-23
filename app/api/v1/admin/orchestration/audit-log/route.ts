@@ -11,15 +11,9 @@ import { withAdminAuth } from '@/lib/auth/guards';
 import { prisma } from '@/lib/db/client';
 import { paginatedResponse } from '@/lib/api/responses';
 import { validateQueryParams } from '@/lib/api/validation';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
-import { getClientIP } from '@/lib/security/ip';
 import { listAuditLogQuerySchema } from '@/lib/validations/orchestration';
 
 export const GET = withAdminAuth(async (request, _session) => {
-  const clientIp = getClientIP(request);
-  const rateLimit = adminLimiter.check(clientIp);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
-
   const { searchParams } = new URL(request.url);
   const { page, limit, action, entityType, entityId, userId, dateFrom, dateTo, q } =
     validateQueryParams(searchParams, listAuditLogQuerySchema);

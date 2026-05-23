@@ -32,13 +32,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  apiLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({
   getClientIP: vi.fn(() => '127.0.0.1'),
 }));
@@ -61,7 +54,6 @@ import { GET, POST } from '@/app/api/v1/user/api-keys/route';
 import { DELETE } from '@/app/api/v1/user/api-keys/[keyId]/route';
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { apiLimiter } from '@/lib/security/rate-limit';
 import { mockAuthenticatedUser, mockUnauthenticatedUser } from '@/tests/helpers/auth';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -99,7 +91,6 @@ describe('API Key Endpoints', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAuthenticatedUser());
-    vi.mocked(apiLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   // ── GET — List keys ────────────────────────────────────────────────────
@@ -146,21 +137,6 @@ describe('API Key Endpoints', () => {
       const res = await GET(makeGetRequest());
 
       expect(res.status).toBe(401);
-    });
-
-    it('returns 429 when rate limited on GET', async () => {
-      // Arrange: rate limit exceeded
-      vi.mocked(apiLimiter.check).mockReturnValue({
-        success: false,
-        limit: 20,
-        remaining: 0,
-        reset: Date.now() + 60_000,
-      } as never);
-
-      const res = await GET(makeGetRequest());
-
-      expect(res.status).toBe(429);
-      expect(prisma.aiApiKey.findMany).not.toHaveBeenCalled();
     });
   });
 
@@ -269,21 +245,6 @@ describe('API Key Endpoints', () => {
         })
       );
     });
-
-    it('returns 429 when rate limited on POST', async () => {
-      // Arrange: rate limit exceeded
-      vi.mocked(apiLimiter.check).mockReturnValue({
-        success: false,
-        limit: 20,
-        remaining: 0,
-        reset: Date.now() + 60_000,
-      } as never);
-
-      const res = await POST(makePostRequest({ name: 'My Key', scopes: ['chat'] }));
-
-      expect(res.status).toBe(429);
-      expect(prisma.aiApiKey.create).not.toHaveBeenCalled();
-    });
   });
 
   // ── DELETE — Revoke key ────────────────────────────────────────────────
@@ -325,19 +286,6 @@ describe('API Key Endpoints', () => {
       const res = await DELETE(makeDeleteRequest(), makeKeyParams());
 
       expect(res.status).toBe(404);
-    });
-
-    it('returns 429 when rate limited', async () => {
-      vi.mocked(apiLimiter.check).mockReturnValue({
-        success: false,
-        limit: 10,
-        remaining: 0,
-        reset: Date.now() + 60_000,
-      } as never);
-
-      const res = await DELETE(makeDeleteRequest(), makeKeyParams());
-
-      expect(res.status).toBe(429);
     });
   });
 });

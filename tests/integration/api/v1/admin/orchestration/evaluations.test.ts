@@ -10,7 +10,7 @@
  * - Admin auth required (401/403 otherwise)
  * - GET: results ALWAYS scoped to session.user.id
  * - GET: optional filters (agentId, status, q) applied alongside userId scope
- * - POST: rate limited (adminLimiter)
+ * - POST: rate limiting enforced by proxy.ts (orchestration tier)
  * - POST: 404 when agent doesn't exist (agents are shared admin-wide)
  * - POST: 400 on invalid body (missing title)
  * - POST: 201 on success
@@ -48,20 +48,12 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '127.0.0.1') }));
 
 // ─── Imports after mocks ─────────────────────────────────────────────────────
 
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter } from '@/lib/security/rate-limit';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -112,7 +104,6 @@ async function parseJson<T>(response: Response): Promise<T> {
 describe('GET /api/v1/admin/orchestration/evaluations', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   describe('Authentication & Authorization', () => {
@@ -236,7 +227,6 @@ describe('GET /api/v1/admin/orchestration/evaluations', () => {
 describe('POST /api/v1/admin/orchestration/evaluations', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   describe('Authentication & Authorization', () => {
@@ -315,17 +305,6 @@ describe('POST /api/v1/admin/orchestration/evaluations', () => {
       const data = await parseJson<{ success: boolean; error: { code: string } }>(response);
       expect(data.success).toBe(false);
       expect(data.error.code).toBe('NOT_FOUND');
-    });
-  });
-
-  describe('Rate limiting', () => {
-    it('returns 429 when rate limit is hit', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-
-      const response = await POST(makePostRequest({ agentId: AGENT_ID, title: 'My Eval' }));
-
-      expect(response.status).toBe(429);
     });
   });
 });

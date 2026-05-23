@@ -22,23 +22,17 @@ import { validateRequestBody } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
 import { prisma } from '@/lib/db/client';
 import {
-  adminLimiter,
   agentChatLimiter,
   chatLimiter,
   createRateLimitResponse,
   imageLimiter,
 } from '@/lib/security/rate-limit';
-import { getClientIP } from '@/lib/security/ip';
 import { streamChat } from '@/lib/orchestration/chat';
 import { chatStreamRequestSchema } from '@/lib/validations/orchestration';
 import { getRequestId } from '@/lib/logging/context';
 import { validateImageMagicBytes, validatePdfMagicBytes } from '@/lib/storage/image';
 
 export const POST = withAdminAuth(async (request, session) => {
-  const clientIP = getClientIP(request);
-  const ipLimit = adminLimiter.check(clientIP);
-  if (!ipLimit.success) return createRateLimitResponse(ipLimit);
-
   const userLimit = chatLimiter.check(session.user.id);
   if (!userLimit.success) return createRateLimitResponse(userLimit);
 

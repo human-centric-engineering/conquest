@@ -25,12 +25,6 @@ vi.mock('@/lib/db/client', () => ({
     aiWorkflowExecution: { findUnique: vi.fn() },
   },
 }));
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '127.0.0.1') }));
 
 // ─── Imports (after mocks) ──────────────────────────────────────────────────
@@ -226,13 +220,6 @@ describe('GET /api/v1/admin/orchestration/executions/:id/report.md', () => {
     } as never);
     const res = await GET(makeRequest(), makeContext());
     expect(res.status).toBe(200);
-  });
-
-  it('returns 429 when the admin rate limiter denies the request', async () => {
-    const { adminLimiter } = await import('@/lib/security/rate-limit');
-    vi.mocked(adminLimiter.check).mockReturnValueOnce({ success: false } as never);
-    const res = await GET(makeRequest(), makeContext());
-    expect(res.status).toBe(429);
   });
 
   it('handles executions whose startedAt/completedAt are null (cancelled before start)', async () => {

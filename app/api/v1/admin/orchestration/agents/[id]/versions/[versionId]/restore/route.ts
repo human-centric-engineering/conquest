@@ -16,7 +16,6 @@ import { withAdminAuth } from '@/lib/auth/guards';
 import { prisma } from '@/lib/db/client';
 import { successResponse } from '@/lib/api/responses';
 import { ForbiddenError, NotFoundError, ValidationError } from '@/lib/api/errors';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 import { getClientIP } from '@/lib/security/ip';
 import { getRouteLogger } from '@/lib/api/context';
 import { cuidSchema } from '@/lib/validations/common';
@@ -65,8 +64,6 @@ const versionSnapshotSchema = z.object({
 export const POST = withAdminAuth<{ id: string; versionId: string }>(
   async (request, session, { params }) => {
     const clientIP = getClientIP(request);
-    const rateLimit = adminLimiter.check(clientIP);
-    if (!rateLimit.success) return createRateLimitResponse(rateLimit);
 
     const log = await getRouteLogger(request);
     const { id: rawId, versionId: rawVersionId } = await params;

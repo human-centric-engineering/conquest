@@ -38,13 +38,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({
   logAdminAction: vi.fn(),
   computeChanges: vi.fn(),
@@ -54,7 +47,6 @@ vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({
 
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter } from '@/lib/security/rate-limit';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -183,7 +175,6 @@ describe('GET /api/v1/admin/orchestration/workflows/:id', () => {
 describe('PATCH /api/v1/admin/orchestration/workflows/:id', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   describe('Authentication & Authorization', () => {
@@ -207,33 +198,6 @@ describe('PATCH /api/v1/admin/orchestration/workflows/:id', () => {
       );
 
       expect(response.status).toBe(403);
-    });
-  });
-
-  describe('Rate limiting', () => {
-    it('calls adminLimiter.check on PATCH (mutating route)', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(prisma.aiWorkflow.findUnique).mockResolvedValue(makeWorkflow() as never);
-      vi.mocked(prisma.aiWorkflow.update).mockResolvedValue(
-        makeWorkflow({ name: 'Updated' }) as never
-      );
-
-      await PATCH(makeRequest('PATCH', { name: 'Updated' }), makeParams(WORKFLOW_ID));
-
-      expect(vi.mocked(adminLimiter.check)).toHaveBeenCalledOnce();
-    });
-
-    it('returns 429 when rate limit exceeded on PATCH', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-
-      const response = await PATCH(
-        makeRequest('PATCH', { name: 'Updated' }),
-        makeParams(WORKFLOW_ID)
-      );
-
-      expect(response.status).toBe(429);
-      expect(vi.mocked(prisma.aiWorkflow.findUnique)).not.toHaveBeenCalled();
     });
   });
 
@@ -367,7 +331,6 @@ describe('PATCH /api/v1/admin/orchestration/workflows/:id', () => {
 describe('DELETE /api/v1/admin/orchestration/workflows/:id', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   describe('Authentication & Authorization', () => {
@@ -385,18 +348,6 @@ describe('DELETE /api/v1/admin/orchestration/workflows/:id', () => {
       const response = await DELETE(makeRequest('DELETE'), makeParams(WORKFLOW_ID));
 
       expect(response.status).toBe(403);
-    });
-  });
-
-  describe('Rate limiting', () => {
-    it('returns 429 when rate limit exceeded on DELETE', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-
-      const response = await DELETE(makeRequest('DELETE'), makeParams(WORKFLOW_ID));
-
-      expect(response.status).toBe(429);
-      expect(vi.mocked(prisma.aiWorkflow.findUnique)).not.toHaveBeenCalled();
     });
   });
 

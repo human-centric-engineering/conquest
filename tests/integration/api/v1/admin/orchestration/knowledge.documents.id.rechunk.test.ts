@@ -7,7 +7,7 @@
  *
  * Key security assertions:
  * - Admin auth required (401/403 otherwise)
- * - Rate limited (adminLimiter)
+ * - Rate limiting enforced by proxy.ts (orchestration tier)
  * - Bad CUID returns 400
  * - Missing document returns 404
  * - Document with status=processing returns 409 (race condition guard)
@@ -49,13 +49,6 @@ vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({
   computeChanges: vi.fn(),
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '127.0.0.1') }));
 
 // ─── Imports after mocks ─────────────────────────────────────────────────────
@@ -63,7 +56,6 @@ vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '127.0.0.1') }));
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
 import { rechunkDocument } from '@/lib/orchestration/knowledge/document-manager';
-import { adminLimiter } from '@/lib/security/rate-limit';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -111,7 +103,6 @@ async function parseJson<T>(response: Response): Promise<T> {
 describe('POST /api/v1/admin/orchestration/knowledge/documents/:id/rechunk', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   describe('Authentication & Authorization', () => {
@@ -206,20 +197,6 @@ describe('POST /api/v1/admin/orchestration/knowledge/documents/:id/rechunk', () 
       const response = await POST(makeRequest(), makeParams(INVALID_ID));
 
       expect(response.status).toBe(400);
-    });
-  });
-
-  describe('Rate limiting', () => {
-    it('calls adminLimiter.check on POST', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(prisma.aiKnowledgeDocument.findUnique).mockResolvedValue(
-        makeDocument({ status: 'ready' }) as never
-      );
-      vi.mocked(rechunkDocument).mockResolvedValue(makeDocument() as never);
-
-      await POST(makeRequest(), makeParams(DOC_ID));
-
-      expect(vi.mocked(adminLimiter.check)).toHaveBeenCalledOnce();
     });
   });
 });

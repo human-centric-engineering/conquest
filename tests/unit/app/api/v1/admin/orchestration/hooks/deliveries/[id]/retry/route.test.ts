@@ -21,13 +21,6 @@ vi.mock('@/lib/orchestration/hooks/registry', () => ({
   retryHookDelivery: vi.fn(),
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(
-    () => new Response(JSON.stringify({ error: 'rate limited' }), { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({
   getClientIP: vi.fn(() => '127.0.0.1'),
 }));
@@ -36,7 +29,6 @@ vi.mock('@/lib/security/ip', () => ({
 
 import { auth } from '@/lib/auth/config';
 import { retryHookDelivery } from '@/lib/orchestration/hooks/registry';
-import { adminLimiter } from '@/lib/security/rate-limit';
 import {
   mockAdminUser,
   mockAuthenticatedUser,
@@ -69,7 +61,6 @@ async function parseJson<T>(response: Response): Promise<T> {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
 });
 
 describe('POST /hooks/deliveries/:id/retry', () => {
@@ -83,15 +74,6 @@ describe('POST /hooks/deliveries/:id/retry', () => {
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAuthenticatedUser('USER'));
     const response = await RetryDelivery(makeRequest(DELIVERY_ID), makeParams(DELIVERY_ID));
     expect(response.status).toBe(403);
-  });
-
-  it('returns 429 when rate limit exceeded', async () => {
-    vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-
-    const response = await RetryDelivery(makeRequest(DELIVERY_ID), makeParams(DELIVERY_ID));
-
-    expect(response.status).toBe(429);
   });
 
   it('returns 404 when delivery is not found or not retriable', async () => {

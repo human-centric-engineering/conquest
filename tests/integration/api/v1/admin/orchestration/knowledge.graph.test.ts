@@ -7,7 +7,7 @@
  *
  * Key assertions:
  * - Admin auth required (401/403 otherwise)
- * - Rate limited (adminLimiter)
+ * - Rate limiting enforced by proxy.ts (orchestration tier)
  * - Returns nodes, links, categories, and stats
  * - Scopes filter to "system" | "app" when provided
  * - view=embedded uses $queryRaw for embedded-only chunk aggregation
@@ -45,20 +45,12 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '127.0.0.1') }));
 
 // ─── Imports after mocks ─────────────────────────────────────────────────────
 
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter } from '@/lib/security/rate-limit';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -128,7 +120,6 @@ interface GraphResponse {
 describe('GET /api/v1/admin/orchestration/knowledge/graph', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   // ── Auth ──────────────────────────────────────────────────────────────────
@@ -150,16 +141,6 @@ describe('GET /api/v1/admin/orchestration/knowledge/graph', () => {
   });
 
   // ── Rate limiting ─────────────────────────────────────────────────────────
-
-  it('returns 429 when rate limited', async () => {
-    vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-
-    const response = await GET(makeRequest());
-
-    expect(response.status).toBe(429);
-    expect(vi.mocked(prisma.aiKnowledgeDocument.findMany)).not.toHaveBeenCalled();
-  });
 
   // ── Validation ────────────────────────────────────────────────────────────
 

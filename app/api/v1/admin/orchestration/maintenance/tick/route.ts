@@ -28,8 +28,6 @@
 
 import { withAdminAuth } from '@/lib/auth/guards';
 import { successResponse } from '@/lib/api/responses';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
-import { getClientIP } from '@/lib/security/ip';
 import { logger } from '@/lib/logging';
 import {
   processDueSchedules,
@@ -78,11 +76,7 @@ const BACKGROUND_TASK_NAMES = [
  */
 const BACKGROUND_TASK_MAX_MS = 5 * 60 * 1000;
 
-export const POST = withAdminAuth(async (request) => {
-  const clientIP = getClientIP(request);
-  const rateLimit = adminLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
-
+export const POST = withAdminAuth(async (_request) => {
   if (tickRunning) {
     logger.info('Maintenance tick skipped — previous tick still running');
     return successResponse({ skipped: true, reason: 'previous tick still running' });

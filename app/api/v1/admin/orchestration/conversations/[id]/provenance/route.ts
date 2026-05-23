@@ -24,7 +24,6 @@ import { prisma } from '@/lib/db/client';
 import { successResponse } from '@/lib/api/responses';
 import { NotFoundError, ValidationError } from '@/lib/api/errors';
 import { getRouteLogger } from '@/lib/api/context';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 import { getClientIP } from '@/lib/security/ip';
 import { cuidSchema } from '@/lib/validations/common';
 import { messageProvenanceSchema } from '@/lib/validations/orchestration';
@@ -32,10 +31,6 @@ import { logConversationAccess } from '@/lib/orchestration/audit/admin-audit-log
 import { adminCanViewConversation } from '@/lib/orchestration/access/conversation-access';
 
 export const GET = withAdminAuth<{ id: string }>(async (request, session, { params }) => {
-  const clientIP = getClientIP(request);
-  const rateLimit = adminLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
-
   const log = await getRouteLogger(request);
   const { id: rawId } = await params;
   const parsed = cuidSchema.safeParse(rawId);

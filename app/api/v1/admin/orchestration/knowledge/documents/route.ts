@@ -22,7 +22,6 @@ import { ValidationError } from '@/lib/api/errors';
 import { enforceContentLengthCap } from '@/lib/api/multipart-guard';
 import { validateQueryParams } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 import { getClientIP } from '@/lib/security/ip';
 import {
   uploadDocument,
@@ -184,8 +183,6 @@ export const GET = withAdminAuth(async (request, _session) => {
 
 export const POST = withAdminAuth(async (request, session) => {
   const clientIP = getClientIP(request);
-  const rateLimit = adminLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
 
   const log = await getRouteLogger(request);
 

@@ -22,8 +22,6 @@ import { prisma } from '@/lib/db/client';
 import { successResponse } from '@/lib/api/responses';
 import { validateRequestBody } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
-import { getClientIP } from '@/lib/security/ip';
 import { testProvider } from '@/lib/orchestration/llm/provider-manager';
 import { bulkProviderTestSchema } from '@/lib/validations/orchestration';
 
@@ -39,10 +37,6 @@ interface BulkTestResult {
 }
 
 export const POST = withAdminAuth(async (request, session) => {
-  const clientIP = getClientIP(request);
-  const rateLimit = adminLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
-
   const log = await getRouteLogger(request);
   const { providerIds } = await validateRequestBody(request, bulkProviderTestSchema);
 

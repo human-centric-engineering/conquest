@@ -57,13 +57,6 @@ vi.mock('@/lib/db/client', () => {
   };
 });
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/orchestration/capabilities', () => ({
   capabilityDispatcher: { clearCache: vi.fn() },
 }));
@@ -77,7 +70,6 @@ vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({
 
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter } from '@/lib/security/rate-limit';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -171,7 +163,6 @@ async function parseJson<T>(response: Response): Promise<T> {
 describe('POST /api/v1/admin/orchestration/agents/import', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
 
     // Default: no existing agents (clean import), no capabilities
     const tx = getTxMock();
@@ -203,16 +194,6 @@ describe('POST /api/v1/admin/orchestration/agents/import', () => {
       );
 
       expect(response.status).toBe(403);
-    });
-  });
-
-  describe('Rate limiting', () => {
-    it('calls adminLimiter.check on POST (mutating route)', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-
-      await POST(makeRequest({ bundle: makeBundle([makeBundledAgent('new-agent')]) }));
-
-      expect(vi.mocked(adminLimiter.check)).toHaveBeenCalledOnce();
     });
   });
 

@@ -42,18 +42,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-const RATE_LIMIT_ALLOW = { success: true, limit: 100, remaining: 99, reset: 9999999999 };
-const RATE_LIMIT_DENY = { success: false, limit: 100, remaining: 0, reset: 9999999999 };
-
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: {
-    check: vi.fn(() => ({ success: true, limit: 100, remaining: 99, reset: 9999999999 })),
-  },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({
   getClientIP: vi.fn(() => '127.0.0.1'),
 }));
@@ -96,7 +84,6 @@ import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
 import { sseResponse } from '@/lib/api/sse';
 import { validateWorkflow } from '@/lib/orchestration/workflows';
-import { adminLimiter } from '@/lib/security/rate-limit';
 import {
   mockAdminUser,
   mockUnauthenticatedUser,
@@ -185,7 +172,6 @@ describe('POST /api/v1/admin/orchestration/workflows/:id/execute', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // Restore safe defaults after clearAllMocks
-    vi.mocked(adminLimiter.check).mockReturnValue(RATE_LIMIT_ALLOW);
     vi.mocked(validateWorkflow).mockReturnValue({ ok: true, errors: [] });
     vi.mocked(sseResponse).mockReturnValue(
       new Response('data: test\n\n', {
@@ -216,22 +202,6 @@ describe('POST /api/v1/admin/orchestration/workflows/:id/execute', () => {
 
       // Assert
       expect(response.status).toBe(403);
-    });
-  });
-
-  describe('rate limiting', () => {
-    it('should return rate-limit response when limiter check fails', async () => {
-      // Arrange
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(adminLimiter.check).mockReturnValue(RATE_LIMIT_DENY);
-
-      // Act
-      const response = await POST(makeRequest(), makeParams());
-
-      // Assert
-      expect(response.status).toBe(429);
-      const body = await parseJson<{ error: { code: string } }>(response);
-      expect(body.error.code).toBe('RATE_LIMITED');
     });
   });
 

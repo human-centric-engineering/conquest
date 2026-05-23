@@ -40,13 +40,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({
   getClientIP: vi.fn(() => '127.0.0.1'),
 }));
@@ -76,7 +69,6 @@ vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({
 import { GET, POST } from '@/app/api/v1/admin/orchestration/knowledge/documents/route';
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter } from '@/lib/security/rate-limit';
 import {
   uploadDocument,
   uploadDocumentFromBuffer,
@@ -149,7 +141,6 @@ describe('Knowledge Documents API', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   // ── GET — List documents ────────────────────────────────────────────────
@@ -490,37 +481,4 @@ describe('Knowledge Documents API', () => {
   });
 
   // ── POST — Rate limiting and auth ────────────────────────────────────────
-
-  describe('POST — auth and rate limiting', () => {
-    it('rejects unauthenticated requests', async () => {
-      // Arrange
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockUnauthenticatedUser());
-
-      // Act
-      const res = await POST(makeFileRequest('test.md', '# Hello'));
-
-      // Assert
-      expect(res.status).toBe(401);
-    });
-
-    it('returns 429 when rate limited', async () => {
-      // Arrange — fixed reset value avoids wall-clock coupling. The route
-      // doesn't compare reset against `Date.now()` today, but a deterministic
-      // value also keeps any future reset-driven assertions stable across CI
-      // hosts where elapsed time would drift.
-      vi.mocked(adminLimiter.check).mockReturnValue({
-        success: false,
-        limit: 10,
-        remaining: 0,
-        reset: 1_700_000_000 + 60,
-      } as never);
-
-      // Act
-      const res = await POST(makeFileRequest('test.md', '# Hello'));
-
-      // Assert
-      expect(res.status).toBe(429);
-      expect(uploadDocument).not.toHaveBeenCalled();
-    });
-  });
 });

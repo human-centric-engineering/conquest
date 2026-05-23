@@ -17,8 +17,6 @@ import { prisma } from '@/lib/db/client';
 import { successResponse } from '@/lib/api/responses';
 import { NotFoundError, ValidationError } from '@/lib/api/errors';
 import { getRouteLogger } from '@/lib/api/context';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
-import { getClientIP } from '@/lib/security/ip';
 import { getProvider } from '@/lib/orchestration/llm/provider-manager';
 import { generateSilentWav } from '@/lib/audio/silent-wav';
 import { deriveParamProfile } from '@/lib/orchestration/llm/model-heuristics';
@@ -62,10 +60,6 @@ const UNSUPPORTED_TEST_MESSAGES: Record<string, string> = {
 };
 
 export const POST = withAdminAuth<{ id: string }>(async (request, session, { params }) => {
-  const clientIP = getClientIP(request);
-  const rateLimit = adminLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
-
   const log = await getRouteLogger(request);
   const { id: rawId } = await params;
   const parsed = cuidSchema.safeParse(rawId);

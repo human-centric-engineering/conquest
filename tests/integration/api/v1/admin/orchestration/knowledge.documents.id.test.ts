@@ -8,7 +8,7 @@
  *
  * Key security assertions:
  * - Admin auth required (401/403 otherwise)
- * - Rate limited on DELETE (adminLimiter)
+ * - Rate limiting enforced by proxy.ts (orchestration tier)
  * - Bad CUID returns 400
  * - Missing document returns 404
  *
@@ -47,13 +47,6 @@ vi.mock('@/lib/orchestration/knowledge/document-manager', () => ({
   deleteDocument: vi.fn(),
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '127.0.0.1') }));
 
 vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({
@@ -66,7 +59,6 @@ vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
 import { deleteDocument } from '@/lib/orchestration/knowledge/document-manager';
-import { adminLimiter } from '@/lib/security/rate-limit';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -180,7 +172,6 @@ describe('GET /api/v1/admin/orchestration/knowledge/documents/:id', () => {
 describe('DELETE /api/v1/admin/orchestration/knowledge/documents/:id', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   describe('Authentication & Authorization', () => {
@@ -244,18 +235,6 @@ describe('DELETE /api/v1/admin/orchestration/knowledge/documents/:id', () => {
       const response = await DELETE(makeRequest('DELETE'), makeParams(INVALID_ID));
 
       expect(response.status).toBe(400);
-    });
-  });
-
-  describe('Rate limiting', () => {
-    it('calls adminLimiter.check on DELETE', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(prisma.aiKnowledgeDocument.findUnique).mockResolvedValue(makeDocument() as never);
-      vi.mocked(deleteDocument).mockResolvedValue(undefined);
-
-      await DELETE(makeRequest('DELETE'), makeParams(DOC_ID));
-
-      expect(vi.mocked(adminLimiter.check)).toHaveBeenCalledOnce();
     });
   });
 });

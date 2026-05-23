@@ -28,12 +28,6 @@ vi.mock('@/lib/auth/config', () => ({
 vi.mock('next/headers', () => ({
   headers: vi.fn(() => Promise.resolve(new Headers())),
 }));
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '127.0.0.1') }));
 vi.mock('@/lib/db/client', () => ({
   prisma: {
@@ -56,7 +50,6 @@ vi.mock('@/lib/orchestration/hooks/registry', () => ({
 import { POST } from '@/app/api/v1/admin/orchestration/executions/[id]/force-fail/route';
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { recordForceFailEvent } from '@/lib/orchestration/engine/lease';
 import { emitHookEvent } from '@/lib/orchestration/hooks/registry';
@@ -127,7 +120,6 @@ describe('POST /executions/:id/force-fail', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser() as never);
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   // ── 1. Unauthenticated ────────────────────────────────────────────────────
@@ -171,22 +163,6 @@ describe('POST /executions/:id/force-fail', () => {
   });
 
   // ── 3. Rate limited ───────────────────────────────────────────────────────
-
-  it('returns 429 when the admin rate limiter rejects the request', async () => {
-    vi.mocked(adminLimiter.check).mockReturnValue({
-      success: false,
-      limit: 100,
-      remaining: 0,
-      reset: Date.now(),
-    } as never);
-    vi.mocked(createRateLimitResponse).mockReturnValue(
-      Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-    );
-
-    const res = await POST(makeRequest(), makeContext());
-
-    expect(res.status).toBe(429);
-  });
 
   // ── 4. Invalid CUID ───────────────────────────────────────────────────────
 

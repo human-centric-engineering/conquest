@@ -10,7 +10,7 @@
  *     warm call may not reach the same module instance)
  *   - ?refresh=true calls refreshFromOpenRouter({ force: true })
  *   - ?refresh=true response includes refreshed: true
- *   - ?refresh=true is rate-limited (adminLimiter.check)
+ *   - ?refresh=true takes the orchestration tier cap from proxy.ts
  *
  * @see app/api/v1/admin/orchestration/models/route.ts
  */
@@ -34,13 +34,6 @@ vi.mock('next/headers', () => ({
   headers: vi.fn(() => Promise.resolve(new Headers())),
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/orchestration/llm/model-registry', () => ({
   getAvailableModels: vi.fn(() => []),
   getRegistryFetchedAt: vi.fn(() => 0),
@@ -59,7 +52,6 @@ vi.mock('@/lib/db/client', () => ({
 
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter } from '@/lib/security/rate-limit';
 import { getAvailableModels, refreshFromOpenRouter } from '@/lib/orchestration/llm/model-registry';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -79,7 +71,6 @@ async function parseJson<T>(response: Response): Promise<T> {
 describe('GET /api/v1/admin/orchestration/models', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   describe('Authentication & Authorization', () => {
@@ -134,15 +125,6 @@ describe('GET /api/v1/admin/orchestration/models', () => {
 
       expect(vi.mocked(refreshFromOpenRouter)).toHaveBeenCalledWith();
     });
-
-    it('does NOT call adminLimiter.check on the default path', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(getAvailableModels).mockReturnValue([]);
-
-      await GET(makeGetRequest());
-
-      expect(vi.mocked(adminLimiter.check)).not.toHaveBeenCalled();
-    });
   });
 
   describe('Refresh path (?refresh=true)', () => {
@@ -165,25 +147,6 @@ describe('GET /api/v1/admin/orchestration/models', () => {
       const data = await parseJson<{ data: { refreshed: boolean } }>(response);
       // test-review:accept tobe_true — structural boolean assertion on API response field
       expect(data.data.refreshed).toBe(true);
-    });
-
-    it('is rate-limited on the refresh path', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-
-      const response = await GET(makeGetRequest({ refresh: 'true' }));
-
-      expect(response.status).toBe(429);
-      expect(vi.mocked(refreshFromOpenRouter)).not.toHaveBeenCalled();
-    });
-
-    it('calls adminLimiter.check only on the refresh path', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(getAvailableModels).mockReturnValue([]);
-
-      await GET(makeGetRequest({ refresh: 'true' }));
-
-      expect(vi.mocked(adminLimiter.check)).toHaveBeenCalledOnce();
     });
   });
 

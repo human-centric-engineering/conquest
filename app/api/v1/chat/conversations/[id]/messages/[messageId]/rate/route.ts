@@ -16,18 +16,12 @@ import { prisma } from '@/lib/db/client';
 import { successResponse } from '@/lib/api/responses';
 import { NotFoundError, ValidationError } from '@/lib/api/errors';
 import { validateRequestBody } from '@/lib/api/validation';
-import { apiLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
-import { getClientIP } from '@/lib/security/ip';
 import { cuidSchema } from '@/lib/validations/common';
 import { rateMessageSchema } from '@/lib/validations/orchestration';
 
 type Params = { id: string; messageId: string };
 
 export const POST = withAuth<Params>(async (request, session, { params }) => {
-  const clientIP = getClientIP(request);
-  const rateLimit = apiLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
-
   const { id: rawConvId, messageId: rawMsgId } = await params;
 
   const convId = cuidSchema.safeParse(rawConvId);

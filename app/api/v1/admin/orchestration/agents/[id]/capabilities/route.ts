@@ -23,7 +23,6 @@ import { successResponse } from '@/lib/api/responses';
 import { ConflictError, NotFoundError, ValidationError } from '@/lib/api/errors';
 import { validateRequestBody } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 import { getClientIP } from '@/lib/security/ip';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities';
 import { findUnsetEnvVarReferences } from '@/lib/orchestration/env-template';
@@ -68,10 +67,6 @@ function parseAgentId(raw: string): string {
 }
 
 export const GET = withAdminAuth<{ id: string }>(async (request, _session, { params }) => {
-  const clientIP = getClientIP(request);
-  const rateLimit = adminLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
-
   const log = await getRouteLogger(request);
   const { id: rawAgentId } = await params;
   const agentId = parseAgentId(rawAgentId);
@@ -91,8 +86,6 @@ export const GET = withAdminAuth<{ id: string }>(async (request, _session, { par
 
 export const POST = withAdminAuth<{ id: string }>(async (request, session, { params }) => {
   const clientIP = getClientIP(request);
-  const rateLimit = adminLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
 
   const log = await getRouteLogger(request);
   const { id: rawAgentId } = await params;

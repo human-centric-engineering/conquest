@@ -63,13 +63,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({
   logAdminAction: vi.fn(),
   computeChanges: vi.fn(() => null),
@@ -84,7 +77,6 @@ vi.mock('@/lib/orchestration/workflows/semantic-validator', () => ({
 
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter } from '@/lib/security/rate-limit';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { semanticValidateWorkflow } from '@/lib/orchestration/workflows/semantic-validator';
 
@@ -172,12 +164,6 @@ function makeParams(workflowId: string = WORKFLOW_ID) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(adminLimiter.check).mockReturnValue({
-    success: true,
-    limit: 100,
-    remaining: 99,
-    reset: 9999999999,
-  });
   vi.mocked(semanticValidateWorkflow).mockResolvedValue({ ok: true, errors: [] });
   vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
 });
@@ -384,20 +370,6 @@ describe('POST /workflows/:id/publish', () => {
     expect(res.status).toBe(403);
   });
 
-  it('429s when rate limited', async () => {
-    vi.mocked(adminLimiter.check).mockReturnValueOnce({
-      success: false,
-      limit: 10,
-      remaining: 0,
-      reset: Date.now() + 60000,
-    });
-    const res = await PUBLISH(
-      makeRequest('POST', `/api/v1/admin/orchestration/workflows/${WORKFLOW_ID}/publish`, {}),
-      makeParams()
-    );
-    expect(res.status).toBe(429);
-  });
-
   it('400s for an invalid workflow id', async () => {
     const res = await PUBLISH(
       makeRequest('POST', `/api/v1/admin/orchestration/workflows/not-a-cuid/publish`, {}),
@@ -436,20 +408,6 @@ describe('POST /workflows/:id/discard-draft', () => {
       makeParams()
     );
     expect(res.status).toBe(401);
-  });
-
-  it('429s when rate limited', async () => {
-    vi.mocked(adminLimiter.check).mockReturnValueOnce({
-      success: false,
-      limit: 10,
-      remaining: 0,
-      reset: Date.now() + 60_000,
-    });
-    const res = await DISCARD(
-      makeRequest('POST', `/api/v1/admin/orchestration/workflows/${WORKFLOW_ID}/discard-draft`),
-      makeParams()
-    );
-    expect(res.status).toBe(429);
   });
 
   it('400s for an invalid workflow id', async () => {
@@ -565,22 +523,6 @@ describe('POST /workflows/:id/rollback', () => {
     expect(res.status).toBe(400);
   });
 
-  it('429s when rate limited', async () => {
-    vi.mocked(adminLimiter.check).mockReturnValueOnce({
-      success: false,
-      limit: 10,
-      remaining: 0,
-      reset: Date.now() + 60_000,
-    });
-    const res = await ROLLBACK(
-      makeRequest('POST', `/api/v1/admin/orchestration/workflows/${WORKFLOW_ID}/rollback`, {
-        targetVersionId: VERSION_ID_V1,
-      }),
-      makeParams()
-    );
-    expect(res.status).toBe(429);
-  });
-
   it('400s for an invalid workflow id', async () => {
     const res = await ROLLBACK(
       makeRequest('POST', `/api/v1/admin/orchestration/workflows/not-a-cuid/rollback`, {
@@ -646,20 +588,6 @@ describe('GET /workflows/:id/versions', () => {
     );
     expect(res.status).toBe(404);
   });
-
-  it('429s when rate limited', async () => {
-    vi.mocked(adminLimiter.check).mockReturnValueOnce({
-      success: false,
-      limit: 10,
-      remaining: 0,
-      reset: Date.now() + 60_000,
-    });
-    const res = await LIST_VERSIONS(
-      makeRequest('GET', `/api/v1/admin/orchestration/workflows/${WORKFLOW_ID}/versions`),
-      makeParams()
-    );
-    expect(res.status).toBe(429);
-  });
 });
 
 // ─── GET /versions/:version ────────────────────────────────────────────────
@@ -693,19 +621,5 @@ describe('GET /workflows/:id/versions/:version', () => {
       { params: Promise.resolve({ id: WORKFLOW_ID, version: 'abc' }) }
     );
     expect(res.status).toBe(400);
-  });
-
-  it('429s when rate limited', async () => {
-    vi.mocked(adminLimiter.check).mockReturnValueOnce({
-      success: false,
-      limit: 10,
-      remaining: 0,
-      reset: Date.now() + 60_000,
-    });
-    const res = await GET_VERSION(
-      makeRequest('GET', `/api/v1/admin/orchestration/workflows/${WORKFLOW_ID}/versions/1`),
-      { params: Promise.resolve({ id: WORKFLOW_ID, version: '1' }) }
-    );
-    expect(res.status).toBe(429);
   });
 });

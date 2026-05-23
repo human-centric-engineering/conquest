@@ -36,13 +36,6 @@ vi.mock('@/lib/orchestration/llm/provider-manager', () => ({
   hasModelWithCapability: vi.fn(),
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  apiLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({
   getClientIP: vi.fn(() => '127.0.0.1'),
 }));
@@ -53,7 +46,6 @@ vi.mock('@/lib/logging', () => ({
 
 import { resolveEmbedToken, isOriginAllowed } from '@/lib/embed/auth';
 import { prisma } from '@/lib/db/client';
-import { apiLimiter } from '@/lib/security/rate-limit';
 import { getAudioProvider, hasModelWithCapability } from '@/lib/orchestration/llm/provider-manager';
 import { GET, OPTIONS } from '@/app/api/v1/embed/widget-config/route';
 import { DEFAULT_WIDGET_CONFIG } from '@/lib/validations/orchestration';
@@ -88,7 +80,6 @@ async function parseJson<T>(response: Response): Promise<T> {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(apiLimiter.check).mockReturnValue({ success: true } as never);
   vi.mocked(resolveEmbedToken).mockResolvedValue(VALID_CONTEXT as never);
   vi.mocked(isOriginAllowed).mockReturnValue(true);
   // `vi.clearAllMocks()` wipes any mock implementation set in `vi.mock()`
@@ -136,12 +127,6 @@ describe('GET /api/v1/embed/widget-config', () => {
     expect(response.status).toBe(403);
     const body = await parseJson<{ error: { code: string } }>(response);
     expect(body.error.code).toBe('ORIGIN_DENIED');
-  });
-
-  it('returns 429 when rate-limited', async () => {
-    vi.mocked(apiLimiter.check).mockReturnValue({ success: false } as never);
-    const response = await GET(makeGetRequest({ 'X-Embed-Token': VALID_TOKEN }));
-    expect(response.status).toBe(429);
   });
 
   it('returns DEFAULT_WIDGET_CONFIG when stored widgetConfig is null', async () => {

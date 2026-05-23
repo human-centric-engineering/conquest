@@ -42,22 +42,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json(
-      {
-        success: false,
-        error: {
-          code: 'RATE_LIMIT_EXCEEDED',
-          message: 'Too many requests. Please try again later.',
-        },
-      },
-      { status: 429 }
-    )
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({
   getClientIP: vi.fn(() => '127.0.0.1'),
 }));
@@ -82,7 +66,6 @@ vi.mock('@/lib/api/context', () => ({
 
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter } from '@/lib/security/rate-limit';
 import { mockAdminUser } from '@/tests/helpers/auth';
 import { POST } from '@/app/api/v1/admin/orchestration/webhooks/[id]/test/route';
 
@@ -132,7 +115,6 @@ describe('POST /api/v1/admin/orchestration/webhooks/:id/test', () => {
     vi.clearAllMocks();
     // Default: authenticated admin, rate limit passes, webhook found, fetch succeeds
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
     vi.mocked(prisma.aiWebhookSubscription.findFirst).mockResolvedValue(makeWebhook() as never);
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 200 }));
   });
@@ -142,25 +124,6 @@ describe('POST /api/v1/admin/orchestration/webhooks/:id/test', () => {
   });
 
   // ── Rate limiting ───────────────────────────────────────────────────────
-
-  describe('Rate limiting', () => {
-    it('returns 429 and does NOT query the database when rate limit is exceeded', async () => {
-      // Arrange
-      vi.mocked(adminLimiter.check).mockReturnValue({
-        success: false,
-        limit: 30,
-        remaining: 0,
-        reset: Date.now() + 60_000,
-      } as never);
-
-      // Act
-      const response = await POST(makeRequest(), makeParams());
-
-      // Assert: rate-limit short-circuits before DB
-      expect(response.status).toBe(429);
-      expect(prisma.aiWebhookSubscription.findFirst).not.toHaveBeenCalled();
-    });
-  });
 
   // ── Input validation ────────────────────────────────────────────────────
 

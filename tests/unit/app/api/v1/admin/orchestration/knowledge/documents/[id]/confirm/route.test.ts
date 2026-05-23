@@ -15,7 +15,7 @@
  *
  * Key Behaviors:
  * - withAdminAuth wraps the handler; auth is mocked via auth.api.getSession
- * - adminLimiter.check is called before business logic
+ * - Rate limiting enforced by proxy.ts (orchestration tier)
  * - cuidSchema validates the URL :id param before confirmPreview is called
  * - body.documentId must equal the URL :id param
  * - confirmPreview receives (id, session.user.id, correctedContent, category)
@@ -42,16 +42,6 @@ vi.mock('next/headers', () => ({
   headers: vi.fn(() => Promise.resolve(new Headers())),
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json(
-      { success: false, error: { code: 'RATE_LIMIT_EXCEEDED', message: 'Too many requests.' } },
-      { status: 429 }
-    )
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({
   getClientIP: vi.fn(() => '127.0.0.1'),
 }));
@@ -63,7 +53,6 @@ vi.mock('@/lib/orchestration/knowledge/document-manager', () => ({
 // ─── Imports after mocks ─────────────────────────────────────────────────────
 
 import { auth } from '@/lib/auth/config';
-import { adminLimiter } from '@/lib/security/rate-limit';
 import { confirmPreview } from '@/lib/orchestration/knowledge/document-manager';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -133,7 +122,6 @@ describe('POST /api/v1/admin/orchestration/knowledge/documents/:id/confirm', () 
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser() as never);
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
     vi.mocked(confirmPreview).mockResolvedValue(makeMockDocument() as never);
   });
 
@@ -244,29 +232,6 @@ describe('POST /api/v1/admin/orchestration/knowledge/documents/:id/confirm', () 
   // ---------------------------------------------------------------------------
   // Rate limiting
   // ---------------------------------------------------------------------------
-
-  describe('Rate limiting', () => {
-    it('should return 429 when the rate limit is exceeded', async () => {
-      vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-
-      const body = { documentId: VALID_DOC_ID };
-      const response = await POST(makeRequest(VALID_DOC_ID, body), makeContext(VALID_DOC_ID));
-      const data = await parseResponse<ErrorBody>(response);
-
-      expect(response.status).toBe(429);
-      expect(data.success).toBe(false);
-      expect(data.error.code).toBe('RATE_LIMIT_EXCEEDED');
-    });
-
-    it('should not call confirmPreview when rate limited', async () => {
-      vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-
-      const body = { documentId: VALID_DOC_ID };
-      await POST(makeRequest(VALID_DOC_ID, body), makeContext(VALID_DOC_ID));
-
-      expect(confirmPreview).not.toHaveBeenCalled();
-    });
-  });
 
   // ---------------------------------------------------------------------------
   // Authentication

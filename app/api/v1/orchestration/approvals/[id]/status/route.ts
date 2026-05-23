@@ -23,8 +23,6 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { errorResponse, successResponse } from '@/lib/api/responses';
-import { apiLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
-import { getClientIP } from '@/lib/security/ip';
 import { verifyApprovalToken } from '@/lib/orchestration/approval-tokens';
 import { prisma } from '@/lib/db/client';
 import { cuidSchema } from '@/lib/validations/common';
@@ -45,10 +43,6 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ): Promise<Response> {
-  const clientIP = getClientIP(request);
-  const rateLimit = apiLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
-
   const { id: rawId } = await params;
   const parsed = cuidSchema.safeParse(rawId);
   if (!parsed.success) {

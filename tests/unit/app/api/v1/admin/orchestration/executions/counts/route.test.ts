@@ -49,13 +49,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: {
-    check: vi.fn(() => ({ success: true, limit: 100, remaining: 99, reset: 0 })),
-  },
-  createRateLimitResponse: vi.fn(() => new Response(null, { status: 429 })),
-}));
-
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '127.0.0.1') }));
 
 vi.mock('@/lib/logging', () => ({
@@ -77,7 +70,6 @@ vi.mock('@/lib/logging', () => ({
 
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 import { GET } from '@/app/api/v1/admin/orchestration/executions/counts/route';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
@@ -105,12 +97,6 @@ beforeEach(() => {
   vi.clearAllMocks();
   // Default: admin session, rate-limit passes, groupBy returns empty
   vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-  vi.mocked(adminLimiter.check).mockReturnValue({
-    success: true,
-    limit: 100,
-    remaining: 99,
-    reset: 0,
-  });
   vi.mocked(prisma.aiWorkflowExecution.groupBy).mockResolvedValue([] as never);
 });
 
@@ -144,24 +130,6 @@ describe('GET /api/v1/admin/orchestration/executions/counts', () => {
   });
 
   // ── 3. Rate-limiting ───────────────────────────────────────────────────────
-
-  describe('Rate limiting', () => {
-    it('returns 429 when the rate limiter rejects the request and does not query the database', async () => {
-      vi.mocked(adminLimiter.check).mockReturnValue({
-        success: false,
-        limit: 100,
-        remaining: 0,
-        reset: Date.now() + 60_000,
-      });
-
-      const response = await GET(makeRequest('?statuses=pending'));
-
-      expect(response.status).toBe(429);
-      // The rate-limit branch must call the factory and NOT fall through to groupBy
-      expect(createRateLimitResponse).toHaveBeenCalledOnce();
-      expect(prisma.aiWorkflowExecution.groupBy).not.toHaveBeenCalled();
-    });
-  });
 
   // ── Validation failures ────────────────────────────────────────────────────
 

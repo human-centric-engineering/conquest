@@ -55,13 +55,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({
   getClientIP: vi.fn(() => '127.0.0.1'),
 }));
@@ -75,7 +68,6 @@ vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({
 
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter } from '@/lib/security/rate-limit';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -145,7 +137,6 @@ describe('GET /api/v1/admin/orchestration/agents/:id/invite-tokens', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   describe('Authentication & Authorization', () => {
@@ -301,7 +292,6 @@ describe('POST /api/v1/admin/orchestration/agents/:id/invite-tokens', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   describe('Authentication & Authorization', () => {
@@ -323,26 +313,6 @@ describe('POST /api/v1/admin/orchestration/agents/:id/invite-tokens', () => {
       expect(response.status).toBe(403);
       const data = await parseJson(response);
       expect(data).toMatchObject({ success: false, error: { code: 'FORBIDDEN' } });
-    });
-  });
-
-  describe('Rate limiting', () => {
-    it('calls adminLimiter.check on POST', async () => {
-      vi.mocked(prisma.aiAgent.findFirst).mockResolvedValue(makeInviteOnlyAgent() as never);
-      vi.mocked(prisma.aiAgentInviteToken.create).mockResolvedValue(makeToken() as never);
-
-      await POST(makePostRequest({ label: 'Test' }), makeAgentParams());
-
-      expect(vi.mocked(adminLimiter.check)).toHaveBeenCalledOnce();
-    });
-
-    it('returns 429 and does not write when rate limit exceeded', async () => {
-      vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-
-      const response = await POST(makePostRequest({ label: 'Test' }), makeAgentParams());
-
-      expect(response.status).toBe(429);
-      expect(vi.mocked(prisma.aiAgentInviteToken.create)).not.toHaveBeenCalled();
     });
   });
 
@@ -570,7 +540,6 @@ describe('DELETE /api/v1/admin/orchestration/agents/:id/invite-tokens/:tokenId',
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   describe('Authentication & Authorization', () => {
@@ -592,28 +561,6 @@ describe('DELETE /api/v1/admin/orchestration/agents/:id/invite-tokens/:tokenId',
       expect(response.status).toBe(403);
       const data = await parseJson(response);
       expect(data).toMatchObject({ success: false, error: { code: 'FORBIDDEN' } });
-    });
-  });
-
-  describe('Rate limiting', () => {
-    it('calls adminLimiter.check on DELETE', async () => {
-      vi.mocked(prisma.aiAgentInviteToken.findFirst).mockResolvedValue(
-        makeToken({ revokedAt: null }) as never
-      );
-      vi.mocked(prisma.aiAgentInviteToken.update).mockResolvedValue({} as never);
-
-      await DELETE(makeDeleteRequest(), makeTokenParams());
-
-      expect(vi.mocked(adminLimiter.check)).toHaveBeenCalledOnce();
-    });
-
-    it('returns 429 and does not write when rate limit exceeded', async () => {
-      vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-
-      const response = await DELETE(makeDeleteRequest(), makeTokenParams());
-
-      expect(response.status).toBe(429);
-      expect(vi.mocked(prisma.aiAgentInviteToken.update)).not.toHaveBeenCalled();
     });
   });
 
@@ -739,7 +686,6 @@ describe('CRUD flow: create → list → revoke', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   it('token created via POST appears in GET list and can be revoked via DELETE', async () => {

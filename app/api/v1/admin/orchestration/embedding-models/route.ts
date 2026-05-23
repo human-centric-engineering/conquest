@@ -14,8 +14,6 @@ import { z } from 'zod';
 import { withAdminAuth } from '@/lib/auth/guards';
 import { successResponse } from '@/lib/api/responses';
 import { validateQueryParams } from '@/lib/api/validation';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
-import { getClientIP } from '@/lib/security/ip';
 import { getEmbeddingModels } from '@/lib/orchestration/llm/embedding-models';
 
 const booleanQueryParam = z
@@ -33,10 +31,6 @@ const embeddingModelsQuerySchema = z.object({
 });
 
 export const GET = withAdminAuth(async (request) => {
-  const clientIP = getClientIP(request);
-  const rateLimit = adminLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
-
   const { searchParams } = new URL(request.url);
   const { schemaCompatibleOnly, hasFreeTier, local } = validateQueryParams(
     searchParams,

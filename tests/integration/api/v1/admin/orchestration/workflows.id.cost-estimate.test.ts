@@ -41,20 +41,12 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/orchestration/cost-estimation/workflow-cost', () => ({
   estimateWorkflowCost: vi.fn(),
 }));
 
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter } from '@/lib/security/rate-limit';
 import { estimateWorkflowCost } from '@/lib/orchestration/cost-estimation/workflow-cost';
 import { GET, POST } from '@/app/api/v1/admin/orchestration/workflows/[id]/cost-estimate/route';
 import type { WorkflowDefinition } from '@/types/orchestration';
@@ -105,7 +97,6 @@ const SAMPLE_ESTIMATE = {
 describe('GET /api/v1/admin/orchestration/workflows/:id/cost-estimate', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
     vi.mocked(estimateWorkflowCost).mockResolvedValue(SAMPLE_ESTIMATE);
     // resolveEffectiveCap reads the singleton settings row; default to
     // no org-level cap configured so existing assertions don't need to
@@ -264,7 +255,6 @@ function makeInvalidJsonRequest(): NextRequest {
 describe('POST /api/v1/admin/orchestration/workflows/:id/cost-estimate', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
     vi.mocked(estimateWorkflowCost).mockResolvedValue(SAMPLE_ESTIMATE);
     vi.mocked(prisma.aiOrchestrationSettings.findUnique).mockResolvedValue({
       defaultMaxCostPerExecutionUsd: null,
@@ -456,26 +446,6 @@ describe('POST /api/v1/admin/orchestration/workflows/:id/cost-estimate', () => {
         response
       );
       expect(body.data.effectiveCapUsd).toBeNull();
-    });
-  });
-
-  describe('Rate limiting', () => {
-    beforeEach(() => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-    });
-
-    it('returns 429 when rate-limited and calls adminLimiter.check', async () => {
-      const { createRateLimitResponse } = await import('@/lib/security/rate-limit');
-      vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-
-      const response = await POST(
-        makePostRequest({ definition: MINIMAL_DEFINITION }),
-        makeParams(WORKFLOW_ID)
-      );
-      expect(response.status).toBe(429);
-      // Verify the limiter was consulted — not just that a 429 appeared
-      expect(adminLimiter.check).toHaveBeenCalledOnce();
-      expect(createRateLimitResponse).toHaveBeenCalledOnce();
     });
   });
 });

@@ -7,7 +7,7 @@
  *
  * Key security assertions:
  * - Admin auth required (401/403 otherwise)
- * - Rate limited (adminLimiter)
+ * - Rate limiting enforced by proxy.ts (orchestration tier)
  * - Missing required query field returns 400
  */
 
@@ -38,13 +38,6 @@ vi.mock('@/lib/orchestration/knowledge/resolveAgentDocumentAccess', () => ({
   resolveAgentDocumentAccess: vi.fn(),
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '127.0.0.1') }));
 
 // ─── Imports after mocks ─────────────────────────────────────────────────────
@@ -52,7 +45,6 @@ vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '127.0.0.1') }));
 import { auth } from '@/lib/auth/config';
 import { searchKnowledge } from '@/lib/orchestration/knowledge/search';
 import { resolveAgentDocumentAccess } from '@/lib/orchestration/knowledge/resolveAgentDocumentAccess';
-import { adminLimiter } from '@/lib/security/rate-limit';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -89,7 +81,6 @@ async function parseJson<T>(response: Response): Promise<T> {
 describe('POST /api/v1/admin/orchestration/knowledge/search', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   describe('Authentication & Authorization', () => {
@@ -183,27 +174,6 @@ describe('POST /api/v1/admin/orchestration/knowledge/search', () => {
       const response = await POST(makePostRequest({ query: '' }));
 
       expect(response.status).toBe(400);
-    });
-  });
-
-  describe('Rate limiting', () => {
-    it('calls adminLimiter.check on POST', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(searchKnowledge).mockResolvedValue([]);
-
-      await POST(makePostRequest({ query: 'agent patterns' }));
-
-      expect(vi.mocked(adminLimiter.check)).toHaveBeenCalledOnce();
-    });
-
-    it('returns 429 when rate limit exceeded', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-
-      const response = await POST(makePostRequest({ query: 'agent patterns' }));
-
-      expect(response.status).toBe(429);
-      expect(vi.mocked(searchKnowledge)).not.toHaveBeenCalled();
     });
   });
 

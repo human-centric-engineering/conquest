@@ -7,7 +7,7 @@
  *
  * Key security assertions:
  * - Admin auth required (401/403 otherwise)
- * - Rate limited (adminLimiter)
+ * - Rate limiting enforced by proxy.ts (orchestration tier)
  * - Bad CUID returns 400
  * - Missing document returns 404
  * - Document with status=processing returns 409 (race condition guard)
@@ -55,13 +55,6 @@ vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({
   computeChanges: vi.fn(),
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '127.0.0.1') }));
 
 import { auth } from '@/lib/auth/config';
@@ -71,7 +64,6 @@ import {
   NoChunksToEnrichError,
 } from '@/lib/orchestration/knowledge/keyword-enricher';
 import { NoDefaultModelConfiguredError } from '@/lib/orchestration/llm/settings-resolver';
-import { adminLimiter } from '@/lib/security/rate-limit';
 
 const DOC_ID = 'cmjbv4i3x00003wsloputgwul';
 const INVALID_ID = 'not-a-cuid';
@@ -113,7 +105,6 @@ async function parseJson<T>(response: Response): Promise<T> {
 describe('POST /api/v1/admin/orchestration/knowledge/documents/:id/enrich-keywords', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   describe('Authentication & Authorization', () => {
@@ -222,24 +213,6 @@ describe('POST /api/v1/admin/orchestration/knowledge/documents/:id/enrich-keywor
 
       const response = await POST(makeRequest(), makeParams(INVALID_ID));
       expect(response.status).toBe(400);
-    });
-  });
-
-  describe('Rate limiting', () => {
-    it('calls adminLimiter.check on POST', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(prisma.aiKnowledgeDocument.findUnique).mockResolvedValue(makeDocument() as never);
-      vi.mocked(enrichDocumentKeywords).mockResolvedValue({
-        chunksProcessed: 1,
-        chunksSkipped: 0,
-        chunksFailed: 0,
-        tokensUsed: 10,
-        costUsd: 0,
-        model: 'local',
-      });
-
-      await POST(makeRequest(), makeParams(DOC_ID));
-      expect(vi.mocked(adminLimiter.check)).toHaveBeenCalledOnce();
     });
   });
 

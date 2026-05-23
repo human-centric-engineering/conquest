@@ -13,15 +13,9 @@ import { prisma } from '@/lib/db/client';
 import { paginatedResponse } from '@/lib/api/responses';
 import { NotFoundError, ValidationError } from '@/lib/api/errors';
 import { validateQueryParams } from '@/lib/api/validation';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
-import { getClientIP } from '@/lib/security/ip';
 import { cuidSchema, paginationQuerySchema } from '@/lib/validations/common';
 
 export const GET = withAdminAuth<{ id: string }>(async (_request, _session, { params }) => {
-  const clientIP = getClientIP(_request);
-  const rateLimit = adminLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
-
   const { id: rawId } = await params;
   const parsed = cuidSchema.safeParse(rawId);
   if (!parsed.success)

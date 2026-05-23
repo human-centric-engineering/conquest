@@ -21,13 +21,11 @@ import { errorResponse } from '@/lib/api/responses';
 import { validateRequestBody } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
 import {
-  apiLimiter,
   consumerChatLimiter,
   agentChatLimiter,
   createRateLimitResponse,
   imageLimiter,
 } from '@/lib/security/rate-limit';
-import { getClientIP } from '@/lib/security/ip';
 import { streamChat } from '@/lib/orchestration/chat';
 import { consumerChatRequestSchema } from '@/lib/validations/orchestration';
 import { getRequestId } from '@/lib/logging/context';
@@ -36,10 +34,6 @@ import { NotFoundError, ForbiddenError } from '@/lib/api/errors';
 import { validateImageMagicBytes, validatePdfMagicBytes } from '@/lib/storage/image';
 
 export const POST = withAuth(async (request, session) => {
-  const clientIP = getClientIP(request);
-  const ipLimit = apiLimiter.check(clientIP);
-  if (!ipLimit.success) return createRateLimitResponse(ipLimit);
-
   const userLimit = consumerChatLimiter.check(session.user.id);
   if (!userLimit.success) return createRateLimitResponse(userLimit);
 

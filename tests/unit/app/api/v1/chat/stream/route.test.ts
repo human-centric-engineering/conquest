@@ -54,9 +54,6 @@ vi.mock('@/lib/auth/config', () => ({
 
 // Mock rate limiters
 vi.mock('@/lib/security/rate-limit', () => ({
-  apiLimiter: {
-    check: vi.fn(),
-  },
   consumerChatLimiter: {
     check: vi.fn(),
   },
@@ -96,7 +93,6 @@ vi.mock('@/lib/logging/context', () => ({
 import { prisma } from '@/lib/db/client';
 import { auth } from '@/lib/auth/config';
 import {
-  apiLimiter,
   consumerChatLimiter,
   agentChatLimiter,
   createRateLimitResponse,
@@ -204,7 +200,6 @@ describe('POST /api/v1/chat/stream', () => {
     vi.mocked(auth.api.getSession).mockResolvedValue(createMockSession() as never);
 
     // Default: rate limits allow the request
-    vi.mocked(apiLimiter.check).mockReturnValue(makeRateLimitResult(true));
     vi.mocked(consumerChatLimiter.check).mockReturnValue(makeRateLimitResult(true));
 
     // Default: public agent found
@@ -346,51 +341,6 @@ describe('POST /api/v1/chat/stream', () => {
   // ---------------------------------------------------------------------------
   // 3. Rate limiting
   // ---------------------------------------------------------------------------
-
-  describe('Rate limiting', () => {
-    it('should return 429 when the IP rate limit is exceeded', async () => {
-      // Arrange
-      vi.mocked(apiLimiter.check).mockReturnValue(makeRateLimitResult(false, 0));
-      const request = createMockRequest(validPayload);
-
-      // Act
-      const response = await POST(request);
-
-      // Assert
-      expect(response.status).toBe(429);
-      expect(createRateLimitResponse).toHaveBeenCalledOnce();
-      expect(streamChat).not.toHaveBeenCalled(); // test-review:accept no_arg_called — error-path guard: function must not be called;
-    });
-
-    it('should return 429 when the per-user chat rate limit is exceeded', async () => {
-      // Arrange: IP passes but user limit fails
-      vi.mocked(apiLimiter.check).mockReturnValue(makeRateLimitResult(true));
-      vi.mocked(consumerChatLimiter.check).mockReturnValue(makeRateLimitResult(false, 0));
-      const request = createMockRequest(validPayload);
-
-      // Act
-      const response = await POST(request);
-
-      // Assert
-      expect(response.status).toBe(429);
-      expect(createRateLimitResponse).toHaveBeenCalledOnce();
-      expect(streamChat).not.toHaveBeenCalled(); // test-review:accept no_arg_called — error-path guard: function must not be called;
-    });
-
-    it('should check the IP limiter before the user limiter', async () => {
-      // Arrange: both would fail, but IP is checked first
-      vi.mocked(apiLimiter.check).mockReturnValue(makeRateLimitResult(false, 0));
-      vi.mocked(consumerChatLimiter.check).mockReturnValue(makeRateLimitResult(false, 0));
-      const request = createMockRequest(validPayload);
-
-      // Act
-      await POST(request);
-
-      // Assert: IP limiter called; user limiter never reached
-      expect(apiLimiter.check).toHaveBeenCalledOnce();
-      expect(consumerChatLimiter.check).not.toHaveBeenCalled(); // test-review:accept no_arg_called — error-path guard: function must not be called;
-    });
-  });
 
   // ---------------------------------------------------------------------------
   // 4. Validation errors

@@ -19,7 +19,6 @@ import { successResponse } from '@/lib/api/responses';
 import { NotFoundError } from '@/lib/api/errors';
 import { validateRequestBody } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 import { getClientIP } from '@/lib/security/ip';
 import { generateApiKey } from '@/lib/orchestration/mcp/auth';
 import { mcpApiKeyRotateSchema } from '@/lib/validations/mcp';
@@ -45,8 +44,6 @@ export const POST = withAdminAuth<{ id: string }>(async (request, session, { par
   cuidSchema.parse(id);
 
   const clientIP = getClientIP(request);
-  const rateLimit = adminLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
 
   const log = await getRouteLogger(request);
 

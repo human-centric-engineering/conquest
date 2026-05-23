@@ -25,8 +25,6 @@ import { prisma } from '@/lib/db/client';
 import { successResponse } from '@/lib/api/responses';
 import { getRouteLogger } from '@/lib/api/context';
 import { validateRequestBody } from '@/lib/api/validation';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
-import { getClientIP } from '@/lib/security/ip';
 import { invalidateModelCache } from '@/lib/orchestration/llm/provider-selector';
 import { deriveMatrixSlug } from '@/lib/orchestration/llm/model-heuristics';
 import { bulkCreateProviderModelsSchema } from '@/lib/validations/orchestration';
@@ -46,10 +44,6 @@ interface ConflictRow {
 }
 
 export const POST = withAdminAuth(async (request, session) => {
-  const clientIP = getClientIP(request);
-  const rateLimit = adminLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
-
   const log = await getRouteLogger(request);
   const body = await validateRequestBody(request, bulkCreateProviderModelsSchema);
 

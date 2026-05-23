@@ -15,8 +15,6 @@ import { withAdminAuth } from '@/lib/auth/guards';
 import { prisma } from '@/lib/db/client';
 import { paginatedResponse } from '@/lib/api/responses';
 import { NotFoundError, ValidationError } from '@/lib/api/errors';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
-import { getClientIP } from '@/lib/security/ip';
 import { cuidSchema } from '@/lib/validations/common';
 
 const querySchema = z.object({
@@ -27,10 +25,6 @@ const querySchema = z.object({
 
 export const GET = withAdminAuth<{ id: string }>(
   async (request: NextRequest, session, { params }) => {
-    const clientIP = getClientIP(request);
-    const rateLimit = adminLimiter.check(clientIP);
-    if (!rateLimit.success) return createRateLimitResponse(rateLimit);
-
     const { id: rawId } = await params;
     const idParsed = cuidSchema.safeParse(rawId);
     if (!idParsed.success) throw new ValidationError('Invalid webhook ID format');

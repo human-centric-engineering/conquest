@@ -54,13 +54,6 @@ vi.mock('@/lib/orchestration/llm/model-registry', () => ({
   refreshFromOpenRouter: vi.fn(() => Promise.resolve()),
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 // Default-models enrichment pulls from the settings singleton. Stub
 // it with an empty merged map by default so existing tests don't see
 // any default-role badges; the dedicated test below overrides this.
@@ -78,7 +71,6 @@ import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
 import { getProvider, isApiKeyEnvVarSet } from '@/lib/orchestration/llm/provider-manager';
 import { refreshFromOpenRouter } from '@/lib/orchestration/llm/model-registry';
-import { adminLimiter } from '@/lib/security/rate-limit';
 import { getOrchestrationSettings } from '@/lib/orchestration/settings';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -142,16 +134,6 @@ describe('GET /api/v1/admin/orchestration/providers/:id/models', () => {
     vi.clearAllMocks();
     // Default: API key is present. Individual tests override when needed.
     vi.mocked(isApiKeyEnvVarSet).mockReturnValue(true);
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
-  });
-
-  describe('Rate limiting', () => {
-    it('returns 429 when rate-limited', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-      const response = await GET(makeGetRequest(), makeParams(PROVIDER_ID));
-      expect(response.status).toBe(429);
-    });
   });
 
   describe('Authentication & Authorization', () => {

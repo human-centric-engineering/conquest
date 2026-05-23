@@ -41,13 +41,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 // Mock the engine module so we can assert the route wires it up
 // correctly without pulling in every executor + provider transitively.
 const mockExecute = vi.fn();
@@ -66,7 +59,6 @@ vi.mock('@/lib/orchestration/engine/orchestration-engine', () => ({
 
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter } from '@/lib/security/rate-limit';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -158,7 +150,6 @@ async function parseJson<T>(response: Response): Promise<T> {
 describe('POST /api/v1/admin/orchestration/workflows/:id/execute', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   describe('Authentication & Authorization', () => {
@@ -176,17 +167,6 @@ describe('POST /api/v1/admin/orchestration/workflows/:id/execute', () => {
       const response = await POST(makePostRequest(), makeParams(WORKFLOW_ID));
 
       expect(response.status).toBe(403);
-    });
-  });
-
-  describe('Rate limiting', () => {
-    it('returns 429 when adminLimiter blocks the request', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-
-      const response = await POST(makePostRequest(), makeParams(WORKFLOW_ID));
-
-      expect(response.status).toBe(429);
     });
   });
 

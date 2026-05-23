@@ -26,13 +26,6 @@ vi.mock('next/headers', () => ({
   headers: vi.fn(() => Promise.resolve(new Headers())),
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({
   getClientIP: vi.fn(() => '127.0.0.1'),
 }));
@@ -45,7 +38,6 @@ vi.mock('@/lib/orchestration/llm/cost-reports', () => ({
 
 import { GET } from '@/app/api/v1/admin/orchestration/costs/summary/route';
 import { auth } from '@/lib/auth/config';
-import { adminLimiter } from '@/lib/security/rate-limit';
 import { getCostSummary } from '@/lib/orchestration/llm/cost-reports';
 import { mockAdminUser, mockUnauthenticatedUser } from '@/tests/helpers/auth';
 import { computeETag } from '@/lib/api/etag';
@@ -80,7 +72,6 @@ describe('GET /api/v1/admin/orchestration/costs/summary', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
     vi.mocked(getCostSummary).mockResolvedValue(mockSummary as never);
   });
 
@@ -179,23 +170,4 @@ describe('GET /api/v1/admin/orchestration/costs/summary', () => {
   });
 
   // ── Rate limiting ────────────────────────────────────────────────────────
-
-  describe('Rate limiting', () => {
-    it('returns 429 when rate limit is exceeded', async () => {
-      // Arrange
-      vi.mocked(adminLimiter.check).mockReturnValue({
-        success: false,
-        limit: 10,
-        remaining: 0,
-        reset: Date.now() + 60_000,
-      } as never);
-
-      // Act
-      const res = await GET(makeGetRequest());
-
-      // Assert
-      expect(res.status).toBe(429);
-      expect(getCostSummary).not.toHaveBeenCalled();
-    });
-  });
 });

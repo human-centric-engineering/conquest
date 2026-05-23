@@ -23,11 +23,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(),
-}));
-
 vi.mock('@/lib/orchestration/knowledge/embedder', () => ({
   embedText: vi.fn(),
 }));

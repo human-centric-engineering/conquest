@@ -41,13 +41,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(
-    () => new Response(JSON.stringify({ error: 'rate limited' }), { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({
   getClientIP: vi.fn(() => '127.0.0.1'),
 }));
@@ -65,7 +58,6 @@ vi.mock('@/lib/orchestration/mcp', () => ({
 
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 import { clearMcpToolCache, broadcastMcpToolsChanged } from '@/lib/orchestration/mcp';
 import {
   mockAdminUser,
@@ -137,7 +129,6 @@ async function parseJson<T>(response: Response): Promise<T> {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
 });
 
 describe('PATCH /mcp/tools/:id', () => {
@@ -155,17 +146,6 @@ describe('PATCH /mcp/tools/:id', () => {
     const response = await PATCH(makePatchRequest({ isEnabled: false }), makeParams(TOOL_ID));
 
     expect(response.status).toBe(403);
-  });
-
-  it('returns 429 when rate limit exceeded', async () => {
-    vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-
-    const response = await PATCH(makePatchRequest({ isEnabled: false }), makeParams(TOOL_ID));
-
-    // test-review:accept no_arg_called — zero-arg side-effect trigger
-    expect(createRateLimitResponse).toHaveBeenCalled();
-    expect(response.status).toBe(429);
   });
 
   it('returns 400 for invalid non-CUID id', async () => {
@@ -272,17 +252,6 @@ describe('DELETE /mcp/tools/:id', () => {
     const response = await DELETE(makeDeleteRequest(), makeParams(TOOL_ID));
 
     expect(response.status).toBe(403);
-  });
-
-  it('returns 429 when rate limit exceeded', async () => {
-    vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-
-    const response = await DELETE(makeDeleteRequest(), makeParams(TOOL_ID));
-
-    // test-review:accept no_arg_called — zero-arg side-effect trigger
-    expect(createRateLimitResponse).toHaveBeenCalled();
-    expect(response.status).toBe(429);
   });
 
   it('returns 400 for invalid non-CUID id', async () => {

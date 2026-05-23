@@ -21,7 +21,6 @@ import { successResponse } from '@/lib/api/responses';
 import { NotFoundError, ValidationError } from '@/lib/api/errors';
 import { validateRequestBody } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 import { getClientIP } from '@/lib/security/ip';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities';
 import { findUnsetEnvVarReferences } from '@/lib/orchestration/env-template';
@@ -68,8 +67,6 @@ function parseIds(raw: RouteParams): { agentId: string; capabilityId: string } {
 
 export const PATCH = withAdminAuth<RouteParams>(async (request, session, { params }) => {
   const clientIP = getClientIP(request);
-  const rateLimit = adminLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
 
   const log = await getRouteLogger(request);
   const { agentId, capabilityId } = parseIds(await params);
@@ -120,8 +117,6 @@ export const PATCH = withAdminAuth<RouteParams>(async (request, session, { param
 
 export const DELETE = withAdminAuth<RouteParams>(async (request, session, { params }) => {
   const clientIP = getClientIP(request);
-  const rateLimit = adminLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
 
   const log = await getRouteLogger(request);
   const { agentId, capabilityId } = parseIds(await params);

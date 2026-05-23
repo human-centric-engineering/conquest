@@ -47,13 +47,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '127.0.0.1') }));
 
 vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({
@@ -75,7 +68,6 @@ vi.mock('@/lib/api/context', () => ({
 
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter } from '@/lib/security/rate-limit';
 import { invalidateAllAgentAccess } from '@/lib/orchestration/knowledge/resolveAgentDocumentAccess';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -122,7 +114,6 @@ async function parseJson<T>(response: Response): Promise<T> {
 describe('GET /api/v1/admin/orchestration/knowledge/tags/:id', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   describe('Authentication & Authorization', () => {
@@ -249,7 +240,6 @@ describe('GET /api/v1/admin/orchestration/knowledge/tags/:id', () => {
 describe('PATCH /api/v1/admin/orchestration/knowledge/tags/:id', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   describe('Authentication & Authorization', () => {
@@ -267,18 +257,6 @@ describe('PATCH /api/v1/admin/orchestration/knowledge/tags/:id', () => {
       const response = await PATCH(makeRequest('PATCH', { name: 'New Name' }), makeParams(TAG_ID));
 
       expect(response.status).toBe(403);
-    });
-  });
-
-  describe('Rate limiting', () => {
-    it('returns 429 when rate limit exceeded', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-
-      const response = await PATCH(makeRequest('PATCH', { name: 'x' }), makeParams(TAG_ID));
-
-      expect(response.status).toBe(429);
-      expect(vi.mocked(prisma.knowledgeTag.findUnique)).not.toHaveBeenCalled();
     });
   });
 
@@ -381,16 +359,6 @@ describe('PATCH /api/v1/admin/orchestration/knowledge/tags/:id', () => {
 
       expect(vi.mocked(invalidateAllAgentAccess)).toHaveBeenCalled();
     });
-
-    it('calls adminLimiter.check on PATCH', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(prisma.knowledgeTag.findUnique).mockResolvedValue(makeTag() as never);
-      vi.mocked(prisma.knowledgeTag.update).mockResolvedValue(makeTag() as never);
-
-      await PATCH(makeRequest('PATCH', { name: 'x' }), makeParams(TAG_ID));
-
-      expect(vi.mocked(adminLimiter.check)).toHaveBeenCalledOnce();
-    });
   });
 });
 
@@ -399,7 +367,6 @@ describe('PATCH /api/v1/admin/orchestration/knowledge/tags/:id', () => {
 describe('DELETE /api/v1/admin/orchestration/knowledge/tags/:id', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   describe('Authentication & Authorization', () => {
@@ -417,18 +384,6 @@ describe('DELETE /api/v1/admin/orchestration/knowledge/tags/:id', () => {
       const response = await DELETE(makeRequest('DELETE'), makeParams(TAG_ID));
 
       expect(response.status).toBe(403);
-    });
-  });
-
-  describe('Rate limiting', () => {
-    it('returns 429 when rate limit exceeded', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-
-      const response = await DELETE(makeRequest('DELETE'), makeParams(TAG_ID));
-
-      expect(response.status).toBe(429);
-      expect(vi.mocked(prisma.knowledgeTag.findUnique)).not.toHaveBeenCalled();
     });
   });
 
@@ -531,18 +486,6 @@ describe('DELETE /api/v1/admin/orchestration/knowledge/tags/:id', () => {
       await DELETE(makeRequest('DELETE'), makeParams(TAG_ID));
 
       expect(vi.mocked(invalidateAllAgentAccess)).toHaveBeenCalled();
-    });
-
-    it('calls adminLimiter.check on DELETE', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(prisma.knowledgeTag.findUnique).mockResolvedValue(
-        makeTag({ _count: { documents: 0, agents: 0 } }) as never
-      );
-      vi.mocked(prisma.knowledgeTag.delete).mockResolvedValue(makeTag() as never);
-
-      await DELETE(makeRequest('DELETE'), makeParams(TAG_ID));
-
-      expect(vi.mocked(adminLimiter.check)).toHaveBeenCalledOnce();
     });
   });
 });

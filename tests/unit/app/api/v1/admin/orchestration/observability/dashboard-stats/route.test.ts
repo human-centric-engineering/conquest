@@ -61,18 +61,6 @@ vi.mock('@/lib/api/etag', () => ({
   checkConditional: vi.fn(() => null),
 }));
 
-const RATE_LIMIT_ALLOW = { success: true, limit: 100, remaining: 99, reset: 9999999999 };
-const RATE_LIMIT_DENY = { success: false, limit: 100, remaining: 0, reset: 9999999999 };
-
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: {
-    check: vi.fn(() => ({ success: true, limit: 100, remaining: 99, reset: 9999999999 })),
-  },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({
   getClientIP: vi.fn(() => '127.0.0.1'),
 }));
@@ -83,7 +71,6 @@ import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
 import { successResponse } from '@/lib/api/responses';
 import { checkConditional } from '@/lib/api/etag';
-import { adminLimiter } from '@/lib/security/rate-limit';
 import {
   mockAdminUser,
   mockUnauthenticatedUser,
@@ -98,10 +85,6 @@ function makeRequest(headers?: Record<string, string>): NextRequest {
     'http://localhost:3000/api/v1/admin/orchestration/observability/dashboard-stats',
     { method: 'GET', headers }
   );
-}
-
-async function parseJson<T>(response: Response): Promise<T> {
-  return JSON.parse(await response.text()) as T;
 }
 
 // ─── Default mock data ────────────────────────────────────────────────────────
@@ -122,7 +105,6 @@ describe('GET /api/v1/admin/orchestration/observability/dashboard-stats', () => 
   beforeEach(() => {
     vi.clearAllMocks();
     // Restore rate-limit and etag defaults
-    vi.mocked(adminLimiter.check).mockReturnValue(RATE_LIMIT_ALLOW);
     vi.mocked(checkConditional).mockReturnValue(null);
     setupDefaultPrismaMocks();
   });
@@ -148,23 +130,6 @@ describe('GET /api/v1/admin/orchestration/observability/dashboard-stats', () => 
 
       // Assert
       expect(response.status).toBe(403);
-    });
-  });
-
-  describe('rate limiting', () => {
-    it('should return rate-limit response when limiter check fails', async () => {
-      // Arrange
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(adminLimiter.check).mockReturnValue(RATE_LIMIT_DENY);
-
-      // Act
-      const response = await GET(makeRequest());
-
-      // Assert
-      expect(response.status).toBe(429);
-      const body = await parseJson<{ success: boolean; error: { code: string } }>(response);
-      expect(body.success).toBe(false);
-      expect(body.error.code).toBe('RATE_LIMITED');
     });
   });
 

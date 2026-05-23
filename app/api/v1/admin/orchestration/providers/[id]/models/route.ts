@@ -27,14 +27,8 @@ import { getOrchestrationSettings } from '@/lib/orchestration/settings';
 import { parseAudioDefault } from '@/lib/orchestration/llm/audio-default';
 import { TASK_TYPES, type TaskType } from '@/types/orchestration';
 import { cuidSchema } from '@/lib/validations/common';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
-import { getClientIP } from '@/lib/security/ip';
 
 export const GET = withAdminAuth<{ id: string }>(async (request, _session, { params }) => {
-  const clientIP = getClientIP(request);
-  const rateLimit = adminLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
-
   const log = await getRouteLogger(request);
   const { id: rawId } = await params;
   const parsed = cuidSchema.safeParse(rawId);

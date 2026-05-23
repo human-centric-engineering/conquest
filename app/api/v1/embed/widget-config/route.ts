@@ -15,7 +15,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
 import { getClientIP } from '@/lib/security/ip';
-import { apiLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 import { resolveEmbedToken, isOriginAllowed } from '@/lib/embed/auth';
 import { resolveWidgetConfig } from '@/lib/validations/orchestration';
 import { getAudioProvider, hasModelWithCapability } from '@/lib/orchestration/llm/provider-manager';
@@ -63,10 +62,6 @@ export async function GET(request: NextRequest): Promise<Response> {
   }
 
   const clientIp = getClientIP(request);
-
-  const rateKey = `${token}:${clientIp}`;
-  const rateLimit = apiLimiter.check(rateKey);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
 
   const ctx = await resolveEmbedToken(token, clientIp);
   if (!ctx) {

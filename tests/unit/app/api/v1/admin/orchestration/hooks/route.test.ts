@@ -34,11 +34,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(),
-}));
-
 vi.mock('@/lib/orchestration/hooks/registry', () => ({
   invalidateHookCache: vi.fn(),
 }));
@@ -52,7 +47,6 @@ vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({
 
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 import { invalidateHookCache } from '@/lib/orchestration/hooks/registry';
 import { mockAdminUser, mockUnauthenticatedUser } from '@/tests/helpers/auth';
 import { GET as ListHooks, POST as CreateHook } from '@/app/api/v1/admin/orchestration/hooks/route';
@@ -131,10 +125,6 @@ beforeEach(() => {
   // Default session: admin authenticated. Tests that need a different user override this.
   vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
   // Reset rate limiter to allow-by-default after each test
-  vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
-  vi.mocked(createRateLimitResponse).mockReturnValue(
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  );
 });
 
 describe('GET /hooks', () => {
@@ -287,28 +277,6 @@ describe('POST /hooks', () => {
     expect(response.status).toBe(400);
   });
 
-  it('returns 429 when rate limited on POST', async () => {
-    // Arrange: rate limit exceeded
-    vi.mocked(adminLimiter.check).mockReturnValue({
-      success: false,
-      limit: 10,
-      remaining: 0,
-      reset: Date.now() + 60_000,
-    } as never);
-
-    // Act
-    const response = await CreateHook(
-      makeCreateRequest({
-        name: 'Rate Limited Hook',
-        eventType: 'conversation.started',
-        action: { type: 'webhook', url: 'https://example.com/hook' },
-      })
-    );
-
-    // Assert
-    expect(response.status).toBe(429);
-  });
-
   it('rejects custom action.headers that collide with reserved signing header names', async () => {
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
 
@@ -455,23 +423,6 @@ describe('PATCH /hooks/:id', () => {
 
     // Assert
     expect(response.status).toBe(400);
-  });
-
-  it('returns 429 when rate limited on PATCH', async () => {
-    // Arrange: rate limit exceeded
-    vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-    vi.mocked(adminLimiter.check).mockReturnValue({
-      success: false,
-      limit: 10,
-      remaining: 0,
-      reset: Date.now() + 60_000,
-    } as never);
-
-    // Act
-    const response = await UpdateHook(makePatchRequest({ name: 'Updated' }), makeParams(HOOK_ID));
-
-    // Assert
-    expect(response.status).toBe(429);
   });
 
   it('updates only eventType and passes it through to prisma.update', async () => {
@@ -635,23 +586,6 @@ describe('DELETE /hooks/:id', () => {
 
     // Assert
     expect(response.status).toBe(400);
-  });
-
-  it('returns 429 when rate limited on DELETE', async () => {
-    // Arrange: rate limit exceeded
-    vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-    vi.mocked(adminLimiter.check).mockReturnValue({
-      success: false,
-      limit: 10,
-      remaining: 0,
-      reset: Date.now() + 60_000,
-    } as never);
-
-    // Act
-    const response = await DeleteHook(makeDeleteRequest(), makeParams(HOOK_ID));
-
-    // Assert
-    expect(response.status).toBe(429);
   });
 
   it('calls invalidateHookCache after a successful delete', async () => {

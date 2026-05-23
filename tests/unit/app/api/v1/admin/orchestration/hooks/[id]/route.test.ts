@@ -40,13 +40,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({
   getClientIP: vi.fn(() => '127.0.0.1'),
 }));
@@ -92,7 +85,6 @@ vi.mock('@/lib/security/safe-url', () => ({
 
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter } from '@/lib/security/rate-limit';
 import { invalidateHookCache } from '@/lib/orchestration/hooks/registry';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { validateRequestBody } from '@/lib/api/validation';
@@ -153,7 +145,6 @@ async function parseJson<T>(response: Response): Promise<T> {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-  vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
 });
 
 describe('GET /hooks/:id', () => {
@@ -289,23 +280,6 @@ describe('PATCH /hooks/:id', () => {
     expect(prisma.aiEventHook.update).not.toHaveBeenCalled();
   });
 
-  it('returns 429 when rate limited', async () => {
-    // Arrange
-    vi.mocked(adminLimiter.check).mockReturnValue({
-      success: false,
-      limit: 30,
-      remaining: 0,
-      reset: Date.now() + 60_000,
-    } as never);
-
-    // Act
-    const response = await PATCH(makePatchRequest(updatePayload), makeParams(HOOK_ID));
-
-    // Assert
-    expect(response.status).toBe(429);
-    expect(prisma.aiEventHook.update).not.toHaveBeenCalled();
-  });
-
   it('updates the hook and returns serialized response on success', async () => {
     // Arrange
     const existing = makeHook();
@@ -423,23 +397,6 @@ describe('DELETE /hooks/:id', () => {
 
     // Assert
     expect(response.status).toBe(404);
-    expect(prisma.aiEventHook.delete).not.toHaveBeenCalled();
-  });
-
-  it('returns 429 when rate limited', async () => {
-    // Arrange
-    vi.mocked(adminLimiter.check).mockReturnValue({
-      success: false,
-      limit: 30,
-      remaining: 0,
-      reset: Date.now() + 60_000,
-    } as never);
-
-    // Act
-    const response = await DELETE(makeDeleteRequest(), makeParams(HOOK_ID));
-
-    // Assert
-    expect(response.status).toBe(429);
     expect(prisma.aiEventHook.delete).not.toHaveBeenCalled();
   });
 

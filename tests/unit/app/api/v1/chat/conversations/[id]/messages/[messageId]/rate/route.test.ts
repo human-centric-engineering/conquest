@@ -36,13 +36,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  apiLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({
   getClientIP: vi.fn(() => '127.0.0.1'),
 }));
@@ -52,7 +45,6 @@ vi.mock('@/lib/security/ip', () => ({
 import { POST } from '@/app/api/v1/chat/conversations/[id]/messages/[messageId]/rate/route';
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { apiLimiter } from '@/lib/security/rate-limit';
 import { mockAuthenticatedUser, mockUnauthenticatedUser } from '@/tests/helpers/auth';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -79,7 +71,6 @@ describe('POST /chat/conversations/:id/messages/:messageId/rate', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAuthenticatedUser());
-    vi.mocked(apiLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   it('rates an assistant message thumbs up', async () => {
@@ -164,19 +155,6 @@ describe('POST /chat/conversations/:id/messages/:messageId/rate', () => {
     const res = await POST(makeRequest({ rating: 1 }), makeParams('not-a-cuid', MSG_ID));
 
     expect(res.status).toBe(400);
-  });
-
-  it('returns 429 when rate limited', async () => {
-    vi.mocked(apiLimiter.check).mockReturnValue({
-      success: false,
-      limit: 10,
-      remaining: 0,
-      reset: Date.now() + 60_000,
-    } as never);
-
-    const res = await POST(makeRequest({ rating: 1 }), makeParams());
-
-    expect(res.status).toBe(429);
   });
 
   it('rejects unauthenticated requests (401)', async () => {

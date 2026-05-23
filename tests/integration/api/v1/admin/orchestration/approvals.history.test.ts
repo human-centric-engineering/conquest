@@ -32,13 +32,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '127.0.0.1') }));
 
 // Stub the route logger so log.info calls don't pollute test output.
@@ -53,7 +46,6 @@ vi.mock('@/lib/api/context', () => ({
 import { GET } from '@/app/api/v1/admin/orchestration/approvals/history/route';
 import { prisma } from '@/lib/db/client';
 import { auth } from '@/lib/auth/config';
-import { adminLimiter } from '@/lib/security/rate-limit';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -250,17 +242,6 @@ describe('GET /api/v1/admin/orchestration/approvals/history', () => {
     vi.mocked(auth.api.getSession).mockResolvedValueOnce(mockAuthenticatedUser('USER'));
     const res = await GET(makeRequest());
     expect(res.status).toBe(403);
-  });
-
-  it('returns 429 when rate limited', async () => {
-    vi.mocked(adminLimiter.check).mockReturnValueOnce({
-      success: false,
-      limit: 30,
-      remaining: 0,
-      reset: Date.now() + 60_000,
-    } as never);
-    const res = await GET(makeRequest());
-    expect(res.status).toBe(429);
   });
 
   it('returns 400 for invalid query params', async () => {

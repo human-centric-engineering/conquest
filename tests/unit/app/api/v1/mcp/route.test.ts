@@ -54,11 +54,6 @@ const mockRateLimiter = {
   check: vi.fn(() => ({ success: true, remaining: 59 })),
 };
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  apiLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() => new Response('Rate limited', { status: 429 })),
-}));
-
 vi.mock('@/lib/security/ip', () => ({
   getClientIP: vi.fn(() => '127.0.0.1'),
 }));
@@ -99,7 +94,6 @@ vi.mock('@/lib/orchestration/mcp', () => ({
 
 // ─── Imports ────────────────────────────────────────────────────────────
 
-import { apiLimiter } from '@/lib/security/rate-limit';
 import {
   authenticateMcpRequest,
   getMcpServerConfig,
@@ -162,7 +156,6 @@ beforeEach(() => {
   capturedIterable = null;
 
   // Restore default mock behaviours
-  vi.mocked(apiLimiter.check).mockReturnValue({ success: true } as never);
   vi.mocked(authenticateMcpRequest).mockResolvedValue(mockAuthContext);
   vi.mocked(getMcpServerConfig).mockResolvedValue(mockServerState as never);
   vi.mocked(handleMcpRequest).mockResolvedValue({
@@ -181,14 +174,6 @@ beforeEach(() => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('POST /mcp', () => {
-  it('returns 429 when IP rate limit exceeded', async () => {
-    vi.mocked(apiLimiter.check).mockReturnValue({ success: false } as never);
-
-    const response = await POST(makePostRequest(makeRpcRequest('tools/list')));
-
-    expect(response.status).toBe(429);
-  });
-
   it('returns 401 JSON-RPC error when authentication fails', async () => {
     vi.mocked(authenticateMcpRequest).mockResolvedValue(null);
 
@@ -488,14 +473,6 @@ describe('POST /mcp', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('GET /mcp', () => {
-  it('returns 429 when IP rate limit exceeded', async () => {
-    vi.mocked(apiLimiter.check).mockReturnValue({ success: false } as never);
-
-    const response = await GET(makeGetRequest());
-
-    expect(response.status).toBe(429);
-  });
-
   it('returns 401 JSON-RPC error when authentication fails', async () => {
     vi.mocked(authenticateMcpRequest).mockResolvedValue(null);
 
@@ -672,14 +649,6 @@ describe('GET /mcp', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('DELETE /mcp', () => {
-  it('returns 429 when IP rate limit exceeded', async () => {
-    vi.mocked(apiLimiter.check).mockReturnValue({ success: false } as never);
-
-    const response = await DELETE(makeDeleteRequest());
-
-    expect(response.status).toBe(429);
-  });
-
   it('returns 401 JSON-RPC error when authentication fails', async () => {
     vi.mocked(authenticateMcpRequest).mockResolvedValue(null);
 

@@ -8,7 +8,7 @@
  *
  * Key assertions:
  *   - Admin auth required (401 unauthenticated, 403 non-admin)
- *   - Rate limited via adminLimiter
+ *   - Rate limiting enforced by proxy.ts (orchestration tier)
  *   - No params → all 9 models returned
  *   - schemaCompatibleOnly=true → only schema-compatible models
  *   - hasFreeTier=true → only free-tier models
@@ -42,13 +42,6 @@ vi.mock('next/headers', () => ({
   headers: vi.fn(() => Promise.resolve(new Headers())),
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '127.0.0.1') }));
 
 // ---------------------------------------------------------------------------
@@ -56,7 +49,6 @@ vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '127.0.0.1') }));
 // ---------------------------------------------------------------------------
 
 import { auth } from '@/lib/auth/config';
-import { adminLimiter } from '@/lib/security/rate-limit';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -84,7 +76,6 @@ async function parseJson<T>(response: Response): Promise<T> {
 describe('GET /api/v1/admin/orchestration/embedding-models', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   // ─── Authentication & Authorization ───────────────────────────────────────
@@ -125,31 +116,6 @@ describe('GET /api/v1/admin/orchestration/embedding-models', () => {
   });
 
   // ─── Rate Limiting ────────────────────────────────────────────────────────
-
-  describe('Rate Limiting', () => {
-    it('should call adminLimiter.check on every request', async () => {
-      // Arrange
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-
-      // Act
-      await GET(makeGetRequest());
-
-      // Assert
-      expect(vi.mocked(adminLimiter.check)).toHaveBeenCalledOnce();
-    });
-
-    it('should return 429 when the rate limit is exceeded', async () => {
-      // Arrange
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-
-      // Act
-      const response = await GET(makeGetRequest());
-
-      // Assert
-      expect(response.status).toBe(429);
-    });
-  });
 
   // ─── Response Format ──────────────────────────────────────────────────────
 

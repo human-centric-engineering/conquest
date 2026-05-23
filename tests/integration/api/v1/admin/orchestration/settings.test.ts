@@ -59,16 +59,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json(
-      { success: false, error: { code: 'RATE_LIMITED', message: 'rate limited' } },
-      { status: 429 }
-    )
-  ),
-}));
-
 vi.mock('@/lib/orchestration/llm/model-registry', async (importOriginal) => {
   const actual = await importOriginal<object>();
   return {
@@ -120,7 +110,6 @@ vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({
 
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter } from '@/lib/security/rate-limit';
 import { invalidateSettingsCache } from '@/lib/orchestration/llm/settings-resolver';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -199,12 +188,6 @@ async function parseJson<T>(res: Response): Promise<T> {
 describe('Admin Orchestration — /settings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({
-      success: true,
-      limit: 100,
-      remaining: 99,
-      reset: Date.now() + 60_000,
-    });
   });
 
   describe('GET — Authentication & Authorization', () => {
@@ -268,24 +251,6 @@ describe('Admin Orchestration — /settings', () => {
       expect(body.data.defaultModels.embeddings).toBe('claude-haiku-4-5');
       // Stored key wins
       expect(body.data.defaultModels.chat).toBe('claude-sonnet-4-6');
-    });
-  });
-
-  describe('GET — Rate limiting', () => {
-    it('returns 429 when rate limit is exceeded', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(adminLimiter.check).mockReturnValue({
-        success: false,
-        limit: 100,
-        remaining: 0,
-        reset: Date.now() + 60_000,
-      });
-
-      const res = await GET(makeGet());
-
-      expect(res.status).toBe(429);
-      // Upsert must NOT fire when rate-limited
-      expect(prisma.aiOrchestrationSettings.upsert).not.toHaveBeenCalled();
     });
   });
 
@@ -1098,22 +1063,6 @@ describe('Admin Orchestration — /settings', () => {
       expect(res.status).toBe(200);
       const upsertCall = vi.mocked(prisma.aiOrchestrationSettings.upsert).mock.calls[0]?.[0];
       expect(upsertCall?.update.embedAllowedOrigins).toEqual([]);
-    });
-  });
-
-  describe('PATCH — Rate limiting', () => {
-    it('returns 429 when rate limit is exceeded', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(adminLimiter.check).mockReturnValue({
-        success: false,
-        limit: 100,
-        remaining: 0,
-        reset: Date.now() + 60_000,
-      });
-
-      const res = await PATCH(makePatch({ globalMonthlyBudgetUsd: 50 }));
-
-      expect(res.status).toBe(429);
     });
   });
 });

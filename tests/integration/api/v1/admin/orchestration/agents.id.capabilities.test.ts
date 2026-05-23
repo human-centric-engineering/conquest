@@ -47,13 +47,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/orchestration/capabilities', () => ({
   capabilityDispatcher: {
     clearCache: vi.fn(),
@@ -69,7 +62,6 @@ vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({
 
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter } from '@/lib/security/rate-limit';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -138,7 +130,6 @@ async function parseJson<T>(response: Response): Promise<T> {
 describe('POST /api/v1/admin/orchestration/agents/:id/capabilities', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   describe('Authentication & Authorization', () => {
@@ -156,19 +147,6 @@ describe('POST /api/v1/admin/orchestration/agents/:id/capabilities', () => {
       const response = await POST(makeAttachRequest(VALID_ATTACH_BODY), makeAttachParams(AGENT_ID));
 
       expect(response.status).toBe(403);
-    });
-  });
-
-  describe('Rate limiting', () => {
-    it('calls adminLimiter.check on POST', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(prisma.aiAgent.findUnique).mockResolvedValue(makeAgent() as never);
-      vi.mocked(prisma.aiCapability.findUnique).mockResolvedValue(makeCapability() as never);
-      vi.mocked(prisma.aiAgentCapability.create).mockResolvedValue(makeLink() as never);
-
-      await POST(makeAttachRequest(VALID_ATTACH_BODY), makeAttachParams(AGENT_ID));
-
-      expect(vi.mocked(adminLimiter.check)).toHaveBeenCalledOnce();
     });
   });
 
@@ -241,7 +219,6 @@ describe('POST /api/v1/admin/orchestration/agents/:id/capabilities', () => {
 describe('PATCH /api/v1/admin/orchestration/agents/:id/capabilities/:capId', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   describe('Authentication & Authorization', () => {
@@ -324,21 +301,6 @@ describe('PATCH /api/v1/admin/orchestration/agents/:id/capabilities/:capId', () 
     });
   });
 
-  describe('Rate limiting', () => {
-    it('returns 429 when rate limit exceeded on PATCH', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-
-      const response = await PATCH(
-        makeCapIdRequest('PATCH', { isEnabled: false }),
-        makeCapIdParams(AGENT_ID, CAPABILITY_ID)
-      );
-
-      expect(response.status).toBe(429);
-      expect(vi.mocked(prisma.aiAgentCapability.update)).not.toHaveBeenCalled();
-    });
-  });
-
   describe('Error cases', () => {
     it('returns 404 when link not found (P2025)', async () => {
       vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
@@ -363,7 +325,6 @@ describe('PATCH /api/v1/admin/orchestration/agents/:id/capabilities/:capId', () 
 describe('DELETE /api/v1/admin/orchestration/agents/:id/capabilities/:capId', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   describe('Authentication & Authorization', () => {
@@ -426,21 +387,6 @@ describe('DELETE /api/v1/admin/orchestration/agents/:id/capabilities/:capId', ()
     });
   });
 
-  describe('Rate limiting', () => {
-    it('returns 429 when rate limit exceeded on DELETE', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-
-      const response = await DELETE(
-        makeCapIdRequest('DELETE'),
-        makeCapIdParams(AGENT_ID, CAPABILITY_ID)
-      );
-
-      expect(response.status).toBe(429);
-      expect(vi.mocked(prisma.aiAgentCapability.delete)).not.toHaveBeenCalled();
-    });
-  });
-
   describe('Error cases', () => {
     it('returns 404 when link not found (P2025)', async () => {
       vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
@@ -465,7 +411,6 @@ describe('DELETE /api/v1/admin/orchestration/agents/:id/capabilities/:capId', ()
 describe('GET /api/v1/admin/orchestration/agents/:id/capabilities', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   describe('Authentication & Authorization', () => {
@@ -554,7 +499,6 @@ describe('${env:VAR} save-time warnings on capability binding routes', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
     vi.mocked(prisma.aiAgent.findUnique).mockResolvedValue(makeAgent() as never);
     vi.mocked(prisma.aiCapability.findUnique).mockResolvedValue(makeCapability() as never);

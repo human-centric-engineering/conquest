@@ -33,12 +33,6 @@ vi.mock('@/lib/db/client', () => ({
     aiWorkflowExecutionLeaseEvent: { findMany: vi.fn() },
   },
 }));
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '127.0.0.1') }));
 
 // ─── Imports (after mocks) ──────────────────────────────────────────────────
@@ -46,7 +40,6 @@ vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '127.0.0.1') }));
 import { GET } from '@/app/api/v1/admin/orchestration/executions/[id]/lease/route';
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter } from '@/lib/security/rate-limit';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -132,12 +125,6 @@ describe('GET /api/v1/admin/orchestration/executions/:id/lease', () => {
   });
 
   // ── 3. Rate limiting: 429 ────────────────────────────────────────────────
-
-  it('returns 429 when the admin rate limiter denies the request', async () => {
-    vi.mocked(adminLimiter.check).mockReturnValueOnce({ success: false } as never);
-    const res = await GET(makeRequest(), makeContext());
-    expect(res.status).toBe(429);
-  });
 
   // ── 4. Validation: 400 invalid CUID ──────────────────────────────────────
 

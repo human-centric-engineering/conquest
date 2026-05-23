@@ -20,7 +20,6 @@ import { successResponse } from '@/lib/api/responses';
 import { ForbiddenError, NotFoundError, ValidationError } from '@/lib/api/errors';
 import { validateRequestBody } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 import { getClientIP } from '@/lib/security/ip';
 import { logAdminAction, computeChanges } from '@/lib/orchestration/audit/admin-audit-logger';
 import { emitHookEvent } from '@/lib/orchestration/hooks/registry';
@@ -43,10 +42,6 @@ function parseAgentId(raw: string): string {
 }
 
 export const GET = withAdminAuth<{ id: string }>(async (request, _session, { params }) => {
-  const clientIP = getClientIP(request);
-  const rateLimit = adminLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
-
   const log = await getRouteLogger(request);
   const { id: rawId } = await params;
   const id = parseAgentId(rawId);
@@ -76,8 +71,6 @@ export const GET = withAdminAuth<{ id: string }>(async (request, _session, { par
 
 export const PATCH = withAdminAuth<{ id: string }>(async (request, session, { params }) => {
   const clientIP = getClientIP(request);
-  const rateLimit = adminLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
 
   const log = await getRouteLogger(request);
   const { id: rawId } = await params;
@@ -433,8 +426,6 @@ export const PATCH = withAdminAuth<{ id: string }>(async (request, session, { pa
 
 export const DELETE = withAdminAuth<{ id: string }>(async (request, session, { params }) => {
   const clientIP = getClientIP(request);
-  const rateLimit = adminLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
 
   const log = await getRouteLogger(request);
   const { id: rawId } = await params;

@@ -5,7 +5,7 @@
  *
  * Key security assertions:
  * - Admin auth required (401/403 otherwise)
- * - Rate limited (adminLimiter)
+ * - Rate limiting enforced by proxy.ts (orchestration tier)
  * - Scoped to calling user's own webhooks (createdBy filter)
  * - Bad CUID returns 400
  * - Missing signing secret returns 200 with a descriptive error payload
@@ -46,22 +46,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json(
-      {
-        success: false,
-        error: {
-          code: 'RATE_LIMIT_EXCEEDED',
-          message: 'Too many requests. Please try again later.',
-        },
-      },
-      { status: 429 }
-    )
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '127.0.0.1') }));
 
 vi.mock('@/lib/api/context', () => ({
@@ -83,7 +67,6 @@ vi.mock('@/lib/env', () => ({
 
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter } from '@/lib/security/rate-limit';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -131,7 +114,6 @@ async function parseJson<T>(response: Response): Promise<T> {
 describe('POST /api/v1/admin/orchestration/webhooks/:id/test', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
     vi.spyOn(global, 'fetch').mockResolvedValue(new Response(null, { status: 200 }) as never);
   });
 
@@ -186,32 +168,6 @@ describe('POST /api/v1/admin/orchestration/webhooks/:id/test', () => {
   });
 
   // ─── Rate Limiting ─────────────────────────────────────────────────────────
-
-  describe('Rate limiting', () => {
-    it('returns 429 when adminLimiter is exhausted before DB is consulted', async () => {
-      // Arrange
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-
-      // Act
-      const response = await POST(makeRequest(), makeParams(WEBHOOK_ID));
-      const body = await parseJson<{ success: boolean; error: { code: string; message: string } }>(
-        response
-      );
-
-      // Assert — rate limit fires before any DB call; envelope matches the
-      // shape `createRateLimitResponse` produces in `lib/security/rate-limit.ts`.
-      expect(response.status).toBe(429);
-      expect(body).toEqual({
-        success: false,
-        error: {
-          code: 'RATE_LIMIT_EXCEEDED',
-          message: 'Too many requests. Please try again later.',
-        },
-      });
-      expect(vi.mocked(prisma.aiWebhookSubscription.findFirst)).not.toHaveBeenCalled();
-    });
-  });
 
   // ─── Validation ───────────────────────────────────────────────────────────
 

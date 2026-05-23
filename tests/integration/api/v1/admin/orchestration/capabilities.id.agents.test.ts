@@ -34,18 +34,10 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 // ─── Imports after mocks ─────────────────────────────────────────────────────
 
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter } from '@/lib/security/rate-limit';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -98,7 +90,6 @@ async function parseJson<T>(response: Response): Promise<T> {
 describe('GET /api/v1/admin/orchestration/capabilities/:id/agents', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   // ── Authentication & Authorization ─────────────────────────────────────────
@@ -242,15 +233,4 @@ describe('GET /api/v1/admin/orchestration/capabilities/:id/agents', () => {
   });
 
   // ── Rate limiting ──────────────────────────────────────────────────────────
-
-  describe('Rate limiting', () => {
-    it('returns 429 when rate limit exceeded', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-
-      const response = await GET(makeRequest(CAPABILITY_ID), makeParams(CAPABILITY_ID));
-
-      expect(response.status).toBe(429);
-    });
-  });
 });

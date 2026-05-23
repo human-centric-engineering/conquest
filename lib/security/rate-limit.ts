@@ -253,6 +253,28 @@ export const orchestrationAdminLimiter = createRateLimiter({
 });
 
 /**
+ * Rate limiter for the MCP transport endpoint (`/api/v1/mcp/*`).
+ * Limit: 300 requests per minute. Override with `RATE_LIMIT_MCP`.
+ *
+ * MCP is a distinct interface from the human-facing REST API. LLM agents
+ * open sessions and fire rapid tool-call sequences; 100/min (the api tier)
+ * is too tight for legitimate agent workloads. Per-customer budgets are
+ * enforced separately by `McpRateLimiter` inside the handler against the
+ * `apiKey.rateLimit` field — this section limiter is the coarse ceiling.
+ *
+ * Wired into the middleware via `RATE_LIMIT_TIERS['mcp']` and the
+ * `/api/v1/mcp/` rule in `rate-limit-policy.ts`, keyed by api-key (not IP)
+ * so two customers sharing a NAT'd egress get independent buckets. Route
+ * handlers should NOT call `.check()` directly — the dispatcher already
+ * applied this cap.
+ */
+export const mcpLimiter = createRateLimiter({
+  interval: SECURITY_CONSTANTS.RATE_LIMIT.DEFAULT_INTERVAL,
+  maxRequests: SECURITY_CONSTANTS.RATE_LIMIT.LIMITS.MCP,
+  uniqueTokenPerInterval: SECURITY_CONSTANTS.RATE_LIMIT.MAX_UNIQUE_TOKENS,
+});
+
+/**
  * Rate limiter for accept-invite endpoint
  * Limit: 5 attempts per 15 minutes per IP
  *
@@ -366,6 +388,24 @@ export const embedChatLimiter = createRateLimiter({
 });
 
 /**
+ * Rate limiter for admin bulk-export endpoints (e.g. conversation export).
+ * Limit: 10 requests per minute per user.
+ *
+ * Export routes are bulk reads — building a JSON/CSV file from many rows
+ * is heavier than the typical orchestration list/edit operation. The
+ * orchestration section tier (120/min) already applies via the middleware;
+ * this per-flow sub-cap is the additive defence specifically for the
+ * expensive read pattern. Keyed on the admin user ID via
+ * `export:user:${session.user.id}` so two admins in the same office don't
+ * share a bucket.
+ */
+export const exportLimiter = createRateLimiter({
+  interval: SECURITY_CONSTANTS.RATE_LIMIT.DEFAULT_INTERVAL,
+  maxRequests: SECURITY_CONSTANTS.RATE_LIMIT.LIMITS.EXPORT,
+  uniqueTokenPerInterval: SECURITY_CONSTANTS.RATE_LIMIT.MAX_UNIQUE_TOKENS,
+});
+
+/**
  * Inbound trigger limiter — 60 requests per minute per (channel + remote IP).
  * Slack can burst on app-mention storms; Postmark inbound is steadier. The
  * limit lives above expected steady traffic but caps runaway loops or
@@ -395,12 +435,13 @@ export const inboundLimiter = createRateLimiter({
  * - `'admin'` — core admin endpoints (users, logs, invitations, feature flags, stats). 30/min.
  * - `'orchestration'` — admin/orchestration UI (agents, workflows, knowledge, executions). 120/min.
  * - `'api'` — general authenticated API + consumer surfaces. 100/min.
+ * - `'mcp'` — MCP transport endpoint (LLM-agent tool calls). 300/min per api-key.
  * - `'auth'` — authentication endpoints (login, signup, password reset). 5/min per IP.
  *
  * Add new tiers here, add a matching entry to {@link RATE_LIMIT_TIERS}, then
  * reference the tier from `RATE_LIMIT_POLICY`.
  */
-export type RateLimitTier = 'admin' | 'orchestration' | 'api' | 'auth';
+export type RateLimitTier = 'admin' | 'orchestration' | 'api' | 'mcp' | 'auth';
 
 /**
  * Resolve a tier name to its concrete limiter instance.
@@ -412,6 +453,7 @@ export const RATE_LIMIT_TIERS: Record<RateLimitTier, RateLimiter> = {
   admin: adminLimiter,
   orchestration: orchestrationAdminLimiter,
   api: apiLimiter,
+  mcp: mcpLimiter,
   auth: authLimiter,
 };
 

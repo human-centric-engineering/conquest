@@ -39,20 +39,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  apiLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(
-    () =>
-      new Response(
-        JSON.stringify({
-          success: false,
-          error: { code: 'RATE_LIMIT_EXCEEDED', message: 'Too many requests.' },
-        }),
-        { status: 429 }
-      )
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({
   getClientIP: vi.fn(() => '127.0.0.1'),
 }));

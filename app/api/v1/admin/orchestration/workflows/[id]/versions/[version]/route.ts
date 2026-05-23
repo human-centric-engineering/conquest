@@ -14,8 +14,6 @@ import { withAdminAuth } from '@/lib/auth/guards';
 import { successResponse } from '@/lib/api/responses';
 import { ValidationError } from '@/lib/api/errors';
 import { getRouteLogger } from '@/lib/api/context';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
-import { getClientIP } from '@/lib/security/ip';
 import { getVersion } from '@/lib/orchestration/workflows/version-service';
 import { cuidSchema } from '@/lib/validations/common';
 
@@ -23,10 +21,6 @@ const versionParamSchema = z.coerce.number().int().min(1);
 
 export const GET = withAdminAuth<{ id: string; version: string }>(
   async (request, _session, { params }) => {
-    const clientIP = getClientIP(request);
-    const rateLimit = adminLimiter.check(clientIP);
-    if (!rateLimit.success) return createRateLimitResponse(rateLimit);
-
     const log = await getRouteLogger(request);
     const { id: rawId, version: rawVersion } = await params;
 

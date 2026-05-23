@@ -37,13 +37,6 @@ vi.mock('next/headers', () => ({
   headers: vi.fn(() => Promise.resolve(new Headers())),
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({
   getClientIP: vi.fn(() => '127.0.0.1'),
 }));
@@ -87,7 +80,6 @@ vi.mock('@/lib/logging', () => ({
 // ─── Imports after mocks ─────────────────────────────────────────────────────
 
 import { auth } from '@/lib/auth/config';
-import { adminLimiter } from '@/lib/security/rate-limit';
 import {
   uploadDocument,
   uploadDocumentFromBuffer,
@@ -136,7 +128,6 @@ async function parseJson<T>(response: Response): Promise<T> {
 describe('POST /api/v1/admin/orchestration/knowledge/documents/bulk', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
     vi.mocked(uploadDocument).mockResolvedValue(makeDocument() as never);
     vi.mocked(uploadDocumentFromBuffer).mockResolvedValue(makeDocument() as never);
   });
@@ -162,20 +153,6 @@ describe('POST /api/v1/admin/orchestration/knowledge/documents/bulk', () => {
       const response = await POST(makePostRequest(fd));
 
       expect(response.status).toBe(403);
-    });
-  });
-
-  describe('Rate limiting', () => {
-    it('returns 429 when rate limit exceeded', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-      const fd = makeFormDataWithFiles([
-        new File(['content'], 'doc.md', { type: 'text/markdown' }),
-      ]);
-
-      const response = await POST(makePostRequest(fd));
-
-      expect(response.status).toBe(429);
     });
   });
 

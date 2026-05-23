@@ -17,11 +17,6 @@ import { NextRequest } from 'next/server';
 // resolved to at module load time in the test runtime).
 const APP_URL = 'http://localhost:3000';
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  apiLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(),
-}));
-
 vi.mock('@/lib/security/ip', () => ({
   getClientIP: vi.fn(() => '127.0.0.1'),
 }));

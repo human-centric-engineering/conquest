@@ -41,20 +41,12 @@ vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({
   computeChanges: vi.fn(),
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '127.0.0.1') }));
 
 // ─── Imports after mocks ─────────────────────────────────────────────────────
 
 import { auth } from '@/lib/auth/config';
 import { confirmPreview } from '@/lib/orchestration/knowledge/document-manager';
-import { adminLimiter } from '@/lib/security/rate-limit';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -106,7 +98,6 @@ function makeParams(id: string) {
 describe('POST /api/v1/admin/orchestration/knowledge/documents/:id/confirm', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   describe('Authentication & Authorization', () => {
@@ -183,21 +174,6 @@ describe('POST /api/v1/admin/orchestration/knowledge/documents/:id/confirm', () 
 
       const response = await POST(makeRequest(DOC_ID, {}), makeParams(DOC_ID));
       expect(response.status).toBe(400);
-    });
-  });
-
-  describe('Rate limiting', () => {
-    it('returns 429 when rate limited', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(adminLimiter.check).mockReturnValue({
-        success: false,
-        limit: 100,
-        remaining: 0,
-        reset: Date.now() + 60_000,
-      });
-
-      const response = await POST(makeRequest(DOC_ID, { documentId: DOC_ID }), makeParams(DOC_ID));
-      expect(response.status).toBe(429);
     });
   });
 });

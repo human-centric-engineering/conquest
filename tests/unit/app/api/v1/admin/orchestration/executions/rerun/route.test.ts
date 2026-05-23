@@ -33,12 +33,6 @@ vi.mock('@/lib/db/client', () => ({
     aiWorkflowVersion: { findFirst: vi.fn() },
   },
 }));
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '127.0.0.1') }));
 // Stub prepareWorkflowExecution so we don't have to mount a workflow row +
 // version row + run the structural validator. The route is the unit under

@@ -18,8 +18,7 @@ import { withAdminAuth } from '@/lib/auth/guards';
 import { prisma } from '@/lib/db/client';
 import { csvEscape } from '@/lib/api/csv';
 import { getRouteLogger } from '@/lib/api/context';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
-import { getClientIP } from '@/lib/security/ip';
+import { exportLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 import { conversationExportQuerySchema } from '@/lib/validations/orchestration';
 
 /** Maximum conversations per export to prevent memory issues. */
@@ -29,9 +28,10 @@ const MAX_EXPORT_CONVERSATIONS = 500;
 const MAX_MESSAGES_PER_CONVERSATION = 500;
 
 export const GET = withAdminAuth(async (request, session) => {
-  // Extra rate limit for exports — 1/min per admin IP
-  const ip = getClientIP(request);
-  const rl = adminLimiter.check(`export:${ip}`);
+  // Per-flow sub-cap on top of the orchestration section tier (which the
+  // proxy applies upstream at 120/min). Exports are bulk reads — tighter
+  // dedicated bucket at 10/min per admin user.
+  const rl = exportLimiter.check(`export:user:${session.user.id}`);
   if (!rl.success) return createRateLimitResponse(rl);
 
   const log = await getRouteLogger(request);

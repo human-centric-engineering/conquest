@@ -12,17 +12,11 @@ import { withAuth } from '@/lib/auth/guards';
 import { prisma } from '@/lib/db/client';
 import { successResponse } from '@/lib/api/responses';
 import { ForbiddenError } from '@/lib/api/errors';
-import { apiLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
-import { getClientIP } from '@/lib/security/ip';
 import { validateRequestBody } from '@/lib/api/validation';
 import { createApiKeySchema } from '@/lib/validations/orchestration';
 import { generateApiKey, hashApiKey, keyPrefix } from '@/lib/auth/api-keys';
 
-export const GET = withAuth(async (request, session) => {
-  const clientIP = getClientIP(request);
-  const rateLimit = apiLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
-
+export const GET = withAuth(async (_request, session) => {
   const keys = await prisma.aiApiKey.findMany({
     where: { userId: session.user.id },
     orderBy: { createdAt: 'desc' },
@@ -42,10 +36,6 @@ export const GET = withAuth(async (request, session) => {
 });
 
 export const POST = withAuth(async (request, session) => {
-  const clientIP = getClientIP(request);
-  const rateLimit = apiLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
-
   const body = await validateRequestBody(request, createApiKeySchema);
 
   if (body.scopes.includes('admin') && session.user.role !== 'ADMIN') {

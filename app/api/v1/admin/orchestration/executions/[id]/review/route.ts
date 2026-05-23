@@ -31,8 +31,6 @@ import { successResponse } from '@/lib/api/responses';
 import { ConflictError, NotFoundError, ValidationError } from '@/lib/api/errors';
 import { getRouteLogger } from '@/lib/api/context';
 import { logger } from '@/lib/logging';
-import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
-import { getClientIP } from '@/lib/security/ip';
 import { cuidSchema } from '@/lib/validations/common';
 import { executionTraceSchema, priorSupervisorReportSchema } from '@/lib/validations/orchestration';
 import {
@@ -93,10 +91,6 @@ function stepOutputsFromTrace(trace: ExecutionTraceEntry[]): Record<string, unkn
 }
 
 export const POST = withAdminAuth<{ id: string }>(async (request, session, { params }) => {
-  const clientIP = getClientIP(request);
-  const rateLimit = adminLimiter.check(clientIP);
-  if (!rateLimit.success) return createRateLimitResponse(rateLimit);
-
   const log = await getRouteLogger(request);
   const { id: rawId } = await params;
   const parsedId = cuidSchema.safeParse(rawId);

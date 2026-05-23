@@ -41,13 +41,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({
   logAdminAction: vi.fn(),
   computeChanges: vi.fn(() => null),
@@ -56,7 +49,6 @@ vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({
 import { GET, POST } from '@/app/api/v1/admin/orchestration/agent-profiles/route';
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter } from '@/lib/security/rate-limit';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
 const PROFILE_ID = 'cmjbv4i3x00003wsloputgwul';
@@ -185,7 +177,6 @@ describe('GET /api/v1/admin/orchestration/agent-profiles', () => {
 describe('POST /api/v1/admin/orchestration/agent-profiles', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   it('returns 401 when unauthenticated', async () => {
@@ -198,13 +189,6 @@ describe('POST /api/v1/admin/orchestration/agent-profiles', () => {
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAuthenticatedUser('USER'));
     const response = await POST(makePostRequest(VALID_PAYLOAD));
     expect(response.status).toBe(403);
-  });
-
-  it('returns 429 when rate limit is exceeded', async () => {
-    vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-    const response = await POST(makePostRequest(VALID_PAYLOAD));
-    expect(response.status).toBe(429);
   });
 
   it('creates a profile and returns 201 with agentCount: 0', async () => {

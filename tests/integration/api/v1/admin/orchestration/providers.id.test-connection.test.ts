@@ -40,13 +40,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-vi.mock('@/lib/security/rate-limit', () => ({
-  adminLimiter: { check: vi.fn(() => ({ success: true })) },
-  createRateLimitResponse: vi.fn(() =>
-    Response.json({ success: false, error: { code: 'RATE_LIMITED' } }, { status: 429 })
-  ),
-}));
-
 vi.mock('@/lib/orchestration/llm/provider-manager', () => ({
   testProvider: vi.fn(),
 }));
@@ -55,7 +48,6 @@ vi.mock('@/lib/orchestration/llm/provider-manager', () => ({
 
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { adminLimiter } from '@/lib/security/rate-limit';
 import { testProvider } from '@/lib/orchestration/llm/provider-manager';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -106,7 +98,6 @@ async function parseJson<T>(response: Response): Promise<T> {
 describe('POST /api/v1/admin/orchestration/providers/:id/test', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(adminLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   describe('Authentication & Authorization', () => {
@@ -145,17 +136,6 @@ describe('POST /api/v1/admin/orchestration/providers/:id/test', () => {
       const response = await POST(makePostRequest(), makeParams(PROVIDER_ID));
 
       expect(response.status).toBe(404);
-    });
-  });
-
-  describe('Rate limiting', () => {
-    it('returns 429 when rate limit is exceeded', async () => {
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(adminLimiter.check).mockReturnValue({ success: false } as never);
-
-      const response = await POST(makePostRequest(), makeParams(PROVIDER_ID));
-
-      expect(response.status).toBe(429);
     });
   });
 
