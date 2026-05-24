@@ -26,11 +26,17 @@ async function getMcpSettings(): Promise<McpSettingsResponse | null> {
   }
 }
 
-async function getStats(): Promise<{ tools: number; resources: number; keys: number }> {
+async function getStats(): Promise<{
+  tools: number;
+  resources: number;
+  prompts: number;
+  keys: number;
+}> {
   try {
-    const [toolsRes, resourcesRes, keysRes] = await Promise.all([
+    const [toolsRes, resourcesRes, promptsRes, keysRes] = await Promise.all([
       serverFetch(`${API.ADMIN.ORCHESTRATION.MCP_TOOLS}?page=1&limit=1`),
       serverFetch(`${API.ADMIN.ORCHESTRATION.MCP_RESOURCES}?page=1&limit=1`),
+      serverFetch(`${API.ADMIN.ORCHESTRATION.MCP_PROMPTS}?page=1&limit=1`),
       serverFetch(`${API.ADMIN.ORCHESTRATION.MCP_KEYS}?page=1&limit=1`),
     ]);
 
@@ -43,15 +49,16 @@ async function getStats(): Promise<{ tools: number; resources: number; keys: num
       return typeof total === 'number' ? total : 0;
     };
 
-    const [tools, resources, keys] = await Promise.all([
+    const [tools, resources, prompts, keys] = await Promise.all([
       parseMeta(toolsRes),
       parseMeta(resourcesRes),
+      parseMeta(promptsRes),
       parseMeta(keysRes),
     ]);
 
-    return { tools, resources, keys };
+    return { tools, resources, prompts, keys };
   } catch {
-    return { tools: 0, resources: 0, keys: 0 };
+    return { tools: 0, resources: 0, prompts: 0, keys: 0 };
   }
 }
 

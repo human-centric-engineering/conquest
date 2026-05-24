@@ -135,7 +135,7 @@ async function dispatchMethod(request: JsonRpcRequest, context: HandlerContext):
     case 'tools/list':
       requireInitialized(session);
       requireScope(auth, McpScope.TOOLS_LIST);
-      return handleToolsList(request.params);
+      return handleToolsList(request.params, session);
 
     case 'tools/call':
       requireInitialized(session);
@@ -160,7 +160,7 @@ async function dispatchMethod(request: JsonRpcRequest, context: HandlerContext):
     case 'prompts/list':
       requireInitialized(session);
       requireScope(auth, McpScope.PROMPTS_READ);
-      return handlePromptsList();
+      return handlePromptsList(request.params);
 
     case 'prompts/get':
       requireInitialized(session);
@@ -201,15 +201,15 @@ function handleInitialize(
   }
 
   // Advertise only features that have working handlers in this build.
-  // tools and resources broadcast list_changed when the admin mutates their
-  // catalogue (see broadcastMcpToolsChanged / broadcastMcpResourcesChanged).
-  // prompts.listChanged, resources.subscribe, logging, and completions land
-  // in later phases — leave them unset until then so compliant clients don't
-  // call methods that aren't implemented.
+  // tools / resources / prompts broadcast list_changed when the admin mutates
+  // their catalogue (see broadcastMcp{Tools,Resources,Prompts}Changed).
+  // resources.subscribe, logging, and completions land in later phases —
+  // leave them unset until then so compliant clients don't call methods
+  // that aren't implemented.
   const capabilities: McpCapabilities = {
     tools: { listChanged: true },
     resources: { listChanged: true },
-    prompts: {},
+    prompts: { listChanged: true },
   };
 
   return {
@@ -225,12 +225,19 @@ function handleInitialize(
 const DEFAULT_PAGE_SIZE = 50;
 
 async function handleToolsList(
-  params: Record<string, unknown> | undefined
+  params: Record<string, unknown> | undefined,
+  session: McpSession
 ): Promise<{ tools: unknown[]; nextCursor?: string }> {
   const allTools = await listMcpTools();
   const { offset, limit } = decodeCursor(params?.cursor, DEFAULT_PAGE_SIZE);
   const page = allTools.slice(offset, offset + limit);
   const nextCursor = offset + limit < allTools.length ? encodeCursor(offset + limit) : undefined;
+
+  // Annotations are a 2025-06-18 addition. Emit them only when the session
+  // negotiated that version or newer; for 2024-11-05 clients the field is
+  // silently dropped (the spec says clients SHOULD ignore unknown fields,
+  // but being clean is cheap).
+  const emitAnnotations = session.protocolVersion >= '2025-06-18';
 
   return {
     tools: page.map((t) => ({
@@ -240,6 +247,7 @@ async function handleToolsList(
         type: 'object',
         ...t.inputSchema,
       },
+      ...(emitAnnotations && t.annotations ? { annotations: t.annotations } : {}),
     })),
     ...(nextCursor ? { nextCursor } : {}),
   };
@@ -308,12 +316,23 @@ async function handleResourcesRead(
   return { contents: [content] };
 }
 
-function handlePromptsList(): { prompts: unknown[] } {
-  const prompts = listMcpPrompts();
-  return { prompts };
+async function handlePromptsList(
+  params: Record<string, unknown> | undefined
+): Promise<{ prompts: unknown[]; nextCursor?: string }> {
+  const allPrompts = await listMcpPrompts();
+  const { offset, limit } = decodeCursor(params?.cursor, DEFAULT_PAGE_SIZE);
+  const page = allPrompts.slice(offset, offset + limit);
+  const nextCursor = offset + limit < allPrompts.length ? encodeCursor(offset + limit) : undefined;
+
+  return {
+    prompts: page,
+    ...(nextCursor ? { nextCursor } : {}),
+  };
 }
 
-function handlePromptsGet(params: Record<string, unknown> | undefined): { messages: unknown[] } {
+async function handlePromptsGet(
+  params: Record<string, unknown> | undefined
+): Promise<{ messages: unknown[] }> {
   const parsed = mcpPromptGetParamsSchema.safeParse(params);
   if (!parsed.success) {
     throw new McpProtocolError(
@@ -322,10 +341,22 @@ function handlePromptsGet(params: Record<string, unknown> | undefined): { messag
     );
   }
 
-  const messages = getMcpPrompt(
-    parsed.data.name,
-    (parsed.data.arguments as Record<string, unknown>) ?? {}
-  );
+  let messages: import('@/types/mcp').McpPromptMessage[] | null;
+  try {
+    messages = await getMcpPrompt(
+      parsed.data.name,
+      (parsed.data.arguments as Record<string, unknown>) ?? {}
+    );
+  } catch (err) {
+    // Registry signals validation failures (missing required arg, oversize
+    // output) via RangeError. Surface them as INVALID_PARAMS with the
+    // original message so clients see precisely what went wrong.
+    if (err instanceof RangeError) {
+      throw new McpProtocolError(JsonRpcErrorCode.INVALID_PARAMS, err.message);
+    }
+    throw err;
+  }
+
   if (!messages) {
     throw new McpProtocolError(
       JsonRpcErrorCode.INVALID_PARAMS,

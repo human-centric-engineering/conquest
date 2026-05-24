@@ -48,6 +48,7 @@ export type {
   McpServerConfig,
   McpExposedTool,
   McpExposedResource,
+  McpExposedPrompt,
   McpApiKey,
   McpAuditLog,
 } from '@prisma/client';

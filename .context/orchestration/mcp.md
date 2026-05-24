@@ -29,16 +29,16 @@ Audit log (fire-and-forget → McpAuditLog)
 
 ## Key Files
 
-| Area          | Files                                                                       |
-| ------------- | --------------------------------------------------------------------------- |
-| Core library  | `lib/orchestration/mcp/` (11 files, platform-agnostic)                      |
-| Transport     | `app/api/v1/mcp/route.ts` (POST/GET/DELETE)                                 |
-| Admin API     | `app/api/v1/admin/orchestration/mcp/` (10 route files)                      |
-| Admin UI      | `app/admin/orchestration/mcp/` (6 pages)                                    |
-| Components    | `components/admin/orchestration/mcp/` (7 components)                        |
-| Types         | `types/mcp.ts`                                                              |
-| Validation    | `lib/validations/mcp.ts`                                                    |
-| Prisma models | McpServerConfig, McpExposedTool, McpExposedResource, McpApiKey, McpAuditLog |
+| Area          | Files                                                                                         |
+| ------------- | --------------------------------------------------------------------------------------------- |
+| Core library  | `lib/orchestration/mcp/` (11 files, platform-agnostic)                                        |
+| Transport     | `app/api/v1/mcp/route.ts` (POST/GET/DELETE)                                                   |
+| Admin API     | `app/api/v1/admin/orchestration/mcp/` (10 route files)                                        |
+| Admin UI      | `app/admin/orchestration/mcp/` (6 pages)                                                      |
+| Components    | `components/admin/orchestration/mcp/` (7 components)                                          |
+| Types         | `types/mcp.ts`                                                                                |
+| Validation    | `lib/validations/mcp.ts`                                                                      |
+| Prisma models | McpServerConfig, McpExposedTool, McpExposedResource, McpExposedPrompt, McpApiKey, McpAuditLog |
 
 ## Security Model
 
@@ -77,6 +77,14 @@ Audit log (fire-and-forget → McpAuditLog)
 
 If `capabilityDispatcher.dispatch()` throws an unexpected exception (as opposed to returning `{ success: false }`), `callMcpTool` catches it and returns an MCP error content block (`isError: true`) with a generic message rather than escalating to a JSON-RPC protocol error.
 
+### Tool annotations (MCP 2025-06-18)
+
+Each `McpExposedTool` row carries five optional annotation overrides (`customTitle`, `readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) that surface on `tools/list` results when the session negotiated `2025-06-18`. **These are advisory only** — the MCP spec is explicit that compliant clients must still treat every tool as untrusted. They inform UX (e.g. surface a "confirm before destructive call" dialog) but never enforce behaviour.
+
+Tri-state per spec: `true`, `false`, or omitted ("no opinion"). The admin UI exposes each as a select with `unset / true / false` so a null override is distinguishable from an explicit "no". `idempotentHint` inherits from `AiCapability.isIdempotent` when the row override is null, but a non-null row override always wins — the same capability can be marked idempotent internally but non-idempotent when called via MCP if its external side-effects differ.
+
+For older protocol negotiations (`2024-11-05`) the annotations field is omitted entirely from the wire response, since pre-2025 clients have no spec definition for it.
+
 ## Resource Handlers
 
 | Type               | URI Pattern                             | Handler                          |
@@ -89,6 +97,51 @@ If `capabilityDispatcher.dispatch()` throws an unexpected exception (as opposed 
 Each `McpExposedResource` has an optional `handlerConfig` JSON field passed to the resource handler as its second argument, allowing per-resource configuration (e.g., custom search parameters, filters). Stored as Prisma JSON and validated as `Record<string, unknown> | null`.
 
 When a URI does not match any registered resource exactly, `readMcpResource` falls back to pattern matching against all enabled resources. Pattern matching uses first-match-wins order (database insertion order). If multiple resource patterns could match the same URI, the first match is used. Both exact and pattern-match handler calls are wrapped in try-catch — handler failures return an error content block instead of propagating.
+
+After creation, **`uri` and `resourceType` are immutable** — the registry routes reads by URI prefix and dispatches by `resourceType`, so changing either mid-life would orphan in-flight client subscriptions. To rename or re-type a resource, delete it and create a new one (per the dialog warning in the admin UI).
+
+## Prompts
+
+Prompts are admin-editable slash-command templates surfaced by MCP clients to end users. They are **not** auto-invoked by the model — a human picks them from a menu (e.g. typing `/analyze-pattern` in Claude Desktop). The distinction matters for design:
+
+| Primitive | Triggered by             | Used for                                               |
+| --------- | ------------------------ | ------------------------------------------------------ |
+| Tool      | Model decides to call    | Functions the model can invoke (send email, run query) |
+| Resource  | Model or client browses  | Read-only context data (knowledge, agent list)         |
+| Prompt    | End user picks from menu | Slash-command templates the user runs deliberately     |
+
+### Storage and registry
+
+`McpExposedPrompt` rows back the registry; `prompt-registry.ts` caches the enabled set for 5 minutes (matching the resource registry). On admin mutations the cache is cleared and `notifications/prompts/list_changed` is broadcast to connected clients.
+
+For freshly installed deployments that haven't run seed `015-mcp-prompts` yet, the registry falls back to two hardcoded legacy prompts (`analyze-pattern`, `search-knowledge`) so clients see something useful immediately. DB rows always take precedence over the fallback.
+
+### Template syntax
+
+Templates use `{{argument_name}}` substitution. The substitution engine is intentionally tiny:
+
+- **Only argument names declared in `argumentsSpec` are interpolated.** Stray placeholders like `{{database_url}}` render literally — this is the security boundary that prevents an admin from accidentally (or maliciously) leaking server state.
+- Whitespace inside placeholders is tolerated (`{{ name }}` works).
+- Undefined optional args render as empty strings.
+- Required args missing from `prompts/get` arguments cause `INVALID_PARAMS` (`Missing required argument(s): ...`).
+- Rendered output is capped at **64 KB** — anything bigger causes `INVALID_PARAMS`.
+
+No helpers, no partials, no conditionals, no lambdas. If the prompt-set needs templating power, add it explicitly with a security review — don't reach for Handlebars.
+
+### Limits and immutability
+
+- Max **200 enabled prompts** per server. Create / re-enable beyond the cap returns HTTP 409 with `code: PROMPT_CAP_EXCEEDED`. Cap exists so MCP clients showing a slash-command menu don't drown in options.
+- Template max **10,000 characters** at the source; rendered max **64 KB**.
+- Max **20 arguments per prompt**.
+- **`name` is immutable post-create** because changing it silently breaks every client that has bookmarked the prompt. Renames require delete + recreate.
+
+### Backward compatibility
+
+When the `argumentsSpec` of a deployed prompt changes:
+
+- **Removing** any argument (required or optional) is safe — existing clients pass extra args, which the engine ignores.
+- **Adding an optional argument** is safe — existing clients omit it, the engine renders it empty.
+- **Adding a required argument** is breaking — existing clients get `INVALID_PARAMS` until they update. Add as optional first, then promote to required after clients catch up.
 
 ## Session Management
 
@@ -106,6 +159,7 @@ When a URI does not match any registered resource exactly, `readMcpResource` fal
 | `/admin/orchestration/mcp`           | Dashboard: master toggle, stats, connection config |
 | `/admin/orchestration/mcp/tools`     | Enable/disable capabilities as MCP tools           |
 | `/admin/orchestration/mcp/resources` | Enable/disable data resources                      |
+| `/admin/orchestration/mcp/prompts`   | Create/edit/disable slash-command prompt templates |
 | `/admin/orchestration/mcp/keys`      | Create/revoke API keys                             |
 | `/admin/orchestration/mcp/audit`     | Audit log with manual purge button                 |
 | `/admin/orchestration/mcp/settings`  | Rate limits, session limits, retention             |

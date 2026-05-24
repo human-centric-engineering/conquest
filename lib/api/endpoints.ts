@@ -248,6 +248,8 @@ export const API = {
       mcpToolById: (id: string): string => `/api/v1/admin/orchestration/mcp/tools/${id}`,
       MCP_RESOURCES: '/api/v1/admin/orchestration/mcp/resources',
       mcpResourceById: (id: string): string => `/api/v1/admin/orchestration/mcp/resources/${id}`,
+      MCP_PROMPTS: '/api/v1/admin/orchestration/mcp/prompts',
+      mcpPromptById: (id: string): string => `/api/v1/admin/orchestration/mcp/prompts/${id}`,
       MCP_KEYS: '/api/v1/admin/orchestration/mcp/keys',
       mcpKeyById: (id: string): string => `/api/v1/admin/orchestration/mcp/keys/${id}`,
       mcpKeyRotate: (id: string): string => `/api/v1/admin/orchestration/mcp/keys/${id}/rotate`,

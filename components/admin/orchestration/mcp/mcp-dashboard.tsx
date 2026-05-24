@@ -8,7 +8,16 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { Wrench, Database, Key, FileText, Settings, Activity, Monitor } from 'lucide-react';
+import {
+  Wrench,
+  Database,
+  Key,
+  FileText,
+  Settings,
+  Activity,
+  Monitor,
+  MessageSquareText,
+} from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
@@ -21,7 +30,7 @@ import { MCP_LATEST_PROTOCOL_VERSION, MCP_MIN_PROTOCOL_VERSION } from '@/types/m
 
 interface McpDashboardProps {
   initialSettings: McpSettingsResponse | null;
-  stats: { tools: number; resources: number; keys: number };
+  stats: { tools: number; resources: number; prompts: number; keys: number };
 }
 
 const DEFAULT_SETTINGS: McpSettingsResponse = {
@@ -74,6 +83,14 @@ export function McpDashboard({ initialSettings, stats }: McpDashboardProps) {
       count: stats.resources,
       description:
         'Expose read-only data endpoints — knowledge base, agent configs, workflows — for clients to browse',
+    },
+    {
+      href: '/admin/orchestration/mcp/prompts',
+      label: 'Prompts',
+      icon: MessageSquareText,
+      count: stats.prompts,
+      description:
+        'Slash-command templates clients show to end users (e.g. /analyze-pattern). Not auto-invoked by the model',
     },
     {
       href: '/admin/orchestration/mcp/keys',

@@ -702,3 +702,94 @@ describe('remove handler', () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// describe: edit dialog
+// ---------------------------------------------------------------------------
+
+describe('edit dialog', () => {
+  it('opens with the row data pre-populated and saves a PATCH', async () => {
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ success: true, data: { id: 'r-1' } }),
+    });
+
+    render(<McpResourcesList initialResources={[makeResource()]} />);
+
+    await user.click(screen.getByTestId('edit-resource-r-1'));
+
+    // Form pre-populated from row
+    const nameInput = await screen.findByLabelText(/Name/i);
+    expect(nameInput).toHaveValue('Knowledge Search');
+
+    // Change the description
+    const descInput = screen.getByLabelText(/Description/i);
+    await user.clear(descInput);
+    await user.type(descInput, 'Updated description');
+
+    await user.click(screen.getByTestId('edit-resource-save'));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        API.ADMIN.ORCHESTRATION.mcpResourceById('r-1'),
+        expect.objectContaining({
+          method: 'PATCH',
+          body: expect.stringContaining('Updated description'),
+        })
+      );
+    });
+  });
+
+  it('blocks save when handlerConfig is invalid JSON', async () => {
+    const user = userEvent.setup();
+    render(<McpResourcesList initialResources={[makeResource()]} />);
+
+    await user.click(screen.getByTestId('edit-resource-r-1'));
+
+    const configInput = await screen.findByLabelText(/Handler Config/i);
+    // user-event treats `{` as a key descriptor — escape with `{{` per docs.
+    await user.type(configInput, '{{not-valid-json');
+
+    await user.click(screen.getByTestId('edit-resource-save'));
+
+    await waitFor(() => {
+      expect(screen.getByText(/handlerConfig must be valid JSON/i)).toBeInTheDocument();
+    });
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('skips the network call when no field has changed', async () => {
+    const user = userEvent.setup();
+    render(<McpResourcesList initialResources={[makeResource()]} />);
+
+    await user.click(screen.getByTestId('edit-resource-r-1'));
+    await user.click(screen.getByTestId('edit-resource-save'));
+
+    // Dialog closes without firing a PATCH because the diff is empty.
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('surfaces a generic error when PATCH fails', async () => {
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      json: async () => ({ success: false, error: { message: 'boom' } }),
+    });
+
+    render(<McpResourcesList initialResources={[makeResource()]} />);
+
+    await user.click(screen.getByTestId('edit-resource-r-1'));
+    const nameInput = await screen.findByLabelText(/Name/i);
+    await user.clear(nameInput);
+    await user.type(nameInput, 'New name');
+
+    await user.click(screen.getByTestId('edit-resource-save'));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Failed to update resource/i)).toBeInTheDocument();
+    });
+  });
+});

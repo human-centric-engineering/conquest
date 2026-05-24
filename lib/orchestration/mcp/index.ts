@@ -50,7 +50,12 @@ export {
   listMcpResourceTemplates,
   clearMcpResourceCache,
 } from '@/lib/orchestration/mcp/resource-registry';
-export { listMcpPrompts, getMcpPrompt } from '@/lib/orchestration/mcp/prompt-registry';
+export {
+  listMcpPrompts,
+  getMcpPrompt,
+  clearMcpPromptCache,
+  MAX_ENABLED_PROMPTS,
+} from '@/lib/orchestration/mcp/prompt-registry';
 
 /**
  * Broadcast tool/resource list change notifications to all connected SSE clients.
@@ -69,5 +74,13 @@ export function broadcastMcpResourcesChanged(): void {
   manager.broadcastNotification({
     jsonrpc: '2.0',
     method: 'notifications/resources/list_changed',
+  });
+}
+
+export function broadcastMcpPromptsChanged(): void {
+  const manager = getMcpSessionManager();
+  manager.broadcastNotification({
+    jsonrpc: '2.0',
+    method: 'notifications/prompts/list_changed',
   });
 }

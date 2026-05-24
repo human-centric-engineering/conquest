@@ -57,8 +57,8 @@ const DISABLED_SETTINGS = {
   isEnabled: false,
 };
 
-const STATS_WITH_DATA = { tools: 3, resources: 2, keys: 1 };
-const STATS_EMPTY = { tools: 0, resources: 0, keys: 0 };
+const STATS_WITH_DATA = { tools: 3, resources: 2, prompts: 4, keys: 1 };
+const STATS_EMPTY = { tools: 0, resources: 0, prompts: 0, keys: 0 };
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 

@@ -64,6 +64,20 @@ const EMPTY_RESOURCE_FORM = {
   isEnabled: false,
 };
 
+interface EditResourceForm {
+  name: string;
+  description: string;
+  mimeType: string;
+  handlerConfig: string; // raw JSON text — parsed on save
+}
+
+const EMPTY_EDIT_FORM: EditResourceForm = {
+  name: '',
+  description: '',
+  mimeType: 'application/json',
+  handlerConfig: '',
+};
+
 interface McpResourcesListProps {
   initialResources: ResourceRow[];
 }
@@ -105,6 +119,85 @@ export function McpResourcesList({ initialResources }: McpResourcesListProps) {
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState(EMPTY_RESOURCE_FORM);
   const [error, setError] = useState<string | null>(null);
+
+  // Edit dialog state. `editingResource` doubles as the open/closed indicator.
+  const [editingResource, setEditingResource] = useState<ResourceRow | null>(null);
+  const [editForm, setEditForm] = useState<EditResourceForm>(EMPTY_EDIT_FORM);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
+  function openEdit(resource: ResourceRow): void {
+    setEditingResource(resource);
+    setEditError(null);
+    setEditForm({
+      name: resource.name,
+      description: resource.description,
+      mimeType: resource.mimeType,
+      // handlerConfig isn't on the row schema; admins fetch the full record
+      // server-side. For v1 the field is a free-form JSON textarea that we
+      // start blank so admins don't accidentally clear an existing config —
+      // see explanation rendered next to the field in the dialog.
+      handlerConfig: '',
+    });
+  }
+
+  async function handleEditSave(): Promise<void> {
+    if (!editingResource) return;
+    setEditSaving(true);
+    setEditError(null);
+    try {
+      const body: Record<string, unknown> = {};
+      const name = editForm.name.trim();
+      const description = editForm.description.trim();
+      const mimeType = editForm.mimeType.trim();
+      const handlerConfigRaw = editForm.handlerConfig.trim();
+
+      if (name && name !== editingResource.name) body.name = name;
+      if (description && description !== editingResource.description)
+        body.description = description;
+      if (mimeType && mimeType !== editingResource.mimeType) body.mimeType = mimeType;
+
+      if (handlerConfigRaw) {
+        try {
+          body.handlerConfig = JSON.parse(handlerConfigRaw);
+        } catch {
+          setEditError('handlerConfig must be valid JSON (or leave blank to keep unchanged).');
+          setEditSaving(false);
+          return;
+        }
+      }
+
+      if (Object.keys(body).length === 0) {
+        // Nothing to save — close cleanly.
+        setEditingResource(null);
+        setEditSaving(false);
+        return;
+      }
+
+      await apiClient.patch(API.ADMIN.ORCHESTRATION.mcpResourceById(editingResource.id), {
+        body,
+      });
+      setResources((prev) =>
+        prev.map((r) =>
+          r.id === editingResource.id
+            ? {
+                ...r,
+                ...(body.name !== undefined ? { name: body.name as string } : {}),
+                ...(body.description !== undefined
+                  ? { description: body.description as string }
+                  : {}),
+                ...(body.mimeType !== undefined ? { mimeType: body.mimeType as string } : {}),
+              }
+            : r
+        )
+      );
+      setEditingResource(null);
+    } catch {
+      setEditError('Failed to update resource.');
+    } finally {
+      setEditSaving(false);
+    }
+  }
 
   async function handleToggle(resourceId: string, isEnabled: boolean) {
     setError(null);
@@ -161,6 +254,87 @@ export function McpResourcesList({ initialResources }: McpResourcesListProps) {
   return (
     <div className="space-y-4">
       {error && <p className="text-destructive text-sm">{error}</p>}
+
+      {/* Edit Resource Dialog */}
+      <Dialog
+        open={editingResource !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditingResource(null);
+            setEditError(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Edit Resource: {editingResource?.name}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="bg-muted/50 rounded-md p-2 text-xs">
+              <p className="text-muted-foreground">
+                <strong className="text-foreground">URI</strong> (
+                <code>{editingResource?.uri}</code>) and{' '}
+                <strong className="text-foreground">type</strong> (
+                <code>{editingResource?.resourceType}</code>) cannot be changed after creation —
+                they shape how the registry routes reads, and changing them mid-life would orphan
+                in-flight clients. To rename or re-type, remove this resource and create a new one.
+              </p>
+            </div>
+            <div>
+              <Label htmlFor="edit-res-name">Name</Label>
+              <Input
+                id="edit-res-name"
+                value={editForm.name}
+                onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
+              />
+            </div>
+            <div>
+              <Label htmlFor="edit-res-desc">Description</Label>
+              <Textarea
+                id="edit-res-desc"
+                rows={3}
+                value={editForm.description}
+                onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))}
+              />
+            </div>
+            <div>
+              <Label htmlFor="edit-res-mime">MIME Type</Label>
+              <Input
+                id="edit-res-mime"
+                value={editForm.mimeType}
+                onChange={(e) => setEditForm((f) => ({ ...f, mimeType: e.target.value }))}
+              />
+            </div>
+            <div>
+              <Label htmlFor="edit-res-config">
+                Handler Config (JSON)
+                <FieldHelp title="Handler Config">
+                  Optional JSON passed to the resource handler at read time. Leave blank to keep the
+                  existing config unchanged. Submit <code>null</code> to clear it.
+                </FieldHelp>
+              </Label>
+              <Textarea
+                id="edit-res-config"
+                rows={4}
+                placeholder='e.g. {"limit": 10}'
+                value={editForm.handlerConfig}
+                onChange={(e) => setEditForm((f) => ({ ...f, handlerConfig: e.target.value }))}
+              />
+            </div>
+            {editError && <p className="text-destructive text-sm">{editError}</p>}
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={() => void handleEditSave()}
+              disabled={editSaving}
+              data-testid="edit-resource-save"
+            >
+              {editSaving ? 'Saving...' : 'Save Changes'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Create Resource Dialog */}
       <Dialog
         open={createOpen}
@@ -364,7 +538,16 @@ export function McpResourcesList({ initialResources }: McpResourcesListProps) {
                       aria-label={`Enable ${resource.name}`}
                     />
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="space-x-1 whitespace-nowrap">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-xs"
+                      onClick={() => openEdit(resource)}
+                      data-testid={`edit-resource-${resource.id}`}
+                    >
+                      Edit
+                    </Button>
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
                         <Button variant="ghost" size="sm" className="text-destructive text-xs">

@@ -45,6 +45,7 @@ function makeCapability(
   overrides: Partial<{
     slug: string;
     isActive: boolean;
+    isIdempotent: boolean;
     functionDefinition: unknown;
   }> = {}
 ) {
@@ -52,6 +53,7 @@ function makeCapability(
     id: 'cap-1',
     slug: 'search_knowledge',
     isActive: true,
+    isIdempotent: false,
     functionDefinition: {
       name: 'search_knowledge',
       description: 'Search the knowledge base',
@@ -67,6 +69,11 @@ function makeExposedTool(
     customName: string | null;
     customDescription: string | null;
     isEnabled: boolean;
+    customTitle: string | null;
+    readOnlyHint: boolean | null;
+    destructiveHint: boolean | null;
+    idempotentHint: boolean | null;
+    openWorldHint: boolean | null;
     capability: ReturnType<typeof makeCapability>;
   }> = {}
 ) {
@@ -78,6 +85,12 @@ function makeExposedTool(
     customDescription: null,
     rateLimitPerKey: null,
     requiresScope: null,
+    // MCP 2025-06-18 tool annotation overrides — all null = "inherit / no opinion"
+    customTitle: null as string | null,
+    readOnlyHint: null as boolean | null,
+    destructiveHint: null as boolean | null,
+    idempotentHint: null as boolean | null,
+    openWorldHint: null as boolean | null,
     capability: makeCapability(),
     ...overrides,
   };
@@ -460,5 +473,90 @@ describe('clearMcpToolCache', () => {
     await listMcpTools();
 
     expect(prisma.mcpExposedTool.findMany).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tool annotations (MCP 2025-06-18)
+// ---------------------------------------------------------------------------
+
+describe('listMcpTools annotations', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearMcpToolCache();
+  });
+
+  it('omits the annotations object when no overrides are set and capability is not idempotent', async () => {
+    vi.mocked(prisma.mcpExposedTool.findMany).mockResolvedValue([makeExposedTool()] as never);
+    vi.mocked(capabilityFunctionDefinitionSchema.safeParse).mockReturnValue(
+      makeSuccessfulParse() as never
+    );
+
+    const tools = await listMcpTools();
+    expect(tools[0].annotations).toBeUndefined();
+  });
+
+  it('emits annotations when any override is set', async () => {
+    vi.mocked(prisma.mcpExposedTool.findMany).mockResolvedValue([
+      makeExposedTool({ readOnlyHint: true, customTitle: 'Search KB' }),
+    ] as never);
+    vi.mocked(capabilityFunctionDefinitionSchema.safeParse).mockReturnValue(
+      makeSuccessfulParse() as never
+    );
+
+    const tools = await listMcpTools();
+    expect(tools[0].annotations).toEqual({
+      title: 'Search KB',
+      readOnlyHint: true,
+    });
+  });
+
+  it('inherits idempotentHint from capability.isIdempotent when override is null', async () => {
+    vi.mocked(prisma.mcpExposedTool.findMany).mockResolvedValue([
+      makeExposedTool({
+        capability: makeCapability({ isIdempotent: true }),
+      }),
+    ] as never);
+    vi.mocked(capabilityFunctionDefinitionSchema.safeParse).mockReturnValue(
+      makeSuccessfulParse() as never
+    );
+
+    const tools = await listMcpTools();
+    expect(tools[0].annotations?.idempotentHint).toBe(true);
+  });
+
+  it('row override of idempotentHint:false beats capability default of true', async () => {
+    vi.mocked(prisma.mcpExposedTool.findMany).mockResolvedValue([
+      makeExposedTool({
+        idempotentHint: false,
+        capability: makeCapability({ isIdempotent: true }),
+      }),
+    ] as never);
+    vi.mocked(capabilityFunctionDefinitionSchema.safeParse).mockReturnValue(
+      makeSuccessfulParse() as never
+    );
+
+    const tools = await listMcpTools();
+    expect(tools[0].annotations?.idempotentHint).toBe(false);
+  });
+
+  it('emits destructiveHint and openWorldHint when set', async () => {
+    vi.mocked(prisma.mcpExposedTool.findMany).mockResolvedValue([
+      makeExposedTool({
+        readOnlyHint: false,
+        destructiveHint: true,
+        openWorldHint: true,
+      }),
+    ] as never);
+    vi.mocked(capabilityFunctionDefinitionSchema.safeParse).mockReturnValue(
+      makeSuccessfulParse() as never
+    );
+
+    const tools = await listMcpTools();
+    expect(tools[0].annotations).toMatchObject({
+      readOnlyHint: false,
+      destructiveHint: true,
+      openWorldHint: true,
+    });
   });
 });

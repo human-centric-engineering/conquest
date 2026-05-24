@@ -56,6 +56,15 @@ export type UpdateMcpSettings = z.infer<typeof updateMcpSettingsSchema>;
 // Exposed Tools
 // ============================================================================
 
+/** Annotation fields shared by create + update. All optional / nullable. */
+const toolAnnotationFields = {
+  customTitle: z.string().max(100).trim().nullable().optional(),
+  readOnlyHint: z.boolean().nullable().optional(),
+  destructiveHint: z.boolean().nullable().optional(),
+  idempotentHint: z.boolean().nullable().optional(),
+  openWorldHint: z.boolean().nullable().optional(),
+};
+
 /**
  * Create exposed tool (POST /api/v1/admin/orchestration/mcp/tools)
  */
@@ -66,6 +75,7 @@ export const createExposedToolSchema = z.object({
   customDescription: z.string().max(5000).trim().nullable().optional(),
   rateLimitPerKey: z.number().int().min(1).max(10000).nullable().optional(),
   requiresScope: z.string().max(100).nullable().optional(),
+  ...toolAnnotationFields,
 });
 
 export type CreateExposedTool = z.infer<typeof createExposedToolSchema>;
@@ -80,6 +90,7 @@ export const updateExposedToolSchema = z
     customDescription: z.string().max(5000).trim().nullable().optional(),
     rateLimitPerKey: z.number().int().min(1).max(10000).nullable().optional(),
     requiresScope: z.string().max(100).nullable().optional(),
+    ...toolAnnotationFields,
   })
   .refine((v) => Object.keys(v).length > 0, {
     message: 'At least one field must be provided',
@@ -154,6 +165,88 @@ export const listExposedResourcesQuerySchema = z.object({
 });
 
 export type ListExposedResourcesQuery = z.infer<typeof listExposedResourcesQuerySchema>;
+
+// ============================================================================
+// Exposed Prompts
+// ============================================================================
+
+/**
+ * MCP prompt name: lowercase letters, digits, underscores, hyphens, starting
+ * with a letter. Matches the MCP spec name shape. Immutable post-create.
+ */
+const mcpPromptNameSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(
+    /^[a-z][a-z0-9_-]*$/,
+    'Prompt name must start with a lowercase letter and contain only lowercase letters, digits, underscores, and hyphens'
+  );
+
+/**
+ * Single argument spec for an MCP prompt. Limited to 20 entries per prompt
+ * (cross-validated in the parent schema). `name` mirrors the prompt-name
+ * shape so MCP client UIs render them consistently as identifiers.
+ */
+const mcpPromptArgumentSchema = z.object({
+  name: z
+    .string()
+    .min(1)
+    .max(64)
+    .regex(
+      /^[a-z][a-z0-9_]*$/,
+      'Argument name must start with a lowercase letter and contain only lowercase letters, digits, and underscores'
+    ),
+  description: z.string().min(1).max(500).trim(),
+  required: z.boolean().default(false),
+});
+
+export type McpPromptArgumentSpec = z.infer<typeof mcpPromptArgumentSchema>;
+
+/**
+ * Create exposed prompt (POST /api/v1/admin/orchestration/mcp/prompts).
+ *
+ * `name` is immutable post-create — renames are not exposed in the update
+ * schema because they silently break every client that has bookmarked or
+ * stored the prompt.
+ */
+export const createPromptSchema = z.object({
+  name: mcpPromptNameSchema,
+  description: z.string().min(1).max(5000).trim(),
+  template: z.string().min(1).max(10_000),
+  argumentsSpec: z
+    .array(mcpPromptArgumentSchema)
+    .max(20, 'Max 20 arguments per prompt')
+    .default([]),
+  isEnabled: z.boolean().default(true),
+});
+
+export type CreatePrompt = z.infer<typeof createPromptSchema>;
+
+/**
+ * Update exposed prompt (PATCH /api/v1/admin/orchestration/mcp/prompts/:id).
+ * `name` is deliberately not updatable — see createPromptSchema.
+ */
+export const updatePromptSchema = z
+  .object({
+    description: z.string().min(1).max(5000).trim().optional(),
+    template: z.string().min(1).max(10_000).optional(),
+    argumentsSpec: z.array(mcpPromptArgumentSchema).max(20).optional(),
+    isEnabled: z.boolean().optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, {
+    message: 'At least one field must be provided',
+  });
+
+export type UpdatePrompt = z.infer<typeof updatePromptSchema>;
+
+/** List prompts query (GET /api/v1/admin/orchestration/mcp/prompts). */
+export const listPromptsQuerySchema = z.object({
+  ...paginationQuerySchema.shape,
+  isEnabled: queryBooleanSchema.optional(),
+});
+
+export type ListPromptsQuery = z.infer<typeof listPromptsQuerySchema>;
 
 // ============================================================================
 // API Keys
@@ -314,6 +407,12 @@ export const exposedToolRowSchema = z.object({
   customDescription: z.string().nullable(),
   rateLimitPerKey: z.number().nullable(),
   requiresScope: z.string().nullable(),
+  // 2025-06-18 MCP tool annotations (advisory hints to clients)
+  customTitle: z.string().nullable(),
+  readOnlyHint: z.boolean().nullable(),
+  destructiveHint: z.boolean().nullable(),
+  idempotentHint: z.boolean().nullable(),
+  openWorldHint: z.boolean().nullable(),
   capability: z.object({
     id: z.string(),
     name: z.string(),
@@ -323,6 +422,18 @@ export const exposedToolRowSchema = z.object({
   }),
 });
 export type ExposedToolRow = z.infer<typeof exposedToolRowSchema>;
+
+/** Exposed prompt row — used by mcp-prompts-list */
+export const promptRowSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string(),
+  template: z.string(),
+  argumentsSpec: z.array(mcpPromptArgumentSchema),
+  isEnabled: z.boolean(),
+  createdAt: z.string(),
+});
+export type PromptRow = z.infer<typeof promptRowSchema>;
 
 /** API key row — used by mcp-keys-list */
 export const apiKeyRowSchema = z.object({

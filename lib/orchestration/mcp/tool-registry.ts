@@ -12,7 +12,12 @@ import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
 import { capabilityFunctionDefinitionSchema } from '@/lib/validations/orchestration';
-import type { McpToolDefinition, McpToolCallResult, McpContentBlock } from '@/types/mcp';
+import type {
+  McpToolDefinition,
+  McpToolAnnotations,
+  McpToolCallResult,
+  McpContentBlock,
+} from '@/types/mcp';
 import type { CapabilityContext } from '@/lib/orchestration/capabilities/types';
 
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes, matching dispatcher
@@ -54,11 +59,14 @@ export async function listMcpTools(): Promise<McpToolDefinition[]> {
       continue;
     }
 
+    const annotations = buildAnnotations(row, row.capability.isIdempotent);
+
     tools.push({
       slug: row.capability.slug,
       name: row.customName ?? parsed.data.name,
       description: row.customDescription ?? parsed.data.description,
       inputSchema: parsed.data.parameters,
+      ...(annotations ? { annotations } : {}),
     });
   }
 
@@ -157,4 +165,46 @@ export function clearMcpToolCache(): void {
   cachedTools = null;
   cachedAt = 0;
   mcpSystemAgentId = null;
+}
+
+/**
+ * Build the MCP tool annotations object from the McpExposedTool row.
+ *
+ * Per-exposure overrides win over capability-level defaults. `idempotentHint`
+ * specifically: a non-null override on the row replaces `capability.isIdempotent`;
+ * a null row value means "inherit the capability". This lets the same
+ * capability behave differently when called via MCP vs. internally — e.g.
+ * a capability that's idempotent internally but routes through an
+ * external service that doesn't deduplicate on the MCP path.
+ *
+ * Returns `undefined` (not `{}`) when no annotations apply, so the registry
+ * can use a spread-conditional to omit the key entirely.
+ */
+function buildAnnotations(
+  row: {
+    customTitle: string | null;
+    readOnlyHint: boolean | null;
+    destructiveHint: boolean | null;
+    idempotentHint: boolean | null;
+    openWorldHint: boolean | null;
+  },
+  capabilityIsIdempotent: boolean
+): McpToolAnnotations | undefined {
+  const annotations: McpToolAnnotations = {};
+  if (row.customTitle) annotations.title = row.customTitle;
+  if (row.readOnlyHint !== null) annotations.readOnlyHint = row.readOnlyHint;
+  if (row.destructiveHint !== null) annotations.destructiveHint = row.destructiveHint;
+  // Inherit capability.isIdempotent only when the override is null.
+  const effectiveIdempotent =
+    row.idempotentHint !== null ? row.idempotentHint : capabilityIsIdempotent;
+  // Only emit if it's a meaningful signal (true) or an explicit "no" (false)
+  // from the row. Don't emit a capability-inherited true unless the
+  // capability actually marked itself idempotent.
+  if (row.idempotentHint !== null) {
+    annotations.idempotentHint = row.idempotentHint;
+  } else if (effectiveIdempotent) {
+    annotations.idempotentHint = true;
+  }
+  if (row.openWorldHint !== null) annotations.openWorldHint = row.openWorldHint;
+  return Object.keys(annotations).length > 0 ? annotations : undefined;
 }

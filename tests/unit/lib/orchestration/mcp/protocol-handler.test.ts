@@ -222,13 +222,14 @@ describe('handleMcpRequest', () => {
       expect(data.protocolVersion).toBe(MCP_LATEST_PROTOCOL_VERSION);
       expect((data.serverInfo as Record<string, string>).name).toBe('Test MCP Server');
       expect((data.serverInfo as Record<string, string>).version).toBe('1.0.0');
-      // Only advertise features the server actually implements. tools and
-      // resources broadcast list_changed; prompts/subscriptions/logging land
-      // in later phases.
+      // Only advertise features the server actually implements. tools,
+      // resources, and prompts now all broadcast list_changed (prompts
+      // landed in Phase 2). resources.subscribe, logging, and completions
+      // land in later phases.
       expect(data.capabilities).toEqual({
         tools: { listChanged: true },
         resources: { listChanged: true },
-        prompts: {},
+        prompts: { listChanged: true },
       });
     });
 
@@ -680,7 +681,7 @@ describe('handleMcpRequest', () => {
 
   describe('prompts/list', () => {
     it('returns the prompts list', async () => {
-      vi.mocked(listMcpPrompts).mockReturnValue([
+      vi.mocked(listMcpPrompts).mockResolvedValue([
         { name: 'analyze-pattern', description: 'Analyze a pattern' },
       ]);
 
@@ -693,7 +694,7 @@ describe('handleMcpRequest', () => {
 
   describe('prompts/get', () => {
     it('returns prompt messages for a valid prompt', async () => {
-      vi.mocked(getMcpPrompt).mockReturnValue([
+      vi.mocked(getMcpPrompt).mockResolvedValue([
         { role: 'user', content: { type: 'text', text: 'Analyze pattern #5' } },
       ]);
 
@@ -707,7 +708,7 @@ describe('handleMcpRequest', () => {
     });
 
     it('returns INVALID_PARAMS when prompt name is unknown', async () => {
-      vi.mocked(getMcpPrompt).mockReturnValue(null);
+      vi.mocked(getMcpPrompt).mockResolvedValue(null);
 
       const req = makeRequest({
         method: 'prompts/get',
@@ -722,6 +723,23 @@ describe('handleMcpRequest', () => {
       const req = makeRequest({ method: 'prompts/get', params: {} });
       const result = await handleMcpRequest(req, { auth, session, serverState, rateLimiter });
       expect(result?.error?.code).toBe(JsonRpcErrorCode.INVALID_PARAMS);
+    });
+
+    it('maps RangeError from the registry to INVALID_PARAMS with the message', async () => {
+      // The registry throws RangeError for missing required args and
+      // oversized rendered output — protocol handler must surface the
+      // specific message so clients see precisely what failed.
+      vi.mocked(getMcpPrompt).mockRejectedValue(
+        new RangeError('Missing required argument(s): pattern_number')
+      );
+
+      const req = makeRequest({
+        method: 'prompts/get',
+        params: { name: 'analyze-pattern', arguments: {} },
+      });
+      const result = await handleMcpRequest(req, { auth, session, serverState, rateLimiter });
+      expect(result?.error?.code).toBe(JsonRpcErrorCode.INVALID_PARAMS);
+      expect(result?.error?.message).toContain('pattern_number');
     });
   });
 

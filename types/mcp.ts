@@ -123,12 +123,35 @@ export interface McpInitializeResult {
   serverInfo: McpServerInfo;
 }
 
+/**
+ * Tool annotations per MCP 2025-06-18. All fields are optional; omit
+ * (`undefined`) to signal "no opinion" rather than sending `null`.
+ *
+ * Per spec these hints are **advisory only** — a compliant client must
+ * still treat every tool as untrusted. They exist to inform UX
+ * (e.g. confirmation dialogs for destructive tools).
+ */
+export interface McpToolAnnotations {
+  /** Human-readable label shown by clients in place of the technical name. */
+  title?: string;
+  /** true = does not modify state. */
+  readOnlyHint?: boolean;
+  /** true = may perform destructive updates. Only meaningful if readOnlyHint is false. */
+  destructiveHint?: boolean;
+  /** true = repeated calls with the same args have the same effect as one call. */
+  idempotentHint?: boolean;
+  /** true = interacts with an open-ended external system (web search, third-party API). */
+  openWorldHint?: boolean;
+}
+
 export interface McpToolDefinition {
   /** Internal capability slug (not sent to MCP clients) */
   slug: string;
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  /** Present only when at least one annotation field is set. */
+  annotations?: McpToolAnnotations;
 }
 
 export interface McpToolCallResult {

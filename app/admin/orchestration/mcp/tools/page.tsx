@@ -20,6 +20,12 @@ interface ExposedToolRow {
   customDescription: string | null;
   rateLimitPerKey: number | null;
   requiresScope: string | null;
+  // MCP 2025-06-18 tool annotations
+  customTitle: string | null;
+  readOnlyHint: boolean | null;
+  destructiveHint: boolean | null;
+  idempotentHint: boolean | null;
+  openWorldHint: boolean | null;
   capability: {
     id: string;
     name: string;
