@@ -719,22 +719,62 @@ model AiConversation {
   summaryUpToMessageId String?
   tags                 String[] @default([])
   isActive             Boolean  @default(true)
+  // Channel/provider split — see plan decision 3.
+  // `channel` is the semantic medium (sms / whatsapp / email / slack / chat).
+  // `provider` is the vendor slug (twilio / meta / vonage / ...). The
+  // (channel, fromAddress) index deliberately excludes provider so memory
+  // continuity survives a provider swap mid-deployment.
+  channel              String?
+  provider             String?
+  fromAddress          String?
+  lastInboundAt        DateTime?
+  smsOptedOut          Boolean  @default(false)
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
   // Relations
-  user     User                 @relation("AiConversationUser", fields: [userId], references: [id])
-  agent    AiAgent              @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  messages AiMessage[]
-  costLogs AiCostLog[]
-  share    AiConversationShare?
+  user             User                @relation("AiConversationUser", fields: [userId], references: [id])
+  agent            AiAgent             @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  messages         AiMessage[]
+  costLogs         AiCostLog[]
+  share            AiConversationShare?
+  outboundMessages AiOutboundMessage[]
 
   @@index([userId])
   @@index([agentId])
   @@index([contextType, contextId])
   @@index([isActive])
   @@index([updatedAt])
+  @@index([channel, fromAddress])
   @@map("ai_conversation")
+}
+
+// Outbound message ledger for SMS / WhatsApp / future channels.
+//
+// Purpose: idempotency + per-recipient throttling for outbound messages
+// dispatched via the `send_message_to_channel` capability. Each row records
+// a dispatch attempt with a deterministic `dedupKey` so workflow retries
+// don't send the same SMS twice; a UNIQUE collision returns the cached
+// `transactionId` instead of re-dispatching.
+//
+// The (conversationId, createdAt) index powers the per-recipient hour
+// window throttle check inside the capability. See plan decision 5.
+model AiOutboundMessage {
+  id             String   @id @default(cuid())
+  conversationId String
+  dedupKey       String   @unique
+  channel        String   // 'sms' | 'whatsapp' | future
+  provider       String   // 'twilio' | 'meta' | future
+  transactionId  String?
+  status         String   // 'pending' | 'sent' | 'failed'
+  errorCode      String?
+  errorMessage   String?  @db.Text
+  createdAt      DateTime @default(now())
+
+  conversation AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@map("ai_outbound_message")
 }
 
 // Consent record for cross-user conversation access.
