@@ -159,9 +159,54 @@ export interface McpToolCallResult {
   isError?: boolean;
 }
 
-export interface McpContentBlock {
+/**
+ * Tool result content blocks per MCP spec.
+ *
+ * - `text`: plain text response.
+ * - `image` / `audio`: base64-encoded binary data with a MIME type.
+ * - `resource`: an embedded resource (a tool returning structured data
+ *   that the client should treat the same as `resources/read` output).
+ *
+ * Size and count limits are enforced by the tool registry — see
+ * `callMcpTool` for the cap values.
+ */
+export type McpContentBlock =
+  | McpTextContentBlock
+  | McpImageContentBlock
+  | McpAudioContentBlock
+  | McpEmbeddedResourceContentBlock;
+
+export interface McpTextContentBlock {
   type: 'text';
   text: string;
+}
+
+export interface McpImageContentBlock {
+  type: 'image';
+  /** Base64-encoded image bytes. */
+  data: string;
+  /** Image MIME type, e.g. `image/png`. */
+  mimeType: string;
+}
+
+export interface McpAudioContentBlock {
+  type: 'audio';
+  /** Base64-encoded audio bytes. */
+  data: string;
+  /** Audio MIME type, e.g. `audio/wav`. */
+  mimeType: string;
+}
+
+export interface McpEmbeddedResourceContentBlock {
+  type: 'resource';
+  /** The embedded resource payload, mirroring resources/read output. */
+  resource: {
+    uri: string;
+    mimeType: string;
+    text?: string;
+    /** Base64-encoded binary data; mutually exclusive with `text`. */
+    blob?: string;
+  };
 }
 
 export interface McpResourceDefinition {

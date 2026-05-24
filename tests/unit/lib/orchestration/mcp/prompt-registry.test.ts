@@ -22,6 +22,17 @@ import {
   clearMcpPromptCache,
 } from '@/lib/orchestration/mcp/prompt-registry';
 import { prisma } from '@/lib/db/client';
+import type { McpPromptMessage } from '@/types/mcp';
+
+/** Narrow a prompt message to its text content for assertions. */
+function asMessageText(messages: McpPromptMessage[] | null | undefined, idx = 0): string {
+  const msg = messages?.[idx];
+  if (!msg) throw new Error(`No message at index ${String(idx)}`);
+  if (msg.content.type !== 'text') {
+    throw new Error(`Expected text content, got ${msg.content.type}`);
+  }
+  return msg.content.text;
+}
 
 const findManyMock = vi.mocked(prisma.mcpExposedPrompt.findMany);
 
@@ -49,17 +60,17 @@ describe('legacy built-in fallback', () => {
 
   it('analyze-pattern fallback renders the pattern number', async () => {
     const messages = await getMcpPrompt('analyze-pattern', { pattern_number: 7 });
-    expect(messages?.[0].content.text).toContain('#7');
+    expect(asMessageText(messages)).toContain('#7');
   });
 
   it('analyze-pattern fallback rejects out-of-range pattern_number', async () => {
     const messages = await getMcpPrompt('analyze-pattern', { pattern_number: 99 });
-    expect(messages?.[0].content.text).toContain('Invalid');
+    expect(asMessageText(messages)).toContain('Invalid');
   });
 
   it('search-knowledge fallback includes query verbatim', async () => {
     const messages = await getMcpPrompt('search-knowledge', { query: 'orchestration' });
-    expect(messages?.[0].content.text).toContain('orchestration');
+    expect(asMessageText(messages)).toContain('orchestration');
   });
 
   it('returns null for an unknown prompt name', async () => {
@@ -100,7 +111,7 @@ describe('DB-backed prompts', () => {
       },
     ]);
     const messages = await getMcpPrompt('analyze-pattern', { pattern_number: 5 });
-    expect(messages?.[0].content.text).toBe('Overridden body for pattern 5');
+    expect(asMessageText(messages)).toBe('Overridden body for pattern 5');
   });
 
   it('substitutes only declared argument names', async () => {
@@ -118,7 +129,7 @@ describe('DB-backed prompts', () => {
       name: 'alice',
       database_url: 'postgres://leaked',
     });
-    expect(messages?.[0].content.text).toBe('declared=alice undeclared={{database_url}}');
+    expect(asMessageText(messages)).toBe('declared=alice undeclared={{database_url}}');
   });
 
   it('tolerates whitespace inside placeholders', async () => {
@@ -131,7 +142,7 @@ describe('DB-backed prompts', () => {
       },
     ]);
     const messages = await getMcpPrompt('ws-test', { name: 'ok' });
-    expect(messages?.[0].content.text).toBe('ok');
+    expect(asMessageText(messages)).toBe('ok');
   });
 
   it('renders undefined optional args as empty strings', async () => {
@@ -144,7 +155,7 @@ describe('DB-backed prompts', () => {
       },
     ]);
     const messages = await getMcpPrompt('opt-test', {});
-    expect(messages?.[0].content.text).toBe('before//after');
+    expect(asMessageText(messages)).toBe('before//after');
   });
 
   it('throws RangeError when a required argument is missing', async () => {

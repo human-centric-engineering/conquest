@@ -77,6 +77,30 @@ Audit log (fire-and-forget → McpAuditLog)
 
 If `capabilityDispatcher.dispatch()` throws an unexpected exception (as opposed to returning `{ success: false }`), `callMcpTool` catches it and returns an MCP error content block (`isError: true`) with a generic message rather than escalating to a JSON-RPC protocol error.
 
+### Tool result content blocks (MCP 2025-06-18)
+
+Capabilities return one of two shapes from `dispatch()`:
+
+1. **Legacy**: any JSON value. The registry wraps it as a single `text` content block via `JSON.stringify`.
+2. **Opt-in rich content**: an object `{ contentBlocks: [...] }`. Each block must be one of:
+
+| Type       | Shape                                                 | Use for                                                                    |
+| ---------- | ----------------------------------------------------- | -------------------------------------------------------------------------- |
+| `text`     | `{ type, text }`                                      | Plain text                                                                 |
+| `image`    | `{ type, data, mimeType }` (base64)                   | Generated images, screenshots                                              |
+| `audio`    | `{ type, data, mimeType }` (base64)                   | Speech, audio clips                                                        |
+| `resource` | `{ type, resource: { uri, mimeType, text?, blob? } }` | Embedded `resources/read`-shaped payload (exactly one of `text` or `blob`) |
+
+Server-enforced caps in `callMcpTool`:
+
+| Cap                                   | Value |
+| ------------------------------------- | ----- |
+| Blocks per response                   | 50    |
+| Image / audio block (decoded)         | 5 MB  |
+| Total payload (text + decoded binary) | 10 MB |
+
+Violations return `{ isError: true }` with a generic message — the specifics are server-logged so a misbehaving capability cannot probe the caps. Base64 is length-checked without full decoding so cap enforcement does not allocate the entire buffer. Embedded resources must have exactly one of `text` or `blob`; both or neither returns an error. Unknown `type` values are rejected.
+
 ### Tool annotations (MCP 2025-06-18)
 
 Each `McpExposedTool` row carries five optional annotation overrides (`customTitle`, `readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) that surface on `tools/list` results when the session negotiated `2025-06-18`. **These are advisory only** — the MCP spec is explicit that compliant clients must still treat every tool as untrusted. They inform UX (e.g. surface a "confirm before destructive call" dialog) but never enforce behaviour.
