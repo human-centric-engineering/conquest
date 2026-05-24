@@ -220,6 +220,20 @@ describe('SendMessageToChannelCapability — guard rails', () => {
     expect(result.error?.code).toBe('no_inbound_channel');
   });
 
+  it('treats an unrecognised channel value on the conversation row as no_inbound_channel (defensive runtime narrow)', async () => {
+    // The DB column is `String?` — a typo, future migration, or direct
+    // SQL write could put an unrecognised value there. The capability
+    // must NOT pass that through to an adapter; `narrowConversationChannel`
+    // returns null for any non-union string, mapping cleanly to
+    // `no_inbound_channel`.
+    setConversation({ channel: 'fax-machine' as never, provider: 'twilio' });
+    setBinding(defaultCustomConfig());
+
+    const result = await makeCapability().execute(defaultArgs(), makeContext());
+
+    expect(result.error?.code).toBe('no_inbound_channel');
+  });
+
   it('returns recipient_opted_out when smsOptedOut is true + audit-logs the refusal', async () => {
     setConversation({ smsOptedOut: true });
     setBinding(defaultCustomConfig());

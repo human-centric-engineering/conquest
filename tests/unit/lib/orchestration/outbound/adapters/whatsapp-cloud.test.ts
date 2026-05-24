@@ -203,4 +203,73 @@ describe('MetaWhatsAppOutboundAdapter.send — vendor error mapping', () => {
       OutboundSendError
     );
   });
+
+  it('falls back to default error message when vendor body has no `error.message` or top-level `message`', async () => {
+    vi.mocked(executeHttpRequest).mockResolvedValue({
+      status: 400,
+      body: { error: { code: 12345 } }, // error present but no `message` string
+      latencyMs: 5,
+    });
+    const adapter = new MetaWhatsAppOutboundAdapter();
+    await expect(adapter.send(makeReq(), makeConv(), baseConfig())).rejects.toThrow(
+      /Meta dispatch failed: HTTP 400/
+    );
+  });
+
+  it('falls back to default error message when vendor body is not an object', async () => {
+    vi.mocked(executeHttpRequest).mockResolvedValue({
+      status: 503,
+      body: 'plain string body',
+      latencyMs: 5,
+    });
+    const adapter = new MetaWhatsAppOutboundAdapter();
+    await expect(adapter.send(makeReq(), makeConv(), baseConfig())).rejects.toThrow(
+      /Meta dispatch failed: HTTP 503/
+    );
+  });
+
+  it('falls back to default error message when vendor body has null error field', async () => {
+    vi.mocked(executeHttpRequest).mockResolvedValue({
+      status: 502,
+      body: { error: null },
+      latencyMs: 5,
+    });
+    const adapter = new MetaWhatsAppOutboundAdapter();
+    await expect(adapter.send(makeReq(), makeConv(), baseConfig())).rejects.toThrow(
+      /Meta dispatch failed: HTTP 502/
+    );
+  });
+
+  it('reads top-level `message` when `error` is absent', async () => {
+    vi.mocked(executeHttpRequest).mockResolvedValue({
+      status: 400,
+      body: { message: 'plain error message at top level' },
+      latencyMs: 5,
+    });
+    const adapter = new MetaWhatsAppOutboundAdapter();
+    await expect(adapter.send(makeReq(), makeConv(), baseConfig())).rejects.toThrow(
+      /plain error message at top level/
+    );
+  });
+});
+
+describe('MetaWhatsAppOutboundAdapter.send — `to` normalisation', () => {
+  it('passes through a `to` that already lacks a leading + verbatim', async () => {
+    vi.mocked(executeHttpRequest).mockResolvedValue({
+      status: 200,
+      body: { messages: [{ id: 'wamid.noplus' }] },
+      latencyMs: 5,
+    });
+
+    const adapter = new MetaWhatsAppOutboundAdapter();
+    await adapter.send(
+      makeReq({ to: '447400123456' }), // no leading +
+      makeConv(),
+      baseConfig()
+    );
+
+    const call = vi.mocked(executeHttpRequest).mock.calls[0][0];
+    const body = JSON.parse(call.body as string);
+    expect(body.to).toBe('447400123456'); // unchanged, no double-strip
+  });
 });

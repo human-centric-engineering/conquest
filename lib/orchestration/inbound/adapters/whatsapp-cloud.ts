@@ -164,6 +164,16 @@ export class WhatsAppCloudAdapter implements InboundAdapter {
   }
 
   normalise(bodyParsed: unknown, _headers: Headers): NormalisedTriggerPayload {
+    // Cast is safe because:
+    //   1. HMAC verification has already passed (`verify()` ran before
+    //      this method), so the bytes were not tampered with in transit.
+    //   2. Every field access below uses optional chaining + defaults —
+    //      a malformed shape produces `eventType: 'unknown'` and empty
+    //      payload fields rather than throwing.
+    //   3. Mirrors the SlackAdapter / PostmarkAdapter pattern in this
+    //      directory — switching one adapter to runtime-Zod-parse the
+    //      vendor envelope while the others don't would create
+    //      inconsistency without a real safety win.
     const body = (bodyParsed ?? {}) as WhatsAppWebhookEnvelope;
     const entry = body.entry?.[0];
     const change = entry?.changes?.[0];

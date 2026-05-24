@@ -131,6 +131,11 @@ export class MetaWhatsAppOutboundAdapter implements OutboundAdapter {
       throw mapMetaError(result.status, result.body);
     }
 
+    // Cast is safe because: 2xx Meta responses are documented to carry
+    // `messages[0].id` on success; the optional chaining below treats any
+    // other shape as a `vendor_rejected` outcome. We deliberately don't
+    // Zod-parse the response because we only read one field; a parse
+    // failure would surface as the same `vendor_rejected` error.
     const responseBody = (result.body ?? {}) as MetaMessageResponse;
     const messageId = responseBody.messages?.[0]?.id;
     if (!messageId) {

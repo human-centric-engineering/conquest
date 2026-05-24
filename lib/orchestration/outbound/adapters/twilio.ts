@@ -135,6 +135,10 @@ export class TwilioOutboundAdapter implements OutboundAdapter {
       throw mapTwilioError(result.status, result.body);
     }
 
+    // Cast is safe because: 2xx Twilio responses are documented to carry
+    // `sid` on success; the explicit `!body.sid` check below treats any
+    // other shape as a `vendor_rejected` outcome. We deliberately don't
+    // Zod-parse — see the matching comment in the Meta outbound adapter.
     const body = (result.body ?? {}) as TwilioMessageResponse;
     if (!body.sid) {
       throw new OutboundSendError(

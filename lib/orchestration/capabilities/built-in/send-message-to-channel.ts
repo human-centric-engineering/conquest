@@ -117,6 +117,25 @@ interface LoadedConversation {
   smsOptedOut: boolean;
 }
 
+const KNOWN_CONVERSATION_CHANNELS: ReadonlySet<ConversationChannel> = new Set([
+  'sms',
+  'whatsapp',
+  'email',
+  'slack',
+  'chat',
+]);
+
+function narrowConversationChannel(value: string | null): ConversationChannel | null {
+  if (value === null) return null;
+  // Runtime narrow — the DB column is `String?`; a bad value (typo,
+  // future migration, third-party direct DB write) should be treated
+  // as "no recorded channel" rather than mis-narrowed and silently
+  // dispatched to the wrong adapter.
+  return KNOWN_CONVERSATION_CHANNELS.has(value as ConversationChannel)
+    ? (value as ConversationChannel)
+    : null;
+}
+
 async function loadConversation(conversationId: string): Promise<LoadedConversation | null> {
   const row = await prisma.aiConversation.findUnique({
     where: { id: conversationId },
@@ -132,7 +151,7 @@ async function loadConversation(conversationId: string): Promise<LoadedConversat
   if (!row) return null;
   return {
     id: row.id,
-    channel: row.channel as ConversationChannel | null,
+    channel: narrowConversationChannel(row.channel),
     provider: row.provider,
     fromAddress: row.fromAddress,
     lastInboundAt: row.lastInboundAt,

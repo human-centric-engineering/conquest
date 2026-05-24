@@ -865,6 +865,19 @@ model AiMessage {
 // whenever the active embedding model in `AiOrchestrationSettings` changes,
 // since pgvector locks dimension at the column level. Today's active model
 // is `text-embedding-3-small` (1536-dim).
+// ⚠️ PRISMA-SCHEMA DRIFT WARNING ⚠️
+// The Postgres HNSW index `idx_message_embedding` on the `embedding`
+// column is managed via raw SQL — Prisma cannot model HNSW indexes on
+// `Unsupported("vector(N)")` columns natively, so it doesn't appear here.
+//
+// `npx prisma migrate dev` WILL try to add a `DROP INDEX
+// "idx_message_embedding"` line on every schema-diff run. Always inspect
+// generated migration SQL and remove that line before applying — the
+// drop would silently break similarity search.
+//
+// Source of truth:
+//   prisma/migrations/20260420063847_add_message_embedding_hnsw_index/
+//   prisma/migrations/20260514151915_flexible_embedding_models_and_kb_grouping/ (re-creates)
 model AiMessageEmbedding {
   id                 String                      @id @default(cuid())
   messageId          String                      @unique
@@ -994,7 +1007,21 @@ model AiKnowledgeDocument {
   @@map("ai_knowledge_document")
 }
 
-// Vector store for knowledge base content
+// Vector store for knowledge base content.
+//
+// ⚠️ PRISMA-SCHEMA DRIFT WARNING ⚠️
+// The Postgres GIN index `idx_ai_knowledge_chunk_search_vector` on
+// `searchVector` (and the `GENERATED ALWAYS` DEFAULT on the same column)
+// are managed via raw SQL in migrations — Prisma cannot model `tsvector`
+// GIN indexes or generated columns natively, so they don't appear here.
+//
+// `npx prisma migrate dev` WILL try to add DROP statements for both on
+// every schema-diff run. Always inspect generated migration SQL and
+// remove any lines touching `idx_ai_knowledge_chunk_search_vector` or
+// the `searchVector` DEFAULT before applying. The drops would silently
+// break hybrid search.
+//
+// Source of truth: prisma/migrations/20260501172919_add_knowledge_chunk_search_vector/
 model AiKnowledgeChunk {
   id                 String                       @id @default(cuid())
   chunkKey           String                       @unique
