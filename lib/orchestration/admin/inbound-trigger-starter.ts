@@ -6,10 +6,12 @@
  * Encoded into the `?definition=` URL param the new-workflow page
  * already accepts (the advisor chatbot uses the same hand-off path).
  *
- * The single `llm_call` step reads the normalised inbound trigger
- * fields (`trigger.text`, `trigger.from`, `trigger.channel`) so the
- * operator lands in the workflow builder with a runnable shape instead
- * of an empty canvas.
+ * The single `chat_turn` step loads prior `AiMessage` rows for the
+ * inbound conversation (so multi-turn context survives across runs)
+ * and dispatches the new user message through the named agent. The
+ * operator must edit `agentSlug` to point at one of their agents
+ * before publishing — the placeholder `''` will fail validation at
+ * publish time with a clear error.
  *
  * Lives in its own module (not inline on the page component) so the
  * shape is importable by tests — the workflow new page silently falls
@@ -19,11 +21,17 @@
  * Field constraints to mind when editing:
  *   - Step `description` is capped at 500 chars by `workflowStepSchema`.
  *     Keep it short.
- *   - Field names referenced in `prompt` must match what the inbound
+ *   - Field names referenced in `message` must match what the inbound
  *     adapters set on `NormalisedTriggerPayload.payload`. Twilio + WA
  *     Cloud set `text` / `from` / `channel`; Slack sets `text` /
- *     `user`; Postmark sets `textBody` / `from.email`. The starter uses
- *     the most cross-channel-compatible subset.
+ *     `user`; Postmark sets `textBody` / `from.email`. The starter
+ *     uses the most cross-channel-compatible subset.
+ *   - `conversationId` defaults to `{{trigger.conversationId}}` which
+ *     the inbound route's `resolveConversation` always populates for
+ *     Twilio / WhatsApp Cloud. Slack / generic HMAC don't populate it
+ *     — operators on those channels should either change the starter
+ *     to `llm_call` or create the conversation themselves before
+ *     calling `chat_turn`.
  */
 
 import type { WorkflowDefinition } from '@/types/orchestration';
@@ -36,11 +44,14 @@ export const INBOUND_TRIGGER_STARTER_DEFINITION: WorkflowDefinition = {
       id: 'respond_to_inbound',
       name: 'Respond to inbound message',
       description:
-        'Reads the inbound trigger payload (trigger.text + trigger.from + trigger.channel) and asks the LLM to draft a reply. To actually send the reply back on the same channel, add a tool_call step using `send_message_to_channel` once you have an agent with that capability bound.',
-      type: 'llm_call',
+        'Loads prior turns of the conversation so the agent sees what the user said earlier, then drafts a reply. Edit `agentSlug` to point at one of your agents before publishing. To send the reply back on the same channel, add a tool_call step after using `send_message_to_channel`.',
+      type: 'chat_turn',
       config: {
-        prompt:
-          'A user sent us this inbound message:\n\n{{trigger.text}}\n\nFrom: {{trigger.from}}\nChannel: {{trigger.channel}}\n\nWrite a concise, helpful reply suitable for the channel (SMS: under 1600 chars; WhatsApp: under 4096; Slack: markdown OK).',
+        agentSlug: '',
+        conversationId: '{{trigger.conversationId}}',
+        message: '{{trigger.text}}',
+        historyLimit: 20,
+        persistMessages: true,
         temperature: 0.4,
       },
       nextSteps: [],

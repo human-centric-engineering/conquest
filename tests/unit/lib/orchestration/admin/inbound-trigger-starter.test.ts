@@ -36,17 +36,24 @@ describe('INBOUND_TRIGGER_STARTER_DEFINITION', () => {
     expect(desc.length).toBeLessThanOrEqual(500);
   });
 
+  it('uses chat_turn so multi-turn conversation context loads automatically', () => {
+    // The starter ships chat_turn (not llm_call) so out-of-the-box the
+    // agent sees the full conversation history on every fire — no
+    // `tool_call`-to-load-history workaround needed. Catches a future
+    // edit that silently regresses to llm_call.
+    expect(INBOUND_TRIGGER_STARTER_DEFINITION.steps[0].type).toBe('chat_turn');
+  });
+
   it('reads canonical inbound trigger fields the adapters always set', () => {
-    // Workflows that come pre-wired for inbound MUST consume the same
-    // fields the inbound route writes into `payload`. If someone renames
-    // trigger.text → trigger.message in the adapters, the starter prompt
-    // will silently produce empty strings — catch that here.
+    // Workflows pre-wired for inbound MUST consume the same fields the
+    // inbound route writes into `payload` + `triggerMeta`. If someone
+    // renames trigger.text → trigger.message in the adapters (or breaks
+    // the conversationId injection in the route handler), the starter
+    // silently produces empty strings — catch that here.
     const step = INBOUND_TRIGGER_STARTER_DEFINITION.steps[0];
-    const config = step.config as { prompt?: unknown };
-    const prompt = typeof config.prompt === 'string' ? config.prompt : '';
-    expect(prompt).toContain('{{trigger.text}}');
-    expect(prompt).toContain('{{trigger.from}}');
-    expect(prompt).toContain('{{trigger.channel}}');
+    const config = step.config as { message?: unknown; conversationId?: unknown };
+    expect(config.message).toBe('{{trigger.text}}');
+    expect(config.conversationId).toBe('{{trigger.conversationId}}');
   });
 });
 

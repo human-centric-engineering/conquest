@@ -44,22 +44,21 @@ export function WhatsAppWorkedExample() {
         </p>
       </div>
 
-      {/* Upfront callout — multi-turn context is the #1 surprise */}
-      <div className="mb-4 rounded-md border border-amber-500/30 bg-amber-50/50 p-3 text-xs dark:bg-amber-950/20">
-        <p className="text-foreground mb-1 font-semibold">
-          Note on multi-turn context (read this before you build)
-        </p>
+      {/* Upfront callout — how multi-turn context works */}
+      <div className="mb-4 rounded-md border border-emerald-500/30 bg-emerald-50/50 p-3 text-xs dark:bg-emerald-950/20">
+        <p className="text-foreground mb-1 font-semibold">Multi-turn context (how it works)</p>
         <p className="text-muted-foreground">
           The platform automatically remembers conversation <em>identity</em> — every future message
           from the same number lands on the same <code>AiConversation</code> row, with{' '}
-          <code>lastInboundAt</code> and <code>smsOptedOut</code> carried forward. It does NOT
-          automatically inject prior message <em>content</em> into a workflow&apos;s{' '}
-          <code>llm_call</code> step. Each inbound creates a fresh <code>AiWorkflowExecution</code>{' '}
-          that sees only <code>trigger.text</code> (the current message) unless your workflow
-          explicitly loads prior turns. If you need multi-turn memory, either add a{' '}
-          <code>tool_call</code> step that fetches the last N <code>AiMessage</code> rows and
-          interpolates them into the prompt, or talk to the user via the streaming chat handler
-          (admin chat / embed widget) which loads history automatically.
+          <code>lastInboundAt</code> and <code>smsOptedOut</code> carried forward. For multi-turn{' '}
+          <em>content</em>, use the <code>chat_turn</code> step: it loads prior{' '}
+          <code>AiMessage</code> rows for the conversation and the LLM sees the full history. The
+          &quot;Create a workflow (pre-filled for inbound)&quot; CTA on the New Trigger page seeds a
+          workflow with <code>chat_turn</code> already wired, so memory works out of the box. The
+          older <code>llm_call</code> step is single-shot (no history) — pick it only when the
+          workflow really is stateless. The streaming chat handler that backs the admin chat and
+          embed widget also loads history automatically; <code>chat_turn</code> brings the same
+          behaviour to inbound-trigger-driven workflows.
         </p>
       </div>
 

@@ -174,6 +174,7 @@ export const KNOWN_STEP_TYPES = [
   'evaluate',
   'external_call',
   'agent_call',
+  'chat_turn',
   'send_notification',
   'orchestrator',
   'supervisor',
