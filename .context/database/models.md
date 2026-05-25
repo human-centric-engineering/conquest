@@ -568,6 +568,24 @@ const users = await prisma.user.findMany({
 
 **Why not repositories?** For a starter template, repositories add abstraction without clear benefit. Prisma already provides a clean query API with full type safety. Direct access is simpler to understand and maintain.
 
+### Writing typed objects to Json columns
+
+Prisma types `Json` / `Json?` columns as `Prisma.InputJsonValue` on writes — a structural type whose index-signature requirement typed interfaces (e.g. `WorkflowDefinition`, an `ExecutionTraceEntry[]`) don't satisfy. Assigning a typed value directly fails type-check, so cast through `unknown` to the precise Prisma type:
+
+```typescript
+import { Prisma } from '@prisma/client';
+
+await prisma.aiWorkflowExecution.update({
+  where: { id },
+  // executionTrace is a Json column; `trace` is ExecutionTraceEntry[]
+  data: { executionTrace: trace as unknown as Prisma.InputJsonValue },
+});
+```
+
+**Don't** reach for `as object` / `as unknown as object` — `@typescript-eslint/no-unnecessary-type-assertion` (enforced in lint) judges those redundant and auto-strips them on `eslint --fix`, which silently breaks the write. Casting to `Prisma.InputJsonValue` is a _necessary_ assertion, so the rule leaves it intact.
+
+When **reading** a Json column back, validate it with Zod rather than asserting — see the `toTemplateItem()` mapper in `.context/admin/workflow-builder.md` for the pattern.
+
 ### Pagination Utilities
 
 Pagination is implemented through multiple utilities working together:
