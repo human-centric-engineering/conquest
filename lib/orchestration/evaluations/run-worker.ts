@@ -82,11 +82,12 @@ export async function processPendingEvaluationRuns(): Promise<{
   completed: number;
   released: number;
   failed: number;
+  cancelled: number;
 }> {
   const workerId = `worker-${process.pid}-${Date.now()}`;
   const claimed = await claimNextRun(workerId);
   if (!claimed) {
-    return { claimed: 0, completed: 0, released: 0, failed: 0 };
+    return { claimed: 0, completed: 0, released: 0, failed: 0, cancelled: 0 };
   }
 
   try {
@@ -96,6 +97,7 @@ export async function processPendingEvaluationRuns(): Promise<{
       completed: outcome === 'completed' ? 1 : 0,
       released: outcome === 'released' ? 1 : 0,
       failed: outcome === 'failed' ? 1 : 0,
+      cancelled: outcome === 'cancelled' ? 1 : 0,
     };
   } catch (err) {
     logger.error('Evaluation run worker crashed; marking run failed', {
@@ -112,7 +114,7 @@ export async function processPendingEvaluationRuns(): Promise<{
         error: markErr instanceof Error ? markErr.message : String(markErr),
       });
     }
-    return { claimed: 1, completed: 0, released: 0, failed: 1 };
+    return { claimed: 1, completed: 0, released: 0, failed: 1, cancelled: 0 };
   }
 }
 
@@ -120,7 +122,7 @@ export async function processPendingEvaluationRuns(): Promise<{
 // Per-run pipeline
 // ---------------------------------------------------------------------------
 
-type RunOutcome = 'completed' | 'released' | 'failed';
+type RunOutcome = 'completed' | 'released' | 'failed' | 'cancelled';
 
 async function driveRun(run: ClaimedRun): Promise<RunOutcome> {
   // 1. Hash-pin check
@@ -204,9 +206,22 @@ async function driveRun(run: ClaimedRun): Promise<RunOutcome> {
   const tickStart = Date.now();
   let processedThisTick = 0;
   let releasedEarly = false;
+  let cancelledExternally = false;
   for (const caseRow of pending) {
     if (Date.now() - tickStart > WORKER_TIME_BUDGET_MS) {
       releasedEarly = true;
+      break;
+    }
+
+    // Re-read status before each case so an admin-initiated cancel
+    // (which flips status='cancelled' on the row directly) stops the
+    // worker from writing further case rows.
+    const statusRow = await prisma.aiEvaluationRun.findUnique({
+      where: { id: run.id },
+      select: { status: true },
+    });
+    if (!statusRow || statusRow.status !== 'running') {
+      cancelledExternally = true;
       break;
     }
 
@@ -234,6 +249,13 @@ async function driveRun(run: ClaimedRun): Promise<RunOutcome> {
     if (processedThisTick % PROGRESS_WRITE_EVERY === 0) {
       await writeProgress(run.id, cases.length);
     }
+  }
+
+  if (cancelledExternally) {
+    // Cancel route already cleared the lease and flipped status. Nothing
+    // to do — do NOT call markTerminal (it would no-op anyway thanks to
+    // the status='running' guard, but skipping is cleaner).
+    return 'cancelled';
   }
 
   if (releasedEarly) {

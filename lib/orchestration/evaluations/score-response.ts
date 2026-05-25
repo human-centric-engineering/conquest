@@ -85,10 +85,18 @@ export async function scoreResponse(params: ScoreResponseParams): Promise<ScoreR
 
   const anySucceeded = faithfulnessResult.ok || groundednessResult.ok || relevanceResult.ok;
   if (!anySucceeded) {
-    const firstError = faithfulnessResult.ok
-      ? null
-      : (faithfulnessResult.errorMessage ?? 'unknown judge failure');
-    throw new Error(firstError ?? 'All three judges failed to produce a score');
+    // All three failed — aggregate every judge's error so operators
+    // triaging the throw see the full picture, not just faithfulness.
+    const errors = (
+      [
+        ['faithfulness', faithfulnessResult],
+        ['groundedness', groundednessResult],
+        ['relevance', relevanceResult],
+      ] as const
+    )
+      .map(([slug, r]) => `${slug}: ${(r.ok ? null : r.errorMessage) ?? 'unknown failure'}`)
+      .join('; ');
+    throw new Error(`All three judges failed to produce a score — ${errors}`);
   }
 
   return {

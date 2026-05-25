@@ -151,6 +151,7 @@ describe('POST /api/v1/admin/orchestration/maintenance/tick', () => {
       completed: 0,
       released: 0,
       failed: 0,
+      cancelled: 0,
     });
     vi.mocked(processOrphanedExecutions).mockResolvedValue({
       recovered: 0,

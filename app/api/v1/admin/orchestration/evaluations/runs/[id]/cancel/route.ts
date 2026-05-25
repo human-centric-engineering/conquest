@@ -5,10 +5,13 @@
  *
  * Behaviour:
  *   - queued  → status flips to 'cancelled' immediately
- *   - running → status flips to 'cancelled'; the in-flight tick will
- *     finish writing the current case but won't pick up a new one
- *     (the worker checks `status` between cases via its claim re-read
- *     when the lease is released)
+ *   - running → status flips to 'cancelled'; the worker re-reads status
+ *     between cases and breaks out without writing more case rows. If
+ *     the worker is mid-case when cancel lands, the in-flight case
+ *     finishes writing, then the loop exits. Even if the worker races
+ *     past the re-read, `markTerminal` / `releaseLease` are guarded by
+ *     a `status='running'` predicate, so a cancelled run can never be
+ *     reverted to completed/failed by a still-draining tick.
  *   - completed | failed | cancelled → 409 (idempotency)
  */
 

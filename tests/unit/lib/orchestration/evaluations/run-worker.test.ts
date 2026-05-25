@@ -33,7 +33,7 @@ vi.mock('@/lib/db/client', () => ({
     aiDatasetCase: { findMany: vi.fn() },
     aiEvaluationCaseResult: { findMany: vi.fn(), create: vi.fn(), count: vi.fn() },
     aiAgent: { findUnique: vi.fn() },
-    aiEvaluationRun: { update: vi.fn() },
+    aiEvaluationRun: { update: vi.fn(), findUnique: vi.fn() },
   },
 }));
 
@@ -94,6 +94,7 @@ const createResult = prisma.aiEvaluationCaseResult.create as unknown as ReturnTy
 const countResults = prisma.aiEvaluationCaseResult.count as unknown as ReturnType<typeof vi.fn>;
 const findAgent = prisma.aiAgent.findUnique as unknown as ReturnType<typeof vi.fn>;
 const updateRun = prisma.aiEvaluationRun.update as unknown as ReturnType<typeof vi.fn>;
+const findRunStatus = prisma.aiEvaluationRun.findUnique as unknown as ReturnType<typeof vi.fn>;
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -173,6 +174,12 @@ beforeEach(() => {
   createResult.mockResolvedValue({});
   findManyResults.mockResolvedValue([]); // no existing case results
   mockedLogCost.mockResolvedValue({ id: 'cost-1' });
+  // Default: the per-case status re-read returns 'running' so the loop
+  // proceeds. Tests that exercise the cancel-mid-loop path override this.
+  findRunStatus.mockResolvedValue({ status: 'running' });
+  // markTerminal returns true (the guard predicate matched) by default.
+  // The cancel-race regression test overrides to return false.
+  mockedMarkTerminal.mockResolvedValue(true);
 });
 
 // ---------------------------------------------------------------------------
@@ -185,7 +192,7 @@ describe('processPendingEvaluationRuns — no claim', () => {
 
     const result = await processPendingEvaluationRuns();
 
-    expect(result).toEqual({ claimed: 0, completed: 0, released: 0, failed: 0 });
+    expect(result).toEqual({ claimed: 0, completed: 0, released: 0, failed: 0, cancelled: 0 });
     expect(findManyCases).not.toHaveBeenCalled();
     expect(mockedMarkTerminal).not.toHaveBeenCalled();
   });
@@ -246,7 +253,7 @@ describe('processPendingEvaluationRuns — happy path', () => {
 
     const result = await processPendingEvaluationRuns();
 
-    expect(result).toEqual({ claimed: 1, completed: 1, released: 0, failed: 0 });
+    expect(result).toEqual({ claimed: 1, completed: 1, released: 0, failed: 0, cancelled: 0 });
 
     // 3 cases × 2 graders = 6 grade calls
     expect(exact.grade).toHaveBeenCalledTimes(3);
@@ -290,7 +297,7 @@ describe('hash mismatch', () => {
 
     const result = await processPendingEvaluationRuns();
 
-    expect(result).toEqual({ claimed: 1, completed: 0, released: 0, failed: 1 });
+    expect(result).toEqual({ claimed: 1, completed: 0, released: 0, failed: 1, cancelled: 0 });
     expect(mockedMarkTerminal).toHaveBeenCalledWith(
       'run-1',
       'failed',
@@ -668,6 +675,66 @@ describe('time-budget release', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Cancel race — the regression case from PR #237 review
+// ---------------------------------------------------------------------------
+
+describe('cancel-race protection', () => {
+  it('breaks out of the case loop when status flips to "cancelled" mid-batch', async () => {
+    // Setup: 3 pending cases. The per-case status re-read returns
+    // 'running' for the first case, then 'cancelled' before the second.
+    // Expected: only one case-result row is written, no markTerminal,
+    // no releaseLease, outcome = 'cancelled'.
+    mockedClaim.mockResolvedValueOnce(makeRun());
+    findManyCases.mockResolvedValueOnce([makeCase(1), makeCase(2), makeCase(3)]);
+    findAgent.mockResolvedValueOnce({ slug: 'agent-slug' });
+    mockedGetGrader.mockReturnValue(passingGrader());
+    mockedRunAgent.mockResolvedValue(drainOk());
+
+    findRunStatus
+      .mockReset()
+      .mockResolvedValueOnce({ status: 'running' })
+      .mockResolvedValueOnce({ status: 'cancelled' });
+
+    const result = await processPendingEvaluationRuns();
+
+    expect(result).toEqual({ claimed: 1, completed: 0, released: 0, failed: 0, cancelled: 1 });
+    expect(createResult).toHaveBeenCalledTimes(1);
+    expect(mockedMarkTerminal).not.toHaveBeenCalled();
+    expect(mockedReleaseLease).not.toHaveBeenCalled();
+  });
+
+  it('breaks out on the first iteration when the row was cancelled before any case ran', async () => {
+    // Cancel landed in between claim and the first per-case status read.
+    mockedClaim.mockResolvedValueOnce(makeRun());
+    findManyCases.mockResolvedValueOnce([makeCase(1), makeCase(2)]);
+    findAgent.mockResolvedValueOnce({ slug: 'agent-slug' });
+    mockedGetGrader.mockReturnValue(passingGrader());
+
+    findRunStatus.mockReset().mockResolvedValueOnce({ status: 'cancelled' });
+
+    const result = await processPendingEvaluationRuns();
+
+    expect(result.cancelled).toBe(1);
+    expect(createResult).not.toHaveBeenCalled();
+    expect(mockedMarkTerminal).not.toHaveBeenCalled();
+  });
+
+  it('treats a vanished row (findUnique returns null) as cancelled — defensive', async () => {
+    mockedClaim.mockResolvedValueOnce(makeRun());
+    findManyCases.mockResolvedValueOnce([makeCase(1)]);
+    findAgent.mockResolvedValueOnce({ slug: 'agent-slug' });
+    mockedGetGrader.mockReturnValue(passingGrader());
+
+    findRunStatus.mockReset().mockResolvedValueOnce(null);
+
+    const result = await processPendingEvaluationRuns();
+
+    expect(result.cancelled).toBe(1);
+    expect(createResult).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Worker-level crash safety
 // ---------------------------------------------------------------------------
 
@@ -679,7 +746,7 @@ describe('worker exception safety', () => {
 
     const result = await processPendingEvaluationRuns();
 
-    expect(result).toEqual({ claimed: 1, completed: 0, released: 0, failed: 1 });
+    expect(result).toEqual({ claimed: 1, completed: 0, released: 0, failed: 1, cancelled: 0 });
     expect(mockedMarkTerminal).toHaveBeenCalledWith(
       'run-1',
       'failed',

@@ -135,7 +135,7 @@ const DEFAULT_RETENTION_RESULT = {
 };
 const DEFAULT_PENDING_RECOVERY_RESULT = { recovered: 0, failed: 0, errors: [] };
 const DEFAULT_ORPHAN_RESULT = { recovered: 0, exhausted: 0, errors: [] };
-const DEFAULT_EVAL_RUN_RESULT = { claimed: 0, completed: 0, released: 0, failed: 0 };
+const DEFAULT_EVAL_RUN_RESULT = { claimed: 0, completed: 0, released: 0, failed: 0, cancelled: 0 };
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
 

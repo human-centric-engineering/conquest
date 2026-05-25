@@ -358,15 +358,22 @@ describe('scoreResponse — parser edge cases', () => {
 });
 
 describe('scoreResponse — total failure', () => {
-  it('throws when all three judges fail', async () => {
+  it('throws an aggregated message naming every judge when all three fail', async () => {
     mockedDrain
       .mockRejectedValueOnce(new Error('faithfulness blew up'))
       .mockRejectedValueOnce(new Error('groundedness blew up'))
       .mockRejectedValueOnce(new Error('relevance blew up'));
 
-    await expect(scoreResponse(BASE_PARAMS)).rejects.toThrow(
-      /All three judges failed to produce a score|faithfulness blew up/
-    );
+    // Regression test for the dead-error fix on the PR #237 review:
+    // previously only the faithfulness judge's message ever surfaced.
+    // All three judge slugs must appear in the thrown message.
+    const err = await scoreResponse(BASE_PARAMS).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    const msg = (err as Error).message;
+    expect(msg).toContain('All three judges failed to produce a score');
+    expect(msg).toContain('faithfulness:');
+    expect(msg).toContain('groundedness:');
+    expect(msg).toContain('relevance:');
   });
 
   it('throws even when all three calls return a stream errorCode (no thrown exception)', async () => {
@@ -375,6 +382,12 @@ describe('scoreResponse — total failure', () => {
       .mockResolvedValueOnce(drainErr({ errorCode: 'PROVIDER_DOWN', errorMessage: 'down 2' }))
       .mockResolvedValueOnce(drainErr({ errorCode: 'PROVIDER_DOWN', errorMessage: 'down 3' }));
 
-    await expect(scoreResponse(BASE_PARAMS)).rejects.toThrow();
+    const err = await scoreResponse(BASE_PARAMS).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    // The per-judge errorMessages should be aggregated into one throw.
+    const msg = (err as Error).message;
+    expect(msg).toContain('down 1');
+    expect(msg).toContain('down 2');
+    expect(msg).toContain('down 3');
   });
 });

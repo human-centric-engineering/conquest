@@ -136,20 +136,32 @@ export async function claimNextRun(workerId: string): Promise<ClaimedRun | null>
   return claimed;
 }
 
-/** Release the lease so the next tick can resume this run. */
+/**
+ * Release the lease so the next tick can resume this run. Guarded by
+ * `status: 'running'` so a concurrent cancel (which sets `status='cancelled'`
+ * and clears the lease itself) is never re-stamped by the lease holder.
+ */
 export async function releaseLease(runId: string): Promise<void> {
-  await prisma.aiEvaluationRun.update({
-    where: { id: runId },
+  await prisma.aiEvaluationRun.updateMany({
+    where: { id: runId, status: 'running' },
     data: { lockedBy: null, lockedAt: null },
   });
 }
 
-/** Mark the run terminal — status='completed'|'failed'|'cancelled'. */
+/**
+ * Mark the run terminal — status='completed'|'failed'|'cancelled'.
+ *
+ * Guarded by `status: 'running'`: if a concurrent cancel has already
+ * transitioned the row to `'cancelled'` (or any other terminal status),
+ * this is a no-op and returns `false`. Returns `true` when the row was
+ * actually updated. The cancellation-by-admin path always wins against a
+ * still-draining worker tick.
+ */
 export async function markTerminal(
   runId: string,
   status: 'completed' | 'failed' | 'cancelled',
   patch: { summary?: unknown; totalCostUsd?: number } = {}
-): Promise<void> {
+): Promise<boolean> {
   const data: {
     status: typeof status;
     lockedBy: null;
@@ -165,11 +177,12 @@ export async function markTerminal(
   };
   if (patch.summary !== undefined) data.summary = patch.summary;
   if (patch.totalCostUsd !== undefined) data.totalCostUsd = patch.totalCostUsd;
-  await prisma.aiEvaluationRun.update({
-    where: { id: runId },
+  const result = await prisma.aiEvaluationRun.updateMany({
+    where: { id: runId, status: 'running' },
     // The `data` map carries an arbitrary JSON `summary` that Prisma
     // types as a `JsonValue`; the cast is the documented escape hatch.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment
     data: data as any,
   });
+  return result.count > 0;
 }

@@ -25,7 +25,6 @@ vi.mock('@/lib/db/client', () => ({
       findFirst: vi.fn(),
       updateMany: vi.fn(),
       findUnique: vi.fn(),
-      update: vi.fn(),
     },
   },
 }));
@@ -42,7 +41,6 @@ const { claimNextRun, releaseLease, markTerminal, RUN_LEASE_TTL_MS } =
 const findFirst = prisma.aiEvaluationRun.findFirst as unknown as ReturnType<typeof vi.fn>;
 const updateMany = prisma.aiEvaluationRun.updateMany as unknown as ReturnType<typeof vi.fn>;
 const findUnique = prisma.aiEvaluationRun.findUnique as unknown as ReturnType<typeof vi.fn>;
-const update = prisma.aiEvaluationRun.update as unknown as ReturnType<typeof vi.fn>;
 const warn = logger.warn as unknown as ReturnType<typeof vi.fn>;
 
 function fullRow(overrides: Record<string, unknown> = {}) {
@@ -216,26 +214,35 @@ describe('claimNextRun', () => {
 });
 
 describe('releaseLease', () => {
-  it('clears lockedBy and lockedAt on the given runId', async () => {
-    update.mockResolvedValueOnce({ id: 'run-1' });
+  it('clears lockedBy and lockedAt on a running run', async () => {
+    updateMany.mockResolvedValueOnce({ count: 1 });
 
     await releaseLease('run-1');
 
-    expect(update).toHaveBeenCalledWith({
-      where: { id: 'run-1' },
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: 'run-1', status: 'running' },
       data: { lockedBy: null, lockedAt: null },
     });
+  });
+
+  it('no-ops when the row is no longer running (concurrent cancel won)', async () => {
+    updateMany.mockResolvedValueOnce({ count: 0 });
+
+    // Should not throw — the status='running' predicate just made it
+    // a no-op write because the cancel route already flipped status.
+    await expect(releaseLease('run-1')).resolves.toBeUndefined();
   });
 });
 
 describe('markTerminal', () => {
   it('sets status + completedAt and clears lease (no patch)', async () => {
-    update.mockResolvedValueOnce({ id: 'run-1' });
+    updateMany.mockResolvedValueOnce({ count: 1 });
 
-    await markTerminal('run-1', 'completed');
+    const ok = await markTerminal('run-1', 'completed');
 
-    const call = update.mock.calls[0][0];
-    expect(call.where).toEqual({ id: 'run-1' });
+    expect(ok).toBe(true);
+    const call = updateMany.mock.calls[0][0];
+    expect(call.where).toEqual({ id: 'run-1', status: 'running' });
     expect(call.data).toMatchObject({
       status: 'completed',
       lockedBy: null,
@@ -247,40 +254,53 @@ describe('markTerminal', () => {
   });
 
   it('writes summary when patch.summary is provided', async () => {
-    update.mockResolvedValueOnce({ id: 'run-1' });
+    updateMany.mockResolvedValueOnce({ count: 1 });
 
     await markTerminal('run-1', 'failed', {
       summary: { note: 'dataset_changed_post_submit' },
     });
 
-    expect(update.mock.calls[0][0].data.summary).toEqual({
+    expect(updateMany.mock.calls[0][0].data.summary).toEqual({
       note: 'dataset_changed_post_submit',
     });
   });
 
   it('writes totalCostUsd when patch.totalCostUsd is provided', async () => {
-    update.mockResolvedValueOnce({ id: 'run-1' });
+    updateMany.mockResolvedValueOnce({ count: 1 });
 
     await markTerminal('run-1', 'completed', { totalCostUsd: 1.23 });
 
-    expect(update.mock.calls[0][0].data.totalCostUsd).toBe(1.23);
+    expect(updateMany.mock.calls[0][0].data.totalCostUsd).toBe(1.23);
   });
 
   it('supports cancelled status', async () => {
-    update.mockResolvedValueOnce({ id: 'run-1' });
+    updateMany.mockResolvedValueOnce({ count: 1 });
 
     await markTerminal('run-1', 'cancelled');
 
-    expect(update.mock.calls[0][0].data.status).toBe('cancelled');
+    expect(updateMany.mock.calls[0][0].data.status).toBe('cancelled');
   });
 
   it('omits patch keys whose values are explicitly undefined', async () => {
-    update.mockResolvedValueOnce({ id: 'run-1' });
+    updateMany.mockResolvedValueOnce({ count: 1 });
 
     await markTerminal('run-1', 'completed', { summary: undefined, totalCostUsd: undefined });
 
-    const data = update.mock.calls[0][0].data;
+    const data = updateMany.mock.calls[0][0].data;
     expect(data).not.toHaveProperty('summary');
     expect(data).not.toHaveProperty('totalCostUsd');
+  });
+
+  it('returns false when the row is no longer running (cancel won the race)', async () => {
+    // Regression test for the cancel-race fix: if an admin cancels a run
+    // while the worker is mid-loop, the status='running' predicate
+    // prevents the worker's terminal update from clobbering 'cancelled'.
+    updateMany.mockResolvedValueOnce({ count: 0 });
+
+    const ok = await markTerminal('run-1', 'completed', { totalCostUsd: 0.42 });
+
+    expect(ok).toBe(false);
+    // The guard predicate is the load-bearing assertion here.
+    expect(updateMany.mock.calls[0][0].where).toEqual({ id: 'run-1', status: 'running' });
   });
 });
