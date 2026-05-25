@@ -57,13 +57,20 @@ export async function claimNextRun(workerId: string): Promise<ClaimedRun | null>
   const orphanCutoff = new Date(Date.now() - RUN_LEASE_TTL_MS);
 
   // Two-step claim:
-  //  1. Find a candidate id (queued, OR running with stale lease)
+  //  1. Find a candidate id (queued, OR running with released lease, OR
+  //     running with stale lease — orphaned).
   //  2. CAS-update only if it still satisfies the predicate.
   // Postgres-portable; mirrors `processOrphanedExecutions`.
+  //
+  // The middle case (running + lockedBy=null) covers the worker's
+  // intentional time-budget release: a partial run releases its lease
+  // and the very next tick MUST be able to pick it up — waiting the full
+  // 5-minute orphan window would stall long batches needlessly.
   const candidate = await prisma.aiEvaluationRun.findFirst({
     where: {
       OR: [
         { status: 'queued', lockedBy: null },
+        { status: 'running', lockedBy: null },
         { status: 'running', lockedAt: { lt: orphanCutoff } },
       ],
     },
@@ -78,6 +85,7 @@ export async function claimNextRun(workerId: string): Promise<ClaimedRun | null>
       id: candidate.id,
       OR: [
         { status: 'queued', lockedBy: null },
+        { status: 'running', lockedBy: null },
         { status: 'running', lockedAt: { lt: orphanCutoff } },
       ],
     },
@@ -85,13 +93,19 @@ export async function claimNextRun(workerId: string): Promise<ClaimedRun | null>
       status: 'running',
       lockedBy: workerId,
       lockedAt: now,
-      startedAt: now,
     },
   });
   if (result.count === 0) {
     // Another worker won the race. Caller can try again next tick.
     return null;
   }
+
+  // Stamp startedAt only on the first successful claim — resumed
+  // (released-and-reclaimed) runs keep their original start time.
+  await prisma.aiEvaluationRun.updateMany({
+    where: { id: candidate.id, startedAt: null },
+    data: { startedAt: now },
+  });
 
   const claimed = await prisma.aiEvaluationRun.findUnique({
     where: { id: candidate.id },
