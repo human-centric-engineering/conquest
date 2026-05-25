@@ -136,3 +136,23 @@ export type ListDatasetCasesQuery = z.infer<typeof listDatasetCasesQuerySchema>;
 export type ListRunsQuery = z.infer<typeof listRunsQuerySchema>;
 export type CreateRunInput = z.infer<typeof createRunSchema>;
 export type ListRunCasesQuery = z.infer<typeof listRunCasesQuerySchema>;
+
+// ---------------------------------------------------------------------------
+// Runs — cost estimate
+// ---------------------------------------------------------------------------
+
+/**
+ * Body of `POST /evaluations/runs/estimate`. Heuristic mode runs without
+ * a judge list; empirical mode requires the same `(agentId, judgeAgentSlugs,
+ * datasetId)` fingerprint that the eventual run will carry, so the
+ * caller (the form) sends them all even if the user hasn't selected
+ * any judges yet.
+ */
+export const estimateRunCostSchema = z.object({
+  agentId: z.string().min(1),
+  datasetId: z.string().min(1),
+  judgeAgentSlugs: z.array(z.string().min(1)).default([]),
+  caseCount: z.coerce.number().int().nonnegative().optional(),
+});
+
+export type EstimateRunCostInput = z.infer<typeof estimateRunCostSchema>;

@@ -276,11 +276,41 @@ code, no "AI flourishes". One grep audits the whole surface.
   returning a typed `workflow_subject_not_supported_in_phase_1` error,
   the run-creation API rejects `subjectKind: 'workflow'` at the route
   boundary. Phase 3 ships the UI.
-- Pairwise graders, RAG-specific Ragas metrics, trace-to-dataset
-  capture, synthetic case generation — all land in Phase 2/3.
-- Cost estimate on the run-create form is a coarse heuristic; the
-  proper estimator is a Phase 2 follow-up.
+- Pairwise graders, RAG-specific Ragas metrics — Phase 3.
 - No CI gating endpoint yet — Phase 4.
+
+## Phase 2 — cost estimator
+
+Replaces the UI-copy-only heuristic with a real two-mode estimator that
+mirrors the workflow cost estimator's contract.
+
+- **Empirical mode** — when ≥3 prior `completed` runs match the
+  fingerprint `(agentId, sorted judgeAgentSlugs, datasetContentHash)`,
+  the estimator takes the median per-case cost from those runs
+  (`totalCostUsd / casesDone`) and multiplies by the dataset's current
+  case count. Range is tight (±15–50%, scaled by relative MAD).
+- **Heuristic mode** — otherwise. Per-case shape is one subject call
+  (~1.5k input + 500 output tokens at the subject agent's bound model)
+  plus one call per judge agent (~600 input + 150 output at the judge's
+  bound model). Heuristic graders cost nothing. Range is wide (×0.5 / ×2)
+  to signal uncertainty.
+- The fingerprint is **strict** on purpose: a judge swap, a model swap
+  on the subject agent, or a dataset re-upload (which changes the
+  content hash) resets the empirical floor until 3 fresh runs
+  accumulate. Looser keys would silently misprice when the operator
+  changes the setup.
+- Models with no registry pricing surface with `pricingKnown: false` on
+  the relevant `modelMix` entry. The form shows an explicit "no pricing
+  data" callout rather than masking the gap as $0.
+- Subject vs. judge `AiCostLog` rows are tagged with
+  `metadata.role: 'subject' | 'judge'` (and `evaluationRunId`) so future
+  per-role breakdowns work without re-instrumenting. The plumbing
+  shipped in 2.0 and is forward-compat for Phase 3 workflow subjects.
+
+The estimate is served by `POST /evaluations/runs/estimate` and called
+from the run-create form on a 350 ms debounce keyed on
+`(agentId, datasetId, sorted judgeAgentSlugs)`. Toggling a heuristic
+grader does not re-fetch — heuristics are free.
 
 ## Roadmap: judges in workflows
 
@@ -374,6 +404,8 @@ type; `workflow_as_judge` reuses the same workflow execution path).
 | Judge agents seed   | `prisma/seeds/016-evaluation-judges.ts`                                                    |
 | drainStreamChat     | `lib/orchestration/evaluations/drain-stream-chat.ts`                                       |
 | Tick wiring         | `app/api/v1/admin/orchestration/maintenance/tick/route.ts`                                 |
+| Cost estimator      | `lib/orchestration/cost-estimation/evaluation-cost.ts`                                     |
+| Estimate route      | `app/api/v1/admin/orchestration/evaluations/runs/estimate/route.ts`                        |
 | API routes          | `app/api/v1/admin/orchestration/evaluations/{datasets,runs,graders}/`                      |
 | UI pages            | `app/admin/orchestration/evaluations/{datasets,runs}/`                                     |
 | UI components       | `components/admin/orchestration/evaluations-foundations/`                                  |

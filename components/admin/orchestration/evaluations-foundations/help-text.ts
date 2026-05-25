@@ -74,7 +74,10 @@ export const runHelp = {
     'Leave blank to use the system default judge model (set via `EVALUATION_JUDGE_*` env vars, or your default chat model if those are unset). Most teams never need to override this per-run.',
 
   totalCostEstimate:
-    'A rough estimate. Cases × selected model graders × ~600 tokens per judge call. Heuristic graders are free; the subject (the agent under test) bills against its usual budget.',
+    'Predicted USD cost of running the dataset against the agent + judges you picked. **Empirical** when 3+ past runs match the same agent + judges + dataset — the median per-case cost from those runs, repriced at current rates. **Heuristic** otherwise — a per-call token guess priced at each model. Heuristic graders are free; the subject bills against its usual budget.',
+
+  costEstimateUnknownPricing:
+    "One or more models in the mix have no pricing data, so the total is missing a slice. Add a row to the provider model matrix (Costs → Provider models) to set `costPerMillionTokens`, or use a model that's already priced.",
 } as const;
 
 // ---------------------------------------------------------------------------

@@ -518,6 +518,145 @@ describe('RunCreateForm', () => {
     });
   });
 
+  describe('cost estimate banner', () => {
+    function buildEstimate(overrides: Record<string, unknown> = {}) {
+      return {
+        midUsd: 0.42,
+        lowUsd: 0.2,
+        highUsd: 0.8,
+        basedOn: 'heuristic',
+        sampleSize: 0,
+        caseCount: 10,
+        modelMix: [
+          {
+            modelId: 'claude-sonnet-4-6',
+            role: 'subject',
+            inputTokens: 15000,
+            outputTokens: 5000,
+            costUsd: 0.4,
+            pricingKnown: true,
+          },
+        ],
+        notes: 'Heuristic estimate from 10 cases.',
+        ...overrides,
+      };
+    }
+
+    function mockEstimateFetch(
+      estimate: ReturnType<typeof buildEstimate>
+    ): ReturnType<typeof vi.fn> {
+      const fn = vi.fn().mockImplementation(async (url: string) => {
+        if (typeof url === 'string' && url.includes('/runs/estimate')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ success: true, data: estimate }),
+          } as Response;
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ success: true, data: { id: 'run-x' } }),
+        } as Response;
+      });
+      vi.stubGlobal('fetch', fn);
+      return fn;
+    }
+
+    it('shows the estimate mid + range + heuristic badge once the API responds', async () => {
+      mockEstimateFetch(buildEstimate());
+      render(<RunCreateForm {...defaultProps()} />);
+
+      await waitFor(
+        () => {
+          expect(screen.getByText(/Estimated cost:/i)).toBeInTheDocument();
+        },
+        { timeout: 2000 }
+      );
+      expect(screen.getByText(/\$0\.42/)).toBeInTheDocument();
+      // "heuristic" appears in the badge — pick the exact-match instance
+      // (other "heuristic" text refers to the heuristic-graders card).
+      expect(
+        screen.getByText((_, node) => node?.textContent?.trim() === 'heuristic')
+      ).toBeInTheDocument();
+      expect(screen.getByText(/Heuristic estimate from 10 cases/i)).toBeInTheDocument();
+    });
+
+    it('shows the empirical badge with sample size when basedOn=empirical', async () => {
+      mockEstimateFetch(
+        buildEstimate({
+          basedOn: 'empirical',
+          sampleSize: 4,
+          notes: 'Calibrated from 4 past runs.',
+        })
+      );
+      render(<RunCreateForm {...defaultProps()} />);
+
+      await waitFor(
+        () => {
+          expect(screen.getByText(/empirical · 4 past runs/i)).toBeInTheDocument();
+        },
+        { timeout: 2000 }
+      );
+    });
+
+    it('surfaces a "pricing unknown" hint when any modelMix row has pricingKnown=false', async () => {
+      mockEstimateFetch(
+        buildEstimate({
+          modelMix: [
+            {
+              modelId: 'mystery-model',
+              role: 'subject',
+              inputTokens: 0,
+              outputTokens: 0,
+              costUsd: 0,
+              pricingKnown: false,
+            },
+          ],
+        })
+      );
+      render(<RunCreateForm {...defaultProps()} />);
+
+      await waitFor(
+        () => {
+          expect(screen.getByText(/no pricing data/i)).toBeInTheDocument();
+        },
+        { timeout: 2000 }
+      );
+    });
+
+    it('renders an inline error notice when the estimate API returns a 4xx', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockImplementation(async (url: string) => {
+          if (typeof url === 'string' && url.includes('/runs/estimate')) {
+            return {
+              ok: false,
+              status: 400,
+              json: async () => ({
+                success: false,
+                error: { code: 'BAD', message: 'estimate failed for tests' },
+              }),
+            } as Response;
+          }
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ success: true, data: {} }),
+          } as Response;
+        })
+      );
+      render(<RunCreateForm {...defaultProps()} />);
+
+      await waitFor(
+        () => {
+          expect(screen.getByText(/Cost estimate unavailable/i)).toBeInTheDocument();
+        },
+        { timeout: 2000 }
+      );
+    });
+  });
+
   describe('summary footer', () => {
     it('reflects selected heuristic and judge counts', async () => {
       const user = userEvent.setup();
