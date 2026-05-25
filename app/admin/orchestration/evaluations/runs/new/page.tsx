@@ -1,10 +1,9 @@
 /**
  * /admin/orchestration/evaluations/runs/new
  *
- * Shell page for the run-creation form. Loads the three option lists
- * (agents, datasets, graders) server-side and hands them to the client
- * form. The form does all the interactive work — section-by-section
- * fill-in, per-grader inline editors, submit-and-redirect.
+ * Shell page for the run-creation form. Loads the option lists
+ * (agents, datasets, heuristic graders, judge agents) server-side and
+ * hands them to the client form.
  */
 
 import type { Metadata } from 'next';
@@ -15,7 +14,8 @@ import { Button } from '@/components/ui/button';
 import {
   type AgentOption,
   type DatasetOption,
-  type GraderOption,
+  type HeuristicGraderOption,
+  type JudgeAgentOption,
   RunCreateForm,
 } from '@/components/admin/orchestration/evaluations-foundations/run-create-form';
 import { API } from '@/lib/api/endpoints';
@@ -29,7 +29,7 @@ export const metadata: Metadata = {
 
 async function loadAgents(): Promise<AgentOption[]> {
   try {
-    const res = await serverFetch(`${API.ADMIN.ORCHESTRATION.AGENTS}?limit=100`);
+    const res = await serverFetch(`${API.ADMIN.ORCHESTRATION.AGENTS}?limit=100&kind=chat`);
     if (!res.ok) return [];
     const parsed = await parseApiResponse<Array<{ id: string; name: string; slug: string }>>(res);
     if (!parsed.success) return [];
@@ -58,18 +58,23 @@ async function loadDatasets(): Promise<DatasetOption[]> {
   }
 }
 
-async function loadGraders(): Promise<GraderOption[]> {
+interface GradersResponse {
+  heuristicGraders: HeuristicGraderOption[];
+  judgeAgents: JudgeAgentOption[];
+}
+
+async function loadGraders(): Promise<GradersResponse> {
   try {
     const res = await serverFetch(API.ADMIN.ORCHESTRATION.EVAL_GRADERS);
-    if (!res.ok) return [];
-    const parsed = await parseApiResponse<{ graders: GraderOption[] }>(res);
-    if (!parsed.success) return [];
-    return parsed.data.graders;
+    if (!res.ok) return { heuristicGraders: [], judgeAgents: [] };
+    const parsed = await parseApiResponse<GradersResponse>(res);
+    if (!parsed.success) return { heuristicGraders: [], judgeAgents: [] };
+    return parsed.data;
   } catch (err) {
     logger.error('Failed to load graders for run-create', {
       error: err instanceof Error ? err.message : String(err),
     });
-    return [];
+    return { heuristicGraders: [], judgeAgents: [] };
   }
 }
 
@@ -99,7 +104,12 @@ export default async function NewRunPage(): Promise<React.ReactElement> {
         </p>
       </div>
 
-      <RunCreateForm agents={agents} datasets={datasets} graders={graders} />
+      <RunCreateForm
+        agents={agents}
+        datasets={datasets}
+        heuristicGraders={graders.heuristicGraders}
+        judgeAgents={graders.judgeAgents}
+      />
     </div>
   );
 }

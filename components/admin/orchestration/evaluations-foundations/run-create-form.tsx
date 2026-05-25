@@ -3,21 +3,21 @@
 /**
  * RunCreateForm — single-page form for queueing a batch evaluation run.
  *
- * Five logical sections (Subject → Dataset → Metrics → Judge → Review)
- * laid out top to bottom, no multi-step wizard. The user fills in the
- * form linearly; submit POSTs to /api/v1/admin/orchestration/evaluations/runs
- * which queues the run for the maintenance-tick worker.
+ * Five logical sections (Basics → Subject → Dataset → Heuristic graders
+ * + Judge agents → Review). The metric picker is split in two:
  *
- * Phase 1 ships agent-only subjects; the schema is workflow-ready but
- * the UI omits workflow until Phase 3.
+ *   - Heuristic graders (cheap, deterministic, no LLM)
+ *   - Judge agents (one LLM call per case, agents the admin can edit
+ *     in the existing agent form)
  *
- * FieldHelp on every non-trivial field. Tone strings pulled from
- * help-text.ts so the wording stays auditable in one place.
+ * Judge agents are loaded live from /graders so any kind='judge' agent
+ * the admin creates appears automatically.
  */
 
 import * as React from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Loader2, Play } from 'lucide-react';
+import { Edit3, Loader2, Play, Plus, Sparkles } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -54,40 +54,45 @@ export interface DatasetOption {
   caseCount: number;
 }
 
-export interface GraderOption {
+export interface HeuristicGraderOption {
   slug: string;
-  family: 'heuristic' | 'model' | 'pairwise';
+  family: 'heuristic';
   description: string;
   referenceRequired: boolean;
   defaultConfig: unknown;
 }
 
+export interface JudgeAgentOption {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  isSystem: boolean;
+  model: string;
+  provider: string;
+}
+
 interface RunCreateFormProps {
   agents: AgentOption[];
   datasets: DatasetOption[];
-  graders: GraderOption[];
+  heuristicGraders: HeuristicGraderOption[];
+  judgeAgents: JudgeAgentOption[];
 }
 
 // ─── Local state types ──────────────────────────────────────────────────────
 
-interface CustomRubricConfig {
-  prompt: string;
-  scaleMin: number;
-  scaleMax: number;
-  passThreshold?: number;
-}
-
-interface MetricSelection {
-  slug: string;
-  config: Record<string, unknown>;
-}
+/** A ticked metric — heuristic by slug, judge by agent slug. */
+type MetricSelection =
+  | { kind: 'heuristic'; slug: string; config: Record<string, unknown> }
+  | { kind: 'judge'; agentSlug: string };
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
 export function RunCreateForm({
   agents,
   datasets,
-  graders,
+  heuristicGraders,
+  judgeAgents,
 }: RunCreateFormProps): React.ReactElement {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -98,31 +103,42 @@ export function RunCreateForm({
   const [agentId, setAgentId] = React.useState(agents[0]?.id ?? '');
   const [datasetId, setDatasetId] = React.useState(prefilledDatasetId || datasets[0]?.id || '');
   const [selectedMetrics, setSelectedMetrics] = React.useState<MetricSelection[]>([]);
-  const [judgeOverride, setJudgeOverride] = React.useState(false);
-  const [judgeProvider, setJudgeProvider] = React.useState('');
-  const [judgeModel, setJudgeModel] = React.useState('');
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   const chosenDataset = datasets.find((d) => d.id === datasetId) ?? null;
+  const builtInJudges = judgeAgents.filter((j) => j.isSystem);
+  const customJudges = judgeAgents.filter((j) => !j.isSystem);
 
-  function toggleMetric(slug: string, defaultConfig: unknown): void {
+  function toggleHeuristic(g: HeuristicGraderOption): void {
     setSelectedMetrics((prev) => {
-      const existing = prev.find((m) => m.slug === slug);
+      const existing = prev.find((m) => m.kind === 'heuristic' && m.slug === g.slug);
       if (existing) {
-        return prev.filter((m) => m.slug !== slug);
+        return prev.filter((m) => !(m.kind === 'heuristic' && m.slug === g.slug));
       }
       const config =
-        defaultConfig && typeof defaultConfig === 'object'
-          ? { ...(defaultConfig as Record<string, unknown>) }
+        g.defaultConfig && typeof g.defaultConfig === 'object'
+          ? { ...(g.defaultConfig as Record<string, unknown>) }
           : {};
-      return [...prev, { slug, config }];
+      return [...prev, { kind: 'heuristic', slug: g.slug, config }];
     });
   }
 
-  function updateMetricConfig(slug: string, patch: Record<string, unknown>): void {
+  function toggleJudge(agentSlug: string): void {
+    setSelectedMetrics((prev) => {
+      const existing = prev.find((m) => m.kind === 'judge' && m.agentSlug === agentSlug);
+      if (existing) {
+        return prev.filter((m) => !(m.kind === 'judge' && m.agentSlug === agentSlug));
+      }
+      return [...prev, { kind: 'judge', agentSlug }];
+    });
+  }
+
+  function updateHeuristicConfig(slug: string, patch: Record<string, unknown>): void {
     setSelectedMetrics((prev) =>
-      prev.map((m) => (m.slug === slug ? { ...m, config: { ...m.config, ...patch } } : m))
+      prev.map((m) =>
+        m.kind === 'heuristic' && m.slug === slug ? { ...m, config: { ...m.config, ...patch } } : m
+      )
     );
   }
 
@@ -135,6 +151,13 @@ export function RunCreateForm({
     if (!datasetId) return setError('Pick a dataset.');
     if (selectedMetrics.length === 0) return setError('Pick at least one metric.');
 
+    // Compile the wire-format metricConfigs.
+    const metricConfigs = selectedMetrics.map((m) =>
+      m.kind === 'heuristic'
+        ? { slug: m.slug, config: m.config }
+        : { slug: 'judge_agent', config: { agentSlug: m.agentSlug } }
+    );
+
     setIsSubmitting(true);
     try {
       const res = await fetch(API.ADMIN.ORCHESTRATION.EVAL_RUNS, {
@@ -146,8 +169,7 @@ export function RunCreateForm({
           subjectKind: 'agent',
           agentId,
           datasetId,
-          metricConfigs: selectedMetrics,
-          ...(judgeOverride && judgeProvider && judgeModel ? { judgeProvider, judgeModel } : {}),
+          metricConfigs,
         }),
       });
       const payload = (await res.json()) as
@@ -164,6 +186,10 @@ export function RunCreateForm({
       setIsSubmitting(false);
     }
   }
+
+  // Count selections for the footer summary.
+  const judgeCount = selectedMetrics.filter((m) => m.kind === 'judge').length;
+  const heuristicCount = selectedMetrics.filter((m) => m.kind === 'heuristic').length;
 
   // ─── Render ──────────────────────────────────────────────────────────────
 
@@ -210,7 +236,7 @@ export function RunCreateForm({
             Subject <FieldHelp title="Subject">{runHelp.subjectKind}</FieldHelp>
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent>
           <div className="space-y-2">
             <Label htmlFor="agentId">
               Agent <FieldHelp title="Agent">{runHelp.subjectAgent}</FieldHelp>
@@ -271,130 +297,161 @@ export function RunCreateForm({
         </CardContent>
       </Card>
 
-      {/* Metrics */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">
-            Metrics <FieldHelp title="Metrics">{runHelp.metricsPicker}</FieldHelp>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {graders.map((g) => {
-            const selected = selectedMetrics.find((m) => m.slug === g.slug);
-            const helpText = (graderHelp as Record<string, string>)[g.slug] ?? g.description;
-            return (
-              <div key={g.slug} className="rounded-md border p-3">
-                <div className="flex items-start gap-3">
-                  <Checkbox
-                    id={`metric-${g.slug}`}
-                    checked={!!selected}
-                    onCheckedChange={() => toggleMetric(g.slug, g.defaultConfig)}
-                  />
-                  <div className="flex-1 space-y-1">
-                    <Label htmlFor={`metric-${g.slug}`} className="flex items-center gap-2">
-                      <span className="font-mono text-sm">{g.slug}</span>
-                      <Badge variant="outline" className="text-[10px]">
-                        {g.family}
-                      </Badge>
-                      {g.referenceRequired ? (
-                        <Badge variant="secondary" className="text-[10px]">
-                          needs expectedOutput
-                        </Badge>
-                      ) : null}
-                      <FieldHelp title={g.slug}>{helpText}</FieldHelp>
-                    </Label>
-                    <p className="text-muted-foreground text-xs">{g.description}</p>
+      {/* Heuristic graders */}
+      {heuristicGraders.length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">
+              Heuristic graders{' '}
+              <FieldHelp title="Heuristic graders">
+                Deterministic checks — no LLM, no cost. Run on every case.
+              </FieldHelp>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {heuristicGraders.map((g) => {
+              const selected = selectedMetrics.find(
+                (m) => m.kind === 'heuristic' && m.slug === g.slug
+              );
+              const helpText = (graderHelp as Record<string, string>)[g.slug] ?? g.description;
+              return (
+                <div key={g.slug} className="rounded-md border p-3">
+                  <div className="flex items-start gap-3">
+                    <Checkbox
+                      id={`heuristic-${g.slug}`}
+                      checked={!!selected}
+                      onCheckedChange={() => toggleHeuristic(g)}
+                    />
+                    <div className="flex-1 space-y-1">
+                      <Label htmlFor={`heuristic-${g.slug}`} className="flex items-center gap-2">
+                        <span className="font-mono text-sm">{g.slug}</span>
+                        {g.referenceRequired ? (
+                          <Badge variant="secondary" className="text-[10px]">
+                            needs expectedOutput
+                          </Badge>
+                        ) : null}
+                        <FieldHelp title={g.slug}>{helpText}</FieldHelp>
+                      </Label>
+                      <p className="text-muted-foreground text-xs">{g.description}</p>
 
-                    {selected && g.slug === 'custom_rubric' ? (
-                      <CustomRubricEditor
-                        config={selected.config as unknown as CustomRubricConfig}
-                        onPatch={(patch) => updateMetricConfig(g.slug, patch)}
-                      />
-                    ) : null}
-                    {selected && g.slug === 'regex' ? (
-                      <RegexEditor
-                        config={selected.config}
-                        onPatch={(patch) => updateMetricConfig(g.slug, patch)}
-                      />
-                    ) : null}
-                    {selected && g.slug === 'contains' ? (
-                      <ContainsEditor
-                        config={selected.config}
-                        onPatch={(patch) => updateMetricConfig(g.slug, patch)}
-                      />
-                    ) : null}
-                    {selected && g.slug === 'length_between' ? (
-                      <LengthBetweenEditor
-                        config={selected.config}
-                        onPatch={(patch) => updateMetricConfig(g.slug, patch)}
-                      />
-                    ) : null}
-                    {selected && g.slug === 'tool_was_called' ? (
-                      <ToolWasCalledEditor
-                        config={selected.config}
-                        onPatch={(patch) => updateMetricConfig(g.slug, patch)}
-                      />
-                    ) : null}
-                    {selected && g.slug === 'citation_count_at_least' ? (
-                      <MinEditor
-                        config={selected.config}
-                        label="Minimum citations"
-                        onPatch={(patch) => updateMetricConfig(g.slug, patch)}
-                      />
-                    ) : null}
+                      {selected && selected.kind === 'heuristic' && g.slug === 'regex' ? (
+                        <ConfigEditor
+                          config={selected.config}
+                          fields={[
+                            {
+                              key: 'pattern',
+                              label: 'Pattern (regex)',
+                              placeholder: '\\d{4}-\\d{2}-\\d{2}',
+                            },
+                            { key: 'flags', label: 'Flags', placeholder: 'i, m, s …' },
+                          ]}
+                          onPatch={(patch) => updateHeuristicConfig(g.slug, patch)}
+                        />
+                      ) : null}
+                      {selected && selected.kind === 'heuristic' && g.slug === 'length_between' ? (
+                        <ConfigEditor
+                          config={selected.config}
+                          fields={[
+                            { key: 'min', label: 'Min chars', type: 'number' },
+                            { key: 'max', label: 'Max chars', type: 'number' },
+                          ]}
+                          onPatch={(patch) => updateHeuristicConfig(g.slug, patch)}
+                        />
+                      ) : null}
+                      {selected && selected.kind === 'heuristic' && g.slug === 'tool_was_called' ? (
+                        <ConfigEditor
+                          config={selected.config}
+                          fields={[
+                            {
+                              key: 'slug',
+                              label: 'Tool slug',
+                              placeholder: 'search_knowledge_base',
+                            },
+                            { key: 'min', label: 'Min invocations', type: 'number' },
+                          ]}
+                          onPatch={(patch) => updateHeuristicConfig(g.slug, patch)}
+                        />
+                      ) : null}
+                      {selected &&
+                      selected.kind === 'heuristic' &&
+                      g.slug === 'citation_count_at_least' ? (
+                        <ConfigEditor
+                          config={selected.config}
+                          fields={[{ key: 'min', label: 'Minimum citations', type: 'number' }]}
+                          onPatch={(patch) => updateHeuristicConfig(g.slug, patch)}
+                        />
+                      ) : null}
+                    </div>
                   </div>
                 </div>
-              </div>
-            );
-          })}
-        </CardContent>
-      </Card>
+              );
+            })}
+          </CardContent>
+        </Card>
+      ) : null}
 
-      {/* Judge override */}
+      {/* Judge agents */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">
-            Judge model <FieldHelp title="Judge model">{runHelp.judgeModel}</FieldHelp>
+          <CardTitle className="flex items-center justify-between text-base">
+            <span className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4" aria-hidden />
+              Judge agents
+              <FieldHelp title="Judge agents">
+                Every model-graded metric is an Agent with kind=&quot;judge&quot;. Pick one or more
+                — each judge fires one LLM call per case and scores via the judge&apos;s system
+                instructions (the rubric). Built-in judges ship with tight rubrics; create custom
+                judges for domain-specific scoring.
+              </FieldHelp>
+            </span>
+            <Button asChild size="sm" variant="outline">
+              <Link href="/admin/orchestration/agents/new?kind=judge">
+                <Plus className="mr-1 h-3.5 w-3.5" aria-hidden />
+                Create custom judge
+              </Link>
+            </Button>
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3">
-          <p className="text-muted-foreground text-xs">{runHelp.judgeOmission}</p>
-          <div className="flex items-center gap-2">
-            <Checkbox
-              id="judgeOverride"
-              checked={judgeOverride}
-              onCheckedChange={(v) => setJudgeOverride(v === true)}
-            />
-            <Label htmlFor="judgeOverride" className="text-sm font-normal">
-              Override the system default judge for this run
-            </Label>
-          </div>
-          {judgeOverride ? (
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label htmlFor="judgeProvider" className="text-xs">
-                  Provider slug
-                </Label>
-                <Input
-                  id="judgeProvider"
-                  placeholder="e.g. anthropic"
-                  value={judgeProvider}
-                  onChange={(e) => setJudgeProvider(e.target.value)}
+        <CardContent className="space-y-4">
+          {builtInJudges.length > 0 ? (
+            <div className="space-y-2">
+              <h4 className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
+                Built-in
+              </h4>
+              {builtInJudges.map((j) => (
+                <JudgeRow
+                  key={j.id}
+                  judge={j}
+                  selected={selectedMetrics.some(
+                    (m) => m.kind === 'judge' && m.agentSlug === j.slug
+                  )}
+                  onToggle={() => toggleJudge(j.slug)}
                 />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="judgeModel" className="text-xs">
-                  Model id
-                </Label>
-                <Input
-                  id="judgeModel"
-                  placeholder="e.g. claude-haiku-4-5-20251001"
-                  value={judgeModel}
-                  onChange={(e) => setJudgeModel(e.target.value)}
-                />
-              </div>
+              ))}
             </div>
           ) : null}
+          {customJudges.length > 0 ? (
+            <div className="space-y-2">
+              <h4 className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
+                Custom
+              </h4>
+              {customJudges.map((j) => (
+                <JudgeRow
+                  key={j.id}
+                  judge={j}
+                  selected={selectedMetrics.some(
+                    (m) => m.kind === 'judge' && m.agentSlug === j.slug
+                  )}
+                  onToggle={() => toggleJudge(j.slug)}
+                />
+              ))}
+            </div>
+          ) : (
+            <p className="text-muted-foreground text-xs">
+              No custom judges yet. Click &quot;Create custom judge&quot; to build a domain-specific
+              scorer (e.g. policy compliance, refund eligibility).
+            </p>
+          )}
         </CardContent>
       </Card>
 
@@ -406,9 +463,10 @@ export function RunCreateForm({
 
       <div className="flex items-center justify-between">
         <p className="text-muted-foreground text-xs">
-          <FieldHelp title="Cost estimate">{runHelp.totalCostEstimate}</FieldHelp> Selected metrics:{' '}
-          <strong>{selectedMetrics.length}</strong>; cases:{' '}
-          <strong>{chosenDataset?.caseCount ?? 0}</strong>.
+          <strong>{heuristicCount}</strong> heuristic, <strong>{judgeCount}</strong> judge agent
+          {judgeCount === 1 ? '' : 's'} selected. Dataset:{' '}
+          <strong>{chosenDataset?.caseCount ?? 0}</strong> cases. Judge cost is metered per case on
+          the judge agent itself — see costs on each judge&apos;s page.
         </p>
         <div className="flex gap-2">
           <Button
@@ -433,202 +491,101 @@ export function RunCreateForm({
   );
 }
 
-// ─── Per-grader inline editors ──────────────────────────────────────────────
+// ─── Per-judge row ──────────────────────────────────────────────────────────
 
-function CustomRubricEditor({
+function JudgeRow({
+  judge,
+  selected,
+  onToggle,
+}: {
+  judge: JudgeAgentOption;
+  selected: boolean;
+  onToggle: () => void;
+}): React.ReactElement {
+  return (
+    <div className="rounded-md border p-3">
+      <div className="flex items-start gap-3">
+        <Checkbox id={`judge-${judge.slug}`} checked={selected} onCheckedChange={onToggle} />
+        <div className="flex-1 space-y-1">
+          <Label htmlFor={`judge-${judge.slug}`} className="flex items-center gap-2">
+            <span className="font-medium">{judge.name}</span>
+            <span className="text-muted-foreground font-mono text-[10px]">{judge.slug}</span>
+            {judge.isSystem ? (
+              <Badge variant="outline" className="text-[10px]">
+                built-in
+              </Badge>
+            ) : null}
+            {judge.model ? (
+              <Badge variant="secondary" className="text-[10px]">
+                {judge.model}
+              </Badge>
+            ) : null}
+            <Link
+              href={`/admin/orchestration/agents/${judge.id}/edit`}
+              target="_blank"
+              className="text-muted-foreground hover:text-foreground ml-1 text-xs underline-offset-4 hover:underline"
+              title="Edit this judge's rubric"
+            >
+              <Edit3 className="inline h-3 w-3" aria-hidden /> edit
+            </Link>
+          </Label>
+          {judge.description ? (
+            <p className="text-muted-foreground text-xs">{judge.description}</p>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Generic config editor for heuristic graders ───────────────────────────
+
+interface ConfigField {
+  key: string;
+  label: string;
+  placeholder?: string;
+  type?: 'text' | 'number';
+}
+
+/**
+ * Coerce an arbitrary config value to a safe display string. Heuristic
+ * graders store strings/numbers in config, so this is straightforward
+ * — but Zod's `unknown` typing here forces the no-base-to-string lint
+ * unless we narrow.
+ */
+function stringifyConfigValue(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return '';
+}
+
+function ConfigEditor({
   config,
+  fields,
   onPatch,
 }: {
-  config: CustomRubricConfig;
+  config: Record<string, unknown>;
+  fields: ConfigField[];
   onPatch: (patch: Record<string, unknown>) => void;
 }): React.ReactElement {
   return (
-    <div className="bg-muted/40 mt-2 space-y-2 rounded p-3">
-      <div className="space-y-1">
-        <Label className="text-xs">
-          Rubric prompt <FieldHelp title="Rubric">{graderHelp.customRubricPrompt}</FieldHelp>
-        </Label>
-        <Textarea
-          rows={3}
-          value={config.prompt ?? ''}
-          onChange={(e) => onPatch({ prompt: e.target.value })}
-          placeholder="Describe what counts as a high vs. low score"
-          maxLength={2000}
-        />
-      </div>
-      <div className="grid grid-cols-3 gap-2">
-        <div className="space-y-1">
-          <Label className="text-xs">Scale min</Label>
+    <div className="bg-muted/40 mt-2 grid grid-cols-2 gap-2 rounded p-3">
+      {fields.map((f) => (
+        <div key={f.key} className={`space-y-1 ${fields.length === 1 ? 'col-span-2' : ''}`}>
+          <Label className="text-xs">{f.label}</Label>
           <Input
-            type="number"
-            value={config.scaleMin ?? 1}
-            onChange={(e) => onPatch({ scaleMin: Number(e.target.value) })}
-            min={0}
-          />
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs">
-            Scale max <FieldHelp title="Scale">{graderHelp.customRubricScale}</FieldHelp>
-          </Label>
-          <Input
-            type="number"
-            value={config.scaleMax ?? 5}
-            onChange={(e) => onPatch({ scaleMax: Number(e.target.value) })}
-            min={1}
-          />
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs">
-            Pass threshold{' '}
-            <FieldHelp title="Threshold">{graderHelp.customRubricThreshold}</FieldHelp>
-          </Label>
-          <Input
-            type="number"
-            value={config.passThreshold ?? ''}
+            type={f.type === 'number' ? 'number' : 'text'}
+            value={stringifyConfigValue(config[f.key])}
+            placeholder={f.placeholder}
             onChange={(e) =>
               onPatch({
-                passThreshold: e.target.value === '' ? undefined : Number(e.target.value),
+                [f.key]: f.type === 'number' ? Number(e.target.value) : e.target.value,
               })
             }
-            placeholder="optional"
           />
         </div>
-      </div>
-    </div>
-  );
-}
-
-function RegexEditor({
-  config,
-  onPatch,
-}: {
-  config: Record<string, unknown>;
-  onPatch: (patch: Record<string, unknown>) => void;
-}): React.ReactElement {
-  return (
-    <div className="bg-muted/40 mt-2 grid grid-cols-2 gap-2 rounded p-3">
-      <div className="col-span-2 space-y-1">
-        <Label className="text-xs">Pattern (regex)</Label>
-        <Input
-          value={(config.pattern as string) ?? ''}
-          onChange={(e) => onPatch({ pattern: e.target.value })}
-          placeholder="e.g. \\d{4}-\\d{2}-\\d{2}"
-        />
-      </div>
-      <div className="space-y-1">
-        <Label className="text-xs">Flags</Label>
-        <Input
-          value={(config.flags as string) ?? ''}
-          onChange={(e) => onPatch({ flags: e.target.value })}
-          placeholder="i, m, s, …"
-        />
-      </div>
-    </div>
-  );
-}
-
-function ContainsEditor({
-  config,
-  onPatch,
-}: {
-  config: Record<string, unknown>;
-  onPatch: (patch: Record<string, unknown>) => void;
-}): React.ReactElement {
-  return (
-    <div className="bg-muted/40 mt-2 flex items-center gap-2 rounded p-3 text-xs">
-      <Checkbox
-        id="contains-case"
-        checked={config.caseInsensitive !== false}
-        onCheckedChange={(v) => onPatch({ caseInsensitive: v === true })}
-      />
-      <Label htmlFor="contains-case" className="text-xs font-normal">
-        Case-insensitive
-      </Label>
-    </div>
-  );
-}
-
-function LengthBetweenEditor({
-  config,
-  onPatch,
-}: {
-  config: Record<string, unknown>;
-  onPatch: (patch: Record<string, unknown>) => void;
-}): React.ReactElement {
-  return (
-    <div className="bg-muted/40 mt-2 grid grid-cols-2 gap-2 rounded p-3">
-      <div className="space-y-1">
-        <Label className="text-xs">Minimum chars</Label>
-        <Input
-          type="number"
-          value={(config.min as number | undefined) ?? 10}
-          onChange={(e) => onPatch({ min: Number(e.target.value) })}
-          min={0}
-        />
-      </div>
-      <div className="space-y-1">
-        <Label className="text-xs">Maximum chars</Label>
-        <Input
-          type="number"
-          value={(config.max as number | undefined) ?? 2000}
-          onChange={(e) => onPatch({ max: Number(e.target.value) })}
-          min={1}
-        />
-      </div>
-    </div>
-  );
-}
-
-function ToolWasCalledEditor({
-  config,
-  onPatch,
-}: {
-  config: Record<string, unknown>;
-  onPatch: (patch: Record<string, unknown>) => void;
-}): React.ReactElement {
-  return (
-    <div className="bg-muted/40 mt-2 grid grid-cols-2 gap-2 rounded p-3">
-      <div className="col-span-2 space-y-1">
-        <Label className="text-xs">Tool / capability slug</Label>
-        <Input
-          value={(config.slug as string) ?? ''}
-          onChange={(e) => onPatch({ slug: e.target.value })}
-          placeholder="e.g. search_knowledge_base"
-        />
-      </div>
-      <div className="space-y-1">
-        <Label className="text-xs">Minimum invocations</Label>
-        <Input
-          type="number"
-          value={(config.min as number | undefined) ?? 1}
-          onChange={(e) => onPatch({ min: Number(e.target.value) })}
-          min={1}
-        />
-      </div>
-    </div>
-  );
-}
-
-function MinEditor({
-  config,
-  label,
-  onPatch,
-}: {
-  config: Record<string, unknown>;
-  label: string;
-  onPatch: (patch: Record<string, unknown>) => void;
-}): React.ReactElement {
-  return (
-    <div className="bg-muted/40 mt-2 grid grid-cols-2 gap-2 rounded p-3">
-      <div className="space-y-1">
-        <Label className="text-xs">{label}</Label>
-        <Input
-          type="number"
-          value={(config.min as number | undefined) ?? 1}
-          onChange={(e) => onPatch({ min: Number(e.target.value) })}
-          min={1}
-        />
-      </div>
+      ))}
     </div>
   );
 }

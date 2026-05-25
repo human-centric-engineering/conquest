@@ -26,13 +26,19 @@ export const GET = withAdminAuth(async (request, _session) => {
   const log = await getRouteLogger(request);
 
   const { searchParams } = new URL(request.url);
-  const { page, limit, isActive, provider, isSystem, q } = validateQueryParams(
+  const { page, limit, isActive, provider, isSystem, q, kind } = validateQueryParams(
     searchParams,
     listAgentsQuerySchema
   );
   const skip = (page - 1) * limit;
 
-  const where: Prisma.AiAgentWhereInput = {};
+  // Default `kind=chat` when the caller doesn't specify — keeps the
+  // standard agents list page free of judge agents without forcing
+  // every existing call site to opt in. The run-create metric picker
+  // passes `kind=judge` to surface judges; an explicit `kind=` value
+  // overrides the default and any caller can still pass nothing to
+  // see every kind (used by the agents-as-cost-targets view).
+  const where: Prisma.AiAgentWhereInput = { kind: kind ?? 'chat' };
   if (isActive !== undefined) where.isActive = isActive;
   if (provider) where.provider = provider;
   if (isSystem !== undefined) where.isSystem = isSystem;

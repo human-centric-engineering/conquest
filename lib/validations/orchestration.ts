@@ -355,6 +355,13 @@ export const listAgentsQuerySchema = paginationQuerySchema.extend({
   provider: z.string().trim().max(50).optional(),
   isSystem: queryBooleanSchema.optional(),
   q: z.string().trim().max(200).optional(),
+  /**
+   * Discriminator filter. `chat` (default) for end-user-facing agents,
+   * `judge` for evaluation judge agents. The agents list page passes
+   * `kind=chat` so judges don't appear there; the run-create metric
+   * picker passes `kind=judge` to populate the judge dropdown.
+   */
+  kind: z.enum(['chat', 'judge']).optional(),
 });
 
 /**

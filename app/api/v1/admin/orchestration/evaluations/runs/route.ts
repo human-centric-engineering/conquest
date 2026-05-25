@@ -95,12 +95,19 @@ export const POST = withAdminAuth(async (request, session) => {
   }
 
   // 4. Subject ownership ---------------------------------------------------
+  let subjectBrandVoice: string | undefined;
   if (body.subjectKind === 'agent') {
     const agent = await prisma.aiAgent.findUnique({
       where: { id: body.agentId! },
-      select: { id: true },
+      select: { id: true, kind: true, brandVoiceInstructions: true },
     });
     if (!agent) throw new NotFoundError(`Agent ${body.agentId} not found`);
+    if (agent.kind !== 'chat') {
+      throw new ValidationError(
+        `Subject agent must be a chat agent (got kind='${agent.kind}'). Pick an agent from /admin/orchestration/agents.`
+      );
+    }
+    subjectBrandVoice = agent.brandVoiceInstructions ?? undefined;
   } else {
     // Phase 1: schema is ready but the worker stub returns a typed
     // not-supported error. Refuse at the route boundary so users get a
@@ -110,18 +117,54 @@ export const POST = withAdminAuth(async (request, session) => {
     );
   }
 
-  // 5. Per-grader config validation ----------------------------------------
-  for (const entry of body.metricConfigs) {
-    const grader = getGrader(entry.slug);
-    const parsed = grader.configSchema.safeParse(entry.config ?? grader.defaultConfig ?? {});
-    if (!parsed.success) {
-      throw new ValidationError(
-        `Grader "${entry.slug}" config invalid: ${parsed.error.issues
-          .map((i) => `${i.path.join('.')}: ${i.message}`)
-          .join('; ')}`
-      );
-    }
-  }
+  // 5. Per-grader config validation + judge_agent slug existence ----------
+  // For `judge_agent` entries: verify the named agent exists and is a
+  // kind='judge' row. Also pin `subjectBrandVoice` into the config when
+  // the brand-voice judge is selected — so dataset/run hash captures
+  // the subject's voice as of submit time (mirrors datasetContentHash
+  // pinning).
+  const pinnedMetricConfigs = await Promise.all(
+    body.metricConfigs.map(async (entry) => {
+      const grader = getGrader(entry.slug);
+      const parsed = grader.configSchema.safeParse(entry.config ?? grader.defaultConfig ?? {});
+      if (!parsed.success) {
+        throw new ValidationError(
+          `Grader "${entry.slug}" config invalid: ${parsed.error.issues
+            .map((i) => `${i.path.join('.')}: ${i.message}`)
+            .join('; ')}`
+        );
+      }
+      if (entry.slug !== 'judge_agent') return entry;
+
+      const cfg = parsed.data as { agentSlug: string; subjectBrandVoice?: string };
+      const judgeAgent = await prisma.aiAgent.findUnique({
+        where: { slug: cfg.agentSlug },
+        select: { kind: true, isActive: true },
+      });
+      if (!judgeAgent) {
+        throw new ValidationError(`Judge agent "${cfg.agentSlug}" not found.`);
+      }
+      if (judgeAgent.kind !== 'judge') {
+        throw new ValidationError(
+          `Agent "${cfg.agentSlug}" is not a judge (kind='${judgeAgent.kind}'). Pick from /admin/orchestration/judges.`
+        );
+      }
+      if (!judgeAgent.isActive) {
+        throw new ValidationError(`Judge agent "${cfg.agentSlug}" is inactive.`);
+      }
+      // Pin brand voice for the brand-voice judge — same hash-pin
+      // discipline as datasetContentHash. Other judges ignore the
+      // field.
+      const isBrandVoiceJudge = cfg.agentSlug === 'eval-judge-brand-voice';
+      const pinnedConfig: { agentSlug: string; subjectBrandVoice?: string } = {
+        agentSlug: cfg.agentSlug,
+      };
+      if (isBrandVoiceJudge && subjectBrandVoice) {
+        pinnedConfig.subjectBrandVoice = subjectBrandVoice;
+      }
+      return { slug: entry.slug, config: pinnedConfig };
+    })
+  );
 
   // 6. Queue the run -------------------------------------------------------
   const created = await prisma.aiEvaluationRun.create({
@@ -134,7 +177,7 @@ export const POST = withAdminAuth(async (request, session) => {
       workflowId: body.workflowId ?? null,
       datasetId: dataset.id,
       datasetContentHash: dataset.contentHash,
-      metricConfigs: body.metricConfigs as Prisma.InputJsonValue,
+      metricConfigs: pinnedMetricConfigs as Prisma.InputJsonValue,
       judgeProvider: body.judgeProvider ?? null,
       judgeModel: body.judgeModel ?? null,
       subjectOutputSelector:
