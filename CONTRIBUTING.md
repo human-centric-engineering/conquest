@@ -124,6 +124,16 @@ chore: update dependencies
 - Documentation updated where needed
 - Commit messages are clear and follow conventions
 
+### Automated checks on every PR
+
+Beyond the local checks above, CI runs supply-chain security scanning on every PR to `main`:
+
+- **CodeQL** — static analysis; findings appear in the repository's Security tab
+- **Dependency Review** — blocks a PR that adds a dependency with a known high+ vulnerability (usually fixed by choosing a patched version)
+- **Secret Scan (TruffleHog)** — blocks a PR that commits a credential (remove it and rotate the secret)
+
+If one fails, the Checks tab or PR comment explains why. See [Supply-Chain Security](.context/security/overview.md#supply-chain-security) for the full layer.
+
 ## Project Structure
 
 See `.context/substrate.md` for full documentation. Key areas:

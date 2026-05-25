@@ -54,16 +54,16 @@ When deploying Sunrise in production:
    - Enable SSL/TLS for database connections in production
 
 3. **Dependencies**:
-   - Run `npm audit` regularly
-   - Keep dependencies up to date
-   - Monitor for security advisories
+   - Dependabot opens weekly update PRs automatically; enable "Dependabot security updates" in repo settings for vulnerability-driven PRs
+   - CodeQL, dependency review, and secret scanning run in CI (see `.github/workflows/`)
+   - Run `npm audit` locally for ad-hoc checks
 
 4. **Rate Limiting**:
    - Configure appropriate rate limits for your use case (see `lib/security/rate-limit.ts`)
    - Use Redis for distributed rate limiting in production
 
 5. **Headers & CORS**:
-   - Review security headers in `middleware.ts`
+   - Review security headers in `proxy.ts` (Next.js 16's renamed middleware)
    - Configure CORS appropriately for your domain
 
 6. **Monitoring**:
@@ -82,6 +82,7 @@ Sunrise includes these security features out of the box:
 - Security headers (CSP, HSTS, X-Frame-Options, etc.)
 - SQL injection protection via Prisma
 - XSS protection via React and input sanitization
+- Supply-chain scanning in CI: automated dependency updates (Dependabot), PR vulnerability gating (dependency review), static analysis (CodeQL), and secret scanning (TruffleHog)
 
 ### Acknowledgments
 

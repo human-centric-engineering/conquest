@@ -351,7 +351,7 @@ export function errorResponse(message: string, code?: string, details?: any) {
 
 **Use**: `package-lock.json` (npm's lock file)
 **Commit**: Always commit lock file to repository
-**Updates**: Run `npm audit fix` monthly, `npm update` quarterly
+**Updates**: Automated weekly via Dependabot (`.github/dependabot.yml`) — minor/patch bumps grouped, majors individual. Use the commands below for ad-hoc updates between Dependabot PRs.
 
 ### Dependency Update Workflow
 
@@ -373,6 +373,13 @@ git add package-lock.json && git commit -m "chore: update dependencies"
 ```
 
 ### Security Scanning
+
+Dependency and supply-chain scanning runs automatically in CI — see [Security → Supply-Chain Security](../security/overview.md#supply-chain-security) for the full layer:
+
+- **Dependabot** opens weekly version-update PRs and (with the repo's "Dependabot security updates" setting on) vulnerability-driven PRs as advisories land.
+- **Dependency Review** (`.github/workflows/dependency-review.yml`) fails any PR that introduces a dependency with a known high+ vulnerability.
+
+Local / ad-hoc audit:
 
 ```bash
 # Audit dependencies

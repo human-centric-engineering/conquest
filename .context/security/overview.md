@@ -397,6 +397,24 @@ export async function POST(request: Request) {
 - NoSQL Injection: Type validation prevents malicious operators
 - Buffer Overflow: Max length limits prevent memory exhaustion
 
+## Supply-Chain Security
+
+CI scans dependencies, code, and git history on every push and PR to `main` (plus a weekly cron). All four layers are zero-config for forks — no secrets, and they work on org-owned repos.
+
+| Layer              | Workflow / file                           | What it does                                                                                 |
+| ------------------ | ----------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Dependency updates | `.github/dependabot.yml`                  | Weekly npm + GitHub Actions version-update PRs; minor/patch grouped, majors individual       |
+| Dependency gate    | `.github/workflows/dependency-review.yml` | Fails a PR that adds a dependency with a known **high+** vulnerability; license advisory     |
+| SAST               | `.github/workflows/codeql.yml`            | CodeQL static analysis (JS/TS, `build-mode: none`); findings in **Security → Code scanning** |
+| Secret scanning    | `.github/workflows/secret-scan.yml`       | TruffleHog scans the diff (PR) and full history (cron); fails on a committed credential      |
+
+**TruffleHog over gitleaks-action:** gitleaks-action requires a paid licence for org-owned repos; TruffleHog is free for everyone, so forks inherit it unchanged.
+
+**Two settings live outside these files — enable them per repo:**
+
+1. **Settings → Code security → Dependabot security updates** — the vulnerability-driven PRs. The version-update config in `dependabot.yml` does not enable them.
+2. After the first green run, add **Analyze (javascript-typescript)**, **Dependency Review**, and **TruffleHog** as required status checks in branch protection. They run on every PR and always report, so requiring them directly is safe — unlike `ci.yml`'s skippable `Validate` / `Docker Build` jobs, which is why `CI Status` is the aggregate gate there.
+
 ## Security Checklist
 
 ### Headers & Policies
@@ -422,7 +440,7 @@ export async function POST(request: Request) {
 
 ### Maintenance
 
-- [ ] Regular dependency updates (schedule `npm audit`)
+- [x] Automated dependency updates + vulnerability scanning in CI (see [Supply-Chain Security](#supply-chain-security))
 - [ ] CSP violation monitoring (check `/api/csp-report` logs)
 
 ## Decision History
