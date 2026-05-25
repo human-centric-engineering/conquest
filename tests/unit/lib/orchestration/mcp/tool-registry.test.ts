@@ -36,6 +36,19 @@ import {
   callMcpTool,
   clearMcpToolCache,
 } from '@/lib/orchestration/mcp/tool-registry';
+import type { McpContentBlock } from '@/types/mcp';
+
+/**
+ * Narrow a content block to text so assertions like `.text` are sound under
+ * the new discriminated-union shape. Throws clearly when the wrong block
+ * type was returned.
+ */
+function asText(block: McpContentBlock): string {
+  if (block.type !== 'text') {
+    throw new Error(`Expected text block, got ${block.type}`);
+  }
+  return block.text;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -45,6 +58,7 @@ function makeCapability(
   overrides: Partial<{
     slug: string;
     isActive: boolean;
+    isIdempotent: boolean;
     functionDefinition: unknown;
   }> = {}
 ) {
@@ -52,6 +66,7 @@ function makeCapability(
     id: 'cap-1',
     slug: 'search_knowledge',
     isActive: true,
+    isIdempotent: false,
     functionDefinition: {
       name: 'search_knowledge',
       description: 'Search the knowledge base',
@@ -67,6 +82,11 @@ function makeExposedTool(
     customName: string | null;
     customDescription: string | null;
     isEnabled: boolean;
+    customTitle: string | null;
+    readOnlyHint: boolean | null;
+    destructiveHint: boolean | null;
+    idempotentHint: boolean | null;
+    openWorldHint: boolean | null;
     capability: ReturnType<typeof makeCapability>;
   }> = {}
 ) {
@@ -78,6 +98,12 @@ function makeExposedTool(
     customDescription: null,
     rateLimitPerKey: null,
     requiresScope: null,
+    // MCP 2025-06-18 tool annotation overrides — all null = "inherit / no opinion"
+    customTitle: null as string | null,
+    readOnlyHint: null as boolean | null,
+    destructiveHint: null as boolean | null,
+    idempotentHint: null as boolean | null,
+    openWorldHint: null as boolean | null,
     capability: makeCapability(),
     ...overrides,
   };
@@ -261,7 +287,7 @@ describe('callMcpTool', () => {
 
     // test-review:accept tobe_true — boolean field isError on McpToolCallResult; structural assertion on MCP error contract
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('Unknown tool');
+    expect(asText(result.content[0])).toContain('Unknown tool');
   });
 
   it('returns isError=true when mcp-system agent is not found', async () => {
@@ -277,7 +303,7 @@ describe('callMcpTool', () => {
 
     // test-review:accept tobe_true — boolean field isError on McpToolCallResult; structural assertion on MCP error contract
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('MCP system agent');
+    expect(asText(result.content[0])).toContain('MCP system agent');
     expect(logger.error).toHaveBeenCalledWith(
       expect.stringContaining('mcp-system agent not found')
     );
@@ -302,7 +328,7 @@ describe('callMcpTool', () => {
       { userId: 'user-1', agentId: 'agent-42' }
     );
     expect(result.isError).toBeUndefined();
-    expect(result.content[0].text).toContain('answer');
+    expect(asText(result.content[0])).toContain('answer');
   });
 
   it('serializes result data as JSON in content block', async () => {
@@ -318,7 +344,7 @@ describe('callMcpTool', () => {
 
     const result = await callMcpTool('search_knowledge', {}, 'user-1');
 
-    const parsed = JSON.parse(result.content[0].text);
+    const parsed = JSON.parse(asText(result.content[0]));
     expect(parsed).toEqual({ key: 'value', count: 42 });
   });
 
@@ -337,7 +363,7 @@ describe('callMcpTool', () => {
 
     // test-review:accept tobe_true — boolean field isError on McpToolCallResult; structural assertion on MCP error contract
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toBe('Something broke');
+    expect(asText(result.content[0])).toBe('Something broke');
   });
 
   it('uses fallback message when dispatcher error has no message', async () => {
@@ -354,7 +380,7 @@ describe('callMcpTool', () => {
 
     // test-review:accept tobe_true — boolean field isError on McpToolCallResult; structural assertion on MCP error contract
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toBe('Tool execution failed');
+    expect(asText(result.content[0])).toBe('Tool execution failed');
   });
 
   it('catches dispatcher exceptions and returns MCP error content', async () => {
@@ -371,7 +397,7 @@ describe('callMcpTool', () => {
     // Act: callMcpTool catches the throw and returns an error content block
     const result = await callMcpTool('search_knowledge', {}, 'user-1');
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toBe('Tool execution failed unexpectedly');
+    expect(asText(result.content[0])).toBe('Tool execution failed unexpectedly');
   });
 
   it('passes empty object when args is undefined', async () => {
@@ -460,5 +486,259 @@ describe('clearMcpToolCache', () => {
     await listMcpTools();
 
     expect(prisma.mcpExposedTool.findMany).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tool annotations (MCP 2025-06-18)
+// ---------------------------------------------------------------------------
+
+describe('listMcpTools annotations', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearMcpToolCache();
+  });
+
+  it('omits the annotations object when no overrides are set and capability is not idempotent', async () => {
+    vi.mocked(prisma.mcpExposedTool.findMany).mockResolvedValue([makeExposedTool()] as never);
+    vi.mocked(capabilityFunctionDefinitionSchema.safeParse).mockReturnValue(
+      makeSuccessfulParse() as never
+    );
+
+    const tools = await listMcpTools();
+    expect(tools[0].annotations).toBeUndefined();
+  });
+
+  it('emits annotations when any override is set', async () => {
+    vi.mocked(prisma.mcpExposedTool.findMany).mockResolvedValue([
+      makeExposedTool({ readOnlyHint: true, customTitle: 'Search KB' }),
+    ] as never);
+    vi.mocked(capabilityFunctionDefinitionSchema.safeParse).mockReturnValue(
+      makeSuccessfulParse() as never
+    );
+
+    const tools = await listMcpTools();
+    expect(tools[0].annotations).toEqual({
+      title: 'Search KB',
+      readOnlyHint: true,
+    });
+  });
+
+  it('inherits idempotentHint from capability.isIdempotent when override is null', async () => {
+    vi.mocked(prisma.mcpExposedTool.findMany).mockResolvedValue([
+      makeExposedTool({
+        capability: makeCapability({ isIdempotent: true }),
+      }),
+    ] as never);
+    vi.mocked(capabilityFunctionDefinitionSchema.safeParse).mockReturnValue(
+      makeSuccessfulParse() as never
+    );
+
+    const tools = await listMcpTools();
+    expect(tools[0].annotations?.idempotentHint).toBe(true);
+  });
+
+  it('row override of idempotentHint:false beats capability default of true', async () => {
+    vi.mocked(prisma.mcpExposedTool.findMany).mockResolvedValue([
+      makeExposedTool({
+        idempotentHint: false,
+        capability: makeCapability({ isIdempotent: true }),
+      }),
+    ] as never);
+    vi.mocked(capabilityFunctionDefinitionSchema.safeParse).mockReturnValue(
+      makeSuccessfulParse() as never
+    );
+
+    const tools = await listMcpTools();
+    expect(tools[0].annotations?.idempotentHint).toBe(false);
+  });
+
+  it('emits destructiveHint and openWorldHint when set', async () => {
+    vi.mocked(prisma.mcpExposedTool.findMany).mockResolvedValue([
+      makeExposedTool({
+        readOnlyHint: false,
+        destructiveHint: true,
+        openWorldHint: true,
+      }),
+    ] as never);
+    vi.mocked(capabilityFunctionDefinitionSchema.safeParse).mockReturnValue(
+      makeSuccessfulParse() as never
+    );
+
+    const tools = await listMcpTools();
+    expect(tools[0].annotations).toMatchObject({
+      readOnlyHint: false,
+      destructiveHint: true,
+      openWorldHint: true,
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Rich tool content blocks (MCP 2025-06-18 image/audio/resource)
+// ---------------------------------------------------------------------------
+
+describe('callMcpTool: rich content blocks', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearMcpToolCache();
+    vi.mocked(prisma.mcpExposedTool.findMany).mockResolvedValue([makeExposedTool()] as never);
+    vi.mocked(capabilityFunctionDefinitionSchema.safeParse).mockReturnValue(
+      makeSuccessfulParse() as never
+    );
+    vi.mocked(prisma.aiAgent.findUnique).mockResolvedValue({ id: 'agent-42' } as never);
+  });
+
+  function mkPayload(blocks: unknown[]): { contentBlocks: unknown[] } {
+    return { contentBlocks: blocks };
+  }
+
+  function mockDispatch(data: unknown): void {
+    vi.mocked(capabilityDispatcher.dispatch).mockResolvedValue({
+      success: true,
+      data,
+    } as never);
+  }
+
+  it('passes through a multi-text payload', async () => {
+    mockDispatch(
+      mkPayload([
+        { type: 'text', text: 'first' },
+        { type: 'text', text: 'second' },
+      ])
+    );
+
+    const result = await callMcpTool('search_knowledge', {}, 'user-1');
+
+    expect(result.isError).toBeUndefined();
+    expect(result.content).toHaveLength(2);
+    expect(asText(result.content[0])).toBe('first');
+    expect(asText(result.content[1])).toBe('second');
+  });
+
+  it('passes through an image block with valid base64', async () => {
+    const tinyPng = Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString('base64');
+    mockDispatch(mkPayload([{ type: 'image', data: tinyPng, mimeType: 'image/png' }]));
+
+    const result = await callMcpTool('search_knowledge', {}, 'user-1');
+
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0].type).toBe('image');
+  });
+
+  it('rejects invalid base64 in image block', async () => {
+    mockDispatch(mkPayload([{ type: 'image', data: 'not!base64!', mimeType: 'image/png' }]));
+
+    const result = await callMcpTool('search_knowledge', {}, 'user-1');
+
+    expect(result.isError).toBe(true);
+    expect(asText(result.content[0])).toContain('invalid base64');
+  });
+
+  it('rejects an image block larger than 5 MB', async () => {
+    // 6 MB of base64 → ~4.5 MB decoded… use a larger source to clearly exceed.
+    const big = 'A'.repeat(7 * 1024 * 1024); // ~5.25 MB decoded
+    mockDispatch(mkPayload([{ type: 'image', data: big, mimeType: 'image/png' }]));
+
+    const result = await callMcpTool('search_knowledge', {}, 'user-1');
+
+    expect(result.isError).toBe(true);
+    expect(asText(result.content[0])).toContain('size limit');
+  });
+
+  it('rejects when total payload exceeds 10 MB', async () => {
+    // 3 binary blocks of 4 MB each (3 * 4 MB = 12 MB)
+    const fourMB = 'A'.repeat(Math.ceil((4 * 1024 * 1024 * 4) / 3)); // ~4 MB decoded
+    mockDispatch(
+      mkPayload([
+        { type: 'image', data: fourMB, mimeType: 'image/png' },
+        { type: 'image', data: fourMB, mimeType: 'image/png' },
+        { type: 'image', data: fourMB, mimeType: 'image/png' },
+      ])
+    );
+
+    const result = await callMcpTool('search_knowledge', {}, 'user-1');
+
+    expect(result.isError).toBe(true);
+  });
+
+  it('rejects more than 50 content blocks', async () => {
+    const blocks = Array.from({ length: 51 }, (_, i) => ({
+      type: 'text',
+      text: `block ${String(i)}`,
+    }));
+    mockDispatch(mkPayload(blocks));
+
+    const result = await callMcpTool('search_knowledge', {}, 'user-1');
+
+    expect(result.isError).toBe(true);
+    expect(asText(result.content[0])).toContain('too many');
+  });
+
+  it('rejects an embedded resource missing both text and blob', async () => {
+    mockDispatch(
+      mkPayload([{ type: 'resource', resource: { uri: 'sunrise://x', mimeType: 'text/plain' } }])
+    );
+
+    const result = await callMcpTool('search_knowledge', {}, 'user-1');
+
+    expect(result.isError).toBe(true);
+    expect(asText(result.content[0])).toContain('exactly one');
+  });
+
+  it('rejects an embedded resource with both text and blob', async () => {
+    mockDispatch(
+      mkPayload([
+        {
+          type: 'resource',
+          resource: {
+            uri: 'sunrise://x',
+            mimeType: 'text/plain',
+            text: 'hello',
+            blob: Buffer.from('hi').toString('base64'),
+          },
+        },
+      ])
+    );
+
+    const result = await callMcpTool('search_knowledge', {}, 'user-1');
+
+    expect(result.isError).toBe(true);
+  });
+
+  it('passes through an embedded text resource', async () => {
+    mockDispatch(
+      mkPayload([
+        {
+          type: 'resource',
+          resource: { uri: 'sunrise://docs/x', mimeType: 'text/markdown', text: '# Title' },
+        },
+      ])
+    );
+
+    const result = await callMcpTool('search_knowledge', {}, 'user-1');
+
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0].type).toBe('resource');
+  });
+
+  it('rejects an unknown content block type', async () => {
+    mockDispatch(mkPayload([{ type: 'video', data: 'x', mimeType: 'video/mp4' }]));
+
+    const result = await callMcpTool('search_knowledge', {}, 'user-1');
+
+    expect(result.isError).toBe(true);
+    expect(asText(result.content[0])).toContain('unknown content block type');
+  });
+
+  it('does not interpret legacy {} return as a content-block payload', async () => {
+    // Legacy capabilities return arbitrary JSON. {contentBlocks} is the new
+    // opt-in shape — anything else must round-trip through JSON.stringify.
+    mockDispatch({ result: 42 });
+
+    const result = await callMcpTool('search_knowledge', {}, 'user-1');
+
+    expect(result.isError).toBeUndefined();
+    expect(asText(result.content[0])).toBe('{"result":42}');
   });
 });

@@ -68,11 +68,35 @@ interface McpToolsListProps {
   capabilities: CapabilityRow[];
 }
 
+/**
+ * Tri-state hint value used by the edit form. Annotation hints are nullable
+ * in the schema — null means "no opinion", which is different from false.
+ */
+type HintState = 'unset' | 'true' | 'false';
+
+function hintFromBool(value: boolean | null | undefined): HintState {
+  if (value === true) return 'true';
+  if (value === false) return 'false';
+  return 'unset';
+}
+
+function hintToBool(value: HintState): boolean | null {
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return null;
+}
+
 interface EditForm {
   customName: string;
   customDescription: string;
   rateLimitPerKey: string;
   requiresScope: string;
+  // 2025-06-18 MCP tool annotations
+  customTitle: string;
+  readOnlyHint: HintState;
+  destructiveHint: HintState;
+  idempotentHint: HintState;
+  openWorldHint: HintState;
 }
 
 export function McpToolsList({ initialTools, capabilities }: McpToolsListProps) {
@@ -85,6 +109,11 @@ export function McpToolsList({ initialTools, capabilities }: McpToolsListProps) 
     customDescription: '',
     rateLimitPerKey: '',
     requiresScope: '',
+    customTitle: '',
+    readOnlyHint: 'unset',
+    destructiveHint: 'unset',
+    idempotentHint: 'unset',
+    openWorldHint: 'unset',
   });
   const [editSaving, setEditSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -139,6 +168,11 @@ export function McpToolsList({ initialTools, capabilities }: McpToolsListProps) 
       customDescription: tool.customDescription ?? '',
       rateLimitPerKey: tool.rateLimitPerKey?.toString() ?? '',
       requiresScope: tool.requiresScope ?? '',
+      customTitle: tool.customTitle ?? '',
+      readOnlyHint: hintFromBool(tool.readOnlyHint),
+      destructiveHint: hintFromBool(tool.destructiveHint),
+      idempotentHint: hintFromBool(tool.idempotentHint),
+      openWorldHint: hintFromBool(tool.openWorldHint),
     });
   }
 
@@ -153,10 +187,21 @@ export function McpToolsList({ initialTools, capabilities }: McpToolsListProps) 
       const rate = editForm.rateLimitPerKey.trim();
       const scope = editForm.requiresScope.trim();
 
+      const customTitle = editForm.customTitle.trim();
+      const readOnlyHint = hintToBool(editForm.readOnlyHint);
+      const destructiveHint = hintToBool(editForm.destructiveHint);
+      const idempotentHint = hintToBool(editForm.idempotentHint);
+      const openWorldHint = hintToBool(editForm.openWorldHint);
+
       body.customName = name || null;
       body.customDescription = desc || null;
       body.rateLimitPerKey = rate ? parseInt(rate, 10) : null;
       body.requiresScope = scope || null;
+      body.customTitle = customTitle || null;
+      body.readOnlyHint = readOnlyHint;
+      body.destructiveHint = destructiveHint;
+      body.idempotentHint = idempotentHint;
+      body.openWorldHint = openWorldHint;
 
       await apiClient.patch(API.ADMIN.ORCHESTRATION.mcpToolById(editingTool.id), { body });
       setTools((prev) =>
@@ -168,6 +213,11 @@ export function McpToolsList({ initialTools, capabilities }: McpToolsListProps) 
                 customDescription: desc || null,
                 rateLimitPerKey: rate ? parseInt(rate, 10) : null,
                 requiresScope: scope || null,
+                customTitle: customTitle || null,
+                readOnlyHint,
+                destructiveHint,
+                idempotentHint,
+                openWorldHint,
               }
             : t
         )
@@ -260,6 +310,85 @@ export function McpToolsList({ initialTools, capabilities }: McpToolsListProps) 
                 onChange={(e) => setEditForm((f) => ({ ...f, requiresScope: e.target.value }))}
                 placeholder="none"
               />
+            </div>
+
+            {/* Tool annotations (MCP 2025-06-18) */}
+            <div className="space-y-3 border-t pt-4">
+              <div>
+                <h4 className="text-foreground text-sm font-medium">
+                  Annotations
+                  <FieldHelp title="Tool Annotations">
+                    Advisory hints that MCP clients use to inform UX — e.g. surfacing a warning
+                    before calling a destructive tool, or grouping idempotent tools so the model can
+                    retry safely. <strong>Hints are not enforced</strong> by the server or by
+                    compliant clients; every tool should still be treated as untrusted regardless of
+                    the hints set here. Leave a hint unset when you genuinely have no opinion.
+                  </FieldHelp>
+                </h4>
+                <p className="text-muted-foreground mt-1 text-xs">
+                  Each hint is tri-state: <em>unset</em> (no opinion), <em>true</em>, or{' '}
+                  <em>false</em>.
+                </p>
+              </div>
+
+              <div>
+                <Label htmlFor="edit-custom-title">
+                  Custom Title
+                  <FieldHelp title="Custom Title">
+                    A human-readable label shown by clients in place of the technical tool name.
+                    Falls back to the capability name when blank.
+                  </FieldHelp>
+                </Label>
+                <Input
+                  id="edit-custom-title"
+                  value={editForm.customTitle}
+                  onChange={(e) => setEditForm((f) => ({ ...f, customTitle: e.target.value }))}
+                  placeholder={editingTool?.capability.name ?? ''}
+                />
+              </div>
+
+              {(
+                [
+                  {
+                    key: 'readOnlyHint' as const,
+                    label: 'Read-only',
+                    help: 'true = does not modify state.',
+                  },
+                  {
+                    key: 'destructiveHint' as const,
+                    label: 'Destructive',
+                    help: 'true = may perform destructive updates (only meaningful when read-only is false).',
+                  },
+                  {
+                    key: 'idempotentHint' as const,
+                    label: 'Idempotent',
+                    help: 'true = calling repeatedly with the same args has the same effect as calling once. Overrides the capability default in MCP context.',
+                  },
+                  {
+                    key: 'openWorldHint' as const,
+                    label: 'Open-world',
+                    help: 'true = interacts with an open-ended external system (e.g. web search, third-party API) rather than a closed local data set.',
+                  },
+                ] as const
+              ).map(({ key, label, help }) => (
+                <div key={key} className="flex items-center gap-3 text-sm">
+                  <span className="w-28">{label}</span>
+                  <Select
+                    value={editForm[key]}
+                    onValueChange={(v: HintState) => setEditForm((f) => ({ ...f, [key]: v }))}
+                  >
+                    <SelectTrigger className="w-32" data-testid={`hint-${key}`}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="unset">unset</SelectItem>
+                      <SelectItem value="true">true</SelectItem>
+                      <SelectItem value="false">false</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <span className="text-muted-foreground text-xs">{help}</span>
+                </div>
+              ))}
             </div>
           </div>
           <DialogFooter>

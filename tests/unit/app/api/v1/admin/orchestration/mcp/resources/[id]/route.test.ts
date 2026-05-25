@@ -53,13 +53,18 @@ vi.mock('@/lib/api/context', () => ({
 vi.mock('@/lib/orchestration/mcp', () => ({
   clearMcpResourceCache: vi.fn(),
   broadcastMcpResourcesChanged: vi.fn(),
+  broadcastMcpResourceUpdated: vi.fn(),
 }));
 
 // ─── Imports ─────────────────────────────────────────────────────────────────
 
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { clearMcpResourceCache, broadcastMcpResourcesChanged } from '@/lib/orchestration/mcp';
+import {
+  broadcastMcpResourceUpdated,
+  broadcastMcpResourcesChanged,
+  clearMcpResourceCache,
+} from '@/lib/orchestration/mcp';
 import {
   mockAdminUser,
   mockUnauthenticatedUser,
@@ -184,10 +189,12 @@ describe('PATCH /mcp/resources/:id', () => {
     );
   });
 
-  it('clears cache and broadcasts change after update', async () => {
+  it('clears cache and broadcasts list_changed + resource updated after update', async () => {
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
     vi.mocked(prisma.mcpExposedResource.findUnique).mockResolvedValue(makeResource() as never);
-    vi.mocked(prisma.mcpExposedResource.update).mockResolvedValue(makeResource() as never);
+    vi.mocked(prisma.mcpExposedResource.update).mockResolvedValue(
+      makeResource({ uri: 'sunrise://knowledge/search' }) as never
+    );
 
     await PATCH(makePatchRequest({ isEnabled: false }), makeParams(RESOURCE_ID));
 
@@ -195,6 +202,10 @@ describe('PATCH /mcp/resources/:id', () => {
     expect(clearMcpResourceCache).toHaveBeenCalled();
     // test-review:accept no_arg_called — zero-arg side-effect trigger
     expect(broadcastMcpResourcesChanged).toHaveBeenCalled();
+    // Per-URI fan-out lets subscribed clients refresh just this resource
+    // without re-running resources/list. Asserting the URI argument
+    // exercises the new Phase 4 wiring.
+    expect(broadcastMcpResourceUpdated).toHaveBeenCalledWith('sunrise://knowledge/search');
   });
 
   it('toggles isEnabled to false', async () => {
@@ -215,7 +226,7 @@ describe('PATCH /mcp/resources/:id', () => {
   });
 
   it('maps handlerConfig: null to Prisma.JsonNull sentinel (not JS null)', async () => {
-    // Verifies the ternary on line 32 of route.ts correctly translates JS null
+    // Verifies the ternary on line 36 of route.ts correctly translates JS null
     // into the Prisma.JsonNull sentinel. Prisma 7 requires this sentinel to store
     // a JSON null literal; passing raw JS null stores SQL NULL instead.
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());

@@ -21,6 +21,15 @@ vi.mock('@/lib/orchestration/mcp/resource-registry', () => ({
   listMcpResources: vi.fn(),
   readMcpResource: vi.fn(),
   listMcpResourceTemplates: vi.fn(),
+  isRegisteredMcpResourceUri: vi.fn(),
+}));
+
+vi.mock('@/lib/orchestration/mcp/singletons', () => ({
+  getMcpSessionManager: vi.fn(),
+}));
+
+vi.mock('@/lib/orchestration/mcp/completion-registry', () => ({
+  completeMcpReference: vi.fn(),
 }));
 
 vi.mock('@/lib/orchestration/mcp/prompt-registry', () => ({
@@ -42,10 +51,15 @@ import {
   listMcpResources,
   readMcpResource,
   listMcpResourceTemplates,
+  isRegisteredMcpResourceUri,
 } from '@/lib/orchestration/mcp/resource-registry';
 import { listMcpPrompts, getMcpPrompt } from '@/lib/orchestration/mcp/prompt-registry';
+import { getMcpSessionManager } from '@/lib/orchestration/mcp/singletons';
+import { completeMcpReference } from '@/lib/orchestration/mcp/completion-registry';
 import {
   JsonRpcErrorCode,
+  MCP_LATEST_PROTOCOL_VERSION,
+  MCP_MIN_PROTOCOL_VERSION,
   MCP_PROTOCOL_VERSION,
   McpScope,
   type JsonRpcRequest,
@@ -73,6 +87,8 @@ function makeSession(overrides: Partial<McpSession> = {}): McpSession {
     id: 'session-1',
     apiKeyId: 'key-1',
     initialized: true,
+    protocolVersion: MCP_LATEST_PROTOCOL_VERSION,
+    logLevel: 'warning',
     createdAt: Date.now(),
     lastActivityAt: Date.now(),
     ...overrides,
@@ -161,7 +177,7 @@ describe('handleMcpRequest', () => {
   });
 
   describe('rate limiting', () => {
-    it('returns rate_limited error when rate limit is exceeded', async () => {
+    it('returns RATE_LIMITED (-32004) error when rate limit is exceeded', async () => {
       const blockedLimiter = makeRateLimiter(false);
       const req = makeRequest({ method: 'ping' });
       const result = await handleMcpRequest(req, {
@@ -171,6 +187,8 @@ describe('handleMcpRequest', () => {
         rateLimiter: blockedLimiter,
       });
       expect(result?.error).toBeDefined();
+      expect(result?.error?.code).toBe(JsonRpcErrorCode.RATE_LIMITED);
+      expect(result?.error?.code).toBe(-32004);
       expect(result?.error?.message).toBe('Rate limit exceeded');
     });
 
@@ -208,13 +226,81 @@ describe('handleMcpRequest', () => {
 
   describe('initialize', () => {
     it('returns server info and capabilities', async () => {
-      const req = makeRequest({ method: 'initialize' });
+      const req = makeRequest({
+        method: 'initialize',
+        params: { protocolVersion: MCP_LATEST_PROTOCOL_VERSION },
+      });
       const result = await handleMcpRequest(req, { auth, session, serverState, rateLimiter });
       const data = result?.result as Record<string, unknown>;
-      expect(data.protocolVersion).toBe(MCP_PROTOCOL_VERSION);
+      expect(data.protocolVersion).toBe(MCP_LATEST_PROTOCOL_VERSION);
       expect((data.serverInfo as Record<string, string>).name).toBe('Test MCP Server');
       expect((data.serverInfo as Record<string, string>).version).toBe('1.0.0');
-      expect(data.capabilities).toEqual({ tools: {}, resources: {}, prompts: {} });
+      // Only advertise features the server actually implements. Tools,
+      // resources, prompts broadcast list_changed; resources also accepts
+      // subscribe/unsubscribe (Phase 4); logging:{} signals support for
+      // logging/setLevel + notifications/message (Phase 5); completions:{}
+      // signals completion/complete support (Phase 6).
+      expect(data.capabilities).toEqual({
+        tools: { listChanged: true },
+        resources: { listChanged: true, subscribe: true },
+        prompts: { listChanged: true },
+        logging: {},
+        completions: {},
+      });
+    });
+
+    describe('version negotiation', () => {
+      it('honours an explicitly-requested supported version', async () => {
+        const req = makeRequest({
+          method: 'initialize',
+          params: { protocolVersion: '2024-11-05' },
+        });
+        const result = await handleMcpRequest(req, { auth, session, serverState, rateLimiter });
+        expect((result?.result as { protocolVersion: string }).protocolVersion).toBe('2024-11-05');
+      });
+
+      it('defaults to the oldest supported version when client omits protocolVersion', async () => {
+        const req = makeRequest({ method: 'initialize' });
+        const result = await handleMcpRequest(req, { auth, session, serverState, rateLimiter });
+        expect((result?.result as { protocolVersion: string }).protocolVersion).toBe(
+          MCP_MIN_PROTOCOL_VERSION
+        );
+      });
+
+      it('downgrades a forward-dated unknown version to the latest supported', async () => {
+        const req = makeRequest({
+          method: 'initialize',
+          params: { protocolVersion: '2099-01-01' },
+        });
+        const result = await handleMcpRequest(req, { auth, session, serverState, rateLimiter });
+        expect((result?.result as { protocolVersion: string }).protocolVersion).toBe(
+          MCP_LATEST_PROTOCOL_VERSION
+        );
+      });
+
+      it('rejects an unknown older version with INVALID_PARAMS', async () => {
+        const req = makeRequest({
+          method: 'initialize',
+          params: { protocolVersion: '2020-01-01' },
+        });
+        const result = await handleMcpRequest(req, { auth, session, serverState, rateLimiter });
+        expect(result?.error?.code).toBe(JsonRpcErrorCode.INVALID_PARAMS);
+      });
+
+      it('rejects a non-string protocolVersion with INVALID_PARAMS', async () => {
+        const req = makeRequest({
+          method: 'initialize',
+          params: { protocolVersion: 12345 },
+        });
+        const result = await handleMcpRequest(req, { auth, session, serverState, rateLimiter });
+        expect(result?.error?.code).toBe(JsonRpcErrorCode.INVALID_PARAMS);
+      });
+
+      it('keeps the MCP_PROTOCOL_VERSION alias pointing at the oldest supported version', () => {
+        // Existing imports of MCP_PROTOCOL_VERSION in downstream code must
+        // not break when we add a new spec revision.
+        expect(MCP_PROTOCOL_VERSION).toBe(MCP_MIN_PROTOCOL_VERSION);
+      });
     });
   });
 
@@ -611,7 +697,7 @@ describe('handleMcpRequest', () => {
 
   describe('prompts/list', () => {
     it('returns the prompts list', async () => {
-      vi.mocked(listMcpPrompts).mockReturnValue([
+      vi.mocked(listMcpPrompts).mockResolvedValue([
         { name: 'analyze-pattern', description: 'Analyze a pattern' },
       ]);
 
@@ -624,7 +710,7 @@ describe('handleMcpRequest', () => {
 
   describe('prompts/get', () => {
     it('returns prompt messages for a valid prompt', async () => {
-      vi.mocked(getMcpPrompt).mockReturnValue([
+      vi.mocked(getMcpPrompt).mockResolvedValue([
         { role: 'user', content: { type: 'text', text: 'Analyze pattern #5' } },
       ]);
 
@@ -638,7 +724,7 @@ describe('handleMcpRequest', () => {
     });
 
     it('returns INVALID_PARAMS when prompt name is unknown', async () => {
-      vi.mocked(getMcpPrompt).mockReturnValue(null);
+      vi.mocked(getMcpPrompt).mockResolvedValue(null);
 
       const req = makeRequest({
         method: 'prompts/get',
@@ -653,6 +739,23 @@ describe('handleMcpRequest', () => {
       const req = makeRequest({ method: 'prompts/get', params: {} });
       const result = await handleMcpRequest(req, { auth, session, serverState, rateLimiter });
       expect(result?.error?.code).toBe(JsonRpcErrorCode.INVALID_PARAMS);
+    });
+
+    it('maps RangeError from the registry to INVALID_PARAMS with the message', async () => {
+      // The registry throws RangeError for missing required args and
+      // oversized rendered output — protocol handler must surface the
+      // specific message so clients see precisely what failed.
+      vi.mocked(getMcpPrompt).mockRejectedValue(
+        new RangeError('Missing required argument(s): pattern_number')
+      );
+
+      const req = makeRequest({
+        method: 'prompts/get',
+        params: { name: 'analyze-pattern', arguments: {} },
+      });
+      const result = await handleMcpRequest(req, { auth, session, serverState, rateLimiter });
+      expect(result?.error?.code).toBe(JsonRpcErrorCode.INVALID_PARAMS);
+      expect(result?.error?.message).toContain('pattern_number');
     });
   });
 
@@ -691,6 +794,301 @@ describe('handleMcpRequest', () => {
       const result = await handleMcpRequest(req, { auth, session, serverState, rateLimiter });
       expect(result?.error?.message).toBe('Bad tool params');
       expect(result?.error?.code).toBe(JsonRpcErrorCode.INVALID_PARAMS);
+    });
+  });
+
+  describe('resources/subscribe', () => {
+    const subscribeMock = vi.fn();
+    beforeEach(() => {
+      subscribeMock.mockReset();
+      vi.mocked(getMcpSessionManager).mockReturnValue({
+        subscribe: subscribeMock,
+        unsubscribe: vi.fn(),
+      } as never);
+    });
+
+    it('returns {} on success', async () => {
+      vi.mocked(isRegisteredMcpResourceUri).mockResolvedValue(true);
+      subscribeMock.mockReturnValue('ok');
+
+      const req = makeRequest({
+        method: 'resources/subscribe',
+        params: { uri: 'sunrise://agents' },
+      });
+      const result = await handleMcpRequest(req, { auth, session, serverState, rateLimiter });
+
+      expect(result?.error).toBeUndefined();
+      expect(result?.result).toEqual({});
+      expect(subscribeMock).toHaveBeenCalledWith(session.id, 'sunrise://agents');
+    });
+
+    it('rejects template URIs with INVALID_PARAMS', async () => {
+      const req = makeRequest({
+        method: 'resources/subscribe',
+        params: { uri: 'sunrise://patterns/{id}' },
+      });
+      const result = await handleMcpRequest(req, { auth, session, serverState, rateLimiter });
+      expect(result?.error?.code).toBe(JsonRpcErrorCode.INVALID_PARAMS);
+      expect(result?.error?.message).toContain('template');
+      // Must not even check the registry — fast-fail on the template
+      // syntax so a misbehaving client can't probe what's registered.
+      expect(isRegisteredMcpResourceUri).not.toHaveBeenCalled();
+    });
+
+    it('rejects unregistered URIs with INVALID_PARAMS', async () => {
+      vi.mocked(isRegisteredMcpResourceUri).mockResolvedValue(false);
+      const req = makeRequest({
+        method: 'resources/subscribe',
+        params: { uri: 'sunrise://nobody/here' },
+      });
+      const result = await handleMcpRequest(req, { auth, session, serverState, rateLimiter });
+      expect(result?.error?.code).toBe(JsonRpcErrorCode.INVALID_PARAMS);
+      expect(result?.error?.message).toContain('Unknown resource');
+      expect(subscribeMock).not.toHaveBeenCalled();
+    });
+
+    it('maps limit-exceeded to INVALID_REQUEST', async () => {
+      vi.mocked(isRegisteredMcpResourceUri).mockResolvedValue(true);
+      subscribeMock.mockReturnValue('limit-exceeded');
+
+      const req = makeRequest({
+        method: 'resources/subscribe',
+        params: { uri: 'sunrise://agents' },
+      });
+      const result = await handleMcpRequest(req, { auth, session, serverState, rateLimiter });
+      expect(result?.error?.code).toBe(JsonRpcErrorCode.INVALID_REQUEST);
+      expect(result?.error?.message).toContain('Subscription limit');
+    });
+
+    it('requires resources:read scope', async () => {
+      const noScopeAuth = makeAuth({ scopes: [] });
+      const req = makeRequest({
+        method: 'resources/subscribe',
+        params: { uri: 'sunrise://agents' },
+      });
+      const result = await handleMcpRequest(req, {
+        auth: noScopeAuth,
+        session,
+        serverState,
+        rateLimiter,
+      });
+      expect(result?.error).toBeDefined();
+      expect(result?.error?.message).toContain('resources:read');
+    });
+
+    it('rejects missing uri with INVALID_PARAMS', async () => {
+      const req = makeRequest({ method: 'resources/subscribe', params: {} });
+      const result = await handleMcpRequest(req, { auth, session, serverState, rateLimiter });
+      expect(result?.error?.code).toBe(JsonRpcErrorCode.INVALID_PARAMS);
+    });
+  });
+
+  describe('resources/unsubscribe', () => {
+    it('returns {} and forwards to session manager', async () => {
+      const unsubscribeMock = vi.fn().mockReturnValue('ok');
+      vi.mocked(getMcpSessionManager).mockReturnValue({
+        subscribe: vi.fn(),
+        unsubscribe: unsubscribeMock,
+      } as never);
+
+      const req = makeRequest({
+        method: 'resources/unsubscribe',
+        params: { uri: 'sunrise://agents' },
+      });
+      const result = await handleMcpRequest(req, { auth, session, serverState, rateLimiter });
+
+      expect(result?.error).toBeUndefined();
+      expect(result?.result).toEqual({});
+      expect(unsubscribeMock).toHaveBeenCalledWith(session.id, 'sunrise://agents');
+    });
+  });
+
+  describe('initialize advertises resources.subscribe', () => {
+    it('includes subscribe: true in the capabilities response', async () => {
+      const req = makeRequest({
+        method: 'initialize',
+        params: { protocolVersion: '2025-06-18' },
+      });
+      const result = await handleMcpRequest(req, { auth, session, serverState, rateLimiter });
+      const data = result?.result as {
+        capabilities: { resources: { subscribe?: boolean }; logging?: Record<string, never> };
+      };
+      expect(data.capabilities.resources.subscribe).toBe(true);
+      expect(data.capabilities.logging).toEqual({});
+    });
+  });
+
+  describe('logging/setLevel', () => {
+    const setLogLevelMock = vi.fn();
+    beforeEach(() => {
+      setLogLevelMock.mockReset();
+      vi.mocked(getMcpSessionManager).mockReturnValue({
+        setLogLevel: setLogLevelMock,
+        subscribe: vi.fn(),
+        unsubscribe: vi.fn(),
+      } as never);
+    });
+
+    it('sets the level on the session and returns {}', async () => {
+      const req = makeRequest({ method: 'logging/setLevel', params: { level: 'debug' } });
+      const result = await handleMcpRequest(req, { auth, session, serverState, rateLimiter });
+      expect(result?.error).toBeUndefined();
+      expect(result?.result).toEqual({});
+      expect(setLogLevelMock).toHaveBeenCalledWith(session.id, 'debug');
+    });
+
+    it('rejects an unknown level with INVALID_PARAMS', async () => {
+      const req = makeRequest({ method: 'logging/setLevel', params: { level: 'verbose' } });
+      const result = await handleMcpRequest(req, { auth, session, serverState, rateLimiter });
+      expect(result?.error?.code).toBe(JsonRpcErrorCode.INVALID_PARAMS);
+      expect(result?.error?.message).toContain('verbose');
+    });
+
+    it('rejects missing level with INVALID_PARAMS', async () => {
+      const req = makeRequest({ method: 'logging/setLevel', params: {} });
+      const result = await handleMcpRequest(req, { auth, session, serverState, rateLimiter });
+      expect(result?.error?.code).toBe(JsonRpcErrorCode.INVALID_PARAMS);
+    });
+  });
+
+  describe('progress token validation on tools/call and resources/read', () => {
+    it('accepts a valid string progressToken', async () => {
+      vi.mocked(callMcpTool).mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
+      const req = makeRequest({
+        method: 'tools/call',
+        params: { name: 'tool', _meta: { progressToken: 'abc' } },
+      });
+      const result = await handleMcpRequest(req, { auth, session, serverState, rateLimiter });
+      expect(result?.error).toBeUndefined();
+    });
+
+    it('rejects an object progressToken on tools/call', async () => {
+      const req = makeRequest({
+        method: 'tools/call',
+        params: { name: 'tool', _meta: { progressToken: { x: 1 } } },
+      });
+      const result = await handleMcpRequest(req, { auth, session, serverState, rateLimiter });
+      expect(result?.error?.code).toBe(JsonRpcErrorCode.INVALID_PARAMS);
+      expect(result?.error?.message).toContain('string or number');
+    });
+
+    it('rejects a 257-char progressToken on resources/read', async () => {
+      const req = makeRequest({
+        method: 'resources/read',
+        params: {
+          uri: 'sunrise://x',
+          _meta: { progressToken: 'x'.repeat(257) },
+        },
+      });
+      const result = await handleMcpRequest(req, { auth, session, serverState, rateLimiter });
+      expect(result?.error?.code).toBe(JsonRpcErrorCode.INVALID_PARAMS);
+    });
+  });
+
+  describe('completion/complete', () => {
+    beforeEach(() => {
+      vi.mocked(completeMcpReference).mockResolvedValue({
+        completion: { values: ['alpha', 'beta'], hasMore: false, total: 2 },
+      });
+    });
+
+    it('returns completion result for a ref/prompt with prompts:read scope', async () => {
+      const req = makeRequest({
+        method: 'completion/complete',
+        params: {
+          ref: { type: 'ref/prompt', name: 'analyze-pattern' },
+          argument: { name: 'pattern_number', value: '1' },
+        },
+      });
+      const result = await handleMcpRequest(req, { auth, session, serverState, rateLimiter });
+      expect(result?.error).toBeUndefined();
+      expect((result?.result as { completion: { total: number } }).completion.total).toBe(2);
+    });
+
+    it('blocks ref/prompt without prompts:read scope', async () => {
+      const noPromptsScope = makeAuth({
+        scopes: [McpScope.TOOLS_LIST, McpScope.RESOURCES_READ],
+      });
+      const req = makeRequest({
+        method: 'completion/complete',
+        params: {
+          ref: { type: 'ref/prompt', name: 'p' },
+          argument: { name: 'x', value: '' },
+        },
+      });
+      const result = await handleMcpRequest(req, {
+        auth: noPromptsScope,
+        session,
+        serverState,
+        rateLimiter,
+      });
+      expect(result?.error?.message).toContain('prompts:read');
+    });
+
+    it('blocks ref/resource without resources:read scope', async () => {
+      const noResScope = makeAuth({ scopes: [McpScope.PROMPTS_READ] });
+      const req = makeRequest({
+        method: 'completion/complete',
+        params: {
+          ref: { type: 'ref/resource', uri: 'sunrise://x' },
+          argument: { name: 'x', value: '' },
+        },
+      });
+      const result = await handleMcpRequest(req, {
+        auth: noResScope,
+        session,
+        serverState,
+        rateLimiter,
+      });
+      expect(result?.error?.message).toContain('resources:read');
+    });
+
+    it('rejects ref with unknown type', async () => {
+      const req = makeRequest({
+        method: 'completion/complete',
+        params: { ref: { type: 'ref/nonsense' }, argument: { name: 'x', value: '' } },
+      });
+      const result = await handleMcpRequest(req, { auth, session, serverState, rateLimiter });
+      expect(result?.error?.code).toBe(JsonRpcErrorCode.INVALID_PARAMS);
+    });
+
+    it('rejects malformed argument', async () => {
+      const req = makeRequest({
+        method: 'completion/complete',
+        params: { ref: { type: 'ref/prompt', name: 'p' }, argument: 'not-an-object' },
+      });
+      const result = await handleMcpRequest(req, { auth, session, serverState, rateLimiter });
+      expect(result?.error?.code).toBe(JsonRpcErrorCode.INVALID_PARAMS);
+    });
+
+    it('maps RangeError from the registry to INVALID_PARAMS', async () => {
+      vi.mocked(completeMcpReference).mockRejectedValueOnce(
+        new RangeError('argument value exceeds 1024 char limit')
+      );
+      const req = makeRequest({
+        method: 'completion/complete',
+        params: {
+          ref: { type: 'ref/prompt', name: 'p' },
+          argument: { name: 'x', value: 'too long' },
+        },
+      });
+      const result = await handleMcpRequest(req, { auth, session, serverState, rateLimiter });
+      expect(result?.error?.code).toBe(JsonRpcErrorCode.INVALID_PARAMS);
+      expect(result?.error?.message).toContain('1024');
+    });
+  });
+
+  describe('initialize advertises completions', () => {
+    it('includes completions:{} in capabilities', async () => {
+      const req = makeRequest({
+        method: 'initialize',
+        params: { protocolVersion: '2025-06-18' },
+      });
+      const result = await handleMcpRequest(req, { auth, session, serverState, rateLimiter });
+      const data = result?.result as {
+        capabilities: { completions?: Record<string, never> };
+      };
+      expect(data.capabilities.completions).toEqual({});
     });
   });
 });

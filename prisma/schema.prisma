@@ -63,7 +63,8 @@ model User {
   aiExperiments          AiExperiment[]          @relation("AiExperimentCreator")
 
   // MCP Server relations
-  mcpApiKeys McpApiKey[] @relation("McpApiKeyCreator")
+  mcpApiKeys       McpApiKey[]        @relation("McpApiKeyCreator")
+  mcpExposedPrompts McpExposedPrompt[] @relation("McpPromptCreator")
 
   @@unique([email])
   @@index([role])
@@ -1566,6 +1567,15 @@ model McpServerConfig {
 /// Each capability can be optionally exposed as an MCP tool. `isEnabled`
 /// defaults to false (default-deny) — nothing is exposed until an admin
 /// explicitly enables it.
+///
+/// The tool-annotation hint fields below (`customTitle`, `readOnlyHint`,
+/// `destructiveHint`, `idempotentHint`, `openWorldHint`) implement the
+/// 2025-06-18 MCP spec tool annotations. Per spec they are **advisory only**
+/// — compliant clients still treat every tool as untrusted; the hints just
+/// inform UX (e.g. surface a warning before invoking a destructive tool).
+/// `idempotentHint` overrides `AiCapability.isIdempotent` in the MCP
+/// context when set, since the same capability may behave differently when
+/// invoked by an external MCP client vs. an internal agent.
 model McpExposedTool {
   id                String  @id @default(cuid())
   capabilityId      String  @unique
@@ -1575,11 +1585,47 @@ model McpExposedTool {
   rateLimitPerKey   Int? // per-key calls/min; null = use capability default
   requiresScope     String? // optional scope string for fine-grained access
 
+  // MCP 2025-06-18 tool annotations (advisory hints to clients)
+  customTitle     String? // human-readable title; falls back to capability.name
+  readOnlyHint    Boolean? // true = does not modify state
+  destructiveHint Boolean? // true = MAY perform destructive updates (only relevant if readOnlyHint=false)
+  idempotentHint  Boolean? // overrides capability.isIdempotent for MCP context
+  openWorldHint   Boolean? // true = interacts with an open world (e.g. web search, external API)
+
   // Relations
   capability AiCapability @relation(fields: [capabilityId], references: [id], onDelete: Cascade)
 
   @@index([isEnabled])
   @@map("mcp_exposed_tool")
+}
+
+/// Prompt templates exposed to MCP clients.
+///
+/// Per MCP spec, prompts are **user-facing slash-command templates** that
+/// clients surface to end-users — not auto-invoked by the model. The
+/// template is a string with `{{var}}` substitution; substitution is
+/// strictly limited to the names declared in `argumentsSpec` so admins
+/// cannot accidentally (or maliciously) reference server-side data.
+///
+/// `name` is immutable post-create because changing it breaks every
+/// bookmarked / saved client invocation. Renames require delete + recreate.
+model McpExposedPrompt {
+  id            String  @id @default(cuid())
+  name          String  @unique // /^[a-z][a-z0-9_-]*$/, max 64
+  description   String  @db.Text // shown to MCP clients in prompts/list
+  template      String  @db.Text // {{var}} substitution; max 10_000 chars
+  argumentsSpec Json // [{ name, description, required }] — max 20 entries
+  completionsSpec Json? // optional { [argName]: string[] } for completion/complete (Phase 6)
+  isEnabled     Boolean @default(true)
+  createdBy     String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  creator User @relation("McpPromptCreator", fields: [createdBy], references: [id])
+
+  @@index([isEnabled])
+  @@map("mcp_exposed_prompt")
 }
 
 /// Data endpoints exposed via MCP resources.

@@ -184,6 +184,20 @@ describe('POST /mcp', () => {
     expect(body.error.code).toBe(JsonRpcErrorCode.UNAUTHORIZED);
   });
 
+  it('includes WWW-Authenticate Bearer challenge on 401', async () => {
+    // Lets 2025-spec OAuth-capable clients detect that this server is
+    // bearer-only and skip the OAuth discovery dance.
+    vi.mocked(authenticateMcpRequest).mockResolvedValue(null);
+
+    const response = await POST(makePostRequest(makeRpcRequest('tools/list')));
+
+    expect(response.status).toBe(401);
+    const challenge = response.headers.get('WWW-Authenticate');
+    expect(challenge).toContain('Bearer');
+    expect(challenge).toContain('realm="sunrise-mcp"');
+    expect(challenge).toContain('error="invalid_token"');
+  });
+
   it('returns 503 when MCP server is disabled', async () => {
     vi.mocked(getMcpServerConfig).mockResolvedValue({
       ...mockServerState,

@@ -325,6 +325,67 @@ describe('PATCH /api/v1/admin/orchestration/workflows/:id', () => {
 
       expect(response.status).toBe(400);
     });
+
+    it('returns 403 when deactivating a system workflow', async () => {
+      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+      vi.mocked(prisma.aiWorkflow.findUnique).mockResolvedValue(
+        makeWorkflow({ isSystem: true }) as never
+      );
+
+      const response = await PATCH(
+        makeRequest('PATCH', { isActive: false }),
+        makeParams(WORKFLOW_ID)
+      );
+
+      expect(response.status).toBe(403);
+    });
+
+    it('returns 403 when changing template status on a system workflow', async () => {
+      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+      vi.mocked(prisma.aiWorkflow.findUnique).mockResolvedValue(
+        makeWorkflow({ isSystem: true }) as never
+      );
+
+      const response = await PATCH(
+        makeRequest('PATCH', { isTemplate: true }),
+        makeParams(WORKFLOW_ID)
+      );
+
+      expect(response.status).toBe(403);
+    });
+
+    it('clears draftDefinition when null is passed', async () => {
+      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+      vi.mocked(prisma.aiWorkflow.findUnique).mockResolvedValue(makeWorkflow() as never);
+      vi.mocked(prisma.aiWorkflow.update).mockResolvedValue(
+        makeWorkflow({ draftDefinition: null }) as never
+      );
+      vi.mocked(prisma.aiWorkflow.findUniqueOrThrow).mockResolvedValue(
+        makeWorkflow({ draftDefinition: null }) as never
+      );
+
+      const response = await PATCH(
+        makeRequest('PATCH', { draftDefinition: null }),
+        makeParams(WORKFLOW_ID)
+      );
+
+      expect(response.status).toBe(200);
+      // The first update call clears the draft via Prisma.DbNull
+      const firstUpdateCall = vi.mocked(prisma.aiWorkflow.update).mock.calls[0][0];
+      expect(firstUpdateCall.data).toEqual({ draftDefinition: Prisma.DbNull });
+    });
+
+    it('rethrows non-P2002 errors (not converted to 409)', async () => {
+      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+      vi.mocked(prisma.aiWorkflow.findUnique).mockResolvedValue(makeWorkflow() as never);
+      vi.mocked(prisma.aiWorkflow.update).mockRejectedValue(new Error('unexpected db failure'));
+
+      // Non-P2002 errors propagate to the route's error handler → 500,
+      // not the 409 ConflictError that the P2002 catch arm would synthesise.
+      const response = await PATCH(makeRequest('PATCH', { name: 'x' }), makeParams(WORKFLOW_ID));
+
+      expect(response.status).toBe(500);
+    });
   });
 });
 
@@ -391,6 +452,17 @@ describe('DELETE /api/v1/admin/orchestration/workflows/:id', () => {
       const response = await DELETE(makeRequest('DELETE'), makeParams(INVALID_ID));
 
       expect(response.status).toBe(400);
+    });
+
+    it('returns 403 when deleting a system workflow', async () => {
+      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+      vi.mocked(prisma.aiWorkflow.findUnique).mockResolvedValue(
+        makeWorkflow({ isSystem: true }) as never
+      );
+
+      const response = await DELETE(makeRequest('DELETE'), makeParams(WORKFLOW_ID));
+
+      expect(response.status).toBe(403);
     });
   });
 });

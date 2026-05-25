@@ -49,6 +49,12 @@ const TOOL = {
   customDescription: null as string | null,
   rateLimitPerKey: null as number | null,
   requiresScope: null as string | null,
+  // MCP 2025-06-18 tool annotations (all null = "no opinion" for the row)
+  customTitle: null as string | null,
+  readOnlyHint: null as boolean | null,
+  destructiveHint: null as boolean | null,
+  idempotentHint: null as boolean | null,
+  openWorldHint: null as boolean | null,
   capability: CAPABILITY,
 };
 

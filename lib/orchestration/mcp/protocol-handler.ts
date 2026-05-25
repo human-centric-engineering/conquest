@@ -11,13 +11,15 @@
 import { logger } from '@/lib/logging';
 import {
   JsonRpcErrorCode,
-  MCP_PROTOCOL_VERSION,
+  MCP_LOG_LEVELS,
   McpScope,
+  negotiateMcpProtocolVersion,
   type JsonRpcRequest,
   type JsonRpcResponse,
   type McpAuthContext,
   type McpCapabilities,
   type McpInitializeResult,
+  type McpLogLevel,
   type McpSession,
 } from '@/types/mcp';
 import {
@@ -32,8 +34,15 @@ import {
   listMcpResources,
   readMcpResource,
   listMcpResourceTemplates,
+  isRegisteredMcpResourceUri,
 } from '@/lib/orchestration/mcp/resource-registry';
+import { getMcpSessionManager } from '@/lib/orchestration/mcp/singletons';
 import { listMcpPrompts, getMcpPrompt } from '@/lib/orchestration/mcp/prompt-registry';
+import { extractProgressToken } from '@/lib/orchestration/mcp/progress-tracker';
+import {
+  completeMcpReference,
+  type McpCompletionRef,
+} from '@/lib/orchestration/mcp/completion-registry';
 import type { McpRateLimiter } from '@/lib/orchestration/mcp/rate-limiter';
 import type { McpServerState } from '@/lib/orchestration/mcp/types';
 
@@ -77,7 +86,7 @@ export async function handleMcpRequest(
       clientIp: auth.clientIp,
       userAgent: auth.userAgent,
     });
-    return jsonRpcError(request.id!, JsonRpcErrorCode.INTERNAL_ERROR, 'Rate limit exceeded');
+    return jsonRpcError(request.id!, JsonRpcErrorCode.RATE_LIMITED, 'Rate limit exceeded');
   }
 
   try {
@@ -127,7 +136,7 @@ async function dispatchMethod(request: JsonRpcRequest, context: HandlerContext):
 
   switch (request.method) {
     case 'initialize':
-      return handleInitialize(context);
+      return handleInitialize(request.params, context);
 
     case 'ping':
       return {};
@@ -135,11 +144,15 @@ async function dispatchMethod(request: JsonRpcRequest, context: HandlerContext):
     case 'tools/list':
       requireInitialized(session);
       requireScope(auth, McpScope.TOOLS_LIST);
-      return handleToolsList(request.params);
+      return handleToolsList(request.params, session);
 
     case 'tools/call':
       requireInitialized(session);
       requireScope(auth, McpScope.TOOLS_EXECUTE);
+      // Validate the optional progress token early so a bad shape gets a
+      // clean INVALID_PARAMS instead of silently being ignored. Reporter
+      // wiring into capabilities is opt-in and lands per-capability.
+      validateProgressToken(request.params);
       return handleToolsCall(request.params, auth);
 
     case 'resources/list':
@@ -155,12 +168,35 @@ async function dispatchMethod(request: JsonRpcRequest, context: HandlerContext):
     case 'resources/read':
       requireInitialized(session);
       requireScope(auth, McpScope.RESOURCES_READ);
+      validateProgressToken(request.params);
       return handleResourcesRead(request.params, auth);
+
+    case 'resources/subscribe':
+      requireInitialized(session);
+      requireScope(auth, McpScope.RESOURCES_READ);
+      return handleResourcesSubscribe(request.params, session);
+
+    case 'resources/unsubscribe':
+      requireInitialized(session);
+      requireScope(auth, McpScope.RESOURCES_READ);
+      return handleResourcesUnsubscribe(request.params, session);
+
+    case 'logging/setLevel':
+      requireInitialized(session);
+      // Logging level is a per-session knob; the spec does not require a
+      // scope. Anyone with a valid session can ask for less verbose logs.
+      return handleLoggingSetLevel(request.params, session);
+
+    case 'completion/complete':
+      requireInitialized(session);
+      // Scope check is per ref-type and happens inside the handler — a
+      // prompt-ref needs prompts:read, a resource-ref needs resources:read.
+      return handleCompletionComplete(request.params, auth);
 
     case 'prompts/list':
       requireInitialized(session);
       requireScope(auth, McpScope.PROMPTS_READ);
-      return handlePromptsList();
+      return handlePromptsList(request.params);
 
     case 'prompts/get':
       requireInitialized(session);
@@ -179,17 +215,43 @@ async function dispatchMethod(request: JsonRpcRequest, context: HandlerContext):
 // Method Handlers
 // ============================================================================
 
-function handleInitialize(context: HandlerContext): McpInitializeResult {
+function handleInitialize(
+  params: Record<string, unknown> | undefined,
+  context: HandlerContext
+): McpInitializeResult {
   const { serverState } = context;
 
+  const negotiation = negotiateMcpProtocolVersion(params?.protocolVersion);
+  if (!negotiation) {
+    throw new McpProtocolError(
+      JsonRpcErrorCode.INVALID_PARAMS,
+      'Unsupported protocolVersion. The server supports 2025-06-18 and 2024-11-05.'
+    );
+  }
+
+  if (negotiation.wasDowngraded) {
+    logger.info('MCP initialize: downgraded client to latest supported version', {
+      requested: params?.protocolVersion,
+      negotiated: negotiation.version,
+    });
+  }
+
+  // Advertise only features that have working handlers in this build.
+  // tools / resources / prompts broadcast list_changed when the admin mutates
+  // their catalogue. resources.subscribe accepts resources/subscribe +
+  // resources/unsubscribe and pushes notifications/resources/updated.
+  // logging:{} signals logging/setLevel + notifications/message support.
+  // completions:{} signals completion/complete support.
   const capabilities: McpCapabilities = {
-    tools: {},
-    resources: {},
-    prompts: {},
+    tools: { listChanged: true },
+    resources: { listChanged: true, subscribe: true },
+    prompts: { listChanged: true },
+    logging: {},
+    completions: {},
   };
 
   return {
-    protocolVersion: MCP_PROTOCOL_VERSION,
+    protocolVersion: negotiation.version,
     capabilities,
     serverInfo: {
       name: serverState.serverName,
@@ -201,12 +263,19 @@ function handleInitialize(context: HandlerContext): McpInitializeResult {
 const DEFAULT_PAGE_SIZE = 50;
 
 async function handleToolsList(
-  params: Record<string, unknown> | undefined
+  params: Record<string, unknown> | undefined,
+  session: McpSession
 ): Promise<{ tools: unknown[]; nextCursor?: string }> {
   const allTools = await listMcpTools();
   const { offset, limit } = decodeCursor(params?.cursor, DEFAULT_PAGE_SIZE);
   const page = allTools.slice(offset, offset + limit);
   const nextCursor = offset + limit < allTools.length ? encodeCursor(offset + limit) : undefined;
+
+  // Annotations are a 2025-06-18 addition. Emit them only when the session
+  // negotiated that version or newer; for 2024-11-05 clients the field is
+  // silently dropped (the spec says clients SHOULD ignore unknown fields,
+  // but being clean is cheap).
+  const emitAnnotations = session.protocolVersion >= '2025-06-18';
 
   return {
     tools: page.map((t) => ({
@@ -216,6 +285,7 @@ async function handleToolsList(
         type: 'object',
         ...t.inputSchema,
       },
+      ...(emitAnnotations && t.annotations ? { annotations: t.annotations } : {}),
     })),
     ...(nextCursor ? { nextCursor } : {}),
   };
@@ -284,12 +354,182 @@ async function handleResourcesRead(
   return { contents: [content] };
 }
 
-function handlePromptsList(): { prompts: unknown[] } {
-  const prompts = listMcpPrompts();
-  return { prompts };
+async function handleResourcesSubscribe(
+  params: Record<string, unknown> | undefined,
+  session: McpSession
+): Promise<Record<string, never>> {
+  const uri = extractUri(params);
+
+  // Subscriptions are for concrete URIs only — clients can't subscribe
+  // to a template (`sunrise://patterns/{id}`). Detect template syntax
+  // before any registry lookup so we give a clear error.
+  if (uri.includes('{') || uri.includes('}')) {
+    throw new McpProtocolError(
+      JsonRpcErrorCode.INVALID_PARAMS,
+      'Cannot subscribe to a template URI. Subscribe to concrete instances only (e.g. sunrise://patterns/5, not sunrise://patterns/{id}).'
+    );
+  }
+
+  // Reject ghost subscriptions to URIs the registry doesn't know about —
+  // those clients would never receive an update notification anyway.
+  if (!(await isRegisteredMcpResourceUri(uri))) {
+    throw new McpProtocolError(JsonRpcErrorCode.INVALID_PARAMS, `Unknown resource URI: ${uri}`);
+  }
+
+  const result = getMcpSessionManager().subscribe(session.id, uri);
+  if (result === 'limit-exceeded') {
+    throw new McpProtocolError(
+      JsonRpcErrorCode.INVALID_REQUEST,
+      'Subscription limit exceeded. Unsubscribe from existing URIs before adding more.'
+    );
+  }
+  if (result === 'session-not-found') {
+    throw new McpProtocolError(JsonRpcErrorCode.SESSION_NOT_FOUND, 'Session not found or expired');
+  }
+  // Per spec, the response payload is an empty object.
+  return {};
 }
 
-function handlePromptsGet(params: Record<string, unknown> | undefined): { messages: unknown[] } {
+async function handleResourcesUnsubscribe(
+  params: Record<string, unknown> | undefined,
+  session: McpSession
+): Promise<Record<string, never>> {
+  const uri = extractUri(params);
+  const result = getMcpSessionManager().unsubscribe(session.id, uri);
+  if (result === 'session-not-found') {
+    throw new McpProtocolError(JsonRpcErrorCode.SESSION_NOT_FOUND, 'Session not found or expired');
+  }
+  return Promise.resolve({});
+}
+
+async function handleCompletionComplete(
+  params: Record<string, unknown> | undefined,
+  auth: McpAuthContext
+): Promise<unknown> {
+  const ref = parseCompletionRef(params?.ref);
+  const argument = params?.argument;
+  if (
+    argument === null ||
+    typeof argument !== 'object' ||
+    typeof (argument as { name?: unknown }).name !== 'string' ||
+    typeof (argument as { value?: unknown }).value !== 'string'
+  ) {
+    throw new McpProtocolError(
+      JsonRpcErrorCode.INVALID_PARAMS,
+      'argument must be { name: string, value: string }'
+    );
+  }
+  const { name: argName, value } = argument as { name: string; value: string };
+
+  // Scope per ref-type — a prompt completion is metadata about a prompt
+  // (prompts:read), a resource template completion is metadata about a
+  // resource (resources:read). Without this gate, completion would be a
+  // free side-channel around the scope check on prompts/list and
+  // resources/list.
+  const requiredScope = ref.type === 'ref/prompt' ? McpScope.PROMPTS_READ : McpScope.RESOURCES_READ;
+  requireScope(auth, requiredScope);
+
+  try {
+    return await completeMcpReference(ref, argName, value);
+  } catch (err) {
+    if (err instanceof RangeError) {
+      throw new McpProtocolError(JsonRpcErrorCode.INVALID_PARAMS, err.message);
+    }
+    throw err;
+  }
+}
+
+function parseCompletionRef(raw: unknown): McpCompletionRef {
+  if (raw === null || typeof raw !== 'object') {
+    throw new McpProtocolError(JsonRpcErrorCode.INVALID_PARAMS, 'ref is required');
+  }
+  const type = (raw as { type?: unknown }).type;
+  if (type === 'ref/prompt') {
+    const name = (raw as { name?: unknown }).name;
+    if (typeof name !== 'string' || name.length === 0) {
+      throw new McpProtocolError(JsonRpcErrorCode.INVALID_PARAMS, 'ref/prompt requires name');
+    }
+    return { type: 'ref/prompt', name };
+  }
+  if (type === 'ref/resource') {
+    const uri = (raw as { uri?: unknown }).uri;
+    if (typeof uri !== 'string' || uri.length === 0) {
+      throw new McpProtocolError(JsonRpcErrorCode.INVALID_PARAMS, 'ref/resource requires uri');
+    }
+    return { type: 'ref/resource', uri };
+  }
+  throw new McpProtocolError(
+    JsonRpcErrorCode.INVALID_PARAMS,
+    'ref.type must be "ref/prompt" or "ref/resource"'
+  );
+}
+
+function handleLoggingSetLevel(
+  params: Record<string, unknown> | undefined,
+  session: McpSession
+): Record<string, never> {
+  const level = params?.level;
+  if (typeof level !== 'string') {
+    throw new McpProtocolError(JsonRpcErrorCode.INVALID_PARAMS, 'level is required');
+  }
+  if (!(MCP_LOG_LEVELS as readonly string[]).includes(level)) {
+    throw new McpProtocolError(
+      JsonRpcErrorCode.INVALID_PARAMS,
+      `Unknown level: ${level}. Expected one of: ${MCP_LOG_LEVELS.join(', ')}`
+    );
+  }
+  getMcpSessionManager().setLogLevel(session.id, level as McpLogLevel);
+  return {};
+}
+
+/**
+ * Validate `params._meta.progressToken` shape if present. Throws
+ * `INVALID_PARAMS` for malformed tokens; no-op for absent tokens.
+ */
+function validateProgressToken(params: Record<string, unknown> | undefined): void {
+  const meta = params?._meta;
+  if (meta === undefined || meta === null) return;
+  if (typeof meta !== 'object') {
+    throw new McpProtocolError(JsonRpcErrorCode.INVALID_PARAMS, '_meta must be an object');
+  }
+  try {
+    extractProgressToken(meta as Record<string, unknown>);
+  } catch (err) {
+    if (err instanceof RangeError) {
+      throw new McpProtocolError(JsonRpcErrorCode.INVALID_PARAMS, err.message);
+    }
+    throw err;
+  }
+}
+
+function extractUri(params: Record<string, unknown> | undefined): string {
+  const uri = params?.uri;
+  if (typeof uri !== 'string' || uri.length === 0) {
+    throw new McpProtocolError(JsonRpcErrorCode.INVALID_PARAMS, 'uri is required');
+  }
+  if (uri.length > 500) {
+    throw new McpProtocolError(JsonRpcErrorCode.INVALID_PARAMS, 'uri exceeds 500 char limit');
+  }
+  return uri;
+}
+
+async function handlePromptsList(
+  params: Record<string, unknown> | undefined
+): Promise<{ prompts: unknown[]; nextCursor?: string }> {
+  const allPrompts = await listMcpPrompts();
+  const { offset, limit } = decodeCursor(params?.cursor, DEFAULT_PAGE_SIZE);
+  const page = allPrompts.slice(offset, offset + limit);
+  const nextCursor = offset + limit < allPrompts.length ? encodeCursor(offset + limit) : undefined;
+
+  return {
+    prompts: page,
+    ...(nextCursor ? { nextCursor } : {}),
+  };
+}
+
+async function handlePromptsGet(
+  params: Record<string, unknown> | undefined
+): Promise<{ messages: unknown[] }> {
   const parsed = mcpPromptGetParamsSchema.safeParse(params);
   if (!parsed.success) {
     throw new McpProtocolError(
@@ -298,10 +538,22 @@ function handlePromptsGet(params: Record<string, unknown> | undefined): { messag
     );
   }
 
-  const messages = getMcpPrompt(
-    parsed.data.name,
-    (parsed.data.arguments as Record<string, unknown>) ?? {}
-  );
+  let messages: import('@/types/mcp').McpPromptMessage[] | null;
+  try {
+    messages = await getMcpPrompt(
+      parsed.data.name,
+      (parsed.data.arguments as Record<string, unknown>) ?? {}
+    );
+  } catch (err) {
+    // Registry signals validation failures (missing required arg, oversize
+    // output) via RangeError. Surface them as INVALID_PARAMS with the
+    // original message so clients see precisely what went wrong.
+    if (err instanceof RangeError) {
+      throw new McpProtocolError(JsonRpcErrorCode.INVALID_PARAMS, err.message);
+    }
+    throw err;
+  }
+
   if (!messages) {
     throw new McpProtocolError(
       JsonRpcErrorCode.INVALID_PARAMS,

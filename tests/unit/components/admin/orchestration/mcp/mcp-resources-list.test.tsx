@@ -330,6 +330,21 @@ describe('form validation — submit button', () => {
     expect(getSubmitButton()).toBeDisabled();
   });
 
+  it('editing the MIME Type input in the create dialog updates the field value', async () => {
+    // Exercises the create form's MIME Type onChange branch (separate from
+    // the edit-dialog MIME field already covered above).
+    const user = userEvent.setup();
+    render(<McpResourcesList initialResources={[]} />);
+    await openDialog(user);
+
+    const mimeInput = screen.getByLabelText(/MIME Type/i);
+    expect(mimeInput).toHaveValue('application/json');
+    await user.clear(mimeInput);
+    await user.type(mimeInput, 'text/markdown');
+
+    expect(mimeInput).toHaveValue('text/markdown');
+  });
+
   it('submit button enabled when name + URI + resourceType all filled', async () => {
     // Arrange
     const user = userEvent.setup();
@@ -699,6 +714,156 @@ describe('remove handler', () => {
     // Assert
     await waitFor(() => {
       expect(screen.getByText('Knowledge Search')).toBeInTheDocument();
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// describe: edit dialog
+// ---------------------------------------------------------------------------
+
+describe('edit dialog', () => {
+  it('opens with the row data pre-populated and saves a PATCH', async () => {
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ success: true, data: { id: 'r-1' } }),
+    });
+
+    render(<McpResourcesList initialResources={[makeResource()]} />);
+
+    await user.click(screen.getByTestId('edit-resource-r-1'));
+
+    // Form pre-populated from row
+    const nameInput = await screen.findByLabelText(/Name/i);
+    expect(nameInput).toHaveValue('Knowledge Search');
+
+    // Change the description
+    const descInput = screen.getByLabelText(/Description/i);
+    await user.clear(descInput);
+    await user.type(descInput, 'Updated description');
+
+    await user.click(screen.getByTestId('edit-resource-save'));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        API.ADMIN.ORCHESTRATION.mcpResourceById('r-1'),
+        expect.objectContaining({
+          method: 'PATCH',
+          body: expect.stringContaining('Updated description'),
+        })
+      );
+    });
+  });
+
+  it('blocks save when handlerConfig is invalid JSON', async () => {
+    const user = userEvent.setup();
+    render(<McpResourcesList initialResources={[makeResource()]} />);
+
+    await user.click(screen.getByTestId('edit-resource-r-1'));
+
+    const configInput = await screen.findByLabelText(/Handler Config/i);
+    // user-event treats `{` as a key descriptor — escape with `{{` per docs.
+    await user.type(configInput, '{{not-valid-json');
+
+    await user.click(screen.getByTestId('edit-resource-save'));
+
+    await waitFor(() => {
+      expect(screen.getByText(/handlerConfig must be valid JSON/i)).toBeInTheDocument();
+    });
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('skips the network call when no field has changed', async () => {
+    const user = userEvent.setup();
+    render(<McpResourcesList initialResources={[makeResource()]} />);
+
+    await user.click(screen.getByTestId('edit-resource-r-1'));
+    await user.click(screen.getByTestId('edit-resource-save'));
+
+    // Dialog closes without firing a PATCH because the diff is empty.
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('closing the edit dialog (Escape) resets editingResource and clears errors', async () => {
+    // Exercises the onOpenChange(false) branch: set an error first by failing
+    // a save, then close the dialog and reopen — the error must be gone.
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      json: async () => ({ success: false, error: { message: 'boom' } }),
+    });
+
+    render(<McpResourcesList initialResources={[makeResource()]} />);
+
+    await user.click(screen.getByTestId('edit-resource-r-1'));
+    const nameInput = await screen.findByLabelText(/Name/i);
+    await user.clear(nameInput);
+    await user.type(nameInput, 'X');
+    await user.click(screen.getByTestId('edit-resource-save'));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Failed to update resource/i)).toBeInTheDocument();
+    });
+
+    // Close via Escape — drives the Dialog onOpenChange(false) callback.
+    await user.keyboard('{Escape}');
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Failed to update resource/i)).not.toBeInTheDocument();
+    });
+
+    // Reopen — error state should not have leaked.
+    await user.click(screen.getByTestId('edit-resource-r-1'));
+    expect(screen.queryByText(/Failed to update resource/i)).not.toBeInTheDocument();
+  });
+
+  it('editing the MIME Type field sends the new value in the PATCH body', async () => {
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ success: true, data: { id: 'r-1' } }),
+    });
+
+    render(<McpResourcesList initialResources={[makeResource()]} />);
+
+    await user.click(screen.getByTestId('edit-resource-r-1'));
+    const mimeInput = await screen.findByLabelText(/MIME Type/i);
+    await user.clear(mimeInput);
+    await user.type(mimeInput, 'text/plain');
+
+    await user.click(screen.getByTestId('edit-resource-save'));
+
+    await waitFor(() => {
+      const body = JSON.parse((vi.mocked(mockFetch).mock.calls[0][1] as { body: string }).body) as {
+        mimeType?: string;
+      };
+      expect(body.mimeType).toBe('text/plain');
+    });
+  });
+
+  it('surfaces a generic error when PATCH fails', async () => {
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      json: async () => ({ success: false, error: { message: 'boom' } }),
+    });
+
+    render(<McpResourcesList initialResources={[makeResource()]} />);
+
+    await user.click(screen.getByTestId('edit-resource-r-1'));
+    const nameInput = await screen.findByLabelText(/Name/i);
+    await user.clear(nameInput);
+    await user.type(nameInput, 'New name');
+
+    await user.click(screen.getByTestId('edit-resource-save'));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Failed to update resource/i)).toBeInTheDocument();
     });
   });
 });

@@ -8,7 +8,16 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { Wrench, Database, Key, FileText, Settings, Activity, Monitor } from 'lucide-react';
+import {
+  Wrench,
+  Database,
+  Key,
+  FileText,
+  Settings,
+  Activity,
+  Monitor,
+  MessageSquareText,
+} from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
@@ -17,10 +26,11 @@ import { FieldHelp } from '@/components/ui/field-help';
 import { apiClient } from '@/lib/api/client';
 import { API } from '@/lib/api/endpoints';
 import { mcpSettingsResponseSchema, type McpSettingsResponse } from '@/lib/validations/mcp';
+import { MCP_LATEST_PROTOCOL_VERSION, MCP_MIN_PROTOCOL_VERSION } from '@/types/mcp';
 
 interface McpDashboardProps {
   initialSettings: McpSettingsResponse | null;
-  stats: { tools: number; resources: number; keys: number };
+  stats: { tools: number; resources: number; prompts: number; keys: number };
 }
 
 const DEFAULT_SETTINGS: McpSettingsResponse = {
@@ -75,6 +85,14 @@ export function McpDashboard({ initialSettings, stats }: McpDashboardProps) {
         'Expose read-only data endpoints — knowledge base, agent configs, workflows — for clients to browse',
     },
     {
+      href: '/admin/orchestration/mcp/prompts',
+      label: 'Prompts',
+      icon: MessageSquareText,
+      count: stats.prompts,
+      description:
+        'Slash-command templates clients show to end users (e.g. /analyze-pattern). Not auto-invoked by the model',
+    },
+    {
       href: '/admin/orchestration/mcp/keys',
       label: 'API Keys',
       icon: Key,
@@ -124,7 +142,14 @@ export function McpDashboard({ initialSettings, stats }: McpDashboardProps) {
           </CardDescription>
           <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 pt-1 text-xs">
             <span>
-              Protocol: <strong className="text-foreground">MCP 2024-11-05</strong>
+              Protocol:{' '}
+              <strong className="text-foreground">MCP {MCP_LATEST_PROTOCOL_VERSION}</strong>
+              {MCP_LATEST_PROTOCOL_VERSION !== MCP_MIN_PROTOCOL_VERSION && (
+                <span className="text-muted-foreground">
+                  {' '}
+                  (back-compat to {MCP_MIN_PROTOCOL_VERSION})
+                </span>
+              )}
             </span>
             <span>
               Transport: <strong className="text-foreground">Streamable HTTP</strong>

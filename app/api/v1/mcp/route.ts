@@ -29,7 +29,16 @@ import { jsonRpcRequestSchema } from '@/lib/validations/mcp';
 import { JsonRpcErrorCode, type JsonRpcResponse } from '@/types/mcp';
 
 function jsonRpcErrorResponse(code: JsonRpcErrorCode, message: string, status: number): Response {
-  return Response.json({ jsonrpc: '2.0', id: null, error: { code, message } }, { status });
+  const headers: Record<string, string> = {};
+  // Per RFC 6750 / RFC 9728 every 401 from a bearer-protected resource
+  // SHOULD include a WWW-Authenticate challenge so clients can distinguish
+  // "supply a bearer" from "this server has no idea how to authenticate
+  // you". 2025-spec MCP clients use this to detect that the server is
+  // bearer-only and skip the OAuth discovery dance.
+  if (status === 401) {
+    headers['WWW-Authenticate'] = `Bearer realm="sunrise-mcp", error="invalid_token"`;
+  }
+  return Response.json({ jsonrpc: '2.0', id: null, error: { code, message } }, { status, headers });
 }
 
 const MAX_BODY_SIZE = 1_048_576; // 1MB
@@ -48,14 +57,7 @@ export async function POST(request: NextRequest): Promise<Response> {
 
     const auth = await authenticateMcpRequest(bearerToken, clientIp, userAgent);
     if (!auth) {
-      return Response.json(
-        {
-          jsonrpc: '2.0',
-          id: null,
-          error: { code: JsonRpcErrorCode.UNAUTHORIZED, message: 'Unauthorized' },
-        },
-        { status: 401 }
-      );
+      return jsonRpcErrorResponse(JsonRpcErrorCode.UNAUTHORIZED, 'Unauthorized', 401);
     }
 
     // 1. Check MCP server is enabled
@@ -238,8 +240,18 @@ export async function POST(request: NextRequest): Promise<Response> {
     for (const rpcRequest of validRequests) {
       const response = await handleMcpRequest(rpcRequest, handlerContext);
 
-      // Mark session initialized after successful initialize call
+      // Persist the negotiated protocol version + flip the session to
+      // initialised after a successful `initialize` call. The version comes
+      // out of the response payload, which the handler has already validated.
       if (rpcRequest.method === 'initialize' && response && !response.error) {
+        const result = response.result as { protocolVersion?: string } | undefined;
+        const negotiated = result?.protocolVersion;
+        if (
+          negotiated === '2024-11-05' ||
+          negotiated === '2025-06-18' // keep this list aligned with MCP_PROTOCOL_VERSIONS
+        ) {
+          sessionManager.setProtocolVersion(session.id, negotiated);
+        }
         sessionManager.markInitialized(session.id);
       }
 
