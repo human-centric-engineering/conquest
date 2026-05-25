@@ -35,6 +35,7 @@ export const POST = withAdminAuth(async (request, session) => {
 
   const estimate = await estimateEvaluationRunCost({
     agentId: body.agentId,
+    userId: session.user.id,
     judgeAgentSlugs: body.judgeAgentSlugs,
     datasetId: body.datasetId,
     ...(body.caseCount !== undefined ? { caseCount: body.caseCount } : {}),

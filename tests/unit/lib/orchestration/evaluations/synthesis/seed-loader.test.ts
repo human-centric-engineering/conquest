@@ -147,7 +147,7 @@ describe('loadFailureSeed — no data', () => {
   it('returns [] when no completed runs exist for the agent', async () => {
     vi.mocked(prisma.aiEvaluationRun.findMany).mockResolvedValue([] as never);
 
-    const result = await loadFailureSeed({ agentId: 'a-1' });
+    const result = await loadFailureSeed({ agentId: 'a-1', userId: 'u-1' });
     expect(result).toEqual([]);
     expect(vi.mocked(prisma.aiEvaluationCaseResult.findMany)).not.toHaveBeenCalled();
   });
@@ -177,7 +177,7 @@ describe('loadFailureSeed — score filtering', () => {
       },
     ] as never);
 
-    const result = await loadFailureSeed({ agentId: 'a-1' });
+    const result = await loadFailureSeed({ agentId: 'a-1', userId: 'u-1' });
 
     expect(result).toHaveLength(1);
     expect(result[0].caseId).toBe('case-bad');
@@ -197,7 +197,7 @@ describe('loadFailureSeed — score filtering', () => {
       },
     ] as never);
 
-    const result = await loadFailureSeed({ agentId: 'a-1' });
+    const result = await loadFailureSeed({ agentId: 'a-1', userId: 'u-1' });
     expect(result[0].reasoning).toContain('really bad');
   });
 
@@ -213,7 +213,7 @@ describe('loadFailureSeed — score filtering', () => {
       },
     ] as never);
 
-    const result = await loadFailureSeed({ agentId: 'a-1' });
+    const result = await loadFailureSeed({ agentId: 'a-1', userId: 'u-1' });
     expect((result[0].reasoning ?? '').length).toBeLessThan(longReason.length);
     expect(result[0].reasoning?.endsWith('…')).toBe(true);
   });
@@ -232,7 +232,7 @@ describe('loadFailureSeed — score filtering', () => {
       },
     ] as never);
 
-    const result = await loadFailureSeed({ agentId: 'a-1' });
+    const result = await loadFailureSeed({ agentId: 'a-1', userId: 'u-1' });
     expect(result.filter((r) => r.caseId === 'case-dup')).toHaveLength(1);
   });
 });
@@ -241,7 +241,23 @@ describe('loadFailureSeed — error handling', () => {
   it('falls back to [] when the runs query throws', async () => {
     vi.mocked(prisma.aiEvaluationRun.findMany).mockRejectedValue(new Error('db down'));
 
-    const result = await loadFailureSeed({ agentId: 'a-1' });
+    const result = await loadFailureSeed({ agentId: 'a-1', userId: 'u-1' });
     expect(result).toEqual([]);
+  });
+});
+
+describe('loadFailureSeed — cross-user isolation', () => {
+  it('scopes the past-runs query to the caller userId so admin B cannot pull admin A runs', async () => {
+    vi.mocked(prisma.aiEvaluationRun.findMany).mockResolvedValue([] as never);
+
+    await loadFailureSeed({ agentId: 'shared-agent', userId: 'caller-id' });
+
+    const args = vi.mocked(prisma.aiEvaluationRun.findMany).mock.calls[0][0];
+    expect(args?.where).toMatchObject({
+      agentId: 'shared-agent',
+      userId: 'caller-id',
+      subjectKind: 'agent',
+      status: 'completed',
+    });
   });
 });

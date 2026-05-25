@@ -148,22 +148,30 @@ describe('POST /evaluations/runs/estimate — happy path', () => {
     const body = await parseJson<{ success: boolean; data: typeof SAMPLE_ESTIMATE }>(res);
     expect(body.success).toBe(true);
     expect(body.data).toEqual(SAMPLE_ESTIMATE);
-    expect(vi.mocked(estimateEvaluationRunCost)).toHaveBeenCalledWith({
-      agentId: 'agent-1',
-      datasetId: 'ds-1',
-      judgeAgentSlugs: ['judge-relevance'],
-    });
+    expect(vi.mocked(estimateEvaluationRunCost)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: 'agent-1',
+        datasetId: 'ds-1',
+        judgeAgentSlugs: ['judge-relevance'],
+        // Route must thread session.user.id so the empirical past-runs
+        // query is user-scoped — see seed-loader.ts for the same fix.
+        userId: expect.any(String),
+      })
+    );
   });
 
   it('defaults judgeAgentSlugs to [] when omitted', async () => {
     const res = await POST(makeRequest({ agentId: 'agent-1', datasetId: 'ds-1' }));
 
     expect(res.status).toBe(200);
-    expect(vi.mocked(estimateEvaluationRunCost)).toHaveBeenCalledWith({
-      agentId: 'agent-1',
-      datasetId: 'ds-1',
-      judgeAgentSlugs: [],
-    });
+    expect(vi.mocked(estimateEvaluationRunCost)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: 'agent-1',
+        datasetId: 'ds-1',
+        judgeAgentSlugs: [],
+        userId: expect.any(String),
+      })
+    );
   });
 
   it('passes caseCount override through to the estimator', async () => {

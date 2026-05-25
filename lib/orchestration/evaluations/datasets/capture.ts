@@ -221,7 +221,7 @@ export async function captureWorkflowExecutionAsCase(params: {
   const result = await appendCasesToDataset({
     datasetId,
     cases: [finalCase],
-    source: 'conversation_capture',
+    source: 'workflow_capture',
   });
 
   logger.info('Captured workflow execution as dataset case', {

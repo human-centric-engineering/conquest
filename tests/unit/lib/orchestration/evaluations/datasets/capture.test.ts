@@ -212,7 +212,11 @@ describe('captureWorkflowExecutionAsCase', () => {
           expectedOutput: 'final answer',
         }),
       ],
-      source: 'conversation_capture',
+      // Dataset-level provenance must match the per-case
+      // metadata.source ('workflow_capture'), not the
+      // conversation-capture value the helper writes in the sibling
+      // entry point.
+      source: 'workflow_capture',
     });
   });
 

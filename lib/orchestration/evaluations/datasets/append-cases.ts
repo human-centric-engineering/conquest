@@ -49,7 +49,8 @@ export interface AppendCasesResult {
  * exceed the per-dataset cap.
  *
  * `source` is the new value to stamp onto `AiDataset.source` —
- * `'conversation_capture'` from the capture API,
+ * `'conversation_capture'` from the capture API's conversation-turn
+ * branch, `'workflow_capture'` from its workflow-execution branch,
  * `'synthetic'` from the synthesis API. Existing rows that were
  * already on that source are unaffected; an upload-source dataset
  * receiving its first captured case will flip to the new source so the
@@ -58,7 +59,7 @@ export interface AppendCasesResult {
 export async function appendCasesToDataset(params: {
   datasetId: string;
   cases: AppendCaseInput[];
-  source?: 'conversation_capture' | 'synthetic' | null;
+  source?: 'conversation_capture' | 'workflow_capture' | 'synthetic' | null;
 }): Promise<AppendCasesResult> {
   const validated = params.cases.map((c, i) => {
     const r = datasetCaseSchema.safeParse(c);

@@ -133,6 +133,7 @@ describe('estimateEvaluationRunCost — heuristic mode', () => {
 
     const result = await estimateEvaluationRunCost({
       agentId: 'agent-1',
+      userId: 'caller-id',
       judgeAgentSlugs: ['judge-relevance', 'judge-faithfulness'],
       datasetId: 'ds-1',
     });
@@ -163,6 +164,7 @@ describe('estimateEvaluationRunCost — heuristic mode', () => {
 
     const result = await estimateEvaluationRunCost({
       agentId: 'agent-1',
+      userId: 'caller-id',
       judgeAgentSlugs: [],
       datasetId: 'ds-empty',
     });
@@ -181,6 +183,7 @@ describe('estimateEvaluationRunCost — heuristic mode', () => {
 
     const result = await estimateEvaluationRunCost({
       agentId: 'agent-1',
+      userId: 'caller-id',
       judgeAgentSlugs: ['no-model-judge'],
       datasetId: 'ds-1',
     });
@@ -199,6 +202,7 @@ describe('estimateEvaluationRunCost — heuristic mode', () => {
 
     const result = await estimateEvaluationRunCost({
       agentId: 'agent-1',
+      userId: 'caller-id',
       judgeAgentSlugs: [],
       datasetId: 'ds-1',
     });
@@ -223,6 +227,7 @@ describe('estimateEvaluationRunCost — empirical mode', () => {
 
     const result = await estimateEvaluationRunCost({
       agentId: 'agent-1',
+      userId: 'caller-id',
       judgeAgentSlugs: ['judge-a'],
       datasetId: 'ds-1',
     });
@@ -265,6 +270,7 @@ describe('estimateEvaluationRunCost — empirical mode', () => {
 
     const result = await estimateEvaluationRunCost({
       agentId: 'agent-1',
+      userId: 'caller-id',
       judgeAgentSlugs: ['judge-a'],
       datasetId: 'ds-1',
     });
@@ -285,6 +291,7 @@ describe('estimateEvaluationRunCost — empirical mode', () => {
 
     const result = await estimateEvaluationRunCost({
       agentId: 'agent-1',
+      userId: 'caller-id',
       judgeAgentSlugs: ['judge-a'],
       datasetId: 'ds-1',
     });
@@ -314,6 +321,7 @@ describe('estimateEvaluationRunCost — empirical mode', () => {
 
     const result = await estimateEvaluationRunCost({
       agentId: 'agent-1',
+      userId: 'caller-id',
       judgeAgentSlugs: ['judge-a', 'judge-b'],
       datasetId: 'ds-1',
     });
@@ -331,6 +339,7 @@ describe('estimateEvaluationRunCost — robustness', () => {
 
     const result = await estimateEvaluationRunCost({
       agentId: 'agent-1',
+      userId: 'caller-id',
       judgeAgentSlugs: [],
       datasetId: 'ds-1',
     });
@@ -350,6 +359,7 @@ describe('estimateEvaluationRunCost — robustness', () => {
 
     const result = await estimateEvaluationRunCost({
       agentId: 'agent-1',
+      userId: 'caller-id',
       judgeAgentSlugs: [],
       datasetId: 'ds-1',
     });
@@ -366,6 +376,7 @@ describe('estimateEvaluationRunCost — robustness', () => {
 
     const result = await estimateEvaluationRunCost({
       agentId: 'agent-1',
+      userId: 'caller-id',
       judgeAgentSlugs: [],
       datasetId: 'ds-1',
       caseCount: 3,

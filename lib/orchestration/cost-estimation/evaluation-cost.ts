@@ -102,6 +102,17 @@ export interface EstimateEvaluationRunCostInput {
   /** Dataset id — drives `caseCount` and the fingerprint. */
   datasetId: string;
   /**
+   * Caller's user id. Used to scope the past-runs query so the
+   * empirical calibration only consumes the caller's own historical
+   * runs — agents are shared across admins but `AiEvaluationRun.userId`
+   * is the ownership column, and consuming another admin's past spend
+   * here would leak their per-agent cost signal into this caller's
+   * estimate. (The exposure is narrower than the
+   * `seed-loader.loadFailureSeed` case — aggregate USD only, no case
+   * content — but we treat the two consistently.)
+   */
+  userId: string;
+  /**
    * Optional override for the case count. Useful in tests and for
    * preview-mode estimates against an in-progress dataset capture.
    * Defaults to the dataset's current row count.
@@ -128,7 +139,7 @@ interface PastRunSummary {
 export async function estimateEvaluationRunCost(
   input: EstimateEvaluationRunCostInput
 ): Promise<EvaluationCostEstimate> {
-  const { agentId, judgeAgentSlugs, datasetId } = input;
+  const { agentId, judgeAgentSlugs, datasetId, userId } = input;
 
   // Warm the registry once. Both helpers are cached (24h / 60s) so the
   // network/DB cost is paid once per process, not per estimate.
@@ -148,6 +159,7 @@ export async function estimateEvaluationRunCost(
   try {
     pastRuns = await loadMatchingPastRuns({
       agentId,
+      userId,
       judgeAgentSlugs,
       datasetContentHash: datasetMeta.contentHash,
     });
@@ -375,15 +387,17 @@ function extractJudgeSlugs(metricConfigs: unknown): string[] {
 
 async function loadMatchingPastRuns(params: {
   agentId: string;
+  userId: string;
   judgeAgentSlugs: string[];
   datasetContentHash: string | null;
 }): Promise<PastRunSummary[]> {
-  const { agentId, judgeAgentSlugs, datasetContentHash } = params;
+  const { agentId, userId, judgeAgentSlugs, datasetContentHash } = params;
   if (!datasetContentHash) return [];
 
   const candidates = await prisma.aiEvaluationRun.findMany({
     where: {
       agentId,
+      userId,
       datasetContentHash,
       status: 'completed',
       subjectKind: 'agent',

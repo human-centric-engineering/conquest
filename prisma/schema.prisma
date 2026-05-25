@@ -1214,7 +1214,8 @@ model AiDataset {
   contentHash String
   // Provenance: how this dataset was created — 'upload' (CSV/JSONL),
   // 'manual' (created case-by-case in UI), 'synthetic' (Phase 2 LLM gen),
-  // 'conversation_capture' (Phase 2 trace-to-dataset).
+  // 'conversation_capture' (Phase 2 trace-to-dataset, conversation source),
+  // 'workflow_capture' (Phase 2 trace-to-dataset, workflow execution source).
   source      String   @default("upload")
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -1243,7 +1244,7 @@ model AiDatasetCase {
   // (context_recall, context_precision) — added by Phase 2 work.
   referenceCitations Json?
   // Author-supplied case-level metadata: tags, difficulty, expectedTrajectory,
-  // source ('synthetic' | 'conversation_capture'), …
+  // source ('synthetic' | 'conversation_capture' | 'workflow_capture'), …
   metadata           Json?
 
   dataset AiDataset                  @relation(fields: [datasetId], references: [id], onDelete: Cascade)

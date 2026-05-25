@@ -138,6 +138,13 @@ async function loadAllowedDocIds(
  */
 export async function loadFailureSeed(params: {
   agentId: string;
+  /**
+   * Caller's user id. Agents are shared across admins but
+   * `AiEvaluationRun.userId` is the ownership column — without this
+   * filter the failure seed would pull other admins' prior runs
+   * (and their case content) into this caller's generator prompt.
+   */
+  userId: string;
   limit?: number;
 }): Promise<FailureSeed[]> {
   const limit = Math.min(params.limit ?? MAX_FAILURE_SEEDS, MAX_FAILURE_SEEDS);
@@ -147,8 +154,16 @@ export async function loadFailureSeed(params: {
     // their case results. Bound the join to ~recent runs so we don't
     // scan every historical row. The case-level mean score has to be
     // computed in JS because metricScores is JSON.
+    //
+    // userId is part of the where clause — see the param doc above for
+    // the cross-user leak this prevents.
     const recentRuns = await prisma.aiEvaluationRun.findMany({
-      where: { agentId: params.agentId, subjectKind: 'agent', status: 'completed' },
+      where: {
+        agentId: params.agentId,
+        userId: params.userId,
+        subjectKind: 'agent',
+        status: 'completed',
+      },
       select: { id: true },
       orderBy: { completedAt: 'desc' },
       take: 10,

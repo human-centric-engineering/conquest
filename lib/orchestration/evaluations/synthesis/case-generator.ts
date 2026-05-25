@@ -98,7 +98,13 @@ export async function generateCases(params: GenerateCasesParams): Promise<Genera
     }
     prompt = buildKbPrompt(chunks, params.count, params.topic);
   } else {
-    const failures = await loadFailureSeed({ agentId: params.agentId });
+    // userId is required — failure-seed reads `AiEvaluationRun` rows
+    // which are user-scoped; without it admin A would pull admin B's
+    // prior runs (and their case content) into A's generator prompt.
+    const failures = await loadFailureSeed({
+      agentId: params.agentId,
+      userId: params.userId,
+    });
     if (failures.length === 0) {
       throw new ValidationError(
         'No low-scoring prior cases for this agent — run an evaluation that produces failures before synthesising hardened variants.'
