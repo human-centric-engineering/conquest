@@ -157,22 +157,10 @@ function mockFetchSuccess(runId = 'run-99'): ReturnType<typeof vi.fn> {
   return fn;
 }
 
-// `mockFetchServerError` was used by the legacy error-path tests
-// before the Phase 2.1 estimate fetch made the global stub
-// double-respond on the estimate path. The two error-path tests now
-// stub `fetch` directly with URL-discrimination (see them below) so
-// this helper is unused — kept as `_mockFetchServerError` so the
-// linter doesn't gate the commit while leaving a hint for anyone
-// adding new submit-error tests.
-function _mockFetchServerError(message: string, status = 400): ReturnType<typeof vi.fn> {
-  const fn = vi.fn().mockResolvedValue({
-    ok: false,
-    status,
-    json: async () => ({ success: false, error: { code: 'BAD_REQUEST', message } }),
-  } as Response);
-  vi.stubGlobal('fetch', fn);
-  return fn;
-}
+// (Phase 2.1 removed the `mockFetchServerError` helper. The Phase 2.1
+// estimate fetch fires on mount, so error-path tests now stub `fetch`
+// directly with URL-discrimination — see the `error handling` block
+// below.)
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
