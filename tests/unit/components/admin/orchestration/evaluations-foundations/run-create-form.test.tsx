@@ -157,7 +157,14 @@ function mockFetchSuccess(runId = 'run-99'): ReturnType<typeof vi.fn> {
   return fn;
 }
 
-function mockFetchServerError(message: string, status = 400): ReturnType<typeof vi.fn> {
+// `mockFetchServerError` was used by the legacy error-path tests
+// before the Phase 2.1 estimate fetch made the global stub
+// double-respond on the estimate path. The two error-path tests now
+// stub `fetch` directly with URL-discrimination (see them below) so
+// this helper is unused — kept as `_mockFetchServerError` so the
+// linter doesn't gate the commit while leaving a hint for anyone
+// adding new submit-error tests.
+function _mockFetchServerError(message: string, status = 400): ReturnType<typeof vi.fn> {
   const fn = vi.fn().mockResolvedValue({
     ok: false,
     status,
@@ -241,13 +248,17 @@ describe('RunCreateForm', () => {
       await user.click(screen.getByRole('checkbox', { name: /exact_match/i }));
       await user.click(screen.getByRole('button', { name: /queue run/i }));
 
+      // Filter to the EVAL_RUNS submit call — the Phase 2.1 estimate
+      // hook also fires fetch on mount, so we can't rely on a singular
+      // call count.
       await waitFor(() => {
-        expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
+        const calls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls;
+        expect(calls.some((c) => c[0] === API.ADMIN.ORCHESTRATION.EVAL_RUNS)).toBe(true);
       });
-      const [, init] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [
-        string,
-        RequestInit,
-      ];
+      const runsCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.find(
+        (c) => c[0] === API.ADMIN.ORCHESTRATION.EVAL_RUNS
+      );
+      const [, init] = runsCall as [string, RequestInit];
       const body = JSON.parse(init.body as string);
       expect(body.datasetId).toBe('ds-2');
     });
@@ -266,7 +277,12 @@ describe('RunCreateForm', () => {
       await waitFor(() => {
         expect(fetchMock).toHaveBeenCalled();
       });
-      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      // Filter to the EVAL_RUNS submit call — the Phase 2.1 estimate
+      // hook fires its own fetch on mount, so `mock.calls[0]` can be
+      // the estimate call rather than the submit call under load.
+      const runsCall = fetchMock.mock.calls.find((c) => c[0] === API.ADMIN.ORCHESTRATION.EVAL_RUNS);
+      expect(runsCall).toBeTruthy();
+      const [, init] = runsCall as [string, RequestInit];
       const body = JSON.parse(init.body as string);
       expect(body.metricConfigs).toContainEqual({
         slug: 'exact_match',
@@ -292,7 +308,12 @@ describe('RunCreateForm', () => {
       await waitFor(() => {
         expect(fetchMock).toHaveBeenCalled();
       });
-      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      // Filter to the EVAL_RUNS submit call — the Phase 2.1 estimate
+      // hook fires its own fetch on mount, so `mock.calls[0]` can be
+      // the estimate call rather than the submit call under load.
+      const runsCall = fetchMock.mock.calls.find((c) => c[0] === API.ADMIN.ORCHESTRATION.EVAL_RUNS);
+      expect(runsCall).toBeTruthy();
+      const [, init] = runsCall as [string, RequestInit];
       const body = JSON.parse(init.body as string);
       const slugs = body.metricConfigs.map((m: { slug: string }) => m.slug);
       expect(slugs).toContain('regex');
@@ -345,7 +366,12 @@ describe('RunCreateForm', () => {
       await waitFor(() => {
         expect(fetchMock).toHaveBeenCalled();
       });
-      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      // Filter to the EVAL_RUNS submit call — the Phase 2.1 estimate
+      // hook fires its own fetch on mount, so `mock.calls[0]` can be
+      // the estimate call rather than the submit call under load.
+      const runsCall = fetchMock.mock.calls.find((c) => c[0] === API.ADMIN.ORCHESTRATION.EVAL_RUNS);
+      expect(runsCall).toBeTruthy();
+      const [, init] = runsCall as [string, RequestInit];
       const body = JSON.parse(init.body as string);
       const regex = body.metricConfigs.find((m: { slug: string }) => m.slug === 'regex');
       expect(regex.config.pattern).toBe('\\d+');
@@ -366,7 +392,12 @@ describe('RunCreateForm', () => {
       await waitFor(() => {
         expect(fetchMock).toHaveBeenCalled();
       });
-      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      // Filter to the EVAL_RUNS submit call — the Phase 2.1 estimate
+      // hook fires its own fetch on mount, so `mock.calls[0]` can be
+      // the estimate call rather than the submit call under load.
+      const runsCall = fetchMock.mock.calls.find((c) => c[0] === API.ADMIN.ORCHESTRATION.EVAL_RUNS);
+      expect(runsCall).toBeTruthy();
+      const [, init] = runsCall as [string, RequestInit];
       const body = JSON.parse(init.body as string);
       expect(body.metricConfigs).toContainEqual({
         slug: 'judge_agent',
@@ -392,7 +423,12 @@ describe('RunCreateForm', () => {
       await waitFor(() => {
         expect(fetchMock).toHaveBeenCalled();
       });
-      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      // Filter to the EVAL_RUNS submit call — the Phase 2.1 estimate
+      // hook fires its own fetch on mount, so `mock.calls[0]` can be
+      // the estimate call rather than the submit call under load.
+      const runsCall = fetchMock.mock.calls.find((c) => c[0] === API.ADMIN.ORCHESTRATION.EVAL_RUNS);
+      expect(runsCall).toBeTruthy();
+      const [, init] = runsCall as [string, RequestInit];
       const body = JSON.parse(init.body as string);
       // No judge_agent metric should remain
       expect(body.metricConfigs.some((m: { slug: string }) => m.slug === 'judge_agent')).toBe(
@@ -449,7 +485,12 @@ describe('RunCreateForm', () => {
           })
         );
       });
-      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      // Filter to the EVAL_RUNS call specifically — the debounced
+      // estimate fetch (Phase 2.1) may have fired in the same render
+      // cycle and `mock.calls[0]` is order-dependent under load.
+      const runsCall = fetchMock.mock.calls.find((c) => c[0] === API.ADMIN.ORCHESTRATION.EVAL_RUNS);
+      expect(runsCall).toBeTruthy();
+      const init = (runsCall as [string, RequestInit])[1];
       const body = JSON.parse(init.body as string);
       expect(body.name).toBe('Smoke run');
       expect(body.description).toBe('after refactor');
@@ -474,9 +515,13 @@ describe('RunCreateForm', () => {
       await user.click(screen.getByRole('button', { name: /queue run/i }));
 
       await waitFor(() => {
-        expect(fetchMock).toHaveBeenCalled();
+        expect(fetchMock).toHaveBeenCalledWith(
+          API.ADMIN.ORCHESTRATION.EVAL_RUNS,
+          expect.anything()
+        );
       });
-      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      const runsCall = fetchMock.mock.calls.find((c) => c[0] === API.ADMIN.ORCHESTRATION.EVAL_RUNS);
+      const init = (runsCall as [string, RequestInit])[1];
       const body = JSON.parse(init.body as string);
       expect(body.description).toBeUndefined();
     });
@@ -484,7 +529,44 @@ describe('RunCreateForm', () => {
 
   describe('error handling', () => {
     it('renders the server error message inline', async () => {
-      mockFetchServerError('Dataset is empty', 400);
+      // URL-aware mock: the estimate hook fires fetch on mount and would
+      // otherwise also receive this error response, surfacing the text in
+      // both the estimate banner and the submit error block (the
+      // getByText assertion below would then match multiple nodes).
+      // Returning success for the estimate route keeps the failure
+      // visible on the submit path only.
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockImplementation(async (url: string) => {
+          if (typeof url === 'string' && url.includes('/runs/estimate')) {
+            return {
+              ok: true,
+              status: 200,
+              json: async () => ({
+                success: true,
+                data: {
+                  midUsd: 0,
+                  lowUsd: 0,
+                  highUsd: 0,
+                  basedOn: 'heuristic',
+                  sampleSize: 0,
+                  caseCount: 0,
+                  modelMix: [],
+                  notes: 'no cases',
+                },
+              }),
+            } as Response;
+          }
+          return {
+            ok: false,
+            status: 400,
+            json: async () => ({
+              success: false,
+              error: { code: 'BAD_REQUEST', message: 'Dataset is empty' },
+            }),
+          } as Response;
+        })
+      );
       const user = userEvent.setup();
       render(<RunCreateForm {...defaultProps()} />);
       await user.type(document.querySelector('#name') as HTMLInputElement, 'My Run');
@@ -497,7 +579,34 @@ describe('RunCreateForm', () => {
     });
 
     it('renders a fallback error when fetch itself rejects', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Network down')));
+      // Same shape as above: the estimate fetch fires on mount and we
+      // don't want its rejection to drown out the submit-path rejection
+      // (jsdom + react-testing-library can pick up either error span).
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockImplementation(async (url: string) => {
+          if (typeof url === 'string' && url.includes('/runs/estimate')) {
+            return {
+              ok: true,
+              status: 200,
+              json: async () => ({
+                success: true,
+                data: {
+                  midUsd: 0,
+                  lowUsd: 0,
+                  highUsd: 0,
+                  basedOn: 'heuristic',
+                  sampleSize: 0,
+                  caseCount: 0,
+                  modelMix: [],
+                  notes: 'no cases',
+                },
+              }),
+            } as Response;
+          }
+          throw new Error('Network down');
+        })
+      );
       const user = userEvent.setup();
       render(<RunCreateForm {...defaultProps()} />);
       await user.type(document.querySelector('#name') as HTMLInputElement, 'My Run');

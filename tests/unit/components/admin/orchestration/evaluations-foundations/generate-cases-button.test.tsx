@@ -53,9 +53,13 @@ const COMMIT_OK = {
   data: { datasetId: 'ds-1', appendedCount: 2, newCaseCount: 12, newContentHash: 'h' },
 };
 
-function mockFetchSequence(
-  responses: Array<Record<string, unknown> | { _status: number; body: Record<string, unknown> }>
-): ReturnType<typeof vi.fn> {
+type FetchMock = Record<string, unknown> | { _status: number; body: Record<string, unknown> };
+
+function isErrorMock(m: FetchMock): m is { _status: number; body: Record<string, unknown> } {
+  return typeof (m as { _status?: unknown })._status === 'number';
+}
+
+function mockFetchSequence(responses: FetchMock[]): ReturnType<typeof vi.fn> {
   const fn = vi.fn().mockImplementation(async () => {
     const next = responses.shift();
     if (!next) {
@@ -65,7 +69,7 @@ function mockFetchSequence(
         json: async () => ({ success: false, error: { message: 'no more mocks' } }),
       } as Response;
     }
-    if ('_status' in next) {
+    if (isErrorMock(next)) {
       return {
         ok: next._status < 400,
         status: next._status,
