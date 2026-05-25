@@ -16,6 +16,7 @@ import { prisma } from '@/lib/db/client';
 import { successResponse, errorResponse } from '@/lib/api/responses';
 import { ForbiddenError, NotFoundError, ValidationError } from '@/lib/api/errors';
 import { withAuth, withAdminAuth } from '@/lib/auth/guards';
+import { eraseUser } from '@/lib/privacy/erase-user';
 import { validateQueryParams, validateRequestBody } from '@/lib/api/validation';
 import { userIdSchema } from '@/lib/validations/user';
 import { adminUserUpdateSchema } from '@/lib/validations/admin';
@@ -212,15 +213,14 @@ export const DELETE = withAdminAuth<{ id: string }>(async (request, session, { p
     });
   }
 
-  // Clean up stored avatar files (no-op if nothing exists)
-  const { deleteByPrefix, isStorageEnabled } = await import('@/lib/storage/upload');
-  if (isStorageEnabled()) {
-    await deleteByPrefix(`avatars/${id}/`);
-  }
-
-  // Delete user (cascade deletes accounts and sessions via Prisma schema)
-  await prisma.user.delete({
-    where: { id },
+  // Erase the user: cascades remove personal data, retained config/audit are
+  // de-attributed, residual PII is scrubbed, an erasure receipt is written, and
+  // avatar blobs are removed. See lib/privacy/erase-user.ts.
+  await eraseUser({
+    userId: id,
+    userEmail: user.email,
+    actorUserId: session.user.id,
+    reason: 'admin_action',
   });
 
   log.info('User deleted by admin', { deletedUserId: id, adminId: session.user.id });

@@ -15,6 +15,7 @@ import { UnauthorizedError, ErrorCodes } from '@/lib/api/errors';
 import { validateRequestBody } from '@/lib/api/validation';
 import { updateUserSchema, deleteAccountSchema } from '@/lib/validations/user';
 import { withAuth } from '@/lib/auth/guards';
+import { eraseUser } from '@/lib/privacy/erase-user';
 import { getRouteLogger } from '@/lib/api/context';
 import { serverTrack } from '@/lib/analytics/server';
 import { EVENTS } from '@/lib/analytics/events';
@@ -165,18 +166,16 @@ export const DELETE = withAuth(async (request, session) => {
       email: session.user.email,
     });
 
-    // Clean up stored avatar files (no-op if nothing exists)
-    const { deleteByPrefix, isStorageEnabled } = await import('@/lib/storage/upload');
-    if (isStorageEnabled()) {
-      await deleteByPrefix(`avatars/${session.user.id}/`);
-    }
-
-    // Delete user. Schema cascades erase the user's personal data (sessions,
-    // accounts, conversations, executions, user memory, evaluations, API keys,
-    // webhook subscriptions); org config + audit rows are retained with their
-    // creator/userId set null. See the account_deletion_erasure_cascade migration.
-    await prisma.user.delete({
-      where: { id: session.user.id },
+    // Erase the user. Schema cascades remove personal data (sessions, accounts,
+    // conversations, executions, user memory, evaluations, API keys, webhook
+    // subscriptions); org config + audit rows are retained with their
+    // creator/userId set null; residual PII is scrubbed; an erasure receipt is
+    // written; and avatar blobs are removed. See lib/privacy/erase-user.ts.
+    await eraseUser({
+      userId: session.user.id,
+      userEmail: session.user.email,
+      actorUserId: session.user.id,
+      reason: 'self_service',
     });
 
     // Clear all better-auth cookies (session, cached session data, CSRF, OAuth state)
