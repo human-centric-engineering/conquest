@@ -36,6 +36,7 @@
     "smoke:hybrid-search": "tsx --env-file=.env.local scripts/smoke/knowledge-hybrid-search.ts",
     "smoke:transcribe": "tsx --env-file=.env.local scripts/smoke/transcribe.ts",
     "smoke:vision": "tsx --env-file=.env.local scripts/smoke/vision.ts",
+    "smoke:erasure": "tsx --env-file=.env.local scripts/smoke/erasure.ts",
     "postinstall": "prisma generate",
     "prepare": "husky"
   },

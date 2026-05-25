@@ -108,6 +108,14 @@ jobs:
       - name: Run tests
         run: npm run test
 
+      # Verifies the DB-enforced erasure behavior (cascade / set-null / PII
+      # scrub) that the Prisma-mocked vitest suite cannot. Uses this job's
+      # Postgres service + applied migrations; invoked directly (not the
+      # smoke:erasure npm script, which loads .env.local — absent in CI).
+      # The script skips cleanly if no DB is reachable.
+      - name: Smoke — account erasure (real DB)
+        run: npx tsx scripts/smoke/erasure.ts
+
       - name: Build
         run: npm run build
 
