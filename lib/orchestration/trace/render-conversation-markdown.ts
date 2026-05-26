@@ -88,7 +88,8 @@ function formatTimestamp(iso: string | null | undefined): string {
 
 function escapePipe(s: string): string {
   // Markdown table cells can't contain unescaped `|` or unescaped newlines.
-  return s.replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+  // Escape backslashes first so a trailing `\` can't escape the `|` delimiter.
+  return s.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
 }
 
 function truncate(s: string, cap: number): string {

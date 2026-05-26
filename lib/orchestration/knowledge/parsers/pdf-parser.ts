@@ -96,7 +96,10 @@ function extractPages(
  */
 function renderMarkdownTable(table: ReadonlyArray<ReadonlyArray<string>>): string {
   if (table.length === 0) return '';
-  const sanitize = (cell: string): string => (cell ?? '').replace(/\|/g, '\\|').replace(/\n/g, ' ');
+  // Escape backslashes before pipes so a trailing `\` in a cell can't escape
+  // the table delimiter we add (`a\` + `|` would otherwise become `a\|`).
+  const sanitize = (cell: string): string =>
+    (cell ?? '').replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\n/g, ' ');
   const widths = table[0].map((_, col) => Math.max(...table.map((row) => (row[col] ?? '').length)));
   if (widths.length === 0) return '';
 
