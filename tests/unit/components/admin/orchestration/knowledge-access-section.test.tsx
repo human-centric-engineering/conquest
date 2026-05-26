@@ -19,6 +19,12 @@
  * - Non-fatal: document label fetch failure does not crash
  * - Handles rawTagIds / rawDocumentIds being undefined (coerces to [])
  * - loadDocumentOptions called with query when MultiSelect async search fires
+ * - Knowledge-search capability gating:
+ *   - Ungated when no agentId is provided (create flow)
+ *   - Gated (controls disabled + banner) when the agent has no search capability
+ *   - Ungated when the search capability is attached and enabled
+ *   - Gated with a distinct message when the capability is attached but disabled
+ *   - Fails open (ungated) when the capability fetch errors
  *
  * @see components/admin/orchestration/knowledge-access-section.tsx
  */

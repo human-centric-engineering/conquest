@@ -10,6 +10,9 @@
  * - onRefresh called after seed and rechunk
  * - Embed button is disabled when no chunks or no provider
  * - Seed error message displayed on failure
+ * - Row actions menu (⋯): Edit name opens the rename dialog, Edit tags opens
+ *   the tags editor, Delete opens the inline confirmation (delete-path tests
+ *   go through the menu — there is no standalone trash icon)
  *
  * @see components/admin/orchestration/knowledge/manage-tab.tsx
  */
