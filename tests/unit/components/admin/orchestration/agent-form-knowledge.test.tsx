@@ -120,12 +120,21 @@ function makeAgent(
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
+// The KnowledgeAccessSection greys itself out unless the agent has an enabled
+// search_knowledge_base capability binding, so edit-mode tests that interact
+// with the section must report it as attached.
+const SEARCH_CAP_LINK = [{ isEnabled: true, capability: { slug: 'search_knowledge_base' } }];
+
 describe('AgentForm — Knowledge Access section callbacks', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
-    // apiClient.get is called by KnowledgeAccessSection for tags/docs
+    // apiClient.get is called by KnowledgeAccessSection for tags/docs and to
+    // check whether the knowledge-search capability is attached.
     const { apiClient } = await import('@/lib/api/client');
-    vi.mocked(apiClient.get).mockResolvedValue([]);
+    vi.mocked(apiClient.get).mockImplementation(async (url: string) => {
+      if (typeof url === 'string' && url.endsWith('/capabilities')) return SEARCH_CAP_LINK;
+      return [];
+    });
   });
 
   afterEach(() => {
@@ -137,6 +146,7 @@ describe('AgentForm — Knowledge Access section callbacks', () => {
       // Arrange: mock apiClient.get to return tags so the MultiSelect can show options
       const { apiClient } = await import('@/lib/api/client');
       vi.mocked(apiClient.get).mockImplementation(async (url: string) => {
+        if (typeof url === 'string' && url.endsWith('/capabilities')) return SEARCH_CAP_LINK;
         if (typeof url === 'string' && url.includes('/knowledge/tags')) {
           return [{ id: 'tag-1', slug: 'sales', name: 'Sales', description: null }];
         }
@@ -181,6 +191,7 @@ describe('AgentForm — Knowledge Access section callbacks', () => {
       // Arrange: provide tags so the MultiSelect offers options
       const { apiClient } = await import('@/lib/api/client');
       vi.mocked(apiClient.get).mockImplementation(async (url: string) => {
+        if (typeof url === 'string' && url.endsWith('/capabilities')) return SEARCH_CAP_LINK;
         if (typeof url === 'string' && url.includes('/knowledge/tags')) {
           return [{ id: 'tag-1', slug: 'sales', name: 'Sales', description: null }];
         }

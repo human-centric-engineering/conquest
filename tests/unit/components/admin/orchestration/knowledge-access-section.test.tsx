@@ -506,6 +506,100 @@ describe('KnowledgeAccessSection', () => {
     });
   });
 
+  // ── Capability gating ──────────────────────────────────────────────────────
+
+  describe('knowledge-search capability gating', () => {
+    const CAP_URL = '/capabilities';
+
+    function mockCapability(state: 'enabled' | 'disabled' | 'absent'): void {
+      vi.mocked(apiClient.get).mockImplementation((url: string) => {
+        if (url.endsWith(CAP_URL)) {
+          if (state === 'absent') return Promise.resolve([]);
+          return Promise.resolve([
+            { isEnabled: state === 'enabled', capability: { slug: 'search_knowledge_base' } },
+          ]);
+        }
+        if (url.includes('/knowledge/tags')) return Promise.resolve([TAG_A, TAG_B]);
+        if (url.includes('/knowledge/documents')) return Promise.resolve([DOC_A, DOC_B]);
+        return Promise.resolve([]);
+      });
+    }
+
+    it('does not gate when no agentId is provided (create flow)', async () => {
+      await act(async () => {
+        render(<KnowledgeAccessSection {...makeProps()} />);
+      });
+
+      expect(
+        screen.queryByText(/no knowledge-search capability attached/i)
+      ).not.toBeInTheDocument();
+      expect(screen.getByLabelText(/full access/i)).toBeEnabled();
+    });
+
+    it('gates the section when the agent has no search capability attached', async () => {
+      mockCapability('absent');
+
+      await act(async () => {
+        render(<KnowledgeAccessSection {...makeProps()} agentId="agent-1" />);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText(/no knowledge-search capability attached/i)).toBeInTheDocument();
+      });
+      // Native fieldset[disabled] disables the radios.
+      expect(screen.getByLabelText(/full access/i)).toBeDisabled();
+      expect(screen.getByLabelText(/restricted/i)).toBeDisabled();
+    });
+
+    it('does NOT gate when the search capability is attached and enabled', async () => {
+      mockCapability('enabled');
+
+      await act(async () => {
+        render(<KnowledgeAccessSection {...makeProps()} agentId="agent-1" />);
+      });
+
+      await waitFor(() => {
+        expect(apiClient.get).toHaveBeenCalledWith(expect.stringContaining(CAP_URL));
+      });
+      expect(
+        screen.queryByText(/no knowledge-search capability attached/i)
+      ).not.toBeInTheDocument();
+      expect(screen.getByLabelText(/full access/i)).toBeEnabled();
+    });
+
+    it('gates with a distinct message when the capability is attached but disabled', async () => {
+      mockCapability('disabled');
+
+      await act(async () => {
+        render(<KnowledgeAccessSection {...makeProps()} agentId="agent-1" />);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText(/attached but switched off/i)).toBeInTheDocument();
+      });
+      expect(screen.getByLabelText(/restricted/i)).toBeDisabled();
+    });
+
+    it('does not gate when the capability fetch fails (fails open)', async () => {
+      vi.mocked(apiClient.get).mockImplementation((url: string) => {
+        if (url.endsWith(CAP_URL)) return Promise.reject(new Error('network'));
+        return Promise.resolve([]);
+      });
+
+      await act(async () => {
+        render(<KnowledgeAccessSection {...makeProps()} agentId="agent-1" />);
+      });
+
+      await waitFor(() => {
+        expect(apiClient.get).toHaveBeenCalledWith(expect.stringContaining(CAP_URL));
+      });
+      expect(
+        screen.queryByText(/no knowledge-search capability attached/i)
+      ).not.toBeInTheDocument();
+      expect(screen.getByLabelText(/full access/i)).toBeEnabled();
+    });
+  });
+
   // ── onTagsChange / onDocumentsChange wiring ────────────────────────────────
 
   describe('MultiSelect onChange wiring', () => {

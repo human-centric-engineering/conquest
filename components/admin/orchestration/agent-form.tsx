@@ -1580,6 +1580,7 @@ export function AgentForm({
             mode={watch('knowledgeAccessMode')}
             tagIds={watch('knowledgeTagIds')}
             documentIds={watch('knowledgeDocumentIds')}
+            agentId={agent?.id}
             onModeChange={(next) => setValue('knowledgeAccessMode', next, { shouldDirty: true })}
             onTagsChange={(next) => setValue('knowledgeTagIds', next, { shouldDirty: true })}
             onDocumentsChange={(next) =>
