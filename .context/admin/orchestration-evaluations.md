@@ -20,6 +20,47 @@ Admin surface for two complementary evaluation flows: **manual sessions** (a hum
 
 All pages are async server components using `serverFetch()` + `parseApiResponse()`. Fetch failures fall back to empty state or `notFound()`. The run-detail and form pages hand off to client components for interactive parts.
 
+## What landed in Phase 3
+
+Four threads, all in one PR. Spec is in
+[`.context/orchestration/evaluations.md`](../orchestration/evaluations.md);
+this is the operator's quick map.
+
+1. **Workflow subjects (runtime + UI).** The run-create form has a
+   Subject-kind toggle. Selecting **Workflow** swaps in a workflow
+   picker (only active + published workflows) and reveals a
+   `subjectOutputSelector` control: **Final report** / **Last step
+   output** / **Specific step…**. The worker drives the workflow via
+   `OrchestrationEngine.execute()` and resolves the selector against
+   the completed execution's trace. Per-step `AiCostLog` rows are
+   tagged `{ evaluationRunId, role: 'subject' }` so the empirical cost
+   estimator can split spend later.
+
+2. **`judge_call` workflow step type.** The workflow builder's palette
+   now lists **Judge Call** under Decisions. Drag it onto the canvas
+   to score a prior step's output against a judge agent inline. Config:
+   `judgeAgentSlug`, `question`, `answer`, optional `expectedOutput`,
+   optional `threshold`. Output carries `passed: boolean` derived from
+   the threshold — workflows route on it via the existing `route` step.
+   Unlocks QA gates, self-review loops, multi-judge approval, and
+   cost-aware routing without touching the eval system.
+
+3. **`workflow_as_judge` + `pairwise_judge_agent` graders.**
+   `workflow_as_judge` is a model-grader entry that runs an entire
+   `AiWorkflow` per case with mapped inputs and parses the final
+   step's `{score, reasoning}` envelope. `pairwise_judge_agent` is the
+   first pairwise built-in (forced A/B/tie verdict). Standalone runs
+   refuse pairwise metrics — they need two side-by-side outputs that
+   only the experiment compare flow supplies. The compare-view verdict
+   badge is Phase 3.5.
+
+4. **Ragas-style RAG judge agents.** Three new seeded
+   `kind='judge'` agents (`prisma/seeds/018-rag-evaluation-judges.ts`):
+   `eval-judge-context-precision`, `eval-judge-context-recall`, and
+   `eval-judge-answer-similarity`. They use the same dispatch path as
+   the existing six judges — `judge_agent` grader, slug lookup at
+   run-time, no code changes. Run `npm run db:seed` to install.
+
 ## What landed in Phase 2
 
 All four items shipped end-to-end. See
@@ -78,7 +119,7 @@ datasetContentHash)`.
 The headline new surface. End-to-end journey:
 
 1. **Upload a dataset** (`/datasets/new`). Drag-drop CSV or JSONL; required column is `input`, everything else optional (`expectedOutput`, `tags`, `metadata`, `referenceCitations`). The form auto-seeds the dataset name from the filename stem, validates extension + size client-side, posts multipart to `POST /api/v1/admin/orchestration/evaluations/datasets`.
-2. **Queue a run** (`/runs/new`). Pick subject (agent only in Phase 1), pick dataset, tick metrics from two sections — heuristic graders (cheap deterministic) and judge agents (built-in + custom). Submit → `POST /api/v1/admin/orchestration/evaluations/runs` validates ownership, pre-flights graders, pins `subjectBrandVoice` into the brand-voice judge config, queues the run.
+2. **Queue a run** (`/runs/new`). Pick subject — either an agent (default) or a workflow (Phase 3, with a `subjectOutputSelector` control for picking final-report / last-step / specific-step output). Pick a dataset, tick metrics from two sections — heuristic graders (cheap deterministic) and judge agents (built-in + custom). Submit → `POST /api/v1/admin/orchestration/evaluations/runs` validates ownership, pre-flights graders (refuses pairwise graders on standalone runs), validates the workflow exists + is active + has a published version when `subjectKind: 'workflow'`, pins `subjectBrandVoice` into the brand-voice judge config, queues the run.
 3. **Watch it process** (`/runs/[id]`). Polls every 3 s while queued/running. Shows progress bar, then summary table after completion (mean / median / p95 / passRate per metric). Per-case results table; click a row → drill-in dialog with the judge's full reasoning + chain-of-thought `evaluation_steps`.
 4. **Cancel anytime**. The Cancel button on the detail page flips the run to 'cancelled'; the worker picks it up between cases.
 

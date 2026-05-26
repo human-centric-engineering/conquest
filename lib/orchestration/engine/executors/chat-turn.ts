@@ -234,6 +234,7 @@ export async function executeChatTurn(
     inputTokens: response.usage?.inputTokens ?? 0,
     outputTokens: response.usage?.outputTokens ?? 0,
     metadata: {
+      ...(ctx.costLogMetadata ?? {}),
       stepId: step.id,
       latencyMs,
       historyTurnsLoaded: priorMessagesAsc.length,

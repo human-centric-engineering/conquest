@@ -3035,6 +3035,21 @@ export const evaluateConfigSchema = stepErrorConfigSchema.extend({
 });
 
 /**
+ * `judge_call` — drive an evaluation judge agent inline as a workflow
+ * step. Reuses the Phase 1.5 judge-agent machinery
+ * (`drainStreamChat` + JSON-envelope parser) so workflows can score
+ * intermediate outputs and route on the verdict.
+ */
+export const judgeCallConfigSchema = stepErrorConfigSchema.extend({
+  judgeAgentSlug: z.string().min(1, 'judgeAgentSlug is required'),
+  question: z.string().min(1, 'question is required'),
+  answer: z.string().min(1, 'answer is required'),
+  expectedOutput: z.string().optional(),
+  subjectBrandVoice: z.string().optional(),
+  threshold: z.number().optional(),
+});
+
+/**
  * `supervisor` — independent post-hoc audit of the execution.
  *
  * Reads the full execution trace (compacted projection) and emits a

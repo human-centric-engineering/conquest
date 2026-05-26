@@ -20,11 +20,17 @@ import '@/lib/orchestration/evaluations/graders/heuristic/json-path-equals';
 import '@/lib/orchestration/evaluations/graders/heuristic/tool-was-called';
 import '@/lib/orchestration/evaluations/graders/heuristic/citation-count-at-least';
 
-// Model graders — a single registry entry, `judge_agent`, that drives
-// any AiAgent with `kind='judge'`. The 6 built-in judges live as
-// seeded agents (prisma/seeds/016-evaluation-judges.ts); admins can
-// create custom judges via the agent form.
+// Model graders — `judge_agent` drives any AiAgent with `kind='judge'`
+// (the 6 built-in judges live as seeded agents in
+// prisma/seeds/016-evaluation-judges.ts; admins can create custom
+// judges via the agent form). `workflow_as_judge` drives an entire
+// workflow as a judge — Phase 3.
 import '@/lib/orchestration/evaluations/graders/model/judge-agent';
+import '@/lib/orchestration/evaluations/graders/model/workflow-as-judge';
+
+// Pairwise graders — judge agent shown two outputs side-by-side
+// picks a winner. Used by the experiment compare view's verdict badge.
+import '@/lib/orchestration/evaluations/graders/pairwise/judge-agent';
 
 export * from '@/lib/orchestration/evaluations/graders/types';
 export {
@@ -53,7 +59,10 @@ export const KNOWN_GRADER_SLUGS = [
   'json_path_equals',
   'tool_was_called',
   'citation_count_at_least',
-  // model — one registry slug; the specific judge is picked via
-  // config.agentSlug at run time.
+  // model — judge_agent picks the specific judge via config.agentSlug.
+  // workflow_as_judge drives an AiWorkflow as the judge.
   'judge_agent',
+  'workflow_as_judge',
+  // pairwise — judge agent shown two outputs picks a winner.
+  'pairwise_judge_agent',
 ] as const;

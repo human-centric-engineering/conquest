@@ -4,15 +4,15 @@ Workflows are DAGs (directed acyclic graphs) of steps executed by the `Orchestra
 
 ## Quick Reference
 
-| Concept                | Detail                                                                                                                                                                                                                      |
-| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Step types             | 15: `llm_call`, `tool_call`, `chain`, `route`, `parallel`, `reflect`, `plan`, `human_approval`, `rag_retrieve`, `guard`, `evaluate`, `external_call`, `agent_call`, `send_notification`, `orchestrator`                     |
-| Templates              | 11 built-in: Customer Support, Content Pipeline, SaaS Backend, Research Agent, Conversational Learning, Data Pipeline, Outreach Safety, Code Review, Autonomous Research, Cited Knowledge Advisor, Scheduled Source Monitor |
-| Error strategies       | 4: `retry`, `fallback`, `skip`, `fail` (default: `fail`)                                                                                                                                                                    |
-| Validator              | `validateWorkflow()` — pure function, no DB, no I/O                                                                                                                                                                         |
-| Semantic validator     | `semanticValidateWorkflow()` — DB-backed checks for model overrides, capability slugs, agent slugs                                                                                                                          |
-| Engine                 | `OrchestrationEngine.execute()` — returns `AsyncIterable<ExecutionEvent>`                                                                                                                                                   |
-| Template interpolation | `{{input}}`, `{{input.key}}`, `{{previous.output}}`, `{{<stepId>.output}}`                                                                                                                                                  |
+| Concept                | Detail                                                                                                                                                                                                                                                     |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Step types             | 19: `llm_call`, `tool_call`, `chain`, `route`, `parallel`, `reflect`, `plan`, `human_approval`, `rag_retrieve`, `guard`, `evaluate`, `judge_call`, `external_call`, `agent_call`, `chat_turn`, `send_notification`, `orchestrator`, `supervisor`, `report` |
+| Templates              | 11 built-in: Customer Support, Content Pipeline, SaaS Backend, Research Agent, Conversational Learning, Data Pipeline, Outreach Safety, Code Review, Autonomous Research, Cited Knowledge Advisor, Scheduled Source Monitor                                |
+| Error strategies       | 4: `retry`, `fallback`, `skip`, `fail` (default: `fail`)                                                                                                                                                                                                   |
+| Validator              | `validateWorkflow()` — pure function, no DB, no I/O                                                                                                                                                                                                        |
+| Semantic validator     | `semanticValidateWorkflow()` — DB-backed checks for model overrides, capability slugs, agent slugs                                                                                                                                                         |
+| Engine                 | `OrchestrationEngine.execute()` — returns `AsyncIterable<ExecutionEvent>`                                                                                                                                                                                  |
+| Template interpolation | `{{input}}`, `{{input.key}}`, `{{previous.output}}`, `{{<stepId>.output}}`                                                                                                                                                                                 |
 
 ## Workflow Definition Structure
 
@@ -28,7 +28,7 @@ interface WorkflowDefinition {
 interface WorkflowStep {
   id: string; // Unique within the workflow
   name: string; // Human-readable label
-  type: WorkflowStepType; // One of the 15 step types
+  type: WorkflowStepType; // One of the 19 step types
   config: Record<string, unknown>; // Type-specific configuration
   nextSteps: ConditionalEdge[]; // Outgoing edges
 }
@@ -53,12 +53,13 @@ interface ConditionalEdge {
 
 ### Decision Steps
 
-| Type             | Label          | Purpose                                      | Key Config                                                     | Default Config                                                      |
-| ---------------- | -------------- | -------------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------- |
-| `route`          | Route          | Classify input and branch to different paths | `classificationPrompt`, `routes`                               | `{ classificationPrompt: '', routes: [] }`                          |
-| `human_approval` | Human Approval | Pause workflow for human review              | `prompt` (required), `timeoutMinutes`, `notificationChannel`   | `{ prompt: '', timeoutMinutes: 60, notificationChannel: 'in-app' }` |
-| `guard`          | Guard          | Safety gate — LLM or regex rule check        | `rules`, `mode` (`llm`/`regex`), `failAction` (`block`/`flag`) | `{ rules: '', mode: 'llm', failAction: 'block', temperature: 0.1 }` |
-| `evaluate`       | Evaluate       | Score output against a rubric                | `rubric`, `scaleMin`, `scaleMax`, `threshold`                  | `{ rubric: '', scaleMin: 1, scaleMax: 5, threshold: 3 }`            |
+| Type             | Label          | Purpose                                      | Key Config                                                              | Default Config                                                                                 |
+| ---------------- | -------------- | -------------------------------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `route`          | Route          | Classify input and branch to different paths | `classificationPrompt`, `routes`                                        | `{ classificationPrompt: '', routes: [] }`                                                     |
+| `human_approval` | Human Approval | Pause workflow for human review              | `prompt` (required), `timeoutMinutes`, `notificationChannel`            | `{ prompt: '', timeoutMinutes: 60, notificationChannel: 'in-app' }`                            |
+| `guard`          | Guard          | Safety gate — LLM or regex rule check        | `rules`, `mode` (`llm`/`regex`), `failAction` (`block`/`flag`)          | `{ rules: '', mode: 'llm', failAction: 'block', temperature: 0.1 }`                            |
+| `evaluate`       | Evaluate       | Score output against a rubric                | `rubric`, `scaleMin`, `scaleMax`, `threshold`                           | `{ rubric: '', scaleMin: 1, scaleMax: 5, threshold: 3 }`                                       |
+| `judge_call`     | Judge Call     | Score a prior step against a judge agent     | `judgeAgentSlug`, `question`, `answer`, `expectedOutput?`, `threshold?` | `{ judgeAgentSlug: '', question: '{{input}}', answer: '{{previous.output}}', threshold: 0.7 }` |
 
 ### Input Steps
 

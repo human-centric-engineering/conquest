@@ -45,6 +45,7 @@ import {
   AgentCallEditor,
   ChainEditor,
   EvaluateEditor,
+  JudgeCallEditor,
   ExternalCallEditor,
   GuardEditor,
   HumanApprovalEditor,
@@ -343,6 +344,8 @@ function BlockEditor({
       return <GuardEditor config={config as never} onChange={onChange} />;
     case 'evaluate':
       return <EvaluateEditor config={config as never} onChange={onChange} />;
+    case 'judge_call':
+      return <JudgeCallEditor config={config as never} onChange={onChange} />;
     case 'external_call':
       return <ExternalCallEditor config={config as never} onChange={onChange} />;
     case 'orchestrator':

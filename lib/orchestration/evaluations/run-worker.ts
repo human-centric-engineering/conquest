@@ -369,7 +369,10 @@ async function processOneCase(args: ProcessCaseArgs): Promise<CaseResultRowInput
       }
     }
   } else {
-    // Phase 1: workflow case returns a typed not-supported error.
+    // Phase 3: drives `OrchestrationEngine.execute()` and resolves
+    // `subjectOutputSelector` against the completed execution. Errors
+    // (missing workflow, malformed snapshot, engine throw) come back
+    // as typed `errorCode` fields rather than throws.
     const result = await runWorkflowCase({
       workflowId: run.workflowId ?? '',
       userId: run.userId,

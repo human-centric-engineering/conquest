@@ -13,6 +13,19 @@ call (one judge call for all three rubrics together); batch runs use
 the registry (one judge call per case × grader). See
 `.context/orchestration/evaluations.md` for the registry architecture.
 
+**Phase 3 update:** three new Ragas-style RAG-focused judges seeded by
+`prisma/seeds/018-rag-evaluation-judges.ts` complement the answer-
+quality metrics above:
+
+| Slug                           | What it measures                                                                                                              |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| `eval-judge-context-precision` | Of the citations the response USED, what fraction are relevant to the question. Penalises clutter in the retrieved set.       |
+| `eval-judge-context-recall`    | Of the gold-reference claims in EXPECTED ANSWER, what fraction appear in the retrieved citations. Measures retrieval surface. |
+| `eval-judge-answer-similarity` | Semantic similarity of ANSWER vs. EXPECTED ANSWER overall (Ragas-style, model-graded — complements `correctness`).            |
+
+These are dispatched the same way as the Phase 1 judges — `judge_agent`
+grader, slug lookup at run time, no code changes beyond the seed.
+
 This doc is the canonical spec. Cross-references:
 
 - Admin UI: `.context/admin/orchestration-evaluations.md` (Named metric scoring section)

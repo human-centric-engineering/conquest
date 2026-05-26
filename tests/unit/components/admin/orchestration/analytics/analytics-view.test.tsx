@@ -257,8 +257,10 @@ describe('AnalyticsView', () => {
             messageId: 'msg_1',
             conversationId: 'c1',
             agentId: 'a1',
+            agentName: 'Support Bot',
             userMessage: 'How do I connect to Stripe?',
             assistantReply: "I'm not sure about that.",
+            matchedPhrase: "I'm not sure",
             createdAt: new Date('2026-04-15'),
           },
         ]}
@@ -267,6 +269,14 @@ describe('AnalyticsView', () => {
 
     expect(screen.getByText('How do I connect to Stripe?')).toBeInTheDocument();
     expect(screen.getByText("I'm not sure about that.")).toBeInTheDocument();
+    expect(screen.getByText('Support Bot')).toBeInTheDocument();
+    expect(screen.getByText("I'm not sure")).toBeInTheDocument();
+    // Conversation link
+    const convLink = screen.getByText('How do I connect to Stripe?').closest('a');
+    expect(convLink).toHaveAttribute('href', '/admin/orchestration/conversations/c1');
+    // Agent link
+    const agentLink = screen.getByText('Support Bot').closest('a');
+    expect(agentLink).toHaveAttribute('href', '/admin/orchestration/agents/a1');
   });
 
   // ── New tests ───────────────────────────────────────────────────────────────

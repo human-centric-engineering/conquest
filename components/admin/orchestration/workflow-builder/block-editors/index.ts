@@ -40,6 +40,7 @@ export { HumanApprovalEditor } from '@/components/admin/orchestration/workflow-b
 export { RagRetrieveEditor } from '@/components/admin/orchestration/workflow-builder/block-editors/rag-retrieve-editor';
 export { GuardEditor } from '@/components/admin/orchestration/workflow-builder/block-editors/guard-editor';
 export { EvaluateEditor } from '@/components/admin/orchestration/workflow-builder/block-editors/evaluate-editor';
+export { JudgeCallEditor } from '@/components/admin/orchestration/workflow-builder/block-editors/judge-call-editor';
 export { ExternalCallEditor } from '@/components/admin/orchestration/workflow-builder/block-editors/external-call-editor';
 export { AgentCallEditor } from '@/components/admin/orchestration/workflow-builder/block-editors/agent-call-editor';
 export { NotificationEditor } from '@/components/admin/orchestration/workflow-builder/block-editors/notification-editor';

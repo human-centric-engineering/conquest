@@ -20,6 +20,7 @@ import '@/lib/orchestration/engine/executors/human-approval';
 import '@/lib/orchestration/engine/executors/rag-retrieve';
 import '@/lib/orchestration/engine/executors/guard';
 import '@/lib/orchestration/engine/executors/evaluate';
+import '@/lib/orchestration/engine/executors/judge-call';
 import '@/lib/orchestration/engine/executors/external-call';
 import '@/lib/orchestration/engine/executors/agent-call';
 import '@/lib/orchestration/engine/executors/chat-turn';

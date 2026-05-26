@@ -239,8 +239,14 @@ export async function captureWorkflowExecutionAsCase(params: {
  * Matches the runtime selector contract; returns the resolved string or
  * `null` when nothing matched. Object outputs are JSON-stringified so
  * the dataset case's `expectedOutput` is always a string.
+ *
+ * Exported so the workflow-as-subject case runner (`run-cases/workflow-case.ts`)
+ * shares the exact selector semantics that trace-to-dataset capture uses.
+ * Keeps the contract in one place — a selector that captures a dataset
+ * case from execution X resolves to the same output when the eval run
+ * later re-executes the workflow against that case.
  */
-function resolveSelectorOutput(
+export function resolveSelectorOutput(
   execution: { outputData: unknown; executionTrace: unknown },
   selector: WorkflowSubjectOutputSelector
 ): string | null {

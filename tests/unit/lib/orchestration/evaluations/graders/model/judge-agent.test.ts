@@ -238,7 +238,7 @@ describe('judge_agent grader — drainStreamChat error', () => {
     const result = await judgeAgentGrader.grade({ ...baseInput() });
 
     expect(result.score).toBeNull();
-    expect(result.reasoning).toMatch(/judge_agent error: PROVIDER_DOWN/);
+    expect(result.reasoning).toMatch(/judge call error: PROVIDER_DOWN/);
     expect(result.reasoning).toMatch(/Anthropic returned 503/);
     expect(result.costUsd).toBe(0.0001);
     expect(result.tokenUsage).toEqual({ input: 4, output: 0 });
@@ -252,7 +252,7 @@ describe('judge_agent grader — drainStreamChat error', () => {
     const result = await judgeAgentGrader.grade({ ...baseInput() });
 
     expect(result.score).toBeNull();
-    expect(result.reasoning).toBe('judge_agent error: RATE_LIMITED');
+    expect(result.reasoning).toBe('judge call error: RATE_LIMITED');
   });
 });
 

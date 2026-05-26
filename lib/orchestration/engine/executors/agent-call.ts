@@ -248,7 +248,7 @@ async function runSingleTurn(
           isLocal: turnCost.isLocal,
           traceId: span.traceId(),
           spanId: span.spanId(),
-          metadata: { stepId: step.id, iteration },
+          metadata: { ...(ctx.costLogMetadata ?? {}), stepId: step.id, iteration },
         }).catch((err: unknown) => {
           logger.warn('agent_call: logCost rejected', {
             executionId: ctx.executionId,

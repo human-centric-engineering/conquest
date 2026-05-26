@@ -16,6 +16,7 @@ import {
   type DatasetOption,
   type HeuristicGraderOption,
   type JudgeAgentOption,
+  type WorkflowOption,
   RunCreateForm,
 } from '@/components/admin/orchestration/evaluations-foundations/run-create-form';
 import { API } from '@/lib/api/endpoints';
@@ -58,6 +59,71 @@ async function loadDatasets(): Promise<DatasetOption[]> {
   }
 }
 
+interface RawWorkflowListItem {
+  id: string;
+  name: string;
+  slug: string;
+  isActive: boolean;
+  publishedVersion: {
+    id: string;
+    version: number;
+    snapshot: unknown;
+  } | null;
+}
+
+interface RawWorkflowStep {
+  id: string;
+  name?: unknown;
+  type?: unknown;
+}
+
+interface RawWorkflowDefinition {
+  steps?: unknown;
+}
+
+function extractSteps(definition: unknown): Array<{ id: string; name: string; type: string }> {
+  if (!definition || typeof definition !== 'object') return [];
+  const steps = (definition as RawWorkflowDefinition).steps;
+  if (!Array.isArray(steps)) return [];
+  return steps.flatMap((raw) => {
+    if (!raw || typeof raw !== 'object') return [];
+    const step = raw as RawWorkflowStep;
+    if (typeof step.id !== 'string' || step.id.length === 0) return [];
+    return [
+      {
+        id: step.id,
+        name: typeof step.name === 'string' && step.name.length > 0 ? step.name : step.id,
+        type: typeof step.type === 'string' ? step.type : 'unknown',
+      },
+    ];
+  });
+}
+
+async function loadWorkflows(): Promise<WorkflowOption[]> {
+  try {
+    // Only workflows that are runnable as eval subjects: active + has a
+    // published version. Filtering at the API layer keeps the picker
+    // honest — a draft-only workflow can't be a subject.
+    const res = await serverFetch(`${API.ADMIN.ORCHESTRATION.WORKFLOWS}?limit=100&isActive=true`);
+    if (!res.ok) return [];
+    const parsed = await parseApiResponse<RawWorkflowListItem[]>(res);
+    if (!parsed.success) return [];
+    return parsed.data
+      .filter((w) => w.publishedVersion !== null)
+      .map((w) => ({
+        id: w.id,
+        name: w.name,
+        slug: w.slug,
+        steps: extractSteps(w.publishedVersion?.snapshot),
+      }));
+  } catch (err) {
+    logger.error('Failed to load workflows for run-create', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return [];
+  }
+}
+
 interface GradersResponse {
   heuristicGraders: HeuristicGraderOption[];
   judgeAgents: JudgeAgentOption[];
@@ -79,8 +145,9 @@ async function loadGraders(): Promise<GradersResponse> {
 }
 
 export default async function NewRunPage(): Promise<React.ReactElement> {
-  const [agents, datasets, graders] = await Promise.all([
+  const [agents, workflows, datasets, graders] = await Promise.all([
     loadAgents(),
+    loadWorkflows(),
     loadDatasets(),
     loadGraders(),
   ]);
@@ -99,13 +166,14 @@ export default async function NewRunPage(): Promise<React.ReactElement> {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">New batch run</h1>
         <p className="text-muted-foreground mt-1 text-sm">
-          Pair a dataset with an agent and one or more graders. The worker drains it on the next
-          maintenance tick.
+          Pair a dataset with an agent or workflow and one or more graders. The worker drains it on
+          the next maintenance tick.
         </p>
       </div>
 
       <RunCreateForm
         agents={agents}
+        workflows={workflows}
         datasets={datasets}
         heuristicGraders={graders.heuristicGraders}
         judgeAgents={graders.judgeAgents}

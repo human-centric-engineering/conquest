@@ -212,6 +212,24 @@ export const STEP_REGISTRY: readonly StepRegistryEntry[] = [
     estimatedDuration: '~2-5s',
   },
   {
+    type: 'judge_call',
+    label: 'Judge Call',
+    description:
+      'Score a prior step against an evaluation judge agent. Routes downstream branches on the score (QA gates, self-review loops, multi-judge approval).',
+    category: 'decision',
+    icon: ClipboardCheck,
+    inputs: 1,
+    outputs: 1,
+    relatedPatterns: [19],
+    defaultConfig: {
+      judgeAgentSlug: '',
+      question: '{{input}}',
+      answer: '{{previous.output}}',
+      threshold: 0.7,
+    },
+    estimatedDuration: '~2-6s',
+  },
+  {
     type: 'external_call',
     label: 'External Call',
     description: 'Call an external HTTP endpoint or agent.',

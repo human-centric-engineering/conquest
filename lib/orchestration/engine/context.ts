@@ -97,6 +97,18 @@ export interface ExecutionContext {
    * here. Engine code reads + clears.
    */
   pendingContextPatch?: Record<string, unknown>;
+  /**
+   * Extra key/value pairs that LLM-cost-emitting executors (`agent_call`,
+   * `chat_turn`, and the judge-driven executors) spread into the
+   * `metadata` field they pass to `logCost`. The intended use is the
+   * evaluation worker tagging every cost row a workflow-as-subject run
+   * generates with `{ evaluationRunId, role: 'subject' }` — the
+   * empirical cost estimator reads those rows back by metadata.
+   *
+   * Executors must merge (not replace) their own metadata so per-step
+   * fields like `stepId` / `iteration` still land on the row.
+   */
+  costLogMetadata?: Record<string, unknown>;
 }
 
 /**
@@ -112,6 +124,7 @@ export function createContext(params: {
   budgetLimitUsd?: number;
   signal?: AbortSignal;
   logger: Logger;
+  costLogMetadata?: Record<string, unknown>;
 }): ExecutionContext {
   return {
     executionId: params.executionId,
@@ -127,6 +140,7 @@ export function createContext(params: {
     signal: params.signal,
     logger: params.logger,
     stepTelemetry: [],
+    ...(params.costLogMetadata ? { costLogMetadata: params.costLogMetadata } : {}),
   };
 }
 

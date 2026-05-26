@@ -42,13 +42,13 @@ describe('PatternPalette', () => {
     }
   });
 
-  it('renders exactly 18 palette blocks (one per step type)', () => {
+  it('renders exactly 19 palette blocks (one per step type)', () => {
     render(<PatternPalette />);
 
-    // STEP_REGISTRY: 15 originals + supervisor + report + chat_turn = 18
-    expect(STEP_REGISTRY.length).toBe(18);
+    // STEP_REGISTRY: 15 originals + supervisor + report + chat_turn + judge_call = 19
+    expect(STEP_REGISTRY.length).toBe(19);
     const blocks = document.querySelectorAll('[data-testid^="palette-block-"]');
-    expect(blocks.length).toBe(18);
+    expect(blocks.length).toBe(19);
   });
 
   it('all palette blocks have draggable attribute', () => {
@@ -246,6 +246,7 @@ describe('PatternPalette', () => {
         rag_retrieve: [14], // Knowledge Retrieval (RAG)
         guard: [18], // Guardrails & Safety
         evaluate: [19], // Evaluation & Monitoring
+        judge_call: [19], // Evaluation & Monitoring (inline judge-driven scoring)
         external_call: [], // generic HTTP — not an agentic pattern
         agent_call: [7, 15], // Multi-Agent Collaboration + A2A
         chat_turn: [8], // Memory Management — loads prior AiMessage rows into the prompt

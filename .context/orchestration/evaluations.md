@@ -107,9 +107,10 @@ Per-tick lifecycle:
    default via `resolveAgentProviderAndModel`.
 5. **Time-budgeted loop** (≤ 45s per tick): for each case without a
    result row, drain the subject (`streamChat` for agent subjects;
-   stub for workflow subjects until Phase 3), run every configured
-   grader, write the `AiEvaluationCaseResult` row, throttle progress
-   writes (every 5 cases).
+   `OrchestrationEngine.execute()` for workflow subjects, resolved
+   via `subjectOutputSelector`), run every configured grader, write
+   the `AiEvaluationCaseResult` row, throttle progress writes (every
+   5 cases).
 6. If the budget expires mid-run, **release the lease** so the next
    tick resumes from the case cursor. Crashed workers recover the same
    way — `lockedAt` ages past the 5-minute threshold and the next claim
@@ -155,8 +156,8 @@ fails CI rather than silently disappearing from the picker.
 - `tool_was_called`, `citation_count_at_least`
 
 **Judge agents** (one `judge_agent` registry entry; per-judge slug
-picked via `config.agentSlug` at run time). Six seeded by
-`prisma/seeds/016-evaluation-judges.ts`:
+picked via `config.agentSlug` at run time). Six answer-quality judges
+seeded by `prisma/seeds/016-evaluation-judges.ts`:
 
 - `eval-judge-correctness` — semantic match against `expectedOutput`.
   The biggest current gap before this refactor: reference-required,
@@ -170,6 +171,23 @@ picked via `config.agentSlug` at run time). Six seeded by
   sources (common-knowledge loophole removed).
 - `eval-judge-brand-voice` — response matches the subject agent's
   `brandVoiceInstructions`. Pinned at queue time.
+
+Three Ragas-style retrieval-quality judges seeded by
+`prisma/seeds/018-rag-evaluation-judges.ts` (Phase 3):
+
+- `eval-judge-context-precision` — fraction of cited sources that are
+  relevant to the question.
+- `eval-judge-context-recall` — fraction of gold-reference claims that
+  appear in the retrieved citations.
+- `eval-judge-answer-similarity` — semantic similarity of ANSWER vs.
+  EXPECTED ANSWER overall (Ragas-style, model-graded).
+
+A second model-grader entry, `workflow_as_judge` (Phase 3), drives an
+entire `AiWorkflow` as a judge — useful when scoring needs a
+multi-step rubric, knowledge-grounded judging with capability calls,
+or conditional rubric application. Config:
+`{ workflowSlug, inputMapping: { var: '$.userInput' | '$.modelOutput' | … } }`.
+The workflow's final step must output a `{score, reasoning}` envelope.
 
 Each judge's `systemInstructions` IS the rubric, with explicit
 **IGNORE** clauses telling it what the metric does NOT cover (so the
@@ -190,8 +208,13 @@ The manual-session path (`score-response.ts`) drives the three RAG
 judges in parallel via `drainStreamChat` (refactored from a bundled
 single-call to per-judge calls for consistency with the batch path).
 
-**Pairwise** — declared family on the registry, no built-ins yet.
-Pairwise judges land in Phase 3 (experiment compare view).
+**Pairwise** — `pairwise_judge_agent` (Phase 3) shows a judge agent
+two candidate answers side-by-side and parses
+`{ verdict: 'A' | 'B' | 'tie', reasoning }`. Used by the experiment
+compare view to add a judge-verdict badge alongside the statistical
+winner. Standalone runs refuse pairwise metrics at the route boundary
+— they need two side-by-side outputs, which only the compare flow
+supplies.
 
 ### Why no sandboxed code-based graders
 
@@ -272,11 +295,12 @@ code, no "AI flourishes". One grep audits the whole surface.
 
 ## Phase 1 boundaries
 
-- Workflow-as-subject — schema is wired, worker has a stub branch
-  returning a typed `workflow_subject_not_supported_in_phase_1` error,
-  the run-creation API rejects `subjectKind: 'workflow'` at the route
-  boundary. Phase 3 ships the UI.
-- Pairwise graders, RAG-specific Ragas metrics — Phase 3.
+- ~~Workflow-as-subject~~ — shipped in Phase 3. The worker dispatches
+  to `OrchestrationEngine.execute()`; the run-create form has a
+  Subject-kind toggle with a workflow picker and a
+  `subjectOutputSelector` control.
+- ~~Pairwise graders, RAG-specific Ragas metrics~~ — shipped in Phase 3
+  (`pairwise_judge_agent` + three new Ragas judges).
 - No CI gating endpoint yet — Phase 4.
 
 ## Phase 2 — cost estimator
@@ -451,69 +475,89 @@ test fallback was considered and rejected — ~10× the implementation
 cost for marginal accuracy at sample sizes a partner pilot would
 realistically generate.
 
-## Roadmap: judges in workflows
+## Phase 3 — judges in workflows
 
-Confirmed as future work. Two complementary integrations let workflows
-use the judge agents that already exist; no schema changes needed for
-either, just new code in `lib/orchestration/engine/executors/` and the
-grader registry.
+Two complementary integrations let workflows use the judge agents
+that already exist. No schema changes — pure code on the Phase 1.5
+foundations (`drainStreamChat` + JSON parser, factored into a shared
+`lib/orchestration/evaluations/judge-driver.ts`).
 
-### Direction 1 — `judge_call` workflow step type
+### `judge_call` workflow step type
 
-A new step executor in `lib/orchestration/engine/executors/judge-call.ts`,
-modelled on the existing `evaluate.ts` step. Config shape:
+New step executor at `lib/orchestration/engine/executors/judge-call.ts`,
+modelled on `evaluate.ts`. Config:
 
 ```ts
 {
   judgeAgentSlug: string;
-  question: string | TemplateRef;
-  answer: string | TemplateRef;
-  expectedOutput?: string | TemplateRef;
-  citations?: CitationsRef;
+  question: string;        // template-interpolated
+  answer: string;          // template-interpolated
+  expectedOutput?: string; // template-interpolated
+  subjectBrandVoice?: string;
+  threshold?: number;
 }
 ```
 
-The executor constructs the same structured user-message payload the
-batch worker uses, drives the named judge agent via `streamChat`,
-parses the `{score, reasoning, evaluationSteps}` envelope, and returns
-a typed step output workflows can route on. Unlocks:
+The executor template-interpolates the string fields (so a workflow
+can pass `{{previous.output}}` as the answer), drives the named judge
+agent via `driveJudgeAgent`, parses the `{score, reasoning,
+evaluationSteps?}` envelope, and returns a step output with a derived
+`passed: boolean` flag (`score >= threshold`, or `true` when no
+threshold). Routes downstream branches via the existing `route` step.
+Unlocks:
 
-| Pattern              | What it enables                                                                                          |
-| -------------------- | -------------------------------------------------------------------------------------------------------- |
-| Inline QA gate       | Workflow → agent_call → judge_call → branch: publish if score ≥ threshold, escalate otherwise            |
-| Self-review loop     | agent_call → judge_call → if score < threshold, agent_call again with feedback in prompt → max-N retries |
-| Multi-judge approval | Parallel branches of 3 judge_calls → aggregate → require all 3 above threshold                           |
-| Cost-aware routing   | Cheap heuristic check first (existing step); only run a judge_call if uncertain                          |
+| Pattern              | What it enables                                                                                  |
+| -------------------- | ------------------------------------------------------------------------------------------------ |
+| Inline QA gate       | Workflow → agent_call → judge_call → branch: publish if `passed`, escalate otherwise             |
+| Self-review loop     | agent_call → judge_call → if `!passed`, agent_call again with feedback in prompt → max-N retries |
+| Multi-judge approval | Parallel branches of 3 judge_calls → aggregate → require all 3 `passed`                          |
+| Cost-aware routing   | Cheap heuristic check first (existing step); only run a judge_call if uncertain                  |
 
-Estimated lift: ~150 LOC + tests. The reusable surface (judge agents,
-`drainStreamChat`, JSON parser) is already in place from Phase 1.5.
+### `workflow_as_judge` grader
 
-### Direction 2 — `workflow_as_judge` grader family
-
-The inverse: an entire workflow used AS a judge in evaluation runs. A
-new grader-family entry alongside `judge_agent`:
+The inverse: an entire `AiWorkflow` used AS a judge in evaluation
+runs. Registered alongside `judge_agent`:
 
 ```ts
-{ slug: 'workflow_as_judge', config: { workflowSlug, inputMapping } }
+{
+  slug: 'workflow_as_judge',
+  config: {
+    workflowSlug: string,
+    inputMapping: { var: '$.userInput' | '$.modelOutput' | '$.expectedOutput' | '$.citations' },
+  },
+}
 ```
 
-The grader executes the workflow with the case input + subject output
-as workflow variables, expects the workflow to output a
-`{score, reasoning}` envelope from its final step. Unlocks:
+The grader executes the workflow with the case fields mapped into its
+variables, expects the final step to emit a `{score, reasoning,
+evaluationSteps?}` envelope. Cost rows tagged
+`{ evaluationRunId, role: 'judge', judgeWorkflowSlug }`. Run-creation
+validates the workflow exists, is active, and has a published version
+before queueing.
 
-- Pairwise grading (workflow runs two candidates, judge picks the winner)
-- Knowledge-grounded judging with capability use (judge agent can call
-  `lookup_authoritative_answer` mid-judging before scoring)
-- Conditional rubric application (different scoring path per question type)
+Unlocks:
+
+- Composed multi-step rubrics that a single judge agent can't capture.
+- Knowledge-grounded judging — the judge workflow can call
+  `lookup_authoritative_answer` mid-judging via capabilities.
+- Conditional rubric application (router → different scoring path per
+  question type).
 - A/B in production (workflow routes traffic to two variants and
-  records the score delta as an evaluation result)
+  records the score delta as an evaluation result).
 
-Estimated lift: ~200 LOC + tests + a `workflow_as_judge.test.ts` round-
-trip integration test. Schema is already forward-compatible
-(`AiEvaluationRun.subjectKind` already supports `workflow` as a subject
-type; `workflow_as_judge` reuses the same workflow execution path).
+### `pairwise_judge_agent` grader
 
-### What's NOT being added
+First built-in `family: 'pairwise'` grader. Shows a judge agent two
+candidate answers side-by-side and parses
+`{ verdict: 'A' | 'B' | 'tie', reasoning }`. Defaults to `'tie'` on
+chat-layer or parse errors so downstream consumers always see a
+usable shape. Standalone runs refuse pairwise metrics — they need
+two side-by-side outputs, which only the experiment compare flow
+supplies. The endpoint that runs pairwise verdicts across an
+experiment's variants (with a compare-view verdict badge) is a
+Phase 3.5 follow-up; the grader is callable programmatically today.
+
+### What's NOT included
 
 - Workflow-per-case (every dataset case its own workflow execution).
   Considered, rejected: 100s of WorkflowExecution rows per run pollutes
@@ -523,6 +567,9 @@ type; `workflow_as_judge` reuses the same workflow execution path).
 - A first-class "evaluation workflow" template type. Keep workflows
   generic; let the `judge_call` step + `workflow_as_judge` grader
   compose into eval-shaped workflows organically.
+- A workflow-aware cost estimator. The form suppresses the cost
+  banner for workflow subjects; the per-step token mix needs to be
+  unioned across the workflow's defined steps. Phase 3.5.
 
 ## Critical files
 
@@ -532,7 +579,12 @@ type; `workflow_as_judge` reuses the same workflow execution path).
 | Worker                  | `lib/orchestration/evaluations/run-worker.ts`                                              |
 | Lease helpers           | `lib/orchestration/evaluations/run-claim.ts`                                               |
 | Agent case dispatch     | `lib/orchestration/evaluations/run-cases/agent-case.ts`                                    |
-| Workflow case stub      | `lib/orchestration/evaluations/run-cases/workflow-case.ts`                                 |
+| Workflow case dispatch  | `lib/orchestration/evaluations/run-cases/workflow-case.ts`                                 |
+| Shared judge driver     | `lib/orchestration/evaluations/judge-driver.ts`                                            |
+| judge_call step         | `lib/orchestration/engine/executors/judge-call.ts`                                         |
+| workflow_as_judge       | `lib/orchestration/evaluations/graders/model/workflow-as-judge.ts`                         |
+| pairwise_judge_agent    | `lib/orchestration/evaluations/graders/pairwise/judge-agent.ts`                            |
+| RAG judges seed         | `prisma/seeds/018-rag-evaluation-judges.ts`                                                |
 | Dataset upload          | `lib/orchestration/evaluations/datasets/upload-handler.ts`                                 |
 | CSV parser              | `lib/orchestration/evaluations/datasets/parsers/csv-parser.ts`                             |
 | JSONL parser            | `lib/orchestration/evaluations/datasets/parsers/jsonl-parser.ts`                           |

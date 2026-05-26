@@ -48,6 +48,19 @@ export interface AgentOption {
   slug: string;
 }
 
+export interface WorkflowStepOption {
+  id: string;
+  name: string;
+  type: string;
+}
+
+export interface WorkflowOption {
+  id: string;
+  name: string;
+  slug: string;
+  steps: WorkflowStepOption[];
+}
+
 export interface DatasetOption {
   id: string;
   name: string;
@@ -74,10 +87,20 @@ export interface JudgeAgentOption {
 
 interface RunCreateFormProps {
   agents: AgentOption[];
+  /**
+   * Workflows available as eval subjects. Optional so existing call
+   * sites and tests that don't care about workflow subjects can omit
+   * it; production callers (run-create page) always pass the list.
+   * When empty, the Subject card hides the Workflow toggle.
+   */
+  workflows?: WorkflowOption[];
   datasets: DatasetOption[];
   heuristicGraders: HeuristicGraderOption[];
   judgeAgents: JudgeAgentOption[];
 }
+
+type SubjectKind = 'agent' | 'workflow';
+type SelectorKind = 'final_report' | 'last_step' | 'step_id';
 
 // ─── Local state types ──────────────────────────────────────────────────────
 
@@ -90,6 +113,7 @@ type MetricSelection =
 
 export function RunCreateForm({
   agents,
+  workflows = [],
   datasets,
   heuristicGraders,
   judgeAgents,
@@ -100,17 +124,39 @@ export function RunCreateForm({
 
   const [name, setName] = React.useState('');
   const [description, setDescription] = React.useState('');
+  const [subjectKind, setSubjectKind] = React.useState<SubjectKind>('agent');
   const [agentId, setAgentId] = React.useState(agents[0]?.id ?? '');
+  const [workflowId, setWorkflowId] = React.useState(workflows[0]?.id ?? '');
+  const [selectorKind, setSelectorKind] = React.useState<SelectorKind>('last_step');
+  const [selectorStepId, setSelectorStepId] = React.useState<string>('');
   const [datasetId, setDatasetId] = React.useState(prefilledDatasetId || datasets[0]?.id || '');
   const [selectedMetrics, setSelectedMetrics] = React.useState<MetricSelection[]>([]);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   const chosenDataset = datasets.find((d) => d.id === datasetId) ?? null;
+  const chosenWorkflow = workflows.find((w) => w.id === workflowId) ?? null;
   const builtInJudges = judgeAgents.filter((j) => j.isSystem);
   const customJudges = judgeAgents.filter((j) => !j.isSystem);
 
-  const estimate = useEvaluationCostEstimate({ agentId, datasetId, selectedMetrics });
+  // When the user switches to a workflow that doesn't contain the
+  // previously-selected step, drop the stale stepId so the submit
+  // can't carry a value from a different workflow.
+  React.useEffect(() => {
+    if (selectorKind !== 'step_id') return;
+    if (!chosenWorkflow) return;
+    if (!chosenWorkflow.steps.some((s) => s.id === selectorStepId)) {
+      setSelectorStepId(chosenWorkflow.steps[0]?.id ?? '');
+    }
+  }, [chosenWorkflow, selectorKind, selectorStepId]);
+
+  const estimate = useEvaluationCostEstimate({
+    subjectKind,
+    agentId,
+    workflowId,
+    datasetId,
+    selectedMetrics,
+  });
 
   function toggleHeuristic(g: HeuristicGraderOption): void {
     setSelectedMetrics((prev) => {
@@ -149,7 +195,11 @@ export function RunCreateForm({
     setError(null);
 
     if (!name.trim()) return setError('Give the run a name.');
-    if (!agentId) return setError('Pick an agent.');
+    if (subjectKind === 'agent' && !agentId) return setError('Pick an agent.');
+    if (subjectKind === 'workflow' && !workflowId) return setError('Pick a workflow.');
+    if (subjectKind === 'workflow' && selectorKind === 'step_id' && !selectorStepId) {
+      return setError('Pick a step for the workflow output selector.');
+    }
     if (!datasetId) return setError('Pick a dataset.');
     if (selectedMetrics.length === 0) return setError('Pick at least one metric.');
 
@@ -160,6 +210,13 @@ export function RunCreateForm({
         : { slug: 'judge_agent', config: { agentSlug: m.agentSlug } }
     );
 
+    const subjectOutputSelector =
+      subjectKind === 'workflow'
+        ? selectorKind === 'step_id'
+          ? { kind: selectorKind, stepId: selectorStepId }
+          : { kind: selectorKind }
+        : undefined;
+
     setIsSubmitting(true);
     try {
       const res = await fetch(API.ADMIN.ORCHESTRATION.EVAL_RUNS, {
@@ -168,10 +225,11 @@ export function RunCreateForm({
         body: JSON.stringify({
           name: name.trim(),
           description: description.trim() || undefined,
-          subjectKind: 'agent',
-          agentId,
+          subjectKind,
+          ...(subjectKind === 'agent' ? { agentId } : { workflowId }),
           datasetId,
           metricConfigs,
+          ...(subjectOutputSelector ? { subjectOutputSelector } : {}),
         }),
       });
       const payload = (await res.json()) as
@@ -238,30 +296,129 @@ export function RunCreateForm({
             Subject <FieldHelp title="Subject">{runHelp.subjectKind}</FieldHelp>
           </CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="agentId">
-              Agent <FieldHelp title="Agent">{runHelp.subjectAgent}</FieldHelp>
-            </Label>
-            {agents.length === 0 ? (
-              <p className="text-muted-foreground text-sm">
-                No agents available. Create an agent first.
-              </p>
-            ) : (
-              <Select value={agentId} onValueChange={setAgentId}>
-                <SelectTrigger id="agentId">
-                  <SelectValue placeholder="Pick an agent" />
-                </SelectTrigger>
-                <SelectContent>
-                  {agents.map((a) => (
-                    <SelectItem key={a.id} value={a.id}>
-                      {a.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
+            <Label>Kind</Label>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant={subjectKind === 'agent' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setSubjectKind('agent')}
+              >
+                Agent
+              </Button>
+              <Button
+                type="button"
+                variant={subjectKind === 'workflow' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setSubjectKind('workflow')}
+                disabled={workflows.length === 0}
+              >
+                Workflow
+              </Button>
+              {workflows.length === 0 ? (
+                <span className="text-muted-foreground self-center text-xs">
+                  No published workflows to choose from yet.
+                </span>
+              ) : null}
+            </div>
           </div>
+
+          {subjectKind === 'agent' ? (
+            <div className="space-y-2">
+              <Label htmlFor="agentId">
+                Agent <FieldHelp title="Agent">{runHelp.subjectAgent}</FieldHelp>
+              </Label>
+              {agents.length === 0 ? (
+                <p className="text-muted-foreground text-sm">
+                  No agents available. Create an agent first.
+                </p>
+              ) : (
+                <Select value={agentId} onValueChange={setAgentId}>
+                  <SelectTrigger id="agentId">
+                    <SelectValue placeholder="Pick an agent" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {agents.map((a) => (
+                      <SelectItem key={a.id} value={a.id}>
+                        {a.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="workflowId">
+                  Workflow{' '}
+                  <FieldHelp title="Workflow">
+                    The workflow runs once per dataset case. Each case&apos;s `input` object is
+                    passed in as the workflow&apos;s variable map. Only active workflows with a
+                    published version appear here.
+                  </FieldHelp>
+                </Label>
+                <Select value={workflowId} onValueChange={setWorkflowId}>
+                  <SelectTrigger id="workflowId">
+                    <SelectValue placeholder="Pick a workflow" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {workflows.map((w) => (
+                      <SelectItem key={w.id} value={w.id}>
+                        {w.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>
+                  Output selector{' '}
+                  <FieldHelp title="Output selector">
+                    Picks which step output the graders see as the &quot;model output&quot;. Final
+                    report = the last `report` step. Last step = the last completed step. Specific
+                    step = pick a step by name.
+                  </FieldHelp>
+                </Label>
+                <Select
+                  value={selectorKind}
+                  onValueChange={(v) => setSelectorKind(v as SelectorKind)}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="final_report">Final report</SelectItem>
+                    <SelectItem value="last_step">Last step output</SelectItem>
+                    <SelectItem value="step_id">Specific step…</SelectItem>
+                  </SelectContent>
+                </Select>
+                {selectorKind === 'step_id' ? (
+                  chosenWorkflow && chosenWorkflow.steps.length > 0 ? (
+                    <Select value={selectorStepId} onValueChange={setSelectorStepId}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Pick a step" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {chosenWorkflow.steps.map((s) => (
+                          <SelectItem key={s.id} value={s.id}>
+                            {s.name} ({s.type})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <p className="text-muted-foreground text-xs">
+                      Selected workflow has no steps; pick a different output selector.
+                    </p>
+                  )
+                ) : null}
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -291,7 +448,9 @@ export function RunCreateForm({
               </Select>
               {chosenDataset ? (
                 <p className="text-muted-foreground text-xs">
-                  Run will fire {chosenDataset.caseCount} cases at the selected agent.
+                  Run will fire {chosenDataset.caseCount} case
+                  {chosenDataset.caseCount === 1 ? '' : 's'} at the selected{' '}
+                  {subjectKind === 'workflow' ? 'workflow' : 'agent'}.
                 </p>
               ) : null}
             </>
@@ -603,7 +762,9 @@ const ESTIMATE_DEBOUNCE_MS = 350;
  * change.
  */
 function useEvaluationCostEstimate(args: {
+  subjectKind: SubjectKind;
   agentId: string;
+  workflowId: string;
   datasetId: string;
   selectedMetrics: MetricSelection[];
 }): EstimateState {
@@ -620,6 +781,14 @@ function useEvaluationCostEstimate(args: {
   const judgeKey = judgeSlugs.join(',');
 
   React.useEffect(() => {
+    // Workflow-subject runs don't have a fingerprint-tight cost estimator
+    // yet — the empirical past-runs query keys on agentId only. Suppress
+    // the banner for workflow subjects rather than showing a misleading
+    // heuristic. A workflow-aware estimator is a Phase 3.5 follow-up.
+    if (args.subjectKind === 'workflow') {
+      setState({ status: 'idle' });
+      return;
+    }
     if (!args.agentId || !args.datasetId) {
       setState({ status: 'idle' });
       return;
@@ -674,7 +843,7 @@ function useEvaluationCostEstimate(args: {
     // would re-fire on every selectedMetrics change even when the judge
     // set is identical.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [args.agentId, args.datasetId, judgeKey]);
+  }, [args.subjectKind, args.agentId, args.datasetId, judgeKey]);
 
   return state;
 }

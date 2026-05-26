@@ -178,6 +178,14 @@ export interface ExecuteOptions {
    * of execution X" breadcrumb.
    */
   parentExecutionId?: string;
+  /**
+   * Extra metadata spread into every `AiCostLog.metadata` row written
+   * by executors during this run. The evaluation worker sets
+   * `{ evaluationRunId, role: 'subject' }` (and graders set `role: 'judge'`)
+   * so the empirical cost estimator can recover spend by run id later.
+   * See `ExecutionContext.costLogMetadata`.
+   */
+  costLogMetadata?: Record<string, unknown>;
 }
 
 export interface ExecuteWorkflowArg {
@@ -1879,6 +1887,7 @@ export class OrchestrationEngine {
         budgetLimitUsd: row.budgetLimitUsd ?? options.budgetLimitUsd,
         signal: options.signal,
         logger: baseLogger.withContext({ executionId: row.id }),
+        ...(options.costLogMetadata ? { costLogMetadata: options.costLogMetadata } : {}),
       });
       // Rehydrate cumulative totals and stepOutputs from the trace.
       ctx.totalTokensUsed = row.totalTokensUsed;
@@ -1986,6 +1995,7 @@ export class OrchestrationEngine {
       budgetLimitUsd: options.budgetLimitUsd,
       signal: options.signal,
       logger: baseLogger.withContext({ executionId: row.id }),
+      ...(options.costLogMetadata ? { costLogMetadata: options.costLogMetadata } : {}),
     });
 
     return {

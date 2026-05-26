@@ -122,8 +122,10 @@ describe('Analytics API', () => {
           messageId: 'msg_1',
           conversationId: 'conv_1',
           agentId: 'agent_1',
+          agentName: 'Agent One',
           userMessage: 'What is X?',
           assistantReply: "I don't know",
+          matchedPhrase: "I don't know",
           createdAt: new Date(),
         },
       ]);

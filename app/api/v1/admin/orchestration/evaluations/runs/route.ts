@@ -21,7 +21,7 @@ import { NotFoundError, ValidationError } from '@/lib/api/errors';
 import { validateQueryParams, validateRequestBody } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
 import { createRunSchema, listRunsQuerySchema } from '@/lib/validations/orchestration-evaluations';
-import { hasGrader, getGrader } from '@/lib/orchestration/evaluations/graders';
+import { hasGrader, getGrader, listGraders } from '@/lib/orchestration/evaluations/graders';
 // Side-effect import — register every grader at module load so the
 // preflight has a populated registry.
 import '@/lib/orchestration/evaluations/graders';
@@ -72,6 +72,20 @@ export const POST = withAdminAuth(async (request, session) => {
     );
   }
 
+  // Pairwise graders require two side-by-side outputs which a single
+  // dataset-driven run can't supply. They're only invokable through the
+  // experiment compare view's pairwise-judge action. Refuse them here so
+  // operators don't queue a run that would silently skip them.
+  const graderEntries = new Map(listGraders().map((g) => [g.slug, g]));
+  const pairwiseInConfig = body.metricConfigs.filter(
+    (m) => graderEntries.get(m.slug)?.family === 'pairwise'
+  );
+  if (pairwiseInConfig.length > 0) {
+    throw new ValidationError(
+      `Pairwise grader(s) [${pairwiseInConfig.map((m) => m.slug).join(', ')}] need two side-by-side outputs; trigger them from the experiment compare view, not a standalone run.`
+    );
+  }
+
   // 2. Dataset ownership + hash capture ------------------------------------
   const dataset = await prisma.aiDataset.findFirst({
     where: { id: body.datasetId, userId: session.user.id },
@@ -109,12 +123,34 @@ export const POST = withAdminAuth(async (request, session) => {
     }
     subjectBrandVoice = agent.brandVoiceInstructions ?? undefined;
   } else {
-    // Phase 1: schema is ready but the worker stub returns a typed
-    // not-supported error. Refuse at the route boundary so users get a
-    // clear error rather than a per-case "not_supported" wall.
-    throw new ValidationError(
-      "Workflow-as-subject runs land in Phase 3. The schema is ready, but the worker isn't. Use an agent subject for now."
-    );
+    // Workflow subject (Phase 3): the workflow must exist, be active, and
+    // carry a published version. Workflows are globally addressable to
+    // admins (see GET /workflows — no createdBy scope), so we don't add
+    // one here either. The run row carries the caller's userId, so
+    // case-result data flows back to the caller; the workflow itself is
+    // shared tenant state.
+    const workflow = await prisma.aiWorkflow.findUnique({
+      where: { id: body.workflowId! },
+      select: {
+        id: true,
+        isActive: true,
+        publishedVersionId: true,
+      },
+    });
+    if (!workflow) throw new NotFoundError(`Workflow ${body.workflowId} not found`);
+    if (!workflow.isActive) {
+      throw new ValidationError(
+        `Workflow "${body.workflowId}" is inactive — activate it before running an evaluation.`
+      );
+    }
+    if (!workflow.publishedVersionId) {
+      throw new ValidationError(
+        `Workflow "${body.workflowId}" has no published version. Publish a version before running an evaluation.`
+      );
+    }
+    // No brand-voice for workflow subjects — the brand-voice judge only
+    // applies to chat agents. Leaving `subjectBrandVoice` undefined makes
+    // the brand-voice judge fall back to its default rubric.
   }
 
   // 5. Per-grader config validation + judge_agent slug existence ----------
@@ -134,6 +170,26 @@ export const POST = withAdminAuth(async (request, session) => {
             .join('; ')}`
         );
       }
+      if (entry.slug === 'workflow_as_judge') {
+        const cfg = parsed.data as { workflowSlug: string };
+        const judgeWorkflow = await prisma.aiWorkflow.findFirst({
+          where: { slug: cfg.workflowSlug },
+          select: { isActive: true, publishedVersionId: true },
+        });
+        if (!judgeWorkflow) {
+          throw new ValidationError(`Judge workflow "${cfg.workflowSlug}" not found.`);
+        }
+        if (!judgeWorkflow.isActive) {
+          throw new ValidationError(`Judge workflow "${cfg.workflowSlug}" is inactive.`);
+        }
+        if (!judgeWorkflow.publishedVersionId) {
+          throw new ValidationError(
+            `Judge workflow "${cfg.workflowSlug}" has no published version.`
+          );
+        }
+        return entry;
+      }
+
       if (entry.slug !== 'judge_agent') return entry;
 
       const cfg = parsed.data as { agentSlug: string; subjectBrandVoice?: string };

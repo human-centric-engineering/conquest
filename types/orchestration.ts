@@ -187,6 +187,7 @@ export const KNOWN_STEP_TYPES = [
   'llm_call',
   'guard',
   'evaluate',
+  'judge_call',
   'external_call',
   'agent_call',
   'chat_turn',

@@ -79,12 +79,24 @@ export async function getPopularTopics(query: AnalyticsQuery): Promise<TopicEntr
 
 // ─── Unanswered Questions ────────────────────────────────────────────────────
 
+const HEDGING_PHRASES = [
+  "I don't know",
+  "I'm not sure",
+  "I don't have information",
+  'I cannot find',
+  'beyond my knowledge',
+  "I'm unable to",
+  'I do not have',
+] as const;
+
 export interface UnansweredEntry {
   messageId: string;
   conversationId: string;
   agentId: string;
+  agentName: string | null;
   userMessage: string;
   assistantReply: string;
+  matchedPhrase: string | null;
   createdAt: Date;
 }
 
@@ -105,22 +117,19 @@ export async function getUnansweredQuestions(query: AnalyticsQuery): Promise<Una
       role: 'assistant',
       createdAt: { gte: from, lte: to },
       conversation: { ...agentFilter(query.agentId) },
-      OR: [
-        { content: { contains: "I don't know" } },
-        { content: { contains: "I'm not sure" } },
-        { content: { contains: "I don't have information" } },
-        { content: { contains: 'I cannot find' } },
-        { content: { contains: 'beyond my knowledge' } },
-        { content: { contains: "I'm unable to" } },
-        { content: { contains: 'I do not have' } },
-      ],
+      OR: HEDGING_PHRASES.map((phrase) => ({ content: { contains: phrase } })),
     },
     select: {
       id: true,
       content: true,
       createdAt: true,
       conversationId: true,
-      conversation: { select: { agentId: true } },
+      conversation: {
+        select: {
+          agentId: true,
+          agent: { select: { name: true } },
+        },
+      },
     },
     orderBy: { createdAt: 'desc' },
     take: limit,
@@ -149,12 +158,15 @@ export async function getUnansweredQuestions(query: AnalyticsQuery): Promise<Una
     const convUserMsgs = userMsgsByConv.get(msg.conversationId) ?? [];
     // Find the latest user message before this hedging reply
     const preceding = convUserMsgs.find((um) => um.createdAt < msg.createdAt);
+    const matchedPhrase = HEDGING_PHRASES.find((p) => msg.content.includes(p)) ?? null;
     return {
       messageId: msg.id,
       conversationId: msg.conversationId,
       agentId: msg.conversation.agentId,
+      agentName: msg.conversation.agent?.name ?? null,
       userMessage: preceding?.content ?? '',
       assistantReply: msg.content.slice(0, 500),
+      matchedPhrase,
       createdAt: msg.createdAt,
     };
   });
@@ -304,15 +316,7 @@ export async function getContentGaps(query: AnalyticsQuery): Promise<ContentGap[
     const topicKey = topic.toLowerCase().trim();
 
     const hasHedging = conv.messages.some(
-      (m) =>
-        m.role === 'assistant' &&
-        (m.content.includes("I don't know") ||
-          m.content.includes("I'm not sure") ||
-          m.content.includes("I don't have information") ||
-          m.content.includes('I cannot find') ||
-          m.content.includes('beyond my knowledge') ||
-          m.content.includes("I'm unable to") ||
-          m.content.includes('I do not have'))
+      (m) => m.role === 'assistant' && HEDGING_PHRASES.some((p) => m.content.includes(p))
     );
 
     const existing = topicStats.get(topicKey) ?? { display: topic, total: 0, unanswered: 0 };

@@ -8,6 +8,7 @@
  * Includes date range and agent filter controls.
  */
 
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback } from 'react';
 
@@ -102,7 +103,10 @@ export function AnalyticsView({
       <Card data-testid="analytics-filters">
         <CardContent className="flex flex-wrap items-end gap-4 pt-4">
           <div className="space-y-1">
-            <label htmlFor="filter-from" className="text-muted-foreground text-xs font-medium">
+            <label
+              htmlFor="filter-from"
+              className="text-muted-foreground block text-xs font-medium"
+            >
               From
             </label>
             <DatePicker
@@ -113,7 +117,7 @@ export function AnalyticsView({
             />
           </div>
           <div className="space-y-1">
-            <label htmlFor="filter-to" className="text-muted-foreground text-xs font-medium">
+            <label htmlFor="filter-to" className="text-muted-foreground block text-xs font-medium">
               To
             </label>
             <DatePicker
@@ -415,7 +419,8 @@ export function AnalyticsView({
             <FieldHelp title="Unanswered questions">
               Conversations where the assistant responded with hedging phrases like &quot;I
               don&apos;t know&quot;, &quot;I&apos;m not sure&quot;, or &quot;I cannot find&quot;.
-              Uses exact phrase matching to detect uncertainty.
+              Uses exact phrase matching to detect uncertainty — open the conversation to confirm a
+              true gap (clarifying questions can trigger a false positive).
             </FieldHelp>
           </CardTitle>
         </CardHeader>
@@ -426,17 +431,44 @@ export function AnalyticsView({
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead>Agent</TableHead>
                   <TableHead>User Message</TableHead>
                   <TableHead>Assistant Reply</TableHead>
+                  <TableHead>Trigger</TableHead>
                   <TableHead>Date</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {unanswered.slice(0, 20).map((u) => (
                   <TableRow key={u.messageId}>
-                    <TableCell className="max-w-[300px] truncate">{u.userMessage}</TableCell>
-                    <TableCell className="text-muted-foreground max-w-[300px] truncate">
+                    <TableCell className="max-w-[160px] truncate">
+                      <Link
+                        href={`/admin/orchestration/agents/${u.agentId}`}
+                        className="hover:underline"
+                      >
+                        {u.agentName ?? u.agentId}
+                      </Link>
+                    </TableCell>
+                    <TableCell className="max-w-[280px] truncate">
+                      <Link
+                        href={`/admin/orchestration/conversations/${u.conversationId}`}
+                        className="hover:underline"
+                        title="Open conversation trace"
+                      >
+                        {u.userMessage || '—'}
+                      </Link>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground max-w-[280px] truncate">
                       {u.assistantReply}
+                    </TableCell>
+                    <TableCell>
+                      {u.matchedPhrase ? (
+                        <Badge variant="outline" className="font-normal">
+                          {u.matchedPhrase}
+                        </Badge>
+                      ) : (
+                        <span className="text-muted-foreground">&mdash;</span>
+                      )}
                     </TableCell>
                     <TableCell className="text-sm whitespace-nowrap">
                       {new Date(u.createdAt).toLocaleDateString()}

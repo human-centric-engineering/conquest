@@ -773,4 +773,124 @@ describe('RunCreateForm', () => {
       expect(text).toMatch(/1\s+judge agent/);
     });
   });
+
+  // ─── Workflow subject (Phase 3) ─────────────────────────────────────────────
+
+  describe('workflow subject', () => {
+    const WORKFLOWS = [
+      {
+        id: 'wf-1',
+        name: 'Triage Report',
+        slug: 'triage-report',
+        steps: [
+          { id: 'step-1', name: 'Classify', type: 'agent_call' },
+          { id: 'step-2', name: 'Summarise', type: 'report' },
+        ],
+      },
+    ];
+
+    it('hides the Workflow toggle when no workflows are passed', () => {
+      render(<RunCreateForm {...defaultProps()} />);
+      const toggle = screen.getByRole('button', { name: /^Workflow$/i });
+      expect(toggle).toBeDisabled();
+      expect(screen.getByText(/No published workflows/i)).toBeInTheDocument();
+    });
+
+    it('switches the picker to workflows when the Workflow toggle is clicked', async () => {
+      const user = userEvent.setup();
+      render(<RunCreateForm {...defaultProps()} workflows={WORKFLOWS} />);
+      await user.click(screen.getByRole('button', { name: /^Workflow$/i }));
+      // The Output selector control is workflow-only — its presence confirms the toggle worked.
+      expect(screen.getByText(/Output selector/i)).toBeInTheDocument();
+    });
+
+    it('submits with subjectKind=workflow + selector { kind: step_id, stepId } when the user picks a step', async () => {
+      const user = userEvent.setup();
+      mockFetchSuccess('run-wf-step');
+      render(<RunCreateForm {...defaultProps()} workflows={WORKFLOWS} />);
+
+      await user.type(document.querySelector('#name') as HTMLInputElement, 'WF Step Run');
+      await user.click(screen.getByRole('button', { name: /^Workflow$/i }));
+
+      // Two `combobox` triggers exist once Workflow is selected:
+      // [0] workflow picker, [1] output-selector picker. Click the
+      // selector and pick "Specific step…".
+      const selectorTriggers = screen.getAllByRole('combobox');
+      await user.click(selectorTriggers[1]);
+      await user.click(await screen.findByRole('option', { name: /Specific step/i }));
+
+      await user.click(screen.getByRole('checkbox', { name: /exact_match/i }));
+      await user.click(screen.getByRole('button', { name: /queue run/i }));
+
+      await waitFor(() => {
+        const calls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls;
+        expect(calls.some((c) => c[0] === API.ADMIN.ORCHESTRATION.EVAL_RUNS)).toBe(true);
+      });
+
+      const runsCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.find(
+        (c) => c[0] === API.ADMIN.ORCHESTRATION.EVAL_RUNS
+      );
+      const [, init] = runsCall as [string, RequestInit];
+      const body = JSON.parse(init.body as string) as Record<string, unknown>;
+      expect(body.subjectKind).toBe('workflow');
+      const selector = body.subjectOutputSelector as { kind: string; stepId?: string };
+      expect(selector.kind).toBe('step_id');
+      expect(typeof selector.stepId).toBe('string');
+      expect(selector.stepId).not.toBe('');
+    });
+
+    it('blocks submit with an inline error when the chosen workflow has no steps for step_id selector', async () => {
+      const user = userEvent.setup();
+      mockFetchSuccess('should-not-fire');
+      const emptyWorkflow = {
+        id: 'wf-empty',
+        name: 'Empty Workflow',
+        slug: 'empty-workflow',
+        steps: [],
+      };
+      render(<RunCreateForm {...defaultProps()} workflows={[emptyWorkflow]} />);
+
+      await user.type(document.querySelector('#name') as HTMLInputElement, 'Empty');
+      await user.click(screen.getByRole('button', { name: /^Workflow$/i }));
+
+      const selectorTriggers = screen.getAllByRole('combobox');
+      await user.click(selectorTriggers[1]);
+      await user.click(await screen.findByRole('option', { name: /Specific step/i }));
+
+      await user.click(screen.getByRole('checkbox', { name: /exact_match/i }));
+      await user.click(screen.getByRole('button', { name: /queue run/i }));
+
+      expect(screen.getByText(/Pick a step/i)).toBeInTheDocument();
+      const calls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls;
+      expect(calls.some((c) => c[0] === API.ADMIN.ORCHESTRATION.EVAL_RUNS)).toBe(false);
+    });
+
+    it('submits with subjectKind=workflow + workflowId + subjectOutputSelector when the user selects a workflow', async () => {
+      const user = userEvent.setup();
+      mockFetchSuccess('run-wf-1');
+      render(<RunCreateForm {...defaultProps()} workflows={WORKFLOWS} />);
+
+      await user.type(document.querySelector('#name') as HTMLInputElement, 'WF Run');
+      await user.click(screen.getByRole('button', { name: /^Workflow$/i }));
+      // Tick a metric to satisfy the ≥1 requirement.
+      await user.click(screen.getByRole('checkbox', { name: /exact_match/i }));
+      await user.click(screen.getByRole('button', { name: /queue run/i }));
+
+      await waitFor(() => {
+        const calls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls;
+        expect(calls.some((c) => c[0] === API.ADMIN.ORCHESTRATION.EVAL_RUNS)).toBe(true);
+      });
+
+      const runsCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.find(
+        (c) => c[0] === API.ADMIN.ORCHESTRATION.EVAL_RUNS
+      );
+      const [, init] = runsCall as [string, RequestInit];
+      const body = JSON.parse(init.body as string) as Record<string, unknown>;
+      expect(body.subjectKind).toBe('workflow');
+      expect(body.workflowId).toBe('wf-1');
+      expect(body.agentId).toBeUndefined();
+      // Default selector is last_step.
+      expect(body.subjectOutputSelector).toEqual({ kind: 'last_step' });
+    });
+  });
 });
