@@ -203,6 +203,25 @@ export function RunCreateForm({
     if (!datasetId) return setError('Pick a dataset.');
     if (selectedMetrics.length === 0) return setError('Pick at least one metric.');
 
+    // Per-grader required-field check. The server-side Zod schemas would
+    // reject these too, but the surfaced error is a raw Zod path string
+    // ("Grader \"tool_was_called\" config invalid: slug: Too small …")
+    // — catching it here lets us point at the specific config field.
+    for (const m of selectedMetrics) {
+      if (m.kind !== 'heuristic') continue;
+      const cfg = m.config;
+      const toolSlug = typeof cfg.slug === 'string' ? cfg.slug.trim() : '';
+      if (m.slug === 'tool_was_called' && toolSlug.length === 0) {
+        return setError(
+          'Pick a tool slug for the "tool_was_called" grader (e.g. `search_knowledge_base`).'
+        );
+      }
+      const pattern = typeof cfg.pattern === 'string' ? cfg.pattern.trim() : '';
+      if (m.slug === 'regex' && pattern.length === 0) {
+        return setError('Set a pattern for the "regex" grader.');
+      }
+    }
+
     // Compile the wire-format metricConfigs.
     const metricConfigs = selectedMetrics.map((m) =>
       m.kind === 'heuristic'

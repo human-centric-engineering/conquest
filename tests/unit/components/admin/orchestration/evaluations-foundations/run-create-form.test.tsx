@@ -290,6 +290,9 @@ describe('RunCreateForm', () => {
       // Untick exact_match
       await user.click(exactCb);
 
+      // regex needs a pattern or the client guard blocks submission.
+      await user.type(getConfigInput(/Pattern \(regex\)/i), '\\d+');
+
       await user.type(document.querySelector('#name') as HTMLInputElement, 'My Run');
       await user.click(screen.getByRole('button', { name: /queue run/i }));
 
@@ -337,6 +340,43 @@ describe('RunCreateForm', () => {
       render(<RunCreateForm {...defaultProps()} />);
       await user.click(screen.getByRole('checkbox', { name: /citation_count_at_least/i }));
       expect(getConfigInput(/Minimum citations/i)).toBeInTheDocument();
+    });
+
+    it('blocks submission with a clear message when tool_was_called has no slug', async () => {
+      const fetchMock = mockFetchSuccess('run-1');
+      const user = userEvent.setup();
+      render(<RunCreateForm {...defaultProps()} />);
+
+      await user.click(screen.getByRole('checkbox', { name: /tool_was_called/i }));
+      await user.type(document.querySelector('#name') as HTMLInputElement, 'My Run');
+      await user.click(screen.getByRole('button', { name: /queue run/i }));
+
+      expect(await screen.findByText(/Pick a tool slug/i)).toBeInTheDocument();
+      // No EVAL_RUNS submit fetch should have fired (only the estimate hook may have).
+      const runsCall = fetchMock.mock.calls.find(
+        (c) =>
+          c[0] === API.ADMIN.ORCHESTRATION.EVAL_RUNS &&
+          (c[1] as RequestInit | undefined)?.method === 'POST'
+      );
+      expect(runsCall).toBeUndefined();
+    });
+
+    it('blocks submission when regex has no pattern', async () => {
+      const fetchMock = mockFetchSuccess('run-1');
+      const user = userEvent.setup();
+      render(<RunCreateForm {...defaultProps()} />);
+
+      await user.click(screen.getByRole('checkbox', { name: /regex/i }));
+      await user.type(document.querySelector('#name') as HTMLInputElement, 'My Run');
+      await user.click(screen.getByRole('button', { name: /queue run/i }));
+
+      expect(await screen.findByText(/Set a pattern/i)).toBeInTheDocument();
+      const runsCall = fetchMock.mock.calls.find(
+        (c) =>
+          c[0] === API.ADMIN.ORCHESTRATION.EVAL_RUNS &&
+          (c[1] as RequestInit | undefined)?.method === 'POST'
+      );
+      expect(runsCall).toBeUndefined();
     });
 
     it('writes user edits back into the regex config and submits them', async () => {
