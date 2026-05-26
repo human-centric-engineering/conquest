@@ -70,8 +70,16 @@ export const PATCH = withAdminAuth<{ id: string }>(async (request, session, { pa
 
   const body = await validateRequestBody(request, updateKnowledgeDocumentSchema);
 
-  // Only mutable surface today is the tag list. Replacing the join rows in a
-  // transaction keeps the doc in a consistent state if the createMany fails.
+  // Rename: a plain scalar update, independent of the tag join rows.
+  if (body.name !== undefined) {
+    await prisma.aiKnowledgeDocument.update({
+      where: { id },
+      data: { name: body.name },
+    });
+  }
+
+  // Replacing the tag join rows in a transaction keeps the doc in a consistent
+  // state if the createMany fails.
   if (body.tagIds !== undefined) {
     await prisma.$transaction(async (tx) => {
       await tx.aiKnowledgeDocumentTag.deleteMany({ where: { documentId: id } });
@@ -88,8 +96,9 @@ export const PATCH = withAdminAuth<{ id: string }>(async (request, session, { pa
     invalidateAllAgentAccess();
   }
 
-  log.info('Document tags updated', {
+  log.info('Document updated', {
     documentId: id,
+    renamed: body.name !== undefined,
     tagCount: body.tagIds?.length,
     adminId: session.user.id,
   });
@@ -99,8 +108,8 @@ export const PATCH = withAdminAuth<{ id: string }>(async (request, session, { pa
     action: 'knowledge_document.update',
     entityType: 'knowledge_document',
     entityId: id,
-    entityName: existing.name,
-    metadata: { tagCount: body.tagIds?.length },
+    entityName: body.name ?? existing.name,
+    metadata: { renamed: body.name !== undefined, tagCount: body.tagIds?.length },
     clientIp: clientIP,
   });
 
