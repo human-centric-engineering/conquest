@@ -77,8 +77,9 @@ function extractPages(
  * The first row is treated as the header row (mirrors common PDF table layout).
  * Returns the empty string for empty/degenerate tables.
  *
- * SECURITY INVARIANT — cell sanitisation only escapes pipes and replaces
- * newlines. It deliberately does NOT escape `<` / `>` / `&`, because:
+ * SECURITY INVARIANT — cell sanitisation escapes backslashes and pipes and
+ * replaces newlines (so table delimiters stay intact). It deliberately does
+ * NOT escape `<` / `>` / `&`, because:
  *
  *  1. Chunk content is rendered downstream by `react-markdown` with no
  *     plugins (see `components/admin/orchestration/knowledge/explore-tab.tsx`
@@ -96,7 +97,10 @@ function extractPages(
  */
 function renderMarkdownTable(table: ReadonlyArray<ReadonlyArray<string>>): string {
   if (table.length === 0) return '';
-  const sanitize = (cell: string): string => (cell ?? '').replace(/\|/g, '\\|').replace(/\n/g, ' ');
+  // Escape backslashes before pipes so a trailing `\` in a cell can't escape
+  // the table delimiter we add (`a\` + `|` would otherwise become `a\|`).
+  const sanitize = (cell: string): string =>
+    (cell ?? '').replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\n/g, ' ');
   const widths = table[0].map((_, col) => Math.max(...table.map((row) => (row[col] ?? '').length)));
   if (widths.length === 0) return '';
 

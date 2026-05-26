@@ -441,6 +441,26 @@ describe('parsePdf', () => {
       expect(result.sections[0].content).toContain('multi line');
     });
 
+    it('escapes backslashes so a trailing `\\` cannot escape the pipe delimiter', async () => {
+      mockGetText.mockResolvedValue(pagedResult([longPageText()]));
+      mockGetInfo.mockResolvedValue(infoResult(1));
+      mockGetTable.mockResolvedValue({
+        pages: [
+          {
+            num: 1,
+            // `path\` would otherwise leave `path\ |`, letting the cell's
+            // trailing slash escape the delimiter we add.
+            tables: [[['path\\', 'next']]],
+          },
+        ],
+      });
+
+      const result = await parsePdf(fakeBuffer(), 'backslash.pdf', { extractTables: true });
+
+      // `path\` → `path\\` (literal backslash, delimiter stays intact).
+      expect(result.sections[0].content).toContain('path\\\\');
+    });
+
     it('records the rendered-table count in metadata', async () => {
       mockGetText.mockResolvedValue(pagedResult([longPageText(), longPageText()]));
       mockGetInfo.mockResolvedValue(infoResult(2));

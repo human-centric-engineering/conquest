@@ -234,6 +234,38 @@ describe('renderConversationMarkdown', () => {
     expect(md).toContain('has \\| pipe in body');
   });
 
+  it('escapes backslashes so a trailing `\\` cannot escape the pipe delimiter', () => {
+    const md = renderConversationMarkdown(baseConversation, [
+      makeMessage({
+        id: 'msg-1',
+        role: 'assistant',
+        content: 'See [1].',
+        provenance: {
+          citations: [
+            {
+              marker: 1,
+              chunkId: 'c1',
+              documentId: 'd1',
+              documentName: 'path\\',
+              contentHash: null,
+              documentVersion: null,
+              section: 'a\\|b',
+              patternNumber: null,
+              patternName: null,
+              excerpt: 'ends with slash\\',
+              similarity: 0.5,
+            },
+          ],
+        },
+      }),
+    ]);
+    // `path\` becomes `path\\` (literal backslash, not an escape of the next `|`).
+    expect(md).toContain('path\\\\');
+    expect(md).toContain('ends with slash\\\\');
+    // `a\|b` → backslash doubled first, then the bare pipe escaped → `a\\\|b`.
+    expect(md).toContain('a\\\\\\|b');
+  });
+
   it('produces deterministic output for the same input (ignoring footer timestamp)', () => {
     const fixture: RenderConversationMessage[] = [
       makeMessage({
