@@ -27,8 +27,11 @@ import {
 
 export const GENERATOR_AGENT_SLUG = 'eval-case-generator';
 const MAX_COUNT = 25;
+const MAX_SEED_INPUTS = 3;
+const MAX_DOMAIN_PROMPT_CHARS = 1000;
+const MIN_DOMAIN_PROMPT_CHARS = 20;
 
-export type SynthesisMode = 'kb' | 'failure_mining';
+export type SynthesisMode = 'kb' | 'failure_mining' | 'description';
 
 export interface ProposedCase {
   input: string | Record<string, unknown>;
@@ -58,6 +61,17 @@ export interface GenerateCasesParams {
   count: number;
   /** Optional KB-mode topic anchor — sent to the generator as guidance. */
   topic?: string;
+  /**
+   * Description-mode only. 1–3 sentences about what the subject agent
+   * does and the kind of questions it should handle. Required when
+   * `mode === 'description'`; ignored otherwise.
+   */
+  domainPrompt?: string;
+  /**
+   * Description-mode only. Up to 3 real user inputs the generator
+   * should anchor variants around. Optional.
+   */
+  seedInputs?: string[];
   /** Optional cancellation. */
   signal?: AbortSignal;
 }
@@ -97,7 +111,7 @@ export async function generateCases(params: GenerateCasesParams): Promise<Genera
       );
     }
     prompt = buildKbPrompt(chunks, params.count, params.topic);
-  } else {
+  } else if (params.mode === 'failure_mining') {
     // userId is required — failure-seed reads `AiEvaluationRun` rows
     // which are user-scoped; without it admin A would pull admin B's
     // prior runs (and their case content) into A's generator prompt.
@@ -111,6 +125,21 @@ export async function generateCases(params: GenerateCasesParams): Promise<Genera
       );
     }
     prompt = buildFailurePrompt(failures, params.count);
+  } else {
+    const domainPrompt = (params.domainPrompt ?? '').trim();
+    if (domainPrompt.length < MIN_DOMAIN_PROMPT_CHARS) {
+      throw new ValidationError(
+        `domainPrompt must be at least ${MIN_DOMAIN_PROMPT_CHARS} characters for description-mode synthesis.`
+      );
+    }
+    if (domainPrompt.length > MAX_DOMAIN_PROMPT_CHARS) {
+      throw new ValidationError(`domainPrompt must be ≤ ${MAX_DOMAIN_PROMPT_CHARS} characters.`);
+    }
+    const seedInputs = (params.seedInputs ?? [])
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+      .slice(0, MAX_SEED_INPUTS);
+    prompt = buildDescriptionPrompt(domainPrompt, params.count, seedInputs);
   }
 
   // 2. Call the generator agent.
@@ -207,6 +236,29 @@ function buildKbPrompt(chunks: KbSeedChunk[], count: number, topic: string | und
   });
   lines.push('');
   lines.push('Generate exactly the requested COUNT cases as JSON.');
+  return lines.join('\n');
+}
+
+function buildDescriptionPrompt(domainPrompt: string, count: number, seedInputs: string[]): string {
+  const lines: string[] = [];
+  lines.push(`SEED_SOURCE: description`);
+  lines.push(`COUNT: ${count}`);
+  lines.push('');
+  lines.push('DOMAIN (what the subject agent does and which questions to cover):');
+  lines.push(domainPrompt);
+  if (seedInputs.length > 0) {
+    lines.push('');
+    lines.push(
+      'ANCHOR INPUTS (real user questions to anchor variants around — produce adjacent cases, not exact rewordings):'
+    );
+    seedInputs.forEach((s, i) => {
+      lines.push(`[${i + 1}] ${s}`);
+    });
+  }
+  lines.push('');
+  lines.push(
+    'Generate exactly the requested COUNT cases as JSON. Each case has `input` (string), an `expectedOutput` that a competent agent in this domain should produce, and `metadata.intent` tagging the case category.'
+  );
   return lines.join('\n');
 }
 

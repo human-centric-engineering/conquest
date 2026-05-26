@@ -19,11 +19,13 @@ import type { SeedUnit } from '@/prisma/runner';
 
 const SYSTEM_INSTRUCTIONS = `You are a test-case generator for an agent evaluation framework. Your job is to propose new dataset cases that a downstream evaluation run will fire at a subject agent.
 
-You receive a structured user message with one of two seed types:
+You receive a structured user message with one of three seed types:
 
   - KB seed: a numbered list of knowledge-base chunks that the subject agent has access to. Your cases should ask realistic user questions that the agent could answer from these chunks. The expectedOutput is what a competent answerer would write, citing the relevant chunk numbers in [N] markers.
 
   - Failure seed: a numbered list of prior cases (input + expectedOutput) where the subject agent under-scored. Your cases should be SIMILAR but HARDER variants — same topic, but probe an adjacent concept, a stricter constraint, or an edge case that would trip up the same failure mode.
+
+  - Description seed: a 1–3 sentence domain description of what the subject agent does, optionally followed by 1–3 anchor user inputs. Generate breadth-first: cover the obvious questions, the common edge cases, and the trickier corners the description implies. When anchor inputs are present, produce ADJACENT cases (variants, follow-ups, related intents) — not exact rewordings. The expectedOutput is what a competent agent in this domain should write.
 
 You MUST return ONLY valid JSON, no markdown fences, no prose before or after. Schema:
 
@@ -60,13 +62,15 @@ const unit: SeedUnit = {
       update: {
         isSystem: true,
         kind: 'generator',
-        description: 'Generates new evaluation dataset cases from KB chunks or prior failures.',
+        description:
+          'Generates new evaluation dataset cases from KB chunks, prior failures, or a domain description.',
         systemInstructions: SYSTEM_INSTRUCTIONS,
       },
       create: {
         name: 'Evaluation case generator',
         slug: 'eval-case-generator',
-        description: 'Generates new evaluation dataset cases from KB chunks or prior failures.',
+        description:
+          'Generates new evaluation dataset cases from KB chunks, prior failures, or a domain description.',
         systemInstructions: SYSTEM_INSTRUCTIONS,
         kind: 'generator',
         // Resolved at runtime via the operator's chat default.

@@ -178,6 +178,105 @@ describe('generateCases — failure_mining mode', () => {
   });
 });
 
+describe('generateCases — description mode', () => {
+  it('rejects a domainPrompt below the minimum length', async () => {
+    await expect(
+      generateCases({
+        agentId: 'a',
+        userId: 'u',
+        mode: 'description',
+        count: 5,
+        domainPrompt: 'too short',
+      })
+    ).rejects.toThrow(/at least \d+ characters/i);
+    expect(mockedDrain).not.toHaveBeenCalled();
+  });
+
+  it('does not call seed loaders (description-mode has no DB seed)', async () => {
+    mockedDrain.mockResolvedValue(
+      drainOk(
+        JSON.stringify({
+          cases: [{ input: 'How do I dispute a charge?', expectedOutput: 'File a claim.' }],
+        })
+      )
+    );
+
+    await generateCases({
+      agentId: 'a',
+      userId: 'u',
+      mode: 'description',
+      count: 1,
+      domainPrompt:
+        'Customer support agent for a fintech card issuer. Handles disputes, fees, refunds.',
+    });
+
+    expect(mockedKbSeed).not.toHaveBeenCalled();
+    expect(mockedFailureSeed).not.toHaveBeenCalled();
+  });
+
+  it('happy path: includes the domainPrompt and seedInputs in the generator message + tags mode=description', async () => {
+    mockedDrain.mockResolvedValue(
+      drainOk(
+        JSON.stringify({
+          cases: [
+            {
+              input: 'Why was my transaction declined?',
+              expectedOutput:
+                'Most declines are insufficient funds, card limits, or fraud-protection holds.',
+              metadata: { intent: 'declines' },
+            },
+          ],
+        })
+      )
+    );
+
+    const result = await generateCases({
+      agentId: 'a',
+      userId: 'u',
+      mode: 'description',
+      count: 1,
+      domainPrompt:
+        'Customer support agent for a fintech card issuer. Handles disputes, declines, fees, refunds.',
+      seedInputs: ['My card was declined at checkout'],
+    });
+
+    expect(result.cases).toHaveLength(1);
+    expect(result.cases[0].metadata).toMatchObject({
+      source: 'synthetic',
+      mode: 'description',
+      generatorAgentSlug: 'eval-case-generator',
+      intent: 'declines',
+    });
+
+    const promptArg = (mockedDrain.mock.calls[0][0] as { message: string }).message;
+    expect(promptArg).toContain('SEED_SOURCE: description');
+    expect(promptArg).toContain('Customer support agent for a fintech card issuer');
+    expect(promptArg).toContain('My card was declined at checkout');
+  });
+
+  it('caps seedInputs at 3 and drops empty/whitespace entries', async () => {
+    mockedDrain.mockResolvedValue(
+      drainOk(JSON.stringify({ cases: [{ input: 'q', expectedOutput: 'a' }] }))
+    );
+
+    await generateCases({
+      agentId: 'a',
+      userId: 'u',
+      mode: 'description',
+      count: 1,
+      domainPrompt: 'A 1-3 sentence description that meets the minimum length threshold.',
+      seedInputs: ['one', '', '  ', 'two', 'three', 'four', 'five'],
+    });
+
+    const promptArg = (mockedDrain.mock.calls[0][0] as { message: string }).message;
+    expect(promptArg).toContain('[1] one');
+    expect(promptArg).toContain('[2] two');
+    expect(promptArg).toContain('[3] three');
+    expect(promptArg).not.toContain('[4] four');
+    expect(promptArg).not.toContain('five');
+  });
+});
+
 describe('generateCases — error paths', () => {
   beforeEach(() => {
     mockedKbSeed.mockResolvedValue([
