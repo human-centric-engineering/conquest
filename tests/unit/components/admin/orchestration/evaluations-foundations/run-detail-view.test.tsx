@@ -660,6 +660,119 @@ describe('RunDetailView', () => {
       });
     });
 
+    it('renders the empty-state hint in the Tool calls section when no tools were called', async () => {
+      const noToolsCase = {
+        id: 'c-2',
+        casePosition: 2,
+        subjectOutput: 'ok',
+        subjectMetadata: { toolCalls: [], citations: [] },
+        metricScores: {
+          tool_was_called: {
+            score: 0,
+            passed: false,
+            reasoning: 'Tool "search_knowledge_base" called 0 time(s), expected ≥ 1.',
+          },
+        },
+        latencyMs: 1,
+        costUsd: 0,
+        errorCode: null,
+        errorMessage: null,
+        datasetCase: { input: 'q', expectedOutput: null, metadata: null },
+      };
+      makeFetchMock(
+        () => buildRun({ status: 'completed' }),
+        () => [noToolsCase]
+      );
+      const user = userEvent.setup();
+      render(<RunDetailView runId="run-1" />);
+      await screen.findByText('q');
+      await user.click(screen.getByText('q'));
+      await screen.findByText(/Case #2/);
+      expect(screen.getByText(/Tool calls \(0\)/i)).toBeInTheDocument();
+      expect(
+        screen.getByText(/The agent did not call any tools for this case/i)
+      ).toBeInTheDocument();
+    });
+
+    it('lists tool-call slugs with args + status when the agent called tools', async () => {
+      const toolsCase = {
+        id: 'c-3',
+        casePosition: 3,
+        subjectOutput: 'ok',
+        subjectMetadata: {
+          toolCalls: [
+            {
+              slug: 'search_knowledge_base',
+              args: { query: 'refund policy' },
+              success: true,
+              latencyMs: 42,
+            },
+            {
+              slug: 'send_email',
+              args: { to: 'a@example.com' },
+              success: false,
+              errorCode: 'RATE_LIMITED',
+            },
+          ],
+          citations: [],
+        },
+        metricScores: {},
+        latencyMs: 1,
+        costUsd: 0,
+        errorCode: null,
+        errorMessage: null,
+        datasetCase: { input: 'q', expectedOutput: null, metadata: null },
+      };
+      makeFetchMock(
+        () => buildRun({ status: 'completed' }),
+        () => [toolsCase]
+      );
+      const user = userEvent.setup();
+      render(<RunDetailView runId="run-1" />);
+      await screen.findByText('q');
+      await user.click(screen.getByText('q'));
+      await screen.findByText(/Case #3/);
+      expect(screen.getByText(/Tool calls \(2\)/i)).toBeInTheDocument();
+      expect(screen.getByText('search_knowledge_base')).toBeInTheDocument();
+      expect(screen.getByText('send_email')).toBeInTheDocument();
+      // "ok" appears in both subject output and the tool-call badge; assert
+      // the failure-coded tool surfaces its errorCode, which is unique.
+      expect(screen.getByText('RATE_LIMITED')).toBeInTheDocument();
+    });
+
+    it('renders citations when the agent emitted them', async () => {
+      const citedCase = {
+        id: 'c-4',
+        casePosition: 4,
+        subjectOutput: 'ok',
+        subjectMetadata: {
+          toolCalls: [],
+          citations: [
+            { title: 'Refund Policy', uri: 'https://example.com/r', marker: 1 },
+            { documentName: 'Shipping FAQ', url: 'https://example.com/s' },
+          ],
+        },
+        metricScores: {},
+        latencyMs: 1,
+        costUsd: 0,
+        errorCode: null,
+        errorMessage: null,
+        datasetCase: { input: 'q', expectedOutput: null, metadata: null },
+      };
+      makeFetchMock(
+        () => buildRun({ status: 'completed' }),
+        () => [citedCase]
+      );
+      const user = userEvent.setup();
+      render(<RunDetailView runId="run-1" />);
+      await screen.findByText('q');
+      await user.click(screen.getByText('q'));
+      await screen.findByText(/Case #4/);
+      expect(screen.getByText(/Citations \(2\)/i)).toBeInTheDocument();
+      expect(screen.getByText('Refund Policy')).toBeInTheDocument();
+      expect(screen.getByText('Shipping FAQ')).toBeInTheDocument();
+    });
+
     it('shows "(empty)" when subjectOutput is an empty string in the dialog', async () => {
       const blankOutputCase = {
         id: 'c-blank',

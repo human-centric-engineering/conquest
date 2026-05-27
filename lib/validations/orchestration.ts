@@ -642,12 +642,13 @@ export const listKnowledgeTagsQuerySchema = paginationQuerySchema.extend({
 });
 
 /**
- * Update knowledge document — admin mutation. Only mutable surface today is the
- * tag list. Pass `tagIds: []` to clear all tags; omit the field to leave them
- * untouched.
+ * Update knowledge document — admin mutation. Mutable surfaces: the display
+ * `name` and the tag list. Pass `tagIds: []` to clear all tags; omit a field
+ * to leave it untouched.
  */
 export const updateKnowledgeDocumentSchema = z
   .object({
+    name: z.string().trim().min(1, 'Name is required').max(255, 'Name is too long').optional(),
     tagIds: z.array(cuidSchema).max(50, 'At most 50 tags per document').optional(),
   })
   .refine((data) => Object.keys(data).length > 0, {

@@ -7,6 +7,7 @@
  * - Detach → DELETE + refetch removes from left column
  * - Toggle Switch → PATCH with { isEnabled }
  * - Configure dialog saves customConfig + customRateLimit via PATCH
+ * - Search Knowledge Base pinned to the top of the Available list
  *
  * @see components/admin/orchestration/agent-capabilities-tab.tsx
  */
@@ -198,6 +199,27 @@ describe('AgentCapabilitiesTab', () => {
   });
 
   // ── Attach ────────────────────────────────────────────────────────────────
+
+  describe('available ordering', () => {
+    it('pins Search Knowledge Base to the top of the Available list', async () => {
+      const { apiClient } = await import('@/lib/api/client');
+      const CAP_KB = makeCapability('cap-kb', 'Search Knowledge Base', 'search_knowledge_base');
+      vi.mocked(apiClient.get).mockImplementation((url: string) => {
+        // Nothing attached, so the knowledge-search tool stays in Available.
+        if (url.includes('/agents/')) return Promise.resolve([]);
+        // Alphabetically this would order Calculator, then Search Knowledge
+        // Base, then Web Search — the pin must override that.
+        return Promise.resolve([CAP_CALC, CAP_KB, CAP_SEARCH]);
+      });
+
+      render(<AgentCapabilitiesTab agentId={AGENT_ID} />);
+
+      const attachButtons = await screen.findAllByRole('button', { name: /^attach$/i });
+      const firstRow = attachButtons[0].closest('li');
+      expect(firstRow).not.toBeNull();
+      expect(firstRow).toHaveTextContent('Search Knowledge Base');
+    });
+  });
 
   describe('attach', () => {
     it('Attach button POSTs with capabilityId then refetches', async () => {

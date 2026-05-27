@@ -1,8 +1,10 @@
 /**
  * /admin/orchestration/evaluations/datasets/new
  *
- * Server page that renders the upload form (client component). Heavy
- * lifting lives in the form; this page is the shell + nav crumb.
+ * Server page that renders a tabbed surface for the two ways to start
+ * a dataset: upload a CSV/JSONL file, or generate cases from a domain
+ * description. The "Anatomy of a case" sidebar sits next to both tabs
+ * so the schema worked example is always visible.
  */
 
 import type { Metadata } from 'next';
@@ -10,14 +12,34 @@ import Link from 'next/link';
 import { ChevronLeft } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
-import { DatasetUploadForm } from '@/components/admin/orchestration/evaluations-foundations/dataset-upload-form';
+import { DatasetAnatomyCard } from '@/components/admin/orchestration/evaluations-foundations/dataset-anatomy-card';
+import { DatasetNewTabs } from '@/components/admin/orchestration/evaluations-foundations/dataset-new-tabs';
+import type { AgentOption } from '@/components/admin/orchestration/evaluations-foundations/generate-from-description-form';
+import { API } from '@/lib/api/endpoints';
+import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
+import { logger } from '@/lib/logging';
 
 export const metadata: Metadata = {
-  title: 'Upload dataset · AI Orchestration',
-  description: 'Upload a CSV or JSONL dataset for batch evaluation runs.',
+  title: 'New dataset · AI Orchestration',
+  description: 'Upload a CSV or JSONL dataset, or generate cases from a description.',
 };
 
-export default function NewDatasetPage(): React.ReactElement {
+async function loadChatAgents(): Promise<AgentOption[]> {
+  try {
+    const res = await serverFetch(`${API.ADMIN.ORCHESTRATION.AGENTS}?limit=100&kind=chat`);
+    if (!res.ok) return [];
+    const parsed = await parseApiResponse<AgentOption[]>(res);
+    return parsed.success && Array.isArray(parsed.data) ? parsed.data : [];
+  } catch (err) {
+    logger.warn('New dataset page: failed to load agents for generate tab', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return [];
+  }
+}
+
+export default async function NewDatasetPage(): Promise<React.ReactElement> {
+  const agents = await loadChatAgents();
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-2 text-sm">
@@ -30,14 +52,17 @@ export default function NewDatasetPage(): React.ReactElement {
       </div>
 
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Upload dataset</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">New dataset</h1>
         <p className="text-muted-foreground mt-1 text-sm">
-          Drop a CSV or JSONL file. The required column is{' '}
+          Upload a CSV or JSONL file, or generate cases from a description. The required column is{' '}
           <code className="bg-muted rounded px-1 text-xs">input</code>; everything else is optional.
         </p>
       </div>
 
-      <DatasetUploadForm />
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+        <DatasetNewTabs agents={agents} />
+        <DatasetAnatomyCard />
+      </div>
     </div>
   );
 }

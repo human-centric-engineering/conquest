@@ -67,6 +67,12 @@ type AttachedLink = AiAgentCapability & { capability: AiCapability };
 
 const ALL_CATEGORIES = '__all__';
 
+/**
+ * Pinned to the top of the Available list: knowledge access settings do
+ * nothing without this tool, so it's the one most agents need first.
+ */
+const PINNED_CAPABILITY_SLUG = 'search_knowledge_base';
+
 export interface AgentCapabilitiesTabProps {
   agentId: string;
 }
@@ -167,9 +173,12 @@ export function AgentCapabilitiesTab({ agentId }: AgentCapabilitiesTabProps) {
 
   const available = useMemo(() => {
     const attachedIds = new Set(attached?.map((l) => l.capabilityId) ?? []);
-    return (catalogue?.filter((c) => !attachedIds.has(c.id)) ?? [])
-      .slice()
-      .sort((a, b) => a.name.localeCompare(b.name));
+    return (catalogue?.filter((c) => !attachedIds.has(c.id)) ?? []).slice().sort((a, b) => {
+      // Pin the knowledge-search capability to the top, then sort by name.
+      if (a.slug === PINNED_CAPABILITY_SLUG) return -1;
+      if (b.slug === PINNED_CAPABILITY_SLUG) return 1;
+      return a.name.localeCompare(b.name);
+    });
   }, [catalogue, attached]);
 
   const availableCategories = useMemo(

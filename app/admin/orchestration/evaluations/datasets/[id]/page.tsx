@@ -14,16 +14,9 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { FieldHelp } from '@/components/ui/field-help';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
 import { datasetHelp } from '@/components/admin/orchestration/evaluations-foundations/help-text';
 import { GenerateCasesButton } from '@/components/admin/orchestration/evaluations-foundations/generate-cases-button';
+import { DatasetCasesTable } from '@/components/admin/orchestration/evaluations-foundations/dataset-cases-table';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
@@ -91,15 +84,6 @@ async function loadDataset(id: string): Promise<DatasetDetail | null> {
       error: err instanceof Error ? err.message : String(err),
     });
     return null;
-  }
-}
-
-function summariseInput(input: unknown): string {
-  if (typeof input === 'string') return input;
-  try {
-    return JSON.stringify(input);
-  } catch {
-    return '[unrenderable input]';
   }
 }
 
@@ -186,32 +170,15 @@ export default async function DatasetDetailPage({
           <CardTitle className="text-base">First {cases.length} cases</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-16">#</TableHead>
-                <TableHead>Input</TableHead>
-                <TableHead>Expected output</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {cases.map((c) => (
-                <TableRow key={c.id}>
-                  <TableCell className="font-mono">{c.position}</TableCell>
-                  <TableCell className="max-w-md">
-                    <div className="line-clamp-3 text-xs whitespace-pre-wrap">
-                      {summariseInput(c.input)}
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground max-w-md">
-                    <div className="line-clamp-3 text-xs whitespace-pre-wrap">
-                      {c.expectedOutput ?? '—'}
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <DatasetCasesTable
+            datasetId={dataset.id}
+            initialCases={cases.map((c) => ({
+              id: c.id,
+              position: c.position,
+              input: c.input,
+              expectedOutput: c.expectedOutput,
+            }))}
+          />
         </CardContent>
       </Card>
     </div>

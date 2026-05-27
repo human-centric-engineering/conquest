@@ -23,6 +23,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { datasetHelp } from '@/components/admin/orchestration/evaluations-foundations/help-text';
+import { SampleDownloadButtons } from '@/components/admin/orchestration/evaluations-foundations/sample-download-buttons';
 import { API } from '@/lib/api/endpoints';
 
 const ACCEPTED_EXTENSIONS = ['.csv', '.jsonl', '.ndjson'];
@@ -109,7 +110,17 @@ export function DatasetUploadForm(): React.ReactElement {
   }
 
   return (
-    <form onSubmit={(e) => void handleSubmit(e)} className="max-w-2xl space-y-6">
+    <form onSubmit={(e) => void handleSubmit(e)} className="space-y-6">
+      <Card className="border-primary/30 bg-primary/5">
+        <CardHeader>
+          <CardTitle className="text-base">Need a starting point?</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-muted-foreground text-sm">{datasetHelp.starterDownload}</p>
+          <SampleDownloadButtons />
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Upload file</CardTitle>
@@ -134,27 +145,25 @@ export function DatasetUploadForm(): React.ReactElement {
             ) : null}
           </div>
 
-          <details className="bg-muted/40 rounded-md p-3 text-xs">
-            <summary className="cursor-pointer font-medium">Expected columns / fields</summary>
-            <div className="mt-2 space-y-2">
-              <p>
-                <strong>Required:</strong> <code className="bg-background rounded px-1">input</code>{' '}
-                — the prompt or workflow input.
-              </p>
-              <p>
-                <strong>Optional:</strong>{' '}
-                <code className="bg-background rounded px-1">expectedOutput</code>,{' '}
-                <code className="bg-background rounded px-1">tags</code> (comma-separated),{' '}
-                <code className="bg-background rounded px-1">metadata</code> (JSON cell or field),{' '}
-                <code className="bg-background rounded px-1">referenceCitations</code> (JSON array),{' '}
-                <code className="bg-background rounded px-1">difficulty</code>.
-              </p>
-              <p className="text-muted-foreground">
-                CSV needs a header row. JSONL is one JSON object per line; empty lines and lines
-                starting with <code>#</code> or <code>{'//'}</code> are skipped.
-              </p>
-            </div>
-          </details>
+          <div className="bg-muted/40 space-y-2 rounded-md p-3 text-xs">
+            <p>
+              <strong>Required:</strong> <code className="bg-background rounded px-1">input</code> —
+              the prompt or workflow input.
+            </p>
+            <p>
+              <strong>Optional:</strong>{' '}
+              <code className="bg-background rounded px-1">expectedOutput</code>,{' '}
+              <code className="bg-background rounded px-1">tags</code> (comma-separated),{' '}
+              <code className="bg-background rounded px-1">metadata</code> (JSON cell or field),{' '}
+              <code className="bg-background rounded px-1">referenceCitations</code> (JSON array),{' '}
+              <code className="bg-background rounded px-1">difficulty</code>.
+            </p>
+            <p className="text-muted-foreground">
+              CSV needs a header row. JSONL is one JSON object per line; empty lines and lines
+              starting with <code>#</code> or <code>{'//'}</code> are skipped. See the worked
+              example to the right.
+            </p>
+          </div>
         </CardContent>
       </Card>
 

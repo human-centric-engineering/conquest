@@ -6,9 +6,12 @@ import {
   ChevronDown,
   Cpu,
   Eye,
+  MoreHorizontal,
+  Pencil,
   RefreshCw,
   Sparkles,
   Sprout,
+  Tag as TagIcon,
   Trash2,
   Upload,
 } from 'lucide-react';
@@ -22,6 +25,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { FieldHelp } from '@/components/ui/field-help';
 import { Tip } from '@/components/ui/tooltip';
 import { z } from 'zod';
@@ -60,6 +71,7 @@ const errorBodySchema = z
 import { CompareProvidersModal } from '@/components/admin/orchestration/knowledge/compare-providers-modal';
 import { DocumentChunksModal } from '@/components/admin/orchestration/knowledge/document-chunks-modal';
 import { DocumentKeywordsModal } from '@/components/admin/orchestration/knowledge/document-keywords-modal';
+import { DocumentRenameModal } from '@/components/admin/orchestration/knowledge/document-rename-modal';
 import { DocumentTagsModal } from '@/components/admin/orchestration/knowledge/document-tags-modal';
 import { DocumentUploadZone } from '@/components/admin/orchestration/knowledge/document-upload-zone';
 import type { PdfPreviewData } from '@/components/admin/orchestration/knowledge/document-upload-zone';
@@ -128,6 +140,8 @@ export function ManageTab({ documents, onRefresh }: ManageTabProps) {
   // not the chunks list — two modals, one job each.
   const [editTagsId, setEditTagsId] = useState<string | null>(null);
   const [editTagsName, setEditTagsName] = useState<string | null>(null);
+  const [renameId, setRenameId] = useState<string | null>(null);
+  const [renameName, setRenameName] = useState<string | null>(null);
   const [setupPreference, setSetupPreference] = useLocalStorage<'open' | 'closed' | null>(
     'orchestration.knowledge.builtin-patterns-panel',
     null
@@ -894,15 +908,44 @@ export function ManageTab({ documents, onRefresh }: ManageTabProps) {
                                     </Button>
                                   </span>
                                 ) : (
-                                  <Tip label="Permanently delete this document, all its chunks, and their embeddings">
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => setDeleteConfirmId(doc.id)}
-                                    >
-                                      <Trash2 className="h-3 w-3" />
-                                    </Button>
-                                  </Tip>
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                                        <span className="sr-only">Document actions</span>
+                                        <MoreHorizontal className="h-4 w-4" />
+                                      </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end">
+                                      <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                                      <DropdownMenuSeparator />
+                                      <DropdownMenuItem
+                                        onClick={() => {
+                                          setRenameId(doc.id);
+                                          setRenameName(doc.name);
+                                        }}
+                                      >
+                                        <Pencil className="mr-2 h-4 w-4" />
+                                        Edit name
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem
+                                        onClick={() => {
+                                          setEditTagsId(doc.id);
+                                          setEditTagsName(doc.name);
+                                        }}
+                                      >
+                                        <TagIcon className="mr-2 h-4 w-4" />
+                                        Edit tags
+                                      </DropdownMenuItem>
+                                      <DropdownMenuSeparator />
+                                      <DropdownMenuItem
+                                        className="text-destructive focus:text-destructive"
+                                        onClick={() => setDeleteConfirmId(doc.id)}
+                                      >
+                                        <Trash2 className="mr-2 h-4 w-4" />
+                                        Delete
+                                      </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
                                 )}
                               </>
                             )}
@@ -972,6 +1015,18 @@ export function ManageTab({ documents, onRefresh }: ManageTabProps) {
           if (!open) {
             setEditTagsId(null);
             setEditTagsName(null);
+          }
+        }}
+      />
+      <DocumentRenameModal
+        documentId={renameId}
+        documentName={renameName}
+        open={renameId !== null}
+        onSaved={onRefresh}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRenameId(null);
+            setRenameName(null);
           }
         }}
       />

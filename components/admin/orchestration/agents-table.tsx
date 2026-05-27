@@ -151,10 +151,15 @@ export function AgentsTable({ initialAgents, initialMeta }: AgentsTableProps) {
         if (!body.success) throw new Error('list failed');
 
         const next = [...body.data];
-        // Client-side sort — Phase 3 list is createdAt desc only.
+        // Bespoke agents always sort before system agents; the column
+        // sort (name / createdAt) is the secondary key. The user-facing
+        // rule is "all bespoke agents before system agents" — applying
+        // it as a primary sort keeps it true regardless of which header
+        // the user clicked.
         const field = overrides?.sortField ?? sortField;
         const order = overrides?.sortOrder ?? sortOrder;
         next.sort((a, b) => {
+          if (a.isSystem !== b.isSystem) return a.isSystem ? 1 : -1;
           const av = field === 'name' ? a.name.toLowerCase() : new Date(a.createdAt).getTime();
           const bv = field === 'name' ? b.name.toLowerCase() : new Date(b.createdAt).getTime();
           if (av < bv) return order === 'asc' ? -1 : 1;

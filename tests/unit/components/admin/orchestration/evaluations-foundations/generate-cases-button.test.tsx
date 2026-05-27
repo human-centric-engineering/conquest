@@ -231,4 +231,34 @@ describe('GenerateCasesButton — commit', () => {
     await user.click(screen.getByRole('button', { name: /Back/i }));
     expect(screen.getByLabelText(/Count/i)).toBeInTheDocument();
   });
+
+  it('inline edits on the review step are reflected in the committed cases', async () => {
+    const fetchMock = mockFetchSequence([PREVIEW_PAYLOAD, COMMIT_OK]);
+    const user = userEvent.setup();
+    render(<GenerateCasesButton datasetId="ds-1" agents={AGENTS} />);
+
+    await user.click(screen.getByRole('button', { name: /Generate cases/i }));
+    await user.click(screen.getByRole('button', { name: /^Generate$/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/2 proposals/i)).toBeInTheDocument();
+    });
+
+    // Edit the first proposal's input. CaseReviewStep ids the textareas
+    // as `proposal-{i}-input` / `proposal-{i}-expected`.
+    const inputBox = document.getElementById('proposal-0-input') as HTMLTextAreaElement;
+    await user.clear(inputBox);
+    await user.type(inputBox, 'EDITED QUESTION');
+
+    await user.click(screen.getByRole('button', { name: /Save 2 cases/i }));
+
+    await waitFor(() => {
+      const commitCall = fetchMock.mock.calls.find((c) =>
+        String(c[0]).includes('/generate-cases/commit')
+      );
+      expect(commitCall).toBeTruthy();
+      const init = (commitCall as [string, RequestInit])[1];
+      const body = JSON.parse(init.body as string);
+      expect(body.cases[0].input).toBe('EDITED QUESTION');
+    });
+  });
 });

@@ -468,6 +468,8 @@ export function RunDetailView({ runId }: { runId: string }): React.ReactElement 
                     </div>
                   </Section>
                 ) : null}
+                <ToolCallsSection metadata={selected.subjectMetadata} />
+                <CitationsSection metadata={selected.subjectMetadata} />
                 <Section title="Scores">
                   <div className="space-y-2">
                     {Object.entries(selected.metricScores).map(([slug, cell]) => (
@@ -527,5 +529,118 @@ function Section({
       <h3 className="text-sm font-medium">{title}</h3>
       {children}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Trajectory + citations drill-in (Phase 3.6 diagnostic surfaces)
+//
+// `subjectMetadata` is the worker's persisted trace blob — `toolCalls` and
+// `citations` live on it. They're the only honest way to answer questions
+// like "why did `tool_was_called` fail?" — without seeing what the agent
+// actually called, the operator is guessing.
+// ---------------------------------------------------------------------------
+
+interface ToolCallTraceRow {
+  slug?: unknown;
+  args?: unknown;
+  arguments?: unknown;
+  success?: unknown;
+  errorCode?: unknown;
+  latencyMs?: unknown;
+}
+
+interface CitationRow {
+  title?: unknown;
+  documentName?: unknown;
+  uri?: unknown;
+  url?: unknown;
+  marker?: unknown;
+}
+
+function readArray(metadata: Record<string, unknown> | null, key: string): unknown[] {
+  if (!metadata) return [];
+  const v = metadata[key];
+  return Array.isArray(v) ? v : [];
+}
+
+function stringOrUndefined(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function ToolCallsSection({
+  metadata,
+}: {
+  metadata: Record<string, unknown> | null;
+}): React.ReactElement {
+  const calls = readArray(metadata, 'toolCalls') as ToolCallTraceRow[];
+  return (
+    <Section title={`Tool calls (${calls.length})`}>
+      {calls.length === 0 ? (
+        <p className="text-muted-foreground bg-muted/40 rounded p-3 text-xs">
+          The agent did not call any tools for this case. If a{' '}
+          <code className="bg-background rounded px-1">tool_was_called</code> grader failed here,
+          the most common causes are: the agent&apos;s instructions don&apos;t direct it to use the
+          tool, the input didn&apos;t obviously need it, or the tool isn&apos;t actually bound to
+          the agent.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {calls.map((c, i) => {
+            const slug = stringOrUndefined(c.slug) ?? '(unknown slug)';
+            const success = c.success === true;
+            const errorCode = stringOrUndefined(c.errorCode);
+            const args = c.args ?? c.arguments;
+            return (
+              <div key={i} className="rounded border p-2">
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="font-mono">{slug}</span>
+                  <Badge variant={success ? 'default' : 'destructive'}>
+                    {success ? 'ok' : (errorCode ?? 'fail')}
+                  </Badge>
+                  {typeof c.latencyMs === 'number' ? (
+                    <span className="text-muted-foreground text-[10px]">{c.latencyMs}ms</span>
+                  ) : null}
+                </div>
+                {args !== undefined && args !== null ? (
+                  <pre className="bg-muted/40 mt-1 rounded p-2 text-[11px] whitespace-pre-wrap">
+                    {JSON.stringify(args, null, 2)}
+                  </pre>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Section>
+  );
+}
+
+function CitationsSection({
+  metadata,
+}: {
+  metadata: Record<string, unknown> | null;
+}): React.ReactElement | null {
+  const citations = readArray(metadata, 'citations') as CitationRow[];
+  if (citations.length === 0) return null;
+  return (
+    <Section title={`Citations (${citations.length})`}>
+      <ol className="space-y-1.5">
+        {citations.map((c, i) => {
+          const title = stringOrUndefined(c.title) ?? stringOrUndefined(c.documentName);
+          const uri = stringOrUndefined(c.uri) ?? stringOrUndefined(c.url);
+          const marker = typeof c.marker === 'number' ? c.marker : i + 1;
+          return (
+            <li key={i} className="bg-muted/40 rounded p-2 text-xs">
+              <span className="text-muted-foreground mr-1.5 font-mono">[{marker}]</span>
+              <span>{title ?? '(untitled source)'}</span>
+              {uri ? (
+                <span className="text-muted-foreground ml-2 font-mono text-[10px]">{uri}</span>
+              ) : null}
+            </li>
+          );
+        })}
+      </ol>
+    </Section>
   );
 }

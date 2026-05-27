@@ -290,6 +290,9 @@ describe('RunCreateForm', () => {
       // Untick exact_match
       await user.click(exactCb);
 
+      // regex needs a pattern or the client guard blocks submission.
+      await user.type(getConfigInput(/Pattern \(regex\)/i), '\\d+');
+
       await user.type(document.querySelector('#name') as HTMLInputElement, 'My Run');
       await user.click(screen.getByRole('button', { name: /queue run/i }));
 
@@ -337,6 +340,107 @@ describe('RunCreateForm', () => {
       render(<RunCreateForm {...defaultProps()} />);
       await user.click(screen.getByRole('checkbox', { name: /citation_count_at_least/i }));
       expect(getConfigInput(/Minimum citations/i)).toBeInTheDocument();
+    });
+
+    it('renders a slug dropdown populated from the selected agent capabilities', async () => {
+      // Custom fetch mock: capabilities for the chosen agent, success
+      // for everything else. The dropdown can only render if the
+      // capabilities fetch resolves before the user opens the tick.
+      const fetchMock = vi.fn(async (url: string) => {
+        if (typeof url === 'string' && url.includes('/capabilities')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              success: true,
+              data: [
+                {
+                  isEnabled: true,
+                  capability: { slug: 'search_knowledge_base', name: 'Search Knowledge Base' },
+                },
+                {
+                  isEnabled: true,
+                  capability: { slug: 'call_external_api', name: 'Call External API' },
+                },
+                {
+                  isEnabled: false,
+                  capability: { slug: 'send_email', name: 'Send Email' },
+                },
+              ],
+            }),
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ success: true, data: { id: 'run-1' } }),
+        };
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const user = userEvent.setup();
+      render(<RunCreateForm {...defaultProps()} />);
+
+      // Wait for the capabilities fetch to land.
+      await waitFor(() => {
+        expect(
+          fetchMock.mock.calls.some(
+            (c) => typeof c[0] === 'string' && c[0].includes('/capabilities')
+          )
+        ).toBe(true);
+      });
+
+      await user.click(screen.getByRole('checkbox', { name: /tool_was_called/i }));
+
+      // Select trigger renders the placeholder when no value is set,
+      // and the "Lists capabilities currently attached..." hint sits
+      // under it. Together those confirm the dropdown branch fired
+      // rather than the text-input fallback.
+      expect(await screen.findByText(/Pick a tool the agent has bound/i)).toBeInTheDocument();
+      expect(
+        screen.getByText(/Lists capabilities currently attached to this agent/i)
+      ).toBeInTheDocument();
+
+      // The placeholder input (text-input fallback) should NOT be in
+      // the DOM — the dropdown replaced it.
+      expect(screen.queryByPlaceholderText(/search_knowledge_base/)).not.toBeInTheDocument();
+    });
+
+    it('blocks submission with a clear message when tool_was_called has no slug', async () => {
+      const fetchMock = mockFetchSuccess('run-1');
+      const user = userEvent.setup();
+      render(<RunCreateForm {...defaultProps()} />);
+
+      await user.click(screen.getByRole('checkbox', { name: /tool_was_called/i }));
+      await user.type(document.querySelector('#name') as HTMLInputElement, 'My Run');
+      await user.click(screen.getByRole('button', { name: /queue run/i }));
+
+      expect(await screen.findByText(/Pick a tool slug/i)).toBeInTheDocument();
+      // No EVAL_RUNS submit fetch should have fired (only the estimate hook may have).
+      const runsCall = fetchMock.mock.calls.find(
+        (c) =>
+          c[0] === API.ADMIN.ORCHESTRATION.EVAL_RUNS &&
+          (c[1] as RequestInit | undefined)?.method === 'POST'
+      );
+      expect(runsCall).toBeUndefined();
+    });
+
+    it('blocks submission when regex has no pattern', async () => {
+      const fetchMock = mockFetchSuccess('run-1');
+      const user = userEvent.setup();
+      render(<RunCreateForm {...defaultProps()} />);
+
+      await user.click(screen.getByRole('checkbox', { name: /regex/i }));
+      await user.type(document.querySelector('#name') as HTMLInputElement, 'My Run');
+      await user.click(screen.getByRole('button', { name: /queue run/i }));
+
+      expect(await screen.findByText(/Set a pattern/i)).toBeInTheDocument();
+      const runsCall = fetchMock.mock.calls.find(
+        (c) =>
+          c[0] === API.ADMIN.ORCHESTRATION.EVAL_RUNS &&
+          (c[1] as RequestInit | undefined)?.method === 'POST'
+      );
+      expect(runsCall).toBeUndefined();
     });
 
     it('writes user edits back into the regex config and submits them', async () => {

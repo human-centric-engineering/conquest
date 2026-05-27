@@ -295,6 +295,22 @@ describe('GET /api/v1/admin/orchestration/agents', () => {
       );
     });
   });
+
+  describe('Ordering', () => {
+    it('lists bespoke agents before system agents (isSystem asc, then createdAt desc)', async () => {
+      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+      vi.mocked(prisma.aiAgent.findMany).mockResolvedValue([]);
+      vi.mocked(prisma.aiAgent.count).mockResolvedValue(0);
+
+      await GET(makeGetRequest({}));
+
+      expect(vi.mocked(prisma.aiAgent.findMany)).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orderBy: [{ isSystem: 'asc' }, { createdAt: 'desc' }],
+        })
+      );
+    });
+  });
 });
 
 describe('POST /api/v1/admin/orchestration/agents', () => {

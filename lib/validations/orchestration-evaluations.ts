@@ -59,6 +59,23 @@ export const patchDatasetSchema = z
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'At least one field must be provided' });
 
+/**
+ * Per-case patch. All fields optional; the route enforces at-least-one.
+ * `expectedOutput`, `metadata`, `referenceCitations` accept `null` to
+ * clear the field; `input` is required to stay populated.
+ */
+export const patchDatasetCaseSchema = z
+  .object({
+    input: z.union([z.string().min(1).max(50_000), z.record(z.string(), z.unknown())]).optional(),
+    expectedOutput: z.string().max(50_000).nullable().optional(),
+    metadata: z.record(z.string(), z.unknown()).nullable().optional(),
+    referenceCitations: z.array(z.unknown()).nullable().optional(),
+  })
+  .strict()
+  .refine((v) => Object.keys(v).length > 0, { message: 'At least one field must be provided' });
+
+export type PatchDatasetCaseInput = z.infer<typeof patchDatasetCaseSchema>;
+
 // ---------------------------------------------------------------------------
 // Datasets — cases pagination
 // ---------------------------------------------------------------------------
@@ -246,3 +263,54 @@ export const generateCasesCommitSchema = z
 
 export type GenerateCasesPreviewInput = z.infer<typeof generateCasesPreviewSchema>;
 export type GenerateCasesCommitInput = z.infer<typeof generateCasesCommitSchema>;
+
+// ---------------------------------------------------------------------------
+// Phase 3.6 — Generate from description (cold-start dataset creation)
+// ---------------------------------------------------------------------------
+
+/**
+ * Preview shape for `/evaluations/datasets/generate-from-description`.
+ * Mirrors `generateCasesPreviewSchema` but feeds the description seed
+ * (no dataset id, no KB / failure dependency).
+ */
+export const generateFromDescriptionPreviewSchema = z
+  .object({
+    agentId: z.string().min(1),
+    count: z.coerce.number().int().min(1).max(25).default(10),
+    domainPrompt: z.string().min(20).max(1000),
+    seedInputs: z.array(z.string().min(1).max(2000)).max(3).optional(),
+  })
+  .strict();
+
+/**
+ * Commit shape — creates a new dataset shell and writes accepted cases
+ * atomically. Name/description/tags are admin-supplied at commit time
+ * so the operator can rename based on what the preview produced.
+ */
+export const generateFromDescriptionCommitSchema = z
+  .object({
+    name: z.string().min(1).max(120),
+    description: z.string().max(2000).optional(),
+    tags: z.array(z.string().min(1).max(40)).max(20).optional(),
+    cases: z
+      .array(
+        z
+          .object({
+            input: z.union([z.string().min(1).max(50_000), z.record(z.string(), z.unknown())]),
+            expectedOutput: z.string().max(50_000).optional(),
+            metadata: z.record(z.string(), z.unknown()).optional(),
+            referenceCitations: z.array(z.unknown()).optional(),
+          })
+          .strict()
+      )
+      .min(1)
+      .max(25),
+  })
+  .strict();
+
+export type GenerateFromDescriptionPreviewInput = z.infer<
+  typeof generateFromDescriptionPreviewSchema
+>;
+export type GenerateFromDescriptionCommitInput = z.infer<
+  typeof generateFromDescriptionCommitSchema
+>;

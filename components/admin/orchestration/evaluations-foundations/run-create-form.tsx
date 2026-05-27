@@ -133,6 +133,56 @@ export function RunCreateForm({
   const [selectedMetrics, setSelectedMetrics] = React.useState<MetricSelection[]>([]);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [agentCapabilities, setAgentCapabilities] = React.useState<
+    Array<{ slug: string; name: string }>
+  >([]);
+
+  // Fetch the chosen agent's bound capabilities so the
+  // `tool_was_called` grader can offer a slug dropdown rather than a
+  // free-text input. Workflow subjects don't surface a single
+  // capability set (steps may bind different ones) — the dropdown
+  // falls back to a text input in that case.
+  React.useEffect(() => {
+    if (subjectKind !== 'agent' || !agentId) {
+      setAgentCapabilities([]);
+      return;
+    }
+    const ac = new AbortController();
+    void (async () => {
+      try {
+        const res = await fetch(API.ADMIN.ORCHESTRATION.agentCapabilities(agentId), {
+          credentials: 'same-origin',
+          signal: ac.signal,
+        });
+        if (!res.ok) {
+          setAgentCapabilities([]);
+          return;
+        }
+        const body = (await res.json()) as
+          | {
+              success: true;
+              data: Array<{
+                isEnabled: boolean;
+                capability: { slug: string; name: string };
+              }>;
+            }
+          | { success: false };
+        if (!body.success) {
+          setAgentCapabilities([]);
+          return;
+        }
+        const enabled = body.data
+          .filter((row) => row.isEnabled)
+          .map((row) => ({ slug: row.capability.slug, name: row.capability.name }));
+        setAgentCapabilities(enabled);
+      } catch (err) {
+        // Aborted fetch from a fast agent-switch — ignore silently.
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        setAgentCapabilities([]);
+      }
+    })();
+    return () => ac.abort();
+  }, [subjectKind, agentId]);
 
   const chosenDataset = datasets.find((d) => d.id === datasetId) ?? null;
   const chosenWorkflow = workflows.find((w) => w.id === workflowId) ?? null;
@@ -202,6 +252,25 @@ export function RunCreateForm({
     }
     if (!datasetId) return setError('Pick a dataset.');
     if (selectedMetrics.length === 0) return setError('Pick at least one metric.');
+
+    // Per-grader required-field check. The server-side Zod schemas would
+    // reject these too, but the surfaced error is a raw Zod path string
+    // ("Grader \"tool_was_called\" config invalid: slug: Too small …")
+    // — catching it here lets us point at the specific config field.
+    for (const m of selectedMetrics) {
+      if (m.kind !== 'heuristic') continue;
+      const cfg = m.config;
+      const toolSlug = typeof cfg.slug === 'string' ? cfg.slug.trim() : '';
+      if (m.slug === 'tool_was_called' && toolSlug.length === 0) {
+        return setError(
+          'Pick a tool slug for the "tool_was_called" grader (e.g. `search_knowledge_base`).'
+        );
+      }
+      const pattern = typeof cfg.pattern === 'string' ? cfg.pattern.trim() : '';
+      if (m.slug === 'regex' && pattern.length === 0) {
+        return setError('Set a pattern for the "regex" grader.');
+      }
+    }
 
     // Compile the wire-format metricConfigs.
     const metricConfigs = selectedMetrics.map((m) =>
@@ -523,11 +592,28 @@ export function RunCreateForm({
                         <ConfigEditor
                           config={selected.config}
                           fields={[
-                            {
-                              key: 'slug',
-                              label: 'Tool slug',
-                              placeholder: 'search_knowledge_base',
-                            },
+                            // Agent subject + ≥1 bound capability → dropdown.
+                            // Workflow subject or no capabilities → free text
+                            // (e.g. the agent has none bound yet, or the tool
+                            // is one bound at a step level inside a workflow).
+                            subjectKind === 'agent' && agentCapabilities.length > 0
+                              ? {
+                                  key: 'slug',
+                                  label: 'Tool slug',
+                                  type: 'select' as const,
+                                  options: agentCapabilities.map((c) => ({
+                                    value: c.slug,
+                                    label: `${c.name} — ${c.slug}`,
+                                  })),
+                                  placeholder: 'Pick a tool the agent has bound',
+                                  selectHint:
+                                    'Lists capabilities currently attached to this agent.',
+                                }
+                              : {
+                                  key: 'slug',
+                                  label: 'Tool slug',
+                                  placeholder: 'search_knowledge_base',
+                                },
                             { key: 'min', label: 'Min invocations', type: 'number' },
                           ]}
                           onPatch={(patch) => updateHeuristicConfig(g.slug, patch)}
@@ -707,7 +793,11 @@ interface ConfigField {
   key: string;
   label: string;
   placeholder?: string;
-  type?: 'text' | 'number';
+  type?: 'text' | 'number' | 'select';
+  /** Required when `type: 'select'`. Empty list falls back to a text input. */
+  options?: Array<{ value: string; label: string }>;
+  /** Hint shown under a select when present. */
+  selectHint?: string;
 }
 
 /**
@@ -920,21 +1010,45 @@ function ConfigEditor({
 }): React.ReactElement {
   return (
     <div className="bg-muted/40 mt-2 grid grid-cols-2 gap-2 rounded p-3">
-      {fields.map((f) => (
-        <div key={f.key} className={`space-y-1 ${fields.length === 1 ? 'col-span-2' : ''}`}>
-          <Label className="text-xs">{f.label}</Label>
-          <Input
-            type={f.type === 'number' ? 'number' : 'text'}
-            value={stringifyConfigValue(config[f.key])}
-            placeholder={f.placeholder}
-            onChange={(e) =>
-              onPatch({
-                [f.key]: f.type === 'number' ? Number(e.target.value) : e.target.value,
-              })
-            }
-          />
-        </div>
-      ))}
+      {fields.map((f) => {
+        const renderSelect = f.type === 'select' && f.options && f.options.length > 0;
+        const currentValue = stringifyConfigValue(config[f.key]);
+        return (
+          <div key={f.key} className={`space-y-1 ${fields.length === 1 ? 'col-span-2' : ''}`}>
+            <Label className="text-xs">{f.label}</Label>
+            {renderSelect ? (
+              <>
+                <Select value={currentValue} onValueChange={(v) => onPatch({ [f.key]: v })}>
+                  <SelectTrigger>
+                    <SelectValue placeholder={f.placeholder ?? 'Pick one'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {f.options?.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {f.selectHint ? (
+                  <p className="text-muted-foreground text-[10px]">{f.selectHint}</p>
+                ) : null}
+              </>
+            ) : (
+              <Input
+                type={f.type === 'number' ? 'number' : 'text'}
+                value={currentValue}
+                placeholder={f.placeholder}
+                onChange={(e) =>
+                  onPatch({
+                    [f.key]: f.type === 'number' ? Number(e.target.value) : e.target.value,
+                  })
+                }
+              />
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

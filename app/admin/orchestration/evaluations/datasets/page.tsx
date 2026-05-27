@@ -73,7 +73,7 @@ export default async function DatasetsListPage(): Promise<React.ReactElement> {
               <p>No datasets yet.</p>
               <Button asChild className="mt-4">
                 <Link href="/admin/orchestration/evaluations/datasets/new">
-                  Upload your first dataset
+                  Upload or generate your first dataset
                 </Link>
               </Button>
             </CardContent>

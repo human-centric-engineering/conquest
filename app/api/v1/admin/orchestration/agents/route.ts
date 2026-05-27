@@ -54,7 +54,10 @@ export const GET = withAdminAuth(async (request, _session) => {
   const [rawAgents, total] = await Promise.all([
     prisma.aiAgent.findMany({
       where,
-      orderBy: { createdAt: 'desc' },
+      // Bespoke (user-created) agents first, then system agents. `false`
+      // sorts before `true` in Postgres ascending order, so `isSystem:
+      // 'asc'` puts non-system rows at the top.
+      orderBy: [{ isSystem: 'asc' }, { createdAt: 'desc' }],
       skip,
       take: limit,
       include: {
