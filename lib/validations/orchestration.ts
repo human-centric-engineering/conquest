@@ -169,6 +169,14 @@ export const createAgentSchema = z.object({
 
   visibility: agentVisibilitySchema.default('internal'),
 
+  knowledgeRetrievalMode: z
+    .enum(['model', 'first_turn', 'every_turn', 'keywords'])
+    .default('model'),
+  knowledgeTriggerKeywords: z
+    .array(z.string().min(1).max(100))
+    .max(50, 'At most 50 trigger keywords')
+    .default([]),
+
   topicBoundaries: z.array(z.string().max(200)).max(50, 'At most 50 topic boundaries').default([]),
 
   brandVoiceInstructions: z
@@ -321,6 +329,12 @@ export const updateAgentSchema = z.object({
     .optional(),
 
   topicBoundaries: z.array(z.string().max(200)).max(50, 'At most 50 topic boundaries').optional(),
+
+  knowledgeRetrievalMode: z.enum(['model', 'first_turn', 'every_turn', 'keywords']).optional(),
+  knowledgeTriggerKeywords: z
+    .array(z.string().min(1).max(100))
+    .max(50, 'At most 50 trigger keywords')
+    .optional(),
 
   brandVoiceInstructions: z
     .string()

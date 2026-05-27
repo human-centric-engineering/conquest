@@ -162,6 +162,10 @@ export const PATCH = withAdminAuth<{ id: string }>(async (request, session, { pa
   }
   if (body.isActive !== undefined) data.isActive = body.isActive;
   if (body.knowledgeAccessMode !== undefined) data.knowledgeAccessMode = body.knowledgeAccessMode;
+  if (body.knowledgeRetrievalMode !== undefined)
+    data.knowledgeRetrievalMode = body.knowledgeRetrievalMode;
+  if (body.knowledgeTriggerKeywords !== undefined)
+    data.knowledgeTriggerKeywords = body.knowledgeTriggerKeywords;
   if (body.topicBoundaries !== undefined) data.topicBoundaries = body.topicBoundaries;
   if (body.brandVoiceInstructions !== undefined)
     data.brandVoiceInstructions = body.brandVoiceInstructions;
@@ -236,6 +240,8 @@ export const PATCH = withAdminAuth<{ id: string }>(async (request, session, { pa
     'provider',
     'fallbackProviders',
     'knowledgeAccessMode',
+    'knowledgeRetrievalMode',
+    'knowledgeTriggerKeywords',
     'rateLimitRpm',
     'visibility',
     'inputGuardMode',
@@ -355,6 +361,8 @@ export const PATCH = withAdminAuth<{ id: string }>(async (request, session, { pa
           brandVoiceInstructions: current.brandVoiceInstructions,
           metadata: current.metadata,
           knowledgeAccessMode: current.knowledgeAccessMode,
+          knowledgeRetrievalMode: current.knowledgeRetrievalMode,
+          knowledgeTriggerKeywords: current.knowledgeTriggerKeywords,
           grantedTagIds: currentGrantedTagIds,
           grantedDocumentIds: currentGrantedDocumentIds,
           rateLimitRpm: current.rateLimitRpm,

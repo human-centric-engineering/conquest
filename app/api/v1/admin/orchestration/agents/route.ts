@@ -163,6 +163,8 @@ export const POST = withAdminAuth(async (request, session) => {
         rateLimitRpm: body.rateLimitRpm ?? null,
         fallbackProviders: body.fallbackProviders ?? [],
         topicBoundaries: body.topicBoundaries ?? [],
+        knowledgeRetrievalMode: body.knowledgeRetrievalMode ?? 'model',
+        knowledgeTriggerKeywords: body.knowledgeTriggerKeywords ?? [],
         brandVoiceInstructions: body.brandVoiceInstructions ?? null,
         enableVoiceInput: body.enableVoiceInput ?? false,
         enableImageInput: body.enableImageInput ?? false,
