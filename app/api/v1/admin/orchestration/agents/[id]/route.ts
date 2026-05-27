@@ -6,9 +6,10 @@
  *   - When `systemInstructions` changes, the previous value is pushed
  *     onto `systemInstructionsHistory` with `{instructions, changedAt, changedBy}`.
  * DELETE /api/v1/admin/orchestration/agents/:id
- *   - Soft delete: sets `isActive = false`. Hard delete would either
- *     cascade conversation/message/cost-log history or fail; soft delete
- *     preserves the audit trail.
+ *   - Soft delete: sets `isActive = false` and renames the slug to a
+ *     unique tombstone (`{slug}-deleted-{id}`) so the slug is freed for
+ *     reuse. Hard delete would either cascade conversation/message/
+ *     cost-log history or fail; soft delete preserves the audit trail.
  *
  * Authentication: Admin role required.
  */
@@ -539,13 +540,26 @@ export const DELETE = withAdminAuth<{ id: string }>(async (request, session, { p
     throw new ForbiddenError('System agents cannot be deleted');
   }
 
+  // Release the slug so the operator can recreate an agent with the same
+  // name. The slug column is @unique, so a soft-delete that left the slug
+  // in place would block reuse forever. Rename to a collision-free
+  // tombstone (slug is never re-deleted because the row is already
+  // inactive, but guard against re-tombstoning just in case). Slug max is
+  // 100 chars, so truncate the original to leave room for the suffix.
+  const tombstoneSuffix = `-deleted-${id}`;
+  const alreadyTombstoned = current.slug.endsWith(tombstoneSuffix);
+  const tombstoneSlug = alreadyTombstoned
+    ? current.slug
+    : `${current.slug.slice(0, Math.max(0, 100 - tombstoneSuffix.length))}${tombstoneSuffix}`;
+
   const agent = await prisma.aiAgent.update({
     where: { id },
-    data: { isActive: false },
+    data: { isActive: false, slug: tombstoneSlug },
   });
 
   log.info('Agent soft-deleted', {
     agentId: id,
+    previousSlug: current.slug,
     slug: agent.slug,
     adminId: session.user.id,
   });

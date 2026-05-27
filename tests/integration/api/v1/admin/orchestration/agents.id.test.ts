@@ -1208,9 +1208,30 @@ describe('DELETE /api/v1/admin/orchestration/agents/:id', () => {
       expect(data.success).toBe(true);
       expect(data.data.isActive).toBe(false);
 
-      // Verify the update was called with isActive: false
+      // Soft delete deactivates the row and renames the slug to a unique
+      // tombstone so the original slug ('test-agent') is freed for reuse.
       expect(vi.mocked(prisma.aiAgent.update)).toHaveBeenCalledWith(
-        expect.objectContaining({ data: { isActive: false } })
+        expect.objectContaining({
+          data: { isActive: false, slug: `test-agent-deleted-${AGENT_ID}` },
+        })
+      );
+    });
+
+    it('does not re-tombstone an already-deleted slug', async () => {
+      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+      const tombstoned = `test-agent-deleted-${AGENT_ID}`;
+      vi.mocked(prisma.aiAgent.findUnique).mockResolvedValue(
+        makeAgent({ isActive: false, slug: tombstoned }) as never
+      );
+      vi.mocked(prisma.aiAgent.update).mockResolvedValue(
+        makeAgent({ isActive: false, slug: tombstoned }) as never
+      );
+
+      const response = await DELETE(makeRequest('DELETE'), makeParams(AGENT_ID));
+
+      expect(response.status).toBe(200);
+      expect(vi.mocked(prisma.aiAgent.update)).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { isActive: false, slug: tombstoned } })
       );
     });
   });

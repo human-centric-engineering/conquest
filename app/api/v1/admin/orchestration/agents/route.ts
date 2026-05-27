@@ -40,7 +40,11 @@ export const GET = withAdminAuth(async (request, _session) => {
   // the run-create metric picker passes `kind=judge`) opt in.
   const where: Prisma.AiAgentWhereInput = {};
   if (kind !== undefined) where.kind = kind;
-  if (isActive !== undefined) where.isActive = isActive;
+  // Default to active agents only. Deletion is a soft-delete (sets
+  // isActive=false on DELETE), so without a default filter every
+  // "deleted" agent would linger in the list. Callers that genuinely
+  // want the deleted rows can opt in with ?isActive=false.
+  where.isActive = isActive ?? true;
   if (provider) where.provider = provider;
   if (isSystem !== undefined) where.isSystem = isSystem;
   if (q) {
@@ -166,6 +170,12 @@ export const POST = withAdminAuth(async (request, session) => {
         knowledgeRetrievalMode: body.knowledgeRetrievalMode ?? 'model',
         knowledgeTriggerKeywords: body.knowledgeTriggerKeywords ?? [],
         brandVoiceInstructions: body.brandVoiceInstructions ?? null,
+        profileId: body.profileId ?? null,
+        persona: body.persona ?? null,
+        guardrails: body.guardrails ?? null,
+        personaMode: body.personaMode,
+        voiceMode: body.voiceMode,
+        guardrailsMode: body.guardrailsMode,
         enableVoiceInput: body.enableVoiceInput ?? false,
         enableImageInput: body.enableImageInput ?? false,
         enableDocumentInput: body.enableDocumentInput ?? false,
