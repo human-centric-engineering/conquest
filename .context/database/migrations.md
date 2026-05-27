@@ -10,7 +10,7 @@ Sunrise uses **Prisma Migrate** for database schema evolution. Migrations are ve
 
 ```mermaid
 graph LR
-    A[Modify schema.prisma] --> B[Run prisma migrate dev]
+    A[Modify prisma/schema/*.prisma] --> B[Run prisma migrate dev]
     B --> C[Migration created]
     C --> D[Migration applied to dev DB]
     D --> E[Prisma Client regenerated]
@@ -40,7 +40,7 @@ graph LR
 | `npm run db:studio`      | Open Prisma Studio                                            |
 
 ```bash
-# Most common flow: edit schema.prisma, then…
+# Most common flow: edit a file in prisma/schema/, then…
 npm run db:migrate:dev -- --name add_user_role
 # Creates prisma/migrations/<timestamp>_add_user_role/migration.sql,
 # applies it, and regenerates the Prisma Client.
@@ -67,7 +67,9 @@ npx prisma migrate resolve --applied <migration_name>
 
 ```
 prisma/
-├── schema.prisma
+├── schema/                  # multi-file schema — one .prisma per domain
+│   ├── base.prisma          # datasource + generator
+│   └── …                    # auth, orchestration-*, mcp, platform, app
 ├── migrations/
 │   ├── migration_lock.toml
 │   ├── 20250101120000_init/
@@ -99,7 +101,7 @@ CREATE INDEX "users_role_idx" ON "users"("role");
 ### 1. Modify Schema
 
 ```prisma
-// prisma/schema.prisma
+// prisma/schema/auth.prisma (one domain file in the schema folder)
 
 model User {
   id       String   @id @default(cuid())
@@ -124,7 +126,7 @@ npx prisma migrate dev --name add_user_role
 **Output**:
 
 ```
-Prisma schema loaded from prisma/schema.prisma
+Prisma schema loaded from prisma/schema
 Datasource "db": PostgreSQL database "sunrise", schema "public" at "localhost:5432"
 
 The following migration(s) have been created and applied from new schema changes:
@@ -478,7 +480,7 @@ npx prisma migrate dev --name fix_migration
 # Pull current database schema
 npx prisma db pull
 
-# This updates schema.prisma to match database
+# This updates the schema in prisma/schema/ to match the database
 # Then create migration to formalize the changes
 npx prisma migrate dev --name sync_with_database
 ```
