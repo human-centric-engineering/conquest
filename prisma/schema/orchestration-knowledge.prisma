@@ -1,0 +1,150 @@
+// Logical grouping for knowledge documents — a "corpus". Reserved for future
+// per-KB embedding-model selection (Layer 2); today every KB shares the
+// global active embedding model from AiOrchestrationSettings.
+model AiKnowledgeBase {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  description String?  @db.Text
+  isDefault   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  documents AiKnowledgeDocument[]
+
+  @@map("ai_knowledge_base")
+}
+
+// Source documents uploaded to the knowledge base
+model AiKnowledgeDocument {
+  id              String   @id @default(cuid())
+  knowledgeBaseId String
+  name            String
+  fileName        String
+  fileHash        String // SHA-256 for deduplication
+  chunkCount      Int      @default(0)
+  status          String // "processing", "ready", "failed"
+  scope           String   @default("app") // "system" | "app"
+  sourceUrl       String? // URL the document was fetched from (null = manual upload)
+  errorMessage    String?  @db.Text
+  metadata        Json? // format-specific metadata, preview data for pending_review docs
+  uploadedBy      String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  knowledgeBase AiKnowledgeBase            @relation(fields: [knowledgeBaseId], references: [id])
+  uploader      User?                      @relation("AiKnowledgeDocumentUploader", fields: [uploadedBy], references: [id], onDelete: SetNull)
+  chunks        AiKnowledgeChunk[]
+  tags          AiKnowledgeDocumentTag[]
+  agentGrants   AiAgentKnowledgeDocument[]
+
+  @@index([uploadedBy])
+  @@index([status])
+  @@index([scope])
+  @@index([fileHash])
+  @@index([knowledgeBaseId])
+  @@map("ai_knowledge_document")
+}
+
+// Vector store for knowledge base content.
+//
+// ⚠️ PRISMA-SCHEMA DRIFT WARNING ⚠️
+// The Postgres GIN index `idx_ai_knowledge_chunk_search_vector` on
+// `searchVector` (and the `GENERATED ALWAYS` DEFAULT on the same column)
+// are managed via raw SQL in migrations — Prisma cannot model `tsvector`
+// GIN indexes or generated columns natively, so they don't appear here.
+//
+// `npx prisma migrate dev` WILL try to add DROP statements for both on
+// every schema-diff run. Always inspect generated migration SQL and
+// remove any lines touching `idx_ai_knowledge_chunk_search_vector` or
+// the `searchVector` DEFAULT before applying. The drops would silently
+// break hybrid search.
+//
+// Source of truth: prisma/migrations/20260501172919_add_knowledge_chunk_search_vector/
+model AiKnowledgeChunk {
+  id                 String                       @id @default(cuid())
+  chunkKey           String                       @unique
+  documentId         String
+  content            String                       @db.Text
+  embedding          Unsupported("vector(1536)")?
+  // GENERATED ALWAYS AS (to_tsvector('english', content || keywords)) STORED — managed by migration, populated by Postgres.
+  searchVector       Unsupported("tsvector")?
+  chunkType          String // "pattern_section", "pattern_overview", "glossary", etc.
+  patternNumber      Int?
+  patternName        String?
+  section            String?
+  keywords           String?                      @db.Text
+  estimatedTokens    Int?
+  embeddingModel     String? // e.g. "voyage-3", "text-embedding-3-small"
+  embeddingProvider  String? // e.g. "voyage", "openai-compatible", "ollama"
+  embeddingDimension Int? // explicit dim of the stored vector; doesn't infer from model (matryoshka-truncated models share IDs but differ in dim)
+  embeddedAt         DateTime? // when the embedding was generated
+  metadata           Json?
+
+  // Relations
+  document AiKnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+  @@index([chunkType])
+  @@index([patternNumber])
+  @@map("ai_knowledge_chunk")
+}
+
+// Managed taxonomy of knowledge "tags" — replaced the legacy free-text `knowledgeCategories[]` on AiAgent (dropped in Phase 6).
+// Many-to-many at both ends: tags ↔ documents (via AiKnowledgeDocumentTag) and tags ↔ agents (via AiAgentKnowledgeTag).
+model KnowledgeTag {
+  id          String   @id @default(cuid())
+  slug        String   @unique // stable cross-environment key (used in backup/export)
+  name        String
+  description String?  @db.Text
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  documents AiKnowledgeDocumentTag[]
+  agents    AiAgentKnowledgeTag[]
+
+  @@map("knowledge_tag")
+}
+
+// Join table: which documents carry which tags
+model AiKnowledgeDocumentTag {
+  documentId String
+  tagId      String
+  createdAt  DateTime @default(now())
+
+  document AiKnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  tag      KnowledgeTag        @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([documentId, tagId])
+  @@index([tagId])
+  @@map("ai_knowledge_document_tag")
+}
+
+// Join table: which agents may access which documents (only consulted when AiAgent.knowledgeAccessMode = 'restricted')
+model AiAgentKnowledgeDocument {
+  agentId    String
+  documentId String
+  createdAt  DateTime @default(now())
+
+  agent    AiAgent             @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  document AiKnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@id([agentId, documentId])
+  @@index([documentId])
+  @@map("ai_agent_knowledge_document")
+}
+
+// Join table: which agents may access docs tagged with which tags
+model AiAgentKnowledgeTag {
+  agentId   String
+  tagId     String
+  createdAt DateTime @default(now())
+
+  agent AiAgent      @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  tag   KnowledgeTag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([agentId, tagId])
+  @@index([tagId])
+  @@map("ai_agent_knowledge_tag")
+}

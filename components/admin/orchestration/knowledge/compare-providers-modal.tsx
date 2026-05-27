@@ -352,8 +352,8 @@ function EmbeddingGuide() {
         </p>
         <p className="mt-1">
           A migration generator that automates this is planned but not yet built. For now, see the{' '}
-          <code className="bg-background rounded px-1 py-0.5 font-mono">prisma/schema.prisma</code>{' '}
-          file &mdash; search for{' '}
+          <code className="bg-background rounded px-1 py-0.5 font-mono">prisma/schema/</code> file
+          &mdash; search for{' '}
           <code className="bg-background rounded px-1 py-0.5 font-mono">vector(1536)</code> to find
           the column definition.
         </p>

@@ -14,9 +14,11 @@ WORKDIR /app
 # .npmrc contains legacy-peer-deps=true to handle better-auth peer dependency warnings
 COPY package.json package-lock.json* .npmrc ./
 
-# Copy Prisma schema BEFORE npm ci
-# This is required because the postinstall script runs "prisma generate"
+# Copy Prisma schema + config BEFORE npm ci. The postinstall runs
+# "prisma generate", which needs prisma.config.ts to locate the prisma/schema/
+# folder (Prisma 7 multi-file schema) and resolve the datasource.
 COPY prisma ./prisma
+COPY prisma.config.ts ./
 
 # Build argument for DATABASE_URL needed by prisma generate during postinstall
 ARG DATABASE_URL
@@ -80,12 +82,17 @@ RUN chown nextjs:nodejs .next
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
-# Prisma CLI + migration files for running `prisma migrate deploy` at deploy time.
-# Required by the docker-compose migrator service and by Render/Railway pre-deploy
-# hooks. Adds ~15-20 MB but keeps ops simple (one image serves both roles).
+# Prisma CLI + schema + config + migration files for running
+# `prisma migrate deploy` at deploy time. Required by the docker-compose migrator
+# service and by Render/Railway pre-deploy hooks. prisma.config.ts carries the
+# prisma/schema/ folder location AND the datasource url (env('DATABASE_URL'));
+# it imports dotenv (a devDependency the standalone trace omits), so dotenv is
+# copied too. Adds ~15-20 MB but keeps ops simple (one image serves both roles).
 COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
+COPY --from=builder --chown=nextjs:nodejs /app/prisma.config.ts ./
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/prisma ./node_modules/prisma
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@prisma ./node_modules/@prisma
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/dotenv ./node_modules/dotenv
 
 USER nextjs
 

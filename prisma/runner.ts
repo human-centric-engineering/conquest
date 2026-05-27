@@ -1,6 +1,6 @@
 import { readdir, readFile } from 'fs/promises';
 import { createHash } from 'crypto';
-import { dirname, join, resolve } from 'path';
+import { dirname, join, relative, resolve, sep } from 'path';
 import { pathToFileURL } from 'url';
 import type { PrismaClient } from '@prisma/client';
 import { logger } from '@/lib/logging';
@@ -27,17 +27,27 @@ export interface SeedUnit {
 const SEED_FILE_PATTERN = /^\d{3}-[a-z0-9-]+\.ts$/;
 
 /**
- * Discover seed units under `seedsDir`, skip those whose source hash
- * matches the stored `SeedHistory.contentHash`, and run the rest in
- * filename order. Each successful run upserts a `SeedHistory` row.
+ * Recursively discover seed units under `seedsDir`, skip those whose source
+ * hash matches the stored `SeedHistory.contentHash`, and run the rest in
+ * relative-path order. Each successful run upserts a `SeedHistory` row.
  *
- * Seed files must default-export a `SeedUnit { name, run(ctx) }`.
- * Filenames must match `NNN-slug.ts` (e.g. `001-test-users.ts`) —
- * the numeric prefix fixes execution order across the team.
+ * Seed files must default-export a `SeedUnit { name, run(ctx) }`. Each file's
+ * BASENAME must match `NNN-slug.ts` (e.g. `001-test-users.ts`) — the numeric
+ * prefix fixes execution order within a directory.
+ *
+ * Discovery is recursive, so an app built on Sunrise can drop its own seeds in
+ * a subdirectory (e.g. `prisma/seeds/app-foo/001-init.ts`). The `SeedHistory`
+ * key is the file's path RELATIVE to `seedsDir` (minus `.ts`), so:
+ *   - top-level files keep their bare-slug key (`001-test-users`) — existing
+ *     history rows are unaffected and never re-run;
+ *   - same-numbered files in different directories don't collide
+ *     (`001-init` vs `app-foo/001-init`).
+ * Execution order is the lexicographic sort of those relative paths: all
+ * top-level core seeds (digit-prefixed) run before any app subdirectory
+ * (letter-prefixed), and numerically within each directory.
  */
 export async function runSeeds(prisma: PrismaClient, seedsDir: string): Promise<void> {
-  const entries = await readdir(seedsDir);
-  const files = entries.filter((f) => SEED_FILE_PATTERN.test(f)).sort();
+  const files = (await discoverSeedFiles(seedsDir, seedsDir)).sort();
 
   if (files.length === 0) {
     logger.warn('No seed units found', { seedsDir });
@@ -49,6 +59,25 @@ export async function runSeeds(prisma: PrismaClient, seedsDir: string): Promise<
   for (const file of files) {
     await applySeed(prisma, seedsDir, file);
   }
+}
+
+/**
+ * Walk `dir` recursively, returning the path of every file whose basename
+ * matches {@link SEED_FILE_PATTERN}, each expressed relative to `baseDir` with
+ * forward slashes so the derived `SeedHistory` key is stable across platforms.
+ */
+async function discoverSeedFiles(dir: string, baseDir: string): Promise<string[]> {
+  const entries = await readdir(dir, { withFileTypes: true });
+  const found: string[] = [];
+  for (const entry of entries) {
+    const abs = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      found.push(...(await discoverSeedFiles(abs, baseDir)));
+    } else if (SEED_FILE_PATTERN.test(entry.name)) {
+      found.push(relative(baseDir, abs).split(sep).join('/'));
+    }
+  }
+  return found;
 }
 
 async function applySeed(prisma: PrismaClient, seedsDir: string, file: string): Promise<void> {

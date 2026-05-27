@@ -1,0 +1,225 @@
+// Granular cost tracking
+model AiCostLog {
+  id                  String   @id @default(cuid())
+  agentId             String?
+  conversationId      String?
+  workflowExecutionId String?
+  model               String
+  provider            String
+  inputTokens         Int
+  outputTokens        Int
+  inputCostUsd        Float
+  outputCostUsd       Float
+  totalCostUsd        Float
+  isLocal             Boolean  @default(false)
+  operation           String // "chat", "tool_call", "embedding", "evaluation"
+  metadata            Json?
+  // OTEL trace correlation — set when an active tracer span exists at the
+  // logCost call site. Nullable for legacy rows and for code paths where
+  // tracing is not registered (default no-op tracer returns empty IDs).
+  traceId             String?
+  spanId              String?
+  createdAt           DateTime @default(now())
+
+  // Relations
+  agent             AiAgent?             @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  conversation      AiConversation?      @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  workflowExecution AiWorkflowExecution? @relation(fields: [workflowExecutionId], references: [id], onDelete: SetNull)
+
+  @@index([agentId])
+  @@index([conversationId])
+  @@index([workflowExecutionId])
+  @@index([provider])
+  @@index([operation])
+  @@index([createdAt])
+  @@index([agentId, createdAt])
+  @@index([traceId])
+  @@map("ai_cost_log")
+}
+
+// Configured LLM providers
+model AiProviderConfig {
+  id           String   @id @default(cuid())
+  name         String   @unique
+  slug         String   @unique
+  providerType String // "anthropic", "openai-compatible"
+  baseUrl      String? // API base URL (required for openai-compatible)
+  apiKeyEnvVar String? // env var name e.g. "ANTHROPIC_API_KEY"
+  isLocal      Boolean  @default(false)
+  isActive     Boolean  @default(true)
+  metadata     Json?
+  timeoutMs    Int? // per-provider request timeout; null = use default (30s cloud, 10s local)
+  maxRetries   Int? // per-provider retry count; null = use default (3)
+  createdBy    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  creator User? @relation("AiProviderConfigCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@index([createdBy])
+  @@index([providerType])
+  @@index([isActive])
+  @@map("ai_provider_config")
+}
+
+// Provider model matrix — per-model landscape analysis
+model AiProviderModel {
+  id           String @id @default(cuid())
+  slug         String @unique // "openai-gpt-5", "voyage-voyage-3"
+  providerSlug String // groups models: "openai", "anthropic", "voyage"
+  modelId      String // API model id: "gpt-5", "voyage-3"
+  name         String // display name: "GPT-5", "Voyage 3"
+  description  String @db.Text
+
+  // Classification
+  capabilities String[] @default(["chat"]) // ["chat"], ["embedding"], ["chat","embedding"]
+  tierRole     String // 'thinking' | 'worker' | 'infrastructure' | 'control_plane' | 'embedding'
+
+  // Deployment profile — orthogonal to tierRole. A model can be a `thinking`-tier
+  // chat LLM that is also `sovereign`-deployable (e.g. Qwen2.5-72B) without
+  // forcing a false choice in the tier classification. Defaults to ["hosted"]
+  // (the most common case — vendor-hosted via API). Models that run on the
+  // operator's own infrastructure carry "sovereign". Reserved values for future
+  // expansion: "edge" (browser/device), "air_gapped" (no outbound network).
+  deploymentProfiles String[] @default(["hosted"])
+
+  // Wire-level parameter convention. Maps to ParamProfile in
+  // lib/orchestration/llm/types.ts. Determines whether the OpenAI-compatible
+  // provider sends `max_tokens` vs `max_completion_tokens` and whether
+  // `temperature` is honoured. Nullable: when null, deriveParamProfile() in
+  // model-heuristics.ts derives a fallback from model id + provider, so
+  // rows from before this column existed keep working.
+  paramProfile String? // 'openai-legacy' | 'openai-reasoning' | 'anthropic' | 'gemini'
+
+  // Selection matrix dimensions
+  reasoningDepth String // 'very_high' | 'high' | 'medium' | 'none'
+  latency        String // 'very_fast' | 'fast' | 'medium'
+  costEfficiency String // 'very_high' | 'high' | 'medium' | 'none'
+  contextLength  String // 'very_high' | 'high' | 'medium' | 'n_a'
+  toolUse        String // 'strong' | 'moderate' | 'none'
+  bestRole       String // free-text, e.g. "Planner / orchestrator"
+
+  // Embedding-specific (nullable for chat-only models)
+  dimensions           Int?
+  schemaCompatible     Boolean?
+  costPerMillionTokens Float?
+  hasFreeTier          Boolean?
+  local                Boolean  @default(false)
+  quality              String? // 'high' | 'medium' | 'budget'
+  strengths            String?  @db.Text
+  setup                String?  @db.Text
+
+  // Lifecycle
+  isDefault Boolean  @default(false) // true = seed-managed, re-seedable
+  isActive  Boolean  @default(true)
+  metadata  Json?
+  createdBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  creator                    User?                     @relation("AiProviderModelCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  activeForEmbeddingSettings AiOrchestrationSettings[] @relation("ActiveEmbeddingModel")
+
+  @@unique([providerSlug, modelId])
+  @@index([createdBy])
+  @@index([isActive])
+  @@index([tierRole])
+  @@index([providerSlug])
+  @@map("ai_provider_model")
+}
+
+// Per-user API key for programmatic access (alternative to session auth)
+model AiApiKey {
+  id           String    @id @default(cuid())
+  userId       String
+  name         String // admin-friendly label (e.g. "My CI Key")
+  keyHash      String    @unique // SHA-256 hash of the API key (key itself never stored)
+  keyPrefix    String // first 8 chars for display (e.g. "sk_abc12...")
+  scopes       String[]  @default(["chat"]) // "chat", "analytics", "knowledge", "admin"
+  rateLimitRpm Int? // per-key rate limit (requests per minute); null = use global default
+  lastUsedAt   DateTime?
+  expiresAt    DateTime? // null = never expires
+  revokedAt    DateTime? // non-null = revoked
+  createdAt    DateTime  @default(now())
+
+  user User @relation("AiApiKeyUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([keyHash])
+  @@map("ai_api_key")
+}
+
+/// Singleton settings row for agent orchestration, keyed by `slug = "global"`.
+///
+/// Holds admin-editable defaults that cross-cut the orchestration layer:
+///   * `defaultModels` — `{ routing, chat, reasoning, embeddings }` map used by
+///     `getDefaultModelForTask()` in `lib/orchestration/llm/model-registry.ts`.
+///   * `globalMonthlyBudgetUsd` — optional month-to-date spend ceiling across
+///     *all* agents, consulted by `checkBudget()` in `lib/orchestration/llm/cost-tracker.ts`.
+///
+/// Upserted lazily on the first `GET /api/v1/admin/orchestration/settings`
+/// call; never touched by the seeder so admin edits survive deploys.
+model AiOrchestrationSettings {
+  id                            String    @id @default(cuid())
+  slug                          String    @unique @default("global")
+  defaultModels                 Json // { routing: string, chat: string, reasoning: string, embeddings: string }
+  activeEmbeddingModelId        String? // FK → AiProviderModel; the model whose dimension the vector columns are currently sized for. Null = use resolver default.
+  globalMonthlyBudgetUsd        Float?
+  // Org-wide default for AiWorkflow.maxCostPerExecutionUsd. Applies when a
+  // workflow has no per-workflow value AND the caller passes no explicit
+  // budgetLimitUsd. Null = no default (unlimited unless caller/workflow
+  // sets one). See lib/orchestration/llm/cost-caps.ts.
+  defaultMaxCostPerExecutionUsd Float?
+  // Org-wide default for AiAgent.maxCostPerTurnUsd. Applies when an agent
+  // has no per-agent value. Null = no default (no per-turn cap; monthly
+  // budget still applies). See lib/orchestration/llm/cost-caps.ts and
+  // lib/orchestration/chat/streaming-handler.ts.
+  defaultMaxCostPerTurnUsd      Float?
+  searchConfig                  Json? // { keywordBoostWeight: number, vectorWeight: number }
+  lastSeededAt                  DateTime?
+  defaultApprovalTimeoutMs      Int? // ms before auto-action on approval gates; null = no timeout
+  approvalDefaultAction         String?   @default("deny") // "deny" or "allow"
+  inputGuardMode                String?   @default("log_only") // "log_only", "warn_and_continue", "block"
+  outputGuardMode               String?   @default("log_only") // "log_only", "warn_and_continue", "block"
+  citationGuardMode             String?   @default("log_only") // "log_only", "warn_and_continue", "block"
+  webhookRetentionDays          Int?
+  // Separate retention window for `exhausted` (DLQ) webhook deliveries.
+  // Null falls back to webhookRetentionDays so behaviour matches the
+  // pre-DLQ retention model.
+  webhookDlqRetentionDays       Int?
+  costLogRetentionDays          Int?
+  auditLogRetentionDays         Int?
+  // Workflow-execution history retention. Prunes terminal executions
+  // (completed / failed / cancelled) older than N days; the cascade removes
+  // steps, dispatches, lease events, per-step cost logs, and inbound-trigger
+  // payloads (which live in AiWorkflowExecution.inputData). Null = keep
+  // forever. Running / pending / awaiting-approval executions are never
+  // pruned regardless of age.
+  executionRetentionDays        Int?
+  // Evaluation history retention (AiEvaluationSession / Run / Log). Null =
+  // keep forever. Should be <= executionRetentionDays: eval runs JSON-
+  // reference the executions they ran (no FK), so a shorter execution window
+  // would dangle those links. See .context/orchestration/retention.md.
+  evaluationRetentionDays       Int?
+  maxConversationsPerUser       Int?
+  maxMessagesPerConversation    Int?
+  escalationConfig              Json? // { emailAddresses, webhookUrl?, notifyOnPriority }
+  embedAllowedOrigins           Json      @default("[]") // [string] — allowlist for the /approvals/:id/{approve,reject}/embed CORS scope
+  voiceInputGloballyEnabled     Boolean   @default(true) // org-wide kill switch for the voice-input feature; when false, every agent's enableVoiceInput flag is treated as off regardless of its own value.
+  imageInputGloballyEnabled     Boolean   @default(true) // org-wide kill switch for image attachments on chat; when false, every agent's enableImageInput flag is treated as off regardless of its own value.
+  documentInputGloballyEnabled  Boolean   @default(true) // org-wide kill switch for PDF / document attachments on chat; when false, every agent's enableDocumentInput flag is treated as off regardless of its own value.
+  // Minutes a running execution may spend in its current step before the
+  // executions list highlights the row as "stuck-looking" and the live-
+  // engine dashboard counts it in the stuck-age band. Read by the live
+  // page + the executions list. Clamped to [1, 1440] on PATCH; the read
+  // path defends with the same clamp so a bad DB value never breaks the UI.
+  stuckExecutionThresholdMins   Int       @default(5)
+  createdAt                     DateTime  @default(now())
+  updatedAt                     DateTime  @updatedAt
+
+  activeEmbeddingModel AiProviderModel? @relation("ActiveEmbeddingModel", fields: [activeEmbeddingModelId], references: [id], onDelete: SetNull)
+
+  @@map("ai_orchestration_settings")
+}

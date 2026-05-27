@@ -1,0 +1,38 @@
+/// Tracks which seed units have been applied, keyed by unit name.
+///
+/// Each entry in `prisma/seeds/` is hashed by source content; the runner
+/// skips units whose hash matches the stored `contentHash`, and re-runs
+/// units whose file has changed. This lets teammates pull new/edited
+/// seeds and apply them incrementally without manual coordination.
+model SeedHistory {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  contentHash String
+  appliedAt   DateTime @default(now())
+  durationMs  Int
+
+  @@map("seed_history")
+}
+
+/// Append-only receipt of a completed right-to-erasure (account deletion).
+///
+/// Written inside the same transaction as `prisma.user.delete` by
+/// `lib/privacy/erase-user.ts`, so a receipt exists iff the user was erased.
+/// Demonstrates GDPR Art. 5(2) accountability without re-introducing the
+/// subject's PII: the user id is opaque (the row is gone) and the email is
+/// stored only as a SHA-256 hash for correlating a later "did you erase me?"
+/// request. No foreign keys — the receipt must outlive every referenced row,
+/// including the actor if they are later erased too.
+model DataErasureReceipt {
+  id               String   @id @default(cuid())
+  subjectUserId    String // id of the erased user (no FK — the user row is gone)
+  subjectEmailHash String? // sha256(lowercased email); for correlation, not reversible
+  actorUserId      String? // who initiated the erasure (self or an admin)
+  reason           String // "self_service" | "admin_action"
+  erasedAt         DateTime @default(now())
+  metadata         Json? // optional summary (e.g. counts)
+
+  @@index([subjectUserId])
+  @@index([erasedAt])
+  @@map("data_erasure_receipt")
+}

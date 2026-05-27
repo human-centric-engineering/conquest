@@ -22,7 +22,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { mkdtemp, writeFile, rm } from 'fs/promises';
+import { mkdtemp, writeFile, rm, mkdir } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { createHash } from 'crypto';
@@ -402,6 +402,104 @@ describe('runSeeds()', () => {
 
     expect(firstCall.where.name).toBe('009-nine');
     expect(secondCall.where.name).toBe('010-ten');
+
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  // -------------------------------------------------------------------------
+  // Seam 2: recursive discovery + relative-path SeedHistory keys
+  // -------------------------------------------------------------------------
+
+  it('should discover seeds in subdirectories and key them by relative path', async () => {
+    const { prisma, upsert } = makeFakePrisma();
+    await mkdir(join(tmpDir, 'app-foo'), { recursive: true });
+    const source = await writeSeedFile(join(tmpDir, 'app-foo'), '001-init.ts', 'app-init');
+
+    await runSeeds(prisma, tmpDir);
+
+    expect(upsert).toHaveBeenCalledTimes(1);
+    const call = vi.mocked(upsert).mock.calls[0][0];
+    // Key is the path RELATIVE to seedsDir (forward-slashed), not the basename.
+    expect(call.where.name).toBe('app-foo/001-init');
+    expect(call.create.contentHash).toBe(sha256(source));
+
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('should not collide same-numbered seeds in different directories — both run, distinct keys', async () => {
+    const { prisma, upsert } = makeFakePrisma();
+    await writeSeedFile(tmpDir, '001-init.ts', 'core-init');
+    await mkdir(join(tmpDir, 'app-foo'), { recursive: true });
+    await writeSeedFile(join(tmpDir, 'app-foo'), '001-init.ts', 'app-init');
+
+    await runSeeds(prisma, tmpDir);
+
+    // The bare-basename keying the old non-recursive runner used would have
+    // collided here and silently skipped one; relative-path keys keep both.
+    expect(upsert).toHaveBeenCalledTimes(2);
+    const names = vi
+      .mocked(upsert)
+      .mock.calls.map((c) => c[0].where.name)
+      .sort();
+    expect(names).toEqual(['001-init', 'app-foo/001-init']);
+
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('should keep the bare-slug key for top-level seeds so existing history never re-runs', async () => {
+    // A pre-seam SeedHistory row is keyed on the bare slug. Post-recursion a
+    // top-level file must still resolve to that same key, or every existing
+    // seed re-runs on the first deploy after this change.
+    const source = await writeSeedFile(tmpDir, '001-existing.ts', 'existing');
+    const { prisma, upsert } = makeFakePrisma([
+      {
+        id: 'id-001-existing',
+        name: '001-existing', // bare slug, as written by the pre-seam runner
+        contentHash: sha256(source),
+        appliedAt: new Date(),
+        durationMs: 3,
+      },
+    ]);
+
+    await runSeeds(prisma, tmpDir);
+
+    // Matched the bare-slug row → skipped, no upsert (no spurious re-run).
+    expect(upsert).not.toHaveBeenCalled();
+
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('should order top-level core seeds before app subdirectories, numerically within each', async () => {
+    const { prisma, upsert } = makeFakePrisma();
+    await writeSeedFile(tmpDir, '002-core-b.ts', 'core-b');
+    await writeSeedFile(tmpDir, '001-core-a.ts', 'core-a');
+    await mkdir(join(tmpDir, 'app-foo'), { recursive: true });
+    await writeSeedFile(join(tmpDir, 'app-foo'), '002-foo-b.ts', 'foo-b');
+    await writeSeedFile(join(tmpDir, 'app-foo'), '001-foo-a.ts', 'foo-a');
+
+    await runSeeds(prisma, tmpDir);
+
+    const order = vi.mocked(upsert).mock.calls.map((c) => c[0].where.name);
+    // Digit-prefixed top-level paths sort before the letter-prefixed subdir;
+    // numeric prefixes order within each directory.
+    expect(order).toEqual(['001-core-a', '002-core-b', 'app-foo/001-foo-a', 'app-foo/002-foo-b']);
+
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('should ignore non-matching files inside subdirectories', async () => {
+    const { prisma, upsert } = makeFakePrisma();
+    await mkdir(join(tmpDir, 'app-foo'), { recursive: true });
+    await writeFile(join(tmpDir, 'app-foo', 'helper.ts'), 'export const x = 1;\n', 'utf-8');
+    await writeFile(join(tmpDir, 'app-foo', 'data.json'), '{}\n', 'utf-8');
+
+    await runSeeds(prisma, tmpDir);
+
+    expect(upsert).not.toHaveBeenCalled();
+    expect(vi.mocked(logger.warn)).toHaveBeenCalledWith(
+      expect.stringContaining('No seed units found'),
+      expect.any(Object)
+    );
 
     await rm(tmpDir, { recursive: true, force: true });
   });

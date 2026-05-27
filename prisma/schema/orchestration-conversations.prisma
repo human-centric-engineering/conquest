@@ -1,0 +1,255 @@
+// Chat sessions
+model AiConversation {
+  id                   String    @id @default(cuid())
+  userId               String?
+  agentId              String
+  title                String?
+  contextType          String?
+  contextId            String?
+  metadata             Json?
+  summary              String?   @db.Text
+  summaryUpToMessageId String?
+  tags                 String[]  @default([])
+  isActive             Boolean   @default(true)
+  // Channel/provider split — see plan decision 3.
+  // `channel` is the semantic medium (sms / whatsapp / email / slack / chat).
+  // `provider` is the vendor slug (twilio / meta / vonage / ...). The
+  // @@unique([agentId, channel, fromAddress]) below deliberately excludes
+  // provider so memory continuity survives a provider swap mid-deployment,
+  // and the DB-side UNIQUE serialises concurrent inbound webhooks to a
+  // single conversation row (without it, a find-or-create race could
+  // duplicate rows and let the STOP/opt-out flag land on the wrong one,
+  // bypassing TCPA/PECR compliance on subsequent outbound).
+  channel              String?
+  provider             String?
+  fromAddress          String?
+  lastInboundAt        DateTime?
+  smsOptedOut          Boolean   @default(false)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  // Relations
+  user             User?                @relation("AiConversationUser", fields: [userId], references: [id], onDelete: Cascade)
+  agent            AiAgent              @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  messages         AiMessage[]
+  costLogs         AiCostLog[]
+  share            AiConversationShare?
+  outboundMessages AiOutboundMessage[]
+
+  @@unique([agentId, channel, fromAddress], name: "ai_conversation_inbound_key")
+  @@index([userId])
+  @@index([agentId])
+  @@index([contextType, contextId])
+  @@index([isActive])
+  @@index([updatedAt])
+  @@map("ai_conversation")
+}
+
+// Outbound message ledger for SMS / WhatsApp / future channels.
+//
+// Purpose: idempotency + per-recipient throttling for outbound messages
+// dispatched via the `send_message_to_channel` capability. Each row records
+// a dispatch attempt with a deterministic `dedupKey` so workflow retries
+// don't send the same SMS twice; a UNIQUE collision returns the cached
+// `transactionId` instead of re-dispatching.
+//
+// The (conversationId, createdAt) index powers the per-recipient hour
+// window throttle check inside the capability. See plan decision 5.
+model AiOutboundMessage {
+  id             String   @id @default(cuid())
+  conversationId String
+  dedupKey       String   @unique
+  channel        String // 'sms' | 'whatsapp' | future
+  provider       String // 'twilio' | 'meta' | future
+  transactionId  String?
+  status         String // 'pending' | 'sent' | 'failed'
+  errorCode      String?
+  errorMessage   String?  @db.Text
+  createdAt      DateTime @default(now())
+
+  conversation AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@map("ai_outbound_message")
+}
+
+// Consent record for cross-user conversation access.
+//
+// End users own their conversations. An admin (or any other user) can view
+// another user's conversation only when the owner has explicitly created
+// an active share. The unique constraint on `conversationId` means a
+// conversation has at most one share row at a time — re-sharing after a
+// revoke updates the existing row (clear `revokedAt`, refresh `expiresAt`,
+// optionally update `reason`).
+//
+// "Active" means `revokedAt IS NULL AND (expiresAt IS NULL OR expiresAt > now())`.
+// Callers should use the `adminCanViewConversation` helper rather than
+// hand-rolling that predicate. The default time limit is 7 days, enforced
+// at the route layer (the schema allows null for never-expiring shares
+// which a future compliance-officer role may use).
+//
+// See `.context/security/conversation-access.md` for the consent posture.
+model AiConversationShare {
+  id             String    @id @default(cuid())
+  conversationId String    @unique
+  reason         String?   @db.Text
+  expiresAt      DateTime?
+  revokedAt      DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  conversation AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@map("ai_conversation_share")
+}
+
+// Individual messages
+//
+// Provenance columns mirror the supervisor-on-execution pattern (5 scalars +
+// 1 JSON bundle on `AiWorkflowExecution`). Scalars are indexed for query
+// ("show me every message produced by agent vN", "...routed to model X");
+// the `provenance` JSON column holds the structured evidence bundle —
+// citations (with documentVersion + contentHash), workflow step sources
+// snapshotted at message-creation time, and capability calls.
+//
+// `workflowExecutionId` is NOT a foreign key — executions can be pruned
+// independently of messages. The column is a snapshot reference, same
+// treatment as `modelId` (a string snapshot, not an FK to `AiModel`).
+model AiMessage {
+  id             String    @id @default(cuid())
+  conversationId String
+  role           String // "user", "assistant", "system", "tool"
+  content        String    @db.Text
+  metadata       Json? // {tokenUsage, latencyMs, costUsd, sideEffectModels, pendingApproval, error}
+  capabilitySlug String?
+  toolCallId     String?
+  rating         Int? // -1 = thumbs down, 1 = thumbs up, null = unrated
+  ratedAt        DateTime?
+  createdAt      DateTime  @default(now())
+
+  // Provenance — version pins captured at message-creation time
+  agentVersionId      String?
+  workflowExecutionId String?
+  workflowVersionId   String?
+  modelId             String?
+  providerSlug        String?
+
+  // Provenance bundle — typed as MessageProvenance in types/orchestration.ts
+  // Shape: { citations: Citation[], workflowSources?: ProvenanceItem[], capabilityCalls?: ToolCallTrace[] }
+  provenance Json?
+
+  // Relations
+  conversation     AiConversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  evaluationLogs   AiEvaluationLog[]
+  messageEmbedding AiMessageEmbedding?
+
+  @@index([conversationId])
+  @@index([conversationId, createdAt])
+  @@index([role])
+  @@index([createdAt])
+  @@index([rating])
+  @@index([agentVersionId])
+  @@index([workflowExecutionId])
+  @@index([modelId])
+  @@map("ai_message")
+}
+
+// Embedding vector for semantic search over conversation messages.
+//
+// The `embedding` column dimension is rebuilt by `npm run embeddings:reset`
+// whenever the active embedding model in `AiOrchestrationSettings` changes,
+// since pgvector locks dimension at the column level. Today's active model
+// is `text-embedding-3-small` (1536-dim).
+// ⚠️ PRISMA-SCHEMA DRIFT WARNING ⚠️
+// The Postgres HNSW index `idx_message_embedding` on the `embedding`
+// column is managed via raw SQL — Prisma cannot model HNSW indexes on
+// `Unsupported("vector(N)")` columns natively, so it doesn't appear here.
+//
+// `npx prisma migrate dev` WILL try to add a `DROP INDEX
+// "idx_message_embedding"` line on every schema-diff run. Always inspect
+// generated migration SQL and remove that line before applying — the
+// drop would silently break similarity search.
+//
+// Source of truth:
+//   prisma/migrations/20260420063847_add_message_embedding_hnsw_index/
+//   prisma/migrations/20260514151915_flexible_embedding_models_and_kb_grouping/ (re-creates)
+model AiMessageEmbedding {
+  id                 String                      @id @default(cuid())
+  messageId          String                      @unique
+  embedding          Unsupported("vector(1536)")
+  embeddingModel     String?
+  embeddingProvider  String?
+  embeddingDimension Int?
+
+  message AiMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+  @@map("ai_message_embedding")
+}
+
+// Configurable event hooks for orchestration events
+// Fires on events like conversation.started, message.created,
+// workflow.completed, etc. Webhook-only action type.
+model AiEventHook {
+  id        String   @id @default(cuid())
+  name      String
+  eventType String   @db.VarChar(100) // e.g. "conversation.started", "workflow.completed"
+  action    Json // { type: 'webhook', url, headers }
+  filter    Json? // optional event filtering e.g. { agentSlug: 'support-bot' }
+  isEnabled Boolean  @default(true)
+  secret    String?  @db.Text // HMAC-SHA256 signing key (hex); nullable = unsigned
+  createdBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  creator    User?                 @relation("AiEventHookCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  deliveries AiEventHookDelivery[]
+
+  @@index([eventType])
+  @@index([isEnabled])
+  @@map("ai_event_hook")
+}
+
+// Delivery history / retry queue for webhook-type AiEventHook dispatches.
+// Internal handlers run in-process and are not tracked here.
+model AiEventHookDelivery {
+  id               String    @id @default(cuid())
+  hookId           String
+  eventType        String
+  payload          Json
+  status           String    @default("pending") // pending, delivered, failed, exhausted
+  attempts         Int       @default(0)
+  lastAttemptAt    DateTime?
+  nextRetryAt      DateTime?
+  lastResponseCode Int?
+  lastError        String?   @db.Text
+  createdAt        DateTime  @default(now())
+
+  hook AiEventHook @relation(fields: [hookId], references: [id], onDelete: Cascade)
+
+  @@index([hookId])
+  @@index([status])
+  @@index([nextRetryAt])
+  @@map("ai_event_hook_delivery")
+}
+
+// Per-user-per-agent key-value memory (preferences, prior topics, facts)
+model AiUserMemory {
+  id        String   @id @default(cuid())
+  userId    String
+  agentId   String
+  key       String   @db.VarChar(255)
+  value     String   @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  user  User    @relation("AiUserMemoryUser", fields: [userId], references: [id], onDelete: Cascade)
+  agent AiAgent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, agentId, key])
+  @@index([userId, agentId])
+  @@map("ai_user_memory")
+}

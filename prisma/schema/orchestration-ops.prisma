@@ -1,0 +1,152 @@
+// Webhook subscriptions for outbound event notifications
+model AiWebhookSubscription {
+  id             String   @id @default(cuid())
+  // Delivery channel — "webhook" routes to `url` with HMAC signing;
+  // "email" routes to `emailAddress` via the generic event-notification
+  // template. The model is kept as `AiWebhookSubscription` for
+  // backward-compat with API paths and migrations; the channel column
+  // discriminates which destination fields are required.
+  channel        String   @default("webhook")
+  url            String? // destination URL — required when channel = "webhook"
+  secret         String? // HMAC-SHA256 signing key — required when channel = "webhook"
+  emailAddress   String? // destination email — required when channel = "email"
+  events         String[] // e.g. ["budget_exceeded","workflow_failed"]
+  // Optional entity scoping. Empty array means "no constraint on this dimension".
+  // The dispatcher applies dimension-specific filtering: `agentIds` only constrains
+  // events whose payload carries an agent ID, `workflowIds` only constrains events
+  // whose payload carries a workflow ID. A sub with `agentIds=['x']` still receives
+  // workflow-typed events unconstrained. See lib/orchestration/webhooks/event-entity-keys.ts.
+  agentIds       String[] @default([])
+  workflowIds    String[] @default([])
+  isActive       Boolean  @default(true)
+  description    String?
+  // Total delivery attempts before the delivery is marked `exhausted` (1–10).
+  // For email rows we still record attempts in AiWebhookDelivery for audit,
+  // but Resend handles its own retry semantics so the policy is effectively
+  // a soft cap on local retries triggered by us.
+  maxAttempts    Int      @default(3)
+  // Backoff delays in ms between successive attempts. Must contain at least
+  // (maxAttempts - 1) entries; the dispatcher only reads the first
+  // (maxAttempts - 1) values. Each entry capped at 24h.
+  retryBackoffMs Int[]    @default([10000, 60000, 300000])
+  createdBy      String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user       User                @relation("AiWebhookUser", fields: [createdBy], references: [id], onDelete: Cascade)
+  deliveries AiWebhookDelivery[]
+
+  @@index([isActive])
+  @@index([createdBy])
+  @@index([channel])
+  @@map("ai_webhook_subscription")
+}
+
+// Webhook delivery tracking — records each delivery attempt for audit + retry
+model AiWebhookDelivery {
+  id               String    @id @default(cuid())
+  subscriptionId   String
+  eventType        String
+  payload          Json
+  status           String    @default("pending") // pending, delivered, failed, exhausted
+  attempts         Int       @default(0)
+  lastAttemptAt    DateTime?
+  nextRetryAt      DateTime?
+  lastResponseCode Int?
+  lastError        String?   @db.Text
+  createdAt        DateTime  @default(now())
+
+  subscription AiWebhookSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([subscriptionId])
+  @@index([status])
+  @@index([nextRetryAt])
+  @@map("ai_webhook_delivery")
+}
+
+/// Immutable audit trail for admin configuration changes.
+///
+/// Fire-and-forget writes — never blocks the request. Tracks agent edits,
+/// workflow changes, knowledge uploads, settings changes, and deletions.
+model AiAdminAuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  action     String // e.g. "agent.create", "agent.update", "workflow.delete"
+  entityType String // "agent", "workflow", "capability", "knowledge_document", "settings", "webhook"
+  entityId   String?
+  entityName String? // human-readable name at time of action
+  changes    Json? // { field: { from, to } } diff for updates
+  metadata   Json? // extra context
+  clientIp   String?
+  createdAt  DateTime @default(now())
+
+  user User? @relation("AiAdminAuditLogUser", fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([action])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("ai_admin_audit_log")
+}
+
+// A/B prompt experiment — compares agent version variants
+model AiExperiment {
+  id              String   @id @default(cuid())
+  name            String
+  description     String?  @db.Text
+  status          String   @default("draft") // "draft" | "running" | "completed"
+  agentId         String
+  // Phase 2: shared dataset every variant's eval run fires against.
+  // Null on legacy rows that pre-date dataset-driven experiments — those
+  // still execute via the legacy AiEvaluationSession path. Required on
+  // any new experiment that opts into per-variant AiEvaluationRun.
+  datasetId       String?
+  // Phase 2: metric configs pinned at run time. Array<{ slug, config }>
+  // mirroring AiEvaluationRun.metricConfigs. Null on legacy rows; the
+  // run route uses [judge_agent: eval-judge-relevance] as a sensible
+  // default when both fields are null on a draft.
+  metricConfigs   Json?
+  // Phase 3.5a: stored pairwise verdict tally from the
+  // /experiments/:id/verdicts endpoint. Shape: PairwiseVerdictSummary
+  // in `types/orchestration.ts`. One blob per experiment — rerunning
+  // verdicts overwrites with the new judge + timestamp. Null when no
+  // verdict has been computed yet.
+  pairwiseVerdict Json?
+  // Erasure: SetNull-retained (de-attributed) when the creator is erased.
+  createdBy       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  agent    AiAgent               @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  dataset  AiDataset?            @relation("AiExperimentDataset", fields: [datasetId], references: [id], onDelete: SetNull)
+  creator  User?                 @relation("AiExperimentCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  variants AiExperimentVariant[]
+
+  @@index([agentId])
+  @@index([status])
+  @@index([datasetId])
+  @@map("ai_experiment")
+}
+
+// A variant (arm) in an A/B experiment — points to an agent version snapshot
+model AiExperimentVariant {
+  id                  String  @id @default(cuid())
+  experimentId        String
+  agentVersionId      String? // references AiAgentVersion.id (null if using live agent)
+  // Wired in Phase 1 alongside AiEvaluationRun; the legacy
+  // `evaluationSessionId` stays for the manual chat path (Phase 2 will
+  // promote experiment.finalize to read from evaluationRun.summary).
+  evaluationSessionId String?
+  evaluationRunId     String?
+  label               String // e.g. "Control", "Variant A"
+  score               Float? // aggregated evaluation score after run
+
+  experiment        AiExperiment         @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  evaluationSession AiEvaluationSession? @relation(fields: [evaluationSessionId], references: [id], onDelete: SetNull)
+  evaluationRun     AiEvaluationRun?     @relation(fields: [evaluationRunId], references: [id], onDelete: SetNull)
+
+  @@index([experimentId])
+  @@index([evaluationSessionId])
+  @@index([evaluationRunId])
+  @@map("ai_experiment_variant")
+}

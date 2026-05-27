@@ -125,7 +125,7 @@ config({ path: '.env.local' });
 config({ path: '.env' });
 
 export default defineConfig({
-  schema: 'prisma/schema.prisma',
+  schema: 'prisma/schema',
   migrations: {
     path: 'prisma/migrations',
   },
@@ -184,7 +184,7 @@ if (env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
 
 ## Prisma Schema
 
-The canonical schema is [`prisma/schema.prisma`](../../prisma/schema.prisma). Read it directly — this document covers design decisions, conventions, and rationale, not the schema definition itself.
+The canonical schema lives in [`prisma/schema/`](../../prisma/schema/) — a multi-file folder (Prisma 7) split by domain (`base`, `auth`, `orchestration-*`, `mcp`, `platform`, `app`). Prisma concatenates every `.prisma` in the folder into one datamodel. Read it directly — this document covers design decisions, conventions, and rationale, not the schema definition itself. Apps built on Sunrise add their own models in a sibling file (e.g. `prisma/schema/app-<name>.prisma`) without editing core.
 
 ## Schema Design Decisions
 

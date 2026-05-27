@@ -1,0 +1,321 @@
+// Reusable workflow definitions.
+//
+// Versioning model: each workflow has a chain of immutable `AiWorkflowVersion`
+// rows (the published history) plus an optional in-progress `draftDefinition`.
+// Executions resolve their definition via `publishedVersionId` so a mid-edit
+// draft never alters in-flight runs. See `.context/orchestration/workflow-versioning.md`.
+model AiWorkflow {
+  id                     String   @id @default(cuid())
+  name                   String
+  slug                   String   @unique
+  description            String   @db.Text
+  draftDefinition        Json? // in-progress edit; null when there is no draft
+  publishedVersionId     String? // FK to the version executions pin to
+  // Per-execution hard cost cap (USD). Default for executions of this
+  // workflow when the caller does not pass an explicit budgetLimitUsd.
+  // Resolution order at execution-creation time: caller override >
+  // AiWorkflow.maxCostPerExecutionUsd > AiOrchestrationSettings
+  // .defaultMaxCostPerExecutionUsd > unlimited. The resolved value is
+  // persisted onto AiWorkflowExecution.budgetLimitUsd so resumes and
+  // lease-reaper paths inherit it without re-resolving. See
+  // lib/orchestration/llm/cost-caps.ts.
+  maxCostPerExecutionUsd Float?
+  patternsUsed           Int[] // pattern numbers used in this workflow
+  isActive               Boolean  @default(true)
+  isTemplate             Boolean  @default(false)
+  isSystem               Boolean  @default(false)
+  templateSource         String? // null = regular workflow, "builtin" = seed template, "custom" = admin-created
+  metadata               Json?
+  createdBy              String?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  // Relations
+  creator          User?                 @relation("AiWorkflowCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  publishedVersion AiWorkflowVersion?    @relation("WorkflowPublishedVersion", fields: [publishedVersionId], references: [id])
+  versions         AiWorkflowVersion[]   @relation("WorkflowVersions")
+  executions       AiWorkflowExecution[]
+  schedules        AiWorkflowSchedule[]
+  triggers         AiWorkflowTrigger[]
+  evaluationRuns   AiEvaluationRun[]     @relation("AiEvaluationRunWorkflow")
+
+  @@index([createdBy])
+  @@index([isActive])
+  @@index([isTemplate])
+  @@index([isSystem])
+  @@index([slug, isActive]) // Webhook trigger lookups: findFirst({ slug, isActive: true })
+  @@index([publishedVersionId])
+  @@map("ai_workflow")
+}
+
+// Immutable snapshot of a workflow definition at publish time.
+// Mirrors the AiAgentVersion model. New rows are inserted by `publishDraft` and
+// `rollback`; existing rows are never mutated. Per-execution pinning is via
+// `AiWorkflowExecution.versionId`.
+model AiWorkflowVersion {
+  id            String   @id @default(cuid())
+  workflowId    String
+  version       Int // monotonic per workflow, starts at 1
+  snapshot      Json // full WorkflowDefinition at publish time
+  changeSummary String?  @db.Text // optional admin-supplied label
+  createdBy     String?
+  createdAt     DateTime @default(now())
+
+  workflow     AiWorkflow            @relation("WorkflowVersions", fields: [workflowId], references: [id], onDelete: Cascade)
+  creator      User?                 @relation("WorkflowVersionCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  publishedFor AiWorkflow[]          @relation("WorkflowPublishedVersion")
+  executions   AiWorkflowExecution[]
+
+  @@unique([workflowId, version])
+  @@index([workflowId])
+  @@map("ai_workflow_version")
+}
+
+// Cron-based workflow scheduling
+model AiWorkflowSchedule {
+  id             String    @id @default(cuid())
+  workflowId     String
+  name           String
+  cronExpression String    @db.VarChar(100)
+  inputTemplate  Json      @default("{}")
+  isEnabled      Boolean   @default(true)
+  lastRunAt      DateTime?
+  nextRunAt      DateTime?
+  createdBy      String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  // Relations
+  workflow AiWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  creator  User?      @relation("AiWorkflowScheduleCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@index([workflowId])
+  @@index([isEnabled, nextRunAt])
+  @@map("ai_workflow_schedule")
+}
+
+// Inbound trigger from a third-party system (Slack, Postmark, generic-HMAC). Each row
+// binds (channel, workflow) so the inbound route can dispatch incoming requests to the
+// right workflow. Channel-wide secrets (Slack signing secret, Postmark basic-auth) live
+// in env vars; per-trigger generic-HMAC secrets are stored as plaintext on `signingSecret`,
+// mirroring `AiEventHook.secret` (HMAC needs the original secret on both sides; the at-rest
+// security model treats the DB as admin-trusted). `metadata` carries channel-specific config
+// (event-type filter, allowed senders, ...).
+model AiWorkflowTrigger {
+  id            String    @id @default(cuid())
+  workflowId    String
+  channel       String    @db.VarChar(40) // "slack" | "postmark" | "hmac"
+  name          String
+  metadata      Json      @default("{}")
+  signingSecret String?   @db.Text // per-trigger HMAC shared secret (plaintext, mirrors AiEventHook.secret); null for env-var-keyed channels
+  isEnabled     Boolean   @default(true)
+  lastFiredAt   DateTime?
+  createdBy     String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  workflow AiWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  creator  User?      @relation("AiWorkflowTriggerCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@unique([channel, workflowId]) // one trigger per (channel, workflow); v2 may relax for multi-event setups
+  @@index([workflowId])
+  @@index([channel, isEnabled])
+  @@map("ai_workflow_trigger")
+}
+
+// Runtime workflow instances
+model AiWorkflowExecution {
+  id                   String    @id @default(cuid())
+  workflowId           String
+  versionId            String? // pinned AiWorkflowVersion at trigger time; null on legacy rows only
+  status               String // "pending", "running", "paused_for_approval", "completed", "failed", "cancelled"
+  inputData            Json
+  outputData           Json?
+  // Resume cursor: the most-recently-entered step's id. Engine writes on
+  // every `markCurrentStep`; preserved across finalize for post-mortem
+  // diagnostics. The full set of in-flight steps lives on the side table
+  // `AiWorkflowRunningStep` (one row per running branch) so a `parallel`
+  // fan-out is fully observable; this scalar is just the cursor used by
+  // the resume path and as a short pointer for the in-flight banner.
+  currentStep          String?
+  executionTrace       Json // array of step execution logs
+  totalTokensUsed      Int       @default(0)
+  totalCostUsd         Float     @default(0)
+  budgetLimitUsd       Float?
+  startedAt            DateTime?
+  completedAt          DateTime?
+  errorMessage         String?   @db.Text
+  // Trigger attribution. Source is `schedule | webhook | chat | inbound:<channel>` (free-form;
+  // not enforced as enum so new sources can be added without migration). External ID carries
+  // vendor-supplied identifiers (Slack `event_id`, Postmark `MessageID`); used for human/audit
+  // attribution only. Dedup is keyed on `dedupKey` so shared-secret channels (Slack, Postmark)
+  // can dedup globally across workflows even though the same external ID is allowed to appear
+  // for unrelated per-trigger HMAC events.
+  triggerSource        String?   @db.VarChar(50)
+  triggerExternalId    String?
+  dedupKey             String?
+  // Recovery state for crash-survival. `leaseToken` identifies the host currently driving
+  // the run; the orphan sweep claims rows whose `leaseExpiresAt` has elapsed and re-drives
+  // them through the resume path. `lastHeartbeatAt` is observability-only. `recoveryAttempts`
+  // caps re-drives — after the cap the row is failed permanently. See
+  // `lib/orchestration/engine/orchestration-engine.ts` (claim/refresh/clear) and
+  // `lib/orchestration/engine/execution-reaper.ts` (sweep).
+  leaseToken           String?
+  leaseExpiresAt       DateTime?
+  lastHeartbeatAt      DateTime?
+  recoveryAttempts     Int       @default(0)
+  // Supervisor verdict columns. Populated by any executor that emits
+  // `StepResult.contextPatch` — the supervisor step is the first user.
+  // Persisted on the row for fast querying ("which runs failed the
+  // neutral audit?") without parsing the trace JSON.
+  // Values: 'pass' | 'concerns' | 'fail' | 'inconclusive'. NULL means
+  // no supervisor has run on this execution.
+  supervisorVerdict    String?
+  supervisorScore      Float?
+  supervisorReport     Json?
+  supervisorReviewedAt DateTime?
+  // Lineage: when this execution was triggered via the rerun endpoint
+  // (`POST /executions/:id/rerun`) this points at the execution it was
+  // rerun from. The admin UI surfaces this as a "Re-run of execution X"
+  // breadcrumb. NULL for normal executions and for the parent of a
+  // rerun chain. `onDelete: SetNull` so deleting the parent doesn't
+  // cascade away children's history — the lineage link goes muted but
+  // the child stays.
+  parentExecutionId    String?
+  userId               String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  // Relations
+  workflow       AiWorkflow                      @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  version        AiWorkflowVersion?              @relation(fields: [versionId], references: [id], onDelete: SetNull)
+  user           User?                           @relation("AiWorkflowExecutionUser", fields: [userId], references: [id], onDelete: Cascade)
+  parent         AiWorkflowExecution?            @relation("ExecutionLineage", fields: [parentExecutionId], references: [id], onDelete: SetNull)
+  reruns         AiWorkflowExecution[]           @relation("ExecutionLineage")
+  costLogs       AiCostLog[]
+  stepDispatches AiWorkflowStepDispatch[]
+  runningSteps   AiWorkflowRunningStep[]
+  leaseEvents    AiWorkflowExecutionLeaseEvent[]
+
+  // Inbound-trigger dedup keyed on `dedupKey`. Route computes per-channel scope:
+  //   - shared-secret channels (slack, postmark): `<channel>:<externalId>` — globally per channel
+  //   - per-trigger HMAC: `hmac:<workflowId>:<externalId>` — scoped per trigger
+  // Postgres treats NULLs as distinct, so non-inbound rows (NULL dedupKey) never collide.
+  @@unique([dedupKey], map: "ai_workflow_execution_dedup_key")
+  @@index([workflowId])
+  @@index([versionId])
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([status, startedAt]) // Zombie reaper: RUNNING rows past threshold
+  @@index([status, createdAt]) // Stale-pending reaper + execution list filters
+  @@index([status, updatedAt]) // Abandoned-approval reaper
+  @@index([status, leaseExpiresAt]) // Orphan sweep: RUNNING rows with expired lease
+  @@index([userId, status, createdAt]) // Execution list with user + status + sort
+  @@index([parentExecutionId]) // "find all reruns of this execution" lookup
+  @@map("ai_workflow_execution")
+}
+
+// Side-effect dispatch cache for crash-safe re-runs. Risky executors
+// (`external_call`, `send_notification`, `tool_call`) compute a deterministic
+// idempotency key per dispatch and call `recordDispatch` after the side effect
+// completes. On re-drive after a crash, `lookupDispatch` hits this row and the
+// executor returns the cached result without re-firing the side effect. The
+// `idempotencyKey` UNIQUE constraint is the dedup gate — two hosts racing on
+// the same key see exactly one winner.
+//
+// Capabilities flagged `isIdempotent: true` on `AiCapability` opt out of this
+// cache (the destination handles duplicates), avoiding a DB write per call.
+//
+// See `lib/orchestration/engine/dispatch-cache.ts` and
+// `.context/orchestration/workflows.md` (Idempotency section).
+model AiWorkflowStepDispatch {
+  id             String   @id @default(cuid())
+  executionId    String
+  stepId         String
+  // Set for multi-turn step types (`agent_call`, `orchestrator`, `reflect`)
+  // where each turn is independently keyed; null for single-shot steps.
+  turnIndex      Int?
+  idempotencyKey String   @unique
+  result         Json
+  createdAt      DateTime @default(now())
+
+  execution AiWorkflowExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+
+  @@index([executionId, stepId]) // resume-time replay lookup per execution+step
+  @@index([createdAt]) // future cleanup of stale cache rows
+  @@map("ai_workflow_step_dispatch")
+}
+
+// In-flight step tracker. One row per step that's currently executing
+// (or paused awaiting approval) for an execution. The engine inserts a
+// row on every `markCurrentStep` and deletes on every step terminate
+// (success / failure / skip / reject / cancel). During a `parallel`
+// fan-out, each branch gets its own row — that's the whole reason this
+// is a side table and not scalar columns on `AiWorkflowExecution`,
+// which would last-writer-wins. The detail-page live poll reads this to
+// synthesise one "running" trace entry per branch.
+//
+// `turns` holds the multi-turn checkpoint state for `agent_call` /
+// `orchestrator` / `reflect` (the executors that record per-turn
+// state). It's per-step here, not per-execution — `markCurrentStep`'s
+// upsert deliberately doesn't touch this column on conflict, so the
+// resume path picks up the recorded turns when the engine re-enters
+// the same stepId after a crash, retry, or approval round-trip.
+//
+// See `lib/orchestration/engine/orchestration-engine.ts`
+// (markCurrentStep / recordStepTurn / clearRunningStep / startOrResume).
+model AiWorkflowRunningStep {
+  id          String    @id @default(cuid())
+  executionId String
+  stepId      String
+  label       String
+  stepType    String
+  startedAt   DateTime  @default(now())
+  // Set when this step finishes but the surrounding batch (e.g. a
+  // parallel fan-out) is still in flight. Lets the live poll surface
+  // "done but waiting for siblings" so the timeline can render a
+  // greyed wait segment after the coloured processing portion. Null
+  // for sequential steps and for parallel branches that are still
+  // running. Rows are deleted (not just nulled) once the whole batch
+  // settles in the post-`Promise.allSettled` loop.
+  completedAt DateTime?
+  turns       Json?
+
+  execution AiWorkflowExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+
+  @@unique([executionId, stepId])
+  @@index([executionId])
+  @@map("ai_workflow_running_step")
+}
+
+// Append-only history of lease transitions for an execution. The lease
+// inspector (admin live-engine surface) reads this to answer "is the
+// engine restarting? has this execution been claimed by multiple hosts?"
+// The execution row itself only holds the *current* lease state, so
+// without this table there is no way to see prior claim/recover events.
+//
+// Written from `lib/orchestration/engine/lease.ts` on every successful
+// claim, heartbeat-loss bail-out, release, and orphan-resume; and from
+// the admin force-fail route when an admin terminates a run early.
+// Pruned by the maintenance tick after the configured retention window.
+//
+// `leaseToken` stores ONLY the last 5 chars of the token (prefixed `…`)
+// — the full token is a write-capability secret and must never appear
+// in audit data. Operators correlate by the tail; that's enough.
+model AiWorkflowExecutionLeaseEvent {
+  id          String   @id @default(cuid())
+  executionId String
+  event       String // "claimed" | "refresh-failed" | "released" | "orphan-resume" | "force-failed"
+  leaseToken  String? // redacted tail (e.g. "…ab12c"); nullable for events with no token in play
+  reason      String? // e.g. "fresh-resume", "admin-force-fail", "engine-terminal"
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  execution AiWorkflowExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+
+  @@index([executionId, createdAt])
+  @@index([createdAt]) // retention prune
+  @@map("ai_workflow_execution_lease_event")
+}

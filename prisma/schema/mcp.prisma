@@ -1,0 +1,171 @@
+// ============================================================================
+// MCP Server
+// ============================================================================
+
+/// Singleton settings row for MCP server configuration, keyed by `slug = "global"`.
+///
+/// Controls the master enable/disable switch and global defaults for MCP
+/// server behaviour. Upserted lazily on first read, matching the
+/// `AiOrchestrationSettings` pattern.
+model McpServerConfig {
+  id                 String   @id @default(cuid())
+  slug               String   @unique @default("global")
+  isEnabled          Boolean  @default(false)
+  serverName         String   @default("Sunrise MCP Server")
+  serverVersion      String   @default("1.0.0")
+  maxSessionsPerKey  Int      @default(5)
+  globalRateLimit    Int      @default(60) // requests per minute per API key
+  auditRetentionDays Int      @default(90)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@map("mcp_server_config")
+}
+
+/// Pivot table linking an AiCapability to MCP exposure.
+///
+/// Each capability can be optionally exposed as an MCP tool. `isEnabled`
+/// defaults to false (default-deny) — nothing is exposed until an admin
+/// explicitly enables it.
+///
+/// The tool-annotation hint fields below (`customTitle`, `readOnlyHint`,
+/// `destructiveHint`, `idempotentHint`, `openWorldHint`) implement the
+/// 2025-06-18 MCP spec tool annotations. Per spec they are **advisory only**
+/// — compliant clients still treat every tool as untrusted; the hints just
+/// inform UX (e.g. surface a warning before invoking a destructive tool).
+/// `idempotentHint` overrides `AiCapability.isIdempotent` in the MCP
+/// context when set, since the same capability may behave differently when
+/// invoked by an external MCP client vs. an internal agent.
+model McpExposedTool {
+  id                String  @id @default(cuid())
+  capabilityId      String  @unique
+  isEnabled         Boolean @default(false)
+  customName        String? // override MCP tool name (must match ^[a-z][a-z0-9_]*$)
+  customDescription String? @db.Text
+  rateLimitPerKey   Int? // per-key calls/min; null = use capability default
+  requiresScope     String? // optional scope string for fine-grained access
+
+  // MCP 2025-06-18 tool annotations (advisory hints to clients)
+  customTitle     String? // human-readable title; falls back to capability.name
+  readOnlyHint    Boolean? // true = does not modify state
+  destructiveHint Boolean? // true = MAY perform destructive updates (only relevant if readOnlyHint=false)
+  idempotentHint  Boolean? // overrides capability.isIdempotent for MCP context
+  openWorldHint   Boolean? // true = interacts with an open world (e.g. web search, external API)
+
+  // Relations
+  capability AiCapability @relation(fields: [capabilityId], references: [id], onDelete: Cascade)
+
+  @@index([isEnabled])
+  @@map("mcp_exposed_tool")
+}
+
+/// Prompt templates exposed to MCP clients.
+///
+/// Per MCP spec, prompts are **user-facing slash-command templates** that
+/// clients surface to end-users — not auto-invoked by the model. The
+/// template is a string with `{{var}}` substitution; substitution is
+/// strictly limited to the names declared in `argumentsSpec` so admins
+/// cannot accidentally (or maliciously) reference server-side data.
+///
+/// `name` is immutable post-create because changing it breaks every
+/// bookmarked / saved client invocation. Renames require delete + recreate.
+model McpExposedPrompt {
+  id              String  @id @default(cuid())
+  name            String  @unique // /^[a-z][a-z0-9_-]*$/, max 64
+  description     String  @db.Text // shown to MCP clients in prompts/list
+  template        String  @db.Text // {{var}} substitution; max 10_000 chars
+  argumentsSpec   Json // [{ name, description, required }] — max 20 entries
+  completionsSpec Json? // optional { [argName]: string[] } for completion/complete (Phase 6)
+  isEnabled       Boolean @default(true)
+  createdBy       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  creator User? @relation("McpPromptCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@index([isEnabled])
+  @@map("mcp_exposed_prompt")
+}
+
+/// Data endpoints exposed via MCP resources.
+///
+/// Each resource has a `sunrise://` URI and maps to an internal handler
+/// that returns data without any external fetch.
+model McpExposedResource {
+  id            String  @id @default(cuid())
+  uri           String  @unique // e.g. "sunrise://knowledge/search"
+  name          String
+  description   String  @db.Text
+  mimeType      String  @default("application/json")
+  resourceType  String // "knowledge_search", "agent_list", "pattern_detail", "workflow_list"
+  isEnabled     Boolean @default(false)
+  handlerConfig Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isEnabled])
+  @@index([resourceType])
+  @@map("mcp_exposed_resource")
+}
+
+/// Bearer tokens for MCP client authentication.
+///
+/// Only the SHA-256 hash of the key is stored — the plaintext is returned
+/// once at creation and never again. Keys use a `smcp_` prefix for easy
+/// identification.
+model McpApiKey {
+  id                String    @id @default(cuid())
+  name              String
+  keyHash           String    @unique // SHA-256 hash of the API key
+  keyPrefix         String // first 8 chars for UI identification (e.g. "smcp_a1b2")
+  scopes            String[] // e.g. ["tools:list", "tools:execute", "resources:read"]
+  scopedAgentId     String? // when non-null, MCP calls via this key are scoped to that agent (resources see only that agent's knowledge grants). When null, the key is an explicit "unscoped service key" with system-wide access.
+  isActive          Boolean   @default(true)
+  expiresAt         DateTime?
+  lastUsedAt        DateTime?
+  rateLimitOverride Int? // per-key rate limit override; null = use global default
+  createdBy         String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Relations
+  creator     User?         @relation("McpApiKeyCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  scopedAgent AiAgent?      @relation(fields: [scopedAgentId], references: [id], onDelete: SetNull)
+  auditLogs   McpAuditLog[]
+
+  @@index([keyHash])
+  @@index([createdBy])
+  @@index([isActive])
+  @@index([scopedAgentId])
+  @@map("mcp_api_key")
+}
+
+/// Immutable audit trail for MCP server operations.
+///
+/// Every MCP method call is logged with client IP, duration, and result.
+/// Request params are sanitized and truncated before storage.
+model McpAuditLog {
+  id            String   @id @default(cuid())
+  apiKeyId      String?
+  method        String // "tools/call", "tools/list", "resources/read", "initialize", etc.
+  toolSlug      String?
+  resourceUri   String?
+  requestParams Json? // sanitized, truncated to 10KB
+  responseCode  String // "success", "error", "rate_limited"
+  errorMessage  String?  @db.Text
+  durationMs    Int
+  clientIp      String?
+  userAgent     String?
+  createdAt     DateTime @default(now())
+
+  // Relations
+  apiKey McpApiKey? @relation(fields: [apiKeyId], references: [id], onDelete: SetNull)
+
+  @@index([apiKeyId])
+  @@index([createdAt])
+  @@index([method])
+  @@index([toolSlug])
+  @@map("mcp_audit_log")
+}
