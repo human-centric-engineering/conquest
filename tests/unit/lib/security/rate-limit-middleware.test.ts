@@ -641,6 +641,60 @@ describe('applyRateLimit', () => {
     });
   });
 
+  // ─── Skip-predicate fall-through loop (Findings 1+2) ─────────────────────
+  // These tests exercise the loop at lines 85-100 of the source: when the
+  // FIRST matched rule's skip fires, the dispatcher iterates subsequent rules
+  // looking for a non-skipping match. findRateLimitRule is NOT overridden here
+  // (beforeEach re-wires it to the real implementation), so the real
+  // RATE_LIMIT_POLICY is evaluated.
+
+  describe('skip-predicate fall-through loop against real policy', () => {
+    it('orchestration dual-rule: no Bearer sk_ header → falls through api-key rule to session-user rule', async () => {
+      // Arrange: request to an orchestration path WITH a session but WITHOUT a
+      // `Bearer sk_...` Authorization header. The first rule (api-key, skip
+      // fires for non-sk_ headers) is skipped; the dispatcher must iterate and
+      // land on the SECOND rule (session-user) — the real loop code path.
+      const userId = uniqueUserId();
+      const token = `mw:orchestration:session-user:user:${userId}`;
+      RATE_LIMIT_TIERS.orchestration.reset(token);
+      vi.mocked(auth.api.getSession).mockResolvedValue(createMockSession({ user: { id: userId } }));
+
+      // No Authorization header → api-key rule's skip fires → must fall through.
+      const request = makeRequest('/api/v1/admin/orchestration/agents');
+
+      // Act
+      const result = await applyRateLimit(request);
+
+      // Assert pass-through (first request, under the 120/min cap)
+      expect(result).toBeNull();
+
+      // The session-user bucket must show exactly 1 consumed request. This
+      // proves the loop selected the SECOND (session-user) rule, not the
+      // (skipped) api-key rule — the api-key bucket token would be different.
+      const stats = RATE_LIMIT_TIERS.orchestration.peek(token);
+      expect(stats.remaining).toBe(119); // 120 cap − 1 consumed
+
+      // Cleanup
+      RATE_LIMIT_TIERS.orchestration.reset(token);
+    });
+
+    it('non-credential better-auth path: /api/auth/get-session → skip fires → no subsequent match → null', async () => {
+      // Arrange: `/api/auth/get-session` matches the /api/auth/ rule, but
+      // skipNonCredentialAuthRoutes returns true (it's not a credential path).
+      // The loop then iterates the remaining policy rules (mcp, webhooks, etc.)
+      // — none of which match /api/auth/... — and falls through to return null.
+      // This exercises the "candidate does not match → continue" path in the loop.
+      const request = makeRequest('/api/auth/get-session');
+
+      // Act
+      const result = await applyRateLimit(request);
+
+      // Assert: no rate limit applied at the middleware layer for non-credential
+      // auth reads. The auth limiter bucket must NOT be consumed.
+      expect(result).toBeNull();
+    });
+  });
+
   // ─── Production-bypass safeguard (3 tests) ───────────────────────────────
 
   describe('RATE_LIMIT_BYPASS production safeguard', () => {

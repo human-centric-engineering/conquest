@@ -4,12 +4,27 @@
  * Centralized configuration for security features.
  * These values follow OWASP recommendations and industry best practices.
  *
- * A few rate limits can be tuned via env vars (use in `.env.local` to
- * loosen them on dev without touching prod):
- *   - `RATE_LIMIT_API`        — overrides default 100/min for general API
- *   - `RATE_LIMIT_ADMIN`      — overrides default 30/min for core admin endpoints
- *   - `RATE_LIMIT_ORCH_ADMIN` — overrides default 120/min for admin/orchestration endpoints
- *   - `RATE_LIMIT_MCP`        — overrides default 300/min for the MCP transport endpoint
+ * Rate limits are tunable via env vars (use in `.env.local` to loosen them on
+ * dev without touching prod). Each `LIMITS.*` count below routes through
+ * `envInt(name, fallback)`, so a positive-integer override wins and anything
+ * else (unset, non-numeric, ≤ 0) falls back to the documented default.
+ *
+ * Section tiers (applied by the rate-limit middleware):
+ *   - `RATE_LIMIT_API`        — general API (default 100/min)
+ *   - `RATE_LIMIT_ADMIN`      — core admin endpoints (default 30/min)
+ *   - `RATE_LIMIT_ORCH_ADMIN` — admin/orchestration endpoints (default 120/min)
+ *   - `RATE_LIMIT_MCP`        — MCP transport endpoint (default 300/min)
+ *   - `RATE_LIMIT_AUTH`       — authentication endpoints (default 5/min)
+ *
+ * Per-flow sub-caps (applied additively inside route handlers):
+ *   - `RATE_LIMIT_PASSWORD_RESET` (3), `RATE_LIMIT_CONTACT` (5),
+ *     `RATE_LIMIT_ACCEPT_INVITE` (5), `RATE_LIMIT_UPLOAD` (10),
+ *     `RATE_LIMIT_INVITE` (10), `RATE_LIMIT_CSP_REPORT` (20),
+ *     `RATE_LIMIT_CHAT` (20), `RATE_LIMIT_CONSUMER_CHAT` (10),
+ *     `RATE_LIMIT_AUDIO` (10), `RATE_LIMIT_EXPORT` (10), `RATE_LIMIT_IMAGE` (20)
+ *
+ * The `*_INTERVAL` windows are intentionally NOT env-tunable — they encode
+ * OWASP-aligned brute-force/abuse windows that shouldn't drift per deployment.
  */
 
 function envInt(name: string, fallback: number): number {
@@ -31,8 +46,8 @@ export const SECURITY_CONSTANTS = {
     MAX_UNIQUE_TOKENS: 500,
     /** Rate limits by endpoint type */
     LIMITS: {
-      /** Auth endpoints: 5 attempts per minute */
-      AUTH: 5,
+      /** Auth endpoints: 5 attempts per minute (override with `RATE_LIMIT_AUTH`) */
+      AUTH: envInt('RATE_LIMIT_AUTH', 5),
       /** General API: 100 requests per minute (override with `RATE_LIMIT_API`) */
       API: envInt('RATE_LIMIT_API', 100),
       /** Admin endpoints: 30 requests per minute (override with `RATE_LIMIT_ADMIN`) */
@@ -50,41 +65,42 @@ export const SECURITY_CONSTANTS = {
        * `apiKey.rateLimit` field.
        */
       MCP: envInt('RATE_LIMIT_MCP', 300),
-      /** Password reset: 3 attempts per 15 minutes */
-      PASSWORD_RESET: 3,
+      /** Password reset: 3 attempts per 15 minutes (override with `RATE_LIMIT_PASSWORD_RESET`) */
+      PASSWORD_RESET: envInt('RATE_LIMIT_PASSWORD_RESET', 3),
       /** Password reset window: 15 minutes */
       PASSWORD_RESET_INTERVAL: 15 * 60 * 1000,
-      /** Contact form: 5 submissions per hour */
-      CONTACT: 5,
+      /** Contact form: 5 submissions per hour (override with `RATE_LIMIT_CONTACT`) */
+      CONTACT: envInt('RATE_LIMIT_CONTACT', 5),
       /** Contact form window: 1 hour */
       CONTACT_INTERVAL: 60 * 60 * 1000,
-      /** Accept invite: 5 attempts per 15 minutes */
-      ACCEPT_INVITE: 5,
-      /** Upload: 10 uploads per 15 minutes */
-      UPLOAD: 10,
+      /** Accept invite: 5 attempts per 15 minutes (override with `RATE_LIMIT_ACCEPT_INVITE`) */
+      ACCEPT_INVITE: envInt('RATE_LIMIT_ACCEPT_INVITE', 5),
+      /** Upload: 10 uploads per 15 minutes (override with `RATE_LIMIT_UPLOAD`) */
+      UPLOAD: envInt('RATE_LIMIT_UPLOAD', 10),
       /** Upload window: 15 minutes */
       UPLOAD_INTERVAL: 15 * 60 * 1000,
-      /** Invite: 10 invitations per 15 minutes */
-      INVITE: 10,
+      /** Invite: 10 invitations per 15 minutes (override with `RATE_LIMIT_INVITE`) */
+      INVITE: envInt('RATE_LIMIT_INVITE', 10),
       /** Invite window: 15 minutes */
       INVITE_INTERVAL: 15 * 60 * 1000,
-      /** CSP report: 20 reports per minute */
-      CSP_REPORT: 20,
-      /** Chat stream (admin): 20 messages per minute per user */
-      CHAT: 20,
-      /** Chat stream (consumer): 10 messages per minute per user */
-      CONSUMER_CHAT: 10,
-      /** Audio transcription: 10 requests per minute per user/session */
-      AUDIO: 10,
+      /** CSP report: 20 reports per minute (override with `RATE_LIMIT_CSP_REPORT`) */
+      CSP_REPORT: envInt('RATE_LIMIT_CSP_REPORT', 20),
+      /** Chat stream (admin): 20 messages per minute per user (override with `RATE_LIMIT_CHAT`) */
+      CHAT: envInt('RATE_LIMIT_CHAT', 20),
+      /** Chat stream (consumer): 10 messages per minute per user (override with `RATE_LIMIT_CONSUMER_CHAT`) */
+      CONSUMER_CHAT: envInt('RATE_LIMIT_CONSUMER_CHAT', 10),
+      /** Audio transcription: 10 requests per minute per user/session (override with `RATE_LIMIT_AUDIO`) */
+      AUDIO: envInt('RATE_LIMIT_AUDIO', 10),
       /**
-       * Conversation export (admin): 10 requests per minute per user.
-       * Per-flow sub-cap on top of the orchestration section tier. Export
-       * routes are bulk reads — building a JSON/CSV file from many rows —
-       * so they get a dedicated bucket that's tighter than the section cap.
+       * Conversation export (admin): 10 requests per minute per user
+       * (override with `RATE_LIMIT_EXPORT`). Per-flow sub-cap on top of the
+       * orchestration section tier. Export routes are bulk reads — building a
+       * JSON/CSV file from many rows — so they get a dedicated bucket that's
+       * tighter than the section cap.
        */
-      EXPORT: 10,
-      /** Image / PDF attachment chat turn: 20 requests per minute per user/session */
-      IMAGE: 20,
+      EXPORT: envInt('RATE_LIMIT_EXPORT', 10),
+      /** Image / PDF attachment chat turn: 20 requests per minute per user/session (override with `RATE_LIMIT_IMAGE`) */
+      IMAGE: envInt('RATE_LIMIT_IMAGE', 20),
     },
   },
 

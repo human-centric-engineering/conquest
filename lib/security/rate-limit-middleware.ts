@@ -27,13 +27,13 @@ import { auth } from '@/lib/auth/config';
 import { logger } from '@/lib/logging';
 import { getClientIP } from '@/lib/security/ip';
 import {
-  RATE_LIMIT_TIERS,
   createRateLimitResponse,
+  resolveRateLimitTier,
   type RateLimiter,
 } from '@/lib/security/rate-limit';
 import {
   findRateLimitRule,
-  RATE_LIMIT_POLICY,
+  getEffectiveRateLimitPolicy,
   type RateLimitKey,
   type RateLimitRule,
 } from '@/lib/security/rate-limit-policy';
@@ -68,22 +68,27 @@ import {
 export async function applyRateLimit(request: NextRequest): Promise<Response | null> {
   if (isBypassEnabled()) return null;
 
+  // Evaluate against the effective policy: Sunrise's base rules plus any
+  // app-registered rules (spliced ahead of the catch-all). When no app rules
+  // are registered this is the base policy by identity — no per-request cost.
+  const policy = getEffectiveRateLimitPolicy();
+
   // First-match-wins, with fall-through on `skip`. A path with two
   // consecutive rules (e.g. the orchestration api-key + session-user pair
   // added in Phase 4) needs the second rule to apply when the first's
   // `skip` fires. `findRateLimitRule` returns the very first path match,
   // so we use it for the typical single-rule case and only iterate the
   // policy directly when that rule's `skip` is true.
-  let rule: RateLimitRule | null = findRateLimitRule(request.nextUrl.pathname);
+  let rule: RateLimitRule | null = findRateLimitRule(request.nextUrl.pathname, policy);
   if (rule?.skip?.(request)) {
     rule = null;
-    const startIndex = RATE_LIMIT_POLICY.findIndex(
+    const startIndex = policy.findIndex(
       (r) =>
         (typeof r.match === 'string' && request.nextUrl.pathname.startsWith(r.match)) ||
         (r.match instanceof RegExp && r.match.test(request.nextUrl.pathname))
     );
-    for (let i = startIndex + 1; i < RATE_LIMIT_POLICY.length; i++) {
-      const candidate = RATE_LIMIT_POLICY[i];
+    for (let i = startIndex + 1; i < policy.length; i++) {
+      const candidate = policy[i];
       const pathMatches =
         typeof candidate.match === 'string'
           ? request.nextUrl.pathname.startsWith(candidate.match)
@@ -96,11 +101,13 @@ export async function applyRateLimit(request: NextRequest): Promise<Response | n
   }
   if (!rule) return null;
 
-  const limiter: RateLimiter | undefined = RATE_LIMIT_TIERS[rule.tier];
+  const limiter: RateLimiter | undefined = resolveRateLimitTier(rule.tier);
   if (!limiter) {
-    // Unreachable under normal type-checked code. If it fires, the policy
-    // table references a tier name not in RATE_LIMIT_TIERS — surface it loudly
-    // so operators can fix the config drift instead of silently failing open.
+    // Unreachable for built-in rules under normal type-checked code. If it
+    // fires, a rule names a tier that `resolveRateLimitTier` can't resolve —
+    // either core config drift, or an app rule referencing a tier it never
+    // registered via `registerRateLimitTier`. Surface it loudly so operators
+    // can fix the config instead of silently failing open.
     logger.warn('Rate-limit policy references an unknown tier; skipping limiter', {
       tier: rule.tier,
       pathname: request.nextUrl.pathname,

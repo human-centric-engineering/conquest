@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { appEnvSchema } from '@/lib/app/env';
 
 /**
  * Environment Variable Validation Schema
@@ -140,8 +141,14 @@ const clientEnvSchema = z.object({
     .describe('Plausible host URL (defaults to https://plausible.io)'),
 });
 
-// Combined schema for type inference
-const envSchema = serverEnvSchema.merge(clientEnvSchema);
+// Combined schema for type inference.
+//
+// `appEnvSchema` (fork-readiness seam 11) folds any app-declared server-side
+// vars into the same fail-fast parse below, so forks extend the environment
+// contract by editing `lib/app/env.ts` — never this core schema. It is merged
+// into the server side only; the browser path validates `clientEnvSchema`
+// alone, so app server vars are never required (or leaked) client-side.
+const envSchema = serverEnvSchema.merge(appEnvSchema).merge(clientEnvSchema);
 
 /**
  * Validated environment variables with type safety.

@@ -166,6 +166,48 @@ export default tseslint.config(
     },
   },
 
+  // ── App-extension boundary (fork-readiness seam 5) ───────────────────────
+  // `lib/app/**` is the supported surface where downstream forks/apps add
+  // their own code. It must stay framework-agnostic so it survives Next.js
+  // upgrades and can be reasoned about in isolation: no RUNTIME `next/*`
+  // imports. Type-only imports (`import type { NextRequest } from 'next/server'`)
+  // are allowed — they erase at compile time and don't couple runtime code to
+  // the framework. Framework glue that genuinely needs runtime APIs belongs in
+  // `app/` (route handlers, server actions) or a `lib/app/<name>/server/`
+  // module, not in the portable core of `lib/app/**`.
+  //
+  // CRITICAL: flat-config `no-restricted-imports` REPLACES (does not merge)
+  // the rule from the React block above. We therefore RESTATE the @/-alias ban
+  // here — omitting it would silently drop relative-import enforcement on
+  // `lib/app/**` files. We switch to the `@typescript-eslint/` variant because
+  // only it supports `allowTypeImports`; the base `no-restricted-imports` is
+  // turned off for these files so the two don't double-report relative imports.
+  {
+    files: ['lib/app/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': 'off',
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['./*', '../*'],
+              message: 'Use the @/ path alias instead of relative imports (CLAUDE.md).',
+            },
+            {
+              group: ['next', 'next/*'],
+              allowTypeImports: true,
+              message:
+                'lib/app/** must stay framework-agnostic — no runtime next/* imports ' +
+                '(type-only imports are allowed). Put framework glue in app/ or a ' +
+                'lib/app/<name>/server/ module.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+
   // CLI-style verification + maintenance scripts. They print to stdout
   // for interactive use; logger's structured-JSON output would be
   // unreadable for an operator running them by hand.
