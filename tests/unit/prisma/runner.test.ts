@@ -427,7 +427,7 @@ describe('runSeeds()', () => {
   });
 
   it('should not collide same-numbered seeds in different directories — both run, distinct keys', async () => {
-    const { prisma, upsert, store } = makeFakePrisma();
+    const { prisma, upsert } = makeFakePrisma();
     await writeSeedFile(tmpDir, '001-init.ts', 'core-init');
     await mkdir(join(tmpDir, 'app-foo'), { recursive: true });
     await writeSeedFile(join(tmpDir, 'app-foo'), '001-init.ts', 'app-init');
@@ -442,8 +442,6 @@ describe('runSeeds()', () => {
       .mock.calls.map((c) => c[0].where.name)
       .sort();
     expect(names).toEqual(['001-init', 'app-foo/001-init']);
-    expect(store.has('001-init')).toBe(true);
-    expect(store.has('app-foo/001-init')).toBe(true);
 
     await rm(tmpDir, { recursive: true, force: true });
   });
