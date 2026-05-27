@@ -43,17 +43,17 @@ Two principles keep an upgrade from upstream a clean merge instead of a fight:
 
 **Where your code goes:**
 
-| Your code                  | Put it in                                                                                       |
-| -------------------------- | ----------------------------------------------------------------------------------------------- |
-| Pages                      | a route group under `app/` (`(public)`, `(protected)`)                                          |
-| API endpoints              | `app/api/v1/<resource>/`                                                                        |
-| React components           | `components/`                                                                                   |
-| Business logic / utilities | `lib/`                                                                                          |
-| Database models            | the Prisma schema + a migration                                                                 |
-| Agent tools                | a capability in the orchestration layer                                                         |
+| Your code                  | Put it in                                                                                                           |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Pages                      | a route group under `app/` (`(public)`, `(protected)`)                                                              |
+| API endpoints              | `app/api/v1/<resource>/`                                                                                            |
+| React components           | `components/`                                                                                                       |
+| Business logic / utilities | `lib/`                                                                                                              |
+| Database models            | the Prisma schema + a migration                                                                                     |
+| Agent tools                | a capability in the orchestration layer                                                                             |
 | Environment variables      | `lib/app/env.ts` (`appEnvSchema`) — see [§4](#4-configuration--environment--the-libapp-surface)                     |
 | App rate-limit tier / rule | `registerRateLimitTier()` / `registerRateLimitRule()` — see [§4](#4-configuration--environment--the-libapp-surface) |
-| Dependencies & scripts     | `package.json` — see [§7](#7-adding-dependencies--scripts)                                      |
+| Dependencies & scripts     | `package.json` — see [§7](#7-adding-dependencies--scripts)                                                          |
 
 ---
 
@@ -141,15 +141,23 @@ Two principles keep an upgrade from upstream a clean merge instead of a fight:
 `lib/app/` is the **auto-wired extension surface**. Each file is imported by the
 Sunrise core consumer that lives in the right runtime, so your registrations
 take effect with **zero wiring** — you fill in the file, you never hunt for a
-startup hook to call it from. Every file ships as an empty no-op; an upstream
-merge never touches it.
+startup hook to call it from.
 
-| Edit this file              | To register                                   | Auto-wired by (runtime)                              |
-| --------------------------- | --------------------------------------------- | ---------------------------------------------------- |
-| `lib/app/env.ts`            | server env vars (`appEnvSchema`)              | `lib/env.ts` startup parse (server)                  |
-| `lib/app/rate-limit.ts`     | rate-limit tiers / rules                      | rate-limit middleware (middleware runtime)           |
-| `lib/app/capabilities.ts`   | agent capabilities (tools)                    | the capability registry (server route-handler)       |
-| `lib/app/admin-nav.ts`      | admin sidebar sections                        | `admin-sidebar.tsx` (client)                         |
+**These files are fork-owned scaffold — treat them like the landing page.** They
+ship as empty no-ops, and Sunrise does **not** change them after shipping them,
+so the edits you make merge cleanly when you pull an upstream release. The stable
+contract the platform depends on is each file's _export_ (`appEnvSchema`,
+`registerAppRateLimits`, `initAppCapabilities`, `initAppNav`) — which the core
+imports — **not** the body, which is yours. Keep the export name and signature;
+everything inside is free to change. (Detailed examples live here in this guide,
+not in the files, precisely so the files stay small and conflict-free.)
+
+| Edit this file            | To register                      | Auto-wired by (runtime)                        |
+| ------------------------- | -------------------------------- | ---------------------------------------------- |
+| `lib/app/env.ts`          | server env vars (`appEnvSchema`) | `lib/env.ts` startup parse (server)            |
+| `lib/app/rate-limit.ts`   | rate-limit tiers / rules         | rate-limit middleware (middleware runtime)     |
+| `lib/app/capabilities.ts` | agent capabilities (tools)       | the capability registry (server route-handler) |
+| `lib/app/admin-nav.ts`    | admin sidebar sections           | `admin-sidebar.tsx` (client)                   |
 
 **Why four files and not one bootstrap call?** Next.js bundles middleware,
 server route-handlers, and the client as three separate module realms — a
@@ -358,6 +366,16 @@ your dependencies and `app:*` scripts sit in regions upstream never edits.
 When you pull a new Sunrise release into your fork, the biggest moving part is
 the database migration history — your app's migrations and Sunrise's share one
 directory.
+
+**What does _not_ conflict.** Your own new files (routes, components, `lib/`
+modules, `prisma/schema/app.prisma`) are invisible to upstream, so they never
+conflict. The `lib/app/` bootstrap files ([§4](#4-configuration--environment--the-libapp-surface))
+are **fork-owned scaffold**: Sunrise ships them empty and doesn't re-edit them,
+so the registrations you add there merge cleanly too — no special handling. The
+files that _can_ conflict are the ones both you and upstream edit (the migration
+directory above, and template files you've customised like the landing page,
+branding, or `package.json` — see [§7](#7-adding-dependencies--scripts)); resolve
+those keeping your version, and add a follow-up rather than rewriting Sunrise's.
 
 - **One shared history.** App and Sunrise migrations both live in
   `prisma/migrations/` and are applied in timestamp order. On an upstream
