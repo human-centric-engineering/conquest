@@ -78,7 +78,7 @@ openssl rand -base64 32
 npm install
 
 # Set up database
-npm run db:migrate
+npm run db:migrate:dev
 
 # Start development
 npm run dev
@@ -119,7 +119,8 @@ These work without configuration in development and can be enabled for productio
 
 ## Documentation
 
-- [**CUSTOMIZATION.md**](./CUSTOMIZATION.md) — Adapt Sunrise for your project
+- [**CUSTOMIZATION.md**](./CUSTOMIZATION.md) — **Building on Sunrise**: the fork/app onboarding guide — extension model, package.json policy, staying in sync with upstream
+- [**CONTRIBUTING.md**](./CONTRIBUTING.md) — Contributing changes back to Sunrise itself
 - [**.context/substrate.md**](./.context/substrate.md) — Full architecture and reference docs
 - [**.context/orchestration/meta/functional-specification.md**](./.context/orchestration/meta/functional-specification.md) — Agent orchestration: full system inventory and capability spec
 

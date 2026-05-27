@@ -168,6 +168,86 @@ git add prisma/migrations/20250105150000_add_user_role/
 git commit -m "feat: add user role enum to database"
 ```
 
+## Staying in Sync with Upstream Sunrise (Forks)
+
+If you build your app on a fork of Sunrise, your migrations and Sunrise's share
+one history. This section is the reconciliation recipe for pulling a new Sunrise
+release into your fork. (For the higher-level fork model, see
+[`CUSTOMIZATION.md`](../../CUSTOMIZATION.md).)
+
+### How the histories combine
+
+App and Sunrise migrations both live in `prisma/migrations/` and are applied in
+**timestamp order** (Prisma sorts by the folder name, which is
+`<timestamp>_<label>`). When you merge an upstream release, new Sunrise
+migration folders **interleave with yours by timestamp** — a Sunrise migration
+authored before your latest one sorts _before_ it, even though you merged it
+later.
+
+This is normal and safe: Prisma tracks applied migrations by folder name in the
+`_prisma_migrations` table, so it applies whatever is recorded as not-yet-applied
+regardless of merge order.
+
+### Name app migrations distinctly
+
+Prefix your app's migrations so you can tell at a glance which are yours when
+they interleave:
+
+```bash
+npm run db:migrate:dev -- --name app_add_orders
+# → prisma/migrations/<timestamp>_app_add_orders/
+```
+
+The prefix is purely for human triage during a merge — Prisma ignores the label
+and orders by timestamp. A consistent prefix (e.g. `app_`) makes
+`git diff -- prisma/migrations/` instantly readable.
+
+### Recipe: merging a Sunrise release
+
+```bash
+# 1. Merge the upstream release into your branch (resolve any conflicts).
+#    Conflicts in prisma/migrations/ are rare — each migration is its own
+#    folder. migration_lock.toml only records the DB provider; if it conflicts,
+#    keep either side (they're identical for the same provider).
+
+# 2. See what the merge brought in that your DB hasn't applied yet.
+npm run db:migrate:status
+
+# 3. Apply the newly-merged migrations.
+npm run db:migrate:dev        # development
+npm run db:migrate:deploy     # production / CI
+```
+
+### Baselining or recovering a migration
+
+Use `prisma migrate resolve` when the recorded state and the actual database
+disagree — e.g. an upstream migration's effect is already present in your DB, or
+a deploy died partway:
+
+```bash
+# Mark a migration as already applied (baseline — no SQL is run)
+npx prisma migrate resolve --applied <migration_name>
+
+# Mark a failed migration as rolled back, then fix forward
+npx prisma migrate resolve --rolled-back <migration_name>
+```
+
+### Reading a release's migration set
+
+The migrations a release added are simply the new folders under
+`prisma/migrations/`. Diff against your last-synced point:
+
+```bash
+git diff <last-sync-ref>..<release-ref> -- prisma/migrations/
+```
+
+### Never edit Sunrise's migration SQL
+
+Editing an applied migration desyncs every environment that already ran it.
+If you need to change the result of a Sunrise migration, add your own
+**follow-up** migration (`app_*`) that alters the schema forward. See
+[Never Edit Applied Migrations](#5-never-edit-applied-migrations).
+
 ## Common Migration Patterns
 
 ### Adding Optional Field

@@ -19,13 +19,19 @@ npm run validate         # Run type-check + lint + format check (use before comm
 ## Database (Prisma)
 
 ```bash
-npm run db:migrate       # Create and apply new migration
-npm run db:push          # Push schema changes without migration (dev only)
-npm run db:studio        # Open Prisma Studio GUI
-npm run db:seed          # Run seed script
-npx prisma generate      # Regenerate Prisma client after schema changes
-npx prisma validate      # Validate schema syntax
+npm run db:migrate:dev      # Create and apply a migration from schema changes (dev only)
+npm run db:migrate:deploy   # Apply pending migrations (prod / CI — no schema diff)
+npm run db:migrate:status   # Report pending / applied migrations
+npm run db:reset            # Drop DB, re-migrate from scratch, re-seed
+npm run db:generate         # Regenerate Prisma client after schema changes
+npm run db:studio           # Open Prisma Studio GUI
+npm run db:seed             # Apply new/changed seed units
+npx prisma validate         # Validate schema syntax
 ```
+
+> `prisma db push` is intentionally **not** exposed as a script — it bypasses
+> migration history and lets dev/prod schemas diverge silently. Always use
+> `db:migrate:dev`. See [`database/migrations.md`](./database/migrations.md).
 
 ## Testing
 

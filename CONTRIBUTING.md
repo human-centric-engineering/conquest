@@ -2,6 +2,11 @@
 
 Thank you for your interest in contributing to Sunrise! This guide will help you get started.
 
+> **Building an app _on_ Sunrise rather than contributing _to_ it?** See
+> [`CUSTOMIZATION.md`](./CUSTOMIZATION.md) — the fork/app onboarding guide. It
+> covers the extension model, the `package.json` dependency/script policy for
+> forks, and how to stay in sync with upstream releases.
+
 ## Code of Conduct
 
 Be respectful and constructive. We're all here to build something useful together.
@@ -29,7 +34,7 @@ cp .env.example .env.local
 # Edit .env.local with your DATABASE_URL and BETTER_AUTH_SECRET
 
 # Set up database and seed test data
-npm run db:migrate
+npm run db:migrate:dev
 npm run db:seed
 
 # Start development server
