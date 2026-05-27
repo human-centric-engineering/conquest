@@ -226,6 +226,47 @@ describe('createAgentSchema', () => {
       expect(result.success).toBe(false);
     });
   });
+
+  describe('knowledgeRetrievalMode + knowledgeTriggerKeywords cross-validation', () => {
+    it('rejects mode "keywords" with no trigger keywords (empty array default)', () => {
+      const result = createAgentSchema.safeParse({
+        ...VALID_AGENT,
+        knowledgeRetrievalMode: 'keywords',
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(
+          result.error.issues.some((i) => i.path.join('.') === 'knowledgeTriggerKeywords')
+        ).toBe(true);
+      }
+    });
+
+    it('rejects mode "keywords" with an empty trigger keywords array', () => {
+      const result = createAgentSchema.safeParse({
+        ...VALID_AGENT,
+        knowledgeRetrievalMode: 'keywords',
+        knowledgeTriggerKeywords: [],
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it('accepts mode "keywords" with at least one trigger keyword', () => {
+      const result = createAgentSchema.safeParse({
+        ...VALID_AGENT,
+        knowledgeRetrievalMode: 'keywords',
+        knowledgeTriggerKeywords: ['refund'],
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('accepts mode "model" with no trigger keywords', () => {
+      const result = createAgentSchema.safeParse({
+        ...VALID_AGENT,
+        knowledgeRetrievalMode: 'model',
+      });
+      expect(result.success).toBe(true);
+    });
+  });
 });
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -262,6 +303,31 @@ describe('updateAgentSchema', () => {
   it('should reject temperature out of range', () => {
     const result = updateAgentSchema.safeParse({ temperature: 3 });
     expect(result.success).toBe(false);
+  });
+
+  describe('knowledgeRetrievalMode + knowledgeTriggerKeywords cross-validation', () => {
+    it('rejects mode "keywords" with explicit empty trigger keywords in the same payload', () => {
+      const result = updateAgentSchema.safeParse({
+        knowledgeRetrievalMode: 'keywords',
+        knowledgeTriggerKeywords: [],
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it('accepts a bare mode update without keywords (existing keywords on the row are not visible to the schema)', () => {
+      const result = updateAgentSchema.safeParse({
+        knowledgeRetrievalMode: 'keywords',
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('accepts mode "keywords" with at least one trigger keyword', () => {
+      const result = updateAgentSchema.safeParse({
+        knowledgeRetrievalMode: 'keywords',
+        knowledgeTriggerKeywords: ['refund'],
+      });
+      expect(result.success).toBe(true);
+    });
   });
 });
 
