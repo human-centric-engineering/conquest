@@ -78,6 +78,7 @@ function makeSourceAgent() {
     id: AGENT_ID,
     name: 'My Agent',
     slug: 'my-agent',
+    kind: 'chat',
     description: 'A test agent',
     systemInstructions: 'You are helpful.',
     systemInstructionsHistory: [],
@@ -86,16 +87,52 @@ function makeSourceAgent() {
     providerConfig: null,
     temperature: 0.7,
     maxTokens: 4096,
+    reasoningEffort: null,
     monthlyBudgetUsd: null,
+    maxCostPerTurnUsd: null,
     fallbackProviders: [],
     metadata: null,
     widgetConfig: { primaryColor: '#16a34a', headerTitle: 'Council' },
+    inputGuardMode: null,
+    outputGuardMode: null,
+    citationGuardMode: null,
+    maxHistoryTokens: null,
+    maxHistoryMessages: null,
+    retentionDays: null,
+    visibility: 'internal',
+    rateLimitRpm: null,
+    knowledgeAccessMode: 'full',
+    knowledgeRetrievalMode: 'model',
+    knowledgeTriggerKeywords: [],
+    topicBoundaries: [],
+    profileId: null,
+    persona: null,
+    guardrails: null,
+    personaMode: 'override',
+    voiceMode: 'override',
+    guardrailsMode: 'override',
+    brandVoiceInstructions: null,
+    enableVoiceInput: false,
+    enableImageInput: false,
+    enableDocumentInput: false,
     isActive: true,
     isSystem: false,
     createdBy: 'user_abc',
     capabilities: [
-      { agentId: AGENT_ID, capabilityId: 'cap_001' },
-      { agentId: AGENT_ID, capabilityId: 'cap_002' },
+      {
+        agentId: AGENT_ID,
+        capabilityId: 'cap_001',
+        isEnabled: true,
+        customConfig: null,
+        customRateLimit: null,
+      },
+      {
+        agentId: AGENT_ID,
+        capabilityId: 'cap_002',
+        isEnabled: true,
+        customConfig: null,
+        customRateLimit: null,
+      },
     ],
   };
 }
@@ -447,6 +484,122 @@ describe('POST /api/v1/admin/orchestration/agents/:id/clone', () => {
       // The create data should not carry isSystem from the source
       // (it's not explicitly set in the route create call, so it defaults to false)
       expect(capturedCreateArgs).toBeDefined();
+    });
+  });
+
+  describe('Field carry-over (regression: fields previously dropped on clone)', () => {
+    it('copies persona, guardrails, mode columns, profileId, kind, multimodal toggles, knowledge retrieval, and per-turn cap', async () => {
+      const richSource = {
+        ...makeSourceAgent(),
+        kind: 'judge',
+        profileId: 'cmjbv4i3x00003wsloputgwu7',
+        persona: 'Be wise.',
+        guardrails: 'No PII.',
+        personaMode: 'append',
+        voiceMode: 'append',
+        guardrailsMode: 'append',
+        enableVoiceInput: true,
+        enableImageInput: true,
+        enableDocumentInput: true,
+        knowledgeRetrievalMode: 'every_turn',
+        knowledgeTriggerKeywords: ['refund', 'cancel'],
+        maxCostPerTurnUsd: 0.5,
+        grantedTags: [],
+        grantedDocuments: [],
+      };
+      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+      vi.mocked(prisma.aiAgent.findUnique).mockResolvedValue(richSource as never);
+
+      let capturedCreate: Record<string, unknown> | null = null;
+      vi.mocked(prisma.$transaction).mockImplementation(async (fn: (tx: never) => unknown) => {
+        const tx = {
+          aiAgent: {
+            create: vi.fn((args: { data: Record<string, unknown> }) => {
+              capturedCreate = args.data;
+              return Promise.resolve(makeClonedAgent());
+            }),
+          },
+          aiAgentCapability: { createMany: vi.fn().mockResolvedValue({ count: 2 }) },
+        };
+        return fn(tx as never);
+      });
+
+      const response = await POST(makePostRequest(), makeParams(AGENT_ID));
+
+      expect(response.status).toBe(201);
+      expect(capturedCreate).not.toBeNull();
+      const data = capturedCreate!;
+      expect(data.kind).toBe('judge');
+      expect(data.profileId).toBe('cmjbv4i3x00003wsloputgwu7');
+      expect(data.persona).toBe('Be wise.');
+      expect(data.guardrails).toBe('No PII.');
+      expect(data.personaMode).toBe('append');
+      expect(data.voiceMode).toBe('append');
+      expect(data.guardrailsMode).toBe('append');
+      expect(data.enableVoiceInput).toBe(true);
+      expect(data.enableImageInput).toBe(true);
+      expect(data.enableDocumentInput).toBe(true);
+      expect(data.knowledgeRetrievalMode).toBe('every_turn');
+      expect(data.knowledgeTriggerKeywords).toEqual(['refund', 'cancel']);
+      expect(data.maxCostPerTurnUsd).toBe(0.5);
+    });
+
+    it('copies per-binding capability config (isEnabled, customConfig, customRateLimit)', async () => {
+      const sourceWithCapConfig = {
+        ...makeSourceAgent(),
+        capabilities: [
+          {
+            agentId: AGENT_ID,
+            capabilityId: 'cap_001',
+            isEnabled: false,
+            customConfig: { mode: 'verbose' },
+            customRateLimit: 30,
+          },
+          {
+            agentId: AGENT_ID,
+            capabilityId: 'cap_002',
+            isEnabled: true,
+            customConfig: null,
+            customRateLimit: null,
+          },
+        ],
+        grantedTags: [],
+        grantedDocuments: [],
+      };
+      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+      vi.mocked(prisma.aiAgent.findUnique).mockResolvedValue(sourceWithCapConfig as never);
+
+      let capturedCapCreateMany: { data: Array<Record<string, unknown>> } | null = null;
+      vi.mocked(prisma.$transaction).mockImplementation(async (fn: (tx: never) => unknown) => {
+        const tx = {
+          aiAgent: { create: vi.fn().mockResolvedValue(makeClonedAgent()) },
+          aiAgentCapability: {
+            createMany: vi.fn((args: { data: Array<Record<string, unknown>> }) => {
+              capturedCapCreateMany = args;
+              return Promise.resolve({ count: 2 });
+            }),
+          },
+        };
+        return fn(tx as never);
+      });
+
+      const response = await POST(makePostRequest(), makeParams(AGENT_ID));
+
+      expect(response.status).toBe(201);
+      expect(capturedCapCreateMany).not.toBeNull();
+      const rows = capturedCapCreateMany!.data;
+      expect(rows).toHaveLength(2);
+      expect(rows[0]).toMatchObject({
+        capabilityId: 'cap_001',
+        isEnabled: false,
+        customConfig: { mode: 'verbose' },
+        customRateLimit: 30,
+      });
+      expect(rows[1]).toMatchObject({
+        capabilityId: 'cap_002',
+        isEnabled: true,
+        customRateLimit: null,
+      });
     });
   });
 });

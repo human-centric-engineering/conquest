@@ -294,6 +294,27 @@ describe('GET /api/v1/admin/orchestration/agents', () => {
         })
       );
     });
+
+    it('hides soft-deleted (tombstoned) agents by default but keeps inactive ones visible', async () => {
+      // Regression: a clone is created with isActive=false (so the operator
+      // can review before enabling), but the previous list filter forced
+      // isActive=true and hid those clones. The list should distinguish
+      // "soft-deleted" (slug tombstoned with -deleted-) from "inactive but
+      // still meant to appear" (a clone, or an agent toggled off via the
+      // table switch).
+      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+      vi.mocked(prisma.aiAgent.findMany).mockResolvedValue([]);
+      vi.mocked(prisma.aiAgent.count).mockResolvedValue(0);
+
+      await GET(makeGetRequest({}));
+
+      const call = vi.mocked(prisma.aiAgent.findMany).mock.calls[0]?.[0] as
+        | { where: Record<string, unknown> }
+        | undefined;
+      expect(call).toBeDefined();
+      expect(call!.where).toMatchObject({ slug: { not: { contains: '-deleted-' } } });
+      expect(call!.where).not.toHaveProperty('isActive');
+    });
   });
 
   describe('Ordering', () => {
@@ -360,6 +381,36 @@ describe('POST /api/v1/admin/orchestration/agents', () => {
       expect(vi.mocked(prisma.aiAgent.create)).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({ createdBy: ADMIN_ID }),
+        })
+      );
+    });
+
+    it('persists persona, guardrails, mode columns, and profileId from the request body', async () => {
+      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+      vi.mocked(prisma.aiAgent.create).mockResolvedValue(makeAgent() as never);
+
+      await POST(
+        makePostRequest({
+          ...VALID_AGENT,
+          profileId: 'cmjbv4i3x00003wsloputgwu7',
+          persona: 'Be wise.',
+          guardrails: 'No PII.',
+          personaMode: 'append',
+          voiceMode: 'append',
+          guardrailsMode: 'append',
+        })
+      );
+
+      expect(vi.mocked(prisma.aiAgent.create)).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            profileId: 'cmjbv4i3x00003wsloputgwu7',
+            persona: 'Be wise.',
+            guardrails: 'No PII.',
+            personaMode: 'append',
+            voiceMode: 'append',
+            guardrailsMode: 'append',
+          }),
         })
       );
     });

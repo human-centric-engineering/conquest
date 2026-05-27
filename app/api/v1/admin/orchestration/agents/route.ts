@@ -40,11 +40,15 @@ export const GET = withAdminAuth(async (request, _session) => {
   // the run-create metric picker passes `kind=judge`) opt in.
   const where: Prisma.AiAgentWhereInput = {};
   if (kind !== undefined) where.kind = kind;
-  // Default to active agents only. Deletion is a soft-delete (sets
-  // isActive=false on DELETE), so without a default filter every
-  // "deleted" agent would linger in the list. Callers that genuinely
-  // want the deleted rows can opt in with ?isActive=false.
-  where.isActive = isActive ?? true;
+  if (isActive !== undefined) where.isActive = isActive;
+  // Hide soft-deleted agents. DELETE renames the slug to
+  // `{slug}-deleted-{id}` so the original is freed for reuse — that
+  // tombstone is the unambiguous "deleted" signal. We deliberately
+  // do not filter by `isActive` here: a freshly cloned agent is
+  // created inactive (so the operator can review it before going
+  // live), and a manually deactivated agent should still appear so
+  // the operator can re-enable it.
+  where.slug = { not: { contains: '-deleted-' } };
   if (provider) where.provider = provider;
   if (isSystem !== undefined) where.isSystem = isSystem;
   if (q) {
