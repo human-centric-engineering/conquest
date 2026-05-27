@@ -152,18 +152,45 @@ Two principles keep an upgrade from upstream a clean merge instead of a fight:
 > a versioned, reviewable migration. See
 > [`.context/database/migrations.md`](./.context/database/migrations.md).
 
-**Adding fields to the User model:**
+**Adding user-related data — use a satellite table, don't edit `User`:**
 
-- Edit the `User` model in `prisma/schema/`
-- Run `npm run db:migrate:dev`
-- Update API types: `types/index.ts` → `PublicUser` interface
-- Update forms if needed: `components/forms/`
+Resist adding columns to the core `User` model. It's the most central, most
+merge-prone platform model (better-auth and Sunrise both evolve it) — editing it
+is exactly the fork-and-edit trap that turns every upstream merge into a fight.
+Keep app-specific user data in **its own satellite table** in
+`prisma/schema/app.prisma`, linked by a plain `String` FK to `User.id`:
 
-> **New `User` relations need an `onDelete` policy.** Any model with a
-> `userId` / `createdBy` FK must declare `onDelete: Cascade` (personal data) or
-> `onDelete: SetNull` (retained config/audit, FK nullable) — omitting it
-> defaults to `Restrict` and silently breaks GDPR erasure. See
-> [`.context/privacy/data-erasure.md`](./.context/privacy/data-erasure.md).
+```prisma
+// prisma/schema/app.prisma
+model AppUserProfile {
+  id     String @id @default(cuid())
+  userId String @unique // FK to User.id — no @relation (that needs a field ON User)
+  // …your app fields…
+
+  @@index([userId])
+}
+```
+
+Because there is no Prisma `@relation`, you **must** add the foreign key — with
+an explicit `ON DELETE` — by hand in the generated migration:
+
+```sql
+ALTER TABLE "AppUserProfile"
+  ADD CONSTRAINT "AppUserProfile_userId_fkey"
+  FOREIGN KEY ("userId") REFERENCES "User"("id")
+  ON DELETE CASCADE; -- personal data; SET NULL (nullable FK) for retained config/audit
+```
+
+> ⚠️ **The schema-level `onDelete` guard does not catch a plain-scalar FK** — it
+> only reviews `@relation onDelete`, and your table has none. Skip the migration
+> FK and `prisma.user.delete()` either orphans your rows (a silent GDPR retention
+> violation) or throws `P2003` (erasure breaks for every user). For residual-PII
+> scrub or external cleanup the cascade can't reach, register a hook with
+> `lib/privacy/erasure-hooks.ts`. Full pattern:
+> [`.context/privacy/data-erasure.md`](./.context/privacy/data-erasure.md#app--fork-tables-relating-to-user).
+
+Then surface the table through its own API endpoint (`app/api/v1/<resource>/`)
+and types — don't widen `User`'s public shape for app-only fields.
 
 ---
 
