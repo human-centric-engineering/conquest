@@ -29,7 +29,10 @@ describe('buildMessages', () => {
       newUserMessage: 'Hello',
     });
 
-    expect(messages[0]).toEqual({ role: 'system', content: 'You are a helpful agent.' });
+    expect(messages[0]).toEqual({
+      role: 'system',
+      content: '[Instructions]\nYou are a helpful agent.',
+    });
     expect(messages[messages.length - 1]).toEqual({ role: 'user', content: 'Hello' });
   });
 
@@ -485,7 +488,7 @@ describe('buildMessages', () => {
       brandVoiceInstructions: null,
     });
 
-    expect(messages[0].content).toBe('You are a helpful agent.');
+    expect(messages[0].content).toBe('[Instructions]\nYou are a helpful agent.');
     expect(messages[0].content).not.toContain('[Brand Voice]');
   });
 
@@ -497,7 +500,7 @@ describe('buildMessages', () => {
       newUserMessage: 'Hi',
     });
 
-    expect(messages[0].content).toBe('System.');
+    expect(messages[0].content).toBe('[Instructions]\nSystem.');
     expect(messages[0].content).not.toContain('[Brand Voice]');
   });
 
@@ -545,7 +548,7 @@ describe('buildMessages', () => {
     const content = messages[0].content as string;
     expect(content).toBe(
       '[Persona]\nYou are Sky.\n\n' +
-        'Help with billing.\n\n' +
+        '[Instructions]\nHelp with billing.\n\n' +
         '[Guardrails]\nNever quote unreleased pricing.\n\n' +
         '[Brand Voice]\nFriendly and concise.'
     );
@@ -562,7 +565,7 @@ describe('buildMessages', () => {
       brandVoiceInstructions: null,
     });
 
-    expect(messages[0].content).toBe('Just do the task.');
+    expect(messages[0].content).toBe('[Instructions]\nJust do the task.');
     expect(messages[0].content).not.toContain('[Persona]');
     expect(messages[0].content).not.toContain('[Guardrails]');
     expect(messages[0].content).not.toContain('[Brand Voice]');

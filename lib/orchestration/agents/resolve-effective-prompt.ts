@@ -136,7 +136,7 @@ export function resolveEffectivePrompt(
  * Join the four sections into the single string that becomes the
  * `system` message content for the LLM call. Order:
  *
- *   [Persona] -> systemInstructions -> [Guardrails] -> [Brand Voice]
+ *   [Persona] -> [Instructions] -> [Guardrails] -> [Brand Voice]
  *
  * Persona first establishes identity before the task. Brand voice last
  * leans on recency bias to anchor tone in the model's working window.
@@ -154,7 +154,7 @@ export function composeSections(opts: {
 }): string {
   const parts: string[] = [];
   if (opts.persona) parts.push(`[Persona]\n${opts.persona}`);
-  parts.push(opts.systemInstructions);
+  if (opts.systemInstructions) parts.push(`[Instructions]\n${opts.systemInstructions}`);
   if (opts.guardrails) parts.push(`[Guardrails]\n${opts.guardrails}`);
   if (opts.brandVoiceInstructions) {
     parts.push(`[Brand Voice]\n${opts.brandVoiceInstructions}`);

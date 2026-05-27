@@ -200,7 +200,7 @@ describe('composeSystemPromptString', () => {
     });
     expect(composed).toBe(
       '[Persona]\nYou are Sky.\n\n' +
-        'Help with billing.\n\n' +
+        '[Instructions]\nHelp with billing.\n\n' +
         '[Guardrails]\nNever quote unreleased pricing.\n\n' +
         '[Brand Voice]\nFriendly and concise.'
     );
@@ -221,7 +221,7 @@ describe('composeSystemPromptString', () => {
         profileName: null,
       },
     });
-    expect(composed).toBe('Just do the task.');
+    expect(composed).toBe('[Instructions]\nJust do the task.');
   });
 
   it('handles persona + instructions without guardrails or voice', () => {
@@ -239,6 +239,6 @@ describe('composeSystemPromptString', () => {
         profileName: null,
       },
     });
-    expect(composed).toBe('[Persona]\nYou are X.\n\nDo Y.');
+    expect(composed).toBe('[Persona]\nYou are X.\n\n[Instructions]\nDo Y.');
   });
 });
