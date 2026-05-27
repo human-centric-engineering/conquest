@@ -212,6 +212,10 @@ When no profile is selected, the checkbox is hidden and the field behaves exactl
 
 Comma-separated text input. Tags that scope the agent to specific knowledge base categories. Transformed to `string[]` on submit.
 
+### Knowledge retrieval
+
+`<Select>` bound to `knowledgeRetrievalMode` — Model decides (default) / Force on first message / Force on every message / Force on keywords. Controls whether the chat handler forces a `search_knowledge_base` call; see the retrieval-policy section in `.context/orchestration/knowledge.md`. When set to **Force on keywords**, a conditional comma-separated **Trigger keywords** input (`knowledgeTriggerKeywords`, transformed to `string[]` on submit) appears below. No effect unless the Search Knowledge Base capability is enabled on the Capabilities tab.
+
 ### Topic boundaries
 
 Comma-separated text input. Topics the output guard checks against. If the LLM response touches these topics, the output guard fires. Transformed to `string[]` on submit.

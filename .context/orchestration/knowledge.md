@@ -231,6 +231,19 @@ Cost is logged via `cost-tracker.ts` under operation `knowledge.enrich_keywords`
 
 Results are ranked chunks with their parent document metadata — the admin search route (`POST /knowledge/search`) surfaces this directly. POST (not GET) because the filter payload can contain arbitrary text and we don't want query bodies in URL logs.
 
+### When the agent searches (retrieval policy)
+
+Knowledge search reaches the LLM as a **tool it chooses to call** (`search_knowledge_base`), so by default the model decides per turn whether to retrieve. The tool's description — read at runtime from `AiCapability.functionDefinition` (seeded by `prisma/seeds/005-pattern-advisor.ts`), **not** the code constant in `lib/orchestration/capabilities/built-in/search-knowledge.ts` — is the main lever on that decision; keep the two in sync.
+
+Per-agent `AiAgent.knowledgeRetrievalMode` lets an operator force retrieval instead of relying on the model:
+
+- `model` (default) — the LLM decides; unchanged behaviour.
+- `first_turn` — force a search on the first user turn of a conversation, then let the model decide.
+- `every_turn` — force a search before answering every user turn.
+- `keywords` — force a search when the user message matches any term in `AiAgent.knowledgeTriggerKeywords` (whole-word, case-insensitive).
+
+Enforcement is in `lib/orchestration/chat/streaming-handler.ts`: when the policy fires it sets `toolChoice: { name: 'search_knowledge_base' }` on the **first LLM iteration of the turn only** — later tool-result iterations are never pinned, so the model answers freely once it has results (no force-search loop). It is a no-op unless the agent has the `search_knowledge_base` capability enabled. Configured on the agent form's Instructions tab → **Knowledge retrieval**.
+
 ### Vector-only mode (default)
 
 Cosine distance via pgvector's `<=>` operator with a small additive **keyword boost** for chunks whose `keywords` (-0.05) or `content` (-0.02) match `plainto_tsquery(query)`. The boost magnitude is admin-tunable via `searchConfig.keywordBoostWeight`. Result rows include a single `similarity` score.
