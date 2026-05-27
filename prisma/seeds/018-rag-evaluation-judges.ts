@@ -45,7 +45,7 @@ const JUDGES: readonly JudgeSpec[] = [
   // ---------------------------------------------------------------------------
   {
     slug: 'eval-judge-context-precision',
-    name: 'Context Precision Judge',
+    name: 'Eval: Context Precision Judge',
     description:
       'Scores whether the citations the response used are actually relevant to the question. High = retrieved chunks were on-topic; low = clutter.',
     instructions: `You are the Context Precision Judge in an evaluation pipeline. Your job is to score whether the citations a response USED are actually relevant to the question.
@@ -90,7 +90,7 @@ OUTPUT — respond ONLY with the JSON object below, no prose around it and no co
   // ---------------------------------------------------------------------------
   {
     slug: 'eval-judge-context-recall',
-    name: 'Context Recall Judge',
+    name: 'Eval: Context Recall Judge',
     description:
       'Scores whether the retrieved citations cover the gold reference passages from EXPECTED ANSWER. High = retrieval surfaced the right docs; low = missing context.',
     instructions: `You are the Context Recall Judge in an evaluation pipeline. Your job is to score whether the retrieval surfaced the passages the gold answer relied on.
@@ -136,7 +136,7 @@ OUTPUT — respond ONLY with the JSON object below, no prose around it and no co
   // ---------------------------------------------------------------------------
   {
     slug: 'eval-judge-answer-similarity',
-    name: 'Answer Similarity Judge',
+    name: 'Eval: Answer Similarity Judge',
     description:
       'Scores semantic similarity between the response and the expected answer. Complements Correctness (which scores coverage of specific key points).',
     instructions: `You are the Answer Similarity Judge in an evaluation pipeline. Your job is to score how semantically close an AI response is to the expected answer.
@@ -198,6 +198,7 @@ const unit: SeedUnit = {
           // Seed-managed — see 016-evaluation-judges for the policy.
           isSystem: true,
           kind: 'judge',
+          name: judge.name,
           description: judge.description,
           systemInstructions: judge.instructions,
         },
