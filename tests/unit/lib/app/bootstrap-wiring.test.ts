@@ -43,16 +43,18 @@ describe('rate-limit auto-wire (lib/app/rate-limit.ts → middleware realm)', ()
     // Arrange — the app hook registers a namespace-scoped tier + rule
     vi.resetModules();
     vi.doMock('@/lib/app/rate-limit', async () => {
-      const rl =
-        await vi.importActual<typeof import('@/lib/security/rate-limit')>(
-          '@/lib/security/rate-limit'
-        );
+      const rl = await vi.importActual<typeof import('@/lib/security/rate-limit')>(
+        '@/lib/security/rate-limit'
+      );
       const policy = await vi.importActual<typeof import('@/lib/security/rate-limit-policy')>(
         '@/lib/security/rate-limit-policy'
       );
       return {
         registerAppRateLimits: (): void => {
-          rl.registerRateLimitTier('wiretest', rl.createRateLimiter({ interval: 60_000, maxRequests: 3 }));
+          rl.registerRateLimitTier(
+            'wiretest',
+            rl.createRateLimiter({ interval: 60_000, maxRequests: 3 })
+          );
           policy.registerRateLimitRule({
             match: /^\/api\/v1\/wiretest\//,
             tier: 'wiretest',
@@ -70,7 +72,9 @@ describe('rate-limit auto-wire (lib/app/rate-limit.ts → middleware realm)', ()
     // Assert — the rule is spliced into the effective policy ahead of the catch-all,
     // and the app tier resolves. If the middleware didn't auto-call the hook, neither holds.
     const eff = getEffectiveRateLimitPolicy();
-    const appRule = eff.find((r) => r.match instanceof RegExp && r.match.test('/api/v1/wiretest/x'));
+    const appRule = eff.find(
+      (r) => r.match instanceof RegExp && r.match.test('/api/v1/wiretest/x')
+    );
     expect(appRule, 'app rule should be in the effective policy').toBeDefined();
     expect(appRule?.tier).toBe('wiretest');
     expect(eff[eff.length - 1].key, 'catch-all stays last').toBe('session-user');
@@ -83,9 +87,8 @@ describe('rate-limit auto-wire (lib/app/rate-limit.ts → middleware realm)', ()
 
     // Act
     await import('@/lib/security/rate-limit-middleware');
-    const { getEffectiveRateLimitPolicy, RATE_LIMIT_POLICY } = await import(
-      '@/lib/security/rate-limit-policy'
-    );
+    const { getEffectiveRateLimitPolicy, RATE_LIMIT_POLICY } =
+      await import('@/lib/security/rate-limit-policy');
 
     // Assert — no app rules registered → identity return (no allocation, no extra rule)
     expect(getEffectiveRateLimitPolicy()).toBe(RATE_LIMIT_POLICY);
@@ -119,9 +122,8 @@ describe('capability auto-wire (lib/app/capabilities.ts → server realm)', () =
       return { initAppCapabilities: (): void => reg.registerAppCapability(new WireCap()) };
     });
 
-    const { registerBuiltInCapabilities, __resetRegistrationForTests } = await import(
-      '@/lib/orchestration/capabilities/registry'
-    );
+    const { registerBuiltInCapabilities, __resetRegistrationForTests } =
+      await import('@/lib/orchestration/capabilities/registry');
     const { capabilityDispatcher } = await import('@/lib/orchestration/capabilities/dispatcher');
     __resetRegistrationForTests();
 
@@ -137,9 +139,8 @@ describe('capability auto-wire (lib/app/capabilities.ts → server realm)', () =
     vi.resetModules();
     const initSpy = vi.fn();
     vi.doMock('@/lib/app/capabilities', () => ({ initAppCapabilities: initSpy }));
-    const { registerBuiltInCapabilities, __resetRegistrationForTests } = await import(
-      '@/lib/orchestration/capabilities/registry'
-    );
+    const { registerBuiltInCapabilities, __resetRegistrationForTests } =
+      await import('@/lib/orchestration/capabilities/registry');
     __resetRegistrationForTests();
 
     // Act — two passes (e.g. two chat dispatches)

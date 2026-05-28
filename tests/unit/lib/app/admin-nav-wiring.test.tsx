@@ -19,8 +19,7 @@ vi.mock('@/lib/app/admin-nav', async () => {
     '@/lib/admin-nav/registry'
   );
   return {
-    initAppNav: (): void =>
-      reg.registerNavSection({ title: 'WireTestSection', items: [] }),
+    initAppNav: (): void => reg.registerNavSection({ title: 'WireTestSection', items: [] }),
   };
 });
 
@@ -31,9 +30,8 @@ describe('admin-nav auto-wire (lib/app/admin-nav.ts → admin-sidebar, client re
   it('the sidebar module invokes initAppNav at load, populating the registry', async () => {
     // Act — importing the sidebar runs its top-level initAppNav() call
     await import('@/components/admin/admin-sidebar');
-    const { getRegisteredNavSections, __resetNavRegistryForTests } = await import(
-      '@/lib/admin-nav/registry'
-    );
+    const { getRegisteredNavSections, __resetNavRegistryForTests } =
+      await import('@/lib/admin-nav/registry');
 
     // Assert — the section the hook registered is present (the sidebar called it)
     const titles = getRegisteredNavSections().map((s) => s.title);

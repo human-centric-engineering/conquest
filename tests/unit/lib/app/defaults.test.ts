@@ -17,10 +17,7 @@ import { registerAppRateLimits } from '@/lib/app/rate-limit';
 import { initAppCapabilities } from '@/lib/app/capabilities';
 import { initAppNav } from '@/lib/app/admin-nav';
 import { getEffectiveRateLimitPolicy, RATE_LIMIT_POLICY } from '@/lib/security/rate-limit-policy';
-import {
-  getRegisteredNavSections,
-  __resetNavRegistryForTests,
-} from '@/lib/admin-nav/registry';
+import { getRegisteredNavSections, __resetNavRegistryForTests } from '@/lib/admin-nav/registry';
 
 afterEach(() => {
   __resetNavRegistryForTests();
