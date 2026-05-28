@@ -10,6 +10,7 @@ vi.mock('@/lib/db/client', () => ({
 
 import { prisma } from '@/lib/db/client';
 import { getMcpServerConfig, invalidateMcpConfigCache } from '@/lib/orchestration/mcp/config';
+import { SUNRISE_VERSION } from '@/lib/sunrise-version';
 
 function makeConfigRow(
   overrides: Partial<{
@@ -26,7 +27,7 @@ function makeConfigRow(
     slug: 'global',
     isEnabled: false,
     serverName: 'Sunrise MCP Server',
-    serverVersion: '1.0.0',
+    serverVersion: SUNRISE_VERSION,
     maxSessionsPerKey: 5,
     globalRateLimit: 60,
     auditRetentionDays: 90,
@@ -63,7 +64,7 @@ describe('getMcpServerConfig', () => {
           slug: 'global',
           isEnabled: false,
           serverName: 'Sunrise MCP Server',
-          serverVersion: '1.0.0',
+          serverVersion: SUNRISE_VERSION,
           maxSessionsPerKey: 5,
           globalRateLimit: 60,
           auditRetentionDays: 90,
@@ -93,7 +94,7 @@ describe('getMcpServerConfig', () => {
     expect(result.isEnabled).toBe(true);
     expect(result.serverName).toBe('Custom MCP');
     expect(result.globalRateLimit).toBe(120);
-    expect(result.serverVersion).toBe('1.0.0');
+    expect(result.serverVersion).toBe(SUNRISE_VERSION);
     expect(result.maxSessionsPerKey).toBe(5);
     expect(result.auditRetentionDays).toBe(90);
   });

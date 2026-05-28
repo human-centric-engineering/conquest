@@ -163,6 +163,9 @@ describe('GET /api/health', () => {
       const response = await GET(createMockRequest());
       const body = await parseResponse<HealthResponse>(response);
 
+      // Pin the status as part of the contract — body-only assertions let
+      // a 500 regression slip through (anti-pattern #7).
+      expect(response.status).toBe(200);
       expect(body.sunrise).toBe(SUNRISE_VERSION);
     });
 

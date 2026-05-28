@@ -58,6 +58,7 @@ import {
 } from '@/lib/analytics/config';
 import { headers } from 'next/headers';
 import { logger } from '@/lib/logging';
+import { APP_VERSION } from '@/lib/app-version';
 import { serverTrack } from '@/lib/analytics/server';
 
 describe('lib/analytics/server - serverTrack', () => {
@@ -329,7 +330,7 @@ describe('lib/analytics/server - serverTrack', () => {
       expect(body.properties.plan).toBe('enterprise');
       expect(body.properties.referrer).toBe('google');
       expect(body.properties.$lib).toBe('sunrise-server');
-      expect(body.properties.$lib_version).toBe('1.0.0');
+      expect(body.properties.$lib_version).toBe(APP_VERSION);
       expect(body.properties.$ip).toBe('192.168.1.1');
       expect(body.properties.$user_agent).toBe('PostHogTestAgent/2.0');
       expect(body.properties.$current_url).toBe('https://example.com/signup');

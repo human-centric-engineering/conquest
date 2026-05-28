@@ -13,6 +13,7 @@ import { getRouteLogger } from '@/lib/api/context';
 import { getClientIP } from '@/lib/security/ip';
 import { getMcpServerConfig, invalidateMcpConfigCache } from '@/lib/orchestration/mcp';
 import { logAdminAction, computeChanges } from '@/lib/orchestration/audit/admin-audit-logger';
+import { SUNRISE_VERSION } from '@/lib/sunrise-version';
 import { updateMcpSettingsSchema } from '@/lib/validations/mcp';
 
 export const GET = withAdminAuth(async (request) => {
@@ -37,7 +38,9 @@ export const PATCH = withAdminAuth(async (request, session) => {
       slug: 'global',
       isEnabled: false,
       serverName: 'Sunrise MCP Server',
-      serverVersion: '1.0.0',
+      // serverVersion tracks SUNRISE_VERSION — see lib/orchestration/mcp/config.ts
+      // for the rationale (Sunrise IS the MCP server implementation here).
+      serverVersion: SUNRISE_VERSION,
       maxSessionsPerKey: 5,
       globalRateLimit: 60,
       auditRetentionDays: 90,

@@ -25,18 +25,16 @@ import { describe, it, expect } from 'vitest';
 import { SUNRISE_VERSION } from '@/lib/sunrise-version';
 
 /**
- * SemVer 2.0.0 regex from the official spec:
- *   https://semver.org/#is-there-a-suggested-regular-expression-regex-to-check-a-semver-string
- *
- * Accepts MAJOR.MINOR.PATCH plus optional pre-release / build-metadata tails.
- * We don't relax it — even during 0.x, the *shape* is fixed; only the
- * stability guarantees attached to the number are loose.
+ * SemVer MAJOR.MINOR.PATCH shape. `VERSIONING.md` defers pre-release tags
+ * past 1.0, so the simple form is sufficient — the full SemVer 2.0.0 regex
+ * would test arms `SUNRISE_VERSION` can never legally hold under the
+ * current versioning policy. If pre-release support lands later, widen the
+ * regex (and the policy doc) together.
  */
-const SEMVER_REGEX =
-  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
+const SEMVER_REGEX = /^\d+\.\d+\.\d+$/;
 
 describe('SUNRISE_VERSION', () => {
-  it('matches the SemVer 2.0.0 shape', () => {
+  it('matches the SemVer MAJOR.MINOR.PATCH shape', () => {
     // Guards a fork (or a Phase-2 typo) from setting the constant to a
     // non-SemVer string like 'unreleased' or '0.0' — downstream consumers
     // (health endpoint, Hub discovery) assume the shape.

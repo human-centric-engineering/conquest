@@ -3,13 +3,8 @@ import { getDatabaseHealth } from '@/lib/db/utils';
 import { getRouteLogger } from '@/lib/api/context';
 import { getMemoryUsage } from '@/lib/monitoring';
 import type { HealthCheckResponse, ServiceStatus } from '@/lib/monitoring';
+import { APP_VERSION } from '@/lib/app-version';
 import { SUNRISE_VERSION } from '@/lib/sunrise-version';
-
-/**
- * Cache the version at module load time to avoid reading package.json on every request.
- * This is safe because the version doesn't change during runtime.
- */
-const APP_VERSION = process.env.npm_package_version || '1.0.0';
 
 /**
  * Check if memory should be included in health response
@@ -33,6 +28,38 @@ function determineServiceStatus(connected: boolean, latency?: number): ServiceSt
   }
 
   return 'operational';
+}
+
+/**
+ * Build the health response payload.
+ *
+ * Centralises the response-shape construction so the version fields (`version`,
+ * `sunrise`), uptime, timestamp, and memory toggle live in ONE place — the
+ * success and error branches both call through here. Adding a new top-level
+ * field to the contract means one edit, not two.
+ */
+function buildHealthPayload(params: {
+  status: 'ok' | 'error';
+  database: HealthCheckResponse['services']['database'];
+  error?: string;
+}): HealthCheckResponse {
+  const payload: HealthCheckResponse = {
+    status: params.status,
+    version: APP_VERSION,
+    sunrise: SUNRISE_VERSION,
+    uptime: Math.floor(process.uptime()),
+    timestamp: new Date().toISOString(),
+    services: {
+      database: params.database,
+    },
+    ...(params.error !== undefined && { error: params.error }),
+  };
+
+  if (shouldIncludeMemory()) {
+    payload.memory = getMemoryUsage();
+  }
+
+  return payload;
 }
 
 /**
@@ -79,56 +106,25 @@ export async function GET(request: NextRequest): Promise<Response> {
     const dbHealth = await getDatabaseHealth();
     const dbStatus = determineServiceStatus(dbHealth.connected, dbHealth.latency);
 
-    // Build response
-    const response: HealthCheckResponse = {
+    const response = buildHealthPayload({
       status: dbHealth.connected ? 'ok' : 'error',
-      version: APP_VERSION,
-      sunrise: SUNRISE_VERSION,
-      uptime: Math.floor(process.uptime()),
-      timestamp: new Date().toISOString(),
-      services: {
-        database: {
-          status: dbStatus,
-          connected: dbHealth.connected,
-          ...(dbHealth.latency !== undefined && { latency: dbHealth.latency }),
-        },
+      database: {
+        status: dbStatus,
+        connected: dbHealth.connected,
+        ...(dbHealth.latency !== undefined && { latency: dbHealth.latency }),
       },
-    };
+    });
 
-    // Optionally include memory usage
-    if (shouldIncludeMemory()) {
-      response.memory = getMemoryUsage();
-    }
-
-    // Return 503 Service Unavailable if database is not connected
-    if (!dbHealth.connected) {
-      return NextResponse.json(response, { status: 503 });
-    }
-
-    return NextResponse.json(response);
+    // 503 Service Unavailable if the database is not connected
+    return NextResponse.json(response, { status: dbHealth.connected ? 200 : 503 });
   } catch (error) {
     log.error('Health check failed', error);
 
-    // Build error response with same structure
-    const errorResponse: HealthCheckResponse = {
+    const errorResponse = buildHealthPayload({
       status: 'error',
-      version: APP_VERSION,
-      sunrise: SUNRISE_VERSION,
-      uptime: Math.floor(process.uptime()),
-      timestamp: new Date().toISOString(),
-      services: {
-        database: {
-          status: 'outage',
-          connected: false,
-        },
-      },
+      database: { status: 'outage', connected: false },
       error: error instanceof Error ? error.message : 'Unknown error',
-    };
-
-    // Optionally include memory usage even in error case
-    if (shouldIncludeMemory()) {
-      errorResponse.memory = getMemoryUsage();
-    }
+    });
 
     return NextResponse.json(errorResponse, { status: 503 });
   }

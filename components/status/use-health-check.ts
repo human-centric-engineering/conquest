@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { HealthCheckResponse } from '@/lib/monitoring';
+import { healthCheckResponseSchema } from '@/lib/validations/monitoring';
 
 /**
  * Health check state
@@ -107,7 +108,16 @@ export function useHealthCheck(options: UseHealthCheckOptions = {}): UseHealthCh
   const fetchHealth = useCallback(async () => {
     try {
       const response = await fetch(endpoint);
-      const data = (await response.json()) as HealthCheckResponse;
+      // Validate the response body against the documented shape rather than
+      // a bare `as HealthCheckResponse` cast. A server returning a payload
+      // that doesn't match the contract (e.g. an older deployment missing
+      // the `sunrise` field, or a stripping proxy) becomes a clear fetch
+      // error here instead of a silent `undefined` rendered in the UI.
+      const parsed = healthCheckResponseSchema.safeParse(await response.json());
+      if (!parsed.success) {
+        throw new Error(`Invalid /api/health response shape: ${parsed.error.message}`);
+      }
+      const data: HealthCheckResponse = parsed.data;
 
       if (!mountedRef.current) return;
 

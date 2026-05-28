@@ -18,6 +18,7 @@ import {
   GA4_ENV,
 } from '@/lib/analytics/config';
 import type { ServerTrackOptions, ServerTrackContext, TrackResult } from '@/lib/analytics/types';
+import { APP_VERSION } from '@/lib/app-version';
 import { logger } from '@/lib/logging';
 
 /**
@@ -206,7 +207,7 @@ async function trackPostHog(
     properties: {
       ...options.properties,
       $lib: 'sunrise-server',
-      $lib_version: '1.0.0',
+      $lib_version: APP_VERSION,
       ...(context.ip && { $ip: context.ip }),
       ...(context.userAgent && { $user_agent: context.userAgent }),
       ...(context.page?.url && { $current_url: context.page.url }),

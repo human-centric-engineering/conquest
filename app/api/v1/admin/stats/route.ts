@@ -15,6 +15,7 @@ import { prisma } from '@/lib/db/client';
 import { getDatabaseHealth } from '@/lib/db/utils';
 import { successResponse } from '@/lib/api/responses';
 import { getRouteLogger } from '@/lib/api/context';
+import { APP_VERSION } from '@/lib/app-version';
 import type { SystemStats } from '@/types/admin';
 
 /**
@@ -22,10 +23,9 @@ import type { SystemStats } from '@/types/admin';
  */
 const PROCESS_START_TIME = Date.now();
 
-/**
- * Cache the version at module load time
- */
-const APP_VERSION = process.env.npm_package_version || '1.0.0';
+// APP_VERSION is the fork's app version, derived from package.json via the
+// shared constant in `lib/app-version.ts`. See VERSIONING.md for why this is
+// separate from SUNRISE_VERSION.
 
 /**
  * GET /api/v1/admin/stats
