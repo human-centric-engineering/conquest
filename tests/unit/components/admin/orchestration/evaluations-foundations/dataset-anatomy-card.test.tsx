@@ -22,6 +22,12 @@ import {
   datasetSamples,
 } from '@/components/admin/orchestration/evaluations-foundations/help-text';
 
+// test-review:accept coverage — DatasetAnatomyCard hardcodes samples[1] (the richest
+// sample). The four `?? '—'` / `? JSON.stringify(...) : '—'` fallback arms in FieldRow
+// are unreachable because the component takes no props to inject a different sample.
+// Fixing this branch coverage requires a source refactor (add a sample prop) — out of
+// scope for the pre-fork coverage sweep that's just landing meaningful tests on the
+// component as it stands today.
 describe('DatasetAnatomyCard', () => {
   it('renders all 5 expected field names as code elements', () => {
     render(<DatasetAnatomyCard />);

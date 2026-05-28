@@ -239,6 +239,43 @@ describe('appendCasesToDataset — happy path', () => {
     expect(rows[0].metadata).toBe(Prisma.DbNull);
   });
 
+  it('stores metadata and referenceCitations as InputJsonValue when provided', async () => {
+    // Arrange: case with defined metadata and referenceCitations
+    mockTx.aiDataset.findUnique.mockResolvedValue({
+      id: 'ds-1',
+      caseCount: 0,
+      source: 'upload',
+    });
+    mockTx.aiDatasetCase.findMany.mockResolvedValue([
+      {
+        position: 0,
+        input: 'q',
+        expectedOutput: null,
+        metadata: { key: 'val' },
+        referenceCitations: [{ url: 'x' }],
+      },
+    ]);
+    mockTx.aiDatasetCase.createMany.mockResolvedValue({ count: 1 });
+    mockTx.aiDataset.update.mockResolvedValue({ id: 'ds-1' });
+
+    // Act
+    await appendCasesToDataset({
+      datasetId: 'ds-1',
+      cases: [{ input: 'q', metadata: { key: 'val' }, referenceCitations: [{ url: 'x' }] }],
+    });
+
+    // Assert: metadata and referenceCitations are passed through as InputJsonValue (NOT DbNull)
+    const rows = (
+      mockTx.aiDatasetCase.createMany.mock.calls[0][0] as {
+        data: Array<{ metadata: unknown; referenceCitations: unknown }>;
+      }
+    ).data;
+    expect(rows[0].metadata).toEqual({ key: 'val' });
+    expect(rows[0].referenceCitations).toEqual([{ url: 'x' }]);
+    expect(rows[0].metadata).not.toBe(Prisma.DbNull);
+    expect(rows[0].referenceCitations).not.toBe(Prisma.DbNull);
+  });
+
   it('case with referenceCitations: undefined → stored as Prisma.DbNull (gap 23)', async () => {
     mockTx.aiDataset.findUnique.mockResolvedValue({
       id: 'ds-1',

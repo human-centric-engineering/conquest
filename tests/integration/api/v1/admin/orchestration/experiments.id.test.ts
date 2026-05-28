@@ -214,6 +214,9 @@ describe('PATCH /api/v1/admin/orchestration/experiments/:id', () => {
     const data = await parseJson<{ success: boolean; data: { name: string } }>(response);
     // test-review:accept tobe_true — structural boolean assertion on API response field
     expect(data.success).toBe(true);
+    // Verify the serialised response body contains the updated name — a broken
+    // successResponse serialiser that echoed the old value would not be caught otherwise.
+    expect(data.data.name).toBe('Updated Name');
     expect(vi.mocked(logAdminAction)).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'experiment.update' })
     );

@@ -327,20 +327,23 @@ describe('generateCases — description mode: domainPrompt length upper boundary
   });
 
   it('accepts a domainPrompt of exactly 1000 chars (boundary is inclusive)', async () => {
+    // Arrange
     const exactlyAtLimit = 'a'.repeat(1000);
     mockedDrain.mockResolvedValue(
       drainOk(JSON.stringify({ cases: [{ input: 'q', expectedOutput: 'a' }] }))
     );
 
-    await expect(
-      generateCases({
-        agentId: 'a',
-        userId: 'u',
-        mode: 'description',
-        count: 1,
-        domainPrompt: exactlyAtLimit,
-      })
-    ).resolves.toBeDefined();
+    // Act
+    const result = await generateCases({
+      agentId: 'a',
+      userId: 'u',
+      mode: 'description',
+      count: 1,
+      domainPrompt: exactlyAtLimit,
+    });
+
+    // Assert: function completed, returned cases, and called drain exactly once
+    expect(result.cases).toHaveLength(1);
     expect(mockedDrain).toHaveBeenCalledTimes(1);
   });
 });

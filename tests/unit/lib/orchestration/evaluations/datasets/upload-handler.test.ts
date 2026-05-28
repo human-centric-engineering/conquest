@@ -203,7 +203,7 @@ describe('uploadDataset — JSONL happy path', () => {
     // CSV with an empty middle row triggers a parser warning.
     const csv = 'input\nA\n\nB\n';
     const result = await uploadDataset(baseParams({ fileName: 'cases.csv', content: csv }));
-    expect(result.warnings.length).toBeGreaterThan(0);
+    expect(result.warnings).toHaveLength(1);
     expect(result.warnings.some((w) => /empty row/i.test(w))).toBe(true);
     expect(mockedLoggerInfo.mock.calls[0][1]).toMatchObject({
       parseWarnings: result.warnings.length,

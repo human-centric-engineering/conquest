@@ -128,6 +128,27 @@ describe('POST /generate-cases (preview) — rate limit', () => {
   });
 });
 
+describe('POST /generate-cases (preview) — CUID validation', () => {
+  beforeEach(() => {
+    vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+  });
+
+  it('returns 400 when the dataset id param is not a valid CUID', async () => {
+    // Arrange: invalid CUID in route params
+    const badCtx = { params: Promise.resolve({ id: 'not-a-cuid' }) };
+
+    // Act
+    const res = await PreviewPOST(makeRequest({ agentId: 'a', mode: 'kb', count: 1 }), badCtx);
+    const body = await parseJson<{ success: boolean; error: { code: string } }>(res);
+
+    // Assert: route validates id before touching the DB
+    expect(res.status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('VALIDATION_ERROR');
+    expect(vi.mocked(prisma.aiDataset.findFirst)).not.toHaveBeenCalled();
+  });
+});
+
 describe('POST /generate-cases (preview) — validation + ownership', () => {
   beforeEach(() => {
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
@@ -157,6 +178,24 @@ describe('POST /generate-cases (preview) — happy path', () => {
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
     vi.mocked(prisma.aiDataset.findFirst).mockResolvedValue({ id: DATASET_ID } as never);
     vi.mocked(prisma.aiAgent.findUnique).mockResolvedValue({ id: 'a' } as never);
+  });
+
+  it('omits topic from the generateCases call when topic is not provided', async () => {
+    // Arrange: valid request without a topic field
+    const fakeResult = {
+      cases: [{ input: 'q', expectedOutput: 'a', metadata: { source: 'synthetic', mode: 'kb' } }],
+      costUsd: 0.001,
+      tokenUsage: { input: 50, output: 25 },
+    };
+    vi.mocked(generateCases).mockResolvedValue(fakeResult);
+
+    // Act
+    const res = await PreviewPOST(makeRequest({ agentId: 'a', mode: 'kb', count: 1 }), ctx());
+
+    // Assert: status 200 AND generateCases was NOT passed a topic key
+    expect(res.status).toBe(200);
+    const call = vi.mocked(generateCases).mock.calls[0][0];
+    expect(call).not.toHaveProperty('topic');
   });
 
   it('returns the generator result verbatim under success:true', async () => {
@@ -274,5 +313,18 @@ describe('POST /generate-cases/commit — happy path + guardrails', () => {
       cases: [{ input: 'q', expectedOutput: 'a' }],
       source: 'synthetic',
     });
+    // Assert response body — a broken successResponse serialiser would not be caught otherwise
+    const body = await parseJson<{
+      success: boolean;
+      data: {
+        datasetId: string;
+        appendedCount: number;
+        newCaseCount: number;
+        newContentHash: string;
+      };
+    }>(res);
+    expect(body.success).toBe(true);
+    expect(body.data.appendedCount).toBe(1);
+    expect(body.data.datasetId).toBe(DATASET_ID);
   });
 });

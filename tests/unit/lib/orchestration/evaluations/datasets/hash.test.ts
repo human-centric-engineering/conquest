@@ -193,10 +193,10 @@ describe('hashDatasetCases — additional branches', () => {
     const withFooUndefined = [
       { position: 0, input: 'Q', metadata: { foo: undefined } as unknown as undefined },
     ];
-    // These hash DIFFERENTLY because canonicalise({foo:undefined})→{} ≠ null
-    // Both are valid inputs; we verify stability (each is self-consistent)
-    expect(hashDatasetCases(withUndefinedMetadata)).toBe(hashDatasetCases(withUndefinedMetadata));
-    expect(hashDatasetCases(withFooUndefined)).toBe(hashDatasetCases(withFooUndefined));
+    // These hash DIFFERENTLY because canonicalise({foo:undefined})→{} (empty obj) ≠ null
+    // The empty-object vs null serialisation distinction is the real contract here.
+    expect(withFooUndefined).not.toBe(withUndefinedMetadata); // sanity: inputs differ
+    expect(hashDatasetCases(withFooUndefined)).not.toBe(hashDatasetCases(withUndefinedMetadata));
   });
 
   it('expectedOutput: undefined vs expectedOutput: null → same hash (gap 31)', () => {

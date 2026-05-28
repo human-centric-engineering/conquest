@@ -192,6 +192,33 @@ describe('GET /agents/:id/quarantined-capabilities', () => {
     ]);
   });
 
+  it('returns expiresAt as ISO string when quarantineUntil is a future Date', async () => {
+    // Arrange: fixed far-future date avoids wall-clock dependency
+    const futureDate = new Date('2099-01-01T00:00:00Z');
+    mockAgentFindUnique.mockResolvedValue({ id: AGENT_ID });
+    mockBindingFindMany.mockResolvedValue([
+      {
+        capability: {
+          id: 'cap-soft',
+          slug: 'timed_tool',
+          name: 'Timed Tool',
+          quarantineState: 'quarantined-soft',
+          quarantineReason: 'Vendor issue',
+          quarantineUntil: futureDate,
+        },
+      },
+    ]);
+
+    // Act
+    const res = await GET_AGENT_QUARANTINED(makeGetRequest(), makeParams(AGENT_ID));
+    const body = await res.json();
+
+    // Assert: route converts the Date to ISO string and sets the correct mode
+    expect(res.status).toBe(200);
+    expect(body.data.items[0].expiresAt).toBe('2099-01-01T00:00:00.000Z');
+    expect(body.data.items[0].mode).toBe('quarantined-soft');
+  });
+
   it('filters out bindings whose quarantineUntil has already passed', async () => {
     mockAgentFindUnique.mockResolvedValue({ id: AGENT_ID });
     mockBindingFindMany.mockResolvedValue([
@@ -271,35 +298,76 @@ describe('GET /capabilities/:id/quarantine-attribution', () => {
     expect(body.data.attribution).toBeNull();
   });
 
-  it('returns name when present, otherwise email, otherwise null', async () => {
+  it('returns 400 when id is not a valid CUID', async () => {
+    // Arrange: invalid id — CUID validation fires before any DB query
+    const res = await GET_ATTRIBUTION(makeGetRequest(), makeParams('not-a-cuid'));
+    const body = await res.json();
+    // Assert: route rejects without hitting the DB
+    expect(res.status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('VALIDATION_ERROR');
+    expect(body.error.message).toMatch(/Invalid capability id/i);
+    expect(mockCapFindUnique).not.toHaveBeenCalled();
+  });
+
+  it('uses actor name when the audit row has a user with name set', async () => {
+    // Arrange
     const at = new Date('2026-05-01T12:00:00Z');
     mockCapFindUnique.mockResolvedValue({
       id: CAP_ID,
       quarantineState: 'quarantined-soft',
       quarantineUntil: null,
     });
-
-    // Name takes precedence
-    mockAuditFindFirst.mockResolvedValueOnce({
+    mockAuditFindFirst.mockResolvedValue({
       createdAt: at,
       user: { name: 'Jane Doe', email: 'jane@example.com' },
     });
-    let body = await (await GET_ATTRIBUTION(makeGetRequest(), makeParams(CAP_ID))).json();
+
+    // Act
+    const res = await GET_ATTRIBUTION(makeGetRequest(), makeParams(CAP_ID));
+    const body = await res.json();
+
+    // Assert: name takes precedence over email
     expect(body.data.attribution.actorName).toBe('Jane Doe');
     expect(body.data.attribution.at).toBe(at.toISOString());
+  });
 
-    // Email fallback when name is null
-    mockAuditFindFirst.mockResolvedValueOnce({
+  it('falls back to email when the audit row has a user with null name', async () => {
+    // Arrange
+    const at = new Date('2026-05-01T12:00:00Z');
+    mockCapFindUnique.mockResolvedValue({
+      id: CAP_ID,
+      quarantineState: 'quarantined-soft',
+      quarantineUntil: null,
+    });
+    mockAuditFindFirst.mockResolvedValue({
       createdAt: at,
       user: { name: null, email: 'jane@example.com' },
     });
-    body = await (await GET_ATTRIBUTION(makeGetRequest(), makeParams(CAP_ID))).json();
-    expect(body.data.attribution.actorName).toBe('jane@example.com');
 
-    // Null when user row is gone (deleted admin — audit row preserved
-    // via onDelete: SetNull on AiAdminAuditLog.user).
-    mockAuditFindFirst.mockResolvedValueOnce({ createdAt: at, user: null });
-    body = await (await GET_ATTRIBUTION(makeGetRequest(), makeParams(CAP_ID))).json();
+    // Act
+    const res = await GET_ATTRIBUTION(makeGetRequest(), makeParams(CAP_ID));
+    const body = await res.json();
+
+    // Assert: email used as fallback when name is null
+    expect(body.data.attribution.actorName).toBe('jane@example.com');
+  });
+
+  it("actorName is null when the audit row's user is null (deleted admin)", async () => {
+    // Arrange: user row deleted — audit row preserved via onDelete: SetNull
+    const at = new Date('2026-05-01T12:00:00Z');
+    mockCapFindUnique.mockResolvedValue({
+      id: CAP_ID,
+      quarantineState: 'quarantined-soft',
+      quarantineUntil: null,
+    });
+    mockAuditFindFirst.mockResolvedValue({ createdAt: at, user: null });
+
+    // Act
+    const res = await GET_ATTRIBUTION(makeGetRequest(), makeParams(CAP_ID));
+    const body = await res.json();
+
+    // Assert: actorName is null when the user record no longer exists
     expect(body.data.attribution.actorName).toBeNull();
   });
 });
