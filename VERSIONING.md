@@ -29,10 +29,17 @@ The current version of the platform lives in
 
 A fork has **two versions**, deliberately separate:
 
-| Version           | Where it lives                                       | Owned by | What it means                                              |
-| ----------------- | ---------------------------------------------------- | -------- | ---------------------------------------------------------- |
-| `version`         | `package.json`                                       | The fork | The fork's app version (your product)                      |
-| `SUNRISE_VERSION` | [`lib/sunrise-version.ts`](./lib/sunrise-version.ts) | Sunrise  | The upstream platform version this checkout corresponds to |
+| Version           | Source of truth                                      | Exposed as a typed import via         | Owned by | What it means                                              |
+| ----------------- | ---------------------------------------------------- | ------------------------------------- | -------- | ---------------------------------------------------------- |
+| `version`         | `package.json`                                       | [`APP_VERSION`](./lib/app-version.ts) | The fork | The fork's app version (your product)                      |
+| `SUNRISE_VERSION` | [`lib/sunrise-version.ts`](./lib/sunrise-version.ts) | (the file itself)                     | Sunrise  | The upstream platform version this checkout corresponds to |
+
+`APP_VERSION` imports `package.json` directly at module load — it is not
+derived from `process.env.npm_package_version`, which is unset under common
+production launchers (Docker `CMD ["node", ...]`, Next.js standalone, PM2,
+some serverless runtimes). The two constants `APP_VERSION` and
+`SUNRISE_VERSION` are the canonical import sites; server-side code should
+read these rather than reaching into `package.json` or hard-coding a literal.
 
 Both are surfaced on the (public) `/api/health` endpoint as `version` and
 `sunrise` respectively, so operators and the eventual HCE Hub can ask any
@@ -40,9 +47,11 @@ deployment which Sunrise it's on without guessing.
 
 **Why two?** Because if `SUNRISE_VERSION` were derived from
 `package.json.version`, Sunrise's version would silently follow whatever the
-fork sets — making _"which Sunrise are you on?"_ unanswerable. The dedicated
-constant is Sunrise-owned: maintainers bump it on release; forks merge it
-through.
+fork sets — making _"which Sunrise are you on?"_ unanswerable. The two files
+are deliberate siblings: `lib/sunrise-version.ts` is Sunrise-owned (forks
+never edit it, upstream merges keep it current); `lib/app-version.ts` is
+fork-owned-by-reference (its body imports `package.json`, which the fork
+edits on every app release).
 
 ---
 

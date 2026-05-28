@@ -369,14 +369,20 @@ question forever.
 
 ### The two-version model
 
-| Version           | Where it lives                                       | Yours or Sunrise's?                                                     |
-| ----------------- | ---------------------------------------------------- | ----------------------------------------------------------------------- |
-| `version`         | [`package.json`](./package.json)                     | **Yours** — your app's version. Bump on your own release cadence.       |
-| `SUNRISE_VERSION` | [`lib/sunrise-version.ts`](./lib/sunrise-version.ts) | **Sunrise's** — which release of the upstream platform you're built on. |
+| Version           | Source of truth                                      | Typed import (server-side)            | Yours or Sunrise's?                                                     |
+| ----------------- | ---------------------------------------------------- | ------------------------------------- | ----------------------------------------------------------------------- |
+| `version`         | [`package.json`](./package.json)                     | [`APP_VERSION`](./lib/app-version.ts) | **Yours** — your app's version. Bump on your own release cadence.       |
+| `SUNRISE_VERSION` | [`lib/sunrise-version.ts`](./lib/sunrise-version.ts) | (the file itself)                     | **Sunrise's** — which release of the upstream platform you're built on. |
 
-You already set the first one in [§1 First steps](#1-first-steps). The second
-one is set for you by whichever Sunrise release you forked from, and updates
-automatically when you merge in a new upstream release.
+You already set the first one in [§1 First steps](#1-first-steps) by editing
+`package.json.version`. Server-side code reads it through the typed
+[`APP_VERSION`](./lib/app-version.ts) constant — a thin file that imports
+`package.json` directly at module load (deliberately not via
+`process.env.npm_package_version`, which is unset under common production
+launchers like `node`-direct Docker entrypoints and Next.js standalone
+builds). The second version is set for you by whichever Sunrise release you
+forked from, and updates automatically when you merge in a new upstream
+release.
 
 ### Why not just use `package.json.version`?
 
@@ -385,9 +391,16 @@ Sunrise's version were derived from it, the upstream version number would
 silently follow your fork's — and nobody could ask a running deployment
 _"which Sunrise are you on?"_ without you also publishing a mapping table.
 
-`lib/sunrise-version.ts` is Sunrise-owned: maintainers bump the constant on
-each upstream release; you don't touch the file. The header comment in the
-file restates this so anyone scanning the source spots it immediately.
+The two version files are deliberate siblings in `lib/`:
+
+- `lib/app-version.ts` re-exports your `package.json.version` as a typed
+  `APP_VERSION` string. This file is **part of the platform** — Sunrise ships
+  it, forks don't edit it (the indirection through `package.json` is the
+  whole point — you edit `package.json`, not this file).
+- `lib/sunrise-version.ts` exports `SUNRISE_VERSION` directly. **Sunrise**
+  maintainers bump the constant on each upstream release; you don't touch
+  the file. The header comments in both files restate this so anyone
+  scanning the source spots it immediately.
 
 > **Don't:** edit `lib/sunrise-version.ts` in your fork. The only way you'd
 > hit a merge conflict on this file is if you've edited it; resolving the
@@ -417,14 +430,23 @@ for free.
 
 ### Where you might surface it in your fork
 
-Optional, not required — surface it wherever it's useful for your operators:
+Optional, not required — surface it wherever it's useful for your operators.
+Import the constants from their canonical locations:
+
+```ts
+import { APP_VERSION } from '@/lib/app-version';
+import { SUNRISE_VERSION } from '@/lib/sunrise-version';
+```
+
+Common surfaces:
 
 - **Your own health endpoint**, if you replaced Sunrise's. Add
-  `sunrise: SUNRISE_VERSION` to the payload.
+  `sunrise: SUNRISE_VERSION` (and optionally `version: APP_VERSION`) to the
+  payload.
 - **An admin "About" panel or sidebar footer** — one line, useful when
   triaging issues that might be release-specific.
-- **Your structured-logger base context** — include `sunrise` in every log
-  line so support tickets carry it implicitly.
+- **Your structured-logger base context** — include both in every log
+  line so support tickets carry the version pair implicitly.
 
 ### What to do when you upgrade
 
