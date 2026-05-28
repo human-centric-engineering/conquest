@@ -62,12 +62,39 @@ const malformedPayload = {
   },
 };
 
-// ─── Helper ──────────────────────────────────────────────────────────────────
+// Polling cadence shared across most polling-lifecycle and status-change tests.
+// Tests that need to compare two different cadences (e.g. the re-render
+// reschedule test) declare their own local constants.
+const POLLING_INTERVAL_MS = 5000;
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function mockFetchOnce(payload: unknown, status = 200): void {
   vi.spyOn(global, 'fetch').mockResolvedValueOnce(
     new Response(JSON.stringify(payload), { status })
   );
+}
+
+function mockFetchOnceRejected(reason: unknown): void {
+  vi.spyOn(global, 'fetch').mockRejectedValueOnce(reason);
+}
+
+// Queues a fetch that won't settle until the caller invokes resolve() or reject().
+// Use for tests that need to observe in-flight state (refresh isLoading, unmount
+// mid-flight, etc.).
+function mockFetchOncePending(): {
+  resolve: (r: Response) => void;
+  reject: (e: unknown) => void;
+} {
+  let resolveFn!: (r: Response) => void;
+  let rejectFn!: (e: unknown) => void;
+  vi.spyOn(global, 'fetch').mockReturnValueOnce(
+    new Promise<Response>((resolve, reject) => {
+      resolveFn = resolve;
+      rejectFn = reject;
+    })
+  );
+  return { resolve: resolveFn, reject: rejectFn };
 }
 
 // ─── Suite ───────────────────────────────────────────────────────────────────
@@ -121,15 +148,14 @@ describe('useHealthCheck', () => {
     });
 
     it('does not start a polling interval when autoStart is false', async () => {
-      const INTERVAL = 5000;
       mockFetchOnce(validOkPayload);
       // No further mocks set up — any extra fetch would throw/fail the test
 
-      renderHook(() => useHealthCheck({ autoStart: false, pollingInterval: INTERVAL }));
+      renderHook(() => useHealthCheck({ autoStart: false, pollingInterval: POLLING_INTERVAL_MS }));
 
       await act(async () => {
         // Advance past two full polling cycles
-        await vi.advanceTimersByTimeAsync(INTERVAL * 2 + 100);
+        await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS * 2 + 100);
       });
 
       // Only the single initial fetch ran
@@ -228,7 +254,7 @@ describe('useHealthCheck', () => {
   describe('fetch-error path', () => {
     it('preserves the thrown Error instance on result.current.error', async () => {
       const networkError = new Error('Network unreachable');
-      vi.spyOn(global, 'fetch').mockRejectedValueOnce(networkError);
+      mockFetchOnceRejected(networkError);
 
       const { result } = renderHook(() => useHealthCheck({ autoStart: false }));
 
@@ -243,7 +269,7 @@ describe('useHealthCheck', () => {
 
     it('wraps a non-Error thrown value as new Error("Failed to fetch health status")', async () => {
       // Covers the fallback branch: `err instanceof Error ? err : new Error('Failed to fetch health status')`
-      vi.spyOn(global, 'fetch').mockRejectedValueOnce('string error');
+      mockFetchOnceRejected('string error');
 
       const { result } = renderHook(() => useHealthCheck({ autoStart: false }));
 
@@ -259,7 +285,7 @@ describe('useHealthCheck', () => {
       // Asymmetric with the success path: the first ERROR does fire onStatusChange
       // because previousStatus starts as null, and the error guard only checks
       // `previousStatus.current !== 'error'` (null !== 'error' is true).
-      vi.spyOn(global, 'fetch').mockRejectedValueOnce(new Error('down'));
+      mockFetchOnceRejected(new Error('down'));
       const onStatusChange = vi.fn();
 
       await act(async () => {
@@ -280,10 +306,13 @@ describe('useHealthCheck', () => {
       mockFetchOnce(validErrorPayload); // triggers transition
 
       const onStatusChange = vi.fn();
-      const INTERVAL = 5000;
 
       const { result } = renderHook(() =>
-        useHealthCheck({ autoStart: false, pollingInterval: INTERVAL, onStatusChange })
+        useHealthCheck({
+          autoStart: false,
+          pollingInterval: POLLING_INTERVAL_MS,
+          onStatusChange,
+        })
       );
 
       // First fetch: seeds status, no callback
@@ -302,7 +331,7 @@ describe('useHealthCheck', () => {
     });
 
     it('fires onStatusChange("ok") exactly once on an error → ok transition', async () => {
-      vi.spyOn(global, 'fetch').mockRejectedValueOnce(new Error('down')); // seeds 'error'
+      mockFetchOnceRejected(new Error('down')); // seeds 'error'
       mockFetchOnce(validOkPayload); // triggers error → ok transition
 
       const onStatusChange = vi.fn();
@@ -387,14 +416,13 @@ describe('useHealthCheck', () => {
 
   describe('polling lifecycle', () => {
     it('schedules repeated fetches at pollingInterval after startPolling()', async () => {
-      const INTERVAL = 5000;
       // Initial fetch + 2 polling ticks = 3 total
       mockFetchOnce(validOkPayload);
       mockFetchOnce(validOkPayload);
       mockFetchOnce(validOkPayload);
 
       const { result } = renderHook(() =>
-        useHealthCheck({ autoStart: false, pollingInterval: INTERVAL })
+        useHealthCheck({ autoStart: false, pollingInterval: POLLING_INTERVAL_MS })
       );
 
       // Initial fetch
@@ -409,7 +437,7 @@ describe('useHealthCheck', () => {
       });
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(INTERVAL * 2);
+        await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS * 2);
       });
 
       expect(global.fetch).toHaveBeenCalledTimes(3);
@@ -417,13 +445,12 @@ describe('useHealthCheck', () => {
     });
 
     it('calling startPolling while already polling clears the previous interval — no double-fetch per tick', async () => {
-      const INTERVAL = 5000;
       // Initial + 1 tick after restart (not 2 — the old interval must be gone)
       mockFetchOnce(validOkPayload);
       mockFetchOnce(validOkPayload);
 
       const { result } = renderHook(() =>
-        useHealthCheck({ autoStart: false, pollingInterval: INTERVAL })
+        useHealthCheck({ autoStart: false, pollingInterval: POLLING_INTERVAL_MS })
       );
 
       await act(async () => {
@@ -438,7 +465,7 @@ describe('useHealthCheck', () => {
       // Advance halfway through the first interval, then call startPolling again.
       // This clears the first interval and replaces it with a new one starting now.
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(INTERVAL / 2);
+        await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS / 2);
       });
 
       act(() => {
@@ -452,7 +479,7 @@ describe('useHealthCheck', () => {
       // Finding #10: tighten per-tick distribution.
       // At INTERVAL/2 into the new interval — no premature tick should have fired.
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(INTERVAL / 2);
+        await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS / 2);
       });
       // Still only the 1 initial fetch — the old interval was cleared and the new one
       // hasn't elapsed yet (only half elapsed so far).
@@ -460,19 +487,18 @@ describe('useHealthCheck', () => {
 
       // Advance the remaining half — exactly one tick fires at INTERVAL after restart.
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(INTERVAL / 2);
+        await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS / 2);
       });
       // 1 initial + 1 tick from the new interval = 2 total; no double-fire
       expect(global.fetch).toHaveBeenCalledTimes(2);
     });
 
     it('stopPolling clears the interval and flips isPolling to false', async () => {
-      const INTERVAL = 5000;
       mockFetchOnce(validOkPayload);
       // After stopPolling, no further fetches should run even if time advances
 
       const { result } = renderHook(() =>
-        useHealthCheck({ autoStart: false, pollingInterval: INTERVAL })
+        useHealthCheck({ autoStart: false, pollingInterval: POLLING_INTERVAL_MS })
       );
 
       await act(async () => {
@@ -490,7 +516,7 @@ describe('useHealthCheck', () => {
       expect(result.current.isPolling).toBe(false);
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(INTERVAL * 3);
+        await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS * 3);
       });
 
       // Only the initial fetch ran; nothing after stopPolling
@@ -498,12 +524,11 @@ describe('useHealthCheck', () => {
     });
 
     it('unmount clears the polling interval — no further fetches after the component unmounts', async () => {
-      const INTERVAL = 5000;
       mockFetchOnce(validOkPayload);
       // If the interval leaked after unmount, a second fetch would run at t=INTERVAL.
 
       const { unmount } = renderHook(() =>
-        useHealthCheck({ autoStart: true, pollingInterval: INTERVAL })
+        useHealthCheck({ autoStart: true, pollingInterval: POLLING_INTERVAL_MS })
       );
 
       // Let the initial fetch settle
@@ -516,7 +541,7 @@ describe('useHealthCheck', () => {
 
       // Advance well past the next polling tick
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(INTERVAL * 2);
+        await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS * 2);
       });
 
       // Still only the single pre-unmount fetch
@@ -577,12 +602,7 @@ describe('useHealthCheck', () => {
       mockFetchOnce(validOkPayload); // initial fetch
       // For the refresh() call: hold the fetch pending so we can observe the
       // intermediate isLoading: true state before the promise resolves.
-      let resolveRefresh!: (r: Response) => void;
-      vi.spyOn(global, 'fetch').mockReturnValueOnce(
-        new Promise<Response>((resolve) => {
-          resolveRefresh = resolve;
-        })
-      );
+      const { resolve: resolveRefresh } = mockFetchOncePending();
 
       const { result } = renderHook(() => useHealthCheck({ autoStart: false }));
 
@@ -634,12 +654,7 @@ describe('useHealthCheck', () => {
       mockFetchOnce(validOkPayload);
 
       // Hold a second fetch pending — it will be dispatched by refresh()
-      let resolveSecondFetch!: (r: Response) => void;
-      vi.spyOn(global, 'fetch').mockReturnValueOnce(
-        new Promise<Response>((resolve) => {
-          resolveSecondFetch = resolve;
-        })
-      );
+      const { resolve: resolveSecondFetch } = mockFetchOncePending();
 
       const onStatusChange = vi.fn();
       const { result, unmount } = renderHook(() =>
@@ -685,12 +700,7 @@ describe('useHealthCheck', () => {
       // With the guard intact, the callback must NOT fire after unmount.
 
       // Hold the initial fetch promise so we can unmount before it rejects
-      let rejectFetch!: (reason: unknown) => void;
-      vi.spyOn(global, 'fetch').mockReturnValueOnce(
-        new Promise<Response>((_resolve, reject) => {
-          rejectFetch = reject;
-        })
-      );
+      const { reject: rejectFetch } = mockFetchOncePending();
 
       const onStatusChange = vi.fn();
       const { unmount } = renderHook(() => useHealthCheck({ autoStart: false, onStatusChange }));
