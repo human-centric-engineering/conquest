@@ -140,6 +140,48 @@ describe('CapabilityQuarantineCard — QuarantinedView', () => {
     expect(screen.getByRole('button', { name: /Lift quarantine/i })).toBeEnabled();
   });
 
+  it('renders audit attribution when supplied', () => {
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60_000).toISOString();
+    render(
+      <CapabilityQuarantineCard
+        capabilityId="cap-1"
+        capabilityName="Stripe Charge"
+        state={{
+          quarantineState: 'quarantined-soft',
+          quarantineReason: 'vendor outage',
+          quarantineUntil: null,
+        }}
+        attribution={{ at: tenMinutesAgo, actorName: 'Jane Doe' }}
+        affectedAgents={AFFECTED}
+      />
+    );
+
+    expect(screen.getByLabelText('Audit attribution')).toHaveTextContent(
+      /Quarantined 10 min ago by Jane Doe\./i
+    );
+  });
+
+  it('omits the actor name when attribution actor is missing', () => {
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60_000).toISOString();
+    render(
+      <CapabilityQuarantineCard
+        capabilityId="cap-1"
+        capabilityName="Stripe Charge"
+        state={{
+          quarantineState: 'quarantined-soft',
+          quarantineReason: null,
+          quarantineUntil: null,
+        }}
+        attribution={{ at: tenMinutesAgo, actorName: null }}
+        affectedAgents={AFFECTED}
+      />
+    );
+
+    const line = screen.getByLabelText('Audit attribution');
+    expect(line).toHaveTextContent(/Quarantined 10 min ago\./i);
+    expect(line).not.toHaveTextContent(/by/);
+  });
+
   it('opens a popover listing the affected agents when the count is clicked', async () => {
     const user = userEvent.setup();
 

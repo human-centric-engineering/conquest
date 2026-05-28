@@ -62,10 +62,19 @@ export interface QuarantineCapabilityState {
   quarantineUntil: string | null;
 }
 
+export interface QuarantineAttribution {
+  /** ISO 8601 timestamp of when the most recent quarantine was applied. */
+  at: string;
+  /** Display name (falls back to email); null when the actor row was deleted. */
+  actorName: string | null;
+}
+
 export interface QuarantineCapabilityCardProps {
   capabilityId: string;
   capabilityName: string;
   state: QuarantineCapabilityState;
+  /** Audit attribution for the current quarantine — `null` when active or unknown. */
+  attribution?: QuarantineAttribution | null;
   /** Agents currently binding this capability — drives the confirmation blast-radius copy. */
   affectedAgents: Array<{ id: string; name: string; slug: string }>;
 }
@@ -81,6 +90,7 @@ export function CapabilityQuarantineCard({
   capabilityId,
   capabilityName,
   state,
+  attribution,
   affectedAgents,
 }: QuarantineCapabilityCardProps): React.ReactElement {
   const isQuarantined = state.quarantineState !== 'active';
@@ -89,6 +99,7 @@ export function CapabilityQuarantineCard({
       capabilityId={capabilityId}
       capabilityName={capabilityName}
       state={state}
+      attribution={attribution ?? null}
       affectedAgents={affectedAgents}
     />
   ) : (
@@ -338,11 +349,13 @@ function ActiveView({
 function QuarantinedView({
   capabilityId,
   state,
+  attribution,
   affectedAgents,
 }: {
   capabilityId: string;
   capabilityName: string;
   state: QuarantineCapabilityState;
+  attribution: QuarantineAttribution | null;
   affectedAgents: QuarantineCapabilityCardProps['affectedAgents'];
 }): React.ReactElement {
   const [lifting, setLifting] = React.useState(false);
@@ -355,6 +368,7 @@ function QuarantinedView({
   const expiry = state.quarantineUntil ? new Date(state.quarantineUntil) : null;
   const expiryHasPassed = expiry !== null && expiry.getTime() <= renderedAt;
   const mode = state.quarantineState as QuarantineMode;
+  const attributionLine = attribution ? formatAttribution(attribution, renderedAt) : null;
 
   async function lift(): Promise<void> {
     setLifting(true);
@@ -383,6 +397,12 @@ function QuarantinedView({
         {error && (
           <p className="text-red-600 dark:text-red-400" role="alert">
             {error}
+          </p>
+        )}
+
+        {attributionLine && (
+          <p className="text-muted-foreground text-xs" aria-label="Audit attribution">
+            {attributionLine}
           </p>
         )}
 
@@ -482,4 +502,32 @@ function AffectedAgentsPopover({
       </Popover>
     </div>
   );
+}
+
+// ─── Shared: format the audit attribution line ─────────────────────────────
+
+/**
+ * Render the audit attribution as "Quarantined <human-relative> ago by
+ * <name>." Falls back gracefully when the actor row is gone (deleted
+ * user → audit row still exists, name unknown) or when the timestamp
+ * looks invalid.
+ *
+ * `now` is passed in so the caller can snapshot it once per render via
+ * useState lazy init, keeping the function pure-render-safe.
+ */
+function formatAttribution(att: QuarantineAttribution, now: number): string {
+  const t = Date.parse(att.at);
+  const when = Number.isFinite(t) ? humanise(now - t) : 'recently';
+  const who = att.actorName?.trim() ? ` by ${att.actorName}` : '';
+  return `Quarantined ${when}${who}.`;
+}
+
+function humanise(ms: number): string {
+  if (ms < 60_000) return 'just now';
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} day${days === 1 ? '' : 's'} ago`;
 }
