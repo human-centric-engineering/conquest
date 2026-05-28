@@ -165,6 +165,38 @@ export const GET = withAdminAuth(async (request, _session) => {
     for (const r of rows) keywordCountMap.set(r.documentId, Number(r.count));
   }
 
+  // Count of active agents that can access each document. Mirrors the
+  // access-set built by `resolveAgentDocumentAccess`:
+  //   - every `full`-mode agent has access to every document
+  //   - restricted agents get explicit doc grants, tag-mediated grants, and
+  //     every `scope = 'system'` doc
+  // Duplicates across the four paths are folded with UNION; only active
+  // agents are counted so the column reflects who would actually search.
+  const agentCountMap = new Map<string, number>();
+  if (documentIds.length > 0) {
+    const rows = await prisma.$queryRaw<Array<{ documentId: string; count: bigint }>>`
+      SELECT d.id AS "documentId", COUNT(DISTINCT a.id) AS count
+      FROM ai_knowledge_document d
+      LEFT JOIN ai_agent a ON a."isActive" = true AND a."deletedAt" IS NULL AND (
+        a."knowledgeAccessMode" = 'full'
+        OR (a."knowledgeAccessMode" = 'restricted' AND d.scope = 'system')
+        OR EXISTS (
+          SELECT 1 FROM ai_agent_knowledge_document g
+          WHERE g."agentId" = a.id AND g."documentId" = d.id
+        )
+        OR EXISTS (
+          SELECT 1
+          FROM ai_agent_knowledge_tag at
+          JOIN ai_knowledge_document_tag dt ON dt."tagId" = at."tagId"
+          WHERE at."agentId" = a.id AND dt."documentId" = d.id
+        )
+      )
+      WHERE d.id = ANY(${documentIds}::text[])
+      GROUP BY d.id
+    `;
+    for (const r of rows) agentCountMap.set(r.documentId, Number(r.count));
+  }
+
   // Flatten the tag join rows into an inline `tags` array. The doc list page
   // renders these as chips in the table — agents granted any of these tags
   // can search this document when running in restricted mode.
@@ -174,6 +206,7 @@ export const GET = withAdminAuth(async (request, _session) => {
       ...rest,
       tags: tags.map((t) => ({ id: t.tag.id, slug: t.tag.slug, name: t.tag.name })),
       distinctKeywordCount: keywordCountMap.get(d.id) ?? 0,
+      agentCount: agentCountMap.get(d.id) ?? 0,
     };
   });
 

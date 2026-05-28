@@ -17,6 +17,7 @@ import {
   Tag as TagIcon,
   Trash2,
   Upload,
+  Users,
 } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
@@ -84,6 +85,7 @@ const errorBodySchema = z
   .nullable();
 
 import { CompareProvidersModal } from '@/components/admin/orchestration/knowledge/compare-providers-modal';
+import { DocumentAgentsModal } from '@/components/admin/orchestration/knowledge/document-agents-modal';
 import { DocumentChunksModal } from '@/components/admin/orchestration/knowledge/document-chunks-modal';
 import { DocumentKeywordsModal } from '@/components/admin/orchestration/knowledge/document-keywords-modal';
 import { DocumentRenameModal } from '@/components/admin/orchestration/knowledge/document-rename-modal';
@@ -262,6 +264,8 @@ export function ManageTab({ documents: initialDocuments, onRefresh, scope }: Man
   const [editTagsName, setEditTagsName] = useState<string | null>(null);
   const [renameId, setRenameId] = useState<string | null>(null);
   const [renameName, setRenameName] = useState<string | null>(null);
+  const [viewAgentsId, setViewAgentsId] = useState<string | null>(null);
+  const [viewAgentsName, setViewAgentsName] = useState<string | null>(null);
   const [setupPreference, setSetupPreference] = useLocalStorage<'open' | 'closed' | null>(
     'orchestration.knowledge.builtin-patterns-panel',
     null
@@ -865,6 +869,44 @@ export function ManageTab({ documents: initialDocuments, onRefresh, scope }: Man
                       </span>
                     </th>
                     <th className="px-4 py-2 text-right font-medium">
+                      <span className="inline-flex items-center justify-end gap-1">
+                        <Tip label="Active agents that can search this document. Click the count to see who they are and how they have access.">
+                          <span>Uses</span>
+                        </Tip>
+                        <FieldHelp
+                          title="How agent access is counted"
+                          ariaLabel="About the Uses column"
+                          contentClassName="w-96 max-h-80 overflow-y-auto"
+                        >
+                          <p>
+                            The count of <em>active</em> agents that can search this document. Four
+                            paths grant access:
+                          </p>
+                          <ul className="mt-2 list-disc space-y-1 pl-4 text-xs">
+                            <li>
+                              <strong>Full access</strong> — the agent&apos;s knowledge mode is{' '}
+                              <code>full</code>, so every document is searchable.
+                            </li>
+                            <li>
+                              <strong>Direct grant</strong> — a restricted agent was assigned this
+                              document on its Knowledge tab.
+                            </li>
+                            <li>
+                              <strong>Tag grant</strong> — a restricted agent was assigned a tag
+                              that this document carries.
+                            </li>
+                            <li>
+                              <strong>System scope</strong> — restricted agents always get access to
+                              documents whose scope is <code>system</code>.
+                            </li>
+                          </ul>
+                          <p className="mt-2 text-xs">
+                            Click the count to see each agent and the path that grants access.
+                          </p>
+                        </FieldHelp>
+                      </span>
+                    </th>
+                    <th className="px-4 py-2 text-right font-medium">
                       <Tip label="Percentage of the parsed source text that was captured in stored chunks. Click the document to see details.">
                         <span>Coverage</span>
                       </Tip>
@@ -971,6 +1013,37 @@ export function ManageTab({ documents: initialDocuments, onRefresh, scope }: Man
                                   }
                                 >
                                   {count === 0 ? 'Enrich' : count.toLocaleString()}
+                                </button>
+                              </Tip>
+                            );
+                          })()}
+                        </td>
+                        <td className="px-4 py-2 text-right">
+                          {(() => {
+                            const count = doc.agentCount ?? 0;
+                            return (
+                              <Tip
+                                label={
+                                  count === 0
+                                    ? 'No active agents can search this document. Click to see why and grant access.'
+                                    : `${count} active agent${count === 1 ? '' : 's'} can search this document. Click to see who.`
+                                }
+                              >
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setViewAgentsId(doc.id);
+                                    setViewAgentsName(doc.name);
+                                  }}
+                                  className={
+                                    count === 0
+                                      ? 'text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs hover:underline'
+                                      : 'text-primary inline-flex items-center gap-1 text-xs hover:underline'
+                                  }
+                                  aria-label={`Show ${count} agent${count === 1 ? '' : 's'} with access to ${doc.name}`}
+                                >
+                                  <Users className="h-3 w-3" />
+                                  {count.toLocaleString()}
                                 </button>
                               </Tip>
                             );
@@ -1237,6 +1310,17 @@ export function ManageTab({ documents: initialDocuments, onRefresh, scope }: Man
           if (!open) {
             setRenameId(null);
             setRenameName(null);
+          }
+        }}
+      />
+      <DocumentAgentsModal
+        documentId={viewAgentsId}
+        documentName={viewAgentsName}
+        open={viewAgentsId !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setViewAgentsId(null);
+            setViewAgentsName(null);
           }
         }}
       />
