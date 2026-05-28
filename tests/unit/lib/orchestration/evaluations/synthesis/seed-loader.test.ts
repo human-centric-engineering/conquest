@@ -118,6 +118,59 @@ describe('loadKbSeed — restricted mode', () => {
     });
   });
 
+  it('uses only granted IDs without querying aiKnowledgeDocument when includeSystemScope is false', async () => {
+    // Gap 7: restricted + includeSystemScope: false → no aiKnowledgeDocument.findMany call.
+    // NOTE: AgentDocumentAccess types includeSystemScope as literal `true` so this path is
+    // structurally unreachable via the normal call chain. We force the value with `as never`
+    // to exercise the `!includeSystemScope` guard in loadAllowedDocIds directly; this is the
+    // only way to hit that branch from a unit test without extracting and exporting the helper.
+    mockedResolveAccess.mockResolvedValue({
+      mode: 'restricted',
+      documentIds: ['granted-1', 'granted-2'],
+      includeSystemScope: false as never,
+    });
+    vi.mocked(prisma.aiKnowledgeChunk.findMany).mockResolvedValue([] as never);
+
+    await loadKbSeed({ agentId: 'a-1' });
+
+    // The system-docs query must NOT have been called
+    expect(vi.mocked(prisma.aiKnowledgeDocument.findMany)).not.toHaveBeenCalled();
+    // The chunk query must be scoped to the granted IDs only
+    const args = vi.mocked(prisma.aiKnowledgeChunk.findMany).mock.calls[0][0];
+    expect(args?.where).toEqual({
+      documentId: { in: expect.arrayContaining(['granted-1', 'granted-2']) },
+    });
+  });
+
+  it('falls back to granted-only IDs when aiKnowledgeDocument.findMany throws (includeSystemScope: true)', async () => {
+    // Gap 8: restricted + system-scope ON + document query throws → falls back to granted-only
+    mockedResolveAccess.mockResolvedValue({
+      mode: 'restricted',
+      documentIds: ['granted-1'],
+      includeSystemScope: true,
+    });
+    vi.mocked(prisma.aiKnowledgeDocument.findMany).mockRejectedValue(new Error('db error'));
+    vi.mocked(prisma.aiKnowledgeChunk.findMany).mockResolvedValue([
+      {
+        documentId: 'granted-1',
+        content: 'fallback content',
+        chunkType: 'body',
+        document: { name: 'Doc' },
+      },
+    ] as never);
+
+    const result = await loadKbSeed({ agentId: 'a-1' });
+
+    // Fell back to granted-only → chunk query was still called, result came through
+    expect(result).toHaveLength(1);
+    expect(result[0].documentId).toBe('granted-1');
+    // The chunk filter should only include the granted IDs (no system docs because fallback applies)
+    const args = vi.mocked(prisma.aiKnowledgeChunk.findMany).mock.calls[0][0];
+    expect(args?.where).toEqual({
+      documentId: { in: ['granted-1'] },
+    });
+  });
+
   it('returns [] when the agent has no granted docs (restricted mode, no system scope)', async () => {
     mockedResolveAccess.mockResolvedValue({
       mode: 'restricted',
@@ -234,6 +287,267 @@ describe('loadFailureSeed — score filtering', () => {
 
     const result = await loadFailureSeed({ agentId: 'a-1', userId: 'u-1' });
     expect(result.filter((r) => r.caseId === 'case-dup')).toHaveLength(1);
+  });
+});
+
+describe('loadFailureSeed — score threshold boundary', () => {
+  beforeEach(() => {
+    vi.mocked(prisma.aiEvaluationRun.findMany).mockResolvedValue([{ id: 'run-1' }] as never);
+  });
+
+  it('score exactly 0.6 is NOT a failure (threshold is strictly < 0.6)', async () => {
+    // Gap 9: boundary value exactly at threshold — should be excluded from failures
+    vi.mocked(prisma.aiEvaluationCaseResult.findMany).mockResolvedValue([
+      {
+        datasetCaseId: 'case-boundary',
+        metricScores: {
+          a: { score: 0.6, reasoning: 'just at threshold' },
+        },
+        datasetCase: { input: 'boundary q', expectedOutput: 'boundary a' },
+      },
+    ] as never);
+
+    const result = await loadFailureSeed({ agentId: 'a-1', userId: 'u-1' });
+
+    // Score of 0.6 is NOT less than 0.6 — must NOT be returned as a failure
+    expect(result).toHaveLength(0);
+  });
+
+  it('score of 0.59 IS a failure (just below the 0.6 threshold)', async () => {
+    vi.mocked(prisma.aiEvaluationCaseResult.findMany).mockResolvedValue([
+      {
+        datasetCaseId: 'case-just-below',
+        metricScores: {
+          a: { score: 0.59, reasoning: 'just below threshold' },
+        },
+        datasetCase: { input: 'almost q', expectedOutput: 'almost a' },
+      },
+    ] as never);
+
+    const result = await loadFailureSeed({ agentId: 'a-1', userId: 'u-1' });
+    expect(result).toHaveLength(1);
+    expect(result[0].caseId).toBe('case-just-below');
+  });
+});
+
+describe('loadFailureSeed — invalid score values (NaN / Infinity)', () => {
+  beforeEach(() => {
+    vi.mocked(prisma.aiEvaluationRun.findMany).mockResolvedValue([{ id: 'run-1' }] as never);
+  });
+
+  it('ignores a metric entry with a NaN score — resulting meanScore is null → case not returned', async () => {
+    // Gap 10: NaN is not finite, must be skipped; if all scores are invalid → meanScore null → case skipped
+    vi.mocked(prisma.aiEvaluationCaseResult.findMany).mockResolvedValue([
+      {
+        datasetCaseId: 'case-nan',
+        metricScores: {
+          a: { score: NaN, reasoning: 'broken scorer' },
+        },
+        datasetCase: { input: 'q', expectedOutput: 'a' },
+      },
+    ] as never);
+
+    const result = await loadFailureSeed({ agentId: 'a-1', userId: 'u-1' });
+    expect(result).toHaveLength(0);
+  });
+
+  it('ignores a metric entry with an Infinity score — resulting meanScore is null → case not returned', async () => {
+    // Gap 10: Infinity is not finite, must be skipped
+    vi.mocked(prisma.aiEvaluationCaseResult.findMany).mockResolvedValue([
+      {
+        datasetCaseId: 'case-inf',
+        metricScores: {
+          a: { score: Infinity, reasoning: 'overflow scorer' },
+        },
+        datasetCase: { input: 'q', expectedOutput: 'a' },
+      },
+    ] as never);
+
+    const result = await loadFailureSeed({ agentId: 'a-1', userId: 'u-1' });
+    expect(result).toHaveLength(0);
+  });
+
+  it('skips entries with invalid scores but still processes valid ones in the same metricScores', async () => {
+    // Mixed: one NaN entry, one valid 0.3 entry → mean should only use the valid one → 0.3 → failure
+    vi.mocked(prisma.aiEvaluationCaseResult.findMany).mockResolvedValue([
+      {
+        datasetCaseId: 'case-mixed',
+        metricScores: {
+          bad: { score: NaN, reasoning: 'nan scorer' },
+          good: { score: 0.3, reasoning: 'poor result' },
+        },
+        datasetCase: { input: 'q', expectedOutput: 'a' },
+      },
+    ] as never);
+
+    const result = await loadFailureSeed({ agentId: 'a-1', userId: 'u-1' });
+    expect(result).toHaveLength(1);
+    expect(result[0].score).toBeCloseTo(0.3, 6);
+  });
+});
+
+describe('loadFailureSeed — metricScores shape guards', () => {
+  beforeEach(() => {
+    vi.mocked(prisma.aiEvaluationRun.findMany).mockResolvedValue([{ id: 'run-1' }] as never);
+  });
+
+  it('returns no failure when metricScores is an array (not an object)', async () => {
+    // Gap 11: Array.isArray guard → meanScore null → case skipped
+    vi.mocked(prisma.aiEvaluationCaseResult.findMany).mockResolvedValue([
+      {
+        datasetCaseId: 'case-array',
+        metricScores: [{ score: 0.1, reasoning: 'should not parse' }],
+        datasetCase: { input: 'q', expectedOutput: 'a' },
+      },
+    ] as never);
+
+    const result = await loadFailureSeed({ agentId: 'a-1', userId: 'u-1' });
+    expect(result).toHaveLength(0);
+  });
+
+  it('returns no failure when metricScores is null', async () => {
+    // Gap 12: null → meanScore null → case skipped
+    vi.mocked(prisma.aiEvaluationCaseResult.findMany).mockResolvedValue([
+      {
+        datasetCaseId: 'case-null-scores',
+        metricScores: null,
+        datasetCase: { input: 'q', expectedOutput: 'a' },
+      },
+    ] as never);
+
+    const result = await loadFailureSeed({ agentId: 'a-1', userId: 'u-1' });
+    expect(result).toHaveLength(0);
+  });
+
+  it('returns null worstReasoning when the worst-scoring metric has a non-string reasoning', async () => {
+    // Gap 13: reasoning is a number → worstReasoning must be null (not the number)
+    vi.mocked(prisma.aiEvaluationCaseResult.findMany).mockResolvedValue([
+      {
+        datasetCaseId: 'case-numeric-reasoning',
+        metricScores: {
+          a: { score: 0.1, reasoning: 42 }, // worst scorer, numeric reasoning
+          b: { score: 0.5, reasoning: 'this is fine' },
+        },
+        datasetCase: { input: 'q', expectedOutput: 'a' },
+      },
+    ] as never);
+
+    const result = await loadFailureSeed({ agentId: 'a-1', userId: 'u-1' });
+    expect(result).toHaveLength(1);
+    // mean(0.1, 0.5) = 0.3 → below threshold
+    expect(result[0].score).toBeCloseTo(0.3, 6);
+    // reasoning field is numeric on the worst scorer → must map to null
+    expect(result[0].reasoning).toBeNull();
+  });
+});
+
+describe('loadFailureSeed — expectedOutput null', () => {
+  beforeEach(() => {
+    vi.mocked(prisma.aiEvaluationRun.findMany).mockResolvedValue([{ id: 'run-1' }] as never);
+  });
+
+  it('sets seed expectedOutput to null when datasetCase.expectedOutput is null', async () => {
+    // Gap 14: null expectedOutput → truncation branch skipped → seed has null
+    vi.mocked(prisma.aiEvaluationCaseResult.findMany).mockResolvedValue([
+      {
+        datasetCaseId: 'case-no-output',
+        metricScores: {
+          a: { score: 0.2, reasoning: 'poor' },
+        },
+        datasetCase: { input: 'q', expectedOutput: null },
+      },
+    ] as never);
+
+    const result = await loadFailureSeed({ agentId: 'a-1', userId: 'u-1' });
+    expect(result).toHaveLength(1);
+    expect(result[0].expectedOutput).toBeNull();
+  });
+});
+
+describe('loadFailureSeed — limit early-break', () => {
+  beforeEach(() => {
+    vi.mocked(prisma.aiEvaluationRun.findMany).mockResolvedValue([{ id: 'run-1' }] as never);
+  });
+
+  it('stops collecting once the limit is reached even when more failures exist', async () => {
+    // Gap 15: provide 12 failing candidates with limit: 8 → exactly 8 returned
+    // All have unique caseIds and scores below 0.6 so they all qualify
+    const candidates = Array.from({ length: 12 }, (_, i) => ({
+      datasetCaseId: `case-${i}`,
+      metricScores: { a: { score: 0.2, reasoning: `fail ${i}` } },
+      datasetCase: { input: `q${i}`, expectedOutput: `a${i}` },
+    }));
+    vi.mocked(prisma.aiEvaluationCaseResult.findMany).mockResolvedValue(candidates as never);
+
+    const result = await loadFailureSeed({ agentId: 'a-1', userId: 'u-1', limit: 8 });
+
+    // Exactly the limit — NOT 12
+    expect(result).toHaveLength(8);
+  });
+});
+
+describe('loadFailureSeed — candidates query throws', () => {
+  it('falls back to [] when the candidates (case-result) query throws', async () => {
+    // Gap 16: second query throws → falls back to []
+    vi.mocked(prisma.aiEvaluationRun.findMany).mockResolvedValue([{ id: 'run-1' }] as never);
+    vi.mocked(prisma.aiEvaluationCaseResult.findMany).mockRejectedValue(
+      new Error('candidates db error')
+    );
+
+    const result = await loadFailureSeed({ agentId: 'a-1', userId: 'u-1' });
+    expect(result).toEqual([]);
+  });
+});
+
+describe('loadFailureSeed — stringifyInput variants', () => {
+  beforeEach(() => {
+    vi.mocked(prisma.aiEvaluationRun.findMany).mockResolvedValue([{ id: 'run-1' }] as never);
+  });
+
+  it('JSON-stringifies an object input', async () => {
+    // Gap 17: object input → JSON.stringify
+    vi.mocked(prisma.aiEvaluationCaseResult.findMany).mockResolvedValue([
+      {
+        datasetCaseId: 'case-obj',
+        metricScores: { a: { score: 0.2, reasoning: 'bad' } },
+        datasetCase: { input: { q: 'hello' }, expectedOutput: 'a' },
+      },
+    ] as never);
+
+    const result = await loadFailureSeed({ agentId: 'a-1', userId: 'u-1' });
+    expect(result).toHaveLength(1);
+    // The code transforms the object to JSON — assert the transformation, not just presence
+    expect(result[0].input).toBe('{"q":"hello"}');
+  });
+
+  it('converts null input to empty string', async () => {
+    // Gap 18: null input → ''
+    vi.mocked(prisma.aiEvaluationCaseResult.findMany).mockResolvedValue([
+      {
+        datasetCaseId: 'case-null-input',
+        metricScores: { a: { score: 0.2, reasoning: 'bad' } },
+        datasetCase: { input: null, expectedOutput: 'a' },
+      },
+    ] as never);
+
+    const result = await loadFailureSeed({ agentId: 'a-1', userId: 'u-1' });
+    expect(result).toHaveLength(1);
+    expect(result[0].input).toBe('');
+  });
+
+  it('converts undefined input to empty string', async () => {
+    // Gap 19: undefined input → ''
+    vi.mocked(prisma.aiEvaluationCaseResult.findMany).mockResolvedValue([
+      {
+        datasetCaseId: 'case-undef-input',
+        metricScores: { a: { score: 0.2, reasoning: 'bad' } },
+        datasetCase: { input: undefined, expectedOutput: 'a' },
+      },
+    ] as never);
+
+    const result = await loadFailureSeed({ agentId: 'a-1', userId: 'u-1' });
+    expect(result).toHaveLength(1);
+    expect(result[0].input).toBe('');
   });
 });
 

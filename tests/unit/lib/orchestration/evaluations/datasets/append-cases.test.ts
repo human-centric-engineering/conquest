@@ -9,11 +9,17 @@
  * - Recomputes contentHash from the *new full* case array
  * - Increments caseCount by exactly the number of new rows
  * - Updates `source` only when the new value differs from the existing
+ * - source=null → source not updated (preserved)
+ * - source=undefined → source not updated (preserved)
+ * - Validation failure at non-zero position names the right index
+ * - metadata: undefined → stored as Prisma.DbNull
+ * - referenceCitations: undefined → stored as Prisma.DbNull
  *
  * @see lib/orchestration/evaluations/datasets/append-cases.ts
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { Prisma } from '@prisma/client';
 
 const mockTx = {
   aiDataset: { findUnique: vi.fn(), update: vi.fn() },
@@ -147,5 +153,114 @@ describe('appendCasesToDataset — happy path', () => {
         cases: [{ input: 'a' }, { input: 'b' }],
       })
     ).rejects.toThrow(/10000-case cap/);
+  });
+
+  it('source=null → source field not updated in the database (gap 19)', async () => {
+    mockTx.aiDataset.findUnique.mockResolvedValue({
+      id: 'ds-1',
+      caseCount: 1,
+      source: 'upload',
+    });
+    mockTx.aiDatasetCase.findMany.mockResolvedValue([
+      { position: 0, input: 'a', expectedOutput: null, metadata: null, referenceCitations: null },
+      { position: 1, input: 'b', expectedOutput: null, metadata: null, referenceCitations: null },
+    ]);
+    mockTx.aiDatasetCase.createMany.mockResolvedValue({ count: 1 });
+    mockTx.aiDataset.update.mockResolvedValue({ id: 'ds-1' });
+
+    await appendCasesToDataset({
+      datasetId: 'ds-1',
+      cases: [{ input: 'b' }],
+      source: null, // explicit null — preserve existing source
+    });
+
+    const updateArgs = mockTx.aiDataset.update.mock.calls[0][0];
+    expect(updateArgs.data).not.toHaveProperty('source');
+  });
+
+  it('source not provided (undefined) → source field not updated (gap 20)', async () => {
+    mockTx.aiDataset.findUnique.mockResolvedValue({
+      id: 'ds-1',
+      caseCount: 1,
+      source: 'upload',
+    });
+    mockTx.aiDatasetCase.findMany.mockResolvedValue([
+      { position: 0, input: 'a', expectedOutput: null, metadata: null, referenceCitations: null },
+      { position: 1, input: 'b', expectedOutput: null, metadata: null, referenceCitations: null },
+    ]);
+    mockTx.aiDatasetCase.createMany.mockResolvedValue({ count: 1 });
+    mockTx.aiDataset.update.mockResolvedValue({ id: 'ds-1' });
+
+    await appendCasesToDataset({
+      datasetId: 'ds-1',
+      cases: [{ input: 'b' }],
+      // no source key at all
+    });
+
+    const updateArgs = mockTx.aiDataset.update.mock.calls[0][0];
+    expect(updateArgs.data).not.toHaveProperty('source');
+  });
+
+  it('validation failure at position 2 mentions the correct index (gap 21)', async () => {
+    await expect(
+      appendCasesToDataset({
+        datasetId: 'ds-1',
+        cases: [
+          { input: 'valid-a' },
+          { input: 'valid-b' },
+          { input: '' }, // invalid: empty string — position 2
+        ],
+      })
+    ).rejects.toThrow(/Case at position 2 is invalid/);
+  });
+
+  it('case with metadata: undefined → stored as Prisma.DbNull (gap 22)', async () => {
+    mockTx.aiDataset.findUnique.mockResolvedValue({
+      id: 'ds-1',
+      caseCount: 0,
+      source: 'upload',
+    });
+    mockTx.aiDatasetCase.findMany.mockResolvedValue([
+      { position: 0, input: 'a', expectedOutput: null, metadata: null, referenceCitations: null },
+    ]);
+    mockTx.aiDatasetCase.createMany.mockResolvedValue({ count: 1 });
+    mockTx.aiDataset.update.mockResolvedValue({ id: 'ds-1' });
+
+    await appendCasesToDataset({
+      datasetId: 'ds-1',
+      cases: [{ input: 'a' }], // no metadata field → undefined
+    });
+
+    const rows = (
+      mockTx.aiDatasetCase.createMany.mock.calls[0][0] as {
+        data: Array<{ metadata: unknown }>;
+      }
+    ).data;
+    expect(rows[0].metadata).toBe(Prisma.DbNull);
+  });
+
+  it('case with referenceCitations: undefined → stored as Prisma.DbNull (gap 23)', async () => {
+    mockTx.aiDataset.findUnique.mockResolvedValue({
+      id: 'ds-1',
+      caseCount: 0,
+      source: 'upload',
+    });
+    mockTx.aiDatasetCase.findMany.mockResolvedValue([
+      { position: 0, input: 'a', expectedOutput: null, metadata: null, referenceCitations: null },
+    ]);
+    mockTx.aiDatasetCase.createMany.mockResolvedValue({ count: 1 });
+    mockTx.aiDataset.update.mockResolvedValue({ id: 'ds-1' });
+
+    await appendCasesToDataset({
+      datasetId: 'ds-1',
+      cases: [{ input: 'a' }], // no referenceCitations field → undefined
+    });
+
+    const rows = (
+      mockTx.aiDatasetCase.createMany.mock.calls[0][0] as {
+        data: Array<{ referenceCitations: unknown }>;
+      }
+    ).data;
+    expect(rows[0].referenceCitations).toBe(Prisma.DbNull);
   });
 });

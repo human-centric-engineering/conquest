@@ -6,6 +6,13 @@
  * calls inside the `$transaction` block. The contentHash is delegated to
  * `hashParsedCases`, so we verify identity (round-trip through the real
  * hash module) rather than exact bytes.
+ *
+ * Additional gaps covered:
+ * - Unsupported extension (.xml) → ValidationError; parsers not called
+ * - DatasetParseError from CSV parser → rewrapped as ValidationError
+ * - params.description: undefined → stored as null
+ * - params.tags: undefined → stored as []
+ * - Validation failure at non-zero position names the right index
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -331,5 +338,58 @@ describe('uploadDataset — validation errors', () => {
     await expect(uploadDataset(baseParams())).rejects.toMatchObject({
       message: 'db blew up',
     });
+  });
+
+  it('unsupported extension .xml → ValidationError; parsers are never reached (gap 24)', async () => {
+    await expect(
+      uploadDataset(baseParams({ fileName: 'data.xml', content: '<root/>' }))
+    ).rejects.toMatchObject({
+      name: 'ValidationError',
+      message: expect.stringMatching(/Unsupported dataset format.*xml/i),
+    });
+    // Transaction must not have been called — parseByExtension throws before we get there
+    expect(mockedTransaction).not.toHaveBeenCalled();
+  });
+
+  it('DatasetParseError from CSV parser → rewrapped as ValidationError "Dataset parse failed: …" (gap 25)', async () => {
+    // CSV missing the required `input` column triggers DatasetParseError in the parser
+    const csvWithoutInputColumn = 'question,answer\nWho?,Me\n';
+    await expect(
+      uploadDataset(baseParams({ fileName: 'bad-cols.csv', content: csvWithoutInputColumn }))
+    ).rejects.toMatchObject({
+      name: 'ValidationError',
+      message: expect.stringMatching(/Dataset parse failed/),
+    });
+    expect(mockedTransaction).not.toHaveBeenCalled();
+  });
+});
+
+// ── Optional param defaults ────────────────────────────────────────────
+
+describe('uploadDataset — optional param defaults', () => {
+  it('description: undefined → stored as null (gap 26)', async () => {
+    await uploadDataset(baseParams()); // baseParams has no description key
+
+    expect(txMocks.aiDatasetCreate.mock.calls[0][0].data.description).toBeNull();
+  });
+
+  it('tags: undefined → stored as [] (gap 27)', async () => {
+    await uploadDataset(baseParams()); // baseParams has no tags key
+
+    expect(txMocks.aiDatasetCreate.mock.calls[0][0].data.tags).toEqual([]);
+  });
+});
+
+describe('uploadDataset — validation position', () => {
+  it('validation failure at position 1 names the correct index (gap 28)', async () => {
+    // First case is valid; second has empty input → Zod rejects at position 1
+    const jsonl = '{"input":"valid"}\n{"input":""}\n';
+    await expect(
+      uploadDataset(baseParams({ fileName: 'partial.jsonl', content: jsonl }))
+    ).rejects.toMatchObject({
+      name: 'ValidationError',
+      message: expect.stringMatching(/Case at position 1 is invalid/),
+    });
+    expect(mockedTransaction).not.toHaveBeenCalled();
   });
 });

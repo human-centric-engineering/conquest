@@ -310,3 +310,147 @@ describe('generateCases — error paths', () => {
     ).rejects.toThrow(/malformed response/i);
   });
 });
+
+describe('generateCases — description mode: domainPrompt length upper boundary', () => {
+  it('rejects a domainPrompt exceeding MAX_DOMAIN_PROMPT_CHARS (1000 chars)', async () => {
+    const overLong = 'a'.repeat(1001);
+    await expect(
+      generateCases({
+        agentId: 'a',
+        userId: 'u',
+        mode: 'description',
+        count: 1,
+        domainPrompt: overLong,
+      })
+    ).rejects.toThrow(/must be ≤ 1000 characters/);
+    expect(mockedDrain).not.toHaveBeenCalled();
+  });
+
+  it('accepts a domainPrompt of exactly 1000 chars (boundary is inclusive)', async () => {
+    const exactlyAtLimit = 'a'.repeat(1000);
+    mockedDrain.mockResolvedValue(
+      drainOk(JSON.stringify({ cases: [{ input: 'q', expectedOutput: 'a' }] }))
+    );
+
+    await expect(
+      generateCases({
+        agentId: 'a',
+        userId: 'u',
+        mode: 'description',
+        count: 1,
+        domainPrompt: exactlyAtLimit,
+      })
+    ).resolves.toBeDefined();
+    expect(mockedDrain).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('generateCases — KB mode: topic whitespace and empty string', () => {
+  beforeEach(() => {
+    mockedKbSeed.mockResolvedValue([
+      { documentId: 'd1', documentName: 'Policy', chunkType: 'overview', content: 'some content' },
+    ]);
+    mockedDrain.mockResolvedValue(
+      drainOk(JSON.stringify({ cases: [{ input: 'q', expectedOutput: 'a' }] }))
+    );
+  });
+
+  it('does NOT emit a TOPIC: line when topic is whitespace-only', async () => {
+    await generateCases({ agentId: 'a', userId: 'u', mode: 'kb', count: 1, topic: '   ' });
+
+    const promptArg = (mockedDrain.mock.calls[0][0] as { message: string }).message;
+    expect(promptArg).not.toMatch(/^TOPIC:/m);
+  });
+
+  it('does NOT emit a TOPIC: line when topic is empty string', async () => {
+    await generateCases({ agentId: 'a', userId: 'u', mode: 'kb', count: 1, topic: '' });
+
+    const promptArg = (mockedDrain.mock.calls[0][0] as { message: string }).message;
+    expect(promptArg).not.toMatch(/^TOPIC:/m);
+  });
+});
+
+describe('generateCases — AbortSignal forwarding', () => {
+  it('passes signal to drainStreamChat when provided', async () => {
+    mockedKbSeed.mockResolvedValue([
+      { documentId: 'd1', documentName: 'X', chunkType: 't', content: 'C' },
+    ]);
+    mockedDrain.mockResolvedValue(
+      drainOk(JSON.stringify({ cases: [{ input: 'q', expectedOutput: 'a' }] }))
+    );
+
+    const controller = new AbortController();
+    await generateCases({
+      agentId: 'a',
+      userId: 'u',
+      mode: 'kb',
+      count: 1,
+      signal: controller.signal,
+    });
+
+    const callArg = mockedDrain.mock.calls[0][0] as { signal?: AbortSignal };
+    expect(callArg.signal).toBe(controller.signal);
+  });
+
+  it('does NOT include a signal key when signal is not provided', async () => {
+    mockedKbSeed.mockResolvedValue([
+      { documentId: 'd1', documentName: 'X', chunkType: 't', content: 'C' },
+    ]);
+    mockedDrain.mockResolvedValue(
+      drainOk(JSON.stringify({ cases: [{ input: 'q', expectedOutput: 'a' }] }))
+    );
+
+    await generateCases({ agentId: 'a', userId: 'u', mode: 'kb', count: 1 });
+
+    const callArg = mockedDrain.mock.calls[0][0] as unknown as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(callArg, 'signal')).toBe(false);
+  });
+});
+
+describe('generateCases — per-case metadata and expectedOutput tagging', () => {
+  beforeEach(() => {
+    mockedKbSeed.mockResolvedValue([
+      { documentId: 'd1', documentName: 'X', chunkType: 't', content: 'C' },
+    ]);
+  });
+
+  it('merges undefined metadata (missing key on raw case) into the standard tags without leaking undefined', async () => {
+    // Raw case has NO metadata key — exercises the `c.metadata ?? {}` branch
+    mockedDrain.mockResolvedValue(
+      drainOk(JSON.stringify({ cases: [{ input: 'q', expectedOutput: 'a' }] }))
+    );
+
+    const result = await generateCases({ agentId: 'a', userId: 'u', mode: 'kb', count: 1 });
+
+    const meta = result.cases[0].metadata;
+    // The code tags source/mode/generatorAgentSlug/generatedAt — assert the transformation happened
+    expect(meta).toMatchObject({
+      source: 'synthetic',
+      mode: 'kb',
+      generatorAgentSlug: 'eval-case-generator',
+    });
+    expect(meta.generatedAt).toMatch(/^\d{4}-/); // ISO date prefix, not undefined
+    // No raw undefined values leaked through
+    expect(Object.values(meta).includes(undefined)).toBe(false);
+  });
+
+  it('does NOT add an expectedOutput key when raw case omits it', async () => {
+    // Raw case has NO expectedOutput — exercises the `if (c.expectedOutput !== undefined)` branch
+    mockedDrain.mockResolvedValue(drainOk(JSON.stringify({ cases: [{ input: 'q' }] })));
+
+    const result = await generateCases({ agentId: 'a', userId: 'u', mode: 'kb', count: 1 });
+
+    // The key must be absent — not just falsy — to avoid the UI treating it as "no output provided"
+    expect(Object.prototype.hasOwnProperty.call(result.cases[0], 'expectedOutput')).toBe(false);
+  });
+
+  it('DOES add an expectedOutput key when raw case includes it', async () => {
+    mockedDrain.mockResolvedValue(
+      drainOk(JSON.stringify({ cases: [{ input: 'q', expectedOutput: 'the answer' }] }))
+    );
+
+    const result = await generateCases({ agentId: 'a', userId: 'u', mode: 'kb', count: 1 });
+
+    expect(result.cases[0].expectedOutput).toBe('the answer');
+  });
+});
