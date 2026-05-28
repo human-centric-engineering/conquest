@@ -95,6 +95,10 @@ export const API = {
         `/api/v1/admin/orchestration/capabilities/${id}/agents`,
       capabilityStats: (id: string): string =>
         `/api/v1/admin/orchestration/capabilities/${id}/stats`,
+      capabilityQuarantine: (id: string): string =>
+        `/api/v1/admin/orchestration/capabilities/${id}/quarantine`,
+      capabilityUnquarantine: (id: string): string =>
+        `/api/v1/admin/orchestration/capabilities/${id}/unquarantine`,
       PROVIDER_MODELS: '/api/v1/admin/orchestration/provider-models',
       providerModelById: (id: string): string =>
         `/api/v1/admin/orchestration/provider-models/${id}`,

@@ -6,6 +6,7 @@ import {
   CapabilityForm,
   type UsedByAgentSummary,
 } from '@/components/admin/orchestration/capability-form';
+import { CapabilityQuarantineCard } from '@/components/admin/orchestration/capability-quarantine-card';
 import { CapabilityStatsPanel } from '@/components/admin/orchestration/capability-stats-panel';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
@@ -87,6 +88,22 @@ export default async function EditCapabilityPage({ params }: { params: Promise<{
       </nav>
 
       <CapabilityStatsPanel capabilityId={id} />
+
+      <CapabilityQuarantineCard
+        capabilityId={id}
+        capabilityName={capability.name}
+        state={{
+          quarantineState: (capability.quarantineState ?? 'active') as
+            | 'active'
+            | 'quarantined-soft'
+            | 'quarantined-hard',
+          quarantineReason: capability.quarantineReason ?? null,
+          quarantineUntil: capability.quarantineUntil
+            ? new Date(capability.quarantineUntil).toISOString()
+            : null,
+        }}
+        affectedAgents={usedBy.map((a) => ({ id: a.id, name: a.name, slug: a.slug }))}
+      />
 
       <CapabilityForm
         mode="edit"
