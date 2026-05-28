@@ -41,6 +41,7 @@ import {
   getEffectiveRateLimitPolicy,
   findRateLimitRule,
   RATE_LIMIT_POLICY,
+  CATCH_ALL_RULE,
   __resetAppRateLimitRules,
   type RateLimitRule,
 } from '@/lib/security/rate-limit-policy';
@@ -90,6 +91,36 @@ describe('registerRateLimitTier / resolveRateLimitTier', () => {
 
   it('rejects an empty tier name', () => {
     expect(() => registerRateLimitTier('', makeLimiter(1))).toThrow();
+  });
+
+  it('rejects a confusable case-variant of a built-in tier (case-insensitive guard)', () => {
+    // `'Admin' in RATE_LIMIT_TIERS` is false case-sensitively, so without
+    // the case-normalize fix a fork could register 'Admin' as a separate
+    // tier that operators reading logs would mistake for the real `admin`
+    // cap. The guard normalizes to lowercase and rejects.
+    expect(() => registerRateLimitTier('Admin', makeLimiter(10_000))).toThrow(/built-in|collides/i);
+    expect(() => registerRateLimitTier('MCP', makeLimiter(10_000))).toThrow(/built-in|collides/i);
+    expect(() => registerRateLimitTier('Auth', makeLimiter(10_000))).toThrow(/built-in|collides/i);
+    // ...and none of those leaked into the registry.
+    expect(resolveRateLimitTier('Admin')).toBeUndefined();
+    expect(resolveRateLimitTier('MCP')).toBeUndefined();
+  });
+
+  it("treats prototype-chain keys as non-collisions (Object.hasOwn, not 'in')", () => {
+    // `'toString' in RATE_LIMIT_TIERS` is `true` via Object.prototype, which
+    // would trip the built-in guard with a misleading "is a built-in Sunrise
+    // tier" message — confusing the author and blocking a legitimate tier
+    // name. Object.hasOwn ignores the prototype chain, so registration goes
+    // through (no built-in actually owns 'toString' as a tier).
+    const limiter = makeLimiter(3);
+    expect(() => registerRateLimitTier('toString', limiter)).not.toThrow();
+    expect(resolveRateLimitTier('toString')).toBe(limiter);
+  });
+
+  it("treats 'constructor' as non-collision (prototype key, not a real tier)", () => {
+    const limiter = makeLimiter(3);
+    expect(() => registerRateLimitTier('constructor', limiter)).not.toThrow();
+    expect(resolveRateLimitTier('constructor')).toBe(limiter);
   });
 });
 
@@ -168,6 +199,23 @@ describe('getEffectiveRateLimitPolicy — insertion position', () => {
     expect(findRateLimitRule('/api/v1/mcp', eff)?.tier).toBe('mcp');
     // A generic api path still lands on the session-user catch-all.
     expect(findRateLimitRule('/api/v1/unrelated/thing', eff)?.key).toBe('session-user');
+  });
+
+  it('CATCH_ALL_RULE is the last element of the base policy (the splice-position invariant)', () => {
+    // Identity equality — `getEffectiveRateLimitPolicy` runtime-asserts this
+    // exact reference is the tail before splicing app rules in. A future PR
+    // that appended another rule (or rebuilt the catch-all as a structural
+    // copy) would silently shift app rules into the wrong slot.
+    expect(RATE_LIMIT_POLICY[RATE_LIMIT_POLICY.length - 1]).toBe(CATCH_ALL_RULE);
+  });
+
+  it('CATCH_ALL_RULE is the same reference spliced into the effective policy', () => {
+    // The effective-policy assembler must rebuild around the SAME catch-all
+    // reference; otherwise the assert / app-rule consumers can't identity-
+    // compare and we lose the invariant.
+    registerRateLimitRule({ match: /^\/api\/v1\/billing\//, tier: 'api', key: 'session-user' });
+    const eff = getEffectiveRateLimitPolicy();
+    expect(eff[eff.length - 1]).toBe(CATCH_ALL_RULE);
   });
 });
 

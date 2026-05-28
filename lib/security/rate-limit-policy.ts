@@ -105,6 +105,22 @@ function skipNonCredentialAuthRoutes(request: Request): boolean {
 }
 
 /**
+ * The `/api/v1/**` catch-all rule — the final fallback before requests escape
+ * the policy. Exported as a named const so:
+ *   1. `getEffectiveRateLimitPolicy` can identity-compare on the last element
+ *      and throw at startup if some future PR ever shifts it off the tail.
+ *   2. Tests can reference the same object instead of structural matching.
+ *
+ * Declared above {@link RATE_LIMIT_POLICY} because the policy literal embeds
+ * this reference (declaration order; `const` is not hoisted).
+ */
+export const CATCH_ALL_RULE: RateLimitRule = {
+  match: /^\/api\/v1\//,
+  tier: 'api',
+  key: 'session-user',
+};
+
+/**
  * The rate-limit policy.
  *
  * **Ordering matters.** Each request is matched against rules top-to-bottom;
@@ -239,11 +255,13 @@ export const RATE_LIMIT_POLICY: readonly RateLimitRule[] = [
   // this (chat-stream, audio, image, upload, invite, password-reset, etc.)
   // keep their sub-limiter call in the handler — it's additive to this
   // section tier.
-  {
-    match: /^\/api\/v1\//,
-    tier: 'api',
-    key: 'session-user',
-  },
+  //
+  // The catch-all is exported as a named const so `getEffectiveRateLimitPolicy`
+  // can runtime-assert it stays last: app rules are spliced in just ahead of
+  // it, and a future PR appending another rule after `CATCH_ALL_RULE` would
+  // silently put app rules in the wrong slot (they'd never match). Identity
+  // check turns that subtle ordering bug into a loud fail-fast at startup.
+  CATCH_ALL_RULE,
 ];
 
 /**
@@ -351,15 +369,28 @@ export function registerRateLimitRule(rule: RateLimitRule): void {
  * Returns the base policy unchanged when no app rules are registered (the
  * common case — Sunrise itself registers none), avoiding a per-request array
  * allocation.
+ *
+ * Runtime-asserts that {@link CATCH_ALL_RULE} is still the last element of
+ * `RATE_LIMIT_POLICY` — a future PR appending another rule after the catch-all
+ * would silently put app rules in the wrong slot (they'd never match), so we
+ * fail fast at first call instead of letting it ship as silent dead-rule debt.
  */
 export function getEffectiveRateLimitPolicy(): readonly RateLimitRule[] {
+  // Identity check — structural match would let a copy slip past, so compare
+  // against the exported reference the policy literal embedded.
+  if (RATE_LIMIT_POLICY[RATE_LIMIT_POLICY.length - 1] !== CATCH_ALL_RULE) {
+    throw new Error(
+      'rate-limit policy invariant violated: CATCH_ALL_RULE is no longer the last element of ' +
+        'RATE_LIMIT_POLICY. App rules splice in just ahead of the catch-all; if something else ' +
+        'is at the tail, app rules would be inserted in the wrong slot and never match. ' +
+        'Move CATCH_ALL_RULE back to the end of the policy array.'
+    );
+  }
   if (appRules.length === 0) return RATE_LIMIT_POLICY;
-  // The catch-all (`/^\/api\/v1\//`, session-user) is the last element by
-  // construction — the policy unit tests assert this. App rules go immediately
-  // before it: after all specific Sunrise rules, ahead of the fallback.
+  // App rules go immediately before the catch-all: after all specific Sunrise
+  // rules, ahead of the fallback.
   const head = RATE_LIMIT_POLICY.slice(0, -1);
-  const catchAll = RATE_LIMIT_POLICY[RATE_LIMIT_POLICY.length - 1];
-  return [...head, ...appRules, catchAll];
+  return [...head, ...appRules, CATCH_ALL_RULE];
 }
 
 /**

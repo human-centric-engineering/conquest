@@ -130,4 +130,62 @@ describe('app env-var extension (seam 11)', () => {
     // Assert — boot succeeds; undeclared app var is simply not on the typed env
     expect(env.DATABASE_URL).toBe('postgresql://user:pass@localhost:5432/mydb');
   });
+
+  it('rejects an app schema that redeclares a core SERVER key (right-wins merge would weaken it)', async () => {
+    // Arrange — fork's appEnvSchema collides with the core DATABASE_URL by
+    // declaring it optional. Without the collision guard, Zod merge is
+    // right-wins → safeParse would succeed with DATABASE_URL absent and
+    // surface later as a Prisma crash. With the guard, boot aborts and
+    // names the offending key.
+    vi.doMock('@/lib/app/env', () => ({
+      appEnvSchema: z.object({ DATABASE_URL: z.string().optional() }),
+    }));
+    setEnv({ ...validServerEnv });
+
+    // Act & Assert — startup throws with both "redeclares" and the key name in
+    // the message so the operator knows what to rename and why.
+    await expect(import('@/lib/env')).rejects.toThrow(
+      /redeclares core Sunrise env key.*DATABASE_URL/s
+    );
+  });
+
+  it('rejects an app schema that redeclares a core CLIENT key', async () => {
+    // Arrange — collision against NEXT_PUBLIC_APP_URL (defined in
+    // clientEnvSchema). The guard checks both core schemas, so this must
+    // also reject.
+    vi.doMock('@/lib/app/env', () => ({
+      appEnvSchema: z.object({ NEXT_PUBLIC_APP_URL: z.string().optional() }),
+    }));
+    setEnv({ ...validServerEnv });
+
+    // Act & Assert
+    await expect(import('@/lib/env')).rejects.toThrow(/NEXT_PUBLIC_APP_URL/);
+  });
+
+  it('names every colliding key in the error when an app schema collides on several', async () => {
+    // Arrange — two collisions at once. The message must list both so the
+    // operator fixes them in one pass instead of one-collision-at-a-time.
+    vi.doMock('@/lib/app/env', () => ({
+      appEnvSchema: z.object({
+        DATABASE_URL: z.string().optional(),
+        BETTER_AUTH_SECRET: z.string().optional(),
+      }),
+    }));
+    setEnv({ ...validServerEnv });
+
+    // Act
+    const importPromise = import('@/lib/env');
+
+    // Assert — both keys present in the thrown error
+    let caught: unknown;
+    try {
+      await importPromise;
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    const message = (caught as Error).message;
+    expect(message).toContain('DATABASE_URL');
+    expect(message).toContain('BETTER_AUTH_SECRET');
+  });
 });

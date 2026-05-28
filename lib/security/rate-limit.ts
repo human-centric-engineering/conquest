@@ -479,8 +479,14 @@ export type RateLimitTier = 'admin' | 'orchestration' | 'api' | 'mcp' | 'auth';
  *
  * Consumed by the rate-limit middleware. Route handlers should not read this
  * directly — let the middleware do tier resolution from the policy table.
+ *
+ * Typed `Readonly<…>` so a property reassignment (e.g.
+ * `RATE_LIMIT_TIERS.admin = newLimiter`) is a compile error. `tierRegistry`
+ * snapshots the SAME instances at module load; a silent reassignment here
+ * wouldn't propagate to `resolveRateLimitTier`, so the type forbids it. Tests
+ * mutate state on the existing limiter via `.reset(key)`, which is unaffected.
  */
-export const RATE_LIMIT_TIERS: Record<RateLimitTier, RateLimiter> = {
+export const RATE_LIMIT_TIERS: Readonly<Record<RateLimitTier, RateLimiter>> = {
   admin: adminLimiter,
   orchestration: orchestrationAdminLimiter,
   api: apiLimiter,
@@ -520,9 +526,16 @@ export function registerRateLimitTier(name: string, limiter: RateLimiter): void 
   if (!name) {
     throw new Error('registerRateLimitTier: tier name must be a non-empty string.');
   }
-  if (name in RATE_LIMIT_TIERS) {
+  // Use `Object.hasOwn` (not `in`) so prototype-chain keys like `'toString'` /
+  // `'constructor'` don't spuriously match the built-in guard — and compare
+  // case-insensitively against the (all-lowercase) built-in names so a
+  // confusable like `'Admin'` cannot register as a separate tier that
+  // operators reading logs would mistake for the real `admin` cap.
+  const normalized = name.toLowerCase();
+  if (Object.hasOwn(RATE_LIMIT_TIERS, normalized)) {
     throw new Error(
-      `registerRateLimitTier: "${name}" is a built-in Sunrise tier and cannot be overridden. ` +
+      `registerRateLimitTier: "${name}" collides with built-in Sunrise tier "${normalized}" ` +
+        '(comparison is case-insensitive to prevent confusable shadows). ' +
         'Choose an app-specific tier name.'
     );
   }
