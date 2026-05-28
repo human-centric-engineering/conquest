@@ -137,11 +137,22 @@ matching Next.js bundle realm (server / middleware / client). A dedicated
 flat-config override keeps that surface **framework-agnostic** so it survives Next.js
 upgrades and can be reasoned about in isolation:
 
-- **No RUNTIME `next/*` imports.** `import { NextResponse } from 'next/server'` is an
-  error. **Type-only imports are allowed** (`import type { NextRequest } from 'next/server'`)
-  — they erase at compile time and don't couple runtime code to the framework. This is
+- **No RUNTIME `next/*` imports** (including the `next/dist/**` deep-import escape
+  hatch). `import { NextResponse } from 'next/server'` is an error. **Type-only
+  imports are allowed** (`import type { NextRequest } from 'next/server'`) — they
+  erase at compile time and don't couple runtime code to the framework. This is
   the one place we use `@typescript-eslint/no-restricted-imports` (not the base rule)
   specifically for its `allowTypeImports` support.
+- **No `react-dom` / `react-dom/*` imports.** `ReactDOMServer.renderToString` and
+  hydration entry points are framework glue that belongs in `app/`, not the portable
+  extension surface — and they land in the client bundle on hydration if mis-imported.
+- **No Prisma imports** (`prisma`, `@prisma/*`). The portable core stays
+  storage-agnostic; DB access flows through `app/` route handlers or `lib/` services.
+  Type-only imports of `@prisma/*` are allowed (they're needed for entity types and
+  erase at compile time).
+- **No Node-only built-ins** (`fs`, `fs/*`, `path`, or any `node:*` specifier). These
+  crash in the edge and client realms a fork's `lib/app/` file may be bundled into.
+  IO belongs in a server-only module.
 - **The `@/`-alias relative-import ban is RESTATED here.** Flat-config
   `no-restricted-imports` _replaces_ rather than merges across config objects, so the
   `lib/app/**` block must re-declare the `./*` / `../*` ban or it would silently drop
