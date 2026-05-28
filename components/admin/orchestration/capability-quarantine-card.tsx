@@ -22,7 +22,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { AlertTriangle, ShieldOff, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronRight, ShieldOff, ShieldCheck } from 'lucide-react';
 
 import {
   AlertDialog,
@@ -128,6 +128,7 @@ function ActiveView({
   const [error, setError] = React.useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
+  const [expanded, setExpanded] = React.useState(false);
 
   function validate(): string | null {
     if (reason.trim().length === 0) return 'Add a reason. It will appear in the audit log.';
@@ -177,125 +178,150 @@ function ActiveView({
   return (
     <Card className="border-amber-200 dark:border-amber-900/60">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
-          <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" aria-hidden />
-          Emergency disable (quarantine)
-          <FieldHelp title="What is quarantine?">
-            <p>
-              Quarantine is for incidents — a vendor API has gone down, a tool is sending wrong
-              data, you need every agent to stop calling it now. The audit log records quarantine
-              separately from routine deactivation so post-incident review can find the response
-              window.
-            </p>
-            <p className="mt-2">
-              For routine deactivation (deprecating a tool, beta-gating one) use the existing{' '}
-              <strong>Active</strong> toggle in the form below instead.
-            </p>
-          </FieldHelp>
+        <CardTitle className="text-base">
+          {/*
+            FieldHelp renders its own <button>, so it must be a SIBLING
+            of the expand-toggle button rather than a child. The previous
+            shape (FieldHelp inside the toggle button) was an HTML
+            invalidity (button-inside-button) and caused a React 19
+            hydration warning. A `stopPropagation` shim on a wrapping
+            span hid the symptom but not the underlying DOM violation.
+          */}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setExpanded((v) => !v)}
+              aria-expanded={expanded}
+              aria-controls="quarantine-active-body"
+              className="hover:text-foreground flex flex-1 items-center gap-2 text-left"
+            >
+              {expanded ? (
+                <ChevronDown className="h-4 w-4 shrink-0" aria-hidden />
+              ) : (
+                <ChevronRight className="h-4 w-4 shrink-0" aria-hidden />
+              )}
+              <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" aria-hidden />
+              <span>Emergency disable (quarantine)</span>
+            </button>
+            <FieldHelp title="What is quarantine?">
+              <p>
+                Quarantine is for incidents — a vendor API has gone down, a tool is sending wrong
+                data, you need every agent to stop calling it now. The audit log records quarantine
+                separately from routine deactivation so post-incident review can find the response
+                window.
+              </p>
+              <p className="mt-2">
+                For routine deactivation (deprecating a tool, beta-gating one) use the existing{' '}
+                <strong>Active</strong> toggle in the form below instead.
+              </p>
+            </FieldHelp>
+          </div>
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-4">
-        {error && (
-          <p className="text-sm text-red-600 dark:text-red-400" role="alert">
-            {error}
-          </p>
-        )}
+      {expanded && (
+        <CardContent id="quarantine-active-body" className="space-y-4">
+          {error && (
+            <p className="text-sm text-red-600 dark:text-red-400" role="alert">
+              {error}
+            </p>
+          )}
 
-        <div className="space-y-1">
-          <Label htmlFor="quarantine-mode" className="flex items-center gap-1 text-xs">
-            Mode
-            <FieldHelp title="Soft vs hard">
-              <p>
-                <strong>Soft:</strong> the agent gets a structured &quot;tool unavailable&quot;
-                error. It can try a different approach. Use this when the tool is missing but not
-                wrong — a vendor outage, a rate-limit storm.
-              </p>
-              <p className="mt-2">
-                <strong>Hard:</strong> the agent cannot call the tool at all and the model&apos;s
-                tool loop stops. Use this when the tool is sending wrong data and you don&apos;t
-                want the agent to retry.
-              </p>
-            </FieldHelp>
-          </Label>
-          <Select value={mode} onValueChange={(v) => setMode(v as QuarantineMode)}>
-            <SelectTrigger id="quarantine-mode" className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="quarantined-soft">{MODE_LABELS['quarantined-soft']}</SelectItem>
-              <SelectItem value="quarantined-hard">{MODE_LABELS['quarantined-hard']}</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+          <div className="space-y-1">
+            <Label htmlFor="quarantine-mode" className="flex items-center gap-1 text-xs">
+              Mode
+              <FieldHelp title="Soft vs hard">
+                <p>
+                  <strong>Soft:</strong> the agent gets a structured &quot;tool unavailable&quot;
+                  error. It can try a different approach. Use this when the tool is missing but not
+                  wrong — a vendor outage, a rate-limit storm.
+                </p>
+                <p className="mt-2">
+                  <strong>Hard:</strong> the agent cannot call the tool at all and the model&apos;s
+                  tool loop stops. Use this when the tool is sending wrong data and you don&apos;t
+                  want the agent to retry.
+                </p>
+              </FieldHelp>
+            </Label>
+            <Select value={mode} onValueChange={(v) => setMode(v as QuarantineMode)}>
+              <SelectTrigger id="quarantine-mode" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="quarantined-soft">{MODE_LABELS['quarantined-soft']}</SelectItem>
+                <SelectItem value="quarantined-hard">{MODE_LABELS['quarantined-hard']}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
 
-        <div className="space-y-1">
-          <Label htmlFor="quarantine-reason" className="flex items-center gap-1 text-xs">
-            Reason
-            <FieldHelp title="What goes in the reason?">
-              <p>
-                A short note explaining why. Goes into the audit log, the hook event payload, and
-                the banner shown on every agent that binds this tool.
-              </p>
-              <p className="mt-2">
-                Good examples: &quot;Stripe charges returning 500s since 14:32 UTC&quot;, &quot;Tool
-                returning wrong city names — investigating geocoding endpoint&quot;.
-              </p>
-            </FieldHelp>
-          </Label>
-          <Textarea
-            id="quarantine-reason"
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            maxLength={MAX_REASON_LENGTH}
-            placeholder="e.g. Stripe charges returning 500s since 14:32 UTC"
-            rows={3}
-          />
-          <p className="text-muted-foreground text-right text-[10px]">
-            {reason.length}/{MAX_REASON_LENGTH}
-          </p>
-        </div>
+          <div className="space-y-1">
+            <Label htmlFor="quarantine-reason" className="flex items-center gap-1 text-xs">
+              Reason
+              <FieldHelp title="What goes in the reason?">
+                <p>
+                  A short note explaining why. Goes into the audit log, the hook event payload, and
+                  the banner shown on every agent that binds this tool.
+                </p>
+                <p className="mt-2">
+                  Good examples: &quot;Stripe charges returning 500s since 14:32 UTC&quot;,
+                  &quot;Tool returning wrong city names — investigating geocoding endpoint&quot;.
+                </p>
+              </FieldHelp>
+            </Label>
+            <Textarea
+              id="quarantine-reason"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              maxLength={MAX_REASON_LENGTH}
+              placeholder="e.g. Stripe charges returning 500s since 14:32 UTC"
+              rows={3}
+            />
+            <p className="text-muted-foreground text-right text-[10px]">
+              {reason.length}/{MAX_REASON_LENGTH}
+            </p>
+          </div>
 
-        <div className="space-y-1">
-          <Label htmlFor="quarantine-expires" className="flex items-center gap-1 text-xs">
-            Auto-lift at (optional)
-            <FieldHelp title="Auto-lift">
-              <p>
-                A future timestamp. The dispatcher treats the capability as active once this time
-                passes — no need to remember to lift the quarantine manually.
-              </p>
-              <p className="mt-2">
-                Leave blank for indefinite. The stored state is preserved either way; an explicit{' '}
-                <strong>Lift quarantine</strong> click also clears all three fields.
-              </p>
-            </FieldHelp>
-          </Label>
-          <Input
-            id="quarantine-expires"
-            type="datetime-local"
-            value={expiresAt}
-            onChange={(e) => setExpiresAt(e.target.value)}
-          />
-        </div>
+          <div className="space-y-1">
+            <Label htmlFor="quarantine-expires" className="flex items-center gap-1 text-xs">
+              Auto-lift at (optional)
+              <FieldHelp title="Auto-lift">
+                <p>
+                  A future timestamp. The dispatcher treats the capability as active once this time
+                  passes — no need to remember to lift the quarantine manually.
+                </p>
+                <p className="mt-2">
+                  Leave blank for indefinite. The stored state is preserved either way; an explicit{' '}
+                  <strong>Lift quarantine</strong> click also clears all three fields.
+                </p>
+              </FieldHelp>
+            </Label>
+            <Input
+              id="quarantine-expires"
+              type="datetime-local"
+              value={expiresAt}
+              onChange={(e) => setExpiresAt(e.target.value)}
+            />
+          </div>
 
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-muted-foreground text-xs">
-            Will affect{' '}
-            <strong>
-              {affectedAgents.length} agent{affectedAgents.length === 1 ? '' : 's'}
-            </strong>{' '}
-            currently using this capability.
-          </p>
-          <Button
-            type="button"
-            variant="destructive"
-            onClick={openConfirm}
-            disabled={saving || reason.trim().length === 0}
-          >
-            <ShieldOff className="mr-1 h-3 w-3" />
-            Quarantine
-          </Button>
-        </div>
-      </CardContent>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-muted-foreground text-xs">
+              Will affect{' '}
+              <strong>
+                {affectedAgents.length} agent{affectedAgents.length === 1 ? '' : 's'}
+              </strong>{' '}
+              currently using this capability.
+            </p>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={openConfirm}
+              disabled={saving || reason.trim().length === 0}
+            >
+              <ShieldOff className="mr-1 h-3 w-3" />
+              Quarantine
+            </Button>
+          </div>
+        </CardContent>
+      )}
 
       <AlertDialog
         open={confirmOpen}
