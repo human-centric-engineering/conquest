@@ -1,6 +1,10 @@
 import type { Metadata } from 'next';
 import type { AiConversation, AiWorkflowExecution } from '@/types/orchestration';
 
+import {
+  ActiveQuarantinesPanel,
+  type ActiveQuarantineRow,
+} from '@/components/admin/orchestration/active-quarantines-panel';
 import { BudgetAlertsBanner } from '@/components/admin/orchestration/budget-alerts-banner';
 import { CostTrendChart } from '@/components/admin/orchestration/costs/cost-trend-chart';
 import {
@@ -16,8 +20,10 @@ import {
 } from '@/components/admin/orchestration/top-capabilities-panel';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
+import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
 import type { BudgetAlert, CostSummary } from '@/lib/orchestration/llm/cost-reports';
+import { resolveQuarantineState } from '@/lib/orchestration/capabilities/dispatcher';
 import { getSetupState } from '@/lib/orchestration/setup-state';
 import type { ModelInfo } from '@/lib/orchestration/llm/types';
 
@@ -105,6 +111,48 @@ async function getDashboardStats(): Promise<DashboardStats | null> {
   } catch (err) {
     logger.error('orchestration dashboard: failed to load observability stats', err);
     return null;
+  }
+}
+
+/**
+ * Capabilities currently in effective quarantine (auto-expiry honoured).
+ * Returns [] on any failure — the panel is informational, never blocks
+ * the dashboard.
+ */
+async function getActiveQuarantines(): Promise<ActiveQuarantineRow[]> {
+  try {
+    const rows = await prisma.aiCapability.findMany({
+      where: { quarantineState: { not: 'active' } },
+      select: {
+        id: true,
+        slug: true,
+        name: true,
+        quarantineState: true,
+        quarantineReason: true,
+        quarantineUntil: true,
+      },
+    });
+    const out: ActiveQuarantineRow[] = [];
+    for (const r of rows) {
+      const effective = resolveQuarantineState({
+        quarantineState:
+          (r.quarantineState as 'active' | 'quarantined-soft' | 'quarantined-hard') ?? 'active',
+        quarantineUntil: r.quarantineUntil,
+      });
+      if (effective === 'active') continue;
+      out.push({
+        id: r.id,
+        slug: r.slug,
+        name: r.name,
+        mode: effective,
+        reason: r.quarantineReason,
+        expiresAt: r.quarantineUntil ? r.quarantineUntil.toISOString() : null,
+      });
+    }
+    return out;
+  } catch (err) {
+    logger.error('orchestration dashboard: failed to load active quarantines', err);
+    return [];
   }
 }
 
@@ -222,15 +270,23 @@ async function getActivityFeed(
 }
 
 export default async function OrchestrationDashboardPage() {
-  const [costSummary, budgetAlerts, agentsCount, dashboardStats, models, setupState] =
-    await Promise.all([
-      getCostSummary(),
-      getBudgetAlerts(),
-      getPaginatedTotal(API.ADMIN.ORCHESTRATION.AGENTS),
-      getDashboardStats(),
-      getModels(),
-      getSetupState(),
-    ]);
+  const [
+    costSummary,
+    budgetAlerts,
+    agentsCount,
+    dashboardStats,
+    models,
+    setupState,
+    activeQuarantines,
+  ] = await Promise.all([
+    getCostSummary(),
+    getBudgetAlerts(),
+    getPaginatedTotal(API.ADMIN.ORCHESTRATION.AGENTS),
+    getDashboardStats(),
+    getModels(),
+    getSetupState(),
+    getActiveQuarantines(),
+  ]);
 
   const todayCostUsd = costSummary?.totals.today ?? null;
   const weekTrend = costSummary?.trend.slice(-7) ?? null;
@@ -253,6 +309,8 @@ export default async function OrchestrationDashboardPage() {
       <SetupRequiredBanner hasProvider={setupState.hasProvider} />
 
       <BudgetAlertsBanner alerts={budgetAlerts} />
+
+      <ActiveQuarantinesPanel rows={activeQuarantines} />
 
       <section aria-label="Summary statistics">
         <DashboardStatsCards
