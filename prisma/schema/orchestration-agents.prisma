@@ -89,6 +89,12 @@ model AiAgent {
   // off the table because conversations, cost logs, evaluations etc. point
   // here via `onDelete: SetNull` / `Cascade` and we want the audit trail.
   deletedAt                 DateTime?
+  // Most recent activity timestamp — bumped whenever a conversation is
+  // created/updated for this agent or a cost log is written against it.
+  // Drives the default sort on the admin agents list (after the bespoke-
+  // first split). Null = never used. See lib/orchestration/agents/
+  // touch-last-active.ts for the bump helper.
+  lastActiveAt              DateTime?
 
   // Relations
   creator          User?                      @relation("AiAgentCreator", fields: [createdBy], references: [id], onDelete: SetNull)
@@ -112,6 +118,7 @@ model AiAgent {
   @@index([isActive, visibility])
   @@index([profileId])
   @@index([deletedAt])
+  @@index([lastActiveAt])
   @@map("ai_agent")
 }
 
