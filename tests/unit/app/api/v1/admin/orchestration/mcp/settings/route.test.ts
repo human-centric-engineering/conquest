@@ -67,6 +67,7 @@ import {
   mockAuthenticatedUser,
 } from '@/tests/helpers/auth';
 import { GET, PATCH } from '@/app/api/v1/admin/orchestration/mcp/settings/route';
+import { SUNRISE_VERSION } from '@/lib/sunrise-version';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -76,7 +77,7 @@ function makeMcpConfig(overrides: Record<string, unknown> = {}) {
     slug: 'global',
     isEnabled: true,
     serverName: 'Sunrise MCP Server',
-    serverVersion: '1.0.0',
+    serverVersion: SUNRISE_VERSION,
     maxSessionsPerKey: 5,
     globalRateLimit: 60,
     auditRetentionDays: 90,
@@ -223,17 +224,13 @@ describe('PATCH /mcp/settings', () => {
     expect(invalidateMcpConfigCache).toHaveBeenCalled();
   });
 
-  it('returns updated config in response', async () => {
-    vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-    vi.mocked(prisma.mcpServerConfig.upsert).mockResolvedValue(
-      makeMcpConfig({ auditRetentionDays: 30 })
-    );
-
-    const response = await PATCH(makePatchRequest({ auditRetentionDays: 30 }));
-
-    const body = await parseJson<{ data: { auditRetentionDays: number } }>(response);
-    expect(body.data.auditRetentionDays).toBe(30);
-  });
+  // NOTE: The previous "returns updated config in response" test was deleted
+  // (PR #268 /test-review finding #7). It mocked `prisma.upsert` to return
+  // `auditRetentionDays: 30`, sent the same value in the request body, and
+  // asserted `body.data.auditRetentionDays === 30` — which only proved the
+  // mock round-trips, not that the route assembled a real response. The
+  // upsert-call-args assertion at "updates isEnabled to false" (L186-194)
+  // is the meaningful contract test for this handler.
 
   it('rejects maxSessionsPerKey above 100', async () => {
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());

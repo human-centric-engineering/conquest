@@ -72,6 +72,11 @@ describe('healthCheckResponseSchema', () => {
     const result = healthCheckResponseSchema.safeParse(malformed);
 
     expect(result.success).toBe(false);
+    if (!result.success) {
+      // Pin the specific field that failed — distinguishes "uptime is wrong"
+      // from "some other field is malformed" (mirrors the pattern at L51-65).
+      expect(JSON.stringify(result.error.issues)).toContain('uptime');
+    }
   });
 
   it('accepts the optional memory and error fields when present', () => {
@@ -84,5 +89,11 @@ describe('healthCheckResponseSchema', () => {
     const result = healthCheckResponseSchema.safeParse(withOptionals);
 
     expect(result.success).toBe(true);
+    if (result.success) {
+      // Confirm optional fields are preserved in the parsed output — a schema
+      // that silently strips optional fields would also pass `success: true`.
+      expect(result.data.memory?.heapUsed).toBe(100);
+      expect(result.data.error).toBe('something');
+    }
   });
 });

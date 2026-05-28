@@ -230,9 +230,13 @@ describe('GET /api/v1/admin/stats', () => {
 
       // Act
       const response = await GET(dummyRequest);
+      const body = await response.json();
 
-      // Assert
+      // Assert: status AND full error envelope (anti-pattern #9 — partial
+      // envelope checks let shape drift ship undetected).
       expect(response.status).toBe(500);
+      expect(body.success).toBe(false);
+      expect(body.error.code).toBe('INTERNAL_ERROR');
     });
   });
 });
