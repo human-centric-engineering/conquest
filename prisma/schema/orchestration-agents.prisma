@@ -82,6 +82,13 @@ model AiAgent {
   createdBy                 String?
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
+  // Soft-delete marker. Set by DELETE /api/v1/admin/orchestration/agents/:id
+  // (along with isActive=false and a `-deleted-{id}` slug tombstone that
+  // releases the unique slug for reuse). All read paths that surface agents
+  // to UI / API consumers must filter `deletedAt: null`. Hard deletion stays
+  // off the table because conversations, cost logs, evaluations etc. point
+  // here via `onDelete: SetNull` / `Cascade` and we want the audit trail.
+  deletedAt                 DateTime?
 
   // Relations
   creator          User?                      @relation("AiAgentCreator", fields: [createdBy], references: [id], onDelete: SetNull)
@@ -104,6 +111,7 @@ model AiAgent {
   @@index([provider])
   @@index([isActive, visibility])
   @@index([profileId])
+  @@index([deletedAt])
   @@map("ai_agent")
 }
 
@@ -214,6 +222,18 @@ model AiCapability {
   isIdempotent       Boolean @default(false)
   isActive           Boolean @default(true)
   isSystem           Boolean @default(false)
+  // Emergency-disable / quarantine state. Distinct from isActive: isActive
+  // toggles capability availability for routine reasons (deprecation,
+  // beta gating). quarantineState is reserved for incident response —
+  // "a vendor API is misbehaving, stop calling this tool now". The
+  // dispatcher returns a distinct capability_quarantined error code so
+  // agents can route around soft-quarantined tools, and the audit log
+  // captures the action under a distinct capability.quarantine action
+  // string so post-incident review can find the response window.
+  // See `.context/orchestration/capabilities.md` (Quarantine section).
+  quarantineState    String    @default("active") // "active" | "quarantined-soft" | "quarantined-hard"
+  quarantineReason   String?
+  quarantineUntil    DateTime? // null = indefinite; past timestamp = auto-cleared at read time
   metadata           Json?
 
   // Relations
@@ -223,6 +243,7 @@ model AiCapability {
   @@index([category])
   @@index([executionType])
   @@index([isActive])
+  @@index([quarantineState])
   @@map("ai_capability")
 }
 

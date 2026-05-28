@@ -1,6 +1,10 @@
 import type { Metadata } from 'next';
 import type { AiConversation, AiWorkflowExecution } from '@/types/orchestration';
 
+import {
+  ActiveQuarantinesPanel,
+  type ActiveQuarantineRow,
+} from '@/components/admin/orchestration/active-quarantines-panel';
 import { BudgetAlertsBanner } from '@/components/admin/orchestration/budget-alerts-banner';
 import { CostTrendChart } from '@/components/admin/orchestration/costs/cost-trend-chart';
 import {
@@ -105,6 +109,27 @@ async function getDashboardStats(): Promise<DashboardStats | null> {
   } catch (err) {
     logger.error('orchestration dashboard: failed to load observability stats', err);
     return null;
+  }
+}
+
+/**
+ * Capabilities currently in effective quarantine (auto-expiry handled
+ * by the API route). Returns [] on any failure — the panel is
+ * informational, never blocks the dashboard.
+ */
+async function getActiveQuarantines(): Promise<ActiveQuarantineRow[]> {
+  try {
+    const res = await serverFetch(API.ADMIN.ORCHESTRATION.OBSERVABILITY_ACTIVE_QUARANTINES);
+    if (!res.ok) return [];
+    const body = await parseApiResponse<{ items: ActiveQuarantineRow[] }>(res);
+    // Defensive: ActiveQuarantinesPanel calls `rows.length`, so any
+    // mock or response shape that omits `items` must not bubble through
+    // as `undefined`.
+    if (!body.success || !Array.isArray(body.data?.items)) return [];
+    return body.data.items;
+  } catch (err) {
+    logger.error('orchestration dashboard: failed to load active quarantines', err);
+    return [];
   }
 }
 
@@ -222,15 +247,23 @@ async function getActivityFeed(
 }
 
 export default async function OrchestrationDashboardPage() {
-  const [costSummary, budgetAlerts, agentsCount, dashboardStats, models, setupState] =
-    await Promise.all([
-      getCostSummary(),
-      getBudgetAlerts(),
-      getPaginatedTotal(API.ADMIN.ORCHESTRATION.AGENTS),
-      getDashboardStats(),
-      getModels(),
-      getSetupState(),
-    ]);
+  const [
+    costSummary,
+    budgetAlerts,
+    agentsCount,
+    dashboardStats,
+    models,
+    setupState,
+    activeQuarantines,
+  ] = await Promise.all([
+    getCostSummary(),
+    getBudgetAlerts(),
+    getPaginatedTotal(API.ADMIN.ORCHESTRATION.AGENTS),
+    getDashboardStats(),
+    getModels(),
+    getSetupState(),
+    getActiveQuarantines(),
+  ]);
 
   const todayCostUsd = costSummary?.totals.today ?? null;
   const weekTrend = costSummary?.trend.slice(-7) ?? null;
@@ -253,6 +286,8 @@ export default async function OrchestrationDashboardPage() {
       <SetupRequiredBanner hasProvider={setupState.hasProvider} />
 
       <BudgetAlertsBanner alerts={budgetAlerts} />
+
+      <ActiveQuarantinesPanel rows={activeQuarantines} />
 
       <section aria-label="Summary statistics">
         <DashboardStatsCards

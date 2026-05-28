@@ -58,7 +58,7 @@ export const POST = withAdminAuth<{ id: string }>(async (request, session, { par
       grantedDocuments: { select: { documentId: true } },
     },
   });
-  if (!source) throw new NotFoundError(`Agent ${id} not found`);
+  if (!source || source.deletedAt !== null) throw new NotFoundError(`Agent ${id} not found`);
 
   const sourceTagIds = (source.grantedTags ?? []).map((g) => g.tagId);
   const sourceDocumentIds = (source.grantedDocuments ?? []).map((g) => g.documentId);

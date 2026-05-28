@@ -37,6 +37,7 @@ import type {
   CapabilityFunctionDefinition,
   CapabilityRegistryEntry,
   CapabilityResult,
+  QuarantineState,
 } from '@/lib/orchestration/capabilities/types';
 import {
   GEN_AI_OPERATION_NAME,
@@ -205,6 +206,47 @@ class CapabilityDispatcher {
       return {
         success: false,
         error: { code: 'capability_inactive', message: `Capability is not active: ${slug}` },
+      };
+    }
+
+    // 3a. Quarantine gate. Distinct from isActive — see
+    //     `.context/orchestration/capabilities.md` (Quarantine section).
+    //     `quarantineUntil` is checked at read time: a past timestamp is
+    //     treated as `active` without mutating the row (the field is kept
+    //     for audit). Soft mode returns a structured error the agent can
+    //     route around via plan / orchestrator; hard mode sets
+    //     skipFollowup so the model's tool loop terminates.
+    const effectiveQuarantine = resolveQuarantineState(entry);
+    if (effectiveQuarantine !== 'active') {
+      logger.warn('Capability dispatch: quarantined', {
+        slug,
+        mode: effectiveQuarantine,
+        reason: entry.quarantineReason,
+        agentId: context.agentId,
+      });
+      return {
+        success: false,
+        error: {
+          code: 'capability_quarantined',
+          message:
+            effectiveQuarantine === 'quarantined-hard'
+              ? `Capability ${slug} is unavailable (disabled by admin)`
+              : `Capability ${slug} is temporarily unavailable${
+                  entry.quarantineReason ? `: ${entry.quarantineReason}` : ''
+                }`,
+        },
+        skipFollowup: effectiveQuarantine === 'quarantined-hard',
+        // Hard mode deliberately omits the reason — the chat handler
+        // persists the role:tool message verbatim and rehydrates it on
+        // the next user turn, so a reason in metadata would survive past
+        // the in-turn `skipFollowup` short-circuit and give the model
+        // operational details to drive a retry. Soft mode keeps the
+        // reason so the agent can describe the unavailability to the
+        // user and route around it.
+        metadata:
+          effectiveQuarantine === 'quarantined-hard'
+            ? { mode: effectiveQuarantine }
+            : { mode: effectiveQuarantine, reason: entry.quarantineReason },
       };
     }
 
@@ -464,6 +506,9 @@ interface AiCapabilityRow {
   rateLimit: number | null;
   isIdempotent: boolean;
   isActive: boolean;
+  quarantineState: string;
+  quarantineReason: string | null;
+  quarantineUntil: Date | null;
 }
 
 function mapRowToEntry(row: AiCapabilityRow): CapabilityRegistryEntry | null {
@@ -480,7 +525,47 @@ function mapRowToEntry(row: AiCapabilityRow): CapabilityRegistryEntry | null {
     rateLimit: row.rateLimit,
     isIdempotent: row.isIdempotent,
     isActive: row.isActive,
+    quarantineState: normaliseQuarantineState(row.quarantineState),
+    quarantineReason: row.quarantineReason,
+    quarantineUntil: row.quarantineUntil,
   };
+}
+
+/**
+ * Guard against a stored quarantineState value that doesn't match the enum
+ * (e.g. a future state added by an out-of-band migration on an older deploy).
+ * Unknown values fail open to 'active' so a corrupt row can't disable a
+ * capability silently.
+ */
+function normaliseQuarantineState(value: string): QuarantineState {
+  if (value === 'quarantined-soft' || value === 'quarantined-hard') return value;
+  return 'active';
+}
+
+/**
+ * Resolve the *effective* quarantine state of a registry entry, accounting
+ * for read-time auto-expiry. A past `quarantineUntil` returns `'active'`
+ * without mutating the row — the column is preserved for audit. Callers
+ * that need to render the stored state in admin UI should read
+ * `entry.quarantineState` directly.
+ *
+ * Accepts `string` for `quarantineState` so callers reading a raw Prisma
+ * row (where the column is typed `string`, not the union) can call this
+ * directly without an `as` cast — values that don't match the enum fall
+ * open to `'active'` via the same `normaliseQuarantineState` guard the
+ * registry loader uses. This keeps every read path consistent and
+ * removes a class of CLAUDE.md "no `as` on external data" violations.
+ */
+export function resolveQuarantineState(entry: {
+  quarantineState: string;
+  quarantineUntil: Date | null;
+}): QuarantineState {
+  const stored = normaliseQuarantineState(entry.quarantineState);
+  if (stored === 'active') return 'active';
+  if (entry.quarantineUntil !== null && entry.quarantineUntil.getTime() <= Date.now()) {
+    return 'active';
+  }
+  return stored;
 }
 
 function formatValidationIssues(issues: unknown[]): string {

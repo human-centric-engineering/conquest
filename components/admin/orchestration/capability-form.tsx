@@ -724,7 +724,7 @@ export function CapabilityForm({
             </Label>
             <Textarea
               id="description"
-              rows={3}
+              rows={5}
               {...register('description')}
               placeholder="Semantic search over the agentic patterns knowledge base."
             />

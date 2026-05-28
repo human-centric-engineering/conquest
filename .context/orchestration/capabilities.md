@@ -171,6 +171,7 @@ The registry refuses to register a capability that declares `processesPii = true
 1. **Load registry** — `loadFromDatabase()` fetches active `AiCapability` rows into the in-memory map. Deduped via an inflight promise; cached for 5 minutes.
 2. **Handler lookup** — `handlers.get(slug)`. Missing → `{ code: 'unknown_capability' }`.
 3. **Registry lookup** — the in-memory `CapabilityRegistryEntry`. Missing → `{ code: 'capability_inactive' }`.
+   3a. **Quarantine gate** — `resolveQuarantineState(entry)` resolves the effective state (a past `quarantineUntil` is treated as `active`). Soft → `{ code: 'capability_quarantined', skipFollowup: false, metadata: { mode, reason } }` with a "temporarily unavailable" message the agent can route around. Hard → same code with `skipFollowup: true` and a firm message that stops the model's tool loop. See the [Quarantine](#quarantine-incident-disable) section below.
 4. **Per-agent binding** — `prisma.aiAgentCapability.findMany({ agentId })`, cached per agent for 5 minutes. An explicit row with `isEnabled: false` → `{ code: 'capability_disabled_for_agent' }`. Missing row = default-allow with base-capability defaults.
 5. **Rate limit** — effective limit = `binding.effectiveRateLimit ?? entry.rateLimit`. If non-null, a sliding-window `RateLimiter` keyed by slug (token = `agentId`) checks the request. Exceeded → `{ code: 'rate_limited' }`.
 6. **Approval gate** — `entry.requiresApproval: true` → `{ code: 'requires_approval', skipFollowup: true }`. The handler never runs. (The admin queue that resolves approvals is a later slice.)
@@ -193,6 +194,78 @@ The dispatcher and `getCapabilityDefinitions` use deliberately asymmetric defaul
 
 - **`dispatch()` is default-allow.** No `AiAgentCapability` row = use the base capability's settings. Backend, CLI, and test callers can dispatch without any admin wiring.
 - **`getCapabilityDefinitions()` is default-deny.** Only capabilities with an explicit `AiAgentCapability` row where `isEnabled: true` AND the underlying capability is both `isActive` and present in the in-memory handler map are returned. The LLM only _sees_ tools an admin has explicitly enabled.
+
+## Quarantine (incident disable)
+
+Quarantine is the **incident-response** half of capability disable. `isActive` (and the `DELETE` route's soft-delete) is the _routine_ on/off switch — deprecating a tool, beta-gating one, removing it permanently. Quarantine is what an admin reaches for when a vendor API is misbehaving _right now_ and every agent needs to stop calling the tool inside the next five minutes. The audit log uses a distinct action string (`capability.quarantine` / `capability.unquarantine`) so post-incident review can find the response window without sifting through routine edits.
+
+### Two modes
+
+| Mode               | Dispatcher behaviour                                                                                                                                                                                                            | When to use                                                              |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `quarantined-soft` | Returns `capability_quarantined` with `skipFollowup: false` and a message like `Capability X is temporarily unavailable: <reason>`. The agent sees a structured tool error and can route around it via `plan` / `orchestrator`. | Vendor outage, rate-limit storm — the tool is _missing_ but not _wrong_. |
+| `quarantined-hard` | Same error code but with `skipFollowup: true` and a firm message (`Capability X is unavailable (disabled by admin)`) that does not include the reason. Stops the model's tool loop.                                             | Tool is sending _wrong_ data — don't let the agent retry.                |
+
+The full dispatcher payload is:
+
+```ts
+{
+  success: false,
+  error: { code: 'capability_quarantined', message: string },
+  skipFollowup: boolean,  // true for hard, false for soft
+  metadata: { mode: 'quarantined-soft' | 'quarantined-hard', reason: string | null },
+}
+```
+
+### Auto-expiry is read-time
+
+The optional `quarantineUntil` timestamp is checked on every dispatch via the exported `resolveQuarantineState()` helper (`lib/orchestration/capabilities/dispatcher.ts`). When the timestamp is in the past, the dispatcher treats the capability as `active` without mutating the row — the stored fields are kept for audit, and the capabilities-list page renders the row as active. The same helper backs the agent-detail banner and the dashboard panel, so all three surfaces stay in sync from a single rule.
+
+An explicit `POST .../unquarantine` clears all three fields and emits the `capability.unquarantined` hook event. It is idempotent: calling on an already-active capability is a no-op with no audit row and no hook event.
+
+### System capabilities are quarantinable
+
+Unlike the `isActive=false` path on `PATCH` (which is blocked on `isSystem: true` to prevent accidental deletion), quarantine has no `isSystem` guard. Incident response must be able to disable any tool quickly, including platform-shipped ones.
+
+### Routes
+
+| Method · Path                             | Body                                                                                               | Effect                                                                                                                                              |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST .../capabilities/[id]/quarantine`   | `{ mode: 'quarantined-soft' \| 'quarantined-hard', reason: string, expiresAt?: ISO 8601 \| null }` | Sets the three fields, drops the dispatcher cache, writes `capability.quarantine` audit row, emits `capability.quarantined` hook                    |
+| `POST .../capabilities/[id]/unquarantine` | (empty)                                                                                            | Clears the three fields (idempotent), drops the dispatcher cache, writes `capability.unquarantine` audit row, emits `capability.unquarantined` hook |
+
+Past expiry timestamps are rejected at the route layer with 400. Empty reasons are rejected by Zod (`quarantineCapabilitySchema`). Both routes require `withAdminAuth`.
+
+### Hook event payloads
+
+```ts
+// 'capability.quarantined'
+{
+  capabilityId, capabilitySlug, capabilityName,
+  mode: 'quarantined-soft' | 'quarantined-hard',
+  reason: string,
+  expiresAt: string | null,
+  actorUserId: string,
+  at: string  // ISO 8601
+}
+
+// 'capability.unquarantined'
+{
+  capabilityId, capabilitySlug, capabilityName,
+  previousMode: 'quarantined-soft' | 'quarantined-hard',
+  actorUserId: string,
+  at: string
+}
+```
+
+Auto-expiry does **not** emit a `capability.unquarantined` event — the stored state is unchanged and the dispatcher just renders it as active at read time. If a fork needs an event for that, a maintenance tick can flip rows whose `quarantineUntil` has passed and emit the event then; not built today.
+
+### Admin surfaces
+
+- **Capability detail page** — `<CapabilityQuarantineCard>` above the main form. Active state shows mode + reason + optional auto-lift; quarantined state shows current mode + reason + Lift button. Confirmation dialog names the affected agents before quarantine is applied.
+- **Agent detail page** — `<QuarantinedCapabilitiesBanner>` above the evaluation chart. Hidden when none of the agent's bound capabilities are quarantined.
+- **Capabilities list** — amber/destructive badge inline with the capability name; header chip showing the count, click to filter the table to quarantined rows.
+- **Orchestration dashboard** — `<ActiveQuarantinesPanel>` above the summary stats. Hidden when there are none. Each row links to the capability detail page where the quarantine can be lifted.
 
 ## Built-in Capabilities
 

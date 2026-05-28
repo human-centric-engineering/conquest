@@ -114,6 +114,9 @@ interface CapabilityRowOverrides {
   approvalTimeoutMs?: number | null;
   isIdempotent?: boolean;
   isActive?: boolean;
+  quarantineState?: 'active' | 'quarantined-soft' | 'quarantined-hard';
+  quarantineReason?: string | null;
+  quarantineUntil?: Date | null;
 }
 
 function makeCapabilityRow(overrides: CapabilityRowOverrides = {}) {
@@ -133,6 +136,9 @@ function makeCapabilityRow(overrides: CapabilityRowOverrides = {}) {
     approvalTimeoutMs: overrides.approvalTimeoutMs ?? null,
     isIdempotent: overrides.isIdempotent ?? false,
     isActive: overrides.isActive ?? true,
+    quarantineState: overrides.quarantineState ?? 'active',
+    quarantineReason: overrides.quarantineReason ?? null,
+    quarantineUntil: overrides.quarantineUntil ?? null,
   };
 }
 
@@ -206,6 +212,112 @@ describe('CapabilityDispatcher', () => {
         success: false,
         error: expect.objectContaining({ code: 'capability_inactive' }),
       });
+    });
+  });
+
+  describe('quarantine (item #42)', () => {
+    it('returns capability_quarantined with mode: soft and skipFollowup=false for soft quarantine', async () => {
+      capabilityDispatcher.register(new OkCapability());
+      mockFindMany.mockResolvedValue([
+        makeCapabilityRow({
+          quarantineState: 'quarantined-soft',
+          quarantineReason: 'Vendor API hanging',
+        }),
+      ]);
+
+      const result = await capabilityDispatcher.dispatch('ok', { n: 1 }, ctx);
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('capability_quarantined');
+      expect(result.error?.message).toContain('temporarily unavailable');
+      expect(result.error?.message).toContain('Vendor API hanging');
+      expect(result.skipFollowup).toBe(false);
+      expect(result.metadata).toMatchObject({
+        mode: 'quarantined-soft',
+        reason: 'Vendor API hanging',
+      });
+    });
+
+    it('returns capability_quarantined with skipFollowup=true for hard quarantine', async () => {
+      capabilityDispatcher.register(new OkCapability());
+      mockFindMany.mockResolvedValue([
+        makeCapabilityRow({
+          quarantineState: 'quarantined-hard',
+          quarantineReason: 'Tool sending wrong data',
+        }),
+      ]);
+
+      const result = await capabilityDispatcher.dispatch('ok', { n: 1 }, ctx);
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('capability_quarantined');
+      expect(result.error?.message).toContain('disabled by admin');
+      // Hard mode must not surface the reason anywhere the model can
+      // see — not in the message, not in metadata. The reason persists
+      // via the role:tool message JSON on the next user turn, and any
+      // metadata leak would let the model use operational details as
+      // retry ammunition.
+      expect(result.error?.message).not.toContain('Tool sending wrong data');
+      expect(result.skipFollowup).toBe(true);
+      expect(result.metadata?.mode).toBe('quarantined-hard');
+      expect(result.metadata).not.toHaveProperty('reason');
+    });
+
+    it('treats past quarantineUntil as active without mutating the row', async () => {
+      capabilityDispatcher.register(new OkCapability());
+      mockFindMany.mockResolvedValue([
+        makeCapabilityRow({
+          quarantineState: 'quarantined-soft',
+          quarantineReason: 'should be ignored',
+          quarantineUntil: new Date(Date.now() - 60_000), // 1 minute ago
+        }),
+      ]);
+
+      const result = await capabilityDispatcher.dispatch('ok', { n: 1 }, ctx);
+
+      // Expired quarantine → dispatch proceeds and returns the
+      // underlying capability's success result.
+      expect(result.success).toBe(true);
+      expect(result.data).toEqual({ doubled: 2 });
+    });
+
+    it('blocks dispatch when quarantineUntil is in the future', async () => {
+      capabilityDispatcher.register(new OkCapability());
+      mockFindMany.mockResolvedValue([
+        makeCapabilityRow({
+          quarantineState: 'quarantined-soft',
+          quarantineReason: 'window not expired',
+          quarantineUntil: new Date(Date.now() + 60_000),
+        }),
+      ]);
+
+      const result = await capabilityDispatcher.dispatch('ok', { n: 1 }, ctx);
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('capability_quarantined');
+    });
+
+    it('proceeds normally when stored quarantineState is "active"', async () => {
+      capabilityDispatcher.register(new OkCapability());
+      mockFindMany.mockResolvedValue([makeCapabilityRow({ quarantineState: 'active' })]);
+
+      const result = await capabilityDispatcher.dispatch('ok', { n: 1 }, ctx);
+
+      expect(result.success).toBe(true);
+    });
+
+    it('fails open on a corrupt stored quarantineState value', async () => {
+      capabilityDispatcher.register(new OkCapability());
+      mockFindMany.mockResolvedValue([
+        // Bypass type system to simulate a corrupt row.
+        makeCapabilityRow({ quarantineState: 'mystery-value' as unknown as 'active' }),
+      ]);
+
+      const result = await capabilityDispatcher.dispatch('ok', { n: 1 }, ctx);
+
+      // normaliseQuarantineState collapses unknown values to 'active'
+      // so a corrupt row cannot silently disable a capability.
+      expect(result.success).toBe(true);
     });
   });
 

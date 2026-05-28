@@ -42,6 +42,16 @@ export const HOOK_EVENT_TYPES = [
   // event specifically. Payload carries `{ executionId, workflowId,
   // actorUserId, reason }`.
   'execution.force_failed',
+  // Capability quarantine lifecycle (item #42). `capability.quarantined`
+  // fires when an admin puts a capability into soft or hard quarantine;
+  // `capability.unquarantined` fires when the quarantine is lifted.
+  // Auto-expiry (read-time) does NOT fire an unquarantined event — the
+  // stored state is unchanged and the dispatcher just renders it as
+  // active. Payloads carry `{ capabilityId, capabilitySlug,
+  // capabilityName, mode, reason, expiresAt, actorUserId, at }`
+  // (`mode` and `expiresAt` are omitted on unquarantined).
+  'capability.quarantined',
+  'capability.unquarantined',
 ] as const;
 
 export type HookEventType = (typeof HOOK_EVENT_TYPES)[number];

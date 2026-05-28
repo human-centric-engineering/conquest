@@ -7,6 +7,10 @@ import {
   EvaluationTrendChart,
   type EvaluationTrendPoint,
 } from '@/components/admin/orchestration/evaluation-trend-chart';
+import {
+  QuarantinedCapabilitiesBanner,
+  type QuarantinedCapabilityForAgent,
+} from '@/components/admin/orchestration/agents/quarantined-capabilities-banner';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
@@ -69,6 +73,32 @@ async function getAgentProfiles(): Promise<AgentProfileSummary[]> {
   }
 }
 
+/**
+ * Quarantined capabilities the agent is currently bound to. Calls the
+ * admin API; the route applies read-time auto-expiry via the shared
+ * `resolveQuarantineState` so the rule lives in exactly one place.
+ *
+ * Returns [] on any failure — the banner is informational and must not
+ * block the page render.
+ */
+async function getQuarantinedCapabilitiesForAgent(
+  agentId: string
+): Promise<QuarantinedCapabilityForAgent[]> {
+  try {
+    const res = await serverFetch(API.ADMIN.ORCHESTRATION.agentQuarantinedCapabilities(agentId));
+    if (!res.ok) return [];
+    const body = await parseApiResponse<{ items: QuarantinedCapabilityForAgent[] }>(res);
+    // Defensive: existing page-level mocks (e.g. the EditAgentPage tests)
+    // return a generic body shape that doesn't include `items`. The
+    // banner expects an array, so always normalise.
+    if (!body.success || !Array.isArray(body.data?.items)) return [];
+    return body.data.items;
+  } catch (err) {
+    logger.error('edit agent page: quarantined-capabilities fetch failed', err, { agentId });
+    return [];
+  }
+}
+
 async function getEvaluationTrend(id: string): Promise<EvaluationTrendPoint[]> {
   try {
     const res = await serverFetch(API.ADMIN.ORCHESTRATION.agentEvaluationTrend(id));
@@ -84,12 +114,13 @@ async function getEvaluationTrend(id: string): Promise<EvaluationTrendPoint[]> {
 
 export default async function EditAgentPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [agent, providers, models, trend, profiles] = await Promise.all([
+  const [agent, providers, models, trend, profiles, quarantinedCapabilities] = await Promise.all([
     getAgent(id),
     getProviders(),
     getAgentModels(),
     getEvaluationTrend(id),
     getAgentProfiles(),
+    getQuarantinedCapabilitiesForAgent(id),
   ]);
 
   if (!agent) notFound();
@@ -112,6 +143,8 @@ export default async function EditAgentPage({ params }: { params: Promise<{ id: 
         {' / '}
         <span>{agent.name}</span>
       </nav>
+
+      <QuarantinedCapabilitiesBanner items={quarantinedCapabilities} />
 
       <EvaluationTrendChart points={trend} />
 

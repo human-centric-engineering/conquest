@@ -95,6 +95,12 @@ export const API = {
         `/api/v1/admin/orchestration/capabilities/${id}/agents`,
       capabilityStats: (id: string): string =>
         `/api/v1/admin/orchestration/capabilities/${id}/stats`,
+      capabilityQuarantine: (id: string): string =>
+        `/api/v1/admin/orchestration/capabilities/${id}/quarantine`,
+      capabilityUnquarantine: (id: string): string =>
+        `/api/v1/admin/orchestration/capabilities/${id}/unquarantine`,
+      capabilityQuarantineAttribution: (id: string): string =>
+        `/api/v1/admin/orchestration/capabilities/${id}/quarantine-attribution`,
       PROVIDER_MODELS: '/api/v1/admin/orchestration/provider-models',
       providerModelById: (id: string): string =>
         `/api/v1/admin/orchestration/provider-models/${id}`,
@@ -270,7 +276,11 @@ export const API = {
       EVAL_GRADERS: '/api/v1/admin/orchestration/evaluations/graders',
       agentEvaluationTrend: (id: string): string =>
         `/api/v1/admin/orchestration/agents/${id}/evaluation-trend`,
+      agentQuarantinedCapabilities: (id: string): string =>
+        `/api/v1/admin/orchestration/agents/${id}/quarantined-capabilities`,
       OBSERVABILITY_DASHBOARD_STATS: '/api/v1/admin/orchestration/observability/dashboard-stats',
+      OBSERVABILITY_ACTIVE_QUARANTINES:
+        '/api/v1/admin/orchestration/observability/active-quarantines',
       QUIZ_SCORES: '/api/v1/admin/orchestration/quiz-scores',
 
       /** MCP Server admin endpoints */
