@@ -747,11 +747,25 @@ export function ManageTab({ documents, onRefresh }: ManageTabProps) {
                                   setEditTagsName(doc.name);
                                 }}
                                 aria-label={`Edit ${doc.tags.length} tag${doc.tags.length === 1 ? '' : 's'} on ${doc.name}`}
-                                className="focus-visible:ring-ring rounded-sm focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:outline-none"
+                                className="focus-visible:ring-ring inline-flex flex-wrap items-center gap-1 rounded-sm focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:outline-none"
                               >
-                                <Badge variant="secondary" className="text-xs hover:underline">
-                                  {doc.tags.length} tag{doc.tags.length === 1 ? '' : 's'}
-                                </Badge>
+                                {doc.tags.slice(0, 3).map((tag) => (
+                                  <Badge
+                                    key={tag.id ?? tag.name}
+                                    variant="secondary"
+                                    className="text-xs hover:underline"
+                                  >
+                                    {tag.name}
+                                  </Badge>
+                                ))}
+                                {doc.tags.length > 3 && (
+                                  <Badge
+                                    variant="outline"
+                                    className="text-muted-foreground text-xs hover:underline"
+                                  >
+                                    +{doc.tags.length - 3} more
+                                  </Badge>
+                                )}
                               </button>
                             </Tip>
                           ) : (
