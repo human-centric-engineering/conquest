@@ -41,14 +41,13 @@ export const GET = withAdminAuth(async (request, _session) => {
   const where: Prisma.AiAgentWhereInput = {};
   if (kind !== undefined) where.kind = kind;
   if (isActive !== undefined) where.isActive = isActive;
-  // Hide soft-deleted agents. DELETE renames the slug to
-  // `{slug}-deleted-{id}` so the original is freed for reuse — that
-  // tombstone is the unambiguous "deleted" signal. We deliberately
-  // do not filter by `isActive` here: a freshly cloned agent is
-  // created inactive (so the operator can review it before going
-  // live), and a manually deactivated agent should still appear so
-  // the operator can re-enable it.
-  where.slug = { not: { contains: '-deleted-' } };
+  // Hide soft-deleted agents. DELETE stamps `deletedAt = now()` (and
+  // tombstones the slug to free the @unique constraint, but the timestamp
+  // is the authoritative signal). We deliberately do not filter by
+  // `isActive` here: a freshly cloned agent is created inactive (so the
+  // operator can review it before going live), and a manually deactivated
+  // agent should still appear so the operator can re-enable it.
+  where.deletedAt = null;
   if (provider) where.provider = provider;
   if (isSystem !== undefined) where.isSystem = isSystem;
   if (q) {

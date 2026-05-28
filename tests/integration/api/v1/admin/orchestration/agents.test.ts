@@ -295,13 +295,15 @@ describe('GET /api/v1/admin/orchestration/agents', () => {
       );
     });
 
-    it('hides soft-deleted (tombstoned) agents by default but keeps inactive ones visible', async () => {
+    it('hides soft-deleted agents (deletedAt set) but keeps inactive ones visible', async () => {
       // Regression: a clone is created with isActive=false (so the operator
       // can review before enabling), but the previous list filter forced
-      // isActive=true and hid those clones. The list should distinguish
-      // "soft-deleted" (slug tombstoned with -deleted-) from "inactive but
-      // still meant to appear" (a clone, or an agent toggled off via the
-      // table switch).
+      // isActive=true and hid those clones. The list distinguishes
+      // "soft-deleted" (deletedAt set by DELETE) from "inactive but still
+      // meant to appear" (a clone, or an agent toggled off via the table
+      // switch). A prior fix hung this off a slug-tombstone substring,
+      // which leaked legacy soft-deletes whose slug was never renamed —
+      // deletedAt is now the authoritative signal.
       vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
       vi.mocked(prisma.aiAgent.findMany).mockResolvedValue([]);
       vi.mocked(prisma.aiAgent.count).mockResolvedValue(0);
@@ -312,8 +314,9 @@ describe('GET /api/v1/admin/orchestration/agents', () => {
         | { where: Record<string, unknown> }
         | undefined;
       expect(call).toBeDefined();
-      expect(call!.where).toMatchObject({ slug: { not: { contains: '-deleted-' } } });
+      expect(call!.where).toMatchObject({ deletedAt: null });
       expect(call!.where).not.toHaveProperty('isActive');
+      expect(call!.where).not.toHaveProperty('slug');
     });
   });
 

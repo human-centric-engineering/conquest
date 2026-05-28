@@ -117,6 +117,7 @@ function makeSourceAgent() {
     enableDocumentInput: false,
     isActive: true,
     isSystem: false,
+    deletedAt: null,
     createdBy: 'user_abc',
     capabilities: [
       {
@@ -340,6 +341,23 @@ describe('POST /api/v1/admin/orchestration/agents/:id/clone', () => {
     it('returns 404 when source agent is not found', async () => {
       vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
       vi.mocked(prisma.aiAgent.findUnique).mockResolvedValue(null);
+
+      const response = await POST(makePostRequest(), makeParams(AGENT_ID));
+
+      expect(response.status).toBe(404);
+      const data = await parseJson<{ success: boolean; error: { code: string } }>(response);
+      expect(data.error.code).toBe('NOT_FOUND');
+    });
+
+    it('returns 404 when source agent is soft-deleted', async () => {
+      // Cloning a tombstoned row would copy a deleted agent's config into a
+      // new live row — the source must look as if it doesn't exist.
+      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+      vi.mocked(prisma.aiAgent.findUnique).mockResolvedValue({
+        ...makeSourceAgent(),
+        isActive: false,
+        deletedAt: new Date('2026-05-01'),
+      } as never);
 
       const response = await POST(makePostRequest(), makeParams(AGENT_ID));
 

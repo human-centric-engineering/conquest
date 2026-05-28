@@ -6,10 +6,13 @@
  *   - When `systemInstructions` changes, the previous value is pushed
  *     onto `systemInstructionsHistory` with `{instructions, changedAt, changedBy}`.
  * DELETE /api/v1/admin/orchestration/agents/:id
- *   - Soft delete: sets `isActive = false` and renames the slug to a
- *     unique tombstone (`{slug}-deleted-{id}`) so the slug is freed for
- *     reuse. Hard delete would either cascade conversation/message/
- *     cost-log history or fail; soft delete preserves the audit trail.
+ *   - Soft delete: sets `deletedAt = now()`, flips `isActive = false`, and
+ *     renames the slug to a unique tombstone (`{slug}-deleted-{id}`) so
+ *     the original slug is freed for reuse. `deletedAt` is the
+ *     authoritative "deleted" signal that read paths filter on; the slug
+ *     rename only exists to release the @unique constraint. Hard delete
+ *     would either cascade conversation/message/cost-log history or
+ *     fail; soft delete preserves the audit trail.
  *
  * Authentication: Admin role required.
  */
@@ -85,7 +88,7 @@ export const GET = withAdminAuth<{ id: string }>(async (request, _session, { par
       grantedDocuments: { select: { documentId: true } },
     },
   });
-  if (!agent) throw new NotFoundError(`Agent ${id} not found`);
+  if (!agent || agent.deletedAt !== null) throw new NotFoundError(`Agent ${id} not found`);
 
   // Flatten the join-row arrays into id arrays for the form. The include is
   // always set in the query above, but defensive defaults keep tests that mock
@@ -115,7 +118,7 @@ export const PATCH = withAdminAuth<{ id: string }>(async (request, session, { pa
       grantedDocuments: { select: { documentId: true } },
     },
   });
-  if (!current) throw new NotFoundError(`Agent ${id} not found`);
+  if (!current || current.deletedAt !== null) throw new NotFoundError(`Agent ${id} not found`);
 
   const currentGrantedTagIds = (current.grantedTags ?? []).map((g) => g.tagId).sort();
   const currentGrantedDocumentIds = (current.grantedDocuments ?? [])
@@ -534,7 +537,7 @@ export const DELETE = withAdminAuth<{ id: string }>(async (request, session, { p
   const id = parseAgentId(rawId);
 
   const current = await prisma.aiAgent.findUnique({ where: { id } });
-  if (!current) throw new NotFoundError(`Agent ${id} not found`);
+  if (!current || current.deletedAt !== null) throw new NotFoundError(`Agent ${id} not found`);
 
   if (current.isSystem) {
     throw new ForbiddenError('System agents cannot be deleted');
@@ -543,9 +546,10 @@ export const DELETE = withAdminAuth<{ id: string }>(async (request, session, { p
   // Release the slug so the operator can recreate an agent with the same
   // name. The slug column is @unique, so a soft-delete that left the slug
   // in place would block reuse forever. Rename to a collision-free
-  // tombstone (slug is never re-deleted because the row is already
-  // inactive, but guard against re-tombstoning just in case). Slug max is
-  // 100 chars, so truncate the original to leave room for the suffix.
+  // tombstone; truncate to leave room for the suffix (slug max is 100
+  // chars at the validation layer). The already-tombstoned guard is
+  // defensive — the `deletedAt` check above already short-circuits any
+  // second DELETE on the same row.
   const tombstoneSuffix = `-deleted-${id}`;
   const alreadyTombstoned = current.slug.endsWith(tombstoneSuffix);
   const tombstoneSlug = alreadyTombstoned
@@ -554,7 +558,7 @@ export const DELETE = withAdminAuth<{ id: string }>(async (request, session, { p
 
   const agent = await prisma.aiAgent.update({
     where: { id },
-    data: { isActive: false, slug: tombstoneSlug },
+    data: { isActive: false, slug: tombstoneSlug, deletedAt: new Date() },
   });
 
   log.info('Agent soft-deleted', {

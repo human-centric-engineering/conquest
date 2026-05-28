@@ -79,6 +79,7 @@ function makeAgent(overrides: Record<string, unknown> = {}) {
     monthlyBudgetUsd: null,
     metadata: null,
     isActive: true,
+    deletedAt: null,
     createdBy: ADMIN_ID,
     createdAt: new Date('2025-01-01'),
     updatedAt: new Date('2025-01-01'),
@@ -157,6 +158,20 @@ describe('GET /api/v1/admin/orchestration/agents/:id', () => {
     it('returns 404 when agent not found', async () => {
       vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
       vi.mocked(prisma.aiAgent.findUnique).mockResolvedValue(null);
+
+      const response = await GET(makeRequest(), makeParams(AGENT_ID));
+
+      expect(response.status).toBe(404);
+    });
+
+    it('returns 404 when the agent is soft-deleted', async () => {
+      // A row with deletedAt set must look the same to admin UI as a missing
+      // row — otherwise an operator could still hit the edit page for an
+      // agent the list endpoint already hides.
+      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+      vi.mocked(prisma.aiAgent.findUnique).mockResolvedValue(
+        makeAgent({ isActive: false, deletedAt: new Date('2026-05-01') }) as never
+      );
 
       const response = await GET(makeRequest(), makeParams(AGENT_ID));
 
@@ -408,6 +423,20 @@ describe('PATCH /api/v1/admin/orchestration/agents/:id', () => {
       const response = await PATCH(makeRequest('PATCH', { name: 'x' }), makeParams(AGENT_ID));
 
       expect(response.status).toBe(404);
+    });
+
+    it('returns 404 when patching a soft-deleted agent', async () => {
+      // A soft-deleted agent must be unreachable from PATCH too — otherwise
+      // an edit on a stale tab could resurrect a tombstoned row.
+      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+      vi.mocked(prisma.aiAgent.findUnique).mockResolvedValue(
+        makeAgent({ isActive: false, deletedAt: new Date('2026-05-01') }) as never
+      );
+
+      const response = await PATCH(makeRequest('PATCH', { name: 'x' }), makeParams(AGENT_ID));
+
+      expect(response.status).toBe(404);
+      expect(vi.mocked(prisma.aiAgent.update)).not.toHaveBeenCalled();
     });
 
     it('returns 400 for P2002 slug conflict on PATCH', async () => {
@@ -1195,10 +1224,12 @@ describe('DELETE /api/v1/admin/orchestration/agents/:id', () => {
   });
 
   describe('Successful soft delete', () => {
-    it('sets isActive to false and returns success', async () => {
+    it('sets isActive=false, stamps deletedAt, tombstones the slug', async () => {
       vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
       vi.mocked(prisma.aiAgent.findUnique).mockResolvedValue(makeAgent() as never);
-      vi.mocked(prisma.aiAgent.update).mockResolvedValue(makeAgent({ isActive: false }) as never);
+      vi.mocked(prisma.aiAgent.update).mockResolvedValue(
+        makeAgent({ isActive: false, deletedAt: new Date() }) as never
+      );
 
       const response = await DELETE(makeRequest('DELETE'), makeParams(AGENT_ID));
 
@@ -1208,31 +1239,33 @@ describe('DELETE /api/v1/admin/orchestration/agents/:id', () => {
       expect(data.success).toBe(true);
       expect(data.data.isActive).toBe(false);
 
-      // Soft delete deactivates the row and renames the slug to a unique
-      // tombstone so the original slug ('test-agent') is freed for reuse.
-      expect(vi.mocked(prisma.aiAgent.update)).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: { isActive: false, slug: `test-agent-deleted-${AGENT_ID}` },
-        })
-      );
+      // Soft delete must (a) flip isActive, (b) stamp deletedAt — the
+      // signal read paths filter on — and (c) rename the slug so the
+      // original ('test-agent') is freed for reuse.
+      const updateCall = vi.mocked(prisma.aiAgent.update).mock.calls[0]?.[0];
+      expect(updateCall?.data).toMatchObject({
+        isActive: false,
+        slug: `test-agent-deleted-${AGENT_ID}`,
+      });
+      expect((updateCall?.data as { deletedAt?: Date }).deletedAt).toBeInstanceOf(Date);
     });
 
-    it('does not re-tombstone an already-deleted slug', async () => {
+    it('returns 404 when called again on an already soft-deleted agent', async () => {
+      // deletedAt is the authoritative marker: a second DELETE should
+      // 404 rather than re-stamp the timestamp or re-tombstone the slug.
       vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      const tombstoned = `test-agent-deleted-${AGENT_ID}`;
       vi.mocked(prisma.aiAgent.findUnique).mockResolvedValue(
-        makeAgent({ isActive: false, slug: tombstoned }) as never
-      );
-      vi.mocked(prisma.aiAgent.update).mockResolvedValue(
-        makeAgent({ isActive: false, slug: tombstoned }) as never
+        makeAgent({
+          isActive: false,
+          deletedAt: new Date('2026-05-01'),
+          slug: `test-agent-deleted-${AGENT_ID}`,
+        }) as never
       );
 
       const response = await DELETE(makeRequest('DELETE'), makeParams(AGENT_ID));
 
-      expect(response.status).toBe(200);
-      expect(vi.mocked(prisma.aiAgent.update)).toHaveBeenCalledWith(
-        expect.objectContaining({ data: { isActive: false, slug: tombstoned } })
-      );
+      expect(response.status).toBe(404);
+      expect(vi.mocked(prisma.aiAgent.update)).not.toHaveBeenCalled();
     });
   });
 
