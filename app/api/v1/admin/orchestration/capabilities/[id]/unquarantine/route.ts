@@ -17,6 +17,7 @@ import { NotFoundError, ValidationError } from '@/lib/api/errors';
 import { getRouteLogger } from '@/lib/api/context';
 import { getClientIP } from '@/lib/security/ip';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities';
+import { resolveQuarantineState } from '@/lib/orchestration/capabilities/dispatcher';
 import { cuidSchema } from '@/lib/validations/common';
 import { computeChanges, logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { emitHookEvent } from '@/lib/orchestration/hooks/registry';
@@ -38,9 +39,18 @@ export const POST = withAdminAuth<{ id: string }>(async (request, session, { par
   const current = await prisma.aiCapability.findUnique({ where: { id } });
   if (!current) throw new NotFoundError(`Capability ${id} not found`);
 
-  // Idempotent: if already active, return current state without writing
-  // a no-op audit row or firing a spurious hook.
-  if (current.quarantineState === 'active') {
+  // Idempotent on *effective* state: a row whose `quarantineUntil` has
+  // already passed is treated as active by the dispatcher and every
+  // read path, so lifting it must not fire a hook or write an audit
+  // row either (the `hooks/types.ts` comment on `capability.unquarantined`
+  // is explicit: "Auto-expiry (read-time) does NOT fire an unquarantined
+  // event"). We still leave the stored quarantineUntil intact — the
+  // field is preserved for audit reconstruction.
+  const effective = resolveQuarantineState({
+    quarantineState: current.quarantineState,
+    quarantineUntil: current.quarantineUntil,
+  });
+  if (effective === 'active') {
     return successResponse(current);
   }
 

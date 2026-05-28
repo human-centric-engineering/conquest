@@ -271,6 +271,27 @@ describe('POST /capabilities/[id]/unquarantine', () => {
     expect(mockEmitHookEvent).not.toHaveBeenCalled();
   });
 
+  it('is idempotent on effective state — auto-expired quarantine does not write or fire', async () => {
+    // Stored as quarantined-soft but `quarantineUntil` has passed.
+    // The dispatcher treats this as active; lifting it must not
+    // emit a `capability.unquarantined` event per the documented
+    // invariant in hooks/types.ts.
+    const cap = makeCapability({
+      quarantineState: 'quarantined-soft',
+      quarantineReason: 'expired window',
+      quarantineUntil: new Date(Date.now() - 60_000),
+    });
+    mockFindUnique.mockResolvedValue(cap);
+
+    const response = await UNQUARANTINE_POST(makeRequest(null, 'unquarantine'), makeParams());
+
+    expect(response.status).toBe(200);
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(mockClearCache).not.toHaveBeenCalled();
+    expect(mockLogAdminAction).not.toHaveBeenCalled();
+    expect(mockEmitHookEvent).not.toHaveBeenCalled();
+  });
+
   it('returns 404 for unknown capability', async () => {
     mockFindUnique.mockResolvedValue(null);
 

@@ -17,6 +17,7 @@ import { prisma } from '@/lib/db/client';
 import { successResponse } from '@/lib/api/responses';
 import { NotFoundError, ValidationError } from '@/lib/api/errors';
 import { getRouteLogger } from '@/lib/api/context';
+import { resolveQuarantineState } from '@/lib/orchestration/capabilities/dispatcher';
 import { cuidSchema } from '@/lib/validations/common';
 
 export interface QuarantineAttribution {
@@ -37,13 +38,19 @@ export const GET = withAdminAuth<{ id: string }>(async (request, _session, { par
 
   const cap = await prisma.aiCapability.findUnique({
     where: { id },
-    select: { id: true, quarantineState: true },
+    select: { id: true, quarantineState: true, quarantineUntil: true },
   });
   if (!cap) throw new NotFoundError(`Capability ${id} not found`);
 
-  // Active state: don't query the audit log. Returning `null` here keeps
-  // the contract uniform — callers always read `data.attribution`.
-  if (cap.quarantineState === 'active') {
+  // Short-circuit on *effective* state — a row whose `quarantineUntil`
+  // has already passed is treated as active by the dispatcher and every
+  // other read path, so the card must not render attribution that
+  // suggests the capability is still being blocked.
+  const effective = resolveQuarantineState({
+    quarantineState: cap.quarantineState,
+    quarantineUntil: cap.quarantineUntil,
+  });
+  if (effective === 'active') {
     return successResponse({ attribution: null as QuarantineAttribution | null });
   }
 

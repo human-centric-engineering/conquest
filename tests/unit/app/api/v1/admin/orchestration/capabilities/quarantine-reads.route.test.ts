@@ -172,7 +172,11 @@ describe('GET /capabilities/:id/quarantine-attribution', () => {
   });
 
   it('returns { attribution: null } when capability is active (no audit query)', async () => {
-    mockCapFindUnique.mockResolvedValue({ id: CAP_ID, quarantineState: 'active' });
+    mockCapFindUnique.mockResolvedValue({
+      id: CAP_ID,
+      quarantineState: 'active',
+      quarantineUntil: null,
+    });
     const res = await GET_ATTRIBUTION(makeGetRequest(), makeParams(CAP_ID));
     const body = await res.json();
     expect(res.status).toBe(200);
@@ -180,8 +184,26 @@ describe('GET /capabilities/:id/quarantine-attribution', () => {
     expect(mockAuditFindFirst).not.toHaveBeenCalled();
   });
 
+  it('returns { attribution: null } when the stored quarantine has auto-expired (no audit query)', async () => {
+    mockCapFindUnique.mockResolvedValue({
+      id: CAP_ID,
+      quarantineState: 'quarantined-soft',
+      quarantineUntil: new Date(Date.now() - 60_000),
+    });
+    const res = await GET_ATTRIBUTION(makeGetRequest(), makeParams(CAP_ID));
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.data.attribution).toBeNull();
+    // Effective state is active → must not hit the audit log either.
+    expect(mockAuditFindFirst).not.toHaveBeenCalled();
+  });
+
   it('returns { attribution: null } when no audit row exists for the quarantine', async () => {
-    mockCapFindUnique.mockResolvedValue({ id: CAP_ID, quarantineState: 'quarantined-soft' });
+    mockCapFindUnique.mockResolvedValue({
+      id: CAP_ID,
+      quarantineState: 'quarantined-soft',
+      quarantineUntil: null,
+    });
     mockAuditFindFirst.mockResolvedValue(null);
     const res = await GET_ATTRIBUTION(makeGetRequest(), makeParams(CAP_ID));
     const body = await res.json();
@@ -190,7 +212,11 @@ describe('GET /capabilities/:id/quarantine-attribution', () => {
 
   it('returns name when present, otherwise email, otherwise null', async () => {
     const at = new Date('2026-05-01T12:00:00Z');
-    mockCapFindUnique.mockResolvedValue({ id: CAP_ID, quarantineState: 'quarantined-soft' });
+    mockCapFindUnique.mockResolvedValue({
+      id: CAP_ID,
+      quarantineState: 'quarantined-soft',
+      quarantineUntil: null,
+    });
 
     // Name takes precedence
     mockAuditFindFirst.mockResolvedValueOnce({
