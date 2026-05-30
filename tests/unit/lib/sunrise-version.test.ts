@@ -2,23 +2,22 @@
  * Tests: Sunrise platform version constant
  *
  * `SUNRISE_VERSION` is Sunrise's source-of-truth for the platform version
- * (the public-surface contract lives in `VERSIONING.md`). These tests defend
- * the two properties the rest of the codebase relies on:
+ * (the public-surface contract lives in `VERSIONING.md`). This test defends
+ * the one property the rest of the codebase relies on: the constant matches
+ * a **valid SemVer MAJOR.MINOR.PATCH shape**, so anything consuming it
+ * (the health endpoint payload, the eventual Hub discovery, CHANGELOG
+ * tooling) can rely on the format without re-validating.
  *
- *  1. The constant matches a **valid SemVer 2.0.0 shape**, so anything
- *     consuming it (the health endpoint payload, the eventual Hub discovery,
- *     CHANGELOG tooling) can rely on the format without re-validating.
- *  2. The Phase-1 value is the **explicit `'0.0.0'` placeholder**. The Phase 2
- *     PR (post-migration-squash) flips this to `'0.0.1'` and tags `v0.0.1` —
- *     this test makes that flip a deliberate, diff-visible change rather than
- *     a silent one. It is NOT a tautology: it asserts the *intended Phase-1
- *     placeholder*, which is a real, separate fact from the constant's value
- *     at any given moment. When Phase 2 lands, this expectation updates with
- *     the same commit that flips the constant.
+ * An earlier draft also pinned the literal value (`'0.0.0'` during Phase 1)
+ * to force the Phase-2 flip to be a deliberate, diff-visible change. That
+ * pin was removed when v0.0.1 shipped — keeping it would make every future
+ * release bump a release-cadence tax (the test would fail until a
+ * maintainer updated the literal), and the SemVer-shape regex already
+ * catches the realistic failure mode (a fork setting the constant to a
+ * malformed string like 'unreleased' or '0.0').
  *
  * @see lib/sunrise-version.ts
  * @see VERSIONING.md
- * @see .instructions/versioning-proposal.md (Phase 1 vs Phase 2 sequencing)
  */
 
 import { describe, it, expect } from 'vitest';
@@ -35,19 +34,9 @@ const SEMVER_REGEX = /^\d+\.\d+\.\d+$/;
 
 describe('SUNRISE_VERSION', () => {
   it('matches the SemVer MAJOR.MINOR.PATCH shape', () => {
-    // Guards a fork (or a Phase-2 typo) from setting the constant to a
-    // non-SemVer string like 'unreleased' or '0.0' — downstream consumers
-    // (health endpoint, Hub discovery) assume the shape.
+    // Guards a fork from setting the constant to a non-SemVer string like
+    // 'unreleased' or '0.0' — downstream consumers (health endpoint, Hub
+    // discovery) assume the shape.
     expect(SUNRISE_VERSION).toMatch(SEMVER_REGEX);
-  });
-
-  it('is the Phase-1 placeholder (0.0.0)', () => {
-    // Phase 1 ships the versioning infrastructure with this explicit
-    // placeholder; Phase 2 flips it to '0.0.1' along with dating the
-    // CHANGELOG and tagging v0.0.1. If this assertion fails outside the
-    // Phase-2 PR, someone has bumped the version without the rest of the
-    // release process — read VERSIONING.md + CONTRIBUTING.md "Cutting a
-    // release" before adjusting this test.
-    expect(SUNRISE_VERSION).toBe('0.0.0');
   });
 });

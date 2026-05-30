@@ -16,9 +16,22 @@ release process.
 
 ## [Unreleased]
 
-The following will ship in the first tagged Sunrise release (`v0.0.1`,
-post-migration-squash). All entries are part of the fork-readiness pass: the
-work that makes Sunrise safe to fork and to merge upstream releases into.
+_No entries yet._ Append public-surface changes here as PRs land (see
+[`VERSIONING.md`](./VERSIONING.md#public-surface-contract-tight-definition)
+for what counts and `CLAUDE.md` for the in-repo rule). Internal refactors,
+tests, docs, and chores deliberately do **not** belong here.
+
+---
+
+## [0.0.1] — 2026-05-30
+
+> **Alpha release.** First tagged Sunrise release. Ships in `0.x` per
+> [`VERSIONING.md`](./VERSIONING.md#0x-alpha-semantics--loose-by-design) —
+> forks adopting this release should expect real merge work between any two
+> `0.x` releases. The strict SemVer contract activates at `1.0.0`.
+
+The entries below are the fork-readiness pass — the work that makes
+Sunrise safe to fork and to merge upstream releases into.
 
 ### Added
 
@@ -85,4 +98,5 @@ work that makes Sunrise safe to fork and to merge upstream releases into.
 
 ---
 
-[Unreleased]: https://github.com/human-centric-engineering/sunrise/compare/main...HEAD
+[Unreleased]: https://github.com/human-centric-engineering/sunrise/compare/v0.0.1...HEAD
+[0.0.1]: https://github.com/human-centric-engineering/sunrise/releases/tag/v0.0.1

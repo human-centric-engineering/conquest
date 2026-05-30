@@ -12,11 +12,6 @@
  * + git tag + CHANGELOG entry — see CONTRIBUTING.md "Cutting a release").
  * Forks merge this file along with the rest of upstream; they do NOT edit it.
  *
- * PHASE-1 PLACEHOLDER: `'0.0.0'` indicates the versioning infrastructure has
- * landed but no Sunrise release has been tagged yet. Phase 2 (post-migration-
- * squash) flips this to `'0.0.1'`, dates the CHANGELOG entry, and tags
- * `v0.0.1`. See `.instructions/versioning-proposal.md` for the rollout plan.
- *
  * # Conventions
  *
  * - **Server-side use only.** This file is platform-agnostic (no Next.js
@@ -26,4 +21,4 @@
  *   it as the `sunrise` field), not by importing this constant in a
  *   `'use client'` component.
  */
-export const SUNRISE_VERSION = '0.0.0';
+export const SUNRISE_VERSION = '0.0.1';
