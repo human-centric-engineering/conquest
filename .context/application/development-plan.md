@@ -752,6 +752,12 @@ Core changes the app currently carries that are not yet reflected in upstream Su
   - **Affected-tests-on-PR** — `vitest run --changed <base-sha>` on PRs (needs `fetch-depth: 0`); full suite runs on push to main as the merge gate, so nothing merges unverified.
   - **Gated + decoupled Docker** — `docker` no longer `needs: validate` (runs in parallel → fails fast); on PRs it runs only when Docker-relevant files change, on main always (merge gate). `changes` job gained a `docker` output.
   - **Deferred (Tier 2, cost minutes):** splitting `validate` into parallel jobs and test sharding — measure Tier-1 first. **Target:** ~5–10 min on a typical PR push.
+  - **Benchmark results (2026-05-31, private repo, 2-core/7GB runners):**
+    - Tier-1 serial baseline (cold, full suite): Validate **25m08s**.
+    - Tier-1 **warm** typical PR (few source files, `--changed`): static checks collapse — **Lint 220s→2s, Format 62s→8s, Type check 13s**; with `--changed` skipping the suite, a typical PR Validate ≈ **5–6 min**. Floor = `next build` (~190s) + install/seed/smoke.
+    - **Gotcha:** `vitest --changed` runs the **full suite** when the PR diff includes `package.json`/config (correct — a root-manifest change can affect anything). So dep-changing PRs don't get the fast path.
+    - **Gotcha:** GitHub scopes caches per-branch (branch + base + default). Sibling feature branches don't share; the warm-cache win only fully lands once the change is on `main`. Forks: expect the speedup after the first default-branch build.
+  - **Tier-2 experiment (PR #5, parallel jobs + 4-way shard, cold, full suite):** wall-clock **~462s (7.7m)** vs serial ~1508s → **~3.3× faster**; billed minutes **~2385s (40m)** vs ~1508s → **~1.6× more**. Shards balanced (403–462s); N=8 = diminishing returns (per-shard DB+install overhead). **Recommendation for upstream:** Tier-1 for everyone; make Tier-2 a **toggle** — default-on for public repos (free minutes → pure wall-clock win), opt-in / full-suite-path-only for private repos (keep PR pushes on the cheap `--changed` path, shard only the main/dep-change full-suite runs).
 
 ---
 
