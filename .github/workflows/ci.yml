@@ -1,6 +1,23 @@
 name: CI
 
-# (Tier-1 perf: concurrency, build caches, content-cached lint/format, changed-tests, docker gate.)
+# Adaptive pipeline — correct and fast on BOTH public Sunrise (free minutes,
+# large runners) and private forks (capped minutes, 2-core/7GB runners).
+#
+# Universal speedups (on for everyone): cancel-superseded runs, warm build
+# caches with a content-based cache strategy, a raised Node heap (a cap, not an
+# allocation — harmless on 16GB, necessary on 7GB), fan-out of the static checks,
+# and a 4-way sharded test matrix.
+#
+# One economics knob — repo variable `CI_TEST_SCOPE`:
+#   • unset / "full" (DEFAULT) — full suite, 4-way sharded, on every PR and on
+#     main. The strong gate; sharding keeps it fast (free minutes absorb the
+#     ~1.6x billed-minutes of fan-out).
+#   • "changed" — PRs run only the tests affected by the diff (cheap, fast
+#     iteration); the full sharded suite still runs on push to main as the
+#     pre-merge/deploy gate, so main is never unverified. For private free-tier
+#     forks pre-production. See .context/architecture/ci.md.
+# Any value other than exactly "changed" falls back to "full" (fails safe to the
+# strong gate on a typo'd variable).
 
 on:
   push:
@@ -12,23 +29,28 @@ permissions:
   contents: read
   pull-requests: read
 
-# CARRIED SUNRISE OVERRIDE (pending-upstream): cancel superseded runs. At AI
-# pace we push fixups rapidly; without this, runs stack and burn the private
-# repo's limited free Actions minutes. Cancel in-progress runs for the same PR;
-# never cancel main (those are the post-merge record).
+# Cancel superseded runs for the same PR so rapid fixup pushes don't stack and
+# burn minutes. Never cancel main — those runs are the post-merge record.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# Raise Node's heap cap globally. It is a ceiling, not a reservation: on a 16GB
+# public runner it is never approached; on a 7GB private-fork runner it stops
+# `tsc` / `next build` OOMing (exit 134) when Node's default heap caps near ~2GB.
+env:
+  NODE_OPTIONS: '--max-old-space-size=5120'
+
 jobs:
-  changes:
+  config:
     name: Detect Changes
     runs-on: ubuntu-latest
     outputs:
       code: ${{ steps.filter.outputs.code }}
       docker: ${{ steps.filter.outputs.docker }}
+      test_scope: ${{ steps.filter.outputs.test_scope }}
     steps:
-      - name: Check for code changes
+      - name: Detect change scope + resolve test mode
         id: filter
         env:
           GH_TOKEN: ${{ github.token }}
@@ -43,8 +65,8 @@ jobs:
           echo "$CHANGED"
 
           # CODE   — anything that isn't docs-only (gates validate + docker)
-          # DOCKER — files that can change the production image (gates the
-          #          docker job on PRs; on main it always runs as a merge gate)
+          # DOCKER — files that can change the production image (gates the docker
+          #          job on PRs; on push to main docker always runs as a gate)
           CODE=false
           DOCKER=false
           while IFS= read -r file; do
@@ -65,16 +87,109 @@ jobs:
 
           echo "code=$CODE" >> "$GITHUB_OUTPUT"
           echo "docker=$DOCKER" >> "$GITHUB_OUTPUT"
+          # Resolve the test mode here so every downstream job reads one value.
+          echo "test_scope=${{ vars.CI_TEST_SCOPE || 'full' }}" >> "$GITHUB_OUTPUT"
 
-  validate:
-    name: Validate
+  # ---- Static checks: fan out so a failure surfaces fast and in parallel ----
+  typecheck:
+    name: Type check
     runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.code == 'true'
+    needs: config
+    if: needs.config.outputs.code == 'true'
+    # prisma generate (postinstall) needs DATABASE_URL defined; it does not
+    # connect, so a placeholder is fine — no Postgres service on this job.
+    env:
+      DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/sunrise_ci'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+      # Per-job cache scoped to the artifact this job produces. (Sharing one key
+      # across fan-out jobs would let the first finisher overwrite the rest.)
+      - name: Cache tsc incremental info
+        uses: actions/cache@v4
+        with:
+          path: tsconfig.tsbuildinfo
+          key: tsc-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ github.sha }}
+          restore-keys: |
+            tsc-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
+            tsc-${{ runner.os }}-
+      - run: npm ci
+      - run: npm run type-check
 
-    # Postgres service exercises migrations and seeds against a real DB so
-    # broken migrations / seed units fail CI at PR time. pgvector image
-    # matches production so the vector extension is available.
+  lint:
+    name: Lint & format
+    runs-on: ubuntu-latest
+    needs: config
+    if: needs.config.outputs.code == 'true'
+    env:
+      DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/sunrise_ci'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+      # The eslint/prettier caches use the `content` strategy (see package.json),
+      # so a fresh checkout's reset mtimes don't invalidate them — but the cache
+      # files still have to survive between runs, which is what this does.
+      - name: Cache eslint / prettier results
+        uses: actions/cache@v4
+        with:
+          path: |
+            .next/cache/eslint
+            .next/cache/.prettiercache
+          key: lint-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ github.sha }}
+          restore-keys: |
+            lint-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
+            lint-${{ runner.os }}-
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run format:check
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: config
+    if: needs.config.outputs.code == 'true'
+    env:
+      DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/sunrise_ci'
+      BETTER_AUTH_SECRET: 'ci-build-secret-not-for-production-use'
+      BETTER_AUTH_URL: 'http://localhost:3000'
+      NEXT_PUBLIC_APP_URL: 'http://localhost:3000'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - name: Cache Next.js build cache
+        uses: actions/cache@v4
+        with:
+          path: .next/cache
+          key: next-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ github.sha }}
+          restore-keys: |
+            next-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
+            next-${{ runner.os }}-
+      - run: npm ci
+      - run: npm run build
+
+  # ---- Tests (full mode): 4-way shard matrix, each shard its own Postgres ----
+  # Runs when CI_TEST_SCOPE is not "changed", OR always on push to main (the
+  # full suite is the merge/deploy gate even for "changed" forks).
+  test-full:
+    name: Test (shard ${{ matrix.shard }}/4)
+    runs-on: ubuntu-latest
+    needs: config
+    if: >-
+      needs.config.outputs.code == 'true' &&
+      (needs.config.outputs.test_scope != 'changed' || github.event_name == 'push')
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     services:
       postgres:
         image: pgvector/pgvector:pg15
@@ -89,110 +204,124 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-
-    # Environment variables needed for Prisma generate (postinstall), migrations, seeds, and build
     env:
       DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/sunrise_ci'
       BETTER_AUTH_SECRET: 'ci-build-secret-not-for-production-use'
       BETTER_AUTH_URL: 'http://localhost:3000'
       NEXT_PUBLIC_APP_URL: 'http://localhost:3000'
-      # CARRIED SUNRISE OVERRIDE (pending-upstream): private-repo runners are
-      # smaller (2-core/7GB) than the public-repo runners Sunrise's CI assumes
-      # (4-core/16GB), so Node's default heap caps near ~2GB and `tsc` /
-      # `next build` OOM (exit 134). Raise the heap until Sunrise ships a
-      # runner-agnostic fix. Tracked: .context/application/development-plan.md
-      # → "Carried Sunrise patches".
-      NODE_OPTIONS: '--max-old-space-size=5120'
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-        with:
-          # Full history so `vitest --changed` can diff against the PR base.
-          fetch-depth: 0
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: '20'
           cache: 'npm'
+      - run: npm ci
+      - run: npm run db:migrate:deploy
+      - run: npm run db:seed
+      - run: npx vitest run --shard=${{ matrix.shard }}/4
 
-      # CARRIED SUNRISE OVERRIDE (pending-upstream): persist warm build caches
-      # across runs. `setup-node` only caches the npm download dir, not these.
-      #   - .next/cache         → Next.js build cache + the ESLint cache
-      #                           (lint already writes to .next/cache/eslint/)
-      #   - tsconfig.tsbuildinfo → incremental `tsc` (tsconfig has
-      #                           incremental:true; cold every run without this)
-      # Cold first run seeds the cache; subsequent runs are much faster.
-      - name: Cache build artifacts (Next.js / ESLint / tsc-incremental)
-        uses: actions/cache@v4
+  # ---- Tests (changed mode): single lean job, PRs only ----
+  # Only when CI_TEST_SCOPE == "changed" and this is a PR. Runs the tests the
+  # diff affects (vitest traces the module graph from the changed files).
+  test-changed:
+    name: Test (changed)
+    runs-on: ubuntu-latest
+    needs: config
+    if: >-
+      needs.config.outputs.code == 'true' &&
+      needs.config.outputs.test_scope == 'changed' &&
+      github.event_name == 'pull_request'
+    services:
+      postgres:
+        image: pgvector/pgvector:pg15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sunrise_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/sunrise_ci'
+      BETTER_AUTH_SECRET: 'ci-build-secret-not-for-production-use'
+      BETTER_AUTH_URL: 'http://localhost:3000'
+      NEXT_PUBLIC_APP_URL: 'http://localhost:3000'
+    steps:
+      - uses: actions/checkout@v6
         with:
-          path: |
-            .next/cache
-            tsconfig.tsbuildinfo
-          key: build-cache-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ github.sha }}
-          restore-keys: |
-            build-cache-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
-            build-cache-${{ runner.os }}-
+          # Full history so `vitest --changed` can diff against the PR base SHA.
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run db:migrate:deploy
+      - run: npm run db:seed
+      # --passWithNoTests: a diff that touches no test-reachable code (e.g. CI
+      # config) is a valid pass, not a failure.
+      - run: npx vitest run --changed ${{ github.event.pull_request.base.sha }} --passWithNoTests
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Apply database migrations
-        run: npm run db:migrate:deploy
-
-      - name: Run seeds
-        run: npm run db:seed
-
-      - name: Type check
-        run: npm run type-check
-
-      - name: Lint
-        run: npm run lint
-
-      - name: Format check
-        run: npm run format:check
-
-      # CARRIED SUNRISE OVERRIDE (pending-upstream): on a PR, run only the tests
-      # affected by the diff (fast iteration loop); the full 973-file suite runs
-      # on push to main as the merge gate, so nothing merges unverified. Uses the
-      # PR base SHA (available thanks to fetch-depth: 0 above).
-      - name: Run tests
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "PR — running tests affected by the diff (full suite runs on merge to main)"
-            # --passWithNoTests: a diff that touches no test-related files (e.g.
-            # CI config or docs-adjacent code) is a valid pass, not a failure.
-            npx vitest run --changed ${{ github.event.pull_request.base.sha }} --passWithNoTests
-          else
-            echo "Push to main — running the full test suite"
-            npx vitest run
-          fi
-
-      # Verifies the DB-enforced erasure behavior (cascade / set-null / PII
-      # scrub) that the Prisma-mocked vitest suite cannot. Uses this job's
-      # Postgres service + applied migrations; invoked directly (not the
-      # smoke:erasure npm script, which loads .env.local — absent in CI).
-      # The script skips cleanly if no DB is reachable.
-      - name: Smoke — account erasure (real DB)
-        run: npx tsx scripts/smoke/erasure.ts
-
-      - name: Build
-        run: npm run build
+  # ---- Real-DB invariants the Prisma-mocked vitest suite can't cover: the
+  # DB-enforced erasure behavior, plus a drift check for the raw-SQL objects
+  # Prisma can't model (pgvector HNSW indexes, the GIN/tsvector search index,
+  # partial-unique indexes, CHECK constraints). Both invoked directly (not the
+  # npm scripts, which load .env.local — absent in CI) so they use this job's
+  # DATABASE_URL. The drift check is the backstop for a `migrate dev` that
+  # silently committed a DROP for one of those objects; /pre-pr catches it first.
+  smoke:
+    name: Smoke — real-DB invariants (erasure + migration drift)
+    runs-on: ubuntu-latest
+    needs: config
+    if: needs.config.outputs.code == 'true'
+    services:
+      postgres:
+        image: pgvector/pgvector:pg15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sunrise_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/sunrise_ci'
+      BETTER_AUTH_SECRET: 'ci-build-secret-not-for-production-use'
+      BETTER_AUTH_URL: 'http://localhost:3000'
+      NEXT_PUBLIC_APP_URL: 'http://localhost:3000'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run db:migrate:deploy
+      - run: npm run db:seed
+      # Fails the PR if a committed migration dropped a Prisma-unmodelled object
+      # (see .context/database/prisma-unmodelled-objects.md).
+      - name: Drift check — Prisma-unmodelled DB objects
+        run: npx tsx scripts/db/check-drift.ts
+      - run: npx tsx scripts/smoke/erasure.ts
 
   docker:
     name: Docker Build
     runs-on: ubuntu-latest
-    needs: changes
-    # CARRIED SUNRISE OVERRIDE (pending-upstream): decoupled from `validate` so
-    # it runs in parallel (a Dockerfile/image break surfaces immediately, not
-    # after the long validate job). To conserve the private repo's free minutes,
-    # on PRs it runs only when Docker-relevant files change; on push to main it
-    # always runs as the production-image merge gate.
+    needs: config
+    # Decoupled from the checks so an image break surfaces in parallel rather
+    # than after the long test run. On PRs it runs only when Docker-relevant
+    # files change; on push to main it always runs as the production-image gate.
     if: >-
-      needs.changes.outputs.code == 'true' &&
-      (github.event_name == 'push' || needs.changes.outputs.docker == 'true')
-
+      needs.config.outputs.code == 'true' &&
+      (github.event_name == 'push' || needs.config.outputs.docker == 'true')
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -214,17 +343,28 @@ jobs:
             BETTER_AUTH_SECRET=ci-build-secret-not-for-production-use
             NEXT_PUBLIC_APP_URL=http://localhost:3000
 
-  # Gate job for branch protection - always runs and reports success
+  # Gate job for branch protection — always runs and reports a single status.
+  # Skipped jobs (docs-only, the inactive test mode, non-docker PRs) are not
+  # failures, so the gate passes as long as nothing that ran failed.
   ci-status:
     name: CI Status
     runs-on: ubuntu-latest
-    needs: [validate, docker]
+    needs: [typecheck, lint, build, test-full, test-changed, smoke, docker]
     if: always()
     steps:
       - name: Check CI result
         run: |
-          if [[ "${{ needs.validate.result }}" == "failure" || "${{ needs.docker.result }}" == "failure" ]]; then
-            echo "CI failed"
-            exit 1
-          fi
-          echo "CI passed (jobs succeeded or were skipped for docs-only / non-docker changes)"
+          for result in \
+            "${{ needs.typecheck.result }}" \
+            "${{ needs.lint.result }}" \
+            "${{ needs.build.result }}" \
+            "${{ needs.test-full.result }}" \
+            "${{ needs.test-changed.result }}" \
+            "${{ needs.smoke.result }}" \
+            "${{ needs.docker.result }}"; do
+            if [[ "$result" == "failure" ]]; then
+              echo "CI failed"
+              exit 1
+            fi
+          done
+          echo "CI passed (jobs succeeded or were skipped for docs-only / inactive-mode changes)"
