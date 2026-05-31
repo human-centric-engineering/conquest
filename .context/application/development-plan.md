@@ -746,6 +746,13 @@ Core changes the app currently carries that are not yet reflected in upstream Su
   - `dependency-review.yml` — `dependency-review` job gated `if: !github.event.repository.private`. Same GHAS dependency-graph requirement.
   - **Before opening the Sunrise issue (the goal):** the solution still has a rough edge — the CodeQL `schedule` exclusion disables the weekly cron even on public repos, which is wrong for upstream. A clean upstream fix should skip GHAS-dependent jobs on private repos across _all_ events without breaking the public scheduled scan, and make the heap bump runner-aware. Refine + test here, then file the issue and propose the patch. Related to the [[building-on-sunrise]] external-fork upgrade story (F9.3).
 
+- **2026-05-31 — CI performance: Tier-1 "pure-win" speedups in `ci.yml`.** `pending-upstream`. A full run was ~33–45 min (single `validate` job runs 973 test files serially; Docker re-runs `next build`; no warm caches). Slow on public Sunrise too, so a strong upstream contribution. Tier-1 changes (faster _and_ fewer minutes — important on the private free 2,000-min/mo quota):
+  - **Concurrency cancel** — `cancel-in-progress` for PR runs so rapid fixup pushes don't stack.
+  - **Persisted build caches** — `actions/cache` over `.next/cache` (Next build + ESLint cache) and `tsconfig.tsbuildinfo` (incremental `tsc`). Cold first run seeds; later runs warm.
+  - **Affected-tests-on-PR** — `vitest run --changed <base-sha>` on PRs (needs `fetch-depth: 0`); full suite runs on push to main as the merge gate, so nothing merges unverified.
+  - **Gated + decoupled Docker** — `docker` no longer `needs: validate` (runs in parallel → fails fast); on PRs it runs only when Docker-relevant files change, on main always (merge gate). `changes` job gained a `docker` output.
+  - **Deferred (Tier 2, cost minutes):** splitting `validate` into parallel jobs and test sharding — measure Tier-1 first. **Target:** ~5–10 min on a typical PR push.
+
 ---
 
 ## References
