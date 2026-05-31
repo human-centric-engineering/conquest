@@ -1,17 +1,29 @@
-# Sunrise - build production apps faster
+# ConQuest
 
-A production-ready Next.js 16 starter template designed for rapid application development with AI assistance — now with a complete AI agent orchestration layer baked in.
+**CON**versational **QUEST**ionnaire — a conversational questionnaire platform built on the [Sunrise](https://github.com/human-centric-engineering/sunrise) application platform.
 
-## Why Sunrise?
+An admin uploads a questionnaire document (PDF / DOCX / MD); an agent extracts its sections and questions; end users complete the questionnaire through a streaming conversation rather than form-filling. The LLM extracts, infers, and synthesises answers with confidence scores and provenance; admins review the structure, evaluate it against goal and audience, manage versions, and export results. It is **provider-agnostic** — every model call resolves through Sunrise's provider registry at runtime.
 
-- **Production-ready from day one** — Auth, database, APIs, security headers, rate limiting all configured
-- **Agent-ready** — Production AI agent orchestration: agents, tools, workflows, knowledge bases (RAG), evaluations, observability
-- **Just ask Claude** — Documentation written as AI context; ask questions, get answers, start building
-- **Balanced** — Comprehensive yet customizable; not too minimal, not too opinionated
-- **Fork-friendly** — Take what you need, customize what you want
-- **API-first** — Actions accessible via versioned API endpoints, MCP server, and agent capabilities — ready for agents and integrations
+> **Project status:** `planning`. The phased build is tracked in [`.context/application/development-plan.md`](./.context/application/development-plan.md) (Project → Phase → Feature → Task). Nothing user-facing has shipped yet — P0 (foundations) is the first work.
+
+## Built on Sunrise
+
+ConQuest is an **application fork** of Sunrise. The repository is two tiers of code:
+
+| Tier         | What it is                                                                            | How we treat it                                                                                                                   |
+| ------------ | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| **Platform** | Sunrise — auth, API conventions, `lib/` utilities, orchestration, security middleware | An upgradable dependency. Extend through its seams; don't fork-and-edit.                                                          |
+| **This app** | ConQuest — questionnaire models, capabilities, admin/user surfaces, business logic    | Ours. Lives in new files (`lib/app/questionnaire/**`, `app/api/v1/app/**`, `app/admin/questionnaires/**`) alongside the platform. |
+
+Sunrise is tracked as the `upstream` git remote (read-only); `origin` is this private repo. Platform fixes are made **upstream in Sunrise and pulled down**, not patched here, so upgrades stay clean merges. The rules:
+
+- [**CUSTOMIZATION.md**](./CUSTOMIZATION.md) — Building on Sunrise: the extension model, package.json policy, staying in sync with upstream
+- [**VERSIONING.md**](./VERSIONING.md) — The two-version split: this app's version (`package.json` → `APP_VERSION`) vs the platform version (`SUNRISE_VERSION`, currently `0.0.1`)
+- [**CONTRIBUTING.md**](./CONTRIBUTING.md) — Contributing platform changes back to Sunrise itself
 
 ## Tech Stack
+
+Inherited from the Sunrise platform:
 
 | Layer            | Technology                                              |
 | ---------------- | ------------------------------------------------------- |
@@ -25,30 +37,23 @@ A production-ready Next.js 16 starter template designed for rapid application de
 | AI Orchestration | Multi-LLM agents, workflows, RAG, MCP server            |
 | LLM Providers    | Anthropic, OpenAI (extensible via provider abstraction) |
 
-## Agent Orchestration
+## Platform capabilities ConQuest builds on
 
-Sunrise ships with a complete AI agent orchestration layer. Admins design, configure, execute, and monitor AI agent systems from `/admin/orchestration`; consumer-facing chat is exposed via `/api/v1/chat` and an embeddable widget.
-
-What's included:
+The Sunrise platform ships a complete AI agent orchestration layer that ConQuest consumes rather than reinvents — the questionnaire extractor, the design-time judge agents, the conversational session engine, and cost/audit/eval tracking are all built on these primitives:
 
 - **Agents** — Configured AI personas with system instructions, model selection, temperature, budgets, and attached capabilities
-- **Capabilities (tools)** — Function-calling tools that agents invoke; ships with built-ins (knowledge search, memory, pattern lookup) and a 4-step pipeline for adding custom tools
-- **Workflows (DAGs)** — Multi-step pipelines with 15 step types: routing, chaining, parallel branches, RAG retrieval, human approval gates, error strategies, templating
+- **Capabilities (tools)** — Function-calling tools that agents invoke; built-ins plus a 4-step pipeline for adding custom tools
+- **Workflows (DAGs)** — Multi-step pipelines: routing, chaining, parallel branches, RAG retrieval, human approval gates, error strategies
 - **Knowledge bases (RAG)** — Document ingestion (MD, PDF, EPUB, DOCX), chunking, embeddings, and pgvector semantic search scoped per agent
 - **Multi-LLM providers** — Provider abstraction with fallback chains, model registry, and cost tracking
-- **MCP server** — Model Context Protocol integration so Claude Code (or any MCP client) can use your agents and tools
-- **Embed widget** — Token-authenticated, CORS-aware chat widget loadable into any site
-- **Scheduling & webhooks** — Cron-scheduled autonomous runs and event-driven triggers
+- **MCP server** — Model Context Protocol integration for Claude Code or any MCP client
 - **Evaluations & A/B experiments** — Named-metric scoring (faithfulness, groundedness, relevance) and variant lifecycle
 - **Observability** — Execution tracing (OTEL plug-in), conversation export, audit log, approval queue, dashboard analytics
 
-Built on the 21 agentic design patterns from _Agentic Design Patterns_ by Antonio Gullí.
+Platform docs:
 
-Docs:
-
-- [`.context/orchestration/meta/functional-specification.md`](./.context/orchestration/meta/functional-specification.md) — What the system does (canonical)
+- [`.context/orchestration/meta/functional-specification.md`](./.context/orchestration/meta/functional-specification.md) — What the orchestration layer does (canonical)
 - [`.context/admin/orchestration.md`](./.context/admin/orchestration.md) — Admin operator landing, quick start
-- [`.context/orchestration/meta/`](./.context/orchestration/meta/) — Architectural decisions, hosting, roadmap, commercial proposition
 
 ## Quick Start
 
@@ -61,8 +66,8 @@ Docs:
 
 ```bash
 # Clone and install
-git clone https://github.com/human-centric-engineering/sunrise.git
-cd sunrise
+git clone git@github.com:human-centric-engineering/conquest.git
+cd conquest
 
 # Create environment file
 cp .env.example .env.local
@@ -74,11 +79,12 @@ openssl rand -base64 32
 #  - your DATABASE_URL
 #  - your BETTER_AUTH_SECRET
 
-# Install dependencies (will error if the database url isn't valid)
+# Install dependencies (postinstall runs `prisma generate`)
 npm install
 
-# Set up database
-npm run db:migrate:dev
+# Set up database (applies migrations, then seeds)
+npm run db:migrate:deploy
+npm run db:seed
 
 # Start development
 npm run dev
@@ -93,10 +99,14 @@ docker-compose up                                    # Start app + database
 docker-compose exec web npx prisma migrate dev       # Run migrations (first time)
 ```
 
-### Test Accounts (after `npm run db:seed`)
+### Logging in for the first time
 
-- **User**: test@example.com / password123
-- **Admin**: admin@example.com / password123
+The seed creates an `admin@example.com` user but **does not set a password** (it creates no better-auth credential). To get an admin login on a fresh DB:
+
+1. Sign up through the app with your own email + password.
+2. Open `npm run db:studio`, find your row in `User`, set `role` to `ADMIN`.
+
+> A proper fix (first-user-becomes-admin, plus optional dev-only seeded credentials) is tracked upstream in Sunrise — [human-centric-engineering/sunrise#278](https://github.com/human-centric-engineering/sunrise/issues/278) — and will arrive here on the next platform sync.
 
 ## Essential Commands
 
@@ -111,7 +121,7 @@ Full command reference: [`.context/commands.md`](./.context/commands.md)
 
 ## Optional Features
 
-These work without configuration in development and can be enabled for production:
+These platform features work without configuration in development and can be enabled for production:
 
 - **Email** — Console logging in dev; configure Resend for production. See [`.context/email/`](./.context/email/)
 - **Analytics** — Console provider in dev; configure PostHog/GA4/Plausible for production. See [`.context/analytics/`](./.context/analytics/)
@@ -119,23 +129,21 @@ These work without configuration in development and can be enabled for productio
 
 ## Documentation
 
-- [**CUSTOMIZATION.md**](./CUSTOMIZATION.md) — **Building on Sunrise**: the fork/app onboarding guide — extension model, package.json policy, staying in sync with upstream
-- [**CONTRIBUTING.md**](./CONTRIBUTING.md) — Contributing changes back to Sunrise itself
-- [**.context/substrate.md**](./.context/substrate.md) — Full architecture and reference docs
-- [**.context/orchestration/meta/functional-specification.md**](./.context/orchestration/meta/functional-specification.md) — Agent orchestration: full system inventory and capability spec
+- [**.context/application/development-plan.md**](./.context/application/development-plan.md) — ConQuest's phased build plan (the app's source of truth)
+- [**CUSTOMIZATION.md**](./CUSTOMIZATION.md) — Building on Sunrise: extension model, syncing with upstream
+- [**.context/substrate.md**](./.context/substrate.md) — Full platform architecture and reference docs
+- [**.context/orchestration/meta/functional-specification.md**](./.context/orchestration/meta/functional-specification.md) — Orchestration: full system inventory and capability spec
 
 ## Just Ask Claude
 
-Sunrise includes comprehensive documentation in `.context/` written specifically as AI context. Instead of reading through docs, just ask Claude:
+The `.context/` docs are written specifically as AI context. Instead of reading through them, just ask Claude:
 
-- _"How do I set up S3 for file uploads?"_
-- _"What are the password validation rules?"_
-- _"Add a new API endpoint for user preferences"_
-- _"How does authentication work in this project?"_
-- _"Build me an agent that searches my knowledge base"_
-- _"Add a capability so my agent can call the Stripe API"_
+- _"Let's plan F0.1 — foundation scaffolding."_
+- _"How does document ingestion work in the orchestration layer?"_
+- _"Add a capability so the extractor agent can parse a new question type."_
+- _"How do I pull the latest platform fixes down from Sunrise?"_
 
-Clone the repo, start Claude Code, and start building. Claude already knows how Sunrise works.
+Start Claude Code in the repo and start building — it already knows how both ConQuest and the Sunrise platform work.
 
 ### Enhanced Capabilities
 
@@ -145,11 +153,9 @@ Install the Next.js DevTools MCP server for real-time diagnostics and browser au
 claude mcp add next-devtools npx next-devtools-mcp@latest
 ```
 
-See the [Next.js DevTools MCP docs](https://github.com/vercel/next-devtools-mcp) for details.
-
 ## Acknowledgements
 
-The 21 design patterns referenced throughout the orchestration learning area are adapted from _Agentic Design Patterns_ by Antonio Gullí.
+Built on the [Sunrise](https://github.com/human-centric-engineering/sunrise) platform. The 21 agentic design patterns referenced throughout the orchestration learning area are adapted from _Agentic Design Patterns_ by Antonio Gullí.
 
 ## License
 
@@ -157,4 +163,4 @@ MIT
 
 ---
 
-Built with ☕ and ⚡ for developers who ship.
+Built with ☕ and ⚡ on Sunrise.

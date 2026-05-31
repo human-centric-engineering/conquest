@@ -4,7 +4,14 @@ Instructions for Claude Code when working in this repository.
 
 ## Project Overview
 
-**Sunrise** is a production-ready Next.js 16 starter template with App Router, PostgreSQL/Prisma, better-auth, and Docker deployment. Optimized for AI-assisted development.
+**ConQuest** (CONversational QUESTionnaire) is a conversational questionnaire platform — an admin uploads a questionnaire document, an agent extracts its structure, and end users complete it through a streaming conversation rather than form-filling. The phased build plan is the app's source of truth: [`.context/application/development-plan.md`](./.context/application/development-plan.md).
+
+**This repo is an application fork of Sunrise**, a production-ready Next.js 16 platform (App Router, PostgreSQL/Prisma, better-auth, Docker, AI orchestration). Two tiers live here:
+
+- **Platform (Sunrise)** — auth, `lib/` utilities, orchestration, security/rate-limit middleware, migration tooling. Treat as an upgradable dependency: **extend through its seams, don't fork-and-edit**. Sunrise is the `upstream` git remote (read-only, public); `origin` is this private `conquest` repo. Fix platform bugs upstream in Sunrise and pull them down — don't patch them here, or every sync becomes a merge fight.
+- **This app (ConQuest)** — questionnaire models, capabilities, and surfaces in _new_ files: `lib/app/questionnaire/**`, `app/api/v1/app/**`, `app/admin/questionnaires/**`, `app/(protected)/questionnaires/**`.
+
+Read [`CUSTOMIZATION.md`](./CUSTOMIZATION.md) for the app/platform model and the extension seams. Versioning is split deliberately: this app's version lives in `package.json` (→ `APP_VERSION`); the platform version is `SUNRISE_VERSION` in `lib/sunrise-version.ts` (never edit it — it merges through from upstream).
 
 **Stack versions (breaking changes from prior versions — use MCP/Context7 for current docs):**
 
