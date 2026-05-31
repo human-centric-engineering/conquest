@@ -739,7 +739,11 @@ _Nothing shipped yet — project in `planning`. First entry will be the fork its
 
 Core changes the app currently carries that are not yet reflected in upstream Sunrise. Each tagged `pending-upstream | app-specific-override | abandoned`. Retired when a Sunrise release includes the change.
 
-_None yet._
+- **2026-05-31 — CI assumes a public repo; carried overrides for a private fork.** `pending-upstream`. Sunrise's CI workflows assume the repo is public, which breaks on a private fork like ConQuest. Three overrides carried in `.github/workflows/`:
+  - `ci.yml` — added `NODE_OPTIONS=--max-old-space-size=5120` to the `validate` job. Public repos get larger free runners (4-core/16GB); private free-tier runners are 2-core/7GB, so Node's default heap caps near ~2GB and `tsc` / `next build` OOM (exit 134).
+  - `codeql.yml` — `analyze` job gated `if: github.event_name != 'schedule' && !github.event.repository.private`. CodeQL upload needs GitHub Advanced Security (free public / paid private); we are not buying GHAS.
+  - `dependency-review.yml` — `dependency-review` job gated `if: !github.event.repository.private`. Same GHAS dependency-graph requirement.
+  - **Before opening the Sunrise issue (the goal):** the solution still has a rough edge — the CodeQL `schedule` exclusion disables the weekly cron even on public repos, which is wrong for upstream. A clean upstream fix should skip GHAS-dependent jobs on private repos across _all_ events without breaking the public scheduled scan, and make the heap bump runner-aware. Refine + test here, then file the issue and propose the patch. Related to the [[building-on-sunrise]] external-fork upgrade story (F9.3).
 
 ---
 

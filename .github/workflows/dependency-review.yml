@@ -15,6 +15,12 @@ permissions:
 jobs:
   dependency-review:
     name: Dependency Review
+    # CARRIED SUNRISE OVERRIDE (pending-upstream): the dependency-review action
+    # needs the dependency graph + Advanced Security, which on a private repo
+    # requires paid GHAS. ConQuest is a private fork without it, so this errors
+    # out. Skip on private repos (Dependabot still covers existing deps).
+    # Tracked: .context/application/development-plan.md → "Carried Sunrise patches".
+    if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-latest
     permissions:
       contents: read

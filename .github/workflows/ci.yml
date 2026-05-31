@@ -76,6 +76,13 @@ jobs:
       BETTER_AUTH_SECRET: 'ci-build-secret-not-for-production-use'
       BETTER_AUTH_URL: 'http://localhost:3000'
       NEXT_PUBLIC_APP_URL: 'http://localhost:3000'
+      # CARRIED SUNRISE OVERRIDE (pending-upstream): private-repo runners are
+      # smaller (2-core/7GB) than the public-repo runners Sunrise's CI assumes
+      # (4-core/16GB), so Node's default heap caps near ~2GB and `tsc` /
+      # `next build` OOM (exit 134). Raise the heap until Sunrise ships a
+      # runner-agnostic fix. Tracked: .context/application/development-plan.md
+      # → "Carried Sunrise patches".
+      NODE_OPTIONS: '--max-old-space-size=5120'
 
     steps:
       - name: Checkout code
