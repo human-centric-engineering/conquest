@@ -746,6 +746,19 @@ Core changes the app currently carries that are not yet reflected in upstream Su
   - `dependency-review.yml` — `dependency-review` job gated `if: !github.event.repository.private`. Same GHAS dependency-graph requirement.
   - **Before opening the Sunrise issue (the goal):** the solution still has a rough edge — the CodeQL `schedule` exclusion disables the weekly cron even on public repos, which is wrong for upstream. A clean upstream fix should skip GHAS-dependent jobs on private repos across _all_ events without breaking the public scheduled scan, and make the heap bump runner-aware. Refine + test here, then file the issue and propose the patch. Related to the [[building-on-sunrise]] external-fork upgrade story (F9.3).
 
+- **2026-05-31 — CI performance: Tier-1 "pure-win" speedups in `ci.yml`.** `pending-upstream`. A full run was ~33–45 min (single `validate` job runs 973 test files serially; Docker re-runs `next build`; no warm caches). Slow on public Sunrise too, so a strong upstream contribution. Tier-1 changes (faster _and_ fewer minutes — important on the private free 2,000-min/mo quota):
+  - **Concurrency cancel** — `cancel-in-progress` for PR runs so rapid fixup pushes don't stack.
+  - **Persisted build caches** — `actions/cache` over `.next/cache` (Next build + ESLint cache) and `tsconfig.tsbuildinfo` (incremental `tsc`). Cold first run seeds; later runs warm.
+  - **Affected-tests-on-PR** — `vitest run --changed <base-sha>` on PRs (needs `fetch-depth: 0`); full suite runs on push to main as the merge gate, so nothing merges unverified.
+  - **Gated + decoupled Docker** — `docker` no longer `needs: validate` (runs in parallel → fails fast); on PRs it runs only when Docker-relevant files change, on main always (merge gate). `changes` job gained a `docker` output.
+  - **Deferred (Tier 2, cost minutes):** splitting `validate` into parallel jobs and test sharding — measure Tier-1 first. **Target:** ~5–10 min on a typical PR push.
+  - **Benchmark results (2026-05-31, private repo, 2-core/7GB runners):**
+    - Tier-1 serial baseline (cold, full suite): Validate **25m08s**.
+    - Tier-1 **warm** typical PR (few source files, `--changed`): static checks collapse — **Lint 220s→2s, Format 62s→8s, Type check 13s**; with `--changed` skipping the suite, a typical PR Validate ≈ **5–6 min**. Floor = `next build` (~190s) + install/seed/smoke.
+    - **Gotcha:** `vitest --changed` runs the **full suite** when the PR diff includes `package.json`/config (correct — a root-manifest change can affect anything). So dep-changing PRs don't get the fast path.
+    - **Gotcha:** GitHub scopes caches per-branch (branch + base + default). Sibling feature branches don't share; the warm-cache win only fully lands once the change is on `main`. Forks: expect the speedup after the first default-branch build.
+  - **Tier-2 experiment (PR #5, parallel jobs + 4-way shard, cold, full suite):** wall-clock **~462s (7.7m)** vs serial ~1508s → **~3.3× faster**; billed minutes **~2385s (40m)** vs ~1508s → **~1.6× more**. Shards balanced (403–462s); N=8 = diminishing returns (per-shard DB+install overhead). **Recommendation for upstream:** Tier-1 for everyone; make Tier-2 a **toggle** — default-on for public repos (free minutes → pure wall-clock win), opt-in / full-suite-path-only for private repos (keep PR pushes on the cheap `--changed` path, shard only the main/dep-change full-suite runs).
+
 ---
 
 ## References
