@@ -57,11 +57,37 @@ Output:
 - `FAIL  AN …` — red for each missing object, identifying the kind and table
 - Exit 0 if all 9 probes pass, exit 1 if any failed, exit 2 on script crash
 
-Recommended use:
+Where this runs automatically:
 
-- **Post-deploy gate** — run after every production migrate-deploy
-- **Pre-fork sanity** — fork install hits this before serving traffic
-- **CI guard** — any PR that touches `prisma/` should run this in CI against a freshly-baselined scratch DB
+- **`/pre-pr`** — runs `db:drift-check` against your local dev DB when the branch
+  touches `prisma/`. This is the earliest catch: `migrate dev` already applied any
+  spurious `DROP` to your local DB, so the probe fails immediately — before you push.
+- **CI `smoke` job** — runs the probe after `migrate:deploy` + `seed` on a
+  freshly-baselined scratch DB, as the backstop for anyone who skipped `/pre-pr`.
+- **Post-deploy / pre-fork** — run after a production migrate-deploy and on fork
+  install before serving traffic.
+
+## Preventing the drop in the first place
+
+Detection (above) is the safety net; the habit that stops the problem at the
+source is **authoring**. When a migration touches a table carrying one of these
+objects, generate it with:
+
+```bash
+prisma migrate dev --create-only
+```
+
+`--create-only` writes the migration **without applying it**, so you review the
+SQL and delete any spurious `DROP INDEX` / `DROP CONSTRAINT` Prisma emitted for an
+unmodelled object before it's ever applied or committed. Without this, `migrate
+dev` applies the DROP to your local DB and bakes it into the migration in one
+step — the exact path that lost the knowledge-embedding HNSW index once already
+(`20260529120000_restore_knowledge_embedding_hnsw_index` was the cleanup).
+
+There is **no Prisma config, preview feature, or plugin** that suppresses these
+DROPs — `postgresqlExtensions` only manages the extension, not its indexes, and
+`prisma-extension-pgvector` is a client query helper, not a migration tool. The
+`--create-only` habit plus the drift probes above is the supported answer.
 
 ## Adding a new unmodelled object
 

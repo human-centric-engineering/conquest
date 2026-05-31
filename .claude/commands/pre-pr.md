@@ -17,6 +17,19 @@ Then run `npm run test:coverage`. This runs the full test suite and generates a 
 
 If either command fails, report the failures and stop. Do not proceed to the anti-pattern scan until automated checks pass.
 
+**Migration drift check (DB objects Prisma can't model).** Only if this branch touched `prisma/`:
+
+```bash
+git fetch origin main --quiet
+git diff --name-only "$(git merge-base origin/main HEAD)"...HEAD | grep -qE '^prisma/(migrations|schema)/' && echo RUN || echo SKIP
+```
+
+If `SKIP`, record "Migration drift: N/A (no prisma/ changes)" and move on. If `RUN`, run `npm run db:drift-check` (probes your local dev DB for the raw-SQL objects the schema can't model — pgvector HNSW indexes, the GIN/tsvector search index, partial-unique indexes, CHECK constraints; see `.context/database/prisma-unmodelled-objects.md`). Interpret the **exit code**:
+
+- **0** — PASS.
+- **1** — FAIL: a migration on this branch dropped one of these objects. This is the `prisma migrate dev` footgun — it diffs the schema against the shadow DB and silently emits `DROP INDEX`/`DROP CONSTRAINT` for anything it can't represent, and `migrate dev` already applied that DROP to your local DB. **Stop and report.** Fix: edit the offending migration to remove the spurious `DROP` (re-add a `CREATE … IF NOT EXISTS` if needed), and re-author migrations on these tables with `prisma migrate dev --create-only` so the DROP is reviewed before it's ever applied.
+- **2** — SKIPPED (local DB unreachable). Record "Migration drift: SKIPPED (start your dev DB to enable)" — do **not** fail the run on this.
+
 ### Step 2: Identify changed files
 
 First, resolve the correct base ref. The local `main` branch may be stale or polluted with feature-branch commits, so **always use the remote tracking ref**:
@@ -157,6 +170,7 @@ Output a clear summary in this format:
 - [ ] Lint: PASS / FAIL
 - [ ] Format: PASS / FAIL
 - [ ] Tests: PASS / FAIL (X passed, Y failed)
+- [ ] Migration drift (Prisma-unmodelled objects): PASS / FAIL / SKIPPED / N/A
 
 ### Coverage (changed files — threshold 80%)
 | File | Lines | Branches | Functions | Stmts | Status |
