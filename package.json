@@ -1,7 +1,7 @@
 {
-  "name": "sunrise",
-  "version": "0.0.1",
-  "description": "A production-ready Next.js starter template designed for rapid application development with AI assistance.",
+  "name": "conquest",
+  "version": "0.0.0",
+  "description": "ConQuest (CONversational QUESTionnaire) — a conversational questionnaire platform built on the Sunrise application platform.",
   "private": true,
   "scripts": {
     "dev": "next dev",

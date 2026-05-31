@@ -20,6 +20,14 @@ permissions:
 jobs:
   analyze:
     name: Analyze (${{ matrix.language }})
+    # CARRIED SUNRISE OVERRIDE (pending-upstream): CodeQL uploads to GitHub code
+    # scanning, which needs Advanced Security — free on public repos, paid on
+    # private. ConQuest is a private fork without GHAS, so the upload fails. Skip
+    # on private repos; also skip the weekly cron (nothing to upload to). The
+    # schedule-exclusion is the rough edge to resolve before proposing this
+    # upstream. Tracked: .context/application/development-plan.md → "Carried
+    # Sunrise patches".
+    if: ${{ github.event_name != 'schedule' && !github.event.repository.private }}
     runs-on: ubuntu-latest
     permissions:
       security-events: write # upload results to code scanning

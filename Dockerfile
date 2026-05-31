@@ -55,6 +55,15 @@ ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL
 # Uncomment the following line in case you want to disable telemetry during the build.
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# CARRIED SUNRISE OVERRIDE (pending-upstream): raise Node's heap for the build
+# only. On a 7GB host (private-repo CI runners; small dev/build boxes) `next
+# build` hits Node's default ~2GB heap cap and OOMs (FATAL ERROR: Reached heap
+# limit). This ENV lives in the `builder` stage only — the `runner` stage below
+# does not inherit it, so production runtime memory is unchanged. Mirrors the
+# ci.yml validate-job heap bump. Tracked: .context/application/development-plan.md
+# → "Carried Sunrise patches".
+ENV NODE_OPTIONS=--max-old-space-size=4096
+
 # Build the application
 # Next.js 16 standalone output creates a minimal production server at .next/standalone/
 RUN npm run build
