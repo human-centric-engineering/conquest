@@ -266,11 +266,15 @@ jobs:
       # config) is a valid pass, not a failure.
       - run: npx vitest run --changed ${{ github.event.pull_request.base.sha }} --passWithNoTests
 
-  # ---- DB-enforced erasure behavior the Prisma-mocked vitest suite can't cover.
-  # Invoked directly (not the smoke:erasure npm script, which loads .env.local —
-  # absent in CI). The script skips cleanly if no DB is reachable.
+  # ---- Real-DB invariants the Prisma-mocked vitest suite can't cover: the
+  # DB-enforced erasure behavior, plus a drift check for the raw-SQL objects
+  # Prisma can't model (pgvector HNSW indexes, the GIN/tsvector search index,
+  # partial-unique indexes, CHECK constraints). Both invoked directly (not the
+  # npm scripts, which load .env.local — absent in CI) so they use this job's
+  # DATABASE_URL. The drift check is the backstop for a `migrate dev` that
+  # silently committed a DROP for one of those objects; /pre-pr catches it first.
   smoke:
-    name: Smoke — account erasure (real DB)
+    name: Smoke — real-DB invariants (erasure + migration drift)
     runs-on: ubuntu-latest
     needs: config
     if: needs.config.outputs.code == 'true'
@@ -302,6 +306,10 @@ jobs:
       - run: npm ci
       - run: npm run db:migrate:deploy
       - run: npm run db:seed
+      # Fails the PR if a committed migration dropped a Prisma-unmodelled object
+      # (see .context/database/prisma-unmodelled-objects.md).
+      - name: Drift check — Prisma-unmodelled DB objects
+        run: npx tsx scripts/db/check-drift.ts
       - run: npx tsx scripts/smoke/erasure.ts
 
   docker:
