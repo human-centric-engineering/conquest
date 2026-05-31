@@ -374,6 +374,7 @@ trace in the baseline is an inert `TENANCY_MODE` seam (default `single`).
 
 ## Related Documentation
 
+- [CI Pipeline](./ci.md) - GitHub Actions pipeline, public/private-fork adaptation, the `CI_TEST_SCOPE` knob
 - [Multi-Tenancy Playbook](./multi-tenancy.md) - RLS-based multi-tenant retrofit (opt-in, for forks)
 - [Dependencies](./dependencies.md) - Dependency injection and package management
 - [Patterns](./patterns.md) - Code organization and error handling patterns

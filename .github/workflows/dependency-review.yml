@@ -16,6 +16,13 @@ jobs:
   dependency-review:
     name: Dependency Review
     runs-on: ubuntu-latest
+    # The dependency-review action needs the dependency graph + Advanced
+    # Security, which is paid on private repos — so it errors on a private fork
+    # without GHAS. Skip on private. Unlike CodeQL we can read the event field
+    # directly: this workflow only triggers on `pull_request`, where
+    # `github.event.repository.private` is always populated (no schedule event
+    # to worry about). Dependabot still covers existing deps on private forks.
+    if: ${{ !github.event.repository.private }}
     permissions:
       contents: read
       pull-requests: write # post the summary comment on failure

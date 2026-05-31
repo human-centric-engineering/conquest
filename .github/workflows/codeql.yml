@@ -18,8 +18,29 @@ permissions:
   contents: read
 
 jobs:
+  # Determine repo visibility via the API rather than the event payload.
+  # CodeQL uploads to GitHub code scanning, which needs Advanced Security: free
+  # on public repos, paid on private — so on a private fork without GHAS the
+  # upload fails. We must skip on private. We can't read `github.event.repository
+  # .private` because it is absent on `schedule` events (the weekly cron), which
+  # would make a naive check run-and-fail on private and/or skip on public. The
+  # API call works on every event, so the public scheduled scan keeps running
+  # and private forks skip cleanly across all events.
+  guard:
+    name: Resolve repo visibility
+    runs-on: ubuntu-latest
+    outputs:
+      private: ${{ steps.check.outputs.private }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "private=$(gh api repos/${{ github.repository }} --jq '.private')" >> "$GITHUB_OUTPUT"
+
   analyze:
     name: Analyze (${{ matrix.language }})
+    needs: guard
+    if: needs.guard.outputs.private != 'true'
     runs-on: ubuntu-latest
     permissions:
       security-events: write # upload results to code scanning
