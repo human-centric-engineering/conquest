@@ -159,7 +159,9 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             echo "PR — running tests affected by the diff (full suite runs on merge to main)"
-            npx vitest run --changed ${{ github.event.pull_request.base.sha }}
+            # --passWithNoTests: a diff that touches no test-related files (e.g.
+            # CI config or docs-adjacent code) is a valid pass, not a failure.
+            npx vitest run --changed ${{ github.event.pull_request.base.sha }} --passWithNoTests
           else
             echo "Push to main — running the full test suite"
             npx vitest run
