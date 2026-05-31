@@ -1,5 +1,7 @@
 name: CI
 
+# (Tier-1 perf changes below — concurrency, build caches, changed-tests, docker gate.)
+
 on:
   push:
     branches: [main]
