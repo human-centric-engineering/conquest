@@ -9,4 +9,15 @@ export {
   ensureQuestionnairesEnabled,
   isQuestionnairesEnabled,
 } from '@/lib/app/questionnaire/feature-flag';
-export type { AppQuestionnaireStatus } from '@/lib/app/questionnaire/types';
+export {
+  QUESTION_TYPES,
+  AUDIENCE_EXPERTISE_LEVELS,
+  AUDIENCE_SENSITIVITY_LEVELS,
+} from '@/lib/app/questionnaire/types';
+export type {
+  AppQuestionnaireStatus,
+  QuestionType,
+  AudienceShape,
+  AudienceExpertiseLevel,
+  AudienceSensitivity,
+} from '@/lib/app/questionnaire/types';
