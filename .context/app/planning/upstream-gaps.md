@@ -39,7 +39,15 @@ _Status:_ open · _Opened:_ YYYY-MM-DD · _Surfaced by:_ <feature/task>
 
 ### UG-1 — No app-extensible registry for Prisma-unmodelled DB objects
 
-_Status:_ raised-upstream ([sunrise#284](https://github.com/human-centric-engineering/sunrise/issues/284)) · _Opened:_ 2026-06-01 · _Surfaced by:_ F0.1 (schema foundations)
+_Status:_ **resolved** ([sunrise#284](https://github.com/human-centric-engineering/sunrise/issues/284) → PR #286, merged to `upstream/main`; pulled into Conquest in the 2026-06-01 sync) · _Opened:_ 2026-06-01 · _Resolved:_ 2026-06-01 · _Surfaced by:_ F0.1 (schema foundations)
+
+**Resolution.** Sunrise added exactly the proposed seam: `lib/db/drift-probes.ts`
+(probe types + merge logic) and an app hook `lib/app/db-drift.ts` exporting
+`registerAppDriftProbes()`, which `scripts/db/check-drift.ts` now merges into its
+probe set. Apps register their own unmodelled objects (FK constraints, custom
+indexes) without touching platform files. When the first user-owned link lands in
+**F2.1**, register its hand-written FK constraint via this hook instead of carrying
+a local patch.
 
 **Gap.** Sunrise's recommended way to relate app data to a user
 ([`CUSTOMIZATION.md` §5](../../../CUSTOMIZATION.md)) is a **plain-`String` FK with
@@ -96,7 +104,19 @@ probe, and **carry it as a tracked patch** until this upstream seam exists.
 
 ### UG-2 — Prisma 7 ignores `@@unique(name:)` → phantom constraint RENAME (B1)
 
-_Status:_ raised-upstream ([sunrise#283](https://github.com/human-centric-engineering/sunrise/issues/283)) · _Opened:_ 2026-06-01 · _Surfaced by:_ F0.1 (T0.1.3 init migration)
+_Status:_ **resolved** ([sunrise#283](https://github.com/human-centric-engineering/sunrise/issues/283) → PR #285, merged to `upstream/main`; pulled into Conquest in the 2026-06-01 sync) · _Opened:_ 2026-06-01 · _Resolved:_ 2026-06-01 · _Surfaced by:_ F0.1 (T0.1.3 init migration)
+
+**Resolution.** Sunrise pinned the DB constraint name with `map:`
+(`@@unique([...], name: "ai_conversation_inbound_key", map: "ai_conversation_inbound_key")`)
+so Prisma's derived name matches the deployed object — the phantom
+`ALTER INDEX … RENAME` no longer appears, and forks stop hand-stripping it on every
+`migrate dev`. The baseline migration kept its `ADD CONSTRAINT` hand-fold (the edit
+was comment-only; DDL unchanged, diffs empty). Note for already-provisioned DBs:
+the comment-only baseline edit changes the migration file's checksum, so databases
+that applied the pre-sync baseline carry a stale `_prisma_migrations.checksum` — a
+silent drift until the next `migrate dev` flags the baseline as edited. Fix is a
+one-row checksum `UPDATE` (data-preserving) or `db:reset` (dev); fresh clones and
+CI are unaffected.
 
 **Gap.** Prisma 7's `migrate diff` ignores `@@unique([...], name: "...")` on
 `AiConversation`, so every `migrate dev` — even against an in-sync DB — emits a
