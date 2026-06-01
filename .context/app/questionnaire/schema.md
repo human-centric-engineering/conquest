@@ -1,9 +1,9 @@
 # Questionnaire — schema
 
-> **Stub.** The anchor models below are added by **T0.1.3** (see
-> [`../planning/features/f0.1.md`](../planning/features/f0.1.md)). This doc records
-> the location, conventions, and migration workflow now; the per-model reference
-> grows as each phase adds its own models.
+> Records the app schema's location, conventions, and migration workflow. The
+> per-model reference grows as each phase adds its models; the anchor
+> (`AppQuestionnaire` + `AppQuestionnaireVersion`) landed in
+> [F0.1 / T0.1.3](../planning/features/f0.1.md).
 
 ## Location
 
