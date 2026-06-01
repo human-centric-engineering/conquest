@@ -57,3 +57,19 @@ export type AudienceShape = {
   sensitivity?: AudienceSensitivity;
   notes?: string;
 };
+
+/**
+ * The `AudienceShape` field names, as a `const` tuple — the single source of
+ * truth for iterating audience fields key-by-key. The ingestion merge
+ * (admin-wins-per-field) walks this to resolve each field's value and
+ * provenance independently. Kept in lock-step with `AudienceShape` above.
+ */
+export const AUDIENCE_FIELDS = [
+  'description',
+  'role',
+  'expertiseLevel',
+  'estimatedDurationMinutes',
+  'locale',
+  'sensitivity',
+  'notes',
+] as const satisfies ReadonlyArray<keyof AudienceShape>;
