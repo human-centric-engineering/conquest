@@ -12,13 +12,13 @@ The pattern across all five: **the original incremental migration emitted the co
 
 ## Inventory
 
-| Bug ID | Description                                                               | Affected object                                  | Workaround                                                    | Upstream issue |
-| ------ | ------------------------------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------- | -------------- |
-| B1     | `@@unique(name: …)` named unique constraint dropped to default-name index | `AiConversation` (`ai_conversation_inbound_key`) | Manual `ALTER TABLE ADD CONSTRAINT` with the named constraint | (not filed)    |
-| B2     | NOT NULL omitted on array column with `@default([…])`                     | `AiProviderModel.deploymentProfiles`             | Manual `ALTER COLUMN SET NOT NULL`                            | (not filed)    |
-| B3     | (same shape as B2)                                                        | `AiWebhookSubscription.agentIds`                 | Manual `ALTER COLUMN SET NOT NULL`                            | (not filed)    |
-| B4     | (same shape as B2)                                                        | `AiWebhookSubscription.workflowIds`              | Manual `ALTER COLUMN SET NOT NULL`                            | (not filed)    |
-| B5     | (same shape as B2)                                                        | `AiWebhookSubscription.retryBackoffMs`           | Manual `ALTER COLUMN SET NOT NULL`                            | (not filed)    |
+| Bug ID | Description                                                               | Affected object                                  | Workaround                                                                                                                                                             | Upstream issue                                                          |
+| ------ | ------------------------------------------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| B1     | `@@unique(name: …)` named unique constraint dropped to default-name index | `AiConversation` (`ai_conversation_inbound_key`) | Pin the DB name with `map:` in the schema (fixes baseline gen **and** the per-`migrate dev` phantom RENAME); baseline keeps the `ALTER TABLE ADD CONSTRAINT` hand-fold | [#283](https://github.com/human-centric-engineering/sunrise/issues/283) |
+| B2     | NOT NULL omitted on array column with `@default([…])`                     | `AiProviderModel.deploymentProfiles`             | Manual `ALTER COLUMN SET NOT NULL`                                                                                                                                     | (not filed)                                                             |
+| B3     | (same shape as B2)                                                        | `AiWebhookSubscription.agentIds`                 | Manual `ALTER COLUMN SET NOT NULL`                                                                                                                                     | (not filed)                                                             |
+| B4     | (same shape as B2)                                                        | `AiWebhookSubscription.workflowIds`              | Manual `ALTER COLUMN SET NOT NULL`                                                                                                                                     | (not filed)                                                             |
+| B5     | (same shape as B2)                                                        | `AiWebhookSubscription.retryBackoffMs`           | Manual `ALTER COLUMN SET NOT NULL`                                                                                                                                     | (not filed)                                                             |
 
 ## B1 — named UNIQUE constraint dropped to default-name UNIQUE INDEX
 
@@ -31,30 +31,42 @@ model AiConversation {
   channel     String?
   fromAddress String?
 
-  @@unique([agentId, channel, fromAddress], name: "ai_conversation_inbound_key")
+  @@unique([agentId, channel, fromAddress], name: "ai_conversation_inbound_key", map: "ai_conversation_inbound_key")
 }
 ```
 
-**Prisma 7 baseline-generator emits:**
+**Prisma 7 generates (without `map:`):**
 
 ```sql
-CREATE UNIQUE INDEX "AiConversation_agentId_channel_fromAddress_key"
+CREATE UNIQUE INDEX "ai_conversation_agentId_channel_fromAddress_key"
   ON "ai_conversation" ("agentId", "channel", "fromAddress");
 ```
 
-The `name:` argument is **ignored**. A new index is created with Prisma's default naming convention (`<Model>_<col1>_<col2>_<col3>_key`), not the named unique constraint the model declared.
+The `name:` argument is **ignored for the DB object** — Prisma derives the default name (`<table>_<col1>_<col2>_<col3>_key`). `name:` only ever controlled the _Prisma Client_ compound-key identifier (the `findUnique({ where: { ai_conversation_inbound_key: … } })` accessor), never the database constraint name.
 
-**Why it matters:** the inbound-conversation lookup path keys on the named constraint via `prisma.aiConversation.findUnique({ where: { ai_conversation_inbound_key: { … } } })`. Without the named constraint (only a same-shape index), the typed lookup compiles fine but fails at runtime because Prisma's query engine can't find the constraint by name.
+**Why it matters:** unlike B2–B5 this isn't only a baseline-generation issue — it bites every fork on **every `prisma migrate dev`**. Because the deployed object is named `ai_conversation_inbound_key` but the schema-derived name is the default, each diff concludes the object is misnamed and injects a phantom
 
-**Workaround (in baseline):** replace the `CREATE UNIQUE INDEX` with the explicit `ALTER TABLE ADD CONSTRAINT` form:
+```sql
+ALTER INDEX "ai_conversation_inbound_key" RENAME TO "ai_conversation_agentId_channel_fromAddress_key";
+```
+
+into the generated migration — even for migrations that touch unrelated tables. Forks have to hand-strip it (issue #283). The runtime lookup is **not** affected by the DB object's name or kind: `findUnique` resolves the `ai_conversation_inbound_key` accessor from the schema's `name:` (a client-side construct) and emits a plain `WHERE agentId=$1 AND channel=$2 AND fromAddress=$3` — it never looks the constraint up by name. The only real harm is the spurious, repeated migration churn (and, hypothetically, breaking `ON CONFLICT ON CONSTRAINT` — which the codebase does not use).
+
+**Fix (schema):** pin the DB name with `map:` so Prisma's derived name matches the deployed object:
+
+```prisma
+@@unique([agentId, channel, fromAddress], name: "ai_conversation_inbound_key", map: "ai_conversation_inbound_key")
+```
+
+With `map:` the phantom rename disappears for fresh baselines and for every fork `migrate dev`. Verified empirically: a DB carrying the baseline's `ADD CONSTRAINT` shape diffs to an **empty migration** against the `map:`-pinned schema (Postgres introspects a constraint-backed unique index identically to a plain unique index), so **no migration is required** on existing databases.
+
+**Baseline (unchanged):** the baseline keeps the explicit `ALTER TABLE ADD CONSTRAINT` hand-fold — it is applied history and must not be edited, and it diffs clean against the `map:` schema anyway:
 
 ```sql
 ALTER TABLE "ai_conversation"
   ADD CONSTRAINT "ai_conversation_inbound_key"
   UNIQUE ("agentId", "channel", "fromAddress");
 ```
-
-The two are functionally equivalent in Postgres (the constraint creates a backing unique index with the constraint's name), but only the constraint form gives the Prisma query engine the name it expects.
 
 ## B2–B5 — NOT NULL omitted on array column with `@default([…])`
 
