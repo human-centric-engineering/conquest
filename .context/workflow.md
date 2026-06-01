@@ -144,10 +144,22 @@ After the PR is created:
 
 ### 7. Merge
 
-Once CI passes and review is complete:
+Once CI passes and review is complete, pick the strategy by **branch type** — there is no single default, because squash and merge-commit each break in the other's situation:
 
-- **Squash and merge** (recommended) — clean history
-- Delete branch after merge
+| Branch type                                                                          | Strategy                                    | Why                                                                                                                                                        |
+| ------------------------------------------------------------------------------------ | ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Internal feature/fix PR** (short-lived, lands once and is never merged from again) | **Squash and merge**                        | One revertible commit per PR, clean linear `main`, WIP/"address review" noise discarded                                                                    |
+| **Upstream sync** (from the `upstream` Sunrise remote)                               | **Merge commit — never squash** (`--no-ff`) | Preserves shared ancestry so the _next_ sync 3-way-merges cleanly. Squashing drops the ancestry and turns the following sync into a manual conflict fight. |
+| **Long-lived shared branch** that is merged _to and from_ repeatedly before it lands | **Merge commit**                            | Squashing mid-life breaks future merges between the same lineages (git can no longer see the shared commits)                                               |
+
+- **Delete the branch after merge** (internal branches only — never delete sync lineage).
+- Enforce the default in GitHub branch protection: allow squash merging for internal PRs; do upstream syncs by hand on the CLI with `git merge --no-ff` so they cannot be squashed by accident.
+
+**Squash vs conflicts — they are independent.** Merge conflicts come from divergence over time, not from the merge strategy; squashing does not reduce them. The levers that actually do:
+
+1. **Keep branches short-lived** — land within days. The single biggest conflict reducer, and why feature PR-sizing (see the development plan) matters: a contained feature that lands as ~1 PR rarely diverges far enough to conflict.
+2. **Rebase on `main` frequently** during development (`git pull --rebase origin main`) so you resolve small conflicts incrementally instead of one large conflict at PR time.
+3. **Agree on module ownership** when co-developing in parallel, so two people aren't editing the same files at once.
 
 ## Pre-PR Checklist (Quick Reference)
 
