@@ -13,6 +13,12 @@
  *
  * Full guide + example: CUSTOMIZATION.md §4 · .context/orchestration/capabilities.md
  */
+import { registerAppCapability } from '@/lib/orchestration/capabilities/registry';
+import { AppExtractQuestionnaireStructureCapability } from '@/lib/app/questionnaire/capabilities';
+
 export function initAppCapabilities(): void {
-  // No app capabilities by default.
+  // F1.1 — questionnaire ingestion. The capability is inert until the
+  // APP_QUESTIONNAIRES_ENABLED flag is on (only the flag-gated ingestion route
+  // dispatches it), so registering it unconditionally here is safe.
+  registerAppCapability(new AppExtractQuestionnaireStructureCapability());
 }
