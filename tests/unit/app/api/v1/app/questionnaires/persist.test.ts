@@ -251,4 +251,74 @@ describe('persistIngestion', () => {
     expect(tx.appQuestionSlot.createMany).not.toHaveBeenCalled();
     expect(tx.appQuestionnaireExtractionChange.createMany).not.toHaveBeenCalled();
   });
+
+  it('writes a null goal and SQL-NULL audience when nothing supplies them', async () => {
+    // No admin metadata, no inferred goal/audience → both fields fall to null.
+    const result = await persistIngestion(input({ admin: {} }));
+
+    expect(tx.appQuestionnaireVersion.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ goal: null, audience: Prisma.JsonNull }),
+      })
+    );
+    expect(result.goal).toBeNull();
+    expect(result.audience).toBeNull();
+    expect(result.fieldProvenance).toEqual({ audience: {} });
+  });
+
+  it('records source pageCount and omits mimeType when only pageCount is supplied', async () => {
+    await persistIngestion(
+      input({
+        source: {
+          fileName: 'scan.pdf',
+          fileHash: 'hash-pdf',
+          byteSize: 1024,
+          pageCount: 3,
+          warnings: ['ocr fallback'],
+          extractedText: 'text',
+          // no mimeType
+        },
+      })
+    );
+
+    const data = (tx.appQuestionnaireSourceDocument.create as Mock).mock.calls[0][0].data as Record<
+      string,
+      unknown
+    >;
+    expect(data.pageCount).toBe(3);
+    expect(data).not.toHaveProperty('mimeType');
+    // Non-empty warnings are stored (not the SQL-NULL sentinel).
+    expect(data.warnings).toEqual(['ocr fallback']);
+  });
+
+  it('carries optional change-record provenance fields when present', async () => {
+    await persistIngestion(
+      input({
+        extraction: extraction({
+          changes: [
+            {
+              changeType: 'rewrite_prompt',
+              targetEntityType: 'question',
+              beforeJson: 'terse',
+              afterJson: 'a clearer prompt',
+              sourceQuote: 'terse',
+              rationale: 'Clarified the ask.',
+              confidence: 0.8,
+            },
+          ],
+        }),
+      })
+    );
+
+    const data = (tx.appQuestionnaireExtractionChange.createMany as Mock).mock.calls[0][0]
+      .data as Array<Record<string, unknown>>;
+    expect(data[0]).toMatchObject({
+      changeType: 'rewrite_prompt',
+      sourceQuote: 'terse',
+      rationale: 'Clarified the ask.',
+      confidence: 0.8,
+      beforeJson: 'terse',
+      afterJson: 'a clearer prompt',
+    });
+  });
 });
