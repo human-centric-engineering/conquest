@@ -720,6 +720,16 @@ The hint is a default, not a commitment — packaging is decided per-feature at 
 
 > **The hints aren't platform-aware audits.** They estimate net-new _app_ code but were sized from the task list, not a per-feature check of what Sunrise already provides — so wherever the platform pre-bakes the machinery (e.g. invitations: token generation, email, and registration all ship in Sunrise — `.context/admin/invitations.md`), the real size is smaller. The definitive sizing happens at **promotion**, when the feature is designed against Sunrise's actual capabilities the way F0.1 was — and some hints will shrink once a planned "build X" reduces to configuring a workflow or consuming a primitive.
 
+**Sizing against the gate-suite tax — the dominant force (F1.1 calibration).**
+
+The lever above ("commits ≠ PRs") is right but underspecified on _which way_ to lean. F1.1 settled it with real data: **the fixed cost you amortise per PR is the whole gate suite — `/pre-pr` + `/security-review` + `/test-review` + `/code-review` — plus CI minutes, not just CI.** Four heavyweight multi-agent passes per PR. That tax is large enough that the default should be **the fewest PRs that each still get one honest review pass**, not the finest cut the seams allow.
+
+- **Floor test (operational):** if a capable session writes the code faster than the gate suite runs, the PR is below the floor — bundle it up. The work should clearly exceed the ceremony.
+- **A risk-type seam is a split you must _justify_, not a default.** The reviews run over the whole diff and are thorough enough to cover mixed concerns in one PR, so "the LLM path and the HTTP path want different reviewers" is a _weak_ reason to split — set against paying the entire suite (and CI) a second time. Split only when the isolated slice is **substantial _and_ carries a genuinely distinct high-stakes concern** (a live endpoint's security surface is the canonical one).
+- **Ceiling unchanged:** stop bundling when a PR can no longer get one coherent review pass, or a security-critical surface would be buried in a large unrelated diff.
+
+F1.1 (keystone) was planned as four risk-typed PRs; in practice **PR1 (schema) was minutes of work — far below the floor — so it folded into PR2**, and PR3/PR4 (#14, #15: ~1.4k and ~2.3k diff) sat right at the floor and could defensibly have been one. The honest cut was **~2 PRs — "the engine" (schema + pure core + capability + seeds, all static / unit-tested) and "the live endpoint" (route + persistence + integration tests, where `/security-review` earns its run)** — not four. Treat the per-feature PR count as "fewest that stay reviewable," and let the executor merge seams at the moment of work.
+
 ### Asking Claude to plan a feature or task
 
 When you're ready to work on something, point Claude at it by ID:
