@@ -1,4 +1,4 @@
-import { APP_QUESTIONNAIRES_FLAG } from '@/lib/app/questionnaire/feature-flag';
+import { APP_QUESTIONNAIRES_FLAG } from '@/lib/app/questionnaire/constants';
 import type { SeedUnit } from '@/prisma/runner';
 
 /**

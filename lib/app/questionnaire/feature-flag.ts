@@ -1,13 +1,11 @@
 import { errorResponse } from '@/lib/api/responses';
+import { APP_QUESTIONNAIRES_FLAG } from '@/lib/app/questionnaire/constants';
 import { isFeatureEnabled } from '@/lib/feature-flags';
 
-/**
- * Feature-flag name gating every questionnaire surface.
- *
- * Seeded (disabled) by `prisma/seeds/app-questionnaire/001-questionnaires-flag.ts`.
- * DB-backed, so it can be toggled at runtime without a redeploy.
- */
-export const APP_QUESTIONNAIRES_FLAG = 'APP_QUESTIONNAIRES_ENABLED';
+// Re-exported so the feature-flag module stays the natural home for the flag
+// name. The constant itself lives in the dependency-light `constants.ts` so leaf
+// consumers (the seed) can import it without this module's HTTP/DB deps.
+export { APP_QUESTIONNAIRES_FLAG };
 
 /**
  * Whether the questionnaire app is enabled. Thin wrapper over Sunrise's
