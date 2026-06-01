@@ -201,6 +201,9 @@ describe('app_questionnaire_init migration SQL', () => {
   it('creates exactly the two app tables', () => {
     expect(sql).toContain('CREATE TABLE "app_questionnaire"');
     expect(sql).toContain('CREATE TABLE "app_questionnaire_version"');
+    // Enforce "exactly" — a phantom platform table leaking back through the
+    // schema-fold footgun would otherwise pass the two presence checks above.
+    expect(executableSql.match(/CREATE TABLE/g) ?? []).toHaveLength(2);
   });
 
   it('declares the version→questionnaire FK with ON DELETE CASCADE', () => {
@@ -236,11 +239,16 @@ describe('app_questionnaire_ingestion migration SQL', () => {
     expect(sql).toContain('CREATE TABLE "app_question_slot"');
     expect(sql).toContain('CREATE TABLE "app_questionnaire_extraction_change"');
     expect(sql).toContain('CREATE TABLE "app_questionnaire_source_document"');
+    // Exactly four — this is the migration where the schema-fold footgun fired,
+    // so guard against a phantom platform CREATE TABLE leaking back in.
+    expect(executableSql.match(/CREATE TABLE/g) ?? []).toHaveLength(4);
   });
 
   it('adds goal/audience to the version table', () => {
     expect(sql).toMatch(/ALTER TABLE "app_questionnaire_version" ADD COLUMN\s+"audience" JSONB/);
-    expect(sql).toContain('"goal" TEXT');
+    // Anchor `goal` to the version ALTER too (not a bare substring that could
+    // match any table's DDL) — mirrors the `audience` assertion above.
+    expect(sql).toMatch(/ALTER TABLE "app_questionnaire_version"[\s\S]*"goal" TEXT/);
   });
 
   it('declares every child→version FK with ON DELETE CASCADE', () => {

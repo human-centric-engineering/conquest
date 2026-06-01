@@ -6,6 +6,7 @@ import {
   validateExtraction,
   type ExtractionResult,
 } from '@/lib/app/questionnaire/ingestion/extraction-schema';
+import { QUESTION_TYPES } from '@/lib/app/questionnaire/types';
 
 /**
  * Contract tests for the extractor's structured-output schema (F1.1 / PR2).
@@ -95,18 +96,10 @@ describe('extractionSchema — valid inputs', () => {
   });
 
   it('accepts every canonical question type and change type', () => {
+    // Drive off the single source of truth so a new QUESTION_TYPES entry is
+    // exercised here automatically (no inline list to drift out of sync).
     const base = validResult();
-    base.questions = (
-      [
-        'free_text',
-        'single_choice',
-        'multi_choice',
-        'likert',
-        'numeric',
-        'date',
-        'boolean',
-      ] as const
-    ).map((t, i) => ({
+    base.questions = QUESTION_TYPES.map((t, i) => ({
       sectionOrdinal: 0,
       key: `q_${t}`,
       prompt: `Prompt ${i}`,

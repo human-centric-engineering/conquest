@@ -92,10 +92,11 @@ describe('buildExtractionPrompt — vocabulary from the single source of truth',
   });
 
   it('states the two coherence rules the normaliser also enforces', () => {
-    // prune ⇒ afterJson null; infer ⇒ version-targeted.
+    // prune ⇒ afterJson null; infer_goal/infer_audience ⇒ version-targeted.
+    // The infer rule couples all three terms so deleting the rule fails the
+    // test (a bare /version/ would pass regardless — "version" recurs elsewhere).
     expect(system).toMatch(/prune.*afterJson.*null/is);
-    expect(system).toMatch(/infer_goal.*infer_audience/is);
-    expect(system).toMatch(/version/i);
+    expect(system).toMatch(/infer_goal[\s\S]*infer_audience[\s\S]*version/is);
   });
 
   it('requires a change record per edit and none for verbatim questions', () => {
