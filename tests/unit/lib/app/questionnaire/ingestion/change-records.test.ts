@@ -132,6 +132,17 @@ describe('normalizeChangeRecords — inference coherence', () => {
     expect(intents).toHaveLength(0);
     expect(dropped[0].reason).toMatch(/not an object/);
   });
+
+  it('drops a vacuous infer_audience (empty afterJson) as incoherent, not suppressed', () => {
+    // With no admin input, an empty {} can't be a suppression — the reason must
+    // say the model inferred nothing, not that the admin masked everything.
+    const { intents, dropped } = normalizeChangeRecords([
+      change({ changeType: 'infer_audience', targetEntityType: 'version', afterJson: {} }),
+    ]);
+    expect(intents).toHaveLength(0);
+    expect(dropped[0].reason).toMatch(/has no fields/);
+    expect(dropped[0].reason).not.toMatch(/suppressed/);
+  });
 });
 
 describe('normalizeChangeRecords — admin-wins-per-field suppression', () => {

@@ -17,6 +17,7 @@
  * the graph is persisted.
  */
 
+import { isRecord } from '@/lib/utils';
 import type { AudienceShape } from '@/lib/app/questionnaire/types';
 import {
   INFER_CHANGE_TYPES,
@@ -40,10 +41,6 @@ export interface NormalizeChangeRecordsResult {
   intents: ChangeRecordIntent[];
   /** Records removed (incoherent or fully admin-suppressed) — for logging. */
   dropped: DroppedChange[];
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /** Carry through the optional provenance fields, omitting `undefined`. */
@@ -100,26 +97,44 @@ export function normalizeChangeRecords(
         continue;
       }
 
-      // infer_audience: prune the keys the admin already owns.
-      if (!isPlainObject(change.afterJson)) {
-        dropped.push({ change, reason: 'incoherent: infer_audience afterJson is not an object' });
+      if (changeType === 'infer_audience') {
+        // Prune the keys the admin already owns.
+        if (!isRecord(change.afterJson)) {
+          dropped.push({
+            change,
+            reason: 'incoherent: infer_audience afterJson is not an object',
+          });
+          continue;
+        }
+        const inferredKeyCount = Object.keys(change.afterJson).length;
+        const kept: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(change.afterJson)) {
+          const adminOwnsKey = suppliedAudience?.[key as keyof AudienceShape] !== undefined;
+          if (!adminOwnsKey) kept[key] = value;
+        }
+        if (Object.keys(kept).length === 0) {
+          // Distinguish a vacuous record (model inferred nothing) from a real
+          // suppression (model inferred fields the admin already owns) — the
+          // reason drives diagnosis/retry decisions downstream.
+          dropped.push({
+            change,
+            reason:
+              inferredKeyCount === 0
+                ? 'incoherent: infer_audience afterJson has no fields'
+                : 'suppressed: all inferred audience fields admin-supplied',
+          });
+          continue;
+        }
+        intents.push(
+          baseIntent(change, { changeType, targetEntityType: 'version', afterJson: kept })
+        );
         continue;
       }
-      const kept: Record<string, unknown> = {};
-      for (const [key, value] of Object.entries(change.afterJson)) {
-        const adminOwnsKey = suppliedAudience?.[key as keyof AudienceShape] !== undefined;
-        if (!adminOwnsKey) kept[key] = value;
-      }
-      if (Object.keys(kept).length === 0) {
-        dropped.push({
-          change,
-          reason: 'suppressed: all inferred audience fields admin-supplied',
-        });
-        continue;
-      }
-      intents.push(
-        baseIntent(change, { changeType, targetEntityType: 'version', afterJson: kept })
-      );
+
+      // Defensive: an INFER_CHANGE_TYPES member added without a handler above.
+      // Drop with an honest reason rather than misrouting it through the
+      // audience path (which would misdiagnose it as a bad object).
+      dropped.push({ change, reason: `incoherent: unhandled inference type ${changeType}` });
       continue;
     }
 

@@ -58,10 +58,15 @@ const extractedQuestionSchema = z.object({
 });
 
 /**
- * One LLM-reported editorial decision. Coherence BETWEEN fields (prune ⇒ no
- * `afterJson`, infer ⇒ version-targeted) and inference suppression are enforced
- * downstream by `normalizeChangeRecords` — kept out of Zod so a single odd record
- * doesn't fail the whole extraction (we normalise rather than reject).
+ * One LLM-reported editorial decision. Two layers of checking apply:
+ *  - STRUCTURAL (here, in Zod): `changeType`/`targetEntityType` must be valid
+ *    enum members, `confidence` in range, etc. A structural failure on ANY change
+ *    fails `validateExtraction` for the whole payload — that's what drives the
+ *    capability's single repair retry (PR3).
+ *  - SEMANTIC coherence BETWEEN fields (prune ⇒ no `afterJson`, infer ⇒
+ *    version-targeted) and inference suppression are deliberately kept OUT of Zod
+ *    and enforced downstream by `normalizeChangeRecords`, which normalises or
+ *    drops an individual odd record rather than failing the whole extraction.
  */
 const extractedChangeSchema = z.object({
   changeType: z.enum(CHANGE_TYPES),
