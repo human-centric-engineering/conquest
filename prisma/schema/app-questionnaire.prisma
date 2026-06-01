@@ -29,17 +29,125 @@ model AppQuestionnaire {
 
 /// A version of a questionnaire. Edits to a launched version fork a new draft
 /// version (P2); in-flight sessions stay pinned to the version they began on.
+///
+/// `goal`/`audience` live on the VERSION (not AppQuestionnaire): the versioning
+/// model pins them where launch (F3.1) and evaluation (F5 judges) operate. Both
+/// are inferred by the F1.1 extractor (recorded as infer_goal / infer_audience
+/// change records) or admin-set, with admin-wins-per-field merge.
 model AppQuestionnaireVersion {
   id              String   @id @default(cuid())
   questionnaireId String
   versionNumber   Int      @default(1)
   status          String   @default("draft")
+  goal            String? // inferred (infer_goal change) or admin-set
+  audience        Json? // structured AudienceShape (types.ts); inferred or admin-set
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  questionnaire AppQuestionnaire @relation(fields: [questionnaireId], references: [id], onDelete: Cascade)
+  questionnaire   AppQuestionnaire                   @relation(fields: [questionnaireId], references: [id], onDelete: Cascade)
+  sections        AppQuestionnaireSection[]
+  changeRecords   AppQuestionnaireExtractionChange[]
+  sourceDocuments AppQuestionnaireSourceDocument[]
 
   @@unique([questionnaireId, versionNumber])
   @@index([questionnaireId])
   @@map("app_questionnaire_version")
+}
+
+/// A section/group within a version. Plain entity — extraction provenance
+/// (sourceQuote, rationale, confidence) lives on the CHANGE RECORDS, not here.
+model AppQuestionnaireSection {
+  id          String   @id @default(cuid())
+  versionId   String
+  ordinal     Int
+  title       String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  version   AppQuestionnaireVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  questions AppQuestionSlot[]
+
+  @@index([versionId])
+  @@map("app_questionnaire_section")
+}
+
+/// A single question. `type` vocabulary is the project-canonical set from the
+/// deep spec. `key` is a stable per-version slug (answers/re-ingest reference it,
+/// not the cuid). `weight` feeds F4.1 weighted selection. NO embedding column yet
+/// (deferred to F4.1 — pgvector is a Prisma-unmodelled object with no consumer
+/// until then).
+model AppQuestionSlot {
+  id                   String   @id @default(cuid())
+  versionId            String // denormalised — F2.2 tagging validates tag+slot share a version
+  sectionId            String
+  ordinal              Int
+  key                  String // slug, unique per version
+  prompt               String
+  guidelines           String?
+  rationale            String?
+  type                 String   @default("free_text") // free_text|single_choice|multi_choice|likert|numeric|date|boolean
+  typeConfig           Json? // choices, likert bounds, etc.
+  required             Boolean  @default(false)
+  weight               Float    @default(1.0)
+  extractionConfidence Float? // 0–1, set by the extractor
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  section AppQuestionnaireSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+
+  @@unique([versionId, key])
+  @@index([versionId])
+  @@index([sectionId])
+  @@map("app_question_slot")
+}
+
+/// The revertible audit trail of every editorial decision the extractor made,
+/// LLM-self-reported at extraction time. F2.3 lists these and restores `beforeJson`
+/// on revert. Write path supports the full vocabulary; F1.1 EMITS the editorial +
+/// inference set (prune, correct, rewrite_prompt, infer_type, merge_questions,
+/// split_question, add_section, augment_question, infer_goal, infer_audience).
+model AppQuestionnaireExtractionChange {
+  id               String    @id @default(cuid())
+  versionId        String
+  changeType       String // see vocabulary note in ingestion docs
+  targetEntityType String // section | question | version
+  targetEntityId   String? // null for pruned-never-persisted / version-level
+  sourceQuote      String? // the span in the source document
+  beforeJson       Json? // pre-change state; restored on revert (null for creations)
+  afterJson        Json? // post-change state (null for prune_*)
+  rationale        String?
+  confidence       Float?
+  status           String    @default("applied") // applied | reverted
+  revertedAt       DateTime? // set in F2.3
+  revertedByUserId String? // plain String, no FK (UG-1); set in F2.3
+  createdAt        DateTime  @default(now())
+
+  version AppQuestionnaireVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@index([versionId, status])
+  @@index([changeType])
+  @@map("app_questionnaire_extraction_change")
+}
+
+/// The uploaded source doc — supports SHA-256 dedup (F2.4 re-ingest) and parse
+/// provenance / source-quote verification. NO User FK (UG-1).
+model AppQuestionnaireSourceDocument {
+  id            String   @id @default(cuid())
+  versionId     String
+  fileName      String
+  fileHash      String // sha256 of the raw bytes
+  byteSize      Int
+  mimeType      String?
+  pageCount     Int?
+  warnings      Json? // parsed.warnings[]
+  extractedText String   @db.Text // what extraction consumed; F2.3 verifies source quotes against it
+  bytes         Bytes? // OPTIONAL raw upload, for F2.4 diff-against-source/re-parse with new opts
+  createdAt     DateTime @default(now())
+
+  version AppQuestionnaireVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@index([versionId])
+  @@index([fileHash])
+  @@map("app_questionnaire_source_document")
 }
