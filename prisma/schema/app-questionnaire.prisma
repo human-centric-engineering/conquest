@@ -1,0 +1,45 @@
+// ConQuest questionnaire app schema.
+//
+// App-owned models (App… prefix, snake_case @@map). Kept in a dedicated file —
+// the platform's app.prisma already holds platform models, so the questionnaire
+// schema stays separate and conflict-free on upstream syncs.
+//
+// F0.1 lays down only the anchor (AppQuestionnaire + AppQuestionnaireVersion).
+// Later phases extend this graph (ingestion P1, config/invitations P3, sessions
+// P4, evaluation P5, turns P6). See .context/app/questionnaire/schema.md.
+//
+// User FKs are deferred: the plain-String-User-FK recipe creates a
+// Prisma-unmodelled object with real maintenance cost (see upstream-gaps UG-1).
+// Nothing here needs user ownership yet, so these models use only app-internal
+// @relation (onDelete: Cascade) — fully modelled, clean drift.
+
+/// The top-level container an admin authors, configures, and launches.
+model AppQuestionnaire {
+  id        String   @id @default(cuid())
+  title     String
+  status    String   @default("draft")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  versions AppQuestionnaireVersion[]
+
+  @@index([status])
+  @@map("app_questionnaire")
+}
+
+/// A version of a questionnaire. Edits to a launched version fork a new draft
+/// version (P2); in-flight sessions stay pinned to the version they began on.
+model AppQuestionnaireVersion {
+  id              String   @id @default(cuid())
+  questionnaireId String
+  versionNumber   Int      @default(1)
+  status          String   @default("draft")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  questionnaire AppQuestionnaire @relation(fields: [questionnaireId], references: [id], onDelete: Cascade)
+
+  @@unique([questionnaireId, versionNumber])
+  @@index([questionnaireId])
+  @@map("app_questionnaire_version")
+}
