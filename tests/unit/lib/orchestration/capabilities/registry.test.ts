@@ -154,8 +154,15 @@ describe('registerBuiltInCapabilities', () => {
   it('is idempotent (second call is a no-op)', () => {
     const spy = vi.spyOn(capabilityDispatcher, 'register');
     registerBuiltInCapabilities();
+    // Capture the first-call count rather than hardcoding it: the flush
+    // registers the 13 built-ins PLUS any capabilities a fork wires through
+    // the `initAppCapabilities()` seam (ConQuest registers the questionnaire
+    // extractor). The contract under test is idempotency, so assert the
+    // SECOND call adds nothing — robust to fork-contributed capabilities.
+    const afterFirst = spy.mock.calls.length;
+    expect(afterFirst).toBeGreaterThanOrEqual(13); // all built-ins (was 12 before #24)
     registerBuiltInCapabilities();
-    expect(spy).toHaveBeenCalledTimes(13); // only from the first call (was 12 before #24)
+    expect(spy).toHaveBeenCalledTimes(afterFirst); // second call is a no-op
     spy.mockRestore();
   });
 });

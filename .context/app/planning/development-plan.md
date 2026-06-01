@@ -21,14 +21,14 @@ supersedes: Conversational Questionnaire Phases.md
 
 ## Project
 
-| Field         | Value                                                                                            |
-| ------------- | ------------------------------------------------------------------------------------------------ |
-| Name          | Conversational Questionnaire                                                                     |
-| Repo          | `human-centric-engineering/conquest` (forked from `human-centric-engineering/sunrise` at v0.0.1) |
-| Host platform | Sunrise v0.0.1                                                                                   |
-| Lead          | Simon Holmes                                                                                     |
-| Status        | `building` — P0 done (F0.1, PR #10); P1 in progress (F1.1 schema + core, PR #13)                 |
-| Opened        | 2026-05-30                                                                                       |
+| Field         | Value                                                                                                              |
+| ------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Name          | Conversational Questionnaire                                                                                       |
+| Repo          | `human-centric-engineering/conquest` (forked from `human-centric-engineering/sunrise` at v0.0.1)                   |
+| Host platform | Sunrise v0.0.1                                                                                                     |
+| Lead          | Simon Holmes                                                                                                       |
+| Status        | `building` — P0 done (F0.1, PR #10); P1 in progress (F1.1 schema + core in PR #13; extractor capability in PR #14) |
+| Opened        | 2026-05-30                                                                                                         |
 
 ---
 
@@ -133,19 +133,19 @@ When a need arises that Sunrise's public surface doesn't cover, the rule is _not
 
 The build moves from scaffolding → ingestion → admin manage → demo branding → configuration → conversational core → evaluation → streaming → user UI → analytics → hardening. Phases are sequenced so each one's surface area is exercisable end-to-end before the next adds new abstraction.
 
-| Phase    | Title                                           | Status      | Notes                                                                                                                                                         |
-| -------- | ----------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **P0**   | Foundations                                     | done        | F0.1 shipped (PR #10) — substantially lighter than the original plan; Sunrise v0.0.1 provides the seams that used to need workarounds.                        |
-| **P1**   | Questionnaire ingestion                         | in progress | Admin uploads a doc; LLM extracts structure; changes recorded for review. API-only. F1.1 PR1 (schema) + PR2 (pure core) in PR #13; capability + route remain. |
-| **P2**   | Admin CRUD over questionnaires                  | not started | Admin UI: list, edit, version, tag, review extraction changes.                                                                                                |
-| **P2.5** | Demo clients and theming                        | not started | Tenancy + branding for the sales-demo audience. `// DEMO-ONLY:` work mostly lives here.                                                                       |
-| **P3**   | Configuration, invitations, and cost estimation | not started | Per-version config; invitation flow; pre-launch cost estimate.                                                                                                |
-| **P4**   | Conversational engine (non-streaming)           | not started | Selection · extraction · contradiction · completion logic, exercised without the streaming surface.                                                           |
-| **P5**   | Design-time evaluation (agents-as-judges)       | not started | Judges score a questionnaire against goal/audience; suggestion review queue.                                                                                  |
-| **P6**   | Conversational session (streaming)              | not started | Per-turn orchestrator over streaming chat; voice + attachments.                                                                                               |
-| **P7**   | User-facing conversational UI                   | not started | Split-screen chat + answer-slot panel; polish; PDF export.                                                                                                    |
-| **P8**   | Admin analytics, exports, anonymous mode        | not started | Dashboards, CSV/JSON export, anonymous-mode handling.                                                                                                         |
-| **P9**   | Hardening + forking docs                        | not started | Runbook, flag inventory, `forking.md`, concurrent-session sanity.                                                                                             |
+| Phase    | Title                                           | Status      | Notes                                                                                                                                                                                         |
+| -------- | ----------------------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **P0**   | Foundations                                     | done        | F0.1 shipped (PR #10) — substantially lighter than the original plan; Sunrise v0.0.1 provides the seams that used to need workarounds.                                                        |
+| **P1**   | Questionnaire ingestion                         | in progress | Admin uploads a doc; LLM extracts structure; changes recorded for review. API-only. F1.1 PR1 (schema) + PR2 (pure core) in PR #13; PR3 (extractor capability) in PR #14; route (PR4) remains. |
+| **P2**   | Admin CRUD over questionnaires                  | not started | Admin UI: list, edit, version, tag, review extraction changes.                                                                                                                                |
+| **P2.5** | Demo clients and theming                        | not started | Tenancy + branding for the sales-demo audience. `// DEMO-ONLY:` work mostly lives here.                                                                                                       |
+| **P3**   | Configuration, invitations, and cost estimation | not started | Per-version config; invitation flow; pre-launch cost estimate.                                                                                                                                |
+| **P4**   | Conversational engine (non-streaming)           | not started | Selection · extraction · contradiction · completion logic, exercised without the streaming surface.                                                                                           |
+| **P5**   | Design-time evaluation (agents-as-judges)       | not started | Judges score a questionnaire against goal/audience; suggestion review queue.                                                                                                                  |
+| **P6**   | Conversational session (streaming)              | not started | Per-turn orchestrator over streaming chat; voice + attachments.                                                                                                                               |
+| **P7**   | User-facing conversational UI                   | not started | Split-screen chat + answer-slot panel; polish; PDF export.                                                                                                                                    |
+| **P8**   | Admin analytics, exports, anonymous mode        | not started | Dashboards, CSV/JSON export, anonymous-mode handling.                                                                                                                                         |
+| **P9**   | Hardening + forking docs                        | not started | Runbook, flag inventory, `forking.md`, concurrent-session sanity.                                                                                                                             |
 
 ---
 
@@ -182,7 +182,7 @@ _Indicative tasks:_
 
 ### F1.1 — Document → questionnaire ingestion
 
-_Status:_ in progress — PR1 (schema) + PR2 (pure extraction core) done in [PR #13](https://github.com/human-centric-engineering/conquest/pull/13); PR3 (extractor capability) + PR4 (HTTP + persistence) remain · _Size:_ multi-PR · _Owner:_ TBD · _Deps:_ F0.1
+_Status:_ in progress — PR1 (schema) + PR2 (pure extraction core) in [PR #13](https://github.com/human-centric-engineering/conquest/pull/13); PR3 (extractor capability) in [PR #14](https://github.com/human-centric-engineering/conquest/pull/14); PR4 (HTTP + persistence) remains · _Size:_ multi-PR · _Owner:_ TBD · _Deps:_ F0.1
 
 > Committable tracker: [`planning/features/f1.1.md`](features/f1.1.md) — the indicative-task list below predates the reconciliation in that doc (e.g. it cites `previewDocument`/`confirmPreview`, which F1.1 deliberately does **not** use — it parses directly via `parseDocument`). Defer to the feature tracker for current scope.
 
@@ -747,6 +747,7 @@ Append-only. Newest at the top. Each entry: date, decision, context, link.
 
 Append-only. Newest at the top.
 
+- **2026-06-01 — F1.1 ingestion PR3 ([PR #14](https://github.com/human-centric-engineering/conquest/pull/14), open).** The extractor **capability** + its agent/capability seeds + registration, behind `APP_QUESTIONNAIRES_ENABLED` (off). `AppExtractQuestionnaireStructureCapability` (`lib/app/questionnaire/capabilities/**`) — a `BaseCapability` dispatched **programmatically** (not an LLM tool loop): resolves a provider-agnostic binding (read from dispatch `entityContext`, empty-binding → system default), runs `runStructuredCompletion` (parse → retry-once-at-temp-0 → cost-sum), validates against the PR2 Zod contract, normalises the change log, logs `CostOperation.CHAT` cost (fire-and-forget, isolated), and returns structure + changes. **No persistence** (PR4 owns the transactional write); stays Prisma-free per the `lib/app/**` ESLint boundary. `processesPii: true` + `redactProvenance()` (document text → sentinel, counts-only ≤200-char preview); **no silent fallback** on final parse failure — surfaces a typed error carrying the Zod issue paths. Seeds `002-extractor-agent` (empty model/provider, budget cap, `internal`, KB-restricted) + `003-extraction-capability` (`internal`, bound to the agent), idempotent; registered via the `initAppCapabilities()` seam. 23-case dispatch integration test through the real dispatcher + real `runStructuredCompletion`, provider mocked; capability coverage 100% stmts/funcs, 93% branches. Gates run on-branch: `/pre-pr`, `/test-review` (no findings ≥80; 2 app-tier near-misses fixed), `/security-review` (clean — real upload/auth surface lands in PR4), `/code-review high` (3 findings: `functionDefinition` dedup + Zod-issue surfacing fixed; agent sampling-param threading deferred until extraction is exercised on real docs). Two items routed upstream rather than forked: a `runStructuredCompletion` dynamic-retry-message enhancement and a `registry.test.ts` handler-reset. Only PR4 (route + persistence) remains. Tracker: `planning/features/f1.1.md`.
 - **2026-06-01 — F1.1 ingestion PR1 + PR2 ([PR #13](https://github.com/human-centric-engineering/conquest/pull/13), open).** The data foundation + pure extraction core for questionnaire ingestion, behind `APP_QUESTIONNAIRES_ENABLED` (off). **PR1 (schema):** the ingestion graph on the F0.1 anchor — `AppQuestionnaireSection`, `AppQuestionSlot` (per-version unique `key`, `type`/`typeConfig`/`weight`, embedding deferred to F4.1), `AppQuestionnaireExtractionChange` (revertible audit trail), `AppQuestionnaireSourceDocument`, plus `goal`/`audience` on the version; no `User` FK (UG-1), all-cascade. Migration hand-trimmed of the schema-fold phantoms — and a Prisma-7 lesson banked: `migrate dev` is **not** transactional, so the phantom index DROPs partially committed mid-apply (recovered surgically, recipe in `questionnaire/schema.md`; drift-check 9/9). **PR2 (pure core):** `lib/app/questionnaire/ingestion/**` — the Zod extraction contract + `z.toJSONSchema` + `validateExtraction`, the provider-agnostic prompt builder, and the change-record normaliser (per-type coherence + admin-wins-per-field suppression); pure, DB-free, framework-free; 44 zero-mock unit tests, 100% coverage on changed files. PR3 (capability) + PR4 (route + persistence) remain. Gates run on-branch: `/pre-pr`, `/test-review` (3 fixed), `/security-review` (clean), `/code-review` (4 fixed). Tracker: `planning/features/f1.1.md`.
 
 - **2026-06-01 — Upstream sync: UG-1 + UG-2 resolved.** Second `upstream/main` merge, pulling down the two F0.1-surfaced fixes Conquest raised: **#283** (UG-2 — pin `AiConversation` inbound unique DB name with `map:`, killing the phantom `ALTER INDEX … RENAME` on every `migrate dev`) and **#284 → #286** (UG-1 — app-extensible drift-probe seam: `lib/db/drift-probes.ts` + the `lib/app/db-drift.ts` `registerAppDriftProbes()` hook, so apps register unmodelled DB objects without forking `scripts/db/check-drift.ts`). Clean merge — no conflicts; Conquest had not modified any of the touched files. The #283 baseline edit is comment-only (DDL unchanged), so no new migration; existing dev DBs needed a one-row `_prisma_migrations.checksum` realignment (done locally — see UG-2 resolution note). Both gaps retired in `planning/upstream-gaps.md`.
