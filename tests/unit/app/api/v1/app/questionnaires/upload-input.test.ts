@@ -1,0 +1,108 @@
+/**
+ * Unit tests for ingestion upload parsing/validation (F1.1 / PR4, T1.4.1).
+ *
+ * Pure form parsing — no HTTP, no mocks. Covers the extension allowlist, the
+ * empty-string-as-absent boundary rule for admin metadata, audience validation,
+ * dotted-key collection, and the extractTables flag.
+ */
+
+import { describe, it, expect } from 'vitest';
+
+import { ValidationError } from '@/lib/api/errors';
+import {
+  ALLOWED_EXTENSIONS,
+  getExtension,
+  hasAllowedExtension,
+  parseAdminMetadata,
+  parseExtractTablesFlag,
+} from '@/app/api/v1/app/questionnaires/_lib/upload-input';
+
+function form(fields: Record<string, string>): FormData {
+  const fd = new FormData();
+  for (const [k, v] of Object.entries(fields)) fd.set(k, v);
+  return fd;
+}
+
+describe('extension allowlist', () => {
+  it('accepts the four supported extensions, case-insensitively', () => {
+    for (const ext of ALLOWED_EXTENSIONS) {
+      expect(hasAllowedExtension(`doc${ext}`)).toBe(true);
+      expect(hasAllowedExtension(`DOC${ext.toUpperCase()}`)).toBe(true);
+    }
+  });
+
+  it('rejects unsupported extensions', () => {
+    expect(hasAllowedExtension('image.png')).toBe(false);
+    expect(hasAllowedExtension('book.epub')).toBe(false);
+    expect(hasAllowedExtension('noextension')).toBe(false);
+  });
+
+  it('reads the lowercased extension', () => {
+    expect(getExtension('Report.PDF')).toBe('.pdf');
+    expect(getExtension('plain')).toBe('');
+  });
+});
+
+describe('parseAdminMetadata — goal', () => {
+  it('captures a non-empty goal', () => {
+    expect(parseAdminMetadata(form({ goal: 'Understand churn' })).goal).toBe('Understand churn');
+  });
+
+  it('treats an empty/whitespace goal as absent (not a suppression signal)', () => {
+    expect(parseAdminMetadata(form({ goal: '   ' })).goal).toBeUndefined();
+    expect(parseAdminMetadata(form({})).goal).toBeUndefined();
+  });
+});
+
+describe('parseAdminMetadata — audience', () => {
+  it('collects dotted audience.* fields into one object, coercing duration', () => {
+    const meta = parseAdminMetadata(
+      form({
+        'audience.role': 'new hire',
+        'audience.expertiseLevel': 'novice',
+        'audience.estimatedDurationMinutes': '15',
+      })
+    );
+    expect(meta.audience).toEqual({
+      role: 'new hire',
+      expertiseLevel: 'novice',
+      estimatedDurationMinutes: 15,
+    });
+  });
+
+  it('omits empty audience fields and yields no audience object when all are empty', () => {
+    const meta = parseAdminMetadata(form({ 'audience.role': '  ', 'audience.notes': '' }));
+    expect(meta.audience).toBeUndefined();
+  });
+
+  it('throws ValidationError with a field path for an invalid enum value', () => {
+    expect(() => parseAdminMetadata(form({ 'audience.expertiseLevel': 'wizard' }))).toThrow(
+      ValidationError
+    );
+  });
+
+  it('throws ValidationError for an unknown audience key (.strict)', () => {
+    expect(() => parseAdminMetadata(form({ 'audience.favouriteColour': 'blue' }))).toThrow(
+      ValidationError
+    );
+  });
+
+  it('throws ValidationError for a non-positive duration', () => {
+    expect(() => parseAdminMetadata(form({ 'audience.estimatedDurationMinutes': '0' }))).toThrow(
+      ValidationError
+    );
+  });
+});
+
+describe('parseExtractTablesFlag', () => {
+  it('is true for truthy string values', () => {
+    for (const v of ['true', '1', 'on', 'yes', 'YES']) {
+      expect(parseExtractTablesFlag(form({ extractTables: v }))).toBe(true);
+    }
+  });
+
+  it('is false when absent or non-truthy', () => {
+    expect(parseExtractTablesFlag(form({}))).toBe(false);
+    expect(parseExtractTablesFlag(form({ extractTables: 'false' }))).toBe(false);
+  });
+});

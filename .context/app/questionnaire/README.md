@@ -6,11 +6,13 @@ plan and feature trackers, see [`../planning/`](../planning/); for the platform
 
 ## In this namespace
 
-| Doc                                  | Read it for                                                                           |
-| ------------------------------------ | ------------------------------------------------------------------------------------- |
-| [`overview.md`](./overview.md)       | The concept, the app/platform boundary, and which Sunrise primitives the app consumes |
-| [`schema.md`](./schema.md)           | The app-owned Prisma schema and its conventions (anchor models land in T0.1.3)        |
-| [`development.md`](./development.md) | Day-to-day: where code lives, the `lib/app/**` boundary, flag gating, commands, tests |
+| Doc                                                | Read it for                                                                           |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| [`overview.md`](./overview.md)                     | The concept, the app/platform boundary, and which Sunrise primitives the app consumes |
+| [`schema.md`](./schema.md)                         | The app-owned Prisma schema and its conventions (anchor models land in T0.1.3)        |
+| [`development.md`](./development.md)               | Day-to-day: where code lives, the `lib/app/**` boundary, flag gating, commands, tests |
+| [`ingestion.md`](./ingestion.md)                   | The `POST /api/v1/app/questionnaires` pipeline — parse → extract → persist (F1.1)     |
+| [`extraction-changes.md`](./extraction-changes.md) | The revertible editorial change-record model, vocabulary, and write path (F1.1)       |
 
 ## Where the code lives
 

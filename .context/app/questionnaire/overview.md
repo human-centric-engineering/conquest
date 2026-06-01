@@ -44,18 +44,31 @@ detail.
 The app builds **on** Sunrise's public surface rather than reimplementing it. Key
 primitives (full list in the plan's "Architecture summary"):
 
-| Need                          | Sunrise primitive                                                        |
-| ----------------------------- | ------------------------------------------------------------------------ |
-| Agents / versioning           | `prisma.aiAgent.create()` + `AiAgentVersion`                             |
-| Workflows                     | `prisma.aiWorkflow.create()`                                             |
-| Capabilities (agent tools)    | `capabilityDispatcher.register()` via the `lib/app/capabilities.ts` hook |
-| Document parsing              | `previewDocument()` / `confirmPreview()` / `parseDocument()`             |
-| Embeddings                    | `embedText()` / `embedBatch()`                                           |
-| Streaming chat                | `streamChat()` + `sseResponse()` + `withAuth` / `withAdminAuth`          |
-| Evaluation (agents-as-judges) | `AiEvaluationRun`, `AiEvaluationCaseResult`, grader registry             |
-| Audit                         | `logAdminAction()`                                                       |
-| Cost                          | Per-agent budgets + `AiCostLog`                                          |
-| Feature flag                  | `isFeatureEnabled('APP_QUESTIONNAIRES_ENABLED')`                         |
+Primitives **already consumed** (F0.1 + F1.1):
+
+| Need                       | Sunrise primitive                                                            |
+| -------------------------- | ---------------------------------------------------------------------------- |
+| Agents / versioning        | `prisma.aiAgent.upsert()` (seeded extractor agent) + `AiAgentVersion`        |
+| Capabilities (agent tools) | `capabilityDispatcher` via the `lib/app/capabilities.ts` hook                |
+| Structured LLM call        | `runStructuredCompletion()` + `resolveAgentProviderAndModel` + `getProvider` |
+| Document parsing           | `parseDocument()` — called **directly** (see note)                           |
+| Audit                      | `logAdminAction()`                                                           |
+| Cost                       | Per-agent budgets + `logCost()` / `AiCostLog`                                |
+| Feature flag               | `isFeatureEnabled('APP_QUESTIONNAIRES_ENABLED')`                             |
+
+> **Parsing — `parseDocument()` directly, not `previewDocument()`/`confirmPreview()`.**
+> Those preview helpers chunk + embed the document into the RAG knowledge base;
+> ingestion (F1.1) only needs bytes → text and parses directly. See
+> [`ingestion.md`](./ingestion.md).
+
+Primitives **planned but not yet consumed** (later phases):
+
+| Need                          | Sunrise primitive                                            | Phase |
+| ----------------------------- | ------------------------------------------------------------ | ----- |
+| Workflows                     | `prisma.aiWorkflow.create()`                                 | TBD   |
+| Embeddings                    | `embedText()` / `embedBatch()` (deferred — no consumer yet)  | F4.1  |
+| Streaming chat                | `streamChat()` + `sseResponse()` + `withAuth`                | P6    |
+| Evaluation (agents-as-judges) | `AiEvaluationRun`, `AiEvaluationCaseResult`, grader registry | P5    |
 
 ## Non-functional principles
 
