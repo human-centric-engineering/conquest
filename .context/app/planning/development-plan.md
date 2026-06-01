@@ -155,7 +155,7 @@ The build moves from scaffolding → ingestion → admin manage → demo brandin
 
 ### F0.1 — Foundation scaffolding
 
-_Status:_ shipped ([PR #10](https://github.com/human-centric-engineering/conquest/pull/10)) · _Owner:_ Simon Holmes · _Deps:_ none (first feature)
+_Status:_ shipped ([PR #10](https://github.com/human-centric-engineering/conquest/pull/10)) · _Size:_ ~1 PR · _Owner:_ Simon Holmes · _Deps:_ none (first feature)
 
 The platform's home in the fork. Module skeleton, app-owned Prisma schema, seed namespace, capability hook wired, env-var surface, feature flag, doc namespace, and the test/healthcheck scaffolding the rest of the build hangs off.
 
@@ -182,7 +182,7 @@ _Indicative tasks:_
 
 ### F1.1 — Document → questionnaire ingestion
 
-_Status:_ not started · _Owner:_ TBD · _Deps:_ F0.1
+_Status:_ not started · _Size:_ multi-PR · _Owner:_ TBD · _Deps:_ F0.1
 
 End-to-end pipeline from uploaded document to populated `AppQuestionnaire(Version|Section|Slot)` graph with confidence per slot, plus the change-record audit trail of every extraction decision. Audit + cost integration are cross-cutting tasks within this feature, not a separate one.
 
@@ -206,7 +206,7 @@ _Indicative tasks:_
 
 ### F2.1 — Questionnaire authoring
 
-_Status:_ not started · _Owner:_ TBD · _Deps:_ F1.1
+_Status:_ not started · _Size:_ multi-PR · _Owner:_ TBD · _Deps:_ F1.1
 
 The main admin surface: nav entry, list view, detail/edit view, and the version-fork-on-launched lifecycle. The first place an admin "lives" in the platform.
 
@@ -220,7 +220,7 @@ _Indicative tasks:_
 
 ### F2.2 — Tagging
 
-_Status:_ not started · _Owner:_ TBD · _Deps:_ F2.1
+_Status:_ not started · _Size:_ ~1 PR · _Owner:_ TBD · _Deps:_ F2.1
 
 Per-version tag vocabulary plus M:N assignment to questions. Used by P8 analytics filtering and by the adaptive selection strategy in F4.1.
 
@@ -232,7 +232,7 @@ _Indicative tasks:_
 
 ### F2.3 — Extraction-change review
 
-_Status:_ not started · _Owner:_ TBD · _Deps:_ F1.1, F2.1
+_Status:_ not started · _Size:_ ~1 PR · _Owner:_ TBD · _Deps:_ F1.1, F2.1
 
 Lists every `AppQuestionnaireExtractionChange` with source quote, before/after, rationale. Admin can revert any change; revert restores `beforeJson`. This is the consumer of P1's change-record log.
 
@@ -244,7 +244,7 @@ _Indicative tasks:_
 
 ### F2.4 — Re-ingest
 
-_Status:_ not started · _Owner:_ TBD · _Deps:_ F1.1, F2.1
+_Status:_ not started · _Size:_ ~1 PR · _Owner:_ TBD · _Deps:_ F1.1, F2.1
 
 Admin uploads a replacement source doc against an existing draft version; SHA-256 dedup short-circuits an identical re-upload; non-identical re-upload produces a fresh extraction + change log.
 
@@ -264,7 +264,7 @@ _Indicative tasks:_
 
 ### F2.5.1 — Tenant scaffolding
 
-_Status:_ not started · _Owner:_ TBD · _Deps:_ F0.1
+_Status:_ not started · _Size:_ ~1–2 PRs · _Owner:_ TBD · _Deps:_ F0.1
 
 A **demo-client partition** — tenant model, scoping rules for questionnaires + sessions, tenant-aware routing — so each prospect sees their own brand and content. Deliberately lightweight and app-owned: application-layer scoping on single-tenant Sunrise, **not** a security isolation boundary. Demo clients aren't adversarial, so hard isolation is out of scope here.
 
@@ -278,7 +278,7 @@ _Indicative tasks:_
 
 ### F2.5.2 — Brand theming
 
-_Status:_ not started · _Owner:_ TBD · _Deps:_ F2.5.1
+_Status:_ not started · _Size:_ ~1 PR · _Owner:_ TBD · _Deps:_ F2.5.1
 
 Per-tenant theme record + admin UI to upload/edit + render hooks consumed by the P7 UI.
 
@@ -290,7 +290,7 @@ _Indicative tasks:_
 
 ### F2.5.3 — Demo content seed
 
-_Status:_ not started · _Owner:_ TBD · _Deps:_ F2.5.1, F2.5.2
+_Status:_ not started · _Size:_ ~1 PR · _Owner:_ TBD · _Deps:_ F2.5.1, F2.5.2
 
 The `LOAD_DEMO_CONTENT=1` mechanism that populates a sample tenant + branded questionnaire on a fresh DB. Idempotent. Strictly demo-only — a fork strips this entirely.
 
@@ -309,7 +309,7 @@ _Indicative tasks:_
 
 ### F3.1 — Questionnaire configuration
 
-_Status:_ not started · _Owner:_ TBD · _Deps:_ F2.1
+_Status:_ not started · _Size:_ ~1–2 PRs · _Owner:_ TBD · _Deps:_ F2.1
 
 The full `AppQuestionnaireConfig` editor — every setting that controls how a session runs — plus the launch gate that says "config is complete enough to invite users."
 
@@ -322,7 +322,7 @@ _Indicative tasks:_
 
 ### F3.2 — Invitation flow
 
-_Status:_ not started · _Owner:_ TBD · _Deps:_ F3.1
+_Status:_ not started · _Size:_ ~1–2 PRs · _Owner:_ TBD · _Deps:_ F3.1
 
 End-to-end invitation lifecycle: tokenised invite, email send, registration, status tracking through to completion.
 
@@ -337,7 +337,7 @@ _Indicative tasks:_
 
 ### F3.3 — Pre-launch cost estimation
 
-_Status:_ not started · _Owner:_ TBD · _Deps:_ F3.1
+_Status:_ not started · _Size:_ ~1 PR · _Owner:_ TBD · _Deps:_ F3.1
 
 Pre-launch: estimated tokens × cost per provider × question count + extraction overhead, surfaced to the admin before sending invites.
 
@@ -357,7 +357,7 @@ _Indicative tasks:_
 
 ### F4.1 — Selection strategies
 
-_Status:_ not started · _Owner:_ TBD · _Deps:_ F0.1, F2.2 (tags), F3.1 (config)
+_Status:_ not started · _Size:_ multi-PR · _Owner:_ TBD · _Deps:_ F0.1, F2.2 (tags), F3.1 (config)
 
 Pluggable strategies for picking the next question. `Sequential`, `Random`, `Weighted`, `Adaptive`. Each a unit-tested function. Adaptive is the most complex — uses prior answers + tags + remaining coverage.
 
@@ -370,7 +370,7 @@ _Indicative tasks:_
 
 ### F4.2 — Answer extraction into slots
 
-_Status:_ not started · _Owner:_ TBD · _Deps:_ F1.1 (slots), F0.1
+_Status:_ not started · _Size:_ multi-PR · _Owner:_ TBD · _Deps:_ F1.1 (slots), F0.1
 
 Capability that, given a user message + active question + session context, produces `(value, confidence, provenance, rationale, label)` for one or more slots. Side effects on other questions are allowed and recorded.
 
@@ -383,7 +383,7 @@ _Indicative tasks:_
 
 ### F4.3 — Contradiction detection
 
-_Status:_ not started · _Owner:_ TBD · _Deps:_ F4.2
+_Status:_ not started · _Size:_ ~1–2 PRs · _Owner:_ TBD · _Deps:_ F4.2
 
 Modes: `off`, `every_turn`, `every_n_turns`, `sweep_only`. Sweep runs at session completion. Surfaces contradictions to the agent for confirmation rather than auto-overwriting.
 
@@ -395,7 +395,7 @@ _Indicative tasks:_
 
 ### F4.4 — Answer refinement
 
-_Status:_ not started · _Owner:_ TBD · _Deps:_ F4.2
+_Status:_ not started · _Size:_ ~1 PR · _Owner:_ TBD · _Deps:_ F4.2
 
 Allows the agent to update a previous slot's value based on new context, with `refinementHistory` preserved. Used both by contradiction resolution and by general "user clarified earlier" flows.
 
@@ -407,7 +407,7 @@ _Indicative tasks:_
 
 ### F4.5 — Completion logic
 
-_Status:_ not started · _Owner:_ TBD · _Deps:_ F4.1, F4.2
+_Status:_ not started · _Size:_ ~1 PR · _Owner:_ TBD · _Deps:_ F4.1, F4.2
 
 Decides when the agent offers submission (based on completion config) and accepts/holds when the user confirms. Drives the contradiction sweep in `sweep_only` mode at the moment of offer.
 
@@ -419,7 +419,7 @@ _Indicative tasks:_
 
 ### F4.6 — Session state machine
 
-_Status:_ not started · _Owner:_ TBD · _Deps:_ F0.1
+_Status:_ not started · _Size:_ ~1–2 PRs · _Owner:_ TBD · _Deps:_ F0.1
 
 Lifecycle: `in_progress | paused | completed | abandoned`. Every transition writes an `AppQuestionnaireSessionEvent` row. Used as the audit trail of session-level state.
 
@@ -440,7 +440,7 @@ _Indicative tasks:_
 
 ### F5.1 — Judge agents
 
-_Status:_ not started · _Owner:_ TBD · _Deps:_ F2.1 (so there's a structure to judge)
+_Status:_ not started · _Size:_ ~1 PR · _Owner:_ TBD · _Deps:_ F2.1 (so there's a structure to judge)
 
 Seed and tune the seven judges. Each is an `AiAgent.kind = 'judge'` with its own system prompt + grader binding consumed from Sunrise.
 
@@ -452,7 +452,7 @@ _Indicative tasks:_
 
 ### F5.2 — Evaluation run
 
-_Status:_ not started · _Owner:_ TBD · _Deps:_ F5.1
+_Status:_ not started · _Size:_ ~1 PR · _Owner:_ TBD · _Deps:_ F5.1
 
 The trigger that fires the seven judges over a version's questions, persists the link to the resulting Sunrise `AiEvaluationRun`, and surfaces run history to the admin.
 
@@ -465,7 +465,7 @@ _Indicative tasks:_
 
 ### F5.3 — Suggestion review
 
-_Status:_ not started · _Owner:_ TBD · _Deps:_ F5.2
+_Status:_ not started · _Size:_ ~1–2 PRs · _Owner:_ TBD · _Deps:_ F5.2
 
 The admin's surface for working through judge suggestions: review queue, accept/decline/edit, apply to the draft version, derive staleness at read time when a suggestion is rendered obsolete by intervening edits.
 
@@ -487,7 +487,7 @@ _Indicative tasks:_
 
 ### F6.1 — Per-turn orchestrator + streaming
 
-_Status:_ not started · _Owner:_ TBD · _Deps:_ F4.1–F4.6
+_Status:_ not started · _Size:_ multi-PR · _Owner:_ TBD · _Deps:_ F4.1–F4.6
 
 The streaming surface around P4. A pure function over session state + new user message produces a list of side effects + an agent response, wrapped in an SSE route. Includes attachment input (consumed from Sunrise's existing schema/validation).
 
@@ -500,7 +500,7 @@ _Indicative tasks:_
 
 ### F6.2 — Voice input
 
-_Status:_ not started · _Owner:_ TBD · _Deps:_ F6.1
+_Status:_ not started · _Size:_ ~1 PR · _Owner:_ TBD · _Deps:_ F6.1
 
 Voice transcription consumed from Sunrise primitives. The `/messages` route accepts multipart audio; transcription uses `getAudioProvider()` + `provider.transcribe()` with Sunrise's MIME/size validation and cost-log shape. UI integration of `useVoiceRecording` + `<MicButton>` happens in P7.
 
@@ -513,7 +513,7 @@ _Indicative tasks:_
 
 ### F6.3 — Cost cap enforcement at turn boundary
 
-_Status:_ not started · _Owner:_ TBD · _Deps:_ F4.6, F6.1
+_Status:_ not started · _Size:_ ~1 PR · _Owner:_ TBD · _Deps:_ F4.6, F6.1
 
 The per-session cost cap that fires the wrap-up turn at 90% (soft) and halts with 402 + auto-pause at 100% (hard). Both write `AppQuestionnaireSessionEvent` rows.
 
@@ -534,7 +534,7 @@ _Indicative tasks:_
 
 ### F7.1 — Chat surface
 
-_Status:_ not started · _Owner:_ TBD · _Deps:_ F6.1, F6.2, F2.5.2 (theming)
+_Status:_ not started · _Size:_ multi-PR · _Owner:_ TBD · _Deps:_ F6.1, F6.2, F2.5.2 (theming)
 
 Live SSE rendering with voice + attachment input wired. Consumes Sunrise's `useVoiceRecording` hook and `<MicButton>` verbatim. Branding hookup from P2.5 happens here. Includes the demo-flow E2E test (Playwright as an app dev-dep).
 
@@ -549,7 +549,7 @@ _Indicative tasks:_
 
 ### F7.2 — Answer-slot panel
 
-_Status:_ not started · _Owner:_ TBD · _Deps:_ F6.1
+_Status:_ not started · _Size:_ ~1–2 PRs · _Owner:_ TBD · _Deps:_ F6.1
 
 Live-updating list of slots with confidence indicators + click-to-jump-to-question. Marked `// DEMO-ONLY:` where it bleeds into questionnaire-specific assumptions so a non-questionnaire fork strips gracefully.
 
@@ -562,7 +562,7 @@ _Indicative tasks:_
 
 ### F7.3 — Session lifecycle UX
 
-_Status:_ not started · _Owner:_ TBD · _Deps:_ F4.6, F6.3
+_Status:_ not started · _Size:_ ~1–2 PRs · _Owner:_ TBD · _Deps:_ F4.6, F6.3
 
 Visible session state: pause/resume affordance, completion-offer prompt, submission flow, cost-cap-reached state, anonymous-mode indicator.
 
@@ -576,7 +576,7 @@ _Indicative tasks:_
 
 ### F7.4 — PDF export
 
-_Status:_ not started · _Owner:_ TBD · _Deps:_ F8.1 (analytics data shape) or independent
+_Status:_ not started · _Size:_ ~1 PR · _Owner:_ TBD · _Deps:_ F8.1 (analytics data shape) or independent
 
 `@react-pdf/renderer` as an app dependency (vertical — not promoted to Sunrise). Admin-facing export of a session's answers first; user-facing PDF download is a nice-to-have.
 
@@ -597,7 +597,7 @@ _Indicative tasks:_
 
 ### F8.1 — Admin analytics dashboards
 
-_Status:_ not started · _Owner:_ TBD · _Deps:_ F4.2 (slots), F4.6 (session events), F3.2 (invitations)
+_Status:_ not started · _Size:_ ~1–2 PRs · _Owner:_ TBD · _Deps:_ F4.2 (slots), F4.6 (session events), F3.2 (invitations)
 
 The admin's read-side view of completed-session data: per-question distributions, completion funnel, cost actuals. Tag-aware filtering throughout.
 
@@ -610,7 +610,7 @@ _Indicative tasks:_
 
 ### F8.2 — Result exports
 
-_Status:_ not started · _Owner:_ TBD · _Deps:_ F8.1
+_Status:_ not started · _Size:_ ~1 PR · _Owner:_ TBD · _Deps:_ F8.1
 
 CSV + JSON export of session results. CSV is one row per session × question; JSON is the full session graph including provenance + turns. Both respect anonymous mode.
 
@@ -622,7 +622,7 @@ _Indicative tasks:_
 
 ### F8.3 — Anonymous-mode hardening
 
-_Status:_ not started · _Owner:_ TBD · _Deps:_ F8.1, F8.2 + any surface that touches session data
+_Status:_ not started · _Size:_ ~1–2 PRs · _Owner:_ TBD · _Deps:_ F8.1, F8.2 + any surface that touches session data
 
 Verification pass across every surface that touches session data, ensuring no PII leak when `anonymousMode = true`. Flag-gating tightened where needed.
 
@@ -643,7 +643,7 @@ _Indicative tasks:_
 
 ### F9.1 — Production hardening
 
-_Status:_ not started · _Owner:_ TBD · _Deps:_ everything (final pass)
+_Status:_ not started · _Size:_ ~1–2 PRs · _Owner:_ TBD · _Deps:_ everything (final pass)
 
 The pre-ship technical hardening: concurrent-session sanity, master + sub-flag inventory, verification that every flag and sub-flag controls the right surfaces independently.
 
@@ -656,7 +656,7 @@ _Indicative tasks:_
 
 ### F9.2 — Operational runbook
 
-_Status:_ not started · _Owner:_ TBD · _Deps:_ F9.1
+_Status:_ not started · _Size:_ ~1 PR · _Owner:_ TBD · _Deps:_ F9.1
 
 `.context/app/questionnaire/runbook.md`: how to spin up a new demo client end-to-end. Road-tested by John or Simon before the phase ships, with friction corrected into the doc.
 
@@ -668,7 +668,7 @@ _Indicative tasks:_
 
 ### F9.3 — Forking documentation
 
-_Status:_ not started · _Owner:_ TBD · _Deps:_ F9.1, F9.2
+_Status:_ not started · _Size:_ ~1 PR · _Owner:_ TBD · _Deps:_ F9.1, F9.2
 
 The fork-readiness deliverables: `forking.md` for an inheriting client-engagement team, the external-fork upgrade guide for OSS forkers, and the consolidated Sunrise-contributions record.
 
@@ -705,6 +705,18 @@ Promoted-task format under a feature in flight:
 | T4.1.1 | Sequential strategy + tests | lib/app/questionnaire/selection/sequential.ts | — | available | — |
 | T4.1.2 | Adaptive strategy | lib/app/questionnaire/selection/adaptive.ts | T4.1.1 | backlog | — |
 ```
+
+### Two feature shapes (PR sizing)
+
+The base model above — _a Feature is a coherent multi-PR capability; a Task is a PR-sized work unit_ — fits the **keystone** features but over-applies to the **contained** ones. F0.1 made this concrete: framed as a multi-PR feature, in practice it was **one PR** and each task was **commit-sized**. Each feature heading carries a `_Size:_` hint to set the right default at promotion:
+
+- **`~1 PR`** — contained, additive, lower-risk (scaffolding, seeds, CRUD, config panels, docs, "consume a Sunrise primitive"). Promote the tasks as **commits in one PR** and batch the review gates once. This is the F0.1 shape, and the most common.
+- **`multi-PR`** — keystone features spanning many files/concerns with real risk (ingestion, the per-turn orchestrator, selection strategies, authoring, the chat surface). Here task ≈ PR, as the base model intends; cluster the small tasks into PRs and split out the genuinely large one (e.g. F4.1's `Adaptive`).
+- **`~1–2 PRs`** — in between; firms up at promotion.
+
+The hint is a default, not a commitment — packaging is decided per-feature at promotion. The lever is **commits ≠ PRs**: don't reflexively make a keystone one PR (it becomes unreviewable), and don't split a contained feature into many tiny PRs (each re-runs the gates).
+
+> **The hints aren't platform-aware audits.** They estimate net-new _app_ code but were sized from the task list, not a per-feature check of what Sunrise already provides — so wherever the platform pre-bakes the machinery (e.g. invitations: token generation, email, and registration all ship in Sunrise — `.context/admin/invitations.md`), the real size is smaller. The definitive sizing happens at **promotion**, when the feature is designed against Sunrise's actual capabilities the way F0.1 was — and some hints will shrink once a planned "build X" reduces to configuring a workflow or consuming a primitive.
 
 ### Asking Claude to plan a feature or task
 
