@@ -39,7 +39,7 @@ _Status:_ open · _Opened:_ YYYY-MM-DD · _Surfaced by:_ <feature/task>
 
 ### UG-1 — No app-extensible registry for Prisma-unmodelled DB objects
 
-_Status:_ open · _Opened:_ 2026-06-01 · _Surfaced by:_ F0.1 (schema foundations)
+_Status:_ raised-upstream ([sunrise#284](https://github.com/human-centric-engineering/sunrise/issues/284)) · _Opened:_ 2026-06-01 · _Surfaced by:_ F0.1 (schema foundations)
 
 **Gap.** Sunrise's recommended way to relate app data to a user
 ([`CUSTOMIZATION.md` §5](../../../CUSTOMIZATION.md)) is a **plain-`String` FK with
@@ -91,3 +91,37 @@ probe, and **carry it as a tracked patch** until this upstream seam exists.
 [`../../database/prisma-unmodelled-objects.md`](../../database/prisma-unmodelled-objects.md)
 · [`../../privacy/data-erasure.md`](../../privacy/data-erasure.md) ·
 [`features/f0.1.md`](./features/f0.1.md) (Correction #2).
+
+---
+
+### UG-2 — Prisma 7 ignores `@@unique(name:)` → phantom constraint RENAME (B1)
+
+_Status:_ raised-upstream ([sunrise#283](https://github.com/human-centric-engineering/sunrise/issues/283)) · _Opened:_ 2026-06-01 · _Surfaced by:_ F0.1 (T0.1.3 init migration)
+
+**Gap.** Prisma 7's `migrate diff` ignores `@@unique([...], name: "...")` on
+`AiConversation`, so every `migrate dev` — even against an in-sync DB — emits a
+phantom `ALTER INDEX "ai_conversation_inbound_key" RENAME TO …` that must be
+hand-stripped from the generated app migration. The DB is correct; the diff is
+wrong (the baseline already documents this as its "B1" note). It sits in the same
+family as the inherent schema-fold `DROP`s of platform unmodelled objects
+(pgvector indexes, the `searchVector` column) that `migrate dev` also emits —
+those aren't a bug (Prisma can't model them; caught by `db:drift-check`), whereas
+B1 is a fixable schema-hygiene issue.
+
+**Why upstream.** Hits any fork that runs `migrate dev` to add its own models, and
+`scripts/db/check-drift.ts` does not probe the constraint name — so a careless
+accept renames the prod constraint that `ON CONFLICT ON CONSTRAINT` relies on.
+
+**Proposed fix.** Pin the DB constraint name with `map:`
+(`@@unique([...], name: "ai_conversation_inbound_key", map: "ai_conversation_inbound_key")`)
+so Prisma's derived name matches the DB and the phantom rename disappears.
+
+**Interim mitigation.** Generate with `--create-only`, **strip all phantom
+DROP/ALTER/RENAME** of platform objects, apply with `migrate deploy`, then
+`db:drift-check`. The init migration's schema-shape test guards against re-leak.
+Procedure: [`../questionnaire/schema.md`](../questionnaire/schema.md).
+
+**References.** `prisma/migrations/00000000000000_baseline/migration.sql` (B1
+comment) · `prisma/schema/orchestration-conversations.prisma` ·
+[`../questionnaire/schema.md`](../questionnaire/schema.md) ·
+[`features/f0.1.md`](./features/f0.1.md) (Correction #1 / T0.1.3).
