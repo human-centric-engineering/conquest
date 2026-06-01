@@ -4,7 +4,7 @@ Instructions for Claude Code when working in this repository.
 
 ## Project Overview
 
-**ConQuest** (CONversational QUESTionnaire) is a conversational questionnaire platform — an admin uploads a questionnaire document, an agent extracts its structure, and end users complete it through a streaming conversation rather than form-filling. The phased build plan is the app's source of truth: [`.context/application/development-plan.md`](./.context/application/development-plan.md).
+**ConQuest** (CONversational QUESTionnaire) is a conversational questionnaire platform — an admin uploads a questionnaire document, an agent extracts its structure, and end users complete it through a streaming conversation rather than form-filling. The phased build plan is the app's source of truth: [`.context/app/planning/development-plan.md`](./.context/app/planning/development-plan.md).
 
 **This repo is an application fork of Sunrise**, a production-ready Next.js 16 platform (App Router, PostgreSQL/Prisma, better-auth, Docker, AI orchestration). Two tiers live here:
 
