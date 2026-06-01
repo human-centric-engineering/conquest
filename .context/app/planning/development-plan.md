@@ -732,7 +732,7 @@ Append-only. Newest at the top. Each entry: date, decision, context, link.
 
 Append-only. Newest at the top.
 
-_Nothing shipped yet — project in `planning`. First entry will be the fork itself + P0._
+- **2026-06-01 — F0.1 Foundation scaffolding (in review · branch `app/f0.1-foundation-scaffolding`).** App docs consolidated under `.context/app/` (`planning/` + `questionnaire/` namespaces). Questionnaire module skeleton + DB-backed `APP_QUESTIONNAIRES_ENABLED` flag (seeded off) with the `ensureQuestionnairesEnabled()` route-gate template; app-owned Prisma schema (`AppQuestionnaire` + `AppQuestionnaireVersion`, app-internal cascade relation, User FK deferred — see `planning/upstream-gaps.md` UG-1) + init migration hand-trimmed of the platform schema-fold DROPs (drift-check green); recursive app seed for the flag; gated `GET /api/v1/app/healthcheck` (404 off / 200 on). Unit + integration tests; `validate` + full `test` green. Six PR-sized tasks (one commit each) batched into one PR — tracker: `planning/features/f0.1.md`.
 
 ---
 
