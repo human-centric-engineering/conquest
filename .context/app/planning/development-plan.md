@@ -1,6 +1,6 @@
 ---
 name: Conversational Questionnaire
-status: planning
+status: building
 host_platform: sunrise
 sunrise_version: 0.0.1
 opened: 2026-05-30
@@ -21,14 +21,14 @@ supersedes: Conversational Questionnaire Phases.md
 
 ## Project
 
-| Field         | Value                                                                         |
-| ------------- | ----------------------------------------------------------------------------- |
-| Name          | Conversational Questionnaire                                                  |
-| Repo          | _(to be created — forked from `human-centric-engineering/sunrise` at v0.0.1)_ |
-| Host platform | Sunrise v0.0.1                                                                |
-| Lead          | Simon Holmes                                                                  |
-| Status        | `planning` (awaiting fork + P0)                                               |
-| Opened        | 2026-05-30                                                                    |
+| Field         | Value                                                                                            |
+| ------------- | ------------------------------------------------------------------------------------------------ |
+| Name          | Conversational Questionnaire                                                                     |
+| Repo          | `human-centric-engineering/conquest` (forked from `human-centric-engineering/sunrise` at v0.0.1) |
+| Host platform | Sunrise v0.0.1                                                                                   |
+| Lead          | Simon Holmes                                                                                     |
+| Status        | `building` — P0 (F0.1) complete, in review (PR #10)                                              |
+| Opened        | 2026-05-30                                                                                       |
 
 ---
 
@@ -133,19 +133,19 @@ When a need arises that Sunrise's public surface doesn't cover, the rule is _not
 
 The build moves from scaffolding → ingestion → admin manage → demo branding → configuration → conversational core → evaluation → streaming → user UI → analytics → hardening. Phases are sequenced so each one's surface area is exercisable end-to-end before the next adds new abstraction.
 
-| Phase    | Title                                           | Status      | Notes                                                                                                          |
-| -------- | ----------------------------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------- |
-| **P0**   | Foundations                                     | not started | Substantially lighter than the original plan; Sunrise v0.0.1 provides the seams that used to need workarounds. |
-| **P1**   | Questionnaire ingestion                         | not started | Admin uploads a doc; LLM extracts structure; changes recorded for review. API-only.                            |
-| **P2**   | Admin CRUD over questionnaires                  | not started | Admin UI: list, edit, version, tag, review extraction changes.                                                 |
-| **P2.5** | Demo clients and theming                        | not started | Tenancy + branding for the sales-demo audience. `// DEMO-ONLY:` work mostly lives here.                        |
-| **P3**   | Configuration, invitations, and cost estimation | not started | Per-version config; invitation flow; pre-launch cost estimate.                                                 |
-| **P4**   | Conversational engine (non-streaming)           | not started | Selection · extraction · contradiction · completion logic, exercised without the streaming surface.            |
-| **P5**   | Design-time evaluation (agents-as-judges)       | not started | Judges score a questionnaire against goal/audience; suggestion review queue.                                   |
-| **P6**   | Conversational session (streaming)              | not started | Per-turn orchestrator over streaming chat; voice + attachments.                                                |
-| **P7**   | User-facing conversational UI                   | not started | Split-screen chat + answer-slot panel; polish; PDF export.                                                     |
-| **P8**   | Admin analytics, exports, anonymous mode        | not started | Dashboards, CSV/JSON export, anonymous-mode handling.                                                          |
-| **P9**   | Hardening + forking docs                        | not started | Runbook, flag inventory, `forking.md`, concurrent-session sanity.                                              |
+| Phase    | Title                                           | Status      | Notes                                                                                                                                   |
+| -------- | ----------------------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| **P0**   | Foundations                                     | in review   | F0.1 complete (PR #10) — substantially lighter than the original plan; Sunrise v0.0.1 provides the seams that used to need workarounds. |
+| **P1**   | Questionnaire ingestion                         | not started | Admin uploads a doc; LLM extracts structure; changes recorded for review. API-only.                                                     |
+| **P2**   | Admin CRUD over questionnaires                  | not started | Admin UI: list, edit, version, tag, review extraction changes.                                                                          |
+| **P2.5** | Demo clients and theming                        | not started | Tenancy + branding for the sales-demo audience. `// DEMO-ONLY:` work mostly lives here.                                                 |
+| **P3**   | Configuration, invitations, and cost estimation | not started | Per-version config; invitation flow; pre-launch cost estimate.                                                                          |
+| **P4**   | Conversational engine (non-streaming)           | not started | Selection · extraction · contradiction · completion logic, exercised without the streaming surface.                                     |
+| **P5**   | Design-time evaluation (agents-as-judges)       | not started | Judges score a questionnaire against goal/audience; suggestion review queue.                                                            |
+| **P6**   | Conversational session (streaming)              | not started | Per-turn orchestrator over streaming chat; voice + attachments.                                                                         |
+| **P7**   | User-facing conversational UI                   | not started | Split-screen chat + answer-slot panel; polish; PDF export.                                                                              |
+| **P8**   | Admin analytics, exports, anonymous mode        | not started | Dashboards, CSV/JSON export, anonymous-mode handling.                                                                                   |
+| **P9**   | Hardening + forking docs                        | not started | Runbook, flag inventory, `forking.md`, concurrent-session sanity.                                                                       |
 
 ---
 
@@ -155,7 +155,7 @@ The build moves from scaffolding → ingestion → admin manage → demo brandin
 
 ### F0.1 — Foundation scaffolding
 
-_Status:_ not started · _Owner:_ TBD · _Deps:_ none (first feature)
+_Status:_ in flight — complete, in review ([PR #10](https://github.com/human-centric-engineering/conquest/pull/10)) · _Owner:_ Simon Holmes · _Deps:_ none (first feature)
 
 The platform's home in the fork. Module skeleton, app-owned Prisma schema, seed namespace, capability hook wired, env-var surface, feature flag, doc namespace, and the test/healthcheck scaffolding the rest of the build hangs off.
 
@@ -169,7 +169,7 @@ _Indicative tasks:_
 - App env-var declaration surface plumbed through Sunrise's app-env extension (empty at P0).
 - Feature-flag wrapper `isQuestionnairesEnabled()` over Sunrise's `isFeatureEnabled()`.
 - Healthcheck route at `app/api/v1/app/_healthcheck/route.ts` — 404 when flag off, 200 when on. Sets the gating template every later route follows.
-- Doc namespace at `.context/app/questionnaire/` — `README.md`, `overview.md`, `schema.md`, `development.md`, plus an empty forward-looking `upstream-gaps.md`.
+- Doc namespace under `.context/app/` — `questionnaire/` for domain/technical docs (`README.md`, `overview.md`, `schema.md`, `development.md`); `planning/` for the build plan, `features/` trackers, and an empty forward-looking `upstream-gaps.md` ledger; plus an app-docs `README.md` index at the `.context/app/` root.
 - Test scaffolding — unit + integration test trees mirroring source; a schema-shape integration test asserting every model/column/index/FK from `information_schema`.
 
 **Definition of phase complete.** Schema migrates cleanly; `npm run type-check` / `npm run lint` / `npm run test` pass; healthcheck flips with the feature flag; seeds run via `db:seed`; doc namespace populated.
@@ -720,6 +720,8 @@ Claude reads this doc for intent and the original [[Conversational Questionnaire
 
 Append-only. Newest at the top. Each entry: date, decision, context, link.
 
+- **2026-06-01 — App changes are tracked in the planning docs, not `CHANGELOG.md`.** `CHANGELOG.md` is the **Sunrise platform** changelog (the public-surface record forks consume); ConQuest's own app surface is not added there — it would be miscategorised noise that conflicts on every upstream sync. The app's record of _what's done / deferred / decided_ lives in these planning docs and is the reference for planning the next feature: **done** → [[#Work completed to date]] plus the per-feature trackers under `features/`; **deferred / platform gaps** → `planning/upstream-gaps.md`; **decided** → this log. A consumer-facing changelog for forks of ConQuest _itself_ is a separate, later decision.
+- **2026-06-01 — App docs consolidated under `.context/app/`.** Replaced the `.context/application/` outlier with a single app-docs root, `.context/app/`, using namespace subfolders that mirror the substrate pattern and the code's app tier (`lib/app/`, `app/api/v1/app/`, `prisma/schema/app-*`). `planning/` holds this development plan, the `features/` trackers, and the forward-looking `upstream-gaps.md` ledger (sibling to this Decisions log and the Carried Sunrise patches section); `questionnaire/` holds the domain/technical docs (overview, schema, development). Purely an app-owned reorg — Sunrise's substrate never referenced `.context/application/`.
 - **2026-05-31 — Demo-client tenancy is a branding partition, not real isolation.** Sunrise ships single-tenant by default with zero tenancy machinery (no `Org` table, no `orgId`, no RLS) — multi-tenancy is a fork-level RLS retrofit at the `lib/db/client.ts` chokepoint, gated behind `TENANCY_MODE=multi`, _not_ a switch. The plan does **not** require multi-tenant Sunrise; it runs on standard single-tenant Sunrise. P2.5's tenancy (F2.5.1) is a deliberately light, app-owned branding/content partition with application-layer scoping — adequate because demo clients aren't adversarial. A fork into a real multi-customer product activates Sunrise's RLS seam rather than promoting the demo table into a security boundary (which is the trap Sunrise's multi-tenancy doc explicitly warns against). Reference: Sunrise `.context/architecture/multi-tenancy.md`.
 - **2026-05-30 — Replaced the phased prompt document with this plan.** The original `Conversational Questionnaire Phases.md` is preserved as reference detail (deep specifications per phase remain useful when planning a feature), but the working source-of-truth is this lighter, intent-shaped doc. Rationale: the prompt-per-phase format was overkill, premature, and didn't leave space for in-flight reframes.
 - **2026-05-30 — Sunrise pre-fork backlog closed in v0.0.1.** Multi-file Prisma schema, recursive seed discovery, capability registration hook, admin nav registry, ESLint app-boundary, user-FK pattern, app env-var extension are all in. Phases that previously workaround these are simplified. Reference: [[fork-readiness-backlog]].
@@ -731,7 +733,7 @@ Append-only. Newest at the top. Each entry: date, decision, context, link.
 
 Append-only. Newest at the top.
 
-_Nothing shipped yet — project in `planning`. First entry will be the fork itself + P0._
+- **2026-06-01 — F0.1 Foundation scaffolding (complete; in review — [PR #10](https://github.com/human-centric-engineering/conquest/pull/10)).** App docs consolidated under `.context/app/` (`planning/` + `questionnaire/` namespaces). Questionnaire module skeleton + DB-backed `APP_QUESTIONNAIRES_ENABLED` flag (seeded off) with the `ensureQuestionnairesEnabled()` route-gate template; app-owned Prisma schema (`AppQuestionnaire` + `AppQuestionnaireVersion`, app-internal cascade relation, User FK deferred — see `planning/upstream-gaps.md` UG-1) + init migration hand-trimmed of the platform schema-fold DROPs (drift-check green); recursive app seed for the flag; gated `GET /api/v1/app/healthcheck` (404 off / 200 on). Unit + integration tests; `validate` + full `test` green. Six PR-sized tasks (one commit each) batched into one PR — tracker: `planning/features/f0.1.md`.
 
 ---
 
@@ -739,7 +741,7 @@ _Nothing shipped yet — project in `planning`. First entry will be the fork its
 
 Core changes the app currently carries that are not yet reflected in upstream Sunrise. Each tagged `pending-upstream | app-specific-override | abandoned`. Retired when a Sunrise release includes the change.
 
-- **2026-05-31 — CI private-fork fixes + performance — RETIRED (landed upstream).** Was `pending-upstream`; now superseded by Sunrise #280 ("ci: adaptive pipeline for public + private forks, with perf overhaul") and pulled down in the first `upstream/main` merge on 2026-05-31. All ConQuest carried CI overrides (heap bumps in `ci.yml`/`Dockerfile`, CodeQL + dependency-review private-gating, Tier-1 caching/concurrency/`--changed`, Tier-2 parallel+sharding) were resolved **in upstream's favour** during the merge — upstream's version is a superset (adaptive public/private, API-based visibility check that fixes the CodeQL `schedule` edge we'd flagged, `CI_TEST_SCOPE` knob). No ConQuest-specific CI override remains; canonical behaviour now documented in `.context/architecture/ci.md`. The seed-credential issue (#278) also landed (first-user-is-admin + `system-owner` seed) — not a carried patch, but the README "first admin" section was updated to match during the merge.
+- **2026-05-31 — CI private-fork fixes + performance — RETIRED (landed upstream).** Was `pending-upstream`; now superseded by Sunrise #280 ("ci: adaptive pipeline for public + private forks, with perf overhaul") and pulled down in the first `upstream/main` merge on 2026-05-31. All Conquest carried CI overrides (heap bumps in `ci.yml`/`Dockerfile`, CodeQL + dependency-review private-gating, Tier-1 caching/concurrency/`--changed`, Tier-2 parallel+sharding) were resolved **in upstream's favour** during the merge — upstream's version is a superset (adaptive public/private, API-based visibility check that fixes the CodeQL `schedule` edge we'd flagged, `CI_TEST_SCOPE` knob). No Conquest-specific CI override remains; canonical behaviour now documented in `.context/architecture/ci.md`. The seed-credential issue (#278) also landed (first-user-is-admin + `system-owner` seed) — not a carried patch, but the README "first admin" section was updated to match during the merge.
 
 ---
 

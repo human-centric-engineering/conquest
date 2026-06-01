@@ -1,19 +1,19 @@
-# ConQuest
+# Conquest
 
 **CON**versational **QUEST**ionnaire — a conversational questionnaire platform built on the [Sunrise](https://github.com/human-centric-engineering/sunrise) application platform.
 
 An admin uploads a questionnaire document (PDF / DOCX / MD); an agent extracts its sections and questions; end users complete the questionnaire through a streaming conversation rather than form-filling. The LLM extracts, infers, and synthesises answers with confidence scores and provenance; admins review the structure, evaluate it against goal and audience, manage versions, and export results. It is **provider-agnostic** — every model call resolves through Sunrise's provider registry at runtime.
 
-> **Project status:** `planning`. The phased build is tracked in [`.context/application/development-plan.md`](./.context/application/development-plan.md) (Project → Phase → Feature → Task). Nothing user-facing has shipped yet — P0 (foundations) is the first work.
+> **Project status:** `planning`. The phased build is tracked in [`.context/app/planning/development-plan.md`](./.context/app/planning/development-plan.md) (Project → Phase → Feature → Task). Nothing user-facing has shipped yet — P0 (foundations) is the first work.
 
 ## Built on Sunrise
 
-ConQuest is an **application fork** of Sunrise. The repository is two tiers of code:
+Conquest is an **application fork** of Sunrise. The repository is two tiers of code:
 
 | Tier         | What it is                                                                            | How we treat it                                                                                                                   |
 | ------------ | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | **Platform** | Sunrise — auth, API conventions, `lib/` utilities, orchestration, security middleware | An upgradable dependency. Extend through its seams; don't fork-and-edit.                                                          |
-| **This app** | ConQuest — questionnaire models, capabilities, admin/user surfaces, business logic    | Ours. Lives in new files (`lib/app/questionnaire/**`, `app/api/v1/app/**`, `app/admin/questionnaires/**`) alongside the platform. |
+| **This app** | Conquest — questionnaire models, capabilities, admin/user surfaces, business logic    | Ours. Lives in new files (`lib/app/questionnaire/**`, `app/api/v1/app/**`, `app/admin/questionnaires/**`) alongside the platform. |
 
 Sunrise is tracked as the `upstream` git remote (read-only); `origin` is this private repo. Platform fixes are made **upstream in Sunrise and pulled down**, not patched here, so upgrades stay clean merges. The rules:
 
@@ -37,9 +37,9 @@ Inherited from the Sunrise platform:
 | AI Orchestration | Multi-LLM agents, workflows, RAG, MCP server            |
 | LLM Providers    | Anthropic, OpenAI (extensible via provider abstraction) |
 
-## Platform capabilities ConQuest builds on
+## Platform capabilities Conquest builds on
 
-The Sunrise platform ships a complete AI agent orchestration layer that ConQuest consumes rather than reinvents — the questionnaire extractor, the design-time judge agents, the conversational session engine, and cost/audit/eval tracking are all built on these primitives:
+The Sunrise platform ships a complete AI agent orchestration layer that Conquest consumes rather than reinvents — the questionnaire extractor, the design-time judge agents, the conversational session engine, and cost/audit/eval tracking are all built on these primitives:
 
 - **Agents** — Configured AI personas with system instructions, model selection, temperature, budgets, and attached capabilities
 - **Capabilities (tools)** — Function-calling tools that agents invoke; built-ins plus a 4-step pipeline for adding custom tools
@@ -132,7 +132,7 @@ These platform features work without configuration in development and can be ena
 
 ## Documentation
 
-- [**.context/application/development-plan.md**](./.context/application/development-plan.md) — ConQuest's phased build plan (the app's source of truth)
+- [**.context/app/planning/development-plan.md**](./.context/app/planning/development-plan.md) — Conquest's phased build plan (the app's source of truth)
 - [**CUSTOMIZATION.md**](./CUSTOMIZATION.md) — Building on Sunrise: extension model, syncing with upstream
 - [**.context/substrate.md**](./.context/substrate.md) — Full platform architecture and reference docs
 - [**.context/orchestration/meta/functional-specification.md**](./.context/orchestration/meta/functional-specification.md) — Orchestration: full system inventory and capability spec
@@ -146,7 +146,7 @@ The `.context/` docs are written specifically as AI context. Instead of reading 
 - _"Add a capability so the extractor agent can parse a new question type."_
 - _"How do I pull the latest platform fixes down from Sunrise?"_
 
-Start Claude Code in the repo and start building — it already knows how both ConQuest and the Sunrise platform work.
+Start Claude Code in the repo and start building — it already knows how both Conquest and the Sunrise platform work.
 
 ### Enhanced Capabilities
 
