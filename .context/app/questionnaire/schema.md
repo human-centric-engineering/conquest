@@ -37,12 +37,26 @@ file to stay clearly separate and conflict-free on upstream syncs.
 2. `npm run db:migrate:dev -- --name app_<change>` (app migrations are
    prefixed so they're easy to spot when they interleave with upstream's by
    timestamp).
-3. **Review the generated `migration.sql`.** Sunrise has DB objects Prisma can't
-   model (pgvector/HNSW indexes, a GENERATED tsvector column, CHECK constraints,
-   partial unique indexes). A `migrate dev` run can emit spurious `DROP`s for them
-   — **delete any such `DROP` lines** before committing, keeping only your intended
-   `CREATE`/`ALTER`. (Inventory: `scripts/db/check-drift.ts` and
-   [`../../database/prisma-unmodelled-objects.md`](../../database/prisma-unmodelled-objects.md).)
+3. **Review the generated `migration.sql` and strip every statement that isn't
+   yours.** Prisma 7's diff emits _phantom_ DDL against platform objects on every
+   `migrate dev` run — the database is correct; the diff is wrong. Delete all of
+   it (DROP / ALTER / **RENAME**), keeping only your intended `CREATE`/`ALTER`.
+   Two known classes:
+   - **A-series — DROP/ALTER of objects Prisma can't model**: the pgvector
+     GIN/HNSW indexes, the `GENERATED` `searchVector` column, CHECK constraints,
+     partial unique indexes. Inventory: `scripts/db/check-drift.ts` +
+     [`../../database/prisma-unmodelled-objects.md`](../../database/prisma-unmodelled-objects.md)
+     (probed by `db:drift-check`).
+   - **B1 — a RENAME of a fully-modelled unique constraint**, e.g.
+     `ALTER INDEX "ai_conversation_inbound_key" RENAME TO …`. Prisma 7's
+     `migrate diff` ignores `@@unique(name:)`, so it perpetually wants to rename a
+     constraint the baseline deliberately created (see the `B1` comment in
+     `prisma/migrations/00000000000000_baseline/migration.sql`). Not covered by
+     `db:drift-check` — catch it here, by eye.
+
+   The init migration (`20260601095814_app_questionnaire_init`) was trimmed of all
+   of the above; its schema-shape test guards against any of it leaking back in.
+
 4. `npm run db:drift-check` → all platform probes must still pass.
 5. `npm run db:generate` (also runs on `postinstall`) to refresh the client.
 
