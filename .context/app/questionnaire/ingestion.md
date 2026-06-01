@@ -82,6 +82,52 @@ pre-existing` (P2-ready; a fresh ingest never produces `pre-existing`).
 13. **Audit** — `logAdminAction({ action: 'questionnaire.ingest', entityType:
 'questionnaire', entityId: versionId, metadata: { counts, fileName, fileHash } })`.
 
+## The extractor capability (the LLM step)
+
+Extraction is a Sunrise **capability** dispatched **programmatically** from the
+route (not exposed to a chat tool-loop) — `app_extract_questionnaire_structure`,
+an `AppExtractQuestionnaireStructureCapability` in
+`lib/app/questionnaire/capabilities/`. Two seeds back it (idempotent, both
+inert until the flag is on):
+
+- **Agent** `app-questionnaire-extractor` (`002-extractor-agent`) — empty
+  `model`/`provider` (resolves dynamically), a `monthlyBudgetUsd` cap,
+  `visibility: 'internal'`, KB access restricted. Carries the provider-agnostic
+  binding the route passes through in the dispatch `entityContext`.
+- **Capability row** (`003-extraction-capability`) — `executionType: 'internal'`,
+  `executionHandler` pointing at the registered class, bound to the agent.
+
+**Novel pattern — an LLM call _inside_ `execute()`.** No built-in Sunrise
+capability calls a provider in its `execute()`; this one does, via the
+`runStructuredCompletion()` primitive (resolve binding →
+`resolveAgentProviderAndModel(agent, 'reasoning')` → `getProvider()` → call →
+parse → **retry-once-at-temp-0** → cost-sum). It validates the model's JSON
+against the PR2 Zod contract (`ingestion/extraction-schema.ts`) and **fails
+loud** — a final parse failure returns a typed error (carrying the Zod issue
+paths), never a silent empty result.
+
+**Storage-agnostic.** The capability returns the structured result
+(`sections`, `questions`, `inferredGoal?`, `inferredAudience?`, `changes[]`) and
+**imports no Prisma** (`lib/app/**` boundary). The route — through `_lib/` —
+owns persistence. It is unit-tested by `dispatch()` with a mocked provider;
+persistence is tested separately at the route.
+
+**PII + cost.** Questionnaire documents carry PII, so the capability sets
+`processesPii = true` and overrides `redactProvenance()` (the registry refuses a
+PII capability without it) — durable provenance rows carry counts only, never
+document text or source quotes. It logs LLM spend via `logCost()`
+(`CostOperation.CHAT`, against the agent id; fire-and-forget, isolated from the
+extraction result) → visible in `AiCostLog` / the costs dashboard.
+
+**Provider-agnostic.** Every call routes through `resolveAgentProviderAndModel`
+and `getProvider` from the seeded agent's binding — no vendor SDK is imported
+anywhere.
+
+See [`extraction-changes.md`](./extraction-changes.md) for how the returned
+`changes[]` become the revertible editorial log, and the F1.1 tracker
+([`../planning/features/f1.1.md`](../planning/features/f1.1.md), "PR 3") for the
+capability's design rationale.
+
 ## Persistence (`_lib/persist.ts`)
 
 One transaction, all-or-nothing, writing the full graph:
@@ -112,13 +158,6 @@ produces no `infer_*` change record — the capability drops it before persist.
 re-ingest, and persisting every upload's bytes is a privacy surface the plan
 defers (open question #5). `extractedText` **is** stored — F2.3 verifies source
 quotes against it.
-
-## Cost & provider-agnosticism
-
-The LLM spend is logged by the capability (`CostOperation.CHAT`, against the
-extractor agent id) — visible via `AiCostLog` / the costs dashboard. No vendor
-SDK is imported anywhere; the model/provider resolve through
-`resolveAgentProviderAndModel` + `getProvider` from the seeded agent's binding.
 
 ## Manual verification
 
