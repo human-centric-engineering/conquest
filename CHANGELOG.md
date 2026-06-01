@@ -18,6 +18,20 @@ release process.
 
 ### Added
 
+- **App-extensible database drift-probe seam — `lib/app/db-drift.ts`** (issue
+  #284). A new auto-wired `lib/app/*` seam exporting `registerAppDriftProbes()`,
+  so a fork can register its **own** Prisma-unmodelled DB objects (hand-written
+  FK constraints, custom indexes, CHECK constraints) and have
+  `npm run db:drift-check` (CI + `/pre-pr`) probe them alongside Sunrise's
+  A-series — without editing the platform-owned `scripts/db/check-drift.ts`. New
+  module `lib/db/drift-probes.ts` exposes the probe primitives (`indexExists`,
+  `constraintExists`, `columnExists`) and registry (`registerAppDriftProbe`,
+  `getAppDriftProbes`, `mergeDriftProbes`). `constraintExists`'s optional
+  definition-substring argument is the documented home for a manual-FK `onDelete`
+  policy (assert `ON DELETE CASCADE`/`SET NULL`), which the schema-level
+  `onDelete` rule can't see. Registering a duplicate name, or one that shadows an
+  A-series probe, throws. See `CUSTOMIZATION.md` §5 and
+  `.context/database/prisma-unmodelled-objects.md`.
 - **`AccountType` enum + `User.accountType` field** (`HUMAN` | `SERVICE`,
   default `HUMAN`) — a first-class axis, orthogonal to `role`, distinguishing
   real login users from non-login machine/system principals (the seeded
@@ -50,6 +64,17 @@ release process.
   users. New export: `SYSTEM_USER_EMAIL` from `lib/auth/constants.ts`.
 - **Orchestration seeds resolve the config owner deterministically** via
   `serviceAccountWhere` (the SERVICE account) rather than the first `ADMIN` row.
+
+### Fixed
+
+- **`AiConversation` inbound unique key no longer triggers a phantom
+  `ALTER INDEX ... RENAME` on every `prisma migrate dev`** (issue #283). The
+  `@@unique([agentId, channel, fromAddress])` now pins its DB name with
+  `map: "ai_conversation_inbound_key"`; Prisma 7's `migrate diff` ignored the
+  `name:` argument for the DB object and re-derived the default name, injecting
+  a spurious rename into every fork's generated migration. The Client-API
+  compound key (`name:`) is unchanged, and existing deployed databases diff
+  clean (no migration required).
 
 ### Security
 

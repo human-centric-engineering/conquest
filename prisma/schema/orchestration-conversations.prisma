@@ -36,7 +36,13 @@ model AiConversation {
   share            AiConversationShare?
   outboundMessages AiOutboundMessage[]
 
-  @@unique([agentId, channel, fromAddress], name: "ai_conversation_inbound_key")
+  // `name:` sets the Client-API compound-key (used by findUnique in
+  // lib/orchestration/inbound/conversation-resolver.ts); `map:` pins the DB
+  // constraint name. Prisma 7's migrate diff ignores `name:` for the DB object
+  // and would otherwise derive the default name, emitting a phantom
+  // `ALTER INDEX ... RENAME` on every `migrate dev` (issue #283). `map:` makes
+  // the derived name match the deployed object so the rename disappears.
+  @@unique([agentId, channel, fromAddress], name: "ai_conversation_inbound_key", map: "ai_conversation_inbound_key")
   @@index([userId])
   @@index([agentId])
   @@index([contextType, contextId])

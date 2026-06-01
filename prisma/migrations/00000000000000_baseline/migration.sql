@@ -1253,12 +1253,16 @@ CREATE INDEX "ai_conversation_isActive_idx" ON "ai_conversation"("isActive");
 -- CreateIndex
 CREATE INDEX "ai_conversation_updatedAt_idx" ON "ai_conversation"("updatedAt");
 
--- B1: Prisma 7 migrate diff ignores @@unique(name:) on the schema (issue:
--- baseline-generation only). Schema declares `name: "ai_conversation_inbound_key"`
--- but the generator emits the default-generated name. The original migration
--- (20260331132111_add_email_channel_to_ai_conversation_inbound_key) created
--- this as an ALTER TABLE ADD CONSTRAINT — emit the same shape here so
--- pg_constraint lookups and any ON CONFLICT ON CONSTRAINT usage match prod.
+-- B1: Prisma 7 migrate diff ignores @@unique(name:) on the schema. The
+-- original migration (20260331132111_add_email_channel_to_ai_conversation_inbound_key)
+-- created this as an ALTER TABLE ADD CONSTRAINT — emit the same shape here so
+-- pg_constraint lookups match prod. The schema now also pins the DB name with
+-- `map: "ai_conversation_inbound_key"` (see orchestration-conversations.prisma,
+-- issue #283), which makes Prisma's derived name match this object so future
+-- `migrate dev` runs no longer emit a phantom RENAME. Leave this hand-fold as
+-- ADD CONSTRAINT — a deployed UNIQUE constraint introspects identically to the
+-- schema's unique index, so the two diff clean (verified empty migration); the
+-- baseline is applied history and must not change.
 ALTER TABLE "ai_conversation"
     ADD CONSTRAINT "ai_conversation_inbound_key"
     UNIQUE ("agentId", "channel", "fromAddress");
