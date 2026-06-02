@@ -24,16 +24,21 @@ content or boilerplate, keep it.`;
  * The extractor capability is dispatched programmatically against this agent's
  * id; the agent carries the budget cap and the provider-agnostic binding. It
  * ships with empty `model`/`provider` so it resolves dynamically via
- * `agent-resolver.ts` — the same contract as every system-seeded agent
- * (quiz-master, model-auditor). `visibility: 'internal'` keeps it out of the
+ * `agent-resolver.ts`. `visibility: 'internal'` keeps it out of the
  * public/embed surfaces.
+ *
+ * This is a ConQuest **app** agent, not a platform/system one: `isSystem: false`
+ * so it lives under the admin "App" tab, is editable/deletable like any bespoke
+ * agent, and is included in config backup/export (the platform's exporter skips
+ * `isSystem` rows). The service account merely owns the seeded `createdBy`.
  *
  * App seed: lives under `prisma/seeds/app-questionnaire/`, found by the
  * recursive runner; its `SeedHistory` key is the relative path
  * `app-questionnaire/002-extractor-agent`. Idempotent — the `update` branch only
- * re-asserts `isSystem: true` so re-seeding never clobbers an operator's edits
- * (model pin, budget change). Core seeds (digit-prefixed) run before any app
- * subdirectory, so `001-system-owner`'s service account exists here.
+ * re-asserts `isSystem: false` so re-seeding corrects any stray system flag
+ * without clobbering an operator's other edits (model pin, budget change). Core
+ * seeds (digit-prefixed) run before any app subdirectory, so `001-system-owner`'s
+ * service account exists here.
  */
 const unit: SeedUnit = {
   name: 'app-questionnaire/002-extractor-agent',
@@ -50,7 +55,7 @@ const unit: SeedUnit = {
 
     await prisma.aiAgent.upsert({
       where: { slug: QUESTIONNAIRE_EXTRACTOR_AGENT_SLUG },
-      update: { isSystem: true },
+      update: { isSystem: false },
       create: {
         name: 'Questionnaire Extractor',
         slug: QUESTIONNAIRE_EXTRACTOR_AGENT_SLUG,
@@ -75,7 +80,9 @@ const unit: SeedUnit = {
         // Internal-only: never surfaced on public/embed picker surfaces.
         visibility: 'internal',
         isActive: true,
-        isSystem: true,
+        // App component, not a platform/system agent — surfaces under the
+        // admin "App" tab and is included in config backup/export.
+        isSystem: false,
         createdBy: admin.id,
       },
     });

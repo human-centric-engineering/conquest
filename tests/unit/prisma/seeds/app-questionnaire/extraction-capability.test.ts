@@ -56,7 +56,9 @@ describe('app-questionnaire/003-extraction-capability seed', () => {
       EXTRACT_QUESTIONNAIRE_STRUCTURE_CAPABILITY_SLUG
     );
     expect(arg.create.isActive).toBe(true);
-    expect(arg.create.isSystem).toBe(true);
+    // App component, not a platform/system capability.
+    expect(arg.create.isSystem).toBe(false);
+    expect(arg.create.category).toBe('app');
   });
 
   it('uses an idempotent update that only re-asserts isSystem', async () => {
@@ -64,7 +66,7 @@ describe('app-questionnaire/003-extraction-capability seed', () => {
 
     await extractionCapabilitySeed.run(ctx);
 
-    expect(capabilityUpsert.mock.calls[0][0].update).toEqual({ isSystem: true });
+    expect(capabilityUpsert.mock.calls[0][0].update).toEqual({ isSystem: false });
   });
 
   it('binds the capability to the extractor agent when the agent exists', async () => {

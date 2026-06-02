@@ -15,15 +15,18 @@ import {
  * in-memory `AppExtractQuestionnaireStructureCapability` registered via
  * `initAppCapabilities()`. The binding to the extractor agent is explicit (the
  * dispatcher would default-allow without it, but an explicit row makes the
- * relationship visible in the admin UI and matches the system-agent seed
- * pattern).
+ * relationship visible in the admin UI).
+ *
+ * This is a ConQuest **app** capability (`category: 'app'`, `isSystem: false`),
+ * not a platform/system one: it shows under the admin "App" surface, stays
+ * editable/deletable, and is included in config backup/export.
  *
  * `rateLimit: null` at the capability layer: the dispatcher's per-capability
  * limiter is keyed on the (shared) extractor agent id, so a cap here would
  * throttle all admins together. PR4's ingestion route owns the meaningful
- * per-admin sub-cap. Idempotent — `update` only re-asserts `isSystem: true`.
- * Runs after `002-extractor-agent` (numeric order within the directory), so the
- * agent exists for the binding.
+ * per-admin sub-cap. Idempotent — `update` only re-asserts `isSystem: false` so
+ * re-seeding corrects any stray system flag. Runs after `002-extractor-agent`
+ * (numeric order within the directory), so the agent exists for the binding.
  */
 const unit: SeedUnit = {
   name: 'app-questionnaire/003-extraction-capability',
@@ -32,7 +35,7 @@ const unit: SeedUnit = {
 
     const capability = await prisma.aiCapability.upsert({
       where: { slug: EXTRACT_QUESTIONNAIRE_STRUCTURE_CAPABILITY_SLUG },
-      update: { isSystem: true },
+      update: { isSystem: false },
       create: {
         slug: EXTRACT_QUESTIONNAIRE_STRUCTURE_CAPABILITY_SLUG,
         name: 'Extract Questionnaire Structure',
@@ -49,7 +52,8 @@ const unit: SeedUnit = {
           EXTRACT_QUESTIONNAIRE_STRUCTURE_FUNCTION_DEFINITION as unknown as Prisma.InputJsonValue,
         rateLimit: null,
         isActive: true,
-        isSystem: true,
+        // App component, not a platform/system capability.
+        isSystem: false,
       },
     });
 
