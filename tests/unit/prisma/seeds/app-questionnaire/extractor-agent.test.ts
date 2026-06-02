@@ -11,7 +11,8 @@ import type { SeedContext } from '@/prisma/runner';
  *  - resolves the service-account admin and fails loudly if absent;
  *  - upserts exactly one AiAgent keyed on the shared extractor slug;
  *  - ships provider-agnostic (empty model/provider) so it resolves dynamically;
- *  - is private (visibility internal), system-owned, budget-capped, KB-restricted;
+ *  - is private (visibility internal), an app component (isSystem false),
+ *    budget-capped, KB-restricted;
  *  - the `update` branch only re-asserts isSystem so re-seeding preserves
  *    operator edits (model pin, budget change);
  *  - declares the path-derived SeedHistory key.
@@ -31,7 +32,7 @@ function makeCtx() {
 }
 
 describe('app-questionnaire/002-extractor-agent seed', () => {
-  it('upserts the extractor agent provider-agnostic, private, system-owned, budget-capped', async () => {
+  it('upserts the extractor agent provider-agnostic, private, app-owned, budget-capped', async () => {
     const { ctx, upsert } = makeCtx();
 
     await extractorAgentSeed.run(ctx);
@@ -43,7 +44,8 @@ describe('app-questionnaire/002-extractor-agent seed', () => {
     // Empty strings → dynamic resolution via agent-resolver.ts.
     expect(arg.create.model).toBe('');
     expect(arg.create.provider).toBe('');
-    expect(arg.create.isSystem).toBe(true);
+    // App component, not a platform/system agent.
+    expect(arg.create.isSystem).toBe(false);
     expect(arg.create.isActive).toBe(true);
     expect(arg.create.visibility).toBe('internal');
     expect(arg.create.knowledgeAccessMode).toBe('restricted');
@@ -57,7 +59,7 @@ describe('app-questionnaire/002-extractor-agent seed', () => {
 
     await extractorAgentSeed.run(ctx);
 
-    expect(upsert.mock.calls[0][0].update).toEqual({ isSystem: true });
+    expect(upsert.mock.calls[0][0].update).toEqual({ isSystem: false });
   });
 
   it('throws when no service-account admin exists', async () => {
