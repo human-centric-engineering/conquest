@@ -352,9 +352,30 @@ export const API = {
       ROOT: '/api/v1/app/questionnaires',
       /** Questionnaire detail (questionnaire + version summaries). */
       byId: (id: string): string => `/api/v1/app/questionnaires/${id}`,
-      /** One version's full section/question graph. */
+      /** One version's full section/question graph (GET); version-meta edit (PATCH). */
       versionGraph: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}`,
+      /** Version status transition (PATCH launch/archive/un-launch). */
+      versionStatus: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/status`,
+      /** Section collection (POST create). */
+      versionSections: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/sections`,
+      /** Section reorder (PATCH `{ order }`). */
+      versionSectionsReorder: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/sections/reorder`,
+      /** Single section (PATCH edit, DELETE). */
+      versionSectionById: (id: string, versionId: string, sectionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/sections/${sectionId}`,
+      /** Question collection under a section (POST create). */
+      versionSectionQuestions: (id: string, versionId: string, sectionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/sections/${sectionId}/questions`,
+      /** Question reorder within a section (PATCH `{ order }`). */
+      versionSectionQuestionsReorder: (id: string, versionId: string, sectionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/sections/${sectionId}/questions/reorder`,
+      /** Single question by flat id (PATCH edit/move, DELETE). */
+      versionQuestionById: (id: string, versionId: string, questionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/questions/${questionId}`,
     },
   },
 } as const;

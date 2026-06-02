@@ -8,18 +8,8 @@
  */
 
 import { Badge } from '@/components/ui/badge';
-import { AUDIENCE_FIELDS } from '@/lib/app/questionnaire/types';
+import { AUDIENCE_FIELDS, QUESTION_TYPE_LABELS } from '@/lib/app/questionnaire/types';
 import type { VersionGraphView } from '@/lib/app/questionnaire/views';
-
-const QUESTION_TYPE_LABEL: Record<string, string> = {
-  free_text: 'Free text',
-  single_choice: 'Single choice',
-  multi_choice: 'Multi choice',
-  likert: 'Likert',
-  numeric: 'Numeric',
-  date: 'Date',
-  boolean: 'Boolean',
-};
 
 const AUDIENCE_FIELD_LABEL: Record<(typeof AUDIENCE_FIELDS)[number], string> = {
   description: 'Description',
@@ -114,7 +104,7 @@ export function VersionGraph({ graph }: { graph: VersionGraphView }) {
                         <p className="text-sm font-medium">{q.prompt}</p>
                         <div className="flex shrink-0 items-center gap-1">
                           <Badge variant="secondary" className="text-xs">
-                            {QUESTION_TYPE_LABEL[q.type] ?? q.type}
+                            {QUESTION_TYPE_LABELS[q.type] ?? q.type}
                           </Badge>
                           {q.required && (
                             <Badge variant="outline" className="text-xs">

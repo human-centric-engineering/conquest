@@ -3,8 +3,10 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
 import { VersionGraph } from '@/components/admin/questionnaires/version-graph';
+import { VersionEditor } from '@/components/admin/questionnaires/version-editor';
 import { QUESTIONNAIRE_STATUS_BADGE } from '@/components/admin/questionnaires/status-badge';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
@@ -18,7 +20,7 @@ export const metadata: Metadata = {
 
 interface PageProps {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ v?: string }>;
+  searchParams: Promise<{ v?: string; edit?: string }>;
 }
 
 async function getDetail(id: string): Promise<QuestionnaireDetail | null> {
@@ -49,7 +51,7 @@ export default async function QuestionnaireDetailPage({ params, searchParams }: 
   if (!(await isQuestionnairesEnabled())) notFound();
 
   const { id } = await params;
-  const { v } = await searchParams;
+  const { v, edit } = await searchParams;
 
   const detail = await getDetail(id);
   if (!detail) notFound();
@@ -58,6 +60,7 @@ export default async function QuestionnaireDetailPage({ params, searchParams }: 
   // Default to the newest version (the detail list is already newest-first).
   const selected = detail.versions.find((ver) => ver.id === v) ?? detail.versions[0] ?? null;
   const graph = selected ? await getGraph(id, selected.id) : null;
+  const editing = edit === '1' && graph !== null;
 
   return (
     <div className="space-y-6">
@@ -111,15 +114,31 @@ export default async function QuestionnaireDetailPage({ params, searchParams }: 
           </div>
 
           {selected && (
-            <p className="text-muted-foreground text-sm">
-              {selected.sectionCount} section{selected.sectionCount === 1 ? '' : 's'} ·{' '}
-              {selected.questionCount} question{selected.questionCount === 1 ? '' : 's'} ·{' '}
-              {selected.changeCount} extraction change{selected.changeCount === 1 ? '' : 's'}
-            </p>
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-muted-foreground text-sm">
+                {selected.sectionCount} section{selected.sectionCount === 1 ? '' : 's'} ·{' '}
+                {selected.questionCount} question{selected.questionCount === 1 ? '' : 's'} ·{' '}
+                {selected.changeCount} extraction change{selected.changeCount === 1 ? '' : 's'}
+              </p>
+              {graph && (
+                <Button asChild variant={editing ? 'outline' : 'default'} size="sm">
+                  <Link
+                    href={`/admin/questionnaires/${id}?v=${selected.id}${editing ? '' : '&edit=1'}`}
+                    scroll={false}
+                  >
+                    {editing ? 'Done' : 'Edit'}
+                  </Link>
+                </Button>
+              )}
+            </div>
           )}
 
           {graph ? (
-            <VersionGraph graph={graph} />
+            editing ? (
+              <VersionEditor questionnaireId={id} version={graph} />
+            ) : (
+              <VersionGraph graph={graph} />
+            )
           ) : (
             <p className="text-muted-foreground text-sm italic">
               Could not load this version’s structure.

@@ -1,3 +1,5 @@
+import type { NextRequest } from 'next/server';
+
 import { errorResponse } from '@/lib/api/responses';
 import { APP_QUESTIONNAIRES_FLAG } from '@/lib/app/questionnaire/constants';
 import { isFeatureEnabled } from '@/lib/feature-flags';
@@ -42,4 +44,25 @@ export async function ensureQuestionnairesEnabled(): Promise<Response | null> {
     return null;
   }
   return errorResponse('Not found', { code: 'NOT_FOUND', status: 404 });
+}
+
+/**
+ * Wrap a route handler so the flag gate runs **before** anything else (auth,
+ * handler work) — the order a disabled app needs to look like a missing route
+ * rather than a 401. Collapses the per-verb `ensureQuestionnairesEnabled()`
+ * boilerplate into one composable wrapper, so a new route can't accidentally
+ * place the gate after `withAdminAuth` and leak the app's existence.
+ *
+ * ```ts
+ * export const PATCH = withQuestionnairesEnabled(handleVersionMetaPatch);
+ * ```
+ */
+export function withQuestionnairesEnabled<C>(
+  handler: (request: NextRequest, context: C) => Promise<Response>
+): (request: NextRequest, context: C) => Promise<Response> {
+  return async (request, context) => {
+    const blocked = await ensureQuestionnairesEnabled();
+    if (blocked) return blocked;
+    return handler(request, context);
+  };
 }
