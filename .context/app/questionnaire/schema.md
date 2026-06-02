@@ -115,6 +115,15 @@ the version; no `User` FK anywhere (UG-1 — uploader/reverter identity is a pla
   PR2). They live on the **version**, not `AppQuestionnaire` — the versioning model
   pins them where launch (F3.1) and judges (F5) operate. Plus relations to the three
   new child models below.
+  - **F2.1 / P2** adds `goalProvenance String?` and `audienceProvenance Json?`
+    (migration `20260602144835_app_questionnaire_version_provenance`) — the
+    persisted admin-wins-per-field merge outcome (`FieldProvenance` /
+    `AudienceProvenance` in `types.ts`). The admin read surface reads them to mark
+    AI-inferred values rather than re-deriving from the change log. Same
+    schema-fold footgun as the ingestion migration: `migrate dev` re-emitted the
+    three pgvector `DROP INDEX` + the `searchVector` ALTER; stripped by hand, only
+    the one app `ALTER TABLE` kept (the migration header names what was removed,
+    and the schema-shape test guards it).
 - **`AppQuestionnaireSection`** (`app_questionnaire_section`) — a section/group
   within a version. `ordinal`, `title`, `description?`; `@relation` to the version
   `onDelete: Cascade`; `questions AppQuestionSlot[]`; `@@index([versionId])`.

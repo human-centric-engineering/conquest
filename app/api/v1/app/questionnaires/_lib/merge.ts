@@ -12,17 +12,25 @@
  * merged values; this stays unit-testable in isolation.
  */
 
-import { AUDIENCE_FIELDS, type AudienceShape } from '@/lib/app/questionnaire/types';
+import {
+  AUDIENCE_FIELDS,
+  type AudienceProvenance,
+  type AudienceShape,
+  type FieldProvenance,
+} from '@/lib/app/questionnaire/types';
 
-/** Where a resolved goal/audience field's value came from. */
-export type FieldProvenance = 'admin-supplied' | 'inferred' | 'pre-existing';
+// `FieldProvenance` is a domain concept (the admin-wins-per-field outcome), so it
+// lives in `lib/app/questionnaire/types` — re-exported here for the existing
+// importers of this module. The view layer reads it from the domain module, not
+// from this route-local file.
+export type { FieldProvenance };
 
 /** Per-field provenance tags for the merged values (UI-ready for P2). */
 export interface MergeProvenance {
   /** Omitted when no goal was resolved from any source. */
   goal?: FieldProvenance;
   /** One entry per resolved audience field; absent fields are omitted. */
-  audience: Partial<Record<keyof AudienceShape, FieldProvenance>>;
+  audience: AudienceProvenance;
 }
 
 export interface MergeGoalAudienceResult {

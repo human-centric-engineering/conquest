@@ -8,11 +8,26 @@
 /**
  * Lifecycle status shared by `AppQuestionnaire` and `AppQuestionnaireVersion`.
  *
- * Mirrors the schema's `status` column (default `draft`). Extended as later
- * phases formalise launch + versioning semantics (P2/P3); treat this as the
- * current vocabulary, not the final one.
+ * Mirrors the schema's `status` column (default `draft`). Declared as a `const`
+ * tuple so it is the **single source of truth**: the type, the route's Zod query
+ * enum (`z.enum(APP_QUESTIONNAIRE_STATUSES)`), and the admin UI's filter/badge
+ * options all derive from it — adding a status here updates every consumer rather
+ * than leaving hard-coded lists to drift. Treat the set as the current
+ * vocabulary, not the final one (later phases formalise launch + versioning).
  */
-export type AppQuestionnaireStatus = 'draft' | 'launched' | 'archived';
+export const APP_QUESTIONNAIRE_STATUSES = ['draft', 'launched', 'archived'] as const;
+export type AppQuestionnaireStatus = (typeof APP_QUESTIONNAIRE_STATUSES)[number];
+
+/**
+ * Where a resolved `goal` / `audience` field's value came from — the
+ * admin-wins-per-field merge outcome (admin-supplied > inferred > pre-existing).
+ * Persisted per field on the version (`goalProvenance`, `audienceProvenance`) so
+ * the admin UI can mark inferred values as "the AI guessed this" without
+ * re-deriving from the change log. A `const` tuple for the same single-source
+ * reason as the status set above.
+ */
+export const FIELD_PROVENANCES = ['admin-supplied', 'inferred', 'pre-existing'] as const;
+export type FieldProvenance = (typeof FIELD_PROVENANCES)[number];
 
 /**
  * Canonical question-type vocabulary for `AppQuestionSlot.type` (schema default
@@ -73,3 +88,11 @@ export const AUDIENCE_FIELDS = [
   'sensitivity',
   'notes',
 ] as const satisfies ReadonlyArray<keyof AudienceShape>;
+
+/**
+ * Per-field provenance for a version's `audience` — one {@link FieldProvenance}
+ * entry per resolved audience field (unresolved fields are absent). Stored as the
+ * `audienceProvenance` JSON column and surfaced by the admin read API so the UI
+ * can mark each inferred field independently.
+ */
+export type AudienceProvenance = Partial<Record<keyof AudienceShape, FieldProvenance>>;

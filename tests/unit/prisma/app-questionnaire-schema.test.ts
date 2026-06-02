@@ -94,6 +94,11 @@ describe('questionnaire datamodel (Prisma.dmmf)', () => {
     expect(getField(model, 'goal').type).toBe('String');
     expect(getField(model, 'audience').type).toBe('Json');
 
+    // Per-field provenance of the merged goal/audience (F2.1 / P2) — stored so the
+    // admin UI marks inferred values without re-deriving from the change log.
+    expect(getField(model, 'goalProvenance').type).toBe('String');
+    expect(getField(model, 'audienceProvenance').type).toBe('Json');
+
     for (const [field, target] of [
       ['sections', 'AppQuestionnaireSection'],
       ['changeRecords', 'AppQuestionnaireExtractionChange'],
@@ -291,5 +296,26 @@ describe('app_questionnaire_ingestion migration SQL', () => {
     expect(executableSql).not.toContain('ai_knowledge');
     expect(executableSql).not.toContain('ai_message');
     expect(executableSql).not.toContain('searchVector');
+  });
+});
+
+describe('app_questionnaire_version_provenance migration SQL', () => {
+  const sql = readMigrationSql('_app_questionnaire_version_provenance');
+  const executableSql = executableLines(sql);
+
+  it('adds goalProvenance + audienceProvenance to the version table', () => {
+    expect(sql).toMatch(/ALTER TABLE "app_questionnaire_version"[\s\S]*"audienceProvenance" JSONB/);
+    expect(sql).toMatch(/ALTER TABLE "app_questionnaire_version"[\s\S]*"goalProvenance" TEXT/);
+  });
+
+  it('contains no platform (unmodelled-object) operations — the schema-fold strip holds', () => {
+    // Same footgun as the ingestion migration: `migrate dev` re-emitted the three
+    // pgvector DROP INDEX + the GENERATED searchVector ALTER. Stripped by hand;
+    // this guard fails if a regeneration leaks them back in.
+    expect(executableSql).not.toContain('DROP INDEX');
+    expect(executableSql).not.toContain('ai_knowledge');
+    expect(executableSql).not.toContain('searchVector');
+    // Exactly one executable statement — our single ALTER TABLE.
+    expect(executableSql.match(/ALTER TABLE/g) ?? []).toHaveLength(1);
   });
 });

@@ -35,14 +35,16 @@ model AppQuestionnaire {
 /// are inferred by the F1.1 extractor (recorded as infer_goal / infer_audience
 /// change records) or admin-set, with admin-wins-per-field merge.
 model AppQuestionnaireVersion {
-  id              String   @id @default(cuid())
-  questionnaireId String
-  versionNumber   Int      @default(1)
-  status          String   @default("draft")
-  goal            String? // inferred (infer_goal change) or admin-set
-  audience        Json? // structured AudienceShape (types.ts); inferred or admin-set
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id                 String   @id @default(cuid())
+  questionnaireId    String
+  versionNumber      Int      @default(1)
+  status             String   @default("draft")
+  goal               String? // inferred (infer_goal change) or admin-set
+  audience           Json? // structured AudienceShape (types.ts); inferred or admin-set
+  goalProvenance     String? // FieldProvenance (types.ts): admin-supplied | inferred | pre-existing
+  audienceProvenance Json? // AudienceProvenance (types.ts): per-field FieldProvenance map
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
   questionnaire   AppQuestionnaire                   @relation(fields: [questionnaireId], references: [id], onDelete: Cascade)
   sections        AppQuestionnaireSection[]

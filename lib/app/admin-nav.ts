@@ -13,6 +13,23 @@
  *
  * Full guide + example: CUSTOMIZATION.md §4 · lib/admin-nav/registry.ts
  */
+import { ClipboardList } from 'lucide-react';
+
+import { registerNavSection } from '@/lib/admin-nav/registry';
+
 export function initAppNav(): void {
-  // No app nav sections by default.
+  // ConQuest questionnaires (P2 / F2.1). The whole surface is flag-gated server
+  // side (`APP_QUESTIONNAIRES_ENABLED`); this nav entry is always present in the
+  // sidebar, but every page/route under it 404s when the flag is off.
+  registerNavSection({
+    title: 'Questionnaires',
+    items: [
+      {
+        href: '/admin/questionnaires',
+        label: 'Questionnaires',
+        icon: ClipboardList,
+        description: 'Ingest, review, and edit conversational questionnaires',
+      },
+    ],
+  });
 }

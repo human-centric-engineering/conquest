@@ -136,7 +136,8 @@ describe('persistIngestion', () => {
       })
     );
 
-    // Admin goal wins; inferred audience fills the rest.
+    // Admin goal wins; inferred audience fills the rest. Provenance persisted per
+    // field so the read surface needn't re-derive it.
     expect(tx.appQuestionnaireVersion.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -145,6 +146,8 @@ describe('persistIngestion', () => {
           status: 'draft',
           goal: 'Admin goal',
           audience: { role: 'new hire' },
+          goalProvenance: 'admin-supplied',
+          audienceProvenance: { role: 'inferred' },
         }),
       })
     );
@@ -258,7 +261,13 @@ describe('persistIngestion', () => {
 
     expect(tx.appQuestionnaireVersion.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ goal: null, audience: Prisma.JsonNull }),
+        data: expect.objectContaining({
+          goal: null,
+          audience: Prisma.JsonNull,
+          // Nothing resolved → null goal provenance, SQL-NULL audience provenance.
+          goalProvenance: null,
+          audienceProvenance: Prisma.JsonNull,
+        }),
       })
     );
     expect(result.goal).toBeNull();
