@@ -133,6 +133,15 @@ export async function persistIngestion(
         status: 'draft',
         goal: merged.goal,
         audience: merged.audience === null ? Prisma.JsonNull : jsonInput(merged.audience),
+        // Persist the admin-wins-per-field provenance the merge resolved, so the
+        // admin read surface can mark inferred values without re-deriving from
+        // the change log. `goalProvenance` is null when no goal was resolved;
+        // `audienceProvenance` is SQL-NULL when no audience field was.
+        goalProvenance: merged.provenance.goal ?? null,
+        audienceProvenance:
+          Object.keys(merged.provenance.audience).length > 0
+            ? jsonInput(merged.provenance.audience)
+            : Prisma.JsonNull,
       },
       select: { id: true },
     });

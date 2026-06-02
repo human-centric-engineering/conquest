@@ -11,13 +11,18 @@ export {
 } from '@/lib/app/questionnaire/feature-flag';
 export {
   QUESTION_TYPES,
+  APP_QUESTIONNAIRE_STATUSES,
+  FIELD_PROVENANCES,
   AUDIENCE_EXPERTISE_LEVELS,
   AUDIENCE_SENSITIVITY_LEVELS,
+  AUDIENCE_FIELDS,
 } from '@/lib/app/questionnaire/types';
 export type {
   AppQuestionnaireStatus,
   QuestionType,
+  FieldProvenance,
   AudienceShape,
+  AudienceProvenance,
   AudienceExpertiseLevel,
   AudienceSensitivity,
 } from '@/lib/app/questionnaire/types';

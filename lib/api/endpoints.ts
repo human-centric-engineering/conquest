@@ -344,4 +344,17 @@ export const API = {
     CONTACT: '/api/v1/contact',
     CSP_REPORT: '/api/csp-report',
   },
+
+  /** App (ConQuest questionnaire) endpoints — flag-gated, admin-only. */
+  APP: {
+    QUESTIONNAIRES: {
+      /** List + ingest (GET list, POST multipart ingest). */
+      ROOT: '/api/v1/app/questionnaires',
+      /** Questionnaire detail (questionnaire + version summaries). */
+      byId: (id: string): string => `/api/v1/app/questionnaires/${id}`,
+      /** One version's full section/question graph. */
+      versionGraph: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}`,
+    },
+  },
 } as const;

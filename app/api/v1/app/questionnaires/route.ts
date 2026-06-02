@@ -1,5 +1,12 @@
 /**
- * Questionnaire ingestion endpoint (F1.1 / PR4).
+ * Questionnaire ingestion + list endpoint (F1.1 / PR4; list added P2 / F2.1a).
+ *
+ * GET /api/v1/app/questionnaires
+ *   Paginated, admin-only list of questionnaires, each enriched with its latest
+ *   version and that version's section / question counts (computed in a fixed
+ *   number of queries — no per-row N+1). Query params: page, limit, q (title
+ *   search), status, sortBy, sortOrder. Read-only; the read model lives in
+ *   `_lib/list.ts`.
  *
  * POST /api/v1/app/questionnaires
  *   Multipart upload of a questionnaire document (.pdf / .docx / .md / .txt). The
@@ -24,9 +31,10 @@
 import { createHash } from 'node:crypto';
 import type { NextRequest } from 'next/server';
 
-import { errorResponse, successResponse } from '@/lib/api/responses';
+import { errorResponse, paginatedResponse, successResponse } from '@/lib/api/responses';
 import { ValidationError } from '@/lib/api/errors';
 import { enforceContentLengthCap } from '@/lib/api/multipart-guard';
+import { validateQueryParams } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
 import { withAdminAuth } from '@/lib/auth/guards';
 import { prisma } from '@/lib/db/client';
@@ -55,6 +63,10 @@ import {
   IncoherentExtractionError,
   persistIngestion,
 } from '@/app/api/v1/app/questionnaires/_lib/persist';
+import {
+  listQuestionnaires,
+  listQuestionnairesQuerySchema,
+} from '@/app/api/v1/app/questionnaires/_lib/list';
 
 /**
  * Decoded upload size cap, 25 MB. A questionnaire is a single document, not the
@@ -369,6 +381,30 @@ const handleIngest = withAdminAuth(async (request: NextRequest, session) => {
     { status: 201 }
   );
 });
+
+const handleList = withAdminAuth(async (request: NextRequest) => {
+  const log = await getRouteLogger(request);
+  const { searchParams } = new URL(request.url);
+  const query = validateQueryParams(searchParams, listQuestionnairesQuerySchema);
+
+  const { items, total } = await listQuestionnaires(query);
+
+  log.info('Questionnaires listed', {
+    count: items.length,
+    total,
+    page: query.page,
+    limit: query.limit,
+  });
+
+  return paginatedResponse(items, { page: query.page, limit: query.limit, total });
+});
+
+export async function GET(request: NextRequest): Promise<Response> {
+  // Flag gate first — a switched-off app is indistinguishable from a missing route.
+  const blocked = await ensureQuestionnairesEnabled();
+  if (blocked) return blocked;
+  return handleList(request);
+}
 
 export async function POST(request: NextRequest): Promise<Response> {
   // Flag gate first — a switched-off app is indistinguishable from a missing route.

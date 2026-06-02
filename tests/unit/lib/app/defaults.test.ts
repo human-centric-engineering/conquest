@@ -1,13 +1,13 @@
 /**
- * Tests: lib/app/ bootstrap files ship as no-op defaults
+ * Tests: lib/app/ bootstrap seams — Sunrise no-op defaults vs ConQuest's fills
  *
  * The auto-wired bootstrap hooks (`lib/app/rate-limit.ts`, `lib/app/capabilities.ts`,
- * `lib/app/admin-nav.ts`) must register NOTHING out of the box — the template
- * ships them empty and forks fill them in. The wiring tests
- * (`bootstrap-wiring.test.ts`, `admin-nav-wiring.test.tsx`) replace these hooks
- * with registering versions; this file exercises the REAL defaults to lock in
- * the no-op contract (a stray default registration would silently apply to
- * every install).
+ * `lib/app/admin-nav.ts`) ship empty in the Sunrise template and forks fill them
+ * in. This is an **application fork** (ConQuest), so it fills some of them: the
+ * `admin-nav` seam now registers the questionnaire surface (P2 / F2.1). This file
+ * locks in the EXACT app-level registration so a stray/missing registration is
+ * caught — `rate-limit` stays a true no-op (F1.1 uses an in-handler `ingestLimiter`,
+ * not `registerAppRateLimits`); `capabilities` still returns void by contract.
  *
  * @see lib/app/rate-limit.ts · lib/app/capabilities.ts · lib/app/admin-nav.ts
  */
@@ -23,7 +23,7 @@ afterEach(() => {
   __resetNavRegistryForTests();
 });
 
-describe('lib/app/ bootstrap defaults are no-ops', () => {
+describe('lib/app/ bootstrap seams', () => {
   it('registerAppRateLimits registers no tiers or rules by default', () => {
     // Act — run the real (empty) hook
     registerAppRateLimits();
@@ -39,14 +39,15 @@ describe('lib/app/ bootstrap defaults are no-ops', () => {
     expect(initAppCapabilities()).toBeUndefined();
   });
 
-  it('initAppNav registers no admin nav sections by default', () => {
+  it('initAppNav registers exactly the ConQuest questionnaire nav section', () => {
     // Arrange — clean registry
     __resetNavRegistryForTests();
 
-    // Act — run the real (empty) hook
+    // Act — run the real app hook (ConQuest fills this seam; Sunrise ships it empty)
     initAppNav();
 
-    // Assert — nothing registered
-    expect(getRegisteredNavSections()).toHaveLength(0);
+    // Assert — exactly the questionnaire section, nothing more. Catches both an
+    // accidental extra registration and a regression that drops the app nav.
+    expect(getRegisteredNavSections().map((s) => s.title)).toEqual(['Questionnaires']);
   });
 });
