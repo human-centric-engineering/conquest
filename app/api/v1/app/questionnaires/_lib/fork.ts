@@ -1,0 +1,209 @@
+/**
+ * Version-fork writer for structural authoring (F2.1 / PR2).
+ *
+ * Editing a *launched* version must not mutate it in place — in-flight work stays
+ * pinned to the version it started on. So every authoring mutation calls
+ * {@link forkVersionIfLaunched} as a preamble: if the target version is launched
+ * (or, from P3/P4, has live sessions/invitations), it deep-copies the version's
+ * goal/audience + section→question graph into a fresh `draft` and returns the new
+ * id; otherwise it returns the original id untouched. The route then writes to the
+ * returned `versionId`.
+ *
+ * Route-local DB seam — the `lib/app/questionnaire/**` module stays Prisma-free;
+ * the pure trigger (`countLaunchBlockers`) lives there, the deep copy lives here,
+ * mirroring `_lib/persist.ts`.
+ *
+ * Deliberately NOT copied into the fork:
+ *   - tags (F2.2 not landed — `// F2.2:` seam below),
+ *   - `AppQuestionnaireExtractionChange` records — a fork starts a clean editorial
+ *     lineage; the original keeps its ingest log.
+ */
+
+import { executeTransaction } from '@/lib/db/utils';
+import {
+  countLaunchBlockers,
+  hasLaunchBlockers,
+} from '@/lib/app/questionnaire/authoring/launch-blockers';
+import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
+import {
+  jsonInput,
+  type ScopedVersion,
+} from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
+
+/** The version a mutation should write to, and whether a fork happened. */
+export interface ForkResult {
+  /** The editable version id — a new draft when `forked`, else the original. */
+  versionId: string;
+  forked: boolean;
+  /** The editable version's number (the new draft's, or the original's). */
+  versionNumber: number;
+  /**
+   * Old→new id maps, present only when `forked`. A child mutation (edit/delete a
+   * section or question of a launched version) targets the *original* id in its
+   * URL; after the fork it must retarget the copied entity. `resolveForkedId`
+   * (authoring-routes) does the lookup. Empty/undefined on the no-fork path, where
+   * the original id is already the editable one.
+   */
+  sectionIdMap?: Map<string, string>;
+  questionIdMap?: Map<string, string>;
+}
+
+/** Audit attribution carried from the route (admin user + client IP). */
+export interface ForkAuditContext {
+  userId: string | null;
+  clientIp?: string | null;
+}
+
+/**
+ * Fork the version into a new draft if it is launched (or pinned by a blocker);
+ * otherwise return it unchanged. Takes the already-loaded {@link ScopedVersion}
+ * from the route's `loadScopedVersion` — no second read of the same row.
+ */
+export async function forkVersionIfLaunched(
+  scoped: ScopedVersion,
+  audit?: ForkAuditContext
+): Promise<ForkResult> {
+  const { id: versionId, questionnaireId } = scoped;
+
+  const blockers = await countLaunchBlockers(versionId);
+  const shouldFork = scoped.status === 'launched' || hasLaunchBlockers(blockers);
+  if (!shouldFork) {
+    return { versionId, forked: false, versionNumber: scoped.versionNumber };
+  }
+
+  const created = await executeTransaction(async (tx) => {
+    const source = await tx.appQuestionnaireVersion.findUniqueOrThrow({
+      where: { id: versionId },
+      select: {
+        goal: true,
+        audience: true,
+        goalProvenance: true,
+        audienceProvenance: true,
+        sections: {
+          orderBy: { ordinal: 'asc' },
+          select: {
+            id: true,
+            ordinal: true,
+            title: true,
+            description: true,
+            questions: {
+              orderBy: { ordinal: 'asc' },
+              select: {
+                id: true,
+                ordinal: true,
+                key: true,
+                prompt: true,
+                guidelines: true,
+                rationale: true,
+                type: true,
+                typeConfig: true,
+                required: true,
+                weight: true,
+                extractionConfidence: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // Next version number for this questionnaire (the version-service pattern).
+    // `@@unique([questionnaireId, versionNumber])` guards against a race.
+    const last = await tx.appQuestionnaireVersion.findFirst({
+      where: { questionnaireId },
+      orderBy: { versionNumber: 'desc' },
+      select: { versionNumber: true },
+    });
+    const versionNumber = (last?.versionNumber ?? 0) + 1;
+
+    const newVersion = await tx.appQuestionnaireVersion.create({
+      data: {
+        questionnaireId,
+        versionNumber,
+        status: 'draft',
+        goal: source.goal,
+        audience: jsonInput(source.audience),
+        goalProvenance: source.goalProvenance,
+        audienceProvenance: jsonInput(source.audienceProvenance),
+      },
+      select: { id: true },
+    });
+
+    // Sections first (slots reference them); copy ordinal verbatim, mapping each
+    // original section id to its copy so child mutations can retarget after a fork.
+    const sectionIdMap = new Map<string, string>();
+    for (const section of source.sections) {
+      const newSection = await tx.appQuestionnaireSection.create({
+        data: {
+          versionId: newVersion.id,
+          ordinal: section.ordinal,
+          title: section.title,
+          ...(section.description !== null ? { description: section.description } : {}),
+        },
+        select: { id: true },
+      });
+      sectionIdMap.set(section.id, newSection.id);
+
+      if (section.questions.length > 0) {
+        await tx.appQuestionSlot.createMany({
+          data: section.questions.map((q) => ({
+            versionId: newVersion.id,
+            sectionId: newSection.id,
+            ordinal: q.ordinal,
+            key: q.key, // copied 1:1 into a fresh version — uniqueness holds by construction
+            prompt: q.prompt,
+            type: q.type,
+            required: q.required,
+            weight: q.weight,
+            ...(q.guidelines !== null ? { guidelines: q.guidelines } : {}),
+            ...(q.rationale !== null ? { rationale: q.rationale } : {}),
+            ...(q.typeConfig !== null ? { typeConfig: jsonInput(q.typeConfig) } : {}),
+            ...(q.extractionConfidence !== null
+              ? { extractionConfidence: q.extractionConfidence }
+              : {}),
+          })),
+        });
+      }
+
+      // F2.2: copy this section's question tags into the fork here.
+    }
+
+    // Map original question ids to their copies via the per-version-unique `key`
+    // (createMany returns no ids; key is the stable join).
+    const newIdByKey = new Map(
+      (
+        await tx.appQuestionSlot.findMany({
+          where: { versionId: newVersion.id },
+          select: { id: true, key: true },
+        })
+      ).map((q) => [q.key, q.id])
+    );
+    const questionIdMap = new Map<string, string>();
+    for (const section of source.sections) {
+      for (const q of section.questions) {
+        const newId = newIdByKey.get(q.key);
+        if (newId) questionIdMap.set(q.id, newId);
+      }
+    }
+
+    return { id: newVersion.id, versionNumber, sectionIdMap, questionIdMap };
+  });
+
+  // Audit outside the transaction (fire-and-forget), once per fork.
+  logAdminAction({
+    userId: audit?.userId ?? null,
+    action: 'questionnaire_version.fork',
+    entityType: 'questionnaire_version',
+    entityId: created.id,
+    metadata: { questionnaireId, sourceVersionId: versionId, versionNumber: created.versionNumber },
+    clientIp: audit?.clientIp ?? null,
+  });
+
+  return {
+    versionId: created.id,
+    forked: true,
+    versionNumber: created.versionNumber,
+    sectionIdMap: created.sectionIdMap,
+    questionIdMap: created.questionIdMap,
+  };
+}

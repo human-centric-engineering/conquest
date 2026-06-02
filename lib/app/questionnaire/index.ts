@@ -7,10 +7,12 @@
 export {
   APP_QUESTIONNAIRES_FLAG,
   ensureQuestionnairesEnabled,
+  withQuestionnairesEnabled,
   isQuestionnairesEnabled,
 } from '@/lib/app/questionnaire/feature-flag';
 export {
   QUESTION_TYPES,
+  QUESTION_TYPE_LABELS,
   APP_QUESTIONNAIRE_STATUSES,
   FIELD_PROVENANCES,
   AUDIENCE_EXPERTISE_LEVELS,
@@ -26,3 +28,29 @@ export type {
   AudienceExpertiseLevel,
   AudienceSensitivity,
 } from '@/lib/app/questionnaire/types';
+export {
+  countLaunchBlockers,
+  hasLaunchBlockers,
+  slugifyKey,
+  nextAvailableKey,
+  typeConfigSchemaFor,
+  validateTypeConfig,
+  updateVersionMetaSchema,
+  updateVersionStatusSchema,
+  createSectionSchema,
+  updateSectionSchema,
+  reorderSchema,
+  createQuestionSchema,
+  updateQuestionSchema,
+} from '@/lib/app/questionnaire/authoring';
+export type {
+  LaunchBlockers,
+  TypeConfigValidation,
+  UpdateVersionMetaInput,
+  UpdateVersionStatusInput,
+  CreateSectionInput,
+  UpdateSectionInput,
+  ReorderInput,
+  CreateQuestionInput,
+  UpdateQuestionInput,
+} from '@/lib/app/questionnaire/authoring';

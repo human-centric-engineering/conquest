@@ -50,6 +50,22 @@ export const QUESTION_TYPES = [
 ] as const;
 export type QuestionType = (typeof QUESTION_TYPES)[number];
 
+/**
+ * Human-readable labels for each {@link QuestionType}. Single source so the
+ * read surface (`version-graph`) and the editor (`question-editor`) can't drift —
+ * a renamed/added type updates both. `Record<QuestionType, string>` so adding a
+ * type to the tuple forces a label here.
+ */
+export const QUESTION_TYPE_LABELS: Record<QuestionType, string> = {
+  free_text: 'Free text',
+  single_choice: 'Single choice',
+  multi_choice: 'Multi choice',
+  likert: 'Likert',
+  numeric: 'Numeric',
+  date: 'Date',
+  boolean: 'Boolean',
+};
+
 export const AUDIENCE_EXPERTISE_LEVELS = ['novice', 'intermediate', 'expert'] as const;
 export type AudienceExpertiseLevel = (typeof AUDIENCE_EXPERTISE_LEVELS)[number];
 
