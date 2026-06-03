@@ -58,6 +58,7 @@ model AppQuestionnaireVersion {
   sections        AppQuestionnaireSection[]
   changeRecords   AppQuestionnaireExtractionChange[]
   sourceDocuments AppQuestionnaireSourceDocument[]
+  tags            AppQuestionTag[]
 
   @@unique([questionnaireId, versionNumber])
   @@index([questionnaireId])
@@ -105,11 +106,53 @@ model AppQuestionSlot {
   updatedAt            DateTime @updatedAt
 
   section AppQuestionnaireSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  tags    AppQuestionSlotTag[]
 
   @@unique([versionId, key])
   @@index([versionId])
   @@index([sectionId])
   @@map("app_question_slot")
+}
+
+/// A tag in a version's vocabulary (F2.2). Version-scoped — the vocabulary forks
+/// with the version. `normalizedLabel` (trim+lowercase of `label`) is the
+/// case-insensitive dedup key; `color` is an optional UI/analytics swatch.
+/// Assigned to questions via the AppQuestionSlotTag join. Consumed by P8 analytics
+/// filtering and F4.1 adaptive selection.
+model AppQuestionTag {
+  id              String   @id @default(cuid())
+  versionId       String
+  label           String
+  normalizedLabel String // trim+lowercase of label; case-insensitive uniqueness key
+  color           String? // optional swatch from the TAG_COLORS allowlist (types.ts)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  version AppQuestionnaireVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  slots   AppQuestionSlotTag[]
+
+  @@unique([versionId, normalizedLabel])
+  @@index([versionId])
+  @@map("app_question_tag")
+}
+
+/// M:N assignment of a vocabulary tag to a question (F2.2). Both sides cascade.
+/// Application-layer validation (not a DB constraint) enforces that the tag and
+/// slot belong to the same version — `AppQuestionSlot.versionId` is denormalised
+/// for exactly this check.
+model AppQuestionSlotTag {
+  id             String   @id @default(cuid())
+  questionSlotId String
+  tagId          String
+  createdAt      DateTime @default(now())
+
+  questionSlot AppQuestionSlot @relation(fields: [questionSlotId], references: [id], onDelete: Cascade)
+  tag          AppQuestionTag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([questionSlotId, tagId])
+  @@index([questionSlotId])
+  @@index([tagId])
+  @@map("app_question_slot_tag")
 }
 
 /// The revertible audit trail of every editorial decision the extractor made,

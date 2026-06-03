@@ -29,6 +29,7 @@ import type { ScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authori
 type Mock = ReturnType<typeof vi.fn>;
 
 let sectionSeq = 0;
+let tagSeq = 0;
 const tx = {
   appQuestionnaireVersion: {
     findUniqueOrThrow: vi.fn(),
@@ -44,6 +45,12 @@ const tx = {
       { id: 'newq-1', key: 'full_name' },
       { id: 'newq-2', key: 'team' },
     ]),
+  },
+  appQuestionTag: {
+    create: vi.fn(async () => ({ id: `newtag-${++tagSeq}` })),
+  },
+  appQuestionSlotTag: {
+    createMany: vi.fn(async () => ({ count: 0 })),
   },
 };
 
@@ -100,12 +107,30 @@ function sourceGraph() {
       },
       { id: 'oldsec-2', ordinal: 1, title: 'Experience', description: null, questions: [] },
     ],
+    // F2.2 vocabulary: 'Core' on both questions, 'Optional' on the second only.
+    tags: [
+      {
+        id: 'oldtag-1',
+        label: 'Core',
+        normalizedLabel: 'core',
+        color: 'blue',
+        slots: [{ questionSlotId: 'oldq-1' }, { questionSlotId: 'oldq-2' }],
+      },
+      {
+        id: 'oldtag-2',
+        label: 'Optional',
+        normalizedLabel: 'optional',
+        color: null,
+        slots: [{ questionSlotId: 'oldq-2' }],
+      },
+    ],
   };
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
   sectionSeq = 0;
+  tagSeq = 0;
   (executeTransaction as unknown as Mock).mockImplementation((cb: (t: typeof tx) => unknown) =>
     cb(tx)
   );
@@ -213,6 +238,57 @@ describe('forkVersionIfLaunched — fork', () => {
       })
     );
     expect(tx).not.toHaveProperty('appQuestionnaireExtractionChange');
+  });
+
+  it('copies the tag vocabulary, preserving label/normalizedLabel and omitting a null colour', async () => {
+    const result = await forkVersionIfLaunched(scoped());
+
+    expect(tx.appQuestionTag.create).toHaveBeenCalledTimes(2);
+    expect(tx.appQuestionTag.create).toHaveBeenNthCalledWith(1, {
+      data: { versionId: 'v2', label: 'Core', normalizedLabel: 'core', color: 'blue' },
+      select: { id: true },
+    });
+    // The uncoloured tag omits `color` rather than writing null.
+    const second = (tx.appQuestionTag.create as Mock).mock.calls[1][0].data as Record<
+      string,
+      unknown
+    >;
+    expect(second).toMatchObject({
+      versionId: 'v2',
+      label: 'Optional',
+      normalizedLabel: 'optional',
+    });
+    expect(second).not.toHaveProperty('color');
+
+    expect(result.tagIdMap?.get('oldtag-1')).toBe('newtag-1');
+    expect(result.tagIdMap?.get('oldtag-2')).toBe('newtag-2');
+  });
+
+  it('re-links assignments through the copied question and tag ids', async () => {
+    await forkVersionIfLaunched(scoped());
+
+    expect(tx.appQuestionSlotTag.createMany).toHaveBeenCalledTimes(1);
+    const links = (tx.appQuestionSlotTag.createMany as Mock).mock.calls[0][0].data as Array<
+      Record<string, string>
+    >;
+    // 'Core' → both copied questions; 'Optional' → the second copied question.
+    expect(links).toEqual([
+      { questionSlotId: 'newq-1', tagId: 'newtag-1' },
+      { questionSlotId: 'newq-2', tagId: 'newtag-1' },
+      { questionSlotId: 'newq-2', tagId: 'newtag-2' },
+    ]);
+  });
+
+  it('skips the assignment write when the vocabulary has no assignments', async () => {
+    tx.appQuestionnaireVersion.findUniqueOrThrow.mockResolvedValue({
+      ...sourceGraph(),
+      tags: [{ id: 'oldtag-1', label: 'Core', normalizedLabel: 'core', color: null, slots: [] }],
+    });
+
+    await forkVersionIfLaunched(scoped());
+
+    expect(tx.appQuestionTag.create).toHaveBeenCalledTimes(1);
+    expect(tx.appQuestionSlotTag.createMany).not.toHaveBeenCalled();
   });
 
   it('writes SQL-NULL for a source with no audience/provenance', async () => {

@@ -39,8 +39,9 @@ import {
   type QuestionType,
 } from '@/lib/app/questionnaire/types';
 import { defaultTypeConfig, validateTypeConfig } from '@/lib/app/questionnaire/authoring';
-import type { QuestionSlotView, SectionView } from '@/lib/app/questionnaire/views';
+import type { QuestionSlotView, SectionView, TagView } from '@/lib/app/questionnaire/views';
 
+import { QuestionTagsEditor } from '@/components/admin/questionnaires/question-tags-editor';
 import type { RunMutation } from '@/components/admin/questionnaires/version-editor-types';
 
 interface Choice {
@@ -67,6 +68,7 @@ export function QuestionEditor({
   versionId,
   sections,
   question,
+  tags,
   run,
   busy,
 }: {
@@ -74,6 +76,7 @@ export function QuestionEditor({
   versionId: string;
   sections: SectionView[];
   question: QuestionSlotView;
+  tags: TagView[];
   run: RunMutation;
   busy: boolean;
 }) {
@@ -200,6 +203,16 @@ export function QuestionEditor({
               onSave={saveTypeConfig}
             />
           )}
+
+          {/* Tag assignment */}
+          <QuestionTagsEditor
+            questionnaireId={questionnaireId}
+            versionId={versionId}
+            question={question}
+            tags={tags}
+            run={run}
+            busy={busy}
+          />
         </div>
       </div>
     </li>

@@ -11,6 +11,8 @@ import { Badge } from '@/components/ui/badge';
 import { AUDIENCE_FIELDS, QUESTION_TYPE_LABELS } from '@/lib/app/questionnaire/types';
 import type { VersionGraphView } from '@/lib/app/questionnaire/views';
 
+import { TagChip } from '@/components/admin/questionnaires/tag-chip';
+
 const AUDIENCE_FIELD_LABEL: Record<(typeof AUDIENCE_FIELDS)[number], string> = {
   description: 'Description',
   role: 'Role',
@@ -71,6 +73,16 @@ export function VersionGraph({ graph }: { graph: VersionGraphView }) {
             <p className="text-muted-foreground mt-1 text-sm italic">Not set</p>
           )}
         </div>
+        {graph.tags.length > 0 && (
+          <div>
+            <h3 className="text-sm font-medium">Tags</h3>
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              {graph.tags.map((t) => (
+                <TagChip key={t.id} tag={t} />
+              ))}
+            </div>
+          </div>
+        )}
       </section>
 
       {/* Sections → questions */}
@@ -124,6 +136,13 @@ export function VersionGraph({ graph }: { graph: VersionGraphView }) {
                           </span>
                         )}
                       </p>
+                      {q.tags.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {q.tags.map((t) => (
+                            <TagChip key={t.id} tag={t} />
+                          ))}
+                        </div>
+                      )}
                     </li>
                   ))}
                 </ul>

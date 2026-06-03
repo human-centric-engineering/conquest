@@ -229,6 +229,45 @@ describe('questionnaire datamodel (Prisma.dmmf)', () => {
     expect(version.kind).toBe('object');
     expect(version.type).toBe('AppQuestionnaireVersion');
   });
+
+  it('AppQuestionTag maps app_question_tag and relates to version + slots (F2.2)', () => {
+    const model = getModel('AppQuestionTag');
+    expect(model.dbName).toBe('app_question_tag');
+
+    expect(getField(model, 'versionId').type).toBe('String');
+    expect(getField(model, 'label').type).toBe('String');
+    expect(getField(model, 'normalizedLabel').type).toBe('String');
+    expect(getField(model, 'color').type).toBe('String');
+
+    const version = getField(model, 'version');
+    expect(version.kind).toBe('object');
+    expect(version.type).toBe('AppQuestionnaireVersion');
+    expect(version.relationName).toBe(
+      getField(getModel('AppQuestionnaireVersion'), 'tags').relationName
+    );
+
+    const slots = getField(model, 'slots');
+    expect(slots.kind).toBe('object');
+    expect(slots.type).toBe('AppQuestionSlotTag');
+  });
+
+  it('AppQuestionSlotTag maps app_question_slot_tag and joins slot↔tag (F2.2)', () => {
+    const model = getModel('AppQuestionSlotTag');
+    expect(model.dbName).toBe('app_question_slot_tag');
+
+    expect(getField(model, 'questionSlotId').type).toBe('String');
+    expect(getField(model, 'tagId').type).toBe('String');
+
+    const slot = getField(model, 'questionSlot');
+    expect(slot.kind).toBe('object');
+    expect(slot.type).toBe('AppQuestionSlot');
+    expect(slot.relationName).toBe(getField(getModel('AppQuestionSlot'), 'tags').relationName);
+
+    const tag = getField(model, 'tag');
+    expect(tag.kind).toBe('object');
+    expect(tag.type).toBe('AppQuestionTag');
+    expect(tag.relationName).toBe(getField(getModel('AppQuestionTag'), 'slots').relationName);
+  });
 });
 
 describe('app_questionnaire_init migration SQL', () => {
@@ -382,5 +421,46 @@ describe('app_questionnaire_version_provenance migration SQL', () => {
     expect(executableSql).not.toContain('searchVector');
     // Exactly one executable statement — our single ALTER TABLE.
     expect(executableSql.match(/ALTER TABLE/g) ?? []).toHaveLength(1);
+  });
+});
+
+describe('app_question_tags migration SQL (F2.2)', () => {
+  const sql = readMigrationSql('_app_question_tags');
+  const executableSql = executableLines(sql);
+
+  it('creates exactly the two tag tables', () => {
+    expect(sql).toContain('CREATE TABLE "app_question_tag"');
+    expect(sql).toContain('CREATE TABLE "app_question_slot_tag"');
+    // Exactly two — guard against a phantom platform CREATE leaking back through
+    // the schema-fold footgun.
+    expect(executableSql.match(/CREATE TABLE/g) ?? []).toHaveLength(2);
+  });
+
+  it('declares both FK directions of the join with ON DELETE CASCADE', () => {
+    // Tag → version.
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "app_question_tag_versionId_fkey"[\s\S]*REFERENCES "app_questionnaire_version"\("id"\)[\s\S]*ON DELETE CASCADE/
+    );
+    // Join → slot and join → tag.
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "app_question_slot_tag_questionSlotId_fkey"[\s\S]*REFERENCES "app_question_slot"\("id"\)[\s\S]*ON DELETE CASCADE/
+    );
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "app_question_slot_tag_tagId_fkey"[\s\S]*REFERENCES "app_question_tag"\("id"\)[\s\S]*ON DELETE CASCADE/
+    );
+  });
+
+  it('enforces per-version label uniqueness, the join uniqueness, and lookup indexes', () => {
+    expect(sql).toContain('CREATE UNIQUE INDEX "app_question_tag_versionId_normalizedLabel_key"');
+    expect(sql).toContain('CREATE INDEX "app_question_tag_versionId_idx"');
+    expect(sql).toContain('CREATE UNIQUE INDEX "app_question_slot_tag_questionSlotId_tagId_key"');
+    expect(sql).toContain('CREATE INDEX "app_question_slot_tag_questionSlotId_idx"');
+    expect(sql).toContain('CREATE INDEX "app_question_slot_tag_tagId_idx"');
+  });
+
+  it('contains no platform (unmodelled-object) operations — the schema-fold strip holds', () => {
+    expect(executableSql).not.toContain('DROP INDEX');
+    expect(executableSql).not.toContain('ai_knowledge');
+    expect(executableSql).not.toContain('searchVector');
   });
 });

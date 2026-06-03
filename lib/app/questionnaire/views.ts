@@ -17,9 +17,18 @@ import type {
   AudienceShape,
   FieldProvenance,
   QuestionType,
+  TagColor,
 } from '@/lib/app/questionnaire/types';
 // DEMO-ONLY (F2.5.1): attribution summary embedded in list/detail rows.
 import type { AttributedDemoClient } from '@/lib/app/questionnaire/demo-clients';
+
+/** A vocabulary tag (F2.2) — client-safe projection of `AppQuestionTag`. */
+export interface TagView {
+  id: string;
+  label: string;
+  /** Swatch from the `TAG_COLORS` allowlist, or `null` when uncoloured. */
+  color: TagColor | null;
+}
 
 /** One row in the admin questionnaires list — enriched with latest-version counts. */
 export interface QuestionnaireListItem {
@@ -85,6 +94,8 @@ export interface QuestionSlotView {
   required: boolean;
   weight: number;
   extractionConfidence: number | null;
+  /** Tags assigned to this question, ordered by normalised label. */
+  tags: TagView[];
 }
 
 /** A section (with its questions) in the version graph. */
@@ -113,4 +124,6 @@ export interface VersionGraphView {
   goalProvenance: FieldProvenance | null;
   audienceProvenance: AudienceProvenance | null;
   sections: SectionView[];
+  /** The version's tag vocabulary (F2.2), ordered by normalised label. */
+  tags: TagView[];
 }

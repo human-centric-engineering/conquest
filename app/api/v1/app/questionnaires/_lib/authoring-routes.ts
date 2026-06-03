@@ -70,11 +70,16 @@ export async function loadScopedVersion(
  */
 export function resolveForkedId(
   fork: ForkResult,
-  kind: 'section' | 'question',
+  kind: 'section' | 'question' | 'tag',
   originalId: string
 ): string | null {
   if (!fork.forked) return originalId;
-  const map = kind === 'section' ? fork.sectionIdMap : fork.questionIdMap;
+  const map =
+    kind === 'section'
+      ? fork.sectionIdMap
+      : kind === 'question'
+        ? fork.questionIdMap
+        : fork.tagIdMap;
   return map?.get(originalId) ?? null;
 }
 
