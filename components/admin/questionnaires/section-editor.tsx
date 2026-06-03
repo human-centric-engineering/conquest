@@ -33,7 +33,7 @@ import { GripVertical, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { API } from '@/lib/api/endpoints';
-import type { SectionView } from '@/lib/app/questionnaire/views';
+import type { SectionView, TagView } from '@/lib/app/questionnaire/views';
 
 import { QuestionEditor } from '@/components/admin/questionnaires/question-editor';
 import type { RunMutation } from '@/components/admin/questionnaires/version-editor-types';
@@ -43,6 +43,7 @@ export function SectionEditor({
   versionId,
   section,
   allSections,
+  tags,
   run,
   busy,
 }: {
@@ -50,6 +51,7 @@ export function SectionEditor({
   versionId: string;
   section: SectionView;
   allSections: SectionView[];
+  tags: TagView[];
   run: RunMutation;
   busy: boolean;
 }) {
@@ -151,6 +153,7 @@ export function SectionEditor({
                   versionId={versionId}
                   sections={allSections}
                   question={q}
+                  tags={tags}
                   run={run}
                   busy={busy}
                 />

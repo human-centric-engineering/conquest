@@ -96,6 +96,11 @@ describe('getQuestionnaireDetail', () => {
       questionCount: 0,
       changeCount: 1,
     });
+    // The count is applied-only (reverted changes don't inflate it) — pin the
+    // `status: 'applied'` filter so a regression dropping it would be caught.
+    expect(changeGroupBy).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ status: 'applied' }) })
+    );
     // Provenance is exposed on the version graph, not the summary — no inferred
     // derivation here.
     expect(detail!.versions[0]).not.toHaveProperty('goalInferred');
@@ -141,6 +146,7 @@ describe('getVersionGraph', () => {
       audience: { role: 'new hire', locale: 'en' },
       goalProvenance: 'admin-supplied',
       audienceProvenance: { role: 'inferred' },
+      tags: [{ id: 't0', label: 'Core', color: 'blue' }],
       sections: [
         {
           id: 's0',
@@ -160,6 +166,7 @@ describe('getVersionGraph', () => {
               required: false,
               weight: 1,
               extractionConfidence: 0.9,
+              tags: [{ tag: { id: 't0', label: 'Core', color: 'blue' } }],
             },
           ],
         },
@@ -174,6 +181,11 @@ describe('getVersionGraph', () => {
     expect(changeGroupBy).not.toHaveBeenCalled();
     expect(graph!.sections).toHaveLength(1);
     expect(graph!.sections[0].questions[0]).toMatchObject({ key: 'name', type: 'free_text' });
+    // Tags (F2.2): version vocabulary + per-question assignments projected to TagView.
+    expect(graph!.tags).toEqual([{ id: 't0', label: 'Core', color: 'blue' }]);
+    expect(graph!.sections[0].questions[0].tags).toEqual([
+      { id: 't0', label: 'Core', color: 'blue' },
+    ]);
   });
 
   it('normalises null / unrecognised stored provenance to null', async () => {
@@ -189,6 +201,7 @@ describe('getVersionGraph', () => {
       audience: null,
       goalProvenance: 'legacy-unknown',
       audienceProvenance: null,
+      tags: [],
       sections: [],
     });
 

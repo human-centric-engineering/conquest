@@ -10,7 +10,7 @@
  */
 
 /** A pending mutation described as `[method, path, body]`. */
-export type MutationSpec = ['POST' | 'PATCH' | 'DELETE', string, unknown];
+export type MutationSpec = ['POST' | 'PUT' | 'PATCH' | 'DELETE', string, unknown];
 
 /** Run a mutation described by the thunk. Fire-and-forget from the caller's view. */
 export type RunMutation = (spec: () => MutationSpec) => void;

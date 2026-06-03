@@ -44,6 +44,7 @@ import type { AppQuestionnaireStatus, AudienceShape } from '@/lib/app/questionna
 import type { VersionGraphView } from '@/lib/app/questionnaire/views';
 
 import { SectionEditor } from '@/components/admin/questionnaires/section-editor';
+import { TagVocabularyEditor } from '@/components/admin/questionnaires/tag-vocabulary-editor';
 import { authoringMutate } from '@/components/admin/questionnaires/authoring-mutate';
 import type {
   MutationSpec,
@@ -243,6 +244,15 @@ export function VersionEditor({
         </Button>
       </section>
 
+      {/* Tag vocabulary */}
+      <TagVocabularyEditor
+        questionnaireId={questionnaireId}
+        versionId={versionId}
+        tags={version.tags}
+        run={run}
+        busy={busy}
+      />
+
       {/* Sections → questions */}
       {sections.length === 0 ? (
         <p className="text-muted-foreground text-sm italic">No sections yet.</p>
@@ -257,6 +267,7 @@ export function VersionEditor({
                   versionId={versionId}
                   section={section}
                   allSections={sections}
+                  tags={version.tags}
                   run={run}
                   busy={busy}
                 />

@@ -152,6 +152,25 @@ the version; no `User` FK anywhere (UG-1 — uploader/reverter identity is a pla
   consumed; F2.3 verifies source quotes against it), `bytes Bytes?` (optional raw
   upload for F2.4 re-parse). `@@index([versionId])`, `@@index([fileHash])`.
 
+### Tagging (F2.2)
+
+Migration `…_app_question_tags`. Two version-scoped, all-cascade models (no `User`
+FK — UG-1). The vocabulary forks with the version (the fork writer copies tags and
+re-links assignments through the slot id-map).
+
+- **`AppQuestionTag`** (`app_question_tag`) — one tag in a version's vocabulary.
+  `label` (display), `normalizedLabel` (trim + collapse-whitespace + lowercase — the
+  case-insensitive dedup key), `color?` (a `TAG_COLORS` allowlist value, `types.ts`).
+  `@relation` to the version `onDelete: Cascade`; `slots AppQuestionSlotTag[]`.
+  `@@unique([versionId, normalizedLabel])`, `@@index([versionId])`.
+- **`AppQuestionSlotTag`** (`app_question_slot_tag`) — the M:N join assigning a tag
+  to a question. `questionSlotId`, `tagId`; both `@relation`s `onDelete: Cascade`.
+  `@@unique([questionSlotId, tagId])`, `@@index` on each FK. **The tag+slot
+  same-version invariant is enforced in the application layer** (the assignment route
+  validates every tag id against the question's version before writing) — the
+  denormalised `AppQuestionSlot.versionId` exists for exactly this check; no DB
+  constraint spans the two tables' versions.
+
 ### Demo-client foundation (F2.5.1 — P2.5) · DEMO-ONLY
 
 Migration `20260603081129_app_demo_client`. **Identity only** — an attribution +

@@ -28,8 +28,10 @@ import type {
   QuestionnaireVersionSummary,
   QuestionSlotView,
   SectionView,
+  TagView,
   VersionGraphView,
 } from '@/lib/app/questionnaire/views';
+import { TAG_COLORS, type TagColor } from '@/lib/app/questionnaire/types';
 
 /** Cast a stored Json column back to our own AudienceShape (we wrote it). */
 function asAudience(value: Prisma.JsonValue): AudienceShape | null {
@@ -48,6 +50,18 @@ function asFieldProvenance(value: string | null): FieldProvenance | null {
 function asAudienceProvenance(value: Prisma.JsonValue): AudienceProvenance | null {
   if (value === null || value === undefined) return null;
   return value as AudienceProvenance;
+}
+
+/** Narrow a stored tag `color` string to TagColor (null if unset/off-allowlist). */
+function asTagColor(value: string | null): TagColor | null {
+  return value !== null && (TAG_COLORS as readonly string[]).includes(value)
+    ? (value as TagColor)
+    : null;
+}
+
+/** Project an `AppQuestionTag` row (id/label/color) to the client-safe TagView. */
+function toTagView(tag: { id: string; label: string; color: string | null }): TagView {
+  return { id: tag.id, label: tag.label, color: asTagColor(tag.color) };
 }
 
 /**
@@ -161,6 +175,10 @@ export async function getVersionGraph(
       audience: true,
       goalProvenance: true,
       audienceProvenance: true,
+      tags: {
+        orderBy: { normalizedLabel: 'asc' },
+        select: { id: true, label: true, color: true },
+      },
       sections: {
         orderBy: { ordinal: 'asc' },
         select: {
@@ -182,6 +200,10 @@ export async function getVersionGraph(
               required: true,
               weight: true,
               extractionConfidence: true,
+              tags: {
+                orderBy: { tag: { normalizedLabel: 'asc' } },
+                select: { tag: { select: { id: true, label: true, color: true } } },
+              },
             },
           },
         },
@@ -208,6 +230,7 @@ export async function getVersionGraph(
         required: qn.required,
         weight: qn.weight,
         extractionConfidence: qn.extractionConfidence,
+        tags: qn.tags.map((t) => toTagView(t.tag)),
       })
     ),
   }));
@@ -222,5 +245,6 @@ export async function getVersionGraph(
     goalProvenance: asFieldProvenance(version.goalProvenance),
     audienceProvenance: asAudienceProvenance(version.audienceProvenance),
     sections,
+    tags: version.tags.map(toTagView),
   };
 }

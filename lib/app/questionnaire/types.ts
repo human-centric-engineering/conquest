@@ -112,3 +112,14 @@ export const AUDIENCE_FIELDS = [
  * can mark each inferred field independently.
  */
 export type AudienceProvenance = Partial<Record<keyof AudienceShape, FieldProvenance>>;
+
+/**
+ * Allowlist of tag swatch colours (F2.2). `color` on `AppQuestionTag` is optional
+ * and, when set, must be one of these — a closed vocabulary so the create/update
+ * Zod schemas, the editor's swatch picker, and the read-view chips all derive from
+ * one source (same single-source reasoning as the status/type tuples above). The
+ * values are semantic names, not hex, so the UI maps them to its own palette and a
+ * theme change doesn't require a data migration.
+ */
+export const TAG_COLORS = ['slate', 'red', 'amber', 'green', 'blue', 'violet', 'pink'] as const;
+export type TagColor = (typeof TAG_COLORS)[number];

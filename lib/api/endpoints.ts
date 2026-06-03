@@ -376,6 +376,15 @@ export const API = {
       /** Single question by flat id (PATCH edit/move, DELETE). */
       versionQuestionById: (id: string, versionId: string, questionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/questions/${questionId}`,
+      /** Tag vocabulary collection (POST create). */
+      versionTags: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/tags`,
+      /** Single tag (PATCH rename/recolour, DELETE). */
+      versionTagById: (id: string, versionId: string, tagId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/tags/${tagId}`,
+      /** A question's tag set (PUT replace-set `{ tagIds }`). */
+      versionQuestionTags: (id: string, versionId: string, questionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/questions/${questionId}/tags`,
     },
     /** DEMO-ONLY (F2.5.1): demo-client identity + attribution. A fork strips this. */
     DEMO_CLIENTS: {

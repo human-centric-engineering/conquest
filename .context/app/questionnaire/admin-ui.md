@@ -64,10 +64,41 @@ switching via the `?v=` query param — no client state. `VersionGraph`
 The nav entry is registered in `lib/app/admin-nav.ts` via `registerNavSection()`
 (seam 4 — no edit to `admin-sidebar.tsx`).
 
-## Not yet (PR2 onward)
+## Tagging (F2.2)
 
-Creating a questionnaire is still the F1.1 ingestion endpoint (no UI). Editing
-structure, the `forkVersionIfLaunched` lifecycle, tagging (F2.2), extraction-change
-review/revert (F2.3), and re-ingest (F2.4) are the remaining P2 work — see
-[`../planning/features/f2.1.md`](../planning/features/f2.1.md) and the
+A per-version **tag vocabulary** plus **M:N assignment to questions**, layered onto
+the `?edit=1` authoring surface. Every write follows the same F2.1 mutation pipeline
+(flag-gate → `withAdminAuth` → scope-404 → `forkVersionIfLaunched` → validate → tx →
+P2002→400 → `logAdminAction` → `successResponse(data, { forked })`), so editing a
+launched version's tags forks a new draft exactly like a structural edit.
+
+**Endpoints** (under `API.APP.QUESTIONNAIRES`):
+
+| Endpoint                                     | Verb     | Action                                                             |
+| -------------------------------------------- | -------- | ------------------------------------------------------------------ |
+| `…/versions/:vid/tags`                       | `POST`   | Create a vocabulary tag (`label`, optional `color`).               |
+| `…/versions/:vid/tags/:tagId`                | `PATCH`  | Rename / recolour.                                                 |
+| `…/versions/:vid/tags/:tagId`                | `DELETE` | Delete (cascades its assignments).                                 |
+| `…/versions/:vid/questions/:questionId/tags` | `PUT`    | **Replace-set** assignment (`{ tagIds }`); empty array clears all. |
+
+- **`normalizedLabel`** (trim + collapse-whitespace + lowercase) is the dedup key —
+  a duplicate label is a 400 (`asTagConflict` maps the `@@unique` P2002).
+- **Cross-version safety:** the assignment route validates every `tagId` against the
+  question's version **before** forking (`resolveAssignableTagIds`), so a stray
+  cross-version id is a 400 with no orphan draft. After a fork it remaps the
+  question id and the tag ids through the fork's id-maps.
+- Tags ride on the existing `GET …/versions/:vid` graph (no separate read): the
+  version carries a `tags` vocabulary list and each question its assigned `tags`,
+  loaded in the same single nested query (no N+1).
+
+**UI** (`components/admin/questionnaires/`): `tag-vocabulary-editor.tsx` (create/
+rename/recolour/delete in the version editor), `question-tags-editor.tsx` (a popover
+checkbox multiselect firing the replace-set `PUT`), and `tag-chip.tsx` (the shared
+coloured pill, used by both the editor and the read-only `version-graph.tsx`).
+
+## Not yet (F2.3 onward)
+
+Creating a questionnaire is still the F1.1 ingestion endpoint (no UI).
+Extraction-change review/revert (F2.3) and re-ingest (F2.4) are the remaining P2
+work — see [`../planning/features/f2.1.md`](../planning/features/f2.1.md) and the
 [development plan](../planning/development-plan.md#p2--admin-crud-over-questionnaires).

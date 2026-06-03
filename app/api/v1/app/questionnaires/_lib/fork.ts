@@ -13,8 +13,11 @@
  * the pure trigger (`countLaunchBlockers`) lives there, the deep copy lives here,
  * mirroring `_lib/persist.ts`.
  *
+ * Copied into the fork: goal/audience + provenance, the section→question graph,
+ * and (F2.2) the tag vocabulary with its question assignments re-linked to the
+ * copies.
+ *
  * Deliberately NOT copied into the fork:
- *   - tags (F2.2 not landed — `// F2.2:` seam below),
  *   - `AppQuestionnaireExtractionChange` records — a fork starts a clean editorial
  *     lineage; the original keeps its ingest log.
  */
@@ -46,6 +49,12 @@ export interface ForkResult {
    */
   sectionIdMap?: Map<string, string>;
   questionIdMap?: Map<string, string>;
+  /**
+   * Old→new tag id map, present only when `forked`. The replace-set tag-assignment
+   * route (`PUT …/questions/:id/tags`) receives client-sent tag ids that name the
+   * *original* version's tags; after a fork it retargets them through this map.
+   */
+  tagIdMap?: Map<string, string>;
 }
 
 /** Audit attribution carried from the route (admin user + client IP). */
@@ -79,6 +88,15 @@ export async function forkVersionIfLaunched(
         audience: true,
         goalProvenance: true,
         audienceProvenance: true,
+        tags: {
+          select: {
+            id: true,
+            label: true,
+            normalizedLabel: true,
+            color: true,
+            slots: { select: { questionSlotId: true } },
+          },
+        },
         sections: {
           orderBy: { ordinal: 'asc' },
           select: {
@@ -164,8 +182,6 @@ export async function forkVersionIfLaunched(
           })),
         });
       }
-
-      // F2.2: copy this section's question tags into the fork here.
     }
 
     // Map original question ids to their copies via the per-version-unique `key`
@@ -186,7 +202,34 @@ export async function forkVersionIfLaunched(
       }
     }
 
-    return { id: newVersion.id, versionNumber, sectionIdMap, questionIdMap };
+    // F2.2: copy the version's tag vocabulary into the fork, then re-link each
+    // assignment to the copied question + copied tag. Done here (not in the
+    // per-section loop) because tags are version-scoped and re-linking needs the
+    // fully-assembled questionIdMap. A copied tag's `normalizedLabel` is unique by
+    // construction (carried 1:1 into a fresh version).
+    const tagIdMap = new Map<string, string>();
+    const newSlotTags: { questionSlotId: string; tagId: string }[] = [];
+    for (const tag of source.tags) {
+      const newTag = await tx.appQuestionTag.create({
+        data: {
+          versionId: newVersion.id,
+          label: tag.label,
+          normalizedLabel: tag.normalizedLabel,
+          ...(tag.color !== null ? { color: tag.color } : {}),
+        },
+        select: { id: true },
+      });
+      tagIdMap.set(tag.id, newTag.id);
+      for (const link of tag.slots) {
+        const newSlotId = questionIdMap.get(link.questionSlotId);
+        if (newSlotId) newSlotTags.push({ questionSlotId: newSlotId, tagId: newTag.id });
+      }
+    }
+    if (newSlotTags.length > 0) {
+      await tx.appQuestionSlotTag.createMany({ data: newSlotTags });
+    }
+
+    return { id: newVersion.id, versionNumber, sectionIdMap, questionIdMap, tagIdMap };
   });
 
   // Audit outside the transaction (fire-and-forget), once per fork.
@@ -205,5 +248,6 @@ export async function forkVersionIfLaunched(
     versionNumber: created.versionNumber,
     sectionIdMap: created.sectionIdMap,
     questionIdMap: created.questionIdMap,
+    tagIdMap: created.tagIdMap,
   };
 }

@@ -35,7 +35,7 @@ export class AuthoringError extends Error {
 }
 
 export async function authoringMutate<T>(
-  method: 'POST' | 'PATCH' | 'DELETE',
+  method: 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   path: string,
   body?: unknown
 ): Promise<AuthoringResult<T>> {
