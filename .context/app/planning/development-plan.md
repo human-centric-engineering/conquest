@@ -21,14 +21,14 @@ supersedes: Conversational Questionnaire Phases.md
 
 ## Project
 
-| Field         | Value                                                                                                                                                                                                   |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Name          | Conversational Questionnaire                                                                                                                                                                            |
-| Repo          | `human-centric-engineering/conquest` (forked from `human-centric-engineering/sunrise` at v0.0.1)                                                                                                        |
-| Host platform | Sunrise v0.0.1                                                                                                                                                                                          |
-| Lead          | Simon Holmes                                                                                                                                                                                            |
-| Status        | `building` — P0 done (F0.1, PR #10); P1 done (F1.1 ingestion: PR #13/#14/#15); P2 in flight (F2.1 done — PR1 #18 + PR2 #19; F2.2 tagging built on `feat/f2.2-tagging`, gates pending; F2.3–F2.4 remain) |
-| Opened        | 2026-05-30                                                                                                                                                                                              |
+| Field         | Value                                                                                                                                                                                                                                               |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Name          | Conversational Questionnaire                                                                                                                                                                                                                        |
+| Repo          | `human-centric-engineering/conquest` (forked from `human-centric-engineering/sunrise` at v0.0.1)                                                                                                                                                    |
+| Host platform | Sunrise v0.0.1                                                                                                                                                                                                                                      |
+| Lead          | Simon Holmes                                                                                                                                                                                                                                        |
+| Status        | `building` — P0 done (F0.1, PR #10); P1 done (F1.1 ingestion: PR #13/#14/#15); P2 in flight (F2.1 done — PR1 #18 + PR2 #19; F2.2 tagging merged #23; F2.3 change review built on `feat/f2.3-extraction-change-review`, gates pending; F2.4 remains) |
+| Opened        | 2026-05-30                                                                                                                                                                                                                                          |
 
 ---
 
@@ -137,7 +137,7 @@ The build moves from scaffolding → ingestion → admin manage → demo brandin
 | -------- | ----------------------------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **P0**   | Foundations                                     | done        | F0.1 shipped (PR #10) — substantially lighter than the original plan; Sunrise v0.0.1 provides the seams that used to need workarounds.                                                                                                                                                                               |
 | **P1**   | Questionnaire ingestion                         | done        | Admin uploads a doc; LLM extracts structure; changes recorded for review. API-only. F1.1 (P1's sole feature) complete: PR1 (schema) + PR2 (pure core) in PR #13; PR3 (extractor capability) in PR #14; PR4 (ingestion route + persistence) in PR #15.                                                                |
-| **P2**   | Admin CRUD over questionnaires                  | in flight   | Admin UI: list, edit, version, tag, review extraction changes. F2.1 done (PR1 read surface + PR2 structural authoring/version-fork/status); F2.2–F2.4 (tagging, change review, re-ingest) remain.                                                                                                                    |
+| **P2**   | Admin CRUD over questionnaires                  | in flight   | Admin UI: list, edit, version, tag, review extraction changes. F2.1 done (PR1 read surface + PR2 structural authoring/version-fork/status); F2.2 tagging merged (#23); F2.3 change review built (full revert + sub-route, gates pending); F2.4 re-ingest remains.                                                    |
 | **P2.5** | Demo-client foundation                          | done        | F2.5.1 shipped (PR #21) — demo-client identity + `AppQuestionnaire` FK + admin attribution, the slice that must **lead** so P3+ build tenant-aware. The rest of demo tenancy (theming, invitation branding, session reset, content seed) is **distributed** into P3/P6/P7/P9 as marked `// DEMO-ONLY:` sub-features. |
 | **P3**   | Configuration, invitations, and cost estimation | not started | Per-version config; invitation flow; pre-launch cost estimate.                                                                                                                                                                                                                                                       |
 | **P4**   | Conversational engine (non-streaming)           | not started | Selection · extraction · contradiction · completion logic, exercised without the streaming surface.                                                                                                                                                                                                                  |
@@ -238,9 +238,11 @@ _Indicative tasks:_
 
 ### F2.3 — Extraction-change review
 
-_Status:_ not started · _Size:_ ~1 PR · _Owner:_ TBD · _Deps:_ F1.1, F2.1
+_Status:_ in flight — built on `feat/f2.3-extraction-change-review` (pure revert planner + list/revert APIs + sub-route review UI + tests; gates pending) · _Size:_ 2 PRs (read surface · revert engine) · _Owner:_ TBD · _Deps:_ F1.1, F2.1
 
-Lists every `AppQuestionnaireExtractionChange` with source quote, before/after, rationale. Admin can revert any change; revert restores `beforeJson`. This is the consumer of P1's change-record log.
+> Committable tracker: [`planning/features/f2.3.md`](features/f2.3.md). Build decisions: **full revert across all change types** (not just the tractable ones); review surface on a **dedicated sub-route** (`…/[id]/extraction-changes?v=`), not a detail-page tab; **fail-cleanly** reconciliation (null-`targetEntityId` edits matched against the live graph, typed `RevertImpossible` → 422 rather than guess); fork-on-launched applies the inverse to the draft and marks the **source** change row reverted.
+
+Lists every `AppQuestionnaireExtractionChange` with source quote, before/after, rationale. Admin can revert any change; revert restores the pre-change graph state. This is the consumer of P1's change-record log.
 
 _Indicative tasks:_
 

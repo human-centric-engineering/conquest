@@ -75,9 +75,42 @@ for entity-targeted edits; F2.3's review surface reconciles them against
 the version, so their `targetEntityId` is the version id and revert clears exactly
 those version fields.
 
-## Revert (F2.3, preview)
+## Revert (F2.3)
 
-F2.3 lists records for a version and restores `beforeJson` on revert (flipping
-`status` to `reverted`). Because pruned content lives only in `beforeJson`, a
-`prune_*` revert re-creates it; an `infer_goal`/`infer_audience` revert clears the
-version field the inference set.
+F2.3 lists a version's records and reverts any one of them, restoring the graph to
+its pre-change state and flipping `status` to `reverted` (with
+`revertedAt`/`revertedByUserId`). A **pure planner** (`planRevert` in
+`lib/app/questionnaire/extraction-review/`) decides what a revert _means_ as
+primitive graph ops; the executor (`_lib/extraction-review-routes.ts`) applies
+them. The honest posture is **fail cleanly, never guess-and-corrupt** — any
+ambiguity returns a typed `RevertImpossible` reason (→ `422 REVERT_IMPOSSIBLE`),
+not a silent wrong mutation.
+
+Revert semantics by confidence:
+
+- **Faithful.** `infer_goal` / `infer_audience` clear the version field(s) the
+  inference set (`infer_audience` clears only the still-inferred key subset; a
+  drift guard refuses a field the admin re-supplied since). `prune_section` /
+  `prune_question` re-create the dropped entity from `beforeJson` (the only copy),
+  appended at the end with a fresh per-version key.
+- **Best-effort, fails cleanly.** `rewrite_prompt`, `correct_*`, `infer_type`,
+  `augment_question` have a null `targetEntityId`, so revert reconciles the target
+  by matching `afterJson` against the live graph (tie-broken by `sourceQuote`).
+  Zero matches → `target_not_found`; multiple → `ambiguous_target`.
+- **Structural, default-fail.** `merge_questions` / `split_question` /
+  `add_section` have no faithful inverse from free-form JSON; they revert only when
+  `beforeJson` carries enough to reconstruct and all products reconcile uniquely,
+  else `structural_inverse_unavailable` / `graph_drift`. Never a half-restored graph.
+
+**Block, don't cascade.** The reconciliation _is_ the dependency guard: a later
+edit to the same entity makes `afterJson` stop matching, so the revert is refused
+(`target_not_found` / `graph_drift`) rather than undoing intervening work. The
+review UI orders changes newest-first and pre-computes each row's `revertable`
+verdict so the admin reverts in the safe order.
+
+**Fork marks the source row.** A fork starts a clean editorial lineage (it copies
+no change records), so reverting on a launched version applies the inverse mutation
+to the forked **draft** and marks the change row — which records the decision —
+`reverted` on the **source** version. The planner is dry-run _before_ the fork so a
+doomed revert leaves no orphan draft. Only `applied` rows are revertible; a
+re-revert is a `409`.

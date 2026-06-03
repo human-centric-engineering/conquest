@@ -385,6 +385,12 @@ export const API = {
       /** A question's tag set (PUT replace-set `{ tagIds }`). */
       versionQuestionTags: (id: string, versionId: string, questionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/questions/${questionId}/tags`,
+      /** Extraction-change log for a version (GET list, filter by status/type). */
+      versionChanges: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/changes`,
+      /** Revert one extraction change (POST). */
+      versionChangeRevert: (id: string, versionId: string, changeId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/changes/${changeId}/revert`,
     },
     /** DEMO-ONLY (F2.5.1): demo-client identity + attribution. A fork strips this. */
     DEMO_CLIENTS: {
