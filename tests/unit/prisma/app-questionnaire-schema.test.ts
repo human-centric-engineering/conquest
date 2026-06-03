@@ -66,6 +66,40 @@ describe('questionnaire datamodel (Prisma.dmmf)', () => {
     const versions = getField(model, 'versions');
     expect(versions.kind).toBe('object');
     expect(versions.type).toBe('AppQuestionnaireVersion');
+
+    // DEMO-ONLY (F2.5.1): nullable demo-client attribution — a plain scalar FK
+    // plus the relation field. onDelete/index are asserted in the migration block.
+    expect(getField(model, 'demoClientId').type).toBe('String');
+    expect(getField(model, 'demoClientId').kind).toBe('scalar');
+    const demoClient = getField(model, 'demoClient');
+    expect(demoClient.kind).toBe('object');
+    expect(demoClient.type).toBe('AppDemoClient');
+  });
+
+  it('AppDemoClient maps app_demo_client with the F2.5.1 identity fields', () => {
+    const model = getModel('AppDemoClient');
+    expect(model.dbName).toBe('app_demo_client');
+
+    expect(getField(model, 'id').type).toBe('String');
+    expect(getField(model, 'slug').type).toBe('String');
+    expect(getField(model, 'name').type).toBe('String');
+    expect(getField(model, 'description').type).toBe('String');
+    expect(getField(model, 'isActive').type).toBe('Boolean');
+    expect(getField(model, 'createdAt').type).toBe('DateTime');
+    expect(getField(model, 'updatedAt').type).toBe('DateTime');
+
+    // Identity only at F2.5.1 — theme columns land with their first renderer.
+    for (const themeField of ['primaryColour', 'logoUrl', 'welcomeMessageMd']) {
+      expect(model.fields.find((f) => f.name === themeField)).toBeUndefined();
+    }
+
+    // Reverse relation back to the attributed questionnaires (count + delete guard).
+    const questionnaires = getField(model, 'questionnaires');
+    expect(questionnaires.kind).toBe('object');
+    expect(questionnaires.type).toBe('AppQuestionnaire');
+    expect(questionnaires.relationName).toBe(
+      getField(getModel('AppQuestionnaire'), 'demoClient').relationName
+    );
   });
 
   it('AppQuestionnaireVersion maps app_questionnaire_version and relates back', () => {
@@ -295,6 +329,37 @@ describe('app_questionnaire_ingestion migration SQL', () => {
     expect(executableSql).not.toContain('DROP INDEX');
     expect(executableSql).not.toContain('ai_knowledge');
     expect(executableSql).not.toContain('ai_message');
+    expect(executableSql).not.toContain('searchVector');
+  });
+});
+
+describe('app_demo_client migration SQL', () => {
+  const sql = readMigrationSql('_app_demo_client');
+  const executableSql = executableLines(sql);
+
+  it('creates exactly the app_demo_client table', () => {
+    expect(sql).toContain('CREATE TABLE "app_demo_client"');
+    expect(executableSql.match(/CREATE TABLE/g) ?? []).toHaveLength(1);
+  });
+
+  it('adds the nullable demoClientId column to app_questionnaire', () => {
+    expect(sql).toMatch(/ALTER TABLE "app_questionnaire" ADD COLUMN\s+"demoClientId" TEXT;/);
+  });
+
+  it('declares the demoClient FK with ON DELETE SET NULL (questionnaire outlives its client)', () => {
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "app_questionnaire_demoClientId_fkey"[\s\S]*REFERENCES "app_demo_client"\("id"\)[\s\S]*ON DELETE SET NULL/
+    );
+  });
+
+  it('enforces the unique slug and the demoClientId lookup index', () => {
+    expect(sql).toContain('CREATE UNIQUE INDEX "app_demo_client_slug_key"');
+    expect(sql).toContain('CREATE INDEX "app_questionnaire_demoClientId_idx"');
+  });
+
+  it('contains no platform (unmodelled-object) operations — the schema-fold strip holds', () => {
+    expect(executableSql).not.toContain('DROP INDEX');
+    expect(executableSql).not.toContain('ai_knowledge');
     expect(executableSql).not.toContain('searchVector');
   });
 });

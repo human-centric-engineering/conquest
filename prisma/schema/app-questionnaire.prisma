@@ -18,12 +18,20 @@ model AppQuestionnaire {
   id        String   @id @default(cuid())
   title     String
   status    String   @default("draft")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  // DEMO-ONLY (F2.5.1): which demo client this questionnaire is attributed to.
+  // null = "Generic Sunrise demo" (defaults end-to-end); no backfill on older rows.
+  // SetNull, not Cascade: a questionnaire outlives its demo client — attribution
+  // just clears. The admin DELETE refuses (409) while attributed, so this is the
+  // schema-honest backstop, not the happy path. See .context/app/questionnaire/demo-clients.md.
+  demoClientId String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  versions AppQuestionnaireVersion[]
+  versions   AppQuestionnaireVersion[]
+  demoClient AppDemoClient?            @relation(fields: [demoClientId], references: [id], onDelete: SetNull)
 
   @@index([status])
+  @@index([demoClientId])
   @@map("app_questionnaire")
 }
 
@@ -152,4 +160,36 @@ model AppQuestionnaireSourceDocument {
   @@index([versionId])
   @@index([fileHash])
   @@map("app_questionnaire_source_document")
+}
+
+/// DEMO-ONLY (F2.5.1): demo-tenancy attribution + branding partition, NOT a
+/// security boundary. Lets a questionnaire be labelled as a given prospect's demo
+/// so the sales surface is attributable. Application-layer scoping on
+/// single-tenant Sunrise — demo clients aren't adversarial, so hard isolation is
+/// out of scope. A multi-customer fork activates Sunrise's RLS seam
+/// (`TENANCY_MODE=multi`, `Org`/`orgId` at `lib/db/client.ts`) rather than
+/// hardening this table.
+///
+/// FORK-GUIDANCE: see .context/app/questionnaire/forking.md § "Replacing demo
+/// tenancy" — delete entirely (single-tenant prod) · rename to AppTenant + RLS
+/// (multi-tenant prod) · keep as AppBrand without the marker.
+///
+/// IDENTITY ONLY in F2.5.1. Theme columns (colours, fonts, logo, copy) land with
+/// their first renderer (F3.4 invitation email / F7.1 user UI); the reset-sessions
+/// and clone-for-client utilities land in F6.4 / P3+. No User FK (UG-1) — a global
+/// admin-managed fixture table, ownership implicit.
+model AppDemoClient {
+  id          String   @id @default(cuid())
+  slug        String   @unique // URL-safe ("acme-bank"); admin URLs + later invite links
+  name        String // display name ("Acme Bank Demo")
+  description String? // internal admin note ("Prepared for the Q1 2026 pitch")
+  isActive    Boolean  @default(true) // soft-disable without delete
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Reverse relation (F2.5.1 AD2): the list endpoint counts attributed
+  // questionnaires per client and the DELETE 409-guard reads it directly.
+  questionnaires AppQuestionnaire[]
+
+  @@map("app_demo_client")
 }

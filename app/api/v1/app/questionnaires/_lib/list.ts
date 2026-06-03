@@ -70,6 +70,8 @@ export async function listQuestionnaires(
         createdAt: true,
         updatedAt: true,
         _count: { select: { versions: true } },
+        // DEMO-ONLY (F2.5.1): attributed demo client, or null for a generic demo.
+        demoClient: { select: { id: true, slug: true, name: true } },
         // Latest version only — the one the list row summarises.
         versions: {
           orderBy: { versionNumber: 'desc' },
@@ -122,6 +124,7 @@ export async function listQuestionnaires(
         : null,
       sectionCount: latest ? (sectionCountByVersion.get(latest.id) ?? 0) : 0,
       questionCount: latest ? (questionCountByVersion.get(latest.id) ?? 0) : 0,
+      demoClient: row.demoClient,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     };

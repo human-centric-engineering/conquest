@@ -5,12 +5,14 @@ import { notFound } from 'next/navigation';
 import { VersionGraph } from '@/components/admin/questionnaires/version-graph';
 import { VersionEditor } from '@/components/admin/questionnaires/version-editor';
 import { QUESTIONNAIRE_STATUS_BADGE } from '@/components/admin/questionnaires/status-badge';
+import { DemoClientAssign } from '@/components/admin/demo-clients/demo-client-assign';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
 import { isQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
+import type { AttributedDemoClient, DemoClientView } from '@/lib/app/questionnaire/demo-clients';
 import type { QuestionnaireDetail, VersionGraphView } from '@/lib/app/questionnaire/views';
 
 export const metadata: Metadata = {
@@ -35,6 +37,24 @@ async function getDetail(id: string): Promise<QuestionnaireDetail | null> {
   }
 }
 
+// DEMO-ONLY (F2.5.1): active demo clients for the attribution picker. Fetch
+// failures degrade gracefully — the picker still shows the current attribution
+// and "None".
+async function getActiveDemoClients(): Promise<AttributedDemoClient[]> {
+  try {
+    const res = await serverFetch(API.APP.DEMO_CLIENTS.ROOT);
+    if (!res.ok) return [];
+    const body = await parseApiResponse<DemoClientView[]>(res);
+    if (!body.success) return [];
+    return body.data
+      .filter((client) => client.isActive)
+      .map((client) => ({ id: client.id, slug: client.slug, name: client.name }));
+  } catch (err) {
+    logger.error('questionnaire detail page: demo clients fetch failed', err);
+    return [];
+  }
+}
+
 async function getGraph(id: string, versionId: string): Promise<VersionGraphView | null> {
   try {
     const res = await serverFetch(API.APP.QUESTIONNAIRES.versionGraph(id, versionId));
@@ -55,6 +75,9 @@ export default async function QuestionnaireDetailPage({ params, searchParams }: 
 
   const detail = await getDetail(id);
   if (!detail) notFound();
+
+  // DEMO-ONLY (F2.5.1): attribution picker options.
+  const demoClientOptions = await getActiveDemoClients();
 
   // Version switching is SSR via the `?v=` query param (no client state needed).
   // Default to the newest version (the detail list is already newest-first).
@@ -83,6 +106,13 @@ export default async function QuestionnaireDetailPage({ params, searchParams }: 
           {detail.versions.length} version{detail.versions.length === 1 ? '' : 's'}
         </p>
       </header>
+
+      {/* DEMO-ONLY (F2.5.1): demo-client attribution. */}
+      <DemoClientAssign
+        questionnaireId={id}
+        current={detail.demoClient}
+        options={demoClientOptions}
+      />
 
       {detail.versions.length === 0 ? (
         <p className="text-muted-foreground text-sm italic">This questionnaire has no versions.</p>

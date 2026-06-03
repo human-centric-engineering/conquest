@@ -152,5 +152,27 @@ the version; no `User` FK anywhere (UG-1 — uploader/reverter identity is a pla
   consumed; F2.3 verifies source quotes against it), `bytes Bytes?` (optional raw
   upload for F2.4 re-parse). `@@index([versionId])`, `@@index([fileHash])`.
 
+### Demo-client foundation (F2.5.1 — P2.5) · DEMO-ONLY
+
+Migration `20260603081129_app_demo_client`. **Identity only** — an attribution +
+branding partition, **not** a security boundary (full rationale + fork paths in
+[`demo-clients.md`](./demo-clients.md)). Same schema-fold footgun as the ingestion
+migration: `migrate dev` re-emitted the three pgvector `DROP INDEX` + the
+`searchVector` ALTER; created with `--create-only`, stripped by hand, applied via
+`db:migrate:deploy`. The migration header names what was removed; the schema-shape
+test guards it.
+
+- **`AppDemoClient`** (`app_demo_client`) — `slug` (`@unique`, kebab-case), `name`,
+  `description?`, `isActive` (default `true`), timestamps;
+  `questionnaires AppQuestionnaire[]` reverse relation (powers the list count + the
+  delete guard). **No `User` FK** (global admin-managed fixture). Theme columns
+  (colours/fonts/logo/copy) are deliberately deferred to their first renderer
+  (F3.4 / F7.1).
+- **`AppQuestionnaire`** gains `demoClientId String?` + `demoClient` relation with
+  **`onDelete: SetNull`** (a questionnaire outlives its demo client — attribution
+  clears) and `@@index([demoClientId])`. `null` = generic Sunrise demo; no backfill.
+  The admin `DELETE /demo-clients/:id` still refuses (409) while attributed — the
+  SetNull is the schema-honest backstop, the 409-guard is the UX.
+
 _Later phases extend this file — config & invitations (P3), session models (P4),
 evaluation links (P5), turns (P6), etc. Each documents its models here as it lands._
