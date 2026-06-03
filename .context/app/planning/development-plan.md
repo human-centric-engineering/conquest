@@ -63,7 +63,7 @@ Some of what this platform builds is questionnaire-specific. Some is reusable ac
 
 - The **per-turn orchestrator** pattern (P6)
 - The **design-time evaluation** pattern (P5) — admin reviews a structured artefact against a stated goal/audience via agents-as-judges
-- The **demo tenancy + theming** module (P2.5)
+- The **demo tenancy + theming** module — a cross-cutting concern in marked `// DEMO-ONLY:` modules; foundation in P2.5, the rest distributed across P3/P6/P7/P9
 - The **change-record review-and-revert** pattern (P1)
 - The **suggestion review-and-accept** pattern (P5)
 - The **tag-and-analytics-filter** pattern (P2, P8)
@@ -133,19 +133,19 @@ When a need arises that Sunrise's public surface doesn't cover, the rule is _not
 
 The build moves from scaffolding → ingestion → admin manage → demo branding → configuration → conversational core → evaluation → streaming → user UI → analytics → hardening. Phases are sequenced so each one's surface area is exercisable end-to-end before the next adds new abstraction.
 
-| Phase    | Title                                           | Status      | Notes                                                                                                                                                                                                                                                 |
-| -------- | ----------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **P0**   | Foundations                                     | done        | F0.1 shipped (PR #10) — substantially lighter than the original plan; Sunrise v0.0.1 provides the seams that used to need workarounds.                                                                                                                |
-| **P1**   | Questionnaire ingestion                         | done        | Admin uploads a doc; LLM extracts structure; changes recorded for review. API-only. F1.1 (P1's sole feature) complete: PR1 (schema) + PR2 (pure core) in PR #13; PR3 (extractor capability) in PR #14; PR4 (ingestion route + persistence) in PR #15. |
-| **P2**   | Admin CRUD over questionnaires                  | in flight   | Admin UI: list, edit, version, tag, review extraction changes. F2.1 done (PR1 read surface + PR2 structural authoring/version-fork/status); F2.2–F2.4 (tagging, change review, re-ingest) remain.                                                     |
-| **P2.5** | Demo clients and theming                        | not started | Tenancy + branding for the sales-demo audience. `// DEMO-ONLY:` work mostly lives here.                                                                                                                                                               |
-| **P3**   | Configuration, invitations, and cost estimation | not started | Per-version config; invitation flow; pre-launch cost estimate.                                                                                                                                                                                        |
-| **P4**   | Conversational engine (non-streaming)           | not started | Selection · extraction · contradiction · completion logic, exercised without the streaming surface.                                                                                                                                                   |
-| **P5**   | Design-time evaluation (agents-as-judges)       | not started | Judges score a questionnaire against goal/audience; suggestion review queue.                                                                                                                                                                          |
-| **P6**   | Conversational session (streaming)              | not started | Per-turn orchestrator over streaming chat; voice + attachments.                                                                                                                                                                                       |
-| **P7**   | User-facing conversational UI                   | not started | Split-screen chat + answer-slot panel; polish; PDF export.                                                                                                                                                                                            |
-| **P8**   | Admin analytics, exports, anonymous mode        | not started | Dashboards, CSV/JSON export, anonymous-mode handling.                                                                                                                                                                                                 |
-| **P9**   | Hardening + forking docs                        | not started | Runbook, flag inventory, `forking.md`, concurrent-session sanity.                                                                                                                                                                                     |
+| Phase    | Title                                           | Status      | Notes                                                                                                                                                                                                                                                                                       |
+| -------- | ----------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **P0**   | Foundations                                     | done        | F0.1 shipped (PR #10) — substantially lighter than the original plan; Sunrise v0.0.1 provides the seams that used to need workarounds.                                                                                                                                                      |
+| **P1**   | Questionnaire ingestion                         | done        | Admin uploads a doc; LLM extracts structure; changes recorded for review. API-only. F1.1 (P1's sole feature) complete: PR1 (schema) + PR2 (pure core) in PR #13; PR3 (extractor capability) in PR #14; PR4 (ingestion route + persistence) in PR #15.                                       |
+| **P2**   | Admin CRUD over questionnaires                  | in flight   | Admin UI: list, edit, version, tag, review extraction changes. F2.1 done (PR1 read surface + PR2 structural authoring/version-fork/status); F2.2–F2.4 (tagging, change review, re-ingest) remain.                                                                                           |
+| **P2.5** | Demo-client foundation                          | not started | Demo-client identity + `AppQuestionnaire` FK + admin attribution — the slice that must **lead** so P3+ build tenant-aware. The rest of demo tenancy (theming, invitation branding, session reset, content seed) is **distributed** into P3/P6/P7/P9 as marked `// DEMO-ONLY:` sub-features. |
+| **P3**   | Configuration, invitations, and cost estimation | not started | Per-version config; invitation flow; pre-launch cost estimate.                                                                                                                                                                                                                              |
+| **P4**   | Conversational engine (non-streaming)           | not started | Selection · extraction · contradiction · completion logic, exercised without the streaming surface.                                                                                                                                                                                         |
+| **P5**   | Design-time evaluation (agents-as-judges)       | not started | Judges score a questionnaire against goal/audience; suggestion review queue.                                                                                                                                                                                                                |
+| **P6**   | Conversational session (streaming)              | not started | Per-turn orchestrator over streaming chat; voice + attachments.                                                                                                                                                                                                                             |
+| **P7**   | User-facing conversational UI                   | not started | Split-screen chat + answer-slot panel; polish; PDF export.                                                                                                                                                                                                                                  |
+| **P8**   | Admin analytics, exports, anonymous mode        | not started | Dashboards, CSV/JSON export, anonymous-mode handling.                                                                                                                                                                                                                                       |
+| **P9**   | Hardening + forking docs                        | not started | Runbook, flag inventory, `forking.md`, concurrent-session sanity.                                                                                                                                                                                                                           |
 
 ---
 
@@ -262,48 +262,44 @@ _Indicative tasks:_
 
 ---
 
-## P2.5 — Demo clients and theming
+## P2.5 — Demo-client foundation
 
-**Intent.** Tenancy + branding so John or Simon can stand up a branded demo for a prospect in under an hour. Mostly `// DEMO-ONLY:` work — a fork into a real client engagement strips most of this. Three features kept separable so a fork can strip demo content without touching the tenancy structure.
+**Intent.** Stand up the demo-client _identity_ — the table, the `AppQuestionnaire` foreign key, and the admin attribution surface — so a questionnaire can be labelled as a given prospect's demo. This is the one slice of demo tenancy that must **lead**: with the FK in place from here on, P3 (invitations), P4/P6 (sessions), and P7 (user UI) are all built tenant-aware in a single pass instead of retrofitted.
 
-### F2.5.1 — Tenant scaffolding
+**This phase used to be all of demo tenancy; it isn't anymore.** Demo tenancy + branding is a _cross-cutting concern_, not a milestone — the decimal in "P2.5" was the tell that it was inserted between P2 and P3 without the dependency pass the round-numbered phases got. Most of it can only be built once the model each piece hangs off exists: invitation branding needs P3's invitation model, session reset needs P4/P6's session graph, the theming render points need P7's user pages, the content seed needs a complete vertical. (The original F2.5.1 even listed `AppQuestionnaireSession` scoping — a model P4/P6 hasn't built yet.) So those pieces now land **in the phase that builds their dependency**, each as a clearly-marked `// DEMO-ONLY:` sub-feature — see the distributed-work table below.
+
+**Decompose the schedule, preserve the module boundary.** Fork-strippability — the property that justified bundling this as a phase — is a property of _code organisation_, not _build scheduling_. Every distributed piece still lives in the same marked territory (`lib/app/questionnaire/theming/`, the `demo-clients/` route + page dirs, `// DEMO-ONLY:` headers), so a fork still strips demo tenancy in one `grep` sweep even though the work is spread across phases. See the [[#Decisions log]] entry (2026-06-03).
+
+### F2.5.1 — Demo-client foundation
 
 _Status:_ not started · _Size:_ ~1–2 PRs · _Owner:_ TBD · _Deps:_ F0.1
 
-A **demo-client partition** — tenant model, scoping rules for questionnaires + sessions, tenant-aware routing — so each prospect sees their own brand and content. Deliberately lightweight and app-owned: application-layer scoping on single-tenant Sunrise, **not** a security isolation boundary. Demo clients aren't adversarial, so hard isolation is out of scope here.
+A **demo-client partition** — identity table, the `AppQuestionnaire` FK, and admin attribution — so each prospect's questionnaires are grouped and labelled under their name. Deliberately lightweight and app-owned: application-layer scoping on single-tenant Sunrise, **not** a security isolation boundary. Demo clients aren't adversarial, so hard isolation is out of scope here. Theme fields, session/invitation scoping, and the reset/seed utilities are **not** here — they ride into later phases (table below).
 
 > **Not the bones of real multi-tenancy.** This table is a branding/content partition, not the foundation a real customer-isolation layer plugs into. If a fork becomes a multi-customer product, the right move is to activate Sunrise's RLS tenancy seam (`TENANCY_MODE=multi`, `Org`/`orgId` retrofit at the `lib/db/client.ts` chokepoint), **not** to harden this demo table into an isolation mechanism. Promoting app-layer demo scoping into a security boundary is exactly the trap Sunrise's multi-tenancy doc warns against. See the [[#Decisions log]] entry.
 
 _Indicative tasks:_
 
-- App-owned tenant table (clearly marked `// DEMO-ONLY:` partition — the abstraction a fork repurposes for branding/content scoping, not for isolation).
-- Tenant scoping on `AppQuestionnaire` + `AppQuestionnaireSession` (application-layer, demo-grade).
-- Tenant-scoped routing — user-facing routes resolve the tenant from URL or invitation token.
+- App-owned `AppDemoClient` **identity** table (`slug`, `name`, `description`, `isActive`), marked `// DEMO-ONLY:` — the abstraction a fork repurposes for branding/content scoping, not for isolation. Theme columns are deferred to the theming module (lands with its first consumer — see table).
+- Nullable `demoClientId` FK on `AppQuestionnaire` (plain `String` FK per seam 6, indexed). `null` = generic Sunrise-default demo; pre-P2.5 questionnaires keep working, no backfill.
+- Admin CRUD under `app/api/v1/app/demo-clients/` (list / create / detail / patch / delete; `DELETE` refuses `409` while any questionnaire still references the client).
+- Attribution in the F2.1 admin surface — assign a questionnaire to a client and show the client in the list/detail. `PATCH …/questionnaires/:id` gains an optional `demoClientId` (nullable to detach).
 
-### F2.5.2 — Brand theming
+**Definition of feature complete.** An admin can create demo clients and attribute questionnaires to them; the F2.1 list/detail surface shows attribution; the FK is in place for downstream phases to build tenant-aware.
 
-_Status:_ not started · _Size:_ ~1 PR · _Owner:_ TBD · _Deps:_ F2.5.1
+### Distributed demo-tenancy work (tracked in host phases)
 
-Per-tenant theme record + admin UI to upload/edit + render hooks consumed by the P7 UI.
+The rest of what was P2.5 lands where its dependency is built. Every piece stays in marked `// DEMO-ONLY:` modules so the fork-strip stays a single sweep.
 
-_Indicative tasks:_
-
-- Theme record (logo, colours, copy strings) on the tenant.
-- Admin UI to upload/edit a tenant's theme.
-- Render hook / context the P7 UI consumes.
-
-### F2.5.3 — Demo content seed
-
-_Status:_ not started · _Size:_ ~1 PR · _Owner:_ TBD · _Deps:_ F2.5.1, F2.5.2
-
-The `LOAD_DEMO_CONTENT=1` mechanism that populates a sample tenant + branded questionnaire on a fresh DB. Idempotent. Strictly demo-only — a fork strips this entirely.
-
-_Indicative tasks:_
-
-- Demo-content seed script, idempotent, refuses to run without the env var.
-- Sample tenant + branded theme + sample questionnaire with realistic content.
-
-**Definition of phase complete.** A new demo tenant can be set up, branded, and seeded in <10 minutes, repeatable on a fresh DB.
+| Piece                                                                       | Why it can't lead                                                  | Home                                              |
+| --------------------------------------------------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------- |
+| Theming module (theme columns + `resolveTheme()` + `themeToCssVariables()`) | Pure producer; its first renderer is an invitation email or a page | **F3.4** if themed invites adopted, else **F7.1** |
+| Invitation `demoClientId` denormalisation + themed invitation email         | Needs `AppQuestionnaireInvitation`                                 | **F3.4** (P3)                                     |
+| Tenant-scoped user routing (resolve tenant from URL / invite token)         | Needs user-facing routes + invite tokens                           | **F7.1** (P7)                                     |
+| Theming application points (landing / completion pages)                     | Needs P7 user pages                                                | **F7.1 / F7.3** (P7)                              |
+| Demo session reset (`reset-sessions`)                                       | Needs the full session graph                                       | **F6.4** (P6)                                     |
+| Clone-for-client admin utility                                              | Needs tags (F2.2) + config (F3.1)                                  | **P3+**, promote once both exist                  |
+| Demo content seed (`010-demo-content.ts`)                                   | Needs a complete themeable vertical                                | **F9.4** (P9)                                     |
 
 ---
 
@@ -351,7 +347,21 @@ _Indicative tasks:_
 - Per-session and per-questionnaire estimates.
 - UI surface in the config editor + launch flow.
 
-**Definition of phase complete.** Admin can configure → estimate cost → invite → see invitation states change as users open the link.
+### F3.4 — Demo-client invitation branding (DEMO-ONLY)
+
+_Status:_ not started · _Size:_ ~1 PR · _Owner:_ TBD · _Deps:_ F2.5.1, F3.2 · _Relocated from the old P2.5._
+
+The first place a prospect sees their brand — the invitation. Snapshots the demo client onto the invitation and (if adopted) themes the invitation email. Can only be built once F3.2's invitation model exists, which is why it lives here and not in P2.5. All `// DEMO-ONLY:`.
+
+> **Open decision at promotion — themed invites or plain?** Themed makes the prospect's first touch branded (strong for the sales intent) but pulls the **theming module** forward into P3; plain defers all theming to P7 (F7.1). This choice decides where the theming module (`lib/app/questionnaire/theming/` + the `AppDemoClient` theme columns) is built.
+
+_Indicative tasks:_
+
+- Denormalise `demoClientId` onto `AppQuestionnaireInvitation` at creation time (O(1) theme lookup; resilient to questionnaire reassignment; indexed).
+- _(If themed invites)_ theme columns on `AppDemoClient` + the theming module — `resolveTheme()` (fills nulls with Sunrise defaults) and `themeToCssVariables()`, all `// DEMO-ONLY:`.
+- _(If themed invites)_ client-aware invitation email — CTA colour, logo, welcome copy from the resolved theme; Sunrise defaults when null.
+
+**Definition of phase complete.** Admin can configure → estimate cost → invite → see invitation states change as users open the link; demo-client invitations carry their attribution (and brand, if themed invites were adopted).
 
 ---
 
@@ -528,6 +538,19 @@ _Indicative tasks:_
 - Hard-cap (100%) — turn refused with 402; session auto-paused; event written.
 - Tests for both boundaries against scripted costs.
 
+### F6.4 — Demo session reset (DEMO-ONLY)
+
+_Status:_ not started · _Size:_ ~1 PR · _Owner:_ TBD · _Deps:_ F4.6, F6.1, F3.1 · _Relocated from the old P2.5._
+
+The between-demos "clean slate" — `POST /api/v1/app/demo-clients/:id/reset-sessions` hard-deletes the session graph for a client's questionnaires so the next prospect starts fresh. Can only exist once that graph does (this phase). Destructive; a production fork removes it — marked `// DEMO-ONLY:`.
+
+_Indicative tasks:_
+
+- Typed-confirmation guard (`confirmSlug` must equal the client slug → `400` on mismatch).
+- Transactional delete of sessions + profiles + answer slots + turns + events for every version of every questionnaire with `demoClientId = :id`; optional invitation cleanup behind `?resetInvitations=true` (preserves `started | completed | revoked`).
+- Refusals: `409` when any of the client's questionnaires has `anonymousMode` on (too destructive for research-sensitive data); `403` on ownership.
+- Returns `deletedCounts`; audit-logged `app_demo_client.reset_sessions` (never deleted from the audit trail).
+
 **Definition of phase complete.** End-to-end conversational session works via API. A scripted client can complete a small questionnaire over SSE; transcripts, costs, audit rows all land correctly.
 
 ---
@@ -538,7 +561,7 @@ _Indicative tasks:_
 
 ### F7.1 — Chat surface
 
-_Status:_ not started · _Size:_ multi-PR · _Owner:_ TBD · _Deps:_ F6.1, F6.2, F2.5.2 (theming)
+_Status:_ not started · _Size:_ multi-PR · _Owner:_ TBD · _Deps:_ F6.1, F6.2, theming module (built in F3.4 if themed invites were adopted, else here)
 
 Live SSE rendering with voice + attachment input wired. Consumes Sunrise's `useVoiceRecording` hook and `<MicButton>` verbatim. Branding hookup from P2.5 happens here. Includes the demo-flow E2E test (Playwright as an app dev-dep).
 
@@ -547,7 +570,7 @@ _Indicative tasks:_
 - SSE message rendering with optimistic local turn append.
 - Voice input integration (consume `useVoiceRecording` + `<MicButton>`).
 - Attachment input (consume Sunrise's attachment-input affordance from `AgentTestChat` verbatim).
-- Branding render — consume tenant theme from F2.5.2.
+- Branding render — consume the theming module (built in F3.4, or build it here if invite-theming was deferred); add the tenant-scoped routing + landing/completion theming application points relocated from the old P2.5.
 - Playwright setup as an app dev dependency (per [[building-on-sunrise]] — apps own their dev deps).
 - Demo-flow happy-path E2E test in Playwright.
 
@@ -682,6 +705,17 @@ _Indicative tasks:_
 - External-fork upgrade guide section — git upstream remote, semantic-conflict discipline, contributing fixes via PR. Per [[building-on-sunrise]] / [[fork-readiness-backlog#External-fork upgrade guidance]].
 - Sunrise contributions record — what this build contributed back (smaller than originally planned, since v0.0.1 closed the pre-fork backlog; still a real sales artefact).
 
+### F9.4 — Demo content seed (DEMO-ONLY)
+
+_Status:_ not started · _Size:_ ~1 PR · _Owner:_ TBD · _Deps:_ F2.5.1, F7.1 (a complete themeable vertical to seed) · _Relocated from the old P2.5._
+
+The `LOAD_DEMO_CONTENT=1` mechanism that populates a sample demo client + branded questionnaire on a fresh DB. Idempotent; refuses to run without the env var. Strictly demo-only — a fork strips it entirely. Lands **before** F9.2's runbook road-test so the runbook can exercise it.
+
+_Indicative tasks:_
+
+- `prisma/seeds/app-questionnaire/010-demo-content.ts`, idempotent, env-gated.
+- Sample demo client + theme + sample questionnaire with realistic content.
+
 **Definition of phase complete.** Platform ships; runbook road-tested; a notional fork can be spun up using only `forking.md`; external-fork upgrade path documented.
 
 ---
@@ -746,6 +780,7 @@ Claude reads this doc for intent and the original [[Conversational Questionnaire
 
 Append-only. Newest at the top. Each entry: date, decision, context, link.
 
+- **2026-06-03 — P2.5 decomposed: demo tenancy is a cross-cutting concern, not a phase.** The decimal was the tell — P2.5 was inserted between P2 and P3 without the dependency pass the round-numbered phases got. Most of it can only be built once the model each piece hangs off exists (invitation branding needs P3's invitation model; session reset needs P4/P6's session graph; the theming render points need P7's user pages; the content seed needs a complete vertical) — and the original F2.5.1 even listed `AppQuestionnaireSession` scoping that P4/P6 hasn't built yet. P2.5 now keeps only the **foundation** (F2.5.1 — demo-client identity table + `AppQuestionnaire` FK + admin attribution), the one slice that must lead so P3+ build tenant-aware in a single pass. The rest is distributed into its host phase as a marked sub-feature: invitation branding → **F3.4**, demo session reset → **F6.4**, theming render + tenant routing → **F7.1/F7.3**, clone-for-client → **P3+** (after F2.2 + F3.1), demo content seed → **F9.4**. **Fork-strippability is preserved by keeping every piece in the same marked modules** (`lib/app/questionnaire/theming/`, the `demo-clients/` dirs, `// DEMO-ONLY:` headers): _decompose the schedule, preserve the module boundary_ — a fork still strips demo tenancy in one grep sweep. One open decision deferred to F3.4 promotion: themed vs plain invitation emails determines whether the theming module is built in P3 or P7.
 - **2026-06-02 — Version status transitions (launch/archive) pulled into F2.1 PR2.** The original phasing parked launching in P3 (alongside invitations + cost estimation), which would have left `forkVersionIfLaunched` dormant — nothing could set a version to `launched`, so the fork branch was untestable end-to-end. Bringing the lifecycle status flip forward into PR2 (a `PATCH …/versions/:vid/status` with a minimal launch guard — goal + ≥1 section + ≥1 question) makes the fork seam **live**: editing a launched version actually forks a new draft, exercised by tests and the editor. The _full_ config-completeness launch gate (audience, config, pre-launch cost estimate) and the invitation/registration machinery remain **F3.1/P3**; `countLaunchBlockers` stays a zero-returning P3/P4 seam. Two further PR2 decisions: manual structural edits are audited via `logAdminAction` only (the `AppQuestionnaireExtractionChange` log stays the _extractor's_ provenance, F2.3's consumer) and a fork starts a clean editorial lineage (structure copied, change records not); reorder uses `@dnd-kit` (app dependency). Reference: [[features/f2.1]].
 - **2026-06-01 — App changes are tracked in the planning docs, not `CHANGELOG.md`.** `CHANGELOG.md` is the **Sunrise platform** changelog (the public-surface record forks consume); ConQuest's own app surface is not added there — it would be miscategorised noise that conflicts on every upstream sync. The app's record of _what's done / deferred / decided_ lives in these planning docs and is the reference for planning the next feature: **done** → [[#Work completed to date]] plus the per-feature trackers under `features/`; **deferred / platform gaps** → `planning/upstream-gaps.md`; **decided** → this log. A consumer-facing changelog for forks of ConQuest _itself_ is a separate, later decision.
 - **2026-06-01 — App docs consolidated under `.context/app/`.** Replaced the `.context/application/` outlier with a single app-docs root, `.context/app/`, using namespace subfolders that mirror the substrate pattern and the code's app tier (`lib/app/`, `app/api/v1/app/`, `prisma/schema/app-*`). `planning/` holds this development plan, the `features/` trackers, and the forward-looking `upstream-gaps.md` ledger (sibling to this Decisions log and the Carried Sunrise patches section); `questionnaire/` holds the domain/technical docs (overview, schema, development). Purely an app-owned reorg — Sunrise's substrate never referenced `.context/application/`.
