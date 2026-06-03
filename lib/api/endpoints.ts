@@ -377,5 +377,12 @@ export const API = {
       versionQuestionById: (id: string, versionId: string, questionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/questions/${questionId}`,
     },
+    /** DEMO-ONLY (F2.5.1): demo-client identity + attribution. A fork strips this. */
+    DEMO_CLIENTS: {
+      /** List (GET) + create (POST). */
+      ROOT: '/api/v1/app/demo-clients',
+      /** Detail (GET), edit (PATCH), delete (DELETE). */
+      byId: (id: string): string => `/api/v1/app/demo-clients/${id}`,
+    },
   },
 } as const;

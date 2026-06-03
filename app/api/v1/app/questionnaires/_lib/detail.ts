@@ -77,6 +77,8 @@ export async function getQuestionnaireDetail(id: string): Promise<QuestionnaireD
       status: true,
       createdAt: true,
       updatedAt: true,
+      // DEMO-ONLY (F2.5.1): attributed demo client, or null for a generic demo.
+      demoClient: { select: { id: true, slug: true, name: true } },
       versions: {
         orderBy: { versionNumber: 'desc' },
         select: {
@@ -132,6 +134,7 @@ export async function getQuestionnaireDetail(id: string): Promise<QuestionnaireD
     id: questionnaire.id,
     title: questionnaire.title,
     status: questionnaire.status as AppQuestionnaireStatus,
+    demoClient: questionnaire.demoClient,
     createdAt: questionnaire.createdAt.toISOString(),
     updatedAt: questionnaire.updatedAt.toISOString(),
     versions,

@@ -18,6 +18,8 @@ import type {
   FieldProvenance,
   QuestionType,
 } from '@/lib/app/questionnaire/types';
+// DEMO-ONLY (F2.5.1): attribution summary embedded in list/detail rows.
+import type { AttributedDemoClient } from '@/lib/app/questionnaire/demo-clients';
 
 /** One row in the admin questionnaires list — enriched with latest-version counts. */
 export interface QuestionnaireListItem {
@@ -35,6 +37,8 @@ export interface QuestionnaireListItem {
   /** Section / question counts for the latest version (0 when no version yet). */
   sectionCount: number;
   questionCount: number;
+  /** DEMO-ONLY (F2.5.1): the attributed demo client, or null for a generic Sunrise demo. */
+  demoClient: AttributedDemoClient | null;
   createdAt: string;
   /** Last activity — the questionnaire row's `updatedAt`. */
   updatedAt: string;
@@ -60,6 +64,8 @@ export interface QuestionnaireDetail {
   id: string;
   title: string;
   status: AppQuestionnaireStatus;
+  /** DEMO-ONLY (F2.5.1): the attributed demo client, or null for a generic Sunrise demo. */
+  demoClient: AttributedDemoClient | null;
   createdAt: string;
   updatedAt: string;
   /** Versions newest-first (highest `versionNumber` first). */
