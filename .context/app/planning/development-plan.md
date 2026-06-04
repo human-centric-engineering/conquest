@@ -383,9 +383,11 @@ _Indicative tasks:_
 
 ### F4.1 — Selection strategies
 
-_Status:_ not started · _Size:_ multi-PR · _Owner:_ TBD · _Deps:_ F0.1, F2.2 (tags), F3.1 (config)
+_Status:_ in flight — built on `feat/f4.1-selection-strategies` (pure `selection/` registry + `sequential`/`random`/`weighted` deterministic strategies + the full `adaptive` LLM+pgvector strategy behind a sub-flag; `next-question` preview route + `embed-questions` backfill; `AppQuestionSlot.embedding` pgvector column; seeded selection agent; gates pending) · _Size:_ multi-PR (3) · _Owner:_ TBD · _Deps:_ F0.1, F2.2 (tags), F3.1 (config)
 
-Pluggable strategies for picking the next question. `Sequential`, `Random`, `Weighted`, `Adaptive`. Each a unit-tested function. Adaptive is the most complex — uses prior answers + tags + remaining coverage.
+Pluggable strategies for picking the next question. `Sequential`, `Random`, `Weighted`, `Adaptive`. Each a unit-tested function. Adaptive is the most complex — embeds the last message, pgvector-ranks unanswered candidates, and an LLM picks the most natural follow-up (fail-soft to `weighted`).
+
+> Committable tracker: [`planning/features/f4.1.md`](features/f4.1.md). Build decisions (confirmed): **`random` added to the `SELECTION_STRATEGIES` enum** (was 3, now 4); **pure strategies over an in-memory `SelectionContext`** (no session tables until F4.6/P6 — strategies are exhaustively unit-testable by hand); **required-before-optional precedence** for random/weighted; **weighted tuning constants in code, not config**; **adaptive is full LLM + pgvector**, gated behind `APP_QUESTIONNAIRES_ADAPTIVE_STRATEGY_ENABLED` (off by default) and **fail-soft to weighted** on any error; **impure deps injected** (`StrategyDeps`) so `lib/` stays Prisma-free; **`embedding vector(1536)` is `Unsupported(...)`** with raw-SQL read/write + HNSW index (create-only + strip migration). API-first via a no-persistence `next-question` preview route. See `.context/app/questionnaire/selection-strategies.md`.
 
 _Indicative tasks:_
 

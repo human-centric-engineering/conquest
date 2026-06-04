@@ -32,3 +32,35 @@ export const ingestLimiter = createRateLimiter({
   interval: INGEST_RATE_LIMIT_INTERVAL_MS,
   maxRequests: INGEST_RATE_LIMIT_MAX,
 });
+
+/**
+ * Adaptive next-question preview sub-cap (F4.1). Only the **adaptive** path is
+ * limited here: it embeds the latest message and runs an LLM pick, so each call
+ * costs an embedding + a completion — far more than the deterministic strategies
+ * (which inherit only the section 100/min). Keyed on the admin user id, who owns
+ * the spend. The deterministic strategies skip this limiter entirely.
+ */
+export const ADAPTIVE_SELECTION_RATE_LIMIT_MAX = 30;
+
+/** Sliding-window length for {@link adaptiveSelectionLimiter}, in milliseconds. */
+export const ADAPTIVE_SELECTION_RATE_LIMIT_INTERVAL_MS = 60_000;
+
+export const adaptiveSelectionLimiter = createRateLimiter({
+  interval: ADAPTIVE_SELECTION_RATE_LIMIT_INTERVAL_MS,
+  maxRequests: ADAPTIVE_SELECTION_RATE_LIMIT_MAX,
+});
+
+/**
+ * Slot-embedding backfill sub-cap (F4.1). One call embeds every (un-embedded)
+ * slot in a version — a batch of embedding API calls. Capped tightly per admin
+ * so a hammered "regenerate embeddings" button can't run up the embedding bill.
+ */
+export const EMBED_SLOTS_RATE_LIMIT_MAX = 10;
+
+/** Sliding-window length for {@link embedSlotsLimiter}, in milliseconds. */
+export const EMBED_SLOTS_RATE_LIMIT_INTERVAL_MS = 60_000;
+
+export const embedSlotsLimiter = createRateLimiter({
+  interval: EMBED_SLOTS_RATE_LIMIT_INTERVAL_MS,
+  maxRequests: EMBED_SLOTS_RATE_LIMIT_MAX,
+});

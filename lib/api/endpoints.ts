@@ -367,6 +367,12 @@ export const API = {
       /** Pre-launch cost estimate (GET `?respondents=N` — F3.3). */
       versionCostEstimate: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/cost-estimate`,
+      /** Next-question preview against a supplied answer state (POST — F4.1). */
+      versionNextQuestion: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/next-question`,
+      /** Generate/backfill slot embeddings for adaptive selection (POST `{ force? }` — F4.1). */
+      versionEmbedQuestions: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/embed-questions`,
       /** Section collection (POST create). */
       versionSections: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/sections`,

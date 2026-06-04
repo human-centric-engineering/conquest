@@ -148,7 +148,7 @@ model AppQuestionnaireConfig {
   versionId String @unique
 
   // Question selection (F4.1): how the agent picks the next question.
-  selectionStrategy String @default("sequential") // sequential | weighted | adaptive (SELECTION_STRATEGIES)
+  selectionStrategy String @default("sequential") // sequential | random | weighted | adaptive (SELECTION_STRATEGIES)
 
   // Completion thresholds: when a session may be considered done.
   minQuestionsAnswered Int   @default(0) // require at least this many answered
@@ -195,9 +195,22 @@ model AppQuestionnaireSection {
 
 /// A single question. `type` vocabulary is the project-canonical set from the
 /// deep spec. `key` is a stable per-version slug (answers/re-ingest reference it,
-/// not the cuid). `weight` feeds F4.1 weighted selection. NO embedding column yet
-/// (deferred to F4.1 — pgvector is a Prisma-unmodelled object with no consumer
-/// until then).
+/// not the cuid). `weight` feeds F4.1 weighted selection.
+///
+/// ⚠️ PRISMA-SCHEMA DRIFT WARNING ⚠️
+/// `embedding` is a pgvector column (F4.1 adaptive selection). Two Postgres
+/// objects on it are managed via raw SQL in migrations because Prisma cannot
+/// model them natively:
+///   1. The `vector(1536)` column type — modelled as `Unsupported(...)` so Prisma
+///      creates the column, but it stays absent from typed selects (read/written
+///      via $queryRawUnsafe / $executeRawUnsafe in `_lib/slot-embeddings.ts`).
+///   2. The HNSW ANN index `idx_app_question_slot_embedding`
+///      (vector_cosine_ops, m=16, ef_construction=64) — added by raw SQL in the
+///      F4.1 migration.
+/// `npx prisma migrate dev` may try to DROP the index on a schema-diff run; always
+/// inspect generated SQL and remove any line touching
+/// `idx_app_question_slot_embedding` before applying (the same discipline the
+/// knowledge `embedding` column documents).
 model AppQuestionSlot {
   id                   String   @id @default(cuid())
   versionId            String // denormalised — F2.2 tagging validates tag+slot share a version
@@ -212,6 +225,10 @@ model AppQuestionSlot {
   required             Boolean  @default(false)
   weight               Float    @default(1.0)
   extractionConfidence Float? // 0–1, set by the extractor
+  // F4.1 adaptive selection: cosine-similarity vector over `prompt` (+`guidelines`).
+  // Width matches the platform embedding model (AiKnowledgeChunk.embedding). Raw-SQL
+  // read/write only — see the drift warning above.
+  embedding            Unsupported("vector(1536)")?
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 

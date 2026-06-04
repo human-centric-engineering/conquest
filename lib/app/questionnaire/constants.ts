@@ -18,6 +18,34 @@ import type { CapabilityFunctionDefinition } from '@/lib/orchestration/capabilit
 export const APP_QUESTIONNAIRES_FLAG = 'APP_QUESTIONNAIRES_ENABLED';
 
 /**
+ * Sub-flag gating the F4.1 **adaptive** selection strategy (LLM + pgvector).
+ * Disabled by default: adaptive spends on embeddings + an LLM call per turn, so
+ * an operator opts in deliberately. When off, the config editor hides the
+ * `adaptive` option and any version persisted with `selectionStrategy: 'adaptive'`
+ * degrades to `weighted` at run time. Independent of {@link APP_QUESTIONNAIRES_FLAG}
+ * (the master gate); both must be on for adaptive to run. Seeded by
+ * `prisma/seeds/app-questionnaire/004-adaptive-selection-flag.ts`.
+ */
+export const APP_QUESTIONNAIRES_ADAPTIVE_FLAG = 'APP_QUESTIONNAIRES_ADAPTIVE_STRATEGY_ENABLED';
+
+/**
+ * Slug of the seeded selection `AiAgent` (F4.1 / adaptive). Drives the "which of
+ * these candidate questions flows most naturally?" pick via `drainStreamChat`,
+ * the same way the evaluation judges are driven. Ships with empty `model`/
+ * `provider` so it resolves dynamically via `agent-resolver.ts`. App-prefixed to
+ * avoid collision with core system agents.
+ */
+export const QUESTIONNAIRE_SELECTOR_AGENT_SLUG = 'app-questionnaire-selector';
+
+/**
+ * Width of the `AppQuestionSlot.embedding` pgvector column — must match the
+ * platform embedding model (the knowledge subsystem standardises on 1536). The
+ * migration hard-codes it in DDL; this constant is the single reference for the
+ * embedding/search code so a column-width change has one obvious touch-point.
+ */
+export const QUESTIONNAIRE_EMBEDDING_DIMENSION = 1536;
+
+/**
  * Slug of the extractor capability (F1.1 / PR3). One source of truth shared by
  * the `BaseCapability` subclass, its `AiCapability` seed row, and the ingestion
  * route (PR4) that dispatches it. Snake_case to match the built-in capability

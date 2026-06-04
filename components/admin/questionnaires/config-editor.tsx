@@ -49,6 +49,7 @@ import type { RunMutation } from '@/components/admin/questionnaires/version-edit
 
 const SELECTION_STRATEGY_LABELS: Record<SelectionStrategy, string> = {
   sequential: 'Sequential (in order)',
+  random: 'Random (shuffled)',
   weighted: 'Weighted (by question weight)',
   adaptive: 'Adaptive (agent-chosen)',
 };
@@ -135,6 +136,7 @@ export function ConfigEditor({
   versionId,
   config,
   questionCount,
+  adaptiveEnabled = true,
   run,
   busy,
 }: {
@@ -143,6 +145,12 @@ export function ConfigEditor({
   config: ConfigView;
   /** Live question count on the version — folded into the estimate's reload key so it refreshes after question edits. */
   questionCount: number;
+  /**
+   * Whether the adaptive strategy sub-flag is on. When `false`, `adaptive` is
+   * hidden from the picker (unless it's already the saved value, so the Select
+   * still renders a label). Defaults to `true` for non-questionnaire mounts.
+   */
+  adaptiveEnabled?: boolean;
   run: RunMutation;
   busy: boolean;
 }) {
@@ -270,7 +278,12 @@ export function ConfigEditor({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {SELECTION_STRATEGIES.map((s) => (
+              {SELECTION_STRATEGIES.filter(
+                // Hide adaptive when its sub-flag is off — unless it's the saved
+                // value, so the Select still shows a label rather than blank.
+                (s) =>
+                  s !== 'adaptive' || adaptiveEnabled || config.selectionStrategy === 'adaptive'
+              ).map((s) => (
                 <SelectItem key={s} value={s}>
                   {SELECTION_STRATEGY_LABELS[s]}
                 </SelectItem>

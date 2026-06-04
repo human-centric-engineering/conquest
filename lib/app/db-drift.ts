@@ -38,6 +38,18 @@
  *
  * Full guide: CUSTOMIZATION.md §5 · .context/database/prisma-unmodelled-objects.md
  */
+import { indexExists, registerAppDriftProbe } from '@/lib/db/drift-probes';
+
 export function registerAppDriftProbes(): void {
-  // No app drift probes by default.
+  // F4.1 adaptive selection: the HNSW ANN index on the Prisma-Unsupported
+  // `AppQuestionSlot.embedding` pgvector column. Prisma can't model it, so a
+  // future `migrate dev` schema-diff would silently emit a DROP — this probe
+  // makes that drop fail the drift check instead. See the drift warning on
+  // AppQuestionSlot in prisma/schema/app-questionnaire.prisma.
+  registerAppDriftProbe({
+    name: 'idx_app_question_slot_embedding (HNSW vector index)',
+    kind: 'HNSW index',
+    table: 'app_question_slot',
+    probe: indexExists('idx_app_question_slot_embedding'),
+  });
 }

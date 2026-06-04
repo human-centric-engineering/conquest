@@ -198,9 +198,14 @@ describe('mergeDriftProbes', () => {
   });
 });
 
-describe('shipped lib/app/db-drift.ts scaffold', () => {
-  it('registers zero probes by default (Sunrise ships the scaffold empty)', () => {
+describe('app lib/app/db-drift.ts registrations', () => {
+  it('registers the F4.1 question-slot embedding HNSW drift probe', () => {
+    // Sunrise ships this scaffold empty; ConQuest (this fork) registers the
+    // Prisma-unmodelled pgvector index added by F4.1. `toContain` keeps the
+    // assertion robust if the fork registers further app probes later.
     registerAppDriftProbes();
-    expect(getAppDriftProbes()).toEqual([]);
+    expect(getAppDriftProbes().map((p) => p.name)).toContain(
+      'idx_app_question_slot_embedding (HNSW vector index)'
+    );
   });
 });
