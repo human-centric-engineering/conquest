@@ -358,6 +358,9 @@ export const API = {
       /** Version status transition (PATCH launch/archive/un-launch). */
       versionStatus: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/status`,
+      /** Re-ingest a replacement source doc into a draft version (POST multipart). */
+      versionReingest: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/reingest`,
       /** Section collection (POST create). */
       versionSections: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/sections`,

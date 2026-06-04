@@ -128,8 +128,17 @@ by change family (prunes / edits / inferences / structural), client-side filters
 before/after JSON blocks, and a single confirm dialog driving the revert mutation
 through the shared `authoringMutate` runner (fork-redirect / `router.refresh()`).
 
-## Not yet (F2.4)
+## Re-ingest (F2.4)
 
-Creating a questionnaire is still the F1.1 ingestion endpoint (no UI). Re-ingest
-(F2.4) is the remaining P2 work — see the
-[development plan](../planning/development-plan.md#p2--admin-crud-over-questionnaires).
+A **Re-ingest** action on the detail page — offered only on **draft** versions —
+uploads a replacement document and **replaces that draft's structure, change log,
+and tags** with a fresh extraction. `components/admin/questionnaires/reingest-dialog.tsx`
+(file picker + optional goal override + extract-tables toggle, each with
+`FieldHelp`) states the replace is destructive; the submit button is the confirm.
+An identical document short-circuits to a no-op. Full behaviour — replace-in-place
+semantics, the draft-only `409`, and the version-scoped dedup — is in
+[`reingest.md`](./reingest.md).
+
+Creating a _new_ questionnaire is still the F1.1 ingestion endpoint (no UI). With
+re-ingest shipped, an admin can ingest, review, edit, tag, version, and re-ingest
+a questionnaire end-to-end through the UI — **P2 is complete**.

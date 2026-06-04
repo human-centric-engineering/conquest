@@ -259,6 +259,17 @@ describe('POST /api/v1/app/questionnaires — happy path', () => {
     );
   });
 
+  it('derives the questionnaire title from the filename when the parsed title is blank', async () => {
+    (parseDocument as Mock).mockResolvedValue({ ...PARSED_DOC, title: '   ' });
+
+    await POST(makeRequest('Q3 Pulse Survey.md'));
+
+    // Empty parsed title → fall back to the filename without its extension.
+    expect(persistIngestion).toHaveBeenCalledWith(
+      expect.objectContaining({ documentTitle: 'Q3 Pulse Survey' })
+    );
+  });
+
   it('writes an admin audit row with the ingest counts and file hash', async () => {
     await POST(makeRequest('onboarding.md'));
 
