@@ -1,13 +1,16 @@
 import type { NextRequest } from 'next/server';
 
 import { errorResponse } from '@/lib/api/responses';
-import { APP_QUESTIONNAIRES_FLAG } from '@/lib/app/questionnaire/constants';
+import {
+  APP_QUESTIONNAIRES_ADAPTIVE_FLAG,
+  APP_QUESTIONNAIRES_FLAG,
+} from '@/lib/app/questionnaire/constants';
 import { isFeatureEnabled } from '@/lib/feature-flags';
 
 // Re-exported so the feature-flag module stays the natural home for the flag
 // name. The constant itself lives in the dependency-light `constants.ts` so leaf
 // consumers (the seed) can import it without this module's HTTP/DB deps.
-export { APP_QUESTIONNAIRES_FLAG };
+export { APP_QUESTIONNAIRES_FLAG, APP_QUESTIONNAIRES_ADAPTIVE_FLAG };
 
 /**
  * Whether the questionnaire app is enabled. Thin wrapper over Sunrise's
@@ -19,6 +22,23 @@ export { APP_QUESTIONNAIRES_FLAG };
  */
 export async function isQuestionnairesEnabled(): Promise<boolean> {
   return isFeatureEnabled(APP_QUESTIONNAIRES_FLAG);
+}
+
+/**
+ * Whether the F4.1 **adaptive** selection strategy may run. Requires BOTH the
+ * master app flag and the adaptive sub-flag — adaptive is a paid (embedding +
+ * LLM) sub-feature, opt-in on top of an already-enabled app. The next-question
+ * route consults this to decide whether to wire adaptive's deps; when it returns
+ * `false`, a version configured for `adaptive` degrades to `weighted`.
+ *
+ * Server-only (resolves both flags from the database).
+ */
+export async function isAdaptiveSelectionEnabled(): Promise<boolean> {
+  const [app, adaptive] = await Promise.all([
+    isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_ADAPTIVE_FLAG),
+  ]);
+  return app && adaptive;
 }
 
 /**

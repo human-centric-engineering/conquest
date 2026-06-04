@@ -42,8 +42,12 @@ describe('updateConfigSchema', () => {
     expect(updateConfigSchema.safeParse({}).success).toBe(false);
   });
 
+  it('accepts the random selection strategy (F4.1)', () => {
+    expect(updateConfigSchema.safeParse({ selectionStrategy: 'random' }).success).toBe(true);
+  });
+
   it('rejects an unknown selection strategy', () => {
-    const res = updateConfigSchema.safeParse({ selectionStrategy: 'random' });
+    const res = updateConfigSchema.safeParse({ selectionStrategy: 'telepathic' });
     expect(res.success).toBe(false);
   });
 

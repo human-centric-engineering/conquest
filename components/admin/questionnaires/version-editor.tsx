@@ -71,9 +71,12 @@ const STATUS_ACTIONS: Record<
 export function VersionEditor({
   questionnaireId,
   version,
+  adaptiveEnabled = true,
 }: {
   questionnaireId: string;
   version: VersionGraphView;
+  /** Adaptive selection sub-flag state, threaded to the config editor's strategy picker. */
+  adaptiveEnabled?: boolean;
 }) {
   const router = useRouter();
   const versionId = version.id;
@@ -251,6 +254,7 @@ export function VersionEditor({
         versionId={versionId}
         config={version.config}
         questionCount={version.sections.reduce((n, s) => n + s.questions.length, 0)}
+        adaptiveEnabled={adaptiveEnabled}
         run={run}
         busy={busy}
       />

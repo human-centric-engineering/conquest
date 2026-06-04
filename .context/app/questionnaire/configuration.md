@@ -133,9 +133,10 @@ redirects, handled by the shared `run` exactly as the other editor sections do.
 F3.1 stores the settings; later phases read them. `costBudgetUsd` is **stored
 only** — pre-launch **cost estimation** ([F3.3](cost-estimation.md)) reads it to
 flag an over-budget projection, and turn-boundary cap enforcement is F6.3.
-Selection strategy + thresholds feed F4.1; contradiction
-mode/N feeds F4.3; voice feeds F6.2; profile-field collection at session start
-lands in P4.
+Selection strategy + thresholds feed F4.1 (the four pluggable strategies —
+sequential, random, weighted, adaptive — see [selection strategies](selection-strategies.md));
+contradiction mode/N feeds F4.3; voice feeds F6.2; profile-field collection at
+session start lands in P4.
 
 ## Not in F3.1
 

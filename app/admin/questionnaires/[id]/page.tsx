@@ -12,7 +12,10 @@ import { Button } from '@/components/ui/button';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
-import { isQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
+import {
+  isAdaptiveSelectionEnabled,
+  isQuestionnairesEnabled,
+} from '@/lib/app/questionnaire/feature-flag';
 import type { AttributedDemoClient, DemoClientView } from '@/lib/app/questionnaire/demo-clients';
 import type { QuestionnaireDetail, VersionGraphView } from '@/lib/app/questionnaire/views';
 
@@ -85,6 +88,8 @@ export default async function QuestionnaireDetailPage({ params, searchParams }: 
   const selected = detail.versions.find((ver) => ver.id === v) ?? detail.versions[0] ?? null;
   const graph = selected ? await getGraph(id, selected.id) : null;
   const editing = edit === '1' && graph !== null;
+  // Adaptive selection sub-flag — controls whether the config picker offers it.
+  const adaptiveEnabled = editing ? await isAdaptiveSelectionEnabled() : false;
 
   return (
     <div className="space-y-6">
@@ -191,7 +196,11 @@ export default async function QuestionnaireDetailPage({ params, searchParams }: 
 
           {graph ? (
             editing ? (
-              <VersionEditor questionnaireId={id} version={graph} />
+              <VersionEditor
+                questionnaireId={id}
+                version={graph}
+                adaptiveEnabled={adaptiveEnabled}
+              />
             ) : (
               <VersionGraph graph={graph} />
             )

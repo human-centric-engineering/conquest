@@ -133,8 +133,15 @@ export type TagColor = (typeof TAG_COLORS)[number];
  * updates every consumer rather than leaving lists to drift.
  */
 
-/** How the agent picks the next question (consumed by F4.1 selection). */
-export const SELECTION_STRATEGIES = ['sequential', 'weighted', 'adaptive'] as const;
+/**
+ * How the agent picks the next question (consumed by F4.1 selection). Ordered
+ * simple → complex, which is also the order the config editor's `<Select>`
+ * renders them: `sequential` walks ordinal order; `random` picks uniformly
+ * (seeded, so a replay re-picks); `weighted` scores by question weight +
+ * coverage; `adaptive` uses prior answers + embeddings + an LLM. The selection
+ * registry (`selection/`) keys its strategy plugins on these slugs.
+ */
+export const SELECTION_STRATEGIES = ['sequential', 'random', 'weighted', 'adaptive'] as const;
 export type SelectionStrategy = (typeof SELECTION_STRATEGIES)[number];
 
 /** Contradiction-detection mode (consumed by F4.3). `off` disables it; `flag`
