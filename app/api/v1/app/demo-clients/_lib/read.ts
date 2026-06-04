@@ -24,6 +24,12 @@ export const DEMO_CLIENT_SELECT = {
   name: true,
   description: true,
   isActive: true,
+  // DEMO-ONLY (F3.4): theme columns — the edit form prefills from these and the
+  // invitation send seam resolves them. Nullable; null = Sunrise default.
+  ctaColor: true,
+  accentColor: true,
+  logoUrl: true,
+  welcomeCopy: true,
   createdAt: true,
   updatedAt: true,
   _count: { select: { questionnaires: true } },
@@ -39,6 +45,10 @@ export function toDemoClientView(row: DemoClientRow): DemoClientView {
     name: row.name,
     description: row.description,
     isActive: row.isActive,
+    ctaColor: row.ctaColor,
+    accentColor: row.accentColor,
+    logoUrl: row.logoUrl,
+    welcomeCopy: row.welcomeCopy,
     questionnaireCount: row._count.questionnaires,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),

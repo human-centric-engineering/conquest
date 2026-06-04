@@ -91,6 +91,14 @@ model AppQuestionnaireVersion {
 /// the respondent (null until registration); `invitedByUserId` is the admin. These are
 /// the first questionnaire rows referencing User — see the erasure note in
 /// .context/app/questionnaire/invitations.md.
+///
+/// DEMO-ONLY (F3.4): `demoClientId` denormalises the attributed demo client onto the
+/// invitation at send time (the route copies the questionnaire's `demoClientId` into
+/// each row). This is the snapshot the themed email resolves its brand from — an O(1)
+/// lookup that points at the client DIRECTLY, so later questionnaire reassignment
+/// doesn't change an already-sent invitation's brand. A real @relation (onDelete:
+/// SetNull, same recipe as AppQuestionnaire): deleting the client just clears the
+/// snapshot and the email falls back to the Sunrise default theme.
 model AppQuestionnaireInvitation {
   id              String    @id @default(cuid())
   versionId       String
@@ -100,6 +108,7 @@ model AppQuestionnaireInvitation {
   status          String    @default("pending") // APP_INVITATION_STATUSES (invitations/types.ts)
   userId          String? // respondent User.id, set on registration; plain String, no FK (UG-1)
   invitedByUserId String // admin User.id; plain String, no FK (UG-1)
+  demoClientId    String? // DEMO-ONLY (F3.4): brand snapshot at send time; null = generic Sunrise theme
   expiresAt       DateTime // token expiry (INVITATION_TOKEN_EXPIRY_DAYS from now)
   sentAt          DateTime? // first successful email send
   openedAt        DateTime? // first landing-page validation of the token
@@ -108,12 +117,14 @@ model AppQuestionnaireInvitation {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  version AppQuestionnaireVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  version    AppQuestionnaireVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  demoClient AppDemoClient?          @relation(fields: [demoClientId], references: [id], onDelete: SetNull)
 
   @@index([versionId])
   @@index([status])
   @@index([email])
   @@index([userId])
+  @@index([demoClientId])
   @@map("app_questionnaire_invitation")
 }
 
@@ -316,22 +327,39 @@ model AppQuestionnaireSourceDocument {
 /// tenancy" — delete entirely (single-tenant prod) · rename to AppTenant + RLS
 /// (multi-tenant prod) · keep as AppBrand without the marker.
 ///
-/// IDENTITY ONLY in F2.5.1. Theme columns (colours, fonts, logo, copy) land with
-/// their first renderer (F3.4 invitation email / F7.1 user UI); the reset-sessions
-/// and clone-for-client utilities land in F6.4 / P3+. No User FK (UG-1) — a global
-/// admin-managed fixture table, ownership implicit.
+/// IDENTITY + THEME. F2.5.1 landed identity only; F3.4 adds the theme columns now
+/// that they have their first renderer (the invitation email; the F7.1 user UI is
+/// the second). All theme columns are NULLABLE — `resolveTheme()`
+/// (lib/app/questionnaire/theming) fills nulls with Sunrise defaults, so an
+/// unthemed client renders exactly as before. The reset-sessions and
+/// clone-for-client utilities still land in F6.4 / P3+. No User FK (UG-1) — a
+/// global admin-managed fixture table, ownership implicit.
 model AppDemoClient {
   id          String   @id @default(cuid())
   slug        String   @unique // URL-safe ("acme-bank"); admin URLs + later invite links
   name        String // display name ("Acme Bank Demo")
   description String? // internal admin note ("Prepared for the Q1 2026 pitch")
   isActive    Boolean  @default(true) // soft-disable without delete
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+
+  // DEMO-ONLY (F3.4): theme columns. All nullable — null means "use the Sunrise
+  // default" (resolveTheme fills it). The invitation email reads all four (ctaColor =
+  // button, accentColor = fallback-link colour, logoUrl = header image, welcomeCopy =
+  // intro line); accentColor is ALSO the F7.1 CSS accent variable.
+  ctaColor    String? // CTA / primary button colour (hex, e.g. "#5469d4")
+  accentColor String? // secondary accent colour (hex); email fallback-link colour + F7.1 CSS var
+  logoUrl     String? // absolute https URL of the client logo shown in the email header
+  welcomeCopy String? // branded intro line for the invitation email body
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Reverse relation (F2.5.1 AD2): the list endpoint counts attributed
   // questionnaires per client and the DELETE 409-guard reads it directly.
   questionnaires AppQuestionnaire[]
+  // DEMO-ONLY (F3.4): invitations carrying this client's brand snapshot. SetNull on
+  // delete (see AppQuestionnaireInvitation); the 409-guard counts questionnaires, not
+  // these, so deleting a client clears its sent invitations' brand to the default.
+  invitations AppQuestionnaireInvitation[]
 
   @@map("app_demo_client")
 }

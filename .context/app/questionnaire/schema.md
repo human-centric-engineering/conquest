@@ -184,9 +184,11 @@ test guards it.
 - **`AppDemoClient`** (`app_demo_client`) — `slug` (`@unique`, kebab-case), `name`,
   `description?`, `isActive` (default `true`), timestamps;
   `questionnaires AppQuestionnaire[]` reverse relation (powers the list count + the
-  delete guard). **No `User` FK** (global admin-managed fixture). Theme columns
-  (colours/fonts/logo/copy) are deliberately deferred to their first renderer
-  (F3.4 / F7.1).
+  delete guard). **No `User` FK** (global admin-managed fixture). **F3.4** added the
+  nullable theme columns (`ctaColor`, `accentColor`, `logoUrl`, `welcomeCopy`) — their
+  first renderer is the invitation email; null on any field → the Sunrise default
+  (`resolveTheme()`). It also added the `invitations AppQuestionnaireInvitation[]`
+  reverse relation (the brand-snapshot back-reference).
 - **`AppQuestionnaire`** gains `demoClientId String?` + `demoClient` relation with
   **`onDelete: SetNull`** (a questionnaire outlives its demo client — attribution
   clears) and `@@index([demoClientId])`. `null` = generic Sunrise demo; no backfill.
@@ -213,5 +215,20 @@ test guards it. Full behaviour in [`configuration.md`](./configuration.md).
   to `DEFAULT_QUESTIONNAIRE_CONFIG`, and the launch gate keys on whether the row
   exists. `AppQuestionnaireVersion` gains the reverse `config AppQuestionnaireConfig?`.
 
-_Later phases extend this file — invitations (P3), session models (P4),
-evaluation links (P5), turns (P6), etc. Each documents its models here as it lands._
+### Invitations + branding (F3.2 / F3.4 — P3)
+
+- **`AppQuestionnaireInvitation`** (`app_questionnaire_invitation`, F3.2) — one row per
+  invited respondent, **pinned to the launched version** (`versionId` FK,
+  `onDelete: Cascade`). `tokenHash @unique` (SHA-256 at rest), `status` lifecycle,
+  plain-`String` `userId?`/`invitedByUserId` (UG-1, no relation). Indexes on
+  `versionId`, `status`, `email`, `userId`. Full behaviour in [`invitations.md`](./invitations.md).
+- **F3.4** (migration `20260604144743_app_questionnaire_invitation_branding`, same
+  schema-fold strip as the others) added: the four nullable `AppDemoClient` theme
+  columns (above) **and** `AppQuestionnaireInvitation.demoClientId String?` — a
+  `DEMO-ONLY` brand snapshot with a real `demoClient` relation (`onDelete: SetNull`,
+  `@@index([demoClientId])`) plus the matching `AppDemoClient.invitations` reverse
+  relation. `null` = generic Sunrise theme; the snapshot points at the client directly
+  so reattribution doesn't change a sent invitation's brand.
+
+_Later phases extend this file — session models (P4), evaluation links (P5),
+turns (P6), etc. Each documents its models here as it lands._

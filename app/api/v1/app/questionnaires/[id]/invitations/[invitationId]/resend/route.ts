@@ -29,7 +29,10 @@ import {
   toInvitationView,
   INVITATION_SELECT,
 } from '@/app/api/v1/app/questionnaires/[id]/invitations/_lib/read';
-import { sendInvitationEmail } from '@/app/api/v1/app/questionnaires/[id]/invitations/_lib/send';
+import {
+  resolveDemoClientTheme,
+  sendInvitationEmail,
+} from '@/app/api/v1/app/questionnaires/[id]/invitations/_lib/send';
 
 type Params = { id: string; invitationId: string };
 
@@ -60,6 +63,11 @@ const handleResend = withAdminAuth<Params>(async (request, session, { params }) 
   // delivered. A failed send must NOT invalidate the recipient's existing working
   // link — we keep the old token and report the failure. Email derives the title from
   // the invitation's own pinned version (no launched-version lookup, no title drift).
+  // DEMO-ONLY (F3.4): theme from the invitation's own brand snapshot — resends keep
+  // the brand the respondent was originally invited under, even if the questionnaire
+  // was later reattributed.
+  const theme = await resolveDemoClientTheme(scoped.demoClientId);
+
   const { token, tokenHash, expiresAt } = mintInvitationToken();
   const emailResult = await sendInvitationEmail({
     to: scoped.email,
@@ -67,6 +75,7 @@ const handleResend = withAdminAuth<Params>(async (request, session, { params }) 
     questionnaireTitle: scoped.questionnaireTitle,
     token,
     expiresAt,
+    theme,
   }).catch(() => ({ success: false, status: 'failed' as const, error: 'Email send threw' }));
 
   if (!emailResult.success) {

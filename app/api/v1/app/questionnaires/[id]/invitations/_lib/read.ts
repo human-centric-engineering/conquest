@@ -92,6 +92,8 @@ export interface ScopedInvitation {
   status: AppInvitationStatus;
   /** Title of the questionnaire the invitation's pinned version belongs to (for the email). */
   questionnaireTitle: string;
+  /** DEMO-ONLY (F3.4): the brand snapshot on the invitation — themes the resend email. */
+  demoClientId: string | null;
 }
 
 /**
@@ -114,6 +116,7 @@ export async function loadScopedInvitation(
       email: true,
       name: true,
       status: true,
+      demoClientId: true,
       version: { select: { questionnaire: { select: { title: true } } } },
     },
   });
@@ -125,5 +128,6 @@ export async function loadScopedInvitation(
     name: row.name,
     status: row.status as AppInvitationStatus,
     questionnaireTitle: row.version.questionnaire.title,
+    demoClientId: row.demoClientId,
   };
 }

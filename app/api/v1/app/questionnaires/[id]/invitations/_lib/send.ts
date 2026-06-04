@@ -11,6 +11,7 @@ import { env } from '@/lib/env';
 import { sendEmail, type SendEmailResult } from '@/lib/email/send';
 import QuestionnaireInvitationEmail from '@/emails/questionnaire-invitation';
 import { INVITATION_BLOCKER_STATUSES } from '@/lib/app/questionnaire/invitations';
+import { resolveTheme, type ResolvedTheme } from '@/lib/app/questionnaire/theming';
 
 /**
  * Public path of the respondent acceptance page (built in F3.2 PR2). The opaque
@@ -28,6 +29,12 @@ export interface LaunchedVersionTarget {
   versionId: string;
   versionNumber: number;
   questionnaireTitle: string;
+  /**
+   * DEMO-ONLY (F3.4): the questionnaire's attributed demo client (null = generic
+   * Sunrise demo). Snapshotted onto each invitation at creation and used to resolve
+   * the email theme.
+   */
+  demoClientId: string | null;
 }
 
 /**
@@ -41,14 +48,33 @@ export async function resolveLaunchedVersion(
   const version = await prisma.appQuestionnaireVersion.findFirst({
     where: { questionnaireId, status: 'launched' },
     orderBy: { versionNumber: 'desc' },
-    select: { id: true, versionNumber: true, questionnaire: { select: { title: true } } },
+    select: {
+      id: true,
+      versionNumber: true,
+      questionnaire: { select: { title: true, demoClientId: true } },
+    },
   });
   if (!version) return null;
   return {
     versionId: version.id,
     versionNumber: version.versionNumber,
     questionnaireTitle: version.questionnaire.title,
+    demoClientId: version.questionnaire.demoClientId,
   };
+}
+
+/**
+ * DEMO-ONLY (F3.4): resolve the invitation-email theme for an attributed demo client.
+ * `null` (generic demo) or a client with no theme columns set both resolve to the
+ * all-defaults Sunrise theme — so an unthemed invite renders exactly as pre-F3.4.
+ */
+export async function resolveDemoClientTheme(demoClientId: string | null): Promise<ResolvedTheme> {
+  if (!demoClientId) return resolveTheme(null);
+  const client = await prisma.appDemoClient.findUnique({
+    where: { id: demoClientId },
+    select: { ctaColor: true, accentColor: true, logoUrl: true, welcomeCopy: true },
+  });
+  return resolveTheme(client);
 }
 
 /**
@@ -72,6 +98,8 @@ export interface SendInvitationEmailArgs {
   questionnaireTitle: string;
   token: string;
   expiresAt: Date;
+  /** DEMO-ONLY (F3.4): resolved brand theme; callers pass resolveDemoClientTheme(). */
+  theme: ResolvedTheme;
 }
 
 /** Render + send the questionnaire-invitation email. Non-blocking: returns the result. */
@@ -84,6 +112,7 @@ export function sendInvitationEmail(args: SendInvitationEmailArgs): Promise<Send
       questionnaireTitle: args.questionnaireTitle,
       invitationUrl: buildInvitationUrl(args.token),
       expiresAt: args.expiresAt,
+      theme: args.theme,
     }),
   });
 }
