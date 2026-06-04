@@ -45,6 +45,7 @@ import type { VersionGraphView } from '@/lib/app/questionnaire/views';
 
 import { SectionEditor } from '@/components/admin/questionnaires/section-editor';
 import { TagVocabularyEditor } from '@/components/admin/questionnaires/tag-vocabulary-editor';
+import { ConfigEditor } from '@/components/admin/questionnaires/config-editor';
 import { authoringMutate } from '@/components/admin/questionnaires/authoring-mutate';
 import type {
   MutationSpec,
@@ -243,6 +244,15 @@ export function VersionEditor({
           Save goal &amp; audience
         </Button>
       </section>
+
+      {/* Run-time configuration (F3.1) */}
+      <ConfigEditor
+        questionnaireId={questionnaireId}
+        versionId={versionId}
+        config={version.config}
+        run={run}
+        busy={busy}
+      />
 
       {/* Tag vocabulary */}
       <TagVocabularyEditor

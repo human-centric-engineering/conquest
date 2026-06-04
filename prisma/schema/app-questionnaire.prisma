@@ -59,10 +59,58 @@ model AppQuestionnaireVersion {
   changeRecords   AppQuestionnaireExtractionChange[]
   sourceDocuments AppQuestionnaireSourceDocument[]
   tags            AppQuestionTag[]
+  config          AppQuestionnaireConfig?
 
   @@unique([questionnaireId, versionNumber])
   @@index([questionnaireId])
   @@map("app_questionnaire_version")
+}
+
+/// The per-version run-time configuration an admin authors before launch (F3.1):
+/// every knob that controls how a session runs. 1:1 with the version (`versionId`
+/// unique) so it forks with the version — launch and the session runtime (P4)
+/// operate on the version, not the questionnaire.
+///
+/// LAZY: no row exists until the admin first saves config. The read path resolves
+/// an absent row to DEFAULT_QUESTIONNAIRE_CONFIG (types.ts), so a never-configured
+/// version still renders complete defaults; the launch gate (F3.1) treats "config
+/// saved at least once" (a row exists) as the deliberate readiness signal. The
+/// fork writer copies this row into the new draft only when present.
+///
+/// `profileFields` is the ordered list of session-start profile fields the admin
+/// collects (name/email/role/custom), stored as JSON (ProfileFieldConfig[] in
+/// types.ts) — a small admin-authored list read wholesale at session start, not
+/// queried field-by-field, so it needs no relational model. No User FK (UG-1).
+model AppQuestionnaireConfig {
+  id        String @id @default(cuid())
+  versionId String @unique
+
+  // Question selection (F4.1): how the agent picks the next question.
+  selectionStrategy String @default("sequential") // sequential | weighted | adaptive (SELECTION_STRATEGIES)
+
+  // Completion thresholds: when a session may be considered done.
+  minQuestionsAnswered Int   @default(0) // require at least this many answered
+  coverageThreshold    Float @default(1.0) // 0–1 fraction of (weighted) questions covered
+
+  // Budget & caps (F3.3/F6.3 consume these; F3.1 only stores them).
+  costBudgetUsd          Float? // per-session USD cap; null = no cap
+  maxQuestionsPerSession Int? // hard question cap; null = no cap
+
+  // Modes.
+  voiceEnabled         Boolean @default(false) // allow voice input (F6.2)
+  contradictionMode    String  @default("off") // off | flag | probe (CONTRADICTION_MODES)
+  contradictionWindowN Int     @default(0) // N prior answers to check against; 0 when mode=off
+  anonymousMode        Boolean @default(false) // don't collect identifying profile fields
+
+  // Session-start profile fields (ProfileFieldConfig[] — types.ts).
+  profileFields Json @default("[]")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  version AppQuestionnaireVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@map("app_questionnaire_config")
 }
 
 /// A section/group within a version. Plain entity — extraction provenance

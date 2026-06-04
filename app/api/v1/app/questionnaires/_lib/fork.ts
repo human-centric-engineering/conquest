@@ -14,8 +14,9 @@
  * mirroring `_lib/persist.ts`.
  *
  * Copied into the fork: goal/audience + provenance, the section→question graph,
- * and (F2.2) the tag vocabulary with its question assignments re-linked to the
- * copies.
+ * (F2.2) the tag vocabulary with its question assignments re-linked to the copies,
+ * and (F3.1) the run-time config row when one exists (so the draft launches with
+ * the same settings; the config is 1:1 with the version, not a child addressed by URL).
  *
  * Deliberately NOT copied into the fork:
  *   - `AppQuestionnaireExtractionChange` records — a fork starts a clean editorial
@@ -28,6 +29,7 @@ import {
   hasLaunchBlockers,
 } from '@/lib/app/questionnaire/authoring/launch-blockers';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
+import { CONFIG_SELECT } from '@/app/api/v1/app/questionnaires/_lib/detail';
 import {
   jsonInput,
   type ScopedVersion,
@@ -88,6 +90,9 @@ export async function forkVersionIfLaunched(
         audience: true,
         goalProvenance: true,
         audienceProvenance: true,
+        // Reuse the read view's column set so a new config column is copied by the
+        // fork automatically — no separate list here to fall out of sync (F3.1).
+        config: { select: CONFIG_SELECT },
         tags: {
           select: {
             id: true,
@@ -146,6 +151,21 @@ export async function forkVersionIfLaunched(
       },
       select: { id: true },
     });
+
+    // F3.1: copy the run-time config row into the fork when one exists (1:1 with
+    // the version). A no-config source forks to a no-config draft — both resolve
+    // to the same defaults on read.
+    if (source.config) {
+      await tx.appQuestionnaireConfig.create({
+        data: {
+          versionId: newVersion.id,
+          // Spread the selected columns (CONFIG_SELECT) verbatim; only the JSON
+          // column needs the null-sentinel wrapper. New columns ride along.
+          ...source.config,
+          profileFields: jsonInput(source.config.profileFields),
+        },
+      });
+    }
 
     // Sections first (slots reference them); copy ordinal verbatim, mapping each
     // original section id to its copy so child mutations can retarget after a fork.

@@ -52,6 +52,9 @@ const tx = {
   appQuestionSlotTag: {
     createMany: vi.fn(async () => ({ count: 0 })),
   },
+  appQuestionnaireConfig: {
+    create: vi.fn(async () => ({ id: 'newcfg-1' })),
+  },
 };
 
 function scoped(overrides: Partial<ScopedVersion> = {}): ScopedVersion {
@@ -312,5 +315,45 @@ describe('forkVersionIfLaunched — fork', () => {
         }),
       })
     );
+  });
+
+  it('copies the run-time config row into the fork when present (F3.1)', async () => {
+    tx.appQuestionnaireVersion.findUniqueOrThrow.mockResolvedValue({
+      ...sourceGraph(),
+      config: {
+        selectionStrategy: 'weighted',
+        minQuestionsAnswered: 3,
+        coverageThreshold: 0.8,
+        costBudgetUsd: 2.5,
+        maxQuestionsPerSession: 20,
+        voiceEnabled: true,
+        contradictionMode: 'flag',
+        contradictionWindowN: 5,
+        anonymousMode: false,
+        profileFields: [{ key: 'role', label: 'Role', type: 'text', required: true }],
+      },
+    });
+
+    await forkVersionIfLaunched(scoped());
+
+    expect(tx.appQuestionnaireConfig.create).toHaveBeenCalledTimes(1);
+    const data = (tx.appQuestionnaireConfig.create as Mock).mock.calls[0][0].data as Record<
+      string,
+      unknown
+    >;
+    expect(data).toMatchObject({
+      versionId: 'v2',
+      selectionStrategy: 'weighted',
+      contradictionMode: 'flag',
+      contradictionWindowN: 5,
+      profileFields: [{ key: 'role', label: 'Role', type: 'text', required: true }],
+    });
+  });
+
+  it('does not create a config row when the source has none (F3.1)', async () => {
+    // The default sourceGraph() carries no config — a no-config source forks to a
+    // no-config draft (both resolve to defaults on read).
+    await forkVersionIfLaunched(scoped());
+    expect(tx.appQuestionnaireConfig.create).not.toHaveBeenCalled();
   });
 });

@@ -34,3 +34,8 @@ export {
   type CreateQuestionInput,
   type UpdateQuestionInput,
 } from '@/lib/app/questionnaire/authoring/schemas';
+export {
+  updateConfigSchema,
+  profileFieldSchema,
+  type UpdateConfigInput,
+} from '@/lib/app/questionnaire/authoring/config-schema';

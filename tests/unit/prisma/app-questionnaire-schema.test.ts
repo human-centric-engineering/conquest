@@ -268,6 +268,46 @@ describe('questionnaire datamodel (Prisma.dmmf)', () => {
     expect(tag.type).toBe('AppQuestionTag');
     expect(tag.relationName).toBe(getField(getModel('AppQuestionTag'), 'slots').relationName);
   });
+
+  it('AppQuestionnaireConfig maps app_questionnaire_config 1:1 with the version (F3.1)', () => {
+    const model = getModel('AppQuestionnaireConfig');
+    expect(model.dbName).toBe('app_questionnaire_config');
+
+    // versionId is the unique 1:1 FK (uniqueness/onDelete asserted in migration SQL).
+    expect(getField(model, 'versionId').type).toBe('String');
+    expect(getField(model, 'versionId').kind).toBe('scalar');
+
+    // Every config column, with its storage type.
+    expect(getField(model, 'selectionStrategy').type).toBe('String');
+    expect(getField(model, 'minQuestionsAnswered').type).toBe('Int');
+    expect(getField(model, 'coverageThreshold').type).toBe('Float');
+    expect(getField(model, 'costBudgetUsd').type).toBe('Float');
+    expect(getField(model, 'maxQuestionsPerSession').type).toBe('Int');
+    expect(getField(model, 'voiceEnabled').type).toBe('Boolean');
+    expect(getField(model, 'contradictionMode').type).toBe('String');
+    expect(getField(model, 'contradictionWindowN').type).toBe('Int');
+    expect(getField(model, 'anonymousMode').type).toBe('Boolean');
+    // Profile fields are stored as JSON (ProfileFieldConfig[]) — not a relation.
+    expect(getField(model, 'profileFields').type).toBe('Json');
+
+    const version = getField(model, 'version');
+    expect(version.kind).toBe('object');
+    expect(version.type).toBe('AppQuestionnaireVersion');
+    // Both ends share the same relation (reverse `config` field on the version).
+    expect(version.relationName).toBe(
+      getField(getModel('AppQuestionnaireVersion'), 'config').relationName
+    );
+  });
+
+  it('AppQuestionnaireVersion carries the F3.1 config reverse relation', () => {
+    const config = getField(getModel('AppQuestionnaireVersion'), 'config');
+    expect(config.kind).toBe('object');
+    expect(config.type).toBe('AppQuestionnaireConfig');
+    // Both ends share the relation (1:1 uniqueness is asserted in the migration SQL).
+    expect(config.relationName).toBe(
+      getField(getModel('AppQuestionnaireConfig'), 'version').relationName
+    );
+  });
 });
 
 describe('app_questionnaire_init migration SQL', () => {
@@ -459,6 +499,41 @@ describe('app_question_tags migration SQL (F2.2)', () => {
   });
 
   it('contains no platform (unmodelled-object) operations — the schema-fold strip holds', () => {
+    expect(executableSql).not.toContain('DROP INDEX');
+    expect(executableSql).not.toContain('ai_knowledge');
+    expect(executableSql).not.toContain('searchVector');
+  });
+});
+
+describe('app_questionnaire_config migration SQL (F3.1)', () => {
+  const sql = readMigrationSql('_app_questionnaire_config');
+  const executableSql = executableLines(sql);
+
+  it('creates exactly the app_questionnaire_config table', () => {
+    expect(sql).toContain('CREATE TABLE "app_questionnaire_config"');
+    // Exactly one — guard against a phantom platform CREATE leaking back through
+    // the schema-fold footgun.
+    expect(executableSql.match(/CREATE TABLE/g) ?? []).toHaveLength(1);
+  });
+
+  it('declares the version FK with ON DELETE CASCADE', () => {
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "app_questionnaire_config_versionId_fkey"[\s\S]*REFERENCES "app_questionnaire_version"\("id"\)[\s\S]*ON DELETE CASCADE/
+    );
+  });
+
+  it('enforces the 1:1 unique index on versionId', () => {
+    expect(sql).toContain('CREATE UNIQUE INDEX "app_questionnaire_config_versionId_key"');
+  });
+
+  it('defaults profileFields to an empty JSON array', () => {
+    expect(sql).toMatch(/"profileFields" JSONB NOT NULL DEFAULT '\[\]'/);
+  });
+
+  it('contains no platform (unmodelled-object) operations — the schema-fold strip holds', () => {
+    // `migrate dev` re-emitted the three pgvector DROP INDEX + the GENERATED
+    // searchVector ALTER. Stripped by hand; this guard fails if a regeneration
+    // leaks them back in.
     expect(executableSql).not.toContain('DROP INDEX');
     expect(executableSql).not.toContain('ai_knowledge');
     expect(executableSql).not.toContain('searchVector');

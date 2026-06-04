@@ -16,6 +16,7 @@ import type {
   AudienceProvenance,
   AudienceShape,
   FieldProvenance,
+  QuestionnaireConfigShape,
   QuestionType,
   TagColor,
 } from '@/lib/app/questionnaire/types';
@@ -107,6 +108,17 @@ export interface SectionView {
   questions: QuestionSlotView[];
 }
 
+/**
+ * A version's resolved run-time configuration (F3.1) — client-safe projection of
+ * `AppQuestionnaireConfig`. Always present on the graph: when no config row exists
+ * the read path returns `DEFAULT_QUESTIONNAIRE_CONFIG`. Whether the admin has
+ * actually saved one (which the launch gate requires) is carried by `saved`.
+ */
+export interface ConfigView extends QuestionnaireConfigShape {
+  /** True once a config row exists for the version (admin saved at least once). */
+  saved: boolean;
+}
+
 /** The full structural graph of one version — sections → questions + goal/audience. */
 export interface VersionGraphView {
   id: string;
@@ -126,4 +138,6 @@ export interface VersionGraphView {
   sections: SectionView[];
   /** The version's tag vocabulary (F2.2), ordered by normalised label. */
   tags: TagView[];
+  /** Resolved run-time configuration (F3.1) — defaults when never saved. */
+  config: ConfigView;
 }
