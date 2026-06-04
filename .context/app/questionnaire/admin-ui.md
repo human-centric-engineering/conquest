@@ -96,9 +96,40 @@ rename/recolour/delete in the version editor), `question-tags-editor.tsx` (a pop
 checkbox multiselect firing the replace-set `PUT`), and `tag-chip.tsx` (the shared
 coloured pill, used by both the editor and the read-only `version-graph.tsx`).
 
-## Not yet (F2.3 onward)
+## Extraction-change review (F2.3)
 
-Creating a questionnaire is still the F1.1 ingestion endpoint (no UI).
-Extraction-change review/revert (F2.3) and re-ingest (F2.4) are the remaining P2
-work — see [`../planning/features/f2.1.md`](../planning/features/f2.1.md) and the
+A dedicated sub-route — `app/admin/questionnaires/[id]/extraction-changes?v=` —
+lists a version's editorial change log (the per-version `changeCount` on the detail
+page links into it) and lets an admin **revert** any change. See
+[`extraction-changes.md`](./extraction-changes.md) for the revert semantics; the
+admin-facing shape:
+
+- `GET …/versions/:vid/changes` — newest-first list, filterable by `status`,
+  `changeType`, `targetEntityType` (Zod query params). Each row is enriched with a
+  **dry-run revert verdict** (`revertable` + `revertBlockedReason` + `revertSummary`)
+  so the table can disable the Revert button and explain _why_ before a click.
+- `POST …/versions/:vid/changes/:changeId/revert` — revert one change. Scope-404 →
+  `409` if already reverted → **dry-run the planner before forking** (`422`
+  `REVERT_IMPOSSIBLE` with a typed `reason` on a doomed revert, so no orphan draft)
+  → fork a launched version → apply the inverse to the editable version → mark the
+  **source** change row `reverted`. Audited as `questionnaire_change.revert`.
+- **Reconciliation caveat.** `targetEntityId` is null for section/question edits,
+  so an editorial revert matches the change's `afterJson` against the live graph; a
+  zero/ambiguous match (or an edit made since) returns a typed reason rather than
+  guessing. Merge/split/add-section have no faithful inverse from free-form JSON and
+  default to `structural_inverse_unavailable` unless `beforeJson` carries enough to
+  reconstruct.
+- **Fork-on-launched UX.** A launched-version revert forks a draft and redirects to
+  the draft's change log — which is **empty** (forks start a clean editorial
+  lineage), while the now-`reverted` source row stays on the original version.
+
+**UI** (`components/admin/questionnaires/extraction-changes-table.tsx`): rows grouped
+by change family (prunes / edits / inferences / structural), client-side filters,
+before/after JSON blocks, and a single confirm dialog driving the revert mutation
+through the shared `authoringMutate` runner (fork-redirect / `router.refresh()`).
+
+## Not yet (F2.4)
+
+Creating a questionnaire is still the F1.1 ingestion endpoint (no UI). Re-ingest
+(F2.4) is the remaining P2 work — see the
 [development plan](../planning/development-plan.md#p2--admin-crud-over-questionnaires).

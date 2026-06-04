@@ -87,7 +87,7 @@ export default async function QuestionnaireDetailPage({ params, searchParams }: 
 
   return (
     <div className="space-y-6">
-      <nav className="text-muted-foreground -mb-2 text-xs">
+      <nav className="text-muted-foreground text-xs">
         <Link href="/admin/questionnaires" className="hover:underline">
           Questionnaires
         </Link>
@@ -148,7 +148,18 @@ export default async function QuestionnaireDetailPage({ params, searchParams }: 
               <p className="text-muted-foreground text-sm">
                 {selected.sectionCount} section{selected.sectionCount === 1 ? '' : 's'} ·{' '}
                 {selected.questionCount} question{selected.questionCount === 1 ? '' : 's'} ·{' '}
-                {selected.changeCount} extraction change{selected.changeCount === 1 ? '' : 's'}
+                {selected.changeCount > 0 ? (
+                  <Link
+                    href={`/admin/questionnaires/${id}/extraction-changes?v=${selected.id}`}
+                    className="hover:text-foreground underline"
+                  >
+                    {selected.changeCount} extraction change{selected.changeCount === 1 ? '' : 's'}
+                  </Link>
+                ) : (
+                  <>
+                    {selected.changeCount} extraction change{selected.changeCount === 1 ? '' : 's'}
+                  </>
+                )}
               </p>
               {graph && (
                 <Button asChild variant={editing ? 'outline' : 'default'} size="sm">
