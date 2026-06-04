@@ -129,6 +129,9 @@ round?, sessionId?, strategyOverride? }` → `{ strategy, decision, question? }`
 - **F4.5 completion logic** — reads the `complete` / `none` terminal signals.
 - **F4.3 contradiction detection** — independent (reads `contradictionMode`), but
   shares the per-turn loop.
+- **F4.2 answer extraction** — produces the `confidence` per answered slot that
+  the `weighted` scorer's low-confidence-section boost reads (see
+  [answer extraction](answer-extraction.md)).
 
 ### Embedding staleness (operator caveat)
 

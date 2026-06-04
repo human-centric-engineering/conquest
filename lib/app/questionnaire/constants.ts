@@ -29,6 +29,17 @@ export const APP_QUESTIONNAIRES_FLAG = 'APP_QUESTIONNAIRES_ENABLED';
 export const APP_QUESTIONNAIRES_ADAPTIVE_FLAG = 'APP_QUESTIONNAIRES_ADAPTIVE_STRATEGY_ENABLED';
 
 /**
+ * Sub-flag gating F4.2 **answer extraction** (the per-turn LLM call that turns a
+ * respondent's message into typed slot values). Disabled by default: every turn
+ * spends an LLM call, so an operator opts in deliberately — the same reasoning as
+ * the adaptive-selection sub-flag above. Independent of {@link APP_QUESTIONNAIRES_FLAG}
+ * (the master gate); both must be on for the extract-answer route to run.
+ * Seeded by `prisma/seeds/app-questionnaire/008-answer-extraction-flag.ts`.
+ */
+export const APP_QUESTIONNAIRES_ANSWER_EXTRACTION_FLAG =
+  'APP_QUESTIONNAIRES_ANSWER_EXTRACTION_ENABLED';
+
+/**
  * Slug of the seeded selection `AiAgent` (F4.1 / adaptive). Drives the "which of
  * these candidate questions flows most naturally?" pick via `drainStreamChat`,
  * the same way the evaluation judges are driven. Ships with empty `model`/

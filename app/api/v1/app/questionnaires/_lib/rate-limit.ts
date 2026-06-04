@@ -64,3 +64,21 @@ export const embedSlotsLimiter = createRateLimiter({
   interval: EMBED_SLOTS_RATE_LIMIT_INTERVAL_MS,
   maxRequests: EMBED_SLOTS_RATE_LIMIT_MAX,
 });
+
+/**
+ * Answer-extraction preview sub-cap (F4.2). Every call runs a structured LLM
+ * completion over the respondent's message — real per-turn spend, unlike the
+ * deterministic selection strategies. Keyed on the admin user id, who owns the
+ * spend. Set a touch higher than the adaptive selection cap (30/min): a preview
+ * admin iterating on phrasing fires more extractions than selections, but it's
+ * still a paid call, so the ceiling stays in the same order of magnitude.
+ */
+export const ANSWER_EXTRACTION_RATE_LIMIT_MAX = 60;
+
+/** Sliding-window length for {@link answerExtractionLimiter}, in milliseconds. */
+export const ANSWER_EXTRACTION_RATE_LIMIT_INTERVAL_MS = 60_000;
+
+export const answerExtractionLimiter = createRateLimiter({
+  interval: ANSWER_EXTRACTION_RATE_LIMIT_INTERVAL_MS,
+  maxRequests: ANSWER_EXTRACTION_RATE_LIMIT_MAX,
+});

@@ -3,6 +3,7 @@ import type { NextRequest } from 'next/server';
 import { errorResponse } from '@/lib/api/responses';
 import {
   APP_QUESTIONNAIRES_ADAPTIVE_FLAG,
+  APP_QUESTIONNAIRES_ANSWER_EXTRACTION_FLAG,
   APP_QUESTIONNAIRES_FLAG,
 } from '@/lib/app/questionnaire/constants';
 import { isFeatureEnabled } from '@/lib/feature-flags';
@@ -10,7 +11,11 @@ import { isFeatureEnabled } from '@/lib/feature-flags';
 // Re-exported so the feature-flag module stays the natural home for the flag
 // name. The constant itself lives in the dependency-light `constants.ts` so leaf
 // consumers (the seed) can import it without this module's HTTP/DB deps.
-export { APP_QUESTIONNAIRES_FLAG, APP_QUESTIONNAIRES_ADAPTIVE_FLAG };
+export {
+  APP_QUESTIONNAIRES_FLAG,
+  APP_QUESTIONNAIRES_ADAPTIVE_FLAG,
+  APP_QUESTIONNAIRES_ANSWER_EXTRACTION_FLAG,
+};
 
 /**
  * Whether the questionnaire app is enabled. Thin wrapper over Sunrise's
@@ -39,6 +44,24 @@ export async function isAdaptiveSelectionEnabled(): Promise<boolean> {
     isFeatureEnabled(APP_QUESTIONNAIRES_ADAPTIVE_FLAG),
   ]);
   return app && adaptive;
+}
+
+/**
+ * Whether F4.2 **answer extraction** may run. Requires BOTH the master app flag
+ * and the answer-extraction sub-flag — extraction spends an LLM call every turn,
+ * so it's opt-in on top of an already-enabled app (the same shape as
+ * {@link isAdaptiveSelectionEnabled}). The extract-answer route consults this and
+ * returns 404 when it's `false`, so a disabled sub-feature looks like a missing
+ * route rather than a 401.
+ *
+ * Server-only (resolves both flags from the database).
+ */
+export async function isAnswerExtractionEnabled(): Promise<boolean> {
+  const [app, extraction] = await Promise.all([
+    isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_ANSWER_EXTRACTION_FLAG),
+  ]);
+  return app && extraction;
 }
 
 /**
