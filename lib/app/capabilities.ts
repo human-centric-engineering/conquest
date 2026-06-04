@@ -14,11 +14,20 @@
  * Full guide + example: CUSTOMIZATION.md §4 · .context/orchestration/capabilities.md
  */
 import { registerAppCapability } from '@/lib/orchestration/capabilities/registry';
-import { AppExtractQuestionnaireStructureCapability } from '@/lib/app/questionnaire/capabilities';
+import {
+  AppExtractAnswerSlotsCapability,
+  AppExtractQuestionnaireStructureCapability,
+} from '@/lib/app/questionnaire/capabilities';
 
 export function initAppCapabilities(): void {
   // F1.1 — questionnaire ingestion. The capability is inert until the
   // APP_QUESTIONNAIRES_ENABLED flag is on (only the flag-gated ingestion route
   // dispatches it), so registering it unconditionally here is safe.
   registerAppCapability(new AppExtractQuestionnaireStructureCapability());
+
+  // F4.2 — answer extraction. Inert until the APP_QUESTIONNAIRES_ENABLED master
+  // flag and the APP_QUESTIONNAIRES_ANSWER_EXTRACTION sub-flag are both on (only
+  // the flag-gated preview route dispatches it), so unconditional registration
+  // here is safe.
+  registerAppCapability(new AppExtractAnswerSlotsCapability());
 }

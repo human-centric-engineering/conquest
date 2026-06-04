@@ -26,12 +26,16 @@ import type { AnswerProvenance, QuestionType } from '@/lib/app/questionnaire/typ
  * extracted value against the slot's real choices / bounds).
  */
 export interface ExtractionSlotView {
-  /** `AppQuestionSlot.id`. */
-  id: string;
+  /**
+   * `AppQuestionSlot.id`. Optional: the pure extraction path (prompt + normaliser)
+   * addresses slots by `key` and never reads the id — the route's DB-derived
+   * context carries it through so F4.6 can persist without a second lookup.
+   */
+  id?: string;
   /** Stable per-version slug — how intents address a slot (no IDs pre-persist). */
   key: string;
-  /** `AppQuestionnaireSection.id` the slot belongs to. */
-  sectionId: string;
+  /** `AppQuestionnaireSection.id` the slot belongs to. Optional for the same reason as `id`. */
+  sectionId?: string;
   /** The question type; drives per-type value validation. */
   type: QuestionType;
   /**

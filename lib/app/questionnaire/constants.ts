@@ -111,3 +111,77 @@ export const EXTRACT_QUESTIONNAIRE_STRUCTURE_FUNCTION_DEFINITION: CapabilityFunc
     required: ['documentText', 'fileName'],
   },
 };
+
+/**
+ * Slug of the answer-extractor capability (F4.2). One source of truth shared by
+ * the `BaseCapability` subclass, its `AiCapability` seed row, and the preview
+ * route that dispatches it. Same naming convention as the structure extractor
+ * above — snake_case with the fork-owned `app_` prefix.
+ */
+export const EXTRACT_ANSWER_SLOTS_CAPABILITY_SLUG = 'app_extract_answer_slots';
+
+/**
+ * `AiCapability.executionHandler` value for the answer-extractor capability — the
+ * class name the dispatcher resolves the in-memory handler by. Must match the
+ * class registered in `lib/app/capabilities.ts`.
+ */
+export const EXTRACT_ANSWER_SLOTS_HANDLER = 'AppExtractAnswerSlotsCapability';
+
+/**
+ * Slug of the seeded answer-extractor `AiAgent` (F4.2). A distinct agent from the
+ * document-structure extractor and the selection agent: answer extraction runs
+ * once per respondent turn (far higher volume than one-off ingestion), so it
+ * carries its own budget ceiling and persona. Ships with empty `model`/`provider`
+ * so it resolves dynamically via `agent-resolver.ts`; the preview route loads it
+ * to populate the dispatch context. App-prefixed to avoid collision with core
+ * system agents.
+ */
+export const QUESTIONNAIRE_ANSWER_EXTRACTOR_AGENT_SLUG = 'app-questionnaire-answer-extractor';
+
+/**
+ * The answer-extractor capability's OpenAI-compatible function definition — the
+ * single source of truth shared by the `BaseCapability` subclass and the
+ * `AiCapability` seed row, so the two can never drift. Lives here (rather than on
+ * the class) so the seed can import it without pulling the capability's
+ * orchestration dependency graph into the seed runtime. Dispatched
+ * programmatically by the preview route — not exposed to a chat tool loop.
+ */
+export const EXTRACT_ANSWER_SLOTS_FUNCTION_DEFINITION: CapabilityFunctionDefinition = {
+  name: EXTRACT_ANSWER_SLOTS_CAPABILITY_SLUG,
+  description:
+    "Extract typed answer values from a respondent's message for one or more question slots — the active question plus any others the message also answers (side-effects). Returns per-slot intents with value, confidence, provenance, and rationale. Dispatched programmatically by the preview route; persists nothing.",
+  parameters: {
+    type: 'object',
+    properties: {
+      userMessage: {
+        type: 'string',
+        description: "The respondent's message to extract answers from (this turn).",
+      },
+      activeQuestionKey: {
+        type: 'string',
+        description: 'Key of the question currently being asked (must be one of candidateSlots).',
+      },
+      candidateSlots: {
+        type: 'array',
+        description:
+          'Slots a value may be extracted into this turn — the active slot plus unanswered slots.',
+        items: { type: 'object', additionalProperties: true },
+      },
+      answered: {
+        type: 'array',
+        description: 'Slots already answered this session (so the extractor does not re-ask).',
+        items: { type: 'object', additionalProperties: true },
+      },
+      recentMessages: {
+        type: 'array',
+        description: 'Recent transcript, oldest first, for disambiguation.',
+        items: { type: 'string' },
+      },
+      sessionId: {
+        type: 'string',
+        description: 'Stable session identity, threaded into cost-log metadata.',
+      },
+    },
+    required: ['userMessage', 'activeQuestionKey', 'candidateSlots'],
+  },
+};

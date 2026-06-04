@@ -12,3 +12,9 @@ export {
   type ExtractQuestionnaireStructureArgs,
   type ExtractQuestionnaireStructureData,
 } from '@/lib/app/questionnaire/capabilities/extract-questionnaire-structure';
+
+export {
+  AppExtractAnswerSlotsCapability,
+  type ExtractAnswerSlotsArgs,
+  type ExtractAnswerSlotsData,
+} from '@/lib/app/questionnaire/capabilities/extract-answer-slots';
