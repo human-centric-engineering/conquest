@@ -36,6 +36,30 @@ describe('createDemoClientSchema', () => {
     const parsed = createDemoClientSchema.parse({ name: 'Acme', description: '  Q1 pitch  ' });
     expect(parsed.description).toBe('Q1 pitch');
   });
+
+  it('accepts the F3.4 theme fields and coerces empty ones to null', () => {
+    const parsed = createDemoClientSchema.parse({
+      name: 'Acme',
+      ctaColor: '#5469d4',
+      accentColor: '   ',
+      logoUrl: 'https://acme.example/logo.png',
+      welcomeCopy: '',
+    });
+    expect(parsed.ctaColor).toBe('#5469d4');
+    expect(parsed.accentColor).toBeNull();
+    expect(parsed.logoUrl).toBe('https://acme.example/logo.png');
+    expect(parsed.welcomeCopy).toBeNull();
+  });
+
+  it('rejects an invalid theme colour / non-https logo', () => {
+    expect(createDemoClientSchema.safeParse({ name: 'Acme', ctaColor: 'blue' }).success).toBe(
+      false
+    );
+    expect(
+      createDemoClientSchema.safeParse({ name: 'Acme', logoUrl: 'http://acme.example/l.png' })
+        .success
+    ).toBe(false);
+  });
 });
 
 describe('updateDemoClientSchema', () => {
@@ -54,6 +78,12 @@ describe('updateDemoClientSchema', () => {
   it('coerces an empty description to null and keeps a non-empty one', () => {
     expect(updateDemoClientSchema.parse({ description: '  ' }).description).toBeNull();
     expect(updateDemoClientSchema.parse({ description: ' note ' }).description).toBe('note');
+  });
+
+  it('accepts a theme-only patch and clears a field to null when blank', () => {
+    expect(updateDemoClientSchema.safeParse({ ctaColor: '#000000' }).success).toBe(true);
+    // A blank field is a deliberate "reset to Sunrise default" — coerced to null.
+    expect(updateDemoClientSchema.parse({ welcomeCopy: '   ' }).welcomeCopy).toBeNull();
   });
 });
 

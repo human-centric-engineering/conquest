@@ -92,6 +92,11 @@ const ROW = {
   name: 'Acme Bank',
   description: null,
   isActive: true,
+  // F3.4 theme columns (null = Sunrise default) — part of DEMO_CLIENT_SELECT.
+  ctaColor: null,
+  accentColor: null,
+  logoUrl: null,
+  welcomeCopy: null,
   createdAt: new Date('2026-01-01T00:00:00.000Z'),
   updatedAt: new Date('2026-01-01T00:00:00.000Z'),
   _count: { questionnaires: 0 },
@@ -131,6 +136,14 @@ describe('GET /api/v1/app/demo-clients (list)', () => {
     const body = await res.json();
     expect(body.success).toBe(true);
     expect(body.data).toHaveLength(1);
+    // F3.4: the projection carries the theme shape (guards against toDemoClientView
+    // dropping the theme fields).
+    expect(body.data[0]).toMatchObject({
+      ctaColor: null,
+      accentColor: null,
+      logoUrl: null,
+      welcomeCopy: null,
+    });
   });
 });
 
@@ -177,11 +190,45 @@ describe('POST /api/v1/app/demo-clients (create)', () => {
     const res = await createPOST(jsonReq({ name: 'Acme Bank' }));
     expect(res.status).toBe(409);
     const body = await res.json();
+    expect(body.success).toBe(false); // full error envelope, not just the code
     expect(body.error.code).toBe('SLUG_CONFLICT');
+  });
+
+  it('persists the F3.4 theme fields when supplied', async () => {
+    prismaMock.appDemoClient.create.mockResolvedValue({
+      ...ROW,
+      ctaColor: '#ff0000',
+      logoUrl: 'https://acme.example/logo.png',
+    });
+    await createPOST(
+      jsonReq({
+        name: 'Acme Bank',
+        ctaColor: '#ff0000',
+        logoUrl: 'https://acme.example/logo.png',
+        welcomeCopy: 'Welcome to the Acme demo.',
+      })
+    );
+    expect(prismaMock.appDemoClient.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          ctaColor: '#ff0000',
+          logoUrl: 'https://acme.example/logo.png',
+          welcomeCopy: 'Welcome to the Acme demo.',
+        }),
+      })
+    );
   });
 });
 
 describe('GET /api/v1/app/demo-clients/:id (detail)', () => {
+  it('404s when the flag is off, before auth (the withQuestionnairesEnabled gate)', async () => {
+    (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
+    const res = await detailGET(getReq(), ctx({ id: 'dc-1' }));
+    expect(res.status).toBe(404);
+    expect(auth.api.getSession).not.toHaveBeenCalled();
+    expect(getDemoClientDetail).not.toHaveBeenCalled();
+  });
+
   it('404s when unknown', async () => {
     (getDemoClientDetail as unknown as Mock).mockResolvedValue(null);
     expect((await detailGET(getReq(), ctx({ id: 'missing' }))).status).toBe(404);
@@ -222,6 +269,24 @@ describe('PATCH /api/v1/app/demo-clients/:id (update)', () => {
     );
     const res = await updatePATCH(jsonReq({ slug: 'taken' }), ctx({ id: 'dc-1' }));
     expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('SLUG_CONFLICT');
+  });
+
+  it('patches the F3.4 theme fields, including clearing one to null', async () => {
+    prismaMock.appDemoClient.findUnique.mockResolvedValue(ROW);
+    prismaMock.appDemoClient.update.mockResolvedValue({ ...ROW, ctaColor: '#000000' });
+    const res = await updatePATCH(
+      jsonReq({ ctaColor: '#000000', welcomeCopy: null }),
+      ctx({ id: 'dc-1' })
+    );
+    expect(res.status).toBe(200);
+    expect(prismaMock.appDemoClient.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ ctaColor: '#000000', welcomeCopy: null }),
+      })
+    );
   });
 });
 

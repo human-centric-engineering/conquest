@@ -9,23 +9,40 @@ gated by `APP_QUESTIONNAIRES_ENABLED` (404 when off).
 `prisma/schema/app-questionnaire.prisma`. One row per invited respondent, **pinned
 to the launched version** it targets (`versionId` FK, `onDelete: Cascade`).
 
-| Field                                          | Notes                                                                                                           |
-| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `versionId`                                    | The launched version at send time. In-flight invitees stay pinned when it forks.                                |
-| `email`, `name?`                               | Recipient. The invitation is keyed by token, not email — duplicates are allowed across versions / after revoke. |
-| `tokenHash` `@unique`                          | SHA-256 of the opaque token. Plaintext lives **only** in the emailed URL.                                       |
-| `status`                                       | Lifecycle (below). Default `pending`.                                                                           |
-| `userId?`                                      | Respondent `User.id`, set on registration. Plain `String`, **no `@relation`** (UG-1).                           |
-| `invitedByUserId`                              | Admin `User.id`. Plain `String`, no `@relation` (UG-1).                                                         |
-| `expiresAt`                                    | `INVITATION_TOKEN_EXPIRY_DAYS` (7) from mint.                                                                   |
-| `sentAt`/`openedAt`/`registeredAt`/`revokedAt` | Lifecycle timestamps.                                                                                           |
+| Field                                          | Notes                                                                                                                                            |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `versionId`                                    | The launched version at send time. In-flight invitees stay pinned when it forks.                                                                 |
+| `email`, `name?`                               | Recipient. The invitation is keyed by token, not email — duplicates are allowed across versions / after revoke.                                  |
+| `tokenHash` `@unique`                          | SHA-256 of the opaque token. Plaintext lives **only** in the emailed URL.                                                                        |
+| `status`                                       | Lifecycle (below). Default `pending`.                                                                                                            |
+| `userId?`                                      | Respondent `User.id`, set on registration. Plain `String`, **no `@relation`** (UG-1).                                                            |
+| `invitedByUserId`                              | Admin `User.id`. Plain `String`, no `@relation` (UG-1).                                                                                          |
+| `demoClientId?`                                | **F3.4** `DEMO-ONLY` brand snapshot (the attributed demo client at send time). Real `@relation`, `onDelete: SetNull`, indexed. Themes the email. |
+| `expiresAt`                                    | `INVITATION_TOKEN_EXPIRY_DAYS` (7) from mint.                                                                                                    |
+| `sentAt`/`openedAt`/`registeredAt`/`revokedAt` | Lifecycle timestamps.                                                                                                                            |
 
-Indexes: `versionId`, `status`, `email`, `userId`, unique `tokenHash`. No
-`(versionId, email)` unique — dedup is application-layer (revoke → re-invite must work).
+Indexes: `versionId`, `status`, `email`, `userId`, `demoClientId`, unique `tokenHash`.
+No `(versionId, email)` unique — dedup is application-layer (revoke → re-invite must work).
 
 There is **no `questionnaireId` column**: the admin list scopes through the version
-relation (`where: { version: { questionnaireId } }`). F3.4 adds a `demoClientId`
-denormalisation for demo-client theming — F3.2 leaves that seam open.
+relation (`where: { version: { questionnaireId } }`).
+
+### Demo-client branding (F3.4, `DEMO-ONLY`)
+
+The send seam snapshots the questionnaire's attributed `demoClientId` onto each
+invitation at creation (`null` = generic Sunrise demo). The snapshot points at the
+**client directly**, so reattributing the questionnaire later doesn't change an
+already-sent invitation's brand. The email theme is resolved from it:
+
+- **Create** (`POST …/invitations`): resolve the questionnaire's `demoClientId` once,
+  write it onto every row, and resolve the brand once per batch.
+- **Resend** (`POST …/invitations/:id/resend`): theme from the invitation's **own**
+  snapshot — the respondent keeps the brand they were originally invited under.
+- `resolveDemoClientTheme()` (route-local) loads the four theme columns and runs the
+  pure `resolveTheme()` (`lib/app/questionnaire/theming`); `null`/unthemed → the
+  all-Sunrise theme, so a generic invite renders exactly as pre-F3.4. The themed email
+  is `emails/questionnaire-invitation.tsx` (CTA colour, logo, welcome copy). See
+  [demo-clients.md] § "Theming module".
 
 ## Lifecycle
 
@@ -114,5 +131,8 @@ invitations must be fully anonymised. See `.context/privacy/data-erasure.md`.
 
 ## Not here
 
-`started`/`completed` transitions (P6/P7). Demo-client branding + themed email
-(F3.4). Cost estimation (F3.3). Anonymous-mode session entry (P6/P7).
+`started`/`completed` transitions (P6/P7). Cost estimation (F3.3). Anonymous-mode
+session entry (P6/P7). (Demo-client branding + themed email shipped in F3.4 — see
+above.)
+
+[demo-clients.md]: ./demo-clients.md

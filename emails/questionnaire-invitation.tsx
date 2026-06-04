@@ -3,9 +3,10 @@
  * a questionnaire. Distinct from the platform's onboarding `invitation.tsx`: the
  * copy is about completing a questionnaire, not joining the product.
  *
- * F3.4 (DEMO-ONLY) themes this per demo client — CTA colour, logo, welcome copy
- * from a resolved theme. F3.2 ships the plain, Sunrise-default version; the props
- * surface is the seam those theme values slot into.
+ * F3.4 (DEMO-ONLY) themes this per demo client — CTA colour, logo, and welcome copy
+ * come from a resolved theme. The send seam passes `resolveDemoClientTheme(...)`; the
+ * `theme` prop defaults to the all-Sunrise theme (`resolveTheme(null)`), so a generic
+ * (unattributed) invite — and the email-preview tooling — render exactly as pre-F3.4.
  */
 
 import * as React from 'react';
@@ -18,9 +19,12 @@ import {
   Section,
   Text,
   Button,
+  Img,
   Hr,
   Heading,
 } from '@react-email/components';
+
+import { resolveTheme, type ResolvedTheme } from '@/lib/app/questionnaire/theming';
 
 export interface QuestionnaireInvitationEmailProps {
   /** Recipient display name, when known. */
@@ -31,6 +35,8 @@ export interface QuestionnaireInvitationEmailProps {
   invitationUrl: string;
   /** When the invitation link stops working. */
   expiresAt: Date;
+  /** DEMO-ONLY (F3.4): resolved brand theme. Defaults to the all-Sunrise theme. */
+  theme?: ResolvedTheme;
 }
 
 export default function QuestionnaireInvitationEmail({
@@ -38,6 +44,7 @@ export default function QuestionnaireInvitationEmail({
   questionnaireTitle,
   invitationUrl,
   expiresAt,
+  theme = resolveTheme(null),
 }: QuestionnaireInvitationEmailProps): React.ReactElement {
   const previewText = `You've been invited to complete ${questionnaireTitle}`;
   const greetingName = inviteeName?.trim() ? inviteeName.trim() : 'there';
@@ -51,23 +58,34 @@ export default function QuestionnaireInvitationEmail({
     timeZoneName: 'short',
   });
 
+  // DEMO-ONLY (F3.4): brand the CTA button + fallback link from the theme; the base
+  // style objects carry the Sunrise defaults, the theme overrides just the colour.
+  const themedButton: React.CSSProperties = { ...button, backgroundColor: theme.ctaColor };
+  const themedLink: React.CSSProperties = { ...link, color: theme.accentColor };
+
   return (
     <Html lang="en">
       <Head />
       <Preview>{previewText}</Preview>
       <Body style={main}>
         <Container style={container}>
+          {theme.logoUrl ? (
+            <Section style={logoContainer}>
+              <Img src={theme.logoUrl} alt={questionnaireTitle} height={40} style={logo} />
+            </Section>
+          ) : null}
+
           <Heading style={h1}>You&apos;re invited</Heading>
 
           <Text style={text}>Hi {greetingName},</Text>
 
           <Text style={text}>
-            You&apos;ve been invited to complete <strong>{questionnaireTitle}</strong>. It&apos;s a
-            short conversation — answer in your own words and we&apos;ll take care of the rest.
+            You&apos;ve been invited to complete <strong>{questionnaireTitle}</strong>.{' '}
+            {theme.welcomeCopy}
           </Text>
 
           <Section style={buttonContainer}>
-            <Button href={invitationUrl} style={button}>
+            <Button href={invitationUrl} style={themedButton}>
               Start the questionnaire
             </Button>
           </Section>
@@ -83,7 +101,7 @@ export default function QuestionnaireInvitationEmail({
           <Text style={footer}>
             If the button doesn&apos;t work, copy and paste this link into your browser:
             <br />
-            <a href={invitationUrl} style={link}>
+            <a href={invitationUrl} style={themedLink}>
               {invitationUrl}
             </a>
           </Text>
@@ -105,6 +123,17 @@ const container: React.CSSProperties = {
   padding: '20px 0 48px',
   marginBottom: '64px',
   maxWidth: '580px',
+};
+
+const logoContainer: React.CSSProperties = {
+  padding: '0 48px',
+  textAlign: 'center' as const,
+  margin: '0 0 16px',
+};
+
+const logo: React.CSSProperties = {
+  height: '40px',
+  margin: '0 auto',
 };
 
 const h1: React.CSSProperties = {

@@ -32,6 +32,20 @@ import {
   DEMO_CLIENT_SLUG_PATTERN,
   type DemoClientView,
 } from '@/lib/app/questionnaire/demo-clients';
+import { HEX_COLOR_PATTERN, WELCOME_COPY_MAX, isHttpsUrl } from '@/lib/app/questionnaire/theming';
+
+/** True for an empty field or an absolute https URL — shares the server's https
+ *  predicate (isHttpsUrl) so the form and the API can't drift. */
+function isBlankOrHttpsUrl(value: string): boolean {
+  return value === '' || isHttpsUrl(value);
+}
+
+const hexOrBlank = z
+  .string()
+  .trim()
+  .refine((v) => v === '' || HEX_COLOR_PATTERN.test(v), {
+    message: 'Hex colour like #5469d4 (or leave blank for the default)',
+  });
 
 const formSchema = z.object({
   name: z.string().trim().min(1, 'Name is required').max(120),
@@ -44,6 +58,13 @@ const formSchema = z.object({
     }),
   description: z.string().trim().max(500),
   isActive: z.boolean(),
+  // DEMO-ONLY (F3.4): brand theme for the invitation email. Blank = Sunrise default.
+  ctaColor: hexOrBlank,
+  accentColor: hexOrBlank,
+  logoUrl: z.string().trim().refine(isBlankOrHttpsUrl, {
+    message: 'Absolute https:// URL (or leave blank)',
+  }),
+  welcomeCopy: z.string().trim().max(WELCOME_COPY_MAX),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -73,6 +94,10 @@ export function DemoClientForm({ client }: DemoClientFormProps) {
       slug: client?.slug ?? '',
       description: client?.description ?? '',
       isActive: client?.isActive ?? true,
+      ctaColor: client?.ctaColor ?? '',
+      accentColor: client?.accentColor ?? '',
+      logoUrl: client?.logoUrl ?? '',
+      welcomeCopy: client?.welcomeCopy ?? '',
     },
   });
 
@@ -82,11 +107,17 @@ export function DemoClientForm({ client }: DemoClientFormProps) {
     setIsLoading(true);
     setError(null);
     try {
+      // Empty theme field → null so the column clears to the Sunrise default.
+      const themeOrNull = (v: string) => (v.trim() === '' ? null : v.trim());
       const body = {
         name: values.name,
         description: values.description.trim() === '' ? null : values.description.trim(),
         isActive: values.isActive,
         ...(values.slug.trim() === '' ? {} : { slug: values.slug.trim() }),
+        ctaColor: themeOrNull(values.ctaColor),
+        accentColor: themeOrNull(values.accentColor),
+        logoUrl: themeOrNull(values.logoUrl),
+        welcomeCopy: themeOrNull(values.welcomeCopy),
       };
 
       if (isEdit) {
@@ -174,6 +205,88 @@ export function DemoClientForm({ client }: DemoClientFormProps) {
           aria-label="Active"
         />
       </div>
+
+      {/* DEMO-ONLY (F3.4): invitation-email branding. Every field is optional — blank
+          falls back to the Sunrise default, so an unthemed client sends the plain email. */}
+      <fieldset className="space-y-4 rounded-md border px-4 py-4">
+        <legend className="px-1 text-sm font-medium">Invitation branding</legend>
+        <p className="text-muted-foreground -mt-1 text-xs">
+          Optional. Used in the invitation email sent to this client&apos;s respondents. Leave a
+          field blank to use the Sunrise default.
+        </p>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="ctaColor" className="flex items-center gap-1">
+              CTA colour
+              <FieldHelp title="Call-to-action colour">
+                Hex colour for the email&apos;s primary button (e.g.{' '}
+                <code className="text-xs">#5469d4</code>). Blank uses the Sunrise default.
+              </FieldHelp>
+            </Label>
+            <Input
+              id="ctaColor"
+              placeholder="#5469d4"
+              disabled={isLoading}
+              {...register('ctaColor')}
+            />
+            <FormError message={errors.ctaColor?.message} />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="accentColor" className="flex items-center gap-1">
+              Accent colour
+              <FieldHelp title="Accent colour">
+                Hex secondary/accent colour (e.g. <code className="text-xs">#5469d4</code>). Colours
+                the email&apos;s fallback link and the respondent UI; blank uses the Sunrise
+                default.
+              </FieldHelp>
+            </Label>
+            <Input
+              id="accentColor"
+              placeholder="#5469d4"
+              disabled={isLoading}
+              {...register('accentColor')}
+            />
+            <FormError message={errors.accentColor?.message} />
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="logoUrl" className="flex items-center gap-1">
+            Logo URL
+            <FieldHelp title="Logo URL">
+              Absolute <code className="text-xs">https://</code> URL of the client logo shown at the
+              top of the invitation email. Blank shows no logo.
+            </FieldHelp>
+          </Label>
+          <Input
+            id="logoUrl"
+            placeholder="https://acme.example/logo.png"
+            disabled={isLoading}
+            {...register('logoUrl')}
+          />
+          <FormError message={errors.logoUrl?.message} />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="welcomeCopy" className="flex items-center gap-1">
+            Welcome copy
+            <FieldHelp title="Welcome copy">
+              A short branded intro line in the invitation email body, after &ldquo;You&apos;ve been
+              invited to complete &lt;questionnaire&gt;.&rdquo; Blank uses the Sunrise default copy.
+            </FieldHelp>
+          </Label>
+          <Textarea
+            id="welcomeCopy"
+            placeholder="A short, branded welcome line (optional)"
+            rows={2}
+            disabled={isLoading}
+            {...register('welcomeCopy')}
+          />
+          <FormError message={errors.welcomeCopy?.message} />
+        </div>
+      </fieldset>
 
       {error && (
         <div className="bg-destructive/10 text-destructive rounded-md p-3 text-sm">{error}</div>

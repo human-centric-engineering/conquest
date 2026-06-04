@@ -27,6 +27,11 @@ vi.mock('@/lib/orchestration/audit/admin-audit-logger', async (importOriginal) =
 
 vi.mock('@/lib/email/send', () => ({ sendEmail: vi.fn() }));
 
+// Mock the email component so we can assert the resolved theme reaches the render —
+// `sendInvitationEmail` invokes it directly, so the rendered element's props are the
+// <Html> props, not the theme. The mock captures the component's own call args.
+vi.mock('@/emails/questionnaire-invitation', () => ({ default: vi.fn(() => null) }));
+
 vi.mock('@/lib/security/rate-limit', async (importOriginal) => {
   const real = await importOriginal<typeof import('@/lib/security/rate-limit')>();
   return { ...real, inviteLimiter: { check: vi.fn(() => ({ success: true })) } };
@@ -35,6 +40,7 @@ vi.mock('@/lib/security/rate-limit', async (importOriginal) => {
 const prismaMock = vi.hoisted(() => ({
   appQuestionnaire: { findUnique: vi.fn() },
   appQuestionnaireVersion: { findFirst: vi.fn() },
+  appDemoClient: { findUnique: vi.fn() },
   appQuestionnaireInvitation: {
     findFirst: vi.fn(),
     findUnique: vi.fn(),
@@ -60,6 +66,8 @@ import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { sendEmail } from '@/lib/email/send';
+import QuestionnaireInvitationEmail from '@/emails/questionnaire-invitation';
+import { SUNRISE_THEME_DEFAULTS } from '@/lib/app/questionnaire/theming';
 import { inviteLimiter } from '@/lib/security/rate-limit';
 import {
   mockAdminUser,
@@ -112,6 +120,7 @@ function scopedRow(overrides: Record<string, unknown> = {}) {
     email: 'a@x.com',
     name: 'Al',
     status: 'sent',
+    demoClientId: null,
     version: { questionnaire: { title: 'Customer Satisfaction' } },
     ...overrides,
   };
@@ -125,12 +134,13 @@ beforeEach(() => {
   (isFeatureEnabled as unknown as Mock).mockResolvedValue(true);
   setAuth(mockAdminUser());
   (sendEmail as unknown as Mock).mockResolvedValue({ success: true, status: 'sent', id: 'em-1' });
-  // Default: a launched version exists.
+  // Default: a launched version exists, on a generic (unattributed) questionnaire.
   prismaMock.appQuestionnaireVersion.findFirst.mockResolvedValue({
     id: 'v1',
     versionNumber: 2,
-    questionnaire: { title: 'Customer Satisfaction' },
+    questionnaire: { title: 'Customer Satisfaction', demoClientId: null },
   });
+  prismaMock.appDemoClient.findUnique.mockResolvedValue(null);
   prismaMock.appQuestionnaireInvitation.findFirst.mockResolvedValue(null); // no dedup hit
   prismaMock.appQuestionnaireInvitation.create.mockResolvedValue({ id: 'inv-new' });
   prismaMock.appQuestionnaireInvitation.update.mockResolvedValue(invitationRow());
@@ -199,6 +209,86 @@ describe('POST — send invitations', () => {
     );
     expect(logAdminAction).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'questionnaire_invitation.create' })
+    );
+  });
+
+  it('snapshots null demoClientId for a generic questionnaire and skips the theme lookup', async () => {
+    await createPOST(req({ recipients: [{ email: 'a@x.com' }] }), ctx(COLL));
+    // DEMO-ONLY (F3.4): the brand snapshot is written even when null.
+    expect(prismaMock.appQuestionnaireInvitation.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ demoClientId: null }) })
+    );
+    // No attributed client → no theme lookup at all (resolveDemoClientTheme short-circuits).
+    expect(prismaMock.appDemoClient.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('denormalises the attributed demoClientId onto the invitation and resolves the theme once', async () => {
+    prismaMock.appQuestionnaireVersion.findFirst.mockResolvedValue({
+      id: 'v1',
+      versionNumber: 2,
+      questionnaire: { title: 'Customer Satisfaction', demoClientId: 'dc-acme' },
+    });
+    prismaMock.appDemoClient.findUnique.mockResolvedValue({
+      ctaColor: '#ff0000',
+      accentColor: null,
+      logoUrl: 'https://acme.example/logo.png',
+      welcomeCopy: 'Welcome to the Acme demo.',
+    });
+
+    await createPOST(req({ recipients: [{ email: 'a@x.com' }, { email: 'b@x.com' }] }), ctx(COLL));
+
+    // Every created invitation carries the attributed client.
+    for (const call of prismaMock.appQuestionnaireInvitation.create.mock.calls) {
+      expect(call[0].data.demoClientId).toBe('dc-acme');
+    }
+    // Theme resolved ONCE for the whole batch (not per recipient).
+    expect(prismaMock.appDemoClient.findUnique).toHaveBeenCalledTimes(1);
+    expect(prismaMock.appDemoClient.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'dc-acme' } })
+    );
+    // The resolved brand reaches the email render (accentColor defaulted from null).
+    expect(QuestionnaireInvitationEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        theme: expect.objectContaining({
+          ctaColor: '#ff0000',
+          accentColor: SUNRISE_THEME_DEFAULTS.accentColor,
+          logoUrl: 'https://acme.example/logo.png',
+          welcomeCopy: 'Welcome to the Acme demo.',
+        }),
+      })
+    );
+  });
+
+  it('falls back to the Sunrise theme when the snapshotted client was deleted (stale FK)', async () => {
+    // demoClientId is set on the questionnaire, but the client row is gone (deleted
+    // after attribution, before the SetNull cascade reached an in-flight send).
+    prismaMock.appQuestionnaireVersion.findFirst.mockResolvedValue({
+      id: 'v1',
+      versionNumber: 2,
+      questionnaire: { title: 'Customer Satisfaction', demoClientId: 'dc-gone' },
+    });
+    prismaMock.appDemoClient.findUnique.mockResolvedValue(null); // client deleted
+
+    await createPOST(req({ recipients: [{ email: 'a@x.com' }] }), ctx(COLL));
+
+    // The lookup was attempted (id non-null), but the miss resolves to the all-Sunrise
+    // theme rather than throwing.
+    expect(prismaMock.appDemoClient.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'dc-gone' } })
+    );
+    expect(QuestionnaireInvitationEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        theme: expect.objectContaining({
+          ctaColor: SUNRISE_THEME_DEFAULTS.ctaColor,
+          accentColor: SUNRISE_THEME_DEFAULTS.accentColor,
+          logoUrl: null,
+          welcomeCopy: SUNRISE_THEME_DEFAULTS.welcomeCopy,
+        }),
+      })
+    );
+    // The invitation still records the snapshot id even though the client is gone.
+    expect(prismaMock.appQuestionnaireInvitation.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ demoClientId: 'dc-gone' }) })
     );
   });
 
@@ -372,6 +462,29 @@ describe('POST — resend', () => {
     expect(res.status).toBe(409);
     expect((await res.json()).error.code).toBe('INVITATION_NOT_RESENDABLE');
     expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it('themes the resend from the invitation’s own brand snapshot (not the questionnaire’s current client)', async () => {
+    // The invitation was sent under dc-acme; resend must use that snapshot.
+    prismaMock.appQuestionnaireInvitation.findFirst.mockResolvedValue(
+      scopedRow({ status: 'opened', demoClientId: 'dc-acme' })
+    );
+    prismaMock.appDemoClient.findUnique.mockResolvedValue({
+      ctaColor: '#00ff00',
+      accentColor: null,
+      logoUrl: null,
+      welcomeCopy: null,
+    });
+    prismaMock.appQuestionnaireInvitation.update.mockResolvedValue(invitationRow());
+
+    await resendPOST(req(undefined), ctx(SINGLE));
+
+    expect(prismaMock.appDemoClient.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'dc-acme' } })
+    );
+    expect(QuestionnaireInvitationEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ theme: expect.objectContaining({ ctaColor: '#00ff00' }) })
+    );
   });
 
   it('404s when the invitation is not scoped to the questionnaire', async () => {

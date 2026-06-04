@@ -9,8 +9,8 @@
  * needs (e.g. the attributed-questionnaire count).
  *
  * FORK-GUIDANCE: a real client engagement strips demo tenancy — see
- * .context/app/questionnaire/forking.md § "Replacing demo tenancy". Theme fields
- * are deliberately absent here (they land with their first renderer, F3.4 / F7.1).
+ * .context/app/questionnaire/forking.md § "Replacing demo tenancy". The theme fields
+ * (F3.4) are DEMO-ONLY branding — a fork that drops demo tenancy drops them too.
  */
 
 /** One row in the admin demo-clients list (and the full detail — same shape today). */
@@ -24,6 +24,17 @@ export interface DemoClientView {
   description: string | null;
   /** Soft-disable flag — an inactive client is excluded from the attribution picker. */
   isActive: boolean;
+  // DEMO-ONLY (F3.4): brand theme — null on any field means "use the Sunrise default"
+  // (resolveTheme fills it). The invitation email renders all four; accentColor is the
+  // email's fallback-link colour and doubles as the F7.1 CSS-variable accent.
+  /** CTA / primary button colour (hex), or null for the Sunrise default. */
+  ctaColor: string | null;
+  /** Accent colour (hex) — email fallback-link colour + F7.1 accent; null = default. */
+  accentColor: string | null;
+  /** Absolute https logo URL shown in the invitation email, or null. */
+  logoUrl: string | null;
+  /** Branded invitation intro line, or null for the Sunrise default copy. */
+  welcomeCopy: string | null;
   /** How many questionnaires are attributed to this client (drives the delete guard). */
   questionnaireCount: number;
   createdAt: string;
@@ -31,9 +42,10 @@ export interface DemoClientView {
 }
 
 /**
- * Detail is the same shape as a list row at F2.5.1 — kept as a distinct alias so
- * later phases can widen detail (theme fields, attributed-questionnaire list)
- * without touching the list contract.
+ * Detail is the same shape as a list row — kept as a distinct alias so a later phase
+ * can widen detail (e.g. the attributed-questionnaire list) without touching the list
+ * contract. (F3.4 added the theme fields to the shared view: the edit form prefills
+ * them and the small demo-clients list tolerates the extra columns.)
  */
 export type DemoClientDetail = DemoClientView;
 

@@ -1,4 +1,4 @@
-# Demo clients (F2.5.1)
+# Demo clients (F2.5.1 · branding F3.4)
 
 > **DEMO-ONLY.** Demo-client tenancy is an attribution + branding partition for the
 > sales demo — **not** a security boundary and **not** real multi-tenancy. A real
@@ -25,25 +25,48 @@ Sunrise's [multi-tenancy doc][mt] warns against.
 
 ## Data model
 
-`AppDemoClient` (`app_demo_client`) — **identity only** at F2.5.1:
+`AppDemoClient` (`app_demo_client`) — identity (F2.5.1) + theme (F3.4):
 
-| Field         | Type     | Notes                                              |
-| ------------- | -------- | -------------------------------------------------- |
-| `id`          | cuid     |                                                    |
-| `slug`        | String   | `@unique`, kebab-case ("acme-bank"); admin URLs    |
-| `name`        | String   | display name ("Acme Bank Demo")                    |
-| `description` | String?  | internal admin note                                |
-| `isActive`    | Boolean  | soft-disable; excluded from the attribution picker |
-| timestamps    | DateTime |                                                    |
+| Field         | Type     | Notes                                                                          |
+| ------------- | -------- | ------------------------------------------------------------------------------ |
+| `id`          | cuid     |                                                                                |
+| `slug`        | String   | `@unique`, kebab-case ("acme-bank"); admin URLs                                |
+| `name`        | String   | display name ("Acme Bank Demo")                                                |
+| `description` | String?  | internal admin note                                                            |
+| `isActive`    | Boolean  | soft-disable; excluded from the attribution picker                             |
+| `ctaColor`    | String?  | **F3.4** hex CTA / button colour; null → Sunrise default                       |
+| `accentColor` | String?  | **F3.4** hex accent; email fallback-link colour + F7.1 CSS var; null → default |
+| `logoUrl`     | String?  | **F3.4** absolute https logo for the invitation email; null → none             |
+| `welcomeCopy` | String?  | **F3.4** branded invitation intro line; null → default copy                    |
+| timestamps    | DateTime |                                                                                |
 
 `AppQuestionnaire.demoClientId String?` — nullable FK, `onDelete: SetNull`, indexed.
 `null` = a "Generic Sunrise demo" (defaults end-to-end). Pre-F2.5.1 questionnaires
 keep working; **no backfill**.
 
-**Theme fields are deliberately absent.** Colours, fonts, logo, and copy land with
-their first renderer (F3.4 invitation email / F7.1 user UI) — additive nullable
-columns later, no backfill. So are the `reset-sessions` (F6.4) and clone-for-client
-(P3+) utilities. See the [development plan][plan] P2.5 distributed-work table.
+**Theme columns (F3.4) are all nullable** — null on any field means "use the Sunrise
+default" (`resolveTheme()` fills it), so an unthemed client renders exactly as before.
+The remaining distributed P2.5 work — `reset-sessions` (F6.4) and clone-for-client
+(P3+) — is still pending. See the [development plan][plan] P2.5 distributed-work table.
+
+### Theming module (F3.4)
+
+`lib/app/questionnaire/theming/` (Prisma-free, `DEMO-ONLY`) turns the nullable theme
+columns into a usable brand:
+
+- `resolveTheme(client | null)` → a `ResolvedTheme` with every gap filled by
+  `SUNRISE_THEME_DEFAULTS` (`logoUrl` stays nullable — there is no default logo).
+  `null` (generic demo) resolves to the all-defaults theme.
+- `themeToCssVariables(theme)` → `--app-cta-color` / `--app-accent-color` (+
+  `--app-logo-url` when a logo is set) for the **F7.1** user UI to spread onto a
+  container. The invitation email reads the resolved values inline instead.
+- `themeFields` (Zod) validate hex colours + an absolute https logo URL; they spread
+  into the demo-client create/update schemas. An empty form field coerces to null
+  (= reset to the Sunrise default).
+
+**First renderer = the invitation email (F3.4).** The send seam resolves the theme
+from the invitation's denormalised `demoClientId` snapshot — see [invitations.md].
+The F7.1 chat surface is the second consumer (via `themeToCssVariables`).
 
 ### FK delete policy (AD2)
 
@@ -66,7 +89,7 @@ auth), `withAdminAuth` (401/403), and audited. Registry: `API.APP.DEMO_CLIENTS`.
 | `GET /api/v1/app/demo-clients`         | List (active + inactive)            | —                                  |
 | `POST /api/v1/app/demo-clients`        | Create                              | `409 SLUG_CONFLICT`                |
 | `GET /api/v1/app/demo-clients/:id`     | Detail                              | `404`                              |
-| `PATCH /api/v1/app/demo-clients/:id`   | Edit any identity field             | `404`, `409 SLUG_CONFLICT`         |
+| `PATCH /api/v1/app/demo-clients/:id`   | Edit any identity or theme field    | `404`, `409 SLUG_CONFLICT`         |
 | `DELETE /api/v1/app/demo-clients/:id`  | Delete (guarded)                    | `404`, `409 DEMO_CLIENT_IN_USE`    |
 | `PATCH /api/v1/app/questionnaires/:id` | Attribute / detach (`demoClientId`) | `404`, `404 DEMO_CLIENT_NOT_FOUND` |
 
@@ -83,6 +106,9 @@ Audit actions: `app_demo_client.create | update | delete`,
 - `/admin/demo-clients/new` — create form.
 - `/admin/demo-clients/:id` — edit form + delete (disabled with an explanation
   while attributed).
+- Both forms carry an **"Invitation branding"** fieldset (F3.4): CTA colour, accent
+  colour, logo URL, welcome copy — each optional with a `<FieldHelp>`; blank = the
+  Sunrise default.
 - The questionnaire detail page (`/admin/questionnaires/:id`) carries the
   attribution `<DemoClientAssign>` picker (active clients + the current one).
 
@@ -93,11 +119,13 @@ itself is **not** themed (that's for the end-user surface in P7).
 
 Everything demo-only is grep-isolated under the `DEMO-ONLY` marker:
 
-- `lib/app/questionnaire/demo-clients/**` (domain) ·
-  `app/api/v1/app/demo-clients/**` (routes) ·
+- `lib/app/questionnaire/demo-clients/**` + `lib/app/questionnaire/theming/**`
+  (domain) · `app/api/v1/app/demo-clients/**` (routes) ·
   `components/admin/demo-clients/**` + `app/admin/demo-clients/**` (UI) ·
-  the `AppDemoClient` model + `demoClientId` column · the `API.APP.DEMO_CLIENTS`
-  block · the nav item · the attribution PATCH on the questionnaire route.
+  the `AppDemoClient` model + theme columns + the invitation `demoClientId`
+  snapshot + the `AppQuestionnaire.demoClientId` column · the `API.APP.DEMO_CLIENTS`
+  block · the nav item · the attribution PATCH on the questionnaire route · the theme
+  resolution in the invitation send seam.
 
 `grep -rl "DEMO-ONLY" lib app components prisma` finds the full surface. See
 [forking.md] for the three replacement paths (delete · rename to `AppTenant` + RLS

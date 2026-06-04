@@ -361,11 +361,11 @@ _Indicative tasks:_
 
 ### F3.4 — Demo-client invitation branding (DEMO-ONLY)
 
-_Status:_ not started · _Size:_ ~1 PR · _Owner:_ TBD · _Deps:_ F2.5.1, F3.2 · _Relocated from the old P2.5._
+_Status:_ in flight — built on `feat/f3.4-invitation-branding` (themed invites adopted; gates pending) · _Size:_ ~1 PR · _Owner:_ TBD · _Deps:_ F2.5.1, F3.2 · _Relocated from the old P2.5._
 
-The first place a prospect sees their brand — the invitation. Snapshots the demo client onto the invitation and (if adopted) themes the invitation email. Can only be built once F3.2's invitation model exists, which is why it lives here and not in P2.5. All `// DEMO-ONLY:`.
+The first place a prospect sees their brand — the invitation. Snapshots the demo client onto the invitation and themes the invitation email. Can only be built once F3.2's invitation model exists, which is why it lives here and not in P2.5. All `// DEMO-ONLY:`.
 
-> **Open decision at promotion — themed invites or plain?** Themed makes the prospect's first touch branded (strong for the sales intent) but pulls the **theming module** forward into P3; plain defers all theming to P7 (F7.1). This choice decides where the theming module (`lib/app/questionnaire/theming/` + the `AppDemoClient` theme columns) is built.
+> **Open decision RESOLVED at promotion — themed invites.** The prospect's first touch is branded, so the **theming module** (`lib/app/questionnaire/theming/` + the `AppDemoClient` theme columns) is built **now (P3)**, not deferred to P7. F7.1's dependency line stands: the chat surface consumes the already-built module via `themeToCssVariables()` rather than building it.
 
 _Indicative tasks:_
 

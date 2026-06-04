@@ -54,6 +54,11 @@ const handleCreate = withAdminAuth(async (request: NextRequest, session) => {
         name: body.name,
         description: body.description ?? null,
         ...(body.isActive !== undefined ? { isActive: body.isActive } : {}),
+        // DEMO-ONLY (F3.4): theme columns — absent leaves the column null (Sunrise default).
+        ...(body.ctaColor !== undefined ? { ctaColor: body.ctaColor } : {}),
+        ...(body.accentColor !== undefined ? { accentColor: body.accentColor } : {}),
+        ...(body.logoUrl !== undefined ? { logoUrl: body.logoUrl } : {}),
+        ...(body.welcomeCopy !== undefined ? { welcomeCopy: body.welcomeCopy } : {}),
       },
       select: DEMO_CLIENT_SELECT,
     });

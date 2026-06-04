@@ -39,6 +39,7 @@ import {
 import { listInvitations } from '@/app/api/v1/app/questionnaires/[id]/invitations/_lib/read';
 import {
   findLiveInvitation,
+  resolveDemoClientTheme,
   resolveLaunchedVersion,
   sendInvitationEmail,
 } from '@/app/api/v1/app/questionnaires/[id]/invitations/_lib/send';
@@ -86,6 +87,10 @@ const handleCreate = withAdminAuth<{ id: string }>(async (request, session, { pa
     });
   }
 
+  // DEMO-ONLY (F3.4): resolve the brand theme once for the whole batch — every
+  // recipient on this questionnaire shares its attributed demo client.
+  const theme = await resolveDemoClientTheme(target.demoClientId);
+
   const results: InvitationSendResult[] = [];
   for (const recipient of body.recipients) {
     // App-layer dedup — a live invite to this address on this version is a no-op.
@@ -109,6 +114,8 @@ const handleCreate = withAdminAuth<{ id: string }>(async (request, session, { pa
         tokenHash,
         status: 'pending',
         invitedByUserId: session.user.id,
+        // DEMO-ONLY (F3.4): snapshot the attributed client onto the invitation.
+        demoClientId: target.demoClientId,
         expiresAt,
       },
       select: { id: true },
@@ -123,6 +130,7 @@ const handleCreate = withAdminAuth<{ id: string }>(async (request, session, { pa
       questionnaireTitle: target.questionnaireTitle,
       token,
       expiresAt,
+      theme,
     }).catch(() => ({ success: false, status: 'failed' as const, error: 'Email send threw' }));
 
     if (emailResult.success) {

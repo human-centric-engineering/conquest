@@ -65,6 +65,11 @@ const handleUpdate = withAdminAuth<{ id: string }>(async (request, session, { pa
         ...(body.slug !== undefined ? { slug: body.slug } : {}),
         ...(body.description !== undefined ? { description: body.description } : {}),
         ...(body.isActive !== undefined ? { isActive: body.isActive } : {}),
+        // DEMO-ONLY (F3.4): theme columns — present (incl. null to clear) patches the column.
+        ...(body.ctaColor !== undefined ? { ctaColor: body.ctaColor } : {}),
+        ...(body.accentColor !== undefined ? { accentColor: body.accentColor } : {}),
+        ...(body.logoUrl !== undefined ? { logoUrl: body.logoUrl } : {}),
+        ...(body.welcomeCopy !== undefined ? { welcomeCopy: body.welcomeCopy } : {}),
       },
       select: DEMO_CLIENT_SELECT,
     });

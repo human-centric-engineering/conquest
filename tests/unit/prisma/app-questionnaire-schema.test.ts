@@ -76,7 +76,7 @@ describe('questionnaire datamodel (Prisma.dmmf)', () => {
     expect(demoClient.type).toBe('AppDemoClient');
   });
 
-  it('AppDemoClient maps app_demo_client with the F2.5.1 identity fields', () => {
+  it('AppDemoClient maps app_demo_client with the identity + F3.4 theme fields', () => {
     const model = getModel('AppDemoClient');
     expect(model.dbName).toBe('app_demo_client');
 
@@ -88,9 +88,13 @@ describe('questionnaire datamodel (Prisma.dmmf)', () => {
     expect(getField(model, 'createdAt').type).toBe('DateTime');
     expect(getField(model, 'updatedAt').type).toBe('DateTime');
 
-    // Identity only at F2.5.1 — theme columns land with their first renderer.
-    for (const themeField of ['primaryColour', 'logoUrl', 'welcomeMessageMd']) {
-      expect(model.fields.find((f) => f.name === themeField)).toBeUndefined();
+    // DEMO-ONLY (F3.4): theme columns land now that the invitation email renders
+    // them. All nullable String scalars (nullability asserted in the migration SQL);
+    // resolveTheme() fills nulls with Sunrise defaults.
+    for (const themeField of ['ctaColor', 'accentColor', 'logoUrl', 'welcomeCopy']) {
+      const field = getField(model, themeField);
+      expect(field.type).toBe('String');
+      expect(field.kind).toBe('scalar');
     }
 
     // Reverse relation back to the attributed questionnaires (count + delete guard).
@@ -99,6 +103,15 @@ describe('questionnaire datamodel (Prisma.dmmf)', () => {
     expect(questionnaires.type).toBe('AppQuestionnaire');
     expect(questionnaires.relationName).toBe(
       getField(getModel('AppQuestionnaire'), 'demoClient').relationName
+    );
+
+    // DEMO-ONLY (F3.4): reverse relation to the invitations carrying this client's
+    // brand snapshot — shares the relation with AppQuestionnaireInvitation.demoClient.
+    const invitations = getField(model, 'invitations');
+    expect(invitations.kind).toBe('object');
+    expect(invitations.type).toBe('AppQuestionnaireInvitation');
+    expect(invitations.relationName).toBe(
+      getField(getModel('AppQuestionnaireInvitation'), 'demoClient').relationName
     );
   });
 
@@ -333,6 +346,15 @@ describe('questionnaire datamodel (Prisma.dmmf)', () => {
     expect(getField(model, 'invitedByUserId').type).toBe('String');
     expect(getField(model, 'invitedByUserId').kind).toBe('scalar');
     expect(model.fields.some((f) => f.relationName?.includes('User'))).toBe(false);
+
+    // DEMO-ONLY (F3.4): the brand-snapshot FK — a scalar plus a modelled relation to
+    // AppDemoClient (onDelete/index asserted in the migration SQL). Unlike the User
+    // columns this IS a real @relation (same recipe as AppQuestionnaire.demoClient).
+    expect(getField(model, 'demoClientId').type).toBe('String');
+    expect(getField(model, 'demoClientId').kind).toBe('scalar');
+    const demoClient = getField(model, 'demoClient');
+    expect(demoClient.kind).toBe('object');
+    expect(demoClient.type).toBe('AppDemoClient');
 
     const version = getField(model, 'version');
     expect(version.kind).toBe('object');
@@ -618,5 +640,44 @@ describe('app_questionnaire_invitation migration SQL (F3.2)', () => {
     expect(executableSql).not.toContain('DROP INDEX');
     expect(executableSql).not.toContain('ai_knowledge');
     expect(executableSql).not.toContain('searchVector');
+  });
+});
+
+describe('app_questionnaire_invitation_branding migration SQL (F3.4)', () => {
+  const sql = readMigrationSql('_app_questionnaire_invitation_branding');
+  const executableSql = executableLines(sql);
+
+  it('adds the four nullable theme columns to app_demo_client', () => {
+    for (const col of ['ctaColor', 'accentColor', 'logoUrl', 'welcomeCopy']) {
+      // Nullable: TEXT with no NOT NULL — resolveTheme() fills nulls with defaults.
+      expect(sql).toMatch(new RegExp(`ADD COLUMN\\s+"${col}" TEXT(?!\\s+NOT NULL)`));
+    }
+  });
+
+  it('adds the nullable demoClientId brand-snapshot column to the invitation', () => {
+    expect(sql).toMatch(
+      /ALTER TABLE "app_questionnaire_invitation" ADD COLUMN\s+"demoClientId" TEXT;/
+    );
+  });
+
+  it('declares the demoClient FK with ON DELETE SET NULL (brand snapshot survives client delete)', () => {
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "app_questionnaire_invitation_demoClientId_fkey"[\s\S]*REFERENCES "app_demo_client"\("id"\)[\s\S]*ON DELETE SET NULL/
+    );
+  });
+
+  it('indexes the invitation demoClientId lookup', () => {
+    expect(sql).toContain('CREATE INDEX "app_questionnaire_invitation_demoClientId_idx"');
+  });
+
+  it('contains no platform (unmodelled-object) operations — the schema-fold strip holds', () => {
+    // `migrate dev` re-emitted the three pgvector DROP INDEX + the GENERATED
+    // searchVector ALTER. Stripped by hand; this guard fails if a regeneration
+    // leaks them back in.
+    expect(executableSql).not.toContain('DROP INDEX');
+    expect(executableSql).not.toContain('ai_knowledge');
+    expect(executableSql).not.toContain('searchVector');
+    // Additive only — no CREATE TABLE in this migration.
+    expect(executableSql).not.toContain('CREATE TABLE');
   });
 });
