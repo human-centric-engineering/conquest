@@ -308,6 +308,46 @@ describe('questionnaire datamodel (Prisma.dmmf)', () => {
       getField(getModel('AppQuestionnaireConfig'), 'version').relationName
     );
   });
+
+  it('AppQuestionnaireInvitation maps app_questionnaire_invitation (F3.2)', () => {
+    const model = getModel('AppQuestionnaireInvitation');
+    expect(model.dbName).toBe('app_questionnaire_invitation');
+
+    // versionId is the pinning FK (onDelete/index asserted in migration SQL).
+    expect(getField(model, 'versionId').type).toBe('String');
+    expect(getField(model, 'versionId').kind).toBe('scalar');
+
+    expect(getField(model, 'email').type).toBe('String');
+    expect(getField(model, 'name').type).toBe('String');
+    expect(getField(model, 'tokenHash').type).toBe('String');
+    expect(getField(model, 'status').type).toBe('String');
+    expect(getField(model, 'expiresAt').type).toBe('DateTime');
+    expect(getField(model, 'sentAt').type).toBe('DateTime');
+    expect(getField(model, 'openedAt').type).toBe('DateTime');
+    expect(getField(model, 'registeredAt').type).toBe('DateTime');
+    expect(getField(model, 'revokedAt').type).toBe('DateTime');
+
+    // User FKs are plain scalars, no @relation (UG-1) — like revertedByUserId.
+    expect(getField(model, 'userId').type).toBe('String');
+    expect(getField(model, 'userId').kind).toBe('scalar');
+    expect(getField(model, 'invitedByUserId').type).toBe('String');
+    expect(getField(model, 'invitedByUserId').kind).toBe('scalar');
+    expect(model.fields.some((f) => f.relationName?.includes('User'))).toBe(false);
+
+    const version = getField(model, 'version');
+    expect(version.kind).toBe('object');
+    expect(version.type).toBe('AppQuestionnaireVersion');
+    // Both ends share the relation (reverse `invitations` field on the version).
+    expect(version.relationName).toBe(
+      getField(getModel('AppQuestionnaireVersion'), 'invitations').relationName
+    );
+  });
+
+  it('AppQuestionnaireVersion carries the F3.2 invitations reverse relation', () => {
+    const invitations = getField(getModel('AppQuestionnaireVersion'), 'invitations');
+    expect(invitations.kind).toBe('object');
+    expect(invitations.type).toBe('AppQuestionnaireInvitation');
+  });
 });
 
 describe('app_questionnaire_init migration SQL', () => {
@@ -534,6 +574,47 @@ describe('app_questionnaire_config migration SQL (F3.1)', () => {
     // `migrate dev` re-emitted the three pgvector DROP INDEX + the GENERATED
     // searchVector ALTER. Stripped by hand; this guard fails if a regeneration
     // leaks them back in.
+    expect(executableSql).not.toContain('DROP INDEX');
+    expect(executableSql).not.toContain('ai_knowledge');
+    expect(executableSql).not.toContain('searchVector');
+  });
+});
+
+describe('app_questionnaire_invitation migration SQL (F3.2)', () => {
+  const sql = readMigrationSql('_app_questionnaire_invitation');
+  const executableSql = executableLines(sql);
+
+  it('creates exactly the app_questionnaire_invitation table', () => {
+    expect(sql).toContain('CREATE TABLE "app_questionnaire_invitation"');
+    // Exactly one — guard against a phantom platform CREATE leaking back through
+    // the schema-fold footgun.
+    expect(executableSql.match(/CREATE TABLE/g) ?? []).toHaveLength(1);
+  });
+
+  it('declares the version FK with ON DELETE CASCADE', () => {
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "app_questionnaire_invitation_versionId_fkey"[\s\S]*REFERENCES "app_questionnaire_version"\("id"\)[\s\S]*ON DELETE CASCADE/
+    );
+  });
+
+  it('enforces the unique index on tokenHash and the lookup indexes', () => {
+    expect(sql).toContain('CREATE UNIQUE INDEX "app_questionnaire_invitation_tokenHash_key"');
+    expect(sql).toContain('CREATE INDEX "app_questionnaire_invitation_versionId_idx"');
+    expect(sql).toContain('CREATE INDEX "app_questionnaire_invitation_status_idx"');
+    expect(sql).toContain('CREATE INDEX "app_questionnaire_invitation_email_idx"');
+    expect(sql).toContain('CREATE INDEX "app_questionnaire_invitation_userId_idx"');
+  });
+
+  it('declares no relational FK for the User columns (UG-1 plain-String FKs)', () => {
+    // userId / invitedByUserId are plain scalars — no FK constraint to "user".
+    expect(sql).not.toMatch(/invitation_userId_fkey/);
+    expect(sql).not.toMatch(/invitation_invitedByUserId_fkey/);
+  });
+
+  it('contains no platform (unmodelled-object) operations — the schema-fold strip holds', () => {
+    // `migrate dev` re-emitted the three pgvector DROP INDEX + the GENERATED
+    // searchVector ALTER (the latter even dropped the live indexes once). Stripped
+    // by hand; this guard fails if a regeneration leaks them back in.
     expect(executableSql).not.toContain('DROP INDEX');
     expect(executableSql).not.toContain('ai_knowledge');
     expect(executableSql).not.toContain('searchVector');

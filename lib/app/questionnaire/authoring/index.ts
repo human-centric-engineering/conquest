@@ -7,7 +7,6 @@
  * (`app/api/v1/app/questionnaires/_lib/fork.ts`), keeping this tree storage-agnostic.
  */
 export {
-  countLaunchBlockers,
   hasLaunchBlockers,
   type LaunchBlockers,
 } from '@/lib/app/questionnaire/authoring/launch-blockers';

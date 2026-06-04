@@ -60,10 +60,61 @@ model AppQuestionnaireVersion {
   sourceDocuments AppQuestionnaireSourceDocument[]
   tags            AppQuestionTag[]
   config          AppQuestionnaireConfig?
+  invitations     AppQuestionnaireInvitation[]
 
   @@unique([questionnaireId, versionNumber])
   @@index([questionnaireId])
   @@map("app_questionnaire_version")
+}
+
+/// A tokenised invitation for one respondent to complete a launched version (F3.2).
+///
+/// VERSION-SCOPED: the FK pins the invitation to the launched version it targets at
+/// send time. A sent invitation is a launch blocker — editing a launched-with-invites
+/// version forks a draft (the F2.1 seam, wired live in F3.2's route-local
+/// `_lib/launch-blockers.ts`), so in-flight invitees stay on the version they were
+/// invited to. New invitations always target the now-launched version. The admin
+/// surface lists per-questionnaire through this relation (no `questionnaireId`
+/// denormalisation); F3.4 adds the demo-client `demoClientId` denormalisation + theming.
+///
+/// TOKEN AT REST: `tokenHash` is the SHA-256 of the opaque token (same recipe as
+/// `lib/utils/invitation-token.ts`); the plaintext lives only in the emailed URL.
+/// Lookups hash the URL token and match `tokenHash`; the email is derived from the
+/// row, not carried in the link.
+///
+/// LIFECYCLE (`status`): pending → sent → opened → registered → started → completed,
+/// with `revoked` reachable from pending|sent|opened. F3.2 drives through `registered`
+/// (respondent registers a real better-auth account, stamped on `userId`);
+/// `started`/`completed` are seam states transitioned by P6/P7 sessions.
+///
+/// USER FKs are plain String, no @relation (UG-1, as `revertedByUserId`). `userId` is
+/// the respondent (null until registration); `invitedByUserId` is the admin. These are
+/// the first questionnaire rows referencing User — see the erasure note in
+/// .context/app/questionnaire/invitations.md.
+model AppQuestionnaireInvitation {
+  id              String    @id @default(cuid())
+  versionId       String
+  email           String // recipient address; the invitation is keyed by token, not email
+  name            String? // optional recipient display name (prefills registration)
+  tokenHash       String    @unique // sha256 of the opaque token; plaintext only in the email URL
+  status          String    @default("pending") // APP_INVITATION_STATUSES (invitations/types.ts)
+  userId          String? // respondent User.id, set on registration; plain String, no FK (UG-1)
+  invitedByUserId String // admin User.id; plain String, no FK (UG-1)
+  expiresAt       DateTime // token expiry (INVITATION_TOKEN_EXPIRY_DAYS from now)
+  sentAt          DateTime? // first successful email send
+  openedAt        DateTime? // first landing-page validation of the token
+  registeredAt    DateTime? // respondent bound to an account
+  revokedAt       DateTime? // admin revoked
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  version AppQuestionnaireVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@index([versionId])
+  @@index([status])
+  @@index([email])
+  @@index([userId])
+  @@map("app_questionnaire_invitation")
 }
 
 /// The per-version run-time configuration an admin authors before launch (F3.1):

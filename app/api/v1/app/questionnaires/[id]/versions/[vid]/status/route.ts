@@ -32,7 +32,7 @@ import { updateVersionStatusSchema } from '@/lib/app/questionnaire/authoring';
 import {
   countLaunchBlockers,
   hasLaunchBlockers,
-} from '@/lib/app/questionnaire/authoring/launch-blockers';
+} from '@/app/api/v1/app/questionnaires/_lib/launch-blockers';
 import type { AppQuestionnaireStatus } from '@/lib/app/questionnaire/types';
 import { loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
 
@@ -109,8 +109,9 @@ const handleStatusPatch = withAdminAuth<{ id: string; vid: string }>(
       });
     }
     // Leaving `launched` (un-launch / archive) must not strand live work pinned to
-    // this version. Blockers are always 0 until P3/P4, so this is a forward guard —
-    // the transition can't quietly mutate a version sessions/invitations depend on.
+    // this version. As of F3.2 `countLaunchBlockers` returns the real count of live
+    // invitations (sessions join at P4) — a launched version with live invitations
+    // cannot be un-launched/archived out from under them.
     if (from === 'launched' && hasLaunchBlockers(await countLaunchBlockers(vid))) {
       throw new ConflictError(
         'Cannot change status: this version has live sessions or invitations'

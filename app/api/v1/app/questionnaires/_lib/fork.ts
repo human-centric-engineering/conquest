@@ -10,8 +10,9 @@
  * returned `versionId`.
  *
  * Route-local DB seam — the `lib/app/questionnaire/**` module stays Prisma-free;
- * the pure trigger (`countLaunchBlockers`) lives there, the deep copy lives here,
- * mirroring `_lib/persist.ts`.
+ * the pure predicate (`hasLaunchBlockers`) lives there, while the DB-touching count
+ * (`countLaunchBlockers`, real for invitations as of F3.2) and this deep copy live
+ * route-local, mirroring `_lib/persist.ts`.
  *
  * Copied into the fork: goal/audience + provenance, the section→question graph,
  * (F2.2) the tag vocabulary with its question assignments re-linked to the copies,
@@ -27,7 +28,7 @@ import { executeTransaction } from '@/lib/db/utils';
 import {
   countLaunchBlockers,
   hasLaunchBlockers,
-} from '@/lib/app/questionnaire/authoring/launch-blockers';
+} from '@/app/api/v1/app/questionnaires/_lib/launch-blockers';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { CONFIG_SELECT } from '@/app/api/v1/app/questionnaires/_lib/detail';
 import {

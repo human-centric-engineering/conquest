@@ -20,6 +20,14 @@ vi.mock('@/lib/db/utils', () => ({ executeTransaction: vi.fn() }));
 // authoring-routes (imported transitively for jsonInput) touches prisma at load.
 vi.mock('@/lib/db/client', () => ({ prisma: { appQuestionSlot: { findFirst: vi.fn() } } }));
 vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({ logAdminAction: vi.fn() }));
+// The fork trigger reads the route-local (Prisma) blocker counter (F3.2). Stub it
+// to zero blockers so the fork decision here is driven solely by `status` — the
+// real count is covered by the status/invitations integration tests.
+vi.mock('@/app/api/v1/app/questionnaires/_lib/launch-blockers', () => ({
+  countLaunchBlockers: vi.fn(async () => ({ sessions: 0, invitations: 0 })),
+  hasLaunchBlockers: (b: { sessions: number; invitations: number }) =>
+    b.sessions > 0 || b.invitations > 0,
+}));
 
 import { executeTransaction } from '@/lib/db/utils';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';

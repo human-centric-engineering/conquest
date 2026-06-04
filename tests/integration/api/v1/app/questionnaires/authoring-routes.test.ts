@@ -59,6 +59,10 @@ const prismaMock = vi.hoisted(() => ({
   appQuestionnaireConfig: {
     count: vi.fn(),
   },
+  // F3.2: the route-local countLaunchBlockers reads this when leaving `launched`.
+  appQuestionnaireInvitation: {
+    count: vi.fn(),
+  },
 }));
 vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
 
@@ -346,6 +350,48 @@ describe('status PATCH', () => {
     );
     // Status route never forks.
     expect(forkVersionIfLaunched).not.toHaveBeenCalled();
+  });
+
+  // F3.2: a sent invitation pins a launched version — un-launching is refused.
+  it('un-launches a launched version with no live invitations', async () => {
+    prismaMock.appQuestionnaireVersion.findFirst.mockResolvedValue({
+      id: 'v1',
+      questionnaireId: 'qn-1',
+      versionNumber: 1,
+      status: 'launched',
+    });
+    prismaMock.appQuestionnaireInvitation.count.mockResolvedValue(0);
+    prismaMock.appQuestionnaireVersion.update.mockResolvedValue({
+      id: 'v1',
+      versionNumber: 1,
+      status: 'draft',
+    });
+
+    const res = await statusPATCH(req({ status: 'draft' }), ctx(VERSION_PARAMS));
+    expect(res.status).toBe(200);
+    expect(prismaMock.appQuestionnaireVersion.update).toHaveBeenCalled();
+  });
+
+  it('refuses to leave launched while a live invitation pins the version (409)', async () => {
+    prismaMock.appQuestionnaireVersion.findFirst.mockResolvedValue({
+      id: 'v1',
+      questionnaireId: 'qn-1',
+      versionNumber: 1,
+      status: 'launched',
+    });
+    prismaMock.appQuestionnaireInvitation.count.mockResolvedValue(1);
+
+    const res = await statusPATCH(req({ status: 'archived' }), ctx(VERSION_PARAMS));
+    expect(res.status).toBe(409);
+    expect(prismaMock.appQuestionnaireVersion.update).not.toHaveBeenCalled();
+    // The blocker count must be scoped to THIS version and the live-status set —
+    // a missing status filter or wrong version would silently allow the un-launch.
+    expect(prismaMock.appQuestionnaireInvitation.count).toHaveBeenCalledWith({
+      where: {
+        versionId: 'v1',
+        status: { in: expect.arrayContaining(['pending', 'sent', 'opened', 'registered']) },
+      },
+    });
   });
 });
 
