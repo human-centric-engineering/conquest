@@ -58,8 +58,9 @@ pre-existing` (P2-ready; a fresh ingest never produces `pre-existing`).
 6. **Admin metadata** — `parseAdminMetadata` (Zod). `400` on an invalid audience
    field (bad enum, unknown key, non-positive duration).
 7. **SHA-256 dedup** — `409 DUPLICATE_DOCUMENT` (with the existing ids) when the
-   exact bytes were already ingested. Re-ingest-into-existing-version is **F2.4**;
-   F1.1 only surfaces the collision.
+   exact bytes were already ingested. This is the **global** new-ingest dedup;
+   re-ingest-into-an-existing-draft is **F2.4**, which scopes its dedup to the
+   target version and short-circuits to a `200` no-op ([`reingest.md`](./reingest.md)).
 8. **Parse** — `parseDocument(buffer, fileName, { extractTables })` directly (not
    the knowledge KB's `previewDocument`/`confirmPreview`, which chunk + embed into
    RAG). `422 PARSE_FAILED` on a parser throw.
@@ -152,12 +153,13 @@ field that was already set. Each resolved field's origin is returned as the
 `fieldProvenance` tag. Inference the admin suppressed (by supplying that field)
 produces no `infer_*` change record — the capability drops it before persist.
 
-### Raw bytes are not stored (F1.1)
+### Raw bytes are not stored
 
-`AppQuestionnaireSourceDocument.bytes` stays null in F1.1: no consumer until F2.4
-re-ingest, and persisting every upload's bytes is a privacy surface the plan
-defers (open question #5). `extractedText` **is** stored — F2.3 verifies source
-quotes against it.
+`AppQuestionnaireSourceDocument.bytes` stays null. F2.4 re-ingest **re-uploads** a
+replacement document rather than diffing against a stored copy, so it added no
+consumer either — the column stays reserved, and persisting every upload's bytes
+remains a privacy surface the plan defers (open question #5). `extractedText`
+**is** stored — F2.3 verifies source quotes against it.
 
 ## Manual verification
 

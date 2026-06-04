@@ -22,6 +22,9 @@ import {
   type MergeProvenance,
 } from '@/app/api/v1/app/questionnaires/_lib/merge';
 
+/** The interactive-transaction client `executeTransaction` passes to its callback. */
+type IngestTx = Parameters<Parameters<typeof executeTransaction>[0]>[0];
+
 /** Parse provenance carried from the route onto the source-document row. */
 export interface IngestionSourceInput {
   fileName: string;
@@ -98,6 +101,123 @@ export function assertPersistable(extraction: ExtractQuestionnaireStructureData)
   }
 }
 
+/** Structural counts written by {@link writeGraph}. */
+export interface GraphCounts {
+  sectionCount: number;
+  questionCount: number;
+  changeCount: number;
+}
+
+/**
+ * Write the extracted section → slot graph and the editorial change log onto an
+ * **existing** version, inside the caller's transaction. Shared by a new ingest
+ * (F1.1, fresh version) and a re-ingest (F2.4, after the draft's prior graph is
+ * cleared). Call {@link assertPersistable} first — this assumes every question's
+ * `sectionOrdinal` resolves.
+ */
+export async function writeGraph(
+  tx: IngestTx,
+  versionId: string,
+  extraction: ExtractQuestionnaireStructureData
+): Promise<GraphCounts> {
+  // Sections first — slots and change records reference them.
+  const sectionIdByOrdinal = new Map<number, string>();
+  for (const section of extraction.sections) {
+    const created = await tx.appQuestionnaireSection.create({
+      data: {
+        versionId,
+        ordinal: section.ordinal,
+        title: section.title,
+        ...(section.description !== undefined ? { description: section.description } : {}),
+      },
+      select: { id: true },
+    });
+    sectionIdByOrdinal.set(section.ordinal, created.id);
+  }
+
+  // Slots — one createMany; `versionId` is denormalised onto each row (F2.2
+  // tag validation reads it), `sectionId` resolved from the ordinal map.
+  if (extraction.questions.length > 0) {
+    await tx.appQuestionSlot.createMany({
+      data: extraction.questions.map((q, index) => {
+        // assertPersistable guarantees the ordinal resolves.
+        const sectionId = sectionIdByOrdinal.get(q.sectionOrdinal) as string;
+        return {
+          versionId,
+          sectionId,
+          ordinal: index,
+          key: q.key,
+          prompt: q.prompt,
+          type: q.suggestedType,
+          required: false,
+          weight: 1.0,
+          ...(q.guidelines !== undefined ? { guidelines: q.guidelines } : {}),
+          ...(q.rationale !== undefined ? { rationale: q.rationale } : {}),
+          ...(q.suggestedTypeConfig !== undefined
+            ? { typeConfig: jsonInput(q.suggestedTypeConfig) }
+            : {}),
+          extractionConfidence: q.extractionConfidence,
+        };
+      }),
+    });
+  }
+
+  // Change records — the revertible editorial log. `targetEntityId` resolves to
+  // the version for version-level (infer_*) decisions; section/question-targeted
+  // edits stay null (the LLM intent carries no entity linkage — F2.3 reconciles
+  // them against `sourceQuote` / before-after JSON on the review surface).
+  if (extraction.changes.length > 0) {
+    await tx.appQuestionnaireExtractionChange.createMany({
+      data: extraction.changes.map((change) => ({
+        versionId,
+        changeType: change.changeType,
+        targetEntityType: change.targetEntityType,
+        targetEntityId: change.targetEntityType === 'version' ? versionId : null,
+        ...(change.sourceQuote !== undefined ? { sourceQuote: change.sourceQuote } : {}),
+        ...(change.beforeJson !== undefined ? { beforeJson: jsonInput(change.beforeJson) } : {}),
+        ...(change.afterJson !== undefined ? { afterJson: jsonInput(change.afterJson) } : {}),
+        ...(change.rationale !== undefined ? { rationale: change.rationale } : {}),
+        ...(change.confidence !== undefined ? { confidence: change.confidence } : {}),
+        status: 'applied',
+      })),
+    });
+  }
+
+  return {
+    sectionCount: extraction.sections.length,
+    questionCount: extraction.questions.length,
+    changeCount: extraction.changes.length,
+  };
+}
+
+/**
+ * Write the source-document provenance row for a version, inside the caller's
+ * transaction. Shared by ingest and re-ingest; re-ingest **appends** a new row
+ * (prior source docs are kept), so the relation is 1:many.
+ */
+export async function writeSourceDocument(
+  tx: IngestTx,
+  versionId: string,
+  source: IngestionSourceInput
+): Promise<void> {
+  await tx.appQuestionnaireSourceDocument.create({
+    data: {
+      versionId,
+      fileName: source.fileName,
+      fileHash: source.fileHash,
+      byteSize: source.byteSize,
+      ...(source.mimeType !== undefined ? { mimeType: source.mimeType } : {}),
+      ...(source.pageCount !== undefined ? { pageCount: source.pageCount } : {}),
+      warnings: source.warnings.length > 0 ? jsonInput(source.warnings) : Prisma.JsonNull,
+      extractedText: source.extractedText,
+      // Raw `bytes` deliberately not persisted: no consumer yet (F2.4 re-ingest
+      // re-uploads rather than diffing against a stored copy). The column stays
+      // nullable, reserved for a future diff-against-source / re-parse feature.
+    },
+    select: { id: true },
+  });
+}
+
 /**
  * Persist a freshly-extracted questionnaire graph in a single transaction.
  *
@@ -147,92 +267,13 @@ export async function persistIngestion(
     });
     const versionId = version.id;
 
-    // Sections first — slots and change records reference them.
-    const sectionIdByOrdinal = new Map<number, string>();
-    for (const section of extraction.sections) {
-      const created = await tx.appQuestionnaireSection.create({
-        data: {
-          versionId,
-          ordinal: section.ordinal,
-          title: section.title,
-          ...(section.description !== undefined ? { description: section.description } : {}),
-        },
-        select: { id: true },
-      });
-      sectionIdByOrdinal.set(section.ordinal, created.id);
-    }
-
-    // Slots — one createMany; `versionId` is denormalised onto each row (F2.2
-    // tag validation reads it), `sectionId` resolved from the ordinal map.
-    if (extraction.questions.length > 0) {
-      await tx.appQuestionSlot.createMany({
-        data: extraction.questions.map((q, index) => {
-          // assertPersistable guarantees the ordinal resolves.
-          const sectionId = sectionIdByOrdinal.get(q.sectionOrdinal) as string;
-          return {
-            versionId,
-            sectionId,
-            ordinal: index,
-            key: q.key,
-            prompt: q.prompt,
-            type: q.suggestedType,
-            required: false,
-            weight: 1.0,
-            ...(q.guidelines !== undefined ? { guidelines: q.guidelines } : {}),
-            ...(q.rationale !== undefined ? { rationale: q.rationale } : {}),
-            ...(q.suggestedTypeConfig !== undefined
-              ? { typeConfig: jsonInput(q.suggestedTypeConfig) }
-              : {}),
-            extractionConfidence: q.extractionConfidence,
-          };
-        }),
-      });
-    }
-
-    // Change records — the revertible editorial log. `targetEntityId` resolves to
-    // the version for version-level (infer_*) decisions; section/question-targeted
-    // edits stay null (the LLM intent carries no entity linkage — F2.3 reconciles
-    // them against `sourceQuote` / before-after JSON on the review surface).
-    if (extraction.changes.length > 0) {
-      await tx.appQuestionnaireExtractionChange.createMany({
-        data: extraction.changes.map((change) => ({
-          versionId,
-          changeType: change.changeType,
-          targetEntityType: change.targetEntityType,
-          targetEntityId: change.targetEntityType === 'version' ? versionId : null,
-          ...(change.sourceQuote !== undefined ? { sourceQuote: change.sourceQuote } : {}),
-          ...(change.beforeJson !== undefined ? { beforeJson: jsonInput(change.beforeJson) } : {}),
-          ...(change.afterJson !== undefined ? { afterJson: jsonInput(change.afterJson) } : {}),
-          ...(change.rationale !== undefined ? { rationale: change.rationale } : {}),
-          ...(change.confidence !== undefined ? { confidence: change.confidence } : {}),
-          status: 'applied',
-        })),
-      });
-    }
-
-    await tx.appQuestionnaireSourceDocument.create({
-      data: {
-        versionId,
-        fileName: source.fileName,
-        fileHash: source.fileHash,
-        byteSize: source.byteSize,
-        ...(source.mimeType !== undefined ? { mimeType: source.mimeType } : {}),
-        ...(source.pageCount !== undefined ? { pageCount: source.pageCount } : {}),
-        warnings: source.warnings.length > 0 ? jsonInput(source.warnings) : Prisma.JsonNull,
-        extractedText: source.extractedText,
-        // Raw `bytes` deliberately not persisted in F1.1: no consumer until F2.4
-        // re-ingest, and storing every upload's bytes is a privacy surface the
-        // plan defers (open question #5). The column stays nullable for F2.4.
-      },
-      select: { id: true },
-    });
+    const counts = await writeGraph(tx, versionId, extraction);
+    await writeSourceDocument(tx, versionId, source);
 
     return {
       questionnaireId: questionnaire.id,
       versionId,
-      sectionCount: extraction.sections.length,
-      questionCount: extraction.questions.length,
-      changeCount: extraction.changes.length,
+      ...counts,
       goal: merged.goal,
       audience: merged.audience,
       fieldProvenance: merged.provenance,

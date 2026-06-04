@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation';
 
 import { VersionGraph } from '@/components/admin/questionnaires/version-graph';
 import { VersionEditor } from '@/components/admin/questionnaires/version-editor';
+import { ReingestDialog } from '@/components/admin/questionnaires/reingest-dialog';
 import { QUESTIONNAIRE_STATUS_BADGE } from '@/components/admin/questionnaires/status-badge';
 import { DemoClientAssign } from '@/components/admin/demo-clients/demo-client-assign';
 import { Badge } from '@/components/ui/badge';
@@ -161,16 +162,26 @@ export default async function QuestionnaireDetailPage({ params, searchParams }: 
                   </>
                 )}
               </p>
-              {graph && (
-                <Button asChild variant={editing ? 'outline' : 'default'} size="sm">
-                  <Link
-                    href={`/admin/questionnaires/${id}?v=${selected.id}${editing ? '' : '&edit=1'}`}
-                    scroll={false}
-                  >
-                    {editing ? 'Done' : 'Edit'}
-                  </Link>
-                </Button>
-              )}
+              <div className="flex items-center gap-2">
+                {/* Re-ingest is a draft editorial operation (F2.4) — only offered on drafts. */}
+                {selected.status === 'draft' && (
+                  <ReingestDialog
+                    questionnaireId={id}
+                    versionId={selected.id}
+                    versionNumber={selected.versionNumber}
+                  />
+                )}
+                {graph && (
+                  <Button asChild variant={editing ? 'outline' : 'default'} size="sm">
+                    <Link
+                      href={`/admin/questionnaires/${id}?v=${selected.id}${editing ? '' : '&edit=1'}`}
+                      scroll={false}
+                    >
+                      {editing ? 'Done' : 'Edit'}
+                    </Link>
+                  </Button>
+                )}
+              </div>
             </div>
           )}
 

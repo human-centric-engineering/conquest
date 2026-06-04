@@ -252,7 +252,9 @@ _Indicative tasks:_
 
 ### F2.4 — Re-ingest
 
-_Status:_ not started · _Size:_ ~1 PR · _Owner:_ TBD · _Deps:_ F1.1, F2.1
+_Status:_ in flight — built on `feat/f2.4-reingest` (shared ingest pipeline refactor + `reingestVersion` replace-in-place writer + draft-only route with version-scoped dedup short-circuit + detail-page re-ingest dialog + tests; gates pending) · _Size:_ ~1 PR · _Owner:_ TBD · _Deps:_ F1.1, F2.1
+
+> Committable tracker: [`planning/features/f2.4.md`](features/f2.4.md). Build decisions (confirmed): **replace the draft graph in place** (not a new version); **draft-only** — a launched/archived target is a typed `409 REINGEST_NOT_DRAFT`, not a fork; **version-scoped dedup** short-circuits an identical re-upload to a `200` no-op (vs. F1.1's global `409`); the F1.1 ingest "bytes → extraction" pipeline is factored into `_lib/extract-pipeline.ts` + `writeGraph`/`writeSourceDocument`, single-sourced by both routes (F1.1's tests are the regression net). No migration (every column, incl. the reserved `bytes`, exists from F1.1).
 
 Admin uploads a replacement source doc against an existing draft version; SHA-256 dedup short-circuits an identical re-upload; non-identical re-upload produces a fresh extraction + change log.
 
