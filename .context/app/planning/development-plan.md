@@ -330,7 +330,9 @@ _Indicative tasks:_
 
 ### F3.2 — Invitation flow
 
-_Status:_ not started · _Size:_ ~1–2 PRs · _Owner:_ TBD · _Deps:_ F3.1
+_Status:_ in flight — built on `feat/f3.2-invitation-flow` (PR1: `AppQuestionnaireInvitation` + pure core + admin send/list/revoke/resend routes + launch-blocker wiring + admin sub-route UI; PR2: public token metadata/accept routes + respondent registration page reaching `registered`. `started`/`completed` left as P6/P7 seam states; demo-client branding is F3.4. Gates pending) · _Size:_ 2 PRs · _Owner:_ TBD · _Deps:_ F3.1
+
+> Committable tracker: [`planning/features/f3.2.md`](features/f3.2.md). Build decisions (confirmed at planning): dedicated **version-scoped** `AppQuestionnaireInvitation` (not Sunrise's `Verification` store); **full better-auth registration** (reuses the `accept-invite` machinery, binds `userId`); **single + simple bulk** send; first non-zero `countLaunchBlockers` (moved route-local for the Prisma count, pure module keeps the type + `hasLaunchBlockers`); first app→User FKs (plain `String`, UG-1) with the erasure decision recorded in `invitations.md`.
 
 End-to-end invitation lifecycle: tokenised invite, email send, registration, status tracking through to completion.
 
