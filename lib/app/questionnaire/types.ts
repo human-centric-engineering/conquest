@@ -123,3 +123,79 @@ export type AudienceProvenance = Partial<Record<keyof AudienceShape, FieldProven
  */
 export const TAG_COLORS = ['slate', 'red', 'amber', 'green', 'blue', 'violet', 'pink'] as const;
 export type TagColor = (typeof TAG_COLORS)[number];
+
+/**
+ * Per-version run-time configuration (F3.1) — the knobs that control how a session
+ * runs, stored in `AppQuestionnaireConfig`. The `const` tuples below are the single
+ * source of truth (same reasoning as the status/type sets above): the config Zod
+ * schema (`authoring/config-schema.ts`), the read-view narrowing (`_lib/detail.ts`),
+ * and the editor's `<Select>` options all derive from them, so adding a value
+ * updates every consumer rather than leaving lists to drift.
+ */
+
+/** How the agent picks the next question (consumed by F4.1 selection). */
+export const SELECTION_STRATEGIES = ['sequential', 'weighted', 'adaptive'] as const;
+export type SelectionStrategy = (typeof SELECTION_STRATEGIES)[number];
+
+/** Contradiction-detection mode (consumed by F4.3). `off` disables it; `flag`
+ *  surfaces contradictions; `probe` follows up in-conversation. */
+export const CONTRADICTION_MODES = ['off', 'flag', 'probe'] as const;
+export type ContradictionMode = (typeof CONTRADICTION_MODES)[number];
+
+/** Input type of a session-start profile field. Distinct from `QUESTION_TYPES` —
+ *  these are lightweight identity/registration inputs, not questionnaire items. */
+export const PROFILE_FIELD_TYPES = ['text', 'email', 'number', 'select'] as const;
+export type ProfileFieldType = (typeof PROFILE_FIELD_TYPES)[number];
+
+/**
+ * One session-start profile field the admin chooses to collect (name, email,
+ * role, organisation, custom…). Stored as an ordered JSON array on the config
+ * (`profileFields`). `options` is present (and non-empty) only for `select`.
+ */
+export type ProfileFieldConfig = {
+  /** Stable slug, unique within the config — keys the collected value. */
+  key: string;
+  label: string;
+  type: ProfileFieldType;
+  required: boolean;
+  /** Choices for a `select` field; absent/empty for other types. */
+  options?: string[];
+};
+
+/**
+ * The full resolved shape of a version's configuration — one field per
+ * `AppQuestionnaireConfig` column. The read view returns this (defaults when no
+ * row exists); the editor and PATCH body are partials of it.
+ */
+export type QuestionnaireConfigShape = {
+  selectionStrategy: SelectionStrategy;
+  minQuestionsAnswered: number;
+  coverageThreshold: number;
+  costBudgetUsd: number | null;
+  maxQuestionsPerSession: number | null;
+  voiceEnabled: boolean;
+  contradictionMode: ContradictionMode;
+  contradictionWindowN: number;
+  anonymousMode: boolean;
+  profileFields: ProfileFieldConfig[];
+};
+
+/**
+ * The resolved config for a version that has never been saved — mirrors the
+ * schema column defaults. The read path returns this when no row exists (lazy
+ * materialization), so the UI always renders a complete config and the launch
+ * gate's "config saved" check is the only thing that distinguishes a deliberate
+ * default-config from an untouched one.
+ */
+export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
+  selectionStrategy: 'sequential',
+  minQuestionsAnswered: 0,
+  coverageThreshold: 1,
+  costBudgetUsd: null,
+  maxQuestionsPerSession: null,
+  voiceEnabled: false,
+  contradictionMode: 'off',
+  contradictionWindowN: 0,
+  anonymousMode: false,
+  profileFields: [],
+};

@@ -56,6 +56,9 @@ const prismaMock = vi.hoisted(() => ({
     update: vi.fn(),
     delete: vi.fn(),
   },
+  appQuestionnaireConfig: {
+    count: vi.fn(),
+  },
 }));
 vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
 
@@ -261,22 +264,72 @@ describe('status PATCH', () => {
     expect(prismaMock.appQuestionnaireVersion.update).not.toHaveBeenCalled();
   });
 
-  it('blocks launch when the version is not ready', async () => {
-    // draft → launched, but no goal / no sections / no questions.
-    prismaMock.appQuestionnaireVersion.findUnique.mockResolvedValue({ goal: null });
+  it('blocks launch when the version is not ready (F3.1 gate)', async () => {
+    // draft → launched, but nothing populated: no goal / audience / sections /
+    // questions / saved config.
+    prismaMock.appQuestionnaireVersion.findUnique.mockResolvedValue({ goal: null, audience: null });
     prismaMock.appQuestionnaireSection.count.mockResolvedValue(0);
     prismaMock.appQuestionSlot.count.mockResolvedValue(0);
+    prismaMock.appQuestionnaireConfig.count.mockResolvedValue(0);
 
     const res = await statusPATCH(req({ status: 'launched' }), ctx(VERSION_PARAMS));
     const json = await res.json();
     expect(res.status).toBe(400);
-    expect(json.error.details).toMatchObject({ goal: expect.any(Array) });
+    expect(json.success).toBe(false);
+    // Every unmet condition is reported per-field.
+    expect(json.error.details).toMatchObject({
+      goal: expect.any(Array),
+      audience: expect.any(Array),
+      sections: expect.any(Array),
+      questions: expect.any(Array),
+      config: expect.any(Array),
+    });
   });
 
-  it('launches a ready version and audits the transition', async () => {
-    prismaMock.appQuestionnaireVersion.findUnique.mockResolvedValue({ goal: 'A goal' });
+  it('blocks launch when audience is an empty object (F3.1)', async () => {
+    // Goal/sections/questions/config all present, but the editor persisted `{}`.
+    prismaMock.appQuestionnaireVersion.findUnique.mockResolvedValue({
+      goal: 'A goal',
+      audience: {},
+    });
+    prismaMock.appQuestionnaireSection.count.mockResolvedValue(1);
+    prismaMock.appQuestionSlot.count.mockResolvedValue(1);
+    prismaMock.appQuestionnaireConfig.count.mockResolvedValue(1);
+
+    const res = await statusPATCH(req({ status: 'launched' }), ctx(VERSION_PARAMS));
+    const json = await res.json();
+    expect(res.status).toBe(400);
+    expect(json.success).toBe(false);
+    expect(json.error.details).toMatchObject({ audience: expect.any(Array) });
+    expect(json.error.details.goal).toBeUndefined();
+  });
+
+  it('blocks launch when config has never been saved (F3.1)', async () => {
+    prismaMock.appQuestionnaireVersion.findUnique.mockResolvedValue({
+      goal: 'A goal',
+      audience: { role: 'patient' },
+    });
+    prismaMock.appQuestionnaireSection.count.mockResolvedValue(1);
+    prismaMock.appQuestionSlot.count.mockResolvedValue(1);
+    prismaMock.appQuestionnaireConfig.count.mockResolvedValue(0);
+
+    const res = await statusPATCH(req({ status: 'launched' }), ctx(VERSION_PARAMS));
+    const json = await res.json();
+    expect(res.status).toBe(400);
+    expect(json.success).toBe(false);
+    expect(json.error.details).toMatchObject({ config: expect.any(Array) });
+    // Only config is unmet.
+    expect(Object.keys(json.error.details)).toEqual(['config']);
+  });
+
+  it('launches a fully-ready version and audits the transition', async () => {
+    prismaMock.appQuestionnaireVersion.findUnique.mockResolvedValue({
+      goal: 'A goal',
+      audience: { role: 'patient' },
+    });
     prismaMock.appQuestionnaireSection.count.mockResolvedValue(2);
     prismaMock.appQuestionSlot.count.mockResolvedValue(5);
+    prismaMock.appQuestionnaireConfig.count.mockResolvedValue(1);
     prismaMock.appQuestionnaireVersion.update.mockResolvedValue({
       id: 'v1',
       versionNumber: 1,
@@ -284,7 +337,10 @@ describe('status PATCH', () => {
     });
 
     const res = await statusPATCH(req({ status: 'launched' }), ctx(VERSION_PARAMS));
+    const json = await res.json();
     expect(res.status).toBe(200);
+    expect(json.success).toBe(true);
+    expect(json.data.status).toBe('launched');
     expect(logAdminAction).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'questionnaire_version.status' })
     );

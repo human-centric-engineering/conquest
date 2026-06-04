@@ -361,6 +361,9 @@ export const API = {
       /** Re-ingest a replacement source doc into a draft version (POST multipart). */
       versionReingest: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/reingest`,
+      /** Version run-time configuration (PATCH partial config — F3.1). */
+      versionConfig: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/config`,
       /** Section collection (POST create). */
       versionSections: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/sections`,

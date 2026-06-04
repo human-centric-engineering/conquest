@@ -2,19 +2,20 @@
  * Questionnaire version status endpoint (F2.1 / PR2).
  *
  * PATCH /api/v1/app/questionnaires/:id/versions/:vid/status
- *   Admin-only lifecycle flip of a version's `status`. This is the *minimal*
- *   transition gate — not the full launch gate (config completeness + cost
- *   estimate land in F3.1). Launching makes the version-fork seam live: a
- *   subsequent content edit to a `launched` version forks a fresh draft.
+ *   Admin-only lifecycle flip of a version's `status`. Launching makes the
+ *   version-fork seam live: a subsequent content edit to a `launched` version
+ *   forks a fresh draft.
  *
  * Allowed transitions:
  *   draft    → launched | archived
  *   launched → draft (un-launch) | archived
  *   archived → (terminal in PR2)
  *
- * Launch guard (minimal): `draft → launched` requires a goal plus at least one
- * section and one question. Operates on the version's status only; questionnaire-
- * level status orchestration is deferred to P3.
+ * Launch gate (F3.1): `draft → launched` requires goal + audience + at least one
+ * section + at least one question + a saved configuration (a config row exists —
+ * the admin's deliberate "ready" signal, since unsaved config resolves to
+ * defaults). Operates on the version's status only; questionnaire-level status
+ * orchestration is deferred to P3. (Pre-launch cost estimation is F3.3.)
  */
 
 import { errorResponse, successResponse } from '@/lib/api/responses';
@@ -42,20 +43,42 @@ const ALLOWED_TRANSITIONS: Record<AppQuestionnaireStatus, AppQuestionnaireStatus
   archived: [],
 };
 
-/** Minimal readiness check for `draft → launched`. Full gate is F3.1. */
+/**
+ * True when a stored audience JSON carries at least one defined field. The editor
+ * may persist an empty `{}` (it holds the full audience in state but exposes only a
+ * couple of inputs), which must count as "not populated" for the launch gate.
+ */
+function hasAudience(audience: unknown): boolean {
+  return (
+    typeof audience === 'object' &&
+    audience !== null &&
+    !Array.isArray(audience) &&
+    Object.values(audience as Record<string, unknown>).some((v) => v !== undefined && v !== null)
+  );
+}
+
+/**
+ * Readiness check for `draft → launched` (F3.1): goal + audience + ≥1 section +
+ * ≥1 question + a saved config row. "Config saved" (a row exists) is the launch
+ * signal — an unsaved config resolves to defaults, so requiring the row makes the
+ * admin opt in deliberately.
+ */
 async function assertLaunchable(versionId: string): Promise<void> {
-  const [version, sectionCount, questionCount] = await Promise.all([
+  const [version, sectionCount, questionCount, configCount] = await Promise.all([
     prisma.appQuestionnaireVersion.findUnique({
       where: { id: versionId },
-      select: { goal: true },
+      select: { goal: true, audience: true },
     }),
     prisma.appQuestionnaireSection.count({ where: { versionId } }),
     prisma.appQuestionSlot.count({ where: { versionId } }),
+    prisma.appQuestionnaireConfig.count({ where: { versionId } }),
   ]);
   const missing: Record<string, string[]> = {};
   if (!version?.goal) missing.goal = ['A goal is required to launch'];
+  if (!hasAudience(version?.audience)) missing.audience = ['An audience is required to launch'];
   if (sectionCount < 1) missing.sections = ['At least one section is required'];
   if (questionCount < 1) missing.questions = ['At least one question is required'];
+  if (configCount < 1) missing.config = ['Configuration must be saved before launch'];
   if (Object.keys(missing).length > 0) {
     throw new ValidationError('Version is not ready to launch', missing);
   }

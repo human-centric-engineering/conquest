@@ -17,13 +17,20 @@ import type { Prisma } from '@prisma/client';
 
 import { prisma } from '@/lib/db/client';
 import {
+  CONTRADICTION_MODES,
+  DEFAULT_QUESTIONNAIRE_CONFIG,
   FIELD_PROVENANCES,
+  SELECTION_STRATEGIES,
   type AudienceProvenance,
   type AppQuestionnaireStatus,
   type AudienceShape,
+  type ContradictionMode,
   type FieldProvenance,
+  type ProfileFieldConfig,
+  type SelectionStrategy,
 } from '@/lib/app/questionnaire/types';
 import type {
+  ConfigView,
   QuestionnaireDetail,
   QuestionnaireVersionSummary,
   QuestionSlotView,
@@ -62,6 +69,76 @@ function asTagColor(value: string | null): TagColor | null {
 /** Project an `AppQuestionTag` row (id/label/color) to the client-safe TagView. */
 function toTagView(tag: { id: string; label: string; color: string | null }): TagView {
   return { id: tag.id, label: tag.label, color: asTagColor(tag.color) };
+}
+
+/** The config columns the read view projects (F3.1). */
+export const CONFIG_SELECT = {
+  selectionStrategy: true,
+  minQuestionsAnswered: true,
+  coverageThreshold: true,
+  costBudgetUsd: true,
+  maxQuestionsPerSession: true,
+  voiceEnabled: true,
+  contradictionMode: true,
+  contradictionWindowN: true,
+  anonymousMode: true,
+  profileFields: true,
+} as const;
+
+type ConfigRow = {
+  selectionStrategy: string;
+  minQuestionsAnswered: number;
+  coverageThreshold: number;
+  costBudgetUsd: number | null;
+  maxQuestionsPerSession: number | null;
+  voiceEnabled: boolean;
+  contradictionMode: string;
+  contradictionWindowN: number;
+  anonymousMode: boolean;
+  profileFields: Prisma.JsonValue;
+};
+
+/** Narrow a stored `selectionStrategy` to the enum (default when unknown). */
+function asSelectionStrategy(value: string): SelectionStrategy {
+  return (SELECTION_STRATEGIES as readonly string[]).includes(value)
+    ? (value as SelectionStrategy)
+    : DEFAULT_QUESTIONNAIRE_CONFIG.selectionStrategy;
+}
+
+/** Narrow a stored `contradictionMode` to the enum (default when unknown). */
+function asContradictionMode(value: string): ContradictionMode {
+  return (CONTRADICTION_MODES as readonly string[]).includes(value)
+    ? (value as ContradictionMode)
+    : DEFAULT_QUESTIONNAIRE_CONFIG.contradictionMode;
+}
+
+/** Cast a stored `profileFields` Json column back to our own array (we wrote it). */
+function asProfileFields(value: Prisma.JsonValue): ProfileFieldConfig[] {
+  return Array.isArray(value) ? (value as unknown as ProfileFieldConfig[]) : [];
+}
+
+/**
+ * Project a config row (or its absence) to the client-safe {@link ConfigView}.
+ * Lazy materialization: a `null` row resolves to `DEFAULT_QUESTIONNAIRE_CONFIG`
+ * with `saved: false`, so the UI always renders a complete config and the launch
+ * gate can distinguish a never-saved version (`saved: false`) from a deliberate
+ * default-config save.
+ */
+export function toConfigView(row: ConfigRow | null): ConfigView {
+  if (!row) return { ...DEFAULT_QUESTIONNAIRE_CONFIG, saved: false };
+  return {
+    selectionStrategy: asSelectionStrategy(row.selectionStrategy),
+    minQuestionsAnswered: row.minQuestionsAnswered,
+    coverageThreshold: row.coverageThreshold,
+    costBudgetUsd: row.costBudgetUsd,
+    maxQuestionsPerSession: row.maxQuestionsPerSession,
+    voiceEnabled: row.voiceEnabled,
+    contradictionMode: asContradictionMode(row.contradictionMode),
+    contradictionWindowN: row.contradictionWindowN,
+    anonymousMode: row.anonymousMode,
+    profileFields: asProfileFields(row.profileFields),
+    saved: true,
+  };
 }
 
 /**
@@ -175,6 +252,7 @@ export async function getVersionGraph(
       audience: true,
       goalProvenance: true,
       audienceProvenance: true,
+      config: { select: CONFIG_SELECT },
       tags: {
         orderBy: { normalizedLabel: 'asc' },
         select: { id: true, label: true, color: true },
@@ -246,5 +324,6 @@ export async function getVersionGraph(
     audienceProvenance: asAudienceProvenance(version.audienceProvenance),
     sections,
     tags: version.tags.map(toTagView),
+    config: toConfigView(version.config),
   };
 }

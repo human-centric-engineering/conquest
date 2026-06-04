@@ -193,5 +193,25 @@ test guards it.
   The admin `DELETE /demo-clients/:id` still refuses (409) while attributed — the
   SetNull is the schema-honest backstop, the 409-guard is the UX.
 
-_Later phases extend this file — config & invitations (P3), session models (P4),
+### Configuration (F3.1 — P3)
+
+Migration `20260604090526_app_questionnaire_config`. Same schema-fold footgun as the
+ingestion/demo-client migrations: `migrate dev` re-emitted the three pgvector
+`DROP INDEX` + the `searchVector` ALTER; stripped by hand and applied via
+`db:migrate:deploy`. The migration header names what was removed; the schema-shape
+test guards it. Full behaviour in [`configuration.md`](./configuration.md).
+
+- **`AppQuestionnaireConfig`** (`app_questionnaire_config`) — the per-version
+  run-time configuration, **1:1 with the version** (`versionId @unique`,
+  `@relation onDelete: Cascade`) so it **forks with the version** (the fork writer
+  copies the row when present). Typed columns per setting — `selectionStrategy`,
+  `minQuestionsAnswered`, `coverageThreshold`, `costBudgetUsd?`,
+  `maxQuestionsPerSession?`, `voiceEnabled`, `contradictionMode`,
+  `contradictionWindowN`, `anonymousMode` — plus `profileFields Json @default("[]")`
+  (an ordered `ProfileFieldConfig[]`, not a relational model). **No `User` FK**
+  (UG-1). **Lazy**: no row until the admin first saves; reads resolve an absent row
+  to `DEFAULT_QUESTIONNAIRE_CONFIG`, and the launch gate keys on whether the row
+  exists. `AppQuestionnaireVersion` gains the reverse `config AppQuestionnaireConfig?`.
+
+_Later phases extend this file — invitations (P3), session models (P4),
 evaluation links (P5), turns (P6), etc. Each documents its models here as it lands._
