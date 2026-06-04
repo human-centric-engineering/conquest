@@ -29,7 +29,6 @@ export type {
   AudienceSensitivity,
 } from '@/lib/app/questionnaire/types';
 export {
-  countLaunchBlockers,
   hasLaunchBlockers,
   slugifyKey,
   nextAvailableKey,

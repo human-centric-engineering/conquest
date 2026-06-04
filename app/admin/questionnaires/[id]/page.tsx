@@ -163,6 +163,10 @@ export default async function QuestionnaireDetailPage({ params, searchParams }: 
                 )}
               </p>
               <div className="flex items-center gap-2">
+                {/* Invitations (F3.2) are managed per-questionnaire across launched versions. */}
+                <Button asChild variant="outline" size="sm">
+                  <Link href={`/admin/questionnaires/${id}/invitations`}>Invitations</Link>
+                </Button>
                 {/* Re-ingest is a draft editorial operation (F2.4) — only offered on drafts. */}
                 {selected.status === 'draft' && (
                   <ReingestDialog

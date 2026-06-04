@@ -14,6 +14,7 @@ plan and feature trackers, see [`../planning/`](../planning/); for the platform
 | [`ingestion.md`](./ingestion.md)                   | The `POST /api/v1/app/questionnaires` pipeline — parse → extract → persist (F1.1)               |
 | [`reingest.md`](./reingest.md)                     | Re-ingest — replace a draft version's structure from a new source doc (F2.4)                    |
 | [`configuration.md`](./configuration.md)           | Per-version run-time config (selection, thresholds, modes, profile fields) + launch gate (F3.1) |
+| [`invitations.md`](./invitations.md)               | Respondent invitation lifecycle, token security, launch-blocker wiring, registration (F3.2)     |
 | [`extraction-changes.md`](./extraction-changes.md) | The revertible editorial change-record model, vocabulary, and write path (F1.1)                 |
 | [`admin-ui.md`](./admin-ui.md)                     | The admin read surface — list/detail/version-graph APIs + pages (P2 / F2.1 PR1)                 |
 

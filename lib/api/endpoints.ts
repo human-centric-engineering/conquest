@@ -397,6 +397,21 @@ export const API = {
       /** Revert one extraction change (POST). */
       versionChangeRevert: (id: string, versionId: string, changeId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/changes/${changeId}/revert`,
+      /** Invitations for a questionnaire (GET list, POST send single/bulk — F3.2). */
+      invitations: (id: string): string => `/api/v1/app/questionnaires/${id}/invitations`,
+      /** Single invitation (PATCH revoke — F3.2). */
+      invitationById: (id: string, invitationId: string): string =>
+        `/api/v1/app/questionnaires/${id}/invitations/${invitationId}`,
+      /** Resend one invitation, regenerating its token (POST — F3.2). */
+      invitationResend: (id: string, invitationId: string): string =>
+        `/api/v1/app/questionnaires/${id}/invitations/${invitationId}/resend`,
+    },
+    /** Public (token-gated) respondent invitation endpoints (F3.2 PR2). */
+    INVITATIONS: {
+      /** Validate a token + mark opened (GET ?token=). */
+      METADATA: '/api/v1/app/invitations/metadata',
+      /** Accept an invitation: register + bind the account (POST). */
+      ACCEPT: '/api/v1/app/invitations/accept',
     },
     /** DEMO-ONLY (F2.5.1): demo-client identity + attribution. A fork strips this. */
     DEMO_CLIENTS: {
