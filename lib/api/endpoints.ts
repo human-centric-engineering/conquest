@@ -364,6 +364,9 @@ export const API = {
       /** Version run-time configuration (PATCH partial config — F3.1). */
       versionConfig: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/config`,
+      /** Pre-launch cost estimate (GET `?respondents=N` — F3.3). */
+      versionCostEstimate: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/cost-estimate`,
       /** Section collection (POST create). */
       versionSections: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/sections`,

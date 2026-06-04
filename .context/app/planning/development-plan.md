@@ -347,7 +347,9 @@ _Indicative tasks:_
 
 ### F3.3 — Pre-launch cost estimation
 
-_Status:_ not started · _Size:_ ~1 PR · _Owner:_ TBD · _Deps:_ F3.1
+_Status:_ in flight — built on `feat/f3.3-cost-estimation` (pure history-aware heuristic estimator + Prisma-free `cost-estimation/` module + read-only `GET …/versions/:vid/cost-estimate` route + shared estimate card in the config editor & invitations page + tests; gates pending) · _Size:_ ~1 PR · _Owner:_ TBD · _Deps:_ F3.1
+
+> Committable tracker: [`planning/features/f3.3.md`](features/f3.3.md). Build decisions (confirmed at planning): **heuristic-only** (no empirical mode — the session engine P4/P6 doesn't exist yet, so there are zero runs to calibrate against; an empirical mode keyed on `AppQuestionnaireTurn` actuals is a future PR); **history-aware token model** (quadratic conversation-history term `HISTORY × Q(Q−1)/2`, not flat-per-question); **`Q` honours the F3.1 caps**; **provider-agnostic pricing via `getModel`**, with **unknown-price ≠ free** (`pricingKnown:false`, USD withheld, never a misleading `$0.00`); **GET-only against persisted config** (no audit, no rate-limit sub-cap); surfaced in the **config editor + invitations page** (one fetch each, `perQuestionnaire = perSession × respondents` scaled client-side).
 
 Pre-launch: estimated tokens × cost per provider × question count + extraction overhead, surfaced to the admin before sending invites.
 

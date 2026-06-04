@@ -250,6 +250,7 @@ export function VersionEditor({
         questionnaireId={questionnaireId}
         versionId={versionId}
         config={version.config}
+        questionCount={version.sections.reduce((n, s) => n + s.questions.length, 0)}
         run={run}
         busy={busy}
       />
