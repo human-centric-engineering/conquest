@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation';
 
 import { InviteForm } from '@/components/admin/questionnaires/invite-form';
 import { InvitationsTable } from '@/components/admin/questionnaires/invitations-table';
+import { CostEstimateCard } from '@/components/admin/questionnaires/cost-estimate-card';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
@@ -61,7 +62,12 @@ export default async function InvitationsPage({ params }: PageProps) {
   const detail = await getDetail(id);
   if (!detail) notFound();
 
-  const hasLaunchedVersion = detail.versions.some((ver) => ver.status === 'launched');
+  // Estimate against the *newest* launched version — the one the send path targets
+  // (`_lib/send.ts` resolves the launched version `orderBy versionNumber desc`).
+  const launchedVersion = detail.versions
+    .filter((ver) => ver.status === 'launched')
+    .sort((a, b) => b.versionNumber - a.versionNumber)[0];
+  const hasLaunchedVersion = launchedVersion !== undefined;
   const { invitations, total } = await getInvitations(id);
   const truncated = total > invitations.length;
 
@@ -86,6 +92,10 @@ export default async function InvitationsPage({ params }: PageProps) {
           register and begin — track their progress through to completion here.
         </p>
       </header>
+
+      {launchedVersion && (
+        <CostEstimateCard questionnaireId={id} versionId={launchedVersion.id} variant="banner" />
+      )}
 
       <InviteForm questionnaireId={id} hasLaunchedVersion={hasLaunchedVersion} />
 

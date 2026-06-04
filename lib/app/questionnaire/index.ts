@@ -53,3 +53,19 @@ export type {
   CreateQuestionInput,
   UpdateQuestionInput,
 } from '@/lib/app/questionnaire/authoring';
+export {
+  estimateSessionCost,
+  effectiveQuestionsPerSession,
+  scaleRange,
+  SYSTEM_PROMPT_TOKENS,
+  HISTORY_TOKENS_PER_PRIOR_TURN,
+  OUTPUT_TOKENS_PER_TURN,
+  RANGE_LOW_FACTOR,
+  RANGE_HIGH_FACTOR,
+} from '@/lib/app/questionnaire/cost-estimation';
+export type {
+  CostRange,
+  CostEstimateAssumptions,
+  SessionCostEstimate,
+  EstimateSessionCostInput,
+} from '@/lib/app/questionnaire/cost-estimation';

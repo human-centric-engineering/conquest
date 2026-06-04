@@ -33,6 +33,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { FieldHelp } from '@/components/ui/field-help';
+import { CostEstimateCard } from '@/components/admin/questionnaires/cost-estimate-card';
 import { API } from '@/lib/api/endpoints';
 import {
   CONTRADICTION_MODES,
@@ -133,12 +134,15 @@ export function ConfigEditor({
   questionnaireId,
   versionId,
   config,
+  questionCount,
   run,
   busy,
 }: {
   questionnaireId: string;
   versionId: string;
   config: ConfigView;
+  /** Live question count on the version — folded into the estimate's reload key so it refreshes after question edits. */
+  questionCount: number;
   run: RunMutation;
   busy: boolean;
 }) {
@@ -317,7 +321,8 @@ export function ConfigEditor({
             Cost budget (USD / session){' '}
             <FieldHelp title="Cost budget">
               Optional per-session spend cap in US dollars. Leave blank for no cap. (Enforcement
-              lands with the turn engine; pre-launch estimation is a later feature.)
+              lands with the turn engine; the estimate below shows projected spend against this
+              cap.)
             </FieldHelp>
           </Label>
           <Input
@@ -347,6 +352,16 @@ export function ConfigEditor({
           />
         </div>
       </div>
+
+      {/* Pre-launch cost estimate (F3.3) — reads persisted config, so it re-fetches
+          when the saved cap/floor change. Compares against the live (possibly
+          unsaved) budget input. */}
+      <CostEstimateCard
+        questionnaireId={questionnaireId}
+        versionId={versionId}
+        reloadKey={`${config.saved}:${config.maxQuestionsPerSession}:${config.minQuestionsAnswered}:${questionCount}`}
+        costBudgetUsd={capOrNull(costBudgetUsd, false)}
+      />
 
       {/* Modes */}
       <div className="space-y-3">
