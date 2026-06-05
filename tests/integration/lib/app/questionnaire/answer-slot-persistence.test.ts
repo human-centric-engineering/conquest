@@ -10,9 +10,10 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Prisma } from '@prisma/client';
 
 const prismaMock = vi.hoisted(() => ({
-  appQuestionnaireSession: { findFirst: vi.fn(), create: vi.fn() },
+  appQuestionnaireSession: { findFirst: vi.fn(), create: vi.fn(), update: vi.fn() },
   appAnswerSlot: { upsert: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
 }));
 vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
@@ -20,6 +21,7 @@ vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
 import {
   getOrCreatePreviewSession,
   loadAnswerSlot,
+  markSessionCompleted,
   persistRefinement,
   upsertAnswerSlot,
 } from '@/app/api/v1/app/questionnaires/_lib/answer-slots';
@@ -58,6 +60,55 @@ describe('getOrCreatePreviewSession', () => {
         data: { versionId: 'v1', isPreview: true, status: 'active' },
       })
     );
+  });
+
+  it('resolves to the winning row when a concurrent create hits the partial-unique P2002', async () => {
+    // Race: findFirst sees nothing, but another request creates the version's preview
+    // session before our create lands → the partial unique index rejects ours with
+    // P2002. We must re-read and return the winner, not throw or double-create.
+    (prismaMock.appQuestionnaireSession.findFirst as Mock)
+      .mockResolvedValueOnce(null) // initial lookup misses
+      .mockResolvedValueOnce({ id: 'sess-winner' }); // post-conflict re-read finds the winner
+    (prismaMock.appQuestionnaireSession.create as Mock).mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002',
+        clientVersion: 'test',
+      })
+    );
+
+    const id = await getOrCreatePreviewSession('v1');
+
+    expect(id).toBe('sess-winner');
+    expect(prismaMock.appQuestionnaireSession.findFirst).toHaveBeenCalledTimes(2);
+  });
+
+  it('rethrows a non-P2002 create error', async () => {
+    (prismaMock.appQuestionnaireSession.findFirst as Mock).mockResolvedValue(null);
+    (prismaMock.appQuestionnaireSession.create as Mock).mockRejectedValueOnce(
+      new Error('connection reset')
+    );
+
+    await expect(getOrCreatePreviewSession('v1')).rejects.toThrow('connection reset');
+  });
+});
+
+describe('markSessionCompleted', () => {
+  it('transitions the session to completed and returns the narrowed status', async () => {
+    (prismaMock.appQuestionnaireSession.update as Mock).mockResolvedValue({ status: 'completed' });
+
+    const status = await markSessionCompleted('sess-1');
+
+    expect(status).toBe('completed');
+    expect(prismaMock.appQuestionnaireSession.update).toHaveBeenCalledWith({
+      where: { id: 'sess-1' },
+      data: { status: 'completed' },
+      select: { status: true },
+    });
+  });
+
+  it('narrows an unexpected stored status to active (boundary guard)', async () => {
+    (prismaMock.appQuestionnaireSession.update as Mock).mockResolvedValue({ status: 'bogus' });
+    expect(await markSessionCompleted('sess-1')).toBe('active');
   });
 });
 

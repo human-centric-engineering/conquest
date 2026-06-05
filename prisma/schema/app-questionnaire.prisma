@@ -411,6 +411,14 @@ model AppQuestionnaireSession {
 
   @@index([versionId])
   @@index([versionId, isPreview])
+  // DRIFT WARNING: a raw-SQL PARTIAL UNIQUE INDEX
+  // (idx_app_questionnaire_session_preview_per_version, migration
+  // 20260605141500) enforces at most one preview session per version
+  // (WHERE "isPreview" = true) — Prisma can't model partial uniques, so it's
+  // invisible here and a `migrate dev` schema-diff would emit a phantom DROP.
+  // A drift probe in lib/app/db-drift.ts guards it; getOrCreatePreviewSession
+  // (F4.5) depends on it for race-safety. Author future migrations on this
+  // table with `--create-only` and strip any DROP of that index.
   @@map("app_questionnaire_session")
 }
 

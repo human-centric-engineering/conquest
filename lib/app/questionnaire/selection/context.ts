@@ -14,8 +14,17 @@ import type {
   SelectionDecision,
 } from '@/lib/app/questionnaire/selection/types';
 
+/**
+ * The narrow slice these coverage helpers actually read — the questions, the
+ * answers, and the config. A {@link SelectionContext} satisfies it structurally
+ * (so every F4.1 caller is unaffected), and F4.5's `CompletionContext` reuses the
+ * same helpers without dragging in `round`/`sessionId`/`recentMessages`, which
+ * coverage math never touches.
+ */
+export type CoverageContext = Pick<SelectionContext, 'questions' | 'answered' | 'config'>;
+
 /** The set of `QuestionView.id`s that already have an answer this session. */
-export function answeredQuestionIds(ctx: SelectionContext): Set<string> {
+export function answeredQuestionIds(ctx: Pick<CoverageContext, 'answered'>): Set<string> {
   return new Set(ctx.answered.map((a) => a.questionId));
 }
 
@@ -31,7 +40,9 @@ export function compareQuestions(a: QuestionView, b: QuestionView): number {
 }
 
 /** Unanswered questions in deterministic order (a fresh, safely-sortable copy). */
-export function unansweredQuestions(ctx: SelectionContext): QuestionView[] {
+export function unansweredQuestions(
+  ctx: Pick<CoverageContext, 'questions' | 'answered'>
+): QuestionView[] {
   const answered = answeredQuestionIds(ctx);
   return ctx.questions
     .filter((q) => !answered.has(q.id))
@@ -56,7 +67,7 @@ export function requiredFirstPool(pool: QuestionView[]): QuestionView[] {
  * two answer rows for the same question can't double-count toward the per-session
  * cap or `minQuestionsAnswered`.
  */
-export function answeredCount(ctx: SelectionContext): number {
+export function answeredCount(ctx: Pick<CoverageContext, 'answered'>): number {
   return answeredQuestionIds(ctx).size;
 }
 
@@ -67,7 +78,7 @@ export function answeredCount(ctx: SelectionContext): number {
  * count ratio (distinct answered ÷ question count) rather than reporting a
  * never-asked questionnaire as 100% done.
  */
-export function coverageRatio(ctx: SelectionContext): number {
+export function coverageRatio(ctx: Pick<CoverageContext, 'questions' | 'answered'>): number {
   let total = 0;
   const weightById = new Map<string, number>();
   for (const q of ctx.questions) {

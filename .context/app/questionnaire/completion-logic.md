@@ -1,0 +1,175 @@
+# Completion logic (F4.5)
+
+When is a questionnaire "done enough" to submit, and what happens when the respondent
+says yes or "not yet"? The fifth of P4's conversational primitives after selection
+(F4.1, _which_ question), extraction (F4.2, _what_ was answered), detection (F4.3, _do
+the answers conflict_), and refinement (F4.4, _update an answer_). F4.5 is the
+**close**: it decides when to offer submission, phrases that offer, and resolves the
+respondent's accept/hold — driving the contradiction **completion-sweep** at the moment
+of offer.
+
+Built as a pure core + a capability (offer phrasing) + two routes, on top of F4.4's
+answer/session persistence.
+
+## Two layers: deterministic gate, LLM phrasing
+
+The split is the heart of F4.5:
+
+1. **Eligibility is deterministic** (`completion/completion-logic.ts`). `assessCompletion`
+   decides _whether_ the agent may offer. No LLM, no I/O — pure math over the config
+   thresholds plus a required-questions gate.
+2. **Phrasing is the LLM's job** (`capabilities/compose-completion-offer.ts`). When the
+   assessment is `offer`, the composer writes the natural-language offer (the "agent
+   contract"). It never decides whether to offer — only how to say it — so the
+   deterministic gate stays authoritative.
+
+This mirrors F4.1's pure-strategy nature for the decision, while keeping the
+extractor/detector/refiner capability shape for the wording.
+
+## The assessment
+
+`assessCompletion(ctx: CompletionContext): CompletionAssessment` returns one of
+`COMPLETION_KINDS = ['offer','not_ready','blocked_on_required']` (`completion/types.ts`),
+with the unmet criteria (`UNMET_CRITERIA`), the coverage, the answered count, the
+unanswered required keys, and a `capReached` flag.
+
+**Ordering** mirrors selection's `terminalDecision` so the two layers agree:
+
+1. **Cap** — `maxQuestionsPerSession` reached → `offer` (a capped session can always
+   submit, even with coverage unmet), flagged `capReached`.
+2. **Required gate (the piece selection lacks)** — any unanswered _required_ slot →
+   `blocked_on_required`. Checked _before_ the thresholds because weighted coverage can
+   clear the bar while a low-weight required slot is still open; a required question is
+   mandatory by definition, so coverage alone can't satisfy completion.
+3. **Thresholds** — coverage ≥ `coverageThreshold` AND answered ≥ `minQuestionsAnswered`
+   → `offer`.
+4. Otherwise → `not_ready`, listing `coverage_below_threshold` / `below_min_answered`.
+
+**Reuse, not reinvention.** `assessCompletion` calls the F4.1 coverage helpers
+(`coverageRatio`, `answeredCount`, `unansweredQuestions` in `selection/context.ts`) —
+whose param type was narrowed to a structural `CoverageContext` so completion can pass
+its own context without dragging in selection-only fields (`round`, `recentMessages`).
+`SelectionContext` still satisfies it, so every F4.1 caller is unaffected, and the
+preview routes reuse `buildSelectionContext` directly — no new context builder. The same
+`COVERAGE_EPSILON` guards the threshold comparison against float-sum drift.
+
+There is no `completionConfig` blob and no `sweep_only` mode (the development plan's
+sketch): F4.5 maps onto the committed flat config fields (`minQuestionsAnswered`,
+`coverageThreshold`, `maxQuestionsPerSession`) and the existing
+`shouldRunDetection(mode, windowN, 'completion-sweep')`.
+
+## Accept / hold resolution
+
+`resolveCompletion(action, assessment, sweep): CompletionResolution`
+(`COMPLETION_ACTIONS = ['accept','hold']`) maps the respondent's reply plus the
+completion-sweep result onto one of:
+
+- **`submit`** — accepted and clean: the sweep didn't run (mode off / detection
+  disabled) or found nothing. The session should transition `active → completed`.
+- **`hold_for_review`** — accepted, but the completion-sweep found contradictions. Do
+  **not** auto-submit: surface the conflicts for reconciliation (F4.4), then re-offer.
+  The session stays `active`. (Consistent with F4.3 never auto-overwriting.)
+- **`continue`** — the respondent held, _or_ accept was attempted while ineligible
+  (e.g. `blocked_on_required`). Keep asking; the session stays `active`.
+
+The sweep's _decision_ to run is pure (`shouldRunDetection`); its _execution_ (LLM
+dispatch) is impure and happens in the route, which passes the resulting
+`contradictionCount` back in so the resolver stays pure and unit-testable.
+
+## The offer composer (capability, agent, sub-flag)
+
+- **`AppComposeCompletionOfferCapability`** (`capabilities/compose-completion-offer.ts`)
+  — a `BaseCapability` running one provider-agnostic structured LLM call (call → parse →
+  retry-once-at-temp-0 → cost-sum). Returns a `CompletionOffer` `{ offerMessage,
+coveredSummary, remainingNote? }`. The recap is built from question **prompts only**
+  (no respondent values); `processesPii = true` (the recap echoes prompts + recent
+  messages) with a counts/flags-only `redactProvenance`. Dispatched by slug
+  `app_compose_completion_offer`.
+- **Completion agent** (`app-questionnaire-completion-agent`, seed 015) — distinct from
+  the extractor (006), detector (009), and refiner (012): it phrases the close rather
+  than extracting or judging, with its own persona and `monthlyBudgetUsd`. Resolves the
+  `chat` tier; ships with empty model/provider (dynamic resolution).
+  `visibility: 'internal'`.
+- **Sub-flag** `APP_QUESTIONNAIRES_COMPLETION_ENABLED` (seed 017, disabled) on top of the
+  master flag — composing the offer spends an LLM call. `isCompletionEnabled()` requires
+  both. **Unlike the other sub-flags it does not 404 its route** — see below.
+
+The completion-sweep itself adds **no new capability**: it reuses F4.3's
+`app_detect_contradictions`, gated by `APP_QUESTIONNAIRES_CONTRADICTION_DETECTION_ENABLED`.
+
+## The two routes
+
+Both admin-only, both gated by the master flag via `withQuestionnairesEnabled`.
+
+### `POST …/versions/:vid/completion-status` — read-only assessment (+ optional offer)
+
+Gate order: `withQuestionnairesEnabled` (404 master-off, before auth) → `withAdminAuth`
+(401/403) → `validateRequestBody` (400) → `buildSelectionContext` (404 version) →
+`assessCompletion`. When the assessment is `offer` AND `isCompletionEnabled()`:
+`completionLimiter` (429, 60/min per admin) → load the completion agent (404 if
+unseeded) → dispatch the composer (fail-soft) → include the `offer`.
+
+Body: `{ answered: [{ key, confidence? }], recentMessages?, sessionId? }`. Response:
+`{ assessment, offer?, diagnostic? }`. **Persists nothing.**
+
+**The sub-flag does not 404 this route.** The deterministic assessment is free and
+useful on its own, so a disabled completion sub-flag simply returns the assessment
+without a composed `offer` — only the paid LLM phrasing is gated. A failed composition is
+fail-soft (assessment + `diagnostic`, no offer, never a 5xx).
+
+### `POST …/versions/:vid/complete` — the accept/hold action (persists)
+
+Gate order: `withQuestionnairesEnabled` → `withAdminAuth` → `validateRequestBody` →
+`completionLimiter` → `buildSelectionContext` (404 version) → `assessCompletion` → seed
+the supplied answers into the preview session (idempotent) → on an eligible `accept`,
+run the sweep → `resolveCompletion` → on `submit`, `markSessionCompleted`.
+
+Body: `{ action: 'accept'|'hold', answers: [{ key, value, confidence?, provenance?,
+turnIndex? }], mode?, windowN?, sessionId? }`. Response: `{ assessment, resolution,
+sessionId, status, findings?, diagnostic? }`.
+
+**The completion-sweep** runs only on an eligible `accept` (assessment `offer`):
+`buildContradictionContext` over the supplied answers → `shouldRunDetection(mode,
+windowN, 'completion-sweep')` (which always compares **all** answers for modes
+flag/probe) → if it should run AND `isContradictionDetectionEnabled()`, dispatch
+`app_detect_contradictions`. A failed or disabled sweep is **fail-soft: treated as
+clean** so a wrap-up never 5xxs (a `diagnostic` is returned). Fewer than two resolvable
+answers → no sweep (nothing can contradict). The dispatch sends **only the answered
+slots** (an unanswered slot can't contradict and is never rendered into the detector
+prompt), so the detector's `MAX_CONTRADICTION_SLOTS` cap tracks the answer count, not the
+questionnaire's size; if even the trimmed input exceeds the detector's caps the sweep is
+**skipped with an explicit `sweep_skipped_oversized` diagnostic + warn log** rather than a
+silent doomed dispatch.
+
+**Persistence** (the F4.4 seam, extended): the route seeds answers via
+`getOrCreatePreviewSession` + `upsertAnswerSlot`, and on a clean `submit` calls the new
+`markSessionCompleted(sessionId)` (`_lib/answer-slots.ts`) to transition the session
+`active → completed` (idempotent). `getOrCreatePreviewSession` is **race-safe**: a raw-SQL
+partial unique index (`idx_app_questionnaire_session_preview_per_version`, WHERE
+`isPreview` = true; migration `20260605141500`, drift-probed in `lib/app/db-drift.ts`)
+makes a concurrent duplicate create fail with P2002, which the seam catches and resolves to
+the winning row — so two simultaneous first-touch requests can't split a version's preview
+answers across two sessions. `hold` and `hold_for_review` leave it `active`.
+`accept` while `blocked_on_required` does **not** submit. There is no
+`AppQuestionnaireSessionEvent` table yet (F4.6) — the `status` column is F4.5's only
+audit surface.
+
+## Who consumes it (F4.6 seam)
+
+The streaming engine (F4.6) wires the live per-turn loop: each turn it calls
+`assessCompletion`; when eligible it composes the offer for the agent to speak; on the
+respondent's reply it runs the completion-sweep and `resolveCompletion`, then transitions
+the session via the same `markSessionCompleted` seam — populating `turnIndex` /
+`lastUpdatedTurnId` from the real turn loop and (once it exists) writing a session event.
+
+## See also
+
+- [`selection-strategies.md`](./selection-strategies.md) — F4.1, whose `terminalDecision`
+  ordering and coverage helpers F4.5 reuses (via the narrowed `CoverageContext`).
+- [`contradiction-detection.md`](./contradiction-detection.md) — F4.3, whose
+  `shouldRunDetection('completion-sweep')` scheduler and `app_detect_contradictions`
+  capability F4.5 drives at the moment of offer.
+- [`answer-refinement.md`](./answer-refinement.md) — F4.4, the persistence foundation and
+  the reconciliation path a `hold_for_review` feeds back into.
+- [`configuration.md`](./configuration.md) — the completion config fields
+  (`minQuestionsAnswered`, `coverageThreshold`, `maxQuestionsPerSession`).

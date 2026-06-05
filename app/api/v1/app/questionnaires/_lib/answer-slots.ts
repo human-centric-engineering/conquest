@@ -20,7 +20,12 @@
 
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db/client';
-import { ANSWER_PROVENANCES, type AnswerProvenance } from '@/lib/app/questionnaire/types';
+import {
+  ANSWER_PROVENANCES,
+  SESSION_STATUSES,
+  type AnswerProvenance,
+  type SessionStatus,
+} from '@/lib/app/questionnaire/types';
 import type {
   ExistingAnswerView,
   RefinedSlotState,
@@ -60,6 +65,13 @@ function asProvenance(value: string): AnswerProvenance {
     : 'direct';
 }
 
+/** Narrow a stored `status` string to the enum, defaulting to `active`. */
+function asSessionStatus(value: string): SessionStatus {
+  return (SESSION_STATUSES as readonly string[]).includes(value)
+    ? (value as SessionStatus)
+    : 'active';
+}
+
 /** Parse a stored `refinementHistory` JSON column into the typed array (our own
  *  data; defensively default a non-array to empty). */
 function asHistory(value: Prisma.JsonValue): RefinementHistoryEntry[] {
@@ -78,11 +90,27 @@ export async function getOrCreatePreviewSession(versionId: string): Promise<stri
   });
   if (existing) return existing.id;
 
-  const created = await prisma.appQuestionnaireSession.create({
-    data: { versionId, isPreview: true, status: 'active' },
-    select: { id: true },
-  });
-  return created.id;
+  try {
+    const created = await prisma.appQuestionnaireSession.create({
+      data: { versionId, isPreview: true, status: 'active' },
+      select: { id: true },
+    });
+    return created.id;
+  } catch (err) {
+    // Race: a concurrent request created the version's preview session between our
+    // findFirst and create. The partial unique index
+    // (idx_app_questionnaire_session_preview_per_version, WHERE isPreview = true)
+    // turns the losing create into a P2002; resolve to the winning row rather than
+    // surfacing a duplicate-key error or creating a second preview session.
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      const winner = await prisma.appQuestionnaireSession.findFirst({
+        where: { versionId, isPreview: true },
+        select: { id: true },
+      });
+      if (winner) return winner.id;
+    }
+    throw err;
+  }
 }
 
 /**
@@ -177,4 +205,23 @@ export async function persistRefinement(rowId: string, refined: RefinedSlotState
       refinementHistory: jsonInput(stampedHistory),
     },
   });
+}
+
+/**
+ * Transition a session to `completed` — the F4.5 accept→submit write path.
+ * Idempotent: a session already `completed` (or any other status) is set to
+ * `completed` again, returning the resulting status. Resolving the result to the
+ * narrowed {@link SessionStatus} guards against a stray DB value at the boundary.
+ *
+ * F4.6 seam: there is no `AppQuestionnaireSessionEvent` table yet, so the `status`
+ * column is the only audit surface F4.5 has. When F4.6 lands the event log, this is
+ * where a `completed` transition event will also be written.
+ */
+export async function markSessionCompleted(sessionId: string): Promise<SessionStatus> {
+  const updated = await prisma.appQuestionnaireSession.update({
+    where: { id: sessionId },
+    data: { status: 'completed' },
+    select: { status: true },
+  });
+  return asSessionStatus(updated.status);
 }
