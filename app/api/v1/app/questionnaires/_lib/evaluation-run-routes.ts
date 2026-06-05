@@ -20,10 +20,22 @@ import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
 import {
   EVALUATION_DIMENSIONS,
+  FINDING_REVIEW_STATUSES,
+  coerceProposedEdit,
+  parseAudienceShape,
+  versionStructureSchema,
   type EvaluationDimension,
+  type ProposedEdit,
+  type VersionStructureInput,
 } from '@/lib/app/questionnaire/evaluation';
+import { narrowToEnum } from '@/lib/app/questionnaire/types';
 import type { EvaluationPanelResult } from '@/lib/app/questionnaire/evaluation/run-panel';
 import { jsonInput } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
+import { buildEvaluationStructure } from '@/app/api/v1/app/questionnaires/_lib/evaluation-structure';
+import {
+  deriveApplicability,
+  deriveFindingState,
+} from '@/app/api/v1/app/questionnaires/_lib/evaluation-staleness';
 import type {
   EvaluationDimensionSummary,
   EvaluationFindingView,
@@ -68,8 +80,48 @@ function parseDimensionSummary(value: unknown, runId: string): EvaluationDimensi
   return [];
 }
 
-/** A persisted finding row → client-safe view. */
-function toFindingView(row: {
+/**
+ * Parse a stored `structureSnapshot` into a {@link VersionStructureInput}, or `null` when absent
+ * (a pre-F5.3 run) or malformed (degrade, don't throw — the `parseDimensionSummary` posture). A
+ * `null` snapshot means staleness can't be derived; findings read as not-stale.
+ */
+export function parseStructureSnapshot(
+  value: unknown,
+  runId: string
+): VersionStructureInput | null {
+  if (value === null || value === undefined) return null;
+  const parsed = versionStructureSchema.safeParse(value);
+  if (parsed.success) {
+    // Re-narrow the audience JSON through the dedicated parser (the schema accepts a superset).
+    return { ...parsed.data, audience: parseAudienceShape(parsed.data.audience) };
+  }
+  logger.warn('Malformed evaluation-run structureSnapshot; staleness derivation skipped', {
+    runId,
+  });
+  return null;
+}
+
+/** Columns for a finding row — shared by the detail read + the review-mutation seam. */
+export const FINDING_SELECT = {
+  id: true,
+  dimension: true,
+  ordinal: true,
+  targetKey: true,
+  severity: true,
+  proposedChange: true,
+  rationale: true,
+  sourceQuote: true,
+  proposedEdit: true,
+  editedOverride: true,
+  status: true,
+  decidedByUserId: true,
+  decidedAt: true,
+  appliedAt: true,
+  appliedToVersionId: true,
+} as const;
+
+/** The shape `toFindingView` consumes — a row selected with {@link FINDING_SELECT}. */
+export interface FindingRow {
   id: string;
   dimension: string;
   ordinal: number;
@@ -78,8 +130,35 @@ function toFindingView(row: {
   proposedChange: string;
   rationale: string;
   sourceQuote: string | null;
+  proposedEdit: unknown;
+  editedOverride: unknown;
   status: string;
-}): EvaluationFindingView {
+  decidedByUserId: string | null;
+  decidedAt: Date | null;
+  appliedAt: Date | null;
+  appliedToVersionId: string | null;
+}
+
+/**
+ * The effective op a finding would apply — the admin's `editedOverride` when present, else the
+ * judge's `proposedEdit`. Both JSON columns are soft-validated (`coerceProposedEdit`), so a
+ * malformed stored op degrades to prose-only rather than throwing.
+ */
+export function effectiveOp(
+  row: Pick<FindingRow, 'proposedEdit' | 'editedOverride'>
+): ProposedEdit | null {
+  return coerceProposedEdit(row.editedOverride) ?? coerceProposedEdit(row.proposedEdit);
+}
+
+/**
+ * A persisted finding row → client-safe view. `stale`/`applicable` are derived here only from
+ * the op (applicability) and default `stale: false`; the detail read re-stamps `stale` against
+ * the live structure for non-terminal findings (it has the structures; this row-only path does
+ * not). Terminal (`applied`/`declined`) findings keep `stale: false`.
+ */
+function toFindingView(row: FindingRow): EvaluationFindingView {
+  const proposedEdit = coerceProposedEdit(row.proposedEdit);
+  const editedOverride = coerceProposedEdit(row.editedOverride);
   return {
     id: row.id,
     dimension: row.dimension as EvaluationDimension,
@@ -89,9 +168,20 @@ function toFindingView(row: {
     proposedChange: row.proposedChange,
     rationale: row.rationale,
     sourceQuote: row.sourceQuote,
-    status: row.status,
+    status: narrowToEnum(row.status, FINDING_REVIEW_STATUSES, 'pending'),
+    proposedEdit,
+    editedOverride,
+    decidedByUserId: row.decidedByUserId,
+    decidedAt: row.decidedAt ? row.decidedAt.toISOString() : null,
+    appliedAt: row.appliedAt ? row.appliedAt.toISOString() : null,
+    appliedToVersionId: row.appliedToVersionId,
+    stale: false,
+    applicable: deriveApplicability(editedOverride ?? proposedEdit),
   };
 }
+
+/** Export the row→view projection so the review-mutation route returns the same shape. */
+export { toFindingView };
 
 /** A persisted run header row → list-item view. */
 function toRunListItem(row: {
@@ -150,14 +240,26 @@ export async function persistEvaluationRun(args: {
   versionId: string;
   triggeredByUserId: string;
   panel: EvaluationPanelResult;
+  /** The structure the judges read — snapshotted on the run for F5.3 staleness derivation. */
+  structure: VersionStructureInput;
   startedAt: Date;
   completedAt: Date;
 }): Promise<EvaluationRunDetail> {
-  const { questionnaireId, versionId, triggeredByUserId, panel, startedAt, completedAt } = args;
+  const {
+    questionnaireId,
+    versionId,
+    triggeredByUserId,
+    panel,
+    structure,
+    startedAt,
+    completedAt,
+  } = args;
   const status = deriveStatus(panel.summary);
   const dimensionSummary = buildDimensionSummary(panel);
 
-  // Flatten verdicts → finding rows, ordinal stable across the whole run (dispatch order).
+  // Flatten verdicts → finding rows, ordinal stable across the whole run (dispatch order). The
+  // judge's optional structured `proposedEdit` is soft-validated on the way in — a malformed op
+  // degrades to `null` (prose-only) rather than sinking the finding.
   let ordinal = 0;
   const findingRows = panel.results.flatMap((r) =>
     (r.verdict?.findings ?? []).map((f) => ({
@@ -168,6 +270,7 @@ export async function persistEvaluationRun(args: {
       proposedChange: f.proposedChange,
       rationale: f.rationale,
       sourceQuote: f.sourceQuote ?? null,
+      proposedEdit: jsonInput(coerceProposedEdit(f.proposedEdit)),
     }))
   );
 
@@ -183,6 +286,7 @@ export async function persistEvaluationRun(args: {
         dimensionsFailed: panel.summary.dimensionsFailed,
         totalFindings: panel.summary.totalFindings,
         dimensionSummary: jsonInput(dimensionSummary),
+        structureSnapshot: jsonInput(structure),
         // A run where every judge failed carries a note; partial/complete runs don't.
         error: status === 'failed' ? 'all_judges_failed' : null,
         startedAt,
@@ -230,6 +334,79 @@ export async function listEvaluationRuns(
   return { runs: rows.map(toRunListItem), total };
 }
 
+/** A finding row plus the run context needed to apply/derive it (snapshot + scope). */
+export interface ScopedFinding {
+  row: FindingRow;
+  versionId: string;
+  questionnaireId: string;
+  /** The run's structure snapshot (for staleness), already parsed; `null` if absent/malformed. */
+  snapshot: VersionStructureInput | null;
+}
+
+/**
+ * Load one finding scoped to (version, run): the finding must belong to `runId`, which must
+ * belong to `versionId`. Returns `null` (→ 404) on any mismatch, so a finding can't be reviewed
+ * across versions/runs. Carries the run's snapshot + questionnaireId for the apply/derive seam.
+ */
+export async function loadScopedFinding(
+  versionId: string,
+  runId: string,
+  findingId: string
+): Promise<ScopedFinding | null> {
+  const row = await prisma.appQuestionnaireEvaluationFinding.findFirst({
+    where: { id: findingId, runId, run: { versionId } },
+    select: {
+      ...FINDING_SELECT,
+      run: { select: { versionId: true, questionnaireId: true, structureSnapshot: true } },
+    },
+  });
+  if (!row) return null;
+  const { run, ...findingRow } = row;
+  return {
+    row: findingRow,
+    versionId: run.versionId,
+    questionnaireId: run.questionnaireId,
+    snapshot: parseStructureSnapshot(run.structureSnapshot, runId),
+  };
+}
+
+/**
+ * Load the live structure for staleness derivation, degrading to `null` on any error. Reading
+ * findings must never fail because the structure load hiccupped — the `parseDimensionSummary`
+ * posture: a derivation we can't compute simply yields not-stale.
+ */
+async function loadCurrentStructureSafe(questionnaireId: string, versionId: string) {
+  try {
+    return await buildEvaluationStructure(questionnaireId, versionId);
+  } catch (err) {
+    logger.warn('Evaluation staleness: live structure load failed; skipping derivation', {
+      versionId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
+
+/**
+ * Project a {@link ScopedFinding} into its view with `stale`/`applicable` derived against the
+ * live structure (the single-finding analogue of `getEvaluationRunDetail`'s per-finding pass).
+ * Used by the PATCH/apply responses so they return the same shape the detail GET does.
+ */
+export async function buildScopedFindingView(
+  scoped: ScopedFinding
+): Promise<EvaluationFindingView> {
+  const view = toFindingView(scoped.row);
+  if (view.status === 'applied' || view.status === 'declined') return view;
+  const current = await loadCurrentStructureSafe(scoped.questionnaireId, scoped.versionId);
+  if (!current) return view;
+  const derived = deriveFindingState(
+    { targetKey: view.targetKey, op: view.editedOverride ?? view.proposedEdit },
+    scoped.snapshot,
+    current
+  );
+  return { ...view, stale: derived.stale, applicable: derived.applicable };
+}
+
 /**
  * One run with its findings, scoped to the version (a run from another version returns
  * `null` → 404). Findings come back ordered by (dimension, ordinal) so the detail UI can
@@ -243,29 +420,36 @@ export async function getEvaluationRunDetail(
     where: { id: runId, versionId },
     select: {
       ...RUN_HEADER_SELECT,
+      structureSnapshot: true,
       findings: {
         orderBy: [{ dimension: 'asc' }, { ordinal: 'asc' }],
-        select: {
-          id: true,
-          dimension: true,
-          ordinal: true,
-          targetKey: true,
-          severity: true,
-          proposedChange: true,
-          rationale: true,
-          sourceQuote: true,
-          status: true,
-        },
+        select: FINDING_SELECT,
       },
     },
   });
   if (!row) return null;
+
+  // Derive each finding's `stale`/`applicable` against the LIVE structure (F5.3). A terminal
+  // (applied/declined) finding keeps its row state — staleness is only meaningful for an open
+  // suggestion. The run's `questionnaireId` scopes the live structure load.
+  const snapshot = parseStructureSnapshot(row.structureSnapshot, row.id);
+  const current = await loadCurrentStructureSafe(row.questionnaireId, versionId);
+  const findings = row.findings.map((f) => {
+    const view = toFindingView(f);
+    if (!current || view.status === 'applied' || view.status === 'declined') return view;
+    const derived = deriveFindingState(
+      { targetKey: view.targetKey, op: view.editedOverride ?? view.proposedEdit },
+      snapshot,
+      current
+    );
+    return { ...view, stale: derived.stale, applicable: derived.applicable };
+  });
 
   return {
     ...toRunListItem(row),
     versionId: row.versionId,
     questionnaireId: row.questionnaireId,
     error: row.error,
-    findings: row.findings.map(toFindingView),
+    findings,
   };
 }

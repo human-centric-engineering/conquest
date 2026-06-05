@@ -13,6 +13,13 @@ export {
   type EvaluationDimension,
   FINDING_SEVERITIES,
   type FindingSeverity,
+  FINDING_REVIEW_STATUSES,
+  type FindingReviewStatus,
+  FINDING_APPLICABILITIES,
+  type FindingApplicability,
+  PROPOSED_EDIT_OPS,
+  type ProposedEditOp,
+  type ProposedEdit,
   type JudgeFinding,
   type JudgeVerdict,
   type StructureQuestion,
@@ -32,6 +39,8 @@ export {
   judgeFindingSchema,
   judgeVerdictSchema,
   judgeVerdictJsonSchema,
+  proposedEditSchema,
+  coerceProposedEdit,
   validateJudgeVerdict,
   type JudgeVerdictOutput,
   type JudgeVerdictValidation,
@@ -41,6 +50,11 @@ export {
   buildJudgePrompt,
   buildJudgeRetryMessage,
 } from '@/lib/app/questionnaire/evaluation/judge-prompt';
+
+export {
+  reviewFindingSchema,
+  type ReviewFindingInput,
+} from '@/lib/app/questionnaire/evaluation/review-schema';
 
 export {
   MAX_EVAL_SECTIONS,

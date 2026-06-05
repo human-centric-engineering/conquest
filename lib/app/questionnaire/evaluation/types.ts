@@ -23,7 +23,7 @@
  * prompt builder (versioned in code), not in the agent row.
  */
 
-import type { AudienceShape } from '@/lib/app/questionnaire/types';
+import type { AudienceShape, QuestionType } from '@/lib/app/questionnaire/types';
 
 /**
  * The seven evaluation dimensions, as a `const` tuple — the single source of truth.
@@ -53,6 +53,101 @@ export const FINDING_SEVERITIES = ['info', 'minor', 'major'] as const;
 export type FindingSeverity = (typeof FINDING_SEVERITIES)[number];
 
 /**
+ * The op vocabulary for a {@link ProposedEdit} — the single source of truth, the
+ * `const`-tuple discipline used everywhere else in this module. F5.3's apply engine
+ * switches on `op`; the judge prompt names them; a parity test asserts coverage.
+ */
+export const PROPOSED_EDIT_OPS = [
+  'replace_prompt',
+  'edit_guidelines',
+  'change_type',
+  'delete_question',
+  'reorder',
+  'edit_goal',
+  'edit_audience',
+  'add_question',
+] as const;
+export type ProposedEditOp = (typeof PROPOSED_EDIT_OPS)[number];
+
+/**
+ * A **structured, machine-applicable** edit a judge may attach to a finding alongside
+ * the prose `proposedChange` (F5.3). When present and well-formed, F5.3's review queue
+ * can apply it in one click through the existing fork-if-launched authoring seam; when
+ * absent (a nuanced suggestion that doesn't map to an op), the finding stays prose-only
+ * and the admin is routed into the pre-filled editor instead.
+ *
+ * Deliberately **draft-shaped**: ops address their target the way `targetKey` does — by
+ * slot `key` / `section:<title>` / `goal` / `audience`, never by a cuid the judge can't
+ * know. The op is an **accelerator, never a trust boundary**: it is prompt-guided, not
+ * provider-enforced (the JSON schema is not sent to the model), so every applied op is
+ * re-validated at apply time exactly like a hand authoring edit (`validateTypeConfig`,
+ * key-collision, ordinal bounds). A malformed op degrades to `null` on persist (the
+ * `parseAudienceShape` posture), never failing the surrounding verdict.
+ *
+ * `op` is the single discriminator. `add_question` carries a *draft* (no ids, the
+ * section may not exist) and is never blind-applied — F5.3 routes it to a pre-filled
+ * create form. There is intentionally **no `merge` op**: the authoring surface has no
+ * single-slot merge write path, so a duplicates finding emits `delete_question` on the
+ * weaker slot plus prose.
+ */
+export type ProposedEdit =
+  /** Rewrite a question's prompt in place. Target: slot `key`. (clarity) */
+  | { op: 'replace_prompt'; prompt: string }
+  /** Set or clear a question's author guidelines. Target: slot `key`. (clarity, audience_match) */
+  | { op: 'edit_guidelines'; guidelines: string | null }
+  /** Change a question's answer type (config reset/revalidated at apply). Target: slot `key`. (type_fit) */
+  | { op: 'change_type'; type: QuestionType; typeConfig?: unknown }
+  /** Remove a question. Target: slot `key`. (duplicates, goal_match) */
+  | { op: 'delete_question' }
+  /**
+   * Move a question to an absolute 0-based `ordinal` (clamped at apply), optionally into
+   * another section by its title. Target: slot `key`. (ordering)
+   */
+  | { op: 'reorder'; ordinal: number; targetSectionKey?: string }
+  /** Replace the version goal. Target: `goal`. (goal_match) */
+  | { op: 'edit_goal'; goal: string }
+  /** Merge-patch the version audience (only the named sub-fields change). Target: `audience`. (audience_match) */
+  | { op: 'edit_audience'; audience: Partial<AudienceShape> }
+  /**
+   * Draft a missing question. Never blind-applied — routes to a pre-filled create form.
+   * Target: `goal` or `section:<title>`. (coverage)
+   */
+  | {
+      op: 'add_question';
+      prompt: string;
+      type: QuestionType;
+      sectionKey?: string;
+      guidelines?: string;
+      typeConfig?: unknown;
+    };
+
+/**
+ * The persisted review lifecycle of a finding (F5.3) — the single source of truth for the
+ * `AppQuestionnaireEvaluationFinding.status` column. A finding starts `pending`; the admin
+ * moves it to `accepted` (agree, not yet applied) or `declined` (dismiss); `applied` is the
+ * terminal state once the structured edit was written to the draft.
+ *
+ * `stale` is **deliberately not a status here**: a finding is stale when intervening edits
+ * make its suggestion obsolete, which is a function of the *live* structure and so is derived
+ * at read time (see `applicable`/`FindingApplicability`), never written — a stored `stale`
+ * would rot the moment the structure changed again.
+ */
+export const FINDING_REVIEW_STATUSES = ['pending', 'accepted', 'declined', 'applied'] as const;
+export type FindingReviewStatus = (typeof FINDING_REVIEW_STATUSES)[number];
+
+/**
+ * How a finding can be actioned, derived at read time (F5.3) from its `proposedEdit`/override
+ * and the live structure:
+ *
+ * - `apply` — a clean structured op the review queue can apply in one click.
+ * - `deep-link` — needs authoring (an `add_question` draft, or a low-confidence op): the admin
+ *   is sent to a pre-filled editor rather than a blind write.
+ * - `manual` — prose-only (no op): the admin edits the structure by hand from the suggestion.
+ */
+export const FINDING_APPLICABILITIES = ['apply', 'deep-link', 'manual'] as const;
+export type FindingApplicability = (typeof FINDING_APPLICABILITIES)[number];
+
+/**
  * One actionable suggestion from a judge. `targetKey` addresses what the finding is
  * about: a question by its stable slot `key`, a section by `section:<title>`, or the
  * version-level `goal` / `audience`. It's a free string (not validated against the
@@ -70,6 +165,11 @@ export interface JudgeFinding {
   rationale: string;
   /** The offending text quoted from the structure, when the finding points at one. */
   sourceQuote?: string;
+  /**
+   * Optional structured edit (F5.3) the review queue can apply in one click. Absent on
+   * a prose-only finding; see {@link ProposedEdit}.
+   */
+  proposedEdit?: ProposedEdit;
 }
 
 /**

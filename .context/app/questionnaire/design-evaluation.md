@@ -1,4 +1,4 @@
-# Design-time evaluation (F5.1–F5.2)
+# Design-time evaluation (F5.1–F5.3)
 
 Before a questionnaire is launched, is its **structure** any good? F5.1 stands up a
 panel of seven LLM **judges** that read a version's authored design — its goal,
@@ -171,7 +171,78 @@ read-only run-detail page grouping findings by dimension. The entry button on th
 detail page is gated on the sub-flag (the POST 404s otherwise). No accept/decline yet —
 that's F5.3.
 
-## Not in F5.2
+## F5.3 — suggestion review
 
-The suggestion review queue with accept/decline/edit/apply and stale-suggestion derivation
-(F5.3). The finding `status` column exists but only ever holds `pending` in F5.2.
+F5.3 turns the persisted findings into a **review queue**: the admin works through each judge
+suggestion and accepts, declines, edits, or **applies** it to the draft version — forking a
+launched version first, exactly like every authoring edit.
+
+### Structured edits — the accelerator
+
+The quality ceiling is whether a suggestion arrives _already actionable_. So F5.3 went back into
+the F5.1 findings contract: alongside the prose `proposedChange`, a judge may attach a structured
+**`proposedEdit`** — a discriminated union on `op` keyed to the same `targetKey` addressing:
+
+| `op`              | Target            | Dimensions             | Apply effect                                  |
+| ----------------- | ----------------- | ---------------------- | --------------------------------------------- |
+| `replace_prompt`  | slot `key`        | clarity                | rewrite the prompt                            |
+| `edit_guidelines` | slot `key`        | clarity, audience      | set/clear author guidelines                   |
+| `change_type`     | slot `key`        | type_fit               | change answer type (config revalidated/reset) |
+| `delete_question` | slot `key`        | duplicates, goal_match | remove the question                           |
+| `reorder`         | slot `key`        | ordering               | move to a 0-based ordinal (± section)         |
+| `edit_goal`       | `goal`            | goal_match             | replace the version goal                      |
+| `edit_audience`   | `audience`        | audience_match         | merge-patch the named audience sub-fields     |
+| `add_question`    | `goal`/`section:` | coverage               | **draft only** — opens a pre-filled editor    |
+
+The op is an **accelerator, never a trust boundary**: it is prompt-guided, _not_
+provider-enforced (the JSON schema is never sent to the model — `runStructuredCompletion` is plain
+prompt + Zod parse). So it is optional (a nuanced finding stays prose-only), soft-degraded to
+`null` on malform at persist (`coerceProposedEdit`, the `parseAudienceShape` posture), and
+**re-validated at apply time exactly like a hand authoring edit**. There is intentionally no
+`merge` op — duplicates emit `delete_question` on the weaker slot.
+
+### Apply — reuse the fork-if-launched seam
+
+`_lib/evaluation-apply.ts` (`applyFinding`) executes `editedOverride ?? proposedEdit` through the
+**same leaf helpers** the F2.1 routes use (`validateTypeConfig`, `forkVersionIfLaunched`, the
+provenance stamps) rather than the HTTP handlers — the load-bearing validation is shared; only the
+`targetKey`→entity resolution is apply-specific. The order matters:
+
+1. prose-only / `add_question` → `needs_authoring` (the UI deep-links the editor — these are never blind-applied).
+2. **Apply-time staleness re-check** (optimistic concurrency) — reject if the structure drifted.
+3. Resolve the editable version: if a prior apply from this run already forked (or edited) a live
+   draft, **reuse it** — repeated applies converge on one draft instead of re-forking the launched
+   original each time (the fork-lineage rule). Otherwise validate the op against the original
+   _before_ forking (no orphan drafts), then `forkVersionIfLaunched`.
+4. Retarget the slot on the editable version (keys copy 1:1 across a fork), execute the op + stamp
+   the finding `applied` (`appliedAt`, `appliedToVersionId`) in one transaction.
+
+An unapplicable apply returns **409** with a reason the UI acts on: `stale` (re-run),
+`target_gone` (deleted), `op_invalid` (e.g. incompatible type config), `needs_authoring`.
+
+### Staleness — derived, never stored
+
+`status` holds `pending | accepted | declined | applied`. **`stale` is not a status** — it is
+derived at read time (`_lib/evaluation-staleness.ts`) by diffing the **targeted slice** of the
+run's `structureSnapshot` (the `VersionStructureInput` captured when the judges ran) against the
+live structure. Only the specific thing a finding addresses is compared, so an unrelated edit never
+falsely stales it; `delete_question` is stale only if the slot is already gone. A pre-F5.3 run with
+no snapshot reads as not-stale (best-effort). For a launched (frozen) version the snapshot always
+equals the live structure, so staleness is meaningful only for drafts — which is exactly where the
+structure mutates under the findings.
+
+### Models, routes, UI
+
+- Columns added (additive, nullable migration): `AppQuestionnaireEvaluationFinding.proposedEdit`,
+  `editedOverride`, `decidedByUserId`, `decidedAt`, `appliedAt`, `appliedToVersionId`; and
+  `AppQuestionnaireEvaluationRun.structureSnapshot`. The detail GET is now staleness-aware (no new
+  read endpoint).
+- `PATCH …/evaluations/:runId/findings/:findingId` — accept / decline / edit (sub-flag gated;
+  `applied` is terminal → 409). `POST …/findings/:findingId/apply` — apply (sub-flag gated +
+  `evaluationApplyLimiter` 60/min; may fork). Accept is triage, **not** apply — kept distinct so an
+  admin can agree across a run, then apply against one consistent fork lineage.
+- The run-detail admin component became the interactive queue: per-finding accept/decline/edit/apply
+  gated on the derived `applicable` (`apply` | `deep-link` | `manual`) and `stale`, a typed
+  edit-override mini-form (text ops + type + ordinal), a status filter, and a fork banner pointing at
+  the new draft when an apply forks a launched version. Reads stay master-flag; apply buttons gate on
+  the sub-flag (`canApply`).

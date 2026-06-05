@@ -115,6 +115,7 @@ const handleCreateRun = withAdminAuth<{ id: string; vid: string }>(
       versionId: vid,
       triggeredByUserId: adminId,
       panel,
+      structure,
       startedAt,
       completedAt,
     });

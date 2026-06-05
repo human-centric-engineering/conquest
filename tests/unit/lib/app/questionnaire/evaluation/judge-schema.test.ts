@@ -4,6 +4,7 @@ import {
   MAX_FINDINGS_PER_JUDGE,
   judgeVerdictJsonSchema,
   validateJudgeVerdict,
+  coerceProposedEdit,
 } from '@/lib/app/questionnaire/evaluation';
 
 const validFinding = {
@@ -102,5 +103,70 @@ describe('validateJudgeVerdict', () => {
     expect(props).toBeDefined();
     expect(props).toHaveProperty('score');
     expect(props).toHaveProperty('findings');
+  });
+
+  it('serialises the optional proposedEdit union into the JSON schema', () => {
+    const props = (judgeVerdictJsonSchema as { properties: Record<string, unknown> }).properties;
+    const items = (props.findings as { items: { properties: Record<string, unknown> } }).items;
+    expect(items.properties).toHaveProperty('proposedEdit');
+  });
+});
+
+describe('judgeFinding.proposedEdit (F5.3)', () => {
+  const base = {
+    targetKey: 'q_role',
+    severity: 'minor' as const,
+    proposedChange: 'Reword for clarity.',
+    rationale: 'Currently ambiguous.',
+  };
+
+  it('accepts a finding carrying a replace_prompt op', () => {
+    const result = validateJudgeVerdict({
+      score: 0.5,
+      findings: [{ ...base, proposedEdit: { op: 'replace_prompt', prompt: 'What is your role?' } }],
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok)
+      expect(result.value.findings[0].proposedEdit).toEqual({
+        op: 'replace_prompt',
+        prompt: 'What is your role?',
+      });
+  });
+
+  it('accepts a finding with no proposedEdit (prose-only)', () => {
+    const result = validateJudgeVerdict({ score: 0.5, findings: [base] });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.findings[0].proposedEdit).toBeUndefined();
+  });
+
+  it('rejects a verdict whose proposedEdit has an unknown op', () => {
+    const result = validateJudgeVerdict({
+      score: 0.5,
+      findings: [{ ...base, proposedEdit: { op: 'rename_everything' } }],
+    });
+    expect(result.ok).toBe(false);
+  });
+});
+
+describe('coerceProposedEdit', () => {
+  it('returns the validated op for a well-formed edit', () => {
+    expect(coerceProposedEdit({ op: 'delete_question' })).toEqual({ op: 'delete_question' });
+    expect(coerceProposedEdit({ op: 'change_type', type: 'single_choice' })).toEqual({
+      op: 'change_type',
+      type: 'single_choice',
+    });
+  });
+
+  it('degrades null / undefined / malformed ops to null (never throws)', () => {
+    expect(coerceProposedEdit(null)).toBeNull();
+    expect(coerceProposedEdit(undefined)).toBeNull();
+    expect(coerceProposedEdit({ op: 'change_type', type: 'not_a_type' })).toBeNull();
+    expect(coerceProposedEdit({ op: 'replace_prompt' })).toBeNull(); // missing prompt
+    expect(coerceProposedEdit('garbage')).toBeNull();
+  });
+
+  it('keeps only the named audience sub-fields on edit_audience', () => {
+    const op = coerceProposedEdit({ op: 'edit_audience', audience: { expertiseLevel: 'novice' } });
+    expect(op).toEqual({ op: 'edit_audience', audience: { expertiseLevel: 'novice' } });
   });
 });

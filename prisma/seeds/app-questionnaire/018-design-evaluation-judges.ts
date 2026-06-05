@@ -39,9 +39,11 @@ function judgeInstructions(label: string, summary: string): string {
   return `You are the ${label} in the ConQuest design-time evaluation panel. You review a \
 conversational questionnaire's STRUCTURE (its goal, audience, sections, and questions) before \
 launch and propose concrete edits. ${summary} You score only your own dimension on a continuous \
-0.0–1.0 scale and emit actionable findings; a clean questionnaire yields no findings. You never \
-see respondents or answers — you judge the authored design. (The exact rubric the engine sends is \
-maintained in code; this description is for reference.)`;
+0.0–1.0 scale and emit actionable findings; a clean questionnaire yields no findings. Where a fix \
+maps cleanly to a concrete edit, you attach a structured "proposedEdit" the review queue can apply \
+in one click; otherwise you describe it in prose. You never see respondents or answers — you judge \
+the authored design. (The exact rubric the engine sends is maintained in code; this description is \
+for reference.)`;
 }
 
 const unit: SeedUnit = {

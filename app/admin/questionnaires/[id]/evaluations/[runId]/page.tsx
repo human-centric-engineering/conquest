@@ -6,7 +6,10 @@ import { EvaluationRunDetail } from '@/components/admin/questionnaires/evaluatio
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
-import { isQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
+import {
+  isDesignEvaluationEnabled,
+  isQuestionnairesEnabled,
+} from '@/lib/app/questionnaire/feature-flag';
 import type {
   EvaluationRunDetail as EvaluationRunDetailView,
   QuestionnaireDetail,
@@ -60,7 +63,11 @@ export default async function EvaluationRunPage({ params, searchParams }: PagePr
   // The detail route is version-scoped; admin pages carry the version in `?v=`, not the path.
   if (!v) notFound();
 
-  const [detail, run] = await Promise.all([getDetail(id), getRun(id, v, runId)]);
+  const [detail, run, canApply] = await Promise.all([
+    getDetail(id),
+    getRun(id, v, runId),
+    isDesignEvaluationEnabled(),
+  ]);
   if (!detail || !run) notFound();
 
   return (
@@ -88,7 +95,7 @@ export default async function EvaluationRunPage({ params, searchParams }: PagePr
         </p>
       </header>
 
-      <EvaluationRunDetail run={run} />
+      <EvaluationRunDetail run={run} questionnaireId={id} versionId={v} canApply={canApply} />
     </div>
   );
 }

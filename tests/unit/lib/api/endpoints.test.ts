@@ -1085,4 +1085,67 @@ describe('API Endpoints', () => {
       expect(path).toBe('/api/v1/admin/invitations/user%2Fname%40example.com');
     });
   });
+
+  describe('APP.QUESTIONNAIRES endpoint builders', () => {
+    const Q = API.APP.QUESTIONNAIRES;
+    const base = '/api/v1/app/questionnaires';
+
+    it('builds questionnaire- and version-scoped paths', () => {
+      expect(Q.ROOT).toBe(base);
+      expect(Q.byId('qn1')).toBe(`${base}/qn1`);
+      expect(Q.versionGraph('qn1', 'v1')).toBe(`${base}/qn1/versions/v1`);
+      expect(Q.versionStatus('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/status`);
+      expect(Q.versionReingest('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/reingest`);
+      expect(Q.versionConfig('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/config`);
+      expect(Q.versionCostEstimate('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/cost-estimate`);
+      expect(Q.versionNextQuestion('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/next-question`);
+      expect(Q.versionEmbedQuestions('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/embed-questions`);
+    });
+
+    it('builds section/question/tag paths', () => {
+      expect(Q.versionSections('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/sections`);
+      expect(Q.versionSectionsReorder('qn1', 'v1')).toBe(
+        `${base}/qn1/versions/v1/sections/reorder`
+      );
+      expect(Q.versionSectionById('qn1', 'v1', 's1')).toBe(`${base}/qn1/versions/v1/sections/s1`);
+      expect(Q.versionSectionQuestions('qn1', 'v1', 's1')).toBe(
+        `${base}/qn1/versions/v1/sections/s1/questions`
+      );
+      expect(Q.versionSectionQuestionsReorder('qn1', 'v1', 's1')).toBe(
+        `${base}/qn1/versions/v1/sections/s1/questions/reorder`
+      );
+      expect(Q.versionQuestionById('qn1', 'v1', 'q1')).toBe(`${base}/qn1/versions/v1/questions/q1`);
+      expect(Q.versionQuestionTags('qn1', 'v1', 'q1')).toBe(
+        `${base}/qn1/versions/v1/questions/q1/tags`
+      );
+      expect(Q.versionTags('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/tags`);
+      expect(Q.versionTagById('qn1', 'v1', 't1')).toBe(`${base}/qn1/versions/v1/tags/t1`);
+    });
+
+    it('builds extraction-change paths', () => {
+      expect(Q.versionChanges('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/changes`);
+      expect(Q.versionChangeRevert('qn1', 'v1', 'c1')).toBe(
+        `${base}/qn1/versions/v1/changes/c1/revert`
+      );
+    });
+
+    it('builds invitation paths', () => {
+      expect(Q.invitations('qn1')).toBe(`${base}/qn1/invitations`);
+      expect(Q.invitationById('qn1', 'i1')).toBe(`${base}/qn1/invitations/i1`);
+      expect(Q.invitationResend('qn1', 'i1')).toBe(`${base}/qn1/invitations/i1/resend`);
+    });
+
+    it('builds design-evaluation paths (F5.2 + F5.3)', () => {
+      expect(Q.versionEvaluations('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/evaluations`);
+      expect(Q.versionEvaluationById('qn1', 'v1', 'run1')).toBe(
+        `${base}/qn1/versions/v1/evaluations/run1`
+      );
+      expect(Q.versionEvaluationFinding('qn1', 'v1', 'run1', 'f1')).toBe(
+        `${base}/qn1/versions/v1/evaluations/run1/findings/f1`
+      );
+      expect(Q.versionEvaluationFindingApply('qn1', 'v1', 'run1', 'f1')).toBe(
+        `${base}/qn1/versions/v1/evaluations/run1/findings/f1/apply`
+      );
+    });
+  });
 });
