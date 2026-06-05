@@ -370,6 +370,84 @@ describe('questionnaire datamodel (Prisma.dmmf)', () => {
     expect(invitations.kind).toBe('object');
     expect(invitations.type).toBe('AppQuestionnaireInvitation');
   });
+
+  it('AppQuestionnaireSession maps app_questionnaire_session (F4.4 / F4.6)', () => {
+    const model = getModel('AppQuestionnaireSession');
+    expect(model.dbName).toBe('app_questionnaire_session');
+
+    expect(getField(model, 'versionId').type).toBe('String');
+    // status / isPreview are plain columns; status is validated against SESSION_STATUSES
+    // at the seam (house style), and F4.6 added `paused` to that tuple.
+    expect(getField(model, 'status').type).toBe('String');
+    expect(getField(model, 'isPreview').type).toBe('Boolean');
+    // respondentUserId is a plain String scalar, no @relation (UG-1); null until F6.1.
+    expect(getField(model, 'respondentUserId').type).toBe('String');
+    expect(getField(model, 'respondentUserId').kind).toBe('scalar');
+
+    const version = getField(model, 'version');
+    expect(version.kind).toBe('object');
+    expect(version.type).toBe('AppQuestionnaireVersion');
+
+    const answers = getField(model, 'answers');
+    expect(answers.kind).toBe('object');
+    expect(answers.type).toBe('AppAnswerSlot');
+  });
+
+  it('AppAnswerSlot maps app_answer_slot with the F4.4 capture fields', () => {
+    const model = getModel('AppAnswerSlot');
+    expect(model.dbName).toBe('app_answer_slot');
+
+    expect(getField(model, 'sessionId').type).toBe('String');
+    expect(getField(model, 'questionSlotId').type).toBe('String');
+    expect(getField(model, 'value').type).toBe('Json');
+    expect(getField(model, 'confidence').type).toBe('Float');
+    expect(getField(model, 'provenanceLabel').type).toBe('String');
+    expect(getField(model, 'refinementHistory').type).toBe('Json');
+    // The F6.1 turn-loop seam — reserved, null until the live loop exists.
+    expect(getField(model, 'lastUpdatedTurnId').type).toBe('String');
+    expect(getField(model, 'lastUpdatedTurnId').kind).toBe('scalar');
+
+    const session = getField(model, 'session');
+    expect(session.kind).toBe('object');
+    expect(session.type).toBe('AppQuestionnaireSession');
+    expect(session.relationName).toBe(
+      getField(getModel('AppQuestionnaireSession'), 'answers').relationName
+    );
+
+    const questionSlot = getField(model, 'questionSlot');
+    expect(questionSlot.kind).toBe('object');
+    expect(questionSlot.type).toBe('AppQuestionSlot');
+  });
+
+  it('AppQuestionnaireSessionEvent maps app_questionnaire_session_event (F4.6)', () => {
+    const model = getModel('AppQuestionnaireSessionEvent');
+    expect(model.dbName).toBe('app_questionnaire_session_event');
+
+    expect(getField(model, 'sessionId').type).toBe('String');
+    expect(getField(model, 'sessionId').kind).toBe('scalar');
+    // eventType / from/toStatus are plain String columns (house style), not Prisma
+    // enums — validated against SESSION_EVENT_TYPES / SESSION_STATUSES at the seam.
+    expect(getField(model, 'eventType').type).toBe('String');
+    expect(getField(model, 'fromStatus').type).toBe('String');
+    expect(getField(model, 'toStatus').type).toBe('String');
+    expect(getField(model, 'reason').type).toBe('String');
+    expect(getField(model, 'metadata').type).toBe('Json');
+    expect(getField(model, 'createdAt').type).toBe('DateTime');
+
+    const session = getField(model, 'session');
+    expect(session.kind).toBe('object');
+    expect(session.type).toBe('AppQuestionnaireSession');
+    // Shares the relation with the reverse `events` field on the session.
+    expect(session.relationName).toBe(
+      getField(getModel('AppQuestionnaireSession'), 'events').relationName
+    );
+  });
+
+  it('AppQuestionnaireSession carries the F4.6 events reverse relation', () => {
+    const events = getField(getModel('AppQuestionnaireSession'), 'events');
+    expect(events.kind).toBe('object');
+    expect(events.type).toBe('AppQuestionnaireSessionEvent');
+  });
 });
 
 describe('app_questionnaire_init migration SQL', () => {
@@ -679,5 +757,100 @@ describe('app_questionnaire_invitation_branding migration SQL (F3.4)', () => {
     expect(executableSql).not.toContain('searchVector');
     // Additive only — no CREATE TABLE in this migration.
     expect(executableSql).not.toContain('CREATE TABLE');
+  });
+});
+
+describe('app_answer_slot_refinement migration SQL (F4.4)', () => {
+  const sql = readMigrationSql('_app_answer_slot_refinement');
+  const executableSql = executableLines(sql);
+
+  it('creates exactly the session + answer-slot tables', () => {
+    expect(sql).toContain('CREATE TABLE "app_questionnaire_session"');
+    expect(sql).toContain('CREATE TABLE "app_answer_slot"');
+    expect(executableSql.match(/CREATE TABLE/g) ?? []).toHaveLength(2);
+  });
+
+  it('declares the session→version and answer→session/slot FKs with ON DELETE CASCADE', () => {
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "app_questionnaire_session_versionId_fkey"[\s\S]*REFERENCES "app_questionnaire_version"\("id"\)[\s\S]*ON DELETE CASCADE/
+    );
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "app_answer_slot_sessionId_fkey"[\s\S]*REFERENCES "app_questionnaire_session"\("id"\)[\s\S]*ON DELETE CASCADE/
+    );
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "app_answer_slot_questionSlotId_fkey"[\s\S]*REFERENCES "app_question_slot"\("id"\)[\s\S]*ON DELETE CASCADE/
+    );
+  });
+
+  it('enforces the one-answer-per-slot composite unique and the lookup indexes', () => {
+    expect(sql).toContain('CREATE UNIQUE INDEX "app_answer_slot_sessionId_questionSlotId_key"');
+    expect(sql).toContain('CREATE INDEX "app_questionnaire_session_versionId_idx"');
+    expect(sql).toContain('CREATE INDEX "app_answer_slot_sessionId_idx"');
+    expect(sql).toContain('CREATE INDEX "app_answer_slot_questionSlotId_idx"');
+  });
+
+  it('contains no platform (unmodelled-object) operations — the schema-fold strip holds', () => {
+    expect(executableSql).not.toContain('DROP INDEX');
+    expect(executableSql).not.toContain('ai_knowledge');
+    expect(executableSql).not.toContain('searchVector');
+  });
+});
+
+describe('app_session_preview_unique migration SQL (F4.5)', () => {
+  const sql = readMigrationSql('_app_session_preview_unique');
+  const executableSql = executableLines(sql);
+
+  it('creates the partial unique index scoped to preview sessions', () => {
+    // The raw-SQL partial unique index Prisma can't model — guarded live by db-drift.ts.
+    expect(sql).toMatch(
+      /CREATE UNIQUE INDEX "idx_app_questionnaire_session_preview_per_version"[\s\S]*ON "app_questionnaire_session" \("versionId"\)[\s\S]*WHERE "isPreview" = true/
+    );
+  });
+
+  it('dedupes pre-existing duplicate preview sessions before the constraint', () => {
+    // Keeps the earliest per version so the new unique index can be created.
+    expect(executableSql).toContain('DELETE FROM "app_questionnaire_session"');
+    expect(executableSql).toMatch(/row_number\(\) OVER \(PARTITION BY "versionId"/);
+  });
+
+  it('is index-only — no table create/drop and no platform DDL', () => {
+    expect(executableSql).not.toContain('CREATE TABLE');
+    expect(executableSql).not.toContain('DROP INDEX');
+    expect(executableSql).not.toContain('ai_knowledge');
+    expect(executableSql).not.toContain('searchVector');
+  });
+});
+
+describe('app_session_event migration SQL (F4.6)', () => {
+  const sql = readMigrationSql('_app_session_event');
+  const executableSql = executableLines(sql);
+
+  it('creates exactly the app_questionnaire_session_event table', () => {
+    expect(sql).toContain('CREATE TABLE "app_questionnaire_session_event"');
+    // Exactly one — guard against a phantom platform CREATE leaking back through
+    // the schema-fold footgun.
+    expect(executableSql.match(/CREATE TABLE/g) ?? []).toHaveLength(1);
+  });
+
+  it('declares the session FK with ON DELETE CASCADE (events follow the session)', () => {
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "app_questionnaire_session_event_sessionId_fkey"[\s\S]*REFERENCES "app_questionnaire_session"\("id"\)[\s\S]*ON DELETE CASCADE/
+    );
+  });
+
+  it('indexes the event log by sessionId and by (sessionId,createdAt)', () => {
+    expect(sql).toContain('CREATE INDEX "app_questionnaire_session_event_sessionId_idx"');
+    expect(sql).toContain('CREATE INDEX "app_questionnaire_session_event_sessionId_createdAt_idx"');
+  });
+
+  it('contains no platform (unmodelled-object) operations — the schema-fold strip holds', () => {
+    // `migrate dev` re-emitted the four pgvector DROP INDEX + the GENERATED
+    // searchVector ALTER. Stripped by hand; this guard fails if a regeneration
+    // leaks them back in (and would, critically, drop the partial unique index the
+    // preview-session race-safety depends on if that ever surfaces here).
+    expect(executableSql).not.toContain('DROP INDEX');
+    expect(executableSql).not.toContain('ai_knowledge');
+    expect(executableSql).not.toContain('ai_message');
+    expect(executableSql).not.toContain('searchVector');
   });
 });

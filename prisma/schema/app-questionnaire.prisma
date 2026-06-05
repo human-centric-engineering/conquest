@@ -400,14 +400,15 @@ model AppDemoClient {
 model AppQuestionnaireSession {
   id               String   @id @default(cuid())
   versionId        String
-  status           String   @default("active") // SESSION_STATUSES (types.ts): active | completed | abandoned
+  status           String   @default("active") // SESSION_STATUSES (types.ts): active | paused | completed | abandoned
   isPreview        Boolean  @default(false) // true = admin refine-answer exercise, not a respondent run
   respondentUserId String? // respondent User.id; plain String, no FK (UG-1); set in F4.6
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  version AppQuestionnaireVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  version AppQuestionnaireVersion       @relation(fields: [versionId], references: [id], onDelete: Cascade)
   answers AppAnswerSlot[]
+  events  AppQuestionnaireSessionEvent[]
 
   @@index([versionId])
   @@index([versionId, isPreview])
@@ -458,4 +459,32 @@ model AppAnswerSlot {
   @@index([sessionId])
   @@index([questionSlotId])
   @@map("app_answer_slot")
+}
+
+/// The append-only audit trail of a session's lifecycle (F4.6). One row per recorded
+/// event: the four status transitions (`paused`, `resumed`, `completed`, `abandoned`),
+/// an optional `created` marker, and `cost_cap_reached` — a non-transition event the
+/// budget hook (F6.3/F6.5) fires, wired here but not fired in F4.6. `eventType` is a
+/// plain String validated against SESSION_EVENT_TYPES (session/types.ts) at the seam
+/// (house style — like `status`/`provenanceLabel`), so adding an event is a tuple edit.
+///
+/// `fromStatus`/`toStatus` capture the transition (both null for `cost_cap_reached`,
+/// `fromStatus` null for `created`); `metadata` carries event-specific detail (e.g.
+/// `{ spentUsd, capUsd }` for a cost-cap event). Fully Prisma-modelled — no raw-SQL
+/// object here, so (unlike the session's partial unique index) no drift probe is needed.
+model AppQuestionnaireSessionEvent {
+  id         String   @id @default(cuid())
+  sessionId  String
+  eventType  String // SESSION_EVENT_TYPES (session/types.ts)
+  fromStatus String? // null for created / cost_cap_reached
+  toStatus   String? // null for cost_cap_reached
+  reason     String? // optional human-readable note (e.g. why abandoned)
+  metadata   Json? // event-specific detail; e.g. { spentUsd, capUsd } for cost_cap_reached
+  createdAt  DateTime @default(now())
+
+  session AppQuestionnaireSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([sessionId, createdAt])
+  @@map("app_questionnaire_session_event")
 }
