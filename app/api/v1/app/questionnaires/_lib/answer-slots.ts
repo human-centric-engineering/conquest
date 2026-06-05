@@ -89,23 +89,35 @@ export async function getOrCreatePreviewSession(versionId: string): Promise<stri
  * Upsert a captured answer for a slot within a session — the "seed the existing
  * answer first" step the refine-answer route runs before refining. Keyed on the
  * `(sessionId, questionSlotId)` unique. Returns the row id.
+ *
+ * **`refinementHistory` is written on CREATE only, never on UPDATE.** Refinements own
+ * the history (`persistRefinement` appends to it), so re-seeding an answer that has
+ * already been refined must NOT reset its accumulated audit trail. Seeding the same
+ * answer twice updates the value/provenance but preserves the history a prior pass
+ * (or the live engine, F4.6) built up.
  */
 export async function upsertAnswerSlot(
   sessionId: string,
   questionSlotId: string,
   answer: SeedAnswerInput
 ): Promise<string> {
-  const common = {
+  // Mutable on every seed; history is initialised once (on create) and thereafter
+  // owned by persistRefinement.
+  const writeBase = {
     value: jsonInput(answer.value),
     provenanceLabel: answer.provenance,
     rationale: answer.rationale ?? null,
     confidence: answer.confidence ?? null,
-    refinementHistory: jsonInput(answer.refinementHistory ?? []),
   };
   const row = await prisma.appAnswerSlot.upsert({
     where: { sessionId_questionSlotId: { sessionId, questionSlotId } },
-    create: { sessionId, questionSlotId, ...common },
-    update: common,
+    create: {
+      sessionId,
+      questionSlotId,
+      ...writeBase,
+      refinementHistory: jsonInput(answer.refinementHistory ?? []),
+    },
+    update: writeBase,
     select: { id: true },
   });
   return row.id;

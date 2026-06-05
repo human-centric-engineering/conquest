@@ -4,6 +4,7 @@ import { errorResponse } from '@/lib/api/responses';
 import {
   APP_QUESTIONNAIRES_ADAPTIVE_FLAG,
   APP_QUESTIONNAIRES_ANSWER_EXTRACTION_FLAG,
+  APP_QUESTIONNAIRES_ANSWER_REFINEMENT_FLAG,
   APP_QUESTIONNAIRES_CONTRADICTION_DETECTION_FLAG,
   APP_QUESTIONNAIRES_FLAG,
 } from '@/lib/app/questionnaire/constants';
@@ -17,6 +18,7 @@ export {
   APP_QUESTIONNAIRES_ADAPTIVE_FLAG,
   APP_QUESTIONNAIRES_ANSWER_EXTRACTION_FLAG,
   APP_QUESTIONNAIRES_CONTRADICTION_DETECTION_FLAG,
+  APP_QUESTIONNAIRES_ANSWER_REFINEMENT_FLAG,
 };
 
 /**
@@ -82,6 +84,24 @@ export async function isContradictionDetectionEnabled(): Promise<boolean> {
     isFeatureEnabled(APP_QUESTIONNAIRES_CONTRADICTION_DETECTION_FLAG),
   ]);
   return app && detection;
+}
+
+/**
+ * Whether F4.4 **answer refinement** may run. Requires BOTH the master app flag and
+ * the answer-refinement sub-flag — refinement spends an LLM call per pass, so it's
+ * opt-in on top of an already-enabled app (the same shape as
+ * {@link isContradictionDetectionEnabled}). The refine-answer route consults this and
+ * returns 404 when it's `false`, so a disabled sub-feature looks like a missing route
+ * rather than a 401.
+ *
+ * Server-only (resolves both flags from the database).
+ */
+export async function isAnswerRefinementEnabled(): Promise<boolean> {
+  const [app, refinement] = await Promise.all([
+    isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_ANSWER_REFINEMENT_FLAG),
+  ]);
+  return app && refinement;
 }
 
 /**

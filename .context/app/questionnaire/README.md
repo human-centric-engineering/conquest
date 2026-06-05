@@ -6,19 +6,21 @@ plan and feature trackers, see [`../planning/`](../planning/); for the platform
 
 ## In this namespace
 
-| Doc                                                    | Read it for                                                                                     |
-| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
-| [`overview.md`](./overview.md)                         | The concept, the app/platform boundary, and which Sunrise primitives the app consumes           |
-| [`schema.md`](./schema.md)                             | The app-owned Prisma schema and its conventions (anchor models land in T0.1.3)                  |
-| [`development.md`](./development.md)                   | Day-to-day: where code lives, the `lib/app/**` boundary, flag gating, commands, tests           |
-| [`ingestion.md`](./ingestion.md)                       | The `POST /api/v1/app/questionnaires` pipeline — parse → extract → persist (F1.1)               |
-| [`reingest.md`](./reingest.md)                         | Re-ingest — replace a draft version's structure from a new source doc (F2.4)                    |
-| [`configuration.md`](./configuration.md)               | Per-version run-time config (selection, thresholds, modes, profile fields) + launch gate (F3.1) |
-| [`invitations.md`](./invitations.md)                   | Respondent invitation lifecycle, token security, launch-blocker wiring, registration (F3.2)     |
-| [`extraction-changes.md`](./extraction-changes.md)     | The revertible editorial change-record model, vocabulary, and write path (F1.1)                 |
-| [`admin-ui.md`](./admin-ui.md)                         | The admin read surface — list/detail/version-graph APIs + pages (P2 / F2.1 PR1)                 |
-| [`selection-strategies.md`](./selection-strategies.md) | The four next-question strategies (sequential/random/weighted/adaptive) + preview route (F4.1)  |
-| [`answer-extraction.md`](./answer-extraction.md)       | Per-turn answer extraction into typed slot intents — capability + preview route (F4.2)          |
+| Doc                                                          | Read it for                                                                                        |
+| ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
+| [`overview.md`](./overview.md)                               | The concept, the app/platform boundary, and which Sunrise primitives the app consumes              |
+| [`schema.md`](./schema.md)                                   | The app-owned Prisma schema and its conventions (anchor models land in T0.1.3)                     |
+| [`development.md`](./development.md)                         | Day-to-day: where code lives, the `lib/app/**` boundary, flag gating, commands, tests              |
+| [`ingestion.md`](./ingestion.md)                             | The `POST /api/v1/app/questionnaires` pipeline — parse → extract → persist (F1.1)                  |
+| [`reingest.md`](./reingest.md)                               | Re-ingest — replace a draft version's structure from a new source doc (F2.4)                       |
+| [`configuration.md`](./configuration.md)                     | Per-version run-time config (selection, thresholds, modes, profile fields) + launch gate (F3.1)    |
+| [`invitations.md`](./invitations.md)                         | Respondent invitation lifecycle, token security, launch-blocker wiring, registration (F3.2)        |
+| [`extraction-changes.md`](./extraction-changes.md)           | The revertible editorial change-record model, vocabulary, and write path (F1.1)                    |
+| [`admin-ui.md`](./admin-ui.md)                               | The admin read surface — list/detail/version-graph APIs + pages (P2 / F2.1 PR1)                    |
+| [`selection-strategies.md`](./selection-strategies.md)       | The four next-question strategies (sequential/random/weighted/adaptive) + preview route (F4.1)     |
+| [`answer-extraction.md`](./answer-extraction.md)             | Per-turn answer extraction into typed slot intents — capability + preview route (F4.2)             |
+| [`contradiction-detection.md`](./contradiction-detection.md) | Cross-slot logical contradiction detection — capability + preview route (F4.3)                     |
+| [`answer-refinement.md`](./answer-refinement.md)             | Refine/overwrite a captured answer with `refinementHistory` — capability + persisting route (F4.4) |
 
 ## Where the code lives
 

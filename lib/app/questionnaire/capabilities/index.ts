@@ -26,3 +26,11 @@ export {
   type DetectContradictionsArgs,
   type DetectContradictionsData,
 } from '@/lib/app/questionnaire/capabilities/detect-contradictions';
+
+export {
+  AppRefineAnswerCapability,
+  MAX_REFINEMENT_SLOTS,
+  MAX_REFINEMENT_ANSWERS,
+  type RefineAnswerArgs,
+  type RefineAnswerData,
+} from '@/lib/app/questionnaire/capabilities/refine-answer';

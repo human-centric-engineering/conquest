@@ -9,7 +9,7 @@
  * history entries at the storage boundary while preserving any already-stamped ones.
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const prismaMock = vi.hoisted(() => ({
   appQuestionnaireSession: { findFirst: vi.fn(), create: vi.fn() },
@@ -85,19 +85,46 @@ describe('upsertAnswerSlot', () => {
       rationale: 'stated',
       confidence: 0.9,
     });
-    // create and update carry the same payload fields.
+    // create carries value/provenance; update carries them too.
     expect(arg.update).toMatchObject({ value: 'an answer', provenanceLabel: 'direct' });
   });
 
-  it('defaults a missing refinementHistory to an empty array and null optionals', async () => {
+  it('initialises refinementHistory on CREATE but never resets it on UPDATE', async () => {
     (prismaMock.appAnswerSlot.upsert as Mock).mockResolvedValue({ id: 'ans-2' });
 
     await upsertAnswerSlot('sess-1', 'slot-2', { value: 5, provenance: 'inferred' });
 
     const arg = (prismaMock.appAnswerSlot.upsert as Mock).mock.calls[0]?.[0];
+    // CREATE seeds the history (default []) and null optionals.
     expect(arg.create.refinementHistory).toEqual([]);
     expect(arg.create.rationale).toBeNull();
     expect(arg.create.confidence).toBeNull();
+    // UPDATE must NOT touch refinementHistory — refinements own it, so re-seeding an
+    // already-refined answer can't wipe the accumulated audit trail.
+    expect(arg.update).not.toHaveProperty('refinementHistory');
+  });
+
+  it('seeds a caller-supplied prior history on create', async () => {
+    (prismaMock.appAnswerSlot.upsert as Mock).mockResolvedValue({ id: 'ans-3' });
+    const prior = [
+      {
+        previousValue: 'a',
+        previousProvenance: 'direct' as const,
+        newValue: 'b',
+        rationale: 'r',
+        source: 'clarification' as const,
+      },
+    ];
+
+    await upsertAnswerSlot('sess-1', 'slot-3', {
+      value: 'b',
+      provenance: 'refined',
+      refinementHistory: prior,
+    });
+
+    const arg = (prismaMock.appAnswerSlot.upsert as Mock).mock.calls[0]?.[0];
+    expect(arg.create.refinementHistory).toEqual(prior);
+    expect(arg.update).not.toHaveProperty('refinementHistory');
   });
 });
 
@@ -163,6 +190,17 @@ describe('loadAnswerSlot', () => {
 });
 
 describe('persistRefinement', () => {
+  // Pin the clock so the boundary-stamped createdAt is deterministic and can be
+  // asserted by exact value (persistRefinement uses new Date().toISOString()).
+  const STAMP = '2026-06-05T12:00:00.000Z';
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(STAMP));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('writes the new value and provenance, and stamps createdAt on a new history entry', async () => {
     (prismaMock.appAnswerSlot.update as Mock).mockResolvedValue({});
 
@@ -188,11 +226,11 @@ describe('persistRefinement', () => {
     expect(arg.data.value).toBe(34);
     expect(arg.data.provenanceLabel).toBe('refined');
     expect(arg.data.refinementHistory).toHaveLength(1);
-    expect(arg.data.refinementHistory[0]).toHaveProperty('createdAt');
-    expect(typeof arg.data.refinementHistory[0].createdAt).toBe('string');
+    // The unstamped entry is stamped with the (pinned) boundary clock.
+    expect(arg.data.refinementHistory[0].createdAt).toBe(STAMP);
   });
 
-  it('preserves an already-stamped createdAt on a prior entry', async () => {
+  it('preserves an already-stamped createdAt on a prior entry, stamping only the new one', async () => {
     (prismaMock.appAnswerSlot.update as Mock).mockResolvedValue({});
 
     const refined: RefinedSlotState = {
@@ -224,8 +262,7 @@ describe('persistRefinement', () => {
     const history = (prismaMock.appAnswerSlot.update as Mock).mock.calls[0]?.[0].data
       .refinementHistory;
     expect(history[0].createdAt).toBe('2026-01-01T00:00:00.000Z'); // untouched
-    expect(history[1].createdAt).toBeTypeOf('string'); // newly stamped
-    expect(history[1].createdAt).not.toBe('2026-01-01T00:00:00.000Z');
+    expect(history[1].createdAt).toBe(STAMP); // newly stamped with the pinned clock
   });
 
   it('writes an overwrite that kept its original provenance verbatim', async () => {

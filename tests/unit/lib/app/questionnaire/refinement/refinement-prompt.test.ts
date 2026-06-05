@@ -78,6 +78,89 @@ describe('buildRefinementPrompt', () => {
     );
     expect(messages[1]?.content).toMatch(/options: red \(RED\), green \(GREEN\)/);
   });
+
+  it('renders a likert slot’s scale and guidelines', () => {
+    const messages = buildRefinementPrompt(
+      ctx({
+        existingAnswers: [existing({ slotKey: 'agree', value: 4 })],
+        slots: [
+          slot({
+            key: 'agree',
+            type: 'likert',
+            typeConfig: { min: 1, max: 5 },
+            guidelines: 'Higher = stronger agreement',
+          }),
+        ],
+      })
+    );
+    const user = messages[1]?.content ?? '';
+    expect(user).toMatch(/scale: 1–5/);
+    expect(user).toMatch(/guidelines: Higher = stronger agreement/);
+  });
+
+  it('renders array, object, and empty values without tripping', () => {
+    const messages = buildRefinementPrompt(
+      ctx({
+        existingAnswers: [
+          existing({ slotKey: 'langs', value: ['ts', 'go'] }),
+          existing({ slotKey: 'meta', value: { a: 1 } }),
+          // Inline (not via the fixture, which coerces null → a default) so the
+          // `(none)` render path is genuinely exercised.
+          { slotKey: 'note', value: null, provenance: 'direct' },
+        ],
+        slots: [
+          // Raw choices WITHOUT labels — exercises the no-label option branch.
+          slot({
+            key: 'langs',
+            type: 'multi_choice',
+            typeConfig: { choices: [{ value: 'ts' }, { value: 'go' }] },
+          }),
+          slot({ key: 'meta', type: 'free_text' }),
+          slot({ key: 'note', type: 'free_text' }),
+        ],
+      })
+    );
+    const user = messages[1]?.content ?? '';
+    expect(user).toMatch(/current_answer: ts, go/);
+    expect(user).toMatch(/current_answer: \{"a":1\}/);
+    expect(user).toMatch(/current_answer: \(none\)/);
+    expect(user).toMatch(/options: ts, go/); // no "(LABEL)" suffix
+  });
+
+  it('includes recent conversation lines when supplied', () => {
+    const messages = buildRefinementPrompt(
+      ctx({
+        existingAnswers: [existing({ slotKey: 'a' })],
+        recentMessages: ['agent: are you sure?', 'user: yes'],
+      })
+    );
+    expect(messages[1]?.content).toMatch(/Recent conversation:/);
+    expect(messages[1]?.content).toMatch(/user: yes/);
+  });
+
+  it('renders a triggering contradiction that carries no suggested probe', () => {
+    const messages = buildRefinementPrompt(
+      ctx({
+        existingAnswers: [existing({ slotKey: 'a' }), existing({ slotKey: 'b' })],
+        triggeringContradiction: { slotKeys: ['a', 'b'], explanation: 'a vs b' },
+      })
+    );
+    const user = messages[1]?.content ?? '';
+    expect(user).toMatch(/a vs b/);
+    expect(user).not.toMatch(/Suggested follow-up/);
+  });
+
+  it('skips an answer whose slot key has no matching definition', () => {
+    const messages = buildRefinementPrompt(
+      ctx({
+        existingAnswers: [existing({ slotKey: 'known' }), existing({ slotKey: 'orphan' })],
+        slots: [slot({ key: 'known' })], // no slot for "orphan"
+      })
+    );
+    const user = messages[1]?.content ?? '';
+    expect(user).toMatch(/key: known/);
+    expect(user).not.toMatch(/key: orphan/);
+  });
 });
 
 describe('buildRefinementRetryMessage', () => {
