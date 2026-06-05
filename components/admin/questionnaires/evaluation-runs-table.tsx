@@ -27,7 +27,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { API } from '@/lib/api/endpoints';
-import { parseApiResponse } from '@/lib/api/server-fetch';
+import { parseApiResponse } from '@/lib/api/parse-response';
 import type { EvaluationRunDetail, EvaluationRunListItem } from '@/lib/app/questionnaire/views';
 import { runStatusBadge } from '@/components/admin/questionnaires/evaluation-status-badge';
 
