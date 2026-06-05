@@ -406,6 +406,12 @@ export const API = {
       /** Revert one extraction change (POST). */
       versionChangeRevert: (id: string, versionId: string, changeId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/changes/${changeId}/revert`,
+      /** Design-evaluation runs for a version (GET list newest-first, POST run + persist — F5.2). */
+      versionEvaluations: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/evaluations`,
+      /** One persisted evaluation run with its findings (GET — F5.2). */
+      versionEvaluationById: (id: string, versionId: string, runId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/evaluations/${runId}`,
       /** Invitations for a questionnaire (GET list, POST send single/bulk — F3.2). */
       invitations: (id: string): string => `/api/v1/app/questionnaires/${id}/invitations`,
       /** Single invitation (PATCH revoke — F3.2). */

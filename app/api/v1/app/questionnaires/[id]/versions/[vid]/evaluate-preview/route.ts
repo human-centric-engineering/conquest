@@ -29,19 +29,16 @@ import { validateRequestBody } from '@/lib/api/validation';
 import { createRateLimitResponse } from '@/lib/security/rate-limit';
 
 import { prisma } from '@/lib/db/client';
-import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
 import {
   isDesignEvaluationEnabled,
   withQuestionnairesEnabled,
 } from '@/lib/app/questionnaire/feature-flag';
-import { EVALUATE_STRUCTURE_CAPABILITY_SLUG } from '@/lib/app/questionnaire/constants';
 import {
   EVALUATION_DIMENSIONS,
   EVALUATION_DIMENSION_SPECS,
   type EvaluationDimension,
-  type JudgeVerdict,
 } from '@/lib/app/questionnaire/evaluation';
-import type { EvaluateStructureData } from '@/lib/app/questionnaire/capabilities';
+import { runEvaluationPanel } from '@/lib/app/questionnaire/evaluation/run-panel';
 import { buildEvaluationStructure } from '@/app/api/v1/app/questionnaires/_lib/evaluation-structure';
 import { designEvaluationLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
 
@@ -49,13 +46,6 @@ const bodySchema = z.object({
   /** Which dimensions to run; defaults to the whole panel. Deduped at use. */
   dimensions: z.array(z.enum(EVALUATION_DIMENSIONS)).max(EVALUATION_DIMENSIONS.length).optional(),
 });
-
-/** One dimension's outcome: a verdict, or a diagnostic when its judge failed/was absent. */
-interface DimensionResult {
-  dimension: EvaluationDimension;
-  verdict?: JudgeVerdict;
-  diagnostic?: string;
-}
 
 const handleEvaluatePreview = withAdminAuth<{ id: string; vid: string }>(
   async (request, session, { params }) => {
@@ -105,85 +95,27 @@ const handleEvaluatePreview = withAdminAuth<{ id: string; vid: string }>(
       throw new NotFoundError('Questionnaire design-time evaluation is not configured');
     }
 
-    // Dispatch the panel concurrently. Per-judge failure is fail-soft: a missing agent
-    // or a failed call yields a `diagnostic` for that dimension, never a thrown error,
-    // so one flaky judge can't sink the other six.
-    const results: DimensionResult[] = await Promise.all(
-      dimensions.map(async (dimension): Promise<DimensionResult> => {
-        const agent = agentBySlug.get(EVALUATION_DIMENSION_SPECS[dimension].slug);
-        if (!agent) {
-          log.warn('Judge agent missing for dimension; skipping', { dimension });
-          return { dimension, diagnostic: 'judge_not_configured' };
-        }
-
-        // The dispatcher represents capability failures as a `{ success: false }`
-        // envelope, but it can still THROW on an infrastructure fault (e.g. the
-        // registry DB load inside `dispatch` failing) — and because the panel fans
-        // out under one `Promise.all`, an unguarded throw would reject the whole
-        // request and 5xx all seven dimensions. Wrap the dispatch so any throw
-        // degrades to this dimension's diagnostic, keeping the fail-soft contract
-        // literally true even for unexpected faults.
-        let dispatch;
-        try {
-          dispatch = await capabilityDispatcher.dispatch(
-            EVALUATE_STRUCTURE_CAPABILITY_SLUG,
-            { dimension, structure, versionId: vid },
-            {
-              userId: adminId,
-              agentId: agent.id,
-              entityContext: {
-                judgeAgent: {
-                  provider: agent.provider,
-                  model: agent.model,
-                  fallbackProviders: agent.fallbackProviders,
-                },
-              },
-            }
-          );
-        } catch (err) {
-          log.error('Judge dispatch threw; returning diagnostic for dimension', {
-            questionnaireId: id,
-            versionId: vid,
-            dimension,
-            error: err instanceof Error ? err.message : String(err),
-          });
-          return { dimension, diagnostic: 'dispatch_error' };
-        }
-
-        if (dispatch.success && dispatch.data) {
-          return { dimension, verdict: (dispatch.data as EvaluateStructureData).verdict };
-        }
-        log.warn('Judge dispatch failed; returning diagnostic for dimension', {
-          questionnaireId: id,
-          versionId: vid,
-          dimension,
-          code: dispatch.error?.code,
-        });
-        return { dimension, diagnostic: dispatch.error?.code ?? 'evaluation_failed' };
-      })
-    );
-
-    const dimensionsRun = results.filter((r) => r.verdict !== undefined).length;
-    const totalFindings = results.reduce((sum, r) => sum + (r.verdict?.findings.length ?? 0), 0);
+    // Dispatch the panel via the shared service — fail-soft per judge (a missing agent or
+    // a failed/throwing dispatch degrades to a `diagnostic` for that one dimension while
+    // the others still return). The F5.2 run route shares this exact dispatch and then
+    // persists the result; the preview returns it ephemerally.
+    const { results, summary } = await runEvaluationPanel({
+      dimensions,
+      structure,
+      questionnaireId: id,
+      versionId: vid,
+      agentBySlug,
+      adminId,
+      log,
+    });
 
     log.info('Questionnaire design-evaluation preview', {
       questionnaireId: id,
       versionId: vid,
-      dimensionsRequested: dimensions.length,
-      dimensionsRun,
-      dimensionsFailed: dimensions.length - dimensionsRun,
-      totalFindings,
+      ...summary,
     });
 
-    return successResponse({
-      results,
-      summary: {
-        dimensionsRequested: dimensions.length,
-        dimensionsRun,
-        dimensionsFailed: dimensions.length - dimensionsRun,
-        totalFindings,
-      },
-    });
+    return successResponse({ results, summary });
   }
 );
 

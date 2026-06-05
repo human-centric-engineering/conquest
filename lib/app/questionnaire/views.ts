@@ -22,6 +22,8 @@ import type {
 } from '@/lib/app/questionnaire/types';
 // DEMO-ONLY (F2.5.1): attribution summary embedded in list/detail rows.
 import type { AttributedDemoClient } from '@/lib/app/questionnaire/demo-clients';
+// F5.2: design-evaluation run views reuse the judge dimension/severity vocabulary.
+import type { EvaluationDimension, FindingSeverity } from '@/lib/app/questionnaire/evaluation';
 
 /** A vocabulary tag (F2.2) — client-safe projection of `AppQuestionTag`. */
 export interface TagView {
@@ -140,4 +142,65 @@ export interface VersionGraphView {
   tags: TagView[];
   /** Resolved run-time configuration (F3.1) — defaults when never saved. */
   config: ConfigView;
+}
+
+/**
+ * One dimension's outcome captured on a run (F5.2) — the client-safe shape of an entry
+ * in the run's `dimensionSummary` JSON. `score` and `diagnostic` are mutually exclusive:
+ * a judge that returned a verdict has a `score` (and `diagnostic: null`); one that failed
+ * has a `diagnostic` (and `score: null`).
+ */
+export interface EvaluationDimensionSummary {
+  dimension: EvaluationDimension;
+  /** Judge score in [0, 1]; `null` when the judge failed (see `diagnostic`). */
+  score: number | null;
+  /** Findings this judge raised (0 when it scored cleanly or failed). */
+  findingCount: number;
+  /** Diagnostic code when the judge failed/was absent; `null` on success. */
+  diagnostic: string | null;
+}
+
+/** One persisted finding (F5.2) — client-safe projection of `AppQuestionnaireEvaluationFinding`. */
+export interface EvaluationFindingView {
+  id: string;
+  dimension: EvaluationDimension;
+  /** Presentation order within (run, dimension). */
+  ordinal: number;
+  /** The slot `key`, `section:<title>`, `goal`, or `audience` this finding addresses. */
+  targetKey: string;
+  severity: FindingSeverity;
+  proposedChange: string;
+  rationale: string;
+  sourceQuote: string | null;
+  /** Review lifecycle (F5.3 drives transitions); `pending` for every F5.2 finding. */
+  status: string;
+}
+
+/** One row in the evaluation-runs list for a version (F5.2), newest-first. */
+export interface EvaluationRunListItem {
+  id: string;
+  /** Terminal status: `completed` | `partial` | `failed`. */
+  status: string;
+  dimensionsRequested: number;
+  dimensionsRun: number;
+  dimensionsFailed: number;
+  totalFindings: number;
+  /** Per-dimension scores/diagnostics, in dispatch order. */
+  dimensionSummary: EvaluationDimensionSummary[];
+  /** Admin who ran it (`User.id`); `null` if unattributed. */
+  triggeredByUserId: string | null;
+  /** ISO timestamps — these cross the HTTP boundary. */
+  startedAt: string;
+  completedAt: string | null;
+  createdAt: string;
+}
+
+/** Full evaluation-run detail (F5.2) — the list row plus its findings and run context. */
+export interface EvaluationRunDetail extends EvaluationRunListItem {
+  versionId: string;
+  questionnaireId: string;
+  /** Run-level failure note when `status === 'failed'`; `null` otherwise. */
+  error: string | null;
+  /** All findings across dimensions, ordered by (dimension, ordinal). */
+  findings: EvaluationFindingView[];
 }

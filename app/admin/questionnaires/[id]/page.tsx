@@ -14,6 +14,7 @@ import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
 import {
   isAdaptiveSelectionEnabled,
+  isDesignEvaluationEnabled,
   isQuestionnairesEnabled,
 } from '@/lib/app/questionnaire/feature-flag';
 import type { AttributedDemoClient, DemoClientView } from '@/lib/app/questionnaire/demo-clients';
@@ -90,6 +91,8 @@ export default async function QuestionnaireDetailPage({ params, searchParams }: 
   const editing = edit === '1' && graph !== null;
   // Adaptive selection sub-flag — controls whether the config picker offers it.
   const adaptiveEnabled = editing ? await isAdaptiveSelectionEnabled() : false;
+  // Design-evaluation sub-flag — gates the Evaluations entry (the run route 404s when off).
+  const designEvalEnabled = selected ? await isDesignEvaluationEnabled() : false;
 
   return (
     <div className="space-y-6">
@@ -172,6 +175,15 @@ export default async function QuestionnaireDetailPage({ params, searchParams }: 
                 <Button asChild variant="outline" size="sm">
                   <Link href={`/admin/questionnaires/${id}/invitations`}>Invitations</Link>
                 </Button>
+                {/* Design-time evaluation (F5.2) — only when the sub-flag is on (the run route
+                    404s otherwise), scoped to the selected version. */}
+                {designEvalEnabled && (
+                  <Button asChild variant="outline" size="sm">
+                    <Link href={`/admin/questionnaires/${id}/evaluations?v=${selected.id}`}>
+                      Evaluations
+                    </Link>
+                  </Button>
+                )}
                 {/* Re-ingest is a draft editorial operation (F2.4) — only offered on drafts. */}
                 {selected.status === 'draft' && (
                   <ReingestDialog

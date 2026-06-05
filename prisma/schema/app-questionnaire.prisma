@@ -62,6 +62,7 @@ model AppQuestionnaireVersion {
   config          AppQuestionnaireConfig?
   invitations     AppQuestionnaireInvitation[]
   sessions        AppQuestionnaireSession[]
+  evaluationRuns  AppQuestionnaireEvaluationRun[]
 
   @@unique([questionnaireId, versionNumber])
   @@index([questionnaireId])
@@ -487,4 +488,84 @@ model AppQuestionnaireSessionEvent {
   @@index([sessionId])
   @@index([sessionId, createdAt])
   @@map("app_questionnaire_session_event")
+}
+
+/// One persisted design-time evaluation run over a version's authored structure (F5.2).
+///
+/// The synchronous POST route dispatches the seven judges (the F5.1 dispatch seam — one
+/// structured LLM call per dimension, fail-soft per judge), then writes this header plus
+/// one `AppQuestionnaireEvaluationFinding` per judge finding in a single transaction. The
+/// run is terminal the moment the POST returns — there is no worker and no polling (the
+/// 2026-06-05 decision: app-native dispatch, not Sunrise's `AiEvaluationRun` worker).
+///
+/// `status` is a plain String (house style — like `AppQuestionnaireVersion.status`) holding
+/// a terminal value: `completed` (every judge returned a verdict), `partial` (some judges
+/// returned a diagnostic), or `failed` (no judge returned). It stays a String so a future
+/// async worker could add `running`/`queued` without a migration. Per-dimension verdict
+/// scores + diagnostics live in `dimensionSummary` JSON — a fixed ≤7-entry array the list
+/// and detail UI read in one shot (the `audience`/`refinementHistory` JSON precedent), so it
+/// needs no per-dimension table. `triggeredByUserId` is the admin who ran it: plain String,
+/// no `@relation` (the UG-1 deferred-User-FK posture, as elsewhere in this schema).
+///
+/// `questionnaireId` is denormalised from the version (the `AppQuestionSlot.versionId`
+/// precedent) so questionnaire-scoped admin views can index without joining through the
+/// version. Fully Prisma-modelled — no raw-SQL object — so no drift probe is needed.
+model AppQuestionnaireEvaluationRun {
+  id                  String    @id @default(cuid())
+  versionId           String
+  questionnaireId     String // denormalised parent for cheap questionnaire-scoped listing
+  status              String    @default("completed") // completed | partial | failed (terminal in F5.2)
+  triggeredByUserId   String? // admin User.id; plain String, no FK (UG-1)
+  dimensionsRequested Int
+  dimensionsRun       Int // judges that returned a verdict
+  dimensionsFailed    Int // judges that returned a diagnostic
+  totalFindings       Int       @default(0)
+  dimensionSummary    Json // [{ dimension, score?, findingCount, diagnostic? }] — read wholesale by the UI
+  costUsd             Float? // reserved; populated if/when the dispatcher surfaces per-run cost
+  error               String? // run-level note when status = 'failed'
+  startedAt           DateTime
+  completedAt         DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  version  AppQuestionnaireVersion             @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  findings AppQuestionnaireEvaluationFinding[]
+
+  @@index([versionId, createdAt]) // newest-first list per version (the primary query)
+  @@index([questionnaireId])
+  @@index([status])
+  @@map("app_questionnaire_evaluation_run")
+}
+
+/// One actionable finding from one judge in one run (F5.2).
+///
+/// Row-per-finding (NOT a JSON blob on the run) because F5.3's review queue mutates findings
+/// individually — accept / decline / edit / apply, plus stale derivation — and queries /
+/// filters / paginates them; that access pattern wants rows. F5.2 persists the `JudgeFinding`
+/// contract verbatim (evaluation/types.ts) plus the stamping `dimension`, an `ordinal` for
+/// stable presentation order within (run, dimension), and a minimal `status` (default
+/// `pending`) added now so F5.3's accept/decline extends rows rather than running a second
+/// migration. The heavier F5.3 columns (edited text, appliedAt, staleReason) are deferred
+/// until their shape settles. `status`/`severity`/`dimension` are plain Strings validated at
+/// the seam (house style). Fully Prisma-modelled — no drift probe needed.
+model AppQuestionnaireEvaluationFinding {
+  id             String   @id @default(cuid())
+  runId          String
+  dimension      String // EvaluationDimension (evaluation/types.ts), stamped by the caller
+  ordinal        Int // presentation order within (run, dimension)
+  targetKey      String // slot `key` | section:<title> | goal | audience
+  severity       String // FINDING_SEVERITIES: info | minor | major
+  proposedChange String
+  rationale      String
+  sourceQuote    String? // offending text when the finding points at one
+  status         String   @default("pending") // pending | accepted | declined | applied | stale (F5.3 drives transitions)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  run AppQuestionnaireEvaluationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+  @@index([runId, dimension])
+  @@index([status])
+  @@map("app_questionnaire_evaluation_finding")
 }
