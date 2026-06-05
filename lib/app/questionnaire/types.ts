@@ -189,6 +189,17 @@ export const PROFILE_FIELD_TYPES = ['text', 'email', 'number', 'select'] as cons
 export type ProfileFieldType = (typeof PROFILE_FIELD_TYPES)[number];
 
 /**
+ * Lifecycle status of an `AppQuestionnaireSession` (the respondent's run over a
+ * version). A minimal vocabulary introduced with the F4.4 persistence foundation —
+ * `active` while in progress, `completed` once submitted, `abandoned` if dropped.
+ * The full session/turn lifecycle is F4.6's; this is the slice F4.4 needs to anchor
+ * answer rows. A `const` tuple for the same single-source reason as the sets above
+ * (the schema's `status` column, the Zod enum, and any UI filter derive from it).
+ */
+export const SESSION_STATUSES = ['active', 'completed', 'abandoned'] as const;
+export type SessionStatus = (typeof SESSION_STATUSES)[number];
+
+/**
  * One session-start profile field the admin chooses to collect (name, email,
  * role, organisation, custom…). Stored as an ordered JSON array on the config
  * (`profileFields`). `options` is present (and non-empty) only for `select`.

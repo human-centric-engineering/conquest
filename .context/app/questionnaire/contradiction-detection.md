@@ -143,10 +143,11 @@ mode?, windowN?, sessionId? }`.
 
 F4.6 (session state machine) wires persistence + the live loop: it calls
 `shouldRunDetection` per turn / at the completion sweep, then this detection seam,
-and renders findings to the agent. **F4.4** (refinement) acts on a confirmed
-contradiction — re-asking and writing the `refined` provenance; the `suggestedProbe`
-is F4.3's handoff to it. **F4.5** (offer-to-submit) owns the trigger point for the
-completion sweep.
+and renders findings to the agent. **F4.4** (refinement, now shipped — see
+[`answer-refinement.md`](./answer-refinement.md)) acts on a confirmed contradiction:
+its capability takes the finding as a `triggeringContradiction` and writes a `refine`
+(transitioning provenance to `refined`); the `suggestedProbe` is F4.3's handoff to it.
+**F4.5** (offer-to-submit) owns the trigger point for the completion sweep.
 
 ## Not in F4.3
 

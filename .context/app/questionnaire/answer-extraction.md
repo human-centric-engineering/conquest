@@ -37,13 +37,15 @@ truth — four labels: `direct`, `inferred`, `synthesised`, `refined`.
 - **`direct`** — stated verbatim/near-verbatim in the message (carries a `sourceQuote`).
 - **`inferred`** — follows by single-step reasoning from the message, not stated.
 - **`synthesised`** — combines several turns / the wider transcript; no single span.
-- **`refined`** — an earlier answer updated in light of later context. **Reserved
-  for F4.4** (the refinement flow) — F4.2's extractor never emits it.
+- **`refined`** — an earlier answer updated in light of later context. Emitted by
+  **F4.4** (the refinement flow — see [`answer-refinement.md`](./answer-refinement.md));
+  F4.2's extractor never emits it.
 
 F4.2's extractor is restricted to the first three via `EXTRACTOR_EMITTED_PROVENANCES`
 (a `satisfies` subset of the vocabulary); the answer Zod contract derives its
 `provenance` enum from that subset, so the model can't return `refined` before
-there's a consumer. F4.4 starts emitting `refined` with no edit to the tuple.
+there's a consumer. F4.4 now emits `refined` (only on a genuine `refine`, not an
+`overwrite`) with no edit to the tuple.
 
 ## Architecture — pure core + a capability
 

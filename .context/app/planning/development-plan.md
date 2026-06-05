@@ -423,9 +423,11 @@ _Indicative tasks:_
 
 ### F4.4 — Answer refinement
 
-_Status:_ not started · _Size:_ ~1 PR · _Owner:_ TBD · _Deps:_ F4.2
+_Status:_ in flight — on `feat/f4.4-answer-refinement` · _Size:_ 3 PRs · _Owner:_ TBD · _Deps:_ F4.2
 
-Allows the agent to update a previous slot's value based on new context, with `refinementHistory` preserved. Used both by contradiction resolution and by general "user clarified earlier" flows.
+> Committable tracker: [`planning/features/f4.4.md`](features/f4.4.md). Build decisions (confirmed): **persistence is in scope** — F4.4 introduces the answer-persistence foundation (a minimal `AppQuestionnaireSession` + the `AppAnswerSlot` model with `refinementHistory` + migration + a real write path), a **deliberate divergence** from the no-persistence F4.1–F4.3 previews (F4.6 builds its live loop on these same tables); **`overwrite` keeps the original provenance, only a genuine `refine` → `refined`** (the precise "evolved across turns" signal); **own agent + capability** (the LLM decides refine/overwrite/leave) with the _apply_ step a pure deterministic `applyRefinement`; **core-local `REFINEMENT_ACTIONS`/`REFINEMENT_SOURCES` tuples**; **no clock in the pure core** (the persistence seam stamps `createdAt`); **reuse F4.2 `validateAnswerValue`**; **own opt-in sub-flag** (`APP_QUESTIONNAIRES_ANSWER_REFINEMENT_ENABLED`, off by default); the route **persists** against a per-version preview session (`isPreview`, excluded from P8). See `.context/app/questionnaire/answer-refinement.md`.
+
+Allows the agent to update a previous slot's value based on new context, with `refinementHistory` preserved. Used both by contradiction resolution (consuming F4.3's `suggestedProbe`) and by general "user clarified earlier" flows.
 
 _Indicative tasks:_
 

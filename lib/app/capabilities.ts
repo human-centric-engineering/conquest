@@ -18,6 +18,7 @@ import {
   AppDetectContradictionsCapability,
   AppExtractAnswerSlotsCapability,
   AppExtractQuestionnaireStructureCapability,
+  AppRefineAnswerCapability,
 } from '@/lib/app/questionnaire/capabilities';
 
 export function initAppCapabilities(): void {
@@ -37,4 +38,10 @@ export function initAppCapabilities(): void {
   // both on (only the flag-gated preview route dispatches it), so unconditional
   // registration here is safe.
   registerAppCapability(new AppDetectContradictionsCapability());
+
+  // F4.4 — answer refinement. Inert until the APP_QUESTIONNAIRES_ENABLED master
+  // flag and the APP_QUESTIONNAIRES_ANSWER_REFINEMENT sub-flag are both on (only
+  // the flag-gated refine-answer route dispatches it), so unconditional
+  // registration here is safe.
+  registerAppCapability(new AppRefineAnswerCapability());
 }

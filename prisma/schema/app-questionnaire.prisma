@@ -61,6 +61,7 @@ model AppQuestionnaireVersion {
   tags            AppQuestionTag[]
   config          AppQuestionnaireConfig?
   invitations     AppQuestionnaireInvitation[]
+  sessions        AppQuestionnaireSession[]
 
   @@unique([questionnaireId, versionNumber])
   @@index([questionnaireId])
@@ -234,6 +235,7 @@ model AppQuestionSlot {
 
   section AppQuestionnaireSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
   tags    AppQuestionSlotTag[]
+  answers AppAnswerSlot[]
 
   @@unique([versionId, key])
   @@index([versionId])
@@ -379,4 +381,73 @@ model AppDemoClient {
   invitations AppQuestionnaireInvitation[]
 
   @@map("app_demo_client")
+}
+
+/// A respondent's run over one launched version — the minimal slice of F4.6's
+/// session machinery that F4.4 introduces to anchor persisted answers. The full
+/// session/turn lifecycle (turn tables, profile snapshot, resumption) lands in
+/// F4.6; this carries only what answer rows need: which version, a status, and an
+/// optional respondent.
+///
+/// `isPreview` distinguishes a session created by the admin refine-answer route
+/// (which exercises the write path before real respondent sessions exist) from a
+/// genuine respondent run, so P8 analytics can exclude preview rows. The route
+/// reuses one preview session per version (idempotent), so admins don't accrete
+/// throwaway sessions.
+///
+/// `respondentUserId` is a plain String, no @relation (UG-1, as on
+/// AppQuestionnaireInvitation); null until F4.6 binds real respondent sessions.
+model AppQuestionnaireSession {
+  id               String   @id @default(cuid())
+  versionId        String
+  status           String   @default("active") // SESSION_STATUSES (types.ts): active | completed | abandoned
+  isPreview        Boolean  @default(false) // true = admin refine-answer exercise, not a respondent run
+  respondentUserId String? // respondent User.id; plain String, no FK (UG-1); set in F4.6
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  version AppQuestionnaireVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  answers AppAnswerSlot[]
+
+  @@index([versionId])
+  @@index([versionId, isPreview])
+  @@map("app_questionnaire_session")
+}
+
+/// One captured answer for a question slot within a session. F4.2 produces the
+/// extraction INTENTS; F4.4 is the first writer (via the refine-answer route) and
+/// owns the refinement update: the value/provenance change plus an appended
+/// `refinementHistory` entry. F4.6 wires the live per-turn write path on top of the
+/// same model.
+///
+/// `provenanceLabel` is a plain String validated against ANSWER_PROVENANCES at the
+/// boundary (house style — `selectionStrategy`/`contradictionMode` are columns, not
+/// Prisma enums), so adding a label is a tuple edit, not a migration. A `refine`
+/// transitions it to `refined`; an `overwrite` preserves it.
+///
+/// `confidence` is a Float 0–1 (matching AppQuestionSlot.extractionConfidence), NOT
+/// the Int(1–10) an early spec sketched. `refinementHistory` is a JSON array of
+/// RefinementHistoryEntry (refinement/types.ts), default []. `provenanceItems` holds
+/// Sunrise's ProvenanceItem[] contract for PII/cost; F4.4 does not populate it.
+model AppAnswerSlot {
+  id                String   @id @default(cuid())
+  sessionId         String
+  questionSlotId    String
+  value             Json
+  confidence        Float? // 0–1; null when not scored
+  provenanceLabel   String   @default("direct") // ANSWER_PROVENANCES (types.ts)
+  provenanceItems   Json? // Sunrise ProvenanceItem[]; reserved, not populated by F4.4
+  rationale         String?
+  lastUpdatedTurnId String? // F4.6 turn-loop seam; null until the live loop exists
+  refinementHistory Json     @default("[]") // RefinementHistoryEntry[] (refinement/types.ts)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  session      AppQuestionnaireSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  questionSlot AppQuestionSlot         @relation(fields: [questionSlotId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, questionSlotId]) // one answer per slot per session — the upsert key
+  @@index([sessionId])
+  @@index([questionSlotId])
+  @@map("app_answer_slot")
 }

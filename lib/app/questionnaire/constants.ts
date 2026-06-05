@@ -277,3 +277,86 @@ export const DETECT_CONTRADICTIONS_FUNCTION_DEFINITION: CapabilityFunctionDefini
     required: ['slots', 'answers', 'mode'],
   },
 };
+
+/**
+ * Sub-flag gating F4.4 **answer refinement** (the LLM call that decides whether a
+ * respondent's already-captured answer should be updated in light of new context).
+ * Disabled by default: it spends an LLM call per refinement pass, so an operator
+ * opts in deliberately — the same reasoning as the contradiction-detection sub-flag
+ * above. Independent of {@link APP_QUESTIONNAIRES_FLAG} (the master gate); both must
+ * be on for the refine-answer route to run. Seeded by
+ * `prisma/seeds/app-questionnaire/014-answer-refinement-flag.ts`.
+ */
+export const APP_QUESTIONNAIRES_ANSWER_REFINEMENT_FLAG =
+  'APP_QUESTIONNAIRES_ANSWER_REFINEMENT_ENABLED';
+
+/**
+ * Slug of the answer-refiner capability (F4.4). One source of truth shared by the
+ * `BaseCapability` subclass, its `AiCapability` seed row, and the refine-answer route
+ * that dispatches it. Same naming convention as the extractors/detector above —
+ * snake_case with the fork-owned `app_` prefix.
+ */
+export const REFINE_ANSWER_CAPABILITY_SLUG = 'app_refine_answer';
+
+/**
+ * `AiCapability.executionHandler` value for the answer-refiner capability — the class
+ * name the dispatcher resolves the in-memory handler by. Must match the class
+ * registered in `lib/app/capabilities.ts`.
+ */
+export const REFINE_ANSWER_HANDLER = 'AppRefineAnswerCapability';
+
+/**
+ * Slug of the seeded answer-refiner `AiAgent` (F4.4). A distinct agent from the
+ * answer extractor and contradiction detector: refinement runs on its own cadence
+ * (when a contradiction is reconciled or a respondent clarifies an earlier answer)
+ * and carries its own budget ceiling and persona. Ships with empty `model`/`provider`
+ * so it resolves dynamically via `agent-resolver.ts`; the refine-answer route loads
+ * it to populate the dispatch context. App-prefixed to avoid collision with core
+ * system agents.
+ */
+export const QUESTIONNAIRE_ANSWER_REFINER_AGENT_SLUG = 'app-questionnaire-answer-refiner';
+
+/**
+ * The answer-refiner capability's OpenAI-compatible function definition — the single
+ * source of truth shared by the `BaseCapability` subclass and the `AiCapability` seed
+ * row, so the two can never drift. Lives here (rather than on the class) so the seed
+ * can import it without pulling the capability's orchestration dependency graph into
+ * the seed runtime. Dispatched programmatically by the refine-answer route — not
+ * exposed to a chat tool loop.
+ */
+export const REFINE_ANSWER_FUNCTION_DEFINITION: CapabilityFunctionDefinition = {
+  name: REFINE_ANSWER_CAPABILITY_SLUG,
+  description:
+    "Decide whether each of a respondent's already-captured answers should be updated in light of new context (a clarifying message and/or a flagged contradiction). Returns per-slot decisions — refine (the value evolved), overwrite (a mistaken capture), or leave — with the new value and a rationale. Dispatched programmatically by the refine-answer route.",
+  parameters: {
+    type: 'object',
+    properties: {
+      slots: {
+        type: 'array',
+        description: 'The version slot definitions (key, type, prompt, typeConfig) to reason over.',
+        items: { type: 'object', additionalProperties: true },
+      },
+      existingAnswers: {
+        type: 'array',
+        description:
+          'The already-captured answers eligible for refinement — each { slotKey, value, provenance, rationale?, confidence? }.',
+        items: { type: 'object', additionalProperties: true },
+      },
+      userMessage: {
+        type: 'string',
+        description: "The respondent's new message that may warrant a refinement (optional).",
+      },
+      triggeringContradiction: {
+        type: 'object',
+        description:
+          'The F4.3 contradiction finding that triggered this pass (slotKeys, explanation, suggestedProbe) — the detection→refinement handoff (optional).',
+        additionalProperties: true,
+      },
+      sessionId: {
+        type: 'string',
+        description: 'Stable session identity, threaded into cost-log metadata.',
+      },
+    },
+    required: ['slots', 'existingAnswers'],
+  },
+};

@@ -99,3 +99,20 @@ export const contradictionDetectionLimiter = createRateLimiter({
   interval: CONTRADICTION_DETECTION_RATE_LIMIT_INTERVAL_MS,
   maxRequests: CONTRADICTION_DETECTION_RATE_LIMIT_MAX,
 });
+
+/**
+ * Answer-refinement preview sub-cap (F4.4). Every call runs a structured LLM
+ * completion deciding whether a respondent's captured answers should change — real
+ * per-pass spend, like contradiction detection. Keyed on the admin user id, who owns
+ * the spend. Same ceiling as the detection/extraction caps (60/min): all three are
+ * paid per-turn-ish previews an admin iterates on before launch.
+ */
+export const ANSWER_REFINEMENT_RATE_LIMIT_MAX = 60;
+
+/** Sliding-window length for {@link answerRefinementLimiter}, in milliseconds. */
+export const ANSWER_REFINEMENT_RATE_LIMIT_INTERVAL_MS = 60_000;
+
+export const answerRefinementLimiter = createRateLimiter({
+  interval: ANSWER_REFINEMENT_RATE_LIMIT_INTERVAL_MS,
+  maxRequests: ANSWER_REFINEMENT_RATE_LIMIT_MAX,
+});
