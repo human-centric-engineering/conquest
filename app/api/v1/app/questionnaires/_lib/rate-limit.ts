@@ -82,3 +82,20 @@ export const answerExtractionLimiter = createRateLimiter({
   interval: ANSWER_EXTRACTION_RATE_LIMIT_INTERVAL_MS,
   maxRequests: ANSWER_EXTRACTION_RATE_LIMIT_MAX,
 });
+
+/**
+ * Contradiction-detection preview sub-cap (F4.3). Every call runs a structured LLM
+ * completion comparing a respondent's answers — real per-pass spend, like answer
+ * extraction. Keyed on the admin user id, who owns the spend. Same ceiling as the
+ * answer-extraction cap (60/min): both are paid per-turn-ish previews an admin
+ * iterates on before launch.
+ */
+export const CONTRADICTION_DETECTION_RATE_LIMIT_MAX = 60;
+
+/** Sliding-window length for {@link contradictionDetectionLimiter}, in milliseconds. */
+export const CONTRADICTION_DETECTION_RATE_LIMIT_INTERVAL_MS = 60_000;
+
+export const contradictionDetectionLimiter = createRateLimiter({
+  interval: CONTRADICTION_DETECTION_RATE_LIMIT_INTERVAL_MS,
+  maxRequests: CONTRADICTION_DETECTION_RATE_LIMIT_MAX,
+});

@@ -15,6 +15,7 @@
  */
 import { registerAppCapability } from '@/lib/orchestration/capabilities/registry';
 import {
+  AppDetectContradictionsCapability,
   AppExtractAnswerSlotsCapability,
   AppExtractQuestionnaireStructureCapability,
 } from '@/lib/app/questionnaire/capabilities';
@@ -30,4 +31,10 @@ export function initAppCapabilities(): void {
   // the flag-gated preview route dispatches it), so unconditional registration
   // here is safe.
   registerAppCapability(new AppExtractAnswerSlotsCapability());
+
+  // F4.3 — contradiction detection. Inert until the APP_QUESTIONNAIRES_ENABLED
+  // master flag and the APP_QUESTIONNAIRES_CONTRADICTION_DETECTION sub-flag are
+  // both on (only the flag-gated preview route dispatches it), so unconditional
+  // registration here is safe.
+  registerAppCapability(new AppDetectContradictionsCapability());
 }

@@ -18,3 +18,11 @@ export {
   type ExtractAnswerSlotsArgs,
   type ExtractAnswerSlotsData,
 } from '@/lib/app/questionnaire/capabilities/extract-answer-slots';
+
+export {
+  AppDetectContradictionsCapability,
+  MAX_CONTRADICTION_SLOTS,
+  MAX_CONTRADICTION_ANSWERS,
+  type DetectContradictionsArgs,
+  type DetectContradictionsData,
+} from '@/lib/app/questionnaire/capabilities/detect-contradictions';
