@@ -448,6 +448,67 @@ describe('questionnaire datamodel (Prisma.dmmf)', () => {
     expect(events.kind).toBe('object');
     expect(events.type).toBe('AppQuestionnaireSessionEvent');
   });
+
+  it('AppQuestionnaireEvaluationRun maps app_questionnaire_evaluation_run with the F5.2 fields', () => {
+    const model = getModel('AppQuestionnaireEvaluationRun');
+    expect(model.dbName).toBe('app_questionnaire_evaluation_run');
+
+    expect(getField(model, 'id').type).toBe('String');
+    expect(getField(model, 'versionId').type).toBe('String');
+    expect(getField(model, 'questionnaireId').type).toBe('String');
+    expect(getField(model, 'status').type).toBe('String');
+    // Deferred User FK (UG-1) — a plain scalar, not a relation.
+    expect(getField(model, 'triggeredByUserId').type).toBe('String');
+    expect(getField(model, 'triggeredByUserId').kind).toBe('scalar');
+    expect(getField(model, 'dimensionsRequested').type).toBe('Int');
+    expect(getField(model, 'dimensionsRun').type).toBe('Int');
+    expect(getField(model, 'dimensionsFailed').type).toBe('Int');
+    expect(getField(model, 'totalFindings').type).toBe('Int');
+    expect(getField(model, 'dimensionSummary').type).toBe('Json');
+    expect(getField(model, 'costUsd').type).toBe('Float');
+    expect(getField(model, 'error').type).toBe('String');
+    expect(getField(model, 'startedAt').type).toBe('DateTime');
+    expect(getField(model, 'completedAt').type).toBe('DateTime');
+    expect(getField(model, 'createdAt').type).toBe('DateTime');
+    expect(getField(model, 'updatedAt').type).toBe('DateTime');
+
+    // Relates back to the version (and forward to its findings).
+    const version = getField(model, 'version');
+    expect(version.kind).toBe('object');
+    expect(version.type).toBe('AppQuestionnaireVersion');
+    expect(version.relationName).toBe(
+      getField(getModel('AppQuestionnaireVersion'), 'evaluationRuns').relationName
+    );
+    const findings = getField(model, 'findings');
+    expect(findings.kind).toBe('object');
+    expect(findings.type).toBe('AppQuestionnaireEvaluationFinding');
+  });
+
+  it('AppQuestionnaireEvaluationFinding maps app_questionnaire_evaluation_finding with the F5.2 fields', () => {
+    const model = getModel('AppQuestionnaireEvaluationFinding');
+    expect(model.dbName).toBe('app_questionnaire_evaluation_finding');
+
+    expect(getField(model, 'id').type).toBe('String');
+    expect(getField(model, 'runId').type).toBe('String');
+    expect(getField(model, 'dimension').type).toBe('String');
+    expect(getField(model, 'ordinal').type).toBe('Int');
+    expect(getField(model, 'targetKey').type).toBe('String');
+    expect(getField(model, 'severity').type).toBe('String');
+    expect(getField(model, 'proposedChange').type).toBe('String');
+    expect(getField(model, 'rationale').type).toBe('String');
+    expect(getField(model, 'sourceQuote').type).toBe('String');
+    // Minimal review lifecycle column, added at F5.2 so F5.3 extends rows (not a 2nd migration).
+    expect(getField(model, 'status').type).toBe('String');
+    expect(getField(model, 'createdAt').type).toBe('DateTime');
+    expect(getField(model, 'updatedAt').type).toBe('DateTime');
+
+    const run = getField(model, 'run');
+    expect(run.kind).toBe('object');
+    expect(run.type).toBe('AppQuestionnaireEvaluationRun');
+    expect(run.relationName).toBe(
+      getField(getModel('AppQuestionnaireEvaluationRun'), 'findings').relationName
+    );
+  });
 });
 
 describe('app_questionnaire_init migration SQL', () => {
@@ -848,6 +909,50 @@ describe('app_session_event migration SQL (F4.6)', () => {
     // searchVector ALTER. Stripped by hand; this guard fails if a regeneration
     // leaks them back in (and would, critically, drop the partial unique index the
     // preview-session race-safety depends on if that ever surfaces here).
+    expect(executableSql).not.toContain('DROP INDEX');
+    expect(executableSql).not.toContain('ai_knowledge');
+    expect(executableSql).not.toContain('ai_message');
+    expect(executableSql).not.toContain('searchVector');
+  });
+});
+
+describe('app_questionnaire_evaluation_run migration SQL (F5.2)', () => {
+  const sql = readMigrationSql('_app_questionnaire_evaluation_run');
+  const executableSql = executableLines(sql);
+
+  it('creates exactly the run + finding tables', () => {
+    expect(sql).toContain('CREATE TABLE "app_questionnaire_evaluation_run"');
+    expect(sql).toContain('CREATE TABLE "app_questionnaire_evaluation_finding"');
+    // Exactly two — guard against a phantom platform CREATE leaking back through
+    // the schema-fold footgun.
+    expect(executableSql.match(/CREATE TABLE/g) ?? []).toHaveLength(2);
+  });
+
+  it('declares the version→run and run→finding FKs with ON DELETE CASCADE', () => {
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "app_questionnaire_evaluation_run_versionId_fkey"[\s\S]*REFERENCES "app_questionnaire_version"\("id"\)[\s\S]*ON DELETE CASCADE/
+    );
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "app_questionnaire_evaluation_finding_runId_fkey"[\s\S]*REFERENCES "app_questionnaire_evaluation_run"\("id"\)[\s\S]*ON DELETE CASCADE/
+    );
+  });
+
+  it('indexes runs newest-first per version and findings by run', () => {
+    expect(sql).toContain(
+      'CREATE INDEX "app_questionnaire_evaluation_run_versionId_createdAt_idx"'
+    );
+    expect(sql).toContain('CREATE INDEX "app_questionnaire_evaluation_run_questionnaireId_idx"');
+    expect(sql).toContain('CREATE INDEX "app_questionnaire_evaluation_run_status_idx"');
+    expect(sql).toContain('CREATE INDEX "app_questionnaire_evaluation_finding_runId_idx"');
+    expect(sql).toContain(
+      'CREATE INDEX "app_questionnaire_evaluation_finding_runId_dimension_idx"'
+    );
+    expect(sql).toContain('CREATE INDEX "app_questionnaire_evaluation_finding_status_idx"');
+  });
+
+  it('contains no platform (unmodelled-object) operations — the schema-fold strip holds', () => {
+    // `migrate dev` re-emitted the four pgvector DROP INDEX + the GENERATED
+    // searchVector ALTER. Stripped by hand; this guard fails if a regeneration leaks them back.
     expect(executableSql).not.toContain('DROP INDEX');
     expect(executableSql).not.toContain('ai_knowledge');
     expect(executableSql).not.toContain('ai_message');

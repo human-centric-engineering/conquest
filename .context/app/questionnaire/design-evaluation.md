@@ -1,15 +1,16 @@
-# Design-time evaluation (F5.1)
+# Design-time evaluation (F5.1–F5.2)
 
 Before a questionnaire is launched, is its **structure** any good? F5.1 stands up a
 panel of seven LLM **judges** that read a version's authored design — its goal,
 audience, sections, and questions — and score it across distinct dimensions, each
-emitting **actionable findings** (concrete proposed edits). This is the first slice of
-P5; F5.2 persists runs and F5.3 turns findings into a review queue (accept / decline /
-edit / apply).
+emitting **actionable findings** (concrete proposed edits). F5.2 **persists** those runs
+and surfaces run history in the admin; F5.3 turns the findings into a review queue
+(accept / decline / edit / apply).
 
 Unlike the P4 conversational engine there is no respondent and no session — the judges
-grade an artefact that already exists. F5.1 ships the judges, the dispatch capability,
-and a **no-persistence preview route**; it stores nothing.
+grade an artefact that already exists. F5.1 shipped the judges, the dispatch capability,
+and a **no-persistence preview route**. F5.2 adds the run + finding models and a
+**persisting run route** built on the same dispatch seam (see [F5.2 below](#f52--persisted-runs)).
 
 ## The seven dimensions
 
@@ -109,9 +110,68 @@ time (the pure core has no live graph), the F2.3 revert-planner posture.
   row. **Not** bound to any one agent — it's dispatched against a different judge each
   call, so there is no `aiAgentCapability` row.
 
-No migration — F5.1 adds no schema (persistence is F5.2).
+F5.1 added no schema; the run + finding tables arrive in F5.2's
+`app_questionnaire_evaluation_run` migration.
 
-## Not in F5.1
+## F5.2 — persisted runs
 
-Run + suggestion persistence and run history (F5.2); the suggestion review queue with
-accept/decline/edit/apply and stale-suggestion derivation (F5.3); any admin UI.
+F5.2 turns the ephemeral preview into a **persisted, synchronous run** and gives the admin
+a run history. Deliberately **synchronous** — the POST runs the panel inline (the same
+`Promise.all` fan-out) and writes the result before returning; there is **no worker and no
+polling**. (Async was considered and rejected: the codebase has no background-task
+registration seam, so a worker would force editing the platform-owned maintenance tick — a
+layering inversion — for no payoff over the proven synchronous seam. `status` is a plain
+String holding a terminal value, so a future worker could add `running`/`queued` with no
+migration.)
+
+Shared dispatch — `lib/app/questionnaire/evaluation/run-panel.ts`. The F5.1 fan-out was
+extracted into `runEvaluationPanel(...)` (Prisma-free: agents + structure passed in,
+returns `{ results, summary }`, fail-soft per judge). Both the preview route and the new
+run route call it; the preview returns it ephemerally, the run route persists it.
+
+Models (`prisma/schema/app-questionnaire.prisma`):
+
+- `AppQuestionnaireEvaluationRun` — the run header. Terminal `status` (`completed` |
+  `partial` | `failed`), the `dimensionsRequested/Run/Failed` tallies, `totalFindings`, and
+  a `dimensionSummary` **JSON** array (`[{ dimension, score?, findingCount, diagnostic? }]`
+  — a fixed ≤7-entry summary read wholesale by the UI, so no per-dimension table).
+  `triggeredByUserId` is a plain String (the UG-1 deferred-User-FK posture); `questionnaireId`
+  is denormalised for questionnaire-scoped listing. FK to the version `ON DELETE CASCADE`.
+- `AppQuestionnaireEvaluationFinding` — **one row per judge finding** (not a JSON blob),
+  because F5.3's review queue mutates findings individually. Persists the `JudgeFinding`
+  contract verbatim plus the stamping `dimension`, an `ordinal`, and a minimal review
+  `status` (default `pending`) **added now** so F5.3 extends rows rather than running a
+  second migration. FK to the run `ON DELETE CASCADE`.
+
+Persistence + reads — `_lib/evaluation-run-routes.ts` (the DB seam; the pure core stays
+Prisma-free). `persistEvaluationRun` derives the status (`failed` if no judge ran, `partial`
+if some failed, else `completed`), flattens verdicts into ordinal-stable finding rows, and
+writes both in one `$transaction`. `dimensionSummary` is Zod-validated on read (the
+`parseAudienceShape` posture), degrading a malformed blob to `[]`.
+
+Routes (under `…/versions/:vid/evaluations`):
+
+```
+POST …/evaluations                 → run the panel, persist, return the run detail
+  body: { dimensions?: EvaluationDimension[] }   // default: all seven
+GET  …/evaluations                 → run headers, newest-first, paginated
+GET  …/evaluations/:runId          → one run with its findings (version-scoped)
+```
+
+The **POST** is paid LLM work, so it keeps the F5.1 gating verbatim: sub-flag 404, the
+`designEvaluationLimiter` 429 (reused — same seven-call cost), version-scope 404, and a
+not-configured 404 when zero judges are seeded. The two **GETs are read-only**: master-flag
+
+- version-scope only, no sub-flag 404, so persisted history stays readable even if the
+  sub-feature is later switched off (the `changes`-list posture).
+
+Admin UI (`app/admin/questionnaires/[id]/evaluations/**`): a runs sub-page mirroring
+`extraction-changes` (the `?v=` version selector) with a "Run evaluation" button, and a
+read-only run-detail page grouping findings by dimension. The entry button on the version
+detail page is gated on the sub-flag (the POST 404s otherwise). No accept/decline yet —
+that's F5.3.
+
+## Not in F5.2
+
+The suggestion review queue with accept/decline/edit/apply and stale-suggestion derivation
+(F5.3). The finding `status` column exists but only ever holds `pending` in F5.2.
