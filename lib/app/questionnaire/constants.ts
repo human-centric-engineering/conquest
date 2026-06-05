@@ -360,3 +360,92 @@ export const REFINE_ANSWER_FUNCTION_DEFINITION: CapabilityFunctionDefinition = {
     required: ['slots', 'existingAnswers'],
   },
 };
+
+/**
+ * Sub-flag gating F4.5 **completion-offer composition** (the LLM call that phrases the
+ * offer-to-submit message once the deterministic gate decides the questionnaire is
+ * done enough). Disabled by default: it spends an LLM call per offer, so an operator
+ * opts in deliberately — the same reasoning as the sub-flags above. Independent of
+ * {@link APP_QUESTIONNAIRES_FLAG} (the master gate); both must be on for the
+ * completion-status route to compose an offer. The deterministic assessment itself is
+ * always available under the master flag — only the LLM phrasing is gated. Seeded by
+ * `prisma/seeds/app-questionnaire/017-completion-flag.ts`.
+ */
+export const APP_QUESTIONNAIRES_COMPLETION_FLAG = 'APP_QUESTIONNAIRES_COMPLETION_ENABLED';
+
+/**
+ * Slug of the completion-offer composer capability (F4.5). One source of truth shared
+ * by the `BaseCapability` subclass, its `AiCapability` seed row, and the
+ * completion-status route that dispatches it. Same naming convention as the
+ * extractors/detector/refiner above — snake_case with the fork-owned `app_` prefix.
+ */
+export const COMPOSE_COMPLETION_OFFER_CAPABILITY_SLUG = 'app_compose_completion_offer';
+
+/**
+ * `AiCapability.executionHandler` value for the completion-offer composer — the class
+ * name the dispatcher resolves the in-memory handler by. Must match the class
+ * registered in `lib/app/capabilities.ts`.
+ */
+export const COMPOSE_COMPLETION_OFFER_HANDLER = 'AppComposeCompletionOfferCapability';
+
+/**
+ * Slug of the seeded completion `AiAgent` (F4.5). A distinct agent from the others:
+ * it phrases the wrap-up offer (a warm, conversational close) rather than extracting
+ * or judging, so it carries its own persona and budget ceiling. Ships with empty
+ * `model`/`provider` so it resolves dynamically via `agent-resolver.ts`; the
+ * completion-status route loads it to populate the dispatch context. App-prefixed to
+ * avoid collision with core system agents.
+ */
+export const QUESTIONNAIRE_COMPLETION_AGENT_SLUG = 'app-questionnaire-completion-agent';
+
+/**
+ * The completion-offer composer's OpenAI-compatible function definition — the single
+ * source of truth shared by the `BaseCapability` subclass and the `AiCapability` seed
+ * row, so the two can never drift. Lives here (rather than on the class) so the seed
+ * can import it without pulling the capability's orchestration dependency graph into
+ * the seed runtime. Dispatched programmatically by the completion-status route — not
+ * exposed to a chat tool loop.
+ */
+export const COMPOSE_COMPLETION_OFFER_FUNCTION_DEFINITION: CapabilityFunctionDefinition = {
+  name: COMPOSE_COMPLETION_OFFER_CAPABILITY_SLUG,
+  description:
+    'Compose the natural-language offer to submit a conversational questionnaire, once the system has already determined the respondent has answered enough. Returns a warm offer message, a short recap of what was covered, and an optional note on what remains optional. Phrasing only — it never decides whether to offer (that is deterministic). Dispatched programmatically by the completion-status route; persists nothing.',
+  parameters: {
+    type: 'object',
+    properties: {
+      coverage: {
+        type: 'number',
+        description: 'Weighted coverage in [0, 1] at offer time.',
+      },
+      answeredCount: {
+        type: 'number',
+        description: 'Distinct questions answered this session.',
+      },
+      capReached: {
+        type: 'boolean',
+        description: 'Whether the per-session cap forced the offer (vs. thresholds being met).',
+      },
+      coveredSlots: {
+        type: 'array',
+        description:
+          'The answered questions to recap — each { key, prompt }. No respondent values.',
+        items: { type: 'object', additionalProperties: true },
+      },
+      remainingSlots: {
+        type: 'array',
+        description: 'Optional questions still open — each { key, prompt }.',
+        items: { type: 'object', additionalProperties: true },
+      },
+      recentMessages: {
+        type: 'array',
+        description: 'Recent user messages, oldest → newest, to match tone.',
+        items: { type: 'string' },
+      },
+      sessionId: {
+        type: 'string',
+        description: 'Stable session identity, threaded into cost-log metadata.',
+      },
+    },
+    required: ['coverage', 'answeredCount', 'capReached', 'coveredSlots'],
+  },
+};

@@ -15,6 +15,7 @@
  */
 import { registerAppCapability } from '@/lib/orchestration/capabilities/registry';
 import {
+  AppComposeCompletionOfferCapability,
   AppDetectContradictionsCapability,
   AppExtractAnswerSlotsCapability,
   AppExtractQuestionnaireStructureCapability,
@@ -44,4 +45,10 @@ export function initAppCapabilities(): void {
   // the flag-gated refine-answer route dispatches it), so unconditional
   // registration here is safe.
   registerAppCapability(new AppRefineAnswerCapability());
+
+  // F4.5 — completion-offer composition. Inert until the APP_QUESTIONNAIRES_ENABLED
+  // master flag and the APP_QUESTIONNAIRES_COMPLETION sub-flag are both on (only the
+  // flag-gated completion-status route dispatches it), so unconditional registration
+  // here is safe.
+  registerAppCapability(new AppComposeCompletionOfferCapability());
 }

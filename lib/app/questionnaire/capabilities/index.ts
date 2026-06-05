@@ -34,3 +34,12 @@ export {
   type RefineAnswerArgs,
   type RefineAnswerData,
 } from '@/lib/app/questionnaire/capabilities/refine-answer';
+
+export {
+  AppComposeCompletionOfferCapability,
+  MAX_COMPLETION_COVERED_SLOTS,
+  MAX_COMPLETION_REMAINING_SLOTS,
+  MAX_COMPLETION_RECENT_MESSAGES,
+  type ComposeCompletionOfferArgs,
+  type ComposeCompletionOfferData,
+} from '@/lib/app/questionnaire/capabilities/compose-completion-offer';

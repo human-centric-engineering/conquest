@@ -5,6 +5,7 @@ import {
   APP_QUESTIONNAIRES_ADAPTIVE_FLAG,
   APP_QUESTIONNAIRES_ANSWER_EXTRACTION_FLAG,
   APP_QUESTIONNAIRES_ANSWER_REFINEMENT_FLAG,
+  APP_QUESTIONNAIRES_COMPLETION_FLAG,
   APP_QUESTIONNAIRES_CONTRADICTION_DETECTION_FLAG,
   APP_QUESTIONNAIRES_FLAG,
 } from '@/lib/app/questionnaire/constants';
@@ -19,6 +20,7 @@ export {
   APP_QUESTIONNAIRES_ANSWER_EXTRACTION_FLAG,
   APP_QUESTIONNAIRES_CONTRADICTION_DETECTION_FLAG,
   APP_QUESTIONNAIRES_ANSWER_REFINEMENT_FLAG,
+  APP_QUESTIONNAIRES_COMPLETION_FLAG,
 };
 
 /**
@@ -102,6 +104,27 @@ export async function isAnswerRefinementEnabled(): Promise<boolean> {
     isFeatureEnabled(APP_QUESTIONNAIRES_ANSWER_REFINEMENT_FLAG),
   ]);
   return app && refinement;
+}
+
+/**
+ * Whether F4.5 **completion-offer composition** may run. Requires BOTH the master
+ * app flag and the completion sub-flag — composing the offer spends an LLM call, so
+ * it's opt-in on top of an already-enabled app (the same shape as
+ * {@link isAnswerRefinementEnabled}).
+ *
+ * Unlike the other sub-features, a disabled flag does NOT 404 the completion-status
+ * route: the deterministic completion *assessment* is always available under the
+ * master flag, and only the LLM offer *phrasing* is gated — so the route returns the
+ * assessment without a composed offer when this is `false`.
+ *
+ * Server-only (resolves both flags from the database).
+ */
+export async function isCompletionEnabled(): Promise<boolean> {
+  const [app, completion] = await Promise.all([
+    isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_COMPLETION_FLAG),
+  ]);
+  return app && completion;
 }
 
 /**
