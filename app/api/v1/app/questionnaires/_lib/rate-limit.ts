@@ -116,3 +116,22 @@ export const answerRefinementLimiter = createRateLimiter({
   interval: ANSWER_REFINEMENT_RATE_LIMIT_INTERVAL_MS,
   maxRequests: ANSWER_REFINEMENT_RATE_LIMIT_MAX,
 });
+
+/**
+ * Completion preview sub-cap (F4.5). Shared by both completion routes: the
+ * `completion-status` route may dispatch the offer-composer LLM call when the
+ * assessment is an offer, and the `complete` route may dispatch the F4.3 sweep on
+ * accept — both paid per call. The deterministic assessment itself is free, but
+ * keying one limiter on the admin user id keeps the paid sub-flows bounded together.
+ * Same ceiling as the detection/extraction/refinement caps (60/min): all are paid
+ * per-turn-ish previews an admin iterates on before launch.
+ */
+export const COMPLETION_RATE_LIMIT_MAX = 60;
+
+/** Sliding-window length for {@link completionLimiter}, in milliseconds. */
+export const COMPLETION_RATE_LIMIT_INTERVAL_MS = 60_000;
+
+export const completionLimiter = createRateLimiter({
+  interval: COMPLETION_RATE_LIMIT_INTERVAL_MS,
+  maxRequests: COMPLETION_RATE_LIMIT_MAX,
+});

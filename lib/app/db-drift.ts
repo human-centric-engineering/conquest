@@ -52,4 +52,18 @@ export function registerAppDriftProbes(): void {
     table: 'app_question_slot',
     probe: indexExists('idx_app_question_slot_embedding'),
   });
+
+  // F4.5 completion: the partial unique index enforcing at most ONE preview session
+  // per version (WHERE "isPreview" = true). Prisma can't model a partial unique
+  // index, so it lives in raw SQL (migration 20260605141500) and `getOrCreatePreviewSession`
+  // relies on it for race-safety (catch P2002 → re-read). A future `migrate dev` that
+  // emitted a phantom DROP for it would silently reopen the duplicate-preview-session
+  // race; this probe fails the drift check instead. See the drift note on
+  // AppQuestionnaireSession in prisma/schema/app-questionnaire.prisma.
+  registerAppDriftProbe({
+    name: 'idx_app_questionnaire_session_preview_per_version (partial unique index)',
+    kind: 'partial unique index',
+    table: 'app_questionnaire_session',
+    probe: indexExists('idx_app_questionnaire_session_preview_per_version'),
+  });
 }

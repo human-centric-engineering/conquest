@@ -137,7 +137,10 @@ Selection strategy + thresholds feed F4.1 (the four pluggable strategies —
 sequential, random, weighted, adaptive — see [selection strategies](selection-strategies.md));
 the per-turn replies those questions draw are turned into typed slot values by
 F4.2 ([answer extraction](answer-extraction.md)); contradiction mode/N feeds F4.3;
-voice feeds F6.2; profile-field collection at session start lands in P4.
+the completion thresholds (`minQuestionsAnswered`, `coverageThreshold`) and
+`maxQuestionsPerSession` feed F4.5's offer-to-submit gate
+([completion logic](completion-logic.md)); voice feeds F6.2; profile-field
+collection at session start lands in P4.
 
 ## Not in F3.1
 

@@ -176,7 +176,7 @@ describe('AppComposeCompletionOfferCapability — dispatch', () => {
     };
     expect(data.offer.offerMessage).toContain('submit');
     expect(data.offer.coveredSummary).toContain('goals');
-    expect(data.offer.remainingNote).toBeDefined();
+    expect(data.offer.remainingNote).toBe('You can still add anything else before we wrap up.');
     expect(provider.chat).toHaveBeenCalledTimes(1);
   });
 
@@ -327,6 +327,86 @@ describe('AppComposeCompletionOfferCapability — dispatch', () => {
       'chat'
     );
   });
+
+  it('defaults fallbackProviders to [] when the binding value is not an array', async () => {
+    (getProvider as Mock).mockResolvedValue(makeProvider([{ content: VALID_JSON }]));
+
+    const result = await capabilityDispatcher.dispatch(
+      SLUG,
+      baseArgs(),
+      baseContext({
+        entityContext: {
+          completionAgent: { provider: 'p', model: 'm', fallbackProviders: 'nope' },
+        },
+      })
+    );
+
+    expect(result.success).toBe(true);
+    expect(resolveAgentProviderAndModel).toHaveBeenCalledWith(
+      { provider: 'p', model: 'm', fallbackProviders: [] },
+      'chat'
+    );
+  });
+
+  it('retries on a schema-invalid (but JSON) first response, then succeeds', async () => {
+    // Valid JSON, invalid schema (missing coveredSummary) → the issue-path map runs
+    // (paths surface in the final error + logs), then a valid retry succeeds.
+    const badSchema = JSON.stringify({ offerMessage: 'hi' });
+    const provider = makeProvider([{ content: badSchema }, { content: VALID_JSON }]);
+    (getProvider as Mock).mockResolvedValue(provider);
+
+    const result = await capabilityDispatcher.dispatch(SLUG, baseArgs(), baseContext());
+
+    expect(result.success).toBe(true);
+    expect(provider.chat).toHaveBeenCalledTimes(2);
+  });
+
+  it('surfaces composition_failed naming the invalid paths when both attempts fail schema', async () => {
+    // Both responses are valid JSON but schema-invalid → onFinalFailure runs with a
+    // non-empty lastIssuePaths, exercising the named-paths branch of the error message.
+    const badSchema = JSON.stringify({ offerMessage: 'hi' });
+    const provider = makeProvider([{ content: badSchema }, { content: badSchema }]);
+    (getProvider as Mock).mockResolvedValue(provider);
+
+    const result = await capabilityDispatcher.dispatch(SLUG, baseArgs(), baseContext());
+
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('composition_failed');
+  });
+
+  it('coerces a non-Error throw to a string message (provider_unavailable)', async () => {
+    // getProvider rejecting with a non-Error exercises errorMessage's String(err) branch.
+    (getProvider as Mock).mockRejectedValueOnce('provider blew up');
+
+    const result = await capabilityDispatcher.dispatch(SLUG, baseArgs(), baseContext());
+
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('provider_unavailable');
+    expect(result.error?.message).toBe('provider blew up');
+  });
+
+  it('logs cost without an agentId, and without a sessionId in metadata, when both are omitted', async () => {
+    (getProvider as Mock).mockResolvedValue(makeProvider([{ content: VALID_JSON }]));
+
+    await capabilityDispatcher.dispatch(
+      SLUG,
+      baseArgs({ sessionId: undefined }),
+      baseContext({ agentId: undefined })
+    );
+
+    const chatCall = (logCost as Mock).mock.calls.find(
+      ([arg]) => arg?.metadata?.capability === SLUG
+    );
+    expect(chatCall, 'a CHAT cost log for this capability should have been emitted').toBeDefined();
+    // Non-null after the guard so a regression points at these lines, not a silent ?. no-op.
+    const chatArg = chatCall![0];
+    expect(chatArg).toMatchObject({
+      operation: CostOperation.CHAT,
+      metadata: { capability: SLUG },
+    });
+    expect(chatArg).not.toHaveProperty('agentId');
+    expect(chatArg.metadata).not.toHaveProperty('sessionId');
+  });
 });
 
 describe('AppComposeCompletionOfferCapability — redactProvenance', () => {
@@ -364,6 +444,16 @@ describe('AppComposeCompletionOfferCapability — redactProvenance', () => {
       error: { code: 'composition_failed', message: 'boom' },
     });
     expect(redaction.resultPreview).toContain('composition_failed');
+  });
+
+  it('caps an over-long error preview at 200 chars with an ellipsis', () => {
+    const args = baseArgs() as Parameters<typeof capability.redactProvenance>[0];
+    const redaction = capability.redactProvenance(args, {
+      success: false,
+      error: { code: 'composition_failed', message: 'x'.repeat(500) },
+    });
+    expect(redaction.resultPreview.length).toBe(200);
+    expect(redaction.resultPreview.endsWith('…')).toBe(true);
   });
 
   it('omits an absent sessionId from the persisted args', () => {

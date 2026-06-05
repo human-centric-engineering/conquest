@@ -147,7 +147,10 @@ and renders findings to the agent. **F4.4** (refinement, now shipped — see
 [`answer-refinement.md`](./answer-refinement.md)) acts on a confirmed contradiction:
 its capability takes the finding as a `triggeringContradiction` and writes a `refine`
 (transitioning provenance to `refined`); the `suggestedProbe` is F4.3's handoff to it.
-**F4.5** (offer-to-submit) owns the trigger point for the completion sweep.
+**F4.5** (offer-to-submit, now shipped — see [`completion-logic.md`](./completion-logic.md))
+owns the trigger point for the completion sweep: its `complete` route, on an eligible
+`accept`, calls `shouldRunDetection(mode, windowN, 'completion-sweep')` and dispatches
+this capability, holding the submit for review when conflicts are found.
 
 ## Not in F4.3
 
