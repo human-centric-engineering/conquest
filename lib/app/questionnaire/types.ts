@@ -30,6 +30,40 @@ export const FIELD_PROVENANCES = ['admin-supplied', 'inferred', 'pre-existing'] 
 export type FieldProvenance = (typeof FIELD_PROVENANCES)[number];
 
 /**
+ * How a respondent's answer value was arrived at (F4.2 answer extraction). The
+ * label travels on each extracted `AnswerSlotIntent` and (from F4.6) the
+ * persisted answer, so a reviewer can see whether a value was stated outright or
+ * derived:
+ *
+ * - `direct` — stated verbatim/near-verbatim in the message (carries a `sourceQuote`).
+ * - `inferred` — follows by single-step reasoning from the message, not stated.
+ * - `synthesised` — combines multiple turns / the wider transcript; no single span.
+ * - `refined` — an earlier answer updated in light of later context (F4.4).
+ *
+ * The **full vocabulary** is the single source of truth (same reasoning as
+ * `FIELD_PROVENANCES`/`QUESTION_TYPES` above). F4.2's extractor only ever emits
+ * the {@link EXTRACTOR_EMITTED_PROVENANCES} subset; `refined` is reserved for the
+ * F4.4 refinement flow, which starts emitting it without editing this tuple.
+ */
+export const ANSWER_PROVENANCES = ['direct', 'inferred', 'synthesised', 'refined'] as const;
+export type AnswerProvenance = (typeof ANSWER_PROVENANCES)[number];
+
+/**
+ * The provenance labels the F4.2 extractor is allowed to emit — `ANSWER_PROVENANCES`
+ * minus `refined` (which only the F4.4 refinement flow produces). The answer
+ * extraction Zod contract derives its `provenance` enum from this subset so the
+ * model can't return `refined` before there's a consumer for it; the normaliser
+ * and tests assert against it too. A `satisfies` keeps it a true subset of the
+ * vocabulary — dropping a label from `ANSWER_PROVENANCES` forces a fix here.
+ */
+export const EXTRACTOR_EMITTED_PROVENANCES = [
+  'direct',
+  'inferred',
+  'synthesised',
+] as const satisfies ReadonlyArray<AnswerProvenance>;
+export type ExtractorEmittedProvenance = (typeof EXTRACTOR_EMITTED_PROVENANCES)[number];
+
+/**
  * Canonical question-type vocabulary for `AppQuestionSlot.type` (schema default
  * `free_text`). Declared as a `const` tuple so it is the single source of truth:
  * the ingestion Zod schema derives its enum from it (`z.enum(QUESTION_TYPES)`)
