@@ -21,7 +21,6 @@ vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
 import {
   getOrCreatePreviewSession,
   loadAnswerSlot,
-  markSessionCompleted,
   persistRefinement,
   upsertAnswerSlot,
 } from '@/app/api/v1/app/questionnaires/_lib/answer-slots';
@@ -92,25 +91,9 @@ describe('getOrCreatePreviewSession', () => {
   });
 });
 
-describe('markSessionCompleted', () => {
-  it('transitions the session to completed and returns the narrowed status', async () => {
-    (prismaMock.appQuestionnaireSession.update as Mock).mockResolvedValue({ status: 'completed' });
-
-    const status = await markSessionCompleted('sess-1');
-
-    expect(status).toBe('completed');
-    expect(prismaMock.appQuestionnaireSession.update).toHaveBeenCalledWith({
-      where: { id: 'sess-1' },
-      data: { status: 'completed' },
-      select: { status: true },
-    });
-  });
-
-  it('narrows an unexpected stored status to active (boundary guard)', async () => {
-    (prismaMock.appQuestionnaireSession.update as Mock).mockResolvedValue({ status: 'bogus' });
-    expect(await markSessionCompleted('sess-1')).toBe('active');
-  });
-});
+// markSessionCompleted moved to the F4.6 session seam (`_lib/sessions.ts`), where it
+// now routes through transitionSession + writes a `completed` event — covered in
+// session-state-machine.test.ts. answer-slots.ts re-exports it for the /complete route.
 
 describe('upsertAnswerSlot', () => {
   it('upserts on the (sessionId, questionSlotId) composite key and returns the row id', async () => {

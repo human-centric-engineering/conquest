@@ -230,5 +230,34 @@ test guards it. Full behaviour in [`configuration.md`](./configuration.md).
   relation. `null` = generic Sunrise theme; the snapshot points at the client directly
   so reattribution doesn't change a sent invitation's brand.
 
-_Later phases extend this file — session models (P4), evaluation links (P5),
-turns (P6), etc. Each documents its models here as it lands._
+### Session + answers (F4.4 / F4.6 — P4)
+
+- **`AppQuestionnaireSession`** (F4.4, migration
+  `20260605091327_app_answer_slot_refinement`) — a respondent's run over a version:
+  `versionId` (FK `onDelete: Cascade`), `status` (default `active`), `isPreview`,
+  `respondentUserId String?` (plain String, UG-1; null until F6.1 binds real
+  respondents), timestamps. A raw-SQL **partial unique index**
+  (`idx_app_questionnaire_session_preview_per_version`, migration
+  `20260605141500_app_session_preview_unique`, `WHERE "isPreview" = true`) enforces at
+  most one preview session per version — Prisma can't model partial uniques, so it's
+  invisible in the schema and guarded by a drift probe (`lib/app/db-drift.ts`). Author
+  future migrations on this table with `--create-only` and strip any phantom DROP of it.
+- **`AppAnswerSlot`** (F4.4, same migration) — one captured answer per `(sessionId,
+questionSlotId)` (the upsert unique), with `value Json`, `provenanceLabel`,
+  `confidence?`, `refinementHistory Json` (default `[]`), and `lastUpdatedTurnId String?`
+  (the F6.1 turn-loop seam; null until the live loop exists). Both FKs
+  `onDelete: Cascade`.
+- **`AppQuestionnaireSessionEvent`** (F4.6, migration
+  `20260605141717_app_session_event`) — the append-only lifecycle audit trail. One row
+  per recorded event: `sessionId` (FK `onDelete: Cascade` — events follow the session),
+  `eventType` (plain String validated against `SESSION_EVENT_TYPES`), `fromStatus?` /
+  `toStatus?` (both null for `cost_cap_reached`; `fromStatus` null for `created`),
+  `reason?`, `metadata Json?`, `createdAt`. Indexed `@@index([sessionId])` and
+  `@@index([sessionId, createdAt])`. Fully Prisma-modelled — no raw-SQL object, so no
+  drift probe. The migration was hand-stripped of the usual phantom pgvector DROPs (the
+  header names them; the schema-shape test guards the strip). F4.6 also adds `paused` to
+  `SESSION_STATUSES` (additive tuple edit, no migration — `status` is a plain String
+  column). See [`session-state-machine.md`](./session-state-machine.md).
+
+_Later phases extend this file — evaluation links (P5), turns (P6), etc. Each
+documents its models here as it lands._

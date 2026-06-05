@@ -6,6 +6,22 @@
  */
 
 /**
+ * Narrow a stored string to one of a `const`-tuple enum's members, falling back to
+ * `fallback` when the value isn't a member. The boundary guard for reading a plain
+ * `String` column we validate at the app layer (house style — `status`,
+ * `provenanceLabel`, `selectionStrategy` are columns, not Prisma enums), so a stray DB
+ * value never escapes as an untyped string. One shared helper so the enum tuples below
+ * stay the single source of truth instead of each read seam re-inlining the check.
+ */
+export function narrowToEnum<T extends string>(
+  value: string,
+  allowed: readonly T[],
+  fallback: T
+): T {
+  return (allowed as readonly string[]).includes(value) ? (value as T) : fallback;
+}
+
+/**
  * Lifecycle status shared by `AppQuestionnaire` and `AppQuestionnaireVersion`.
  *
  * Mirrors the schema's `status` column (default `draft`). Declared as a `const`
@@ -190,13 +206,17 @@ export type ProfileFieldType = (typeof PROFILE_FIELD_TYPES)[number];
 
 /**
  * Lifecycle status of an `AppQuestionnaireSession` (the respondent's run over a
- * version). A minimal vocabulary introduced with the F4.4 persistence foundation —
- * `active` while in progress, `completed` once submitted, `abandoned` if dropped.
- * The full session/turn lifecycle is F4.6's; this is the slice F4.4 needs to anchor
- * answer rows. A `const` tuple for the same single-source reason as the sets above
- * (the schema's `status` column, the Zod enum, and any UI filter derive from it).
+ * version). F4.4 introduced a minimal slice (`active | completed | abandoned`) to
+ * anchor answer rows; F4.6 completes the lifecycle by adding `paused` — `active`
+ * while in progress, `paused` when the respondent steps away (resumable), `completed`
+ * once submitted, `abandoned` if dropped. The legal transitions between these (and
+ * the event written on each) live in the pure state machine at
+ * `lib/app/questionnaire/session/`. A `const` tuple for the same single-source reason
+ * as the sets above (the schema's `status` column, the Zod enum, and any UI filter
+ * derive from it). The schema keeps `@default("active")` — a new session starts
+ * in progress.
  */
-export const SESSION_STATUSES = ['active', 'completed', 'abandoned'] as const;
+export const SESSION_STATUSES = ['active', 'paused', 'completed', 'abandoned'] as const;
 export type SessionStatus = (typeof SESSION_STATUSES)[number];
 
 /**

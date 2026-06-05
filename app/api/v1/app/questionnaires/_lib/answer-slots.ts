@@ -22,9 +22,8 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db/client';
 import {
   ANSWER_PROVENANCES,
-  SESSION_STATUSES,
+  narrowToEnum,
   type AnswerProvenance,
-  type SessionStatus,
 } from '@/lib/app/questionnaire/types';
 import type {
   ExistingAnswerView,
@@ -56,20 +55,6 @@ export interface SeedAnswerInput {
 function jsonInput(value: unknown): Prisma.InputJsonValue | typeof Prisma.JsonNull {
   if (value === null || value === undefined) return Prisma.JsonNull;
   return value;
-}
-
-/** Narrow a stored `provenanceLabel` string to the enum, defaulting to `direct`. */
-function asProvenance(value: string): AnswerProvenance {
-  return (ANSWER_PROVENANCES as readonly string[]).includes(value)
-    ? (value as AnswerProvenance)
-    : 'direct';
-}
-
-/** Narrow a stored `status` string to the enum, defaulting to `active`. */
-function asSessionStatus(value: string): SessionStatus {
-  return (SESSION_STATUSES as readonly string[]).includes(value)
-    ? (value as SessionStatus)
-    : 'active';
 }
 
 /** Parse a stored `refinementHistory` JSON column into the typed array (our own
@@ -178,7 +163,7 @@ export async function loadAnswerSlot(
     existing: {
       slotKey: row.questionSlot.key,
       value: row.value,
-      provenance: asProvenance(row.provenanceLabel),
+      provenance: narrowToEnum(row.provenanceLabel, ANSWER_PROVENANCES, 'direct'),
       confidence: row.confidence,
       refinementHistory: asHistory(row.refinementHistory),
       ...(row.rationale != null ? { rationale: row.rationale } : {}),
@@ -208,20 +193,9 @@ export async function persistRefinement(rowId: string, refined: RefinedSlotState
 }
 
 /**
- * Transition a session to `completed` — the F4.5 accept→submit write path.
- * Idempotent: a session already `completed` (or any other status) is set to
- * `completed` again, returning the resulting status. Resolving the result to the
- * narrowed {@link SessionStatus} guards against a stray DB value at the boundary.
- *
- * F4.6 seam: there is no `AppQuestionnaireSessionEvent` table yet, so the `status`
- * column is the only audit surface F4.5 has. When F4.6 lands the event log, this is
- * where a `completed` transition event will also be written.
+ * The session→completed write path (F4.5 accept→submit). Moved to the F4.6 session
+ * seam (`sessions.ts`), where it now routes through `transitionSession` so it writes a
+ * `completed` audit event like every other transition. Re-exported here so the
+ * `/complete` route's import is unchanged.
  */
-export async function markSessionCompleted(sessionId: string): Promise<SessionStatus> {
-  const updated = await prisma.appQuestionnaireSession.update({
-    where: { id: sessionId },
-    data: { status: 'completed' },
-    select: { status: true },
-  });
-  return asSessionStatus(updated.status);
-}
+export { markSessionCompleted } from '@/app/api/v1/app/questionnaires/_lib/sessions';
