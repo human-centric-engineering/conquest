@@ -135,3 +135,21 @@ export const completionLimiter = createRateLimiter({
   interval: COMPLETION_RATE_LIMIT_INTERVAL_MS,
   maxRequests: COMPLETION_RATE_LIMIT_MAX,
 });
+
+/**
+ * Design-time evaluation preview sub-cap (F5.1). One call fans out to **seven** judge
+ * LLM completions (the whole panel), so it's the most expensive questionnaire sub-flow
+ * per request — capped tighter than the per-turn previews. Keyed on the admin user id,
+ * who owns the spend. Checked once per run (not per judge): 20 runs/min is ample for an
+ * admin iterating on a structure before launch while bounding a hammered "evaluate"
+ * button to ~140 judge calls/min.
+ */
+export const DESIGN_EVALUATION_RATE_LIMIT_MAX = 20;
+
+/** Sliding-window length for {@link designEvaluationLimiter}, in milliseconds. */
+export const DESIGN_EVALUATION_RATE_LIMIT_INTERVAL_MS = 60_000;
+
+export const designEvaluationLimiter = createRateLimiter({
+  interval: DESIGN_EVALUATION_RATE_LIMIT_INTERVAL_MS,
+  maxRequests: DESIGN_EVALUATION_RATE_LIMIT_MAX,
+});
