@@ -196,3 +196,84 @@ export const EXTRACT_ANSWER_SLOTS_FUNCTION_DEFINITION: CapabilityFunctionDefinit
     required: ['userMessage', 'activeQuestionKey', 'candidateSlots'],
   },
 };
+
+/**
+ * Sub-flag gating F4.3 **contradiction detection** (the LLM call that compares a
+ * respondent's answers across slots and surfaces logical conflicts). Disabled by
+ * default: it spends an LLM call per detection pass, so an operator opts in
+ * deliberately — the same reasoning as the answer-extraction sub-flag above.
+ * Independent of {@link APP_QUESTIONNAIRES_FLAG} (the master gate); both must be on
+ * for the detect-contradictions route to run. Seeded by
+ * `prisma/seeds/app-questionnaire/011-contradiction-detection-flag.ts`.
+ */
+export const APP_QUESTIONNAIRES_CONTRADICTION_DETECTION_FLAG =
+  'APP_QUESTIONNAIRES_CONTRADICTION_DETECTION_ENABLED';
+
+/**
+ * Slug of the contradiction-detector capability (F4.3). One source of truth shared
+ * by the `BaseCapability` subclass, its `AiCapability` seed row, and the preview
+ * route that dispatches it. Same naming convention as the extractors above —
+ * snake_case with the fork-owned `app_` prefix.
+ */
+export const DETECT_CONTRADICTIONS_CAPABILITY_SLUG = 'app_detect_contradictions';
+
+/**
+ * `AiCapability.executionHandler` value for the contradiction-detector capability —
+ * the class name the dispatcher resolves the in-memory handler by. Must match the
+ * class registered in `lib/app/capabilities.ts`.
+ */
+export const DETECT_CONTRADICTIONS_HANDLER = 'AppDetectContradictionsCapability';
+
+/**
+ * Slug of the seeded contradiction-detector `AiAgent` (F4.3). A distinct agent from
+ * the answer extractor: detection runs on its own cadence (per turn and/or at the
+ * completion sweep) and carries its own budget ceiling and persona. Ships with
+ * empty `model`/`provider` so it resolves dynamically via `agent-resolver.ts`; the
+ * preview route loads it to populate the dispatch context. App-prefixed to avoid
+ * collision with core system agents.
+ */
+export const QUESTIONNAIRE_CONTRADICTION_DETECTOR_AGENT_SLUG =
+  'app-questionnaire-contradiction-detector';
+
+/**
+ * The contradiction-detector capability's OpenAI-compatible function definition —
+ * the single source of truth shared by the `BaseCapability` subclass and the
+ * `AiCapability` seed row, so the two can never drift. Lives here (rather than on
+ * the class) so the seed can import it without pulling the capability's
+ * orchestration dependency graph into the seed runtime. Dispatched programmatically
+ * by the preview route — not exposed to a chat tool loop.
+ */
+export const DETECT_CONTRADICTIONS_FUNCTION_DEFINITION: CapabilityFunctionDefinition = {
+  name: DETECT_CONTRADICTIONS_CAPABILITY_SLUG,
+  description:
+    "Compare a respondent's captured answers across question slots and report genuine logical contradictions (which slots conflict, why, a severity, and — under probe mode — a follow-up question to reconcile them). Surfaces conflicts for confirmation; never overwrites an answer. Dispatched programmatically by the preview route; persists nothing.",
+  parameters: {
+    type: 'object',
+    properties: {
+      slots: {
+        type: 'array',
+        description: 'The version slot definitions (key, type, prompt, typeConfig) to reason over.',
+        items: { type: 'object', additionalProperties: true },
+      },
+      answers: {
+        type: 'array',
+        description:
+          'The captured answers to compare — each { slotKey, value, confidence?, provenance? }.',
+        items: { type: 'object', additionalProperties: true },
+      },
+      mode: {
+        type: 'string',
+        description: 'Behaviour on a hit: off | flag (surface) | probe (request a follow-up).',
+      },
+      windowN: {
+        type: 'number',
+        description: 'How many prior answers to compare against; 0 = compare all.',
+      },
+      sessionId: {
+        type: 'string',
+        description: 'Stable session identity, threaded into cost-log metadata.',
+      },
+    },
+    required: ['slots', 'answers', 'mode'],
+  },
+};
