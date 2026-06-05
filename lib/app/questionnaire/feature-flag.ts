@@ -7,6 +7,7 @@ import {
   APP_QUESTIONNAIRES_ANSWER_REFINEMENT_FLAG,
   APP_QUESTIONNAIRES_COMPLETION_FLAG,
   APP_QUESTIONNAIRES_CONTRADICTION_DETECTION_FLAG,
+  APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG,
   APP_QUESTIONNAIRES_FLAG,
 } from '@/lib/app/questionnaire/constants';
 import { isFeatureEnabled } from '@/lib/feature-flags';
@@ -21,6 +22,7 @@ export {
   APP_QUESTIONNAIRES_CONTRADICTION_DETECTION_FLAG,
   APP_QUESTIONNAIRES_ANSWER_REFINEMENT_FLAG,
   APP_QUESTIONNAIRES_COMPLETION_FLAG,
+  APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG,
 };
 
 /**
@@ -125,6 +127,25 @@ export async function isCompletionEnabled(): Promise<boolean> {
     isFeatureEnabled(APP_QUESTIONNAIRES_COMPLETION_FLAG),
   ]);
   return app && completion;
+}
+
+/**
+ * Whether the F5.1 **design-time evaluation** judge panel may run. Requires BOTH the
+ * master app flag and the design-evaluation sub-flag — a run spends seven LLM calls
+ * (one per judge), so it's opt-in on top of an already-enabled app (the same shape as
+ * {@link isCompletionEnabled}). The evaluate-preview route consults this and returns
+ * 404 when it's `false`, so a disabled sub-feature looks like a missing route rather
+ * than a 401 — the whole route is paid LLM work, so unlike completion there is no free
+ * deterministic result to fall back to.
+ *
+ * Server-only (resolves both flags from the database).
+ */
+export async function isDesignEvaluationEnabled(): Promise<boolean> {
+  const [app, evaluation] = await Promise.all([
+    isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG),
+  ]);
+  return app && evaluation;
 }
 
 /**

@@ -17,6 +17,7 @@ import { registerAppCapability } from '@/lib/orchestration/capabilities/registry
 import {
   AppComposeCompletionOfferCapability,
   AppDetectContradictionsCapability,
+  AppEvaluateStructureCapability,
   AppExtractAnswerSlotsCapability,
   AppExtractQuestionnaireStructureCapability,
   AppRefineAnswerCapability,
@@ -51,4 +52,10 @@ export function initAppCapabilities(): void {
   // flag-gated completion-status route dispatches it), so unconditional registration
   // here is safe.
   registerAppCapability(new AppComposeCompletionOfferCapability());
+
+  // F5.1 — design-time structure evaluation. Inert until the APP_QUESTIONNAIRES_ENABLED
+  // master flag and the APP_QUESTIONNAIRES_DESIGN_EVALUATION sub-flag are both on (only
+  // the flag-gated evaluate-preview route dispatches it), so unconditional registration
+  // here is safe.
+  registerAppCapability(new AppEvaluateStructureCapability());
 }

@@ -43,3 +43,9 @@ export {
   type ComposeCompletionOfferArgs,
   type ComposeCompletionOfferData,
 } from '@/lib/app/questionnaire/capabilities/compose-completion-offer';
+
+export {
+  AppEvaluateStructureCapability,
+  type EvaluateStructureArgs,
+  type EvaluateStructureData,
+} from '@/lib/app/questionnaire/capabilities/evaluate-structure';

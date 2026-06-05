@@ -449,3 +449,67 @@ export const COMPOSE_COMPLETION_OFFER_FUNCTION_DEFINITION: CapabilityFunctionDef
     required: ['coverage', 'answeredCount', 'capReached', 'coveredSlots'],
   },
 };
+
+/**
+ * Sub-flag gating the F5.1 **design-time evaluation** judges (the LLM panel that
+ * scores a version's structure against its goal/audience and proposes edits). Disabled
+ * by default: a run spends seven LLM calls, so an operator opts in deliberately — the
+ * same reasoning as the F4 sub-flags above. Independent of {@link APP_QUESTIONNAIRES_FLAG}
+ * (the master gate); both must be on for the evaluate-preview route to run. Seeded by
+ * `prisma/seeds/app-questionnaire/019-design-evaluation-flag.ts`.
+ */
+export const APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG =
+  'APP_QUESTIONNAIRES_DESIGN_EVALUATION_ENABLED';
+
+/**
+ * Slug of the evaluate-structure capability (F5.1). One source of truth shared by the
+ * `BaseCapability` subclass, its `AiCapability` seed row, and the evaluate-preview
+ * route that dispatches it once per dimension. Snake_case with the fork-owned `app_`
+ * prefix, like the F4 capabilities. The judge agents themselves are slugged in the
+ * dimension registry (`evaluation/dimensions.ts`).
+ */
+export const EVALUATE_STRUCTURE_CAPABILITY_SLUG = 'app_evaluate_structure';
+
+/**
+ * `AiCapability.executionHandler` value for the evaluate-structure capability — the
+ * class name the dispatcher resolves the in-memory handler by. Must match the class
+ * registered in `lib/app/capabilities.ts`.
+ */
+export const EVALUATE_STRUCTURE_HANDLER = 'AppEvaluateStructureCapability';
+
+/**
+ * The evaluate-structure capability's OpenAI-compatible function definition — the
+ * single source of truth shared by the `BaseCapability` subclass and the
+ * `AiCapability` seed row, so the two can never drift. Lives here (rather than on the
+ * class) so the seed can import it without pulling the capability's orchestration
+ * dependency graph into the seed runtime. Dispatched programmatically by the
+ * evaluate-preview route — not exposed to a chat tool loop. `structure` is passed as
+ * an opaque object (the pure `VersionStructureInput` DTO); the capability validates it
+ * with Zod at execute time.
+ */
+export const EVALUATE_STRUCTURE_FUNCTION_DEFINITION: CapabilityFunctionDefinition = {
+  name: EVALUATE_STRUCTURE_CAPABILITY_SLUG,
+  description:
+    "Judge one dimension of a questionnaire version's structure (clarity, coverage, duplicates, type fit, ordering, audience match, or goal match) against its stated goal and audience, via a provider-agnostic structured LLM call. Returns a continuous score in [0, 1] and a list of actionable findings (proposed edits). Dispatched once per dimension by the evaluate-preview route; persists nothing.",
+  parameters: {
+    type: 'object',
+    properties: {
+      dimension: {
+        type: 'string',
+        description:
+          'Which dimension to judge: clarity | coverage | duplicates | type_fit | ordering | audience_match | goal_match.',
+      },
+      structure: {
+        type: 'object',
+        description:
+          'The version structure DTO to judge — { goal, audience, sections[] } with each question carrying its key, prompt, type, and required flag.',
+        additionalProperties: true,
+      },
+      versionId: {
+        type: 'string',
+        description: 'Stable version identity, threaded into cost-log metadata.',
+      },
+    },
+    required: ['dimension', 'structure'],
+  },
+};
