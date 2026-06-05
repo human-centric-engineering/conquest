@@ -1,0 +1,204 @@
+/**
+ * Route-local session-lifecycle persistence seam (F4.6).
+ *
+ * The DB write path for the session state machine. The pure core
+ * (`lib/app/questionnaire/session/**`) decides which transitions are legal and what
+ * event each writes; this seam performs the I/O: read the current status, validate the
+ * move, and — atomically — update the status AND append one `AppQuestionnaireSessionEvent`
+ * row (the audit trail). Like the answer-slot seam (`answer-slots.ts`), it's route-local
+ * for now; F6.1's live turn loop may promote it to a shared lib module.
+ *
+ * The single writer is {@link transitionSession}; {@link pauseSession} /
+ * {@link resumeSession} / {@link abandonSession} / {@link markSessionCompleted} are thin
+ * status-specific wrappers. {@link recordCostCapReached} writes a non-transition
+ * `cost_cap_reached` event (no status change) — the budget hook F6.3/F6.5 will fire,
+ * wired here but never fired in F4.6. {@link loadSessionResumeState} is the "resume"
+ * read: a paused session's status plus the answers captured so far, so the caller picks
+ * up where it left off (turn-free — the live turn loop is F6.1).
+ *
+ * `markSessionCompleted` lives here (moved from `answer-slots.ts`, which re-exports it
+ * for the F4.5 `/complete` route) so completion now writes its `completed` event like
+ * every other transition.
+ */
+
+import { Prisma } from '@prisma/client';
+import { prisma } from '@/lib/db/client';
+import { NotFoundError } from '@/lib/api/errors';
+import {
+  ANSWER_PROVENANCES,
+  SESSION_STATUSES,
+  narrowToEnum,
+  type AnswerProvenance,
+  type SessionStatus,
+} from '@/lib/app/questionnaire/types';
+import { classifyTransition, eventTypeFor } from '@/lib/app/questionnaire/session/session-logic';
+import { SessionTransitionError } from '@/lib/app/questionnaire/session/types';
+
+/** Optional detail recorded on a transition's event row. */
+export interface TransitionOptions {
+  /** Human-readable note (e.g. why a session was abandoned). */
+  reason?: string;
+  /** Event-specific structured detail, stored on `metadata`. */
+  metadata?: Prisma.InputJsonValue;
+}
+
+/**
+ * Transition a session to `to`, recording the audit event — the single writer the
+ * wrappers delegate to. In one transaction: read the current status, classify the
+ * `from → to` move via the pure core, then:
+ *
+ *  - `illegal` → throw {@link SessionTransitionError} (the route maps it to 409); nothing
+ *    is written.
+ *  - `noop` (`from === to`, incl. terminal re-entry like `completed → completed`) → no
+ *    write, no event; returns the current status. This is what keeps the F4.5
+ *    accept→submit path idempotent.
+ *  - `apply` → update `status` AND insert one event ({@link eventTypeFor}); returns `to`.
+ *
+ * Status update and event insert share a transaction so a status can never change
+ * without its audit row (or vice-versa). Throws {@link NotFoundError} if the session id
+ * doesn't resolve.
+ */
+export async function transitionSession(
+  sessionId: string,
+  to: SessionStatus,
+  opts: TransitionOptions = {}
+): Promise<SessionStatus> {
+  return prisma.$transaction(async (tx) => {
+    const row = await tx.appQuestionnaireSession.findUnique({
+      where: { id: sessionId },
+      select: { status: true },
+    });
+    if (!row) throw new NotFoundError('Session not found');
+
+    const from = narrowToEnum(row.status, SESSION_STATUSES, 'active');
+    const classification = classifyTransition(from, to);
+
+    if (classification === 'illegal') {
+      throw new SessionTransitionError(from, to);
+    }
+    if (classification === 'noop') {
+      return from;
+    }
+
+    await tx.appQuestionnaireSession.update({
+      where: { id: sessionId },
+      data: { status: to },
+    });
+    await tx.appQuestionnaireSessionEvent.create({
+      data: {
+        sessionId,
+        eventType: eventTypeFor(from, to),
+        fromStatus: from,
+        toStatus: to,
+        ...(opts.reason !== undefined ? { reason: opts.reason } : {}),
+        ...(opts.metadata !== undefined ? { metadata: opts.metadata } : {}),
+      },
+    });
+    return to;
+  });
+}
+
+/** Pause an active session (`active → paused`). Idempotent if already paused. */
+export function pauseSession(sessionId: string, opts?: TransitionOptions): Promise<SessionStatus> {
+  return transitionSession(sessionId, 'paused', opts);
+}
+
+/** Resume a paused session (`paused → active`), writing a `resumed` event. */
+export function resumeSession(sessionId: string, opts?: TransitionOptions): Promise<SessionStatus> {
+  return transitionSession(sessionId, 'active', opts);
+}
+
+/** Abandon a session (`active|paused → abandoned`). Terminal. */
+export function abandonSession(
+  sessionId: string,
+  opts?: TransitionOptions
+): Promise<SessionStatus> {
+  return transitionSession(sessionId, 'abandoned', opts);
+}
+
+/**
+ * Transition a session to `completed` — the F4.5 accept→submit write path, now routed
+ * through {@link transitionSession} so it writes a `completed` event. Idempotent
+ * (re-completing a completed session is a no-op that writes no second event).
+ * Re-exported from `answer-slots.ts` so the `/complete` route's import is unchanged.
+ */
+export function markSessionCompleted(
+  sessionId: string,
+  opts?: TransitionOptions
+): Promise<SessionStatus> {
+  return transitionSession(sessionId, 'completed', opts);
+}
+
+/** The cost-cap detail recorded on a `cost_cap_reached` event. */
+export interface CostCapDetail {
+  /** USD spent on the session when the cap was hit. */
+  spentUsd: number;
+  /** The session's configured USD cap. */
+  capUsd: number;
+}
+
+/**
+ * Record that a session hit its cost budget — a non-transition event (no status
+ * change), with the spend detail on `metadata`. The hook F6.3/F6.5 will fire at the
+ * turn boundary; F4.6 wires it but never fires it.
+ */
+export async function recordCostCapReached(
+  sessionId: string,
+  detail: CostCapDetail
+): Promise<void> {
+  await prisma.appQuestionnaireSessionEvent.create({
+    data: {
+      sessionId,
+      eventType: 'cost_cap_reached',
+      metadata: { spentUsd: detail.spentUsd, capUsd: detail.capUsd },
+    },
+  });
+}
+
+/** One answered slot in a session's resume state. */
+export interface ResumeAnswerView {
+  slotKey: string;
+  value: Prisma.JsonValue;
+  provenance: AnswerProvenance;
+  confidence: number | null;
+}
+
+/** What a caller needs to pick up a session where it left off. */
+export interface SessionResumeState {
+  status: SessionStatus;
+  answeredSlots: ResumeAnswerView[];
+}
+
+/**
+ * Load a session's resume state: its status plus the answers captured so far (keyed by
+ * slot). Intentionally minimal — coverage / next-question stay in the F4.1/F4.5 context
+ * builders the caller already uses, and the per-turn history is F6.1's. Throws
+ * {@link NotFoundError} if the session id doesn't resolve.
+ */
+export async function loadSessionResumeState(sessionId: string): Promise<SessionResumeState> {
+  const row = await prisma.appQuestionnaireSession.findUnique({
+    where: { id: sessionId },
+    select: {
+      status: true,
+      answers: {
+        select: {
+          value: true,
+          provenanceLabel: true,
+          confidence: true,
+          questionSlot: { select: { key: true } },
+        },
+      },
+    },
+  });
+  if (!row) throw new NotFoundError('Session not found');
+
+  return {
+    status: narrowToEnum(row.status, SESSION_STATUSES, 'active'),
+    answeredSlots: row.answers.map((a) => ({
+      slotKey: a.questionSlot.key,
+      value: a.value,
+      provenance: narrowToEnum(a.provenanceLabel, ANSWER_PROVENANCES, 'direct'),
+      confidence: a.confidence,
+    })),
+  };
+}
