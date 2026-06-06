@@ -392,3 +392,106 @@ describe('applyIntents (pure merge)', () => {
     expect(applyIntents(s, [])).toBe(s);
   });
 });
+
+describe('runTurn — soft cost cap (F6.3)', () => {
+  it('biases a not_ready turn into an offer when costPressure is soft and ≥1 answered', async () => {
+    // Two questions, one answered → coverage 0.5 < default threshold → not_ready, answeredCount 1.
+    const { invokers, calls } = stubInvokers();
+    const result = await runTurn(
+      state({
+        questions: [q({ id: 'a', key: 'a' }), q({ id: 'b', key: 'b' })],
+        answered: [{ questionId: 'a', confidence: null }],
+        costPressure: 'soft',
+      }),
+      invokers
+    );
+
+    // The deterministic assessment is unchanged (honest), but the response is an early offer.
+    expect(result.assessment.kind).toBe('not_ready');
+    expect(result.response.kind).toBe('offer');
+    expect(calls.select).toHaveLength(0);
+    expect(slugs(result.toolCalls)).toEqual([COMPOSE_COMPLETION_OFFER_CAPABILITY_SLUG]);
+    // The composer input carries the wrap-up flag so the prose nudges submission.
+    if (result.response.kind === 'offer') {
+      expect(result.response.input.costWrapUp).toBe(true);
+    }
+  });
+
+  it('does NOT force an offer on an empty session (answeredCount 0) — selection still runs', async () => {
+    const { invokers, calls } = stubInvokers({
+      select: { decision: { kind: 'ask', questionId: 'a', rationale: 'first', costUsd: 0 } },
+    });
+    const result = await runTurn(
+      state({
+        questions: [q({ id: 'a', key: 'a' }), q({ id: 'b', key: 'b' })],
+        costPressure: 'soft',
+      }),
+      invokers
+    );
+
+    expect(result.assessment.answeredCount).toBe(0);
+    expect(result.response.kind).toBe('question');
+    expect(calls.select).toHaveLength(1);
+  });
+
+  it('does NOT bypass the required-questions gate (blocked_on_required stays authoritative)', async () => {
+    // `a` is required + unanswered → blocked_on_required even though `b` is answered.
+    const { invokers } = stubInvokers({
+      select: { decision: { kind: 'ask', questionId: 'a', rationale: 'ask required', costUsd: 0 } },
+    });
+    const result = await runTurn(
+      state({
+        questions: [q({ id: 'a', key: 'a', required: true }), q({ id: 'b', key: 'b' })],
+        answered: [{ questionId: 'b', confidence: null }],
+        costPressure: 'soft',
+      }),
+      invokers
+    );
+
+    expect(result.assessment.kind).toBe('blocked_on_required');
+    expect(result.response.kind).toBe('question');
+  });
+
+  it('tags an already-eligible offer with costWrapUp under soft pressure', async () => {
+    // Both answered → offer regardless; soft pressure should still set the wrap-up flag.
+    const { invokers } = stubInvokers();
+    const result = await runTurn(
+      state({
+        questions: [q({ id: 'a', key: 'a' }), q({ id: 'b', key: 'b' })],
+        answered: [
+          { questionId: 'a', confidence: null },
+          { questionId: 'b', confidence: null },
+        ],
+        config: { minQuestionsAnswered: 2 },
+        costPressure: 'soft',
+      }),
+      invokers
+    );
+
+    expect(result.assessment.kind).toBe('offer');
+    expect(result.response.kind).toBe('offer');
+    if (result.response.kind === 'offer') {
+      expect(result.response.input.costWrapUp).toBe(true);
+    }
+  });
+
+  it('omits costWrapUp when there is no cost pressure', async () => {
+    const { invokers } = stubInvokers();
+    const result = await runTurn(
+      state({
+        questions: [q({ id: 'a', key: 'a' }), q({ id: 'b', key: 'b' })],
+        answered: [
+          { questionId: 'a', confidence: null },
+          { questionId: 'b', confidence: null },
+        ],
+        config: { minQuestionsAnswered: 2 },
+      }),
+      invokers
+    );
+
+    expect(result.response.kind).toBe('offer');
+    if (result.response.kind === 'offer') {
+      expect(result.response.input.costWrapUp).toBeUndefined();
+    }
+  });
+});

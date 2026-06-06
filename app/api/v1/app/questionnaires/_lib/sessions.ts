@@ -129,18 +129,24 @@ export function markSessionCompleted(
   return transitionSession(sessionId, 'completed', opts);
 }
 
+/** Which cost-cap threshold a `cost_cap_reached` event marks (F6.3). */
+export type CostCapTierLabel = 'soft' | 'hard';
+
 /** The cost-cap detail recorded on a `cost_cap_reached` event. */
 export interface CostCapDetail {
   /** USD spent on the session when the cap was hit. */
   spentUsd: number;
   /** The session's configured USD cap. */
   capUsd: number;
+  /** Which threshold this marks — `soft` (≥90%, nudge) or `hard` (≥100%, refuse + pause). */
+  tier: CostCapTierLabel;
 }
 
 /**
- * Record that a session hit its cost budget — a non-transition event (no status
- * change), with the spend detail on `metadata`. The hook F6.3/F6.5 will fire at the
- * turn boundary; F4.6 wires it but never fires it.
+ * Record that a session crossed a cost-budget threshold — a non-transition event (no
+ * status change), with the spend detail + `tier` on `metadata`. Fired by the F6.3 turn
+ * boundary: once on the first soft crossing and once on the hard refusal. The hard-cap
+ * auto-pause is a separate {@link pauseSession} call (its own `paused` event).
  */
 export async function recordCostCapReached(
   sessionId: string,
@@ -150,9 +156,30 @@ export async function recordCostCapReached(
     data: {
       sessionId,
       eventType: 'cost_cap_reached',
-      metadata: { spentUsd: detail.spentUsd, capUsd: detail.capUsd },
+      metadata: { spentUsd: detail.spentUsd, capUsd: detail.capUsd, tier: detail.tier },
     },
   });
+}
+
+/**
+ * Whether a `cost_cap_reached` event of the given `tier` has already been written for this
+ * session — used by the turn boundary to fire the soft-cap event only once (the soft tier
+ * persists across every turn between 90% and 100%, so a naive write would spam the audit
+ * trail). Reads `metadata.tier` via a JSON-path filter.
+ */
+export async function hasCostCapReachedEvent(
+  sessionId: string,
+  tier: CostCapTierLabel
+): Promise<boolean> {
+  const existing = await prisma.appQuestionnaireSessionEvent.findFirst({
+    where: {
+      sessionId,
+      eventType: 'cost_cap_reached',
+      metadata: { path: ['tier'], equals: tier },
+    },
+    select: { id: true },
+  });
+  return existing !== null;
 }
 
 /**

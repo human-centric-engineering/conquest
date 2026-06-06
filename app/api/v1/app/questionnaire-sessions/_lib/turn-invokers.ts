@@ -122,7 +122,8 @@ export async function buildTurnInvokers(opts: {
           diagnostic: dispatch.error?.code ?? 'extraction_failed',
         };
       }
-      return { intents: (dispatch.data as ExtractAnswerSlotsData).intents, costUsd: 0, latencyMs };
+      const data = dispatch.data as ExtractAnswerSlotsData;
+      return { intents: data.intents, costUsd: data.costUsd ?? 0, latencyMs };
     },
 
     async detectContradictions(state): Promise<DetectOutcome> {
@@ -159,9 +160,10 @@ export async function buildTurnInvokers(opts: {
           diagnostic: dispatch.error?.code ?? 'detection_failed',
         };
       }
+      const data = dispatch.data as DetectContradictionsData;
       return {
-        findings: (dispatch.data as DetectContradictionsData).findings,
-        costUsd: 0,
+        findings: data.findings,
+        costUsd: data.costUsd ?? 0,
         latencyMs,
       };
     },
@@ -208,7 +210,8 @@ export async function buildTurnInvokers(opts: {
           diagnostic: dispatch.error?.code ?? 'refinement_failed',
         };
       }
-      return { decisions: (dispatch.data as RefineAnswerData).decisions, costUsd: 0, latencyMs };
+      const data = dispatch.data as RefineAnswerData;
+      return { decisions: data.decisions, costUsd: data.costUsd ?? 0, latencyMs };
     },
 
     async selectNext(state): Promise<SelectOutcome> {

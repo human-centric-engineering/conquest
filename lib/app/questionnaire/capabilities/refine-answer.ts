@@ -148,6 +148,11 @@ export interface RefineAnswerData {
    * route can report it honestly.
    */
   droppedCount: number;
+  /**
+   * USD cost of this LLM call — surfaced so the live turn loop can sum a turn's true
+   * spend for cost-cap enforcement (F6.3); mirrors the figure logged to `AiCostLog`.
+   */
+  costUsd: number;
 }
 
 /**
@@ -368,6 +373,6 @@ export class AppRefineAnswerCapability extends BaseCapability<RefineAnswerArgs, 
       });
     }
 
-    return this.success({ decisions, droppedCount: dropped.length });
+    return this.success({ decisions, droppedCount: dropped.length, costUsd: completion.costUsd });
   }
 }

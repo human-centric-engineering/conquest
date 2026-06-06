@@ -132,6 +132,12 @@ export interface ExtractAnswerSlotsData {
    * what's in `intents`.
    */
   droppedCount: number;
+  /**
+   * USD cost of this LLM call (summed input+output across the retry). Surfaced on the
+   * data so the live turn loop can sum a turn's true spend for cost-cap enforcement
+   * (F6.3) — the same figure already logged fire-and-forget to `AiCostLog`.
+   */
+  costUsd: number;
 }
 
 /**
@@ -357,6 +363,6 @@ export class AppExtractAnswerSlotsCapability extends BaseCapability<
       });
     }
 
-    return this.success({ intents, droppedCount: dropped.length });
+    return this.success({ intents, droppedCount: dropped.length, costUsd: completion.costUsd });
   }
 }

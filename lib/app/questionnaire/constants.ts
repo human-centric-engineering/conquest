@@ -487,6 +487,17 @@ export const APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG = 'APP_QUESTIONNAIRES_LIVE_SE
 export const APP_QUESTIONNAIRES_VOICE_INPUT_FLAG = 'APP_QUESTIONNAIRES_VOICE_INPUT_ENABLED';
 
 /**
+ * Sub-flag gating F6.3 **cost-cap enforcement** — the per-session USD budget enforced at the
+ * turn boundary (soft nudge at ≥90%, hard 402 + auto-pause at ≥100%). Disabled by default so
+ * enforcement dark-launches independently: a live-sessions deployment runs unmetered until an
+ * operator deliberately turns the cap on, and it can be switched off again without touching the
+ * live surface. Requires the master flag AND the live-sessions flag (the cap only applies to the
+ * live `/messages` turn loop) AND this sub-flag; when off, turns run with no budget check even if
+ * a version sets `costBudgetUsd`. Seeded by `prisma/seeds/app-questionnaire/023-cost-cap-flag.ts`.
+ */
+export const APP_QUESTIONNAIRES_COST_CAP_FLAG = 'APP_QUESTIONNAIRES_COST_CAP_ENABLED';
+
+/**
  * Slug of the evaluate-structure capability (F5.1). One source of truth shared by the
  * `BaseCapability` subclass, its `AiCapability` seed row, and the evaluate-preview
  * route that dispatches it once per dimension. Snake_case with the fork-owned `app_`

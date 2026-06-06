@@ -102,7 +102,8 @@ function buildOfferInput(
   state: TurnState,
   coverage: number,
   answeredCount: number,
-  capReached: boolean
+  capReached: boolean,
+  costWrapUp: boolean
 ): OfferComposeInput {
   const remaining = unansweredQuestions(state);
   const remainingIds = new Set(remaining.map((q) => q.id));
@@ -115,6 +116,7 @@ function buildOfferInput(
     coveredSlots: covered.map((q) => ({ key: q.key, prompt: q.prompt ?? '' })),
     remainingSlots: remaining.map((q) => ({ key: q.key, prompt: q.prompt ?? '' })),
     recentMessages: state.recentMessages,
+    ...(costWrapUp ? { costWrapUp: true } : {}),
   };
 }
 
@@ -213,11 +215,18 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
     sessionId: effective.sessionId,
   });
 
+  // Soft cost cap (F6.3): bias toward offering completion early so the session winds down
+  // before the hard cap, and tag the offer prose with a wrap-up instruction. Only overrides
+  // `not_ready` (thresholds merely unmet) — never the required-questions gate
+  // (`blocked_on_required` stays authoritative), and never an empty session (answeredCount 0).
+  const costWrapUp = effective.costPressure === 'soft';
+  const offerEarly = costWrapUp && assessment.kind === 'not_ready' && assessment.answeredCount > 0;
+
   // 6. Respond.
   let response: TurnResponse;
   let targetedQuestionId: string | null;
 
-  if (assessment.kind === 'offer') {
+  if (assessment.kind === 'offer' || offerEarly) {
     if (effective.flags.completion) {
       // Offer turn: the route streams the composed prose; the core hands it the input.
       toolCalls.push(toolCall(COMPOSE_COMPLETION_OFFER_CAPABILITY_SLUG, true));
@@ -227,7 +236,8 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
           effective,
           assessment.coverage,
           assessment.answeredCount,
-          assessment.capReached
+          assessment.capReached,
+          costWrapUp
         ),
       };
     } else {

@@ -94,3 +94,18 @@ export async function recordTurn(input: TurnWriteInput): Promise<string> {
     return turn.id;
   });
 }
+
+/**
+ * Sum a session's recorded per-turn LLM spend (USD) across all its turns — the cost basis
+ * the F6.3 turn boundary grades against the session's budget. `AppQuestionnaireTurn.costUsd`
+ * is `null` for a zero-cost turn (see {@link recordTurn}); `_sum` ignores nulls, and a
+ * session with no costed turns coalesces to `0`. This is the spend *before* the current
+ * turn runs (turn-boundary semantics — the current turn's cost is recorded afterward).
+ */
+export async function sumSessionTurnCost(sessionId: string): Promise<number> {
+  const agg = await prisma.appQuestionnaireTurn.aggregate({
+    where: { sessionId },
+    _sum: { costUsd: true },
+  });
+  return agg._sum.costUsd ?? 0;
+}

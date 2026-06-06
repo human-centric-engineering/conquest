@@ -45,6 +45,7 @@ export function state(input: {
   selectionRound?: number;
   flags?: Partial<TurnFlags>;
   sessionId?: string;
+  costPressure?: 'soft';
 }): TurnState {
   return {
     sessionId: input.sessionId ?? 'sess-1',
@@ -56,6 +57,7 @@ export function state(input: {
     recentMessages: input.recentMessages ?? [],
     selectionRound: input.selectionRound ?? 0,
     flags: flags(input.flags),
+    ...(input.costPressure ? { costPressure: input.costPressure } : {}),
   };
 }
 

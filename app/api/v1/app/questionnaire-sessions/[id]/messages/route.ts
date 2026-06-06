@@ -34,12 +34,20 @@ import {
   isAnswerRefinementEnabled,
   isCompletionEnabled,
   isContradictionDetectionEnabled,
+  isCostCapEnforcementEnabled,
   withLiveSessionsEnabled,
 } from '@/lib/app/questionnaire/feature-flag';
+import { classifyCostCap } from '@/lib/app/questionnaire/session';
 import { runTurn, type TurnState } from '@/lib/app/questionnaire/orchestrator';
 import type { ChatEvent } from '@/types/orchestration';
 import { turnLimiter } from '@/app/api/v1/app/questionnaire-sessions/_lib/rate-limit';
 import { buildTurnContext } from '@/app/api/v1/app/questionnaires/_lib/turn-context';
+import { sumSessionTurnCost } from '@/app/api/v1/app/questionnaires/_lib/turns';
+import {
+  hasCostCapReachedEvent,
+  pauseSession,
+  recordCostCapReached,
+} from '@/app/api/v1/app/questionnaires/_lib/sessions';
 import { buildTurnInvokers } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-invokers';
 import { persistTurn } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-run';
 import { streamOfferMessage } from '@/app/api/v1/app/questionnaire-sessions/_lib/offer-stream';
@@ -85,6 +93,54 @@ async function handleMessage(
 
     const body = await validateRequestBody(request, bodySchema);
 
+    // Cost cap (F6.3): grade the session's spend so far against its budget at the turn
+    // boundary, before any per-turn work. Hard (≥100%) refuses this turn with 402 and
+    // auto-pauses the session (the `paused` event + a `cost_cap_reached` marker); the status
+    // gate above then rejects every later turn. Soft (≥90%) lets the turn run but flags
+    // `costPressure` so the core offers completion early + the offer prose nudges a wrap-up,
+    // and writes the soft marker once. Gated by its own sub-flag and a configured budget.
+    const capUsd = loaded.base.config.costBudgetUsd;
+    let costPressure: 'soft' | undefined;
+    if (capUsd !== null && (await isCostCapEnforcementEnabled())) {
+      const spentUsd = await sumSessionTurnCost(sessionId);
+      const tier = classifyCostCap(spentUsd, capUsd);
+      if (tier === 'hard') {
+        // Pause FIRST — the pause is the enforcement (the status gate then 409s every later
+        // turn); the audit event is secondary. Doing it first means a failed event write can't
+        // leave the session active-but-recorded (which a retry would then double-record).
+        await pauseSession(sessionId, { reason: 'cost_cap' });
+        try {
+          await recordCostCapReached(sessionId, { spentUsd, capUsd, tier: 'hard' });
+        } catch (err) {
+          log.error('Cost cap: hard event write failed (session already paused)', {
+            sessionId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        log.info('Live turn refused: cost cap reached', { sessionId, spentUsd, capUsd });
+        return errorResponse('Session cost budget exhausted', {
+          code: 'COST_CAP_REACHED',
+          status: 402,
+          details: { spentUsd, capUsd },
+        });
+      }
+      if (tier === 'soft') {
+        costPressure = 'soft';
+        // Best-effort: the soft cap is an advisory nudge, so a bookkeeping failure must not
+        // fail a turn that should run. (The hard cap above fails closed; soft fails open.)
+        try {
+          if (!(await hasCostCapReachedEvent(sessionId, 'soft'))) {
+            await recordCostCapReached(sessionId, { spentUsd, capUsd, tier: 'soft' });
+          }
+        } catch (err) {
+          log.error('Cost cap: soft event write failed (continuing turn)', {
+            sessionId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+    }
+
     // Resolve the per-step flags (async DB reads) up front, so the pure core stays sync.
     const [extraction, contradiction, refinement, completion, adaptive] = await Promise.all([
       isAnswerExtractionEnabled(),
@@ -98,6 +154,7 @@ async function handleMessage(
       ...loaded.base,
       userMessage: body.message,
       flags: { extraction, contradiction, refinement, completion },
+      ...(costPressure ? { costPressure } : {}),
     };
 
     const invokers = await buildTurnInvokers({

@@ -21,3 +21,9 @@ export {
   assertTransition,
   eventTypeFor,
 } from '@/lib/app/questionnaire/session/session-logic';
+
+export {
+  SOFT_CAP_RATIO,
+  type CostCapTier,
+  classifyCostCap,
+} from '@/lib/app/questionnaire/session/cost-cap';

@@ -43,7 +43,12 @@ export function buildStreamingOfferPrompt(input: OfferComposeInput): LlmMessage[
     'You are a warm, concise questionnaire assistant. The respondent has answered enough ' +
     'to submit. Write a short, friendly message (2–3 sentences) that briefly acknowledges ' +
     'what they covered and invites them to submit now — or keep going if they prefer. ' +
-    'Reply with plain conversational prose only: no JSON, no lists, no headings, no preamble.';
+    'Reply with plain conversational prose only: no JSON, no lists, no headings, no preamble.' +
+    // F6.3 soft cost cap: nudge toward wrapping up without alarming the respondent about cost.
+    (input.costWrapUp
+      ? ' This session is approaching its limit, so gently encourage them to wrap up and ' +
+        'submit now rather than continue, and keep the message especially brief.'
+      : '');
 
   const user =
     `Coverage: ${pct}% across ${input.answeredCount} answered question(s).` +

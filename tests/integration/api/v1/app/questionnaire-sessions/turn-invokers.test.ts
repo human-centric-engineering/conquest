@@ -132,7 +132,7 @@ describe('extractAnswers', () => {
   it('dispatches the extractor with mapped args + entityContext, returning intents', async () => {
     (dispatcherMock.dispatch as Mock).mockResolvedValue({
       success: true,
-      data: { intents: [{ slotKey: 'role', value: 'x' }], droppedCount: 0 },
+      data: { intents: [{ slotKey: 'role', value: 'x' }], droppedCount: 0, costUsd: 0 },
     });
     const inv = await invokers();
     const out = await inv.extractAnswers(state());
@@ -187,6 +187,7 @@ describe('detectContradictions', () => {
       data: {
         findings: [{ slotKeys: ['role'], explanation: 'x', severity: 'low', confidence: 0.5 }],
         droppedCount: 0,
+        costUsd: 0,
       },
     });
     const inv = await invokers();
@@ -220,7 +221,7 @@ describe('refineAnswer', () => {
   it('dispatches the refiner with the triggering contradiction + existing answers', async () => {
     (dispatcherMock.dispatch as Mock).mockResolvedValue({
       success: true,
-      data: { decisions: [{ slotKey: 'role', action: 'refine' }], droppedCount: 0 },
+      data: { decisions: [{ slotKey: 'role', action: 'refine' }], droppedCount: 0, costUsd: 0 },
     });
     const inv = await invokers();
     const out = await inv.refineAnswer(state(), {
@@ -304,6 +305,44 @@ describe('optional-field branches (the false sides of the arg spreads)', () => {
     expect(await inv.refineAnswer(minimal(), {})).toMatchObject({
       diagnostic: 'refiner_unconfigured',
     });
+  });
+});
+
+describe('cost surfacing (F6.3)', () => {
+  it('extractAnswers surfaces the capability data costUsd', async () => {
+    (dispatcherMock.dispatch as Mock).mockResolvedValue({
+      success: true,
+      data: { intents: [], droppedCount: 0, costUsd: 0.0123 },
+    });
+    const inv = await invokers();
+    expect((await inv.extractAnswers(state())).costUsd).toBe(0.0123);
+  });
+
+  it('detectContradictions surfaces the capability data costUsd', async () => {
+    (dispatcherMock.dispatch as Mock).mockResolvedValue({
+      success: true,
+      data: { findings: [], droppedCount: 0, costUsd: 0.004 },
+    });
+    const inv = await invokers();
+    expect((await inv.detectContradictions(state())).costUsd).toBe(0.004);
+  });
+
+  it('refineAnswer surfaces the capability data costUsd', async () => {
+    (dispatcherMock.dispatch as Mock).mockResolvedValue({
+      success: true,
+      data: { decisions: [], droppedCount: 0, costUsd: 0.002 },
+    });
+    const inv = await invokers();
+    expect((await inv.refineAnswer(state(), {})).costUsd).toBe(0.002);
+  });
+
+  it('falls back to 0 when the capability data omits costUsd', async () => {
+    (dispatcherMock.dispatch as Mock).mockResolvedValue({
+      success: true,
+      data: { intents: [], droppedCount: 0 },
+    });
+    const inv = await invokers();
+    expect((await inv.extractAnswers(state())).costUsd).toBe(0);
   });
 });
 

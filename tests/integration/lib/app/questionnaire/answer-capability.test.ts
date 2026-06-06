@@ -183,6 +183,7 @@ describe('AppExtractAnswerSlotsCapability — dispatch', () => {
     expect(result.success).toBe(true);
     const data = result.data as {
       intents: Array<{ slotKey: string; isActiveQuestion: boolean; value: unknown }>;
+      costUsd: number;
     };
     expect(data.intents).toHaveLength(2);
     const active = data.intents.find((i) => i.slotKey === 'full_name');
@@ -190,6 +191,9 @@ describe('AppExtractAnswerSlotsCapability — dispatch', () => {
     expect(active?.isActiveQuestion).toBe(true);
     expect(sideEffect?.isActiveQuestion).toBe(false);
     expect(active?.value).toBe('Dana Scully');
+    // F6.3: the real LLM cost is surfaced on the data (here the mocked calculateCost total),
+    // so the live turn loop can sum a turn's true spend for cost-cap enforcement.
+    expect(data.costUsd).toBe(0.003);
     // No retry on the happy path.
     expect(provider.chat).toHaveBeenCalledTimes(1);
   });
@@ -466,6 +470,7 @@ describe('AppExtractAnswerSlotsCapability — redactProvenance', () => {
       success: true,
       data: {
         droppedCount: 0,
+        costUsd: 0,
         intents: [
           {
             slotKey: 'full_name',
@@ -531,7 +536,7 @@ describe('AppExtractAnswerSlotsCapability — redactProvenance', () => {
 
     const redaction = capability.redactProvenance(args, {
       success: true,
-      data: { intents: [], droppedCount: 0 },
+      data: { intents: [], droppedCount: 0, costUsd: 0 },
     });
 
     const safeArgs = redaction.args as Record<string, unknown>;

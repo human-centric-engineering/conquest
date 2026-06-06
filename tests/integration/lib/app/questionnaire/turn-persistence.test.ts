@@ -20,12 +20,17 @@ const mocks = vi.hoisted(() => {
   };
   const prisma = {
     $transaction: vi.fn((cb: (t: typeof tx) => unknown) => cb(tx)),
+    appQuestionnaireTurn: { aggregate: vi.fn() },
   };
   return { tx, prisma };
 });
 vi.mock('@/lib/db/client', () => ({ prisma: mocks.prisma }));
 
-import { recordTurn, type TurnWriteInput } from '@/app/api/v1/app/questionnaires/_lib/turns';
+import {
+  recordTurn,
+  sumSessionTurnCost,
+  type TurnWriteInput,
+} from '@/app/api/v1/app/questionnaires/_lib/turns';
 import { NotFoundError } from '@/lib/api/errors';
 
 type Mock = ReturnType<typeof vi.fn>;
@@ -142,5 +147,29 @@ describe('recordTurn — unknown session', () => {
 
     expect(mocks.tx.appQuestionnaireTurn.create).not.toHaveBeenCalled();
     expect(mocks.tx.appAnswerSlot.updateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('sumSessionTurnCost (F6.3)', () => {
+  it('sums the session turns _sum.costUsd, scoped to the session', async () => {
+    (mocks.prisma.appQuestionnaireTurn.aggregate as Mock).mockResolvedValue({
+      _sum: { costUsd: 0.0246 },
+    });
+
+    const total = await sumSessionTurnCost('sess-1');
+
+    expect(total).toBe(0.0246);
+    expect(mocks.prisma.appQuestionnaireTurn.aggregate).toHaveBeenCalledWith({
+      where: { sessionId: 'sess-1' },
+      _sum: { costUsd: true },
+    });
+  });
+
+  it('coalesces a null sum (no costed turns) to 0', async () => {
+    (mocks.prisma.appQuestionnaireTurn.aggregate as Mock).mockResolvedValue({
+      _sum: { costUsd: null },
+    });
+
+    expect(await sumSessionTurnCost('sess-1')).toBe(0);
   });
 });

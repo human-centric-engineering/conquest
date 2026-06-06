@@ -30,6 +30,17 @@ vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/turn-run', () => runMock);
 const offerMock = vi.hoisted(() => ({ streamOfferMessage: vi.fn() }));
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/offer-stream', () => offerMock);
 
+// Cost-cap seams (F6.3): the route sums prior spend + writes events / pauses on a breach.
+const turnsMock = vi.hoisted(() => ({ sumSessionTurnCost: vi.fn() }));
+vi.mock('@/app/api/v1/app/questionnaires/_lib/turns', () => turnsMock);
+
+const sessionsMock = vi.hoisted(() => ({
+  recordCostCapReached: vi.fn(() => Promise.resolve()),
+  pauseSession: vi.fn(() => Promise.resolve('paused')),
+  hasCostCapReachedEvent: vi.fn(() => Promise.resolve(false)),
+}));
+vi.mock('@/app/api/v1/app/questionnaires/_lib/sessions', () => sessionsMock);
+
 // The real resolveTurnAccess runs; stub only the token verify so the anonymous-path test
 // isn't coupled to the HMAC crypto (which session-access-token.test.ts covers directly).
 const tokenMock = vi.hoisted(() => ({ verifySessionToken: vi.fn() }));
@@ -37,6 +48,7 @@ vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/session-access-token', () 
 
 import { POST } from '@/app/api/v1/app/questionnaire-sessions/[id]/messages/route';
 import { isFeatureEnabled } from '@/lib/feature-flags';
+import { APP_QUESTIONNAIRES_COST_CAP_FLAG } from '@/lib/app/questionnaire/constants';
 import { auth } from '@/lib/auth/config';
 import { mockAuthenticatedUser, mockUnauthenticatedUser } from '@/tests/helpers/auth';
 
@@ -162,7 +174,23 @@ beforeEach(() => {
     yield { type: 'content', delta: 'Ready to submit?' };
     return { message: 'Ready to submit?', costUsd: 0.001 };
   });
+  turnsMock.sumSessionTurnCost.mockResolvedValue(0);
+  sessionsMock.recordCostCapReached.mockResolvedValue(undefined);
+  sessionsMock.pauseSession.mockResolvedValue('paused');
+  sessionsMock.hasCostCapReachedEvent.mockResolvedValue(false);
 });
+
+/** A loaded context carrying a USD budget; `answered` optionally pre-answers the only question. */
+function cappedContext(capUsd: number, answered: Array<{ questionId: string }> = []) {
+  const baseCtx = loadedContext();
+  return loadedContext({
+    base: {
+      ...baseCtx.base,
+      config: { ...baseCtx.base.config, costBudgetUsd: capUsd },
+      answered: answered.map((a) => ({ questionId: a.questionId, confidence: null })),
+    },
+  });
+}
 
 describe('gate order', () => {
   it('404s when the live-sessions flag is off, before auth', async () => {
@@ -323,5 +351,128 @@ describe('fail-soft persistence', () => {
     // The reply already streamed; the persistence failure is swallowed and `done` still lands.
     expect(types).toContain('content');
     expect(types[types.length - 1]).toBe('done');
+  });
+});
+
+describe('cost cap (F6.3)', () => {
+  it('does not sum spend or write events when no budget is configured (cap null)', async () => {
+    const res = await POST(req({ message: 'hi' }), ctx); // default context: costBudgetUsd null
+    expect(res.status).toBe(200);
+    expect(turnsMock.sumSessionTurnCost).not.toHaveBeenCalled();
+    expect(sessionsMock.recordCostCapReached).not.toHaveBeenCalled();
+  });
+
+  it('runs the turn normally when spend is below the soft threshold', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(cappedContext(1.0));
+    turnsMock.sumSessionTurnCost.mockResolvedValue(0.5); // 50%
+    const res = await POST(req({ message: 'hi' }), ctx);
+    expect(res.status).toBe(200);
+    await drainSse(res); // persistTurn runs inside the streamed generator
+    expect(sessionsMock.recordCostCapReached).not.toHaveBeenCalled();
+    expect(sessionsMock.pauseSession).not.toHaveBeenCalled();
+    expect(runMock.persistTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses the turn with 402, auto-pauses, and writes a hard event when at/over the cap', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(cappedContext(1.0));
+    turnsMock.sumSessionTurnCost.mockResolvedValue(1.2); // 120%
+    const res = await POST(req({ message: 'hi' }), ctx);
+
+    expect(res.status).toBe(402);
+    const body = (await res.json()) as {
+      success: boolean;
+      error: { code: string; details: { spentUsd: number; capUsd: number } };
+    };
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('COST_CAP_REACHED');
+    // The spend context is surfaced to the client.
+    expect(body.error.details).toEqual({ spentUsd: 1.2, capUsd: 1.0 });
+    expect(sessionsMock.recordCostCapReached).toHaveBeenCalledWith('sess-1', {
+      spentUsd: 1.2,
+      capUsd: 1.0,
+      tier: 'hard',
+    });
+    expect(sessionsMock.pauseSession).toHaveBeenCalledWith('sess-1', { reason: 'cost_cap' });
+    // Pause FIRST, then record — enforcement is durable even if the audit write fails.
+    expect(sessionsMock.pauseSession.mock.invocationCallOrder[0]).toBeLessThan(
+      sessionsMock.recordCostCapReached.mock.invocationCallOrder[0]
+    );
+    // The turn never ran — no invokers, no persistence.
+    expect(invokersMock.buildTurnInvokers).not.toHaveBeenCalled();
+    expect(runMock.persistTurn).not.toHaveBeenCalled();
+  });
+
+  it('soft cap: runs the turn, writes a soft event once, and biases the offer with a wrap-up', async () => {
+    // Pre-answer the only question so the assessment offers; soft pressure threads costWrapUp.
+    ctxMock.buildTurnContext.mockResolvedValue(cappedContext(1.0, [{ questionId: 'q1' }]));
+    turnsMock.sumSessionTurnCost.mockResolvedValue(0.95); // 95%
+
+    const res = await POST(req({ message: 'I think that is everything' }), ctx);
+    expect(res.status).toBe(200);
+    const types = (await drainSse(res)).map((e) => e.event);
+    expect(types[types.length - 1]).toBe('done');
+
+    expect(sessionsMock.recordCostCapReached).toHaveBeenCalledWith('sess-1', {
+      spentUsd: 0.95,
+      capUsd: 1.0,
+      tier: 'soft',
+    });
+    // The offer composer was handed the wrap-up flag.
+    expect(offerMock.streamOfferMessage).toHaveBeenCalledTimes(1);
+    const offerArgs = offerMock.streamOfferMessage.mock.calls[0][0] as {
+      input: { costWrapUp?: boolean };
+    };
+    expect(offerArgs.input.costWrapUp).toBe(true);
+  });
+
+  it('hard cap: pauses and still returns 402 even if the audit-event write fails', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(cappedContext(1.0));
+    turnsMock.sumSessionTurnCost.mockResolvedValue(1.2);
+    sessionsMock.recordCostCapReached.mockRejectedValue(new Error('event write boom'));
+
+    const res = await POST(req({ message: 'hi' }), ctx);
+    // Enforcement (pause) is durable and the 402 contract holds even when the marker write fails.
+    expect(res.status).toBe(402);
+    expect(sessionsMock.pauseSession).toHaveBeenCalledWith('sess-1', { reason: 'cost_cap' });
+    expect(invokersMock.buildTurnInvokers).not.toHaveBeenCalled();
+  });
+
+  it('soft cap: a failed audit-event write does not fail the (advisory) turn', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(cappedContext(1.0, [{ questionId: 'q1' }]));
+    turnsMock.sumSessionTurnCost.mockResolvedValue(0.95);
+    sessionsMock.recordCostCapReached.mockRejectedValue(new Error('event write boom'));
+
+    const res = await POST(req({ message: 'more' }), ctx);
+    expect(res.status).toBe(200);
+    const types = (await drainSse(res)).map((e) => e.event);
+    // The soft cap is a nudge — a bookkeeping failure must not 500 a turn that should run.
+    expect(types[types.length - 1]).toBe('done');
+    expect(runMock.persistTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('soft cap: does not re-write the soft event when one already exists (dedupe)', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(cappedContext(1.0, [{ questionId: 'q1' }]));
+    turnsMock.sumSessionTurnCost.mockResolvedValue(0.95);
+    sessionsMock.hasCostCapReachedEvent.mockResolvedValue(true); // already recorded earlier
+
+    const res = await POST(req({ message: 'more' }), ctx);
+    expect(res.status).toBe(200);
+    await drainSse(res);
+    expect(sessionsMock.recordCostCapReached).not.toHaveBeenCalled();
+  });
+
+  it('does not enforce when the cost-cap sub-flag is off, even over the cap', async () => {
+    vi.mocked(isFeatureEnabled).mockImplementation((name: string) =>
+      Promise.resolve(name !== APP_QUESTIONNAIRES_COST_CAP_FLAG)
+    );
+    ctxMock.buildTurnContext.mockResolvedValue(cappedContext(1.0));
+    turnsMock.sumSessionTurnCost.mockResolvedValue(2.0); // would be hard if enforced
+
+    const res = await POST(req({ message: 'hi' }), ctx);
+    expect(res.status).toBe(200);
+    await drainSse(res); // persistTurn runs inside the streamed generator
+    expect(turnsMock.sumSessionTurnCost).not.toHaveBeenCalled();
+    expect(sessionsMock.recordCostCapReached).not.toHaveBeenCalled();
+    expect(runMock.persistTurn).toHaveBeenCalledTimes(1);
   });
 });
