@@ -46,8 +46,9 @@ keep working; **no backfill**.
 
 **Theme columns (F3.4) are all nullable** — null on any field means "use the Sunrise
 default" (`resolveTheme()` fills it), so an unthemed client renders exactly as before.
-The remaining distributed P2.5 work — `reset-sessions` (F6.4) and clone-for-client
-(P3+) — is still pending. See the [development plan][plan] P2.5 distributed-work table.
+`reset-sessions` (F6.4) is now built ([demo-session-reset.md](./demo-session-reset.md));
+clone-for-client (P3+) is the remaining distributed P2.5 work. See the
+[development plan][plan] P2.5 distributed-work table.
 
 ### Theming module (F3.4)
 
@@ -84,21 +85,27 @@ The F7.1 chat surface is the second consumer (via `themeToCssVariables`).
 All routes are flag-gated (`404` when `APP_QUESTIONNAIRES_ENABLED` is off, before
 auth), `withAdminAuth` (401/403), and audited. Registry: `API.APP.DEMO_CLIENTS`.
 
-| Method + path                          | Purpose                             | Notable codes                      |
-| -------------------------------------- | ----------------------------------- | ---------------------------------- |
-| `GET /api/v1/app/demo-clients`         | List (active + inactive)            | —                                  |
-| `POST /api/v1/app/demo-clients`        | Create                              | `409 SLUG_CONFLICT`                |
-| `GET /api/v1/app/demo-clients/:id`     | Detail                              | `404`                              |
-| `PATCH /api/v1/app/demo-clients/:id`   | Edit any identity or theme field    | `404`, `409 SLUG_CONFLICT`         |
-| `DELETE /api/v1/app/demo-clients/:id`  | Delete (guarded)                    | `404`, `409 DEMO_CLIENT_IN_USE`    |
-| `PATCH /api/v1/app/questionnaires/:id` | Attribute / detach (`demoClientId`) | `404`, `404 DEMO_CLIENT_NOT_FOUND` |
+| Method + path                                      | Purpose                             | Notable codes                                               |
+| -------------------------------------------------- | ----------------------------------- | ----------------------------------------------------------- |
+| `GET /api/v1/app/demo-clients`                     | List (active + inactive)            | —                                                           |
+| `POST /api/v1/app/demo-clients`                    | Create                              | `409 SLUG_CONFLICT`                                         |
+| `GET /api/v1/app/demo-clients/:id`                 | Detail                              | `404`                                                       |
+| `PATCH /api/v1/app/demo-clients/:id`               | Edit any identity or theme field    | `404`, `409 SLUG_CONFLICT`                                  |
+| `DELETE /api/v1/app/demo-clients/:id`              | Delete (guarded)                    | `404`, `409 DEMO_CLIENT_IN_USE`                             |
+| `POST /api/v1/app/demo-clients/:id/reset-sessions` | Reset session graph (F6.4)          | `400 CONFIRM_SLUG_MISMATCH`, `409 ANONYMOUS_MODE_PROTECTED` |
+| `PATCH /api/v1/app/questionnaires/:id`             | Attribute / detach (`demoClientId`) | `404`, `404 DEMO_CLIENT_NOT_FOUND`                          |
 
 **Slug is derive-with-override:** omit it on create and the server derives a
 kebab-case slug from the name (`slugifyDemoClient`); supply it to override. A
 collision surfaces as `409`, never a silent mutation.
 
-Audit actions: `app_demo_client.create | update | delete`,
+Audit actions: `app_demo_client.create | update | delete | reset_sessions`,
 `questionnaire.assign_demo_client`.
+
+**Session reset (F6.4):** `POST /demo-clients/:id/reset-sessions` hard-deletes the
+session graph for all the client's questionnaires — the between-demos clean slate, with
+a typed-confirmation guard and an anonymous-mode refusal. See
+[demo-session-reset.md](./demo-session-reset.md).
 
 ## Admin UI
 
