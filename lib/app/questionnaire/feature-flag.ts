@@ -9,6 +9,7 @@ import {
   APP_QUESTIONNAIRES_CONTRADICTION_DETECTION_FLAG,
   APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG,
   APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG,
+  APP_QUESTIONNAIRES_VOICE_INPUT_FLAG,
   APP_QUESTIONNAIRES_FLAG,
 } from '@/lib/app/questionnaire/constants';
 import { isFeatureEnabled } from '@/lib/feature-flags';
@@ -25,6 +26,7 @@ export {
   APP_QUESTIONNAIRES_COMPLETION_FLAG,
   APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG,
   APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG,
+  APP_QUESTIONNAIRES_VOICE_INPUT_FLAG,
 };
 
 /**
@@ -243,6 +245,62 @@ export function withLiveSessionsEnabled<C>(
 ): (request: NextRequest, context: C) => Promise<Response> {
   return async (request, context) => {
     const blocked = await ensureLiveSessionsEnabled();
+    if (blocked) return blocked;
+    return handler(request, context);
+  };
+}
+
+/**
+ * Whether F6.2 **voice input** may run — the respondent transcribe endpoint that turns recorded
+ * audio into text via Sunrise's audio provider (Whisper). Requires the master app flag, the
+ * **live-sessions** flag, AND the voice-input sub-flag. Voice depends on live-sessions, not just
+ * coexists with it: a transcript is only useful when the respondent can then send it through the
+ * live `/messages` turn loop — with live-sessions off that route 404s, so transcription would be a
+ * dead (but still paid) Whisper call. Gating voice behind live-sessions keeps the surface coherent
+ * and means turning live-sessions off also closes the paid audio path. The voice sub-flag remains
+ * an independent opt-in *on top of* that prerequisite (every call spends per-minute cost). The
+ * transcribe route consults this and 404s when it's `false`, so a disabled sub-feature looks like a
+ * missing route rather than a 401.
+ *
+ * Server-only (resolves the flags from the database).
+ */
+export async function isVoiceInputEnabled(): Promise<boolean> {
+  const [app, live, voice] = await Promise.all([
+    isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_VOICE_INPUT_FLAG),
+  ]);
+  return app && live && voice;
+}
+
+/**
+ * Flag gate for the F6.2 voice-input (transcribe) route — 404 when either the master flag or the
+ * voice-input sub-flag is off, `null` when both are on. The {@link ensureLiveSessionsEnabled}
+ * analogue for the transcribe endpoint; call it first, before any auth or handler work.
+ *
+ * Server-only (resolves both flags from the database).
+ */
+export async function ensureVoiceInputEnabled(): Promise<Response | null> {
+  if (await isVoiceInputEnabled()) {
+    return null;
+  }
+  return errorResponse('Not found', { code: 'NOT_FOUND', status: 404 });
+}
+
+/**
+ * Wrap the transcribe route handler so the voice-input gate runs **before** anything else (auth,
+ * handler work) — the order a disabled sub-feature needs to look like a missing route rather than a
+ * 401. The {@link withLiveSessionsEnabled} analogue for the voice-input surface.
+ *
+ * ```ts
+ * export const POST = withVoiceInputEnabled(handleTranscribe);
+ * ```
+ */
+export function withVoiceInputEnabled<C>(
+  handler: (request: NextRequest, context: C) => Promise<Response>
+): (request: NextRequest, context: C) => Promise<Response> {
+  return async (request, context) => {
+    const blocked = await ensureVoiceInputEnabled();
     if (blocked) return blocked;
     return handler(request, context);
   };
