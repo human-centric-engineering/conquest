@@ -509,6 +509,39 @@ describe('questionnaire datamodel (Prisma.dmmf)', () => {
       getField(getModel('AppQuestionnaireEvaluationRun'), 'findings').relationName
     );
   });
+
+  it('AppQuestionnaireTurn maps app_questionnaire_turn with the F6.1 fields', () => {
+    const model = getModel('AppQuestionnaireTurn');
+    expect(model.dbName).toBe('app_questionnaire_turn');
+
+    expect(getField(model, 'id').type).toBe('String');
+    expect(getField(model, 'sessionId').type).toBe('String');
+    expect(getField(model, 'ordinal').type).toBe('Int');
+    expect(getField(model, 'userMessage').type).toBe('String');
+    expect(getField(model, 'agentResponse').type).toBe('String');
+    // targetedQuestionId is a plain String column (no FK to AppQuestionSlot) — symmetry
+    // with the JSON sideEffectAnswerIds id array, validated at the seam (UG-1 house style).
+    expect(getField(model, 'targetedQuestionId').type).toBe('String');
+    expect(getField(model, 'targetedQuestionId').kind).toBe('scalar');
+    expect(getField(model, 'toolCalls').type).toBe('Json');
+    expect(getField(model, 'sideEffectAnswerIds').type).toBe('Json');
+    expect(getField(model, 'costUsd').type).toBe('Float');
+    expect(getField(model, 'createdAt').type).toBe('DateTime');
+
+    const session = getField(model, 'session');
+    expect(session.kind).toBe('object');
+    expect(session.type).toBe('AppQuestionnaireSession');
+    // Shares the relation with the reverse `turns` field on the session.
+    expect(session.relationName).toBe(
+      getField(getModel('AppQuestionnaireSession'), 'turns').relationName
+    );
+  });
+
+  it('AppQuestionnaireSession carries the F6.1 turns reverse relation', () => {
+    const turns = getField(getModel('AppQuestionnaireSession'), 'turns');
+    expect(turns.kind).toBe('object');
+    expect(turns.type).toBe('AppQuestionnaireTurn');
+  });
 });
 
 describe('app_questionnaire_init migration SQL', () => {
@@ -953,6 +986,41 @@ describe('app_questionnaire_evaluation_run migration SQL (F5.2)', () => {
   it('contains no platform (unmodelled-object) operations — the schema-fold strip holds', () => {
     // `migrate dev` re-emitted the four pgvector DROP INDEX + the GENERATED
     // searchVector ALTER. Stripped by hand; this guard fails if a regeneration leaks them back.
+    expect(executableSql).not.toContain('DROP INDEX');
+    expect(executableSql).not.toContain('ai_knowledge');
+    expect(executableSql).not.toContain('ai_message');
+    expect(executableSql).not.toContain('searchVector');
+  });
+});
+
+describe('app_questionnaire_turn migration SQL (F6.1)', () => {
+  const sql = readMigrationSql('_app_questionnaire_turn');
+  const executableSql = executableLines(sql);
+
+  it('creates exactly the app_questionnaire_turn table', () => {
+    expect(sql).toContain('CREATE TABLE "app_questionnaire_turn"');
+    // Exactly one — guard against a phantom platform CREATE leaking back through
+    // the schema-fold footgun.
+    expect(executableSql.match(/CREATE TABLE/g) ?? []).toHaveLength(1);
+  });
+
+  it('declares the session FK with ON DELETE CASCADE (turns follow the session)', () => {
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "app_questionnaire_turn_sessionId_fkey"[\s\S]*REFERENCES "app_questionnaire_session"\("id"\)[\s\S]*ON DELETE CASCADE/
+    );
+  });
+
+  it('indexes turns by sessionId and by (sessionId,ordinal) — no unique on ordinal', () => {
+    expect(sql).toContain('CREATE INDEX "app_questionnaire_turn_sessionId_idx"');
+    expect(sql).toContain('CREATE INDEX "app_questionnaire_turn_sessionId_ordinal_idx"');
+    // Plain index, not unique — count-based ordinals tolerate rare gaps under a retried turn.
+    expect(sql).not.toContain('CREATE UNIQUE INDEX "app_questionnaire_turn_sessionId_ordinal_idx"');
+  });
+
+  it('contains no platform (unmodelled-object) operations — the schema-fold strip holds', () => {
+    // `migrate dev` re-emitted the four pgvector DROP INDEX (incl.
+    // idx_app_question_slot_embedding) + the GENERATED searchVector ALTER. Stripped by
+    // hand; this guard fails if a regeneration leaks them back in.
     expect(executableSql).not.toContain('DROP INDEX');
     expect(executableSql).not.toContain('ai_knowledge');
     expect(executableSql).not.toContain('ai_message');

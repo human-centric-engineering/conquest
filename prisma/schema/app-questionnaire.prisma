@@ -410,6 +410,7 @@ model AppQuestionnaireSession {
   version AppQuestionnaireVersion       @relation(fields: [versionId], references: [id], onDelete: Cascade)
   answers AppAnswerSlot[]
   events  AppQuestionnaireSessionEvent[]
+  turns   AppQuestionnaireTurn[]
 
   @@index([versionId])
   @@index([versionId, isPreview])
@@ -488,6 +489,41 @@ model AppQuestionnaireSessionEvent {
   @@index([sessionId])
   @@index([sessionId, createdAt])
   @@map("app_questionnaire_session_event")
+}
+
+/// One persisted respondent turn over a live session (F6.1). The streaming turn
+/// route's seam (`_lib/turns.ts`) writes one row AFTER the deterministic per-turn
+/// orchestrator pipeline runs (extract → detect → refine → assess → offer → select).
+/// It anchors the answer rows the turn produced — `AppAnswerSlot.lastUpdatedTurnId`
+/// points back here, finally fired by `recordTurn` (null until F6.1) — and captures
+/// per-turn cost plus which capabilities ran.
+///
+/// `targetedQuestionId` is a plain String validated at the seam (not an FK) — symmetry
+/// with the JSON `sideEffectAnswerIds` id array and the UG-1 house style, avoiding a
+/// second slot-prune `onDelete` policy. `toolCalls` (the ordered capability outcomes —
+/// `{ slug, success, code?, latencyMs? }`) and `sideEffectAnswerIds` (the AppAnswerSlot
+/// ids this turn created/updated) are JSON arrays read wholesale, like the answer's
+/// `refinementHistory`. `costUsd` is the summed per-turn LLM spend; null until set.
+/// `ordinal` is the 1-based turn index, derived `count+1` inside the write transaction
+/// (no `@@unique([sessionId, ordinal])` — a unique can throw under a retried turn; rare
+/// gaps are acceptable). No `respondentUserId` here — it's reachable via the session.
+model AppQuestionnaireTurn {
+  id                  String   @id @default(cuid())
+  sessionId           String
+  ordinal             Int // 1-based turn index within the session
+  userMessage         String   @db.Text // respondent's message (PII)
+  agentResponse       String   @db.Text // composed agent reply streamed back
+  targetedQuestionId  String? // AppQuestionSlot.id asked for; null = completion/offer turn
+  toolCalls           Json     @default("[]") // [{ slug, success, code?, latencyMs? }] ordered
+  sideEffectAnswerIds Json     @default("[]") // AppAnswerSlot.id[] this turn created/updated
+  costUsd             Float? // summed per-turn LLM spend; null until set
+  createdAt           DateTime @default(now())
+
+  session AppQuestionnaireSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([sessionId, ordinal])
+  @@map("app_questionnaire_turn")
 }
 
 /// One persisted design-time evaluation run over a version's authored structure (F5.2).

@@ -462,6 +462,17 @@ export const APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG =
   'APP_QUESTIONNAIRES_DESIGN_EVALUATION_ENABLED';
 
 /**
+ * Sub-flag gating the F6.1 **live respondent sessions** surface — the streaming turn
+ * loop a real respondent drives (create a session, send messages, get a streamed reply).
+ * Disabled by default so the live surface dark-launches independently of the admin
+ * preview routes (which run under the master flag alone): a master-on app shouldn't expose
+ * respondent sessions until an operator deliberately turns them on. Independent of
+ * {@link APP_QUESTIONNAIRES_FLAG}; both must be on for the session-create + messages routes
+ * to run. Seeded by `prisma/seeds/app-questionnaire/021-live-sessions-flag.ts`.
+ */
+export const APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG = 'APP_QUESTIONNAIRES_LIVE_SESSIONS_ENABLED';
+
+/**
  * Slug of the evaluate-structure capability (F5.1). One source of truth shared by the
  * `BaseCapability` subclass, its `AiCapability` seed row, and the evaluate-preview
  * route that dispatches it once per dimension. Snake_case with the fork-owned `app_`

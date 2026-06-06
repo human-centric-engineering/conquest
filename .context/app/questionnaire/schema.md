@@ -258,6 +258,17 @@ questionSlotId)` (the upsert unique), with `value Json`, `provenanceLabel`,
   header names them; the schema-shape test guards the strip). F4.6 also adds `paused` to
   `SESSION_STATUSES` (additive tuple edit, no migration — `status` is a plain String
   column). See [`session-state-machine.md`](./session-state-machine.md).
+- **`AppQuestionnaireTurn`** (F6.1, migration `20260606062423_app_questionnaire_turn`) —
+  one persisted respondent turn over a live session. `sessionId` (FK `onDelete: Cascade` —
+  turns follow the session), `ordinal` (1-based, derived `count+1` in the write
+  transaction; **no `@@unique`** — a unique can throw under a retried turn, rare gaps are
+  acceptable), `userMessage`/`agentResponse` (`@db.Text`), `targetedQuestionId String?`
+  (plain String, no FK — symmetry with the JSON id array + UG-1 house style),
+  `toolCalls Json` + `sideEffectAnswerIds Json` (read wholesale), `costUsd Float?`,
+  `createdAt`. Indexed `@@index([sessionId])` and `@@index([sessionId, ordinal])`. The
+  `recordTurn` seam writes a turn AND back-stamps `AppAnswerSlot.lastUpdatedTurnId` on the
+  answers it touched, in one transaction — the seam that finally fires that column.
+  Migration hand-stripped of the phantom pgvector DROPs (schema-shape test guards the
+  strip). See [`per-turn-orchestrator.md`](./per-turn-orchestrator.md).
 
-_Later phases extend this file — evaluation links (P5), turns (P6), etc. Each
-documents its models here as it lands._
+_Later phases extend this file. Each documents its models here as it lands._

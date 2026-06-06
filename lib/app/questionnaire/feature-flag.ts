@@ -8,6 +8,7 @@ import {
   APP_QUESTIONNAIRES_COMPLETION_FLAG,
   APP_QUESTIONNAIRES_CONTRADICTION_DETECTION_FLAG,
   APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG,
+  APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG,
   APP_QUESTIONNAIRES_FLAG,
 } from '@/lib/app/questionnaire/constants';
 import { isFeatureEnabled } from '@/lib/feature-flags';
@@ -23,6 +24,7 @@ export {
   APP_QUESTIONNAIRES_ANSWER_REFINEMENT_FLAG,
   APP_QUESTIONNAIRES_COMPLETION_FLAG,
   APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG,
+  APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG,
 };
 
 /**
@@ -189,6 +191,58 @@ export function withQuestionnairesEnabled<C>(
 ): (request: NextRequest, context: C) => Promise<Response> {
   return async (request, context) => {
     const blocked = await ensureQuestionnairesEnabled();
+    if (blocked) return blocked;
+    return handler(request, context);
+  };
+}
+
+/**
+ * Whether the F6.1 **live respondent sessions** surface may run. Requires BOTH the master
+ * app flag and the live-sessions sub-flag — the streaming turn loop spends LLM calls per
+ * turn AND opens a respondent-facing surface (incl. the no-login anonymous path), so it
+ * dark-launches independently of the admin previews. The session-create and messages
+ * routes consult this and 404 when it's `false`, so a disabled surface looks like a missing
+ * route rather than a 401.
+ *
+ * Server-only (resolves both flags from the database).
+ */
+export async function isLiveSessionsEnabled(): Promise<boolean> {
+  const [app, live] = await Promise.all([
+    isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG),
+  ]);
+  return app && live;
+}
+
+/**
+ * Flag gate for the live-sessions routes — 404 when either the master flag or the
+ * live-sessions sub-flag is off, `null` when both are on. The {@link ensureQuestionnairesEnabled}
+ * analogue for the respondent surface; call it first, before any auth or handler work.
+ *
+ * Server-only (resolves both flags from the database).
+ */
+export async function ensureLiveSessionsEnabled(): Promise<Response | null> {
+  if (await isLiveSessionsEnabled()) {
+    return null;
+  }
+  return errorResponse('Not found', { code: 'NOT_FOUND', status: 404 });
+}
+
+/**
+ * Wrap a live-sessions route handler so the live-sessions gate runs **before** anything
+ * else (auth, handler work) — the order a disabled surface needs to look like a missing
+ * route rather than a 401. The {@link withQuestionnairesEnabled} analogue for the
+ * respondent surface.
+ *
+ * ```ts
+ * export const POST = withLiveSessionsEnabled(withAuth(handleCreateSession));
+ * ```
+ */
+export function withLiveSessionsEnabled<C>(
+  handler: (request: NextRequest, context: C) => Promise<Response>
+): (request: NextRequest, context: C) => Promise<Response> {
+  return async (request, context) => {
+    const blocked = await ensureLiveSessionsEnabled();
     if (blocked) return blocked;
     return handler(request, context);
   };
