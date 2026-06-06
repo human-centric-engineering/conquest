@@ -3,11 +3,16 @@
 /**
  * QuestionnaireChat — the respondent-facing conversational surface (F7.1).
  *
- * A bespoke chat client built on {@link useQuestionnaireSessionStream}. Deliberately NOT
- * the admin `ChatInterface` (that one is wired to the orchestration `agentSlug` endpoint);
- * this consumes the questionnaire `/messages` SSE contract and renders a calm, focused
- * conversation rather than a tool-trace console. The layout is a single readable column so
- * a future answer-slot panel (F7.2) can sit beside it without touching this component.
+ * A bespoke chat client rendering the respondent turn loop. Deliberately NOT the admin
+ * `ChatInterface` (that one is wired to the orchestration `agentSlug` endpoint); this
+ * consumes the questionnaire `/messages` SSE contract and renders a calm, focused
+ * conversation rather than a tool-trace console. The layout is a single readable column
+ * so the answer-slot panel (F7.2) sits beside it in {@link SessionWorkspace}.
+ *
+ * The stream state is owned by {@link SessionWorkspace} (which also drives the answer
+ * panel from the same session) and passed in via `stream`, so the chat and the panel
+ * share one {@link useQuestionnaireSessionStream} instance — that's what lets the
+ * panel's "Revisit" action send a turn through this same loop.
  *
  * Brand colours come from CSS custom properties (`--app-accent-color`, `--app-cta-color`)
  * with platform-default fallbacks, so the F7.1-PR4 theming layer activates with no change
@@ -24,22 +29,16 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { ThinkingIndicator } from '@/components/admin/orchestration/chat/thinking-indicator';
 import { MicButton } from '@/components/admin/orchestration/chat/mic-button';
-import { useQuestionnaireSessionStream } from '@/lib/hooks/use-questionnaire-session-stream';
-import type {
-  QuestionnaireChatStatus,
-  QuestionnaireTurn,
-} from '@/lib/app/questionnaire/chat/types';
+import type { UseQuestionnaireSessionStreamReturn } from '@/lib/hooks/use-questionnaire-session-stream';
 import { ChatErrorPanel } from '@/components/app/questionnaire/chat/chat-error-panel';
 
 export interface QuestionnaireChatProps {
-  /** The session id powering `/questionnaire-sessions/:id/messages`. */
+  /** The session id powering `/questionnaire-sessions/:id/messages` (used by the mic). */
   sessionId: string;
   /** Anonymous no-login token; omit for authenticated sessions. */
   accessToken?: string;
-  /** Seed the transcript (e.g. a resume greeting). */
-  initialTurns?: QuestionnaireTurn[];
-  /** Start in a blocking status (e.g. an already-paused session). */
-  initialStatus?: QuestionnaireChatStatus;
+  /** The shared stream state, owned by {@link SessionWorkspace}. */
+  stream: UseQuestionnaireSessionStreamReturn;
   /** Show the voice-input affordance (gated server-side on the voice flag). */
   voiceInputEnabled?: boolean;
   className?: string;
@@ -78,8 +77,7 @@ function AssistantTurn({ children }: { children: React.ReactNode }) {
 export function QuestionnaireChat({
   sessionId,
   accessToken,
-  initialTurns,
-  initialStatus,
+  stream,
   voiceInputEnabled = false,
   className,
 }: QuestionnaireChatProps) {
@@ -93,7 +91,7 @@ export function QuestionnaireChat({
     canSend,
     sendMessage,
     dismissError,
-  } = useQuestionnaireSessionStream({ sessionId, accessToken, initialTurns, initialStatus });
+  } = stream;
 
   const [input, setInput] = useState('');
   const [voiceError, setVoiceError] = useState<string | null>(null);

@@ -34,7 +34,7 @@ export default async function PublicQuestionnairePage({
   ]);
 
   return (
-    <div className="container mx-auto h-[calc(100dvh-9rem)] max-w-3xl px-4 py-6">
+    <div className="container mx-auto h-[calc(100dvh-9rem)] max-w-6xl px-4 py-6">
       <BrandThemeProvider theme={theme}>
         <AnonymousSessionBoot
           versionId={versionId}

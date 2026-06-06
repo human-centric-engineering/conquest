@@ -300,6 +300,8 @@ describe('questionnaire datamodel (Prisma.dmmf)', () => {
     expect(getField(model, 'contradictionMode').type).toBe('String');
     expect(getField(model, 'contradictionWindowN').type).toBe('Int');
     expect(getField(model, 'anonymousMode').type).toBe('Boolean');
+    // F7.2 — respondent answer-panel scope (full_progress | answered_only).
+    expect(getField(model, 'answerSlotPanelScope').type).toBe('String');
     // Profile fields are stored as JSON (ProfileFieldConfig[]) — not a relation.
     expect(getField(model, 'profileFields').type).toBe('Json');
 

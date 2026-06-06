@@ -80,22 +80,23 @@ vi.mock('@/lib/app/questionnaire/chat/theme', () => ({
 }));
 
 /**
- * Stub QuestionnaireChat — exposes all props via data-* attributes so tests
- * can assert on what the page passes without rendering the full component tree.
+ * Stub SessionWorkspace (chat + answer panel) — exposes all props via data-*
+ * attributes so tests can assert on what the page passes without rendering the
+ * full component tree.
  */
-vi.mock('@/components/app/questionnaire/chat/questionnaire-chat', () => ({
-  QuestionnaireChat: ({
+vi.mock('@/components/app/questionnaire/session-workspace', () => ({
+  SessionWorkspace: ({
     sessionId,
     initialStatus,
     voiceInputEnabled,
     initialTurns,
-    className,
+    initialPanel,
   }: {
     sessionId: string;
     initialStatus: string;
     voiceInputEnabled: boolean;
     initialTurns: Array<{ role: string; content: string }>;
-    className?: string;
+    initialPanel?: { answeredCount: number };
   }) => (
     <div
       data-testid="questionnaire-chat"
@@ -103,9 +104,17 @@ vi.mock('@/components/app/questionnaire/chat/questionnaire-chat', () => ({
       data-initial-status={initialStatus}
       data-voice-input-enabled={String(voiceInputEnabled)}
       data-initial-turns={JSON.stringify(initialTurns)}
-      data-class-name={className}
+      data-has-panel={initialPanel ? 'true' : 'false'}
     />
   ),
+}));
+
+/**
+ * Mock the answer-panel read seam — the page SSR-seeds the panel via it; tests
+ * default it to a minimal view (individual tests don't depend on its shape).
+ */
+vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/answer-panel', () => ({
+  loadAnswerPanelState: vi.fn(),
 }));
 
 /**
@@ -124,6 +133,7 @@ import { clearInvalidSession } from '@/lib/auth/clear-session';
 import { prisma } from '@/lib/db/client';
 import { isLiveSessionsEnabled, isVoiceInputEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { resolveThemeForSession } from '@/lib/app/questionnaire/chat/theme';
+import { loadAnswerPanelState } from '@/app/api/v1/app/questionnaire-sessions/_lib/answer-panel';
 import type { ResolvedTheme } from '@/lib/app/questionnaire/theming';
 import type React from 'react';
 
@@ -194,6 +204,16 @@ describe('QuestionnaireSessionPage', () => {
     vi.mocked(resolveThemeForSession).mockResolvedValue(MOCK_THEME);
     vi.mocked(getServerSession).mockResolvedValue(MOCK_SESSION);
     vi.mocked(prisma.appQuestionnaireSession.findUnique).mockResolvedValue(makeRow() as never);
+    vi.mocked(loadAnswerPanelState).mockResolvedValue({
+      session: { id: SESSION_ID, respondentUserId: 'user_abc' },
+      view: {
+        status: 'active',
+        scope: 'full_progress',
+        sections: [],
+        answeredCount: 0,
+        totalCount: 0,
+      },
+    });
   });
 
   // -------------------------------------------------------------------------

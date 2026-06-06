@@ -2,14 +2,15 @@
  * AnonymousSessionBoot — client-side bootstrap for the no-login respondent surface (F7.1).
  *
  * Stubs fetch and sessionStorage to test the three boot paths without a real network or
- * browser environment: (1) valid stored token → renders QuestionnaireChat directly;
- * (2) no token → POSTs, on success renders QuestionnaireChat and writes storage;
+ * browser environment: (1) valid stored token → renders the session workspace directly;
+ * (2) no token → POSTs, on success renders the workspace and writes storage;
  * (3) create failure → renders the error UI with the server message and a "Try again" button;
  * (4) fetch throws → renders the connection error UI.
  *
- * `QuestionnaireChat` is replaced with a stub that writes its sessionId and accessToken into
- * `data-*` attributes so we can assert props without rendering the full hook+SSE tree.
- * `buildWelcomeTurns` is mocked to a no-op so the greeting module is not exercised here.
+ * `SessionWorkspace` (chat + answer panel) is replaced with a stub that writes its
+ * sessionId and accessToken into `data-*` attributes so we can assert props without
+ * mounting the full hook+SSE tree. `buildWelcomeTurns` is mocked to a no-op so the
+ * greeting module is not exercised here.
  *
  * @see components/app/questionnaire/chat/anonymous-session-boot.tsx
  */
@@ -17,18 +18,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 
-import type { QuestionnaireChatProps } from '@/components/app/questionnaire/chat/questionnaire-chat';
+import type { SessionWorkspaceProps } from '@/components/app/questionnaire/session-workspace';
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
 
 /**
- * Stub QuestionnaireChat — renders sessionId + accessToken into data-* attributes so
+ * Stub SessionWorkspace — renders sessionId + accessToken into data-* attributes so
  * tests can assert they were forwarded without mounting the full streaming component.
  */
-vi.mock('@/components/app/questionnaire/chat/questionnaire-chat', () => ({
-  QuestionnaireChat: ({ sessionId, accessToken }: QuestionnaireChatProps) => (
+vi.mock('@/components/app/questionnaire/session-workspace', () => ({
+  SessionWorkspace: ({ sessionId, accessToken }: SessionWorkspaceProps) => (
     <div
       data-testid="questionnaire-chat"
       data-session-id={sessionId}
@@ -39,7 +40,7 @@ vi.mock('@/components/app/questionnaire/chat/questionnaire-chat', () => ({
 
 /**
  * Mock buildWelcomeTurns — the greeting module has its own unit test; here we only care
- * that the array it returns is forwarded to QuestionnaireChat (initialTurns).
+ * that the array it returns is forwarded to the workspace (initialTurns).
  */
 vi.mock('@/lib/app/questionnaire/chat/greeting', () => ({
   buildWelcomeTurns: vi.fn().mockReturnValue([]),

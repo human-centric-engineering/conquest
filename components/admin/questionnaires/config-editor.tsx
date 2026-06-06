@@ -36,9 +36,11 @@ import { FieldHelp } from '@/components/ui/field-help';
 import { CostEstimateCard } from '@/components/admin/questionnaires/cost-estimate-card';
 import { API } from '@/lib/api/endpoints';
 import {
+  ANSWER_SLOT_PANEL_SCOPES,
   CONTRADICTION_MODES,
   PROFILE_FIELD_TYPES,
   SELECTION_STRATEGIES,
+  type AnswerSlotPanelScope,
   type ContradictionMode,
   type ProfileFieldConfig,
   type ProfileFieldType,
@@ -65,6 +67,11 @@ const PROFILE_FIELD_TYPE_LABELS: Record<ProfileFieldType, string> = {
   email: 'Email',
   number: 'Number',
   select: 'Select (choices)',
+};
+
+const ANSWER_SLOT_PANEL_SCOPE_LABELS: Record<AnswerSlotPanelScope, string> = {
+  full_progress: 'Full progress (all questions)',
+  answered_only: 'Answered only',
 };
 
 /** A profile-field row in local edit state — `options` carried as raw text. */
@@ -175,6 +182,9 @@ export function ConfigEditor({
     String(config.contradictionWindowN)
   );
   const [anonymousMode, setAnonymousMode] = useState(config.anonymousMode);
+  const [answerSlotPanelScope, setAnswerSlotPanelScope] = useState<AnswerSlotPanelScope>(
+    config.answerSlotPanelScope
+  );
   const [profileFields, setProfileFields] = useState<ProfileFieldRow[]>(
     config.profileFields.map(toRow)
   );
@@ -192,6 +202,7 @@ export function ConfigEditor({
     setContradictionMode(config.contradictionMode);
     setContradictionWindowN(String(config.contradictionWindowN));
     setAnonymousMode(config.anonymousMode);
+    setAnswerSlotPanelScope(config.answerSlotPanelScope);
     setProfileFields(config.profileFields.map(toRow));
   }, [config]);
 
@@ -234,6 +245,7 @@ export function ConfigEditor({
           ? 0
           : boundedNumber(contradictionWindowN, 1, Number.MAX_SAFE_INTEGER, 1, true),
         anonymousMode,
+        answerSlotPanelScope,
         profileFields: profileFields.map((f) => ({
           key: f.key.trim(),
           label: f.label.trim(),
@@ -439,6 +451,32 @@ export function ConfigEditor({
               disabled={busy || contradictionOff}
             />
           </div>
+        </div>
+        <div className="space-y-1.5 sm:max-w-xs">
+          <Label className="text-sm font-medium">
+            Answer panel scope{' '}
+            <FieldHelp title="Answer panel scope">
+              How much of the questionnaire the live answer panel shows the respondent beside the
+              chat. Full progress lists every question grouped by section with an answered-count;
+              answered only shows just the answers captured so far.
+            </FieldHelp>
+          </Label>
+          <Select
+            value={answerSlotPanelScope}
+            onValueChange={(v) => setAnswerSlotPanelScope(v as AnswerSlotPanelScope)}
+            disabled={busy}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {ANSWER_SLOT_PANEL_SCOPES.map((s) => (
+                <SelectItem key={s} value={s}>
+                  {ANSWER_SLOT_PANEL_SCOPE_LABELS[s]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </div>
 

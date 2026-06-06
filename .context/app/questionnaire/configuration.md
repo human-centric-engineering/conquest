@@ -22,24 +22,32 @@ and stores them; the consumers land later (see _Who consumes it_).
 like goal/audience and the section graph. One typed column per setting plus a
 single JSON column for the profile fields:
 
-| Setting                          | Column                   | Type                   | Default        |
-| -------------------------------- | ------------------------ | ---------------------- | -------------- |
-| Question selection strategy      | `selectionStrategy`      | String (enum)          | `'sequential'` |
-| Completion: min questions        | `minQuestionsAnswered`   | Int                    | `0`            |
-| Completion: coverage threshold   | `coverageThreshold`      | Float (0–1)            | `1.0`          |
-| Cost budget (USD / session)      | `costBudgetUsd`          | Float? (null = no cap) | `null`         |
-| Per-session question cap         | `maxQuestionsPerSession` | Int? (null = no cap)   | `null`         |
-| Voice input                      | `voiceEnabled`           | Boolean                | `false`        |
-| Contradiction-detection mode     | `contradictionMode`      | String (enum)          | `'off'`        |
-| Contradiction look-back window N | `contradictionWindowN`   | Int                    | `0`            |
-| Anonymous mode                   | `anonymousMode`          | Boolean                | `false`        |
-| Session-start profile fields     | `profileFields`          | Json (array)           | `[]`           |
+| Setting                          | Column                   | Type                   | Default           |
+| -------------------------------- | ------------------------ | ---------------------- | ----------------- |
+| Question selection strategy      | `selectionStrategy`      | String (enum)          | `'sequential'`    |
+| Completion: min questions        | `minQuestionsAnswered`   | Int                    | `0`               |
+| Completion: coverage threshold   | `coverageThreshold`      | Float (0–1)            | `1.0`             |
+| Cost budget (USD / session)      | `costBudgetUsd`          | Float? (null = no cap) | `null`            |
+| Per-session question cap         | `maxQuestionsPerSession` | Int? (null = no cap)   | `null`            |
+| Voice input                      | `voiceEnabled`           | Boolean                | `false`           |
+| Contradiction-detection mode     | `contradictionMode`      | String (enum)          | `'off'`           |
+| Contradiction look-back window N | `contradictionWindowN`   | Int                    | `0`               |
+| Anonymous mode                   | `anonymousMode`          | Boolean                | `false`           |
+| Session-start profile fields     | `profileFields`          | Json (array)           | `[]`              |
+| Answer panel scope               | `answerSlotPanelScope`   | String (enum)          | `'full_progress'` |
 
 The enums are `const` tuples in `lib/app/questionnaire/types.ts` (single source of
 truth — the Zod schema, the read-view narrowing, and the editor's `<Select>`
 options all derive from them): `SELECTION_STRATEGIES`
 (`sequential | weighted | adaptive`), `CONTRADICTION_MODES` (`off | flag | probe`),
-`PROFILE_FIELD_TYPES` (`text | email | number | select`).
+`PROFILE_FIELD_TYPES` (`text | email | number | select`), `ANSWER_SLOT_PANEL_SCOPES`
+(`full_progress | answered_only`).
+
+`answerSlotPanelScope` (F7.2) is read by the respondent answer-panel endpoint
+(`GET …/questionnaire-sessions/:id/answers`), not the turn engine: `full_progress`
+returns every slot grouped by section (an X-of-N progress view), `answered_only`
+returns just the captured answers so the pending structure is never sent to the
+client. See `.context/app/questionnaire/answer-slot-panel.md`.
 
 ### Profile fields (JSON, not a relational model)
 

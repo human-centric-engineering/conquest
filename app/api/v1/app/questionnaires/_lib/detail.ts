@@ -17,10 +17,12 @@ import type { Prisma } from '@prisma/client';
 
 import { prisma } from '@/lib/db/client';
 import {
+  ANSWER_SLOT_PANEL_SCOPES,
   CONTRADICTION_MODES,
   DEFAULT_QUESTIONNAIRE_CONFIG,
   FIELD_PROVENANCES,
   SELECTION_STRATEGIES,
+  type AnswerSlotPanelScope,
   type AudienceProvenance,
   type AppQuestionnaireStatus,
   type AudienceShape,
@@ -83,6 +85,7 @@ export const CONFIG_SELECT = {
   contradictionWindowN: true,
   anonymousMode: true,
   profileFields: true,
+  answerSlotPanelScope: true,
 } as const;
 
 type ConfigRow = {
@@ -96,6 +99,7 @@ type ConfigRow = {
   contradictionWindowN: number;
   anonymousMode: boolean;
   profileFields: Prisma.JsonValue;
+  answerSlotPanelScope: string;
 };
 
 /** Narrow a stored `selectionStrategy` to the enum (default when unknown). */
@@ -115,6 +119,13 @@ function asContradictionMode(value: string): ContradictionMode {
 /** Cast a stored `profileFields` Json column back to our own array (we wrote it). */
 function asProfileFields(value: Prisma.JsonValue): ProfileFieldConfig[] {
   return Array.isArray(value) ? (value as unknown as ProfileFieldConfig[]) : [];
+}
+
+/** Narrow a stored `answerSlotPanelScope` to the enum (default when unknown). */
+function asAnswerSlotPanelScope(value: string): AnswerSlotPanelScope {
+  return (ANSWER_SLOT_PANEL_SCOPES as readonly string[]).includes(value)
+    ? (value as AnswerSlotPanelScope)
+    : DEFAULT_QUESTIONNAIRE_CONFIG.answerSlotPanelScope;
 }
 
 /**
@@ -137,6 +148,7 @@ export function toConfigView(row: ConfigRow | null): ConfigView {
     contradictionWindowN: row.contradictionWindowN,
     anonymousMode: row.anonymousMode,
     profileFields: asProfileFields(row.profileFields),
+    answerSlotPanelScope: asAnswerSlotPanelScope(row.answerSlotPanelScope),
     saved: true,
   };
 }

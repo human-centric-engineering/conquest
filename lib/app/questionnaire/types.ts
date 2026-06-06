@@ -205,6 +205,16 @@ export const PROFILE_FIELD_TYPES = ['text', 'email', 'number', 'select'] as cons
 export type ProfileFieldType = (typeof PROFILE_FIELD_TYPES)[number];
 
 /**
+ * How much of the questionnaire the respondent's live answer-slot panel shows
+ * (F7.2). `full_progress` lists every slot grouped by section with an X-of-N
+ * header (the conversation's running state); `answered_only` shows just the
+ * captured answers, so the pending structure is never sent to the client. An
+ * admin chooses per version in the config editor; the read endpoint enforces it.
+ */
+export const ANSWER_SLOT_PANEL_SCOPES = ['full_progress', 'answered_only'] as const;
+export type AnswerSlotPanelScope = (typeof ANSWER_SLOT_PANEL_SCOPES)[number];
+
+/**
  * Lifecycle status of an `AppQuestionnaireSession` (the respondent's run over a
  * version). F4.4 introduced a minimal slice (`active | completed | abandoned`) to
  * anchor answer rows; F4.6 completes the lifecycle by adding `paused` — `active`
@@ -250,6 +260,7 @@ export type QuestionnaireConfigShape = {
   contradictionWindowN: number;
   anonymousMode: boolean;
   profileFields: ProfileFieldConfig[];
+  answerSlotPanelScope: AnswerSlotPanelScope;
 };
 
 /**
@@ -270,4 +281,5 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   contradictionWindowN: 0,
   anonymousMode: false,
   profileFields: [],
+  answerSlotPanelScope: 'full_progress',
 };
