@@ -90,6 +90,9 @@ describe('anonymous create', () => {
     });
     const res = await POST(req({ versionId: 'v1' }), undefined);
     expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('INVITATION_REQUIRED');
     expect(tokenMock.mintSessionToken).not.toHaveBeenCalled();
   });
 

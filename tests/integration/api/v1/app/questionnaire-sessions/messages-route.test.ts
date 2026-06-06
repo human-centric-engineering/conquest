@@ -30,6 +30,11 @@ vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/turn-run', () => runMock);
 const offerMock = vi.hoisted(() => ({ streamOfferMessage: vi.fn() }));
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/offer-stream', () => offerMock);
 
+// The real resolveTurnAccess runs; stub only the token verify so the anonymous-path test
+// isn't coupled to the HMAC crypto (which session-access-token.test.ts covers directly).
+const tokenMock = vi.hoisted(() => ({ verifySessionToken: vi.fn() }));
+vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/session-access-token', () => tokenMock);
+
 import { POST } from '@/app/api/v1/app/questionnaire-sessions/[id]/messages/route';
 import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
@@ -39,10 +44,10 @@ type Mock = ReturnType<typeof vi.fn>;
 const USER = 'cmjbv4i3x00003wsloputgwul';
 const URL = 'http://localhost:3000/api/v1/app/questionnaire-sessions/sess-1/messages';
 
-function req(body: unknown): NextRequest {
+function req(body: unknown, headers: Record<string, string> = {}): NextRequest {
   return {
     url: URL,
-    headers: new Headers(),
+    headers: new Headers(headers),
     signal: undefined,
     json: () => Promise.resolve(body),
   } as unknown as NextRequest;
@@ -260,6 +265,8 @@ describe('streaming an offer turn', () => {
     );
 
     const res = await POST(req({ message: 'I think that is everything' }), ctx);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/event-stream');
     const events = await drainSse(res);
 
     expect(offerMock.streamOfferMessage).toHaveBeenCalledTimes(1);
@@ -272,5 +279,49 @@ describe('streaming an offer turn', () => {
     expect(runMock.persistTurn).toHaveBeenCalledWith(
       expect.objectContaining({ targetedQuestionId: null, agentResponse: 'Ready to submit?' })
     );
+  });
+});
+
+describe('anonymous (no-login) access', () => {
+  it('grants a session-token-bearing anonymous caller and streams the turn', async () => {
+    setAuth(null); // no cookie session
+    tokenMock.verifySessionToken.mockReturnValue({ ok: true, sessionId: 'sess-1' });
+    ctxMock.buildTurnContext.mockResolvedValue(
+      loadedContext({
+        session: { id: 'sess-1', status: 'active', versionId: 'v1', respondentUserId: null },
+      })
+    );
+
+    const res = await POST(req({ message: 'hello' }, { 'x-session-token': 'tok.sig' }), ctx);
+    expect(res.status).toBe(200);
+    const types = (await drainSse(res)).map((e) => e.event);
+    expect(types[0]).toBe('start');
+    expect(types[types.length - 1]).toBe('done');
+    expect(runMock.persistTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('401s an anonymous session with no/invalid token (no turn run)', async () => {
+    setAuth(null);
+    tokenMock.verifySessionToken.mockReturnValue({ ok: false, reason: 'bad_signature' });
+    ctxMock.buildTurnContext.mockResolvedValue(
+      loadedContext({
+        session: { id: 'sess-1', status: 'active', versionId: 'v1', respondentUserId: null },
+      })
+    );
+    const res = await POST(req({ message: 'hello' }, { 'x-session-token': 'bad' }), ctx);
+    expect(res.status).toBe(401);
+    expect(runMock.persistTurn).not.toHaveBeenCalled();
+  });
+});
+
+describe('fail-soft persistence', () => {
+  it('still completes the stream with `done` when persistTurn rejects (logged, not 5xx)', async () => {
+    runMock.persistTurn.mockRejectedValue(new Error('db boom'));
+    const res = await POST(req({ message: 'I do marketing' }), ctx);
+    expect(res.status).toBe(200);
+    const types = (await drainSse(res)).map((e) => e.event);
+    // The reply already streamed; the persistence failure is swallowed and `done` still lands.
+    expect(types).toContain('content');
+    expect(types[types.length - 1]).toBe('done');
   });
 });

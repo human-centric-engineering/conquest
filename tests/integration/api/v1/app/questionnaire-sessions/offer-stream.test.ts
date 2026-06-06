@@ -186,7 +186,7 @@ describe('streamOfferMessage — fail-soft', () => {
     expect(ret.message).toBe(FALLBACK_OFFER_MESSAGE);
   });
 
-  it('returns the fallback message when the stream completes with no text at all', async () => {
+  it('silently returns the fallback message (no content frame) when the stream completes empty', async () => {
     providerMgrMock.getProvider.mockResolvedValue({
       chatStream: async function* () {
         // yields nothing and never errors — empty completion

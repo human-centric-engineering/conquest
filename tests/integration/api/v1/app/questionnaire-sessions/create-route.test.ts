@@ -169,5 +169,8 @@ describe('typed failure → HTTP mapping', () => {
     });
     const res = await POST(req({ invitationToken: 'tok_abcdefghij' }), undefined);
     expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('INVITATION_NOT_FOUND');
   });
 });

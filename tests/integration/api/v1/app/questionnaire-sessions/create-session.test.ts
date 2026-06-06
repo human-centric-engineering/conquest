@@ -86,7 +86,8 @@ describe('createSessionFromInvitation', () => {
     (mocks.prisma.appQuestionnaireInvitation.findUnique as Mock).mockResolvedValue(
       invitation({ status: 'started' })
     );
-    await createSessionFromInvitation('tok', USER);
+    const result = await createSessionFromInvitation('tok', USER);
+    expect(result).toEqual({ ok: true, session: NEW_SESSION, resumed: false });
     expect(mocks.tx.appQuestionnaireSession.create).toHaveBeenCalledTimes(1);
     expect(mocks.tx.appQuestionnaireInvitation.update).not.toHaveBeenCalled();
   });
