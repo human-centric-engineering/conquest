@@ -33,6 +33,7 @@ import {
   markSessionCompleted,
   pauseSession,
   recordCostCapReached,
+  recordSessionCreated,
   resumeSession,
   transitionSession,
 } from '@/app/api/v1/app/questionnaires/_lib/sessions';
@@ -230,6 +231,30 @@ describe('recordCostCapReached', () => {
     });
     // It never touches the session status — it's a budget marker, not a transition.
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+  });
+});
+
+describe('recordSessionCreated', () => {
+  it('writes a created event (toStatus active, no fromStatus) via the top-level client', async () => {
+    await recordSessionCreated('sess-1');
+    expect(mocks.prisma.appQuestionnaireSessionEvent.create).toHaveBeenCalledWith({
+      data: { sessionId: 'sess-1', eventType: 'created', toStatus: 'active' },
+    });
+  });
+
+  it('writes through the supplied transaction client and threads a reason', async () => {
+    const tx = mocks.tx as unknown as NonNullable<Parameters<typeof recordSessionCreated>[1]>['tx'];
+    await recordSessionCreated('sess-1', { tx, reason: 'invitation start' });
+    expect(mocks.tx.appQuestionnaireSessionEvent.create).toHaveBeenCalledWith({
+      data: {
+        sessionId: 'sess-1',
+        eventType: 'created',
+        toStatus: 'active',
+        reason: 'invitation start',
+      },
+    });
+    // Used the tx client, not the top-level prisma.
+    expect(mocks.prisma.appQuestionnaireSessionEvent.create).not.toHaveBeenCalled();
   });
 });
 

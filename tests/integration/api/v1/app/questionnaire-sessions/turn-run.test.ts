@@ -118,4 +118,22 @@ describe('persistTurn', () => {
       expect.objectContaining({ sideEffectAnswerIds: ['ans-q1'] })
     );
   });
+
+  it('skips a refinement whose slotKey does not resolve to a slot', async () => {
+    await persistTurn({
+      sessionId: 'sess-1',
+      userMessage: 'm',
+      agentResponse: 'r',
+      targetedQuestionId: null,
+      toolCalls: [],
+      costUsd: 0,
+      upserts: [],
+      refinements: [decision('stale', 'x')],
+      keyToSlotId: new Map([['role', 'slot-q1']]),
+    });
+    expect(seamMock.upsertAnswerSlot).not.toHaveBeenCalled();
+    expect(seamMock.recordTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ sideEffectAnswerIds: [] })
+    );
+  });
 });

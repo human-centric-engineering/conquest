@@ -141,4 +141,43 @@ describe('buildTurnContext', () => {
     expect(loaded!.base.config.selectionStrategy).toBe('sequential');
     expect(loaded!.base.config.contradictionMode).toBe('off');
   });
+
+  it('has no active question and an empty transcript on a fresh session (no turns/answers)', async () => {
+    (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionGraph({ answers: [], turns: [] })
+    );
+    const loaded = await buildTurnContext('sess-1');
+    expect(loaded!.activeQuestionKey).toBeNull();
+    expect(loaded!.base.recentMessages).toEqual([]);
+    expect(loaded!.base.answered).toEqual([]);
+    expect(loaded!.base.existingAnswers).toEqual([]);
+    expect(loaded!.base.selectionRound).toBe(0);
+  });
+
+  it('drops blank user/agent messages from the transcript and tolerates null answer fields', async () => {
+    (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionGraph({
+        answers: [
+          {
+            value: 5,
+            confidence: null,
+            provenanceLabel: 'inferred',
+            rationale: null,
+            questionSlot: { id: 'q2', key: 'team' },
+          },
+        ],
+        turns: [
+          { userMessage: 'only user', agentResponse: '', targetedQuestionId: null, ordinal: 1 },
+        ],
+      })
+    );
+    const loaded = await buildTurnContext('sess-1');
+    // Blank agent response is dropped; the active question is null (turn targeted nothing).
+    expect(loaded!.base.recentMessages).toEqual(['only user']);
+    expect(loaded!.activeQuestionKey).toBeNull();
+    const ans = loaded!.base.existingAnswers[0];
+    expect(ans).toMatchObject({ slotKey: 'team', value: 5, provenance: 'inferred' });
+    expect(ans).not.toHaveProperty('confidence');
+    expect(ans).not.toHaveProperty('rationale');
+  });
 });
