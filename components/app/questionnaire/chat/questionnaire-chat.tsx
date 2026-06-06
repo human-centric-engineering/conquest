@@ -1,0 +1,230 @@
+'use client';
+
+/**
+ * QuestionnaireChat — the respondent-facing conversational surface (F7.1).
+ *
+ * A bespoke chat client built on {@link useQuestionnaireSessionStream}. Deliberately NOT
+ * the admin `ChatInterface` (that one is wired to the orchestration `agentSlug` endpoint);
+ * this consumes the questionnaire `/messages` SSE contract and renders a calm, focused
+ * conversation rather than a tool-trace console. The layout is a single readable column so
+ * a future answer-slot panel (F7.2) can sit beside it without touching this component.
+ *
+ * Brand colours come from CSS custom properties (`--app-accent-color`, `--app-cta-color`)
+ * with platform-default fallbacks, so the F7.1-PR4 theming layer activates with no change
+ * here. A `<div>` (not a `<form>`) hosts the composer to stay safe if ever embedded.
+ */
+
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { SendHorizontal } from 'lucide-react';
+import Markdown from 'react-markdown';
+
+import { cn } from '@/lib/utils';
+import { API } from '@/lib/api/endpoints';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { ThinkingIndicator } from '@/components/admin/orchestration/chat/thinking-indicator';
+import { MicButton } from '@/components/admin/orchestration/chat/mic-button';
+import { useQuestionnaireSessionStream } from '@/lib/hooks/use-questionnaire-session-stream';
+import type {
+  QuestionnaireChatStatus,
+  QuestionnaireTurn,
+} from '@/lib/app/questionnaire/chat/types';
+import { ChatErrorPanel } from '@/components/app/questionnaire/chat/chat-error-panel';
+
+export interface QuestionnaireChatProps {
+  /** The session id powering `/questionnaire-sessions/:id/messages`. */
+  sessionId: string;
+  /** Anonymous no-login token; omit for authenticated sessions. */
+  accessToken?: string;
+  /** Seed the transcript (e.g. a resume greeting). */
+  initialTurns?: QuestionnaireTurn[];
+  /** Start in a blocking status (e.g. an already-paused session). */
+  initialStatus?: QuestionnaireChatStatus;
+  /** Show the voice-input affordance (gated server-side on the voice flag). */
+  voiceInputEnabled?: boolean;
+  className?: string;
+}
+
+function UserBubble({ content }: { content: string }) {
+  return (
+    <div className="flex justify-end">
+      <div
+        className="max-w-[85%] rounded-2xl rounded-br-sm px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap"
+        style={{
+          backgroundColor:
+            'color-mix(in srgb, var(--app-accent-color, var(--color-primary)) 12%, transparent)',
+          color: 'var(--color-foreground)',
+        }}
+      >
+        {content}
+      </div>
+    </div>
+  );
+}
+
+function AssistantTurn({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex gap-3">
+      <span
+        aria-hidden="true"
+        className="mt-1.5 h-2 w-2 shrink-0 rounded-full"
+        style={{ backgroundColor: 'var(--app-accent-color, var(--color-primary))' }}
+      />
+      <div className="min-w-0 flex-1 pt-0.5">{children}</div>
+    </div>
+  );
+}
+
+export function QuestionnaireChat({
+  sessionId,
+  accessToken,
+  initialTurns,
+  initialStatus,
+  voiceInputEnabled = false,
+  className,
+}: QuestionnaireChatProps) {
+  const {
+    turns,
+    streaming,
+    streamingText,
+    status,
+    warning,
+    error,
+    canSend,
+    sendMessage,
+    dismissError,
+  } = useQuestionnaireSessionStream({ sessionId, accessToken, initialTurns, initialStatus });
+
+  const [input, setInput] = useState('');
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  // Keep the latest turn / streaming tail in view.
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [turns.length, streamingText, streaming]);
+
+  const handleSend = () => {
+    if (!canSend || input.trim().length === 0) return;
+    setVoiceError(null);
+    void sendMessage(input);
+    setInput('');
+  };
+
+  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // Enter sends; Shift+Enter inserts a newline.
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  const isTerminal = status === 'cost_capped' || status === 'not_active' || status === 'expired';
+
+  return (
+    <div className={cn('bg-card flex h-full min-h-0 flex-col rounded-xl border', className)}>
+      {/* Transcript */}
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6">
+        <div className="mx-auto flex max-w-2xl flex-col gap-6">
+          {turns.map((turn, i) =>
+            turn.role === 'user' ? (
+              <UserBubble key={i} content={turn.content} />
+            ) : (
+              <AssistantTurn key={i}>
+                <div className="prose prose-sm dark:prose-invert max-w-none">
+                  <Markdown>{turn.content}</Markdown>
+                </div>
+              </AssistantTurn>
+            )
+          )}
+
+          {/* In-flight assistant turn */}
+          {streaming && (
+            <AssistantTurn>
+              {streamingText.length === 0 ? (
+                <ThinkingIndicator />
+              ) : (
+                <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                  {streamingText}
+                  <span className="terminal-caret" aria-hidden="true">
+                    ▋
+                  </span>
+                </p>
+              )}
+            </AssistantTurn>
+          )}
+
+          {/* Side-band contradiction / fail-soft notice */}
+          {warning && (
+            <div
+              role="status"
+              className="border-l-2 pl-3 text-xs"
+              style={{ borderColor: 'var(--app-accent-color, var(--color-primary))' }}
+            >
+              <span className="text-muted-foreground">{warning.message}</span>
+            </div>
+          )}
+
+          {/* Blocking / error state */}
+          {error && (
+            <ChatErrorPanel
+              status={status}
+              error={error}
+              onDismiss={status === 'error' ? dismissError : undefined}
+            />
+          )}
+
+          <div ref={bottomRef} />
+        </div>
+      </div>
+
+      {/* Composer */}
+      {!isTerminal && (
+        <div className="border-t px-4 py-3 sm:px-6">
+          <div className="mx-auto max-w-2xl">
+            <div className="flex items-end gap-2">
+              <Textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                disabled={!canSend}
+                rows={1}
+                placeholder={streaming ? 'Waiting for a reply…' : 'Type your answer…'}
+                aria-label="Your answer"
+                className="max-h-40 min-h-[2.5rem] resize-none"
+              />
+              {voiceInputEnabled && (
+                <MicButton
+                  agentId={sessionId}
+                  endpoint={API.APP.QUESTIONNAIRE_SESSIONS.transcribe(sessionId)}
+                  disabled={!canSend}
+                  extraHeaders={accessToken ? { 'X-Session-Token': accessToken } : undefined}
+                  onTranscript={(text) => {
+                    setVoiceError(null);
+                    setInput((cur) => (cur ? `${cur.trimEnd()} ${text}` : text));
+                  }}
+                  onError={(message) => setVoiceError(message)}
+                />
+              )}
+              <Button
+                type="button"
+                onClick={handleSend}
+                disabled={!canSend || input.trim().length === 0}
+                aria-label="Send"
+                className="shrink-0 text-white"
+                style={{ backgroundColor: 'var(--app-cta-color, var(--color-primary))' }}
+              >
+                <SendHorizontal className="h-4 w-4" aria-hidden="true" />
+              </Button>
+            </div>
+            {voiceError && (
+              <p className="text-destructive mt-1.5 text-xs" role="alert">
+                {voiceError}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

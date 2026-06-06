@@ -14,8 +14,17 @@ export default defineConfig({
     // Include test files
     include: ['**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'],
 
-    // Exclude files
-    exclude: ['node_modules', 'dist', '.next', 'coverage', '**/*.config.{js,ts}', '.claude/**'],
+    // Exclude files. `tests/e2e` holds Playwright specs (`.spec.ts`) — they import
+    // `@playwright/test` and must NOT be picked up by Vitest's `.spec` glob.
+    exclude: [
+      'node_modules',
+      'dist',
+      '.next',
+      'coverage',
+      '**/*.config.{js,ts}',
+      '.claude/**',
+      'tests/e2e/**',
+    ],
 
     // Enable global test APIs (describe, it, expect, etc.)
     globals: true,

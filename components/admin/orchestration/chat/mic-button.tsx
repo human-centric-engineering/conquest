@@ -53,6 +53,13 @@ export interface MicButtonProps {
   disabled?: boolean;
   /** Override the client-side recording cap. */
   maxDurationMs?: number;
+  /**
+   * Extra request headers merged into the transcribe POST (e.g. an
+   * `X-Session-Token` for a no-login questionnaire respondent, who has no
+   * cookie to ride on). The multipart `Content-Type` is set by the browser
+   * from the FormData body, so don't pass it here.
+   */
+  extraHeaders?: Record<string, string>;
   /** Additional class names for the button element. */
   className?: string;
 }
@@ -80,6 +87,7 @@ export function MicButton({
   onError,
   disabled = false,
   maxDurationMs = DEFAULT_MAX_DURATION_MS,
+  extraHeaders,
   className,
 }: MicButtonProps) {
   const recording = useVoiceRecording({ maxDurationMs });
@@ -149,6 +157,7 @@ export function MicButton({
         const res = await fetch(endpoint, {
           method: 'POST',
           credentials: 'include',
+          ...(extraHeaders ? { headers: extraHeaders } : {}),
           body: fd,
         });
 
@@ -175,7 +184,17 @@ export function MicButton({
         window.setTimeout(() => setSubmit('idle'), 0);
       }
     }
-  }, [agentId, disabled, endpoint, language, onError, onTranscript, recording, submit]);
+  }, [
+    agentId,
+    disabled,
+    endpoint,
+    extraHeaders,
+    language,
+    onError,
+    onTranscript,
+    recording,
+    submit,
+  ]);
 
   const isRecording = recording.state === 'recording';
   const isBusy = submit === 'transcribing' || recording.state === 'requesting';

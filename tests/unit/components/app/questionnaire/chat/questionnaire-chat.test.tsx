@@ -1,0 +1,238 @@
+/**
+ * QuestionnaireChat — rendering + composer interaction.
+ *
+ * The streaming hook is mocked (it has its own test); here we verify the component renders
+ * turns, the in-flight states (thinking / streaming caret), the warning banner, the blocking
+ * panels, and that the composer wires Enter / click to `sendMessage`.
+ *
+ * @see components/app/questionnaire/chat/questionnaire-chat.tsx
+ */
+
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent } from '@testing-library/react';
+
+import type { UseQuestionnaireSessionStreamReturn } from '@/lib/hooks/use-questionnaire-session-stream';
+
+const sendMessage = vi.fn();
+const dismissError = vi.fn();
+
+let hookReturn: UseQuestionnaireSessionStreamReturn;
+
+vi.mock('@/lib/hooks/use-questionnaire-session-stream', () => ({
+  useQuestionnaireSessionStream: () => hookReturn,
+}));
+
+vi.mock('@/components/admin/orchestration/chat/mic-button', () => ({
+  MicButton: ({
+    onTranscript,
+    onError,
+    disabled,
+  }: {
+    onTranscript: (t: string) => void;
+    onError: (m: string) => void;
+    disabled?: boolean;
+  }) => (
+    <div>
+      <button
+        type="button"
+        aria-label="Start voice input"
+        disabled={disabled}
+        onClick={() => onTranscript('voiced')}
+      >
+        mic
+      </button>
+      <button
+        type="button"
+        aria-label="Trigger voice error"
+        onClick={() => onError('Mic unavailable')}
+      >
+        err
+      </button>
+    </div>
+  ),
+}));
+
+// HTMLElement.scrollIntoView is not implemented in happy-dom.
+beforeEach(() => {
+  vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {});
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+import { QuestionnaireChat } from '@/components/app/questionnaire/chat/questionnaire-chat';
+
+function makeReturn(
+  overrides: Partial<UseQuestionnaireSessionStreamReturn> = {}
+): UseQuestionnaireSessionStreamReturn {
+  return {
+    turns: [],
+    streaming: false,
+    streamingText: '',
+    status: 'idle',
+    warning: null,
+    error: null,
+    canSend: true,
+    sendMessage,
+    dismissError,
+    ...overrides,
+  };
+}
+
+describe('QuestionnaireChat', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    hookReturn = makeReturn();
+  });
+
+  it('renders user and assistant turns', () => {
+    hookReturn = makeReturn({
+      turns: [
+        { role: 'assistant', content: 'What is your name?' },
+        { role: 'user', content: 'Ada' },
+      ],
+    });
+    render(<QuestionnaireChat sessionId="s1" />);
+
+    expect(screen.getByText('What is your name?')).toBeInTheDocument();
+    expect(screen.getByText('Ada')).toBeInTheDocument();
+  });
+
+  it('shows a thinking indicator while streaming with no text yet', () => {
+    hookReturn = makeReturn({ streaming: true, streamingText: '', canSend: false });
+    render(<QuestionnaireChat sessionId="s1" />);
+
+    expect(screen.getByRole('status', { name: 'Thinking…' })).toBeInTheDocument();
+  });
+
+  it('shows the streaming text while a reply is in flight', () => {
+    hookReturn = makeReturn({ streaming: true, streamingText: 'Let me think', canSend: false });
+    render(<QuestionnaireChat sessionId="s1" />);
+
+    expect(screen.getByText(/Let me think/)).toBeInTheDocument();
+  });
+
+  it('renders the side-band warning banner', () => {
+    hookReturn = makeReturn({
+      warning: { code: 'CONTRADICTION', message: 'That differs from your earlier answer.' },
+    });
+    render(<QuestionnaireChat sessionId="s1" />);
+
+    expect(screen.getByText('That differs from your earlier answer.')).toBeInTheDocument();
+  });
+
+  it('sends on Send click and clears the composer', () => {
+    render(<QuestionnaireChat sessionId="s1" />);
+
+    const textarea = screen.getByLabelText('Your answer');
+    fireEvent.change(textarea, { target: { value: 'hello' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    expect(sendMessage).toHaveBeenCalledWith('hello');
+    expect((textarea as HTMLTextAreaElement).value).toBe('');
+  });
+
+  it('does not send on Shift+Enter', () => {
+    render(<QuestionnaireChat sessionId="s1" />);
+    const textarea = screen.getByLabelText('Your answer');
+
+    fireEvent.change(textarea, { target: { value: 'first' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true });
+
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('sends on Enter', () => {
+    render(<QuestionnaireChat sessionId="s1" />);
+    const textarea = screen.getByLabelText('Your answer');
+
+    fireEvent.change(textarea, { target: { value: 'first' } });
+    fireEvent.keyDown(textarea, { key: 'Enter' });
+
+    expect(sendMessage).toHaveBeenCalledWith('first');
+  });
+
+  it('disables the composer when sending is not allowed', () => {
+    hookReturn = makeReturn({ streaming: true, canSend: false });
+    render(<QuestionnaireChat sessionId="s1" />);
+
+    expect(screen.getByLabelText('Your answer')).toBeDisabled();
+  });
+
+  it('hides the composer and shows a terminal panel when cost-capped', () => {
+    hookReturn = makeReturn({
+      status: 'cost_capped',
+      error: {
+        code: 'COST_CAP_REACHED',
+        title: "We've reached this conversation's limit",
+        message: 'Budget used up.',
+      },
+    });
+    render(<QuestionnaireChat sessionId="s1" />);
+
+    expect(screen.getByText("We've reached this conversation's limit")).toBeInTheDocument();
+    expect(screen.queryByLabelText('Your answer')).not.toBeInTheDocument();
+    // Terminal panels never have a dismiss control.
+    expect(screen.queryByLabelText('Dismiss')).not.toBeInTheDocument();
+  });
+
+  it('renders the mic button only when voice input is enabled', () => {
+    const { rerender } = render(<QuestionnaireChat sessionId="s1" />);
+    expect(screen.queryByLabelText('Start voice input')).not.toBeInTheDocument();
+
+    rerender(<QuestionnaireChat sessionId="s1" voiceInputEnabled />);
+    expect(screen.getByLabelText('Start voice input')).toBeInTheDocument();
+  });
+
+  it('does not send when input is whitespace-only', () => {
+    render(<QuestionnaireChat sessionId="s1" />);
+    const textarea = screen.getByLabelText('Your answer');
+
+    fireEvent.change(textarea, { target: { value: '   ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('appends a transcript to existing textarea content (voice onTranscript)', () => {
+    render(<QuestionnaireChat sessionId="s1" voiceInputEnabled />);
+    const textarea = screen.getByLabelText<HTMLTextAreaElement>('Your answer');
+
+    fireEvent.change(textarea, { target: { value: 'existing' } });
+    fireEvent.click(screen.getByLabelText('Start voice input'));
+
+    expect(textarea.value).toBe('existing voiced');
+  });
+
+  it('sets textarea to transcript when it was empty (voice onTranscript)', () => {
+    render(<QuestionnaireChat sessionId="s1" voiceInputEnabled />);
+    const textarea = screen.getByLabelText<HTMLTextAreaElement>('Your answer');
+
+    fireEvent.click(screen.getByLabelText('Start voice input'));
+
+    expect(textarea.value).toBe('voiced');
+  });
+
+  it('shows a role=alert with the error message on voice onError', () => {
+    render(<QuestionnaireChat sessionId="s1" voiceInputEnabled />);
+
+    fireEvent.click(screen.getByLabelText('Trigger voice error'));
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Mic unavailable');
+  });
+
+  it('shows a dismiss control for transient errors and calls dismissError on click', () => {
+    hookReturn = makeReturn({
+      status: 'error',
+      error: { code: 'STREAM_ERROR', title: 'Something went wrong', message: 'x' },
+    });
+    render(<QuestionnaireChat sessionId="s1" />);
+
+    const dismissBtn = screen.getByLabelText('Dismiss');
+    expect(dismissBtn).toBeInTheDocument();
+    fireEvent.click(dismissBtn);
+
+    expect(dismissError).toHaveBeenCalledTimes(1);
+  });
+});

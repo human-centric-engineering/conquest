@@ -18,6 +18,12 @@ release process.
 
 ### Added
 
+- **`MicButton` `extraHeaders` prop** (`components/admin/orchestration/chat/mic-button.tsx`).
+  An optional `Record<string, string>` merged into the transcribe POST so callers without a
+  cookie session (e.g. a no-login questionnaire respondent passing an `X-Session-Token`) can
+  authenticate the upload. Backward-compatible — omitting it preserves the previous
+  cookie-only behaviour. The multipart `Content-Type` is still set by the browser from the
+  FormData body, so it must not be passed here.
 - **App-extensible database drift-probe seam — `lib/app/db-drift.ts`** (issue
   #284). A new auto-wired `lib/app/*` seam exporting `registerAppDriftProbes()`,
   so a fork can register its **own** Prisma-unmodelled DB objects (hand-written
