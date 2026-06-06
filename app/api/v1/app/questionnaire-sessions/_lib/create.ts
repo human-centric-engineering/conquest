@@ -170,3 +170,40 @@ export async function createSessionForVersion(
 
   return { ok: true, session, resumed: false };
 }
+
+/**
+ * Create a NO-LOGIN anonymous session for a launched `anonymousMode` version — the public
+ * pop-up/demo surface (F6.1, PR6). Unlike the authenticated paths, `respondentUserId` is
+ * left null; access is later proven by the signed token the route mints. No resume here:
+ * an anonymous caller can't be re-identified across requests without the token, so each
+ * create mints a fresh session.
+ */
+export async function createAnonymousSession(versionId: string): Promise<CreateSessionResult> {
+  const version = await prisma.appQuestionnaireVersion.findUnique({
+    where: { id: versionId },
+    select: { id: true, status: true, config: { select: { anonymousMode: true } } },
+  });
+
+  if (!version || version.status !== 'launched') {
+    return { ok: false, status: 404, code: 'NOT_FOUND', message: 'Questionnaire not found' };
+  }
+  if (!version.config?.anonymousMode) {
+    return {
+      ok: false,
+      status: 403,
+      code: 'INVITATION_REQUIRED',
+      message: 'This questionnaire requires an invitation',
+    };
+  }
+
+  const session = await prisma.$transaction(async (tx) => {
+    const created = await tx.appQuestionnaireSession.create({
+      data: { versionId, respondentUserId: null, isPreview: false, status: 'active' },
+      select: { id: true, status: true, versionId: true },
+    });
+    await recordSessionCreated(created.id, { tx });
+    return created;
+  });
+
+  return { ok: true, session, resumed: false };
+}

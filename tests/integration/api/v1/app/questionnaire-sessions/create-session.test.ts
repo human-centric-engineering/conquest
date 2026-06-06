@@ -29,6 +29,7 @@ const seamMock = vi.hoisted(() => ({ recordSessionCreated: vi.fn() }));
 vi.mock('@/app/api/v1/app/questionnaires/_lib/sessions', () => seamMock);
 
 import {
+  createAnonymousSession,
   createSessionForVersion,
   createSessionFromInvitation,
 } from '@/app/api/v1/app/questionnaire-sessions/_lib/create';
@@ -194,5 +195,44 @@ describe('createSessionForVersion (authed anonymous-direct)', () => {
     const result = await createSessionForVersion('v1', USER);
     expect(result).toMatchObject({ ok: true, resumed: true });
     expect(mocks.tx.appQuestionnaireSession.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('createAnonymousSession (no-login)', () => {
+  const version = (overrides = {}) => ({
+    id: 'v1',
+    status: 'launched',
+    config: { anonymousMode: true },
+    ...overrides,
+  });
+
+  it('creates a session with a NULL respondentUserId + the created event', async () => {
+    (mocks.prisma.appQuestionnaireVersion.findUnique as Mock).mockResolvedValue(version());
+    const result = await createAnonymousSession('v1');
+
+    expect(result).toEqual({ ok: true, session: NEW_SESSION, resumed: false });
+    expect(mocks.tx.appQuestionnaireSession.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { versionId: 'v1', respondentUserId: null, isPreview: false, status: 'active' },
+      })
+    );
+    expect(seamMock.recordSessionCreated).toHaveBeenCalledWith('sess-new', { tx: mocks.tx });
+  });
+
+  it('404s an unknown or unlaunched version', async () => {
+    (mocks.prisma.appQuestionnaireVersion.findUnique as Mock).mockResolvedValue(
+      version({ status: 'draft' })
+    );
+    const result = await createAnonymousSession('v1');
+    expect(result).toMatchObject({ ok: false, status: 404, code: 'NOT_FOUND' });
+    expect(mocks.tx.appQuestionnaireSession.create).not.toHaveBeenCalled();
+  });
+
+  it('403s a non-anonymous questionnaire (requires an invitation)', async () => {
+    (mocks.prisma.appQuestionnaireVersion.findUnique as Mock).mockResolvedValue(
+      version({ config: { anonymousMode: false } })
+    );
+    const result = await createAnonymousSession('v1');
+    expect(result).toMatchObject({ ok: false, status: 403, code: 'INVITATION_REQUIRED' });
   });
 });
