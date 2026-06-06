@@ -5,10 +5,11 @@ import { getServerSession } from '@/lib/auth/utils';
 import { clearInvalidSession } from '@/lib/auth/clear-session';
 import { prisma } from '@/lib/db/client';
 import { isLiveSessionsEnabled, isVoiceInputEnabled } from '@/lib/app/questionnaire/feature-flag';
-import { QuestionnaireChat } from '@/components/app/questionnaire/chat/questionnaire-chat';
+import { SessionWorkspace } from '@/components/app/questionnaire/session-workspace';
 import { BrandThemeProvider } from '@/components/app/questionnaire/chat/brand-theme-provider';
 import { buildWelcomeTurns } from '@/lib/app/questionnaire/chat/greeting';
 import { resolveThemeForSession } from '@/lib/app/questionnaire/chat/theme';
+import { loadAnswerPanelState } from '@/app/api/v1/app/questionnaire-sessions/_lib/answer-panel';
 
 export const metadata: Metadata = {
   title: 'Questionnaire',
@@ -52,21 +53,24 @@ export default async function QuestionnaireSessionPage({
 
   const resumed = row._count.answers > 0;
   const initialStatus = row.status === 'active' ? 'idle' : 'not_active';
-  // Independent reads — resolve in parallel rather than serialising two DB round-trips.
-  const [voiceInputEnabled, theme] = await Promise.all([
+  // Independent reads — resolve in parallel rather than serialising the round-trips. The
+  // panel is SSR-seeded here (the user is already verified as owner), so it paints with no
+  // fetch flash; the live updates after each turn come from the client hook.
+  const [voiceInputEnabled, theme, panel] = await Promise.all([
     isVoiceInputEnabled(),
     resolveThemeForSession(sessionId),
+    loadAnswerPanelState(sessionId),
   ]);
 
   return (
-    <div className="mx-auto h-[calc(100vh-12rem)] max-w-3xl">
+    <div className="mx-auto h-[calc(100vh-12rem)] max-w-6xl">
       <BrandThemeProvider theme={theme}>
-        <QuestionnaireChat
+        <SessionWorkspace
           sessionId={sessionId}
           initialTurns={buildWelcomeTurns({ resumed, welcomeCopy: theme.welcomeCopy })}
           initialStatus={initialStatus}
+          initialPanel={panel?.view}
           voiceInputEnabled={voiceInputEnabled}
-          className="h-full"
         />
       </BrandThemeProvider>
     </div>

@@ -18,6 +18,7 @@
 import { z } from 'zod';
 
 import {
+  ANSWER_SLOT_PANEL_SCOPES,
   CONTRADICTION_MODES,
   PROFILE_FIELD_TYPES,
   SELECTION_STRATEGIES,
@@ -82,6 +83,7 @@ export const updateConfigSchema = z
     contradictionWindowN: z.number().int().nonnegative().optional(),
     anonymousMode: z.boolean().optional(),
     profileFields: z.array(profileFieldSchema).optional(),
+    answerSlotPanelScope: z.enum(ANSWER_SLOT_PANEL_SCOPES).optional(),
   })
   .refine((b) => Object.values(b).some((v) => v !== undefined), {
     message: 'Provide at least one field to update',

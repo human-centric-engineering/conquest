@@ -1,9 +1,10 @@
 /**
  * QuestionnaireChat — rendering + composer interaction.
  *
- * The streaming hook is mocked (it has its own test); here we verify the component renders
- * turns, the in-flight states (thinking / streaming caret), the warning banner, the blocking
- * panels, and that the composer wires Enter / click to `sendMessage`.
+ * The stream state is now owned by `SessionWorkspace` and passed in as the `stream`
+ * prop, so the test supplies it directly (no hook mock). Verifies the component renders
+ * turns, the in-flight states (thinking / streaming caret), the warning banner, the
+ * blocking panels, and that the composer wires Enter / click to `sendMessage`.
  *
  * @see components/app/questionnaire/chat/questionnaire-chat.tsx
  */
@@ -17,10 +18,6 @@ const sendMessage = vi.fn();
 const dismissError = vi.fn();
 
 let hookReturn: UseQuestionnaireSessionStreamReturn;
-
-vi.mock('@/lib/hooks/use-questionnaire-session-stream', () => ({
-  useQuestionnaireSessionStream: () => hookReturn,
-}));
 
 vi.mock('@/components/admin/orchestration/chat/mic-button', () => ({
   MicButton: ({
@@ -93,7 +90,7 @@ describe('QuestionnaireChat', () => {
         { role: 'user', content: 'Ada' },
       ],
     });
-    render(<QuestionnaireChat sessionId="s1" />);
+    render(<QuestionnaireChat sessionId="s1" stream={hookReturn} />);
 
     expect(screen.getByText('What is your name?')).toBeInTheDocument();
     expect(screen.getByText('Ada')).toBeInTheDocument();
@@ -101,14 +98,14 @@ describe('QuestionnaireChat', () => {
 
   it('shows a thinking indicator while streaming with no text yet', () => {
     hookReturn = makeReturn({ streaming: true, streamingText: '', canSend: false });
-    render(<QuestionnaireChat sessionId="s1" />);
+    render(<QuestionnaireChat sessionId="s1" stream={hookReturn} />);
 
     expect(screen.getByRole('status', { name: 'Thinking…' })).toBeInTheDocument();
   });
 
   it('shows the streaming text while a reply is in flight', () => {
     hookReturn = makeReturn({ streaming: true, streamingText: 'Let me think', canSend: false });
-    render(<QuestionnaireChat sessionId="s1" />);
+    render(<QuestionnaireChat sessionId="s1" stream={hookReturn} />);
 
     expect(screen.getByText(/Let me think/)).toBeInTheDocument();
   });
@@ -117,13 +114,13 @@ describe('QuestionnaireChat', () => {
     hookReturn = makeReturn({
       warning: { code: 'CONTRADICTION', message: 'That differs from your earlier answer.' },
     });
-    render(<QuestionnaireChat sessionId="s1" />);
+    render(<QuestionnaireChat sessionId="s1" stream={hookReturn} />);
 
     expect(screen.getByText('That differs from your earlier answer.')).toBeInTheDocument();
   });
 
   it('sends on Send click and clears the composer', () => {
-    render(<QuestionnaireChat sessionId="s1" />);
+    render(<QuestionnaireChat sessionId="s1" stream={hookReturn} />);
 
     const textarea = screen.getByLabelText('Your answer');
     fireEvent.change(textarea, { target: { value: 'hello' } });
@@ -134,7 +131,7 @@ describe('QuestionnaireChat', () => {
   });
 
   it('does not send on Shift+Enter', () => {
-    render(<QuestionnaireChat sessionId="s1" />);
+    render(<QuestionnaireChat sessionId="s1" stream={hookReturn} />);
     const textarea = screen.getByLabelText('Your answer');
 
     fireEvent.change(textarea, { target: { value: 'first' } });
@@ -144,7 +141,7 @@ describe('QuestionnaireChat', () => {
   });
 
   it('sends on Enter', () => {
-    render(<QuestionnaireChat sessionId="s1" />);
+    render(<QuestionnaireChat sessionId="s1" stream={hookReturn} />);
     const textarea = screen.getByLabelText('Your answer');
 
     fireEvent.change(textarea, { target: { value: 'first' } });
@@ -155,7 +152,7 @@ describe('QuestionnaireChat', () => {
 
   it('disables the composer when sending is not allowed', () => {
     hookReturn = makeReturn({ streaming: true, canSend: false });
-    render(<QuestionnaireChat sessionId="s1" />);
+    render(<QuestionnaireChat sessionId="s1" stream={hookReturn} />);
 
     expect(screen.getByLabelText('Your answer')).toBeDisabled();
   });
@@ -169,7 +166,7 @@ describe('QuestionnaireChat', () => {
         message: 'Budget used up.',
       },
     });
-    render(<QuestionnaireChat sessionId="s1" />);
+    render(<QuestionnaireChat sessionId="s1" stream={hookReturn} />);
 
     expect(screen.getByText("We've reached this conversation's limit")).toBeInTheDocument();
     expect(screen.queryByLabelText('Your answer')).not.toBeInTheDocument();
@@ -178,15 +175,15 @@ describe('QuestionnaireChat', () => {
   });
 
   it('renders the mic button only when voice input is enabled', () => {
-    const { rerender } = render(<QuestionnaireChat sessionId="s1" />);
+    const { rerender } = render(<QuestionnaireChat sessionId="s1" stream={hookReturn} />);
     expect(screen.queryByLabelText('Start voice input')).not.toBeInTheDocument();
 
-    rerender(<QuestionnaireChat sessionId="s1" voiceInputEnabled />);
+    rerender(<QuestionnaireChat sessionId="s1" stream={hookReturn} voiceInputEnabled />);
     expect(screen.getByLabelText('Start voice input')).toBeInTheDocument();
   });
 
   it('does not send when input is whitespace-only', () => {
-    render(<QuestionnaireChat sessionId="s1" />);
+    render(<QuestionnaireChat sessionId="s1" stream={hookReturn} />);
     const textarea = screen.getByLabelText('Your answer');
 
     fireEvent.change(textarea, { target: { value: '   ' } });
@@ -196,7 +193,7 @@ describe('QuestionnaireChat', () => {
   });
 
   it('appends a transcript to existing textarea content (voice onTranscript)', () => {
-    render(<QuestionnaireChat sessionId="s1" voiceInputEnabled />);
+    render(<QuestionnaireChat sessionId="s1" stream={hookReturn} voiceInputEnabled />);
     const textarea = screen.getByLabelText<HTMLTextAreaElement>('Your answer');
 
     fireEvent.change(textarea, { target: { value: 'existing' } });
@@ -206,7 +203,7 @@ describe('QuestionnaireChat', () => {
   });
 
   it('sets textarea to transcript when it was empty (voice onTranscript)', () => {
-    render(<QuestionnaireChat sessionId="s1" voiceInputEnabled />);
+    render(<QuestionnaireChat sessionId="s1" stream={hookReturn} voiceInputEnabled />);
     const textarea = screen.getByLabelText<HTMLTextAreaElement>('Your answer');
 
     fireEvent.click(screen.getByLabelText('Start voice input'));
@@ -215,7 +212,7 @@ describe('QuestionnaireChat', () => {
   });
 
   it('shows a role=alert with the error message on voice onError', () => {
-    render(<QuestionnaireChat sessionId="s1" voiceInputEnabled />);
+    render(<QuestionnaireChat sessionId="s1" stream={hookReturn} voiceInputEnabled />);
 
     fireEvent.click(screen.getByLabelText('Trigger voice error'));
 
@@ -227,7 +224,7 @@ describe('QuestionnaireChat', () => {
       status: 'error',
       error: { code: 'STREAM_ERROR', title: 'Something went wrong', message: 'x' },
     });
-    render(<QuestionnaireChat sessionId="s1" />);
+    render(<QuestionnaireChat sessionId="s1" stream={hookReturn} />);
 
     const dismissBtn = screen.getByLabelText('Dismiss');
     expect(dismissBtn).toBeInTheDocument();

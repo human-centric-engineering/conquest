@@ -67,6 +67,7 @@ function state(over: Partial<TurnState> = {}): TurnState {
       contradictionWindowN: 3,
       anonymousMode: false,
       profileFields: [],
+      answerSlotPanelScope: 'full_progress',
     },
     questions: [
       {

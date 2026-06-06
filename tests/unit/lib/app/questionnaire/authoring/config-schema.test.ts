@@ -26,6 +26,7 @@ const fullConfig = {
   contradictionMode: 'flag' as const,
   contradictionWindowN: 5,
   anonymousMode: false,
+  answerSlotPanelScope: 'answered_only' as const,
   profileFields: [{ key: 'role', label: 'Role', type: 'text' as const, required: true }],
 };
 
@@ -49,6 +50,21 @@ describe('updateConfigSchema', () => {
   it('rejects an unknown selection strategy', () => {
     const res = updateConfigSchema.safeParse({ selectionStrategy: 'telepathic' });
     expect(res.success).toBe(false);
+  });
+
+  it('accepts the answer-panel scope enum (F7.2)', () => {
+    expect(updateConfigSchema.safeParse({ answerSlotPanelScope: 'full_progress' }).success).toBe(
+      true
+    );
+    expect(updateConfigSchema.safeParse({ answerSlotPanelScope: 'answered_only' }).success).toBe(
+      true
+    );
+  });
+
+  it('rejects an unknown answer-panel scope', () => {
+    expect(updateConfigSchema.safeParse({ answerSlotPanelScope: 'everything' }).success).toBe(
+      false
+    );
   });
 
   it('accepts null budget / cap as "no cap"', () => {

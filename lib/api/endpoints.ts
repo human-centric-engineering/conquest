@@ -447,6 +447,8 @@ export const API = {
       messages: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/messages`,
       /** Voice transcription (POST multipart `{ audio, language? }`). */
       transcribe: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/transcribe`,
+      /** Answer-slot panel state — live read for the respondent panel (GET) (F7.2). */
+      answers: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/answers`,
     },
     /** Public (token-gated) respondent invitation endpoints (F3.2 PR2). */
     INVITATIONS: {

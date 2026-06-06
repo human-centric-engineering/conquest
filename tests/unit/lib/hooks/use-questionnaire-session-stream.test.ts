@@ -424,4 +424,36 @@ describe('useQuestionnaireSessionStream', () => {
     expect(result.current.error).toBeNull();
     expect(result.current.status).not.toBe('error');
   });
+
+  // ── onTurnSettled (F7.2 live-panel hook) ────────────────────────────────────
+
+  it('fires onTurnSettled after a clean settle to idle (so the panel can refetch)', async () => {
+    fetchMock.mockResolvedValue(streamResponse(HAPPY_FRAMES));
+    const onTurnSettled = vi.fn();
+
+    const { result } = renderHook(() =>
+      useQuestionnaireSessionStream({ sessionId: SESSION_ID, onTurnSettled })
+    );
+    await act(async () => {
+      await result.current.sendMessage('hi');
+    });
+
+    expect(result.current.status).toBe('idle');
+    expect(onTurnSettled).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not fire onTurnSettled when the turn ends in an error', async () => {
+    fetchMock.mockResolvedValue(errorResponse(429, 'RATE_LIMITED'));
+    const onTurnSettled = vi.fn();
+
+    const { result } = renderHook(() =>
+      useQuestionnaireSessionStream({ sessionId: SESSION_ID, onTurnSettled })
+    );
+    await act(async () => {
+      await result.current.sendMessage('hi');
+    });
+
+    expect(result.current.status).toBe('error');
+    expect(onTurnSettled).not.toHaveBeenCalled();
+  });
 });

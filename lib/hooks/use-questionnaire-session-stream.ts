@@ -41,6 +41,13 @@ export interface UseQuestionnaireSessionStreamOptions {
   initialTurns?: QuestionnaireTurn[];
   /** Start in a blocking status (e.g. `not_active` for an already-paused session). */
   initialStatus?: QuestionnaireChatStatus;
+  /**
+   * Fired once a turn settles cleanly to `idle` (the server has persisted the turn +
+   * any answers). NOT fired on error/abort. F7.2 uses this to refetch the answer
+   * panel after each turn. Read through a ref, so passing a fresh closure each render
+   * does not churn `sendMessage`'s identity.
+   */
+  onTurnSettled?: () => void;
 }
 
 export interface UseQuestionnaireSessionStreamReturn {
@@ -153,8 +160,13 @@ function defaultBlockingError(status: QuestionnaireChatStatus): ChatErrorState |
 export function useQuestionnaireSessionStream(
   options: UseQuestionnaireSessionStreamOptions
 ): UseQuestionnaireSessionStreamReturn {
-  const { sessionId, accessToken, initialTurns, initialStatus } = options;
+  const { sessionId, accessToken, initialTurns, initialStatus, onTurnSettled } = options;
   const anonymous = Boolean(accessToken);
+
+  // Hold the latest settle callback in a ref so `sendMessage` stays stable even when
+  // the caller passes a new closure each render.
+  const onTurnSettledRef = useRef(onTurnSettled);
+  onTurnSettledRef.current = onTurnSettled;
 
   const [turns, setTurns] = useState<QuestionnaireTurn[]>(initialTurns ?? []);
   const [streaming, setStreaming] = useState(false);
@@ -270,6 +282,8 @@ export function useQuestionnaireSessionStream(
           setError(streamError);
         } else {
           setStatus('idle');
+          // The turn (and any answers it captured) is now persisted — let the panel refresh.
+          onTurnSettledRef.current?.();
         }
       } catch (err) {
         // Aborted (unmount / navigation) is expected — leave state alone.

@@ -7,7 +7,8 @@
  * client memory (and `sessionStorage` for refresh survival inside its 24h TTL) and is never
  * serialized into server-rendered HTML. On mount it reuses a stored token for this version if
  * one is still valid, otherwise POSTs to the anonymous create route, then hands the session +
- * token to {@link QuestionnaireChat}.
+ * token to {@link SessionWorkspace} (chat + the live answer panel). The panel can't SSR-seed
+ * here (the token is client-only), so it shows a brief skeleton until its first fetch lands.
  *
  * @see app/api/v1/app/questionnaire-sessions/anonymous/route.ts
  */
@@ -17,7 +18,7 @@ import { Loader2 } from 'lucide-react';
 
 import { API } from '@/lib/api/endpoints';
 import { Button } from '@/components/ui/button';
-import { QuestionnaireChat } from '@/components/app/questionnaire/chat/questionnaire-chat';
+import { SessionWorkspace } from '@/components/app/questionnaire/session-workspace';
 import { buildWelcomeTurns } from '@/lib/app/questionnaire/chat/greeting';
 
 interface AnonymousSessionBootProps {
@@ -161,12 +162,11 @@ export function AnonymousSessionBoot({
   }
 
   return (
-    <QuestionnaireChat
+    <SessionWorkspace
       sessionId={state.sessionId}
       accessToken={state.accessToken}
       initialTurns={buildWelcomeTurns({ welcomeCopy })}
       voiceInputEnabled={voiceInputEnabled}
-      className="h-full"
     />
   );
 }
