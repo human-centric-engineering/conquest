@@ -180,11 +180,14 @@ describe('AppDetectContradictionsCapability — dispatch', () => {
     const data = result.data as {
       findings: Array<{ slotKeys: string[]; severity: string; suggestedProbe?: string }>;
       droppedCount: number;
+      costUsd: number;
     };
     expect(data.findings).toHaveLength(1);
     expect(data.findings[0]?.slotKeys).toEqual(['has_children', 'children_count']);
     expect(data.findings[0]?.severity).toBe('high');
     expect(data.findings[0]?.suggestedProbe).toContain('two');
+    // F6.3: the real LLM cost is surfaced on the data so the live turn loop can sum turn spend.
+    expect(data.costUsd).toBe(0.003);
     expect(provider.chat).toHaveBeenCalledTimes(1);
   });
 
@@ -470,6 +473,7 @@ describe('AppDetectContradictionsCapability — redactProvenance', () => {
       success: true,
       data: {
         droppedCount: 1,
+        costUsd: 0,
         findings: [
           {
             slotKeys: ['has_children', 'children_count'],
@@ -535,7 +539,7 @@ describe('AppDetectContradictionsCapability — redactProvenance', () => {
 
     const redaction = capability.redactProvenance(args, {
       success: true,
-      data: { findings: [], droppedCount: 0 },
+      data: { findings: [], droppedCount: 0, costUsd: 0 },
     });
 
     expect(redaction.args as Record<string, unknown>).not.toHaveProperty('sessionId');

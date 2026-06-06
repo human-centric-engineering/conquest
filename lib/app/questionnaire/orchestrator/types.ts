@@ -88,6 +88,14 @@ export interface TurnState {
   selectionRound: number;
   /** Which sub-features are enabled this turn. */
   flags: TurnFlags;
+  /**
+   * Cost-cap pressure for this turn, set by the route when the session's spend so far crosses
+   * the soft threshold (F6.3). `'soft'` biases the core toward offering completion early (so the
+   * session winds down before the hard cap) and threads a wrap-up instruction into the offer
+   * prose. Absent (the default) means no cost pressure. The hard cap never reaches the core — the
+   * route refuses that turn with a 402 before `runTurn`.
+   */
+  costPressure?: 'soft';
 }
 
 /** One capability outcome recorded on a turn (ordered by dispatch). Re-exported by the
@@ -165,6 +173,12 @@ export interface OfferComposeInput {
   coveredSlots: Array<{ key: string; prompt: string }>;
   remainingSlots: Array<{ key: string; prompt: string }>;
   recentMessages: string[];
+  /**
+   * Set when the session is at the soft cost cap (F6.3): the composer adds a brief "we're near
+   * this session's limit, keep it short and wrap up" instruction to its system prompt. Distinct
+   * from {@link capReached} (the F4.5 question-count cap) — this is the USD budget.
+   */
+  costWrapUp?: boolean;
 }
 
 /**

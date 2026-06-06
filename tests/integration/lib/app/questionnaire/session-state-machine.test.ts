@@ -21,7 +21,7 @@ const mocks = vi.hoisted(() => {
   const prisma = {
     $transaction: vi.fn((cb: (t: typeof tx) => unknown) => cb(tx)),
     appQuestionnaireSession: { findUnique: vi.fn() },
-    appQuestionnaireSessionEvent: { create: vi.fn() },
+    appQuestionnaireSessionEvent: { create: vi.fn(), findFirst: vi.fn() },
   };
   return { tx, prisma };
 });
@@ -29,6 +29,7 @@ vi.mock('@/lib/db/client', () => ({ prisma: mocks.prisma }));
 
 import {
   abandonSession,
+  hasCostCapReachedEvent,
   loadSessionResumeState,
   markSessionCompleted,
   pauseSession,
@@ -220,17 +221,49 @@ describe('lifecycle wrappers map to the right transition + event', () => {
 
 describe('recordCostCapReached', () => {
   it('writes a non-transition cost_cap_reached event with the spend detail and no status change', async () => {
-    await recordCostCapReached('sess-1', { spentUsd: 4.2, capUsd: 4 });
+    await recordCostCapReached('sess-1', { spentUsd: 4.2, capUsd: 4, tier: 'hard' });
 
     expect(mocks.prisma.appQuestionnaireSessionEvent.create).toHaveBeenCalledWith({
       data: {
         sessionId: 'sess-1',
         eventType: 'cost_cap_reached',
-        metadata: { spentUsd: 4.2, capUsd: 4 },
+        metadata: { spentUsd: 4.2, capUsd: 4, tier: 'hard' },
       },
     });
     // It never touches the session status — it's a budget marker, not a transition.
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('records the tier on the event metadata (soft)', async () => {
+    await recordCostCapReached('sess-1', { spentUsd: 3.6, capUsd: 4, tier: 'soft' });
+    expect(mocks.prisma.appQuestionnaireSessionEvent.create).toHaveBeenCalledWith({
+      data: {
+        sessionId: 'sess-1',
+        eventType: 'cost_cap_reached',
+        metadata: { spentUsd: 3.6, capUsd: 4, tier: 'soft' },
+      },
+    });
+  });
+});
+
+describe('hasCostCapReachedEvent (F6.3)', () => {
+  it('returns true when a matching tier event exists, querying by metadata path', async () => {
+    (mocks.prisma.appQuestionnaireSessionEvent.findFirst as Mock).mockResolvedValue({ id: 'ev-1' });
+
+    expect(await hasCostCapReachedEvent('sess-1', 'soft')).toBe(true);
+    expect(mocks.prisma.appQuestionnaireSessionEvent.findFirst).toHaveBeenCalledWith({
+      where: {
+        sessionId: 'sess-1',
+        eventType: 'cost_cap_reached',
+        metadata: { path: ['tier'], equals: 'soft' },
+      },
+      select: { id: true },
+    });
+  });
+
+  it('returns false when no matching event exists', async () => {
+    (mocks.prisma.appQuestionnaireSessionEvent.findFirst as Mock).mockResolvedValue(null);
+    expect(await hasCostCapReachedEvent('sess-1', 'hard')).toBe(false);
   });
 });
 

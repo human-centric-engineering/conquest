@@ -10,6 +10,7 @@ import {
   APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG,
   APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG,
   APP_QUESTIONNAIRES_VOICE_INPUT_FLAG,
+  APP_QUESTIONNAIRES_COST_CAP_FLAG,
   APP_QUESTIONNAIRES_FLAG,
 } from '@/lib/app/questionnaire/constants';
 import { isFeatureEnabled } from '@/lib/feature-flags';
@@ -27,6 +28,7 @@ export {
   APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG,
   APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG,
   APP_QUESTIONNAIRES_VOICE_INPUT_FLAG,
+  APP_QUESTIONNAIRES_COST_CAP_FLAG,
 };
 
 /**
@@ -304,4 +306,24 @@ export function withVoiceInputEnabled<C>(
     if (blocked) return blocked;
     return handler(request, context);
   };
+}
+
+/**
+ * Whether F6.3 **cost-cap enforcement** may run for the live turn loop. Requires the master
+ * app flag, the **live-sessions** flag, AND the cost-cap sub-flag. The cap only applies to the
+ * live `/messages` turn loop (it's about *respondent* spend), so enforcement depends on
+ * live-sessions the same way voice does — turning live-sessions off also turns off the budget
+ * check. When this returns `false` the messages route runs turns with no budget check even if a
+ * version sets `costBudgetUsd`; there's no route to 404 (unlike the other sub-features, this gates
+ * a behaviour *inside* an already-gated route, not a route of its own).
+ *
+ * Server-only (resolves the flags from the database).
+ */
+export async function isCostCapEnforcementEnabled(): Promise<boolean> {
+  const [app, live, costCap] = await Promise.all([
+    isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_COST_CAP_FLAG),
+  ]);
+  return app && live && costCap;
 }

@@ -254,4 +254,15 @@ describe('buildStreamingOfferPrompt', () => {
     );
     expect(user).toContain('(nothing yet)');
   });
+
+  it('appends a wrap-up instruction to the system prompt when costWrapUp is set (F6.3)', () => {
+    const system = text(buildStreamingOfferPrompt({ ...INPUT, costWrapUp: true })[0].content);
+    expect(system).toMatch(/approaching its limit/i);
+    expect(system).toMatch(/wrap up/i);
+  });
+
+  it('omits the wrap-up instruction by default (no costWrapUp)', () => {
+    const system = text(buildStreamingOfferPrompt(INPUT)[0].content);
+    expect(system).not.toMatch(/approaching its limit/i);
+  });
 });

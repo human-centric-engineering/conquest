@@ -196,6 +196,7 @@ describe('AppRefineAnswerCapability — dispatch', () => {
         questionType: string;
       }>;
       droppedCount: number;
+      costUsd: number;
     };
     expect(data.decisions).toHaveLength(1);
     expect(data.decisions[0]).toMatchObject({
@@ -205,6 +206,8 @@ describe('AppRefineAnswerCapability — dispatch', () => {
     });
     // questionType is resolved from the slot, not the LLM.
     expect(data.decisions[0]?.questionType).toBe('single_choice');
+    // F6.3: the real LLM cost is surfaced on the data so the live turn loop can sum turn spend.
+    expect(data.costUsd).toBe(0.003);
     expect(provider.chat).toHaveBeenCalledTimes(1);
   });
 
@@ -616,6 +619,7 @@ describe('AppRefineAnswerCapability — redactProvenance', () => {
       success: true,
       data: {
         droppedCount: 1,
+        costUsd: 0,
         decisions: [
           {
             slotKey: 'color',

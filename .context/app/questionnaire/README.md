@@ -25,6 +25,7 @@ plan and feature trackers, see [`../planning/`](../planning/); for the platform
 | [`session-state-machine.md`](./session-state-machine.md)     | Session lifecycle transitions + event audit trail — transition table, admin route (F4.6)                                                                                           |
 | [`design-evaluation.md`](./design-evaluation.md)             | Seven LLM judges score a version's structure vs goal/audience + propose edits — pure core, capability, preview route (F5.1); persisted synchronous runs + admin run history (F5.2) |
 | [`per-turn-orchestrator.md`](./per-turn-orchestrator.md)     | The live streaming turn loop — pure orchestrator, SSE route, 3 access scenarios (incl. no-login anonymous), streamed offers (F6.1)                                                 |
+| [`cost-cap-enforcement.md`](./cost-cap-enforcement.md)       | Per-session USD budget at the turn boundary — soft wrap-up nudge at 90%, hard 402 + auto-pause at 100%, summed turn cost, dark-launch flag (F6.3)                                  |
 
 ## Where the code lives
 
