@@ -473,6 +473,20 @@ export const APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG =
 export const APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG = 'APP_QUESTIONNAIRES_LIVE_SESSIONS_ENABLED';
 
 /**
+ * Sub-flag gating F6.2 **voice input** — the respondent transcribe endpoint
+ * (`POST /api/v1/app/questionnaire-sessions/:id/transcribe`) that turns recorded audio into
+ * text via Sunrise's audio provider (OpenAI Whisper). Disabled by default: every call spends
+ * per-minute transcription cost, so an operator turns it on deliberately. The transcribe route
+ * requires the master flag, the live-sessions flag, AND this voice sub-flag — voice *depends on*
+ * live-sessions (a transcript is only useful if the respondent can then send it through the live
+ * `/messages` turn loop), so it's an opt-in on top of that prerequisite, not an independent
+ * surface. When any of the three is off the route returns 404, so a disabled sub-feature looks
+ * like a missing route rather than a 401. Seeded by
+ * `prisma/seeds/app-questionnaire/022-voice-input-flag.ts`.
+ */
+export const APP_QUESTIONNAIRES_VOICE_INPUT_FLAG = 'APP_QUESTIONNAIRES_VOICE_INPUT_ENABLED';
+
+/**
  * Slug of the evaluate-structure capability (F5.1). One source of truth shared by the
  * `BaseCapability` subclass, its `AiCapability` seed row, and the evaluate-preview
  * route that dispatches it once per dimension. Snake_case with the fork-owned `app_`
