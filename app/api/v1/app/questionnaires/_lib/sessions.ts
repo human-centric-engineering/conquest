@@ -155,6 +155,28 @@ export async function recordCostCapReached(
   });
 }
 
+/**
+ * Record the `created` event for a freshly-born real respondent session (F6.1) — the
+ * non-transition marker reserved for when a real session is created (the preview singleton
+ * never fires it). `fromStatus` is null (no prior status); `toStatus` is `active`. The
+ * session row itself is created by the caller in the same transaction; pass `tx` so the
+ * row and its birth event commit together.
+ */
+export async function recordSessionCreated(
+  sessionId: string,
+  opts: { tx?: Prisma.TransactionClient; reason?: string } = {}
+): Promise<void> {
+  const db = opts.tx ?? prisma;
+  await db.appQuestionnaireSessionEvent.create({
+    data: {
+      sessionId,
+      eventType: 'created',
+      toStatus: 'active',
+      ...(opts.reason !== undefined ? { reason: opts.reason } : {}),
+    },
+  });
+}
+
 /** One answered slot in a session's resume state. */
 export interface ResumeAnswerView {
   slotKey: string;
