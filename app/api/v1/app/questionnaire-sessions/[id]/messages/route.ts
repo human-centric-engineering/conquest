@@ -39,10 +39,8 @@ import type { ChatEvent } from '@/types/orchestration';
 import { turnLimiter } from '@/app/api/v1/app/questionnaire-sessions/_lib/rate-limit';
 import { buildTurnContext } from '@/app/api/v1/app/questionnaires/_lib/turn-context';
 import { buildTurnInvokers } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-invokers';
-import {
-  persistTurn,
-  renderOfferMessage,
-} from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-run';
+import { persistTurn } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-run';
+import { streamOfferMessage } from '@/app/api/v1/app/questionnaire-sessions/_lib/offer-stream';
 
 const bodySchema = z.object({ message: z.string().min(1).max(10_000) });
 
@@ -116,14 +114,20 @@ const handleMessage = withAuth<{ id: string }>(async (request, session, { params
     // Side-band frames the core determined (contradiction warnings, fail-soft notices).
     for (const ev of result.events) yield ev;
 
-    // Render the reply: an offer turn composes prose (PR4 non-streamed, chunked); a
-    // question/terminal turn carries deterministic text.
-    const agentResponse =
-      result.response.kind === 'offer'
-        ? await renderOfferMessage({ input: result.response.input, userId, sessionId })
-        : result.response.text;
-
-    for (const delta of chunkText(agentResponse)) yield { type: 'content', delta };
+    // Render the reply: an offer turn streams its prose token-by-token off the provider
+    // (the offer composer); a question/terminal turn carries deterministic text emitted as
+    // chunked content. Track any extra (offer) spend to fold into the turn's cost.
+    let agentResponse: string;
+    let extraCostUsd = 0;
+    if (result.response.kind === 'offer') {
+      const offer = yield* streamOfferMessage({ input: result.response.input, userId, sessionId });
+      agentResponse = offer.message;
+      extraCostUsd = offer.costUsd;
+    } else {
+      agentResponse = result.response.text;
+      for (const delta of chunkText(agentResponse)) yield { type: 'content', delta };
+    }
+    const costUsd = result.costUsd + extraCostUsd;
 
     // Persist after the reply is composed — a write failure is logged, not retro-failed
     // onto an already-streamed response (the cost rows are logged by the capabilities).
@@ -134,7 +138,7 @@ const handleMessage = withAuth<{ id: string }>(async (request, session, { params
         agentResponse,
         targetedQuestionId: result.targetedQuestionId,
         toolCalls: result.toolCalls,
-        costUsd: result.costUsd,
+        costUsd,
         upserts: result.sideEffects.answerUpserts,
         refinements: result.sideEffects.answerRefinements,
         keyToSlotId,
@@ -149,7 +153,7 @@ const handleMessage = withAuth<{ id: string }>(async (request, session, { params
     yield {
       type: 'done',
       tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
-      costUsd: result.costUsd,
+      costUsd,
     };
   }
 

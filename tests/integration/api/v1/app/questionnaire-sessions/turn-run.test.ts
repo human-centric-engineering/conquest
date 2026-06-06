@@ -1,9 +1,9 @@
 /**
- * Integration test: turn rendering + persistence helpers (F6.1, PR4).
+ * Integration test: turn persistence helper (F6.1, PR4).
  *
- * The slot seam (`upsertAnswerSlot`), turn seam (`recordTurn`), and capability dispatcher
- * are mocked. Pins persistTurn's mapping (slotKey → slotId, refined provenance, dedup,
- * recordTurn args) and renderOfferMessage's fail-soft fallback.
+ * The slot seam (`upsertAnswerSlot`) and turn seam (`recordTurn`) are mocked. Pins
+ * persistTurn's mapping (slotKey → slotId, refined provenance, dedup, recordTurn args).
+ * The offer streaming is covered in offer-stream.test.ts.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -14,19 +14,7 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/answer-slots', () => ({
 }));
 vi.mock('@/app/api/v1/app/questionnaires/_lib/turns', () => ({ recordTurn: seamMock.recordTurn }));
 
-const dispatcherMock = vi.hoisted(() => ({ dispatch: vi.fn() }));
-vi.mock('@/lib/orchestration/capabilities/dispatcher', () => ({
-  capabilityDispatcher: dispatcherMock,
-}));
-
-const prismaMock = vi.hoisted(() => ({ aiAgent: { findUnique: vi.fn() } }));
-vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
-
-import {
-  FALLBACK_OFFER_MESSAGE,
-  persistTurn,
-  renderOfferMessage,
-} from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-run';
+import { persistTurn } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-run';
 import type { AnswerSlotIntent } from '@/lib/app/questionnaire/extraction/types';
 import type { RefinementDecision } from '@/lib/app/questionnaire/refinement/types';
 
@@ -128,57 +116,6 @@ describe('persistTurn', () => {
     );
     expect(seamMock.recordTurn).toHaveBeenCalledWith(
       expect.objectContaining({ sideEffectAnswerIds: ['ans-q1'] })
-    );
-  });
-});
-
-describe('renderOfferMessage', () => {
-  const input = {
-    coverage: 1,
-    answeredCount: 2,
-    capReached: false,
-    coveredSlots: [{ key: 'role', prompt: 'Role?' }],
-    remainingSlots: [],
-    recentMessages: [],
-  };
-
-  it('returns the composed offer message on success', async () => {
-    (prismaMock.aiAgent.findUnique as Mock).mockResolvedValue({
-      id: 'agent-1',
-      provider: 'openai',
-      model: 'gpt',
-      fallbackProviders: [],
-    });
-    (dispatcherMock.dispatch as Mock).mockResolvedValue({
-      success: true,
-      data: { offer: { offerMessage: 'Ready to submit your answers?', coveredSummary: '...' } },
-    });
-    expect(await renderOfferMessage({ input, userId: 'u', sessionId: 'sess-1' })).toBe(
-      'Ready to submit your answers?'
-    );
-  });
-
-  it('falls back when the completion agent is unconfigured', async () => {
-    (prismaMock.aiAgent.findUnique as Mock).mockResolvedValue(null);
-    expect(await renderOfferMessage({ input, userId: 'u', sessionId: 'sess-1' })).toBe(
-      FALLBACK_OFFER_MESSAGE
-    );
-    expect(dispatcherMock.dispatch).not.toHaveBeenCalled();
-  });
-
-  it('falls back when the capability dispatch fails', async () => {
-    (prismaMock.aiAgent.findUnique as Mock).mockResolvedValue({
-      id: 'a',
-      provider: 'p',
-      model: 'm',
-      fallbackProviders: [],
-    });
-    (dispatcherMock.dispatch as Mock).mockResolvedValue({
-      success: false,
-      error: { code: 'composition_failed', message: 'x' },
-    });
-    expect(await renderOfferMessage({ input, userId: 'u', sessionId: 'sess-1' })).toBe(
-      FALLBACK_OFFER_MESSAGE
     );
   });
 });

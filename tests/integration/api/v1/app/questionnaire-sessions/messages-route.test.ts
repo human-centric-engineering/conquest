@@ -23,8 +23,11 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/turn-context', () => ctxMock);
 const invokersMock = vi.hoisted(() => ({ buildTurnInvokers: vi.fn() }));
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/turn-invokers', () => invokersMock);
 
-const runMock = vi.hoisted(() => ({ renderOfferMessage: vi.fn(), persistTurn: vi.fn() }));
+const runMock = vi.hoisted(() => ({ persistTurn: vi.fn() }));
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/turn-run', () => runMock);
+
+const offerMock = vi.hoisted(() => ({ streamOfferMessage: vi.fn() }));
+vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/offer-stream', () => offerMock);
 
 import { POST } from '@/app/api/v1/app/questionnaire-sessions/[id]/messages/route';
 import { isFeatureEnabled } from '@/lib/feature-flags';
@@ -148,8 +151,11 @@ beforeEach(() => {
   rateMock.turnLimiter.check.mockReturnValue({ success: true });
   ctxMock.buildTurnContext.mockResolvedValue(loadedContext());
   invokersMock.buildTurnInvokers.mockResolvedValue(stubInvokers());
-  runMock.renderOfferMessage.mockResolvedValue('Would you like to submit?');
   runMock.persistTurn.mockResolvedValue('turn-1');
+  offerMock.streamOfferMessage.mockImplementation(async function* () {
+    yield { type: 'content', delta: 'Ready to submit?' };
+    return { message: 'Ready to submit?', costUsd: 0.001 };
+  });
 });
 
 describe('gate order', () => {
@@ -236,6 +242,34 @@ describe('streaming a question turn', () => {
         targetedQuestionId: 'q1',
         userMessage: 'I do marketing',
       })
+    );
+  });
+});
+
+describe('streaming an offer turn', () => {
+  it('delegates to the offer stream and persists the streamed message with no target', async () => {
+    // The only question is already answered → assessment offers → the route streams the offer.
+    ctxMock.buildTurnContext.mockResolvedValue(
+      loadedContext({
+        base: {
+          ...loadedContext().base,
+          answered: [{ questionId: 'q1', confidence: null }],
+        },
+      })
+    );
+
+    const res = await POST(req({ message: 'I think that is everything' }), ctx);
+    const events = await drainSse(res);
+
+    expect(offerMock.streamOfferMessage).toHaveBeenCalledTimes(1);
+    const text = events
+      .filter((e) => e.event === 'content')
+      .map((e) => (e.data as { delta: string }).delta)
+      .join('');
+    expect(text).toBe('Ready to submit?');
+    // Offer turns target no question; the streamed message is persisted as the reply.
+    expect(runMock.persistTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ targetedQuestionId: null, agentResponse: 'Ready to submit?' })
     );
   });
 });
