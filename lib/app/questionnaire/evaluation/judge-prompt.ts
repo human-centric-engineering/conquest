@@ -38,6 +38,14 @@ interface DimensionRubric {
   scale: string;
   /** What this judge does NOT score, so dimensions don't bleed into each other. */
   ignore: string;
+  /**
+   * Guidance for the optional structured `proposedEdit` (F5.3) this dimension should
+   * attach when its fix maps cleanly to one machine-applicable op. Named per dimension so
+   * a clarity judge proposes `replace_prompt`, a type-fit judge `change_type`, etc. The
+   * op is an accelerator the review queue can apply in one click; when no op fits, the
+   * judge omits it and describes the change in prose only.
+   */
+  editGuidance: string;
 }
 
 /**
@@ -56,6 +64,8 @@ const DIMENSION_RUBRICS: Record<EvaluationDimension, DimensionRubric> = {
 - 0.0 — Pervasively unclear.`,
     ignore:
       'Whether the question is the RIGHT question for the goal (Coverage/Goal-Match judge that), its answer type (Type-Fit), or its position (Ordering). Score wording only.',
+    editGuidance:
+      'When you propose a clearer wording, attach `"proposedEdit": { "op": "replace_prompt", "prompt": "<the full rewritten question>" }`. If the fix is to the author guidance rather than the prompt, use `{ "op": "edit_guidelines", "guidelines": "<new guidance, or null to clear>" }`.',
   },
   coverage: {
     focus:
@@ -67,6 +77,8 @@ const DIMENSION_RUBRICS: Record<EvaluationDimension, DimensionRubric> = {
 - 0.0 — The questions barely address the goal.`,
     ignore:
       'Redundancy (Duplicates judge that), wording (Clarity), and whether existing questions are on-mission (Goal-Match). Score gaps only — what is MISSING.',
+    editGuidance:
+      'For a gap, target `"goal"` and attach `"proposedEdit": { "op": "add_question", "prompt": "<the question to add>", "type": "<one of the answer types>", "sectionKey": "<existing section title, optional>" }`. This drafts a new question for the admin to confirm.',
   },
   duplicates: {
     focus:
@@ -78,6 +90,8 @@ const DIMENSION_RUBRICS: Record<EvaluationDimension, DimensionRubric> = {
 - 0.0 — Pervasive duplication.`,
     ignore:
       'Gaps (Coverage), wording (Clarity), and ordering. Score redundancy only — what is REPEATED.',
+    editGuidance:
+      'When two questions overlap, target the weaker/later one by its key and attach `"proposedEdit": { "op": "delete_question" }` to remove it. There is no merge op — delete the redundant one and, if wording from it should survive, say so in `proposedChange`.',
   },
   type_fit: {
     focus:
@@ -88,6 +102,8 @@ const DIMENSION_RUBRICS: Record<EvaluationDimension, DimensionRubric> = {
 - 0.3 — Most types are poorly chosen.
 - 0.0 — Types are essentially arbitrary.`,
     ignore: 'Wording (Clarity), coverage, ordering. Score the type↔question fit only.',
+    editGuidance:
+      'Attach `"proposedEdit": { "op": "change_type", "type": "<the better type>" }`. When the new type needs configuration (single_choice/multi_choice need choices, likert needs a scale), include a `"typeConfig"` object with that configuration; omit it and the admin will fill it in.',
   },
   ordering: {
     focus:
@@ -98,6 +114,8 @@ const DIMENSION_RUBRICS: Record<EvaluationDimension, DimensionRubric> = {
 - 0.3 — The order works against the respondent in several places.
 - 0.0 — The order is effectively random.`,
     ignore: 'Wording (Clarity), coverage, duplicates, type. Score sequence and placement only.',
+    editGuidance:
+      'When a question should move, target it by its key and attach `"proposedEdit": { "op": "reorder", "ordinal": <0-based position within its section> }`. To move it into a different section, add `"targetSectionKey": "<section title>"`. Use this only when the better position is unambiguous; otherwise describe the move in prose.',
   },
   audience_match: {
     focus:
@@ -109,6 +127,8 @@ const DIMENSION_RUBRICS: Record<EvaluationDimension, DimensionRubric> = {
 - 0.0 — Wrong audience entirely.`,
     ignore:
       'Coverage and duplicates. Where wording is unclear *for this audience specifically*, that is in scope here; generic ambiguity is the Clarity judge.',
+    editGuidance:
+      'To re-pitch the audience itself, target `"audience"` and attach `"proposedEdit": { "op": "edit_audience", "audience": { <only the sub-fields to change, e.g. "expertiseLevel": "novice"> } }`. To soften a single question for this audience, target its key with `{ "op": "edit_guidelines", "guidelines": "<guidance>" }` or `{ "op": "replace_prompt", "prompt": "<reworded>" }`.',
   },
   goal_match: {
     focus:
@@ -120,6 +140,8 @@ const DIMENSION_RUBRICS: Record<EvaluationDimension, DimensionRubric> = {
 - 0.0 — The questions don't serve the stated goal.`,
     ignore:
       'Gaps (Coverage judges what is missing), wording (Clarity), type, ordering. Score whether existing questions belong.',
+    editGuidance:
+      'For an off-mission question, target it by its key and attach `"proposedEdit": { "op": "delete_question" }`. If the goal itself is mis-stated, target `"goal"` with `{ "op": "edit_goal", "goal": "<the corrected goal>" }`.',
   },
 };
 
@@ -191,13 +213,17 @@ FINDINGS
 - Emit a finding for each concrete issue you would fix on this dimension. A clean questionnaire yields an empty findings array — do not invent problems.
 - Address each finding's "targetKey" precisely: a question by its key exactly as shown (e.g. "q_role"), a section as "section:<title>", or the version-level "goal" / "audience".
 - "severity": "major" (fix before launch), "minor" (real but not blocking), or "info" (nice-to-have).
-- "proposedChange": the specific edit to make. "rationale": why, in one or two sentences. "sourceQuote": the offending text, when the finding points at a specific phrase.
+- "proposedChange": the specific edit to make, in plain prose. "rationale": why, in one or two sentences. "sourceQuote": the offending text, when the finding points at a specific phrase.
+
+STRUCTURED EDIT (optional)
+${rubric.editGuidance}
+Attach "proposedEdit" ONLY when the fix maps cleanly to the op above and you are confident of every field; otherwise omit it entirely and rely on "proposedChange" prose. Never guess a key, section title, or type you cannot see in the structure.
 
 OUTPUT — respond with ONLY this JSON object, no prose around it and no code fences:
 {
   "score": <number 0.0-1.0>,
   "findings": [
-    { "targetKey": "<key | section:title | goal | audience>", "severity": "info|minor|major", "proposedChange": "<edit>", "rationale": "<why>", "sourceQuote": "<optional quote>" }
+    { "targetKey": "<key | section:title | goal | audience>", "severity": "info|minor|major", "proposedChange": "<edit>", "rationale": "<why>", "sourceQuote": "<optional quote>", "proposedEdit": <optional structured op, omit if none fits> }
   ]
 }`;
 }
@@ -233,8 +259,9 @@ export function buildJudgeRetryMessage(issuePaths: string[]): string {
       : ' The previous response was not valid JSON for the required schema.';
   return (
     `Return ONLY the JSON object with a numeric "score" in [0, 1] and a "findings" array ` +
-    `(each finding with "targetKey", "severity", "proposedChange", "rationale", and an ` +
-    `optional "sourceQuote"), matching the specified shape exactly.` +
+    `(each finding with "targetKey", "severity", "proposedChange", "rationale", an ` +
+    `optional "sourceQuote", and an optional structured "proposedEdit"), matching the ` +
+    `specified shape exactly. Omit "proposedEdit" rather than guessing one.` +
     detail
   );
 }

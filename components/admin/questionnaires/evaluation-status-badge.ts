@@ -8,7 +8,7 @@
  * `status` and finding `severity` are plain Strings validated at the seam, not DB enums).
  */
 
-import type { FindingSeverity } from '@/lib/app/questionnaire/evaluation';
+import type { FindingSeverity, FindingReviewStatus } from '@/lib/app/questionnaire/evaluation';
 
 type BadgeVariant = 'default' | 'secondary' | 'outline' | 'destructive';
 
@@ -33,6 +33,23 @@ export const FINDING_SEVERITY_BADGE: Record<FindingSeverity, BadgeDescriptor> = 
 
 export const UNKNOWN_SEVERITY_BADGE: BadgeDescriptor = { label: 'Unknown', variant: 'outline' };
 
+/**
+ * Finding review-status badge (F5.3), keyed by `FINDING_REVIEW_STATUSES`. `stale` is NOT here
+ * — it's a derived flag rendered as a separate overlay, not a stored status (see the view's
+ * `stale`/`applicable`).
+ */
+export const FINDING_REVIEW_STATUS_BADGE: Record<FindingReviewStatus, BadgeDescriptor> = {
+  pending: { label: 'Pending', variant: 'outline' },
+  accepted: { label: 'Accepted', variant: 'secondary' },
+  declined: { label: 'Declined', variant: 'outline' },
+  applied: { label: 'Applied', variant: 'default' },
+};
+
+export const UNKNOWN_REVIEW_STATUS_BADGE: BadgeDescriptor = {
+  label: 'Unknown',
+  variant: 'outline',
+};
+
 /** Resolve a run-status badge, falling back to a neutral descriptor for unknown values. */
 export function runStatusBadge(status: string): BadgeDescriptor {
   return EVALUATION_RUN_STATUS_BADGE[status] ?? UNKNOWN_RUN_STATUS_BADGE;
@@ -46,5 +63,13 @@ export function runStatusBadge(status: string): BadgeDescriptor {
 export function findingSeverityBadge(severity: string): BadgeDescriptor {
   return (
     (FINDING_SEVERITY_BADGE as Record<string, BadgeDescriptor>)[severity] ?? UNKNOWN_SEVERITY_BADGE
+  );
+}
+
+/** Resolve a finding review-status badge, falling back to a neutral descriptor (F5.3). */
+export function findingReviewStatusBadge(status: string): BadgeDescriptor {
+  return (
+    (FINDING_REVIEW_STATUS_BADGE as Record<string, BadgeDescriptor>)[status] ??
+    UNKNOWN_REVIEW_STATUS_BADGE
   );
 }

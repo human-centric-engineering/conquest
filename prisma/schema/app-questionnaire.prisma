@@ -521,6 +521,12 @@ model AppQuestionnaireEvaluationRun {
   dimensionsFailed    Int // judges that returned a diagnostic
   totalFindings       Int       @default(0)
   dimensionSummary    Json // [{ dimension, score?, findingCount, diagnostic? }] — read wholesale by the UI
+  // The `VersionStructureInput` the judges read, captured at run time (F5.3). The review
+  // queue diffs the targeted slice of this against the live structure to derive a finding
+  // `stale` at READ time (never stored) — so a finding only flags stale when the specific
+  // thing it addresses actually changed. Nullable: F5.2 rows predate the snapshot; a null
+  // snapshot means staleness can't be derived (treated as not-stale, best-effort).
+  structureSnapshot   Json?
   costUsd             Float? // reserved; populated if/when the dispatcher surfaces per-run cost
   error               String? // run-level note when status = 'failed'
   startedAt           DateTime
@@ -541,26 +547,38 @@ model AppQuestionnaireEvaluationRun {
 ///
 /// Row-per-finding (NOT a JSON blob on the run) because F5.3's review queue mutates findings
 /// individually — accept / decline / edit / apply, plus stale derivation — and queries /
-/// filters / paginates them; that access pattern wants rows. F5.2 persists the `JudgeFinding`
-/// contract verbatim (evaluation/types.ts) plus the stamping `dimension`, an `ordinal` for
-/// stable presentation order within (run, dimension), and a minimal `status` (default
-/// `pending`) added now so F5.3's accept/decline extends rows rather than running a second
-/// migration. The heavier F5.3 columns (edited text, appliedAt, staleReason) are deferred
-/// until their shape settles. `status`/`severity`/`dimension` are plain Strings validated at
-/// the seam (house style). Fully Prisma-modelled — no drift probe needed.
+/// filters / paginates them; that access pattern wants rows. F5.2 persisted the `JudgeFinding`
+/// prose contract (evaluation/types.ts) plus the stamping `dimension`, an `ordinal` for
+/// stable presentation order within (run, dimension), and a `status`. F5.3 adds the structured
+/// edit + review-decision columns below.
+///
+/// `proposedEdit` is the judge's optional machine-applicable op (`ProposedEdit`, validated /
+/// soft-degraded by `coerceProposedEdit` on persist); `editedOverride` is the admin's edited
+/// op, which takes precedence at apply. The decision/apply columns record who/when. `status`
+/// holds `pending | accepted | declined | applied` — `stale` is **derived at read time** from
+/// the run's `structureSnapshot` vs the live structure, never written (it would rot the instant
+/// the structure changes). `appliedToVersionId` is a plain String (may point at a forked draft;
+/// the UG-1 deferred-FK posture, like `triggeredByUserId`). `status`/`severity`/`dimension` are
+/// plain Strings validated at the seam (house style). Fully Prisma-modelled — no drift probe.
 model AppQuestionnaireEvaluationFinding {
-  id             String   @id @default(cuid())
-  runId          String
-  dimension      String // EvaluationDimension (evaluation/types.ts), stamped by the caller
-  ordinal        Int // presentation order within (run, dimension)
-  targetKey      String // slot `key` | section:<title> | goal | audience
-  severity       String // FINDING_SEVERITIES: info | minor | major
-  proposedChange String
-  rationale      String
-  sourceQuote    String? // offending text when the finding points at one
-  status         String   @default("pending") // pending | accepted | declined | applied | stale (F5.3 drives transitions)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id                 String   @id @default(cuid())
+  runId              String
+  dimension          String // EvaluationDimension (evaluation/types.ts), stamped by the caller
+  ordinal            Int // presentation order within (run, dimension)
+  targetKey          String // slot `key` | section:<title> | goal | audience
+  severity           String // FINDING_SEVERITIES: info | minor | major
+  proposedChange     String
+  rationale          String
+  sourceQuote        String? // offending text when the finding points at one
+  proposedEdit       Json? // optional structured op (ProposedEdit); null when prose-only or degraded (F5.3)
+  editedOverride     Json? // admin-edited op; takes precedence over proposedEdit at apply (F5.3)
+  status             String   @default("pending") // pending | accepted | declined | applied (stale is derived, not stored)
+  decidedByUserId    String? // admin who accepted/declined/edited; plain String, no FK (UG-1)
+  decidedAt          DateTime?
+  appliedAt          DateTime?
+  appliedToVersionId String? // version actually written (may be a forked draft); plain String (UG-1)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
   run AppQuestionnaireEvaluationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
 

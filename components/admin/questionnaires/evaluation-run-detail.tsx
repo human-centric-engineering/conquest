@@ -1,38 +1,76 @@
 'use client';
 
 /**
- * EvaluationRunDetail (F5.2) — read-only view of one persisted design-evaluation run.
+ * EvaluationRunDetail (F5.2 read view → F5.3 review queue).
  *
- * Renders the run header (status, judges run/requested, total findings) and then one
- * section per dimension, in dispatch order: the judge's score (or its diagnostic when it
- * failed), followed by that dimension's findings — each with its severity, the targeted
- * key, the proposed change, the rationale, and the offending quote when present. Purely
- * presentational; the accept / decline / edit / apply review queue is F5.3, so there are
- * no actions here yet.
+ * Renders the run header and one section per dimension (the judge's score or diagnostic, then its
+ * findings), now as an **interactive review queue**: each finding can be accepted, declined,
+ * edited, or applied (see `FindingReviewCard`). Findings live in component state so an action
+ * updates the card in place without a full reload. When an apply forks a launched version, the
+ * returned meta surfaces a banner pointing at the new draft (subsequent applies from this run
+ * converge on that same draft server-side). A status filter narrows the queue.
  */
 
+import { useMemo, useState } from 'react';
+import Link from 'next/link';
+
 import { Badge } from '@/components/ui/badge';
-import { EVALUATION_DIMENSION_SPECS } from '@/lib/app/questionnaire/evaluation';
+import { Button } from '@/components/ui/button';
+import {
+  EVALUATION_DIMENSION_SPECS,
+  FINDING_REVIEW_STATUSES,
+  type FindingReviewStatus,
+} from '@/lib/app/questionnaire/evaluation';
 import type {
   EvaluationFindingView,
   EvaluationRunDetail as EvaluationRunDetailView,
 } from '@/lib/app/questionnaire/views';
-import {
-  findingSeverityBadge,
-  runStatusBadge,
-} from '@/components/admin/questionnaires/evaluation-status-badge';
+import { runStatusBadge } from '@/components/admin/questionnaires/evaluation-status-badge';
+import { FindingReviewCard } from '@/components/admin/questionnaires/evaluation-finding-review';
 
-export function EvaluationRunDetail({ run }: { run: EvaluationRunDetailView }) {
+interface ForkNotice {
+  versionId: string;
+  versionNumber: number;
+}
+
+interface Props {
+  run: EvaluationRunDetailView;
+  questionnaireId: string;
+  versionId: string;
+  canApply: boolean;
+}
+
+const STATUS_FILTERS: ('all' | FindingReviewStatus)[] = ['all', ...FINDING_REVIEW_STATUSES];
+
+export function EvaluationRunDetail({ run, questionnaireId, versionId, canApply }: Props) {
   const badge = runStatusBadge(run.status);
+  const [findings, setFindings] = useState<EvaluationFindingView[]>(run.findings);
+  const [fork, setFork] = useState<ForkNotice | null>(null);
+  const [filter, setFilter] = useState<'all' | FindingReviewStatus>('all');
 
-  // Findings arrive ordered by (dimension, ordinal); bucket them so each dimension section
-  // can render its own without re-filtering the whole list per section.
-  const byDimension = new Map<string, EvaluationFindingView[]>();
-  for (const f of run.findings) {
-    const list = byDimension.get(f.dimension) ?? [];
-    list.push(f);
-    byDimension.set(f.dimension, list);
+  function handleUpdate(
+    next: EvaluationFindingView,
+    meta?: { forked: boolean; versionId: string; versionNumber: number }
+  ) {
+    setFindings((prev) => prev.map((f) => (f.id === next.id ? next : f)));
+    if (meta?.forked) setFork({ versionId: meta.versionId, versionNumber: meta.versionNumber });
   }
+
+  const visible = useMemo(
+    () => (filter === 'all' ? findings : findings.filter((f) => f.status === filter)),
+    [findings, filter]
+  );
+
+  // Bucket the (already dimension/ordinal-ordered) visible findings per dimension.
+  const byDimension = useMemo(() => {
+    const map = new Map<string, EvaluationFindingView[]>();
+    for (const f of visible) {
+      const list = map.get(f.dimension) ?? [];
+      list.push(f);
+      map.set(f.dimension, list);
+    }
+    return map;
+  }, [visible]);
 
   return (
     <div className="space-y-6">
@@ -48,9 +86,38 @@ export function EvaluationRunDetail({ run }: { run: EvaluationRunDetailView }) {
         </span>
       </div>
 
+      {fork && (
+        <div className="rounded-md border border-amber-400 bg-amber-50 p-3 text-sm">
+          A new draft <strong>v{fork.versionNumber}</strong> was created from this launched version.
+          Applied suggestions land there.{' '}
+          <Link
+            href={`/admin/questionnaires/${questionnaireId}?v=${fork.versionId}`}
+            className="underline"
+          >
+            Open the draft →
+          </Link>
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-1">
+        {STATUS_FILTERS.map((s) => (
+          <Button
+            key={s}
+            size="sm"
+            variant={filter === s ? 'secondary' : 'ghost'}
+            onClick={() => setFilter(s)}
+            className="text-xs capitalize"
+          >
+            {s}
+          </Button>
+        ))}
+      </div>
+
       {run.dimensionSummary.map((dim) => {
         const spec = EVALUATION_DIMENSION_SPECS[dim.dimension];
-        const findings = byDimension.get(dim.dimension) ?? [];
+        const dimFindings = byDimension.get(dim.dimension) ?? [];
+        // Hide a clean dimension entirely once a filter is active and it has nothing to show.
+        if (filter !== 'all' && dimFindings.length === 0) return null;
         return (
           <section key={dim.dimension} className="space-y-3">
             <div className="flex flex-wrap items-baseline gap-2">
@@ -67,31 +134,22 @@ export function EvaluationRunDetail({ run }: { run: EvaluationRunDetailView }) {
               )}
             </div>
 
-            {!dim.diagnostic && findings.length === 0 && (
+            {filter === 'all' && !dim.diagnostic && dimFindings.length === 0 && (
               <p className="text-muted-foreground text-sm italic">No issues raised.</p>
             )}
 
             <ul className="space-y-3">
-              {findings.map((f) => {
-                const sev = findingSeverityBadge(f.severity);
-                return (
-                  <li key={f.id} className="rounded-md border p-3">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant={sev.variant} className="text-xs">
-                        {sev.label}
-                      </Badge>
-                      <code className="bg-muted rounded px-1.5 py-0.5 text-xs">{f.targetKey}</code>
-                    </div>
-                    <p className="mt-2 text-sm font-medium">{f.proposedChange}</p>
-                    <p className="text-muted-foreground mt-1 text-sm">{f.rationale}</p>
-                    {f.sourceQuote && (
-                      <blockquote className="text-muted-foreground mt-2 border-l-2 pl-3 text-xs italic">
-                        {f.sourceQuote}
-                      </blockquote>
-                    )}
-                  </li>
-                );
-              })}
+              {dimFindings.map((f) => (
+                <FindingReviewCard
+                  key={f.id}
+                  finding={f}
+                  questionnaireId={questionnaireId}
+                  versionId={versionId}
+                  runId={run.id}
+                  canApply={canApply}
+                  onUpdate={handleUpdate}
+                />
+              ))}
             </ul>
           </section>
         );

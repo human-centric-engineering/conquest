@@ -22,8 +22,14 @@ import type {
 } from '@/lib/app/questionnaire/types';
 // DEMO-ONLY (F2.5.1): attribution summary embedded in list/detail rows.
 import type { AttributedDemoClient } from '@/lib/app/questionnaire/demo-clients';
-// F5.2: design-evaluation run views reuse the judge dimension/severity vocabulary.
-import type { EvaluationDimension, FindingSeverity } from '@/lib/app/questionnaire/evaluation';
+// F5.2/F5.3: design-evaluation run views reuse the judge dimension/severity/edit vocabulary.
+import type {
+  EvaluationDimension,
+  FindingSeverity,
+  FindingReviewStatus,
+  FindingApplicability,
+  ProposedEdit,
+} from '@/lib/app/questionnaire/evaluation';
 
 /** A vocabulary tag (F2.2) — client-safe projection of `AppQuestionTag`. */
 export interface TagView {
@@ -160,7 +166,7 @@ export interface EvaluationDimensionSummary {
   diagnostic: string | null;
 }
 
-/** One persisted finding (F5.2) — client-safe projection of `AppQuestionnaireEvaluationFinding`. */
+/** One persisted finding (F5.2 + F5.3) — client-safe projection of `AppQuestionnaireEvaluationFinding`. */
 export interface EvaluationFindingView {
   id: string;
   dimension: EvaluationDimension;
@@ -172,8 +178,26 @@ export interface EvaluationFindingView {
   proposedChange: string;
   rationale: string;
   sourceQuote: string | null;
-  /** Review lifecycle (F5.3 drives transitions); `pending` for every F5.2 finding. */
-  status: string;
+  /** Review lifecycle: `pending` | `accepted` | `declined` | `applied`. */
+  status: FindingReviewStatus;
+  /** The judge's structured edit, when it attached one (F5.3); `null` when prose-only or degraded. */
+  proposedEdit: ProposedEdit | null;
+  /** The admin's edited op, which takes precedence over `proposedEdit` at apply (F5.3); `null` if unedited. */
+  editedOverride: ProposedEdit | null;
+  /** Admin who decided (accept/decline/edit); `null` while `pending`. */
+  decidedByUserId: string | null;
+  /** ISO timestamps — cross the HTTP boundary. */
+  decidedAt: string | null;
+  appliedAt: string | null;
+  /** The version actually written when applied (may be a forked draft); `null` until applied. */
+  appliedToVersionId: string | null;
+  /**
+   * Derived at read time (F5.3), never stored: whether intervening edits made this suggestion
+   * obsolete. A stale finding's Apply is disabled — re-run the evaluation.
+   */
+  stale: boolean;
+  /** Derived at read time (F5.3): how this finding can be actioned. See {@link FindingApplicability}. */
+  applicable: FindingApplicability;
 }
 
 /** One row in the evaluation-runs list for a version (F5.2), newest-first. */

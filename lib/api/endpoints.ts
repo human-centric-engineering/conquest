@@ -412,6 +412,22 @@ export const API = {
       /** One persisted evaluation run with its findings (GET — F5.2). */
       versionEvaluationById: (id: string, versionId: string, runId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/evaluations/${runId}`,
+      /** Review one finding (PATCH accept/decline/edit — F5.3). */
+      versionEvaluationFinding: (
+        id: string,
+        versionId: string,
+        runId: string,
+        findingId: string
+      ): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/evaluations/${runId}/findings/${findingId}`,
+      /** Apply one finding's structured edit to the draft (POST — F5.3). */
+      versionEvaluationFindingApply: (
+        id: string,
+        versionId: string,
+        runId: string,
+        findingId: string
+      ): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/evaluations/${runId}/findings/${findingId}/apply`,
       /** Invitations for a questionnaire (GET list, POST send single/bulk — F3.2). */
       invitations: (id: string): string => `/api/v1/app/questionnaires/${id}/invitations`,
       /** Single invitation (PATCH revoke — F3.2). */

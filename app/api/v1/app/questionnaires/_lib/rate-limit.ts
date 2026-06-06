@@ -153,3 +153,21 @@ export const designEvaluationLimiter = createRateLimiter({
   interval: DESIGN_EVALUATION_RATE_LIMIT_INTERVAL_MS,
   maxRequests: DESIGN_EVALUATION_RATE_LIMIT_MAX,
 });
+
+/**
+ * Suggestion-apply sub-cap (F5.3). Applying a finding is not LLM work, but it mutates the
+ * structure and may **fork** a launched version (a multi-row deep copy) — costlier than a plain
+ * edit, so it takes its own per-admin sub-cap rather than only the section 100/min. The
+ * accept/decline/edit decisions are cheap row writes and inherit the section cap with no sub-cap.
+ * 60/min is ample for an admin working through a review queue while bounding a hammered "apply"
+ * button's fork churn. Keyed on the admin user id, who owns the version.
+ */
+export const EVALUATION_APPLY_RATE_LIMIT_MAX = 60;
+
+/** Sliding-window length for {@link evaluationApplyLimiter}, in milliseconds. */
+export const EVALUATION_APPLY_RATE_LIMIT_INTERVAL_MS = 60_000;
+
+export const evaluationApplyLimiter = createRateLimiter({
+  interval: EVALUATION_APPLY_RATE_LIMIT_INTERVAL_MS,
+  maxRequests: EVALUATION_APPLY_RATE_LIMIT_MAX,
+});
