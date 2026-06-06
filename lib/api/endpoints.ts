@@ -437,6 +437,17 @@ export const API = {
       invitationResend: (id: string, invitationId: string): string =>
         `/api/v1/app/questionnaires/${id}/invitations/${invitationId}/resend`,
     },
+    /** Respondent live-session endpoints (F6.1/F6.2) — consumed by the F7.1 chat surface. */
+    QUESTIONNAIRE_SESSIONS: {
+      /** Create/resume an authenticated session (POST `{ invitationToken }` or `{ versionId }`). */
+      ROOT: '/api/v1/app/questionnaire-sessions',
+      /** Create a no-login anonymous session (POST `{ versionId }` → `{ session, accessToken }`). */
+      ANONYMOUS: '/api/v1/app/questionnaire-sessions/anonymous',
+      /** Respondent turn — SSE stream (POST `{ message }`). */
+      messages: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/messages`,
+      /** Voice transcription (POST multipart `{ audio, language? }`). */
+      transcribe: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/transcribe`,
+    },
     /** Public (token-gated) respondent invitation endpoints (F3.2 PR2). */
     INVITATIONS: {
       /** Validate a token + mark opened (GET ?token=). */
