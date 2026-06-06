@@ -19,6 +19,9 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db/client';
 import { NotFoundError } from '@/lib/api/errors';
+import type { ToolCallRecord } from '@/lib/app/questionnaire/orchestrator';
+
+export type { ToolCallRecord };
 
 /**
  * Convert an arbitrary JSON value into a Prisma `Json` input — mirrors the answer-slot
@@ -28,21 +31,6 @@ import { NotFoundError } from '@/lib/api/errors';
 function jsonInput(value: unknown): Prisma.InputJsonValue | typeof Prisma.JsonNull {
   if (value === null || value === undefined) return Prisma.JsonNull;
   return value;
-}
-
-/**
- * One capability outcome recorded on a turn's `toolCalls` (ordered by dispatch). Mirrors
- * the deterministic pipeline's per-step result, not the LLM tool-loop's trace.
- */
-export interface ToolCallRecord {
-  /** The capability slug dispatched (e.g. `app_extract_answer_slots`). */
-  slug: string;
-  /** Whether the capability succeeded (a fail-soft empty result counts as a failure). */
-  success: boolean;
-  /** Error code when `success` is false (the capability's `error.code`). */
-  code?: string;
-  /** Wall-clock dispatch latency in milliseconds, when measured. */
-  latencyMs?: number;
 }
 
 /** Everything {@link recordTurn} persists for one turn. */
