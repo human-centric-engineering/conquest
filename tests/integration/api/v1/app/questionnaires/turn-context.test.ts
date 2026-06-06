@@ -19,7 +19,7 @@ import { buildTurnContext } from '@/app/api/v1/app/questionnaires/_lib/turn-cont
 type Mock = ReturnType<typeof vi.fn>;
 
 function sessionGraph(over: Record<string, unknown> = {}) {
-  return {
+  const merged = {
     id: 'sess-1',
     status: 'active',
     versionId: 'v1',
@@ -84,7 +84,10 @@ function sessionGraph(over: Record<string, unknown> = {}) {
       },
     ],
     ...over,
-  };
+  } as Record<string, unknown> & { turns: unknown[] };
+  // The true turn count defaults to the (possibly windowed) turns length, but can be
+  // overridden to model a session whose history exceeds the transcript window.
+  return { _count: { turns: merged.turns.length }, ...merged };
 }
 
 beforeEach(() => {
@@ -133,6 +136,18 @@ describe('buildTurnContext', () => {
     ]);
     // selectionRound is the number of prior turns (monotonic).
     expect(loaded!.base.selectionRound).toBe(2);
+  });
+
+  it('uses the TRUE turn count for selectionRound, not the windowed transcript length', async () => {
+    // 2 transcript turns (windowed) but a real history of 20 — selectionRound must be 20,
+    // so the random strategy's session+round seed keeps advancing past the window.
+    (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionGraph({ _count: { turns: 20 } })
+    );
+    const loaded = await buildTurnContext('sess-1');
+    expect(loaded!.base.selectionRound).toBe(20);
+    // The transcript itself is still just the windowed turns.
+    expect(loaded!.base.recentMessages.length).toBeGreaterThan(0);
   });
 
   it('resolves an absent config row to defaults', async () => {

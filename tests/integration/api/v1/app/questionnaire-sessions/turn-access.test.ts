@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NextRequest } from 'next/server';
 
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
+vi.mock('@/lib/auth/api-keys', () => ({ resolveApiKey: vi.fn() }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 vi.mock('@/lib/env', () => ({
   env: { BETTER_AUTH_SECRET: 'test-secret-that-is-at-least-32-characters-long' },
@@ -21,6 +22,7 @@ import {
 } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-access';
 import { mintSessionToken } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-access-token';
 import { auth } from '@/lib/auth/config';
+import { resolveApiKey } from '@/lib/auth/api-keys';
 
 type Mock = ReturnType<typeof vi.fn>;
 
@@ -33,7 +35,10 @@ function setSession(userId: string | null): void {
   );
 }
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  (resolveApiKey as unknown as Mock).mockResolvedValue(null); // no API key by default
+});
 
 describe('authenticated owner', () => {
   it('grants access when the logged-in user owns the session', async () => {
@@ -46,6 +51,15 @@ describe('authenticated owner', () => {
     setSession(null);
     const access = await resolveTurnAccess(req(), { id: 'sess-1', respondentUserId: 'user-1' });
     expect(access).toMatchObject({ ok: false, status: 401 });
+  });
+
+  it('grants access via a valid API key (Bearer sk_...) without a cookie session', async () => {
+    setSession(null); // no cookie session
+    (resolveApiKey as unknown as Mock).mockResolvedValue({ session: { user: { id: 'user-1' } } });
+    const access = await resolveTurnAccess(req(), { id: 'sess-1', respondentUserId: 'user-1' });
+    expect(access).toMatchObject({ ok: true, userId: 'user-1', anonymous: false });
+    // The API key short-circuits the cookie-session lookup.
+    expect(auth.api.getSession).not.toHaveBeenCalled();
   });
 
   it('403s when a different user is logged in', async () => {

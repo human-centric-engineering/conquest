@@ -18,6 +18,7 @@ import { headers } from 'next/headers';
 import type { NextRequest } from 'next/server';
 
 import { auth } from '@/lib/auth/config';
+import { resolveApiKey } from '@/lib/auth/api-keys';
 import { getClientIP } from '@/lib/security/ip';
 import { verifySessionToken } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-access-token';
 
@@ -32,9 +33,13 @@ export async function resolveTurnAccess(
   request: NextRequest,
   session: { id: string; respondentUserId: string | null }
 ): Promise<TurnAccess> {
-  // Authenticated session: a logged-in user who owns it.
+  // Authenticated session: a logged-in user who owns it. Mirror `withAuth` — accept a valid
+  // API key (`Authorization: Bearer sk_...`) as well as a cookie session, so a headless
+  // owner can drive their own session.
   if (session.respondentUserId !== null) {
-    const authSession = await auth.api.getSession({ headers: await headers() });
+    const apiKey = await resolveApiKey(request);
+    const authSession =
+      apiKey?.session ?? (await auth.api.getSession({ headers: await headers() }));
     if (!authSession) {
       return { ok: false, status: 401, code: 'UNAUTHORIZED', message: 'Authentication required' };
     }

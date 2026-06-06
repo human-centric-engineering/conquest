@@ -33,6 +33,12 @@ import {
 
 const slugs = (calls: { slug: string }[]): string[] => calls.map((c) => c.slug);
 
+/** Two captured answers — the floor the detector capability needs (`answers.min(2)`). */
+const TWO_ANSWERS = [
+  { slotKey: 'a', value: 1, provenance: 'direct' as const },
+  { slotKey: 'b', value: 2, provenance: 'direct' as const },
+];
+
 describe('runTurn — opening turn (empty message)', () => {
   it('skips extract/detect/refine and selects the first question', async () => {
     const { invokers, calls } = stubInvokers({
@@ -148,6 +154,7 @@ describe('runTurn — contradiction detection', () => {
         userMessage: 'x',
         questions: [q({ id: 'a' })],
         config: { contradictionMode: 'flag' },
+        existingAnswers: TWO_ANSWERS,
       }),
       invokers
     );
@@ -171,10 +178,28 @@ describe('runTurn — contradiction detection', () => {
         questions: [q({ id: 'a' })],
         config: { contradictionMode: 'flag' },
         flags: { contradiction: false },
+        existingAnswers: TWO_ANSWERS,
       }),
       invokers
     );
     expect(calls.detect).toHaveLength(0);
+  });
+
+  it('skips detection below the two-answer floor (the detector capability needs ≥2)', async () => {
+    const { invokers, calls } = stubInvokers({ detect: { findings: [finding()] } });
+    const result = await runTurn(
+      state({
+        userMessage: 'x',
+        questions: [q({ id: 'a' })],
+        config: { contradictionMode: 'flag' },
+        existingAnswers: [{ slotKey: 'a', value: 1, provenance: 'direct' }],
+      }),
+      invokers
+    );
+    // Only one answer → detection would fail the capability's args validation, so skip it.
+    expect(calls.detect).toHaveLength(0);
+    expect(result.contradictions).toHaveLength(0);
+    expect(slugs(result.toolCalls)).not.toContain(DETECT_CONTRADICTIONS_CAPABILITY_SLUG);
   });
 });
 
@@ -189,6 +214,7 @@ describe('runTurn — refinement', () => {
         userMessage: 'x',
         questions: [q({ id: 'a' })],
         config: { contradictionMode: 'probe' },
+        existingAnswers: TWO_ANSWERS,
       }),
       invokers
     );
@@ -206,6 +232,7 @@ describe('runTurn — refinement', () => {
         questions: [q({ id: 'a' })],
         config: { contradictionMode: 'flag' },
         flags: { refinement: false },
+        existingAnswers: TWO_ANSWERS,
       }),
       invokers
     );
@@ -220,6 +247,7 @@ describe('runTurn — refinement', () => {
         userMessage: 'x',
         questions: [q({ id: 'a' })],
         config: { contradictionMode: 'flag' },
+        existingAnswers: TWO_ANSWERS,
       }),
       invokers
     );
@@ -318,6 +346,7 @@ describe('runTurn — cost summing', () => {
         userMessage: 'x',
         questions: [q({ id: 'a', key: 'a' }), q({ id: 'b', key: 'b' })],
         config: { contradictionMode: 'flag', coverageThreshold: 1, minQuestionsAnswered: 5 },
+        existingAnswers: TWO_ANSWERS,
       }),
       invokers
     );

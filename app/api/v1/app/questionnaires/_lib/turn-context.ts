@@ -114,6 +114,9 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
         take: RECENT_TURNS_WINDOW,
         select: { userMessage: true, agentResponse: true, targetedQuestionId: true, ordinal: true },
       },
+      // The TRUE turn count — `turns` above is windowed (take), so its length saturates at
+      // RECENT_TURNS_WINDOW and can't seed the monotonic selection round past that.
+      _count: { select: { turns: true } },
     },
   });
   if (!session) return null;
@@ -192,8 +195,10 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
       existingAnswers,
       recentMessages,
       // Monotonic per-turn counter (the engine contract selection-context.ts calls out):
-      // the number of turns already taken, so a presented-but-unanswered question isn't re-picked.
-      selectionRound: session.turns.length,
+      // the TRUE number of turns already taken (not the windowed `turns` array, whose length
+      // saturates at RECENT_TURNS_WINDOW), so the `random` strategy's session+round seed keeps
+      // advancing and a presented-but-unanswered question isn't re-picked.
+      selectionRound: session._count.turns,
     },
     slots,
     activeQuestionKey,

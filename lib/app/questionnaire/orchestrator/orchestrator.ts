@@ -43,6 +43,9 @@ import type {
 /** Synthetic slug recorded on a turn's `toolCalls` for the (non-capability) selection step. */
 export const SELECTION_TOOL_SLUG = 'app_select_question';
 
+/** Fewest answers a contradiction pass needs — the detector capability enforces `min(2)`. */
+export const MIN_CONTRADICTION_ANSWERS = 2;
+
 /** Deterministic fallback prose for the terminal branches (offer phrasing is the LLM's job). */
 export const COMPLETE_MESSAGE =
   "Thanks — that's everything we need. You can submit your responses whenever you're ready.";
@@ -162,8 +165,15 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
   // 2. Merge the extracted intents so the rest of the pipeline sees the answer just given.
   const effective = applyIntents(state, answerUpserts);
 
-  // 3. Detect contradictions over the effective answers.
-  if (effective.config.contradictionMode !== 'off' && effective.flags.contradiction) {
+  // 3. Detect contradictions over the effective answers. A contradiction needs ≥2 answers
+  //    to compare, and the detector capability enforces that (`answers.min(2)`); skip the
+  //    dispatch below that floor so an early turn doesn't surface a spurious validation
+  //    warning or record a failed tool-call.
+  if (
+    effective.config.contradictionMode !== 'off' &&
+    effective.flags.contradiction &&
+    effective.existingAnswers.length >= MIN_CONTRADICTION_ANSWERS
+  ) {
     const out = await invokers.detectContradictions(effective);
     costUsd += out.costUsd;
     toolCalls.push(
