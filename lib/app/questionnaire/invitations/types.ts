@@ -43,3 +43,15 @@ export const INVITATION_RESENDABLE_STATUSES = [
   'sent',
   'opened',
 ] as const satisfies readonly AppInvitationStatus[];
+
+/**
+ * Statuses the demo session reset (F6.4 `?resetInvitations=true`) **preserves** —
+ * everything else (`pending | sent | opened | registered`) is deleted. `started` and
+ * `completed` record real respondent progress; `revoked` is a deliberate admin act —
+ * none should silently vanish when a demo client is wiped for the next prospect.
+ */
+export const RESET_PRESERVED_INVITATION_STATUSES = [
+  'started',
+  'completed',
+  'revoked',
+] as const satisfies readonly AppInvitationStatus[];

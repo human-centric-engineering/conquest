@@ -554,7 +554,7 @@ _Indicative tasks:_
 
 ### F6.4 — Demo session reset (DEMO-ONLY)
 
-_Status:_ not started · _Size:_ ~1 PR · _Owner:_ TBD · _Deps:_ F4.6, F6.1, F3.1 · _Relocated from the old P2.5._
+_Status:_ **done** (tracker: [`features/f6.4.md`](features/f6.4.md)) · _Size:_ ~1 PR · _Owner:_ — · _Deps:_ F4.6, F6.1, F3.1 · _Relocated from the old P2.5._
 
 The between-demos "clean slate" — `POST /api/v1/app/demo-clients/:id/reset-sessions` hard-deletes the session graph for a client's questionnaires so the next prospect starts fresh. Can only exist once that graph does (this phase). Destructive; a production fork removes it — marked `// DEMO-ONLY:`.
 

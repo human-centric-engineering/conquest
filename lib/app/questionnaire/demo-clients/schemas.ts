@@ -69,6 +69,27 @@ export const assignDemoClientSchema = z.object({
   demoClientId: z.string().min(1).nullable(),
 });
 
+/**
+ * DEMO-ONLY (F6.4): typed-confirmation body for `POST /demo-clients/:id/reset-sessions`.
+ * Validates the *shape* only (kebab-case, non-empty); the route compares the value
+ * against the loaded client's own slug and 400s on mismatch (CONFIRM_SLUG_MISMATCH).
+ */
+export const resetSessionsSchema = z.object({
+  confirmSlug: slugField,
+});
+
+/**
+ * DEMO-ONLY (F6.4): query for the reset endpoint — `?resetInvitations=true` opts into
+ * invitation cleanup. Query params arrive as strings; absent/anything-but-"true" → false.
+ */
+export const resetSessionsQuerySchema = z.object({
+  resetInvitations: z
+    .enum(['true', 'false'])
+    .optional()
+    .transform((v) => v === 'true'),
+});
+
 export type CreateDemoClientInput = z.infer<typeof createDemoClientSchema>;
 export type UpdateDemoClientInput = z.infer<typeof updateDemoClientSchema>;
 export type AssignDemoClientInput = z.infer<typeof assignDemoClientSchema>;
+export type ResetSessionsInput = z.infer<typeof resetSessionsSchema>;

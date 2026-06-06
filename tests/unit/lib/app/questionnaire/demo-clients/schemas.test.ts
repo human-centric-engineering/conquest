@@ -3,6 +3,8 @@ import { describe, it, expect } from 'vitest';
 import {
   assignDemoClientSchema,
   createDemoClientSchema,
+  resetSessionsQuerySchema,
+  resetSessionsSchema,
   updateDemoClientSchema,
 } from '@/lib/app/questionnaire/demo-clients/schemas';
 
@@ -100,5 +102,33 @@ describe('assignDemoClientSchema', () => {
   it('rejects an empty string and a missing field', () => {
     expect(assignDemoClientSchema.safeParse({ demoClientId: '' }).success).toBe(false);
     expect(assignDemoClientSchema.safeParse({}).success).toBe(false);
+  });
+});
+
+describe('resetSessionsSchema (F6.4)', () => {
+  it('accepts a kebab-case confirmSlug', () => {
+    expect(resetSessionsSchema.parse({ confirmSlug: 'acme-bank' }).confirmSlug).toBe('acme-bank');
+  });
+
+  it('rejects a missing, empty, or non-kebab confirmSlug', () => {
+    expect(resetSessionsSchema.safeParse({}).success).toBe(false);
+    expect(resetSessionsSchema.safeParse({ confirmSlug: '' }).success).toBe(false);
+    expect(resetSessionsSchema.safeParse({ confirmSlug: 'Acme Bank' }).success).toBe(false);
+  });
+});
+
+describe('resetSessionsQuerySchema (F6.4)', () => {
+  it('coerces "true" to true and "false"/absent to false', () => {
+    expect(resetSessionsQuerySchema.parse({ resetInvitations: 'true' }).resetInvitations).toBe(
+      true
+    );
+    expect(resetSessionsQuerySchema.parse({ resetInvitations: 'false' }).resetInvitations).toBe(
+      false
+    );
+    expect(resetSessionsQuerySchema.parse({}).resetInvitations).toBe(false);
+  });
+
+  it('rejects a value that is neither "true" nor "false"', () => {
+    expect(resetSessionsQuerySchema.safeParse({ resetInvitations: '1' }).success).toBe(false);
   });
 });
