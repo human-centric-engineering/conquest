@@ -19,6 +19,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { DemoClientThemePreview } from '@/components/admin/demo-clients/demo-client-theme-preview';
 import type { DemoClientView } from '@/lib/app/questionnaire/demo-clients';
 
 function formatDate(iso: string): string {
@@ -43,6 +44,7 @@ export function DemoClientsTable({ clients }: DemoClientsTableProps) {
           <TableRow>
             <TableHead>Name</TableHead>
             <TableHead>Slug</TableHead>
+            <TableHead>Branding</TableHead>
             <TableHead>Status</TableHead>
             <TableHead className="text-right">Questionnaires</TableHead>
             <TableHead className="text-right">Created</TableHead>
@@ -51,7 +53,7 @@ export function DemoClientsTable({ clients }: DemoClientsTableProps) {
         <TableBody>
           {clients.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={5} className="text-muted-foreground py-10 text-center">
+              <TableCell colSpan={6} className="text-muted-foreground py-10 text-center">
                 No demo clients yet. Create one to attribute questionnaires to a prospect.
               </TableCell>
             </TableRow>
@@ -65,6 +67,9 @@ export function DemoClientsTable({ clients }: DemoClientsTableProps) {
                 <TableCell className="font-medium">{client.name}</TableCell>
                 <TableCell className="text-muted-foreground">
                   <code className="text-xs">{client.slug}</code>
+                </TableCell>
+                <TableCell>
+                  <DemoClientThemePreview theme={client} compact />
                 </TableCell>
                 <TableCell>
                   <Badge variant={client.isActive ? 'default' : 'secondary'}>

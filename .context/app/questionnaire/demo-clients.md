@@ -115,7 +115,16 @@ a typed-confirmation guard and an anonymous-mode refusal. See
   while attributed).
 - Both forms carry an **"Invitation branding"** fieldset (F3.4): CTA colour, accent
   colour, logo URL, welcome copy — each optional with a `<FieldHelp>`; blank = the
-  Sunrise default.
+  Sunrise default. The edit form shows a **live `<DemoClientThemePreview>`** under the
+  fieldset (valid inputs only — a half-typed hex shows the default, not a broken
+  swatch).
+- **Brand preview (`<DemoClientThemePreview>`).** Surfaces the configured brand back
+  to the admin — the gap that a client could set four theme fields and see nothing.
+  Reuses `resolveTheme()` and the same escaped `--app-logo-url` background as
+  `BrandThemeProvider` (never a raw `<img src>`). Two modes: **compact** on the list's
+  _Branding_ column (a swatch/thumbnail only for fields actually set; "Default" when
+  none) and **full** on the detail page / live form preview (the resolved brand the
+  respondent sees, defaults filled).
 - The questionnaire detail page (`/admin/questionnaires/:id`) carries the
   attribution `<DemoClientAssign>` picker (active clients + the current one).
 
