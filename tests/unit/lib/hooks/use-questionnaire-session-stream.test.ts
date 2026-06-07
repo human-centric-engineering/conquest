@@ -456,4 +456,28 @@ describe('useQuestionnaireSessionStream', () => {
     expect(result.current.status).toBe('error');
     expect(onTurnSettled).not.toHaveBeenCalled();
   });
+
+  // ── applyStatus (F7.3 lifecycle seam) ───────────────────────────────────────
+  it('applyStatus pushes a terminal status and disables the composer', () => {
+    const { result } = renderHook(() => useQuestionnaireSessionStream({ sessionId: SESSION_ID }));
+    expect(result.current.canSend).toBe(true);
+
+    act(() => result.current.applyStatus('completed'));
+    expect(result.current.status).toBe('completed');
+    expect(result.current.canSend).toBe(false);
+  });
+
+  it('applyStatus to a non-blocking status clears a stale blocking error and re-enables', () => {
+    const { result } = renderHook(() =>
+      useQuestionnaireSessionStream({ sessionId: SESSION_ID, initialStatus: 'not_active' })
+    );
+    // Mounted paused → blocking + a default blocking error.
+    expect(result.current.canSend).toBe(false);
+    expect(result.current.error).not.toBeNull();
+
+    act(() => result.current.applyStatus('idle'));
+    expect(result.current.status).toBe('idle');
+    expect(result.current.canSend).toBe(true);
+    expect(result.current.error).toBeNull();
+  });
 });

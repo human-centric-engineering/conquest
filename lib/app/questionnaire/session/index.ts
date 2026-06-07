@@ -27,3 +27,11 @@ export {
   type CostCapTier,
   classifyCostCap,
 } from '@/lib/app/questionnaire/session/cost-cap';
+
+export {
+  type StatusCompletionView,
+  type SessionStatusView,
+  type SessionStatusInput,
+  buildSessionStatusView,
+  canSubmitSession,
+} from '@/lib/app/questionnaire/session/status-view';

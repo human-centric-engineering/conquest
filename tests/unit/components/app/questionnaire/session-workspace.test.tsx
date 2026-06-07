@@ -1,10 +1,11 @@
 /**
  * SessionWorkspace — the chat + answer-panel split-screen wiring (F7.2).
  *
- * Both hooks and both children are mocked so the test pins SessionWorkspace's OWN
- * responsibilities, not theirs: that the single stream is created with
- * `onTurnSettled` wired to the panel's `refetch`, that the panel's view/loading and
- * the stream's `canSend` are threaded down, and that the Revisit handler sends a
+ * All three hooks and the children are mocked so the test pins SessionWorkspace's OWN
+ * responsibilities, not theirs: that the single stream is created with `onTurnSettled`
+ * fanning out to BOTH the panel refetch and the lifecycle refetch (F7.3), that the
+ * panel's view/loading and the stream's `canSend` are threaded down, that the lifecycle
+ * `applyStatus` is wired to the shared stream, and that the Revisit handler sends a
  * correctly-phrased turn through the shared stream only when sending is allowed.
  *
  * @see components/app/questionnaire/session-workspace.tsx
@@ -16,10 +17,13 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import type { PanelSlotView } from '@/lib/app/questionnaire/panel/types';
 
 const sendMessage = vi.fn();
+const applyStatus = vi.fn();
 const refetch = vi.fn();
+const lifecycleRefetch = vi.fn();
 
 const streamHook = vi.fn();
 const panelHook = vi.fn();
+const lifecycleHook = vi.fn();
 
 vi.mock('@/lib/hooks/use-questionnaire-session-stream', () => ({
   useQuestionnaireSessionStream: (opts: unknown) => streamHook(opts),
@@ -27,10 +31,40 @@ vi.mock('@/lib/hooks/use-questionnaire-session-stream', () => ({
 vi.mock('@/lib/hooks/use-answer-panel', () => ({
   useAnswerPanel: (opts: unknown) => panelHook(opts),
 }));
+vi.mock('@/lib/hooks/use-session-lifecycle', () => ({
+  useSessionLifecycle: (opts: unknown) => lifecycleHook(opts),
+}));
 
-// Chat is irrelevant here — a marker stub keeps the render cheap.
+// Chat + lifecycle children are irrelevant here — marker stubs keep the render cheap.
 vi.mock('@/components/app/questionnaire/chat/questionnaire-chat', () => ({
   QuestionnaireChat: () => <div data-testid="chat" />,
+}));
+// Lifecycle-bar stub surfaces the Pause/Resume handlers as buttons so the test can verify
+// the workspace wires them to the hook's actions.
+vi.mock('@/components/app/questionnaire/lifecycle/session-lifecycle-bar', () => ({
+  SessionLifecycleBar: ({ onPause, onResume }: { onPause: () => void; onResume: () => void }) => (
+    <div data-testid="lifecycle-bar">
+      <button type="button" onClick={onPause}>
+        bar-pause
+      </button>
+      <button type="button" onClick={onResume}>
+        bar-resume
+      </button>
+    </div>
+  ),
+}));
+// Completion-offer stub surfaces the Submit handler as a button (same reason).
+vi.mock('@/components/app/questionnaire/lifecycle/completion-offer', () => ({
+  CompletionOffer: ({ onSubmit }: { onSubmit: () => void }) => (
+    <div data-testid="completion-offer">
+      <button type="button" onClick={onSubmit}>
+        offer-submit
+      </button>
+    </div>
+  ),
+}));
+vi.mock('@/components/app/questionnaire/lifecycle/session-complete', () => ({
+  SessionComplete: () => <div data-testid="session-complete" />,
 }));
 
 // Panel stub exposes the props the workspace controls + a button that fires onRevisit.
@@ -68,9 +102,37 @@ const SLOT: PanelSlotView = {
   refinementHistory: [],
 };
 
-function setup(streamOver: Record<string, unknown> = {}, panelOver: Record<string, unknown> = {}) {
-  streamHook.mockReturnValue({ canSend: true, sendMessage, ...streamOver });
+function lifecycleReturn(over: Record<string, unknown> = {}) {
+  return {
+    view: null,
+    loading: false,
+    busy: false,
+    actionError: null,
+    canSubmit: false,
+    canPause: false,
+    canResume: false,
+    refetch: lifecycleRefetch,
+    pause: vi.fn(),
+    resume: vi.fn(),
+    submit: vi.fn(),
+    ...over,
+  };
+}
+
+function setup(
+  streamOver: Record<string, unknown> = {},
+  panelOver: Record<string, unknown> = {},
+  lifecycleOver: Record<string, unknown> = {}
+) {
+  streamHook.mockReturnValue({
+    canSend: true,
+    status: 'idle',
+    sendMessage,
+    applyStatus,
+    ...streamOver,
+  });
   panelHook.mockReturnValue({ view: null, loading: false, error: false, refetch, ...panelOver });
+  lifecycleHook.mockReturnValue(lifecycleReturn(lifecycleOver));
   render(<SessionWorkspace sessionId="s1" />);
 }
 
@@ -79,24 +141,36 @@ beforeEach(() => {
 });
 
 describe('SessionWorkspace', () => {
-  it('creates the stream with onTurnSettled wired to the panel refetch', () => {
+  it('fans onTurnSettled out to BOTH the panel and lifecycle refetches', () => {
     setup();
     const opts = streamHook.mock.calls[0][0];
-    expect(opts.onTurnSettled).toBe(refetch);
+    // It's a combined closure now (refs set in an effect), not the panel refetch directly.
+    expect(typeof opts.onTurnSettled).toBe('function');
+    opts.onTurnSettled();
+    expect(refetch).toHaveBeenCalledTimes(1);
+    expect(lifecycleRefetch).toHaveBeenCalledTimes(1);
   });
 
-  it('threads the session id and access token into both hooks', () => {
-    streamHook.mockReturnValue({ canSend: true, sendMessage });
+  it('wires the lifecycle hook to the shared stream applyStatus', () => {
+    setup();
+    expect(lifecycleHook.mock.calls[0][0]).toMatchObject({ applyStatus });
+  });
+
+  it('threads the session id and access token into all three hooks', () => {
+    streamHook.mockReturnValue({ canSend: true, status: 'idle', sendMessage, applyStatus });
     panelHook.mockReturnValue({ view: null, loading: false, error: false, refetch });
+    lifecycleHook.mockReturnValue(lifecycleReturn());
     render(<SessionWorkspace sessionId="s1" accessToken="tok-9" />);
 
     expect(panelHook.mock.calls[0][0]).toMatchObject({ sessionId: 's1', accessToken: 'tok-9' });
     expect(streamHook.mock.calls[0][0]).toMatchObject({ sessionId: 's1', accessToken: 'tok-9' });
+    expect(lifecycleHook.mock.calls[0][0]).toMatchObject({ sessionId: 's1', accessToken: 'tok-9' });
   });
 
   it('seeds useAnswerPanel with the SSR-resolved initialPanel view', () => {
-    streamHook.mockReturnValue({ canSend: true, sendMessage });
+    streamHook.mockReturnValue({ canSend: true, status: 'idle', sendMessage, applyStatus });
     panelHook.mockReturnValue({ view: null, loading: false, error: false, refetch });
+    lifecycleHook.mockReturnValue(lifecycleReturn());
     const seed = {
       status: 'active' as const,
       scope: 'full_progress' as const,
@@ -107,6 +181,36 @@ describe('SessionWorkspace', () => {
     render(<SessionWorkspace sessionId="s1" initialPanel={seed} />);
 
     expect(panelHook.mock.calls[0][0]).toMatchObject({ initialView: seed });
+  });
+
+  it('seeds useSessionLifecycle with the SSR-resolved initialStatusView', () => {
+    streamHook.mockReturnValue({ canSend: true, status: 'idle', sendMessage, applyStatus });
+    panelHook.mockReturnValue({ view: null, loading: false, error: false, refetch });
+    lifecycleHook.mockReturnValue(lifecycleReturn());
+    const statusSeed = {
+      status: 'active' as const,
+      completion: {
+        kind: 'offer' as const,
+        coverage: 0.9,
+        answeredCount: 3,
+        requiredUnansweredKeys: [],
+        capReached: false,
+      },
+      cost: null,
+      anonymous: false,
+    };
+    render(<SessionWorkspace sessionId="s1" initialStatusView={statusSeed} />);
+
+    expect(lifecycleHook.mock.calls[0][0]).toMatchObject({ initialView: statusSeed });
+  });
+
+  it('seeds the stream hook with the SSR-resolved initialStatus', () => {
+    streamHook.mockReturnValue({ canSend: true, status: 'idle', sendMessage, applyStatus });
+    panelHook.mockReturnValue({ view: null, loading: false, error: false, refetch });
+    lifecycleHook.mockReturnValue(lifecycleReturn());
+    render(<SessionWorkspace sessionId="s1" initialStatus="not_active" />);
+
+    expect(streamHook.mock.calls[0][0]).toMatchObject({ initialStatus: 'not_active' });
   });
 
   it('passes the panel loading state and stream canSend down to the panel', () => {
@@ -130,5 +234,37 @@ describe('SessionWorkspace', () => {
     setup({ canSend: false });
     fireEvent.click(screen.getByText('revisit'));
     expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('swaps to the completion confirmation (not the chat) once submitted', () => {
+    setup({ status: 'completed', canSend: false });
+    expect(screen.getByTestId('session-complete')).toBeInTheDocument();
+    expect(screen.queryByTestId('chat')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('panel')).not.toBeInTheDocument();
+  });
+
+  it('wires the lifecycle bar Pause/Resume controls to the hook actions', () => {
+    const pause = vi.fn();
+    const resume = vi.fn();
+    setup({}, {}, { canPause: true, canResume: true, pause, resume });
+
+    fireEvent.click(screen.getByText('bar-pause'));
+    fireEvent.click(screen.getByText('bar-resume'));
+
+    expect(pause).toHaveBeenCalledTimes(1);
+    expect(resume).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the completion offer and wires Submit when the session is submittable', () => {
+    const submit = vi.fn();
+    setup({}, {}, { canSubmit: true, submit });
+
+    fireEvent.click(screen.getByText('offer-submit'));
+    expect(submit).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides the completion offer when the session is not submittable', () => {
+    setup({}, {}, { canSubmit: false });
+    expect(screen.queryByTestId('completion-offer')).not.toBeInTheDocument();
   });
 });

@@ -31,7 +31,12 @@ export interface SessionWarning {
  * - `streaming` — a turn is in flight; composer disabled.
  * - `cost_capped` — the session's budget is exhausted (HTTP 402). Terminal
  *   for this session: the next turn would 409, so the composer stays disabled.
- * - `not_active` — the session is paused / completed / abandoned (HTTP 409).
+ * - `not_active` — the session is paused / abandoned (HTTP 409). For a
+ *   respondent-paused session this is resumable (F7.3); the surface shows a
+ *   Resume affordance rather than treating it as final.
+ * - `completed` — the respondent submitted (or the session was completed).
+ *   Terminal + positive: the surface shows the completion confirmation (F7.3),
+ *   not an error panel.
  * - `expired` — an anonymous session token is invalid or past its 24h TTL
  *   (HTTP 401). The respondent must restart.
  * - `error` — a transient failure (network, 429 rate-limit, defensive stream
@@ -42,6 +47,7 @@ export type QuestionnaireChatStatus =
   | 'streaming'
   | 'cost_capped'
   | 'not_active'
+  | 'completed'
   | 'expired'
   | 'error';
 
@@ -60,5 +66,6 @@ export const BLOCKING_STATUSES: readonly QuestionnaireChatStatus[] = [
   'streaming',
   'cost_capped',
   'not_active',
+  'completed',
   'expired',
 ];

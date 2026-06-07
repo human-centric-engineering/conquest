@@ -63,12 +63,37 @@ question prompts are deterministic).
 | `POST /api/v1/app/questionnaire-sessions/anonymous`      | **public**  | No-login anonymous create → returns a signed `accessToken`          |
 | `POST /api/v1/app/questionnaire-sessions/:id/messages`   | per-session | The streaming turn loop                                             |
 | `POST /api/v1/app/questionnaire-sessions/:id/transcribe` | per-session | Voice input (F6.2) — audio → `{ text, durationMs, language? }`      |
+| `GET /api/v1/app/questionnaire-sessions/:id/status`      | per-session | Lifecycle status (F7.3) — completion-offer + cost tier + anon       |
+| `POST /api/v1/app/questionnaire-sessions/:id/lifecycle`  | per-session | Pause/resume (F7.3) — **signed-in respondents only** (403 for anon) |
+| `POST /api/v1/app/questionnaire-sessions/:id/submit`     | per-session | Accept→completed (F7.3) — the only respondent completion path       |
 
 The turn route can't use `withAuth` (which hard-requires a session), so `resolveTurnAccess`
 branches on the session's `respondentUserId`: **set** → require a logged-in user who matches;
 **null** (anonymous) → require a valid `X-Session-Token` bound to this session. Rate-keyed on
-the user id, or client IP + session id for anonymous. The transcribe route shares this same
-resolver.
+the user id, or client IP + session id for anonymous. The transcribe, status, lifecycle, and
+submit routes all share this same resolver.
+
+### Session lifecycle (F7.3)
+
+The respondent surface needs three signals the SSE stream doesn't carry, so they're a
+read + two mutations rather than stream frames (mirrors F7.2's "read endpoint, not a stream
+event" decision):
+
+- **`GET …/status`** returns a respondent-safe `SessionStatusView`: the completion assessment
+  (so a Submit affordance can appear when `completion.kind === 'offer'`), a coarse cost
+  **tier** (never the raw spend), and the `anonymous` flag. Reuses `buildTurnContext` so the
+  assessment is byte-identical to the live turn's; the UI refetches it on the same
+  `onTurnSettled` that drives the answer panel. No status gate (paused/completed still report).
+- **`POST …/lifecycle` `{ action: 'pause' | 'resume' }`** drives the F4.6 state machine through
+  the same `_lib/sessions.ts` seam as the admin `/transition` route, but is **signed-in only** —
+  a no-login session has no durable place to resume from (the token is client-only), so an
+  anonymous caller is refused with `403 PAUSE_NOT_PERMITTED`. `resume` returns the resume state.
+- **`POST …/submit`** is the sole respondent path to `completed`. It re-asserts eligibility via
+  the F4.5 `resolveCompletion` (no completion sweep — contradictions already surface live) and
+  transitions `active → completed`. A required question can't be outstanding at an offer (the
+  required gate is upstream); the lone exception is the existing "a capped session can always
+  submit" behaviour. Idempotent on an already-completed session; `409 SUBMIT_NOT_READY` when not
+  offerable; `409 SESSION_NOT_ACTIVE` for a paused/abandoned session.
 
 ### Voice input (F6.2)
 

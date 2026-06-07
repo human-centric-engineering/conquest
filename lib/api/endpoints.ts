@@ -449,6 +449,12 @@ export const API = {
       transcribe: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/transcribe`,
       /** Answer-slot panel state — live read for the respondent panel (GET) (F7.2). */
       answers: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/answers`,
+      /** Session lifecycle/status — completion-offer + cost tier + anon (GET) (F7.3). */
+      status: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/status`,
+      /** Pause/resume a session (POST `{ action }`) — signed-in respondents only (F7.3). */
+      lifecycle: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/lifecycle`,
+      /** Submit (complete) a session (POST) — the respondent accept→completed path (F7.3). */
+      submit: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/submit`,
     },
     /** Public (token-gated) respondent invitation endpoints (F3.2 PR2). */
     INVITATIONS: {
