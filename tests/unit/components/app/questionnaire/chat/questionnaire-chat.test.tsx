@@ -127,7 +127,8 @@ describe('QuestionnaireChat', () => {
     fireEvent.change(textarea, { target: { value: 'hello' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
-    expect(sendMessage).toHaveBeenCalledWith('hello');
+    // No attachments selected → second arg is undefined.
+    expect(sendMessage).toHaveBeenCalledWith('hello', undefined);
     expect((textarea as HTMLTextAreaElement).value).toBe('');
   });
 
@@ -148,7 +149,15 @@ describe('QuestionnaireChat', () => {
     fireEvent.change(textarea, { target: { value: 'first' } });
     fireEvent.keyDown(textarea, { key: 'Enter' });
 
-    expect(sendMessage).toHaveBeenCalledWith('first');
+    expect(sendMessage).toHaveBeenCalledWith('first', undefined);
+  });
+
+  it('hides the attachment affordance unless attachmentInputEnabled', () => {
+    const { rerender } = render(<QuestionnaireChat sessionId="s1" stream={hookReturn} />);
+    expect(screen.queryByRole('button', { name: 'Attach a file' })).not.toBeInTheDocument();
+
+    rerender(<QuestionnaireChat sessionId="s1" stream={hookReturn} attachmentInputEnabled />);
+    expect(screen.getByRole('button', { name: 'Attach a file' })).toBeInTheDocument();
   });
 
   it('disables the composer when sending is not allowed', () => {

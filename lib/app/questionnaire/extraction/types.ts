@@ -84,8 +84,22 @@ export interface ExtractionContext {
    * the extractor works off `userMessage` alone when absent.
    */
   recentMessages?: string[];
+  /**
+   * Files the respondent attached to this turn (images / documents), base64-encoded.
+   * When present the prompt builder turns the user message into multimodal content
+   * parts so the extractor can read the attachment alongside the text. Shape mirrors
+   * the platform `chatAttachmentSchema`.
+   */
+  attachments?: ExtractionAttachment[];
   /** Stable session identity — threaded into cost-log metadata. */
   sessionId: string;
+}
+
+/** One base64-encoded attachment on a respondent turn (mirrors `chatAttachmentSchema`). */
+export interface ExtractionAttachment {
+  name: string;
+  mediaType: string;
+  data: string;
 }
 
 /**

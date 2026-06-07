@@ -11,6 +11,7 @@ import {
   APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG,
   APP_QUESTIONNAIRES_VOICE_INPUT_FLAG,
   APP_QUESTIONNAIRES_COST_CAP_FLAG,
+  APP_QUESTIONNAIRES_ATTACHMENT_INPUT_FLAG,
   APP_QUESTIONNAIRES_FLAG,
 } from '@/lib/app/questionnaire/constants';
 import { isFeatureEnabled } from '@/lib/feature-flags';
@@ -29,6 +30,7 @@ export {
   APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG,
   APP_QUESTIONNAIRES_VOICE_INPUT_FLAG,
   APP_QUESTIONNAIRES_COST_CAP_FLAG,
+  APP_QUESTIONNAIRES_ATTACHMENT_INPUT_FLAG,
 };
 
 /**
@@ -273,6 +275,25 @@ export async function isVoiceInputEnabled(): Promise<boolean> {
     isFeatureEnabled(APP_QUESTIONNAIRES_VOICE_INPUT_FLAG),
   ]);
   return app && live && voice;
+}
+
+/**
+ * Whether **attachment input** may run — a respondent attaching images/documents to a
+ * `/messages` turn for the answer-extractor to read. Like voice, it depends on live-sessions
+ * (attachments only matter inside the live turn loop) and is an independent opt-in on top
+ * (multimodal turns cost more and need a vision/document-capable model). The chat surface
+ * shows the affordance only when this is true, and the `/messages` route ignores any
+ * attachments a client sends while it's off — so the paid multimodal path stays closed.
+ *
+ * Server-only (resolves the flags from the database).
+ */
+export async function isAttachmentInputEnabled(): Promise<boolean> {
+  const [app, live, attachments] = await Promise.all([
+    isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_ATTACHMENT_INPUT_FLAG),
+  ]);
+  return app && live && attachments;
 }
 
 /**

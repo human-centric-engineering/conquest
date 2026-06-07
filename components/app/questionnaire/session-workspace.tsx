@@ -52,6 +52,8 @@ export interface SessionWorkspaceProps {
   initialStatusView?: SessionStatusView;
   /** Show the voice-input affordance (gated server-side on the voice flag). */
   voiceInputEnabled?: boolean;
+  /** Show the attachment affordance (gated server-side on the attachment-input flag). */
+  attachmentInputEnabled?: boolean;
 }
 
 export function SessionWorkspace({
@@ -62,6 +64,7 @@ export function SessionWorkspace({
   initialPanel,
   initialStatusView,
   voiceInputEnabled = false,
+  attachmentInputEnabled = false,
 }: SessionWorkspaceProps) {
   // Both reads refetch on each clean turn-settle. The stream reads its `onTurnSettled`
   // through a ref, so routing the refetches through refs here breaks the declaration
@@ -140,6 +143,7 @@ export function SessionWorkspace({
             accessToken={accessToken}
             stream={stream}
             voiceInputEnabled={voiceInputEnabled}
+            attachmentInputEnabled={attachmentInputEnabled}
             className="min-h-0 flex-1"
           />
         </div>

@@ -69,6 +69,13 @@ export interface TurnFlags {
  * DTOs: selection/completion read `questions`/`answered`/`config`; extraction reads
  * `userMessage`/`recentMessages`; refinement reads `existingAnswers`.
  */
+/** One base64-encoded attachment on a turn (mirrors the platform `chatAttachmentSchema`). */
+export interface TurnAttachment {
+  name: string;
+  mediaType: string;
+  data: string;
+}
+
 export interface TurnState {
   /** The session this turn belongs to. */
   sessionId: string;
@@ -84,6 +91,12 @@ export interface TurnState {
   existingAnswers: ExistingAnswerView[];
   /** Recent transcript, oldest → newest (extraction / adaptive / offer phrasing read it). */
   recentMessages: string[];
+  /**
+   * Files attached to this turn's message (images / documents), base64-encoded. The
+   * extraction invoker forwards them so the extractor reads them alongside the text.
+   * Absent on the opening turn and text-only turns. Shape mirrors `chatAttachmentSchema`.
+   */
+  attachments?: TurnAttachment[];
   /** Zero-based selection round — the number of prior question picks. */
   selectionRound: number;
   /** Which sub-features are enabled this turn. */

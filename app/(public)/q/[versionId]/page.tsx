@@ -1,7 +1,11 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 
-import { isLiveSessionsEnabled, isVoiceInputEnabled } from '@/lib/app/questionnaire/feature-flag';
+import {
+  isAttachmentInputEnabled,
+  isLiveSessionsEnabled,
+  isVoiceInputEnabled,
+} from '@/lib/app/questionnaire/feature-flag';
 import { AnonymousSessionBoot } from '@/components/app/questionnaire/chat/anonymous-session-boot';
 import { BrandThemeProvider } from '@/components/app/questionnaire/chat/brand-theme-provider';
 import { resolveThemeForVersion } from '@/lib/app/questionnaire/chat/theme';
@@ -28,8 +32,9 @@ export default async function PublicQuestionnairePage({
 
   const { versionId } = await params;
   // Independent reads — resolve in parallel rather than serialising two DB round-trips.
-  const [voiceInputEnabled, theme] = await Promise.all([
+  const [voiceInputEnabled, attachmentInputEnabled, theme] = await Promise.all([
     isVoiceInputEnabled(),
+    isAttachmentInputEnabled(),
     resolveThemeForVersion(versionId),
   ]);
 
@@ -39,6 +44,7 @@ export default async function PublicQuestionnairePage({
         <AnonymousSessionBoot
           versionId={versionId}
           voiceInputEnabled={voiceInputEnabled}
+          attachmentInputEnabled={attachmentInputEnabled}
           welcomeCopy={theme.welcomeCopy}
         />
       </BrandThemeProvider>

@@ -498,6 +498,18 @@ export const APP_QUESTIONNAIRES_VOICE_INPUT_FLAG = 'APP_QUESTIONNAIRES_VOICE_INP
 export const APP_QUESTIONNAIRES_COST_CAP_FLAG = 'APP_QUESTIONNAIRES_COST_CAP_ENABLED';
 
 /**
+ * Sub-flag gating **attachment input** — letting a respondent attach images/documents to a
+ * `/messages` turn so the answer-extractor reads them alongside the text. Disabled by default:
+ * multimodal turns spend more and require a vision/document-capable model. Requires the master
+ * flag AND the live-sessions flag (attachments only apply to the live turn loop) AND this
+ * sub-flag; when off, the chat surface hides the affordance and the route ignores any attachments
+ * a client sends (text-only turn), so the paid multimodal path can't be reached. Seeded by
+ * `prisma/seeds/app-questionnaire/024-attachment-input-flag.ts`.
+ */
+export const APP_QUESTIONNAIRES_ATTACHMENT_INPUT_FLAG =
+  'APP_QUESTIONNAIRES_ATTACHMENT_INPUT_ENABLED';
+
+/**
  * Slug of the evaluate-structure capability (F5.1). One source of truth shared by the
  * `BaseCapability` subclass, its `AiCapability` seed row, and the evaluate-preview
  * route that dispatches it once per dimension. Snake_case with the fork-owned `app_`

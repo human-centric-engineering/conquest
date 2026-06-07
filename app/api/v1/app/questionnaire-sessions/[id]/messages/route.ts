@@ -26,6 +26,7 @@ import { errorResponse } from '@/lib/api/responses';
 import { getRouteLogger } from '@/lib/api/context';
 import { handleAPIError } from '@/lib/api/errors';
 import { validateRequestBody } from '@/lib/api/validation';
+import { chatAttachmentsArraySchema } from '@/lib/validations/orchestration';
 import { createRateLimitResponse } from '@/lib/security/rate-limit';
 
 import {
@@ -33,6 +34,7 @@ import {
   isAnswerExtractionEnabled,
   isAnswerRefinementEnabled,
   isCompletionEnabled,
+  isAttachmentInputEnabled,
   isContradictionDetectionEnabled,
   isCostCapEnforcementEnabled,
   withLiveSessionsEnabled,
@@ -53,7 +55,11 @@ import { persistTurn } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-r
 import { streamOfferMessage } from '@/app/api/v1/app/questionnaire-sessions/_lib/offer-stream';
 import { resolveTurnAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-access';
 
-const bodySchema = z.object({ message: z.string().min(1).max(10_000) });
+const bodySchema = z.object({
+  message: z.string().min(1).max(10_000),
+  /** Optional files attached to this turn (images/documents) — read by the extractor. */
+  attachments: chatAttachmentsArraySchema.optional(),
+});
 
 /** Chunk text into small pieces for a streamed feel (true token streaming is PR5). */
 function chunkText(text: string, size = 48): string[] {
@@ -142,18 +148,28 @@ async function handleMessage(
     }
 
     // Resolve the per-step flags (async DB reads) up front, so the pure core stays sync.
-    const [extraction, contradiction, refinement, completion, adaptive] = await Promise.all([
-      isAnswerExtractionEnabled(),
-      isContradictionDetectionEnabled(),
-      isAnswerRefinementEnabled(),
-      isCompletionEnabled(),
-      isAdaptiveSelectionEnabled(),
-    ]);
+    const [extraction, contradiction, refinement, completion, adaptive, attachmentInput] =
+      await Promise.all([
+        isAnswerExtractionEnabled(),
+        isContradictionDetectionEnabled(),
+        isAnswerRefinementEnabled(),
+        isCompletionEnabled(),
+        isAdaptiveSelectionEnabled(),
+        isAttachmentInputEnabled(),
+      ]);
+
+    // Attachments only flow when the sub-flag is on (dark-launch): with it off, a client
+    // that sends attachments anyway gets a text-only turn — the paid multimodal path stays shut.
+    const attachments =
+      attachmentInput && body.attachments && body.attachments.length > 0
+        ? body.attachments
+        : undefined;
 
     const state: TurnState = {
       ...loaded.base,
       userMessage: body.message,
       flags: { extraction, contradiction, refinement, completion },
+      ...(attachments ? { attachments } : {}),
       ...(costPressure ? { costPressure } : {}),
     };
 
