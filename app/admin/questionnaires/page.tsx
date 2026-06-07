@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 
 import { QuestionnairesTable } from '@/components/admin/questionnaires/questionnaires-table';
+import { UploadQuestionnaireDialog } from '@/components/admin/questionnaires/upload-questionnaire-dialog';
 import { FieldHelp } from '@/components/ui/field-help';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
@@ -51,28 +52,31 @@ export default async function QuestionnairesListPage() {
 
   return (
     <div className="space-y-6">
-      <header className="bg-background sticky top-0 z-30 -mx-6 border-b px-6 pt-3 pb-3">
-        <h1 className="text-2xl font-semibold">
-          Questionnaires{' '}
-          <FieldHelp
-            title="What are questionnaires?"
-            contentClassName="w-96 max-h-80 overflow-y-auto"
-          >
-            <p>
-              A questionnaire is a structured set of sections and questions an end user completes
-              through a streaming conversation rather than a form. An admin ingests a source
-              document (PDF / DOCX / MD / TXT) and an agent extracts its structure.
-            </p>
-            <p className="text-foreground mt-2 font-medium">This page</p>
-            <p>
-              Browse every ingested questionnaire with its latest version and structure counts.
-              Click a row to view its versions and full section / question graph.
-            </p>
-          </FieldHelp>
-        </h1>
-        <p className="text-muted-foreground text-sm">
-          Ingest, review, and edit conversational questionnaires.
-        </p>
+      <header className="bg-background sticky top-0 z-30 -mx-6 flex items-start justify-between gap-4 border-b px-6 pt-3 pb-3">
+        <div>
+          <h1 className="text-2xl font-semibold">
+            Questionnaires{' '}
+            <FieldHelp
+              title="What are questionnaires?"
+              contentClassName="w-96 max-h-80 overflow-y-auto"
+            >
+              <p>
+                A questionnaire is a structured set of sections and questions an end user completes
+                through a streaming conversation rather than a form. An admin ingests a source
+                document (PDF / DOCX / MD / TXT) and an agent extracts its structure.
+              </p>
+              <p className="text-foreground mt-2 font-medium">This page</p>
+              <p>
+                Browse every ingested questionnaire with its latest version and structure counts.
+                Click a row to view its versions and full section / question graph.
+              </p>
+            </FieldHelp>
+          </h1>
+          <p className="text-muted-foreground text-sm">
+            Ingest, review, and edit conversational questionnaires.
+          </p>
+        </div>
+        <UploadQuestionnaireDialog />
       </header>
 
       <QuestionnairesTable initialItems={items} initialMeta={meta} />

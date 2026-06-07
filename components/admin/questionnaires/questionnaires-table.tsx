@@ -6,8 +6,8 @@
  * Read-only admin list of questionnaires. Modelled on the orchestration
  * `AgentsTable` but deliberately lean for the read-surface PR: debounced title
  * search, a status filter, prev/next pagination, and click-through to the detail
- * page. No mutations — create is the existing ingestion endpoint (no UI yet) and
- * edit affordances land in F2.1b (PR2).
+ * page. Create is the ingestion endpoint, driven by the `UploadQuestionnaireDialog`
+ * (header button + empty-state CTA); edit affordances live on the detail page.
  *
  * Hydrates from server-fetched `initialItems` / `initialMeta`, then re-fetches
  * `GET /api/v1/app/questionnaires` on filter/page changes. Fetch failures keep
@@ -18,6 +18,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ChevronLeft, ChevronRight, Loader2, Search } from 'lucide-react';
 
+import { UploadQuestionnaireDialog } from '@/components/admin/questionnaires/upload-questionnaire-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import {
@@ -183,9 +184,13 @@ export function QuestionnairesTable({ initialItems, initialMeta }: Questionnaire
           <TableBody>
             {items.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-muted-foreground py-10 text-center">
-                  No questionnaires yet. Ingest a document via{' '}
-                  <code className="text-xs">POST /api/v1/app/questionnaires</code> to create one.
+                <TableCell colSpan={6} className="py-10 text-center">
+                  <div className="flex flex-col items-center gap-3">
+                    <p className="text-muted-foreground">
+                      No questionnaires yet. Upload a document to create your first one.
+                    </p>
+                    <UploadQuestionnaireDialog />
+                  </div>
                 </TableCell>
               </TableRow>
             ) : (

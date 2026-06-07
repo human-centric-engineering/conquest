@@ -1,9 +1,11 @@
 # Questionnaire — document ingestion
 
 > How an uploaded document becomes a populated questionnaire graph. Built by
-> **F1.1** ([`../planning/features/f1.1.md`](../planning/features/f1.1.md));
-> **API-only** — the review/edit UI is P2. Every surface here is gated by
-> `APP_QUESTIONNAIRES_ENABLED` (seeded off).
+> **F1.1** ([`../planning/features/f1.1.md`](../planning/features/f1.1.md)); the
+> review/edit UI is P2. Admins drive ingestion from the `UploadQuestionnaireDialog`
+> on `/admin/questionnaires` (header button + empty-state CTA), which POSTs to the
+> endpoint below. Every surface here is gated by `APP_QUESTIONNAIRES_ENABLED`
+> (seeded off).
 
 ## The endpoint
 
