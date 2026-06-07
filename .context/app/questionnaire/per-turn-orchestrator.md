@@ -53,7 +53,11 @@ question prompts are deterministic).
   cost; the route delegates with `yield*`.
 - **Persistence** `_lib/turn-run.ts` (`persistTurn`) writes answer side-effects through the
   F4.4 slot seam, then `recordTurn` (firing `lastUpdatedTurnId`). A post-response write
-  failure is logged, not retro-failed onto the streamed reply.
+  failure is logged, not retro-failed onto the streamed reply. Refinements take the F4.4
+  path in full — `loadAnswerSlot` → `applyRefinement` → `persistRefinement` — so a live
+  session **appends to `refinementHistory`** (the corrected value plus the pre-change
+  value/provenance/source), not just the new value. A refinement targeting a slot with no
+  captured answer (shouldn't happen) falls back to a plain `refined`-provenance upsert.
 
 ## Routes & access
 

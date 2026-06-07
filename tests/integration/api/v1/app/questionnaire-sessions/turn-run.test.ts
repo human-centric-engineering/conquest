@@ -8,17 +8,40 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const seamMock = vi.hoisted(() => ({ upsertAnswerSlot: vi.fn(), recordTurn: vi.fn() }));
+const seamMock = vi.hoisted(() => ({
+  upsertAnswerSlot: vi.fn(),
+  loadAnswerSlot: vi.fn(),
+  persistRefinement: vi.fn(),
+  recordTurn: vi.fn(),
+}));
 vi.mock('@/app/api/v1/app/questionnaires/_lib/answer-slots', () => ({
   upsertAnswerSlot: seamMock.upsertAnswerSlot,
+  loadAnswerSlot: seamMock.loadAnswerSlot,
+  persistRefinement: seamMock.persistRefinement,
 }));
 vi.mock('@/app/api/v1/app/questionnaires/_lib/turns', () => ({ recordTurn: seamMock.recordTurn }));
 
 import { persistTurn } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-run';
 import type { AnswerSlotIntent } from '@/lib/app/questionnaire/extraction/types';
-import type { RefinementDecision } from '@/lib/app/questionnaire/refinement/types';
+import type {
+  ExistingAnswerView,
+  RefinementDecision,
+} from '@/lib/app/questionnaire/refinement/types';
 
 type Mock = ReturnType<typeof vi.fn>;
+
+/** A loaded answer row, shaped as the answer-slots seam returns it. */
+const loaded = (id: string, existing: Partial<ExistingAnswerView> = {}) => ({
+  id,
+  existing: {
+    slotKey: 'role',
+    value: 'first',
+    provenance: 'direct' as const,
+    confidence: 0.9,
+    refinementHistory: [],
+    ...existing,
+  },
+});
 
 const intent = (slotKey: string, value: unknown): AnswerSlotIntent => ({
   slotKey,
@@ -43,6 +66,8 @@ const decision = (slotKey: string, newValue: unknown): RefinementDecision => ({
 beforeEach(() => {
   vi.clearAllMocks();
   (seamMock.recordTurn as Mock).mockResolvedValue('turn-1');
+  // Default: no existing answer for a refinement (overridden per-test).
+  (seamMock.loadAnswerSlot as Mock).mockResolvedValue(null);
 });
 
 describe('persistTurn', () => {
@@ -95,9 +120,12 @@ describe('persistTurn', () => {
     expect(seamMock.recordTurn).toHaveBeenCalledWith(expect.objectContaining({ costUsd: null }));
   });
 
-  it('persists a refinement with refined provenance and dedupes a doubly-touched slot', async () => {
-    // The same slot is both upserted and refined → one id, not two.
+  it('refines through persistRefinement and dedupes a doubly-touched slot', async () => {
+    // The same slot is both upserted and refined → loadAnswerSlot resolves to the
+    // upserted row, persistRefinement writes it back, and the id appears once.
     (seamMock.upsertAnswerSlot as Mock).mockResolvedValue('ans-q1');
+    (seamMock.loadAnswerSlot as Mock).mockResolvedValue(loaded('ans-q1'));
+
     await persistTurn({
       sessionId: 'sess-1',
       userMessage: 'm',
@@ -109,7 +137,78 @@ describe('persistTurn', () => {
       refinements: [decision('role', 'corrected')],
       keyToSlotId: new Map([['role', 'slot-q1']]),
     });
-    expect(seamMock.upsertAnswerSlot).toHaveBeenLastCalledWith(
+
+    expect(seamMock.loadAnswerSlot).toHaveBeenCalledWith('sess-1', 'slot-q1');
+    expect(seamMock.persistRefinement).toHaveBeenCalledWith(
+      'ans-q1',
+      expect.objectContaining({ value: 'corrected', provenance: 'refined' })
+    );
+    expect(seamMock.recordTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ sideEffectAnswerIds: ['ans-q1'] })
+    );
+  });
+
+  it('appends the prior value to refinementHistory on a live refinement (the gap this closes)', async () => {
+    // An existing answer with one prior history entry; a refine should grow it to two,
+    // capturing the pre-change value/provenance + the decision source.
+    (seamMock.loadAnswerSlot as Mock).mockResolvedValue(
+      loaded('ans-q1', {
+        value: 'marketing',
+        provenance: 'direct',
+        refinementHistory: [
+          {
+            previousValue: null,
+            previousProvenance: 'direct',
+            newValue: 'marketing',
+            rationale: 'initial capture',
+            source: 'correction',
+          },
+        ],
+      })
+    );
+
+    await persistTurn({
+      sessionId: 'sess-1',
+      userMessage: 'actually, sales',
+      agentResponse: 'r',
+      targetedQuestionId: null,
+      toolCalls: [],
+      costUsd: 0,
+      upserts: [],
+      refinements: [decision('role', 'sales')],
+      keyToSlotId: new Map([['role', 'slot-q1']]),
+    });
+
+    expect(seamMock.upsertAnswerSlot).not.toHaveBeenCalled();
+    const [, refined] = (seamMock.persistRefinement as Mock).mock.calls[0];
+    expect(refined.refinementHistory).toHaveLength(2);
+    expect(refined.refinementHistory[1]).toMatchObject({
+      previousValue: 'marketing',
+      previousProvenance: 'direct',
+      newValue: 'sales',
+      source: 'contradiction',
+    });
+  });
+
+  it('falls back to a plain upsert when the refined slot has no existing answer', async () => {
+    // Defensive path: loadAnswerSlot returns null (default) → value is persisted via
+    // upsert with `refined` provenance rather than skipped or thrown.
+    (seamMock.upsertAnswerSlot as Mock).mockResolvedValue('ans-q1');
+
+    await persistTurn({
+      sessionId: 'sess-1',
+      userMessage: 'm',
+      agentResponse: 'r',
+      targetedQuestionId: null,
+      toolCalls: [],
+      costUsd: 0,
+      upserts: [],
+      refinements: [decision('role', 'corrected')],
+      keyToSlotId: new Map([['role', 'slot-q1']]),
+    });
+
+    expect(seamMock.persistRefinement).not.toHaveBeenCalled();
+    expect(seamMock.upsertAnswerSlot).toHaveBeenCalledWith(
       'sess-1',
       'slot-q1',
       expect.objectContaining({ value: 'corrected', provenance: 'refined' })
@@ -131,6 +230,8 @@ describe('persistTurn', () => {
       refinements: [decision('stale', 'x')],
       keyToSlotId: new Map([['role', 'slot-q1']]),
     });
+    expect(seamMock.loadAnswerSlot).not.toHaveBeenCalled();
+    expect(seamMock.persistRefinement).not.toHaveBeenCalled();
     expect(seamMock.upsertAnswerSlot).not.toHaveBeenCalled();
     expect(seamMock.recordTurn).toHaveBeenCalledWith(
       expect.objectContaining({ sideEffectAnswerIds: [] })
