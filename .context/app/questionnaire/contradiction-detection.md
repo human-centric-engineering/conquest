@@ -30,9 +30,13 @@ will drive.
     (or all when `windowN <= 0`) — covers the prose's _every_turn_.
   - `phase: 'completion-sweep'` → run once before submit, comparing **all** answers
     — covers the prose's _sweep_only_.
-  - The prose's _every_n_turns_ (a pure cost-tuning interval) is **deferred to
-    F4.6**, where the real turn loop exists; it becomes an additive config field +
-    a scheduler branch then, with no rework here.
+  - The prose's _every_n_turns_ (a pure cost-tuning interval) **landed 2026-06-07**
+    (deferred-gaps audit): the additive config column `contradictionEveryNTurns`
+    (`Int @default(1)`, 1 = every turn) + an optional `cadence` arg on
+    `shouldRunDetection(mode, windowN, phase, { everyNTurns, turnIndex })`. For
+    `phase: 'turn'`, detection runs only when `turnIndex % everyNTurns === 0` (the
+    orchestrator passes the zero-based `selectionRound`); the completion sweep ignores
+    cadence (the final gate never skips).
 
 The natural high-value default falls out for free: `probe` + a completion sweep
 catches every conflict with one end-of-session LLM call; per-turn detection is the
@@ -82,8 +86,9 @@ contradiction/
   ≡ `[b,a]`, keep highest confidence); clamp severity; mode-shape (`flag` strips any
   probe; a `probe` finding with a missing/blank probe is _downgrade-kept_ without one,
   not dropped — the conflict still stands).
-- **`shouldRunDetection(mode, windowN, phase)`** — the pure scheduler (see cadence
-  above). Lives in the core so it's zero-mock unit-testable and reusable by F4.6.
+- **`shouldRunDetection(mode, windowN, phase, cadence?)`** — the pure scheduler (see
+  cadence above). The optional `cadence` (`{ everyNTurns, turnIndex }`) skips off-boundary
+  turns. Lives in the core so it's zero-mock unit-testable; the live orchestrator consumes it.
 
 ### `normalizeContradictionFindings` outcomes
 

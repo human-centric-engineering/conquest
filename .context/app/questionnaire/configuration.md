@@ -22,19 +22,20 @@ and stores them; the consumers land later (see _Who consumes it_).
 like goal/audience and the section graph. One typed column per setting plus a
 single JSON column for the profile fields:
 
-| Setting                          | Column                   | Type                   | Default           |
-| -------------------------------- | ------------------------ | ---------------------- | ----------------- |
-| Question selection strategy      | `selectionStrategy`      | String (enum)          | `'sequential'`    |
-| Completion: min questions        | `minQuestionsAnswered`   | Int                    | `0`               |
-| Completion: coverage threshold   | `coverageThreshold`      | Float (0–1)            | `1.0`             |
-| Cost budget (USD / session)      | `costBudgetUsd`          | Float? (null = no cap) | `null`            |
-| Per-session question cap         | `maxQuestionsPerSession` | Int? (null = no cap)   | `null`            |
-| Voice input                      | `voiceEnabled`           | Boolean                | `false`           |
-| Contradiction-detection mode     | `contradictionMode`      | String (enum)          | `'off'`           |
-| Contradiction look-back window N | `contradictionWindowN`   | Int                    | `0`               |
-| Anonymous mode                   | `anonymousMode`          | Boolean                | `false`           |
-| Session-start profile fields     | `profileFields`          | Json (array)           | `[]`              |
-| Answer panel scope               | `answerSlotPanelScope`   | String (enum)          | `'full_progress'` |
+| Setting                               | Column                     | Type                   | Default           |
+| ------------------------------------- | -------------------------- | ---------------------- | ----------------- |
+| Question selection strategy           | `selectionStrategy`        | String (enum)          | `'sequential'`    |
+| Completion: min questions             | `minQuestionsAnswered`     | Int                    | `0`               |
+| Completion: coverage threshold        | `coverageThreshold`        | Float (0–1)            | `1.0`             |
+| Cost budget (USD / session)           | `costBudgetUsd`            | Float? (null = no cap) | `null`            |
+| Per-session question cap              | `maxQuestionsPerSession`   | Int? (null = no cap)   | `null`            |
+| Voice input                           | `voiceEnabled`             | Boolean                | `false`           |
+| Contradiction-detection mode          | `contradictionMode`        | String (enum)          | `'off'`           |
+| Contradiction look-back window N      | `contradictionWindowN`     | Int                    | `0`               |
+| Contradiction cadence (every N turns) | `contradictionEveryNTurns` | Int                    | `1`               |
+| Anonymous mode                        | `anonymousMode`            | Boolean                | `false`           |
+| Session-start profile fields          | `profileFields`            | Json (array)           | `[]`              |
+| Answer panel scope                    | `answerSlotPanelScope`     | String (enum)          | `'full_progress'` |
 
 The enums are `const` tuples in `lib/app/questionnaire/types.ts` (single source of
 truth — the Zod schema, the read-view narrowing, and the editor's `<Select>`

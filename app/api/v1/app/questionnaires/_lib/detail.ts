@@ -83,6 +83,7 @@ export const CONFIG_SELECT = {
   voiceEnabled: true,
   contradictionMode: true,
   contradictionWindowN: true,
+  contradictionEveryNTurns: true,
   anonymousMode: true,
   profileFields: true,
   answerSlotPanelScope: true,
@@ -97,6 +98,7 @@ type ConfigRow = {
   voiceEnabled: boolean;
   contradictionMode: string;
   contradictionWindowN: number;
+  contradictionEveryNTurns: number;
   anonymousMode: boolean;
   profileFields: Prisma.JsonValue;
   answerSlotPanelScope: string;
@@ -146,6 +148,7 @@ export function toConfigView(row: ConfigRow | null): ConfigView {
     voiceEnabled: row.voiceEnabled,
     contradictionMode: asContradictionMode(row.contradictionMode),
     contradictionWindowN: row.contradictionWindowN,
+    contradictionEveryNTurns: row.contradictionEveryNTurns,
     anonymousMode: row.anonymousMode,
     profileFields: asProfileFields(row.profileFields),
     answerSlotPanelScope: asAnswerSlotPanelScope(row.answerSlotPanelScope),

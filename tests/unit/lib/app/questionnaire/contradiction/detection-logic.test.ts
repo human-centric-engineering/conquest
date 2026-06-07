@@ -192,4 +192,28 @@ describe('shouldRunDetection', () => {
   it('runs every turn comparing the last N answers when a window is set', () => {
     expect(shouldRunDetection('probe', 4, 'turn')).toEqual({ run: true, compareWindow: 4 });
   });
+
+  it('runs every turn when the cadence is 1 (or absent)', () => {
+    expect(shouldRunDetection('flag', 4, 'turn', { everyNTurns: 1, turnIndex: 3 })).toEqual({
+      run: true,
+      compareWindow: 4,
+    });
+  });
+
+  it('runs only on turn-index multiples of N when a cadence > 1 is set', () => {
+    // every_n_turns = 2 → run on turns 0, 2, 4; skip 1, 3.
+    expect(shouldRunDetection('flag', 4, 'turn', { everyNTurns: 2, turnIndex: 0 }).run).toBe(true);
+    expect(shouldRunDetection('flag', 4, 'turn', { everyNTurns: 2, turnIndex: 2 }).run).toBe(true);
+    const skipped = shouldRunDetection('flag', 4, 'turn', { everyNTurns: 2, turnIndex: 1 });
+    expect(skipped.run).toBe(false);
+    // A skipped turn still reports the comparison window it *would* have used.
+    expect(skipped.compareWindow).toBe(4);
+    expect(shouldRunDetection('flag', 4, 'turn', { everyNTurns: 3, turnIndex: 5 }).run).toBe(false);
+  });
+
+  it('ignores the cadence for the completion sweep — the final gate never skips', () => {
+    expect(
+      shouldRunDetection('flag', 4, 'completion-sweep', { everyNTurns: 5, turnIndex: 1 })
+    ).toEqual({ run: true, compareWindow: 'all' });
+  });
 });
