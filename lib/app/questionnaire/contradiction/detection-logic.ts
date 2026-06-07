@@ -143,19 +143,27 @@ export function normalizeContradictionFindings(
  *
  *  - `mode: 'off'` → never run.
  *  - `phase: 'completion-sweep'` → always run, comparing **all** answers (the final
- *    pass before submit must be thorough regardless of the window).
- *  - `phase: 'turn'` → run every turn; compare the most recent `windowN` answers
- *    (or all when `windowN <= 0`). `windowN` is a *comparison window*, not a cadence
- *    interval — a true "every N turns" cadence is a later, additive concern (F4.6),
- *    not in the committed config schema.
+ *    pass before submit must be thorough regardless of the window or cadence — the
+ *    last gate before submit is never skipped).
+ *  - `phase: 'turn'` → run on a turn boundary; compare the most recent `windowN`
+ *    answers (or all when `windowN <= 0`). `windowN` is a *comparison window* (how
+ *    much history to check); the optional `cadence` is the *interval* (how often to
+ *    run): with `everyNTurns > 1`, a turn runs detection only when its zero-based
+ *    `turnIndex` is a multiple of `everyNTurns` (so N=2 → turns 0, 2, 4…). Omitted
+ *    cadence (or `everyNTurns <= 1`) means every turn.
  */
 export function shouldRunDetection(
   mode: ContradictionMode,
   windowN: number,
-  phase: DetectionPhase
+  phase: DetectionPhase,
+  cadence?: { everyNTurns: number; turnIndex: number }
 ): DetectionDecision {
   if (mode === 'off') return { run: false, compareWindow: 'all' };
   if (phase === 'completion-sweep') return { run: true, compareWindow: 'all' };
+  // Turn phase: honour the cadence interval when one is supplied.
+  if (cadence && cadence.everyNTurns > 1 && cadence.turnIndex % cadence.everyNTurns !== 0) {
+    return { run: false, compareWindow: windowN > 0 ? windowN : 'all' };
+  }
   return { run: true, compareWindow: windowN > 0 ? windowN : 'all' };
 }
 

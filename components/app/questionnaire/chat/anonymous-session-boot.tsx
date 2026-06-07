@@ -27,6 +27,8 @@ interface AnonymousSessionBootProps {
   welcomeCopy?: string;
   /** Show the voice-input affordance (gated server-side on the voice flag). */
   voiceInputEnabled?: boolean;
+  /** Show the attachment affordance (gated server-side on the attachment-input flag). */
+  attachmentInputEnabled?: boolean;
 }
 
 interface StoredAnonSession {
@@ -73,6 +75,7 @@ export function AnonymousSessionBoot({
   versionId,
   welcomeCopy,
   voiceInputEnabled = false,
+  attachmentInputEnabled = false,
 }: AnonymousSessionBootProps) {
   const [state, setState] = useState<BootState>({ phase: 'creating' });
   // Guard against React 19 StrictMode's double-invoke minting two sessions in dev.
@@ -167,6 +170,7 @@ export function AnonymousSessionBoot({
       accessToken={state.accessToken}
       initialTurns={buildWelcomeTurns({ welcomeCopy })}
       voiceInputEnabled={voiceInputEnabled}
+      attachmentInputEnabled={attachmentInputEnabled}
     />
   );
 }

@@ -25,6 +25,7 @@ import {
   REFINE_ANSWER_CAPABILITY_SLUG,
 } from '@/lib/app/questionnaire/constants';
 import { assessCompletion } from '@/lib/app/questionnaire/completion/completion-logic';
+import { shouldRunDetection } from '@/lib/app/questionnaire/contradiction';
 import { unansweredQuestions } from '@/lib/app/questionnaire/selection/context';
 import type { AnsweredView, QuestionView } from '@/lib/app/questionnaire/selection/types';
 import type { AnswerSlotIntent } from '@/lib/app/questionnaire/extraction/types';
@@ -171,8 +172,19 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
   //    to compare, and the detector capability enforces that (`answers.min(2)`); skip the
   //    dispatch below that floor so an early turn doesn't surface a spurious validation
   //    warning or record a failed tool-call.
+  // `shouldRunDetection` folds in the mode (off → never) AND the `every_n_turns`
+  // cadence (run only on a turn boundary); `selectionRound` is the zero-based turn index.
+  const detection = shouldRunDetection(
+    effective.config.contradictionMode,
+    effective.config.contradictionWindowN,
+    'turn',
+    {
+      everyNTurns: effective.config.contradictionEveryNTurns,
+      turnIndex: effective.selectionRound,
+    }
+  );
   if (
-    effective.config.contradictionMode !== 'off' &&
+    detection.run &&
     effective.flags.contradiction &&
     effective.existingAnswers.length >= MIN_CONTRADICTION_ANSWERS
   ) {

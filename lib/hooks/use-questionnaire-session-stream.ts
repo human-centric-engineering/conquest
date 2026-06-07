@@ -28,6 +28,12 @@ import {
   type QuestionnaireTurn,
   type SessionWarning,
 } from '@/lib/app/questionnaire/chat/types';
+import type { ChatAttachment } from '@/lib/orchestration/chat/types';
+
+/** A base64-encoded file the respondent attaches to a turn — the platform `ChatAttachment`
+ *  shape (`{ name, mediaType, data }`), single-sourced so the composer, the picker hook,
+ *  and this sender can't drift. */
+export type MessageAttachment = ChatAttachment;
 
 export interface UseQuestionnaireSessionStreamOptions {
   /** The session id (the `:id` in `/questionnaire-sessions/:id/messages`). */
@@ -61,8 +67,8 @@ export interface UseQuestionnaireSessionStreamReturn {
   error: ChatErrorState | null;
   /** Whether the composer should accept input. */
   canSend: boolean;
-  /** Send a respondent message and stream the reply. No-ops when blocked or empty. */
-  sendMessage: (text: string) => Promise<void>;
+  /** Send a respondent message (with optional attachments) and stream the reply. No-ops when blocked or empty. */
+  sendMessage: (text: string, attachments?: MessageAttachment[]) => Promise<void>;
   /** Clear a transient error banner. */
   dismissError: () => void;
   /**
@@ -202,7 +208,7 @@ export function useQuestionnaireSessionStream(
   }, []);
 
   const sendMessage = useCallback(
-    async (text: string) => {
+    async (text: string, attachments?: MessageAttachment[]) => {
       const trimmed = text.trim();
       // `BLOCKING_STATUSES` (streaming + the terminal cost-cap / not-active / expired states)
       // is the single source of truth for "no further input is meaningful" — the same set
@@ -231,7 +237,10 @@ export function useQuestionnaireSessionStream(
           method: 'POST',
           credentials: 'include',
           headers,
-          body: JSON.stringify({ message: trimmed }),
+          body: JSON.stringify({
+            message: trimmed,
+            ...(attachments && attachments.length > 0 ? { attachments } : {}),
+          }),
           signal: controller.signal,
         });
 

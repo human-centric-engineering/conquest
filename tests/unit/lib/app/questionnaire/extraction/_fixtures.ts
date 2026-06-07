@@ -7,6 +7,7 @@ import type { QuestionType } from '@/lib/app/questionnaire/types';
 import type { ExtractedAnswer } from '@/lib/app/questionnaire/extraction/extraction-schema';
 import type {
   ExtractionAnsweredView,
+  ExtractionAttachment,
   ExtractionContext,
   ExtractionSlotView,
 } from '@/lib/app/questionnaire/extraction/types';
@@ -32,6 +33,7 @@ export function ctx(input: {
   answered?: ExtractionAnsweredView[];
   userMessage?: string;
   recentMessages?: string[];
+  attachments?: ExtractionAttachment[];
   sessionId?: string;
 }): ExtractionContext {
   return {
@@ -41,6 +43,7 @@ export function ctx(input: {
     userMessage: input.userMessage ?? 'a respondent message',
     sessionId: input.sessionId ?? 'sess-1',
     ...(input.recentMessages ? { recentMessages: input.recentMessages } : {}),
+    ...(input.attachments ? { attachments: input.attachments } : {}),
   };
 }
 

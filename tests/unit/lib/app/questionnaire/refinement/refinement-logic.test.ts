@@ -178,6 +178,8 @@ describe('applyRefinement', () => {
     const after = applyRefinement(before, baseDecision);
     expect(after.value).toBe('new value');
     expect(after.provenance).toBe('refined');
+    // The refinement's certainty becomes the slot's new confidence (refining can improve it).
+    expect(after.confidence).toBe(0.9);
     expect(after.refinementHistory).toHaveLength(1);
     expect(after.refinementHistory[0]).toMatchObject({
       previousValue: 'old value',

@@ -185,6 +185,35 @@ describe('runTurn — contradiction detection', () => {
     expect(calls.detect).toHaveLength(0);
   });
 
+  it('honours the every_n_turns cadence — skips an off-boundary turn, runs on a boundary', async () => {
+    // every_n_turns = 2 → run on rounds 0, 2, 4; skip odd rounds.
+    const skipped = stubInvokers();
+    await runTurn(
+      state({
+        userMessage: 'x',
+        questions: [q({ id: 'a' })],
+        config: { contradictionMode: 'flag', contradictionEveryNTurns: 2 },
+        existingAnswers: TWO_ANSWERS,
+        selectionRound: 1,
+      }),
+      skipped.invokers
+    );
+    expect(skipped.calls.detect).toHaveLength(0);
+
+    const ran = stubInvokers();
+    await runTurn(
+      state({
+        userMessage: 'x',
+        questions: [q({ id: 'a' })],
+        config: { contradictionMode: 'flag', contradictionEveryNTurns: 2 },
+        existingAnswers: TWO_ANSWERS,
+        selectionRound: 2,
+      }),
+      ran.invokers
+    );
+    expect(ran.calls.detect).toHaveLength(1);
+  });
+
   it('skips detection below the two-answer floor (the detector capability needs ≥2)', async () => {
     const { invokers, calls } = stubInvokers({ detect: { findings: [finding()] } });
     const result = await runTurn(

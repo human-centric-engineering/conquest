@@ -104,6 +104,9 @@ export async function buildTurnInvokers(opts: {
             confidence: a.confidence ?? null,
           })),
           ...(state.recentMessages.length > 0 ? { recentMessages: state.recentMessages } : {}),
+          ...(state.attachments && state.attachments.length > 0
+            ? { attachments: state.attachments }
+            : {}),
           sessionId: state.sessionId,
         },
         {

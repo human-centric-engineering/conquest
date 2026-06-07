@@ -27,6 +27,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { FieldHelp } from '@/components/ui/field-help';
 import { FormError } from '@/components/forms/form-error';
+import { DemoClientThemePreview } from '@/components/admin/demo-clients/demo-client-theme-preview';
 import {
   DEMO_CLIENT_SLUG_MAX_LENGTH,
   DEMO_CLIENT_SLUG_PATTERN,
@@ -102,6 +103,21 @@ export function DemoClientForm({ client }: DemoClientFormProps) {
   });
 
   const isActive = watch('isActive');
+
+  // Live brand preview: reflect only valid inputs (a half-typed hex / non-https URL
+  // shows the default rather than a broken swatch); blank → null → Sunrise default.
+  const [ctaColor, accentColor, logoUrl, welcomeCopy] = watch([
+    'ctaColor',
+    'accentColor',
+    'logoUrl',
+    'welcomeCopy',
+  ]);
+  const livePreviewTheme = {
+    ctaColor: HEX_COLOR_PATTERN.test(ctaColor.trim()) ? ctaColor.trim() : null,
+    accentColor: HEX_COLOR_PATTERN.test(accentColor.trim()) ? accentColor.trim() : null,
+    logoUrl: isHttpsUrl(logoUrl.trim()) ? logoUrl.trim() : null,
+    welcomeCopy: welcomeCopy.trim() === '' ? null : welcomeCopy.trim(),
+  };
 
   const onSubmit = async (values: FormValues) => {
     setIsLoading(true);
@@ -285,6 +301,11 @@ export function DemoClientForm({ client }: DemoClientFormProps) {
             {...register('welcomeCopy')}
           />
           <FormError message={errors.welcomeCopy?.message} />
+        </div>
+
+        <div className="space-y-2 border-t pt-4">
+          <p className="text-muted-foreground text-xs font-medium">Preview</p>
+          <DemoClientThemePreview theme={livePreviewTheme} />
         </div>
       </fieldset>
 

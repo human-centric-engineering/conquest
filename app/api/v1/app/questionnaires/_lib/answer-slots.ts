@@ -187,6 +187,10 @@ export async function persistRefinement(rowId: string, refined: RefinedSlotState
     data: {
       value: jsonInput(refined.value),
       provenanceLabel: refined.provenance,
+      // A refinement carries the refiner's certainty in the new value — write it so the
+      // next turn's coverage view + refiner context see the updated confidence, not the
+      // stale capture score. Improving a low-confidence answer is the point of refining.
+      confidence: refined.confidence,
       refinementHistory: jsonInput(stampedHistory),
     },
   });

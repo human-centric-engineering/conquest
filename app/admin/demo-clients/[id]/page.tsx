@@ -14,6 +14,7 @@ import { ChevronLeft } from 'lucide-react';
 
 import { DemoClientForm } from '@/components/admin/demo-clients/demo-client-form';
 import { DemoClientActions } from '@/components/admin/demo-clients/demo-client-actions';
+import { DemoClientThemePreview } from '@/components/admin/demo-clients/demo-client-theme-preview';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
@@ -70,6 +71,13 @@ export default async function DemoClientDetailPage({ params }: PageProps) {
           questionnaireCount={client.questionnaireCount}
         />
       </header>
+
+      {/* DEMO-ONLY (F3.4 gap-fill): the resolved brand a respondent will see, from the
+          saved values. Blank fields fall back to the Sunrise defaults. */}
+      <section className="space-y-3 rounded-md border px-4 py-4">
+        <h2 className="text-sm font-medium">Brand preview</h2>
+        <DemoClientThemePreview theme={client} />
+      </section>
 
       <DemoClientForm client={client} />
     </div>

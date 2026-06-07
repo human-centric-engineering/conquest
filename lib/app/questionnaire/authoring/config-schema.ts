@@ -81,6 +81,7 @@ export const updateConfigSchema = z
     voiceEnabled: z.boolean().optional(),
     contradictionMode: z.enum(CONTRADICTION_MODES).optional(),
     contradictionWindowN: z.number().int().nonnegative().optional(),
+    contradictionEveryNTurns: z.number().int().min(1).optional(),
     anonymousMode: z.boolean().optional(),
     profileFields: z.array(profileFieldSchema).optional(),
     answerSlotPanelScope: z.enum(ANSWER_SLOT_PANEL_SCOPES).optional(),

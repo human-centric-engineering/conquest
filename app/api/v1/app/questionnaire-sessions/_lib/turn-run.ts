@@ -8,8 +8,13 @@
 
 import type { AnswerSlotIntent } from '@/lib/app/questionnaire/extraction/types';
 import type { RefinementDecision } from '@/lib/app/questionnaire/refinement/types';
+import { applyRefinement } from '@/lib/app/questionnaire/refinement';
 import type { ToolCallRecord } from '@/lib/app/questionnaire/orchestrator';
-import { upsertAnswerSlot } from '@/app/api/v1/app/questionnaires/_lib/answer-slots';
+import {
+  loadAnswerSlot,
+  persistRefinement,
+  upsertAnswerSlot,
+} from '@/app/api/v1/app/questionnaires/_lib/answer-slots';
 import { recordTurn } from '@/app/api/v1/app/questionnaires/_lib/turns';
 
 /**
@@ -46,15 +51,28 @@ export async function persistTurn(opts: {
   for (const decision of opts.refinements) {
     const slotId = opts.keyToSlotId.get(decision.slotKey);
     if (!slotId) continue;
-    // PR4 persists the corrected value with `refined` provenance via the upsert seam; the
-    // full refinementHistory append (persistRefinement) is a follow-up.
-    const id = await upsertAnswerSlot(opts.sessionId, slotId, {
-      value: decision.newValue,
-      provenance: 'refined',
-      rationale: decision.rationale,
-      confidence: decision.confidence,
-    });
-    if (!sideEffectAnswerIds.includes(id)) sideEffectAnswerIds.push(id);
+    // Mirror the F4.4 refine-answer route: load the existing answer, merge it via the
+    // pure `applyRefinement`, and write the new value + provenance + the *appended*
+    // refinementHistory back. The live loop previously persisted only the corrected
+    // value (history append was an F6.1 follow-up), so real sessions silently dropped
+    // the "evolved across turns" audit trail the preview route keeps.
+    const loaded = await loadAnswerSlot(opts.sessionId, slotId);
+    if (loaded) {
+      const refined = applyRefinement(loaded.existing, decision);
+      await persistRefinement(loaded.id, refined);
+      if (!sideEffectAnswerIds.includes(loaded.id)) sideEffectAnswerIds.push(loaded.id);
+    } else {
+      // Defensive: a refinement targeting a slot with no captured answer (shouldn't
+      // happen — refinement acts on prior answers). Fall back to a plain upsert so the
+      // value isn't lost, rather than skip it or throw.
+      const id = await upsertAnswerSlot(opts.sessionId, slotId, {
+        value: decision.newValue,
+        provenance: 'refined',
+        rationale: decision.rationale,
+        confidence: decision.confidence,
+      });
+      if (!sideEffectAnswerIds.includes(id)) sideEffectAnswerIds.push(id);
+    }
   }
 
   return recordTurn({

@@ -4,7 +4,11 @@ import { notFound } from 'next/navigation';
 import { getServerSession } from '@/lib/auth/utils';
 import { clearInvalidSession } from '@/lib/auth/clear-session';
 import { prisma } from '@/lib/db/client';
-import { isLiveSessionsEnabled, isVoiceInputEnabled } from '@/lib/app/questionnaire/feature-flag';
+import {
+  isAttachmentInputEnabled,
+  isLiveSessionsEnabled,
+  isVoiceInputEnabled,
+} from '@/lib/app/questionnaire/feature-flag';
 import { SessionWorkspace } from '@/components/app/questionnaire/session-workspace';
 import { BrandThemeProvider } from '@/components/app/questionnaire/chat/brand-theme-provider';
 import { buildWelcomeTurns } from '@/lib/app/questionnaire/chat/greeting';
@@ -82,8 +86,9 @@ export default async function QuestionnaireSessionPage({
   // panel + lifecycle status are SSR-seeded here (the user is already verified as owner),
   // so they paint with no fetch flash; the live updates after each turn come from the
   // client hooks.
-  const [voiceInputEnabled, theme, panel, status] = await Promise.all([
+  const [voiceInputEnabled, attachmentInputEnabled, theme, panel, status] = await Promise.all([
     isVoiceInputEnabled(),
+    isAttachmentInputEnabled(),
     resolveThemeForSession(sessionId),
     loadAnswerPanelState(sessionId),
     loadSessionStatus(sessionId),
@@ -100,6 +105,7 @@ export default async function QuestionnaireSessionPage({
           initialPanel={panel?.view}
           initialStatusView={status?.view}
           voiceInputEnabled={voiceInputEnabled}
+          attachmentInputEnabled={attachmentInputEnabled}
         />
       </BrandThemeProvider>
     </div>

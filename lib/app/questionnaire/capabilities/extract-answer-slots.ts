@@ -36,8 +36,14 @@ import {
   resolveAgentProviderAndModel,
   type ResolvableAgent,
 } from '@/lib/orchestration/llm/agent-resolver';
-import { getProvider } from '@/lib/orchestration/llm/provider-manager';
+import {
+  assertModelSupportsAttachments,
+  getProvider,
+  type AttachmentCapability,
+} from '@/lib/orchestration/llm/provider-manager';
+import { ProviderError } from '@/lib/orchestration/llm/provider';
 import { logCost } from '@/lib/orchestration/llm/cost-tracker';
+import { chatAttachmentsArraySchema } from '@/lib/validations/orchestration';
 import {
   runStructuredCompletion,
   tryParseJson,
@@ -116,6 +122,8 @@ const argsSchema = z.object({
     .optional(),
   /** Recent transcript, oldest first. */
   recentMessages: z.array(z.string()).max(50).optional(),
+  /** Files attached to this turn (images/documents) — read alongside the message. */
+  attachments: chatAttachmentsArraySchema.optional(),
   /** Stable session identity, threaded into cost-log metadata. */
   sessionId: z.string().optional(),
 });
@@ -188,7 +196,20 @@ function toExtractionContext(args: ExtractAnswerSlotsArgs): ExtractionContext {
     userMessage: args.userMessage,
     sessionId: args.sessionId ?? `dispatch-${args.activeQuestionKey}`,
     ...(args.recentMessages ? { recentMessages: args.recentMessages } : {}),
+    ...(args.attachments && args.attachments.length > 0 ? { attachments: args.attachments } : {}),
   };
+}
+
+/** The attachment capabilities a turn's files require: vision for images, documents else. */
+function requiredAttachmentCapabilities(
+  attachments: ExtractAnswerSlotsArgs['attachments']
+): AttachmentCapability[] {
+  if (!attachments || attachments.length === 0) return [];
+  const required = new Set<AttachmentCapability>();
+  for (const att of attachments) {
+    required.add(att.mediaType.startsWith('image/') ? 'vision' : 'documents');
+  }
+  return [...required];
 }
 
 export class AppExtractAnswerSlotsCapability extends BaseCapability<
@@ -222,6 +243,7 @@ export class AppExtractAnswerSlotsCapability extends BaseCapability<
         ? { recentMessages: redactedString('recentMessages') }
         : {}),
       ...(args.answered !== undefined ? { answered: redactedString('answered') } : {}),
+      ...(args.attachments !== undefined ? { attachmentCount: args.attachments.length } : {}),
       ...(args.sessionId !== undefined ? { sessionId: args.sessionId } : {}),
     };
 
@@ -288,6 +310,27 @@ export class AppExtractAnswerSlotsCapability extends BaseCapability<
         error: errorMessage(err),
       });
       return this.error(errorMessage(err), 'provider_unavailable');
+    }
+
+    // 1b. Attachment capability gate — if the turn carries files, the resolved model
+    //     must support the needed modality (vision / documents). A mismatch is a typed
+    //     error (not a silent text-only extraction that would drop the attached answer).
+    const requiredCaps = requiredAttachmentCapabilities(args.attachments);
+    if (requiredCaps.length > 0) {
+      try {
+        await assertModelSupportsAttachments(providerSlug, model, requiredCaps);
+      } catch (err) {
+        if (err instanceof ProviderError && err.code === 'CAPABILITY_NOT_SUPPORTED') {
+          logger.warn('extract_answer_slots: model lacks attachment capability', {
+            agentId: context.agentId,
+            providerSlug,
+            model,
+            requiredCaps,
+          });
+          return this.error(errorMessage(err), 'attachments_not_supported');
+        }
+        return this.error(errorMessage(err), 'attachment_capability_check_failed');
+      }
     }
 
     // 2. Build the prompt from the pure context.

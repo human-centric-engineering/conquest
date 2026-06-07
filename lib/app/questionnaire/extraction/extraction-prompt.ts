@@ -9,9 +9,10 @@
  * the respondent's message — not the exact wording, which is free to evolve.
  */
 
-import type { LlmMessage } from '@/lib/orchestration/llm/types';
+import type { ContentPart, LlmMessage } from '@/lib/orchestration/llm/types';
 import { EXTRACTOR_EMITTED_PROVENANCES } from '@/lib/app/questionnaire/types';
 import type {
+  ExtractionAttachment,
   ExtractionContext,
   ExtractionSlotView,
 } from '@/lib/app/questionnaire/extraction/types';
@@ -91,16 +92,50 @@ export function buildAnswerExtractionPrompt(ctx: ExtractionContext): LlmMessage[
 
   const candidates = ctx.candidateSlots.map(describeSlot).join('\n');
 
-  const userContent =
+  const hasAttachments = ctx.attachments !== undefined && ctx.attachments.length > 0;
+  const attachmentNote = hasAttachments
+    ? `\n\nThe respondent also attached ${ctx.attachments!.length} file(s) (below). Read them as ` +
+      `part of their answer — extract values they support, citing the file in the rationale.`
+    : '';
+
+  const userText =
     `Active question key: ${ctx.activeQuestionKey}\n\n` +
     `Candidate questions (extract answers only for these):\n${candidates}\n\n` +
     transcript +
-    `--- RESPONDENT MESSAGE ---\n${ctx.userMessage}\n--- END RESPONDENT MESSAGE ---`;
+    `--- RESPONDENT MESSAGE ---\n${ctx.userMessage}\n--- END RESPONDENT MESSAGE ---` +
+    attachmentNote;
+
+  // With attachments, the user turn becomes multimodal content parts (text + each
+  // file) so the provider passes the files to the model; otherwise a plain string.
+  const userContent: string | ContentPart[] = hasAttachments
+    ? [{ type: 'text', text: userText }, ...attachmentsToContentParts(ctx.attachments!)]
+    : userText;
 
   return [
     { role: 'system', content: SYSTEM_RULES },
     { role: 'user', content: userContent },
   ];
+}
+
+/**
+ * Map respondent attachments to provider content parts — images as `image`, every
+ * other allowed media type as `document`. Mirrors the platform chat message builder's
+ * conversion (`lib/orchestration/chat/message-builder.ts`) so the wire shape the
+ * provider receives is identical.
+ */
+export function attachmentsToContentParts(attachments: ExtractionAttachment[]): ContentPart[] {
+  return attachments.map((att) =>
+    att.mediaType.startsWith('image/')
+      ? {
+          type: 'image',
+          source: { type: 'base64', mediaType: att.mediaType, data: att.data },
+        }
+      : {
+          type: 'document',
+          source: { type: 'base64', mediaType: att.mediaType, data: att.data },
+          name: att.name,
+        }
+  );
 }
 
 /**

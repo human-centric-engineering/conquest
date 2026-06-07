@@ -44,6 +44,7 @@ vi.mock('@/lib/orchestration/llm/cost-tracker', () => ({
 
 vi.mock('@/lib/orchestration/llm/provider-manager', () => ({
   getProvider: vi.fn(),
+  assertModelSupportsAttachments: vi.fn(),
 }));
 
 vi.mock('@/lib/orchestration/llm/agent-resolver', () => ({
@@ -56,7 +57,9 @@ vi.mock('@/lib/orchestration/llm/agent-resolver', () => ({
 
 const { prisma } = await import('@/lib/db/client');
 const { logger } = await import('@/lib/logging');
-const { getProvider } = await import('@/lib/orchestration/llm/provider-manager');
+const { getProvider, assertModelSupportsAttachments } =
+  await import('@/lib/orchestration/llm/provider-manager');
+const { ProviderError } = await import('@/lib/orchestration/llm/provider');
 const { resolveAgentProviderAndModel } = await import('@/lib/orchestration/llm/agent-resolver');
 const { logCost } = await import('@/lib/orchestration/llm/cost-tracker');
 const { capabilityDispatcher } = await import('@/lib/orchestration/capabilities/dispatcher');
@@ -196,6 +199,73 @@ describe('AppExtractAnswerSlotsCapability — dispatch', () => {
     expect(data.costUsd).toBe(0.003);
     // No retry on the happy path.
     expect(provider.chat).toHaveBeenCalledTimes(1);
+  });
+
+  it('gates on attachment capability, then passes the files to the provider as content parts', async () => {
+    const provider = makeProvider([{ content: VALID_JSON }]);
+    (getProvider as Mock).mockResolvedValue(provider);
+    (assertModelSupportsAttachments as Mock).mockResolvedValue(undefined);
+
+    const result = await capabilityDispatcher.dispatch(
+      SLUG,
+      baseArgs({
+        attachments: [
+          { name: 'photo.png', mediaType: 'image/png', data: 'aW1n' },
+          { name: 'cv.pdf', mediaType: 'application/pdf', data: 'cGRm' },
+        ],
+      }),
+      baseContext()
+    );
+
+    expect(result.success).toBe(true);
+    // Image → vision, PDF → documents (deduped, order-independent).
+    const [, , required] = (assertModelSupportsAttachments as Mock).mock.calls[0];
+    expect([...(required as string[])].sort()).toEqual(['documents', 'vision']);
+    // The user turn handed to the provider is multimodal (text + 2 file parts).
+    const messages = (provider.chat as Mock).mock.calls[0][0] as Array<{
+      role: string;
+      content: unknown;
+    }>;
+    const user = messages.find((m) => m.role === 'user');
+    expect(Array.isArray(user?.content)).toBe(true);
+    expect((user?.content as unknown[]).length).toBe(3);
+  });
+
+  it('fails with attachments_not_supported when the model lacks the capability (no LLM call)', async () => {
+    const provider = makeProvider([{ content: VALID_JSON }]);
+    (getProvider as Mock).mockResolvedValue(provider);
+    (assertModelSupportsAttachments as Mock).mockRejectedValue(
+      new ProviderError('no vision', { code: 'CAPABILITY_NOT_SUPPORTED' })
+    );
+
+    const result = await capabilityDispatcher.dispatch(
+      SLUG,
+      baseArgs({ attachments: [{ name: 'p.png', mediaType: 'image/png', data: 'aW1n' }] }),
+      baseContext()
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('attachments_not_supported');
+    // The capability gate runs before the LLM call — no provider spend on an unsupported model.
+    expect(provider.chat).not.toHaveBeenCalled();
+  });
+
+  it('maps a non-ProviderError from the attachment gate to attachment_capability_check_failed', async () => {
+    const provider = makeProvider([{ content: VALID_JSON }]);
+    (getProvider as Mock).mockResolvedValue(provider);
+    // A generic failure (not a CAPABILITY_NOT_SUPPORTED ProviderError) — e.g. the model
+    // matrix lookup itself errored — must surface as a distinct code, not be swallowed.
+    (assertModelSupportsAttachments as Mock).mockRejectedValue(new Error('matrix lookup timeout'));
+
+    const result = await capabilityDispatcher.dispatch(
+      SLUG,
+      baseArgs({ attachments: [{ name: 'p.png', mediaType: 'image/png', data: 'aW1n' }] }),
+      baseContext()
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('attachment_capability_check_failed');
+    expect(provider.chat).not.toHaveBeenCalled();
   });
 
   it('drops an answer whose value fails the slot type, keeping the valid one', async () => {

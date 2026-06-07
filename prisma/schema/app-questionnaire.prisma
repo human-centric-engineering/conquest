@@ -164,6 +164,7 @@ model AppQuestionnaireConfig {
   voiceEnabled         Boolean @default(false) // allow voice input (F6.2)
   contradictionMode    String  @default("off") // off | flag | probe (CONTRADICTION_MODES)
   contradictionWindowN Int     @default(0) // N prior answers to check against; 0 when mode=off
+  contradictionEveryNTurns Int @default(1) // run detection every N respondent turns; 1 = every turn
   anonymousMode        Boolean @default(false) // don't collect identifying profile fields
 
   // Respondent answer-slot panel (F7.2): how much of the questionnaire the live

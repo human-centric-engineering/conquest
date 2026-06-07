@@ -29,6 +29,12 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { ThinkingIndicator } from '@/components/admin/orchestration/chat/thinking-indicator';
 import { MicButton } from '@/components/admin/orchestration/chat/mic-button';
+import {
+  AttachmentPickerButton,
+  AttachmentThumbnailStrip,
+} from '@/components/admin/orchestration/chat/attachment-picker-button';
+import { type AttachmentEntry } from '@/lib/hooks/use-attachments';
+import type { ChatAttachment } from '@/lib/orchestration/chat/types';
 import type { UseQuestionnaireSessionStreamReturn } from '@/lib/hooks/use-questionnaire-session-stream';
 import { ChatErrorPanel } from '@/components/app/questionnaire/chat/chat-error-panel';
 
@@ -41,6 +47,8 @@ export interface QuestionnaireChatProps {
   stream: UseQuestionnaireSessionStreamReturn;
   /** Show the voice-input affordance (gated server-side on the voice flag). */
   voiceInputEnabled?: boolean;
+  /** Show the attachment affordance (gated server-side on the attachment-input flag). */
+  attachmentInputEnabled?: boolean;
   className?: string;
 }
 
@@ -79,6 +87,7 @@ export function QuestionnaireChat({
   accessToken,
   stream,
   voiceInputEnabled = false,
+  attachmentInputEnabled = false,
   className,
 }: QuestionnaireChatProps) {
   const {
@@ -95,6 +104,15 @@ export function QuestionnaireChat({
 
   const [input, setInput] = useState('');
   const [voiceError, setVoiceError] = useState<string | null>(null);
+  // Attachment state is owned by the platform <AttachmentPickerButton> (the useAttachments
+  // hook): base64 encoding, per-file + combined size caps, MIME gating, and object-URL
+  // cleanup. We mirror its current payload + entries here for sending + the thumbnail strip,
+  // and reset it after a send via the imperative controls.
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const [attachEntries, setAttachEntries] = useState<AttachmentEntry[]>([]);
+  const [attachError, setAttachError] = useState<string | null>(null);
+  const attachControls = useRef<{ clear: () => void; remove: (id: string) => void } | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Keep the latest turn / streaming tail in view.
@@ -105,8 +123,10 @@ export function QuestionnaireChat({
   const handleSend = () => {
     if (!canSend || input.trim().length === 0) return;
     setVoiceError(null);
-    void sendMessage(input);
+    void sendMessage(input, attachments.length > 0 ? attachments : undefined);
     setInput('');
+    attachControls.current?.clear();
+    setAttachError(null);
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -184,8 +204,17 @@ export function QuestionnaireChat({
       {!isTerminal && (
         <div className="border-t px-4 py-3 sm:px-6">
           <div className="mx-auto max-w-2xl">
+            {/* Pending attachments — strip above the input row, driven by the picker hook. */}
+            {attachmentInputEnabled && (
+              <AttachmentThumbnailStrip
+                attachments={attachEntries}
+                remove={(id) => attachControls.current?.remove(id)}
+                className="mb-2"
+              />
+            )}
             <div className="flex items-end gap-2">
               <Textarea
+                ref={textareaRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
@@ -195,6 +224,17 @@ export function QuestionnaireChat({
                 aria-label="Your answer"
                 className="max-h-40 min-h-[2.5rem] resize-none"
               />
+              {attachmentInputEnabled && (
+                <AttachmentPickerButton
+                  inlineThumbnails={false}
+                  disabled={!canSend}
+                  pasteTarget={textareaRef}
+                  controlsRef={attachControls}
+                  onAttachmentsChange={setAttachments}
+                  onEntriesChange={setAttachEntries}
+                  onError={setAttachError}
+                />
+              )}
               {voiceInputEnabled && (
                 <MicButton
                   agentId={sessionId}
@@ -222,6 +262,11 @@ export function QuestionnaireChat({
             {voiceError && (
               <p className="text-destructive mt-1.5 text-xs" role="alert">
                 {voiceError}
+              </p>
+            )}
+            {attachError && (
+              <p className="text-destructive mt-1.5 text-xs" role="alert">
+                {attachError}
               </p>
             )}
           </div>

@@ -53,7 +53,12 @@ question prompts are deterministic).
   cost; the route delegates with `yield*`.
 - **Persistence** `_lib/turn-run.ts` (`persistTurn`) writes answer side-effects through the
   F4.4 slot seam, then `recordTurn` (firing `lastUpdatedTurnId`). A post-response write
-  failure is logged, not retro-failed onto the streamed reply.
+  failure is logged, not retro-failed onto the streamed reply. Refinements take the F4.4
+  path in full — `loadAnswerSlot` → `applyRefinement` → `persistRefinement` — so a live
+  session **appends to `refinementHistory`** (the corrected value plus the pre-change
+  value/provenance/source) and **updates the slot's `confidence`** to the refiner's
+  certainty, not just the new value. A refinement targeting a slot with no
+  captured answer (shouldn't happen) falls back to a plain `refined`-provenance upsert.
 
 ## Routes & access
 
@@ -109,6 +114,19 @@ invariant:** no audio bytes or transcript are persisted — the only happy-path 
 row. The client sends the returned transcript through the normal text `/messages` path, so P7 can
 wire Sunrise's `<MicButton>` (which expects an endpoint returning `{ text }`) at it verbatim.
 
+### Attachment input
+
+The `/messages` body accepts an optional `attachments` array (the platform `chatAttachmentSchema`
+— up to 10 files, ~5 MB each / ~25 MB combined; images + PDF/DOCX/text). When the attachment
+sub-flag is on, the route threads them onto `TurnState.attachments`; the extraction invoker forwards
+them to the answer-extractor capability, whose prompt builder turns the user turn into multimodal
+content parts (`text` + one `image`/`document` part per file — the same conversion as the platform
+chat message builder) so the model reads the file alongside the message. Before the LLM call the
+capability runs `assertModelSupportsAttachments(provider, model, [vision?|documents?])` and returns a
+typed `attachments_not_supported` error if the resolved model lacks the modality (no silent text-only
+extraction that would drop the attached answer). The `redactProvenance` row records only an
+`attachmentCount`, never the bytes.
+
 ### No-login anonymous tokens
 
 `_lib/session-access-token.ts` mints/verifies a stateless HMAC token (`{ sessionId, expiresAt }`
@@ -131,6 +149,11 @@ existing precedent is the embed widget (`lib/embed/auth.ts`).
   useful once the respondent can send it through the live `/messages` loop (with live-sessions off
   that route 404s, so transcription would be a dead but still-paid call). Off → the transcribe
   route 404s before auth (`withVoiceInputEnabled`).
+- Attachment input has its own dark-launch sub-flag `APP_QUESTIONNAIRES_ATTACHMENT_INPUT_ENABLED`
+  (seed 024, off by default), also ANDed with master + live-sessions (`isAttachmentInputEnabled`).
+  Unlike voice it doesn't gate a dedicated route — the chat surface hides the affordance and the
+  `/messages` route **ignores** any attachments a client sends while it's off, so the paid
+  multimodal path stays shut.
 
 ## See also
 

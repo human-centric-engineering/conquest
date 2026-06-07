@@ -9,9 +9,11 @@
  *   and forward the session cookies so the respondent is logged in.
  *
  * The email is taken from the invitation row, not the request — the token is the
- * sole credential. An already-registered email returns `409 ACCOUNT_EXISTS`
- * (claim-via-login is deferred to P7). Flag-gate first; `acceptInviteLimiter`
- * sub-cap guards against token brute force.
+ * sole credential. If the invited email **already has an account**, the respondent
+ * claims the invitation by signing in: the supplied password is verified (a wrong one
+ * is `401 INVALID_CREDENTIALS`) and the invitation is bound to that existing account —
+ * no second account, no dead-end. Flag-gate first; `acceptInviteLimiter` sub-cap guards
+ * against token / password brute force.
  */
 
 import type { NextRequest } from 'next/server';
@@ -83,69 +85,85 @@ async function acceptInvitation(
     });
   }
 
-  // The account is keyed on the invitation's email — an existing account can't be
-  // claimed through this flow (deferred to P7).
+  // The account is keyed on the invitation's email. A fresh email registers a new
+  // account; an existing one claims the invitation by signing in (verified below).
   const existing = await prisma.user.findUnique({
     where: { email: invitation.email },
     select: { id: true },
   });
+
+  let userId: string;
   if (existing) {
-    return errorResponse('An account already exists for this email — please sign in', {
-      code: 'ACCOUNT_EXISTS',
-      status: 409,
-    });
+    // Claim-via-existing-login: bind to the existing account. The password is proven
+    // by the sign-in step below (which also issues the session), so we don't create or
+    // mutate the user here.
+    userId = existing.id;
+  } else {
+    // 1. Create the user (better-auth, scrypt-hashed password).
+    try {
+      const signup = await auth.api.signUpEmail({
+        body: {
+          name: body.name ?? invitation.name ?? invitation.email,
+          email: invitation.email,
+          password: body.password,
+        },
+      });
+      userId = signup.user.id;
+    } catch (err) {
+      // A racing signup (email taken between the check and here) lands here too.
+      log.warn('Invitation signup failed', { invitationId: invitation.id, error: String(err) });
+      return errorResponse('Could not create your account — it may already exist', {
+        code: 'ACCOUNT_EXISTS',
+        status: 409,
+      });
+    }
+    // 2. Accepting the invitation proves email ownership (fresh account only).
+    await prisma.user.update({ where: { id: userId }, data: { emailVerified: true } });
   }
 
-  // 1. Create the user (better-auth, scrypt-hashed password).
-  let newUserId: string;
-  try {
-    const signup = await auth.api.signUpEmail({
-      body: {
-        name: body.name ?? invitation.name ?? invitation.email,
-        email: invitation.email,
-        password: body.password,
-      },
-    });
-    newUserId = signup.user.id;
-  } catch (err) {
-    // A racing signup (email taken between the check and here) lands here too.
-    log.warn('Invitation signup failed', { invitationId: invitation.id, error: String(err) });
-    return errorResponse('Could not create your account — it may already exist', {
-      code: 'ACCOUNT_EXISTS',
-      status: 409,
-    });
-  }
-
-  // 2. Accepting the invitation proves email ownership.
-  await prisma.user.update({ where: { id: newUserId }, data: { emailVerified: true } });
-
-  // 3. Bind the invitation to the new account: registered.
-  await prisma.appQuestionnaireInvitation.update({
-    where: { id: invitation.id },
-    data: {
-      userId: newUserId,
-      status: 'registered',
-      registeredAt: new Date(),
-      ...(invitation.openedAt ? {} : { openedAt: new Date() }),
-    },
-  });
-  log.info('Invitation registered', { invitationId: invitation.id, userId: newUserId });
-
-  // 4. Sign in and forward the session cookies (auto-login), as the platform flow does.
+  // 3. Sign in and forward the session cookies (auto-login), as the platform flow does.
+  // For an existing account this is also the credential check — a wrong password is
+  // the respondent's failure mode, surfaced as 401 so nothing gets bound.
   const signInResponse = await auth.api.signInEmail({
     body: { email: invitation.email, password: body.password },
     asResponse: true,
   });
   if (!signInResponse.ok) {
+    if (existing) {
+      log.warn('Invitation claim sign-in failed (bad credentials)', {
+        invitationId: invitation.id,
+      });
+      return errorResponse(
+        'That password is incorrect. Enter the password for your existing account to claim this invitation.',
+        { code: 'INVALID_CREDENTIALS', status: 401 }
+      );
+    }
     log.error('Sign-in after invitation accept failed', undefined, {
       invitationId: invitation.id,
-      userId: newUserId,
+      userId,
     });
     return errorResponse('Account created but sign-in failed — please log in', {
       code: 'INTERNAL_ERROR',
       status: 500,
     });
   }
+
+  // 4. Bind the invitation to the account: registered. After sign-in, so a wrong
+  // password on the claim path never binds.
+  await prisma.appQuestionnaireInvitation.update({
+    where: { id: invitation.id },
+    data: {
+      userId,
+      status: 'registered',
+      registeredAt: new Date(),
+      ...(invitation.openedAt ? {} : { openedAt: new Date() }),
+    },
+  });
+  log.info('Invitation registered', {
+    invitationId: invitation.id,
+    userId,
+    claimed: Boolean(existing),
+  });
 
   const response = successResponse({ message: 'Registered. Redirecting…' }, undefined, {
     status: 200,

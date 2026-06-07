@@ -46,4 +46,10 @@ export interface InvitationLandingView {
   inviteeName: string | null;
   status: AppInvitationStatus;
   expiresAt: string;
+  /**
+   * True when the invited email already has an account. The landing form uses it to
+   * ask for the existing password ("sign in to claim") instead of offering to set a
+   * new one. Disclosed only to a valid token holder, who was invited to that email.
+   */
+  accountExists: boolean;
 }

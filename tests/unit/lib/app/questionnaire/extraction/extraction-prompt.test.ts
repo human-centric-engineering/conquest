@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import { EXTRACTOR_EMITTED_PROVENANCES } from '@/lib/app/questionnaire/types';
 import {
+  attachmentsToContentParts,
   buildAnswerExtractionPrompt,
   buildAnswerExtractionRetryMessage,
 } from '@/lib/app/questionnaire/extraction/extraction-prompt';
+import type { ContentPart } from '@/lib/orchestration/llm/types';
 import { choiceSlot, ctx, slot } from '@/tests/unit/lib/app/questionnaire/extraction/_fixtures';
 
 function userContent(messages: ReturnType<typeof buildAnswerExtractionPrompt>): string {
@@ -98,6 +100,53 @@ describe('buildAnswerExtractionPrompt', () => {
     const content = userContent(messages);
     expect(content).toContain('options: red');
     expect(content).not.toContain('red (');
+  });
+});
+
+describe('buildAnswerExtractionPrompt — attachments', () => {
+  it('keeps the user content a plain string when there are no attachments', () => {
+    const messages = buildAnswerExtractionPrompt(ctx({ candidateSlots: [slot({ key: 'q1' })] }));
+    expect(typeof messages[1]?.content).toBe('string');
+  });
+
+  it('makes the user content multimodal (text + parts) when attachments are present', () => {
+    const messages = buildAnswerExtractionPrompt(
+      ctx({
+        candidateSlots: [slot({ key: 'q1' })],
+        userMessage: 'see attached',
+        attachments: [
+          { name: 'photo.png', mediaType: 'image/png', data: 'aW1n' },
+          { name: 'cv.pdf', mediaType: 'application/pdf', data: 'cGRm' },
+        ],
+      })
+    );
+    const content = messages[1]?.content;
+    expect(Array.isArray(content)).toBe(true);
+    const parts = content as ContentPart[];
+    // First part is the text (carrying the message + an attachment note); then one part per file.
+    expect(parts[0]).toMatchObject({ type: 'text' });
+    expect((parts[0] as { text: string }).text).toContain('see attached');
+    expect((parts[0] as { text: string }).text).toContain('attached 2 file');
+    expect(parts[1]).toMatchObject({ type: 'image' });
+    expect(parts[2]).toMatchObject({ type: 'document', name: 'cv.pdf' });
+  });
+});
+
+describe('attachmentsToContentParts', () => {
+  it('maps images to image parts and everything else to named document parts', () => {
+    const parts = attachmentsToContentParts([
+      { name: 'a.webp', mediaType: 'image/webp', data: 'aW1n' },
+      { name: 'notes.txt', mediaType: 'text/plain', data: 'dHh0' },
+    ]);
+    expect(parts[0]).toEqual({
+      type: 'image',
+      source: { type: 'base64', mediaType: 'image/webp', data: 'aW1n' },
+    });
+    expect(parts[1]).toEqual({
+      type: 'document',
+      source: { type: 'base64', mediaType: 'text/plain', data: 'dHh0' },
+      name: 'notes.txt',
+    });
   });
 });
 

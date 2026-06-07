@@ -127,7 +127,8 @@ describe('QuestionnaireChat', () => {
     fireEvent.change(textarea, { target: { value: 'hello' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
-    expect(sendMessage).toHaveBeenCalledWith('hello');
+    // No attachments selected → second arg is undefined.
+    expect(sendMessage).toHaveBeenCalledWith('hello', undefined);
     expect((textarea as HTMLTextAreaElement).value).toBe('');
   });
 
@@ -148,7 +149,17 @@ describe('QuestionnaireChat', () => {
     fireEvent.change(textarea, { target: { value: 'first' } });
     fireEvent.keyDown(textarea, { key: 'Enter' });
 
-    expect(sendMessage).toHaveBeenCalledWith('first');
+    expect(sendMessage).toHaveBeenCalledWith('first', undefined);
+  });
+
+  it('hides the platform attachment picker unless attachmentInputEnabled', () => {
+    const { rerender } = render(<QuestionnaireChat sessionId="s1" stream={hookReturn} />);
+    expect(screen.queryByTestId('attachment-picker-button')).not.toBeInTheDocument();
+
+    rerender(<QuestionnaireChat sessionId="s1" stream={hookReturn} attachmentInputEnabled />);
+    // The composer mounts the shared <AttachmentPickerButton> (useAttachments hook),
+    // not a hand-rolled file input.
+    expect(screen.getByTestId('attachment-picker-button')).toBeInTheDocument();
   });
 
   it('disables the composer when sending is not allowed', () => {

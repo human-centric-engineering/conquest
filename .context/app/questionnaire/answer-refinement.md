@@ -94,8 +94,11 @@ write seam, keeping `lib/app/questionnaire/refinement/**` Prisma-free):
   answer (the "seed then refine" step), keyed on `@@unique([sessionId, questionSlotId])`.
 - `loadAnswerSlot(sessionId, questionSlotId)` — shape a row for `applyRefinement`,
   narrowing the stored `provenanceLabel` to the enum.
-- `persistRefinement(rowId, refined)` — write `value`, `provenanceLabel`, and the
-  extended `refinementHistory`, stamping `createdAt` on any unstamped entry.
+- `persistRefinement(rowId, refined)` — write `value`, `provenanceLabel`, `confidence`,
+  and the extended `refinementHistory`, stamping `createdAt` on any unstamped entry. The
+  refinement's `confidence` (from the decision) **replaces** the slot's prior score — a
+  refine can raise or lower it, since improving a low-confidence capture is the point of
+  refining; `applyRefinement` carries `decision.confidence` onto `RefinedSlotState`.
 
 ## Persistence foundation (the F4.6 slice F4.4 introduces)
 

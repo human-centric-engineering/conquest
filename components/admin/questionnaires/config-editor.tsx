@@ -181,6 +181,9 @@ export function ConfigEditor({
   const [contradictionWindowN, setContradictionWindowN] = useState(
     String(config.contradictionWindowN)
   );
+  const [contradictionEveryNTurns, setContradictionEveryNTurns] = useState(
+    String(config.contradictionEveryNTurns)
+  );
   const [anonymousMode, setAnonymousMode] = useState(config.anonymousMode);
   const [answerSlotPanelScope, setAnswerSlotPanelScope] = useState<AnswerSlotPanelScope>(
     config.answerSlotPanelScope
@@ -201,6 +204,7 @@ export function ConfigEditor({
     setVoiceEnabled(config.voiceEnabled);
     setContradictionMode(config.contradictionMode);
     setContradictionWindowN(String(config.contradictionWindowN));
+    setContradictionEveryNTurns(String(config.contradictionEveryNTurns));
     setAnonymousMode(config.anonymousMode);
     setAnswerSlotPanelScope(config.answerSlotPanelScope);
     setProfileFields(config.profileFields.map(toRow));
@@ -244,6 +248,14 @@ export function ConfigEditor({
         contradictionWindowN: contradictionOff
           ? 0
           : boundedNumber(contradictionWindowN, 1, Number.MAX_SAFE_INTEGER, 1, true),
+        // Cadence: run detection every N turns (≥1). Irrelevant when off, but harmless to send.
+        contradictionEveryNTurns: boundedNumber(
+          contradictionEveryNTurns,
+          1,
+          Number.MAX_SAFE_INTEGER,
+          1,
+          true
+        ),
         anonymousMode,
         answerSlotPanelScope,
         profileFields: profileFields.map((f) => ({
@@ -448,6 +460,23 @@ export function ConfigEditor({
               min={contradictionOff ? 0 : 1}
               value={contradictionOff ? 0 : contradictionWindowN}
               onChange={(e) => setContradictionWindowN(e.target.value)}
+              disabled={busy || contradictionOff}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-sm font-medium">
+              Detection cadence (every N turns){' '}
+              <FieldHelp title="Detection cadence">
+                How often to run contradiction detection during the conversation — every N
+                respondent turns. 1 runs it every turn (most thorough); a higher value trades some
+                immediacy for lower per-turn cost. The completion sweep always runs regardless.
+              </FieldHelp>
+            </Label>
+            <Input
+              type="number"
+              min={1}
+              value={contradictionEveryNTurns}
+              onChange={(e) => setContradictionEveryNTurns(e.target.value)}
               disabled={busy || contradictionOff}
             />
           </div>

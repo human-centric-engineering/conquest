@@ -258,6 +258,8 @@ export type QuestionnaireConfigShape = {
   voiceEnabled: boolean;
   contradictionMode: ContradictionMode;
   contradictionWindowN: number;
+  /** Run contradiction detection every N respondent turns; 1 = every turn. */
+  contradictionEveryNTurns: number;
   anonymousMode: boolean;
   profileFields: ProfileFieldConfig[];
   answerSlotPanelScope: AnswerSlotPanelScope;
@@ -279,6 +281,7 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   voiceEnabled: false,
   contradictionMode: 'off',
   contradictionWindowN: 0,
+  contradictionEveryNTurns: 1,
   anonymousMode: false,
   profileFields: [],
   answerSlotPanelScope: 'full_progress',
