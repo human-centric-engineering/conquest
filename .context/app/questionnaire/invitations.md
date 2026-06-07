@@ -100,14 +100,20 @@ the request — the response is a per-recipient result array (`sent`/`skipped`/`
 
 Public, token-gated (F3.2 PR2 — no auth guard, rate-limited):
 
-| Route                              | Method | Purpose                                                                        |
-| ---------------------------------- | ------ | ------------------------------------------------------------------------------ |
-| `/api/v1/app/invitations/metadata` | GET    | Validate token → `{ questionnaireTitle, inviteeName, status }`, mark `opened`. |
-| `/api/v1/app/invitations/accept`   | POST   | Register (better-auth `signUpEmail`) + bind `userId` → `registered`.           |
+| Route                              | Method | Purpose                                                                                              |
+| ---------------------------------- | ------ | ---------------------------------------------------------------------------------------------------- |
+| `/api/v1/app/invitations/metadata` | GET    | Validate token → `{ questionnaireTitle, inviteeName, status, accountExists }`, mark `opened`.        |
+| `/api/v1/app/invitations/accept`   | POST   | New email: register (`signUpEmail`) + bind. Existing email: sign-in-and-claim + bind → `registered`. |
 
-Accept reuses the platform `accept-invite` machinery (sign-up → set `emailVerified`
-→ sign-in → forward Set-Cookie for auto-login). An already-registered email returns
-`409 ACCOUNT_EXISTS` (claim-via-login deferred to P7).
+Accept reuses the platform `accept-invite` machinery (set `emailVerified` → sign-in →
+forward Set-Cookie for auto-login). **A fresh email** registers a new account. **An
+already-registered email claims the invitation by signing in** — the supplied password
+is verified via `signInEmail` (a wrong one is `401 INVALID_CREDENTIALS`, binding
+nothing) and the invitation is bound to that existing account; binding happens _after_
+sign-in so a failed credential never half-registers. The metadata route reports
+`accountExists` so the landing form asks for the existing password ("sign in to claim")
+instead of offering to set a new one. _(Closed 2026-06-07, deferred-gaps audit Item 3 —
+was the P7-deferred `409 ACCOUNT_EXISTS` dead-end.)_
 
 ## Admin UI
 

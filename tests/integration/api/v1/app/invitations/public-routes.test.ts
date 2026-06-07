@@ -132,6 +132,7 @@ describe('GET metadata', () => {
       inviteeName: 'Alice',
       status: 'opened',
       expiresAt: expect.any(String), // ISO string — part of the landing-view contract
+      accountExists: false, // no user for this email → "set a password" branch
     });
     expect(prismaMock.appQuestionnaireInvitation.findUnique).toHaveBeenCalledWith(
       expect.objectContaining({ where: { tokenHash: TOKEN_HASH } })
@@ -151,6 +152,16 @@ describe('GET metadata', () => {
     const res = await metadataGET(metaReq(TOKEN));
     expect(res.status).toBe(200);
     expect(prismaMock.appQuestionnaireInvitation.update).not.toHaveBeenCalled();
+  });
+
+  it('reports accountExists when the invited email already has an account', async () => {
+    prismaMock.user.findUnique.mockResolvedValue({ id: 'user-existing' });
+    const res = await metadataGET(metaReq(TOKEN));
+    expect(res.status).toBe(200);
+    expect((await res.json()).data.accountExists).toBe(true);
+    expect(prismaMock.user.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { email: 'alice@example.com' } })
+    );
   });
 });
 
@@ -190,11 +201,35 @@ describe('POST accept', () => {
     expect(data).not.toHaveProperty('openedAt');
   });
 
-  it('409s when an account already exists for the email', async () => {
+  it('claims the invitation for an existing account via sign-in (no new account)', async () => {
     prismaMock.user.findUnique.mockResolvedValue({ id: 'user-existing' });
     const res = await acceptPOST(acceptReq({ token: TOKEN, password: 'longenough1' }));
-    expect(res.status).toBe(409);
-    expect((await res.json()).error.code).toBe('ACCOUNT_EXISTS');
+    expect(res.status).toBe(200);
+    // No signup, no emailVerified mutation — we bind to the existing account.
+    expect(auth.api.signUpEmail).not.toHaveBeenCalled();
+    expect(prismaMock.user.update).not.toHaveBeenCalled();
+    // The supplied password is verified by signInEmail, then bound to the existing id.
+    expect(auth.api.signInEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ body: expect.objectContaining({ email: 'alice@example.com' }) })
+    );
+    expect(prismaMock.appQuestionnaireInvitation.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ userId: 'user-existing', status: 'registered' }),
+      })
+    );
+    expect(res.headers.getSetCookie().some((c) => c.startsWith('session='))).toBe(true);
+  });
+
+  it('401s on a wrong password when claiming an existing account, binding nothing', async () => {
+    prismaMock.user.findUnique.mockResolvedValue({ id: 'user-existing' });
+    (auth.api.signInEmail as unknown as Mock).mockResolvedValue(
+      new Response(null, { status: 401 })
+    );
+    const res = await acceptPOST(acceptReq({ token: TOKEN, password: 'wrongpass1' }));
+    expect(res.status).toBe(401);
+    expect((await res.json()).error.code).toBe('INVALID_CREDENTIALS');
+    // A bad credential must not bind the invitation.
+    expect(prismaMock.appQuestionnaireInvitation.update).not.toHaveBeenCalled();
     expect(auth.api.signUpEmail).not.toHaveBeenCalled();
   });
 
@@ -229,16 +264,18 @@ describe('POST accept', () => {
     expect((await res.json()).error.code).toBe('INVITATION_REVOKED');
   });
 
-  it('500s when sign-in fails after the account is created', async () => {
+  it('500s when sign-in fails after the account is created, binding nothing', async () => {
     (auth.api.signInEmail as unknown as Mock).mockResolvedValue(
       new Response(null, { status: 401 })
     );
     const res = await acceptPOST(acceptReq({ token: TOKEN, password: 'longenough1' }));
     expect(res.status).toBe(500);
-    // The account + binding still happened — only the auto-login leg failed.
-    expect(prismaMock.appQuestionnaireInvitation.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ status: 'registered' }) })
+    // The account was created + verified, but binding now happens *after* sign-in, so a
+    // failed auto-login leaves the invitation unbound (not a half-registered state).
+    expect(prismaMock.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { emailVerified: true } })
     );
+    expect(prismaMock.appQuestionnaireInvitation.update).not.toHaveBeenCalled();
   });
 
   it('429s when the accept rate limit is exceeded, before any work', async () => {

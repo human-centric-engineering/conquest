@@ -85,16 +85,27 @@ export function QuestionnaireInviteForm() {
     };
   }, [token]);
 
+  // An invited email that already has an account *claims* the invitation by signing
+  // in with its existing password — no new account, no second password to set.
+  const claiming = state.kind === 'valid' && state.landing.accountExists;
+
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     setError(null);
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters.');
-      return;
-    }
-    if (password !== confirm) {
-      setError('Passwords do not match.');
-      return;
+    if (claiming) {
+      if (password.length === 0) {
+        setError('Enter the password for your existing account.');
+        return;
+      }
+    } else {
+      if (password.length < 8) {
+        setError('Password must be at least 8 characters.');
+        return;
+      }
+      if (password !== confirm) {
+        setError('Passwords do not match.');
+        return;
+      }
     }
 
     setSubmitting(true);
@@ -143,39 +154,43 @@ export function QuestionnaireInviteForm() {
     <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
       <p className="text-sm">
         You&apos;ve been invited to complete <strong>{state.landing.questionnaireTitle}</strong>
-        {state.landing.inviteeName ? `, ${state.landing.inviteeName}` : ''}. Set a password to
-        register and begin.
+        {state.landing.inviteeName ? `, ${state.landing.inviteeName}` : ''}.{' '}
+        {claiming
+          ? 'You already have an account — sign in with your password to claim this invitation and begin.'
+          : 'Set a password to register and begin.'}
       </p>
 
       <div className="space-y-1.5">
-        <Label htmlFor={passwordId}>Password</Label>
+        <Label htmlFor={passwordId}>{claiming ? 'Your password' : 'Password'}</Label>
         <PasswordInput
           id={passwordId}
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          autoComplete="new-password"
+          autoComplete={claiming ? 'current-password' : 'new-password'}
           disabled={submitting}
           required
         />
       </div>
 
-      <div className="space-y-1.5">
-        <Label htmlFor={confirmId}>Confirm password</Label>
-        <PasswordInput
-          id={confirmId}
-          value={confirm}
-          onChange={(e) => setConfirm(e.target.value)}
-          autoComplete="new-password"
-          disabled={submitting}
-          required
-        />
-      </div>
+      {!claiming && (
+        <div className="space-y-1.5">
+          <Label htmlFor={confirmId}>Confirm password</Label>
+          <PasswordInput
+            id={confirmId}
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+            autoComplete="new-password"
+            disabled={submitting}
+            required
+          />
+        </div>
+      )}
 
       {error && <FormError message={error} />}
 
       <Button type="submit" className="w-full" disabled={submitting}>
         {submitting && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
-        Register &amp; begin
+        {claiming ? 'Sign in & begin' : 'Register & begin'}
       </Button>
     </form>
   );

@@ -68,11 +68,20 @@ async function readMetadata(
     log.info('Invitation opened', { invitationId: invitation.id });
   }
 
+  // Whether the invited email already has an account — drives the "sign in to claim"
+  // vs "set a password" branch on the landing form. Safe to disclose to a valid token
+  // holder (they were invited to this exact email).
+  const account = await prisma.user.findUnique({
+    where: { email: invitation.email },
+    select: { id: true },
+  });
+
   const view: InvitationLandingView = {
     questionnaireTitle: invitation.questionnaireTitle,
     inviteeName: invitation.name,
     status,
     expiresAt: invitation.expiresAt.toISOString(),
+    accountExists: account !== null,
   };
   return successResponse(view);
 }
