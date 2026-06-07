@@ -117,7 +117,11 @@ export function QuestionnaireChat({
     }
   };
 
-  const isTerminal = status === 'cost_capped' || status === 'not_active' || status === 'expired';
+  const isTerminal =
+    status === 'cost_capped' ||
+    status === 'not_active' ||
+    status === 'completed' ||
+    status === 'expired';
 
   return (
     <div className={cn('bg-card flex h-full min-h-0 flex-col rounded-xl border', className)}>

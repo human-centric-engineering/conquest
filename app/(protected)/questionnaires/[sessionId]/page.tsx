@@ -10,6 +10,32 @@ import { BrandThemeProvider } from '@/components/app/questionnaire/chat/brand-th
 import { buildWelcomeTurns } from '@/lib/app/questionnaire/chat/greeting';
 import { resolveThemeForSession } from '@/lib/app/questionnaire/chat/theme';
 import { loadAnswerPanelState } from '@/app/api/v1/app/questionnaire-sessions/_lib/answer-panel';
+import { loadSessionStatus } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-status';
+import type { QuestionnaireChatStatus } from '@/lib/app/questionnaire/chat/types';
+import type { SessionStatusView } from '@/lib/app/questionnaire/session/status-view';
+
+/**
+ * Map the SSR-loaded session status to the surface's initial chat status. A budget-paused
+ * session (hard cost tier) is terminal cost_capped, not a resumable pause; a respondent
+ * pause is `not_active` (the lifecycle bar offers Resume); completed shows the
+ * confirmation. Falls back to the row status when the status view didn't resolve.
+ */
+function initialChatStatus(
+  view: SessionStatusView | undefined,
+  fallbackActive: boolean
+): QuestionnaireChatStatus {
+  if (!view) return fallbackActive ? 'idle' : 'not_active';
+  switch (view.status) {
+    case 'active':
+      return 'idle';
+    case 'completed':
+      return 'completed';
+    case 'paused':
+      return view.cost?.tier === 'hard' ? 'cost_capped' : 'not_active';
+    default:
+      return 'not_active'; // abandoned
+  }
+}
 
 export const metadata: Metadata = {
   title: 'Questionnaire',
@@ -52,15 +78,17 @@ export default async function QuestionnaireSessionPage({
   if (!row || row.respondentUserId !== session.user.id) notFound();
 
   const resumed = row._count.answers > 0;
-  const initialStatus = row.status === 'active' ? 'idle' : 'not_active';
   // Independent reads — resolve in parallel rather than serialising the round-trips. The
-  // panel is SSR-seeded here (the user is already verified as owner), so it paints with no
-  // fetch flash; the live updates after each turn come from the client hook.
-  const [voiceInputEnabled, theme, panel] = await Promise.all([
+  // panel + lifecycle status are SSR-seeded here (the user is already verified as owner),
+  // so they paint with no fetch flash; the live updates after each turn come from the
+  // client hooks.
+  const [voiceInputEnabled, theme, panel, status] = await Promise.all([
     isVoiceInputEnabled(),
     resolveThemeForSession(sessionId),
     loadAnswerPanelState(sessionId),
+    loadSessionStatus(sessionId),
   ]);
+  const initialStatus = initialChatStatus(status?.view, row.status === 'active');
 
   return (
     <div className="mx-auto h-[calc(100vh-12rem)] max-w-6xl">
@@ -70,6 +98,7 @@ export default async function QuestionnaireSessionPage({
           initialTurns={buildWelcomeTurns({ resumed, welcomeCopy: theme.welcomeCopy })}
           initialStatus={initialStatus}
           initialPanel={panel?.view}
+          initialStatusView={status?.view}
           voiceInputEnabled={voiceInputEnabled}
         />
       </BrandThemeProvider>

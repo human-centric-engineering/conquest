@@ -10,7 +10,8 @@
  * - Row belongs to a different user → notFound() (ownership 404 — key authz test)
  * - Valid owned active session, no prior answers → QuestionnaireChat with initialStatus='idle', fresh welcome
  * - Valid owned active session, answers exist → resumed welcome copy
- * - Session status not 'active' → initialStatus='not_active'
+ * - Completed session → initialStatus='completed' (terminal-positive, F7.3)
+ * - Abandoned session → initialStatus='not_active'
  * - voiceInputEnabled flag propagated to QuestionnaireChat
  * - Page metadata title
  *
@@ -91,12 +92,14 @@ vi.mock('@/components/app/questionnaire/session-workspace', () => ({
     voiceInputEnabled,
     initialTurns,
     initialPanel,
+    initialStatusView,
   }: {
     sessionId: string;
     initialStatus: string;
     voiceInputEnabled: boolean;
     initialTurns: Array<{ role: string; content: string }>;
-    initialPanel?: { answeredCount: number };
+    initialPanel?: Record<string, unknown>;
+    initialStatusView?: Record<string, unknown>;
   }) => (
     <div
       data-testid="questionnaire-chat"
@@ -105,6 +108,7 @@ vi.mock('@/components/app/questionnaire/session-workspace', () => ({
       data-voice-input-enabled={String(voiceInputEnabled)}
       data-initial-turns={JSON.stringify(initialTurns)}
       data-has-panel={initialPanel ? 'true' : 'false'}
+      data-has-status-view={initialStatusView ? 'true' : 'false'}
     />
   ),
 }));
@@ -115,6 +119,16 @@ vi.mock('@/components/app/questionnaire/session-workspace', () => ({
  */
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/answer-panel', () => ({
   loadAnswerPanelState: vi.fn(),
+}));
+
+/**
+ * Mock the session-status read seam (F7.3) — the page SSR-seeds the lifecycle
+ * status via it, and derives the surface's initialStatus from the projected view.
+ * Tests drive the scenario through this mock (see makeStatus); the real seam reads
+ * the DB via buildTurnContext and is covered by status-route / session-status tests.
+ */
+vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/session-status', () => ({
+  loadSessionStatus: vi.fn(),
 }));
 
 /**
@@ -134,7 +148,9 @@ import { prisma } from '@/lib/db/client';
 import { isLiveSessionsEnabled, isVoiceInputEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { resolveThemeForSession } from '@/lib/app/questionnaire/chat/theme';
 import { loadAnswerPanelState } from '@/app/api/v1/app/questionnaire-sessions/_lib/answer-panel';
+import { loadSessionStatus } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-status';
 import type { ResolvedTheme } from '@/lib/app/questionnaire/theming';
+import type { SessionStatus } from '@/lib/app/questionnaire/types';
 import type React from 'react';
 
 // ---------------------------------------------------------------------------
@@ -187,6 +203,31 @@ function makeRow(
   };
 }
 
+/**
+ * Build a minimal LoadedSessionStatus for the session-status seam mock. The page
+ * derives initialStatus from `view.status`, so tests vary that to drive the mapping.
+ */
+function makeStatus(
+  status: SessionStatus = 'active',
+  cost: { tier: 'none' | 'soft' | 'hard' } | null = null
+) {
+  return {
+    session: { id: SESSION_ID, respondentUserId: 'user_abc' },
+    view: {
+      status,
+      completion: {
+        kind: 'not_ready' as const,
+        coverage: 0,
+        answeredCount: 0,
+        requiredUnansweredKeys: [],
+        capReached: false,
+      },
+      cost,
+      anonymous: false,
+    },
+  };
+}
+
 function makeParams(sessionId: string = SESSION_ID) {
   return Promise.resolve({ sessionId });
 }
@@ -214,6 +255,7 @@ describe('QuestionnaireSessionPage', () => {
         totalCount: 0,
       },
     });
+    vi.mocked(loadSessionStatus).mockResolvedValue(makeStatus('active'));
   });
 
   // -------------------------------------------------------------------------
@@ -305,6 +347,8 @@ describe('QuestionnaireSessionPage', () => {
       // Assert: the route derived initialStatus from row.status, not just passed it through
       const chat = screen.getByTestId('questionnaire-chat');
       expect(chat).toHaveAttribute('data-initial-status', 'idle');
+      // The SSR-loaded status view is threaded down as initialStatusView (F7.3)
+      expect(chat).toHaveAttribute('data-has-status-view', 'true');
     });
 
     it('passes the correct sessionId to QuestionnaireChat', async () => {
@@ -376,34 +420,115 @@ describe('QuestionnaireSessionPage', () => {
   // -------------------------------------------------------------------------
 
   describe('non-active session status', () => {
-    it('passes initialStatus=not_active when the session status is not active', async () => {
-      // Arrange: session is completed — the page should set initialStatus='not_active'
+    it('passes initialStatus=completed when the session is completed', async () => {
+      // Arrange: completed session — F7.3 maps this to the distinct terminal-positive
+      // 'completed' status (completion confirmation), not the generic 'not_active'.
       vi.mocked(prisma.appQuestionnaireSession.findUnique).mockResolvedValue(
         makeRow({ status: 'completed' }) as never
       );
+      vi.mocked(loadSessionStatus).mockResolvedValue(makeStatus('completed'));
 
       // Act
       const Component = await QuestionnaireSessionPage({ params: makeParams() });
       render(Component);
 
-      // Assert: the page mapped a non-'active' status to 'not_active', not passed 'completed' raw
+      // Assert: the page derived 'completed' from the status view, not 'not_active'
       expect(screen.getByTestId('questionnaire-chat')).toHaveAttribute(
         'data-initial-status',
-        'not_active'
+        'completed'
       );
     });
 
-    it('passes initialStatus=not_active when the session status is abandoned', async () => {
+    it('passes initialStatus=not_active when the session is abandoned', async () => {
       // Arrange
       vi.mocked(prisma.appQuestionnaireSession.findUnique).mockResolvedValue(
         makeRow({ status: 'abandoned' }) as never
       );
+      vi.mocked(loadSessionStatus).mockResolvedValue(makeStatus('abandoned'));
 
       // Act
       const Component = await QuestionnaireSessionPage({ params: makeParams() });
       render(Component);
 
       // Assert
+      expect(screen.getByTestId('questionnaire-chat')).toHaveAttribute(
+        'data-initial-status',
+        'not_active'
+      );
+    });
+
+    it('maps a budget-paused session (hard cost tier) to cost_capped', async () => {
+      // Arrange: paused with a hard cost tier — terminal, not a resumable respondent pause
+      vi.mocked(prisma.appQuestionnaireSession.findUnique).mockResolvedValue(
+        makeRow({ status: 'paused' }) as never
+      );
+      vi.mocked(loadSessionStatus).mockResolvedValue(makeStatus('paused', { tier: 'hard' }));
+
+      // Act
+      const Component = await QuestionnaireSessionPage({ params: makeParams() });
+      render(Component);
+
+      // Assert
+      expect(screen.getByTestId('questionnaire-chat')).toHaveAttribute(
+        'data-initial-status',
+        'cost_capped'
+      );
+    });
+
+    it('maps a respondent-paused session (non-hard tier) to not_active', async () => {
+      // Arrange: paused without a hard cost tier — resumable, the lifecycle bar offers Resume
+      vi.mocked(prisma.appQuestionnaireSession.findUnique).mockResolvedValue(
+        makeRow({ status: 'paused' }) as never
+      );
+      vi.mocked(loadSessionStatus).mockResolvedValue(makeStatus('paused', { tier: 'soft' }));
+
+      // Act
+      const Component = await QuestionnaireSessionPage({ params: makeParams() });
+      render(Component);
+
+      // Assert
+      expect(screen.getByTestId('questionnaire-chat')).toHaveAttribute(
+        'data-initial-status',
+        'not_active'
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Status-view fallback — when loadSessionStatus didn't resolve a view
+  // -------------------------------------------------------------------------
+
+  describe('status-view fallback', () => {
+    it('falls back to idle from the row status when the status view is unavailable', async () => {
+      // Arrange: active row, but the status seam returned null (e.g. transient)
+      vi.mocked(prisma.appQuestionnaireSession.findUnique).mockResolvedValue(
+        makeRow({ status: 'active' }) as never
+      );
+      vi.mocked(loadSessionStatus).mockResolvedValue(null);
+
+      // Act
+      const Component = await QuestionnaireSessionPage({ params: makeParams() });
+      render(Component);
+
+      // Assert: row.status === 'active' → idle fallback
+      expect(screen.getByTestId('questionnaire-chat')).toHaveAttribute(
+        'data-initial-status',
+        'idle'
+      );
+    });
+
+    it('falls back to not_active from a non-active row when the status view is unavailable', async () => {
+      // Arrange: non-active row + null status view
+      vi.mocked(prisma.appQuestionnaireSession.findUnique).mockResolvedValue(
+        makeRow({ status: 'completed' }) as never
+      );
+      vi.mocked(loadSessionStatus).mockResolvedValue(null);
+
+      // Act
+      const Component = await QuestionnaireSessionPage({ params: makeParams() });
+      render(Component);
+
+      // Assert: row.status !== 'active' → not_active fallback
       expect(screen.getByTestId('questionnaire-chat')).toHaveAttribute(
         'data-initial-status',
         'not_active'

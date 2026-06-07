@@ -75,8 +75,11 @@ ordinal map so `lastUpdatedTurnId` becomes `answeredAtTurnIndex`) and hands them
 side. Two consequences:
 
 - **Live refresh:** the stream hook gained an additive `onTurnSettled` option, fired
-  once a turn settles cleanly to `idle` (not on error/abort). `SessionWorkspace` passes
-  `onTurnSettled={panel.refetch}`.
+  once a turn settles cleanly to `idle` (not on error/abort). `SessionWorkspace` routes
+  it to **both** `panel.refetch` and the F7.3 lifecycle-status refetch, so the answer
+  panel and the Submit affordance update off the same settle. (F7.3 also lifted a third
+  hook, `useSessionLifecycle`, into `SessionWorkspace` — see
+  [`session-lifecycle.md`](./session-lifecycle.md).)
 - **Revisit:** because the chat and panel share one stream, the panel's confirm-gated
   "Revisit" button calls `stream.sendMessage("I'd like to revisit my answer to: …")`,
   re-asking the question through the same turn loop. Disabled while `!stream.canSend`.

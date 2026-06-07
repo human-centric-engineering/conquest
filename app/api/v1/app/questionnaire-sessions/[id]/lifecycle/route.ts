@@ -1,0 +1,102 @@
+/**
+ * Respondent session pause / resume (F7.3).
+ *
+ * POST /api/v1/app/questionnaire-sessions/:id/lifecycle
+ *   body: { action: 'pause' | 'resume' }
+ *
+ * The respondent-facing counterpart to the admin `/transition` route, driving the same
+ * F4.6 state machine through the same `_lib/sessions.ts` seam — but authorised via
+ * `resolveTurnAccess` (the session's owner) instead of `withAdminAuth`. `resume` returns
+ * the resume state (status + answers so far) so the surface picks up where it left off.
+ *
+ * **Signed-in respondents only.** A no-login anonymous session lives entirely in the
+ * browser tab (its token is client-only and lost on reload), so a deliberate pause has
+ * nowhere durable to resume from — the endpoint refuses anonymous callers with 403. They
+ * still see system-driven states (budget pause, completed) via `GET …/status`.
+ *
+ * Gate order: live-sessions flag (404 before auth) → load → access (401/403) →
+ * anonymous-refusal (403) → transition. An illegal move (e.g. resuming an active session,
+ * or pausing a completed one) is a 409 via {@link SessionTransitionError}. Completion is
+ * NOT an action here — accept→submit is the dedicated `/submit` route.
+ */
+
+import { z } from 'zod';
+import type { NextRequest } from 'next/server';
+
+import { prisma } from '@/lib/db/client';
+import { successResponse, errorResponse } from '@/lib/api/responses';
+import { getRouteLogger } from '@/lib/api/context';
+import { ConflictError, handleAPIError } from '@/lib/api/errors';
+import { validateRequestBody } from '@/lib/api/validation';
+import { withLiveSessionsEnabled } from '@/lib/app/questionnaire/feature-flag';
+import { SessionTransitionError } from '@/lib/app/questionnaire/session';
+import { resolveTurnAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-access';
+import {
+  loadSessionResumeState,
+  pauseSession,
+  resumeSession,
+} from '@/app/api/v1/app/questionnaires/_lib/sessions';
+
+const bodySchema = z.object({ action: z.enum(['pause', 'resume']) });
+
+async function handleLifecycle(
+  request: NextRequest,
+  context: { params: Promise<{ id: string }> }
+): Promise<Response> {
+  try {
+    const log = await getRouteLogger(request);
+    const { id: sessionId } = await context.params;
+
+    // Minimal load: pause/resume only need the access fields + the state machine handles
+    // the current status, so there's no need for the full turn context here.
+    const row = await prisma.appQuestionnaireSession.findUnique({
+      where: { id: sessionId },
+      select: { id: true, respondentUserId: true },
+    });
+    if (!row) return errorResponse('Session not found', { code: 'NOT_FOUND', status: 404 });
+
+    const access = await resolveTurnAccess(request, row);
+    if (!access.ok) {
+      return errorResponse(access.message, { code: access.code, status: access.status });
+    }
+
+    // Pause/resume is for signed-in respondents only — an anonymous session has no durable
+    // place to resume from (see the header note).
+    if (access.anonymous) {
+      return errorResponse('Pause is only available for signed-in respondents', {
+        code: 'PAUSE_NOT_PERMITTED',
+        status: 403,
+      });
+    }
+
+    const body = await validateRequestBody(request, bodySchema);
+
+    try {
+      if (body.action === 'resume') {
+        await resumeSession(sessionId, { reason: 'respondent_resume' });
+        const resumeState = await loadSessionResumeState(sessionId);
+        log.info('Respondent session resumed', { sessionId, status: resumeState.status });
+        return successResponse({ sessionId, ...resumeState });
+      }
+
+      const status = await pauseSession(sessionId, { reason: 'respondent_pause' });
+      log.info('Respondent session paused', { sessionId, status });
+      return successResponse({ sessionId, status });
+    } catch (err) {
+      // An illegal transition is a client conflict, not a 500 — surface the from/to.
+      if (err instanceof SessionTransitionError) {
+        log.warn('Illegal respondent session transition rejected', {
+          sessionId,
+          from: err.from,
+          to: err.to,
+        });
+        throw new ConflictError(err.message, { from: err.from, to: err.to });
+      }
+      throw err;
+    }
+  } catch (err) {
+    return handleAPIError(err);
+  }
+}
+
+export const POST = withLiveSessionsEnabled(handleLifecycle);

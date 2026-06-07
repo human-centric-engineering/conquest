@@ -65,6 +65,14 @@ export interface UseQuestionnaireSessionStreamReturn {
   sendMessage: (text: string) => Promise<void>;
   /** Clear a transient error banner. */
   dismissError: () => void;
+  /**
+   * Push an authoritative session status into the surface — the seam for lifecycle
+   * actions (F7.3) that change status server-side: a respondent pause sets `not_active`,
+   * resume sets `idle`, submit sets `completed`. Moving to a non-blocking status clears
+   * any stale blocking error so the composer re-enables. NOT used for turn flow (that's
+   * driven internally by `sendMessage`).
+   */
+  applyStatus: (status: QuestionnaireChatStatus) => void;
 }
 
 interface ErrorEnvelope {
@@ -185,6 +193,13 @@ export function useQuestionnaireSessionStream(
   }, []);
 
   const dismissError = useCallback(() => setError(null), []);
+
+  const applyStatus = useCallback((next: QuestionnaireChatStatus) => {
+    setStatus(next);
+    // Resuming (→ idle/active) clears a stale paused/blocking banner; a terminal status
+    // (completed / not_active) keeps its own surface (confirmation / blocking panel).
+    if (!BLOCKING_STATUSES.includes(next)) setError(null);
+  }, []);
 
   const sendMessage = useCallback(
     async (text: string) => {
@@ -321,5 +336,6 @@ export function useQuestionnaireSessionStream(
     canSend,
     sendMessage,
     dismissError,
+    applyStatus,
   };
 }
