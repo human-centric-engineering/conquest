@@ -39,6 +39,7 @@ vi.mock('next/navigation', () => ({
 vi.mock('@/lib/app/questionnaire/feature-flag', () => ({
   isLiveSessionsEnabled: vi.fn(),
   isVoiceInputEnabled: vi.fn(),
+  isAttachmentInputEnabled: vi.fn(),
 }));
 
 /**

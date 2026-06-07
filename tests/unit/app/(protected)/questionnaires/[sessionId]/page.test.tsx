@@ -71,6 +71,7 @@ vi.mock('@/lib/db/client', () => ({
 vi.mock('@/lib/app/questionnaire/feature-flag', () => ({
   isLiveSessionsEnabled: vi.fn(),
   isVoiceInputEnabled: vi.fn(),
+  isAttachmentInputEnabled: vi.fn(),
 }));
 
 /**
