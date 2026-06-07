@@ -436,6 +436,9 @@ export const API = {
       /** Resend one invitation, regenerating its token (POST — F3.2). */
       invitationResend: (id: string, invitationId: string): string =>
         `/api/v1/app/questionnaires/${id}/invitations/${invitationId}/resend`,
+      /** Admin download of one session's results as a branded PDF (GET — F7.4). */
+      sessionExportPdf: (id: string, sessionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/sessions/${sessionId}/export.pdf`,
     },
     /** Respondent live-session endpoints (F6.1/F6.2) — consumed by the F7.1 chat surface. */
     QUESTIONNAIRE_SESSIONS: {
@@ -455,6 +458,8 @@ export const API = {
       lifecycle: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/lifecycle`,
       /** Submit (complete) a session (POST) — the respondent accept→completed path (F7.3). */
       submit: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/submit`,
+      /** Download the session's results as a branded PDF (GET — F7.4). */
+      exportPdf: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/export.pdf`,
     },
     /** Public (token-gated) respondent invitation endpoints (F3.2 PR2). */
     INVITATIONS: {
