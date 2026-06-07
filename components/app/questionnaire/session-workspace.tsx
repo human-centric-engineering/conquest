@@ -108,7 +108,13 @@ export function SessionWorkspace({
 
   // Submitted → the conversation is done; show the confirmation in place of the workspace.
   if (stream.status === 'completed') {
-    return <SessionComplete answeredCount={lifecycle.view?.completion.answeredCount ?? null} />;
+    return (
+      <SessionComplete
+        sessionId={sessionId}
+        accessToken={accessToken}
+        answeredCount={lifecycle.view?.completion.answeredCount ?? null}
+      />
+    );
   }
 
   return (
