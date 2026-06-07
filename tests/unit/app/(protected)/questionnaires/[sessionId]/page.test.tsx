@@ -91,6 +91,7 @@ vi.mock('@/components/app/questionnaire/session-workspace', () => ({
     sessionId,
     initialStatus,
     voiceInputEnabled,
+    attachmentInputEnabled,
     initialTurns,
     initialPanel,
     initialStatusView,
@@ -98,6 +99,7 @@ vi.mock('@/components/app/questionnaire/session-workspace', () => ({
     sessionId: string;
     initialStatus: string;
     voiceInputEnabled: boolean;
+    attachmentInputEnabled: boolean;
     initialTurns: Array<{ role: string; content: string }>;
     initialPanel?: Record<string, unknown>;
     initialStatusView?: Record<string, unknown>;
@@ -107,6 +109,7 @@ vi.mock('@/components/app/questionnaire/session-workspace', () => ({
       data-session-id={sessionId}
       data-initial-status={initialStatus}
       data-voice-input-enabled={String(voiceInputEnabled)}
+      data-attachment-input-enabled={String(attachmentInputEnabled)}
       data-initial-turns={JSON.stringify(initialTurns)}
       data-has-panel={initialPanel ? 'true' : 'false'}
       data-has-status-view={initialStatusView ? 'true' : 'false'}
@@ -146,7 +149,11 @@ import QuestionnaireSessionPage, {
 import { getServerSession } from '@/lib/auth/utils';
 import { clearInvalidSession } from '@/lib/auth/clear-session';
 import { prisma } from '@/lib/db/client';
-import { isLiveSessionsEnabled, isVoiceInputEnabled } from '@/lib/app/questionnaire/feature-flag';
+import {
+  isAttachmentInputEnabled,
+  isLiveSessionsEnabled,
+  isVoiceInputEnabled,
+} from '@/lib/app/questionnaire/feature-flag';
 import { resolveThemeForSession } from '@/lib/app/questionnaire/chat/theme';
 import { loadAnswerPanelState } from '@/app/api/v1/app/questionnaire-sessions/_lib/answer-panel';
 import { loadSessionStatus } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-status';
@@ -243,6 +250,7 @@ describe('QuestionnaireSessionPage', () => {
     // Happy-path defaults
     vi.mocked(isLiveSessionsEnabled).mockResolvedValue(true);
     vi.mocked(isVoiceInputEnabled).mockResolvedValue(false);
+    vi.mocked(isAttachmentInputEnabled).mockResolvedValue(false);
     vi.mocked(resolveThemeForSession).mockResolvedValue(MOCK_THEME);
     vi.mocked(getServerSession).mockResolvedValue(MOCK_SESSION);
     vi.mocked(prisma.appQuestionnaireSession.findUnique).mockResolvedValue(makeRow() as never);
@@ -567,6 +575,34 @@ describe('QuestionnaireSessionPage', () => {
       // Assert
       expect(screen.getByTestId('questionnaire-chat')).toHaveAttribute(
         'data-voice-input-enabled',
+        'false'
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Attachment input flag propagation
+  // -------------------------------------------------------------------------
+
+  describe('attachmentInputEnabled flag', () => {
+    it('passes attachmentInputEnabled=true when the flag is on', async () => {
+      vi.mocked(isAttachmentInputEnabled).mockResolvedValue(true);
+
+      const Component = await QuestionnaireSessionPage({ params: makeParams() });
+      render(Component);
+
+      expect(screen.getByTestId('questionnaire-chat')).toHaveAttribute(
+        'data-attachment-input-enabled',
+        'true'
+      );
+    });
+
+    it('passes attachmentInputEnabled=false when the flag is off', async () => {
+      const Component = await QuestionnaireSessionPage({ params: makeParams() });
+      render(Component);
+
+      expect(screen.getByTestId('questionnaire-chat')).toHaveAttribute(
+        'data-attachment-input-enabled',
         'false'
       );
     });

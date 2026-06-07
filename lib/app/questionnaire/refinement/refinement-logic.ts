@@ -167,6 +167,9 @@ export function applyRefinement(
     slotKey: existing.slotKey,
     value: decision.newValue,
     provenance: decision.action === 'refine' ? 'refined' : existing.provenance,
+    // The new value carries the refiner's certainty — refining is allowed to improve
+    // (or lower) the slot's confidence, not freeze it at the original capture's score.
+    confidence: decision.confidence,
     refinementHistory: [...(existing.refinementHistory ?? []), entry],
   };
 }

@@ -28,13 +28,12 @@ import {
   type QuestionnaireTurn,
   type SessionWarning,
 } from '@/lib/app/questionnaire/chat/types';
+import type { ChatAttachment } from '@/lib/orchestration/chat/types';
 
-/** A base64-encoded file the respondent attaches to a turn (mirrors `chatAttachmentSchema`). */
-export interface MessageAttachment {
-  name: string;
-  mediaType: string;
-  data: string;
-}
+/** A base64-encoded file the respondent attaches to a turn — the platform `ChatAttachment`
+ *  shape (`{ name, mediaType, data }`), single-sourced so the composer, the picker hook,
+ *  and this sender can't drift. */
+export type MessageAttachment = ChatAttachment;
 
 export interface UseQuestionnaireSessionStreamOptions {
   /** The session id (the `:id` in `/questionnaire-sessions/:id/messages`). */

@@ -20,7 +20,7 @@
  */
 
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { Paperclip, SendHorizontal, X } from 'lucide-react';
+import { SendHorizontal } from 'lucide-react';
 import Markdown from 'react-markdown';
 
 import { cn } from '@/lib/utils';
@@ -29,33 +29,14 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { ThinkingIndicator } from '@/components/admin/orchestration/chat/thinking-indicator';
 import { MicButton } from '@/components/admin/orchestration/chat/mic-button';
-import type {
-  MessageAttachment,
-  UseQuestionnaireSessionStreamReturn,
-} from '@/lib/hooks/use-questionnaire-session-stream';
+import {
+  AttachmentPickerButton,
+  AttachmentThumbnailStrip,
+} from '@/components/admin/orchestration/chat/attachment-picker-button';
+import { type AttachmentEntry } from '@/lib/hooks/use-attachments';
+import type { ChatAttachment } from '@/lib/orchestration/chat/types';
+import type { UseQuestionnaireSessionStreamReturn } from '@/lib/hooks/use-questionnaire-session-stream';
 import { ChatErrorPanel } from '@/components/app/questionnaire/chat/chat-error-panel';
-
-/** Media types the respondent may attach — mirrors the platform `chatAttachmentSchema`. */
-const ATTACHMENT_ACCEPT =
-  'image/jpeg,image/png,image/gif,image/webp,application/pdf,text/plain,text/csv,text/markdown,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-const MAX_ATTACHMENTS = 10;
-/** ~5 MB per file — matches the server's per-attachment cap before base64 expansion. */
-const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
-
-/** Read a File into the base64 `{ name, mediaType, data }` the `/messages` route accepts. */
-function readAttachment(file: File): Promise<MessageAttachment> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error('Could not read file'));
-    reader.onload = () => {
-      const result = typeof reader.result === 'string' ? reader.result : '';
-      // Strip the `data:<mime>;base64,` prefix — the schema wants raw base64.
-      const data = result.slice(result.indexOf(',') + 1);
-      resolve({ name: file.name, mediaType: file.type, data });
-    };
-    reader.readAsDataURL(file);
-  });
-}
 
 export interface QuestionnaireChatProps {
   /** The session id powering `/questionnaire-sessions/:id/messages` (used by the mic). */
@@ -123,9 +104,15 @@ export function QuestionnaireChat({
 
   const [input, setInput] = useState('');
   const [voiceError, setVoiceError] = useState<string | null>(null);
-  const [attachments, setAttachments] = useState<MessageAttachment[]>([]);
+  // Attachment state is owned by the platform <AttachmentPickerButton> (the useAttachments
+  // hook): base64 encoding, per-file + combined size caps, MIME gating, and object-URL
+  // cleanup. We mirror its current payload + entries here for sending + the thumbnail strip,
+  // and reset it after a send via the imperative controls.
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const [attachEntries, setAttachEntries] = useState<AttachmentEntry[]>([]);
   const [attachError, setAttachError] = useState<string | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
+  const attachControls = useRef<{ clear: () => void; remove: (id: string) => void } | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Keep the latest turn / streaming tail in view.
@@ -138,35 +125,8 @@ export function QuestionnaireChat({
     setVoiceError(null);
     void sendMessage(input, attachments.length > 0 ? attachments : undefined);
     setInput('');
-    setAttachments([]);
+    attachControls.current?.clear();
     setAttachError(null);
-  };
-
-  const handleFiles = async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    setAttachError(null);
-    const room = MAX_ATTACHMENTS - attachments.length;
-    const picked = Array.from(files).slice(0, room);
-    if (Array.from(files).length > room) {
-      setAttachError(`At most ${MAX_ATTACHMENTS} files per message.`);
-    }
-    try {
-      const tooBig = picked.find((f) => f.size > MAX_ATTACHMENT_BYTES);
-      if (tooBig) {
-        setAttachError(`"${tooBig.name}" is over the 5 MB limit.`);
-        return;
-      }
-      const read = await Promise.all(picked.map(readAttachment));
-      setAttachments((prev) => [...prev, ...read]);
-    } catch {
-      setAttachError('Could not read that file. Try another.');
-    } finally {
-      if (fileRef.current) fileRef.current.value = '';
-    }
-  };
-
-  const removeAttachment = (index: number) => {
-    setAttachments((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -244,31 +204,17 @@ export function QuestionnaireChat({
       {!isTerminal && (
         <div className="border-t px-4 py-3 sm:px-6">
           <div className="mx-auto max-w-2xl">
-            {/* Pending attachment chips */}
-            {attachmentInputEnabled && attachments.length > 0 && (
-              <ul className="mb-2 flex flex-wrap gap-2">
-                {attachments.map((att, i) => (
-                  <li
-                    key={`${att.name}-${i}`}
-                    className="bg-muted flex items-center gap-1.5 rounded-md px-2 py-1 text-xs"
-                  >
-                    <Paperclip className="h-3 w-3 shrink-0" aria-hidden="true" />
-                    <span className="max-w-[12rem] truncate">{att.name}</span>
-                    <button
-                      type="button"
-                      onClick={() => removeAttachment(i)}
-                      disabled={!canSend}
-                      aria-label={`Remove ${att.name}`}
-                      className="text-muted-foreground hover:text-foreground"
-                    >
-                      <X className="h-3 w-3" aria-hidden="true" />
-                    </button>
-                  </li>
-                ))}
-              </ul>
+            {/* Pending attachments — strip above the input row, driven by the picker hook. */}
+            {attachmentInputEnabled && (
+              <AttachmentThumbnailStrip
+                attachments={attachEntries}
+                remove={(id) => attachControls.current?.remove(id)}
+                className="mb-2"
+              />
             )}
             <div className="flex items-end gap-2">
               <Textarea
+                ref={textareaRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
@@ -279,27 +225,15 @@ export function QuestionnaireChat({
                 className="max-h-40 min-h-[2.5rem] resize-none"
               />
               {attachmentInputEnabled && (
-                <>
-                  <input
-                    ref={fileRef}
-                    type="file"
-                    multiple
-                    accept={ATTACHMENT_ACCEPT}
-                    className="hidden"
-                    onChange={(e) => void handleFiles(e.target.files)}
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    onClick={() => fileRef.current?.click()}
-                    disabled={!canSend || attachments.length >= MAX_ATTACHMENTS}
-                    aria-label="Attach a file"
-                    className="shrink-0"
-                  >
-                    <Paperclip className="h-4 w-4" aria-hidden="true" />
-                  </Button>
-                </>
+                <AttachmentPickerButton
+                  inlineThumbnails={false}
+                  disabled={!canSend}
+                  pasteTarget={textareaRef}
+                  controlsRef={attachControls}
+                  onAttachmentsChange={setAttachments}
+                  onEntriesChange={setAttachEntries}
+                  onError={setAttachError}
+                />
               )}
               {voiceInputEnabled && (
                 <MicButton

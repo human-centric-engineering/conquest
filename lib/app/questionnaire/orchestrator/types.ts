@@ -63,12 +63,6 @@ export interface TurnFlags {
   completion: boolean;
 }
 
-/**
- * Everything {@link runTurn} reads for one turn — assembled once by the route's context
- * loader (PR3) from the session's real answer + turn rows. The union of the P4 context
- * DTOs: selection/completion read `questions`/`answered`/`config`; extraction reads
- * `userMessage`/`recentMessages`; refinement reads `existingAnswers`.
- */
 /** One base64-encoded attachment on a turn (mirrors the platform `chatAttachmentSchema`). */
 export interface TurnAttachment {
   name: string;
@@ -76,6 +70,12 @@ export interface TurnAttachment {
   data: string;
 }
 
+/**
+ * Everything {@link runTurn} reads for one turn — assembled once by the route's context
+ * loader (PR3) from the session's real answer + turn rows. The union of the P4 context
+ * DTOs: selection/completion read `questions`/`answered`/`config`; extraction reads
+ * `userMessage`/`recentMessages`; refinement reads `existingAnswers`.
+ */
 export interface TurnState {
   /** The session this turn belongs to. */
   sessionId: string;

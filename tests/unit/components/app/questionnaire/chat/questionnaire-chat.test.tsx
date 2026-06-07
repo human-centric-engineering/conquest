@@ -152,12 +152,14 @@ describe('QuestionnaireChat', () => {
     expect(sendMessage).toHaveBeenCalledWith('first', undefined);
   });
 
-  it('hides the attachment affordance unless attachmentInputEnabled', () => {
+  it('hides the platform attachment picker unless attachmentInputEnabled', () => {
     const { rerender } = render(<QuestionnaireChat sessionId="s1" stream={hookReturn} />);
-    expect(screen.queryByRole('button', { name: 'Attach a file' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('attachment-picker-button')).not.toBeInTheDocument();
 
     rerender(<QuestionnaireChat sessionId="s1" stream={hookReturn} attachmentInputEnabled />);
-    expect(screen.getByRole('button', { name: 'Attach a file' })).toBeInTheDocument();
+    // The composer mounts the shared <AttachmentPickerButton> (useAttachments hook),
+    // not a hand-rolled file input.
+    expect(screen.getByTestId('attachment-picker-button')).toBeInTheDocument();
   });
 
   it('disables the composer when sending is not allowed', () => {

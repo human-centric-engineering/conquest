@@ -175,6 +175,10 @@ export interface RefinedSlotState {
   slotKey: string;
   value: unknown;
   provenance: AnswerProvenance;
+  /** The refiner's certainty in the new value (from the decision) — a refinement can
+   *  raise (or lower) the slot's confidence, since improving a low-confidence capture is
+   *  the point of refining. The persistence seam writes this onto the row. */
+  confidence: number;
   refinementHistory: RefinementHistoryEntry[];
 }
 

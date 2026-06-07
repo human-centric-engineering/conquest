@@ -250,6 +250,24 @@ describe('AppExtractAnswerSlotsCapability — dispatch', () => {
     expect(provider.chat).not.toHaveBeenCalled();
   });
 
+  it('maps a non-ProviderError from the attachment gate to attachment_capability_check_failed', async () => {
+    const provider = makeProvider([{ content: VALID_JSON }]);
+    (getProvider as Mock).mockResolvedValue(provider);
+    // A generic failure (not a CAPABILITY_NOT_SUPPORTED ProviderError) — e.g. the model
+    // matrix lookup itself errored — must surface as a distinct code, not be swallowed.
+    (assertModelSupportsAttachments as Mock).mockRejectedValue(new Error('matrix lookup timeout'));
+
+    const result = await capabilityDispatcher.dispatch(
+      SLUG,
+      baseArgs({ attachments: [{ name: 'p.png', mediaType: 'image/png', data: 'aW1n' }] }),
+      baseContext()
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('attachment_capability_check_failed');
+    expect(provider.chat).not.toHaveBeenCalled();
+  });
+
   it('drops an answer whose value fails the slot type, keeping the valid one', async () => {
     // `mood` is a single_choice limited to happy/sad; the model returns an
     // off-list value, so the normaliser drops it but keeps the free_text answer.

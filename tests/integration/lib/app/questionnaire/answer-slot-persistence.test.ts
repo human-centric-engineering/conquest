@@ -242,6 +242,7 @@ describe('persistRefinement', () => {
       slotKey: 'age',
       value: 34,
       provenance: 'refined',
+      confidence: 0.92,
       refinementHistory: [
         {
           previousValue: 30,
@@ -259,6 +260,8 @@ describe('persistRefinement', () => {
     expect(arg.where).toEqual({ id: 'ans-1' });
     expect(arg.data.value).toBe(34);
     expect(arg.data.provenanceLabel).toBe('refined');
+    // A refinement updates the slot's confidence (improving a low capture is the point).
+    expect(arg.data.confidence).toBe(0.92);
     expect(arg.data.refinementHistory).toHaveLength(1);
     // The unstamped entry is stamped with the (pinned) boundary clock.
     expect(arg.data.refinementHistory[0].createdAt).toBe(STAMP);
@@ -271,6 +274,7 @@ describe('persistRefinement', () => {
       slotKey: 'age',
       value: 40,
       provenance: 'refined',
+      confidence: 0.88,
       refinementHistory: [
         {
           previousValue: 30,
@@ -306,6 +310,7 @@ describe('persistRefinement', () => {
       slotKey: 'name',
       value: 'corrected',
       provenance: 'direct', // overwrite kept the original label upstream
+      confidence: 0.95,
       refinementHistory: [
         {
           previousValue: 'typo',

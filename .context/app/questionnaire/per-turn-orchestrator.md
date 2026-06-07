@@ -56,7 +56,8 @@ question prompts are deterministic).
   failure is logged, not retro-failed onto the streamed reply. Refinements take the F4.4
   path in full — `loadAnswerSlot` → `applyRefinement` → `persistRefinement` — so a live
   session **appends to `refinementHistory`** (the corrected value plus the pre-change
-  value/provenance/source), not just the new value. A refinement targeting a slot with no
+  value/provenance/source) and **updates the slot's `confidence`** to the refiner's
+  certainty, not just the new value. A refinement targeting a slot with no
   captured answer (shouldn't happen) falls back to a plain `refined`-provenance upsert.
 
 ## Routes & access

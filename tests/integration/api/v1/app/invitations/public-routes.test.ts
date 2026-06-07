@@ -120,7 +120,9 @@ describe('GET metadata', () => {
     );
     const res = await metadataGET(metaReq(TOKEN));
     expect(res.status).toBe(410);
-    expect((await res.json()).error.code).toBe('INVITATION_REVOKED');
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('INVITATION_REVOKED');
   });
 
   it('returns the landing view and marks a sent invitation opened', async () => {
@@ -201,6 +203,18 @@ describe('POST accept', () => {
     expect(data).not.toHaveProperty('openedAt');
   });
 
+  it('falls back to the invitation email as the account name when no name is anywhere', async () => {
+    // No body.name and an invitation with a null name → the final `?? invitation.email` arm.
+    prismaMock.appQuestionnaireInvitation.findUnique.mockResolvedValue(
+      invitationRow({ name: null })
+    );
+    const res = await acceptPOST(acceptReq({ token: TOKEN, password: 'longenough1' }));
+    expect(res.status).toBe(200);
+    expect(auth.api.signUpEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ body: expect.objectContaining({ name: 'alice@example.com' }) })
+    );
+  });
+
   it('claims the invitation for an existing account via sign-in (no new account)', async () => {
     prismaMock.user.findUnique.mockResolvedValue({ id: 'user-existing' });
     const res = await acceptPOST(acceptReq({ token: TOKEN, password: 'longenough1' }));
@@ -227,7 +241,9 @@ describe('POST accept', () => {
     );
     const res = await acceptPOST(acceptReq({ token: TOKEN, password: 'wrongpass1' }));
     expect(res.status).toBe(401);
-    expect((await res.json()).error.code).toBe('INVALID_CREDENTIALS');
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('INVALID_CREDENTIALS');
     // A bad credential must not bind the invitation.
     expect(prismaMock.appQuestionnaireInvitation.update).not.toHaveBeenCalled();
     expect(auth.api.signUpEmail).not.toHaveBeenCalled();
@@ -239,7 +255,11 @@ describe('POST accept', () => {
     );
     const res = await acceptPOST(acceptReq({ token: TOKEN, password: 'longenough1' }));
     expect(res.status).toBe(409);
-    expect((await res.json()).error.code).toBe('INVITATION_ALREADY_USED');
+    {
+      const body = await res.json();
+      expect(body.success).toBe(false);
+      expect(body.error.code).toBe('INVITATION_ALREADY_USED');
+    }
   });
 
   it('410s for an expired token', async () => {
@@ -261,7 +281,9 @@ describe('POST accept', () => {
     );
     const res = await acceptPOST(acceptReq({ token: TOKEN, password: 'longenough1' }));
     expect(res.status).toBe(410);
-    expect((await res.json()).error.code).toBe('INVITATION_REVOKED');
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('INVITATION_REVOKED');
   });
 
   it('500s when sign-in fails after the account is created, binding nothing', async () => {
@@ -294,6 +316,10 @@ describe('POST accept', () => {
     (auth.api.signUpEmail as unknown as Mock).mockRejectedValue(new Error('email taken'));
     const res = await acceptPOST(acceptReq({ token: TOKEN, password: 'longenough1' }));
     expect(res.status).toBe(409);
-    expect((await res.json()).error.code).toBe('ACCOUNT_EXISTS');
+    {
+      const body = await res.json();
+      expect(body.success).toBe(false);
+      expect(body.error.code).toBe('ACCOUNT_EXISTS');
+    }
   });
 });
