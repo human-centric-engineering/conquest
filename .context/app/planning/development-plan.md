@@ -306,7 +306,7 @@ The rest of what was P2.5 lands where its dependency is built. Every piece stays
 | Tenant-scoped user routing (resolve tenant from URL / invite token)         | Needs user-facing routes + invite tokens                           | **F7.1** (P7)                                     |
 | Theming application points (landing / completion pages)                     | Needs P7 user pages                                                | **F7.1 / F7.3** (P7)                              |
 | Demo session reset (`reset-sessions`)                                       | Needs the full session graph                                       | **F6.4** (P6)                                     |
-| Clone-for-client admin utility                                              | Needs tags (F2.2) + config (F3.1)                                  | **P3+**, promote once both exist                  |
+| Clone-for-client admin utility                                              | Needs tags (F2.2) + config (F3.1)                                  | **done 2026-06-07** (deferred-gaps audit, Item 4) |
 | Demo content seed (`010-demo-content.ts`)                                   | Needs a complete themeable vertical                                | **F9.4** (P9)                                     |
 
 ---

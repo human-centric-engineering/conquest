@@ -5,6 +5,7 @@ import { notFound } from 'next/navigation';
 import { VersionGraph } from '@/components/admin/questionnaires/version-graph';
 import { VersionEditor } from '@/components/admin/questionnaires/version-editor';
 import { ReingestDialog } from '@/components/admin/questionnaires/reingest-dialog';
+import { CloneForClientDialog } from '@/components/admin/questionnaires/clone-for-client-dialog';
 import { QUESTIONNAIRE_STATUS_BADGE } from '@/components/admin/questionnaires/status-badge';
 import { DemoClientAssign } from '@/components/admin/demo-clients/demo-client-assign';
 import { Badge } from '@/components/ui/badge';
@@ -192,6 +193,9 @@ export default async function QuestionnaireDetailPage({ params, searchParams }: 
                     versionNumber={selected.versionNumber}
                   />
                 )}
+                {/* Clone-for-client (DEMO-ONLY) — duplicate the current version for another
+                    prospect; available regardless of the selected version's status. */}
+                <CloneForClientDialog questionnaireId={id} options={demoClientOptions} />
                 {graph && (
                   <Button asChild variant={editing ? 'outline' : 'default'} size="sm">
                     <Link

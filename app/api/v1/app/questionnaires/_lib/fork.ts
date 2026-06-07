@@ -30,7 +30,7 @@ import {
   hasLaunchBlockers,
 } from '@/app/api/v1/app/questionnaires/_lib/launch-blockers';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
-import { CONFIG_SELECT } from '@/app/api/v1/app/questionnaires/_lib/detail';
+import { copyVersionGraph } from '@/app/api/v1/app/questionnaires/_lib/copy-version-graph';
 import {
   jsonInput,
   type ScopedVersion,
@@ -84,6 +84,8 @@ export async function forkVersionIfLaunched(
   }
 
   const created = await executeTransaction(async (tx) => {
+    // Goal/audience live on the version row (copied here); the structural graph copy
+    // is single-sourced with clone-for-client via copyVersionGraph.
     const source = await tx.appQuestionnaireVersion.findUniqueOrThrow({
       where: { id: versionId },
       select: {
@@ -91,43 +93,6 @@ export async function forkVersionIfLaunched(
         audience: true,
         goalProvenance: true,
         audienceProvenance: true,
-        // Reuse the read view's column set so a new config column is copied by the
-        // fork automatically — no separate list here to fall out of sync (F3.1).
-        config: { select: CONFIG_SELECT },
-        tags: {
-          select: {
-            id: true,
-            label: true,
-            normalizedLabel: true,
-            color: true,
-            slots: { select: { questionSlotId: true } },
-          },
-        },
-        sections: {
-          orderBy: { ordinal: 'asc' },
-          select: {
-            id: true,
-            ordinal: true,
-            title: true,
-            description: true,
-            questions: {
-              orderBy: { ordinal: 'asc' },
-              select: {
-                id: true,
-                ordinal: true,
-                key: true,
-                prompt: true,
-                guidelines: true,
-                rationale: true,
-                type: true,
-                typeConfig: true,
-                required: true,
-                weight: true,
-                extractionConfidence: true,
-              },
-            },
-          },
-        },
       },
     });
 
@@ -153,102 +118,11 @@ export async function forkVersionIfLaunched(
       select: { id: true },
     });
 
-    // F3.1: copy the run-time config row into the fork when one exists (1:1 with
-    // the version). A no-config source forks to a no-config draft — both resolve
-    // to the same defaults on read.
-    if (source.config) {
-      await tx.appQuestionnaireConfig.create({
-        data: {
-          versionId: newVersion.id,
-          // Spread the selected columns (CONFIG_SELECT) verbatim; only the JSON
-          // column needs the null-sentinel wrapper. New columns ride along.
-          ...source.config,
-          profileFields: jsonInput(source.config.profileFields),
-        },
-      });
-    }
-
-    // Sections first (slots reference them); copy ordinal verbatim, mapping each
-    // original section id to its copy so child mutations can retarget after a fork.
-    const sectionIdMap = new Map<string, string>();
-    for (const section of source.sections) {
-      const newSection = await tx.appQuestionnaireSection.create({
-        data: {
-          versionId: newVersion.id,
-          ordinal: section.ordinal,
-          title: section.title,
-          ...(section.description !== null ? { description: section.description } : {}),
-        },
-        select: { id: true },
-      });
-      sectionIdMap.set(section.id, newSection.id);
-
-      if (section.questions.length > 0) {
-        await tx.appQuestionSlot.createMany({
-          data: section.questions.map((q) => ({
-            versionId: newVersion.id,
-            sectionId: newSection.id,
-            ordinal: q.ordinal,
-            key: q.key, // copied 1:1 into a fresh version — uniqueness holds by construction
-            prompt: q.prompt,
-            type: q.type,
-            required: q.required,
-            weight: q.weight,
-            ...(q.guidelines !== null ? { guidelines: q.guidelines } : {}),
-            ...(q.rationale !== null ? { rationale: q.rationale } : {}),
-            ...(q.typeConfig !== null ? { typeConfig: jsonInput(q.typeConfig) } : {}),
-            ...(q.extractionConfidence !== null
-              ? { extractionConfidence: q.extractionConfidence }
-              : {}),
-          })),
-        });
-      }
-    }
-
-    // Map original question ids to their copies via the per-version-unique `key`
-    // (createMany returns no ids; key is the stable join).
-    const newIdByKey = new Map(
-      (
-        await tx.appQuestionSlot.findMany({
-          where: { versionId: newVersion.id },
-          select: { id: true, key: true },
-        })
-      ).map((q) => [q.key, q.id])
+    const { sectionIdMap, questionIdMap, tagIdMap } = await copyVersionGraph(
+      tx,
+      versionId,
+      newVersion.id
     );
-    const questionIdMap = new Map<string, string>();
-    for (const section of source.sections) {
-      for (const q of section.questions) {
-        const newId = newIdByKey.get(q.key);
-        if (newId) questionIdMap.set(q.id, newId);
-      }
-    }
-
-    // F2.2: copy the version's tag vocabulary into the fork, then re-link each
-    // assignment to the copied question + copied tag. Done here (not in the
-    // per-section loop) because tags are version-scoped and re-linking needs the
-    // fully-assembled questionIdMap. A copied tag's `normalizedLabel` is unique by
-    // construction (carried 1:1 into a fresh version).
-    const tagIdMap = new Map<string, string>();
-    const newSlotTags: { questionSlotId: string; tagId: string }[] = [];
-    for (const tag of source.tags) {
-      const newTag = await tx.appQuestionTag.create({
-        data: {
-          versionId: newVersion.id,
-          label: tag.label,
-          normalizedLabel: tag.normalizedLabel,
-          ...(tag.color !== null ? { color: tag.color } : {}),
-        },
-        select: { id: true },
-      });
-      tagIdMap.set(tag.id, newTag.id);
-      for (const link of tag.slots) {
-        const newSlotId = questionIdMap.get(link.questionSlotId);
-        if (newSlotId) newSlotTags.push({ questionSlotId: newSlotId, tagId: newTag.id });
-      }
-    }
-    if (newSlotTags.length > 0) {
-      await tx.appQuestionSlotTag.createMany({ data: newSlotTags });
-    }
 
     return { id: newVersion.id, versionNumber, sectionIdMap, questionIdMap, tagIdMap };
   });

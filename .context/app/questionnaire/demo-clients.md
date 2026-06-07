@@ -126,10 +126,27 @@ a typed-confirmation guard and an anonymous-mode refusal. See
   none) and **full** on the detail page / live form preview (the resolved brand the
   respondent sees, defaults filled).
 - The questionnaire detail page (`/admin/questionnaires/:id`) carries the
-  attribution `<DemoClientAssign>` picker (active clients + the current one).
+  attribution `<DemoClientAssign>` picker (active clients + the current one) and a
+  **`<CloneForClientDialog>`** "Clone for client" action (below).
 
 Nav entry registered via `initAppNav()` (seam 4 — no sidebar edit). The admin shell
 itself is **not** themed (that's for the end-user surface in P7).
+
+## Clone for client
+
+`POST /api/v1/app/questionnaires/:id/clone-for-client` `{ targetDemoClientId, nameSuffix? }`
+(DEMO-ONLY) duplicates a questionnaire's **current** version (launched if present, else
+the highest-numbered) into a brand-new questionnaire as a fresh `draft` v1, attributed to
+the chosen demo client (`null` = a generic, unattributed copy) — so the same questionnaire
+is re-usable for the next prospect. The structural copy (config + sections/slots + tag
+vocabulary + assignments) is single-sourced with the F2.1 version-fork via
+`_lib/copy-version-graph.ts` (`copyVersionGraph`); goal/audience are copied onto the new
+v1; the newest source-document row is copied as provenance. **Not** copied: sessions,
+invitations, evaluation runs, extraction-change records (a clone starts fresh). The new
+title is `"<source title> — <suffix>"`, the suffix defaulting to the client name (or
+"Copy"). Admin-only, flag-gated, audited as `questionnaire.clone_for_client`. _(Built
+2026-06-07, deferred-gaps audit Item 4 — the relocated P2.5 clone-for-client, unblocked
+once F2.2 tags + F3.1 config existed.)_
 
 ## Fork guidance
 
