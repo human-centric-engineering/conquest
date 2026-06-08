@@ -1100,6 +1100,7 @@ describe('API Endpoints', () => {
       expect(Q.versionCostEstimate('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/cost-estimate`);
       expect(Q.versionNextQuestion('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/next-question`);
       expect(Q.versionEmbedQuestions('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/embed-questions`);
+      expect(Q.versionExport('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/export`);
     });
 
     it('builds section/question/tag paths', () => {
