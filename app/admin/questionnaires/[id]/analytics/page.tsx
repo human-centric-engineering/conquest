@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
 import { AnalyticsView } from '@/components/admin/questionnaires/analytics/analytics-view';
+import { ExportButtons } from '@/components/admin/questionnaires/analytics/export-buttons';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
@@ -169,28 +170,31 @@ export default async function QuestionnaireAnalyticsPage({ params, searchParams 
       ) : (
         <>
           {/* Version selector — SSR links that set ?v= on this sub-route. */}
-          <div className="flex flex-wrap gap-2 border-b pb-3">
-            {detail.versions.map((ver) => {
-              const active = ver.id === selected.id;
-              return (
-                <Link
-                  key={ver.id}
-                  href={`/admin/questionnaires/${id}/analytics?v=${ver.id}`}
-                  scroll={false}
-                  className={
-                    active
-                      ? 'bg-primary text-primary-foreground rounded-md px-3 py-1.5 text-sm font-medium'
-                      : 'hover:bg-accent rounded-md border px-3 py-1.5 text-sm'
-                  }
-                >
-                  v{ver.versionNumber}
-                  <span className={active ? 'opacity-80' : 'text-muted-foreground'}>
-                    {' '}
-                    · {ver.status}
-                  </span>
-                </Link>
-              );
-            })}
+          <div className="flex flex-wrap items-start justify-between gap-3 border-b pb-3">
+            <div className="flex flex-wrap gap-2">
+              {detail.versions.map((ver) => {
+                const active = ver.id === selected.id;
+                return (
+                  <Link
+                    key={ver.id}
+                    href={`/admin/questionnaires/${id}/analytics?v=${ver.id}`}
+                    scroll={false}
+                    className={
+                      active
+                        ? 'bg-primary text-primary-foreground rounded-md px-3 py-1.5 text-sm font-medium'
+                        : 'hover:bg-accent rounded-md border px-3 py-1.5 text-sm'
+                    }
+                  >
+                    v{ver.versionNumber}
+                    <span className={active ? 'opacity-80' : 'text-muted-foreground'}>
+                      {' '}
+                      · {ver.status}
+                    </span>
+                  </Link>
+                );
+              })}
+            </div>
+            <ExportButtons questionnaireId={id} versionId={selected.id} query={query} />
           </div>
 
           <AnalyticsView

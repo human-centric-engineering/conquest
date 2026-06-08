@@ -439,6 +439,9 @@ export const API = {
       /** Per-version cost actuals from `AiCostLog` (GET — F8.1). */
       versionAnalyticsCost: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/analytics/cost`,
+      /** Completed-session results export, CSV or JSON via `?format=` (GET — F8.2). */
+      versionExport: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/export`,
       /** Invitations for a questionnaire (GET list, POST send single/bulk — F3.2). */
       invitations: (id: string): string => `/api/v1/app/questionnaires/${id}/invitations`,
       /** Single invitation (PATCH revoke — F3.2). */

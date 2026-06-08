@@ -78,3 +78,38 @@ query (`from`, `to`, `tagIds`). Rate limiting is the automatic section cap (read
 | `…/versions/[vid]/analytics/cost`          | `QuestionnaireCostResult`     |
 
 Endpoint builders: `API.APP.QUESTIONNAIRES.versionAnalytics{Distributions,Funnel,Cost}(id, vid)`.
+
+## Exports (F8.2)
+
+The record-level companion to the aggregate views above: download a version's **completed**
+session results. Two buttons on the analytics page (`export-buttons.tsx`, next to the version
+selector) hit one route, carrying the **same `from`/`to`/`tagIds` filter** the page is showing — so
+an export matches the view.
+
+| Format   | Shape                                                                                   |
+| -------- | --------------------------------------------------------------------------------------- |
+| **CSV**  | One row per session × question (every question; unanswered slots are empty value cells) |
+| **JSON** | The full session graph — answers + provenance + per-turn transcript                     |
+
+- **Scope** — only **completed**, non-preview sessions whose `createdAt` falls in the window. Status
+  is still surfaced as a column/field. Capped at `MAX_EXPORT_SESSIONS` (5000); over-cap exports set
+  `capped: true` (JSON) and log a warning.
+- **CSV** is the lossy, spreadsheet-friendly view: every cell is run through `csvEscape`
+  (RFC-4180 + formula-injection guard). Booleans render `true`/`false`, multi-choice joins with `, `.
+- **JSON** is the faithful, machine-readable graph, returned **bare** (no API success envelope) so the
+  downloaded file is the data itself.
+
+**Anonymous-mode contract.** When the version's `AppQuestionnaireConfig.anonymousMode = true`, the
+loader nulls every `respondentName` **and** drops every session's `turns` array (raw respondent
+messages never reach the export). Honoured at the data boundary (`results-loader.ts`), not just the
+UI. Answer _values_ are always present in both formats — anonymity is about not linking data to a
+person, not redacting the survey data (mirrors the F7.4 PDF export).
+
+| Endpoint                  | Query                            | Returns                         |
+| ------------------------- | -------------------------------- | ------------------------------- |
+| `…/versions/[vid]/export` | `from`, `to`, `tagIds`, `format` | CSV text / `ResultsExportModel` |
+
+`format=csv\|json` (default `json`). Admin-only, version-scoped, master-flag-gated. Bulk read — a
+dedicated `exportLimiter` sub-cap (10/min/user) on top of the section tier. Endpoint builder:
+`API.APP.QUESTIONNAIRES.versionExport(id, vid)`. Source: `lib/app/questionnaire/export/results-*.ts`
+and `app/api/v1/app/questionnaires/[id]/versions/[vid]/export/route.ts`.
