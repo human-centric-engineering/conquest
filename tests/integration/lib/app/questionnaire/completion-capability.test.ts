@@ -225,7 +225,10 @@ describe('AppComposeCompletionOfferCapability — dispatch', () => {
         provider: 'test-provider',
         inputTokens: 321,
         outputTokens: 123,
-        metadata: expect.objectContaining({ capability: SLUG, sessionId: 'sess-1' }),
+        metadata: expect.objectContaining({
+          capability: SLUG,
+          appQuestionnaireSessionId: 'sess-1',
+        }),
       })
     );
   });
@@ -385,7 +388,7 @@ describe('AppComposeCompletionOfferCapability — dispatch', () => {
     expect(result.error?.message).toBe('provider blew up');
   });
 
-  it('logs cost without an agentId, and without a sessionId in metadata, when both are omitted', async () => {
+  it('logs cost without an agentId, and without a session id in metadata, when both are omitted', async () => {
     (getProvider as Mock).mockResolvedValue(makeProvider([{ content: VALID_JSON }]));
 
     await capabilityDispatcher.dispatch(
@@ -405,7 +408,7 @@ describe('AppComposeCompletionOfferCapability — dispatch', () => {
       metadata: { capability: SLUG },
     });
     expect(chatArg).not.toHaveProperty('agentId');
-    expect(chatArg.metadata).not.toHaveProperty('sessionId');
+    expect(chatArg.metadata).not.toHaveProperty('appQuestionnaireSessionId');
   });
 });
 

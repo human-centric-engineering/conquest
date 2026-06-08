@@ -176,6 +176,13 @@ export default async function QuestionnaireDetailPage({ params, searchParams }: 
                 <Button asChild variant="outline" size="sm">
                   <Link href={`/admin/questionnaires/${id}/invitations`}>Invitations</Link>
                 </Button>
+                {/* Analytics (F8.1) — read-side completed-session view, scoped to the
+                    selected version. Always available (read-only, no paid work). */}
+                <Button asChild variant="outline" size="sm">
+                  <Link href={`/admin/questionnaires/${id}/analytics?v=${selected.id}`}>
+                    Analytics
+                  </Link>
+                </Button>
                 {/* Design-time evaluation (F5.2) — only when the sub-flag is on (the run route
                     404s otherwise), scoped to the selected version. */}
                 {designEvalEnabled && (

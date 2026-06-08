@@ -294,7 +294,10 @@ export class AppComposeCompletionOfferCapability extends BaseCapability<
       provider: providerSlug,
       inputTokens: completion.tokenUsage.input,
       outputTokens: completion.tokenUsage.output,
-      metadata: { capability: SLUG, ...(args.sessionId ? { sessionId: args.sessionId } : {}) },
+      metadata: {
+        capability: SLUG,
+        ...(args.sessionId ? { appQuestionnaireSessionId: args.sessionId } : {}),
+      },
     }).catch((err) => {
       logger.error('compose_completion_offer: logCost rejected', {
         agentId: context.agentId,

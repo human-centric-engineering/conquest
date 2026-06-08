@@ -386,7 +386,7 @@ export class AppExtractAnswerSlotsCapability extends BaseCapability<
       provider: providerSlug,
       inputTokens: completion.tokenUsage.input,
       outputTokens: completion.tokenUsage.output,
-      metadata: { capability: SLUG, sessionId: extractionContext.sessionId },
+      metadata: { capability: SLUG, appQuestionnaireSessionId: extractionContext.sessionId },
     }).catch((err) => {
       logger.error('extract_answer_slots: logCost rejected', {
         agentId: context.agentId,

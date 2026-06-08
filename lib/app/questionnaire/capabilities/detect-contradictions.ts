@@ -347,7 +347,7 @@ export class AppDetectContradictionsCapability extends BaseCapability<
       provider: providerSlug,
       inputTokens: completion.tokenUsage.input,
       outputTokens: completion.tokenUsage.output,
-      metadata: { capability: SLUG, sessionId: detectionContext.sessionId },
+      metadata: { capability: SLUG, appQuestionnaireSessionId: detectionContext.sessionId },
     }).catch((err) => {
       logger.error('detect_contradictions: logCost rejected', {
         agentId: context.agentId,
