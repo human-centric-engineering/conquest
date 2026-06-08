@@ -430,6 +430,15 @@ export const API = {
         findingId: string
       ): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/evaluations/${runId}/findings/${findingId}/apply`,
+      /** Per-question answer distributions for a version (GET — F8.1). */
+      versionAnalyticsDistributions: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/analytics/distributions`,
+      /** Completion funnel (invited → opened → started → completed) for a version (GET — F8.1). */
+      versionAnalyticsFunnel: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/analytics/funnel`,
+      /** Per-version cost actuals from `AiCostLog` (GET — F8.1). */
+      versionAnalyticsCost: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/analytics/cost`,
       /** Invitations for a questionnaire (GET list, POST send single/bulk — F3.2). */
       invitations: (id: string): string => `/api/v1/app/questionnaires/${id}/invitations`,
       /** Single invitation (PATCH revoke — F3.2). */

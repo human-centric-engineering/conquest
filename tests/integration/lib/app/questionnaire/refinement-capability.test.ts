@@ -564,7 +564,9 @@ describe('AppRefineAnswerCapability — dispatch', () => {
     expect((result.data as { decisions: unknown[] }).decisions).toHaveLength(1);
     // The cost log uses the dispatch-derived sessionId fallback (no sessionId supplied).
     expect(logCost).toHaveBeenCalledWith(
-      expect.objectContaining({ metadata: { capability: SLUG, sessionId: 'dispatch-refine' } })
+      expect.objectContaining({
+        metadata: { capability: SLUG, appQuestionnaireSessionId: 'dispatch-refine' },
+      })
     );
   });
 

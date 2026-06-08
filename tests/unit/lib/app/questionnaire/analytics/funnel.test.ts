@@ -1,0 +1,108 @@
+/**
+ * Unit test: completion funnel aggregation (F8.1).
+ *
+ * Mocks the invitation + session reads and asserts stage counting (derived from real
+ * sessions, not invitation status), drop-off math, anonymous-session separation, and
+ * preview exclusion.
+ */
+
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+const findManyInvitations = vi.fn();
+const findManySessions = vi.fn();
+
+vi.mock('@/lib/db/client', () => ({
+  prisma: {
+    appQuestionnaireInvitation: { findMany: (...a: unknown[]) => findManyInvitations(...a) },
+    appQuestionnaireSession: { findMany: (...a: unknown[]) => findManySessions(...a) },
+  },
+}));
+
+import { getCompletionFunnel } from '@/lib/app/questionnaire/analytics/funnel';
+import type { AnalyticsScope } from '@/lib/app/questionnaire/analytics/query-schema';
+
+const scope: AnalyticsScope = {
+  versionId: 'v1',
+  from: new Date('2026-01-01T00:00:00.000Z'),
+  to: new Date('2026-02-01T00:00:00.000Z'),
+  tagIds: [],
+};
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
+describe('getCompletionFunnel', () => {
+  beforeEach(() => {
+    // 4 invited (all sent); 3 opened; 3 registered respondents u1/u2/u3.
+    findManyInvitations.mockResolvedValue([
+      { sentAt: new Date(), openedAt: new Date(), userId: 'u1' },
+      { sentAt: new Date(), openedAt: new Date(), userId: 'u2' },
+      { sentAt: new Date(), openedAt: new Date(), userId: 'u3' },
+      { sentAt: new Date(), openedAt: null, userId: null }, // sent, never opened/registered
+    ]);
+    // u1 started (active), u2 + u3 completed; plus two anonymous (un-invited).
+    findManySessions.mockResolvedValue([
+      { respondentUserId: 'u1', status: 'active' },
+      { respondentUserId: 'u2', status: 'completed' },
+      { respondentUserId: 'u3', status: 'completed' },
+      { respondentUserId: 'anon1', status: 'completed' },
+      { respondentUserId: null, status: 'active' },
+    ]);
+  });
+
+  it('counts invited → opened → started → completed from session reality', async () => {
+    const result = await getCompletionFunnel(scope);
+    const byKey = Object.fromEntries(result.stages.map((s) => [s.key, s.count]));
+    expect(byKey).toEqual({ invited: 4, opened: 3, started: 3, completed: 2 });
+  });
+
+  it('computes drop-off, retention, and step conversion', async () => {
+    const result = await getCompletionFunnel(scope);
+    const completed = result.stages.find((s) => s.key === 'completed')!;
+    expect(completed.retention).toBeCloseTo(2 / 4, 5); // of invited
+    expect(completed.conversionFromPrev).toBeCloseTo(2 / 3, 5); // started → completed
+    expect(completed.dropoff).toBe(1); // 3 started, 2 completed
+
+    const invited = result.stages.find((s) => s.key === 'invited')!;
+    expect(invited.dropoff).toBe(0);
+    expect(invited.conversionFromPrev).toBe(1);
+  });
+
+  it('reports anonymous (un-invited) sessions separately', async () => {
+    const result = await getCompletionFunnel(scope);
+    expect(result.anonymous).toEqual({ started: 2, completed: 1 });
+  });
+
+  it('excludes preview sessions and revoked invitations in its queries', async () => {
+    await getCompletionFunnel(scope);
+    expect(findManySessions.mock.calls[0][0].where.isPreview).toBe(false);
+    expect(findManyInvitations.mock.calls[0][0].where.revokedAt).toBeNull();
+  });
+
+  it('handles a zero-invite window without dividing by zero', async () => {
+    findManyInvitations.mockResolvedValue([]);
+    findManySessions.mockResolvedValue([{ respondentUserId: 'anon', status: 'completed' }]);
+    const result = await getCompletionFunnel(scope);
+    expect(result.stages).toHaveLength(4); // lock the stage count so .every() can't be vacuous
+    expect(result.stages.every((s) => s.retention === 0)).toBe(true);
+    expect(result.anonymous).toEqual({ started: 1, completed: 1 });
+  });
+
+  it('guards conversionFromPrev against a zero-count intermediate stage', async () => {
+    // 2 invited, but none opened → the started stage converts from a zero "opened" base.
+    findManyInvitations.mockResolvedValue([
+      { sentAt: new Date(), openedAt: null, userId: 'u1' },
+      { sentAt: new Date(), openedAt: null, userId: 'u2' },
+    ]);
+    findManySessions.mockResolvedValue([{ respondentUserId: 'u1', status: 'active' }]);
+
+    const result = await getCompletionFunnel(scope);
+    const byKey = Object.fromEntries(result.stages.map((s) => [s.key, s]));
+    expect(byKey.opened.count).toBe(0);
+    expect(byKey.started.count).toBe(1);
+    // prev (opened) is 0 → guard returns 0, not NaN/Infinity.
+    expect(byKey.started.conversionFromPrev).toBe(0);
+    expect(Number.isFinite(byKey.started.conversionFromPrev)).toBe(true);
+  });
+});

@@ -352,7 +352,7 @@ export class AppRefineAnswerCapability extends BaseCapability<RefineAnswerArgs, 
       provider: providerSlug,
       inputTokens: completion.tokenUsage.input,
       outputTokens: completion.tokenUsage.output,
-      metadata: { capability: SLUG, sessionId: refinementContext.sessionId },
+      metadata: { capability: SLUG, appQuestionnaireSessionId: refinementContext.sessionId },
     }).catch((err) => {
       logger.error('refine_answer: logCost rejected', {
         agentId: context.agentId,
