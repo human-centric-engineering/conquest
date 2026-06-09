@@ -1,0 +1,274 @@
+// DEMO-ONLY (F9.4): sample demo client + a fully launched, attributed questionnaire
+// so the F9.2 operational runbook can be road-tested end-to-end without any manual
+// admin clicks. This whole file is demo scaffolding — a fork strips it via
+// `grep -rl "DEMO-ONLY"` (see .context/app/questionnaire/forking.md). Nothing else
+// imports it; the seed runner discovers it by glob, so deletion is a clean removal.
+//
+// Env-gated: it no-ops unless `LOAD_DEMO_CONTENT=1`, so it never loads in production.
+// Idempotent: re-running replaces the demo questionnaire (keyed on a stable title)
+// and upserts the demo client by slug — no duplicates.
+
+import type { SeedUnit } from '@/prisma/runner';
+import { executeTransaction } from '@/lib/db/utils';
+import { assertPersistable, writeGraph } from '@/app/api/v1/app/questionnaires/_lib/persist';
+import { slugifyDemoClient } from '@/lib/app/questionnaire/demo-clients/slug';
+import type { ExtractQuestionnaireStructureData } from '@/lib/app/questionnaire/capabilities';
+import {
+  DEFAULT_QUESTIONNAIRE_CONFIG,
+  type AudienceProvenance,
+  type AudienceShape,
+  type ProfileFieldConfig,
+} from '@/lib/app/questionnaire/types';
+
+// DEMO-ONLY: the demo prospect. Slug is derived from the name (the admin UI does the
+// same), so the client appears at /admin/demo-clients/<slug>.
+const DEMO_CLIENT_NAME = 'Northwind Logistics (Demo)';
+const DEMO_CLIENT = {
+  name: DEMO_CLIENT_NAME,
+  slug: slugifyDemoClient(DEMO_CLIENT_NAME),
+  description: 'DEMO-ONLY: sample prospect for the F9.2 spin-up walkthrough.',
+  isActive: true,
+  // Brand snapshot the invitation email + F7.1 chat surface resolve. Valid hex /
+  // absolute-https so the themed paths are visibly exercised, not defaulted away.
+  ctaColor: '#2563eb',
+  accentColor: '#0ea5e9',
+  logoUrl: 'https://dummyimage.com/200x48/2563eb/ffffff&text=Northwind',
+  welcomeCopy: 'Thanks for trialing Northwind — a few quick questions about your onboarding.',
+} as const;
+
+// DEMO-ONLY: stable idempotency marker. The seed finds-and-replaces the questionnaire
+// with this exact title on every run, so editing the sample content below refreshes
+// the demo without duplicating it. (A respondent session/invitation against the prior
+// launched version cascades away on replace — re-running the seed is an explicit reset.)
+const DEMO_QUESTIONNAIRE_TITLE = 'Northwind Logistics — Onboarding Experience Review';
+
+// DEMO-ONLY: the questionnaire's goal + audience. Both are required by the launch gate
+// (assertLaunchable: goal set + audience has ≥1 defined field); the audience populates
+// all seven AudienceShape fields so it reads like a real engagement.
+const DEMO_GOAL =
+  'Understand how new Northwind Logistics customers experience the first 30 days of ' +
+  'onboarding, and identify the friction points that most affect early retention.';
+
+const DEMO_AUDIENCE: AudienceShape = {
+  description: 'Recently onboarded Northwind Logistics customers (first 30 days)',
+  role: 'Operations / logistics coordinator',
+  expertiseLevel: 'intermediate',
+  estimatedDurationMinutes: 8,
+  locale: 'en',
+  sensitivity: 'low',
+  notes: 'Demo questionnaire — not a real customer engagement.',
+};
+
+// DEMO-ONLY: every audience field was hand-authored, so mark each admin-supplied.
+const DEMO_AUDIENCE_PROVENANCE: AudienceProvenance = {
+  description: 'admin-supplied',
+  role: 'admin-supplied',
+  expertiseLevel: 'admin-supplied',
+  estimatedDurationMinutes: 'admin-supplied',
+  locale: 'admin-supplied',
+  sensitivity: 'admin-supplied',
+  notes: 'admin-supplied',
+};
+
+// DEMO-ONLY: session-start profile capture, so the demo shows the F8.3 profile step
+// (anonymousMode stays false). Keys are lowercase-snake per profileFieldKeySchema.
+const DEMO_PROFILE_FIELDS: ProfileFieldConfig[] = [
+  { key: 'name', label: 'Your name', type: 'text', required: true },
+  { key: 'work_email', label: 'Work email', type: 'email', required: true },
+];
+
+// DEMO-ONLY: the hand-authored extraction graph (2 sections, 6 questions spanning the
+// question-type range). Fed through `writeGraph` exactly as the ingestion route feeds
+// the extractor's output, so the demo content takes the same persistence path as a
+// real upload. `changes: []` — hand-authored content has no editorial change log.
+const DEMO_EXTRACTION: ExtractQuestionnaireStructureData = {
+  inferredGoal: DEMO_GOAL,
+  inferredAudience: DEMO_AUDIENCE,
+  changes: [],
+  sections: [
+    {
+      ordinal: 0,
+      title: 'Getting started',
+      description: 'Your first experience setting up Northwind.',
+    },
+    {
+      ordinal: 1,
+      title: 'Value & support',
+      description: 'Getting value and getting help.',
+    },
+  ],
+  questions: [
+    {
+      sectionOrdinal: 0,
+      key: 'setup_ease',
+      prompt: 'How easy was it to set up your account during onboarding?',
+      suggestedType: 'likert',
+      suggestedTypeConfig: { min: 1, max: 5, minLabel: 'Very difficult', maxLabel: 'Very easy' },
+      extractionConfidence: 0.95,
+    },
+    {
+      sectionOrdinal: 0,
+      key: 'setup_blockers',
+      prompt: 'What, if anything, slowed you down while getting started?',
+      guidelines: 'Encourage a specific example rather than a yes/no answer.',
+      suggestedType: 'free_text',
+      extractionConfidence: 0.9,
+    },
+    {
+      sectionOrdinal: 0,
+      key: 'onboarding_channel',
+      prompt: 'How did you primarily complete onboarding?',
+      suggestedType: 'single_choice',
+      suggestedTypeConfig: {
+        choices: ['Self-serve docs', 'Guided call with a CSM', 'In-app walkthrough', 'A mix'],
+      },
+      extractionConfidence: 0.92,
+    },
+    {
+      sectionOrdinal: 1,
+      key: 'first_value_days',
+      prompt: 'Roughly how many days passed before you got real value from Northwind?',
+      suggestedType: 'numeric',
+      suggestedTypeConfig: { min: 0, max: 365, unit: 'days' },
+      extractionConfidence: 0.85,
+    },
+    {
+      sectionOrdinal: 1,
+      key: 'support_channels_used',
+      prompt: 'Which support channels did you use in your first 30 days?',
+      suggestedType: 'multi_choice',
+      suggestedTypeConfig: { choices: ['Email', 'Live chat', 'Phone', 'Help center', 'None'] },
+      extractionConfidence: 0.9,
+    },
+    {
+      sectionOrdinal: 1,
+      key: 'would_recommend',
+      prompt: 'Based on onboarding alone, would you recommend Northwind to a peer?',
+      rationale: 'Quick proxy for early-onboarding sentiment.',
+      suggestedType: 'boolean',
+      extractionConfidence: 0.88,
+    },
+  ],
+};
+
+/**
+ * DEMO-ONLY (F9.4): seed a sample demo client + a launched, attributed questionnaire.
+ *
+ * No-ops unless `LOAD_DEMO_CONTENT=1` (the env gate lives inside `run()` so the runner
+ * still stamps SeedHistory on the no-op; to load demo content on an environment that
+ * previously no-op'd, set the env var AND clear the `app-questionnaire/025-demo-content`
+ * SeedHistory row, since the file content is unchanged — see the F9.2 runbook).
+ *
+ * Builds the whole graph in one transaction so a partial demo never exists: upsert the
+ * demo client → (replace any prior demo questionnaire) → questionnaire → version →
+ * section/slot graph via `writeGraph` → config row → flip the version to `launched`.
+ * The seed sets `status: 'launched'` directly (there is no pure launch helper — the
+ * gate lives in the status HTTP route), so it re-checks the gate's invariants itself:
+ * goal ✓, non-empty audience ✓, ≥1 section ✓, ≥1 question ✓, config row ✓.
+ */
+const unit: SeedUnit = {
+  name: 'app-questionnaire/025-demo-content',
+  async run({ logger }) {
+    if (process.env.LOAD_DEMO_CONTENT !== '1') {
+      logger.info('⏭  DEMO-ONLY: LOAD_DEMO_CONTENT!=1 — skipping demo content seed');
+      return;
+    }
+
+    logger.info('🎬 DEMO-ONLY: seeding demo client + launched questionnaire...');
+
+    // Fail fast before touching the DB if the hand-authored graph is incoherent.
+    assertPersistable(DEMO_EXTRACTION);
+
+    await executeTransaction(async (tx) => {
+      // Demo client — upsert by unique slug (idempotent on every field).
+      const demoClient = await tx.appDemoClient.upsert({
+        where: { slug: DEMO_CLIENT.slug },
+        update: {
+          name: DEMO_CLIENT.name,
+          description: DEMO_CLIENT.description,
+          isActive: DEMO_CLIENT.isActive,
+          ctaColor: DEMO_CLIENT.ctaColor,
+          accentColor: DEMO_CLIENT.accentColor,
+          logoUrl: DEMO_CLIENT.logoUrl,
+          welcomeCopy: DEMO_CLIENT.welcomeCopy,
+        },
+        create: { ...DEMO_CLIENT },
+        select: { id: true },
+      });
+
+      // Replace-on-rerun: drop any prior demo questionnaire (version/section/slot/
+      // config/sessions/invitations cascade) so edits to the content above take hold
+      // without duplicating.
+      const existing = await tx.appQuestionnaire.findFirst({
+        where: { title: DEMO_QUESTIONNAIRE_TITLE },
+        select: { id: true },
+      });
+      if (existing) {
+        await tx.appQuestionnaire.delete({ where: { id: existing.id } });
+      }
+
+      // Questionnaire attributed to the demo client at create (the UI does this via
+      // a later PATCH; the seed sets it inline). Questionnaire-level status stays
+      // 'draft' — the launch lifecycle is version-scoped.
+      const questionnaire = await tx.appQuestionnaire.create({
+        data: {
+          title: DEMO_QUESTIONNAIRE_TITLE,
+          status: 'draft',
+          demoClientId: demoClient.id,
+        },
+        select: { id: true },
+      });
+
+      // Version 1 — carries the launch-gate goal + audience (+ provenance).
+      const version = await tx.appQuestionnaireVersion.create({
+        data: {
+          questionnaireId: questionnaire.id,
+          versionNumber: 1,
+          status: 'draft',
+          goal: DEMO_GOAL,
+          audience: DEMO_AUDIENCE,
+          goalProvenance: 'admin-supplied',
+          audienceProvenance: DEMO_AUDIENCE_PROVENANCE,
+        },
+        select: { id: true },
+      });
+
+      // Section + slot graph — same writer the ingestion route uses.
+      const counts = await writeGraph(tx, version.id, DEMO_EXTRACTION);
+
+      // Config row — the launch gate requires the row to exist. Mirror the schema
+      // defaults, overriding only the demo-relevant knobs (profile capture on).
+      await tx.appQuestionnaireConfig.create({
+        data: {
+          versionId: version.id,
+          selectionStrategy: DEFAULT_QUESTIONNAIRE_CONFIG.selectionStrategy,
+          minQuestionsAnswered: DEFAULT_QUESTIONNAIRE_CONFIG.minQuestionsAnswered,
+          coverageThreshold: DEFAULT_QUESTIONNAIRE_CONFIG.coverageThreshold,
+          costBudgetUsd: DEFAULT_QUESTIONNAIRE_CONFIG.costBudgetUsd,
+          maxQuestionsPerSession: DEFAULT_QUESTIONNAIRE_CONFIG.maxQuestionsPerSession,
+          voiceEnabled: DEFAULT_QUESTIONNAIRE_CONFIG.voiceEnabled,
+          contradictionMode: DEFAULT_QUESTIONNAIRE_CONFIG.contradictionMode,
+          contradictionWindowN: DEFAULT_QUESTIONNAIRE_CONFIG.contradictionWindowN,
+          contradictionEveryNTurns: DEFAULT_QUESTIONNAIRE_CONFIG.contradictionEveryNTurns,
+          anonymousMode: DEFAULT_QUESTIONNAIRE_CONFIG.anonymousMode,
+          answerSlotPanelScope: DEFAULT_QUESTIONNAIRE_CONFIG.answerSlotPanelScope,
+          profileFields: DEMO_PROFILE_FIELDS,
+        },
+      });
+
+      // Launch gate satisfied (goal, audience, sections, questions, config) — flip the
+      // version to launched so the runbook can invite a respondent immediately.
+      await tx.appQuestionnaireVersion.update({
+        where: { id: version.id },
+        data: { status: 'launched' },
+      });
+
+      logger.info(
+        `✅ DEMO-ONLY: seeded "${DEMO_QUESTIONNAIRE_TITLE}" — ${counts.sectionCount} sections, ` +
+          `${counts.questionCount} questions, launched and attributed to ${DEMO_CLIENT.slug}`
+      );
+    });
+  },
+};
+
+export default unit;

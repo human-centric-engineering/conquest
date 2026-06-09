@@ -4,6 +4,10 @@
 > sales demo — **not** a security boundary and **not** real multi-tenancy. A real
 > client engagement strips it. See [forking.md] § "Replacing demo tenancy" (P9) and
 > the [development plan][plan] P2.5 section.
+>
+> **Spinning one up?** The end-to-end operational walkthrough — seed fast path,
+> branding, content, launch, invite, first session, reset — is in
+> [runbook.md](./runbook.md).
 
 ## What it is (and isn't)
 
