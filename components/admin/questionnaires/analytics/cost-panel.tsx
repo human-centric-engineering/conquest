@@ -28,6 +28,9 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { formatUsd } from '@/lib/utils/format-currency';
+// Import the threshold from the pure `privacy` leaf, not the barrel — the barrel
+// re-exports the Prisma-coupled aggregators, which must not enter this client bundle.
+import { K_ANONYMITY_THRESHOLD } from '@/lib/app/questionnaire/analytics/privacy';
 import type { QuestionnaireCostResult } from '@/lib/app/questionnaire/analytics';
 
 function StatCard({ label, value }: { label: string; value: string }) {
@@ -122,7 +125,13 @@ export function CostPanel({ data }: { data: QuestionnaireCostResult | null }) {
           <CardTitle className="text-base">Top sessions by spend</CardTitle>
         </CardHeader>
         <CardContent>
-          {data.topSessions.length === 0 ? (
+          {data.topSessionsSuppressed ? (
+            <p className="text-muted-foreground text-sm italic">
+              Per-session spend is hidden to protect respondent privacy — the questionnaire is
+              anonymous or has fewer than {K_ANONYMITY_THRESHOLD} sessions. Totals above are
+              unaffected.
+            </p>
+          ) : data.topSessions.length === 0 ? (
             <p className="text-muted-foreground text-sm italic">No respondent session spend yet.</p>
           ) : (
             <Table>

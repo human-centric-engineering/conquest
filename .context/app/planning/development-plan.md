@@ -667,13 +667,13 @@ _Indicative tasks:_
 
 ### F8.3 — Anonymous-mode hardening
 
-_Status:_ not started · _Size:_ ~1–2 PRs · _Owner:_ TBD · _Deps:_ F8.1, F8.2 + any surface that touches session data
+_Status:_ in flight ([tracker](./features/f8.3.md)) · _Size:_ ~1–2 PRs · _Owner:_ TBD · _Deps:_ F8.1, F8.2 + any surface that touches session data
 
 Verification pass across every surface that touches session data, ensuring no PII leak when `anonymousMode = true`. Flag-gating tightened where needed.
 
 _Indicative tasks:_
 
-- Audit every read path that touches `AppQuestionnaireUserProfile` for anonymous-mode gating.
+- Audit every read path that touches `AppRespondentProfileSnapshot` for anonymous-mode gating.
 - Audit exports + analytics + admin UI.
 - Integration tests that flip the flag and assert PII absence on every surface.
 - Documentation of the anonymous-mode contract.

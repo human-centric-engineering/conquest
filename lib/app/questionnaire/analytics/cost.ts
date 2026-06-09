@@ -19,6 +19,7 @@
 
 import { prisma } from '@/lib/db/client';
 import { narrowToEnum, SESSION_STATUSES, type SessionStatus } from '@/lib/app/questionnaire/types';
+import { isCohortSuppressed } from '@/lib/app/questionnaire/analytics/privacy';
 import type { AnalyticsScope } from '@/lib/app/questionnaire/analytics/query-schema';
 import type {
   CostCapabilityBucket,
@@ -76,11 +77,27 @@ export async function getQuestionnaireCostBreakdown(
   const range = { from: scope.from.toISOString(), to: scope.to.toISOString() };
 
   // Non-preview sessions for the version (all time — cost rows are date-filtered by
-  // their own `createdAt`). Carries status + createdAt for the top-sessions table.
-  const sessions = await prisma.appQuestionnaireSession.findMany({
-    where: { versionId: scope.versionId, isPreview: false },
-    select: { id: true, status: true, createdAt: true },
-  });
+  // their own `createdAt`). Carries status + createdAt for the top-sessions table. The
+  // anonymous-mode flag is read alongside; the two reads are independent, so run them
+  // together.
+  const [sessions, config] = await Promise.all([
+    prisma.appQuestionnaireSession.findMany({
+      where: { versionId: scope.versionId, isPreview: false },
+      select: { id: true, status: true, createdAt: true },
+    }),
+    prisma.appQuestionnaireConfig.findUnique({
+      where: { versionId: scope.versionId },
+      select: { anonymousMode: true },
+    }),
+  ]);
+
+  // F8.3: the per-session spend table exposes session ids (a re-identification handle).
+  // Withhold it when the version is anonymous, or the cohort is below the k-anonymity
+  // threshold. Aggregate spend (total / by-capability / trend) carries no identity and
+  // is always returned.
+  const anonymous = config?.anonymousMode ?? false;
+  const topSessionsSuppressed = anonymous || isCohortSuppressed(sessions.length);
+
   const sessionMeta = new Map(sessions.map((s) => [s.id, s]));
   const sessionIds = sessions.map((s) => s.id);
   const hasSessions = sessionIds.length > 0;
@@ -184,20 +201,22 @@ export async function getQuestionnaireCostBreakdown(
     .map(([key, v]) => ({ key, label: labelFor(key), costUsd: v.costUsd, callCount: v.callCount }))
     .sort((a, b) => b.costUsd - a.costUsd);
 
-  const topSessions: SessionCostRow[] = [...sessionCost.entries()]
-    .map(([sessionId, costUsd]) => {
-      const meta = sessionMeta.get(sessionId);
-      return {
-        sessionId,
-        status: meta
-          ? narrowToEnum<SessionStatus>(meta.status, SESSION_STATUSES, 'active')
-          : 'active',
-        costUsd,
-        createdAt: (meta?.createdAt ?? scope.from).toISOString(),
-      };
-    })
-    .sort((a, b) => b.costUsd - a.costUsd)
-    .slice(0, TOP_SESSIONS_LIMIT);
+  const topSessions: SessionCostRow[] = topSessionsSuppressed
+    ? []
+    : [...sessionCost.entries()]
+        .map(([sessionId, costUsd]) => {
+          const meta = sessionMeta.get(sessionId);
+          return {
+            sessionId,
+            status: meta
+              ? narrowToEnum<SessionStatus>(meta.status, SESSION_STATUSES, 'active')
+              : 'active',
+            costUsd,
+            createdAt: (meta?.createdAt ?? scope.from).toISOString(),
+          };
+        })
+        .sort((a, b) => b.costUsd - a.costUsd)
+        .slice(0, TOP_SESSIONS_LIMIT);
 
   return {
     versionId: scope.versionId,
@@ -208,5 +227,6 @@ export async function getQuestionnaireCostBreakdown(
     byCapability: capabilityBuckets,
     trend,
     topSessions,
+    topSessionsSuppressed,
   };
 }

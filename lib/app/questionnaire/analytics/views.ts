@@ -61,6 +61,8 @@ export interface HistogramBin {
 /**
  * The type-appropriate shape of a question's answer distribution. `free_text`
  * carries no value detail by design (PII / not meaningful as a distribution).
+ * `suppressed` carries none either — the whole surface is below the k-anonymity
+ * threshold (F8.3), so no per-question detail is emitted.
  */
 export type DistributionDetail =
   | { kind: 'choice'; buckets: ValueBucket[]; otherCount: number }
@@ -74,7 +76,8 @@ export type DistributionDetail =
       falseCount: number;
     }
   | { kind: 'date'; buckets: { label: string; count: number }[] }
-  | { kind: 'free_text' };
+  | { kind: 'free_text' }
+  | { kind: 'suppressed' };
 
 /** One question's distribution over the non-preview sessions in scope. */
 export interface QuestionDistribution {
@@ -104,6 +107,13 @@ export interface QuestionDistributionsResult {
   totalSessions: number;
   /** Of those, how many reached `completed`. */
   completedSessions: number;
+  /**
+   * True when the cohort is non-empty but below the k-anonymity threshold
+   * ({@link K_ANONYMITY_THRESHOLD}): per-question `detail` is withheld (every question's
+   * `detail.kind` is `suppressed` and its counts are zeroed) so a tiny sample can't
+   * re-identify a respondent. F8.3, applied at the aggregator boundary.
+   */
+  suppressed: boolean;
   questions: QuestionDistribution[];
 }
 
@@ -137,6 +147,12 @@ export interface CompletionFunnelResult {
     started: number;
     completed: number;
   };
+  /**
+   * True when the funnel cohort is non-empty but below the k-anonymity threshold
+   * ({@link K_ANONYMITY_THRESHOLD}): all stage counts and anonymous counts are zeroed so
+   * a tiny cohort can't re-identify who reached a stage. F8.3, at the aggregator.
+   */
+  suppressed: boolean;
 }
 
 /* ── Cost actuals ───────────────────────────────────────────────────────── */
@@ -175,6 +191,13 @@ export interface QuestionnaireCostResult {
   byCapability: CostCapabilityBucket[];
   /** Daily total spend across the window, ascending. */
   trend: CostDayPoint[];
-  /** Highest-spend respondent sessions, descending (capped). */
+  /** Highest-spend respondent sessions, descending (capped). Empty when suppressed. */
   topSessions: SessionCostRow[];
+  /**
+   * True when the per-session spend table was withheld (F8.3): the version is anonymous
+   * (session ids are a re-identification handle), or the cohort is below the k-anonymity
+   * threshold ({@link K_ANONYMITY_THRESHOLD}). Aggregate spend (total / by-capability /
+   * trend) is always returned — it carries no per-respondent identity.
+   */
+  topSessionsSuppressed: boolean;
 }

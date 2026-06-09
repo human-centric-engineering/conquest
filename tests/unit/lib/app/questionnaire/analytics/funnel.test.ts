@@ -81,19 +81,32 @@ describe('getCompletionFunnel', () => {
   });
 
   it('handles a zero-invite window without dividing by zero', async () => {
+    // 5 anonymous sessions (≥ threshold) so the divide-by-zero guard is exercised
+    // without the cohort being suppressed by F8.3.
     findManyInvitations.mockResolvedValue([]);
-    findManySessions.mockResolvedValue([{ respondentUserId: 'anon', status: 'completed' }]);
+    findManySessions.mockResolvedValue([
+      { respondentUserId: 'anon1', status: 'completed' },
+      { respondentUserId: 'anon2', status: 'completed' },
+      { respondentUserId: 'anon3', status: 'active' },
+      { respondentUserId: 'anon4', status: 'active' },
+      { respondentUserId: null, status: 'active' },
+    ]);
     const result = await getCompletionFunnel(scope);
     expect(result.stages).toHaveLength(4); // lock the stage count so .every() can't be vacuous
     expect(result.stages.every((s) => s.retention === 0)).toBe(true);
-    expect(result.anonymous).toEqual({ started: 1, completed: 1 });
+    expect(result.suppressed).toBe(false);
+    expect(result.anonymous).toEqual({ started: 5, completed: 2 });
   });
 
   it('guards conversionFromPrev against a zero-count intermediate stage', async () => {
-    // 2 invited, but none opened → the started stage converts from a zero "opened" base.
+    // 5 invited (≥ threshold), none opened → the started stage converts from a zero
+    // "opened" base; cohort is large enough not to be suppressed.
     findManyInvitations.mockResolvedValue([
       { sentAt: new Date(), openedAt: null, userId: 'u1' },
       { sentAt: new Date(), openedAt: null, userId: 'u2' },
+      { sentAt: new Date(), openedAt: null, userId: 'u3' },
+      { sentAt: new Date(), openedAt: null, userId: 'u4' },
+      { sentAt: new Date(), openedAt: null, userId: 'u5' },
     ]);
     findManySessions.mockResolvedValue([{ respondentUserId: 'u1', status: 'active' }]);
 
@@ -104,5 +117,38 @@ describe('getCompletionFunnel', () => {
     // prev (opened) is 0 → guard returns 0, not NaN/Infinity.
     expect(byKey.started.conversionFromPrev).toBe(0);
     expect(Number.isFinite(byKey.started.conversionFromPrev)).toBe(true);
+  });
+
+  it('suppresses every count below the k-anonymity threshold (F8.3)', async () => {
+    // 2 invited + 1 anonymous = 3 participants (< 5): knowing "1 of 2 completed" plus the
+    // invitee list re-identifies, so all counts are zeroed and `suppressed` is set.
+    findManyInvitations.mockResolvedValue([
+      { sentAt: new Date(), openedAt: new Date(), userId: 'u1' },
+      { sentAt: new Date(), openedAt: new Date(), userId: 'u2' },
+    ]);
+    findManySessions.mockResolvedValue([
+      { respondentUserId: 'u1', status: 'completed' },
+      { respondentUserId: 'anon1', status: 'active' },
+    ]);
+
+    const result = await getCompletionFunnel(scope);
+    expect(result.suppressed).toBe(true);
+    expect(result.stages.every((s) => s.count === 0)).toBe(true);
+    expect(result.anonymous).toEqual({ started: 0, completed: 0 });
+  });
+
+  it('does not suppress a cohort exactly at the threshold (F8.3 boundary)', async () => {
+    findManyInvitations.mockResolvedValue([
+      { sentAt: new Date(), openedAt: new Date(), userId: 'u1' },
+      { sentAt: new Date(), openedAt: new Date(), userId: 'u2' },
+      { sentAt: new Date(), openedAt: new Date(), userId: 'u3' },
+      { sentAt: new Date(), openedAt: new Date(), userId: 'u4' },
+      { sentAt: new Date(), openedAt: new Date(), userId: 'u5' },
+    ]);
+    findManySessions.mockResolvedValue([{ respondentUserId: 'u1', status: 'completed' }]);
+
+    const result = await getCompletionFunnel(scope);
+    expect(result.suppressed).toBe(false);
+    expect(result.stages.find((s) => s.key === 'invited')!.count).toBe(5);
   });
 });

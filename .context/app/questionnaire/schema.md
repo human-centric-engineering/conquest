@@ -271,4 +271,18 @@ questionSlotId)` (the upsert unique), with `value Json`, `provenanceLabel`,
   Migration hand-stripped of the phantom pgvector DROPs (schema-shape test guards the
   strip). See [`per-turn-orchestrator.md`](./per-turn-orchestrator.md).
 
+### Respondent profile snapshot (F8.3 — P8)
+
+- **`AppRespondentProfileSnapshot`** (F8.3, migration
+  `20260609062611_app_respondent_profile_snapshot`) — the `profileFields` values a
+  respondent supplied at session start, 1:1 with a session (`sessionId @unique`). `values
+Json` (keyed by field `key`), `respondentUserId String?` denormalised from the session.
+  **The first questionnaire model with a modelled `User` FK** — the deferred-UG-1
+  "plain String, no `@relation`" posture is deliberately broken because this row IS personal
+  data and must cascade on erasure. Both FKs `onDelete: Cascade`: the session FK (owned
+  data) and the user FK (so `eraseUser()` removes it natively, no hook). **Never written for
+  an anonymous session** (no row, not an empty row). Migration hand-stripped of the phantom
+  pgvector DROPs (schema-shape test guards the strip + asserts both cascades). See
+  [`anonymous-mode.md`](./anonymous-mode.md).
+
 _Later phases extend this file. Each documents its models here as it lands._

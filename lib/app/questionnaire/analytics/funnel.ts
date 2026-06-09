@@ -15,6 +15,7 @@
  */
 
 import { prisma } from '@/lib/db/client';
+import { isCohortSuppressed } from '@/lib/app/questionnaire/analytics/privacy';
 import type { AnalyticsScope } from '@/lib/app/questionnaire/analytics/query-schema';
 import type {
   CompletionFunnelResult,
@@ -108,10 +109,28 @@ export async function getCompletionFunnel(scope: AnalyticsScope): Promise<Comple
     if (s.status === 'completed') anonCompleted += 1;
   }
 
+  // F8.3: the funnel output is counts-only (no respondent identity ever crosses the
+  // boundary), so the only re-identification risk is a tiny cohort — knowing "1 of 2
+  // invitees completed" plus the invitee list pinpoints a person. Suppress every count
+  // when the participant cohort is non-empty but below the k-anonymity threshold. The
+  // cohort is the population the stages actually describe — invitations that were SENT
+  // (`invited`) plus anonymous starts — not raw invitation rows, so a batch of unsent
+  // (draft) invitations neither pads the count past the floor nor trips suppression on
+  // an otherwise-empty funnel.
+  const cohortSize = invited + anonStarted;
+  const suppressed = isCohortSuppressed(cohortSize);
+
+  const counts = suppressed
+    ? { invited: 0, opened: 0, started: 0, completed: 0 }
+    : { invited, opened, started, completed };
+
   return {
     versionId: scope.versionId,
     range,
-    stages: buildStages({ invited, opened, started, completed }),
-    anonymous: { started: anonStarted, completed: anonCompleted },
+    stages: buildStages(counts),
+    anonymous: suppressed
+      ? { started: 0, completed: 0 }
+      : { started: anonStarted, completed: anonCompleted },
+    suppressed,
   };
 }

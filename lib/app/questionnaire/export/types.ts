@@ -20,6 +20,7 @@
 
 import type { ResolvedTheme } from '@/lib/app/questionnaire/theming';
 import type { PanelSectionView } from '@/lib/app/questionnaire/panel/types';
+import type { ProfileValues } from '@/lib/app/questionnaire/profile/profile-values';
 
 /** The respondent identity shown in the PDF header (name only — never email). */
 export interface ExportRespondent {
@@ -42,6 +43,12 @@ export interface SessionExportModel {
    * "Anonymous respondent".
    */
   respondent: ExportRespondent | null;
+  /**
+   * The profile-field values the respondent supplied at session start (keyed by field
+   * `key`), or null when anonymous OR none were collected. Identifying data — the
+   * builder forces this to null in anonymous mode, the same as `respondent`.
+   */
+  profile: ProfileValues | null;
   /** True when the version is configured `anonymousMode` (drives the header copy). */
   anonymous: boolean;
   /** ISO timestamp the session completed, or null when not yet completed. */

@@ -9,6 +9,9 @@
  *
  * Anonymous-mode contract (resolved in the loader, not here):
  *   - `respondentName` is null on every session.
+ *   - `profile` is null on every session — the respondent profile snapshot (F8.3) is
+ *     identifying data, so it never reaches an anonymous export (and is never even
+ *     written for an anonymous session).
  *   - `turns` is `[]` on every session — raw respondent prose never reaches the export.
  * Answer *values* are always present in both formats: anonymity is about not linking
  * data to a person, not redacting the survey data itself (mirrors the PDF export).
@@ -17,6 +20,7 @@
 import type { AnalyticsRange } from '@/lib/app/questionnaire/analytics';
 import type { AnswerProvenance, QuestionType, SessionStatus } from '@/lib/app/questionnaire/types';
 import type { PanelRefinementEntry } from '@/lib/app/questionnaire/panel/types';
+import type { ProfileValues } from '@/lib/app/questionnaire/profile/profile-values';
 
 /** One question column in the export, in display order (section ordinal → slot ordinal). */
 export interface ExportQuestion {
@@ -65,6 +69,12 @@ export interface ExportSession {
   completedAt: string | null;
   /** Null when the version is anonymous or the respondent is unknown. */
   respondentName: string | null;
+  /**
+   * The profile-field values the respondent supplied at session start (keyed by field
+   * `key`), or null when the version is anonymous or none were collected. Identifying
+   * data — null on every session in an anonymous export.
+   */
+  profile: ProfileValues | null;
   answers: ExportAnswer[];
   /** Empty in anonymous mode. */
   turns: ExportTurn[];

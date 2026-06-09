@@ -413,10 +413,11 @@ model AppQuestionnaireSession {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  version AppQuestionnaireVersion       @relation(fields: [versionId], references: [id], onDelete: Cascade)
-  answers AppAnswerSlot[]
-  events  AppQuestionnaireSessionEvent[]
-  turns   AppQuestionnaireTurn[]
+  version         AppQuestionnaireVersion       @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  answers         AppAnswerSlot[]
+  events          AppQuestionnaireSessionEvent[]
+  turns           AppQuestionnaireTurn[]
+  profileSnapshot AppRespondentProfileSnapshot?
 
   @@index([versionId])
   @@index([versionId, isPreview])
@@ -429,6 +430,40 @@ model AppQuestionnaireSession {
   // (F4.5) depends on it for race-safety. Author future migrations on this
   // table with `--create-only` and strip any DROP of that index.
   @@map("app_questionnaire_session")
+}
+
+/// The profile-field values a respondent supplied at session start (F8.3), 1:1 with a
+/// NON-anonymous session. PII by construction: `values` holds the answers to the
+/// admin-authored `AppQuestionnaireConfig.profileFields` (name/email/role/custom),
+/// keyed by field `key`.
+///
+/// ⚠️ ANONYMOUS-MODE INVARIANT ⚠️
+/// NO row is ever written for a session whose version config has
+/// `anonymousMode = true`. The capture seam (`questionnaire-sessions/_lib/create.ts`)
+/// skips the write entirely in anonymous mode — absence, not an empty row (the
+/// strongest, most testable guarantee). Read paths additionally omit the snapshot when
+/// anonymous, as defence in depth. See `.context/app/questionnaire/anonymous-mode.md`.
+///
+/// This is the FIRST questionnaire model with a modelled `User` FK — the deferred-UG-1
+/// "plain String, no @relation" posture used elsewhere is deliberately broken here
+/// because this row IS personal data and MUST cascade on erasure. `respondentUserId`
+/// is denormalised from the session so the cascade has a direct FK; it carries
+/// `onDelete: Cascade` so `prisma.user.delete()` (via `eraseUser()`) removes the
+/// snapshot natively — no erasure hook needed. The `session` FK also cascades, so
+/// deleting a session removes its snapshot.
+model AppRespondentProfileSnapshot {
+  id               String   @id @default(cuid())
+  sessionId        String   @unique
+  respondentUserId String? // denormalised from the session; null for no-login (which never writes a row anyway)
+  values           Json     @default("{}") // { [profileFieldKey]: string | number } — the collected PII
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  session AppQuestionnaireSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user    User?                   @relation(fields: [respondentUserId], references: [id], onDelete: Cascade)
+
+  @@index([respondentUserId])
+  @@map("app_respondent_profile_snapshot")
 }
 
 /// One captured answer for a question slot within a session. F4.2 produces the

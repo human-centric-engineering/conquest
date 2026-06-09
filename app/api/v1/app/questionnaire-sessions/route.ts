@@ -31,8 +31,22 @@ import {
   createSessionFromInvitation,
 } from '@/app/api/v1/app/questionnaire-sessions/_lib/create';
 
+// Respondent profile submission (F8.3): a flat map of profile-field key → value. The
+// creator validates it against the version's configured `profileFields`; here we only
+// gate the coarse shape. Collected on the invitation (non-anonymous) surface only —
+// the anonymous version-direct surface never carries it.
+const profileValuesSchema = z.record(
+  z.string().max(60),
+  z.union([z.string().max(2000), z.number()])
+);
+
 const bodySchema = z.union([
-  z.object({ invitationToken: z.string().min(10).max(512) }).strict(),
+  z
+    .object({
+      invitationToken: z.string().min(10).max(512),
+      profileValues: profileValuesSchema.optional(),
+    })
+    .strict(),
   z.object({ versionId: z.string().min(1).max(64) }).strict(),
 ]);
 
@@ -48,7 +62,11 @@ const handleCreateSession = withAuth(async (request, session) => {
 
   const result =
     'invitationToken' in body
-      ? await createSessionFromInvitation(body.invitationToken, respondentUserId)
+      ? await createSessionFromInvitation(
+          body.invitationToken,
+          respondentUserId,
+          body.profileValues
+        )
       : await createSessionForVersion(body.versionId, respondentUserId);
 
   if (!result.ok) {

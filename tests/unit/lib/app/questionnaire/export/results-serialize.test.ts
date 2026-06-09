@@ -52,6 +52,7 @@ function model(overrides: Partial<ResultsExportModel> = {}): ResultsExportModel 
         createdAt: '2026-01-10T09:00:00.000Z',
         completedAt: '2026-01-10T09:30:00.000Z',
         respondentName: 'Ada Lovelace',
+        profile: { team: 'Analytics' },
         answers: [
           {
             questionKey: 'role',
@@ -84,6 +85,7 @@ function model(overrides: Partial<ResultsExportModel> = {}): ResultsExportModel 
         createdAt: '2026-01-11T09:00:00.000Z',
         completedAt: '2026-01-11T09:30:00.000Z',
         respondentName: null,
+        profile: null,
         answers: [
           {
             questionKey: 'rating',
@@ -153,6 +155,15 @@ describe('toResultsCsv', () => {
     expect(s2Row).not.toContain('Ada Lovelace');
   });
 
+  it('serialises the collected profile as a JSON cell (F8.3)', () => {
+    const csv = toResultsCsv(model());
+    const s1Row = csv.split('\n').find((l) => l.startsWith('s1,'));
+    // s1 carries profile { team: 'Analytics' }; s2 carries none → blank cell.
+    expect(s1Row).toContain('Analytics');
+    const s2Row = csv.split('\n').find((l) => l.startsWith('s2,'));
+    expect(s2Row).not.toContain('Analytics');
+  });
+
   it('neutralises formula-injection in answer values', () => {
     const m = model();
     m.sessions[0].answers[0].value = '=HYPERLINK("http://evil")';
@@ -170,14 +181,20 @@ describe('toResultsJson', () => {
     expect(out.sessions[0].answers[0].provenanceLabel).toBe('direct');
   });
 
-  it('carries through an anonymous model untouched (null respondent, empty turns)', () => {
+  it('carries through an anonymous model untouched (null respondent, no profile, empty turns)', () => {
     const anon = model({
       anonymous: true,
-      sessions: model().sessions.map((s) => ({ ...s, respondentName: null, turns: [] })),
+      sessions: model().sessions.map((s) => ({
+        ...s,
+        respondentName: null,
+        profile: null,
+        turns: [],
+      })),
     });
     const out = toResultsJson(anon);
     expect(out.anonymous).toBe(true);
     expect(out.sessions.every((s) => s.respondentName === null)).toBe(true);
+    expect(out.sessions.every((s) => s.profile === null)).toBe(true);
     expect(out.sessions.every((s) => s.turns.length === 0)).toBe(true);
   });
 });

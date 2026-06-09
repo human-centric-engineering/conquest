@@ -146,6 +146,12 @@ function formatConfidence(confidence: number | null): string | null {
   return `${Math.round(confidence * 100)}% confidence`;
 }
 
+/** Humanise a profile-field key slug (`job_title` → `Job title`) for the header label. */
+function humaniseKey(key: string): string {
+  const spaced = key.replace(/[_-]+/g, ' ').trim();
+  return spaced.length === 0 ? key : spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
 /** One question slot — answered or "Not answered", with provenance/rationale/history. */
 function SlotBlock({ slot }: { slot: PanelSlotView }) {
   const confidence = formatConfidence(slot.confidence);
@@ -218,6 +224,15 @@ export function SessionPdfDocument({ model }: SessionPdfDocumentProps) {
             <Text style={styles.metaLabel}>Respondent: </Text>
             {respondentLabel}
           </Text>
+          {/* Collected profile (F8.3) — only present for a non-anonymous session; the
+              model builder forces it to null in anonymous mode. */}
+          {model.profile &&
+            Object.entries(model.profile).map(([key, value]) => (
+              <Text key={key} style={styles.metaRow}>
+                <Text style={styles.metaLabel}>{`${humaniseKey(key)}: `}</Text>
+                {String(value)}
+              </Text>
+            ))}
           <Text style={styles.metaRow}>
             <Text style={styles.metaLabel}>Completed: </Text>
             {formatDate(model.completedAt)}

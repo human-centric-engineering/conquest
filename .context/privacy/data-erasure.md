@@ -137,6 +137,13 @@ Two failure modes if the migration FK is wrong:
 
 So the migration FK with an explicit `ON DELETE` is **mandatory**, not optional.
 
+**ConQuest exception — a modelled `User` FK.** `AppRespondentProfileSnapshot` (F8.3,
+respondent profile values, PII) deliberately breaks the plain-scalar pattern: it adds a
+real `@relation` with a reverse field on `User`, FK `onDelete: Cascade`. Because it
+cascades natively, `eraseUser()` removes it with no cleanup hook. It is the one app table
+that _is_ caught by the schema-level `@relation onDelete` review. See
+[`../app/questionnaire/anonymous-mode.md`](../app/questionnaire/anonymous-mode.md).
+
 ### What the FK cascade can't do — register a cleanup hook
 
 A `CASCADE` FK is erased automatically by `prisma.user.delete()`. But, exactly as

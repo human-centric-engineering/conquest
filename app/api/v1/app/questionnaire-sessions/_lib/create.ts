@@ -19,8 +19,15 @@
  */
 
 import { prisma } from '@/lib/db/client';
+import type { Prisma } from '@prisma/client';
 import { hashInvitationToken } from '@/lib/app/questionnaire/invitations';
+import { findResumableSession } from '@/lib/app/questionnaire/chat/resumable-session';
 import { recordSessionCreated } from '@/app/api/v1/app/questionnaires/_lib/sessions';
+import {
+  parseProfileFields,
+  validateProfileValues,
+  type ProfileValues,
+} from '@/lib/app/questionnaire/profile/profile-values';
 
 /** A created-or-resumed session, or a typed failure the route maps to an HTTP status. */
 export type CreateSessionResult =
@@ -32,22 +39,44 @@ export type CreateSessionResult =
     }
   | { ok: false; status: number; code: string; message: string };
 
-/** Find a respondent's existing non-terminal real session for a version (resume target). */
-async function findResumableSession(
-  versionId: string,
-  respondentUserId: string
-): Promise<{ id: string; status: string; versionId: string } | null> {
-  const row = await prisma.appQuestionnaireSession.findFirst({
-    where: {
-      versionId,
-      respondentUserId,
-      isPreview: false,
-      status: { in: ['active', 'paused'] },
-    },
-    orderBy: { createdAt: 'desc' },
-    select: { id: true, status: true, versionId: true },
+/**
+ * Validate a respondent's profile submission against a version's configured fields,
+ * for the NON-anonymous capture seam. Anonymous mode short-circuits to "nothing to
+ * capture" — anonymous sessions never collect profile data (the F8.3 invariant).
+ *
+ * The server is the enforcing boundary, not the form: an OMITTED `profileValues` is
+ * validated as an empty submission, so a version with a required field rejects with a
+ * 400 even when a direct API caller sends no values (the form always submits them).
+ * Versions with no fields, or only optional fields the caller omitted, capture nothing.
+ * Returns the values to persist (or null), or a typed 400 to reject.
+ */
+function resolveProfileCapture(
+  anonymous: boolean,
+  profileFieldsJson: unknown,
+  rawValues: Record<string, unknown> | undefined
+):
+  | { ok: true; values: ProfileValues | null }
+  | { ok: false; status: number; code: string; message: string } {
+  if (anonymous) return { ok: true, values: null };
+  const fields = parseProfileFields(profileFieldsJson);
+  if (fields.length === 0) return { ok: true, values: null };
+  const result = validateProfileValues(fields, rawValues ?? {});
+  if (!result.ok) {
+    return { ok: false, status: 400, code: 'INVALID_PROFILE', message: result.message };
+  }
+  return { ok: true, values: Object.keys(result.values).length > 0 ? result.values : null };
+}
+
+/** Persist a profile snapshot inside the session-create transaction (non-anonymous only). */
+async function writeProfileSnapshot(
+  tx: Prisma.TransactionClient,
+  sessionId: string,
+  respondentUserId: string | null,
+  values: ProfileValues
+): Promise<void> {
+  await tx.appRespondentProfileSnapshot.create({
+    data: { sessionId, respondentUserId, values },
   });
-  return row;
 }
 
 /**
@@ -57,7 +86,8 @@ async function findResumableSession(
  */
 export async function createSessionFromInvitation(
   token: string,
-  respondentUserId: string
+  respondentUserId: string,
+  profileValues?: Record<string, unknown>
 ): Promise<CreateSessionResult> {
   const invitation = await prisma.appQuestionnaireInvitation.findUnique({
     where: { tokenHash: hashInvitationToken(token) },
@@ -66,7 +96,12 @@ export async function createSessionFromInvitation(
       userId: true,
       status: true,
       versionId: true,
-      version: { select: { status: true } },
+      version: {
+        select: {
+          status: true,
+          config: { select: { anonymousMode: true, profileFields: true } },
+        },
+      },
     },
   });
 
@@ -100,6 +135,16 @@ export async function createSessionFromInvitation(
     };
   }
 
+  // Validate any profile submission against the version's fields before any write — an
+  // invitation surface is never anonymous, so its profile fields (if any) are collected.
+  const anonymous = invitation.version.config?.anonymousMode ?? false;
+  const capture = resolveProfileCapture(
+    anonymous,
+    invitation.version.config?.profileFields,
+    profileValues
+  );
+  if (!capture.ok) return capture;
+
   const existing = await findResumableSession(invitation.versionId, respondentUserId);
   if (existing) return { ok: true, session: existing, resumed: true };
 
@@ -114,6 +159,9 @@ export async function createSessionFromInvitation(
       select: { id: true, status: true, versionId: true },
     });
     await recordSessionCreated(created.id, { tx });
+    // Profile snapshot is captured once, on first start (skipped on resume above).
+    if (capture.values)
+      await writeProfileSnapshot(tx, created.id, respondentUserId, capture.values);
     // Advance the invitation lifecycle on first start; a re-entry (already `started`) is a no-op.
     if (invitation.status === 'registered') {
       await tx.appQuestionnaireInvitation.update({
@@ -146,7 +194,9 @@ export async function createSessionForVersion(
     return { ok: false, status: 404, code: 'NOT_FOUND', message: 'Questionnaire not found' };
   }
   // Direct (no-invitation) starts are only for the anonymous-mode surface; an
-  // invitation-gated questionnaire requires the invitation path.
+  // invitation-gated questionnaire requires the invitation path. Because this surface is
+  // anonymous by definition, NO profile snapshot is ever captured here (F8.3 invariant) —
+  // only the invitation path (always non-anonymous) collects profile data.
   if (!version.config?.anonymousMode) {
     return {
       ok: false,

@@ -64,11 +64,31 @@ vi.mock('@/lib/app/questionnaire/chat/session-bootstrap', () => ({
   createOrResumeAuthedSession: vi.fn(),
 }));
 
+/**
+ * Mock the F8.3 pre-create resolver — the page calls this (which hits Prisma)
+ * before bootstrap to decide whether to collect a profile first. Defaulted to
+ * `start-now` (the legacy straight-to-chat path); branch tests override it.
+ */
+vi.mock('@/lib/app/questionnaire/chat/start-context', () => ({
+  loadStartContext: vi.fn(),
+}));
+
+/**
+ * Mock the profile form — a client component the page renders for the
+ * `needs-profile` branch. We only assert it is reached, not its internals.
+ */
+vi.mock('@/components/app/questionnaire/profile/profile-start-form', () => ({
+  ProfileStartForm: vi.fn(({ invitationToken }: { invitationToken: string }) => (
+    <div data-testid="profile-start-form" data-token={invitationToken} />
+  )),
+}));
+
 import StartQuestionnairePage, { metadata } from '@/app/(protected)/questionnaires/start/page';
 import { getServerSession } from '@/lib/auth/utils';
 import { clearInvalidSession } from '@/lib/auth/clear-session';
 import { isLiveSessionsEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { createOrResumeAuthedSession } from '@/lib/app/questionnaire/chat/session-bootstrap';
+import { loadStartContext } from '@/lib/app/questionnaire/chat/start-context';
 import { redirect } from 'next/navigation';
 
 // ---------------------------------------------------------------------------
@@ -110,6 +130,7 @@ describe('StartQuestionnairePage', () => {
     // Happy-path defaults
     vi.mocked(isLiveSessionsEnabled).mockResolvedValue(true);
     vi.mocked(getServerSession).mockResolvedValue(MOCK_SESSION);
+    vi.mocked(loadStartContext).mockResolvedValue({ kind: 'start-now' });
     vi.mocked(createOrResumeAuthedSession).mockResolvedValue({
       ok: true,
       sessionId: 's1',
@@ -305,6 +326,65 @@ describe('StartQuestionnairePage', () => {
 
       // Assert: full message is rendered verbatim
       expect(screen.getByText(message)).toBeInTheDocument();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // F8.3 pre-create profile resolution
+  // -------------------------------------------------------------------------
+
+  describe('profile resolution (F8.3)', () => {
+    it('redirects straight to the chat when a resumable session already exists', async () => {
+      // Arrange: resolver finds a non-terminal session — skip the form entirely
+      vi.mocked(loadStartContext).mockResolvedValue({ kind: 'resume', sessionId: 'resumed_1' });
+
+      // Act & Assert: page redirects without creating a new session
+      await expect(
+        StartQuestionnairePage({
+          searchParams: makeSearchParams({ invitationToken: 'tok_xyz' }),
+        })
+      ).rejects.toThrow('NEXT_REDIRECT:/questionnaires/resumed_1');
+      expect(redirect).toHaveBeenCalledWith('/questionnaires/resumed_1');
+      // Bootstrap is bypassed — the existing session is reused
+      expect(createOrResumeAuthedSession).not.toHaveBeenCalled();
+    });
+
+    it('renders the profile form when the version needs a profile and no session exists', async () => {
+      // Arrange: resolver asks for profile collection before session creation
+      vi.mocked(loadStartContext).mockResolvedValue({
+        kind: 'needs-profile',
+        profileFields: [{ key: 'full_name', label: 'Full name', type: 'text', required: true }],
+      });
+
+      // Act
+      const Component = await StartQuestionnairePage({
+        searchParams: makeSearchParams({ invitationToken: 'tok_xyz' }),
+      });
+      render(Component);
+
+      // Assert: the form is rendered with the invitation token; bootstrap is deferred
+      // to the form's submit (the page does not create the session itself here)
+      const form = screen.getByTestId('profile-start-form');
+      expect(form).toHaveAttribute('data-token', 'tok_xyz');
+      expect(createOrResumeAuthedSession).not.toHaveBeenCalled();
+    });
+
+    it('falls through to bootstrap for a needs-profile context on the versionId surface', async () => {
+      // Arrange: needs-profile but the request is versionId (no invitationToken) — the
+      // page guards the form render on `'invitationToken' in request`, so it must NOT
+      // render the form and instead create the session normally.
+      vi.mocked(loadStartContext).mockResolvedValue({
+        kind: 'needs-profile',
+        profileFields: [{ key: 'full_name', label: 'Full name', type: 'text', required: true }],
+      });
+
+      // Act & Assert: version-direct path creates the session despite needs-profile
+      await expect(
+        StartQuestionnairePage({
+          searchParams: makeSearchParams({ versionId: 'ver_abc' }),
+        })
+      ).rejects.toThrow('NEXT_REDIRECT:/questionnaires/s1');
+      expect(createOrResumeAuthedSession).toHaveBeenCalledWith({ versionId: 'ver_abc' });
     });
   });
 });

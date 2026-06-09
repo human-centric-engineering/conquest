@@ -10,6 +10,9 @@
  */
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+// Import the threshold from the pure `privacy` leaf, not the barrel — the barrel
+// re-exports the Prisma-coupled aggregators, which must not enter this client bundle.
+import { K_ANONYMITY_THRESHOLD } from '@/lib/app/questionnaire/analytics/privacy';
 import type { CompletionFunnelResult, FunnelStage } from '@/lib/app/questionnaire/analytics';
 
 function pct(n: number): string {
@@ -46,6 +49,15 @@ function StageBar({ stage, isFirst }: { stage: FunnelStage; isFirst: boolean }) 
 export function CompletionFunnelPanel({ data }: { data: CompletionFunnelResult | null }) {
   if (!data) {
     return <p className="text-muted-foreground text-sm">Funnel data could not be loaded.</p>;
+  }
+
+  if (data.suppressed) {
+    return (
+      <p className="text-muted-foreground text-sm italic">
+        The completion funnel is hidden to protect respondent privacy — fewer than{' '}
+        {K_ANONYMITY_THRESHOLD} respondents in this window.
+      </p>
+    );
   }
 
   const invited = data.stages[0]?.count ?? 0;
