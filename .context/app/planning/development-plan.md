@@ -688,7 +688,7 @@ _Indicative tasks:_
 
 ### F9.1 — Production hardening
 
-_Status:_ not started · _Size:_ ~1–2 PRs · _Owner:_ TBD · _Deps:_ everything (final pass)
+_Status:_ in flight ([tracker](./features/f9.1.md)) · _Size:_ ~1–2 PRs · _Owner:_ TBD · _Deps:_ everything (final pass)
 
 The pre-ship technical hardening: concurrent-session sanity, master + sub-flag inventory, verification that every flag and sub-flag controls the right surfaces independently.
 

@@ -28,6 +28,7 @@ plan and feature trackers, see [`../planning/`](../planning/); for the platform
 | [`cost-cap-enforcement.md`](./cost-cap-enforcement.md)       | Per-session USD budget at the turn boundary — soft wrap-up nudge at 90%, hard 402 + auto-pause at 100%, summed turn cost, dark-launch flag (F6.3)                                  |
 | [`answer-slot-panel.md`](./answer-slot-panel.md)             | The live respondent answer panel beside the chat — `GET …/answers` read endpoint, scope config, confidence language, Revisit wiring (F7.2)                                         |
 | [`anonymous-mode.md`](./anonymous-mode.md)                   | The cross-surface PII contract — per-surface gates, the profile snapshot rule, k-anonymity suppression, erasure cascade (F8.3)                                                     |
+| [`feature-flags.md`](./feature-flags.md)                     | The master + 10 sub-flag gate matrix — what each flag gates, its dependency chain, and the three off-behaviour shapes (404 / degrade / behaviour-inside-route) (F9.1)              |
 
 ## Where the code lives
 
