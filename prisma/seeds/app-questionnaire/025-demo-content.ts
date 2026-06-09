@@ -17,7 +17,6 @@ import {
   DEFAULT_QUESTIONNAIRE_CONFIG,
   type AudienceProvenance,
   type AudienceShape,
-  type ProfileFieldConfig,
 } from '@/lib/app/questionnaire/types';
 
 // DEMO-ONLY: the demo prospect. Slug is derived from the name (the admin UI does the
@@ -70,12 +69,11 @@ const DEMO_AUDIENCE_PROVENANCE: AudienceProvenance = {
   notes: 'admin-supplied',
 };
 
-// DEMO-ONLY: session-start profile capture, so the demo shows the F8.3 profile step
-// (anonymousMode stays false). Keys are lowercase-snake per profileFieldKeySchema.
-const DEMO_PROFILE_FIELDS: ProfileFieldConfig[] = [
-  { key: 'name', label: 'Your name', type: 'text', required: true },
-  { key: 'work_email', label: 'Work email', type: 'email', required: true },
-];
+// DEMO-ONLY: the demo runs in anonymous mode (anonymousMode: true) so the admin can
+// one-click "Preview as respondent" through the no-login public surface — no email, no
+// invitation. Anonymous mode collects no profile fields (the F8.3 invariant), which suits
+// an anonymous onboarding-feedback survey. To demo identified profile capture instead,
+// turn anonymous mode off in the config and add profileFields.
 
 // DEMO-ONLY: the hand-authored extraction graph (2 sections, 6 questions spanning the
 // question-type range). Fed through `writeGraph` exactly as the ingestion route feeds
@@ -237,7 +235,13 @@ const unit: SeedUnit = {
       const counts = await writeGraph(tx, version.id, DEMO_EXTRACTION);
 
       // Config row — the launch gate requires the row to exist. Mirror the schema
-      // defaults, overriding only the demo-relevant knobs (profile capture on).
+      // defaults, overriding only the demo-relevant knobs:
+      //   - anonymousMode: true — lets the admin one-click "Preview as respondent" via the
+      //     no-login public surface; collects no profile fields (F8.3).
+      //   - contradictionMode: 'flag' — so the chat's "I noticed something" callout fires
+      //     when a respondent gives inconsistent answers (the most visible sign of the
+      //     agent reasoning about the conversation). The contradiction sub-flag and
+      //     live-sessions flag (DB rows) must also be on at runtime; see the runbook.
       await tx.appQuestionnaireConfig.create({
         data: {
           versionId: version.id,
@@ -247,12 +251,12 @@ const unit: SeedUnit = {
           costBudgetUsd: DEFAULT_QUESTIONNAIRE_CONFIG.costBudgetUsd,
           maxQuestionsPerSession: DEFAULT_QUESTIONNAIRE_CONFIG.maxQuestionsPerSession,
           voiceEnabled: DEFAULT_QUESTIONNAIRE_CONFIG.voiceEnabled,
-          contradictionMode: DEFAULT_QUESTIONNAIRE_CONFIG.contradictionMode,
-          contradictionWindowN: DEFAULT_QUESTIONNAIRE_CONFIG.contradictionWindowN,
-          contradictionEveryNTurns: DEFAULT_QUESTIONNAIRE_CONFIG.contradictionEveryNTurns,
-          anonymousMode: DEFAULT_QUESTIONNAIRE_CONFIG.anonymousMode,
+          contradictionMode: 'flag',
+          contradictionWindowN: 4,
+          contradictionEveryNTurns: 1,
+          anonymousMode: true,
           answerSlotPanelScope: DEFAULT_QUESTIONNAIRE_CONFIG.answerSlotPanelScope,
-          profileFields: DEMO_PROFILE_FIELDS,
+          profileFields: [],
         },
       });
 

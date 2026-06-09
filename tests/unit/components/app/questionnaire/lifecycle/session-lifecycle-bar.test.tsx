@@ -46,9 +46,15 @@ function renderBar(props: Partial<React.ComponentProps<typeof SessionLifecycleBa
 }
 
 describe('SessionLifecycleBar', () => {
-  it('renders nothing when there is nothing to show', () => {
-    const { container } = renderBar();
+  it('renders nothing when there is no status view', () => {
+    const { container } = renderBar({ view: null });
     expect(container.firstChild).toBeNull();
+  });
+
+  it('shows the coverage progress bar whenever there is a status view', () => {
+    renderBar();
+    const bar = screen.getByRole('progressbar', { name: /questionnaire progress/i });
+    expect(bar).toHaveAttribute('aria-valuenow', '90');
   });
 
   it('shows the anonymous indicator when the session is anonymous', () => {

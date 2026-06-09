@@ -12,7 +12,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const prismaMock = vi.hoisted(() => ({ aiAgent: { findUnique: vi.fn() } }));
 vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
 
-const dispatcherMock = vi.hoisted(() => ({ dispatch: vi.fn() }));
+const dispatcherMock = vi.hoisted(() => ({ dispatch: vi.fn(), register: vi.fn() }));
 vi.mock('@/lib/orchestration/capabilities/dispatcher', () => ({
   capabilityDispatcher: dispatcherMock,
 }));

@@ -36,6 +36,22 @@ vi.mock('@/lib/api/server-fetch', () => ({
   parseApiResponse: vi.fn(),
 }));
 
+// Defensive DB isolation. The edit page's happy path passes the agent's already-set
+// provider/model to `getEffectiveAgentDefaults`, so it skips Prisma — but the prefetch
+// helpers import the real client, and an empty provider/model (or future edit) would hit
+// `aiProviderConfig.findMany` / `aiOrchestrationSettings.findUnique`. Stub the client so
+// this test can never touch the live dev database (the same real-DB-under-load contention
+// that made the sibling new-agent page test flaky). See new-page.test.tsx.
+vi.mock('@/lib/db/client', () => ({
+  prisma: {
+    aiProviderConfig: {
+      findMany: vi.fn().mockResolvedValue([]),
+      findFirst: vi.fn().mockResolvedValue(null),
+    },
+    aiOrchestrationSettings: { findUnique: vi.fn().mockResolvedValue(null) },
+  },
+}));
+
 vi.mock('@/lib/logging', () => ({
   logger: {
     info: vi.fn(),
