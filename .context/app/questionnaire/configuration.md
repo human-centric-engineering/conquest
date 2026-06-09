@@ -59,6 +59,11 @@ needs no separate model (the same shape precedent as `audience` / `typeConfig`).
 `key` is a unique lowercase slug; `options` is required (non-empty, distinct) for
 `select` and forbidden for every other type.
 
+The values a respondent supplies for these fields are collected at session start and
+persisted to `AppRespondentProfileSnapshot` — **only on the non-anonymous surface**. When
+`anonymousMode = true` no profile is collected, stored, or surfaced. See
+[`anonymous-mode.md`](./anonymous-mode.md) for the full PII contract (F8.3).
+
 ## Lazy materialization
 
 No config row exists until the admin first saves — this keeps the F1.1 ingest path

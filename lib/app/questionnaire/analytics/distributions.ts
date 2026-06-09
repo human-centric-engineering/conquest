@@ -18,11 +18,13 @@ import {
   ANSWER_PROVENANCES,
   QUESTION_TYPE_LABELS,
   narrowToEnum,
+  TAG_COLORS,
   type AnswerProvenance,
   type QuestionType,
   QUESTION_TYPES,
 } from '@/lib/app/questionnaire/types';
 import { typeConfigSchemaFor } from '@/lib/app/questionnaire/authoring/type-config-schema';
+import { isCohortSuppressed } from '@/lib/app/questionnaire/analytics/privacy';
 import type { TagColor } from '@/lib/app/questionnaire/types';
 import type { TagView } from '@/lib/app/questionnaire/views';
 import type { AnalyticsScope } from '@/lib/app/questionnaire/analytics/query-schema';
@@ -292,20 +294,26 @@ export async function getQuestionDistributions(
     bucket.provenance[label] += 1;
   }
 
+  // F8.3: below the k-anonymity threshold a per-question distribution over a handful of
+  // sessions can re-identify a respondent's exact answer, so withhold all per-question
+  // detail and zero the counts. The question structure (prompt/type/section/tags) stays —
+  // only the response data is suppressed. An empty cohort (0) is not "suppressed".
+  const suppressed = isCohortSuppressed(totalSessions);
+
   const questions: QuestionDistribution[] = slots.map((slot) => {
     const type = narrowToEnum<QuestionType>(slot.type, QUESTION_TYPES, 'free_text');
     const bucket = byQuestion.get(slot.id)!;
-    const answeredCount = bucket.values.length;
-    const avgConfidence =
-      bucket.confidences.length > 0
-        ? bucket.confidences.reduce((a, b) => a + b, 0) / bucket.confidences.length
-        : null;
     const tags: TagView[] = slot.tags.map((t) => ({
       id: t.tag.id,
       label: t.tag.label,
-      color: (t.tag.color as TagColor | null) ?? null,
+      // `color` is a free String? column constrained to the allowlist at write time;
+      // validate membership before narrowing rather than blindly casting the DB value.
+      color:
+        t.tag.color !== null && (TAG_COLORS as readonly string[]).includes(t.tag.color)
+          ? (t.tag.color as TagColor)
+          : null,
     }));
-    return {
+    const base = {
       questionId: slot.id,
       key: slot.key,
       prompt: slot.prompt,
@@ -313,6 +321,25 @@ export async function getQuestionDistributions(
       sectionTitle: slot.section.title,
       required: slot.required,
       tags,
+    };
+    if (suppressed) {
+      return {
+        ...base,
+        answeredCount: 0,
+        unansweredCount: 0,
+        responseRate: 0,
+        avgConfidence: null,
+        provenance: emptyProvenance(),
+        detail: { kind: 'suppressed' },
+      };
+    }
+    const answeredCount = bucket.values.length;
+    const avgConfidence =
+      bucket.confidences.length > 0
+        ? bucket.confidences.reduce((a, b) => a + b, 0) / bucket.confidences.length
+        : null;
+    return {
+      ...base,
       answeredCount,
       unansweredCount: Math.max(0, totalSessions - answeredCount),
       responseRate: totalSessions > 0 ? answeredCount / totalSessions : 0,
@@ -322,7 +349,14 @@ export async function getQuestionDistributions(
     };
   });
 
-  return { versionId: scope.versionId, range, totalSessions, completedSessions, questions };
+  return {
+    versionId: scope.versionId,
+    range,
+    totalSessions,
+    completedSessions,
+    suppressed,
+    questions,
+  };
 }
 
 /** Re-exported for the read view / tests that label types. */

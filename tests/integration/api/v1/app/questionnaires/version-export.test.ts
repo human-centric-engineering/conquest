@@ -91,6 +91,7 @@ const MODEL: ResultsExportModel = {
       createdAt: '2026-01-10T09:00:00.000Z',
       completedAt: '2026-01-10T09:30:00.000Z',
       respondentName: 'Ada',
+      profile: null,
       answers: [
         {
           questionKey: 'role',
@@ -182,7 +183,7 @@ describe('GET versions/:vid/export', () => {
     const text = await res.text();
     const [header, firstRow] = text.split('\n');
     expect(header).toBe(
-      'session_id,session_status,created_at,completed_at,respondent_name,section_title,question_key,question_prompt,question_type,answer_value,confidence,provenance_label'
+      'session_id,session_status,created_at,completed_at,respondent_name,respondent_profile,section_title,question_key,question_prompt,question_type,answer_value,confidence,provenance_label'
     );
     expect(firstRow).toContain('s1,completed,');
     expect(firstRow).toContain('Engineer');

@@ -33,6 +33,10 @@ import {
   buildSessionExportModel,
   type SessionExportInput,
 } from '@/lib/app/questionnaire/export/build-session-export-model';
+import {
+  asProfileValues,
+  type ProfileValues,
+} from '@/lib/app/questionnaire/profile/profile-values';
 import type { SessionExportModel } from '@/lib/app/questionnaire/export/types';
 
 /** Raw demo-client theme columns (or null when the questionnaire is unattributed). */
@@ -55,6 +59,8 @@ export interface LoadedSessionExport {
   audience: AudienceShape | null;
   anonymous: boolean;
   respondentName: string | null;
+  /** Collected profile values, or null when anonymous / none collected (identifying). */
+  profile: ProfileValues | null;
   completedAt: string | null;
   theme: RawTheme;
   status: SessionStatus;
@@ -112,6 +118,9 @@ export async function loadSessionExport(sessionId: string): Promise<LoadedSessio
           },
         },
       },
+      // Identifying — surfaced only when NOT anonymous (gated below); an anonymous
+      // session never has a snapshot row, but the output gate is the hard guarantee.
+      profileSnapshot: { select: { values: true } },
       answers: {
         select: {
           value: true,
@@ -147,6 +156,9 @@ export async function loadSessionExport(sessionId: string): Promise<LoadedSessio
     });
     respondentName = user?.name ?? null;
   }
+
+  // Profile snapshot is identifying — dropped entirely in anonymous mode.
+  const profile = anonymous ? null : asProfileValues(row.profileSnapshot?.values);
 
   // Completion timestamp: the latest `completed` event, else the row's updatedAt when the
   // session is completed, else null (an in-progress session has no completion date).
@@ -189,6 +201,7 @@ export async function loadSessionExport(sessionId: string): Promise<LoadedSessio
     audience: asAudience(row.version.audience),
     anonymous,
     respondentName,
+    profile,
     completedAt,
     theme: {
       ctaColor: demoClient?.ctaColor ?? null,
@@ -254,6 +267,7 @@ export async function buildSessionExportPdfModel(
     audience: loaded.audience,
     anonymous: loaded.anonymous,
     respondentName: loaded.respondentName,
+    profile: loaded.profile,
     completedAt: loaded.completedAt,
     generatedAt: new Date().toISOString(),
     // Carry the (possibly null) logo data URI through as the theme's logoUrl — the

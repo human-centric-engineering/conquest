@@ -26,6 +26,7 @@ function input(over: Partial<SessionExportInput> = {}): SessionExportInput {
     audience: { description: 'New engineering hires' },
     anonymous: false,
     respondentName: 'Ada Lovelace',
+    profile: { team: 'Analytics' },
     completedAt: '2026-06-01T10:00:00.000Z',
     generatedAt: '2026-06-07T12:00:00.000Z',
     theme: null,
@@ -96,15 +97,17 @@ describe('buildSessionExportModel', () => {
   });
 
   describe('anonymous redaction', () => {
-    it('drops respondent identity when anonymous, even with a name supplied', () => {
+    it('drops respondent identity and profile when anonymous, even when supplied (F8.3)', () => {
       const model = buildSessionExportModel(input({ anonymous: true }));
       expect(model.anonymous).toBe(true);
       expect(model.respondent).toBeNull();
+      expect(model.profile).toBeNull();
     });
 
-    it('keeps the respondent name when not anonymous', () => {
+    it('keeps the respondent name and profile when not anonymous', () => {
       const model = buildSessionExportModel(input());
       expect(model.respondent).toEqual({ name: 'Ada Lovelace' });
+      expect(model.profile).toEqual({ team: 'Analytics' });
     });
 
     it('is null when not anonymous but no name is known', () => {

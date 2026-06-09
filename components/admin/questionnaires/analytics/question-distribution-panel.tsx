@@ -13,6 +13,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { TagChip } from '@/components/admin/questionnaires/tag-chip';
 import { QUESTION_TYPE_LABELS } from '@/lib/app/questionnaire/types';
+// Import the threshold from the pure `privacy` leaf, not the barrel — the barrel
+// re-exports the Prisma-coupled aggregators, which must not enter this client bundle.
+import { K_ANONYMITY_THRESHOLD } from '@/lib/app/questionnaire/analytics/privacy';
 import type {
   DistributionDetail,
   QuestionDistribution,
@@ -49,6 +52,13 @@ function DetailBody({ detail }: { detail: DistributionDetail }) {
       return (
         <p className="text-muted-foreground text-sm italic">
           Free-text responses — values are not shown. See response rate and confidence above.
+        </p>
+      );
+
+    case 'suppressed':
+      return (
+        <p className="text-muted-foreground text-sm italic">
+          Hidden to protect respondent privacy (small sample).
         </p>
       );
 
@@ -178,6 +188,13 @@ export function QuestionDistributionPanel({ data }: { data: QuestionDistribution
         {data.totalSessions} session{data.totalSessions === 1 ? '' : 's'} in range ·{' '}
         {data.completedSessions} completed
       </p>
+      {data.suppressed && (
+        <p className="text-muted-foreground text-sm italic">
+          Per-question answer detail is hidden to protect respondent privacy — fewer than{' '}
+          {K_ANONYMITY_THRESHOLD} sessions in this window. Response rates return once the sample
+          grows.
+        </p>
+      )}
       {data.questions.length === 0 ? (
         <p className="text-muted-foreground text-sm italic">
           No questions match the current filter.

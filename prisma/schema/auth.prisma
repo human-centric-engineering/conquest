@@ -70,6 +70,9 @@ model User {
   mcpApiKeys        McpApiKey[]        @relation("McpApiKeyCreator")
   mcpExposedPrompts McpExposedPrompt[] @relation("McpPromptCreator")
 
+  // ConQuest app relations — personal data, cascades on erasure (F8.3).
+  appRespondentProfileSnapshots AppRespondentProfileSnapshot[]
+
   @@unique([email])
   @@index([role])
   @@index([role, accountType])

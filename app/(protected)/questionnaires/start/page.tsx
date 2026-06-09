@@ -10,6 +10,8 @@ import {
   createOrResumeAuthedSession,
   type AuthedSessionRequest,
 } from '@/lib/app/questionnaire/chat/session-bootstrap';
+import { loadStartContext } from '@/lib/app/questionnaire/chat/start-context';
+import { ProfileStartForm } from '@/components/app/questionnaire/profile/profile-start-form';
 
 export const metadata: Metadata = {
   title: 'Start questionnaire',
@@ -53,6 +55,20 @@ export default async function StartQuestionnairePage({
       ? `?invitationToken=${encodeURIComponent(sp.invitationToken)}`
       : `?versionId=${encodeURIComponent(sp.versionId ?? '')}`;
     clearInvalidSession(`/questionnaires/start${query}`);
+    return null; // unreachable — clearInvalidSession redirects
+  }
+
+  // F8.3: a non-anonymous questionnaire with profile fields collects them BEFORE the
+  // session is created. The form posts the values back into the create route (which
+  // writes the snapshot atomically); a resumable session skips straight to the chat.
+  const context = await loadStartContext(request, session.user.id);
+  if (context.kind === 'resume') {
+    redirect(`/questionnaires/${context.sessionId}`);
+  }
+  if (context.kind === 'needs-profile' && 'invitationToken' in request) {
+    return (
+      <ProfileStartForm invitationToken={request.invitationToken} fields={context.profileFields} />
+    );
   }
 
   const result = await createOrResumeAuthedSession(request);

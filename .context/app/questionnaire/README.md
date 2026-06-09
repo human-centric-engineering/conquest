@@ -27,6 +27,7 @@ plan and feature trackers, see [`../planning/`](../planning/); for the platform
 | [`per-turn-orchestrator.md`](./per-turn-orchestrator.md)     | The live streaming turn loop — pure orchestrator, SSE route, 3 access scenarios (incl. no-login anonymous), streamed offers (F6.1)                                                 |
 | [`cost-cap-enforcement.md`](./cost-cap-enforcement.md)       | Per-session USD budget at the turn boundary — soft wrap-up nudge at 90%, hard 402 + auto-pause at 100%, summed turn cost, dark-launch flag (F6.3)                                  |
 | [`answer-slot-panel.md`](./answer-slot-panel.md)             | The live respondent answer panel beside the chat — `GET …/answers` read endpoint, scope config, confidence language, Revisit wiring (F7.2)                                         |
+| [`anonymous-mode.md`](./anonymous-mode.md)                   | The cross-surface PII contract — per-surface gates, the profile snapshot rule, k-anonymity suppression, erasure cascade (F8.3)                                                     |
 
 ## Where the code lives
 

@@ -45,6 +45,15 @@ function slot(overrides: Record<string, unknown>) {
   };
 }
 
+/**
+ * A cohort of `n` completed sessions (ids `s1..sn`). The detail-math tests need a cohort
+ * at or above the F8.3 k-anonymity threshold (5) so per-question detail isn't withheld;
+ * answers attach by `questionSlotId`, not session id, so padding never changes the math.
+ */
+function cohort(n: number): Array<{ id: string; status: 'completed' }> {
+  return Array.from({ length: n }, (_, i) => ({ id: `s${i + 1}`, status: 'completed' as const }));
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -83,12 +92,8 @@ describe('getQuestionDistributions', () => {
         },
       }),
     ]);
-    findManySessions.mockResolvedValue([
-      { id: 's1', status: 'completed' },
-      { id: 's2', status: 'completed' },
-      { id: 's3', status: 'completed' },
-      { id: 's4', status: 'active' },
-    ]);
+    // 5 sessions (≥ threshold so detail isn't suppressed); only 4 answered.
+    findManySessions.mockResolvedValue(cohort(5));
     findManyAnswers.mockResolvedValue([
       { questionSlotId: 'q1', value: 'a', confidence: 0.8, provenanceLabel: 'direct' },
       { questionSlotId: 'q1', value: 'a', confidence: 0.6, provenanceLabel: 'inferred' },
@@ -100,8 +105,8 @@ describe('getQuestionDistributions', () => {
     const q = result.questions[0];
 
     expect(q.answeredCount).toBe(4);
-    expect(q.unansweredCount).toBe(0); // 4 sessions, 4 answers
-    expect(q.responseRate).toBe(1);
+    expect(q.unansweredCount).toBe(1); // 5 sessions, 4 answers
+    expect(q.responseRate).toBeCloseTo(0.8, 5);
     // avg of the two scored confidences (0.8, 0.6); nulls ignored.
     expect(q.avgConfidence).toBeCloseTo(0.7, 5);
     expect(q.provenance).toEqual({ direct: 3, inferred: 1, synthesised: 0, refined: 0 });
@@ -117,10 +122,7 @@ describe('getQuestionDistributions', () => {
 
   it('summarises numeric answers with stats and a histogram', async () => {
     findManySlots.mockResolvedValue([slot({ id: 'q2', type: 'numeric', typeConfig: {} })]);
-    findManySessions.mockResolvedValue([
-      { id: 's1', status: 'completed' },
-      { id: 's2', status: 'completed' },
-    ]);
+    findManySessions.mockResolvedValue(cohort(5));
     findManyAnswers.mockResolvedValue([
       { questionSlotId: 'q2', value: 10, confidence: null, provenanceLabel: 'direct' },
       { questionSlotId: 'q2', value: 20, confidence: null, provenanceLabel: 'direct' },
@@ -139,7 +141,7 @@ describe('getQuestionDistributions', () => {
 
   it('never exposes free-text values, only counts/confidence/provenance', async () => {
     findManySlots.mockResolvedValue([slot({ id: 'q3', type: 'free_text', typeConfig: null })]);
-    findManySessions.mockResolvedValue([{ id: 's1', status: 'completed' }]);
+    findManySessions.mockResolvedValue(cohort(5));
     findManyAnswers.mockResolvedValue([
       {
         questionSlotId: 'q3',
@@ -171,10 +173,7 @@ describe('getQuestionDistributions', () => {
         },
       }),
     ]);
-    findManySessions.mockResolvedValue([
-      { id: 's1', status: 'completed' },
-      { id: 's2', status: 'completed' },
-    ]);
+    findManySessions.mockResolvedValue(cohort(5));
     findManyAnswers.mockResolvedValue([
       { questionSlotId: 'qm', value: ['a', 'b'], confidence: null, provenanceLabel: 'direct' },
       { questionSlotId: 'qm', value: ['a', 'zzz'], confidence: null, provenanceLabel: 'inferred' },
@@ -201,7 +200,7 @@ describe('getQuestionDistributions', () => {
         typeConfig: { min: 1, max: 5, minLabel: 'Low', maxLabel: 'High' },
       }),
     ]);
-    findManySessions.mockResolvedValue([{ id: 's1', status: 'completed' }]);
+    findManySessions.mockResolvedValue(cohort(5));
     findManyAnswers.mockResolvedValue([
       { questionSlotId: 'ql', value: 1, confidence: null, provenanceLabel: 'direct' },
       { questionSlotId: 'ql', value: 5, confidence: null, provenanceLabel: 'direct' },
@@ -226,7 +225,7 @@ describe('getQuestionDistributions', () => {
     findManySlots.mockResolvedValue([
       slot({ id: 'qb', type: 'boolean', typeConfig: { trueLabel: 'Yes', falseLabel: 'No' } }),
     ]);
-    findManySessions.mockResolvedValue([{ id: 's1', status: 'completed' }]);
+    findManySessions.mockResolvedValue(cohort(5));
     findManyAnswers.mockResolvedValue([
       { questionSlotId: 'qb', value: true, confidence: null, provenanceLabel: 'direct' },
       { questionSlotId: 'qb', value: true, confidence: null, provenanceLabel: 'direct' },
@@ -246,7 +245,7 @@ describe('getQuestionDistributions', () => {
 
   it('buckets date answers by month', async () => {
     findManySlots.mockResolvedValue([slot({ id: 'qd', type: 'date', typeConfig: null })]);
-    findManySessions.mockResolvedValue([{ id: 's1', status: 'completed' }]);
+    findManySessions.mockResolvedValue(cohort(5));
     findManyAnswers.mockResolvedValue([
       { questionSlotId: 'qd', value: '2026-01-15', confidence: null, provenanceLabel: 'direct' },
       { questionSlotId: 'qd', value: '2026-01-20', confidence: null, provenanceLabel: 'direct' },
@@ -272,7 +271,7 @@ describe('getQuestionDistributions', () => {
       slot({ id: 'qb', type: 'boolean', typeConfig: null }), // default True/False labels
       slot({ id: 'qn', type: 'numeric', typeConfig: {} }), // numeric with no numeric answers
     ]);
-    findManySessions.mockResolvedValue([{ id: 's1', status: 'completed' }]);
+    findManySessions.mockResolvedValue(cohort(5));
     findManyAnswers.mockResolvedValue([
       // choice with no readable config: everything counts as "other"
       { questionSlotId: 'qc', value: 'whatever', confidence: null, provenanceLabel: 'weird' },
@@ -305,7 +304,7 @@ describe('getQuestionDistributions', () => {
 
   it('renders a single-bin histogram when all numeric answers are equal', async () => {
     findManySlots.mockResolvedValue([slot({ id: 'qn', type: 'numeric', typeConfig: {} })]);
-    findManySessions.mockResolvedValue([{ id: 's1', status: 'completed' }]);
+    findManySessions.mockResolvedValue(cohort(5));
     findManyAnswers.mockResolvedValue([
       { questionSlotId: 'qn', value: 7, confidence: null, provenanceLabel: 'direct' },
       { questionSlotId: 'qn', value: 7, confidence: null, provenanceLabel: 'direct' },
@@ -321,7 +320,7 @@ describe('getQuestionDistributions', () => {
 
   it('averages the two middle values for an even-count numeric median', async () => {
     findManySlots.mockResolvedValue([slot({ id: 'qn', type: 'numeric', typeConfig: {} })]);
-    findManySessions.mockResolvedValue([{ id: 's1', status: 'completed' }]);
+    findManySessions.mockResolvedValue(cohort(5));
     findManyAnswers.mockResolvedValue(
       [10, 20, 30, 40].map((value) => ({
         questionSlotId: 'qn',
@@ -354,5 +353,38 @@ describe('getQuestionDistributions', () => {
     expect(findManyAnswers).not.toHaveBeenCalled();
     expect(result.questions[0].responseRate).toBe(0);
     expect(result.questions[0].answeredCount).toBe(0);
+    expect(result.suppressed).toBe(false); // an empty cohort is not "suppressed"
+  });
+
+  it('withholds per-question detail below the k-anonymity threshold (F8.3)', async () => {
+    findManySlots.mockResolvedValue([
+      slot({
+        id: 'q1',
+        type: 'single_choice',
+        typeConfig: { choices: [{ value: 'a', label: 'Apple' }] },
+      }),
+    ]);
+    // 3 sessions (< 5) — a per-question distribution over so few could re-identify.
+    findManySessions.mockResolvedValue([
+      { id: 's1', status: 'completed' },
+      { id: 's2', status: 'completed' },
+      { id: 's3', status: 'completed' },
+    ]);
+    findManyAnswers.mockResolvedValue([
+      { questionSlotId: 'q1', value: 'a', confidence: 0.8, provenanceLabel: 'direct' },
+    ]);
+
+    const result = await getQuestionDistributions(scope);
+    expect(result.suppressed).toBe(true);
+    const q = result.questions[0];
+    // Structure is preserved; all response data is withheld.
+    expect(q.prompt).toBe('P');
+    expect(q.detail).toEqual({ kind: 'suppressed' });
+    expect(q.answeredCount).toBe(0);
+    expect(q.responseRate).toBe(0);
+    expect(q.avgConfidence).toBeNull();
+    expect(q.provenance).toEqual({ direct: 0, inferred: 0, synthesised: 0, refined: 0 });
+    // No answer value leaks anywhere in the serialized question.
+    expect(JSON.stringify(q)).not.toContain('Apple');
   });
 });

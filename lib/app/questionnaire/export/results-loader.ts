@@ -25,6 +25,7 @@ import {
   type SessionStatus,
 } from '@/lib/app/questionnaire/types';
 import type { PanelRefinementEntry } from '@/lib/app/questionnaire/panel/types';
+import { asProfileValues } from '@/lib/app/questionnaire/profile/profile-values';
 import type { AnalyticsScope } from '@/lib/app/questionnaire/analytics';
 import type {
   ExportAnswer,
@@ -106,6 +107,9 @@ export async function loadResultsExport(scope: AnalyticsScope): Promise<ResultsE
         createdAt: true,
         updatedAt: true,
         respondentUserId: true,
+        // Identifying — surfaced only when NOT anonymous (gated below). An anonymous
+        // session never has a snapshot row, but the output gate is the hard guarantee.
+        profileSnapshot: { select: { values: true } },
         answers: {
           select: {
             value: true,
@@ -206,6 +210,8 @@ export async function loadResultsExport(scope: AnalyticsScope): Promise<ResultsE
     const completedAt = row.events[0]?.createdAt.toISOString() ?? row.updatedAt.toISOString();
     const respondentName =
       anonymous || !row.respondentUserId ? null : (nameById.get(row.respondentUserId) ?? null);
+    // Profile snapshot is identifying — dropped entirely in anonymous mode.
+    const profile = anonymous ? null : asProfileValues(row.profileSnapshot?.values);
 
     return {
       id: row.id,
@@ -213,6 +219,7 @@ export async function loadResultsExport(scope: AnalyticsScope): Promise<ResultsE
       createdAt: row.createdAt.toISOString(),
       completedAt,
       respondentName,
+      profile,
       answers,
       turns,
     };

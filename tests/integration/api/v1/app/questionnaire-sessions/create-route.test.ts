@@ -115,12 +115,26 @@ describe('dispatch', () => {
     expect(res.status).toBe(201);
     expect(createMock.createSessionFromInvitation).toHaveBeenCalledWith(
       'tok_abcdefghij',
-      'cmjbv4i3x00003wsloputgwul'
+      'cmjbv4i3x00003wsloputgwul',
+      undefined // no profileValues on this body
     );
     expect(createMock.createSessionForVersion).not.toHaveBeenCalled();
     const body = await res.json();
     expect(body.data.session).toEqual(OK_SESSION);
     expect(body.meta.resumed).toBe(false);
+  });
+
+  it('forwards profileValues from an invitationToken body (F8.3)', async () => {
+    const res = await POST(
+      req({ invitationToken: 'tok_abcdefghij', profileValues: { team: 'Analytics' } }),
+      undefined
+    );
+    expect(res.status).toBe(201);
+    expect(createMock.createSessionFromInvitation).toHaveBeenCalledWith(
+      'tok_abcdefghij',
+      'cmjbv4i3x00003wsloputgwul',
+      { team: 'Analytics' }
+    );
   });
 
   it('routes a versionId body to createSessionForVersion', async () => {

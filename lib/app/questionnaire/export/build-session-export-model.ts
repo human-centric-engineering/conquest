@@ -24,6 +24,7 @@ import {
   type PanelSectionInput,
 } from '@/lib/app/questionnaire/panel/answer-panel';
 import { resolveTheme, type DemoClientTheme } from '@/lib/app/questionnaire/theming';
+import type { ProfileValues } from '@/lib/app/questionnaire/profile/profile-values';
 import type { SessionExportModel } from '@/lib/app/questionnaire/export/types';
 
 /** The plain inputs the DB seam hands the builder. */
@@ -37,6 +38,8 @@ export interface SessionExportInput {
   anonymous: boolean;
   /** Respondent display name (or null); dropped when `anonymous`. */
   respondentName: string | null;
+  /** Collected profile values (or null); dropped when `anonymous`, same as the name. */
+  profile: ProfileValues | null;
   /** ISO completion timestamp (or null when the session isn't completed). */
   completedAt: string | null;
   /** ISO generation timestamp (the seam stamps it; the builder has no clock). */
@@ -74,6 +77,8 @@ export function buildSessionExportModel(input: SessionExportInput): SessionExpor
 
   const respondent =
     input.anonymous || !input.respondentName ? null : { name: input.respondentName };
+  // Profile is identity — dropped in anonymous mode, same rule as the respondent name.
+  const profile = input.anonymous ? null : input.profile;
 
   return {
     questionnaireTitle: input.questionnaireTitle,
@@ -81,6 +86,7 @@ export function buildSessionExportModel(input: SessionExportInput): SessionExpor
     goal: input.goal,
     audienceSummary: summariseAudience(input.audience),
     respondent,
+    profile,
     anonymous: input.anonymous,
     completedAt: input.completedAt,
     generatedAt: input.generatedAt,

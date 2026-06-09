@@ -22,6 +22,11 @@ export {
 export { getCompletionFunnel } from '@/lib/app/questionnaire/analytics/funnel';
 export { getQuestionnaireCostBreakdown } from '@/lib/app/questionnaire/analytics/cost';
 
+export {
+  K_ANONYMITY_THRESHOLD,
+  isCohortSuppressed,
+} from '@/lib/app/questionnaire/analytics/privacy';
+
 export type {
   AnalyticsRange,
   ProvenanceBreakdown,

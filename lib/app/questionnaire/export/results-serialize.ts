@@ -22,6 +22,7 @@ export const RESULTS_CSV_COLUMNS = [
   'created_at',
   'completed_at',
   'respondent_name',
+  'respondent_profile',
   'section_title',
   'question_key',
   'question_prompt',
@@ -56,6 +57,9 @@ export function toResultsCsv(model: ResultsExportModel): string {
 
   for (const session of model.sessions) {
     const answerByKey = new Map(session.answers.map((a) => [a.questionKey, a]));
+    // Collected profile (F8.3) as a single JSON cell — empty in anonymous mode / when
+    // none were collected. Repeated per row like respondent_name (the spreadsheet view).
+    const profileCell = session.profile ? JSON.stringify(session.profile) : '';
     for (const question of model.questions) {
       const answer = answerByKey.get(question.key);
       lines.push(
@@ -65,6 +69,7 @@ export function toResultsCsv(model: ResultsExportModel): string {
           csvEscape(session.createdAt),
           csvEscape(session.completedAt ?? ''),
           csvEscape(session.respondentName ?? ''),
+          csvEscape(profileCell),
           csvEscape(question.sectionTitle),
           csvEscape(question.key),
           csvEscape(question.prompt),

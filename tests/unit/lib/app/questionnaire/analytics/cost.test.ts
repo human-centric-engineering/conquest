@@ -8,11 +8,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const findManySessions = vi.fn();
+const findUniqueConfig = vi.fn();
 const queryRawUnsafe = vi.fn();
 
 vi.mock('@/lib/db/client', () => ({
   prisma: {
     appQuestionnaireSession: { findMany: (...a: unknown[]) => findManySessions(...a) },
+    appQuestionnaireConfig: { findUnique: (...a: unknown[]) => findUniqueConfig(...a) },
     $queryRawUnsafe: (...a: unknown[]) => queryRawUnsafe(...a),
   },
 }));
@@ -29,7 +31,24 @@ const scope: AnalyticsScope = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Non-anonymous by default; F8.3 k-anonymity only withholds top-sessions, never totals.
+  findUniqueConfig.mockResolvedValue({ anonymousMode: false });
 });
+
+/**
+ * Pad a session list to ≥ the k-anonymity threshold so the top-sessions table isn't
+ * withheld (F8.3). The padding sessions carry no spend, so ranking/content is unchanged.
+ */
+function withCohort(
+  sessions: Array<{ id: string; status: string; createdAt: Date }>
+): Array<{ id: string; status: string; createdAt: Date }> {
+  const pad = Array.from({ length: 5 }, (_, i) => ({
+    id: `pad${i}`,
+    status: 'active',
+    createdAt: new Date('2026-01-02T00:00:00.000Z'),
+  }));
+  return [...sessions, ...pad];
+}
 
 /**
  * Route each raw query to canned rows by inspecting its SQL. The four queries are
@@ -105,10 +124,12 @@ describe('getQuestionnaireCostBreakdown', () => {
   });
 
   it('ranks top sessions by spend and joins status + createdAt', async () => {
-    findManySessions.mockResolvedValue([
-      { id: 's1', status: 'completed', createdAt: new Date('2026-01-05T00:00:00.000Z') },
-      { id: 's2', status: 'abandoned', createdAt: new Date('2026-01-06T00:00:00.000Z') },
-    ]);
+    findManySessions.mockResolvedValue(
+      withCohort([
+        { id: 's1', status: 'completed', createdAt: new Date('2026-01-05T00:00:00.000Z') },
+        { id: 's2', status: 'abandoned', createdAt: new Date('2026-01-06T00:00:00.000Z') },
+      ])
+    );
     wireRawSql();
 
     const result = await getQuestionnaireCostBreakdown(scope);
@@ -134,9 +155,11 @@ describe('getQuestionnaireCostBreakdown', () => {
   });
 
   it('coerces string/bigint aggregates and falls back for an unknown session row', async () => {
-    findManySessions.mockResolvedValue([
-      { id: 's1', status: 'completed', createdAt: new Date('2026-01-05T00:00:00.000Z') },
-    ]);
+    findManySessions.mockResolvedValue(
+      withCohort([
+        { id: 's1', status: 'completed', createdAt: new Date('2026-01-05T00:00:00.000Z') },
+      ])
+    );
     queryRawUnsafe.mockImplementation((sql: string) => {
       if (sql.includes('GROUP BY session_id')) {
         // 's9' is not in findMany → must fall back to status 'active' + scope.from.
@@ -165,9 +188,11 @@ describe('getQuestionnaireCostBreakdown', () => {
   });
 
   it('handles null/undefined aggregates, null capability, and string trend days', async () => {
-    findManySessions.mockResolvedValue([
-      { id: 's1', status: 'completed', createdAt: new Date('2026-01-05T00:00:00.000Z') },
-    ]);
+    findManySessions.mockResolvedValue(
+      withCohort([
+        { id: 's1', status: 'completed', createdAt: new Date('2026-01-05T00:00:00.000Z') },
+      ])
+    );
     queryRawUnsafe.mockImplementation((sql: string) => {
       if (sql.includes('GROUP BY session_id')) {
         // a null session_id row must be ignored.
@@ -213,5 +238,41 @@ describe('getQuestionnaireCostBreakdown', () => {
     expect(result.runtimeCostUsd).toBe(0);
     expect(result.designTimeCostUsd).toBeCloseTo(0.4, 5);
     expect(result.topSessions).toEqual([]);
+    expect(result.topSessionsSuppressed).toBe(false); // empty cohort is not "suppressed"
+  });
+
+  it('withholds the top-sessions table in anonymous mode but keeps aggregate spend (F8.3)', async () => {
+    findUniqueConfig.mockResolvedValue({ anonymousMode: true });
+    findManySessions.mockResolvedValue(
+      withCohort([
+        { id: 's1', status: 'completed', createdAt: new Date('2026-01-05T00:00:00.000Z') },
+        { id: 's2', status: 'abandoned', createdAt: new Date('2026-01-06T00:00:00.000Z') },
+      ])
+    );
+    wireRawSql();
+
+    const result = await getQuestionnaireCostBreakdown(scope);
+
+    // Session ids are a re-identification handle — suppressed when anonymous.
+    expect(result.topSessionsSuppressed).toBe(true);
+    expect(result.topSessions).toEqual([]);
+    // Aggregate spend carries no identity and is always returned.
+    expect(result.totalCostUsd).toBeCloseTo(2.8, 5);
+    expect(result.byCapability.length).toBeGreaterThan(0);
+  });
+
+  it('withholds the top-sessions table below the k-anonymity threshold (F8.3)', async () => {
+    // 2 non-preview sessions (< 5) — a top-spend list over so few is a near-complete roster.
+    findManySessions.mockResolvedValue([
+      { id: 's1', status: 'completed', createdAt: new Date('2026-01-05T00:00:00.000Z') },
+      { id: 's2', status: 'abandoned', createdAt: new Date('2026-01-06T00:00:00.000Z') },
+    ]);
+    wireRawSql();
+
+    const result = await getQuestionnaireCostBreakdown(scope);
+
+    expect(result.topSessionsSuppressed).toBe(true);
+    expect(result.topSessions).toEqual([]);
+    expect(result.totalCostUsd).toBeCloseTo(2.8, 5); // totals unaffected
   });
 });

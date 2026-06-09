@@ -55,6 +55,7 @@ function model(over: Partial<SessionExportModel> = {}): SessionExportModel {
     audienceSummary: null,
     respondent: null,
     anonymous: true,
+    profile: null,
     completedAt: null,
     generatedAt: '2026-06-07T12:00:00.000Z',
     theme: { ctaColor: '#000', accentColor: '#000', logoUrl: null, welcomeCopy: 'hi' },

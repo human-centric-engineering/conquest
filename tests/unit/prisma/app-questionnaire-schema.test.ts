@@ -1031,3 +1031,48 @@ describe('app_questionnaire_turn migration SQL (F6.1)', () => {
     expect(executableSql).not.toContain('searchVector');
   });
 });
+
+describe('app_respondent_profile_snapshot datamodel + migration SQL (F8.3)', () => {
+  it('AppRespondentProfileSnapshot maps the expected table + fields', () => {
+    const model = getModel('AppRespondentProfileSnapshot');
+    expect(model.dbName).toBe('app_respondent_profile_snapshot');
+    expect(getField(model, 'sessionId').type).toBe('String');
+    expect(getField(model, 'respondentUserId').type).toBe('String');
+    expect(getField(model, 'values').type).toBe('Json');
+    // The User relation exists — this is the first questionnaire model with a modelled
+    // User FK (the deferred-UG-1 posture is deliberately broken because this is PII).
+    expect(getField(model, 'user').type).toBe('User');
+  });
+
+  const sql = readMigrationSql('_app_respondent_profile_snapshot');
+  const executableSql = executableLines(sql);
+
+  it('creates exactly the app_respondent_profile_snapshot table', () => {
+    expect(sql).toContain('CREATE TABLE "app_respondent_profile_snapshot"');
+    expect(executableSql.match(/CREATE TABLE/g) ?? []).toHaveLength(1);
+  });
+
+  it('declares BOTH FKs with ON DELETE CASCADE — the GDPR erasure contract (F8.3)', () => {
+    // session FK: the snapshot is owned data of the session.
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "app_respondent_profile_snapshot_sessionId_fkey"[\s\S]*REFERENCES "app_questionnaire_session"\("id"\)[\s\S]*ON DELETE CASCADE/
+    );
+    // user FK: this row IS personal data — it must cascade on account deletion, so
+    // eraseUser()'s prisma.user.delete() removes it natively, no erasure hook needed.
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "app_respondent_profile_snapshot_respondentUserId_fkey"[\s\S]*REFERENCES "user"\("id"\)[\s\S]*ON DELETE CASCADE/
+    );
+  });
+
+  it('enforces one snapshot per session and indexes the user FK', () => {
+    expect(sql).toContain('CREATE UNIQUE INDEX "app_respondent_profile_snapshot_sessionId_key"');
+    expect(sql).toContain('CREATE INDEX "app_respondent_profile_snapshot_respondentUserId_idx"');
+  });
+
+  it('contains no platform (unmodelled-object) operations — the schema-fold strip holds', () => {
+    expect(executableSql).not.toContain('DROP INDEX');
+    expect(executableSql).not.toContain('ai_knowledge');
+    expect(executableSql).not.toContain('ai_message');
+    expect(executableSql).not.toContain('searchVector');
+  });
+});

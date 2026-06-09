@@ -265,6 +265,21 @@ describe('loadSessionExport', () => {
       expect(findUser).not.toHaveBeenCalled();
     });
 
+    it('surfaces the profile snapshot when not anonymous (F8.3)', async () => {
+      findSession.mockResolvedValue(row({ profileSnapshot: { values: { team: 'Analytics' } } }));
+      const loaded = await loadSessionExport('sess-1');
+      expect(loaded?.profile).toEqual({ team: 'Analytics' });
+    });
+
+    it('drops the profile snapshot entirely in anonymous mode (F8.3)', async () => {
+      findSession.mockResolvedValue(
+        rowWithVersion({ config: { anonymousMode: true } })
+        // even if a snapshot row somehow existed, anonymous output must omit it
+      );
+      const loaded = await loadSessionExport('sess-1');
+      expect(loaded?.profile).toBeNull();
+    });
+
     it('defaults anonymous to false when the version has no config row', async () => {
       findSession.mockResolvedValue(rowWithVersion({ config: null }));
       const loaded = await loadSessionExport('sess-1');
@@ -319,6 +334,7 @@ describe('buildSessionExportPdfModel', () => {
       audience: { description: 'New hires' },
       anonymous: false,
       respondentName: 'Ada Lovelace',
+      profile: null,
       completedAt: '2026-06-02T10:30:00.000Z',
       theme: {
         ctaColor: '#111111',

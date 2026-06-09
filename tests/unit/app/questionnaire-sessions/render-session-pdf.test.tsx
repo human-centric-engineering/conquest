@@ -25,6 +25,7 @@ function model(
     audience: { description: 'New hires' },
     anonymous: false,
     respondentName: 'Ada Lovelace',
+    profile: null,
     completedAt: '2026-06-01T10:00:00.000Z',
     generatedAt: '2026-06-07T12:00:00.000Z',
     theme: null,
