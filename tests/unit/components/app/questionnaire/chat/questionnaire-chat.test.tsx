@@ -111,12 +111,25 @@ describe('QuestionnaireChat', () => {
     expect(screen.getByText(/Let me think/)).toBeInTheDocument();
   });
 
-  it('renders the side-band warning banner', () => {
+  it('renders a generic side-band warning as a quiet line', () => {
     hookReturn = makeReturn({
-      warning: { code: 'CONTRADICTION', message: 'That differs from your earlier answer.' },
+      warning: { code: 'fail_soft', message: 'A detail could not be checked.' },
     });
     render(<QuestionnaireChat sessionId="s1" stream={hookReturn} />);
 
+    expect(screen.getByText('A detail could not be checked.')).toBeInTheDocument();
+    // Not the contradiction callout.
+    expect(screen.queryByText(/I noticed something/i)).not.toBeInTheDocument();
+  });
+
+  it('renders a flagged contradiction as the "I noticed something" callout', () => {
+    // The orchestrator emits a `contradiction`-coded warning whose message is the agent's probe.
+    hookReturn = makeReturn({
+      warning: { code: 'contradiction', message: 'That differs from your earlier answer.' },
+    });
+    render(<QuestionnaireChat sessionId="s1" stream={hookReturn} />);
+
+    expect(screen.getByText(/I noticed something/i)).toBeInTheDocument();
     expect(screen.getByText('That differs from your earlier answer.')).toBeInTheDocument();
   });
 

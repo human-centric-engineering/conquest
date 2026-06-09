@@ -71,6 +71,13 @@ export function AnswerSlotItem({ slot, onRevisit, canRevisit = false }: AnswerSl
               Not answered yet
             </span>
           )}
+          {/* A one-line peek at the model's reasoning, so the "why" reads in the row
+              itself; the full rationale stays in the expanded view. */}
+          {slot.answered && slot.rationale && !expanded && (
+            <span className="text-muted-foreground/70 mt-0.5 line-clamp-1 block text-xs">
+              {slot.rationale}
+            </span>
+          )}
         </span>
         {slot.answered && <ProvenanceBadge provenance={slot.provenance} className="mt-0.5" />}
       </button>

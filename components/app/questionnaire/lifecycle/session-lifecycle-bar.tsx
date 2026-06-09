@@ -17,6 +17,7 @@ import { PauseCircle, PlayCircle, ShieldCheck, Hourglass, AlertTriangle } from '
 
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { SessionProgressBar } from '@/components/app/questionnaire/session-progress-bar';
 import type { SessionStatusView } from '@/lib/app/questionnaire/session/status-view';
 
 export interface SessionLifecycleBarProps {
@@ -50,67 +51,71 @@ export function SessionLifecycleBar({
   const showResume = paused && canResume;
   const showPause = !paused && canPause;
 
-  const hasContent = anonymous || showCostHint || showResume || showPause || actionError !== null;
-  if (!hasContent) return null;
+  // The coverage bar shows whenever we have a status view (i.e. the session is live);
+  // the affordance strip below it stays conditional, so a plain active session shows
+  // just the progress bar.
+  const showProgress = view !== null;
+  const hasStrip = anonymous || showCostHint || showResume || showPause || actionError !== null;
+  if (!showProgress && !hasStrip) return null;
 
   return (
-    <div
-      className={cn(
-        'text-muted-foreground flex flex-wrap items-center gap-x-4 gap-y-2 text-xs',
-        className
-      )}
-    >
-      {anonymous && (
-        <span
-          className="inline-flex items-center gap-1.5"
-          title="Your responses are not linked to an account."
-        >
-          <ShieldCheck
-            className="h-3.5 w-3.5"
-            style={{ color: 'var(--app-accent-color, var(--color-primary))' }}
-            aria-hidden="true"
-          />
-          Responses are anonymous
-        </span>
-      )}
+    <div className={cn('flex flex-col gap-2', className)}>
+      {showProgress && <SessionProgressBar coverage={view.completion.coverage} />}
+      {hasStrip && (
+        <div className="text-muted-foreground flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
+          {anonymous && (
+            <span
+              className="inline-flex items-center gap-1.5"
+              title="Your responses are not linked to an account."
+            >
+              <ShieldCheck
+                className="h-3.5 w-3.5"
+                style={{ color: 'var(--app-accent-color, var(--color-primary))' }}
+                aria-hidden="true"
+              />
+              Responses are anonymous
+            </span>
+          )}
 
-      {showCostHint && (
-        <span role="status" className="inline-flex items-center gap-1.5">
-          <Hourglass className="h-3.5 w-3.5" aria-hidden="true" />
-          Approaching this session&rsquo;s limit
-        </span>
-      )}
+          {showCostHint && (
+            <span role="status" className="inline-flex items-center gap-1.5">
+              <Hourglass className="h-3.5 w-3.5" aria-hidden="true" />
+              Approaching this session&rsquo;s limit
+            </span>
+          )}
 
-      {paused && (
-        <span
-          role="status"
-          className="text-foreground inline-flex items-center gap-1.5 font-medium"
-        >
-          <PauseCircle className="h-3.5 w-3.5" aria-hidden="true" />
-          Paused — your progress is saved
-        </span>
-      )}
+          {paused && (
+            <span
+              role="status"
+              className="text-foreground inline-flex items-center gap-1.5 font-medium"
+            >
+              <PauseCircle className="h-3.5 w-3.5" aria-hidden="true" />
+              Paused — your progress is saved
+            </span>
+          )}
 
-      <span className="ml-auto inline-flex items-center gap-2">
-        {actionError && (
-          <span role="alert" className="text-destructive inline-flex items-center gap-1">
-            <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
-            {actionError}
+          <span className="ml-auto inline-flex items-center gap-2">
+            {actionError && (
+              <span role="alert" className="text-destructive inline-flex items-center gap-1">
+                <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
+                {actionError}
+              </span>
+            )}
+            {showResume && (
+              <Button type="button" variant="outline" size="sm" onClick={onResume} disabled={busy}>
+                <PlayCircle className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                Resume
+              </Button>
+            )}
+            {showPause && (
+              <Button type="button" variant="ghost" size="sm" onClick={onPause} disabled={busy}>
+                <PauseCircle className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                Pause
+              </Button>
+            )}
           </span>
-        )}
-        {showResume && (
-          <Button type="button" variant="outline" size="sm" onClick={onResume} disabled={busy}>
-            <PlayCircle className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
-            Resume
-          </Button>
-        )}
-        {showPause && (
-          <Button type="button" variant="ghost" size="sm" onClick={onPause} disabled={busy}>
-            <PauseCircle className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
-            Pause
-          </Button>
-        )}
-      </span>
+        </div>
+      )}
     </div>
   );
 }

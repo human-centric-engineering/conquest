@@ -45,9 +45,13 @@ This creates (idempotently — safe to re-run):
 - **Demo client** "Northwind Logistics (Demo)" (slug `northwind-logistics-demo`), branded
   (CTA/accent colours, logo, welcome copy).
 - **Launched questionnaire** "Northwind Logistics — Onboarding Experience Review" — 2 sections,
-  6 questions, attributed to that client, with name + work-email profile capture on.
+  6 questions, attributed to that client. Runs **anonymously** (so you can one-click "Preview as
+  respondent" from the questionnaire's admin page — no email needed) with **contradiction
+  flagging** on (give inconsistent answers and the chat surfaces an "I noticed something" callout;
+  needs the contradiction + live-sessions flags on — see §0).
 
-Then skip to **§3 Invite a respondent**. To confirm it loaded, open `/admin/questionnaires` —
+Then skip to **§3 Invite a respondent** — or just hit **Preview as respondent** on the
+questionnaire's admin page to try it yourself immediately. To confirm it loaded, open `/admin/questionnaires` —
 the questionnaire shows `launched` and attributed to Northwind.
 
 > **Gotcha — it didn't appear?** The seed no-ops unless `LOAD_DEMO_CONTENT=1`. If `db:seed` ran

@@ -12,6 +12,7 @@
 
 import { prisma } from '@/lib/db/client';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
+import { registerBuiltInCapabilities } from '@/lib/orchestration/capabilities';
 import {
   DETECT_CONTRADICTIONS_CAPABILITY_SLUG,
   EXTRACT_ANSWER_SLOTS_CAPABILITY_SLUG,
@@ -79,6 +80,15 @@ export async function buildTurnInvokers(opts: {
   adaptiveEnabled: boolean;
 }): Promise<CapabilityInvokers> {
   const { userId, slots, activeQuestionKey, adaptiveEnabled } = opts;
+
+  // Flush the built-in + app capability handlers into the dispatcher before any
+  // invoker dispatches. The turn loop calls `capabilityDispatcher.dispatch()` directly
+  // (not through the orchestration chat handler / agent-call executor, which is where the
+  // platform normally registers), so on a fresh server process that has only served
+  // questionnaire traffic the handler map would otherwise be empty and every capability
+  // dispatch would return `unknown_capability`. Idempotent (one-shot inside the registry).
+  registerBuiltInCapabilities();
+
   const [extractor, detector, refiner] = await Promise.all([
     loadBinding(QUESTIONNAIRE_ANSWER_EXTRACTOR_AGENT_SLUG),
     loadBinding(QUESTIONNAIRE_CONTRADICTION_DETECTOR_AGENT_SLUG),

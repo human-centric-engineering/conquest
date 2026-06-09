@@ -6,6 +6,7 @@ import { VersionGraph } from '@/components/admin/questionnaires/version-graph';
 import { VersionEditor } from '@/components/admin/questionnaires/version-editor';
 import { ReingestDialog } from '@/components/admin/questionnaires/reingest-dialog';
 import { CloneForClientDialog } from '@/components/admin/questionnaires/clone-for-client-dialog';
+import { LaunchChecklist } from '@/components/admin/questionnaires/launch-checklist';
 import { QUESTIONNAIRE_STATUS_BADGE } from '@/components/admin/questionnaires/status-badge';
 import { DemoClientAssign } from '@/components/admin/demo-clients/demo-client-assign';
 import { Badge } from '@/components/ui/badge';
@@ -16,6 +17,7 @@ import { logger } from '@/lib/logging';
 import {
   isAdaptiveSelectionEnabled,
   isDesignEvaluationEnabled,
+  isLiveSessionsEnabled,
   isQuestionnairesEnabled,
 } from '@/lib/app/questionnaire/feature-flag';
 import type { AttributedDemoClient, DemoClientView } from '@/lib/app/questionnaire/demo-clients';
@@ -94,6 +96,9 @@ export default async function QuestionnaireDetailPage({ params, searchParams }: 
   const adaptiveEnabled = editing ? await isAdaptiveSelectionEnabled() : false;
   // Design-evaluation sub-flag — gates the Evaluations entry (the run route 404s when off).
   const designEvalEnabled = selected ? await isDesignEvaluationEnabled() : false;
+  // Live-sessions sub-flag — gates the "Preview as respondent" link (the /q surface 404s when off).
+  const liveSessionsEnabled =
+    selected?.status === 'launched' ? await isLiveSessionsEnabled() : false;
 
   return (
     <div className="space-y-6">
@@ -172,6 +177,42 @@ export default async function QuestionnaireDetailPage({ params, searchParams }: 
                 )}
               </p>
               <div className="flex items-center gap-2">
+                {/* Review & Launch (F2.1 surfacing) — a draft's primary action, with the
+                    launch-gate checklist shown before the flip. Outside edit mode so launch
+                    isn't buried behind Edit. */}
+                {selected.status === 'draft' && graph && (
+                  <LaunchChecklist
+                    questionnaireId={id}
+                    versionId={selected.id}
+                    versionNumber={selected.versionNumber}
+                    goal={graph.goal}
+                    audience={graph.audience}
+                    sectionCount={selected.sectionCount}
+                    questionCount={selected.questionCount}
+                    configSaved={graph.config.saved}
+                  />
+                )}
+                {/* Preview as respondent — one-click "try it" via the no-login public surface.
+                    Only works on a launched, anonymous-mode version (the /q route's gates); the
+                    demo seed satisfies both. */}
+                {liveSessionsEnabled &&
+                  graph &&
+                  (graph.config.anonymousMode ? (
+                    <Button asChild variant="outline" size="sm">
+                      <Link href={`/q/${selected.id}`} target="_blank" rel="noopener noreferrer">
+                        Preview as respondent
+                      </Link>
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled
+                      title="Enable anonymous mode in this version's configuration to preview as a respondent."
+                    >
+                      Preview as respondent
+                    </Button>
+                  ))}
                 {/* Invitations (F3.2) are managed per-questionnaire across launched versions. */}
                 <Button asChild variant="outline" size="sm">
                   <Link href={`/admin/questionnaires/${id}/invitations`}>Invitations</Link>

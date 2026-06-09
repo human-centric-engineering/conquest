@@ -37,6 +37,7 @@ import { type AttachmentEntry } from '@/lib/hooks/use-attachments';
 import type { ChatAttachment } from '@/lib/orchestration/chat/types';
 import type { UseQuestionnaireSessionStreamReturn } from '@/lib/hooks/use-questionnaire-session-stream';
 import { ChatErrorPanel } from '@/components/app/questionnaire/chat/chat-error-panel';
+import { ContradictionNotice } from '@/components/app/questionnaire/chat/contradiction-notice';
 
 export interface QuestionnaireChatProps {
   /** The session id powering `/questionnaire-sessions/:id/messages` (used by the mic). */
@@ -176,16 +177,21 @@ export function QuestionnaireChat({
             </AssistantTurn>
           )}
 
-          {/* Side-band contradiction / fail-soft notice */}
-          {warning && (
-            <div
-              role="status"
-              className="border-l-2 pl-3 text-xs"
-              style={{ borderColor: 'var(--app-accent-color, var(--color-primary))' }}
-            >
-              <span className="text-muted-foreground">{warning.message}</span>
-            </div>
-          )}
+          {/* Side-band notice. A flagged contradiction (F4.3) gets a tasteful callout —
+              the clearest "the agent is reasoning about your answers" signal; every other
+              warning stays a quiet fail-soft line. */}
+          {warning &&
+            (warning.code === 'contradiction' ? (
+              <ContradictionNotice message={warning.message} />
+            ) : (
+              <div
+                role="status"
+                className="border-l-2 pl-3 text-xs"
+                style={{ borderColor: 'var(--app-accent-color, var(--color-primary))' }}
+              >
+                <span className="text-muted-foreground">{warning.message}</span>
+              </div>
+            ))}
 
           {/* Blocking / error state */}
           {error && (

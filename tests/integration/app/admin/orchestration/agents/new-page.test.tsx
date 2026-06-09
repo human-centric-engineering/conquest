@@ -21,6 +21,24 @@ vi.mock('@/lib/api/server-fetch', () => ({
   parseApiResponse: vi.fn(),
 }));
 
+// The new-agent page resolves "effective defaults" for an empty provider/model via
+// `getEffectiveAgentDefaults`, which reads the provider list (`aiProviderConfig.findMany`)
+// and the default-model singleton (`aiOrchestrationSettings.findUnique`) straight from
+// Prisma. Without this mock the test hits the real dev database: in isolation that's fast,
+// but under the full suite the connection pool is saturated by other integration tests and
+// the query blocks until the 10s test timeout fires — the source of the intermittent
+// "renders New agent heading"/"Create agent button" failures. Stubbing the client keeps the
+// page on its DB-empty path (provider/model stay '', which is exactly the create-mode default).
+vi.mock('@/lib/db/client', () => ({
+  prisma: {
+    aiProviderConfig: {
+      findMany: vi.fn().mockResolvedValue([]),
+      findFirst: vi.fn().mockResolvedValue(null),
+    },
+    aiOrchestrationSettings: { findUnique: vi.fn().mockResolvedValue(null) },
+  },
+}));
+
 vi.mock('@/lib/logging', () => ({
   logger: {
     info: vi.fn(),

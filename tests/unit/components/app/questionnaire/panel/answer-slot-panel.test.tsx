@@ -93,10 +93,15 @@ describe('AnswerSlotPanel', () => {
     expect(screen.getByText('About you')).toBeInTheDocument();
   });
 
-  it('expands an answered slot to reveal its rationale on click', () => {
+  it('previews the rationale in the collapsed row and expands on click', () => {
     render(<AnswerSlotPanel view={view()} />);
-    expect(screen.queryByText('Stated directly.')).not.toBeInTheDocument();
+    // The model's rationale now previews one-line in the collapsed row.
+    expect(screen.getByText('Stated directly.')).toBeInTheDocument();
+    const row = screen.getByText('What is your role?').closest('button');
+    expect(row).toHaveAttribute('aria-expanded', 'false');
     fireEvent.click(screen.getByText('What is your role?'));
+    expect(row).toHaveAttribute('aria-expanded', 'true');
+    // Full rationale remains visible when expanded.
     expect(screen.getByText('Stated directly.')).toBeInTheDocument();
   });
 
