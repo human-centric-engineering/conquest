@@ -402,6 +402,12 @@ export const API = {
       /** A question's tag set (PUT replace-set `{ tagIds }`). */
       versionQuestionTags: (id: string, versionId: string, questionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/questions/${questionId}/tags`,
+      /** Data slots for a version (GET list, PUT replace-set with the reviewed slots). */
+      versionDataSlots: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/data-slots`,
+      /** Generate proposed data slots for a version (POST — preview, persists nothing). */
+      versionDataSlotsGenerate: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/data-slots/generate`,
       /** Extraction-change log for a version (GET list, filter by status/type). */
       versionChanges: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/changes`,

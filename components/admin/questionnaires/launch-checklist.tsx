@@ -43,6 +43,10 @@ export interface LaunchChecklistProps {
   questionCount: number;
   /** True once a config row exists for the version (the launch gate's deliberate signal). */
   configSaved: boolean;
+  /** When the data-slots feature is on, launch requires the version to have data slots. */
+  dataSlotsRequired?: boolean;
+  /** True when the version has ≥1 saved data slot (only checked when required). */
+  dataSlotsReady?: boolean;
 }
 
 /**
@@ -81,6 +85,8 @@ export function LaunchChecklist({
   sectionCount,
   questionCount,
   configSaved,
+  dataSlotsRequired = false,
+  dataSlotsReady = false,
 }: LaunchChecklistProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -93,6 +99,8 @@ export function LaunchChecklist({
     { ok: sectionCount >= 1, label: 'At least one section' },
     { ok: questionCount >= 1, label: 'At least one question' },
     { ok: configSaved, label: 'Configuration saved' },
+    // Data Slots feature: only a gate when the flag is on (the server mirrors this).
+    ...(dataSlotsRequired ? [{ ok: dataSlotsReady, label: 'Data slots generated' }] : []),
   ];
   const ready = checks.every((c) => c.ok);
 

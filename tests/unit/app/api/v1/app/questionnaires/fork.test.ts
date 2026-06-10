@@ -60,6 +60,12 @@ const tx = {
   appQuestionSlotTag: {
     createMany: vi.fn(async () => ({ count: 0 })),
   },
+  appDataSlot: {
+    create: vi.fn(async () => ({ id: 'newds-1' })),
+  },
+  appDataSlotQuestion: {
+    createMany: vi.fn(async () => ({ count: 0 })),
+  },
   appQuestionnaireConfig: {
     create: vi.fn(async () => ({ id: 'newcfg-1' })),
   },
@@ -135,6 +141,8 @@ function sourceGraph() {
         slots: [{ questionSlotId: 'oldq-2' }],
       },
     ],
+    // Data Slots feature: none on this source (copy is exercised by data-slot-specific tests).
+    dataSlots: [],
   };
 }
 

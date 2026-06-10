@@ -171,3 +171,19 @@ export const evaluationApplyLimiter = createRateLimiter({
   interval: EVALUATION_APPLY_RATE_LIMIT_INTERVAL_MS,
   maxRequests: EVALUATION_APPLY_RATE_LIMIT_MAX,
 });
+
+/**
+ * Data-slot generation sub-cap (Data Slots feature). One call runs a structured LLM
+ * completion over the whole question set to infer the data slots — real paid work, like
+ * the design-evaluation panel. Capped per admin so a hammered "Generate data slots" button
+ * can't run up the bill. Keyed on the admin user id, who owns the spend.
+ */
+export const DATA_SLOTS_GENERATION_RATE_LIMIT_MAX = 20;
+
+/** Sliding-window length for {@link dataSlotsGenerationLimiter}, in milliseconds. */
+export const DATA_SLOTS_GENERATION_RATE_LIMIT_INTERVAL_MS = 60_000;
+
+export const dataSlotsGenerationLimiter = createRateLimiter({
+  interval: DATA_SLOTS_GENERATION_RATE_LIMIT_INTERVAL_MS,
+  maxRequests: DATA_SLOTS_GENERATION_RATE_LIMIT_MAX,
+});

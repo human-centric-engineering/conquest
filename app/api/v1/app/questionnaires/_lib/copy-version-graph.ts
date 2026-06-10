@@ -33,6 +33,7 @@ export interface CopiedGraphMaps {
   sectionIdMap: Map<string, string>;
   questionIdMap: Map<string, string>;
   tagIdMap: Map<string, string>;
+  dataSlotIdMap: Map<string, string>;
 }
 
 /**
@@ -57,6 +58,21 @@ export async function copyVersionGraph(
           normalizedLabel: true,
           color: true,
           slots: { select: { questionSlotId: true } },
+        },
+      },
+      // Data Slots feature: the abstraction layer forks with the version (like tags).
+      dataSlots: {
+        orderBy: { ordinal: 'asc' },
+        select: {
+          id: true,
+          key: true,
+          name: true,
+          description: true,
+          theme: true,
+          ordinal: true,
+          weight: true,
+          generationConfidence: true,
+          questions: { select: { questionSlotId: true } },
         },
       },
       sections: {
@@ -182,5 +198,37 @@ export async function copyVersionGraph(
     await tx.appQuestionSlotTag.createMany({ data: newSlotTags });
   }
 
-  return { sectionIdMap, questionIdMap, tagIdMap };
+  // Data Slots feature: copy each data slot, then re-link its question mappings to the copied
+  // question ids (via questionIdMap). A copied key is unique by construction (carried 1:1).
+  const dataSlotIdMap = new Map<string, string>();
+  const newDataSlotQuestions: { dataSlotId: string; questionSlotId: string }[] = [];
+  for (const slot of source.dataSlots) {
+    const newSlot = await tx.appDataSlot.create({
+      data: {
+        versionId: targetVersionId,
+        key: slot.key,
+        name: slot.name,
+        description: slot.description,
+        theme: slot.theme,
+        ordinal: slot.ordinal,
+        weight: slot.weight,
+        ...(slot.generationConfidence !== null
+          ? { generationConfidence: slot.generationConfidence }
+          : {}),
+      },
+      select: { id: true },
+    });
+    dataSlotIdMap.set(slot.id, newSlot.id);
+    for (const link of slot.questions) {
+      const newQuestionId = questionIdMap.get(link.questionSlotId);
+      if (newQuestionId) {
+        newDataSlotQuestions.push({ dataSlotId: newSlot.id, questionSlotId: newQuestionId });
+      }
+    }
+  }
+  if (newDataSlotQuestions.length > 0) {
+    await tx.appDataSlotQuestion.createMany({ data: newDataSlotQuestions });
+  }
+
+  return { sectionIdMap, questionIdMap, tagIdMap, dataSlotIdMap };
 }

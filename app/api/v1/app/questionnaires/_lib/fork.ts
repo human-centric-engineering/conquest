@@ -118,13 +118,20 @@ export async function forkVersionIfLaunched(
       select: { id: true },
     });
 
-    const { sectionIdMap, questionIdMap, tagIdMap } = await copyVersionGraph(
+    const { sectionIdMap, questionIdMap, tagIdMap, dataSlotIdMap } = await copyVersionGraph(
       tx,
       versionId,
       newVersion.id
     );
 
-    return { id: newVersion.id, versionNumber, sectionIdMap, questionIdMap, tagIdMap };
+    return {
+      id: newVersion.id,
+      versionNumber,
+      sectionIdMap,
+      questionIdMap,
+      tagIdMap,
+      dataSlotIdMap,
+    };
   });
 
   // Audit outside the transaction (fire-and-forget), once per fork.

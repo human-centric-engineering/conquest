@@ -1,0 +1,175 @@
+/**
+ * Data-slot generation capability — infers the semantic abstraction layer over a version's
+ * questions (Data Slots feature). Modelled on F5.1's evaluate-structure: one provider-agnostic
+ * structured LLM call via `runStructuredCompletion` (call → parse → retry-once-at-temp-0 →
+ * cost-sum), validated against the data-slots output schema. Persists nothing — the route
+ * returns the proposed slots for admin review.
+ *
+ * Input is the **authored structure** (goal, audience, question prompts) — admin content, not
+ * respondent PII — so `processesPii = false`. Lives under `lib/app/**`: no Prisma, no Next.
+ */
+
+import { isRecord } from '@/lib/utils';
+import { logger } from '@/lib/logging';
+import { CostOperation } from '@/types/orchestration';
+import { z } from 'zod';
+
+import { BaseCapability } from '@/lib/orchestration/capabilities/base-capability';
+import type { CapabilityContext, CapabilityResult } from '@/lib/orchestration/capabilities/types';
+import {
+  resolveAgentProviderAndModel,
+  type ResolvableAgent,
+} from '@/lib/orchestration/llm/agent-resolver';
+import { getProvider } from '@/lib/orchestration/llm/provider-manager';
+import { logCost } from '@/lib/orchestration/llm/cost-tracker';
+import {
+  runStructuredCompletion,
+  tryParseJson,
+  type StructuredCompletionResult,
+} from '@/lib/orchestration/evaluations/parse-structured';
+
+import { GENERATE_DATA_SLOTS_FUNCTION_DEFINITION } from '@/lib/app/questionnaire/constants';
+import {
+  buildDataSlotGenerationPrompt,
+  buildDataSlotRetryMessage,
+  dataSlotStructureSchema,
+  validateDataSlotGeneration,
+  type DataSlotGenerationOutput,
+} from '@/lib/app/questionnaire/data-slots';
+
+const SLUG = GENERATE_DATA_SLOTS_FUNCTION_DEFINITION.name;
+
+/** Designing a slot set over a whole questionnaire is a moderate generation. */
+const GENERATE_MAX_TOKENS = 2_048;
+/** One call; 60s covers a slow reasoning model over a large question set. */
+const GENERATE_TIMEOUT_MS = 60_000;
+
+const argsSchema = z.object({
+  structure: dataSlotStructureSchema,
+  versionId: z.string().optional(),
+});
+
+export type GenerateDataSlotsArgs = z.infer<typeof argsSchema>;
+export interface GenerateDataSlotsData {
+  slots: DataSlotGenerationOutput['slots'];
+}
+
+function readGeneratorBinding(entityContext: CapabilityContext['entityContext']): ResolvableAgent {
+  const raw = entityContext?.dataSlotsAgent;
+  if (isRecord(raw)) {
+    return {
+      provider: typeof raw.provider === 'string' ? raw.provider : '',
+      model: typeof raw.model === 'string' ? raw.model : '',
+      fallbackProviders: Array.isArray(raw.fallbackProviders)
+        ? raw.fallbackProviders.filter((v): v is string => typeof v === 'string')
+        : [],
+    };
+  }
+  return { provider: '', model: '', fallbackProviders: [] };
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+export class AppGenerateDataSlotsCapability extends BaseCapability<
+  GenerateDataSlotsArgs,
+  GenerateDataSlotsData
+> {
+  readonly slug = SLUG;
+  readonly processesPii = false;
+  readonly functionDefinition = GENERATE_DATA_SLOTS_FUNCTION_DEFINITION;
+  protected readonly schema = argsSchema;
+
+  async execute(
+    args: GenerateDataSlotsArgs,
+    context: CapabilityContext
+  ): Promise<CapabilityResult<GenerateDataSlotsData>> {
+    let providerSlug: string;
+    let model: string;
+    try {
+      const resolved = await resolveAgentProviderAndModel(
+        readGeneratorBinding(context.entityContext),
+        'reasoning'
+      );
+      providerSlug = resolved.providerSlug;
+      model = resolved.model;
+    } catch (err) {
+      logger.error('generate_data_slots: no provider resolved', {
+        agentId: context.agentId,
+        error: errorMessage(err),
+      });
+      return this.error(errorMessage(err), 'no_provider_configured');
+    }
+
+    let provider: Awaited<ReturnType<typeof getProvider>>;
+    try {
+      provider = await getProvider(providerSlug);
+    } catch (err) {
+      logger.error('generate_data_slots: provider unavailable', {
+        agentId: context.agentId,
+        providerSlug,
+        error: errorMessage(err),
+      });
+      return this.error(errorMessage(err), 'provider_unavailable');
+    }
+
+    const messages = buildDataSlotGenerationPrompt(args.structure);
+
+    let lastIssuePaths: string[] = [];
+    let completion: StructuredCompletionResult<DataSlotGenerationOutput>;
+    try {
+      completion = await runStructuredCompletion<DataSlotGenerationOutput>({
+        provider,
+        model,
+        messages,
+        maxTokens: GENERATE_MAX_TOKENS,
+        timeoutMs: GENERATE_TIMEOUT_MS,
+        parse: (raw) =>
+          tryParseJson(raw, (parsed) => {
+            const validation = validateDataSlotGeneration(parsed);
+            if (validation.ok) return validation.value;
+            lastIssuePaths = validation.issues.map((i) =>
+              i.path.length > 0 ? i.path.join('.') : '(root)'
+            );
+            return null;
+          }),
+        retryUserMessage: buildDataSlotRetryMessage(),
+        onFinalFailure: () =>
+          new Error(
+            'Data-slot generation response was not valid against the schema after one retry' +
+              (lastIssuePaths.length > 0 ? ` (invalid at: ${lastIssuePaths.join(', ')})` : '')
+          ),
+      });
+    } catch (err) {
+      logger.error('generate_data_slots: structured completion failed', {
+        agentId: context.agentId,
+        model,
+        provider: providerSlug,
+        issuePaths: lastIssuePaths,
+        error: errorMessage(err),
+      });
+      return this.error(errorMessage(err), 'generation_failed');
+    }
+
+    void logCost({
+      ...(context.agentId ? { agentId: context.agentId } : {}),
+      operation: CostOperation.CHAT,
+      model,
+      provider: providerSlug,
+      inputTokens: completion.tokenUsage.input,
+      outputTokens: completion.tokenUsage.output,
+      metadata: {
+        capability: SLUG,
+        ...(args.versionId ? { versionId: args.versionId } : {}),
+      },
+    }).catch((err) => {
+      logger.error('generate_data_slots: logCost rejected', {
+        agentId: context.agentId,
+        error: errorMessage(err),
+      });
+    });
+
+    return this.success({ slots: completion.value.slots });
+  }
+}

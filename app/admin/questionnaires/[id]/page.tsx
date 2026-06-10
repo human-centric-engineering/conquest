@@ -16,12 +16,14 @@ import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
 import {
   isAdaptiveSelectionEnabled,
+  isDataSlotsEnabled,
   isDesignEvaluationEnabled,
   isLiveSessionsEnabled,
   isQuestionnairesEnabled,
 } from '@/lib/app/questionnaire/feature-flag';
 import type { AttributedDemoClient, DemoClientView } from '@/lib/app/questionnaire/demo-clients';
 import type { QuestionnaireDetail, VersionGraphView } from '@/lib/app/questionnaire/views';
+import type { DataSlotView } from '@/lib/app/questionnaire/data-slots';
 
 export const metadata: Metadata = {
   title: 'Questionnaire',
@@ -75,6 +77,20 @@ async function getGraph(id: string, versionId: string): Promise<VersionGraphView
   }
 }
 
+// Data Slots feature: how many data slots the selected version has (drives the launch
+// gate + the "Data slots" entry). Degrades to 0 on any failure.
+async function getDataSlotCount(id: string, versionId: string): Promise<number> {
+  try {
+    const res = await serverFetch(API.APP.QUESTIONNAIRES.versionDataSlots(id, versionId));
+    if (!res.ok) return 0;
+    const body = await parseApiResponse<{ slots: DataSlotView[] }>(res);
+    return body.success ? body.data.slots.length : 0;
+  } catch (err) {
+    logger.error('questionnaire detail page: data slot count fetch failed', err);
+    return 0;
+  }
+}
+
 export default async function QuestionnaireDetailPage({ params, searchParams }: PageProps) {
   if (!(await isQuestionnairesEnabled())) notFound();
 
@@ -99,6 +115,9 @@ export default async function QuestionnaireDetailPage({ params, searchParams }: 
   // Live-sessions sub-flag — gates the "Preview as respondent" link (the /q surface 404s when off).
   const liveSessionsEnabled =
     selected?.status === 'launched' ? await isLiveSessionsEnabled() : false;
+  // Data-slots sub-flag — gates the "Data slots" entry + makes data slots a launch requirement.
+  const dataSlotsEnabled = selected ? await isDataSlotsEnabled() : false;
+  const dataSlotCount = dataSlotsEnabled && selected ? await getDataSlotCount(id, selected.id) : 0;
 
   return (
     <div className="space-y-6">
@@ -209,7 +228,18 @@ export default async function QuestionnaireDetailPage({ params, searchParams }: 
                     sectionCount={selected.sectionCount}
                     questionCount={selected.questionCount}
                     configSaved={graph.config.saved}
+                    dataSlotsRequired={dataSlotsEnabled}
+                    dataSlotsReady={dataSlotCount > 0}
                   />
+                )}
+                {/* Data slots (Data Slots feature) — generate + review the semantic abstraction
+                    layer; required before launch while the flag is on. */}
+                {dataSlotsEnabled && (
+                  <Button asChild variant="outline" size="sm">
+                    <Link href={`/admin/questionnaires/${id}/data-slots?v=${selected.id}`}>
+                      Data slots{dataSlotCount > 0 ? ` (${dataSlotCount})` : ''}
+                    </Link>
+                  </Button>
                 )}
                 {/* Preview as respondent — one-click "try it" on the live respondent surface.
                     An anonymous-mode version opens its real no-login surface; an
