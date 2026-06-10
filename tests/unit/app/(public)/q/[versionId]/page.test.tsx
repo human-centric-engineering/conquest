@@ -59,11 +59,13 @@ vi.mock('@/components/app/questionnaire/chat/anonymous-session-boot', () => ({
     voiceInputEnabled,
     attachmentInputEnabled,
     welcomeCopy,
+    preview,
   }: {
     versionId: string;
     voiceInputEnabled: boolean;
     attachmentInputEnabled: boolean;
     welcomeCopy: string;
+    preview: boolean;
   }) => (
     <div
       data-testid="anonymous-session-boot"
@@ -71,6 +73,7 @@ vi.mock('@/components/app/questionnaire/chat/anonymous-session-boot', () => ({
       data-voice-input-enabled={String(voiceInputEnabled)}
       data-attachment-input-enabled={String(attachmentInputEnabled)}
       data-welcome-copy={welcomeCopy}
+      data-preview={String(preview)}
     />
   ),
 }));
@@ -110,6 +113,10 @@ function makeParams(versionId: string = VERSION_ID) {
   return Promise.resolve({ versionId });
 }
 
+function makeSearchParams(preview?: string) {
+  return Promise.resolve(preview === undefined ? {} : { preview });
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -145,9 +152,9 @@ describe('PublicQuestionnairePage', () => {
       vi.mocked(isLiveSessionsEnabled).mockResolvedValue(false);
 
       // Act & Assert: execution halts with the NEXT_NOT_FOUND sentinel
-      await expect(PublicQuestionnairePage({ params: makeParams() })).rejects.toThrow(
-        'NEXT_NOT_FOUND'
-      );
+      await expect(
+        PublicQuestionnairePage({ params: makeParams(), searchParams: makeSearchParams() })
+      ).rejects.toThrow('NEXT_NOT_FOUND');
     });
   });
 
@@ -160,7 +167,10 @@ describe('PublicQuestionnairePage', () => {
       // Arrange (defaults from beforeEach)
 
       // Act
-      const Component = await PublicQuestionnairePage({ params: makeParams() });
+      const Component = await PublicQuestionnairePage({
+        params: makeParams(),
+        searchParams: makeSearchParams(),
+      });
       render(Component);
 
       // Assert: the page passed the versionId from params to the boot component
@@ -174,7 +184,7 @@ describe('PublicQuestionnairePage', () => {
       // Arrange (defaults)
 
       // Act
-      await PublicQuestionnairePage({ params: makeParams() });
+      await PublicQuestionnairePage({ params: makeParams(), searchParams: makeSearchParams() });
 
       // Assert: the page called the theme resolver with the correct versionId (side effect)
       expect(resolveThemeForVersion).toHaveBeenCalledWith(VERSION_ID);
@@ -189,7 +199,10 @@ describe('PublicQuestionnairePage', () => {
       vi.mocked(resolveThemeForVersion).mockResolvedValue(customTheme);
 
       // Act
-      const Component = await PublicQuestionnairePage({ params: makeParams() });
+      const Component = await PublicQuestionnairePage({
+        params: makeParams(),
+        searchParams: makeSearchParams(),
+      });
       render(Component);
 
       // Assert: the page used the theme-resolved welcomeCopy (not a hard-coded default)
@@ -203,7 +216,10 @@ describe('PublicQuestionnairePage', () => {
       // Arrange: voice flag already defaulted to false in beforeEach
 
       // Act
-      const Component = await PublicQuestionnairePage({ params: makeParams() });
+      const Component = await PublicQuestionnairePage({
+        params: makeParams(),
+        searchParams: makeSearchParams(),
+      });
       render(Component);
 
       // Assert: the resolved flag value reaches the boot component
@@ -218,7 +234,10 @@ describe('PublicQuestionnairePage', () => {
       vi.mocked(isVoiceInputEnabled).mockResolvedValue(true);
 
       // Act
-      const Component = await PublicQuestionnairePage({ params: makeParams() });
+      const Component = await PublicQuestionnairePage({
+        params: makeParams(),
+        searchParams: makeSearchParams(),
+      });
       render(Component);
 
       // Assert
@@ -231,7 +250,10 @@ describe('PublicQuestionnairePage', () => {
     it('passes attachmentInputEnabled=true when the attachment flag is on', async () => {
       vi.mocked(isAttachmentInputEnabled).mockResolvedValue(true);
 
-      const Component = await PublicQuestionnairePage({ params: makeParams() });
+      const Component = await PublicQuestionnairePage({
+        params: makeParams(),
+        searchParams: makeSearchParams(),
+      });
       render(Component);
 
       expect(screen.getByTestId('anonymous-session-boot')).toHaveAttribute(
@@ -241,13 +263,52 @@ describe('PublicQuestionnairePage', () => {
     });
 
     it('passes attachmentInputEnabled=false when the attachment flag is off', async () => {
-      const Component = await PublicQuestionnairePage({ params: makeParams() });
+      const Component = await PublicQuestionnairePage({
+        params: makeParams(),
+        searchParams: makeSearchParams(),
+      });
       render(Component);
 
       expect(screen.getByTestId('anonymous-session-boot')).toHaveAttribute(
         'data-attachment-input-enabled',
         'false'
       );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Preview mode (?preview=1)
+  // -------------------------------------------------------------------------
+
+  describe('admin preview mode', () => {
+    it('passes preview=false when no preview query param is present', async () => {
+      const Component = await PublicQuestionnairePage({
+        params: makeParams(),
+        searchParams: makeSearchParams(),
+      });
+      render(Component);
+
+      expect(screen.getByTestId('anonymous-session-boot')).toHaveAttribute('data-preview', 'false');
+    });
+
+    it('passes preview=true when ?preview=1 is present', async () => {
+      const Component = await PublicQuestionnairePage({
+        params: makeParams(),
+        searchParams: makeSearchParams('1'),
+      });
+      render(Component);
+
+      expect(screen.getByTestId('anonymous-session-boot')).toHaveAttribute('data-preview', 'true');
+    });
+
+    it('passes preview=false for any non-"1" preview value', async () => {
+      const Component = await PublicQuestionnairePage({
+        params: makeParams(),
+        searchParams: makeSearchParams('true'),
+      });
+      render(Component);
+
+      expect(screen.getByTestId('anonymous-session-boot')).toHaveAttribute('data-preview', 'false');
     });
   });
 
@@ -261,7 +322,10 @@ describe('PublicQuestionnairePage', () => {
       const otherVersionId = 'ver_other999';
 
       // Act
-      const Component = await PublicQuestionnairePage({ params: makeParams(otherVersionId) });
+      const Component = await PublicQuestionnairePage({
+        params: makeParams(otherVersionId),
+        searchParams: makeSearchParams(),
+      });
       render(Component);
 
       // Assert: versionId from params — not a hard-coded value — is forwarded

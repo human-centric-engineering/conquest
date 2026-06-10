@@ -15,11 +15,13 @@ import { ChevronLeft } from 'lucide-react';
 import { DemoClientForm } from '@/components/admin/demo-clients/demo-client-form';
 import { DemoClientActions } from '@/components/admin/demo-clients/demo-client-actions';
 import { DemoClientThemePreview } from '@/components/admin/demo-clients/demo-client-theme-preview';
+import { QUESTIONNAIRE_STATUS_BADGE } from '@/components/admin/questionnaires/status-badge';
+import { Badge } from '@/components/ui/badge';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
 import { isQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
-import type { DemoClientView } from '@/lib/app/questionnaire/demo-clients';
+import type { DemoClientDetail } from '@/lib/app/questionnaire/demo-clients';
 
 export const metadata: Metadata = {
   title: 'Demo client',
@@ -30,11 +32,11 @@ interface PageProps {
   params: Promise<{ id: string }>;
 }
 
-async function getDemoClient(id: string): Promise<DemoClientView | null> {
+async function getDemoClient(id: string): Promise<DemoClientDetail | null> {
   try {
     const res = await serverFetch(API.APP.DEMO_CLIENTS.byId(id));
     if (!res.ok) return null;
-    const body = await parseApiResponse<DemoClientView>(res);
+    const body = await parseApiResponse<DemoClientDetail>(res);
     return body.success ? body.data : null;
   } catch (err) {
     logger.error('demo client detail page: fetch failed', err);
@@ -71,6 +73,39 @@ export default async function DemoClientDetailPage({ params }: PageProps) {
           questionnaireCount={client.questionnaireCount}
         />
       </header>
+
+      {/* Attributed questionnaires — the destination the delete guard points at. A
+          questionnaire is "attributed" when its Demo client field names this client, so
+          its sales surface is branded as them. Each row links to the questionnaire's
+          editor, where the picker detaches ("None") or reassigns it. */}
+      {client.questionnaires.length > 0 && (
+        <section className="space-y-3 rounded-md border px-4 py-4">
+          <div className="space-y-1">
+            <h2 className="text-sm font-medium">Attributed questionnaires</h2>
+            <p className="text-muted-foreground text-xs">
+              These questionnaires are branded as this client, so it can’t be deleted while any
+              remain. Open one and set its{' '}
+              <span className="text-foreground font-medium">Demo client</span> field to “None
+              (generic demo)” to detach it, or to another client to reassign it.
+            </p>
+          </div>
+          <ul className="divide-y rounded-md border">
+            {client.questionnaires.map((q) => (
+              <li key={q.id} className="flex items-center justify-between gap-3 px-3 py-2">
+                <Link
+                  href={`/admin/questionnaires/${q.id}`}
+                  className="text-sm font-medium hover:underline"
+                >
+                  {q.title}
+                </Link>
+                <Badge variant={QUESTIONNAIRE_STATUS_BADGE[q.status].variant}>
+                  {QUESTIONNAIRE_STATUS_BADGE[q.status].label}
+                </Badge>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {/* DEMO-ONLY (F3.4 gap-fill): the resolved brand a respondent will see, from the
           saved values. Blank fields fall back to the Sunrise defaults. */}

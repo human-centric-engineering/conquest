@@ -45,10 +45,17 @@ This creates (idempotently — safe to re-run):
 - **Demo client** "Northwind Logistics (Demo)" (slug `northwind-logistics-demo`), branded
   (CTA/accent colours, logo, welcome copy).
 - **Launched questionnaire** "Northwind Logistics — Onboarding Experience Review" — 2 sections,
-  6 questions, attributed to that client. Runs **anonymously** (so you can one-click "Preview as
-  respondent" from the questionnaire's admin page — no email needed) with **contradiction
-  flagging** on (give inconsistent answers and the chat surfaces an "I noticed something" callout;
-  needs the contradiction + live-sessions flags on — see §0).
+  6 questions, attributed to that client. Runs **anonymously** (so "Preview as respondent" opens
+  its real no-login surface) with **contradiction flagging** on (give inconsistent answers and the
+  chat surfaces an "I noticed something" callout; needs the contradiction + live-sessions flags on
+  — see §0).
+
+> **Preview as respondent** (on a launched version's admin page) always works, anonymous or not.
+> An anonymous-mode version opens its real `/q/<versionId>` no-login surface; an invitation-gated
+> one opens an admin-only preview (`/q/<versionId>?preview=1` → the admin-gated
+> `POST …/questionnaire-sessions/preview` route, which mints a token-backed `isPreview` session that
+> is **excluded from analytics**). The selected version's access mode is shown as an "Anonymous
+> mode" / "Invitation only" badge next to its section/question counts.
 
 Then skip to **§3 Invite a respondent** — or just hit **Preview as respondent** on the
 questionnaire's admin page to try it yourself immediately. To confirm it loaded, open `/admin/questionnaires` —

@@ -160,22 +160,41 @@ export default async function QuestionnaireDetailPage({ params, searchParams }: 
 
           {selected && (
             <div className="flex items-center justify-between gap-3">
-              <p className="text-muted-foreground text-sm">
-                {selected.sectionCount} section{selected.sectionCount === 1 ? '' : 's'} ·{' '}
-                {selected.questionCount} question{selected.questionCount === 1 ? '' : 's'} ·{' '}
-                {selected.changeCount > 0 ? (
-                  <Link
-                    href={`/admin/questionnaires/${id}/extraction-changes?v=${selected.id}`}
-                    className="hover:text-foreground underline"
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-muted-foreground text-sm">
+                  {selected.sectionCount} section{selected.sectionCount === 1 ? '' : 's'} ·{' '}
+                  {selected.questionCount} question{selected.questionCount === 1 ? '' : 's'} ·{' '}
+                  {selected.changeCount > 0 ? (
+                    <Link
+                      href={`/admin/questionnaires/${id}/extraction-changes?v=${selected.id}`}
+                      className="hover:text-foreground underline"
+                    >
+                      {selected.changeCount} extraction change
+                      {selected.changeCount === 1 ? '' : 's'}
+                    </Link>
+                  ) : (
+                    <>
+                      {selected.changeCount} extraction change
+                      {selected.changeCount === 1 ? '' : 's'}
+                    </>
+                  )}
+                </p>
+                {/* Access mode of the selected version — anonymous mode decides whether the
+                    respondent surface is open (no-login) or invitation-gated, and whether
+                    "Preview as respondent" opens the real surface or an admin preview. */}
+                {graph && (
+                  <Badge
+                    variant={graph.config.anonymousMode ? 'secondary' : 'outline'}
+                    title={
+                      graph.config.anonymousMode
+                        ? 'Anonymous mode: anyone with the link can answer without an account.'
+                        : 'Invitation only: respondents need an invitation. Preview opens an admin-only walkthrough.'
+                    }
                   >
-                    {selected.changeCount} extraction change{selected.changeCount === 1 ? '' : 's'}
-                  </Link>
-                ) : (
-                  <>
-                    {selected.changeCount} extraction change{selected.changeCount === 1 ? '' : 's'}
-                  </>
+                    {graph.config.anonymousMode ? 'Anonymous mode' : 'Invitation only'}
+                  </Badge>
                 )}
-              </p>
+              </div>
               <div className="flex items-center gap-2">
                 {/* Review & Launch (F2.1 surfacing) — a draft's primary action, with the
                     launch-gate checklist shown before the flip. Outside edit mode so launch
@@ -192,27 +211,26 @@ export default async function QuestionnaireDetailPage({ params, searchParams }: 
                     configSaved={graph.config.saved}
                   />
                 )}
-                {/* Preview as respondent — one-click "try it" via the no-login public surface.
-                    Only works on a launched, anonymous-mode version (the /q route's gates); the
-                    demo seed satisfies both. */}
-                {liveSessionsEnabled &&
-                  graph &&
-                  (graph.config.anonymousMode ? (
-                    <Button asChild variant="outline" size="sm">
-                      <Link href={`/q/${selected.id}`} target="_blank" rel="noopener noreferrer">
-                        Preview as respondent
-                      </Link>
-                    </Button>
-                  ) : (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled
-                      title="Enable anonymous mode in this version's configuration to preview as a respondent."
+                {/* Preview as respondent — one-click "try it" on the live respondent surface.
+                    An anonymous-mode version opens its real no-login surface; an
+                    invitation-gated one opens an admin-only preview (`?preview=1` → the
+                    admin-gated /preview route, isPreview, excluded from analytics), so preview
+                    works regardless of anonymous mode. */}
+                {liveSessionsEnabled && graph && (
+                  <Button asChild variant="outline" size="sm">
+                    <Link
+                      href={
+                        graph.config.anonymousMode
+                          ? `/q/${selected.id}`
+                          : `/q/${selected.id}?preview=1`
+                      }
+                      target="_blank"
+                      rel="noopener noreferrer"
                     >
                       Preview as respondent
-                    </Button>
-                  ))}
+                    </Link>
+                  </Button>
+                )}
                 {/* Invitations (F3.2) are managed per-questionnaire across launched versions. */}
                 <Button asChild variant="outline" size="sm">
                   <Link href={`/admin/questionnaires/${id}/invitations`}>Invitations</Link>

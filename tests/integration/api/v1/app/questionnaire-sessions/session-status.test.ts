@@ -80,6 +80,7 @@ function ctx(
     slots: [],
     activeQuestionKey: null,
     byId: new Map(),
+    meta: {},
   };
 }
 

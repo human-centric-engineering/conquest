@@ -30,6 +30,7 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/sessions', () => seamMock);
 
 import {
   createAnonymousSession,
+  createPreviewSession,
   createSessionForVersion,
   createSessionFromInvitation,
 } from '@/app/api/v1/app/questionnaire-sessions/_lib/create';
@@ -235,5 +236,43 @@ describe('createAnonymousSession (no-login)', () => {
     );
     const result = await createAnonymousSession('v1');
     expect(result).toMatchObject({ ok: false, status: 403, code: 'INVITATION_REQUIRED' });
+  });
+});
+
+describe('createPreviewSession (admin preview)', () => {
+  const version = (overrides = {}) => ({ id: 'v1', status: 'launched', ...overrides });
+
+  it('creates a user-less isPreview session + a created event tagged admin_preview', async () => {
+    (mocks.prisma.appQuestionnaireVersion.findUnique as Mock).mockResolvedValue(version());
+    const result = await createPreviewSession('v1');
+
+    expect(result).toEqual({ ok: true, session: NEW_SESSION, resumed: false });
+    expect(mocks.tx.appQuestionnaireSession.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { versionId: 'v1', respondentUserId: null, isPreview: true, status: 'active' },
+      })
+    );
+    expect(seamMock.recordSessionCreated).toHaveBeenCalledWith('sess-new', {
+      tx: mocks.tx,
+      reason: 'admin_preview',
+    });
+  });
+
+  it('previews a NON-anonymous version (no anonymous-mode gate) — the whole point', async () => {
+    // The version has no anonymousMode/config at all; the anonymous + direct paths would 403,
+    // preview must not. (Preview never selects config, so none is provided.)
+    (mocks.prisma.appQuestionnaireVersion.findUnique as Mock).mockResolvedValue(version());
+    const result = await createPreviewSession('v1');
+    expect(result).toMatchObject({ ok: true });
+    expect(mocks.tx.appQuestionnaireSession.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('404s an unknown or unlaunched version (preview mirrors the live surface)', async () => {
+    (mocks.prisma.appQuestionnaireVersion.findUnique as Mock).mockResolvedValue(
+      version({ status: 'draft' })
+    );
+    const result = await createPreviewSession('v1');
+    expect(result).toMatchObject({ ok: false, status: 404, code: 'NOT_FOUND' });
+    expect(mocks.tx.appQuestionnaireSession.create).not.toHaveBeenCalled();
   });
 });

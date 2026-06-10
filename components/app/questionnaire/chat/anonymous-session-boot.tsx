@@ -3,14 +3,21 @@
 /**
  * AnonymousSessionBoot — client bootstrap for the no-login respondent surface (F7.1).
  *
- * The anonymous session must be created from the client so the signed `accessToken` lives in
- * client memory (and `sessionStorage` for refresh survival inside its 24h TTL) and is never
+ * The session must be created from the client so the signed `accessToken` lives in client
+ * memory (and `sessionStorage` for refresh survival inside its 24h TTL) and is never
  * serialized into server-rendered HTML. On mount it reuses a stored token for this version if
- * one is still valid, otherwise POSTs to the anonymous create route, then hands the session +
- * token to {@link SessionWorkspace} (chat + the live answer panel). The panel can't SSR-seed
- * here (the token is client-only), so it shows a brief skeleton until its first fetch lands.
+ * one is still valid, otherwise POSTs to the create route, then hands the session + token to
+ * {@link SessionWorkspace} (chat + the live answer panel). The panel can't SSR-seed here (the
+ * token is client-only), so it shows a brief skeleton until its first fetch lands.
+ *
+ * Two modes, same token machinery:
+ *  - default — the public no-login surface (`/anonymous`, requires anonymous mode).
+ *  - `preview` — an admin "Preview as respondent" walkthrough (`/preview`, admin-gated,
+ *    `isPreview`); works on any launched version, anonymous or invitation-gated. Stored under
+ *    a separate key so a preview run never clashes with a real anonymous session.
  *
  * @see app/api/v1/app/questionnaire-sessions/anonymous/route.ts
+ * @see app/api/v1/app/questionnaire-sessions/preview/route.ts
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -29,6 +36,11 @@ interface AnonymousSessionBootProps {
   voiceInputEnabled?: boolean;
   /** Show the attachment affordance (gated server-side on the attachment-input flag). */
   attachmentInputEnabled?: boolean;
+  /**
+   * Admin preview mode: create via the admin-gated `/preview` route (works on any launched
+   * version, anonymous or not) instead of the public `/anonymous` route. Set by `?preview=1`.
+   */
+  preview?: boolean;
 }
 
 interface StoredAnonSession {
@@ -48,13 +60,13 @@ type BootState =
   | { phase: 'ready'; sessionId: string; accessToken: string }
   | { phase: 'error'; message: string };
 
-function storageKey(versionId: string): string {
-  return `qn.anon.${versionId}`;
+function storageKey(versionId: string, preview: boolean): string {
+  return `${preview ? 'qn.preview' : 'qn.anon'}.${versionId}`;
 }
 
-function readStored(versionId: string): StoredAnonSession | null {
+function readStored(versionId: string, preview: boolean): StoredAnonSession | null {
   try {
-    const raw = window.sessionStorage.getItem(storageKey(versionId));
+    const raw = window.sessionStorage.getItem(storageKey(versionId, preview));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<StoredAnonSession>;
     if (
@@ -76,16 +88,22 @@ export function AnonymousSessionBoot({
   welcomeCopy,
   voiceInputEnabled = false,
   attachmentInputEnabled = false,
+  preview = false,
 }: AnonymousSessionBootProps) {
   const [state, setState] = useState<BootState>({ phase: 'creating' });
-  // Guard against React 19 StrictMode's double-invoke minting two sessions in dev.
+  // Dedup the create across React 19 StrictMode's double-invoke (which would otherwise mint two
+  // sessions in dev): the ref persists across the simulated unmount/remount, so only the first
+  // run fetches. We deliberately do NOT cancel the in-flight create on cleanup — StrictMode's
+  // synchronous fake-unmount fires that cleanup while the component is still mounted, so a
+  // cancel-guard would swallow the only `setState` and leave the boot spinning forever. A real
+  // unmount mid-flight just lands a harmless no-op `setState` (React 19 ignores it).
   const startedRef = useRef(false);
 
   useEffect(() => {
     if (startedRef.current) return;
     startedRef.current = true;
 
-    const existing = readStored(versionId);
+    const existing = readStored(versionId, preview);
     if (existing) {
       setState({
         phase: 'ready',
@@ -95,16 +113,17 @@ export function AnonymousSessionBoot({
       return;
     }
 
-    let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch(API.APP.QUESTIONNAIRE_SESSIONS.ANONYMOUS, {
+        const endpoint = preview
+          ? API.APP.QUESTIONNAIRE_SESSIONS.PREVIEW
+          : API.APP.QUESTIONNAIRE_SESSIONS.ANONYMOUS;
+        const res = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ versionId }),
         });
         const body = (await res.json()) as AnonCreateResponse;
-        if (cancelled) return;
 
         if (!res.ok || !body.success || !body.data) {
           setState({
@@ -120,26 +139,20 @@ export function AnonymousSessionBoot({
           expiresAt: body.data.expiresAt,
         };
         try {
-          window.sessionStorage.setItem(storageKey(versionId), JSON.stringify(stored));
+          window.sessionStorage.setItem(storageKey(versionId, preview), JSON.stringify(stored));
         } catch {
           // Storage unavailable (private mode) — the in-memory token still works for this load.
         }
         setState({ phase: 'ready', sessionId: stored.sessionId, accessToken: stored.accessToken });
       } catch {
-        if (!cancelled) {
-          setState({
-            phase: 'error',
-            message:
-              'We could not start the questionnaire. Please check your connection and try again.',
-          });
-        }
+        setState({
+          phase: 'error',
+          message:
+            'We could not start the questionnaire. Please check your connection and try again.',
+        });
       }
     })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [versionId]);
+  }, [versionId, preview]);
 
   if (state.phase === 'creating') {
     return (

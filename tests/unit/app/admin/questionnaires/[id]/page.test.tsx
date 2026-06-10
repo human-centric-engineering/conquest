@@ -6,9 +6,10 @@
  * tests pin the feature-flag gate, the not-found paths, version selection, and — the focus of
  * the demo-polish PR — the two new operator affordances:
  *   - "Review & Launch" (LaunchChecklist) shows only on a draft version with a loaded graph.
- *   - "Preview as respondent" links to the no-login `/q/<versionId>` surface only when the
- *     live-sessions flag is on AND the version is launched AND anonymous mode is enabled;
- *     otherwise it renders disabled (with guidance) or not at all.
+ *   - "Preview as respondent" links to the live respondent surface whenever the live-sessions
+ *     flag is on AND the version is launched: an anonymous-mode version opens its real no-login
+ *     `/q/<versionId>` surface; a non-anonymous one opens the admin preview (`?preview=1`). The
+ *     selected version's access mode is also surfaced as a badge.
  *
  * Data fetching is faked at the `server-fetch` boundary (routed by URL); the heavy child
  * components are stubbed so we assert the page's own branching, not their internals.
@@ -208,7 +209,7 @@ describe('QuestionnaireDetailPage', () => {
   });
 
   describe('Preview as respondent', () => {
-    it('renders an enabled link to /q/<versionId> when launched + live-sessions on + anonymous', async () => {
+    it('links to the real /q/<versionId> surface when launched + live-sessions on + anonymous', async () => {
       apiData.graph = makeGraph({ anonymousMode: true });
       render(await renderPage());
       const link = screen.getByRole('link', { name: /preview as respondent/i });
@@ -217,14 +218,29 @@ describe('QuestionnaireDetailPage', () => {
       expect(link).toHaveAttribute('rel', 'noopener noreferrer');
     });
 
-    it('renders a disabled button (no link) when anonymous mode is off', async () => {
+    it('links to the admin preview (?preview=1) when anonymous mode is off — no longer disabled', async () => {
       apiData.graph = makeGraph({ anonymousMode: false });
       render(await renderPage());
       expect(
-        screen.queryByRole('link', { name: /preview as respondent/i })
+        screen.queryByRole('button', { name: /preview as respondent/i })
       ).not.toBeInTheDocument();
-      const btn = screen.getByRole('button', { name: /preview as respondent/i });
-      expect(btn).toBeDisabled();
+      const link = screen.getByRole('link', { name: /preview as respondent/i });
+      expect(link).toHaveAttribute('href', '/q/ver-1?preview=1');
+      expect(link).toHaveAttribute('target', '_blank');
+    });
+
+    it('surfaces the access mode of the selected version as a badge', async () => {
+      apiData.graph = makeGraph({ anonymousMode: true });
+      render(await renderPage());
+      expect(screen.getByText('Anonymous mode')).toBeInTheDocument();
+      expect(screen.queryByText('Invitation only')).not.toBeInTheDocument();
+    });
+
+    it('shows the "Invitation only" badge when anonymous mode is off', async () => {
+      apiData.graph = makeGraph({ anonymousMode: false });
+      render(await renderPage());
+      expect(screen.getByText('Invitation only')).toBeInTheDocument();
+      expect(screen.queryByText('Anonymous mode')).not.toBeInTheDocument();
     });
 
     it('is absent entirely when the live-sessions flag is off', async () => {

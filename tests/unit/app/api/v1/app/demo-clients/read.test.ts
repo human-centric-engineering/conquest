@@ -76,13 +76,32 @@ describe('getDemoClientDetail', () => {
   });
 
   it('maps the row to a view', async () => {
-    findUnique.mockResolvedValue(row({ description: 'Q1 pitch', isActive: false }));
+    findUnique.mockResolvedValue(
+      row({ description: 'Q1 pitch', isActive: false, questionnaires: [] })
+    );
     const view = await getDemoClientDetail('dc-1');
     expect(view).toMatchObject({
       id: 'dc-1',
       description: 'Q1 pitch',
       isActive: false,
       questionnaireCount: 3,
+      questionnaires: [],
     });
+  });
+
+  it('projects the attributed-questionnaire list, narrowing an unknown status to draft', async () => {
+    findUnique.mockResolvedValue(
+      row({
+        questionnaires: [
+          { id: 'q-1', title: 'Onboarding', status: 'launched' },
+          { id: 'q-2', title: 'Renewal', status: 'bogus' },
+        ],
+      })
+    );
+    const view = await getDemoClientDetail('dc-1');
+    expect(view?.questionnaires).toEqual([
+      { id: 'q-1', title: 'Onboarding', status: 'launched' },
+      { id: 'q-2', title: 'Renewal', status: 'draft' },
+    ]);
   });
 });

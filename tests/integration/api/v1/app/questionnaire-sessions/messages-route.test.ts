@@ -30,6 +30,9 @@ vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/turn-run', () => runMock);
 const offerMock = vi.hoisted(() => ({ streamOfferMessage: vi.fn() }));
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/offer-stream', () => offerMock);
 
+const questionMock = vi.hoisted(() => ({ streamQuestionMessage: vi.fn() }));
+vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/question-stream', () => questionMock);
+
 // Cost-cap seams (F6.3): the route sums prior spend + writes events / pauses on a breach.
 const turnsMock = vi.hoisted(() => ({ sumSessionTurnCost: vi.fn() }));
 vi.mock('@/app/api/v1/app/questionnaires/_lib/turns', () => turnsMock);
@@ -48,7 +51,10 @@ vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/session-access-token', () 
 
 import { POST } from '@/app/api/v1/app/questionnaire-sessions/[id]/messages/route';
 import { isFeatureEnabled } from '@/lib/feature-flags';
-import { APP_QUESTIONNAIRES_COST_CAP_FLAG } from '@/lib/app/questionnaire/constants';
+import {
+  APP_QUESTIONNAIRES_COST_CAP_FLAG,
+  APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG,
+} from '@/lib/app/questionnaire/constants';
 import { auth } from '@/lib/auth/config';
 import { mockAuthenticatedUser, mockUnauthenticatedUser } from '@/tests/helpers/auth';
 
@@ -119,6 +125,7 @@ function loadedContext(over: Record<string, unknown> = {}) {
     ],
     activeQuestionKey: null,
     byId: new Map(),
+    meta: {},
     ...over,
   };
 }
@@ -173,6 +180,14 @@ beforeEach(() => {
   offerMock.streamOfferMessage.mockImplementation(async function* () {
     yield { type: 'content', delta: 'Ready to submit?' };
     return { message: 'Ready to submit?', costUsd: 0.001 };
+  });
+  // Phrasing on by default in these tests (all sub-flags true): echo the verbatim prompt so
+  // existing content assertions hold; the real fail-soft/streaming is covered in question-stream.test.ts.
+  questionMock.streamQuestionMessage.mockImplementation(async function* (opts: {
+    input: { prompt: string };
+  }) {
+    yield { type: 'content', delta: opts.input.prompt };
+    return { message: opts.input.prompt, costUsd: 0 };
   });
   turnsMock.sumSessionTurnCost.mockResolvedValue(0);
   sessionsMock.recordCostCapReached.mockResolvedValue(undefined);
@@ -277,6 +292,34 @@ describe('streaming a question turn', () => {
         userMessage: 'I do marketing',
       })
     );
+  });
+
+  it('runs the conversational phraser (with the verbatim prompt + last message) when phrasing is on', async () => {
+    await drainSse(await POST(req({ message: 'I do marketing' }), ctx));
+
+    expect(questionMock.streamQuestionMessage).toHaveBeenCalledTimes(1);
+    const arg = questionMock.streamQuestionMessage.mock.calls[0][0] as {
+      input: { prompt: string; lastUserMessage: string; isOpening: boolean };
+    };
+    expect(arg.input.prompt).toBe('What is your role?');
+    expect(arg.input.lastUserMessage).toBe('I do marketing');
+    // No prior turns in the fixture (selectionRound 0) → this is the opening question.
+    expect(arg.input.isOpening).toBe(true);
+  });
+
+  it('falls back to the verbatim prompt (no phraser) when question phrasing is disabled', async () => {
+    vi.mocked(isFeatureEnabled).mockImplementation((name: string) =>
+      Promise.resolve(name !== APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG)
+    );
+
+    const events = await drainSse(await POST(req({ message: 'I do marketing' }), ctx));
+
+    expect(questionMock.streamQuestionMessage).not.toHaveBeenCalled();
+    const text = events
+      .filter((e) => e.event === 'content')
+      .map((e) => (e.data as { delta: string }).delta)
+      .join('');
+    expect(text).toBe('What is your role?');
   });
 });
 
