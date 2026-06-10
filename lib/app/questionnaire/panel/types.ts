@@ -60,6 +60,29 @@ export interface PanelSectionView {
   slots: PanelSlotView[];
 }
 
+/**
+ * One data slot in the respondent panel (Data Slots feature). Shows the short name, the
+ * agent's paraphrase of the respondent's position, and a confidence indicator. The underlying
+ * question answers stay hidden — the respondent sees only this abstraction layer.
+ */
+export interface DataSlotPanelSlot {
+  key: string;
+  name: string;
+  description: string;
+  /** The agent's restatement of the respondent's position, or null when not yet filled. */
+  paraphrase: string | null;
+  /** 0–1; null when not yet filled. */
+  confidence: number | null;
+  /** True once a fill (≥ the filled threshold) exists for this slot. */
+  filled: boolean;
+}
+
+/** A themed group of data slots (the panel groups by the generator's theme). */
+export interface DataSlotPanelGroup {
+  theme: string;
+  slots: DataSlotPanelSlot[];
+}
+
 /** The full panel state for a session. */
 export interface AnswerPanelView {
   status: SessionStatus;
@@ -73,4 +96,11 @@ export interface AnswerPanelView {
    * pending prompts themselves.
    */
   totalCount: number;
+  /**
+   * Data Slots feature: when present, the panel renders these themed data-slot groups instead
+   * of the question sections (the respondent-facing abstraction layer). `answeredCount` /
+   * `totalCount` then track the BACKGROUND QUESTIONS (so the header + progress bar reflect the
+   * deliverable), while these rows show the data-slot paraphrases + confidence.
+   */
+  dataSlotGroups?: DataSlotPanelGroup[];
 }

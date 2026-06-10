@@ -27,7 +27,12 @@ import {
   type PanelAnswerInput,
   type PanelSectionInput,
 } from '@/lib/app/questionnaire/panel/answer-panel';
-import type { AnswerPanelView, PanelRefinementEntry } from '@/lib/app/questionnaire/panel/types';
+import type {
+  AnswerPanelView,
+  DataSlotPanelGroup,
+  PanelRefinementEntry,
+} from '@/lib/app/questionnaire/panel/types';
+import { DATA_SLOT_FILLED_THRESHOLD } from '@/lib/app/questionnaire/orchestrator';
 
 /** What the route needs: access fields + the rendered panel view. */
 export interface LoadedAnswerPanel {
@@ -48,9 +53,15 @@ function asPanelScope(value: string | null | undefined): AnswerSlotPanelScope {
 }
 
 /**
- * Load a session's answer-panel state. `null` when the session doesn't exist.
+ * Load a session's answer-panel state. `null` when the session doesn't exist. When
+ * `dataSlotMode` is on, the view's `dataSlotGroups` carries the themed data-slot rows (the
+ * respondent-facing abstraction layer) and `answeredCount`/`totalCount` track the background
+ * questions; the question section rows are suppressed (the respondent never sees raw answers).
  */
-export async function loadAnswerPanelState(sessionId: string): Promise<LoadedAnswerPanel | null> {
+export async function loadAnswerPanelState(
+  sessionId: string,
+  dataSlotMode = false
+): Promise<LoadedAnswerPanel | null> {
   const row = await prisma.appQuestionnaireSession.findUnique({
     where: { id: sessionId },
     select: {
@@ -60,6 +71,11 @@ export async function loadAnswerPanelState(sessionId: string): Promise<LoadedAns
       version: {
         select: {
           config: { select: { answerSlotPanelScope: true } },
+          // Data Slots feature: the version's data slots (rendered when dataSlotMode).
+          dataSlots: {
+            orderBy: { ordinal: 'asc' },
+            select: { id: true, key: true, name: true, description: true, theme: true },
+          },
           sections: {
             orderBy: { ordinal: 'asc' },
             select: {
@@ -83,6 +99,10 @@ export async function loadAnswerPanelState(sessionId: string): Promise<LoadedAns
           refinementHistory: true,
           questionSlot: { select: { key: true } },
         },
+      },
+      // Data Slots feature: the session's fills (the respondent-facing capture).
+      dataSlotFills: {
+        select: { dataSlotId: true, paraphrase: true, confidence: true },
       },
       turns: { select: { id: true, ordinal: true } },
     },
@@ -120,6 +140,42 @@ export async function loadAnswerPanelState(sessionId: string): Promise<LoadedAns
     sections,
     answers,
   });
+
+  // Data Slots feature: when in data-slot mode, replace the question rows with themed data-slot
+  // groups (paraphrase + confidence). The header/progress keep tracking the BACKGROUND questions
+  // — the respondent sees the abstraction layer, never the raw question answers.
+  if (dataSlotMode && row.version.dataSlots.length > 0) {
+    const fillByDataSlotId = new Map(
+      row.dataSlotFills.map((f) => [
+        f.dataSlotId,
+        { paraphrase: f.paraphrase, confidence: f.confidence },
+      ])
+    );
+    const groups: DataSlotPanelGroup[] = [];
+    const byTheme = new Map<string, DataSlotPanelGroup>();
+    for (const ds of row.version.dataSlots) {
+      const fill = fillByDataSlotId.get(ds.id);
+      const filled = (fill?.confidence ?? 0) >= DATA_SLOT_FILLED_THRESHOLD;
+      let group = byTheme.get(ds.theme);
+      if (!group) {
+        group = { theme: ds.theme, slots: [] };
+        byTheme.set(ds.theme, group);
+        groups.push(group);
+      }
+      group.slots.push({
+        key: ds.key,
+        name: ds.name,
+        description: ds.description,
+        paraphrase: fill?.paraphrase ?? null,
+        confidence: fill?.confidence ?? null,
+        filled,
+      });
+    }
+    view.dataSlotGroups = groups;
+    // Question rows are suppressed in data-slot mode; the header/progress use the question counts
+    // (answeredCount/totalCount) which the pure builder already computed from `answers`/`sections`.
+    view.sections = [];
+  }
 
   return { session: { id: row.id, respondentUserId: row.respondentUserId }, view };
 }
