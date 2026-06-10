@@ -23,7 +23,12 @@ import {
 } from '@/lib/app/questionnaire/types';
 import { toConfigView, CONFIG_SELECT } from '@/app/api/v1/app/questionnaires/_lib/detail';
 import type { AnsweredView, QuestionView } from '@/lib/app/questionnaire/selection';
-import type { ExistingAnswerView, TurnState } from '@/lib/app/questionnaire/orchestrator';
+import type {
+  DataSlotAnsweredView,
+  DataSlotTarget,
+  ExistingAnswerView,
+  TurnState,
+} from '@/lib/app/questionnaire/orchestrator';
 
 /** How many prior turns of transcript to feed the capabilities (oldest → newest). */
 const RECENT_TURNS_WINDOW = 12;
@@ -107,6 +112,19 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
           goal: true,
           audience: true,
           config: { select: CONFIG_SELECT },
+          // Data Slots feature: the version's data slots (the abstraction-layer targets).
+          dataSlots: {
+            orderBy: { ordinal: 'asc' },
+            select: {
+              id: true,
+              key: true,
+              name: true,
+              description: true,
+              theme: true,
+              ordinal: true,
+              weight: true,
+            },
+          },
           sections: {
             orderBy: { ordinal: 'asc' },
             select: {
@@ -140,6 +158,8 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
           questionSlot: { select: { id: true, key: true } },
         },
       },
+      // Data Slots feature: this session's data-slot fills (the respondent-facing capture).
+      dataSlotFills: { select: { dataSlotId: true, confidence: true } },
       turns: {
         orderBy: { ordinal: 'desc' },
         take: RECENT_TURNS_WINDOW,
@@ -203,10 +223,40 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
     if (turn.agentResponse.trim().length > 0) recentMessages.push(turn.agentResponse);
   }
 
-  // The active question is whatever the most recent turn asked for (newest-first → [0]).
+  // Data Slots feature: the version's data slots, theme-grouped (stable: theme first-seen order,
+  // then ordinal) for topic-local targeting. `dataSlotAnswered` is the per-session fill state.
+  const themeOrder = new Map<string, number>();
+  for (const ds of session.version.dataSlots) {
+    if (!themeOrder.has(ds.theme)) themeOrder.set(ds.theme, themeOrder.size);
+  }
+  const dataSlots: DataSlotTarget[] = session.version.dataSlots
+    .map((ds) => ({
+      id: ds.id,
+      key: ds.key,
+      name: ds.name,
+      description: ds.description,
+      theme: ds.theme,
+      ordinal: ds.ordinal,
+      weight: ds.weight,
+    }))
+    .sort((a, b) => {
+      const ta = themeOrder.get(a.theme) ?? 0;
+      const tb = themeOrder.get(b.theme) ?? 0;
+      return ta !== tb ? ta - tb : a.ordinal - b.ordinal;
+    });
+  const dataSlotAnswered: DataSlotAnsweredView[] = session.dataSlotFills.map((f) => ({
+    dataSlotId: f.dataSlotId,
+    confidence: f.confidence,
+  }));
+  const byDataSlotId = new Map(dataSlots.map((s) => [s.id, s]));
+
+  // The active target is whatever the most recent turn asked for (newest-first → [0]). The
+  // generic `targetedQuestionId` column holds a QUESTION id in question mode and a DATA-SLOT id
+  // in data-slot mode — resolve against both maps; at most one matches.
   const lastTargetedId = session.turns[0]?.targetedQuestionId ?? null;
   const byId = new Map(questions.map((q) => [q.id, q]));
   const activeQuestionKey = lastTargetedId ? (byId.get(lastTargetedId)?.key ?? null) : null;
+  const activeDataSlotKey = lastTargetedId ? (byDataSlotId.get(lastTargetedId)?.key ?? null) : null;
 
   const { saved: _saved, ...config } = toConfigView(session.version.config);
   void _saved;
@@ -231,6 +281,11 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
       answered,
       existingAnswers,
       recentMessages,
+      // Data Slots feature: present always (cheap); the route decides whether to run data-slot
+      // mode (flag on + dataSlots non-empty). The pure orchestrators read these only in that mode.
+      dataSlots,
+      dataSlotAnswered,
+      activeDataSlotKey,
       // Monotonic per-turn counter (the engine contract selection-context.ts calls out):
       // the TRUE number of turns already taken (not the windowed `turns` array, whose length
       // saturates at RECENT_TURNS_WINDOW), so the `random` strategy's session+round seed keeps

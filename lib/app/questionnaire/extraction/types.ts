@@ -80,6 +80,12 @@ export interface ExtractionContext {
   /** The respondent's message to extract from (the current turn). */
   userMessage: string;
   /**
+   * Data Slots feature: the version's data slots to ALSO fill this turn (the abstraction
+   * layer). When present, the extractor emits `dataSlotFills` alongside the question answers
+   * in one call. Absent in question-only mode (the prompt then omits the data-slot section).
+   */
+  dataSlotCandidates?: DataSlotCandidateView[];
+  /**
    * Recent transcript, oldest → newest, for disambiguating references. Optional;
    * the extractor works off `userMessage` alone when absent.
    */
@@ -100,6 +106,38 @@ export interface ExtractionAttachment {
   name: string;
   mediaType: string;
   data: string;
+}
+
+/**
+ * A data slot projected into the shape the extractor reads (Data Slots feature). When present
+ * in the {@link ExtractionContext}, the extractor ALSO scans the message for data-slot fills —
+ * the respondent-facing capture — alongside the background question answers, in the same call.
+ */
+export interface DataSlotCandidateView {
+  /** Stable per-version slug — how fills address a slot. */
+  key: string;
+  /** Short (1–4 word) name — the human target. */
+  name: string;
+  /** What the slot captures + why (guides what counts as filled). */
+  description: string;
+  /** Group label (for the model's sense of the area). */
+  theme: string;
+}
+
+/**
+ * A normalised data-slot fill intent (Data Slots feature) — the abstraction-layer analogue of
+ * {@link AnswerSlotIntent}. `paraphrase` is a short natural-language restatement of the
+ * respondent's position toward the slot (shown in the panel); `confidence` is how well the
+ * agent believes it understands them. Addressed by `dataSlotKey`; the route resolves it to an
+ * `AppDataSlot.id` and upserts a per-session fill.
+ */
+export interface DataSlotFillIntent {
+  dataSlotKey: string;
+  value: unknown;
+  paraphrase: string;
+  confidence: number;
+  provenance: AnswerProvenance;
+  rationale?: string;
 }
 
 /**

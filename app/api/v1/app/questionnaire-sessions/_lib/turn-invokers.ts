@@ -78,8 +78,10 @@ export async function buildTurnInvokers(opts: {
   slots: CapabilitySlotView[];
   activeQuestionKey: string | null;
   adaptiveEnabled: boolean;
+  /** Data Slots feature: the data slots to also fill (omit for question-only mode). */
+  dataSlotCandidates?: Array<{ key: string; name: string; description: string; theme: string }>;
 }): Promise<CapabilityInvokers> {
-  const { userId, slots, activeQuestionKey, adaptiveEnabled } = opts;
+  const { userId, slots, activeQuestionKey, adaptiveEnabled, dataSlotCandidates } = opts;
 
   // Flush the built-in + app capability handlers into the dispatcher before any
   // invoker dispatches. The turn loop calls `capabilityDispatcher.dispatch()` directly
@@ -117,6 +119,8 @@ export async function buildTurnInvokers(opts: {
           ...(state.attachments && state.attachments.length > 0
             ? { attachments: state.attachments }
             : {}),
+          // Data Slots feature: when present, the same call also returns data-slot fills.
+          ...(dataSlotCandidates && dataSlotCandidates.length > 0 ? { dataSlotCandidates } : {}),
           sessionId: state.sessionId,
         },
         {
@@ -136,7 +140,12 @@ export async function buildTurnInvokers(opts: {
         };
       }
       const data = dispatch.data as ExtractAnswerSlotsData;
-      return { intents: data.intents, costUsd: data.costUsd ?? 0, latencyMs };
+      return {
+        intents: data.intents,
+        dataSlotFills: data.dataSlotFills ?? [],
+        costUsd: data.costUsd ?? 0,
+        latencyMs,
+      };
     },
 
     async detectContradictions(state): Promise<DetectOutcome> {
