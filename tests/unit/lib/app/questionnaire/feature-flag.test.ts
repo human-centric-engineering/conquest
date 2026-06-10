@@ -13,6 +13,7 @@ import {
   APP_QUESTIONNAIRES_VOICE_INPUT_FLAG,
   APP_QUESTIONNAIRES_COST_CAP_FLAG,
   APP_QUESTIONNAIRES_ATTACHMENT_INPUT_FLAG,
+  APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG,
   ensureQuestionnairesEnabled,
   ensureLiveSessionsEnabled,
   ensureVoiceInputEnabled,
@@ -30,6 +31,7 @@ import {
   isVoiceInputEnabled,
   isAttachmentInputEnabled,
   isCostCapEnforcementEnabled,
+  isQuestionPhrasingEnabled,
 } from '@/lib/app/questionnaire/feature-flag';
 import { isFeatureEnabled } from '@/lib/feature-flags';
 
@@ -50,7 +52,7 @@ function setFlags(enabled: Record<string, boolean>): void {
   );
 }
 
-/** All eleven flag names, used to build "everything on" baselines. */
+/** All twelve flag names, used to build "everything on" baselines. */
 const ALL_FLAGS = [
   APP_QUESTIONNAIRES_FLAG,
   APP_QUESTIONNAIRES_ADAPTIVE_FLAG,
@@ -63,6 +65,7 @@ const ALL_FLAGS = [
   APP_QUESTIONNAIRES_VOICE_INPUT_FLAG,
   APP_QUESTIONNAIRES_COST_CAP_FLAG,
   APP_QUESTIONNAIRES_ATTACHMENT_INPUT_FLAG,
+  APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG,
 ] as const;
 
 /** A map with every flag on (the baseline each truth-table test perturbs from). */
@@ -98,6 +101,9 @@ describe('questionnaire feature flag — flag names are stable', () => {
     expect(APP_QUESTIONNAIRES_COST_CAP_FLAG).toBe('APP_QUESTIONNAIRES_COST_CAP_ENABLED');
     expect(APP_QUESTIONNAIRES_ATTACHMENT_INPUT_FLAG).toBe(
       'APP_QUESTIONNAIRES_ATTACHMENT_INPUT_ENABLED'
+    );
+    expect(APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG).toBe(
+      'APP_QUESTIONNAIRES_QUESTION_PHRASING_ENABLED'
     );
   });
 });
@@ -188,6 +194,15 @@ const SUB_FLAG_RESOLVERS: ReadonlyArray<{
       APP_QUESTIONNAIRES_COST_CAP_FLAG,
     ],
   },
+  {
+    name: 'isQuestionPhrasingEnabled',
+    fn: isQuestionPhrasingEnabled,
+    requires: [
+      APP_QUESTIONNAIRES_FLAG,
+      APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG,
+      APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG,
+    ],
+  },
 ];
 
 describe('sub-flag resolvers — truth tables', () => {
@@ -237,6 +252,7 @@ describe('sub-flag independence — one flag off suppresses only its own surface
     { flag: APP_QUESTIONNAIRES_VOICE_INPUT_FLAG, resolver: isVoiceInputEnabled },
     { flag: APP_QUESTIONNAIRES_ATTACHMENT_INPUT_FLAG, resolver: isAttachmentInputEnabled },
     { flag: APP_QUESTIONNAIRES_COST_CAP_FLAG, resolver: isCostCapEnforcementEnabled },
+    { flag: APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG, resolver: isQuestionPhrasingEnabled },
   ];
 
   for (const { flag, resolver } of INDEPENDENT_PAIRS) {
@@ -267,8 +283,8 @@ describe('sub-flag independence — one flag off suppresses only its own surface
   });
 });
 
-describe('live-sessions cascade — turning the parent off closes the live-dependent trio', () => {
-  it('live-sessions off ⇒ voice, attachment, and cost-cap all false even with their sub-flags on', async () => {
+describe('live-sessions cascade — turning the parent off closes the live-dependent group', () => {
+  it('live-sessions off ⇒ voice, attachment, cost-cap, and phrasing all false even with their sub-flags on', async () => {
     const flags = allOn();
     flags[APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG] = false;
     setFlags(flags);
@@ -277,6 +293,7 @@ describe('live-sessions cascade — turning the parent off closes the live-depen
     await expect(isVoiceInputEnabled()).resolves.toBe(false);
     await expect(isAttachmentInputEnabled()).resolves.toBe(false);
     await expect(isCostCapEnforcementEnabled()).resolves.toBe(false);
+    await expect(isQuestionPhrasingEnabled()).resolves.toBe(false);
   });
 
   it('master off ⇒ every resolver false (transitive close)', async () => {

@@ -78,7 +78,9 @@ The F7.1 chat surface is the second consumer (via `themeToCssVariables`).
 `onDelete: SetNull` with a reverse `questionnaires` relation, **plus an app-layer
 409 guard**:
 
-- The reverse relation powers the list `questionnaireCount` and the delete guard.
+- The reverse relation powers the list `questionnaireCount`, the delete guard, and the
+  detail page's attributed-questionnaire list (each row links to the questionnaire editor,
+  where the picker detaches/reassigns — so the guard's "detach or reassign first" has a destination).
 - `DELETE /demo-clients/:id` **refuses with 409 `DEMO_CLIENT_IN_USE`** while any
   questionnaire is attributed — the admin must detach/reassign first. This is the
   happy-path UX; `SetNull` is the schema-honest backstop (a delete that bypassed
@@ -89,15 +91,15 @@ The F7.1 chat surface is the second consumer (via `themeToCssVariables`).
 All routes are flag-gated (`404` when `APP_QUESTIONNAIRES_ENABLED` is off, before
 auth), `withAdminAuth` (401/403), and audited. Registry: `API.APP.DEMO_CLIENTS`.
 
-| Method + path                                      | Purpose                             | Notable codes                                               |
-| -------------------------------------------------- | ----------------------------------- | ----------------------------------------------------------- |
-| `GET /api/v1/app/demo-clients`                     | List (active + inactive)            | —                                                           |
-| `POST /api/v1/app/demo-clients`                    | Create                              | `409 SLUG_CONFLICT`                                         |
-| `GET /api/v1/app/demo-clients/:id`                 | Detail                              | `404`                                                       |
-| `PATCH /api/v1/app/demo-clients/:id`               | Edit any identity or theme field    | `404`, `409 SLUG_CONFLICT`                                  |
-| `DELETE /api/v1/app/demo-clients/:id`              | Delete (guarded)                    | `404`, `409 DEMO_CLIENT_IN_USE`                             |
-| `POST /api/v1/app/demo-clients/:id/reset-sessions` | Reset session graph (F6.4)          | `400 CONFIRM_SLUG_MISMATCH`, `409 ANONYMOUS_MODE_PROTECTED` |
-| `PATCH /api/v1/app/questionnaires/:id`             | Attribute / detach (`demoClientId`) | `404`, `404 DEMO_CLIENT_NOT_FOUND`                          |
+| Method + path                                      | Purpose                                  | Notable codes                                               |
+| -------------------------------------------------- | ---------------------------------------- | ----------------------------------------------------------- |
+| `GET /api/v1/app/demo-clients`                     | List (active + inactive)                 | —                                                           |
+| `POST /api/v1/app/demo-clients`                    | Create                                   | `409 SLUG_CONFLICT`                                         |
+| `GET /api/v1/app/demo-clients/:id`                 | Detail (+ attributed-questionnaire list) | `404`                                                       |
+| `PATCH /api/v1/app/demo-clients/:id`               | Edit any identity or theme field         | `404`, `409 SLUG_CONFLICT`                                  |
+| `DELETE /api/v1/app/demo-clients/:id`              | Delete (guarded)                         | `404`, `409 DEMO_CLIENT_IN_USE`                             |
+| `POST /api/v1/app/demo-clients/:id/reset-sessions` | Reset session graph (F6.4)               | `400 CONFIRM_SLUG_MISMATCH`, `409 ANONYMOUS_MODE_PROTECTED` |
+| `PATCH /api/v1/app/questionnaires/:id`             | Attribute / detach (`demoClientId`)      | `404`, `404 DEMO_CLIENT_NOT_FOUND`                          |
 
 **Slug is derive-with-override:** omit it on create and the server derives a
 kebab-case slug from the name (`slugifyDemoClient`); supply it to override. A
@@ -116,7 +118,8 @@ a typed-confirmation guard and an anonymous-mode refusal. See
 - `/admin/demo-clients` — list + "New demo client".
 - `/admin/demo-clients/new` — create form.
 - `/admin/demo-clients/:id` — edit form + delete (disabled with an explanation
-  while attributed).
+  while attributed) + an **"Attributed questionnaires"** list (each row links to the
+  questionnaire editor) so the admin can act on the delete guard's instruction.
 - Both forms carry an **"Invitation branding"** fieldset (F3.4): CTA colour, accent
   colour, logo URL, welcome copy — each optional with a `<FieldHelp>`; blank = the
   Sunrise default. The edit form shows a **live `<DemoClientThemePreview>`** under the

@@ -222,6 +222,40 @@ export async function createSessionForVersion(
 }
 
 /**
+ * Create an admin **preview** session for a launched version — the "Preview as respondent"
+ * walkthrough. Unlike {@link createAnonymousSession} it does NOT require `anonymousMode`: an
+ * admin may preview any launched questionnaire, invitation-gated or not. The session is
+ * marked `isPreview: true` so it is excluded from analytics (the `isPreview: false` filter in
+ * `lib/app/questionnaire/analytics/**`), exactly like the F4.4/F4.5 design-time preview. It's
+ * left user-less (`respondentUserId: null`) and access is proven by the signed token the
+ * route mints — so the token-based turn path (`turn-access.ts`) drives it identically to the
+ * no-login surface, regardless of anonymous mode. No resume: each preview mints a fresh
+ * session. The calling route is admin-gated; this seam itself trusts the caller.
+ */
+export async function createPreviewSession(versionId: string): Promise<CreateSessionResult> {
+  const version = await prisma.appQuestionnaireVersion.findUnique({
+    where: { id: versionId },
+    select: { id: true, status: true },
+  });
+
+  // Preview mirrors the live respondent surface, which only serves launched versions.
+  if (!version || version.status !== 'launched') {
+    return { ok: false, status: 404, code: 'NOT_FOUND', message: 'Questionnaire not found' };
+  }
+
+  const session = await prisma.$transaction(async (tx) => {
+    const created = await tx.appQuestionnaireSession.create({
+      data: { versionId, respondentUserId: null, isPreview: true, status: 'active' },
+      select: { id: true, status: true, versionId: true },
+    });
+    await recordSessionCreated(created.id, { tx, reason: 'admin_preview' });
+    return created;
+  });
+
+  return { ok: true, session, resumed: false };
+}
+
+/**
  * Create a NO-LOGIN anonymous session for a launched `anonymousMode` version — the public
  * pop-up/demo surface (F6.1, PR6). Unlike the authenticated paths, `respondentUserId` is
  * left null; access is later proven by the signed token the route mints. No resume here:

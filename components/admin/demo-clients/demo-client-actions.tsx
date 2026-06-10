@@ -61,9 +61,10 @@ export function DemoClientActions({ id, name, questionnaireCount }: DemoClientAc
           <Trash2 className="mr-2 h-4 w-4" />
           Delete
         </Button>
-        <p className="text-muted-foreground text-xs">
-          Detach or reassign {questionnaireCount} attributed{' '}
-          {questionnaireCount === 1 ? 'questionnaire' : 'questionnaires'} before deleting.
+        <p className="text-muted-foreground max-w-[15rem] text-right text-xs">
+          Detach or reassign the {questionnaireCount} attributed{' '}
+          {questionnaireCount === 1 ? 'questionnaire' : 'questionnaires'} listed below before
+          deleting.
         </p>
       </div>
     );

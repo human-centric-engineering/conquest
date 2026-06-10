@@ -13,6 +13,8 @@
  * (F3.4) are DEMO-ONLY branding — a fork that drops demo tenancy drops them too.
  */
 
+import type { AppQuestionnaireStatus } from '@/lib/app/questionnaire/types';
+
 /** One row in the admin demo-clients list (and the full detail — same shape today). */
 export interface DemoClientView {
   id: string;
@@ -41,13 +43,25 @@ export interface DemoClientView {
   updatedAt: string;
 }
 
+/** One attributed questionnaire row on a demo client's detail page — links to its editor. */
+export interface AttributedQuestionnaireRow {
+  id: string;
+  /** Questionnaire title (the link label). */
+  title: string;
+  /** Lifecycle status — drives the status badge. */
+  status: AppQuestionnaireStatus;
+}
+
 /**
- * Detail is the same shape as a list row — kept as a distinct alias so a later phase
- * can widen detail (e.g. the attributed-questionnaire list) without touching the list
- * contract. (F3.4 added the theme fields to the shared view: the edit form prefills
- * them and the small demo-clients list tolerates the extra columns.)
+ * Detail widens the list row with the attributed-questionnaire list. The delete guard
+ * refuses while any questionnaire is attributed, so the detail page renders this list
+ * — each row links to the questionnaire's editor, where the "Demo client" picker
+ * detaches ("None") or reassigns it. Empty when nothing is attributed (delete is allowed).
+ * (F3.4 added the theme fields to the shared list view; the edit form prefills them.)
  */
-export type DemoClientDetail = DemoClientView;
+export interface DemoClientDetail extends DemoClientView {
+  questionnaires: AttributedQuestionnaireRow[];
+}
 
 /**
  * Compact attribution summary embedded in a questionnaire list/detail row — what

@@ -37,6 +37,7 @@ import {
   isAttachmentInputEnabled,
   isContradictionDetectionEnabled,
   isCostCapEnforcementEnabled,
+  isQuestionPhrasingEnabled,
   withLiveSessionsEnabled,
 } from '@/lib/app/questionnaire/feature-flag';
 import { classifyCostCap } from '@/lib/app/questionnaire/session';
@@ -53,6 +54,7 @@ import {
 import { buildTurnInvokers } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-invokers';
 import { persistTurn } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-run';
 import { streamOfferMessage } from '@/app/api/v1/app/questionnaire-sessions/_lib/offer-stream';
+import { streamQuestionMessage } from '@/app/api/v1/app/questionnaire-sessions/_lib/question-stream';
 import { resolveTurnAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-access';
 
 const bodySchema = z.object({
@@ -148,15 +150,23 @@ async function handleMessage(
     }
 
     // Resolve the per-step flags (async DB reads) up front, so the pure core stays sync.
-    const [extraction, contradiction, refinement, completion, adaptive, attachmentInput] =
-      await Promise.all([
-        isAnswerExtractionEnabled(),
-        isContradictionDetectionEnabled(),
-        isAnswerRefinementEnabled(),
-        isCompletionEnabled(),
-        isAdaptiveSelectionEnabled(),
-        isAttachmentInputEnabled(),
-      ]);
+    const [
+      extraction,
+      contradiction,
+      refinement,
+      completion,
+      adaptive,
+      attachmentInput,
+      questionPhrasing,
+    ] = await Promise.all([
+      isAnswerExtractionEnabled(),
+      isContradictionDetectionEnabled(),
+      isAnswerRefinementEnabled(),
+      isCompletionEnabled(),
+      isAdaptiveSelectionEnabled(),
+      isAttachmentInputEnabled(),
+      isQuestionPhrasingEnabled(),
+    ]);
 
     // Attachments only flow when the sub-flag is on (dark-launch): with it off, a client
     // that sends attachments anyway gets a text-only turn — the paid multimodal path stays shut.
@@ -181,6 +191,10 @@ async function handleMessage(
     });
 
     const keyToSlotId = new Map(loaded.slots.map((s) => [s.key, s.id]));
+    // Hoist the conversational-phraser inputs out of `loaded` (narrowed non-null here) so the
+    // async generator below — where TS loses the narrowing — closes over plain values.
+    const slotById = new Map(loaded.slots.map((s) => [s.id, s]));
+    const { byId, activeQuestionKey, meta } = loaded;
 
     log.info('Live turn started', { sessionId, versionId: loaded.session.versionId, userId });
 
@@ -192,9 +206,11 @@ async function handleMessage(
       // Side-band frames the core determined (contradiction warnings, fail-soft notices).
       for (const ev of result.events) yield ev;
 
-      // Render the reply: an offer turn streams its prose token-by-token off the provider
-      // (the offer composer); a question/terminal turn carries deterministic text emitted as
-      // chunked content. Track any extra (offer) spend to fold into the turn's cost.
+      // Render the reply: an offer turn streams its prose token-by-token off the provider (the
+      // offer composer); a question turn streams a conversational rendering of the prompt when
+      // phrasing is on (fail-soft to verbatim inside the helper), else carries deterministic text
+      // emitted as chunked content; terminal turns are always deterministic. Track any extra
+      // (offer/phrasing) spend to fold into the turn's cost.
       let agentResponse: string;
       let extraCostUsd = 0;
       if (result.response.kind === 'offer') {
@@ -205,6 +221,34 @@ async function handleMessage(
         });
         agentResponse = offer.message;
         extraCostUsd = offer.costUsd;
+      } else if (result.response.kind === 'question' && questionPhrasing) {
+        // Conversational interviewer pass: acknowledge the prior answer + ask the targeted
+        // question naturally. Re-ask = this turn re-selected the question the previous turn
+        // asked (its answer wasn't captured); opening = the first turn of the session.
+        const targetedKey = result.targetedQuestionId
+          ? (byId.get(result.targetedQuestionId)?.key ?? null)
+          : null;
+        const slot = result.targetedQuestionId
+          ? slotById.get(result.targetedQuestionId)
+          : undefined;
+        const phrased = yield* streamQuestionMessage({
+          input: {
+            prompt: result.response.text,
+            type: slot?.type ?? 'free_text',
+            ...(slot?.typeConfig !== undefined ? { typeConfig: slot.typeConfig } : {}),
+            ...(slot?.guidelines ? { guidelines: slot.guidelines } : {}),
+            ...(meta.goal ? { goal: meta.goal } : {}),
+            ...(meta.audience ? { audience: meta.audience } : {}),
+            recentMessages: state.recentMessages,
+            lastUserMessage: body.message,
+            isReask: targetedKey !== null && targetedKey === activeQuestionKey,
+            isOpening: state.selectionRound === 0,
+          },
+          userId,
+          sessionId,
+        });
+        agentResponse = phrased.message;
+        extraCostUsd = phrased.costUsd;
       } else {
         agentResponse = result.response.text;
         for (const delta of chunkText(agentResponse)) yield { type: 'content', delta };

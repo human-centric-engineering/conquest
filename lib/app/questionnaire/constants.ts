@@ -510,6 +510,33 @@ export const APP_QUESTIONNAIRES_ATTACHMENT_INPUT_FLAG =
   'APP_QUESTIONNAIRES_ATTACHMENT_INPUT_ENABLED';
 
 /**
+ * Sub-flag gating **conversational question phrasing** — the interviewer pass that renders the
+ * next question as warm, natural prose (acknowledging the prior answer, calibrating tone to the
+ * audience/locale, and re-asking conversationally) instead of surfacing the raw question prompt
+ * verbatim. This restores the originally-planned "warm conversational interviewer" voice that
+ * F6.1's deterministic orchestrator dropped when it chose the app-native pipeline over
+ * `streamChat`. Disabled by default: it spends one extra LLM call per asked question, so an
+ * operator opts in deliberately — the same reasoning as the F4 sub-flags. Requires the master
+ * flag AND the live-sessions flag (phrasing only applies inside the live `/messages` turn loop)
+ * AND this sub-flag; when off, the route falls back to the verbatim prompt (no extra spend, no
+ * behaviour change). Fail-soft at runtime too: a missing agent/provider or a stream error drops
+ * back to the verbatim prompt, so a question is never lost. Seeded by
+ * `prisma/seeds/app-questionnaire/027-question-phrasing-flag.ts`.
+ */
+export const APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG =
+  'APP_QUESTIONNAIRES_QUESTION_PHRASING_ENABLED';
+
+/**
+ * Slug of the conversational **interviewer** agent that phrases asked questions (the question
+ * analogue of {@link QUESTIONNAIRE_COMPLETION_AGENT_SLUG}). Dispatched programmatically by the
+ * live `/messages` route's question-stream helper — never a chat tool loop. Carries its own
+ * provider-agnostic binding + budget; ships with empty model/provider so it resolves at runtime
+ * via `agent-resolver.ts` (the snappy `chat` tier). Seeded by
+ * `prisma/seeds/app-questionnaire/026-interviewer-agent.ts`.
+ */
+export const QUESTIONNAIRE_INTERVIEWER_AGENT_SLUG = 'app-questionnaire-interviewer';
+
+/**
  * Slug of the evaluate-structure capability (F5.1). One source of truth shared by the
  * `BaseCapability` subclass, its `AiCapability` seed row, and the evaluate-preview
  * route that dispatches it once per dimension. Snake_case with the fork-owned `app_`

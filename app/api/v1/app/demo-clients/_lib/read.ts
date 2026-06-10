@@ -12,6 +12,7 @@ import { Prisma } from '@prisma/client';
 
 import { prisma } from '@/lib/db/client';
 import type { DemoClientDetail, DemoClientView } from '@/lib/app/questionnaire/demo-clients';
+import { APP_QUESTIONNAIRE_STATUSES, narrowToEnum } from '@/lib/app/questionnaire/types';
 
 /**
  * Selection shared by every demo-client read/write serializer — identity columns
@@ -36,6 +37,23 @@ export const DEMO_CLIENT_SELECT = {
 } as const;
 
 type DemoClientRow = Prisma.AppDemoClientGetPayload<{ select: typeof DEMO_CLIENT_SELECT }>;
+
+/**
+ * Detail read adds the attributed-questionnaire list to the shared selection — the rows
+ * the detail page links to so the delete guard's "detach or reassign first" has a
+ * destination. Newest-first; identity-only columns (no per-version fan-out).
+ */
+const DEMO_CLIENT_DETAIL_SELECT = {
+  ...DEMO_CLIENT_SELECT,
+  questionnaires: {
+    orderBy: { createdAt: 'desc' },
+    select: { id: true, title: true, status: true },
+  },
+} as const satisfies Prisma.AppDemoClientSelect;
+
+type DemoClientDetailRow = Prisma.AppDemoClientGetPayload<{
+  select: typeof DEMO_CLIENT_DETAIL_SELECT;
+}>;
 
 /** Project a `DEMO_CLIENT_SELECT` row to the client-safe view (ISO dates, flattened count). */
 export function toDemoClientView(row: DemoClientRow): DemoClientView {
@@ -64,11 +82,23 @@ export async function listDemoClients(): Promise<DemoClientView[]> {
   return rows.map(toDemoClientView);
 }
 
-/** One demo client by id, or `null` when absent (the route maps null → 404). */
+/** Project a detail row to the view, attaching the attributed-questionnaire list. */
+function toDemoClientDetail(row: DemoClientDetailRow): DemoClientDetail {
+  return {
+    ...toDemoClientView(row),
+    questionnaires: row.questionnaires.map((q) => ({
+      id: q.id,
+      title: q.title,
+      status: narrowToEnum(q.status, APP_QUESTIONNAIRE_STATUSES, 'draft'),
+    })),
+  };
+}
+
+/** One demo client by id (with its attributed questionnaires), or `null` when absent (route maps null → 404). */
 export async function getDemoClientDetail(id: string): Promise<DemoClientDetail | null> {
   const row = await prisma.appDemoClient.findUnique({
     where: { id },
-    select: DEMO_CLIENT_SELECT,
+    select: DEMO_CLIENT_DETAIL_SELECT,
   });
-  return row ? toDemoClientView(row) : null;
+  return row ? toDemoClientDetail(row) : null;
 }

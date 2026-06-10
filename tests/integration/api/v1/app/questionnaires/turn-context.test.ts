@@ -195,4 +195,48 @@ describe('buildTurnContext', () => {
     expect(ans).not.toHaveProperty('confidence');
     expect(ans).not.toHaveProperty('rationale');
   });
+
+  it('leaves meta empty when the version has no goal or audience', async () => {
+    // The default fixture version carries neither — meta is an empty object, not undefined,
+    // so the phraser simply has nothing extra to calibrate on.
+    (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(sessionGraph());
+    const loaded = await buildTurnContext('sess-1');
+    expect(loaded!.meta).toEqual({});
+  });
+
+  it('builds meta with the version goal and only the string audience fields', async () => {
+    const graph = sessionGraph();
+    const version = (graph as Record<string, unknown>).version as Record<string, unknown>;
+    version.goal = 'Assess readiness';
+    version.audience = {
+      role: 'CTO',
+      expertiseLevel: 'expert',
+      sensitivity: 'high',
+      locale: 'fr',
+      // Non-string fields are dropped by toTurnAudience, not coerced.
+      headcount: 200,
+      decisionMaker: true,
+    };
+    (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(graph);
+
+    const loaded = await buildTurnContext('sess-1');
+    expect(loaded!.meta).toEqual({
+      goal: 'Assess readiness',
+      audience: { role: 'CTO', expertiseLevel: 'expert', sensitivity: 'high', locale: 'fr' },
+    });
+  });
+
+  it('omits audience when it has no usable string fields, and goal when blank', async () => {
+    const graph = sessionGraph();
+    // A non-null audience whose every field is the wrong type collapses to undefined → omitted.
+    ((graph as Record<string, unknown>).version as Record<string, unknown>).audience = {
+      role: 42,
+      locale: null,
+    };
+    (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(graph);
+
+    const loaded = await buildTurnContext('sess-1');
+    expect(loaded!.meta).not.toHaveProperty('audience');
+    expect(loaded!.meta).not.toHaveProperty('goal');
+  });
 });

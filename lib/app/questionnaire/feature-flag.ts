@@ -12,6 +12,7 @@ import {
   APP_QUESTIONNAIRES_VOICE_INPUT_FLAG,
   APP_QUESTIONNAIRES_COST_CAP_FLAG,
   APP_QUESTIONNAIRES_ATTACHMENT_INPUT_FLAG,
+  APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG,
   APP_QUESTIONNAIRES_FLAG,
 } from '@/lib/app/questionnaire/constants';
 import { isFeatureEnabled } from '@/lib/feature-flags';
@@ -31,6 +32,7 @@ export {
   APP_QUESTIONNAIRES_VOICE_INPUT_FLAG,
   APP_QUESTIONNAIRES_COST_CAP_FLAG,
   APP_QUESTIONNAIRES_ATTACHMENT_INPUT_FLAG,
+  APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG,
 };
 
 /**
@@ -294,6 +296,25 @@ export async function isAttachmentInputEnabled(): Promise<boolean> {
     isFeatureEnabled(APP_QUESTIONNAIRES_ATTACHMENT_INPUT_FLAG),
   ]);
   return app && live && attachments;
+}
+
+/**
+ * Whether **conversational question phrasing** may run — the interviewer pass that renders the
+ * next question as warm, natural prose instead of the verbatim prompt. Like voice/attachments it
+ * depends on live-sessions (phrasing only applies inside the live `/messages` turn loop) and is
+ * an independent opt-in on top (one extra LLM call per asked question). When off, the route
+ * surfaces the verbatim prompt — no extra spend, the pre-existing behaviour. Requires the master
+ * flag AND the live-sessions flag AND the phrasing sub-flag.
+ *
+ * Server-only (resolves the flags from the database).
+ */
+export async function isQuestionPhrasingEnabled(): Promise<boolean> {
+  const [app, live, phrasing] = await Promise.all([
+    isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG),
+  ]);
+  return app && live && phrasing;
 }
 
 /**

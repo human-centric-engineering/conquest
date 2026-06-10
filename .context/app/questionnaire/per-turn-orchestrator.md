@@ -35,8 +35,31 @@ Pipeline (a step is **skipped, not failed**, when its flag/config is off):
 
 The core returns `{ response, targetedQuestionId, sideEffects, events, toolCalls, costUsd,
 contradictions, assessment }`. It does **not** stream — for an offer turn it returns the
-composer input and the route streams the prose (the offer is the only LLM-streamed text;
-question prompts are deterministic).
+composer input and the route streams the prose. A `question` response carries the **verbatim
+prompt** as `text`; whether the respondent sees that verbatim or a conversational rendering of
+it is the route's decision (see Conversational question phrasing below) — the pure core stays
+deterministic and prompt-faithful either way.
+
+## Conversational question phrasing (interviewer)
+
+By default the route streams the question's verbatim `prompt`. With the
+`APP_QUESTIONNAIRES_QUESTION_PHRASING_ENABLED` sub-flag on, a `question` turn instead runs an
+**interviewer pass** (`_lib/question-stream.ts` → `streamQuestionMessage`) that renders the
+targeted question as warm, natural prose — briefly acknowledging the prior answer, calibrating
+tone to the version's `goal`/`audience` (role, expertise, sensitivity, locale), offering a
+choice/Likert question's options naturally, and **re-asking conversationally** when the prior
+answer wasn't captured (`isReask` = this turn re-selected the question the previous turn asked).
+Streamed token-by-token off `provider.chatStream` via the seeded `app-questionnaire-interviewer`
+agent, exactly like the offer composer. This restores the originally-planned interviewer voice
+(`Conversational Questionnaire Phases.md` §Phase 6) that F6.1 dropped when it chose the
+deterministic orchestrator over `streamChat`.
+
+**Fail-soft & cost.** A missing agent, no provider, or a mid-stream error before any token drops
+back to the **verbatim prompt** (a question is never lost). The phrased message is what's
+persisted as the turn's `agentResponse`, so future turns' transcript context reads naturally.
+It's an extra LLM call per asked question, hence the opt-in sub-flag (master + live-sessions +
+phrasing); when off, there's no extra spend and behaviour is unchanged. The version `goal` +
+`audience` reach the route via `buildTurnContext`'s `meta` (the pure core never reads them).
 
 ## The route seam
 
@@ -51,6 +74,9 @@ question prompts are deterministic).
 - **Offer stream** `_lib/offer-stream.ts` (`streamOfferMessage`) is an async generator that
   yields `content` frames off `provider.chatStream` and returns the accumulated message +
   cost; the route delegates with `yield*`.
+- **Question stream** `_lib/question-stream.ts` (`streamQuestionMessage`) is the same shape for
+  the asked question when phrasing is on (see _Conversational question phrasing_); fail-soft to
+  the verbatim prompt.
 - **Persistence** `_lib/turn-run.ts` (`persistTurn`) writes answer side-effects through the
   F4.4 slot seam, then `recordTurn` (firing `lastUpdatedTurnId`). A post-response write
   failure is logged, not retro-failed onto the streamed reply. Refinements take the F4.4

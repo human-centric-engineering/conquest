@@ -1,11 +1,13 @@
 /**
  * AnonymousSessionBoot — client-side bootstrap for the no-login respondent surface (F7.1).
  *
- * Stubs fetch and sessionStorage to test the three boot paths without a real network or
- * browser environment: (1) valid stored token → renders the session workspace directly;
+ * Stubs fetch and sessionStorage to test the boot paths without a real network or browser
+ * environment: (1) valid stored token → renders the session workspace directly;
  * (2) no token → POSTs, on success renders the workspace and writes storage;
  * (3) create failure → renders the error UI with the server message and a "Try again" button;
- * (4) fetch throws → renders the connection error UI.
+ * (4) fetch throws → renders the connection error UI;
+ * (5) StrictMode double-invoke → resolves (no spinner hang) and creates exactly one session;
+ * (6) preview mode → POSTs to the admin `/preview` endpoint under its own storage key.
  *
  * `SessionWorkspace` (chat + answer panel) is replaced with a stub that writes its
  * sessionId and accessToken into `data-*` attributes so we can assert props without
@@ -15,6 +17,7 @@
  * @see components/app/questionnaire/chat/anonymous-session-boot.tsx
  */
 
+import { StrictMode } from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 
@@ -391,6 +394,80 @@ describe('AnonymousSessionBoot', () => {
         expect(screen.getByText(/couldn.*t start the questionnaire/i)).toBeInTheDocument();
       });
       expect(screen.queryByTestId('questionnaire-chat')).toBeNull();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // (5) StrictMode double-invoke — must not hang, must create exactly once
+  // -------------------------------------------------------------------------
+
+  describe('StrictMode double-invoke', () => {
+    it('reaches the workspace (does not hang in the spinner) and creates exactly one session', async () => {
+      // Arrange: StrictMode double-invokes the effect (setup → cleanup → setup), reproducing
+      // the dev runtime. The boot must still resolve, and only one session may be minted.
+      fakeFetch.mockResolvedValue(jsonResponse(successBody('sm-sess', 'sm-tok')));
+
+      // Act
+      render(
+        <StrictMode>
+          <AnonymousSessionBoot versionId={VERSION_ID} />
+        </StrictMode>
+      );
+
+      // Assert: it transitions out of 'creating' to the workspace…
+      await waitFor(() => {
+        expect(screen.getByTestId('questionnaire-chat')).toBeInTheDocument();
+      });
+      expect(screen.getByTestId('questionnaire-chat')).toHaveAttribute(
+        'data-session-id',
+        'sm-sess'
+      );
+      // …and the create ran once despite the double-invoke (no duplicate session).
+      expect(fakeFetch).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // (6) Admin preview mode (preview prop)
+  // -------------------------------------------------------------------------
+
+  describe('preview mode', () => {
+    it('POSTs to the PREVIEW endpoint and stores under the preview key (not the anon key)', async () => {
+      // Arrange
+      fakeFetch.mockResolvedValue(jsonResponse(successBody('pv-sess', 'pv-tok')));
+
+      // Act
+      render(<AnonymousSessionBoot versionId={VERSION_ID} preview />);
+      await waitFor(() => {
+        expect(screen.getByTestId('questionnaire-chat')).toBeInTheDocument();
+      });
+
+      // Assert: preview routes to the admin-gated endpoint and isolates its stored token.
+      const [url] = fakeFetch.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe(API.APP.QUESTIONNAIRE_SESSIONS.PREVIEW);
+      expect(fakeStorage.getItem(`qn.preview.${VERSION_ID}`)).not.toBeNull();
+      expect(fakeStorage.getItem(STORAGE_KEY)).toBeNull();
+    });
+
+    it('reuses a stored preview token without fetching', async () => {
+      // Arrange: a valid token under the preview key.
+      fakeStorage.setItem(
+        `qn.preview.${VERSION_ID}`,
+        storedSession('pv-stored', 'pv-stored-tok', futureExpiry())
+      );
+
+      // Act
+      render(<AnonymousSessionBoot versionId={VERSION_ID} preview />);
+      await waitFor(() => {
+        expect(screen.getByTestId('questionnaire-chat')).toBeInTheDocument();
+      });
+
+      // Assert: the stored preview token is sufficient — no network call.
+      expect(fakeFetch).not.toHaveBeenCalled();
+      expect(screen.getByTestId('questionnaire-chat')).toHaveAttribute(
+        'data-session-id',
+        'pv-stored'
+      );
     });
   });
 });

@@ -43,6 +43,20 @@ export interface CapabilitySlotView {
 /** The structural half of a turn — everything but the per-turn `userMessage` + `flags`. */
 export type TurnContextBase = Omit<TurnState, 'userMessage' | 'flags'>;
 
+/** Audience calibration the interviewer uses to set tone + language (subset of `AudienceShape`). */
+export interface TurnAudience {
+  role?: string;
+  expertiseLevel?: string;
+  sensitivity?: string;
+  locale?: string;
+}
+
+/** Version-level framing the conversational question phraser reads (goal + audience). */
+export interface TurnMeta {
+  goal?: string;
+  audience?: TurnAudience;
+}
+
 /** What {@link buildTurnContext} resolves for one live turn. */
 export interface LoadedTurnContext {
   session: { id: string; status: string; versionId: string; respondentUserId: string | null };
@@ -53,6 +67,20 @@ export interface LoadedTurnContext {
   activeQuestionKey: string | null;
   /** `id → QuestionView` for response enrichment without re-querying. */
   byId: Map<string, QuestionView>;
+  /** Version goal + audience — used by the conversational question phraser (not the pure core). */
+  meta: TurnMeta;
+}
+
+/** Pull the interviewer-relevant string fields out of the opaque `audience` Json. */
+function toTurnAudience(audience: unknown): TurnAudience | undefined {
+  if (audience === null || typeof audience !== 'object') return undefined;
+  const a = audience as Record<string, unknown>;
+  const out: TurnAudience = {};
+  if (typeof a.role === 'string') out.role = a.role;
+  if (typeof a.expertiseLevel === 'string') out.expertiseLevel = a.expertiseLevel;
+  if (typeof a.sensitivity === 'string') out.sensitivity = a.sensitivity;
+  if (typeof a.locale === 'string') out.locale = a.locale;
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 function asQuestionType(value: string): QuestionType {
@@ -75,6 +103,9 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
       respondentUserId: true,
       version: {
         select: {
+          // Version framing for the conversational question phraser (F6 interviewer).
+          goal: true,
+          audience: true,
           config: { select: CONFIG_SELECT },
           sections: {
             orderBy: { ordinal: 'asc' },
@@ -180,6 +211,12 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
   const { saved: _saved, ...config } = toConfigView(session.version.config);
   void _saved;
 
+  const audience = toTurnAudience(session.version.audience);
+  const meta: TurnMeta = {
+    ...(typeof session.version.goal === 'string' ? { goal: session.version.goal } : {}),
+    ...(audience ? { audience } : {}),
+  };
+
   return {
     session: {
       id: session.id,
@@ -203,5 +240,6 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
     slots,
     activeQuestionKey,
     byId,
+    meta,
   };
 }
