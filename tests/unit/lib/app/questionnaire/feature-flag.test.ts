@@ -14,6 +14,7 @@ import {
   APP_QUESTIONNAIRES_COST_CAP_FLAG,
   APP_QUESTIONNAIRES_ATTACHMENT_INPUT_FLAG,
   APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG,
+  APP_QUESTIONNAIRES_DATA_SLOTS_FLAG,
   ensureQuestionnairesEnabled,
   ensureLiveSessionsEnabled,
   ensureVoiceInputEnabled,
@@ -32,6 +33,7 @@ import {
   isAttachmentInputEnabled,
   isCostCapEnforcementEnabled,
   isQuestionPhrasingEnabled,
+  isDataSlotsEnabled,
 } from '@/lib/app/questionnaire/feature-flag';
 import { isFeatureEnabled } from '@/lib/feature-flags';
 
@@ -66,6 +68,7 @@ const ALL_FLAGS = [
   APP_QUESTIONNAIRES_COST_CAP_FLAG,
   APP_QUESTIONNAIRES_ATTACHMENT_INPUT_FLAG,
   APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG,
+  APP_QUESTIONNAIRES_DATA_SLOTS_FLAG,
 ] as const;
 
 /** A map with every flag on (the baseline each truth-table test perturbs from). */
@@ -105,6 +108,7 @@ describe('questionnaire feature flag — flag names are stable', () => {
     expect(APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG).toBe(
       'APP_QUESTIONNAIRES_QUESTION_PHRASING_ENABLED'
     );
+    expect(APP_QUESTIONNAIRES_DATA_SLOTS_FLAG).toBe('APP_QUESTIONNAIRES_DATA_SLOTS_ENABLED');
   });
 });
 
@@ -203,6 +207,13 @@ const SUB_FLAG_RESOLVERS: ReadonlyArray<{
       APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG,
     ],
   },
+  {
+    // Master-only child (admin generation happens at authoring time, before any session) —
+    // unlike the live-dependent trio, data slots don't require the live-sessions flag here.
+    name: 'isDataSlotsEnabled',
+    fn: isDataSlotsEnabled,
+    requires: [APP_QUESTIONNAIRES_FLAG, APP_QUESTIONNAIRES_DATA_SLOTS_FLAG],
+  },
 ];
 
 describe('sub-flag resolvers — truth tables', () => {
@@ -253,6 +264,7 @@ describe('sub-flag independence — one flag off suppresses only its own surface
     { flag: APP_QUESTIONNAIRES_ATTACHMENT_INPUT_FLAG, resolver: isAttachmentInputEnabled },
     { flag: APP_QUESTIONNAIRES_COST_CAP_FLAG, resolver: isCostCapEnforcementEnabled },
     { flag: APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG, resolver: isQuestionPhrasingEnabled },
+    { flag: APP_QUESTIONNAIRES_DATA_SLOTS_FLAG, resolver: isDataSlotsEnabled },
   ];
 
   for (const { flag, resolver } of INDEPENDENT_PAIRS) {
