@@ -92,7 +92,11 @@ export function DataSlotsReview({
         API.APP.QUESTIONNAIRES.versionDataSlotsGenerate(questionnaireId, versionId)
       );
       if (res.data.diagnostic || res.data.slots.length === 0) {
-        setError('Generation did not return any slots. Try again.');
+        setError(
+          res.data.diagnostic
+            ? `Generation failed (${res.data.diagnostic}). Check an LLM provider is configured for this agent, then try again.`
+            : 'Generation did not return any slots. Try again.'
+        );
       } else {
         setDrafts(res.data.slots.map(toDraft));
         setNotice(`Generated ${res.data.slots.length} data slots — review and save.`);

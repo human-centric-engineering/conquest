@@ -17,6 +17,7 @@ import { createRateLimitResponse } from '@/lib/security/rate-limit';
 
 import { prisma } from '@/lib/db/client';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
+import { registerBuiltInCapabilities } from '@/lib/orchestration/capabilities';
 import {
   isDataSlotsEnabled,
   withQuestionnairesEnabled,
@@ -60,6 +61,13 @@ const handleGenerate = withAdminAuth<{ id: string; vid: string }>(
       });
       throw new NotFoundError('Data-slot generation is not configured');
     }
+
+    // Flush the built-in + app capability handlers into the dispatcher before dispatching. This
+    // route may be the FIRST capability touch on a fresh server process (an admin generating data
+    // slots before any chat/turn has run), and the dispatcher does not lazy-register — without
+    // this the handler map is empty and the dispatch returns `unknown_capability` (fail-soft to
+    // an empty set). Same one-shot, idempotent flush the live turn loop performs.
+    registerBuiltInCapabilities();
 
     const dispatch = await capabilityDispatcher.dispatch(
       GENERATE_DATA_SLOTS_CAPABILITY_SLUG,
