@@ -34,6 +34,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { FieldHelp } from '@/components/ui/field-help';
+import { StatusTicker, REINGEST_MESSAGES } from '@/components/admin/questionnaires/status-ticker';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse } from '@/lib/api/parse-response';
 
@@ -221,6 +222,7 @@ export function ReingestDialog({ questionnaireId, versionId, versionNumber }: Re
               </FieldHelp>
             </div>
 
+            {busy && <StatusTicker messages={REINGEST_MESSAGES} />}
             {error && <p className="text-destructive text-sm">{error}</p>}
 
             <DialogFooter>

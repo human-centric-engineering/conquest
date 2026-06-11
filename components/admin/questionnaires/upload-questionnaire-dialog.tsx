@@ -41,7 +41,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { FieldHelp } from '@/components/ui/field-help';
-import { ExtractionStatusTicker } from '@/components/admin/questionnaires/extraction-status-ticker';
+import { StatusTicker } from '@/components/admin/questionnaires/status-ticker';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse } from '@/lib/api/parse-response';
 import {
@@ -387,7 +387,7 @@ export function UploadQuestionnaireDialog({
             </FieldHelp>
           </div>
 
-          {busy && <ExtractionStatusTicker />}
+          {busy && <StatusTicker />}
           {error && <p className="text-destructive text-sm">{error}</p>}
 
           <DialogFooter>

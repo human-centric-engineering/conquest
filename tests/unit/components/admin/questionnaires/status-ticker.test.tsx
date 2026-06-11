@@ -1,18 +1,18 @@
 /**
- * ExtractionStatusTicker component tests.
+ * StatusTicker component tests.
  *
  * Anti-green-bar: drives the fake-timer clock through the typewriter cadence
  * and asserts the actual visible text at each stage — characters appear one
  * per tick, the next message starts only after the randomised 3–10s hold, and
  * the final message holds indefinitely rather than looping.
  *
- * @see components/admin/questionnaires/extraction-status-ticker.tsx
+ * @see components/admin/questionnaires/status-ticker.tsx
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, act } from '@testing-library/react';
 
-import { ExtractionStatusTicker } from '@/components/admin/questionnaires/extraction-status-ticker';
+import { StatusTicker } from '@/components/admin/questionnaires/status-ticker';
 
 const TYPE_INTERVAL_MS = 40;
 const CURSOR = '▍';
@@ -30,7 +30,7 @@ function typedText(): string {
   return screen.getByTestId('typed-text').textContent ?? '';
 }
 
-describe('ExtractionStatusTicker', () => {
+describe('StatusTicker', () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });
@@ -41,7 +41,7 @@ describe('ExtractionStatusTicker', () => {
   });
 
   it('types the first message out character by character', () => {
-    render(<ExtractionStatusTicker messages={['Reading…', 'Thinking…']} />);
+    render(<StatusTicker messages={['Reading…', 'Thinking…']} />);
 
     expect(typedText()).toBe(CURSOR);
     typeChars(4);
@@ -53,7 +53,7 @@ describe('ExtractionStatusTicker', () => {
   it('holds a typed message for the randomised 3–10s window before starting the next', () => {
     // random=0.5 → hold of 3000 + 0.5 * 7000 = 6500ms.
     vi.spyOn(Math, 'random').mockReturnValue(0.5);
-    render(<ExtractionStatusTicker messages={['Hi', 'Bye']} />);
+    render(<StatusTicker messages={['Hi', 'Bye']} />);
 
     typeChars(2);
     expect(typedText()).toBe(`Hi${CURSOR}`);
@@ -74,13 +74,13 @@ describe('ExtractionStatusTicker', () => {
   });
 
   it('announces the full message to screen readers without the typing animation', () => {
-    render(<ExtractionStatusTicker messages={['Processing…']} />);
+    render(<StatusTicker messages={['Processing…']} />);
     expect(screen.getByRole('status')).toHaveTextContent('Processing…');
   });
 
   it('holds the final message indefinitely instead of looping', () => {
     vi.spyOn(Math, 'random').mockReturnValue(0);
-    render(<ExtractionStatusTicker messages={['Hi', 'Bye']} />);
+    render(<StatusTicker messages={['Hi', 'Bye']} />);
 
     typeChars(2);
     act(() => {

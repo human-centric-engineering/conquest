@@ -24,6 +24,7 @@ import {
   authoringMutate,
   AuthoringError,
 } from '@/components/admin/questionnaires/authoring-mutate';
+import { StatusTicker, DATA_SLOT_MESSAGES } from '@/components/admin/questionnaires/status-ticker';
 import type { DataSlotView, GeneratedDataSlot } from '@/lib/app/questionnaire/data-slots';
 
 interface QuestionRef {
@@ -181,6 +182,7 @@ export function DataSlotsReview({
         </Button>
       </div>
 
+      {generating && <StatusTicker messages={DATA_SLOT_MESSAGES} />}
       {error && <p className="text-destructive text-sm">{error}</p>}
       {notice && <p className="text-sm text-emerald-600">{notice}</p>}
 
