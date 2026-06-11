@@ -40,3 +40,15 @@ export interface DataSlotQuestionRef {
   key: string;
   prompt: string;
 }
+
+/**
+ * A version's PENDING data-slot proposal — the generated set the admin is reviewing but has
+ * not saved yet. Persisted (so it survives navigation) but explicitly NOT live: runtime and
+ * the launch gate ignore it until the admin saves it as the version's data slots.
+ */
+export interface DataSlotDraftView {
+  /** The proposed slots (a snapshot from the last generation). */
+  slots: GeneratedDataSlot[];
+  /** When the proposal was generated/updated (ISO 8601). */
+  updatedAt: string;
+}

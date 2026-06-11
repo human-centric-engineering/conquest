@@ -8,7 +8,7 @@ import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
 import { isDataSlotsEnabled, isQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import type { QuestionnaireDetail, VersionGraphView } from '@/lib/app/questionnaire/views';
-import type { DataSlotView } from '@/lib/app/questionnaire/data-slots';
+import type { DataSlotView, DataSlotDraftView } from '@/lib/app/questionnaire/data-slots';
 
 export const metadata: Metadata = {
   title: 'Data slots',
@@ -45,15 +45,21 @@ async function getGraph(id: string, versionId: string): Promise<VersionGraphView
   }
 }
 
-async function getSlots(id: string, versionId: string): Promise<DataSlotView[]> {
+interface LoadedSlots {
+  slots: DataSlotView[];
+  draft: DataSlotDraftView | null;
+}
+
+async function getSlots(id: string, versionId: string): Promise<LoadedSlots> {
+  const empty: LoadedSlots = { slots: [], draft: null };
   try {
     const res = await serverFetch(API.APP.QUESTIONNAIRES.versionDataSlots(id, versionId));
-    if (!res.ok) return [];
-    const body = await parseApiResponse<{ slots: DataSlotView[] }>(res);
-    return body.success ? body.data.slots : [];
+    if (!res.ok) return empty;
+    const body = await parseApiResponse<LoadedSlots>(res);
+    return body.success ? { slots: body.data.slots, draft: body.data.draft } : empty;
   } catch (err) {
     logger.error('data slots page: slots fetch failed', err);
-    return [];
+    return empty;
   }
 }
 
@@ -68,9 +74,9 @@ export default async function DataSlotsPage({ params, searchParams }: PageProps)
   if (!detail) notFound();
 
   const selected = detail.versions.find((ver) => ver.id === v) ?? detail.versions[0] ?? null;
-  const [graph, slots] = selected
+  const [graph, loaded] = selected
     ? await Promise.all([getGraph(id, selected.id), getSlots(id, selected.id)])
-    : [null, []];
+    : [null, { slots: [], draft: null } satisfies LoadedSlots];
 
   const questions = graph
     ? graph.sections.flatMap((s) => s.questions.map((q) => ({ key: q.key, prompt: q.prompt })))
@@ -136,7 +142,8 @@ export default async function DataSlotsPage({ params, searchParams }: PageProps)
               questionnaireId={id}
               versionId={selected.id}
               questions={questions}
-              initialSlots={slots}
+              initialSlots={loaded.slots}
+              initialDraft={loaded.draft}
             />
           )}
         </>

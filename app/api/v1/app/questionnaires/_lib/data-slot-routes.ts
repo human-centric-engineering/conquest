@@ -5,10 +5,22 @@
  * data-slot set on a bulk save. Used by the generate + CRUD routes.
  */
 
+import type { Prisma } from '@prisma/client';
+
 import { prisma } from '@/lib/db/client';
 import { executeTransaction } from '@/lib/db/utils';
 import { slugifyKey, nextAvailableKey } from '@/lib/app/questionnaire/authoring/key';
-import type { DataSlotView, DataSlotStructureInput } from '@/lib/app/questionnaire/data-slots';
+import {
+  generatedDataSlotSchema,
+  type DataSlotView,
+  type DataSlotDraftView,
+  type DataSlotStructureInput,
+  type GeneratedDataSlot,
+} from '@/lib/app/questionnaire/data-slots';
+import { z } from 'zod';
+
+/** A persisted draft holds an array of generated slots (validated on read). */
+const draftSlotsSchema = z.array(generatedDataSlotSchema);
 
 /** Shared select projecting a data slot + its mapped question keys. */
 export const DATA_SLOT_SELECT = {
@@ -60,6 +72,40 @@ export async function loadDataSlots(versionId: string): Promise<DataSlotView[]> 
 /** Count of data slots for a version (the launch gate reads this). */
 export async function countDataSlots(versionId: string): Promise<number> {
   return prisma.appDataSlot.count({ where: { versionId } });
+}
+
+/**
+ * The version's pending data-slot proposal (the generated-but-not-saved draft), or `null` if
+ * none. Stored JSON is re-validated; an unparseable row reads as no draft (never throws into
+ * the admin surface). This is the abstraction's *draft* — never the live set.
+ */
+export async function loadDataSlotDraft(versionId: string): Promise<DataSlotDraftView | null> {
+  const row = await prisma.appDataSlotDraft.findUnique({
+    where: { versionId },
+    select: { slots: true, updatedAt: true },
+  });
+  if (!row) return null;
+  const parsed = draftSlotsSchema.safeParse(row.slots);
+  if (!parsed.success) return null;
+  return { slots: parsed.data, updatedAt: row.updatedAt.toISOString() };
+}
+
+/** Persist (replace) the version's pending data-slot proposal. One draft per version. */
+export async function upsertDataSlotDraft(
+  versionId: string,
+  slots: GeneratedDataSlot[]
+): Promise<void> {
+  const value = slots as unknown as Prisma.InputJsonValue;
+  await prisma.appDataSlotDraft.upsert({
+    where: { versionId },
+    create: { versionId, slots: value },
+    update: { slots: value },
+  });
+}
+
+/** Delete the version's pending data-slot proposal (admin discards it). No-op if none. */
+export async function deleteDataSlotDraft(versionId: string): Promise<void> {
+  await prisma.appDataSlotDraft.deleteMany({ where: { versionId } });
 }
 
 /**
@@ -134,6 +180,9 @@ export async function replaceDataSlots(
 
   await executeTransaction(async (tx) => {
     await tx.appDataSlot.deleteMany({ where: { versionId } });
+    // Saving the reviewed set promotes it to live AND retires the pending proposal: the draft
+    // and the saved set are never both relevant once the admin has committed.
+    await tx.appDataSlotDraft.deleteMany({ where: { versionId } });
 
     const takenKeys = new Set<string>();
     for (let i = 0; i < slots.length; i += 1) {

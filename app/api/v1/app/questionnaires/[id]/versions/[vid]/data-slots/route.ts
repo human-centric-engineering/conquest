@@ -2,7 +2,8 @@
  * Data-slot collection — Data Slots feature.
  *
  * GET /api/v1/app/questionnaires/:id/versions/:vid/data-slots
- *   Admin-only: list the version's saved data slots (with their mapped question keys).
+ *   Admin-only: list the version's saved (live) data slots with their mapped question keys,
+ *   plus any pending generated `draft` proposal the admin hasn't saved yet.
  *
  * PUT /api/v1/app/questionnaires/:id/versions/:vid/data-slots
  *   Admin-only: replace the version's data slots with the reviewed/accepted set. Forks a new
@@ -27,7 +28,9 @@ import { forkVersionIfLaunched } from '@/app/api/v1/app/questionnaires/_lib/fork
 import { forkMeta, loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
 import {
   loadDataSlots,
+  loadDataSlotDraft,
   replaceDataSlots,
+  deleteDataSlotDraft,
 } from '@/app/api/v1/app/questionnaires/_lib/data-slot-routes';
 
 const handleList = withAdminAuth<{ id: string; vid: string }>(
@@ -40,7 +43,8 @@ const handleList = withAdminAuth<{ id: string; vid: string }>(
     if (!scoped) {
       return errorResponse('Questionnaire version not found', { code: 'NOT_FOUND', status: 404 });
     }
-    return successResponse({ slots: await loadDataSlots(vid) });
+    const [slots, draft] = await Promise.all([loadDataSlots(vid), loadDataSlotDraft(vid)]);
+    return successResponse({ slots, draft });
   }
 );
 
@@ -64,7 +68,12 @@ const handleSave = withAdminAuth<{ id: string; vid: string }>(
     const fork = await forkVersionIfLaunched(scoped, { userId: session.user.id, clientIp });
     const editId = fork.versionId;
 
+    // `replaceDataSlots` clears the edited version's draft; if the save forked off a launched
+    // version, also retire the proposal left on the source version so it doesn't orphan.
     const slots = await replaceDataSlots(editId, body.slots);
+    if (editId !== vid) {
+      await deleteDataSlotDraft(vid);
+    }
 
     logAdminAction({
       userId: session.user.id,

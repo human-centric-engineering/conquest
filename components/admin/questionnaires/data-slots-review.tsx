@@ -3,15 +3,20 @@
 /**
  * Data-slots review surface (Data Slots feature).
  *
- * Shows the version's saved data slots, lets the admin GENERATE a proposed set from the
- * approved questions (one LLM call), review/edit/reject each proposed slot, and SAVE the
- * accepted set (a PUT that replaces the version's slots; forks a launched version first).
- * The conversation later targets these slots; each maps to one or more questions it captures.
+ * Shows the version's data slots, lets the admin GENERATE a proposed set from the approved
+ * questions (one LLM call) and review/edit/reject each slot, then SAVE the accepted set
+ * (a PUT that replaces the version's slots; forks a launched version first).
+ *
+ * A generated set is a persisted DRAFT, not the live set: generation writes it server-side so
+ * it survives navigation, but respondents and the launch gate only ever see SAVED slots. The
+ * surface makes the distinction explicit — a "draft / not live yet" banner, per-slot Draft vs
+ * Live badges, a Discard control, and an unsaved-edits navigation guard. The conversation later
+ * targets the saved slots; each maps to one or more questions it captures.
  */
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Loader2, Sparkles, Trash2 } from 'lucide-react';
+import { AlertTriangle, Loader2, Sparkles, Trash2, Undo2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -20,12 +25,17 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { API } from '@/lib/api/endpoints';
+import { useUnsavedChangesWarning } from '@/lib/hooks/use-unsaved-changes-warning';
 import {
   authoringMutate,
   AuthoringError,
 } from '@/components/admin/questionnaires/authoring-mutate';
 import { StatusTicker, DATA_SLOT_MESSAGES } from '@/components/admin/questionnaires/status-ticker';
-import type { DataSlotView, GeneratedDataSlot } from '@/lib/app/questionnaire/data-slots';
+import type {
+  DataSlotView,
+  DataSlotDraftView,
+  GeneratedDataSlot,
+} from '@/lib/app/questionnaire/data-slots';
 
 interface QuestionRef {
   key: string;
@@ -36,10 +46,16 @@ export interface DataSlotsReviewProps {
   questionnaireId: string;
   versionId: string;
   questions: QuestionRef[];
+  /** The saved, LIVE data slots (what respondents and the launch gate see). */
   initialSlots: DataSlotView[];
+  /** A pending generated proposal the admin hasn't saved yet, if any. */
+  initialDraft: DataSlotDraftView | null;
 }
 
-/** An editable proposed slot (generation output the admin tweaks before saving). */
+/** Whether the working set is an unsaved generated proposal or the saved live set. */
+type SlotMode = 'draft' | 'live';
+
+/** An editable slot in the working set (a proposed or saved slot the admin tweaks). */
 interface DraftSlot {
   name: string;
   description: string;
@@ -48,7 +64,7 @@ interface DraftSlot {
   accepted: boolean;
 }
 
-function toDraft(slot: GeneratedDataSlot): DraftSlot {
+function fromGenerated(slot: GeneratedDataSlot): DraftSlot {
   return {
     name: slot.name,
     description: slot.description,
@@ -68,20 +84,51 @@ function fromSaved(slot: DataSlotView): DraftSlot {
   };
 }
 
+/** A stable signature of the editable fields, so we can detect unsaved edits. */
+function signature(drafts: DraftSlot[]): string {
+  return JSON.stringify(
+    drafts.map((d) => ({
+      name: d.name.trim(),
+      description: d.description.trim(),
+      theme: d.theme.trim(),
+      questionKeys: [...d.questionKeys].sort(),
+      accepted: d.accepted,
+    }))
+  );
+}
+
 export function DataSlotsReview({
   questionnaireId,
   versionId,
   questions,
   initialSlots,
+  initialDraft,
 }: DataSlotsReviewProps) {
   const router = useRouter();
-  const [drafts, setDrafts] = useState<DraftSlot[]>(initialSlots.map(fromSaved));
+
+  const seed = initialDraft ? initialDraft.slots.map(fromGenerated) : initialSlots.map(fromSaved);
+  const [liveSlots, setLiveSlots] = useState<DataSlotView[]>(initialSlots);
+  const [drafts, setDrafts] = useState<DraftSlot[]>(seed);
+  const [mode, setMode] = useState<SlotMode>(initialDraft ? 'draft' : 'live');
+  const [baseline, setBaseline] = useState<string>(() => signature(seed));
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   const promptByKey = new Map(questions.map((q) => [q.key, q.prompt]));
+  const dirty = signature(drafts) !== baseline;
+  const busy = generating || saving || discarding;
+
+  // Warn before leaving with unsaved edits (a generated draft itself is persisted and safe).
+  useUnsavedChangesWarning(dirty);
+
+  const resetTo = (next: DraftSlot[], nextMode: SlotMode) => {
+    setDrafts(next);
+    setMode(nextMode);
+    setBaseline(signature(next));
+  };
 
   const generate = async () => {
     setGenerating(true);
@@ -99,8 +146,10 @@ export function DataSlotsReview({
             : 'Generation did not return any slots. Try again.'
         );
       } else {
-        setDrafts(res.data.slots.map(toDraft));
-        setNotice(`Generated ${res.data.slots.length} data slots — review and save.`);
+        resetTo(res.data.slots.map(fromGenerated), 'draft');
+        setNotice(
+          `Generated ${res.data.slots.length} draft data slots — review and save to make them live.`
+        );
       }
     } catch (err) {
       setError(err instanceof AuthoringError ? err.message : 'Could not generate data slots.');
@@ -151,8 +200,11 @@ export function DataSlotsReview({
       // A launched version forks a new draft — navigate there so the admin keeps editing.
       if (res.meta?.forked) {
         router.push(`/admin/questionnaires/${questionnaireId}/data-slots?v=${res.meta.versionId}`);
+        return;
       }
-      setNotice(`Saved ${res.data.slots.length} data slots.`);
+      setLiveSlots(res.data.slots);
+      resetTo(res.data.slots.map(fromSaved), 'live');
+      setNotice(`Saved ${res.data.slots.length} data slots — now live.`);
       router.refresh();
     } catch (err) {
       setError(err instanceof AuthoringError ? err.message : 'Could not save data slots.');
@@ -161,8 +213,36 @@ export function DataSlotsReview({
     }
   };
 
+  const discard = async () => {
+    if (
+      !window.confirm(
+        'Discard this generated draft? The proposal is removed and your live data slots are left unchanged.'
+      )
+    ) {
+      return;
+    }
+    setDiscarding(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await authoringMutate(
+        'DELETE',
+        API.APP.QUESTIONNAIRES.versionDataSlotsDraft(questionnaireId, versionId)
+      );
+      resetTo(liveSlots.map(fromSaved), 'live');
+      setNotice('Draft discarded.');
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof AuthoringError ? err.message : 'Could not discard the draft.');
+    } finally {
+      setDiscarding(false);
+    }
+  };
+
   const coveredKeys = new Set(drafts.filter((d) => d.accepted).flatMap((d) => d.questionKeys));
   const uncovered = questions.filter((q) => !coveredKeys.has(q.key));
+  const acceptedCount = drafts.filter((d) => d.accepted).length;
+  const isDraft = mode === 'draft';
 
   return (
     <div className="space-y-5">
@@ -170,9 +250,11 @@ export function DataSlotsReview({
         <p className="text-muted-foreground text-sm">
           {drafts.length === 0
             ? 'No data slots yet. Generate a set from this version’s questions.'
-            : `${drafts.length} data slot${drafts.length === 1 ? '' : 's'}.`}
+            : isDraft
+              ? `${drafts.length} draft data slot${drafts.length === 1 ? '' : 's'} — not live yet.`
+              : `${drafts.length} live data slot${drafts.length === 1 ? '' : 's'}.`}
         </p>
-        <Button variant="outline" size="sm" onClick={() => void generate()} disabled={generating}>
+        <Button variant="outline" size="sm" onClick={() => void generate()} disabled={busy}>
           {generating ? (
             <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
           ) : (
@@ -183,6 +265,43 @@ export function DataSlotsReview({
       </div>
 
       {generating && <StatusTicker messages={DATA_SLOT_MESSAGES} />}
+
+      {isDraft && drafts.length > 0 && (
+        <div className="flex items-start gap-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-900/60 dark:bg-amber-950/40">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+          <div className="space-y-1.5">
+            <p className="font-medium text-amber-900 dark:text-amber-200">Draft — not live yet</p>
+            <p className="text-amber-800 dark:text-amber-300/90">
+              These {drafts.length} data slot{drafts.length === 1 ? '' : 's'} were generated but
+              haven’t been saved. Respondents won’t see them until you save.{' '}
+              {liveSlots.length > 0
+                ? `Your ${liveSlots.length} live data slot${liveSlots.length === 1 ? '' : 's'} stay in use until then.`
+                : 'Launching this version requires saved data slots.'}
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void discard()}
+              disabled={busy}
+              className="mt-1"
+            >
+              {discarding ? (
+                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+              ) : (
+                <Undo2 className="mr-1.5 h-4 w-4" />
+              )}
+              Discard draft
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {!isDraft && dirty && (
+        <p className="text-sm text-amber-700 dark:text-amber-400">
+          You have unsaved edits to your live data slots. Save to apply them.
+        </p>
+      )}
+
       {error && <p className="text-destructive text-sm">{error}</p>}
       {notice && <p className="text-sm text-emerald-600">{notice}</p>}
 
@@ -207,6 +326,21 @@ export function DataSlotsReview({
                   onCheckedChange={(v) => update(i, { accepted: v === true })}
                   aria-label="Accept this slot"
                 />
+                {isDraft ? (
+                  <Badge
+                    variant="outline"
+                    className="border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300"
+                  >
+                    Draft
+                  </Badge>
+                ) : (
+                  <Badge
+                    variant="outline"
+                    className="border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300"
+                  >
+                    Live
+                  </Badge>
+                )}
                 <Input
                   value={d.name}
                   onChange={(e) => update(i, { name: e.target.value })}
@@ -271,9 +405,9 @@ export function DataSlotsReview({
 
       {drafts.length > 0 && (
         <div className="flex items-center gap-3">
-          <Button onClick={() => void save()} disabled={saving}>
+          <Button onClick={() => void save()} disabled={busy || (!isDraft && !dirty)}>
             {saving && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
-            Save accepted slots ({drafts.filter((d) => d.accepted).length})
+            {isDraft ? `Save & make live (${acceptedCount})` : `Save changes (${acceptedCount})`}
           </Button>
           <Badge variant="outline">
             {coveredKeys.size}/{questions.length} questions covered

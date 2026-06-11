@@ -24,17 +24,32 @@ Two layers, in parallel:
 one or more questions. Data slots are version-scoped and fork with the version (like tags), copied
 by `copyVersionGraph`.
 
+`AppDataSlot` is exclusively the **saved/live** set. A generated-but-unsaved proposal lives in a
+separate `AppDataSlotDraft` (one JSON-snapshot row per version, `versionId @unique`, cascades with
+the version) so it survives navigation without ever being mistaken for live — runtime targeting, the
+respondent panel, and the launch gate never read it. See the generate → review → launch-gate flow
+below for the draft lifecycle (generate persists it, save promotes + clears it, discard drops it).
+
 ## Admin: generate → review → launch gate
 
 1. After questions are extracted + approved, the version detail page shows **Data slots** (draft +
    launched). It links to `/admin/questionnaires/:id/data-slots`.
 2. **Generate** dispatches `app_generate_data_slots` (the `app-questionnaire-data-slots-generator`
    agent) over the version's questions → proposed slots (name + description + theme + question
-   mappings). Read-only preview — `POST …/versions/:vid/data-slots/generate` persists nothing.
+   mappings). `POST …/versions/:vid/data-slots/generate` persists the proposal as the version's
+   pending **draft** (`AppDataSlotDraft`, one JSON row per version) so it survives the admin
+   navigating away — but the draft is **not live**: runtime, the respondent panel, and the launch
+   gate read only the saved set (`AppDataSlot`). The capability itself is still pure (returns
+   slots); it's the route that persists the draft. A fail-soft (empty) generation persists nothing.
 3. The admin reviews/edits/accepts each slot, then **Save** (`PUT …/versions/:vid/data-slots`)
-   replaces the version's slots (fork-safe). `theme` is the generator's grouping label.
+   replaces the version's slots (fork-safe) AND clears the pending draft in the same transaction
+   (promoting the reviewed set to live). `theme` is the generator's grouping label. **Discard**
+   (`DELETE …/versions/:vid/data-slots/draft`) drops the proposal, leaving the live set untouched.
+   The review surface marks status explicitly — a "draft / not live yet" banner, per-slot Draft vs
+   Live badges, and an unsaved-edits navigation guard (`useUnsavedChangesWarning`).
 4. **Launch gate:** when the flag is on, "Data slots generated" is a launch-checklist item
-   (client `LaunchChecklist` + server `assertLaunchable`), so every launched questionnaire runs in
+   (client `LaunchChecklist` + server `assertLaunchable`), counting only **saved** `AppDataSlot`
+   rows — a pending draft does not satisfy the gate — so every launched questionnaire runs in
    data-slot mode.
 
 ## Runtime: the data-slot conversation (`runDataSlotTurn`)

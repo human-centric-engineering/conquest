@@ -64,6 +64,7 @@ model AppQuestionnaireVersion {
   sessions        AppQuestionnaireSession[]
   evaluationRuns  AppQuestionnaireEvaluationRun[]
   dataSlots       AppDataSlot[]
+  dataSlotDraft   AppDataSlotDraft?
 
   @@unique([questionnaireId, versionNumber])
   @@index([questionnaireId])
@@ -541,6 +542,26 @@ model AppDataSlot {
   @@unique([versionId, key])
   @@index([versionId])
   @@map("app_data_slot")
+}
+
+/// A PENDING data-slot generation for a version — the reviewable DRAFT proposal (Data Slots
+/// feature). Generating data slots runs a paid LLM call; rather than holding the result only
+/// in the admin's browser (lost on navigation), the proposal is persisted here as a JSON
+/// snapshot of `GeneratedDataSlot[]`. It is explicitly NOT live: runtime targeting, the
+/// respondent panel, and the launch gate read only AppDataSlot (the saved/live set), never
+/// this table. Saving the reviewed set (PUT data-slots) writes AppDataSlot and clears this
+/// draft in one transaction; "Discard draft" deletes it. One pending draft per version
+/// (`versionId @unique`); cascades/forks with the version.
+model AppDataSlotDraft {
+  id        String   @id @default(cuid())
+  versionId String   @unique
+  slots     Json // GeneratedDataSlot[] snapshot — the proposed, reviewable set (not live)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  version AppQuestionnaireVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@map("app_data_slot_draft")
 }
 
 /// M:N mapping of a data slot to the question(s) it abstracts over. Both sides cascade.
