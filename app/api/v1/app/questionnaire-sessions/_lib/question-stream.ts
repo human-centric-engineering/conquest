@@ -123,7 +123,11 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
     'Ask the ONE question provided, naturally — never as a numbered form field, never restate ' +
     'the whole survey, never invent new questions, and never answer on their behalf. ' +
     (input.isOpening
-      ? 'This is the first question — open warmly, no need to acknowledge a prior answer. '
+      ? 'This is the very first message of the conversation — be proactive and set the scene. ' +
+        'Open with a short, warm scene-setting line ("Let\'s start by…", "To begin, we\'ll explore…") ' +
+        'and then ease straight into this first question gently — keep it light and easy to answer, ' +
+        'the kind of opener a thoughtful human interviewer would lead with. There is no prior answer ' +
+        'to acknowledge. Do not tell them to "send a message to begin" — you are starting the conversation. '
       : input.isReask
         ? 'You already asked about this but could not capture a usable answer from their last ' +
           'reply — gently say you want to make sure you get it right, then ask again clearly. '

@@ -182,6 +182,11 @@ export function AnonymousSessionBoot({
       sessionId={state.sessionId}
       accessToken={state.accessToken}
       initialTurns={buildWelcomeTurns({ welcomeCopy })}
+      // This surface always shows the fresh greeting and never replays the transcript, so the
+      // kickoff always fires: it streams the opening question on a new session, and proactively
+      // re-asks the next pending question on a restored one (else the greeting has no question
+      // to answer beneath it). The live answer panel still reflects real prior progress.
+      autoStart
       voiceInputEnabled={voiceInputEnabled}
       attachmentInputEnabled={attachmentInputEnabled}
     />

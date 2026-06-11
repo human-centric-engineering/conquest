@@ -69,6 +69,11 @@ export interface UseQuestionnaireSessionStreamReturn {
   canSend: boolean;
   /** Send a respondent message (with optional attachments) and stream the reply. No-ops when blocked or empty. */
   sendMessage: (text: string, attachments?: MessageAttachment[]) => Promise<void>;
+  /**
+   * Proactive opening: stream the first question without a respondent message (no user bubble).
+   * Fired once on a fresh session by {@link SessionWorkspace}'s `autoStart`. No-ops when blocked.
+   */
+  kickoff: () => Promise<void>;
   /** Clear a transient error banner. */
   dismissError: () => void;
   /**
@@ -207,16 +212,21 @@ export function useQuestionnaireSessionStream(
     if (!BLOCKING_STATUSES.includes(next)) setError(null);
   }, []);
 
-  const sendMessage = useCallback(
-    async (text: string, attachments?: MessageAttachment[]) => {
-      const trimmed = text.trim();
+  // Shared streaming core for both a respondent send and the proactive kickoff. `userTurn`
+  // is the optimistic respondent bubble to show before streaming (omitted for a kickoff, which
+  // carries no respondent message); `body` is the POST payload (`{ message, attachments }` or
+  // `{ kickoff: true }`).
+  const streamTurn = useCallback(
+    async (opts: { body: Record<string, unknown>; userTurn?: string }) => {
       // `BLOCKING_STATUSES` (streaming + the terminal cost-cap / not-active / expired states)
       // is the single source of truth for "no further input is meaningful" — the same set
       // `canSend` is derived from, so the guard and the composer can never disagree.
-      if (trimmed.length === 0 || BLOCKING_STATUSES.includes(status)) return;
+      if (BLOCKING_STATUSES.includes(status)) return;
 
-      // Optimistic: show the respondent's turn immediately and clear prior side-band state.
-      setTurns((prev) => [...prev, { role: 'user', content: trimmed }]);
+      // Optimistic: show the respondent's turn immediately (when present) and clear side-band state.
+      if (opts.userTurn !== undefined) {
+        setTurns((prev) => [...prev, { role: 'user', content: opts.userTurn as string }]);
+      }
       setWarning(null);
       setError(null);
       setStatus('streaming');
@@ -237,10 +247,7 @@ export function useQuestionnaireSessionStream(
           method: 'POST',
           credentials: 'include',
           headers,
-          body: JSON.stringify({
-            message: trimmed,
-            ...(attachments && attachments.length > 0 ? { attachments } : {}),
-          }),
+          body: JSON.stringify(opts.body),
           signal: controller.signal,
         });
 
@@ -329,6 +336,27 @@ export function useQuestionnaireSessionStream(
     [sessionId, accessToken, anonymous, status, typing]
   );
 
+  const sendMessage = useCallback(
+    async (text: string, attachments?: MessageAttachment[]) => {
+      const trimmed = text.trim();
+      if (trimmed.length === 0) return;
+      await streamTurn({
+        body: {
+          message: trimmed,
+          ...(attachments && attachments.length > 0 ? { attachments } : {}),
+        },
+        userTurn: trimmed,
+      });
+    },
+    [streamTurn]
+  );
+
+  // Proactive opening: stream the first question with no respondent bubble. The empty-message
+  // turn is skipped by the server's `recentMessages` and ignored by the opening phraser.
+  const kickoff = useCallback(async () => {
+    await streamTurn({ body: { kickoff: true } });
+  }, [streamTurn]);
+
   // The composer accepts input when idle or recovering from a transient error — but never
   // while streaming or in a terminal blocking state (cost cap / not active / expired).
   // `BLOCKING_STATUSES` is the single source of truth: `streaming` is itself a blocking
@@ -344,6 +372,7 @@ export function useQuestionnaireSessionStream(
     error,
     canSend,
     sendMessage,
+    kickoff,
     dismissError,
     applyStatus,
   };

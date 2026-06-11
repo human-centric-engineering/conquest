@@ -262,6 +262,27 @@ describe('gate order', () => {
     const res = await POST(req({ message: '' }), ctx);
     expect(res.status).toBe(400);
   });
+
+  it('accepts a kickoff turn with no message and streams the opening question', async () => {
+    // The proactive opening: the surface fires `{ kickoff: true }` once on a fresh session.
+    const res = await POST(req({ kickoff: true }), ctx);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/event-stream');
+
+    const events = await drainSse(res);
+    expect(events.map((e) => e.event)).toContain('content');
+
+    // The opening question is phrased with an EMPTY last-user-message (no answer to acknowledge)
+    // and persisted with an empty `userMessage` — which `recentMessages` then skips next turn.
+    const arg = questionMock.streamQuestionMessage.mock.calls[0][0] as {
+      input: { lastUserMessage: string; isOpening: boolean };
+    };
+    expect(arg.input.lastUserMessage).toBe('');
+    expect(arg.input.isOpening).toBe(true);
+    expect(runMock.persistTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 'sess-1', userMessage: '' })
+    );
+  });
 });
 
 describe('streaming a question turn', () => {

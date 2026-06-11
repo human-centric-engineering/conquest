@@ -58,11 +58,23 @@ import { streamOfferMessage } from '@/app/api/v1/app/questionnaire-sessions/_lib
 import { streamQuestionMessage } from '@/app/api/v1/app/questionnaire-sessions/_lib/question-stream';
 import { resolveTurnAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-access';
 
-const bodySchema = z.object({
-  message: z.string().min(1).max(10_000),
-  /** Optional files attached to this turn (images/documents) — read by the extractor. */
-  attachments: chatAttachmentsArraySchema.optional(),
-});
+const bodySchema = z
+  .object({
+    /** Omitted (or empty) only on a kickoff turn — the proactive opening (see `kickoff`). */
+    message: z.string().max(10_000).optional(),
+    /**
+     * Proactive-opening turn: the surface fires this once on a fresh session so the agent
+     * streams the first question without the respondent typing first. Carries no respondent
+     * answer — extraction no-ops (no active question yet), selection picks the opening question.
+     */
+    kickoff: z.boolean().optional(),
+    /** Optional files attached to this turn (images/documents) — read by the extractor. */
+    attachments: chatAttachmentsArraySchema.optional(),
+  })
+  .refine((b) => b.kickoff === true || (b.message?.trim().length ?? 0) > 0, {
+    message: 'message is required',
+    path: ['message'],
+  });
 
 /** Chunk text into small pieces for a streamed feel (true token streaming is PR5). */
 function chunkText(text: string, size = 48): string[] {
@@ -101,6 +113,9 @@ async function handleMessage(
     if (!limit.success) return createRateLimitResponse(limit);
 
     const body = await validateRequestBody(request, bodySchema);
+    // A kickoff carries no respondent answer — the opening question is selected, not extracted.
+    // An empty `userMessage` is skipped by `recentMessages` and ignored by the opening phraser.
+    const userMessage = body.kickoff ? '' : (body.message ?? '');
 
     // Cost cap (F6.3): grade the session's spend so far against its budget at the turn
     // boundary, before any per-turn work. Hard (≥100%) refuses this turn with 402 and
@@ -185,8 +200,15 @@ async function handleMessage(
 
     const state: TurnState = {
       ...loaded.base,
-      userMessage: body.message,
-      flags: { extraction, contradiction, refinement, completion },
+      userMessage,
+      // A kickoff carries no answer — force extraction off so a restored session (which has an
+      // active question) doesn't fire a pointless extraction call against the empty message.
+      flags: {
+        extraction: body.kickoff ? false : extraction,
+        contradiction,
+        refinement,
+        completion,
+      },
       ...(attachments ? { attachments } : {}),
       ...(costPressure ? { costPressure } : {}),
     };
@@ -259,7 +281,7 @@ async function handleMessage(
             ...(meta.goal ? { goal: meta.goal } : {}),
             ...(meta.audience ? { audience: meta.audience } : {}),
             recentMessages: state.recentMessages,
-            lastUserMessage: body.message,
+            lastUserMessage: userMessage,
             isReask: r.isReask,
             isOpening: state.selectionRound === 0,
             isTransition: r.isTransition,
@@ -289,7 +311,7 @@ async function handleMessage(
             ...(meta.goal ? { goal: meta.goal } : {}),
             ...(meta.audience ? { audience: meta.audience } : {}),
             recentMessages: state.recentMessages,
-            lastUserMessage: body.message,
+            lastUserMessage: userMessage,
             isReask: targetedKey !== null && targetedKey === activeQuestionKey,
             isOpening: state.selectionRound === 0,
           },
@@ -309,7 +331,7 @@ async function handleMessage(
       try {
         await persistTurn({
           sessionId,
-          userMessage: body.message,
+          userMessage,
           agentResponse,
           targetedQuestionId: persistedTargetedId,
           toolCalls: result.toolCalls,

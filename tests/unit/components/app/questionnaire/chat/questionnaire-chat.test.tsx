@@ -72,6 +72,7 @@ function makeReturn(
     error: null,
     canSend: true,
     sendMessage,
+    kickoff: vi.fn(),
     dismissError,
     applyStatus: vi.fn(),
     ...overrides,

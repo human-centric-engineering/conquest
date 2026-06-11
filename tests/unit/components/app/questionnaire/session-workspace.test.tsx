@@ -18,6 +18,7 @@ import type { PanelSlotView } from '@/lib/app/questionnaire/panel/types';
 
 const sendMessage = vi.fn();
 const applyStatus = vi.fn();
+const kickoff = vi.fn();
 const refetch = vi.fn();
 const lifecycleRefetch = vi.fn();
 
@@ -128,6 +129,7 @@ function setup(
     canSend: true,
     status: 'idle',
     sendMessage,
+    kickoff,
     applyStatus,
     ...streamOver,
   });
@@ -154,6 +156,29 @@ describe('SessionWorkspace', () => {
   it('wires the lifecycle hook to the shared stream applyStatus', () => {
     setup();
     expect(lifecycleHook.mock.calls[0][0]).toMatchObject({ applyStatus });
+  });
+
+  it('does NOT auto-fire the kickoff when autoStart is off (the default)', () => {
+    setup();
+    expect(kickoff).not.toHaveBeenCalled();
+  });
+
+  it('fires the kickoff exactly once on mount when autoStart is set', () => {
+    streamHook.mockReturnValue({
+      canSend: true,
+      status: 'idle',
+      sendMessage,
+      kickoff,
+      applyStatus,
+    });
+    panelHook.mockReturnValue({ view: null, loading: false, error: false, refetch });
+    lifecycleHook.mockReturnValue(lifecycleReturn());
+
+    const { rerender } = render(<SessionWorkspace sessionId="s1" autoStart />);
+    // A re-render must NOT fire a second kickoff (the ref guard holds across renders).
+    rerender(<SessionWorkspace sessionId="s1" autoStart />);
+
+    expect(kickoff).toHaveBeenCalledTimes(1);
   });
 
   it('threads the session id and access token into all three hooks', () => {

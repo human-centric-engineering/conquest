@@ -124,7 +124,7 @@ describe('buildWelcomeTurns -- fresh session with custom welcomeCopy', () => {
     expect(turns[0]?.content).not.toContain(DEFAULT_WELCOME_COPY);
   });
 
-  it('appends the begin-nudge after the custom copy, separated by a blank line', () => {
+  it('seeds the custom copy alone with NO begin-nudge (the first question is auto-streamed)', () => {
     // Arrange
     const customCopy = 'Welcome to the Acme survey.';
     const opts = { welcomeCopy: customCopy };
@@ -132,9 +132,10 @@ describe('buildWelcomeTurns -- fresh session with custom welcomeCopy', () => {
     // Act
     const turns = buildWelcomeTurns(opts);
 
-    // Assert: the nudge is present and comes after a double newline.
-    expect(turns[0]?.content).toContain('send a message to begin');
-    expect(turns[0]?.content).toMatch(new RegExp(`${customCopy.replace('.', '\\.')}\\n\\n`));
+    // Assert: the fresh seed is exactly the branded intro -- the proactive first question now
+    // arrives via the auto-kickoff turn, so no "send a message to begin" nudge is appended.
+    expect(turns[0]?.content).toBe(customCopy);
+    expect(turns[0]?.content).not.toContain('send a message to begin');
   });
 });
 
@@ -155,29 +156,30 @@ describe('buildWelcomeTurns -- fresh session with no welcomeCopy', () => {
     expect(turns[0]?.content).toContain(DEFAULT_WELCOME_COPY);
   });
 
-  it('appends the begin-nudge after DEFAULT_WELCOME_COPY', () => {
+  it('seeds DEFAULT_WELCOME_COPY alone with NO begin-nudge (the first question is auto-streamed)', () => {
     // Arrange
     const opts = {};
 
     // Act
     const turns = buildWelcomeTurns(opts);
 
-    // Assert: both parts are present.
-    expect(turns[0]?.content).toContain(DEFAULT_WELCOME_COPY);
-    expect(turns[0]?.content).toContain('send a message to begin');
+    // Assert: the fresh seed is exactly the default intro -- the proactive first question now
+    // arrives via the auto-kickoff turn, so no "send a message to begin" nudge is appended.
+    expect(turns[0]?.content).toBe(DEFAULT_WELCOME_COPY);
+    expect(turns[0]?.content).not.toContain('send a message to begin');
   });
 
-  it('produces the exact joined string: DEFAULT_WELCOME_COPY + double newline + nudge', () => {
+  it('produces a single-turn seed of exactly the intro line (no second nudge part)', () => {
     // Arrange
     const opts = {};
 
     // Act
     const turns = buildWelcomeTurns(opts);
 
-    // Assert: the join format is correct (not a single newline, not no separator).
-    const [part1, part2] = turns[0]?.content.split('\n\n') ?? [];
-    expect(part1).toBe(DEFAULT_WELCOME_COPY);
-    expect(part2).toContain('send a message to begin');
+    // Assert: one assistant turn whose content is the intro line verbatim -- no "\n\n" join.
+    expect(turns).toHaveLength(1);
+    expect(turns[0]?.content).toBe(DEFAULT_WELCOME_COPY);
+    expect(turns[0]?.content).not.toContain('\n\n');
   });
 
   it('uses DEFAULT_WELCOME_COPY when welcomeCopy is undefined explicitly', () => {
@@ -220,15 +222,16 @@ describe('buildWelcomeTurns -- whitespace-only welcomeCopy', () => {
     expect(turns[0]?.content).toContain(DEFAULT_WELCOME_COPY);
   });
 
-  it('still appends the begin-nudge when falling back from a whitespace-only copy', () => {
+  it('seeds the default intro alone (no begin-nudge) when falling back from a whitespace-only copy', () => {
     // Arrange
     const opts = { welcomeCopy: '   ' };
 
     // Act
     const turns = buildWelcomeTurns(opts);
 
-    // Assert: nudge is still appended -- it is not skipped on fallback.
-    expect(turns[0]?.content).toContain('send a message to begin');
+    // Assert: fallback yields exactly the default intro -- no nudge, consistent with a fresh seed.
+    expect(turns[0]?.content).toBe(DEFAULT_WELCOME_COPY);
+    expect(turns[0]?.content).not.toContain('send a message to begin');
   });
 });
 
