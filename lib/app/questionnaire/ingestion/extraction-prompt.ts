@@ -10,8 +10,16 @@
  */
 
 import type { LlmMessage } from '@/lib/orchestration/llm/types';
-import { QUESTION_TYPES } from '@/lib/app/questionnaire/types';
-import { CHANGE_TYPES, type AdminSuppliedMetadata } from '@/lib/app/questionnaire/ingestion/types';
+import {
+  QUESTION_TYPES,
+  AUDIENCE_EXPERTISE_LEVELS,
+  AUDIENCE_SENSITIVITY_LEVELS,
+} from '@/lib/app/questionnaire/types';
+import {
+  CHANGE_TYPES,
+  TARGET_ENTITY_TYPES,
+  type AdminSuppliedMetadata,
+} from '@/lib/app/questionnaire/ingestion/types';
 
 export interface BuildExtractionPromptInput {
   /** Plain text the parser extracted from the upload (what the model reads). */
@@ -69,11 +77,52 @@ original span where one exists.
 - For infer_goal / infer_audience, set "targetEntityType" to "version" and put the \
 inferred value in "afterJson".
 
-Output: respond with ONLY a single JSON object with these top-level keys: "sections", \
-"questions", "inferredGoal" (optional), "inferredAudience" (optional), and "changes". \
-Each question references its section by "sectionOrdinal" and carries a stable, unique \
-"key" slug and an "extractionConfidence" between 0 and 1. Do not wrap the JSON in prose \
-or code fences.`;
+Output: respond with ONLY a single JSON object — no prose, no code fences — with \
+these top-level keys, using EXACTLY these field names:
+
+{
+  "sections": [
+    { "ordinal": <integer ≥ 0>, "title": "<string>", "description": "<string, optional>" }
+  ],
+  "questions": [
+    {
+      "sectionOrdinal": <integer matching a section's "ordinal">,
+      "key": "<stable unique slug>",
+      "prompt": "<the question text shown to the respondent — REQUIRED>",
+      "suggestedType": "<one of: ${QUESTION_TYPES.join(' | ')}>",
+      "suggestedTypeConfig": { <optional, e.g. {"choices": ["A","B"]} for choice types> },
+      "guidelines": "<optional answering guidance>",
+      "rationale": "<optional why-this-question>",
+      "extractionConfidence": <number between 0 and 1>,
+      "sourceQuote": "<optional original span>"
+    }
+  ],
+  "inferredGoal": "<optional string>",
+  "inferredAudience": {
+    "description": "<optional string>",
+    "role": "<optional string>",
+    "expertiseLevel": "<optional, one of: ${AUDIENCE_EXPERTISE_LEVELS.join(' | ')}>",
+    "estimatedDurationMinutes": <optional positive integer>,
+    "locale": "<optional BCP-47 tag, e.g. 'en'>",
+    "sensitivity": "<optional, one of: ${AUDIENCE_SENSITIVITY_LEVELS.join(' | ')}>",
+    "notes": "<optional string>"
+  },
+  "changes": [
+    {
+      "changeType": "<one of: ${CHANGE_TYPES.join(' | ')}>",
+      "targetEntityType": "<one of: ${TARGET_ENTITY_TYPES.join(' | ')}>",
+      "rationale": "<short string>",
+      "sourceQuote": "<optional original span>",
+      "beforeJson": <optional>,
+      "afterJson": <optional>,
+      "confidence": <optional number between 0 and 1>
+    }
+  ]
+}
+
+"prompt" and "suggestedType" are REQUIRED on every question — never omit them or \
+rename them. Omit any optional field entirely rather than sending null. "inferredGoal" \
+and "inferredAudience" are themselves optional; omit them if you cannot infer them.`;
 
 /**
  * Build the system + user messages for one extraction call. The system message
