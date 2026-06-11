@@ -175,6 +175,29 @@ describe('UploadQuestionnaireDialog', () => {
       expect(screen.getByText(/already been ingested/i)).toBeInTheDocument();
     });
     expect(mockPush).not.toHaveBeenCalled(); // test-review:accept no_arg_called — error-path guard
+    // The form must re-enable so the admin can fix the input and retry.
+    expect(screen.getByRole('button', { name: /upload & extract/i })).toBeEnabled();
+  });
+
+  it('shows the animated status ticker while extraction is in flight and removes it on error', async () => {
+    // A fetch that never settles keeps the dialog in its busy state.
+    let rejectFetch: (reason: Error) => void = () => {};
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockReturnValue(new Promise((_, reject) => (rejectFetch = reject)))
+    );
+    const user = await openDialog();
+
+    await user.upload(fileInput(), makeFile());
+    await user.click(screen.getByRole('button', { name: /upload & extract/i }));
+
+    expect(await screen.findByRole('status')).toBeInTheDocument();
+
+    rejectFetch(new Error('Network down'));
+    await waitFor(() => {
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    });
+    expect(screen.getByText(/upload failed/i)).toBeInTheDocument();
   });
 
   it('shows a generic message when fetch itself rejects', async () => {
