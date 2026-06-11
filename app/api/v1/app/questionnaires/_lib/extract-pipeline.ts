@@ -25,6 +25,7 @@ import type { getRouteLogger } from '@/lib/api/context';
 import { prisma } from '@/lib/db/client';
 import { parseDocument } from '@/lib/orchestration/knowledge/parsers';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
+import { registerBuiltInCapabilities } from '@/lib/orchestration/capabilities';
 
 import {
   EXTRACT_QUESTIONNAIRE_STRUCTURE_CAPABILITY_SLUG,
@@ -256,6 +257,13 @@ export async function extractFromDocument(
       }),
     };
   }
+
+  // Flush the built-in + app capability handlers into the dispatcher before dispatching. Upload is
+  // often the FIRST capability touch on a fresh server process (an admin ingesting a questionnaire
+  // before any chat/turn has run), and the dispatcher does not lazy-register — without this the
+  // handler map is empty and the dispatch returns `unknown_capability`. Same one-shot, idempotent
+  // flush the data-slot and live turn loops perform.
+  registerBuiltInCapabilities();
 
   const dispatch = await capabilityDispatcher.dispatch(
     EXTRACT_QUESTIONNAIRE_STRUCTURE_CAPABILITY_SLUG,

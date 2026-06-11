@@ -23,7 +23,7 @@ import type { NextRequest } from 'next/server';
 import { successResponse, errorResponse } from '@/lib/api/responses';
 import { getRouteLogger } from '@/lib/api/context';
 import { handleAPIError } from '@/lib/api/errors';
-import { withLiveSessionsEnabled } from '@/lib/app/questionnaire/feature-flag';
+import { isDataSlotsEnabled, withLiveSessionsEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { resolveTurnAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-access';
 import { loadAnswerPanelState } from '@/app/api/v1/app/questionnaire-sessions/_lib/answer-panel';
 
@@ -35,7 +35,9 @@ async function handleGetAnswers(
     const log = await getRouteLogger(request);
     const { id: sessionId } = await context.params;
 
-    const loaded = await loadAnswerPanelState(sessionId);
+    // Data Slots feature: render the data-slot panel when the feature is on (the loader only
+    // switches if the version actually has data slots). A cheap flag read before the access check.
+    const loaded = await loadAnswerPanelState(sessionId, await isDataSlotsEnabled());
     if (!loaded) return errorResponse('Session not found', { code: 'NOT_FOUND', status: 404 });
 
     // Access: an authenticated owner OR a valid anonymous session token (no-login surface).

@@ -41,6 +41,7 @@ const flagMock = vi.hoisted(() => ({
   isAdaptiveSelectionEnabled: vi.fn(),
   isDesignEvaluationEnabled: vi.fn(),
   isLiveSessionsEnabled: vi.fn(),
+  isDataSlotsEnabled: vi.fn(),
 }));
 vi.mock('@/lib/app/questionnaire/feature-flag', () => flagMock);
 
@@ -153,6 +154,7 @@ beforeEach(() => {
   flagMock.isAdaptiveSelectionEnabled.mockResolvedValue(false);
   flagMock.isDesignEvaluationEnabled.mockResolvedValue(false);
   flagMock.isLiveSessionsEnabled.mockResolvedValue(true);
+  flagMock.isDataSlotsEnabled.mockResolvedValue(false);
 });
 
 describe('QuestionnaireDetailPage', () => {

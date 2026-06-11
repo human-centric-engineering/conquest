@@ -15,9 +15,9 @@
 
 /// The top-level container an admin authors, configures, and launches.
 model AppQuestionnaire {
-  id        String   @id @default(cuid())
-  title     String
-  status    String   @default("draft")
+  id           String   @id @default(cuid())
+  title        String
+  status       String   @default("draft")
   // DEMO-ONLY (F2.5.1): which demo client this questionnaire is attributed to.
   // null = "Generic Sunrise demo" (defaults end-to-end); no backfill on older rows.
   // SetNull, not Cascade: a questionnaire outlives its demo client — attribution
@@ -63,6 +63,8 @@ model AppQuestionnaireVersion {
   invitations     AppQuestionnaireInvitation[]
   sessions        AppQuestionnaireSession[]
   evaluationRuns  AppQuestionnaireEvaluationRun[]
+  dataSlots       AppDataSlot[]
+  dataSlotDraft   AppDataSlotDraft?
 
   @@unique([questionnaireId, versionNumber])
   @@index([questionnaireId])
@@ -161,11 +163,11 @@ model AppQuestionnaireConfig {
   maxQuestionsPerSession Int? // hard question cap; null = no cap
 
   // Modes.
-  voiceEnabled         Boolean @default(false) // allow voice input (F6.2)
-  contradictionMode    String  @default("off") // off | flag | probe (CONTRADICTION_MODES)
-  contradictionWindowN Int     @default(0) // N prior answers to check against; 0 when mode=off
-  contradictionEveryNTurns Int @default(1) // run detection every N respondent turns; 1 = every turn
-  anonymousMode        Boolean @default(false) // don't collect identifying profile fields
+  voiceEnabled             Boolean @default(false) // allow voice input (F6.2)
+  contradictionMode        String  @default("off") // off | flag | probe (CONTRADICTION_MODES)
+  contradictionWindowN     Int     @default(0) // N prior answers to check against; 0 when mode=off
+  contradictionEveryNTurns Int     @default(1) // run detection every N respondent turns; 1 = every turn
+  anonymousMode            Boolean @default(false) // don't collect identifying profile fields
 
   // Respondent answer-slot panel (F7.2): how much of the questionnaire the live
   // panel shows. full_progress = every slot grouped by section (X-of-N progress);
@@ -220,7 +222,7 @@ model AppQuestionnaireSection {
 /// `idx_app_question_slot_embedding` before applying (the same discipline the
 /// knowledge `embedding` column documents).
 model AppQuestionSlot {
-  id                   String   @id @default(cuid())
+  id                   String                       @id @default(cuid())
   versionId            String // denormalised — F2.2 tagging validates tag+slot share a version
   sectionId            String
   ordinal              Int
@@ -228,21 +230,22 @@ model AppQuestionSlot {
   prompt               String
   guidelines           String?
   rationale            String?
-  type                 String   @default("free_text") // free_text|single_choice|multi_choice|likert|numeric|date|boolean
+  type                 String                       @default("free_text") // free_text|single_choice|multi_choice|likert|numeric|date|boolean
   typeConfig           Json? // choices, likert bounds, etc.
-  required             Boolean  @default(false)
-  weight               Float    @default(1.0)
+  required             Boolean                      @default(false)
+  weight               Float                        @default(1.0)
   extractionConfidence Float? // 0–1, set by the extractor
   // F4.1 adaptive selection: cosine-similarity vector over `prompt` (+`guidelines`).
   // Width matches the platform embedding model (AiKnowledgeChunk.embedding). Raw-SQL
   // read/write only — see the drift warning above.
   embedding            Unsupported("vector(1536)")?
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  createdAt            DateTime                     @default(now())
+  updatedAt            DateTime                     @updatedAt
 
-  section AppQuestionnaireSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
-  tags    AppQuestionSlotTag[]
-  answers AppAnswerSlot[]
+  section       AppQuestionnaireSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  tags          AppQuestionSlotTag[]
+  answers       AppAnswerSlot[]
+  dataSlotLinks AppDataSlotQuestion[]
 
   @@unique([versionId, key])
   @@index([versionId])
@@ -361,11 +364,11 @@ model AppQuestionnaireSourceDocument {
 /// clone-for-client utilities still land in F6.4 / P3+. No User FK (UG-1) — a
 /// global admin-managed fixture table, ownership implicit.
 model AppDemoClient {
-  id          String   @id @default(cuid())
-  slug        String   @unique // URL-safe ("acme-bank"); admin URLs + later invite links
+  id          String  @id @default(cuid())
+  slug        String  @unique // URL-safe ("acme-bank"); admin URLs + later invite links
   name        String // display name ("Acme Bank Demo")
   description String? // internal admin note ("Prepared for the Q1 2026 pitch")
-  isActive    Boolean  @default(true) // soft-disable without delete
+  isActive    Boolean @default(true) // soft-disable without delete
 
   // DEMO-ONLY (F3.4): theme columns. All nullable — null means "use the Sunrise
   // default" (resolveTheme fills it). The invitation email reads all four (ctaColor =
@@ -385,7 +388,7 @@ model AppDemoClient {
   // DEMO-ONLY (F3.4): invitations carrying this client's brand snapshot. SetNull on
   // delete (see AppQuestionnaireInvitation); the 409-guard counts questionnaires, not
   // these, so deleting a client clears its sent invitations' brand to the default.
-  invitations AppQuestionnaireInvitation[]
+  invitations    AppQuestionnaireInvitation[]
 
   @@map("app_demo_client")
 }
@@ -413,8 +416,9 @@ model AppQuestionnaireSession {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  version         AppQuestionnaireVersion       @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  version         AppQuestionnaireVersion        @relation(fields: [versionId], references: [id], onDelete: Cascade)
   answers         AppAnswerSlot[]
+  dataSlotFills   AppDataSlotFill[]
   events          AppQuestionnaireSessionEvent[]
   turns           AppQuestionnaireTurn[]
   profileSnapshot AppRespondentProfileSnapshot?
@@ -504,6 +508,112 @@ model AppAnswerSlot {
   @@map("app_answer_slot")
 }
 
+/// A semantic DATA SLOT — the abstraction layer over questions (Data Slots feature).
+///
+/// A data slot is a short (1–4 word) `name` plus a `description` explaining what it
+/// captures and why it matters. It is the respondent-facing operational target: the
+/// live conversation aims to FILL data slots naturally, while the underlying questions
+/// (AppQuestionSlot/AppAnswerSlot) are answered in the background as the deliverable.
+/// Version-scoped (forks with the version, like tags F2.2); generated by the data-slot
+/// generator agent after questions are approved, then admin-reviewed.
+///
+/// `theme` is a short group label the generator assigns (the respondent panel groups by
+/// it). `ordinal` orders slots within the version; `weight` feeds weighted/topic-local
+/// targeting (mirrors AppQuestionSlot.weight). `generationConfidence` is the generator's
+/// 0–1 confidence. A slot relates to one or more questions via AppDataSlotQuestion (M:N) —
+/// filling the slot well captures those questions.
+model AppDataSlot {
+  id                   String   @id @default(cuid())
+  versionId            String
+  key                  String // slug, unique per version (fills/links reference it, not the cuid)
+  name                 String // 1–4 words (the panel label + the targeting "prompt")
+  description          String // why it matters + what counts as filled (the targeting "guidelines")
+  theme                String // short group label for panel grouping
+  ordinal              Int      @default(0)
+  weight               Float    @default(1.0)
+  generationConfidence Float? // 0–1, set by the generator
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  version   AppQuestionnaireVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  questions AppDataSlotQuestion[]
+  fills     AppDataSlotFill[]
+
+  @@unique([versionId, key])
+  @@index([versionId])
+  @@map("app_data_slot")
+}
+
+/// A PENDING data-slot generation for a version — the reviewable DRAFT proposal (Data Slots
+/// feature). Generating data slots runs a paid LLM call; rather than holding the result only
+/// in the admin's browser (lost on navigation), the proposal is persisted here as a JSON
+/// snapshot of `GeneratedDataSlot[]`. It is explicitly NOT live: runtime targeting, the
+/// respondent panel, and the launch gate read only AppDataSlot (the saved/live set), never
+/// this table. Saving the reviewed set (PUT data-slots) writes AppDataSlot and clears this
+/// draft in one transaction; "Discard draft" deletes it. One pending draft per version
+/// (`versionId @unique`); cascades/forks with the version.
+model AppDataSlotDraft {
+  id        String   @id @default(cuid())
+  versionId String   @unique
+  slots     Json // GeneratedDataSlot[] snapshot — the proposed, reviewable set (not live)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  version AppQuestionnaireVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@map("app_data_slot_draft")
+}
+
+/// M:N mapping of a data slot to the question(s) it abstracts over. Both sides cascade.
+/// A data slot "meaningfully captures" its mapped questions: filling the slot in the
+/// conversation lets the background extractor answer those questions.
+model AppDataSlotQuestion {
+  id             String   @id @default(cuid())
+  dataSlotId     String
+  questionSlotId String
+  createdAt      DateTime @default(now())
+
+  dataSlot     AppDataSlot     @relation(fields: [dataSlotId], references: [id], onDelete: Cascade)
+  questionSlot AppQuestionSlot @relation(fields: [questionSlotId], references: [id], onDelete: Cascade)
+
+  @@unique([dataSlotId, questionSlotId])
+  @@index([dataSlotId])
+  @@index([questionSlotId])
+  @@map("app_data_slot_question")
+}
+
+/// One filled data slot within a session — the respondent-facing capture (Data Slots
+/// feature). Mirrors AppAnswerSlot but for the abstraction layer: `value` is the captured
+/// structured position, `paraphrase` is a short natural-language restatement of the
+/// respondent's position toward the slot (shown in the panel), `confidence` is how well
+/// the agent believes it understands their position. Per session, one fill per slot.
+///
+/// PII by construction (the paraphrase + value are the respondent's words). Cascades from
+/// the session (deleting/resetting a session removes its fills — F6.4 reset + erasure rely
+/// on this cascade, no explicit table list needed).
+model AppDataSlotFill {
+  id                String   @id @default(cuid())
+  sessionId         String
+  dataSlotId        String
+  value             Json
+  paraphrase        String? // short restatement of the respondent's position (panel-facing)
+  confidence        Float? // 0–1; the agent's confidence in its understanding
+  provenanceLabel   String   @default("direct") // ANSWER_PROVENANCES (types.ts)
+  rationale         String?
+  lastUpdatedTurnId String?
+  refinementHistory Json     @default("[]") // RefinementHistoryEntry[] (refinement/types.ts)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  session  AppQuestionnaireSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  dataSlot AppDataSlot             @relation(fields: [dataSlotId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, dataSlotId]) // one fill per slot per session — the upsert key
+  @@index([sessionId])
+  @@index([dataSlotId])
+  @@map("app_data_slot_fill")
+}
+
 /// The append-only audit trail of a session's lifecycle (F4.6). One row per recorded
 /// event: the four status transitions (`paused`, `resumed`, `completed`, `abandoned`),
 /// an optional `created` marker, and `cost_cap_reached` — a non-transition event the
@@ -549,16 +659,17 @@ model AppQuestionnaireSessionEvent {
 /// (no `@@unique([sessionId, ordinal])` — a unique can throw under a retried turn; rare
 /// gaps are acceptable). No `respondentUserId` here — it's reachable via the session.
 model AppQuestionnaireTurn {
-  id                  String   @id @default(cuid())
-  sessionId           String
-  ordinal             Int // 1-based turn index within the session
-  userMessage         String   @db.Text // respondent's message (PII)
-  agentResponse       String   @db.Text // composed agent reply streamed back
-  targetedQuestionId  String? // AppQuestionSlot.id asked for; null = completion/offer turn
-  toolCalls           Json     @default("[]") // [{ slug, success, code?, latencyMs? }] ordered
-  sideEffectAnswerIds Json     @default("[]") // AppAnswerSlot.id[] this turn created/updated
-  costUsd             Float? // summed per-turn LLM spend; null until set
-  createdAt           DateTime @default(now())
+  id                    String   @id @default(cuid())
+  sessionId             String
+  ordinal               Int // 1-based turn index within the session
+  userMessage           String   @db.Text // respondent's message (PII)
+  agentResponse         String   @db.Text // composed agent reply streamed back
+  targetedQuestionId    String? // AppQuestionSlot.id asked for; null = completion/offer turn
+  toolCalls             Json     @default("[]") // [{ slug, success, code?, latencyMs? }] ordered
+  sideEffectAnswerIds   Json     @default("[]") // AppAnswerSlot.id[] this turn created/updated
+  sideEffectDataSlotIds Json     @default("[]") // AppDataSlotFill.id[] this turn created/updated (data-slot mode)
+  costUsd               Float? // summed per-turn LLM spend; null until set
+  createdAt             DateTime @default(now())
 
   session AppQuestionnaireSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
@@ -638,7 +749,7 @@ model AppQuestionnaireEvaluationRun {
 /// the UG-1 deferred-FK posture, like `triggeredByUserId`). `status`/`severity`/`dimension` are
 /// plain Strings validated at the seam (house style). Fully Prisma-modelled — no drift probe.
 model AppQuestionnaireEvaluationFinding {
-  id                 String   @id @default(cuid())
+  id                 String    @id @default(cuid())
   runId              String
   dimension          String // EvaluationDimension (evaluation/types.ts), stamped by the caller
   ordinal            Int // presentation order within (run, dimension)
@@ -649,13 +760,13 @@ model AppQuestionnaireEvaluationFinding {
   sourceQuote        String? // offending text when the finding points at one
   proposedEdit       Json? // optional structured op (ProposedEdit); null when prose-only or degraded (F5.3)
   editedOverride     Json? // admin-edited op; takes precedence over proposedEdit at apply (F5.3)
-  status             String   @default("pending") // pending | accepted | declined | applied (stale is derived, not stored)
+  status             String    @default("pending") // pending | accepted | declined | applied (stale is derived, not stored)
   decidedByUserId    String? // admin who accepted/declined/edited; plain String, no FK (UG-1)
   decidedAt          DateTime?
   appliedAt          DateTime?
   appliedToVersionId String? // version actually written (may be a forked draft); plain String (UG-1)
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   run AppQuestionnaireEvaluationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
 

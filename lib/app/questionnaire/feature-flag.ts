@@ -13,6 +13,7 @@ import {
   APP_QUESTIONNAIRES_COST_CAP_FLAG,
   APP_QUESTIONNAIRES_ATTACHMENT_INPUT_FLAG,
   APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG,
+  APP_QUESTIONNAIRES_DATA_SLOTS_FLAG,
   APP_QUESTIONNAIRES_FLAG,
 } from '@/lib/app/questionnaire/constants';
 import { isFeatureEnabled } from '@/lib/feature-flags';
@@ -33,6 +34,7 @@ export {
   APP_QUESTIONNAIRES_COST_CAP_FLAG,
   APP_QUESTIONNAIRES_ATTACHMENT_INPUT_FLAG,
   APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG,
+  APP_QUESTIONNAIRES_DATA_SLOTS_FLAG,
 };
 
 /**
@@ -315,6 +317,24 @@ export async function isQuestionPhrasingEnabled(): Promise<boolean> {
     isFeatureEnabled(APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG),
   ]);
   return app && live && phrasing;
+}
+
+/**
+ * Whether the **data slots** feature is enabled — the semantic abstraction layer. Gates the
+ * admin generation surface + the launch gate (master flag + this sub-flag). The *runtime*
+ * data-slot mode additionally requires the live-sessions flag (the `/messages` route already
+ * enforces it) and the version actually having data slots; this resolver is the master/sub-flag
+ * half both surfaces share. A master-only child (like adaptive/extraction), not live-dependent —
+ * generation happens at admin/authoring time, before any session exists.
+ *
+ * Server-only (resolves the flags from the database).
+ */
+export async function isDataSlotsEnabled(): Promise<boolean> {
+  const [app, dataSlots] = await Promise.all([
+    isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_DATA_SLOTS_FLAG),
+  ]);
+  return app && dataSlots;
 }
 
 /**

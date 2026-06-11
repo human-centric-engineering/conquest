@@ -41,6 +41,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { FieldHelp } from '@/components/ui/field-help';
+import { StatusTicker } from '@/components/admin/questionnaires/status-ticker';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse } from '@/lib/api/parse-response';
 import {
@@ -159,6 +160,7 @@ export function UploadQuestionnaireDialog({
       const parsed = await parseApiResponse<UploadResult>(res);
       if (!parsed.success) {
         setError(parsed.error.message);
+        setBusy(false);
         return;
       }
       // Land on the freshly extracted draft. Keep busy=true so the form stays
@@ -385,6 +387,7 @@ export function UploadQuestionnaireDialog({
             </FieldHelp>
           </div>
 
+          {busy && <StatusTicker />}
           {error && <p className="text-destructive text-sm">{error}</p>}
 
           <DialogFooter>

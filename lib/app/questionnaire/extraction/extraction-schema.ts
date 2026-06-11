@@ -42,9 +42,25 @@ const extractedAnswerSchema = z.object({
   sourceQuote: z.string().optional(),
 });
 
-/** Top-level extraction result: the answers the model found in this turn. */
+/**
+ * One LLM-reported data-slot fill (Data Slots feature). Emitted only when the prompt carried
+ * data-slot candidates. `paraphrase` restates the respondent's position; `value` is free-form
+ * (no per-type validation — a data slot is a semantic target, not a typed question).
+ */
+const dataSlotFillSchema = z.object({
+  dataSlotKey: z.string().min(1),
+  value: z.unknown(),
+  paraphrase: z.string(),
+  confidence: z.number().min(0).max(1),
+  provenance: z.enum(EXTRACTOR_EMITTED_PROVENANCES),
+  rationale: z.string().optional(),
+});
+
+/** Top-level extraction result: the answers (+ optional data-slot fills) found this turn. */
 export const answerExtractionSchema = z.object({
   answers: z.array(extractedAnswerSchema),
+  /** Data Slots feature: present only when the prompt carried data-slot candidates. */
+  dataSlotFills: z.array(dataSlotFillSchema).optional(),
 });
 
 export type ExtractedAnswer = z.infer<typeof extractedAnswerSchema>;

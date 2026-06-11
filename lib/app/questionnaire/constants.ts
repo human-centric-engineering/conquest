@@ -537,6 +537,59 @@ export const APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG =
 export const QUESTIONNAIRE_INTERVIEWER_AGENT_SLUG = 'app-questionnaire-interviewer';
 
 /**
+ * Sub-flag gating the **data slots** feature — the semantic abstraction layer over questions.
+ * When on: the admin can generate + review data slots, every launch requires them, and a
+ * launched questionnaire with data slots runs its live session in "data-slot mode" (the
+ * conversation targets data slots; questions fill in the background). Disabled by default;
+ * gates both the admin generation surface (master flag) and the runtime mode (additionally
+ * requires the live-sessions flag, enforced by the `/messages` route). Seeded by
+ * `prisma/seeds/app-questionnaire/028-data-slots-flag.ts`.
+ */
+export const APP_QUESTIONNAIRES_DATA_SLOTS_FLAG = 'APP_QUESTIONNAIRES_DATA_SLOTS_ENABLED';
+
+/**
+ * Slug of the **data-slot generator** agent. Dispatched programmatically by the
+ * generate-data-slots route to infer short (1–4 word) data slots + descriptions + question
+ * mappings from a version's approved questions. Provider-agnostic empty binding (resolves at
+ * runtime, `reasoning` tier). Seeded by `prisma/seeds/app-questionnaire/029-data-slots-generator-agent.ts`.
+ */
+export const QUESTIONNAIRE_DATA_SLOTS_AGENT_SLUG = 'app-questionnaire-data-slots-generator';
+
+/** Slug of the generate-data-slots capability (source of truth for class + seed row). */
+export const GENERATE_DATA_SLOTS_CAPABILITY_SLUG = 'app_generate_data_slots';
+
+/** `AiCapability.executionHandler` for the generate-data-slots capability — the class name. */
+export const GENERATE_DATA_SLOTS_HANDLER = 'AppGenerateDataSlotsCapability';
+
+/**
+ * The generate-data-slots capability's OpenAI-compatible function definition — shared by the
+ * `BaseCapability` subclass and the `AiCapability` seed row so the two can't drift. Dispatched
+ * programmatically (not a chat tool loop); `structure` is the opaque questions DTO the
+ * capability validates with Zod at execute time.
+ */
+export const GENERATE_DATA_SLOTS_FUNCTION_DEFINITION: CapabilityFunctionDefinition = {
+  name: GENERATE_DATA_SLOTS_CAPABILITY_SLUG,
+  description:
+    "Infer a set of semantic data slots — short (1–4 word) names, each with a description and a mapping to the question(s) it abstracts over — from a questionnaire version's approved questions, goal, and audience, via a provider-agnostic structured LLM call. Returns the proposed slots; persists nothing (the admin reviews them).",
+  parameters: {
+    type: 'object',
+    properties: {
+      structure: {
+        type: 'object',
+        description:
+          'The version structure DTO: { goal, audience, questions[] } where each question carries its key, prompt, type, and section.',
+        additionalProperties: true,
+      },
+      versionId: {
+        type: 'string',
+        description: 'Stable version identity, threaded into cost-log metadata.',
+      },
+    },
+    required: ['structure'],
+  },
+};
+
+/**
  * Slug of the evaluate-structure capability (F5.1). One source of truth shared by the
  * `BaseCapability` subclass, its `AiCapability` seed row, and the evaluate-preview
  * route that dispatches it once per dimension. Snake_case with the fork-owned `app_`

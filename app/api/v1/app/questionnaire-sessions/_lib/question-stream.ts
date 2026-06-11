@@ -61,6 +61,12 @@ export interface QuestionComposeInput {
   isReask: boolean;
   /** True for the first question of the session (nothing to acknowledge yet). */
   isOpening: boolean;
+  /**
+   * Data Slots feature — topic rhythm. `true` = we just moved to a NEW subject area (bridge with
+   * a natural segue); `false`/absent = staying in the same area (deepen — the skilled-interviewer
+   * "linger before moving on"). Only consulted on a normal acknowledge-and-ask turn.
+   */
+  isTransition?: boolean;
 }
 
 /** What {@link streamQuestionMessage} returns once the stream completes. */
@@ -117,11 +123,19 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
     'Ask the ONE question provided, naturally — never as a numbered form field, never restate ' +
     'the whole survey, never invent new questions, and never answer on their behalf. ' +
     (input.isOpening
-      ? 'This is the first question — open warmly, no need to acknowledge a prior answer. '
+      ? 'This is the very first message of the conversation — be proactive and set the scene. ' +
+        'Open with a short, warm scene-setting line ("Let\'s start by…", "To begin, we\'ll explore…") ' +
+        'and then ease straight into this first question gently — keep it light and easy to answer, ' +
+        'the kind of opener a thoughtful human interviewer would lead with. There is no prior answer ' +
+        'to acknowledge. Do not tell them to "send a message to begin" — you are starting the conversation. '
       : input.isReask
-        ? 'You already asked this question but could not capture a usable answer from their last ' +
-          'reply — gently say you want to make sure you get it right, then re-ask it clearly. '
-        : 'Briefly acknowledge what they just said (a few words), then ask the next question. ') +
+        ? 'You already asked about this but could not capture a usable answer from their last ' +
+          'reply — gently say you want to make sure you get it right, then ask again clearly. '
+        : input.isTransition
+          ? 'Briefly acknowledge what they just said, then bridge naturally into a NEW area and ' +
+            'ask about it — like a skilled interviewer changing subject without it feeling abrupt. '
+          : 'Briefly acknowledge what they just said, then ask the next question — stay in the ' +
+            'same subject area and let their answer lead naturally into it (deepen before moving on). ') +
     (input.goal ? `Questionnaire goal: ${input.goal}. ` : '') +
     (calibration.length > 0 ? calibration.join(' ') + ' ' : '') +
     'Match the respondent’s tone. Keep it to one or two sentences. ' +

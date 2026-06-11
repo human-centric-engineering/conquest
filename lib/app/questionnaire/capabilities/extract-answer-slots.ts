@@ -66,6 +66,8 @@ import {
 import { normalizeAnswerIntents } from '@/lib/app/questionnaire/extraction/answer-intents';
 import type {
   AnswerSlotIntent,
+  DataSlotCandidateView,
+  DataSlotFillIntent,
   ExtractionContext,
   ExtractionSlotView,
 } from '@/lib/app/questionnaire/extraction/types';
@@ -107,6 +109,14 @@ const candidateSlotSchema = z.object({
   sectionId: z.string().optional(),
 });
 
+/** A data-slot candidate (Data Slots feature) the extractor also fills, addressed by key. */
+const dataSlotCandidateSchema = z.object({
+  key: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string(),
+  theme: z.string(),
+});
+
 const argsSchema = z.object({
   /** The respondent's message to extract from (this turn). */
   userMessage: z.string().min(1),
@@ -114,6 +124,8 @@ const argsSchema = z.object({
   activeQuestionKey: z.string().min(1),
   /** The active slot plus the version's unanswered slots. */
   candidateSlots: z.array(candidateSlotSchema).min(1).max(MAX_CANDIDATE_SLOTS),
+  /** Data Slots feature: the data slots to also fill this turn (omit for question-only mode). */
+  dataSlotCandidates: z.array(dataSlotCandidateSchema).max(MAX_CANDIDATE_SLOTS).optional(),
   /** Already-answered state, so the extractor doesn't re-ask. */
   answered: z
     .array(
@@ -133,6 +145,11 @@ export type ExtractAnswerSlotsArgs = z.infer<typeof argsSchema>;
 /** What the capability returns: the normalised answer-write intents for this turn. */
 export interface ExtractAnswerSlotsData {
   intents: AnswerSlotIntent[];
+  /**
+   * Data Slots feature: the data-slot fills captured this turn. Present (possibly empty) when the
+   * call carried data-slot candidates; omitted in question-only mode. Consumers read `?? []`.
+   */
+  dataSlotFills?: DataSlotFillIntent[];
   /**
    * How many of the model's reported answers the normaliser discarded (unknown
    * slot, value failed its type, duplicate). Surfaced so the preview route can
@@ -197,7 +214,38 @@ function toExtractionContext(args: ExtractAnswerSlotsArgs): ExtractionContext {
     sessionId: args.sessionId ?? `dispatch-${args.activeQuestionKey}`,
     ...(args.recentMessages ? { recentMessages: args.recentMessages } : {}),
     ...(args.attachments && args.attachments.length > 0 ? { attachments: args.attachments } : {}),
+    ...(args.dataSlotCandidates && args.dataSlotCandidates.length > 0
+      ? { dataSlotCandidates: args.dataSlotCandidates }
+      : {}),
   };
+}
+
+/**
+ * Normalise the model's data-slot fills (Data Slots feature): keep only fills addressing a known
+ * candidate key, coercing the fields. No per-type value validation — a data slot is a free-form
+ * semantic target, so the paraphrase + value pass through.
+ */
+function normalizeDataSlotFills(
+  raw: AnswerExtraction['dataSlotFills'],
+  candidates: DataSlotCandidateView[]
+): DataSlotFillIntent[] {
+  if (!raw || raw.length === 0) return [];
+  const known = new Set(candidates.map((c) => c.key));
+  const seen = new Set<string>();
+  const out: DataSlotFillIntent[] = [];
+  for (const fill of raw) {
+    if (!known.has(fill.dataSlotKey) || seen.has(fill.dataSlotKey)) continue;
+    seen.add(fill.dataSlotKey);
+    out.push({
+      dataSlotKey: fill.dataSlotKey,
+      value: fill.value,
+      paraphrase: fill.paraphrase,
+      confidence: fill.confidence,
+      provenance: fill.provenance,
+      ...(fill.rationale !== undefined ? { rationale: fill.rationale } : {}),
+    });
+  }
+  return out;
 }
 
 /** The attachment capabilities a turn's files require: vision for images, documents else. */
@@ -406,6 +454,16 @@ export class AppExtractAnswerSlotsCapability extends BaseCapability<
       });
     }
 
-    return this.success({ intents, droppedCount: dropped.length, costUsd: completion.costUsd });
+    const dataSlotFills = normalizeDataSlotFills(
+      completion.value.dataSlotFills,
+      args.dataSlotCandidates ?? []
+    );
+
+    return this.success({
+      intents,
+      dataSlotFills,
+      droppedCount: dropped.length,
+      costUsd: completion.costUsd,
+    });
   }
 }

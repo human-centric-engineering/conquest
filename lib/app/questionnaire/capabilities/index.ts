@@ -49,3 +49,9 @@ export {
   type EvaluateStructureArgs,
   type EvaluateStructureData,
 } from '@/lib/app/questionnaire/capabilities/evaluate-structure';
+
+export {
+  AppGenerateDataSlotsCapability,
+  type GenerateDataSlotsArgs,
+  type GenerateDataSlotsData,
+} from '@/lib/app/questionnaire/capabilities/generate-data-slots';

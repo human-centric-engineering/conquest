@@ -30,6 +30,7 @@ import { API } from '@/lib/api/endpoints';
 import { parseApiResponse } from '@/lib/api/parse-response';
 import type { EvaluationRunDetail, EvaluationRunListItem } from '@/lib/app/questionnaire/views';
 import { runStatusBadge } from '@/components/admin/questionnaires/evaluation-status-badge';
+import { StatusTicker, EVALUATION_MESSAGES } from '@/components/admin/questionnaires/status-ticker';
 
 interface Props {
   questionnaireId: string;
@@ -101,6 +102,7 @@ export function EvaluationRunsTable({
         )}
       </div>
 
+      {running && <StatusTicker messages={EVALUATION_MESSAGES} />}
       {error && <p className="text-destructive text-sm">{error}</p>}
 
       {runs.length > 0 && (

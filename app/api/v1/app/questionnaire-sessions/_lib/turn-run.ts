@@ -6,7 +6,10 @@
  * offer prose is streamed separately (`offer-stream.ts`).
  */
 
-import type { AnswerSlotIntent } from '@/lib/app/questionnaire/extraction/types';
+import type {
+  AnswerSlotIntent,
+  DataSlotFillIntent,
+} from '@/lib/app/questionnaire/extraction/types';
 import type { RefinementDecision } from '@/lib/app/questionnaire/refinement/types';
 import { applyRefinement } from '@/lib/app/questionnaire/refinement';
 import type { ToolCallRecord } from '@/lib/app/questionnaire/orchestrator';
@@ -15,6 +18,7 @@ import {
   persistRefinement,
   upsertAnswerSlot,
 } from '@/app/api/v1/app/questionnaires/_lib/answer-slots';
+import { upsertDataSlotFill } from '@/app/api/v1/app/questionnaires/_lib/data-slot-fills';
 import { recordTurn } from '@/app/api/v1/app/questionnaires/_lib/turns';
 
 /**
@@ -33,8 +37,12 @@ export async function persistTurn(opts: {
   upserts: AnswerSlotIntent[];
   refinements: RefinementDecision[];
   keyToSlotId: Map<string, string>;
+  /** Data Slots feature: the data-slot fills to upsert + their key→id map (data-slot mode). */
+  dataSlotFills?: DataSlotFillIntent[];
+  dataSlotKeyToId?: Map<string, string>;
 }): Promise<string> {
   const sideEffectAnswerIds: string[] = [];
+  const sideEffectDataSlotIds: string[] = [];
 
   for (const intent of opts.upserts) {
     const slotId = opts.keyToSlotId.get(intent.slotKey);
@@ -75,6 +83,22 @@ export async function persistTurn(opts: {
     }
   }
 
+  // Data Slots feature: upsert the data-slot fills (the respondent-facing capture).
+  if (opts.dataSlotFills && opts.dataSlotKeyToId) {
+    for (const fill of opts.dataSlotFills) {
+      const dataSlotId = opts.dataSlotKeyToId.get(fill.dataSlotKey);
+      if (!dataSlotId) continue;
+      const id = await upsertDataSlotFill(opts.sessionId, dataSlotId, {
+        value: fill.value,
+        paraphrase: fill.paraphrase,
+        confidence: fill.confidence,
+        provenance: fill.provenance,
+        ...(fill.rationale !== undefined ? { rationale: fill.rationale } : {}),
+      });
+      sideEffectDataSlotIds.push(id);
+    }
+  }
+
   return recordTurn({
     sessionId: opts.sessionId,
     userMessage: opts.userMessage,
@@ -82,6 +106,7 @@ export async function persistTurn(opts: {
     targetedQuestionId: opts.targetedQuestionId,
     toolCalls: opts.toolCalls,
     sideEffectAnswerIds,
+    sideEffectDataSlotIds,
     costUsd: opts.costUsd > 0 ? opts.costUsd : null,
   });
 }

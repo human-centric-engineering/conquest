@@ -45,6 +45,7 @@ vi.mock('@/lib/orchestration/knowledge/parsers', () => ({ parseDocument: vi.fn()
 vi.mock('@/lib/orchestration/capabilities/dispatcher', () => ({
   capabilityDispatcher: { dispatch: vi.fn() },
 }));
+vi.mock('@/lib/orchestration/capabilities', () => ({ registerBuiltInCapabilities: vi.fn() }));
 
 vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({ logAdminAction: vi.fn() }));
 

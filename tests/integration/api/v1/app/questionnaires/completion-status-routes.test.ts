@@ -31,6 +31,10 @@ const dispatchMock = vi.hoisted(() => ({
 }));
 vi.mock('@/lib/orchestration/capabilities/dispatcher', () => dispatchMock);
 
+// The route flushes capability handlers before dispatching; here it's a no-op so the
+// mocked dispatcher stands alone (the real flush is covered by the registry's own tests).
+vi.mock('@/lib/orchestration/capabilities', () => ({ registerBuiltInCapabilities: vi.fn() }));
+
 const rateLimitMock = vi.hoisted(() => ({
   completionLimiter: {
     check: vi.fn(() => ({ success: true, limit: 60, remaining: 59, reset: 0 })),

@@ -29,6 +29,7 @@ const dispatchMock = vi.hoisted(() => ({
   capabilityDispatcher: { dispatch: vi.fn() },
 }));
 vi.mock('@/lib/orchestration/capabilities/dispatcher', () => dispatchMock);
+vi.mock('@/lib/orchestration/capabilities', () => ({ registerBuiltInCapabilities: vi.fn() }));
 
 const rateLimitMock = vi.hoisted(() => ({
   designEvaluationLimiter: {

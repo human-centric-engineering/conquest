@@ -26,6 +26,7 @@ function sessionGraph(over: Record<string, unknown> = {}) {
     respondentUserId: 'user-1',
     version: {
       config: null, // lazy — resolves to defaults
+      dataSlots: [], // Data Slots feature: none by default
       sections: [
         {
           id: 's1',
@@ -68,6 +69,7 @@ function sessionGraph(over: Record<string, unknown> = {}) {
         questionSlot: { id: 'q1', key: 'role' },
       },
     ],
+    dataSlotFills: [], // Data Slots feature: none by default
     turns: [
       // newest first (orderBy ordinal desc)
       {

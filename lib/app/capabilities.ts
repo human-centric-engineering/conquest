@@ -20,6 +20,7 @@ import {
   AppEvaluateStructureCapability,
   AppExtractAnswerSlotsCapability,
   AppExtractQuestionnaireStructureCapability,
+  AppGenerateDataSlotsCapability,
   AppRefineAnswerCapability,
 } from '@/lib/app/questionnaire/capabilities';
 
@@ -58,4 +59,9 @@ export function initAppCapabilities(): void {
   // the flag-gated evaluate-preview route dispatches it), so unconditional registration
   // here is safe.
   registerAppCapability(new AppEvaluateStructureCapability());
+
+  // Data Slots — the data-slot generator. Inert until the APP_QUESTIONNAIRES_ENABLED master
+  // flag and the APP_QUESTIONNAIRES_DATA_SLOTS sub-flag are both on (only the flag-gated
+  // generate-data-slots route dispatches it), so unconditional registration here is safe.
+  registerAppCapability(new AppGenerateDataSlotsCapability());
 }

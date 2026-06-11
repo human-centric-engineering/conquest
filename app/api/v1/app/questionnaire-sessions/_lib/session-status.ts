@@ -25,7 +25,10 @@ import {
   type CostCapTier,
   type SessionStatusView,
 } from '@/lib/app/questionnaire/session';
-import { isCostCapEnforcementEnabled } from '@/lib/app/questionnaire/feature-flag';
+import {
+  isCostCapEnforcementEnabled,
+  isDataSlotsEnabled,
+} from '@/lib/app/questionnaire/feature-flag';
 import { buildTurnContext } from '@/app/api/v1/app/questionnaires/_lib/turn-context';
 import { sumSessionTurnCost } from '@/app/api/v1/app/questionnaires/_lib/turns';
 
@@ -43,12 +46,28 @@ export async function loadSessionStatus(sessionId: string): Promise<LoadedSessio
   const status = narrowToEnum(loaded.session.status, SESSION_STATUSES, 'active');
   const anonymous = loaded.session.respondentUserId === null;
 
-  const assessment = assessCompletion({
+  let assessment = assessCompletion({
     questions: loaded.base.questions,
     answered: loaded.base.answered,
     config: loaded.base.config,
     sessionId: loaded.base.sessionId,
   });
+
+  // Data Slots feature: in data-slot mode the deliverable is "every question answered", and the
+  // progress bar tracks that (not the configurable weighted threshold). Override coverage to the
+  // raw question-completion fraction and offer only when all questions are answered — matching
+  // `runDataSlotTurn`'s gate so the Submit affordance and the turn loop can't disagree.
+  const dataSlots = loaded.base.dataSlots ?? [];
+  if (dataSlots.length > 0 && (await isDataSlotsEnabled())) {
+    const total = loaded.base.questions.length;
+    const allAnswered = total > 0 && assessment.answeredCount >= total;
+    assessment = {
+      ...assessment,
+      coverage: total === 0 ? 1 : assessment.answeredCount / total,
+      kind: allAnswered ? 'offer' : 'not_ready',
+      requiredUnansweredKeys: allAnswered ? [] : assessment.requiredUnansweredKeys,
+    };
+  }
 
   // Grade spend against the budget exactly as the turn boundary does — but only when a
   // budget is set and enforcement is on, so the UI's hint matches what would actually happen.

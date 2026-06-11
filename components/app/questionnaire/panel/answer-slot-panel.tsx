@@ -18,7 +18,12 @@
 
 import { cn } from '@/lib/utils';
 import { AnswerSlotItem } from '@/components/app/questionnaire/panel/answer-slot-item';
-import type { AnswerPanelView, PanelSlotView } from '@/lib/app/questionnaire/panel/types';
+import { ConfidenceIndicator } from '@/components/app/questionnaire/panel/confidence-indicator';
+import type {
+  AnswerPanelView,
+  DataSlotPanelGroup,
+  PanelSlotView,
+} from '@/lib/app/questionnaire/panel/types';
 
 export interface AnswerSlotPanelProps {
   /** The panel view, or null while the first (anonymous) fetch is in flight. */
@@ -32,14 +37,58 @@ export interface AnswerSlotPanelProps {
 }
 
 function ProgressHeading({ view }: { view: AnswerPanelView }) {
+  const dataSlotMode = view.dataSlotGroups !== undefined;
   const summary =
-    view.scope === 'answered_only'
+    view.scope === 'answered_only' && !dataSlotMode
       ? `${view.answeredCount} captured`
       : `${view.answeredCount} of ${view.totalCount} answered`;
   return (
     <div className="border-b px-4 py-3">
-      <h2 className="text-sm font-semibold">Your answers</h2>
+      <h2 className="text-sm font-semibold">
+        {dataSlotMode ? 'What we’re learning' : 'Your answers'}
+      </h2>
       <p className="text-muted-foreground mt-0.5 text-xs tabular-nums">{summary}</p>
+    </div>
+  );
+}
+
+/** Data Slots feature: themed groups of data slots showing the paraphrase + a confidence dot. */
+function DataSlotGroups({ groups }: { groups: DataSlotPanelGroup[] }) {
+  if (groups.every((g) => g.slots.length === 0)) {
+    return (
+      <p className="text-muted-foreground px-1 py-4 text-sm">
+        As you chat, we’ll show what we’re learning here.
+      </p>
+    );
+  }
+  return (
+    <div className="space-y-4">
+      {groups.map((group) => (
+        <section key={group.theme}>
+          <h3 className="text-muted-foreground mb-1.5 px-1 text-xs font-medium tracking-wide uppercase">
+            {group.theme}
+          </h3>
+          <ul className="space-y-2">
+            {group.slots.map((slot) => (
+              <li key={slot.key} className="rounded-md border px-3 py-2">
+                <div className="flex items-start gap-2">
+                  <ConfidenceIndicator confidence={slot.confidence} className="mt-1" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium">{slot.name}</p>
+                    {slot.paraphrase ? (
+                      <p className="text-muted-foreground mt-0.5 text-sm">{slot.paraphrase}</p>
+                    ) : (
+                      <p className="text-muted-foreground/70 mt-0.5 text-xs italic">
+                        Not covered yet
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
     </div>
   );
 }
@@ -64,7 +113,9 @@ export function AnswerSlotPanel({
         <>
           <ProgressHeading view={view} />
           <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
-            {view.sections.length === 0 ? (
+            {view.dataSlotGroups !== undefined ? (
+              <DataSlotGroups groups={view.dataSlotGroups} />
+            ) : view.sections.length === 0 ? (
               <p className="text-muted-foreground px-1 py-4 text-sm">
                 Your answers will appear here as the conversation continues.
               </p>

@@ -33,6 +33,7 @@ import { createRateLimitResponse } from '@/lib/security/rate-limit';
 
 import { prisma } from '@/lib/db/client';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
+import { registerBuiltInCapabilities } from '@/lib/orchestration/capabilities';
 import {
   isCompletionEnabled,
   withQuestionnairesEnabled,
@@ -113,6 +114,10 @@ const handleCompletionStatus = withAdminAuth<{ id: string; vid: string }>(
         if (answeredIds.has(q.id)) coveredSlots.push(entry);
         else remainingSlots.push(entry);
       }
+
+      // Flush capability handlers before dispatch — this route may be the first capability touch
+      // on a fresh process (the dispatcher does not lazy-register). Idempotent, one-shot.
+      registerBuiltInCapabilities();
 
       const dispatch = await capabilityDispatcher.dispatch(
         COMPOSE_COMPLETION_OFFER_CAPABILITY_SLUG,

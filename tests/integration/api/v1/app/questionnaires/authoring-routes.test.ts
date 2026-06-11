@@ -59,6 +59,10 @@ const prismaMock = vi.hoisted(() => ({
   appQuestionnaireConfig: {
     count: vi.fn(),
   },
+  // Data Slots: the launch gate counts these when the flag is on (default 1 = satisfied).
+  appDataSlot: {
+    count: vi.fn(async () => 1),
+  },
   // F3.2: the route-local countLaunchBlockers reads this when leaving `launched`.
   appQuestionnaireInvitation: {
     count: vi.fn(),

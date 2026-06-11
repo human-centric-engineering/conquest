@@ -19,6 +19,7 @@
 
 import type { Logger } from '@/lib/logging';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
+import { registerBuiltInCapabilities } from '@/lib/orchestration/capabilities';
 
 import { EVALUATE_STRUCTURE_CAPABILITY_SLUG } from '@/lib/app/questionnaire/constants';
 import type { EvaluateStructureData } from '@/lib/app/questionnaire/capabilities';
@@ -85,6 +86,11 @@ export async function runEvaluationPanel(args: {
   log: Logger;
 }): Promise<EvaluationPanelResult> {
   const { dimensions, structure, questionnaireId, versionId, agentBySlug, adminId, log } = args;
+
+  // Flush capability handlers before the fan-out — this panel may be the first capability touch
+  // on a fresh process (the dispatcher does not lazy-register). Idempotent, one-shot; registering
+  // once here keeps it off the per-dimension hot path below.
+  registerBuiltInCapabilities();
 
   // Dispatch the panel concurrently. Per-judge failure is fail-soft: a missing agent or a
   // failed call yields a `diagnostic` for that dimension, never a thrown error, so one

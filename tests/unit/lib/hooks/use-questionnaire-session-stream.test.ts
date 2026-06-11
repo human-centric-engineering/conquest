@@ -94,6 +94,22 @@ describe('useQuestionnaireSessionStream', () => {
     expect(result.current.canSend).toBe(true);
   });
 
+  it('kickoff streams the opening reply with NO user bubble and a `{ kickoff: true }` body', async () => {
+    fetchMock.mockResolvedValue(streamResponse(HAPPY_FRAMES));
+
+    const { result } = renderHook(() => useQuestionnaireSessionStream({ sessionId: SESSION_ID }));
+
+    await act(async () => {
+      await result.current.kickoff();
+    });
+
+    // The proactive opening: only the streamed assistant turn lands — no optimistic user bubble.
+    expect(result.current.turns).toEqual([{ role: 'assistant', content: 'Hello there.' }]);
+    expect(result.current.status).toBe('idle');
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({ kickoff: true });
+  });
+
   it('POSTs to the messages endpoint with the trimmed message and no token header by default', async () => {
     fetchMock.mockResolvedValue(streamResponse(HAPPY_FRAMES));
 

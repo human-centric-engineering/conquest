@@ -47,6 +47,8 @@ export interface TurnWriteInput {
   toolCalls: ToolCallRecord[];
   /** The `AppAnswerSlot.id`s this turn created or updated — back-stamped with the turn id. */
   sideEffectAnswerIds: string[];
+  /** Data Slots feature: the `AppDataSlotFill.id`s this turn touched — back-stamped likewise. */
+  sideEffectDataSlotIds?: string[];
   /** Summed per-turn LLM spend in USD; `null` until cost-summing is wired. */
   costUsd: number | null;
 }
@@ -78,6 +80,9 @@ export async function recordTurn(input: TurnWriteInput): Promise<string> {
         targetedQuestionId: input.targetedQuestionId,
         toolCalls: jsonInput(input.toolCalls),
         sideEffectAnswerIds: jsonInput(input.sideEffectAnswerIds),
+        ...(input.sideEffectDataSlotIds
+          ? { sideEffectDataSlotIds: jsonInput(input.sideEffectDataSlotIds) }
+          : {}),
         costUsd: input.costUsd,
       },
       select: { id: true },
@@ -87,6 +92,14 @@ export async function recordTurn(input: TurnWriteInput): Promise<string> {
       // Scope the stamp to this session so a stray id can't touch another session's row.
       await tx.appAnswerSlot.updateMany({
         where: { id: { in: input.sideEffectAnswerIds }, sessionId: input.sessionId },
+        data: { lastUpdatedTurnId: turn.id },
+      });
+    }
+
+    // Data Slots feature: back-stamp the data-slot fills this turn touched.
+    if (input.sideEffectDataSlotIds && input.sideEffectDataSlotIds.length > 0) {
+      await tx.appDataSlotFill.updateMany({
+        where: { id: { in: input.sideEffectDataSlotIds }, sessionId: input.sessionId },
         data: { lastUpdatedTurnId: turn.id },
       });
     }

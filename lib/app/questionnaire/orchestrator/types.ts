@@ -26,7 +26,10 @@ import type {
   QuestionView,
   SelectionDecision,
 } from '@/lib/app/questionnaire/selection/types';
-import type { AnswerSlotIntent } from '@/lib/app/questionnaire/extraction/types';
+import type {
+  AnswerSlotIntent,
+  DataSlotFillIntent,
+} from '@/lib/app/questionnaire/extraction/types';
 import type { ContradictionFinding } from '@/lib/app/questionnaire/contradiction/types';
 import type { RefinementDecision } from '@/lib/app/questionnaire/refinement/types';
 import type { CompletionAssessment } from '@/lib/app/questionnaire/completion/types';
@@ -71,6 +74,29 @@ export interface TurnAttachment {
 }
 
 /**
+ * A data slot the conversation targets (Data Slots feature). Loaded by the route, ordered for
+ * topic-local targeting (grouped by theme). `name`/`description` feed the interviewer phraser.
+ */
+export interface DataSlotTarget {
+  /** `AppDataSlot.id`. */
+  id: string;
+  /** Stable per-version slug — how fills address it. */
+  key: string;
+  name: string;
+  description: string;
+  theme: string;
+  ordinal: number;
+  weight: number;
+}
+
+/** One data slot already filled this session (targeting view — filled at confidence ≥ θ). */
+export interface DataSlotAnsweredView {
+  /** `DataSlotTarget.id`. */
+  dataSlotId: string;
+  confidence: number | null;
+}
+
+/**
  * Everything {@link runTurn} reads for one turn — assembled once by the route's context
  * loader (PR3) from the session's real answer + turn rows. The union of the P4 context
  * DTOs: selection/completion read `questions`/`answered`/`config`; extraction reads
@@ -102,6 +128,15 @@ export interface TurnState {
   /** Which sub-features are enabled this turn. */
   flags: TurnFlags;
   /**
+   * Data Slots feature: present in data-slot mode. `dataSlots` is the version's data slots
+   * (theme-ordered for topic-local targeting); `dataSlotAnswered` is the filled set; the
+   * `activeDataSlotKey` is the slot the previous turn targeted (for re-ask/transition framing).
+   * Absent (the default) means question mode — `runDataSlotTurn` is not used.
+   */
+  dataSlots?: DataSlotTarget[];
+  dataSlotAnswered?: DataSlotAnsweredView[];
+  activeDataSlotKey?: string | null;
+  /**
    * Cost-cap pressure for this turn, set by the route when the session's spend so far crosses
    * the soft threshold (F6.3). `'soft'` biases the core toward offering completion early (so the
    * session winds down before the hard cap) and threads a wrap-up instruction into the offer
@@ -127,6 +162,8 @@ export interface ToolCallRecord {
 /** Extraction invoker outcome — fail-soft: `diagnostic` set instead of throwing. */
 export interface ExtractOutcome {
   intents: AnswerSlotIntent[];
+  /** Data Slots feature: fills captured this turn (present only in data-slot mode). */
+  dataSlotFills?: DataSlotFillIntent[];
   costUsd: number;
   latencyMs?: number;
   diagnostic?: string;
@@ -201,6 +238,22 @@ export interface OfferComposeInput {
  */
 export type TurnResponse =
   | { kind: 'question'; questionId: string; text: string }
+  | {
+      /**
+       * Data Slots feature: target a data slot conversationally. The route streams the
+       * interviewer phrasing of `name` + `description`. `isReask` = this turn re-targeted the
+       * slot the previous turn asked (its fill wasn't captured); `isTransition` = we just moved
+       * to a new theme/area (the phraser bridges with a natural segue vs deepening in-area).
+       */
+      kind: 'data_slot';
+      dataSlotId: string;
+      dataSlotKey: string;
+      name: string;
+      description: string;
+      theme: string;
+      isReask: boolean;
+      isTransition: boolean;
+    }
   | { kind: 'offer'; input: OfferComposeInput }
   | { kind: 'complete'; text: string }
   | { kind: 'none'; text: string };
@@ -218,6 +271,8 @@ export interface TurnResult {
   sideEffects: {
     answerUpserts: AnswerSlotIntent[];
     answerRefinements: RefinementDecision[];
+    /** Data Slots feature: the data-slot fills to upsert (present only in data-slot mode). */
+    dataSlotFills?: DataSlotFillIntent[];
   };
   /** Side-band frames to stream (warnings/status) — NOT the main content. */
   events: ChatEvent[];

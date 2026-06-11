@@ -40,6 +40,11 @@ vi.mock('@/lib/orchestration/capabilities/dispatcher', () => ({
   capabilityDispatcher: { dispatch: vi.fn() },
 }));
 
+// The pipeline flushes capability handlers before dispatching (so upload works as
+// the first capability touch on a fresh process). The flush is exercised in the
+// registry's own tests; here it's a no-op so the mocked dispatcher stands alone.
+vi.mock('@/lib/orchestration/capabilities', () => ({ registerBuiltInCapabilities: vi.fn() }));
+
 vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({ logAdminAction: vi.fn() }));
 
 // Keep assertPersistable + IncoherentExtractionError real; mock only the writer.

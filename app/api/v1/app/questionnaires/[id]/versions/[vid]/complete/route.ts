@@ -41,6 +41,7 @@ import { createRateLimitResponse } from '@/lib/security/rate-limit';
 
 import { prisma } from '@/lib/db/client';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
+import { registerBuiltInCapabilities } from '@/lib/orchestration/capabilities';
 import {
   isContradictionDetectionEnabled,
   withQuestionnairesEnabled,
@@ -206,6 +207,10 @@ const handleComplete = withAdminAuth<{ id: string; vid: string }>(
               });
               throw new NotFoundError('Contradiction detection is not configured');
             }
+
+            // Flush capability handlers before dispatch — this route may be the first capability
+            // touch on a fresh process (the dispatcher does not lazy-register). Idempotent, one-shot.
+            registerBuiltInCapabilities();
 
             const dispatch = await capabilityDispatcher.dispatch(
               DETECT_CONTRADICTIONS_CAPABILITY_SLUG,

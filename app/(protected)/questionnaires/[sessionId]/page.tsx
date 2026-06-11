@@ -101,6 +101,7 @@ export default async function QuestionnaireSessionPage({
         <SessionWorkspace
           sessionId={sessionId}
           initialTurns={buildWelcomeTurns({ resumed, welcomeCopy: theme.welcomeCopy })}
+          autoStart={!resumed}
           initialStatus={initialStatus}
           initialPanel={panel?.view}
           initialStatusView={status?.view}

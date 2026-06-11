@@ -37,11 +37,12 @@ import {
   isAttachmentInputEnabled,
   isContradictionDetectionEnabled,
   isCostCapEnforcementEnabled,
+  isDataSlotsEnabled,
   isQuestionPhrasingEnabled,
   withLiveSessionsEnabled,
 } from '@/lib/app/questionnaire/feature-flag';
 import { classifyCostCap } from '@/lib/app/questionnaire/session';
-import { runTurn, type TurnState } from '@/lib/app/questionnaire/orchestrator';
+import { runTurn, runDataSlotTurn, type TurnState } from '@/lib/app/questionnaire/orchestrator';
 import type { ChatEvent } from '@/types/orchestration';
 import { turnLimiter } from '@/app/api/v1/app/questionnaire-sessions/_lib/rate-limit';
 import { buildTurnContext } from '@/app/api/v1/app/questionnaires/_lib/turn-context';
@@ -57,11 +58,23 @@ import { streamOfferMessage } from '@/app/api/v1/app/questionnaire-sessions/_lib
 import { streamQuestionMessage } from '@/app/api/v1/app/questionnaire-sessions/_lib/question-stream';
 import { resolveTurnAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-access';
 
-const bodySchema = z.object({
-  message: z.string().min(1).max(10_000),
-  /** Optional files attached to this turn (images/documents) — read by the extractor. */
-  attachments: chatAttachmentsArraySchema.optional(),
-});
+const bodySchema = z
+  .object({
+    /** Omitted (or empty) only on a kickoff turn — the proactive opening (see `kickoff`). */
+    message: z.string().max(10_000).optional(),
+    /**
+     * Proactive-opening turn: the surface fires this once on a fresh session so the agent
+     * streams the first question without the respondent typing first. Carries no respondent
+     * answer — extraction no-ops (no active question yet), selection picks the opening question.
+     */
+    kickoff: z.boolean().optional(),
+    /** Optional files attached to this turn (images/documents) — read by the extractor. */
+    attachments: chatAttachmentsArraySchema.optional(),
+  })
+  .refine((b) => b.kickoff === true || (b.message?.trim().length ?? 0) > 0, {
+    message: 'message is required',
+    path: ['message'],
+  });
 
 /** Chunk text into small pieces for a streamed feel (true token streaming is PR5). */
 function chunkText(text: string, size = 48): string[] {
@@ -100,6 +113,9 @@ async function handleMessage(
     if (!limit.success) return createRateLimitResponse(limit);
 
     const body = await validateRequestBody(request, bodySchema);
+    // A kickoff carries no respondent answer — the opening question is selected, not extracted.
+    // An empty `userMessage` is skipped by `recentMessages` and ignored by the opening phraser.
+    const userMessage = body.kickoff ? '' : (body.message ?? '');
 
     // Cost cap (F6.3): grade the session's spend so far against its budget at the turn
     // boundary, before any per-turn work. Hard (≥100%) refuses this turn with 402 and
@@ -158,6 +174,7 @@ async function handleMessage(
       adaptive,
       attachmentInput,
       questionPhrasing,
+      dataSlotsFlag,
     ] = await Promise.all([
       isAnswerExtractionEnabled(),
       isContradictionDetectionEnabled(),
@@ -166,7 +183,13 @@ async function handleMessage(
       isAdaptiveSelectionEnabled(),
       isAttachmentInputEnabled(),
       isQuestionPhrasingEnabled(),
+      isDataSlotsEnabled(),
     ]);
+
+    // Data Slots feature: run in data-slot mode when the flag is on AND the version actually has
+    // data slots (the conversation targets data slots; questions fill in the background).
+    const dataSlots = loaded.base.dataSlots ?? [];
+    const dataSlotMode = dataSlotsFlag && dataSlots.length > 0;
 
     // Attachments only flow when the sub-flag is on (dark-launch): with it off, a client
     // that sends attachments anyway gets a text-only turn — the paid multimodal path stays shut.
@@ -177,8 +200,15 @@ async function handleMessage(
 
     const state: TurnState = {
       ...loaded.base,
-      userMessage: body.message,
-      flags: { extraction, contradiction, refinement, completion },
+      userMessage,
+      // A kickoff carries no answer — force extraction off so a restored session (which has an
+      // active question) doesn't fire a pointless extraction call against the empty message.
+      flags: {
+        extraction: body.kickoff ? false : extraction,
+        contradiction,
+        refinement,
+        completion,
+      },
       ...(attachments ? { attachments } : {}),
       ...(costPressure ? { costPressure } : {}),
     };
@@ -188,12 +218,24 @@ async function handleMessage(
       slots: loaded.slots,
       activeQuestionKey: loaded.activeQuestionKey,
       adaptiveEnabled: adaptive,
+      // Data Slots feature: feed the data slots so the SAME extraction call fills them too.
+      ...(dataSlotMode
+        ? {
+            dataSlotCandidates: dataSlots.map((s) => ({
+              key: s.key,
+              name: s.name,
+              description: s.description,
+              theme: s.theme,
+            })),
+          }
+        : {}),
     });
 
     const keyToSlotId = new Map(loaded.slots.map((s) => [s.key, s.id]));
     // Hoist the conversational-phraser inputs out of `loaded` (narrowed non-null here) so the
     // async generator below — where TS loses the narrowing — closes over plain values.
     const slotById = new Map(loaded.slots.map((s) => [s.id, s]));
+    const dataSlotKeyToId = new Map(dataSlots.map((s) => [s.key, s.id]));
     const { byId, activeQuestionKey, meta } = loaded;
 
     log.info('Live turn started', { sessionId, versionId: loaded.session.versionId, userId });
@@ -201,7 +243,11 @@ async function handleMessage(
     async function* drive(): AsyncGenerator<ChatEvent> {
       yield { type: 'start', conversationId: sessionId, messageId: sessionId };
 
-      const result = await runTurn(state, invokers);
+      // Data Slots feature: data-slot mode runs the parallel orchestrator (targets data slots,
+      // fills questions in the background); otherwise the question-mode pipeline.
+      const result = dataSlotMode
+        ? await runDataSlotTurn(state, invokers)
+        : await runTurn(state, invokers);
 
       // Side-band frames the core determined (contradiction warnings, fail-soft notices).
       for (const ev of result.events) yield ev;
@@ -213,6 +259,9 @@ async function handleMessage(
       // (offer/phrasing) spend to fold into the turn's cost.
       let agentResponse: string;
       let extraCostUsd = 0;
+      // The generic `targetedQuestionId` column holds a QUESTION id (question/sweep turns) or a
+      // DATA-SLOT id (data-slot turns) — the loader resolves whichever matches next turn.
+      let persistedTargetedId: string | null = result.targetedQuestionId;
       if (result.response.kind === 'offer') {
         const offer = yield* streamOfferMessage({
           input: result.response.input,
@@ -221,7 +270,29 @@ async function handleMessage(
         });
         agentResponse = offer.message;
         extraCostUsd = offer.costUsd;
-      } else if (result.response.kind === 'question' && questionPhrasing) {
+      } else if (result.response.kind === 'data_slot') {
+        // Data Slots feature: phrase the targeted data slot as a natural interview question
+        // (acknowledge prior answer · deepen vs bridge to a new area · re-ask when uncaptured).
+        const r = result.response;
+        const phrased = yield* streamQuestionMessage({
+          input: {
+            prompt: `${r.name} — ${r.description}`,
+            type: 'free_text',
+            ...(meta.goal ? { goal: meta.goal } : {}),
+            ...(meta.audience ? { audience: meta.audience } : {}),
+            recentMessages: state.recentMessages,
+            lastUserMessage: userMessage,
+            isReask: r.isReask,
+            isOpening: state.selectionRound === 0,
+            isTransition: r.isTransition,
+          },
+          userId,
+          sessionId,
+        });
+        agentResponse = phrased.message;
+        extraCostUsd = phrased.costUsd;
+        persistedTargetedId = r.dataSlotId;
+      } else if (result.response.kind === 'question' && (questionPhrasing || dataSlotMode)) {
         // Conversational interviewer pass: acknowledge the prior answer + ask the targeted
         // question naturally. Re-ask = this turn re-selected the question the previous turn
         // asked (its answer wasn't captured); opening = the first turn of the session.
@@ -240,7 +311,7 @@ async function handleMessage(
             ...(meta.goal ? { goal: meta.goal } : {}),
             ...(meta.audience ? { audience: meta.audience } : {}),
             recentMessages: state.recentMessages,
-            lastUserMessage: body.message,
+            lastUserMessage: userMessage,
             isReask: targetedKey !== null && targetedKey === activeQuestionKey,
             isOpening: state.selectionRound === 0,
           },
@@ -260,14 +331,21 @@ async function handleMessage(
       try {
         await persistTurn({
           sessionId,
-          userMessage: body.message,
+          userMessage,
           agentResponse,
-          targetedQuestionId: result.targetedQuestionId,
+          targetedQuestionId: persistedTargetedId,
           toolCalls: result.toolCalls,
           costUsd,
           upserts: result.sideEffects.answerUpserts,
           refinements: result.sideEffects.answerRefinements,
           keyToSlotId,
+          // Data Slots feature: persist the respondent-facing fills captured this turn.
+          ...(dataSlotMode
+            ? {
+                dataSlotFills: result.sideEffects.dataSlotFills ?? [],
+                dataSlotKeyToId,
+              }
+            : {}),
         });
       } catch (err) {
         log.error('Turn persistence failed (response already streamed)', {

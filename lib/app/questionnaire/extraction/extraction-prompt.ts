@@ -12,6 +12,7 @@
 import type { ContentPart, LlmMessage } from '@/lib/orchestration/llm/types';
 import { EXTRACTOR_EMITTED_PROVENANCES } from '@/lib/app/questionnaire/types';
 import type {
+  DataSlotCandidateView,
   ExtractionAttachment,
   ExtractionContext,
   ExtractionSlotView,
@@ -45,6 +46,32 @@ message doesn't support.
 
 Output: respond with ONLY a single JSON object: { "answers": [ ... ] }. Do not wrap the JSON in \
 prose or code fences.`;
+
+/**
+ * Appended to the system rules when the turn carries data slots (Data Slots feature). The
+ * extractor ALSO captures the respondent's position toward each data slot the message informs,
+ * as a short paraphrase — in the SAME call as the question answers.
+ */
+const DATA_SLOT_RULES = `
+
+You ALSO maintain a set of DATA SLOTS — short semantic targets the conversation is filling. In \
+the same response, add a "dataSlotFills" array. For every data slot the respondent's message \
+informs (directly, by inference, or by synthesising the conversation), output one entry:
+- "dataSlotKey": a key from the provided data-slot list ONLY.
+- "value": the captured position (free-form: a string, number, or small object — whatever best \
+represents their answer).
+- "paraphrase": a one-sentence restatement of the respondent's position toward this slot, in your \
+own words ("They found setup straightforward but were slowed by unclear docs.").
+- "confidence": 0–1, how well you understand their position on this slot.
+- "provenance": ${EXTRACTOR_EMITTED_PROVENANCES.join(', ')} (as above).
+- "rationale": a short reason.
+Only fill a data slot the message genuinely informs; improve an existing fill if the message adds \
+to it. If the message informs no data slots, return an empty "dataSlotFills" array.`;
+
+/** Render one data-slot candidate as a compact, model-readable line. */
+function describeDataSlot(slot: DataSlotCandidateView): string {
+  return `- key: ${slot.key}\n  name: ${slot.name}\n  theme: ${slot.theme}\n  description: ${slot.description}`;
+}
 
 /** Render one candidate slot as a compact, model-readable line. */
 function describeSlot(slot: ExtractionSlotView): string {
@@ -92,6 +119,14 @@ export function buildAnswerExtractionPrompt(ctx: ExtractionContext): LlmMessage[
 
   const candidates = ctx.candidateSlots.map(describeSlot).join('\n');
 
+  // Data Slots feature: when present, the system rules + a candidate section are added so the
+  // model fills data slots in the same call.
+  const hasDataSlots = ctx.dataSlotCandidates !== undefined && ctx.dataSlotCandidates.length > 0;
+  const systemContent = hasDataSlots ? SYSTEM_RULES + DATA_SLOT_RULES : SYSTEM_RULES;
+  const dataSlotSection = hasDataSlots
+    ? `\n\nData slots (fill these too):\n${ctx.dataSlotCandidates!.map(describeDataSlot).join('\n')}`
+    : '';
+
   const hasAttachments = ctx.attachments !== undefined && ctx.attachments.length > 0;
   const attachmentNote = hasAttachments
     ? `\n\nThe respondent also attached ${ctx.attachments!.length} file(s) (below). Read them as ` +
@@ -100,7 +135,9 @@ export function buildAnswerExtractionPrompt(ctx: ExtractionContext): LlmMessage[
 
   const userText =
     `Active question key: ${ctx.activeQuestionKey}\n\n` +
-    `Candidate questions (extract answers only for these):\n${candidates}\n\n` +
+    `Candidate questions (extract answers only for these):\n${candidates}` +
+    dataSlotSection +
+    '\n\n' +
     transcript +
     `--- RESPONDENT MESSAGE ---\n${ctx.userMessage}\n--- END RESPONDENT MESSAGE ---` +
     attachmentNote;
@@ -112,7 +149,7 @@ export function buildAnswerExtractionPrompt(ctx: ExtractionContext): LlmMessage[
     : userText;
 
   return [
-    { role: 'system', content: SYSTEM_RULES },
+    { role: 'system', content: systemContent },
     { role: 'user', content: userContent },
   ];
 }

@@ -54,6 +54,12 @@ export interface SessionWorkspaceProps {
   voiceInputEnabled?: boolean;
   /** Show the attachment affordance (gated server-side on the attachment-input flag). */
   attachmentInputEnabled?: boolean;
+  /**
+   * Proactively stream the first question once on mount (a "kickoff" turn) so the respondent
+   * never has to send a message to begin. Set for fresh sessions only — NOT on resume, where
+   * re-asking on every refresh would burn an LLM turn per load.
+   */
+  autoStart?: boolean;
 }
 
 export function SessionWorkspace({
@@ -65,6 +71,7 @@ export function SessionWorkspace({
   initialStatusView,
   voiceInputEnabled = false,
   attachmentInputEnabled = false,
+  autoStart = false,
 }: SessionWorkspaceProps) {
   // Both reads refetch on each clean turn-settle. The stream reads its `onTurnSettled`
   // through a ref, so routing the refetches through refs here breaks the declaration
@@ -93,6 +100,18 @@ export function SessionWorkspace({
     initialView: initialStatusView,
     applyStatus: stream.applyStatus,
   });
+
+  // Proactive opening: fire the kickoff turn exactly once on a fresh session so the agent
+  // streams the first question without the respondent typing. The ref guards against React
+  // 19 StrictMode's double-invoke (which would otherwise mint two kickoff turns) and re-runs
+  // from `kickoff`'s identity churning as status flips to `streaming`.
+  const kickedOffRef = useRef(false);
+  const kickoff = stream.kickoff;
+  useEffect(() => {
+    if (!autoStart || kickedOffRef.current) return;
+    kickedOffRef.current = true;
+    void kickoff();
+  }, [autoStart, kickoff]);
 
   // Keep the settle targets current without touching refs during render. The stream calls
   // `onTurnSettled` (and thus reads these) only after a turn settles — well after this effect.

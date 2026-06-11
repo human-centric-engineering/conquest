@@ -27,7 +27,10 @@ import { getClientIP } from '@/lib/security/ip';
 import { prisma } from '@/lib/db/client';
 import { computeChanges, logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
+import {
+  isDataSlotsEnabled,
+  withQuestionnairesEnabled,
+} from '@/lib/app/questionnaire/feature-flag';
 import { updateVersionStatusSchema } from '@/lib/app/questionnaire/authoring';
 import {
   countLaunchBlockers,
@@ -64,21 +67,28 @@ function hasAudience(audience: unknown): boolean {
  * admin opt in deliberately.
  */
 async function assertLaunchable(versionId: string): Promise<void> {
-  const [version, sectionCount, questionCount, configCount] = await Promise.all([
-    prisma.appQuestionnaireVersion.findUnique({
-      where: { id: versionId },
-      select: { goal: true, audience: true },
-    }),
-    prisma.appQuestionnaireSection.count({ where: { versionId } }),
-    prisma.appQuestionSlot.count({ where: { versionId } }),
-    prisma.appQuestionnaireConfig.count({ where: { versionId } }),
-  ]);
+  const [version, sectionCount, questionCount, configCount, dataSlotsEnabled, dataSlotCount] =
+    await Promise.all([
+      prisma.appQuestionnaireVersion.findUnique({
+        where: { id: versionId },
+        select: { goal: true, audience: true },
+      }),
+      prisma.appQuestionnaireSection.count({ where: { versionId } }),
+      prisma.appQuestionSlot.count({ where: { versionId } }),
+      prisma.appQuestionnaireConfig.count({ where: { versionId } }),
+      isDataSlotsEnabled(),
+      prisma.appDataSlot.count({ where: { versionId } }),
+    ]);
   const missing: Record<string, string[]> = {};
   if (!version?.goal) missing.goal = ['A goal is required to launch'];
   if (!hasAudience(version?.audience)) missing.audience = ['An audience is required to launch'];
   if (sectionCount < 1) missing.sections = ['At least one section is required'];
   if (questionCount < 1) missing.questions = ['At least one question is required'];
   if (configCount < 1) missing.config = ['Configuration must be saved before launch'];
+  // Data Slots feature: when the flag is on, every launch requires generated data slots.
+  if (dataSlotsEnabled && dataSlotCount < 1) {
+    missing.dataSlots = ['Generate data slots before launch'];
+  }
   if (Object.keys(missing).length > 0) {
     throw new ValidationError('Version is not ready to launch', missing);
   }
