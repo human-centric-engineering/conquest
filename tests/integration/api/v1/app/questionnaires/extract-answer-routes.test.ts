@@ -30,6 +30,10 @@ const dispatchMock = vi.hoisted(() => ({
 }));
 vi.mock('@/lib/orchestration/capabilities/dispatcher', () => dispatchMock);
 
+// The route flushes capability handlers before dispatching; here it's a no-op so the
+// mocked dispatcher stands alone (the real flush is covered by the registry's own tests).
+vi.mock('@/lib/orchestration/capabilities', () => ({ registerBuiltInCapabilities: vi.fn() }));
+
 // Per-admin LLM sub-cap. Mock so tests don't consume the real window and the 429
 // path is drivable. Default: allow; a test overrides per-call to deny.
 const rateLimitMock = vi.hoisted(() => ({

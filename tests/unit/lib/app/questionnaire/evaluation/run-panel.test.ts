@@ -15,6 +15,10 @@ const dispatchMock = vi.hoisted(() => ({
 }));
 vi.mock('@/lib/orchestration/capabilities/dispatcher', () => dispatchMock);
 
+// The panel flushes capability handlers before dispatching; here it's a no-op so the
+// mocked dispatcher stands alone (the real flush is covered by the registry's own tests).
+vi.mock('@/lib/orchestration/capabilities', () => ({ registerBuiltInCapabilities: vi.fn() }));
+
 import {
   runEvaluationPanel,
   type JudgeAgentRef,
