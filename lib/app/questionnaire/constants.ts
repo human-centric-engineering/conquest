@@ -589,6 +589,51 @@ export const GENERATE_DATA_SLOTS_FUNCTION_DEFINITION: CapabilityFunctionDefiniti
   },
 };
 
+/** Slug of the refine-single-data-slot capability (source of truth for class + seed row). */
+export const REFINE_DATA_SLOT_CAPABILITY_SLUG = 'app_refine_data_slot';
+
+/** `AiCapability.executionHandler` for the refine-data-slot capability — the class name. */
+export const REFINE_DATA_SLOT_HANDLER = 'AppRefineDataSlotCapability';
+
+/**
+ * The refine-data-slot capability's OpenAI-compatible function definition — shared by the
+ * `BaseCapability` subclass and the `AiCapability` seed row so the two can't drift. Reuses the
+ * data-slot generator agent ({@link QUESTIONNAIRE_DATA_SLOTS_AGENT_SLUG}); dispatched
+ * programmatically by the refine route. Refines ONE existing slot per the admin's free-text
+ * instructions, re-grounded against the version's full question set (so it can re-suggest coverage).
+ */
+export const REFINE_DATA_SLOT_FUNCTION_DEFINITION: CapabilityFunctionDefinition = {
+  name: REFINE_DATA_SLOT_CAPABILITY_SLUG,
+  description:
+    "Refine a single data slot — its name, description, theme, and the question(s) it covers — according to the admin's free-text instructions, re-grounded against the questionnaire version's full question set, via a provider-agnostic structured LLM call. Returns the one refined slot; persists nothing (the admin reviews it).",
+  parameters: {
+    type: 'object',
+    properties: {
+      structure: {
+        type: 'object',
+        description:
+          'The version structure DTO: { goal, audience, questions[] } — the full question set the refined slot may re-map its coverage against.',
+        additionalProperties: true,
+      },
+      slot: {
+        type: 'object',
+        description:
+          'The current slot to refine: { name, description, theme, questionKeys[] }. The model rewrites it per the instructions.',
+        additionalProperties: true,
+      },
+      instructions: {
+        type: 'string',
+        description: "The admin's free-text refinement instructions for this slot.",
+      },
+      versionId: {
+        type: 'string',
+        description: 'Stable version identity, threaded into cost-log metadata.',
+      },
+    },
+    required: ['structure', 'slot', 'instructions'],
+  },
+};
+
 /**
  * Slug of the evaluate-structure capability (F5.1). One source of truth shared by the
  * `BaseCapability` subclass, its `AiCapability` seed row, and the evaluate-preview

@@ -55,3 +55,9 @@ export {
   type GenerateDataSlotsArgs,
   type GenerateDataSlotsData,
 } from '@/lib/app/questionnaire/capabilities/generate-data-slots';
+
+export {
+  AppRefineDataSlotCapability,
+  type RefineDataSlotArgs,
+  type RefineDataSlotData,
+} from '@/lib/app/questionnaire/capabilities/refine-data-slot';

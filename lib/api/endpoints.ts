@@ -411,6 +411,9 @@ export const API = {
       /** Streaming map-reduce generation (POST → SSE: per-section progress + merge + done). */
       versionDataSlotsGenerateStream: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/data-slots/generate/stream`,
+      /** Refine a single data slot from free-text instructions (POST — returns the one refined slot). */
+      versionDataSlotsRefine: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/data-slots/refine`,
       /** Pending generated data-slot draft for a version (DELETE — discard the proposal). */
       versionDataSlotsDraft: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/data-slots/draft`,

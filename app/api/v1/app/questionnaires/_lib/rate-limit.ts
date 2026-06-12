@@ -187,3 +187,19 @@ export const dataSlotsGenerationLimiter = createRateLimiter({
   interval: DATA_SLOTS_GENERATION_RATE_LIMIT_INTERVAL_MS,
   maxRequests: DATA_SLOTS_GENERATION_RATE_LIMIT_MAX,
 });
+
+/**
+ * Single-slot refinement sub-cap (Data Slots feature). One reasoning-model call per refine —
+ * cheaper than a whole-set generation but still paid work, and an admin iterates on a slot’s
+ * wording several times. Set higher than the generation cap (20/min) to allow that iteration,
+ * in the same order as the per-turn previews (60/min). Keyed on the admin user id, who owns the spend.
+ */
+export const DATA_SLOTS_REFINE_RATE_LIMIT_MAX = 60;
+
+/** Sliding-window length for {@link dataSlotsRefineLimiter}, in milliseconds. */
+export const DATA_SLOTS_REFINE_RATE_LIMIT_INTERVAL_MS = 60_000;
+
+export const dataSlotsRefineLimiter = createRateLimiter({
+  interval: DATA_SLOTS_REFINE_RATE_LIMIT_INTERVAL_MS,
+  maxRequests: DATA_SLOTS_REFINE_RATE_LIMIT_MAX,
+});

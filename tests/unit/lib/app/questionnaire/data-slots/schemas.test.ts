@@ -25,11 +25,14 @@ import { describe, it, expect } from 'vitest';
 import {
   generatedDataSlotSchema,
   dataSlotGenerationOutputSchema,
+  dataSlotRefinementOutputSchema,
   questionForGenerationSchema,
   dataSlotStructureSchema,
   createDataSlotSchema,
   updateDataSlotSchema,
   saveDataSlotsSchema,
+  refineInputSlotSchema,
+  refineDataSlotRequestSchema,
 } from '@/lib/app/questionnaire/data-slots/schemas';
 
 // ---------------------------------------------------------------------------
@@ -480,5 +483,117 @@ describe('saveDataSlotsSchema', () => {
 
   it('rejects a missing slots key', () => {
     expect(saveDataSlotsSchema.safeParse({}).success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// dataSlotRefinementOutputSchema — the refine capability's { slot } output
+// ---------------------------------------------------------------------------
+
+describe('dataSlotRefinementOutputSchema', () => {
+  it('accepts a single valid slot under the `slot` key', () => {
+    const result = dataSlotRefinementOutputSchema.safeParse({ slot: validGeneratedSlot });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects the generation shape ({ slots: [...] })', () => {
+    expect(dataSlotRefinementOutputSchema.safeParse({ slots: [validGeneratedSlot] }).success).toBe(
+      false
+    );
+  });
+
+  it('rejects a slot whose name exceeds 4 words', () => {
+    const result = dataSlotRefinementOutputSchema.safeParse({
+      slot: { ...validGeneratedSlot, name: 'one two three four five' },
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// refineInputSlotSchema — the CURRENT (lenient) slot a refine acts on
+// ---------------------------------------------------------------------------
+
+describe('refineInputSlotSchema', () => {
+  it('accepts a normal slot and defaults questionKeys to []', () => {
+    const result = refineInputSlotSchema.safeParse({
+      name: 'Onboarding ease',
+      description: 'd',
+      theme: 'Friction',
+    });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.questionKeys).toEqual([]);
+  });
+
+  it('is lenient: allows an empty name/theme (a mid-edit working copy)', () => {
+    const result = refineInputSlotSchema.safeParse({ name: '', description: '', theme: '' });
+    expect(result.success).toBe(true);
+  });
+
+  it('does NOT enforce the 4-word name cap (only the OUTPUT is strict)', () => {
+    const result = refineInputSlotSchema.safeParse({
+      name: 'one two three four five six',
+      description: 'd',
+      theme: 'T',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects an over-long description (payload bound)', () => {
+    const result = refineInputSlotSchema.safeParse({
+      name: 'X',
+      description: 'a'.repeat(4001),
+      theme: 'T',
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// refineDataSlotRequestSchema — the refine route body
+// ---------------------------------------------------------------------------
+
+describe('refineDataSlotRequestSchema', () => {
+  const validSlot = {
+    name: 'Onboarding ease',
+    description: 'd',
+    theme: 'Friction',
+    questionKeys: [],
+  };
+
+  it('accepts instructions + slot', () => {
+    const result = refineDataSlotRequestSchema.safeParse({
+      instructions: 'Focus on enterprise buyers.',
+      slot: validSlot,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects empty/whitespace-only instructions', () => {
+    expect(
+      refineDataSlotRequestSchema.safeParse({ instructions: '   ', slot: validSlot }).success
+    ).toBe(false);
+  });
+
+  it('rejects instructions longer than 2000 chars', () => {
+    expect(
+      refineDataSlotRequestSchema.safeParse({ instructions: 'a'.repeat(2001), slot: validSlot })
+        .success
+    ).toBe(false);
+  });
+
+  it('rejects a missing slot', () => {
+    expect(refineDataSlotRequestSchema.safeParse({ instructions: 'do the thing' }).success).toBe(
+      false
+    );
+  });
+
+  it('accepts an optional siblingSlots array', () => {
+    const result = refineDataSlotRequestSchema.safeParse({
+      instructions: 'Focus on enterprise buyers.',
+      slot: validSlot,
+      siblingSlots: [{ name: 'Pricing', theme: 'Money' }],
+    });
+    expect(result.success).toBe(true);
   });
 });

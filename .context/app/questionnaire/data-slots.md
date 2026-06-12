@@ -59,12 +59,25 @@ below for the draft lifecycle (generate persists it, save promotes + clears it, 
    JSON row per version) so it survives the admin navigating away — but the draft is **not live**:
    runtime, the respondent panel, and the launch gate read only the saved set (`AppDataSlot`).
    A fail-soft (empty) generation persists nothing.
-3. The admin reviews/edits/accepts each slot, then **Save** (`PUT …/versions/:vid/data-slots`)
+3. The admin reviews/edits each slot, then **Save** (`PUT …/versions/:vid/data-slots`)
    replaces the version's slots (fork-safe) AND clears the pending draft in the same transaction
    (promoting the reviewed set to live). `theme` is the generator's grouping label. **Discard**
    (`DELETE …/versions/:vid/data-slots/draft`) drops the proposal, leaving the live set untouched.
-   The review surface marks status explicitly — a "draft / not live yet" banner, per-slot Draft vs
-   Live badges, and an unsaved-edits navigation guard (`useUnsavedChangesWarning`).
+   The review surface mirrors the runtime hierarchy: slots are **grouped under one editable theme
+   heading** (renaming it re-themes every slot in the group — the same exact-match grouping the
+   respondent panel uses), each card carrying name → description → covered-questions. Draft-vs-live
+   status is shown once (the "draft / not live yet" banner + the "Save & make live" button), not per
+   slot. An unsaved-edits navigation guard (`useUnsavedChangesWarning`) covers in-progress edits —
+   every slot in the working set is saved (there is no per-slot accept/reject).
+   3a. **Refine one slot** — each card has a **Refine with AI** control: the admin types free-text
+   instructions and `POST …/versions/:vid/data-slots/refine` dispatches `app_refine_data_slot` (the
+   same generator agent, `reasoning` tier) over that slot + the version's full question set + the
+   other slots' names/themes (`siblingSlots`, so it stays distinct and keeps the theme consistent
+   with the set), returning ONE rewritten slot (name, description, theme, and **re-suggested**
+   question coverage).
+   It's a thin compute endpoint — **persists nothing**; the result splices into the working set in
+   place (like a manual edit) and commits with the next Save. Fail-soft: a refiner failure returns
+   `slot: null` + a diagnostic, not a 5xx. Per-admin sub-cap `dataSlotsRefineLimiter` (60/min).
 4. **Launch gate:** when the flag is on, "Data slots generated" is a launch-checklist item
    (client `LaunchChecklist` + server `assertLaunchable`), counting only **saved** `AppDataSlot`
    rows — a pending draft does not satisfy the gate — so every launched questionnaire runs in
@@ -105,13 +118,13 @@ the respondent only ever sees the abstraction layer.
 
 ## Key files
 
-| Concern                | Path                                                                                                                    |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| Models                 | `prisma/schema/app-questionnaire.prisma` (`AppDataSlot`, `AppDataSlotQuestion`, `AppDataSlotFill`)                      |
-| Domain (pure)          | `lib/app/questionnaire/data-slots/**` (views, schemas, generation prompt)                                               |
-| Generator capability   | `lib/app/questionnaire/capabilities/generate-data-slots.ts`                                                             |
-| Generate / CRUD routes | `app/api/v1/app/questionnaires/[id]/versions/[vid]/data-slots/**`                                                       |
-| Admin review UI        | `app/admin/questionnaires/[id]/data-slots/page.tsx`, `components/admin/questionnaires/data-slots-review.tsx`            |
-| Engine                 | `orchestrator/data-slot-orchestrator.ts`, `extraction/**` (combined), `_lib/turn-context.ts`, `_lib/data-slot-fills.ts` |
-| Respondent panel       | `_lib/answer-panel.ts`, `components/app/questionnaire/panel/answer-slot-panel.tsx`                                      |
-| Seeds                  | `prisma/seeds/app-questionnaire/028-030`                                                                                |
+| Concern                          | Path                                                                                                                                        |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Models                           | `prisma/schema/app-questionnaire.prisma` (`AppDataSlot`, `AppDataSlotQuestion`, `AppDataSlotFill`)                                          |
+| Domain (pure)                    | `lib/app/questionnaire/data-slots/**` (views, schemas, generation prompt)                                                                   |
+| Generator / refiner capabilities | `lib/app/questionnaire/capabilities/generate-data-slots.ts`, `refine-data-slot.ts`                                                          |
+| Generate / refine / CRUD routes  | `app/api/v1/app/questionnaires/[id]/versions/[vid]/data-slots/**` (`generate`, `generate/stream`, `refine`, `draft`)                        |
+| Admin review UI                  | `app/admin/questionnaires/[id]/data-slots/page.tsx`, `components/admin/questionnaires/data-slots-review.tsx`, `data-slot-refine-button.tsx` |
+| Engine                           | `orchestrator/data-slot-orchestrator.ts`, `extraction/**` (combined), `_lib/turn-context.ts`, `_lib/data-slot-fills.ts`                     |
+| Respondent panel                 | `_lib/answer-panel.ts`, `components/app/questionnaire/panel/answer-slot-panel.tsx`                                                          |
+| Seeds                            | `prisma/seeds/app-questionnaire/028-031` (031 = refine capability row, bound to the generator agent)                                        |

@@ -11,8 +11,11 @@ import { z } from 'zod';
 import type { LlmMessage } from '@/lib/orchestration/llm/types';
 import {
   dataSlotGenerationOutputSchema,
+  dataSlotRefinementOutputSchema,
   type DataSlotGenerationOutput,
+  type DataSlotRefinementOutput,
   type DataSlotStructureInput,
+  type RefineInputSlot,
 } from '@/lib/app/questionnaire/data-slots/schemas';
 import {
   DEFAULT_DATA_SLOT_GRANULARITY,
@@ -131,6 +134,78 @@ export function buildDataSlotMergePrompt(
   ];
 }
 
+/**
+ * Build the REFINE prompt: rewrite ONE existing data slot per the admin's free-text instructions.
+ * The model sees the slot as it stands, the instructions, and the version's full question list (so
+ * it can re-suggest which questions the slot covers — "wording + coverage" scope), plus the other
+ * slots' names/themes so it keeps the theme consistent and doesn't duplicate a sibling. Output is
+ * the single refined slot as JSON (same shape as one generated slot), parsed by the capability.
+ */
+export function buildDataSlotRefinementPrompt(
+  structure: DataSlotStructureInput,
+  slot: RefineInputSlot,
+  instructions: string,
+  siblingSlots: { name: string; theme: string }[] = []
+): LlmMessage[] {
+  const system =
+    'You REFINE a single DATA SLOT for a conversational questionnaire. A data slot is a short ' +
+    '(1–4 word) semantic target — a single meaningful thing we want to learn — paired with a ' +
+    'DETAILED description of what it captures and why it matters, plus the question(s) it ' +
+    'abstracts over. A skilled interviewer fills it naturally in conversation.\n\n' +
+    'You are given ONE existing slot, the admin’s refinement instructions, and the full question ' +
+    'set. Apply the instructions to produce an improved version of THIS slot only.\n\n' +
+    'Rules:\n' +
+    '- Follow the admin’s instructions faithfully; otherwise preserve the slot’s intent.\n' +
+    '- You MAY change the name, description, theme, AND which questions it covers — re-map ' +
+    '`questionKeys` to the questions this refined slot genuinely captures (use the keys from the ' +
+    'question list; drop any that no longer fit, add any that now do). Keep at least one key when ' +
+    'a sensible match exists.\n' +
+    '- Name is 1–4 words, human and concrete (e.g. "Onboarding ease", "Time to value").\n' +
+    '- Keep the `theme` consistent with the related slots listed below unless the instructions ask ' +
+    'otherwise — theme is a shared grouping label.\n' +
+    '- Do NOT duplicate another slot listed below; stay a distinct target.\n' +
+    '- DESCRIPTION IS CRITICAL — it is the brief the interviewer works from. Write 3–5 sentences ' +
+    '(up to ~900 characters) that: (a) state precisely what information the slot must capture, ' +
+    'naming every distinct sub-aspect of the question(s) it covers; (b) explain why it matters and ' +
+    'what a complete, high-quality answer reveals; (c) note what would leave the answer incomplete ' +
+    'or which follow-ups to probe for.\n' +
+    'Reply with JSON only: { "slot": { "name", "description", "theme", "questionKeys": [...], ' +
+    '"confidence": 0..1 } }. No prose, no markdown.';
+
+  const questionLines = structure.questions.map(
+    (q) =>
+      `- [${q.key}] (${q.type}${q.sectionTitle ? `, section: ${q.sectionTitle}` : ''}) ${q.prompt}`
+  );
+  const siblingLines = siblingSlots.map((s) => `- "${s.name}" [theme: ${s.theme}]`);
+  const user =
+    (structure.goal ? `Questionnaire goal: ${structure.goal}\n\n` : '') +
+    'Slot to refine:\n' +
+    `- name: ${slot.name || '(empty)'}\n` +
+    `- theme: ${slot.theme || '(empty)'}\n` +
+    `- currently covers: ${slot.questionKeys.join(', ') || '(none)'}\n` +
+    `- description: ${slot.description || '(empty)'}\n\n` +
+    `Refinement instructions:\n${instructions}\n\n` +
+    (siblingLines.length > 0
+      ? `Other slots in this set (keep distinct, harmonize theme):\n${siblingLines.join('\n')}\n\n`
+      : '') +
+    `All questions (${structure.questions.length}):\n${questionLines.join('\n')}\n\n` +
+    'Produce the refined slot now.';
+
+  return [
+    { role: 'system', content: system },
+    { role: 'user', content: user },
+  ];
+}
+
+/** Retry nudge (user-message text) when a refine response wasn't valid JSON / schema. */
+export function buildDataSlotRefinementRetryMessage(): string {
+  return (
+    'Your previous reply was not valid. Reply with ONLY the JSON object ' +
+    '{ "slot": { "name", "description", "theme", "questionKeys": [...], "confidence" } } ' +
+    'and nothing else.'
+  );
+}
+
 /** Retry nudge (user-message text) when the first response wasn't valid JSON / schema. */
 export function buildDataSlotRetryMessage(): string {
   return (
@@ -193,6 +268,18 @@ export type DataSlotValidation =
 /** Validate a parsed generator response against the output schema. */
 export function validateDataSlotGeneration(parsed: unknown): DataSlotValidation {
   const result = dataSlotGenerationOutputSchema.safeParse(parsed);
+  return result.success
+    ? { ok: true, value: result.data }
+    : { ok: false, issues: result.error.issues };
+}
+
+export type DataSlotRefinementValidation =
+  | { ok: true; value: DataSlotRefinementOutput }
+  | { ok: false; issues: z.ZodIssue[] };
+
+/** Validate a parsed refine response ({ slot }) against the refinement output schema. */
+export function validateDataSlotRefinement(parsed: unknown): DataSlotRefinementValidation {
+  const result = dataSlotRefinementOutputSchema.safeParse(parsed);
   return result.success
     ? { ok: true, value: result.data }
     : { ok: false, issues: result.error.issues };

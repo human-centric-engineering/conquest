@@ -6,15 +6,17 @@
  * A slot typically maps to a handful of a questionnaire's (often dozens of) questions, so
  * rendering every question as a toggle per slot wastes huge amounts of space. Instead this
  * shows just the applied subset as removable chips plus a "X of N" count, and tucks the full
- * (filterable) question list behind an Edit popover.
+ * (filterable) question list behind an Edit popover. A read-only "View questions" popover
+ * surfaces the full prompt text of the covered questions for a quick glance without editing.
  */
 
 import { useState } from 'react';
-import { Check, Pencil, X } from 'lucide-react';
+import { Check, Eye, Pencil, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { FieldHelp } from '@/components/ui/field-help';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 
@@ -36,6 +38,7 @@ export function QuestionCoverageEditor({
   onToggle,
 }: QuestionCoverageEditorProps) {
   const [open, setOpen] = useState(false);
+  const [viewOpen, setViewOpen] = useState(false);
   const [filter, setFilter] = useState('');
 
   const promptByKey = new Map(questions.map((q) => [q.key, q.prompt]));
@@ -52,10 +55,48 @@ export function QuestionCoverageEditor({
   return (
     <div className="space-y-1.5">
       <div className="flex items-center gap-2">
-        <Label className="text-muted-foreground text-xs">
-          Covers {selectedKeys.length} of {questions.length} question
-          {questions.length === 1 ? '' : 's'}
+        <Label className="text-muted-foreground flex items-center gap-1 text-xs">
+          Covered question keys ({selectedKeys.length} of {questions.length})
+          <FieldHelp title="Question key">
+            A <strong>question key</strong> is the short, stable identifier (a slug like{' '}
+            <code>sales_model_definition</code>) for one question in this questionnaire. Each chip
+            below is the key of a question this data slot is responsible for capturing in the
+            conversation — filling the slot well answers those questions in the background. Removing
+            a key here only unmaps that question from this slot; it does not delete the question. If
+            no slot covers a question, the respondent flow asks it directly instead.
+          </FieldHelp>
         </Label>
+        {selectedKeys.length > 0 && (
+          <Popover open={viewOpen} onOpenChange={setViewOpen}>
+            <PopoverTrigger asChild>
+              <Button variant="ghost" size="sm" className="h-6 px-2 text-xs">
+                <Eye className="mr-1 h-3 w-3" /> View questions
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-96 p-0">
+              <div className="border-b px-3 py-2">
+                <p className="text-xs font-medium">Raw questions this slot covers</p>
+              </div>
+              <div className="max-h-72 space-y-2 overflow-y-auto p-3">
+                {selectedKeys.map((key) => {
+                  const prompt = promptByKey.get(key);
+                  return (
+                    <div key={key} className="text-xs">
+                      <p className="font-mono font-medium">{key}</p>
+                      {prompt ? (
+                        <p className="text-muted-foreground">{prompt}</p>
+                      ) : (
+                        <p className="text-destructive italic">
+                          Not in this version — will be dropped on save.
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </PopoverContent>
+          </Popover>
+        )}
         <Popover open={open} onOpenChange={setOpen}>
           <PopoverTrigger asChild>
             <Button variant="ghost" size="sm" className="h-6 px-2 text-xs">
@@ -99,7 +140,7 @@ export function QuestionCoverageEditor({
                         {on && <Check className="h-3 w-3" />}
                       </span>
                       <span className="flex-1">
-                        <span className="font-medium">{q.key}</span>
+                        <span className="font-mono font-medium">{q.key}</span>
                         <span className="text-muted-foreground"> — {q.prompt}</span>
                       </span>
                     </button>
@@ -113,18 +154,21 @@ export function QuestionCoverageEditor({
 
       {selectedKeys.length === 0 ? (
         <p className="text-muted-foreground text-xs italic">
-          No questions mapped — the respondent flow will ask them directly.
+          No question keys mapped — the respondent flow will ask these questions directly.
         </p>
       ) : (
         <div className="flex flex-wrap gap-1.5">
           {selectedKeys.map((key) => {
             const stale = !promptByKey.has(key);
+            const prompt = promptByKey.get(key);
             return (
               <span
                 key={key}
-                title={promptByKey.get(key) ?? 'Not in this version — will be dropped on save'}
+                title={
+                  prompt ? `${key} — ${prompt}` : 'Not in this version — will be dropped on save'
+                }
                 className={cn(
-                  'inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs',
+                  'inline-flex items-center gap-1 rounded-md px-2 py-0.5 font-mono text-xs',
                   stale
                     ? 'text-destructive border-destructive/50 border'
                     : 'bg-primary/10 border border-transparent'

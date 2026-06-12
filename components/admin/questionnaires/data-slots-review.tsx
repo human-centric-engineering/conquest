@@ -4,7 +4,7 @@
  * Data-slots review surface (Data Slots feature).
  *
  * Shows the version's data slots, lets the admin GENERATE a proposed set from the approved
- * questions (one LLM call) and review/edit/reject each slot, then SAVE the accepted set
+ * questions (one LLM call) and review/edit/remove each slot, then SAVE the set
  * (a PUT that replaces the version's slots; forks a launched version first).
  *
  * A generated set is a persisted DRAFT, not the live set: generation writes it server-side so
@@ -14,15 +14,15 @@
  * targets the saved slots; each maps to one or more questions it captures.
  */
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AlertTriangle, Loader2, Sparkles, Trash2, Undo2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { AutoTextarea } from '@/components/ui/auto-textarea';
 import { Badge } from '@/components/ui/badge';
-import { Checkbox } from '@/components/ui/checkbox';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -41,6 +41,7 @@ import {
   AuthoringError,
 } from '@/components/admin/questionnaires/authoring-mutate';
 import { DataSlotGranularityField } from '@/components/admin/questionnaires/data-slot-granularity-field';
+import { DataSlotRefineButton } from '@/components/admin/questionnaires/data-slot-refine-button';
 import { QuestionCoverageEditor } from '@/components/admin/questionnaires/question-coverage-editor';
 import {
   DataSlotGenerationProgress,
@@ -75,31 +76,59 @@ type SlotMode = 'draft' | 'live';
 
 /** An editable slot in the working set (a proposed or saved slot the admin tweaks). */
 interface DraftSlot {
+  /** Stable client-side id used as a React key, so re-grouping (e.g. on a theme rename) doesn't
+   *  remount cards mid-edit. Not persisted — `assignIds` stamps it. */
+  id: string;
   name: string;
   description: string;
   theme: string;
   questionKeys: string[];
-  accepted: boolean;
 }
 
-function fromGenerated(slot: GeneratedDataSlot): DraftSlot {
+/** The persisted shape of an editable slot, before a client id is stamped on. */
+type DraftSlotData = Omit<DraftSlot, 'id'>;
+
+function fromGenerated(slot: GeneratedDataSlot): DraftSlotData {
   return {
     name: slot.name,
     description: slot.description,
     theme: slot.theme,
     questionKeys: slot.questionKeys,
-    accepted: true,
   };
 }
 
-function fromSaved(slot: DataSlotView): DraftSlot {
+function fromSaved(slot: DataSlotView): DraftSlotData {
   return {
     name: slot.name,
     description: slot.description,
     theme: slot.theme,
     questionKeys: slot.questionKeys,
-    accepted: true,
   };
+}
+
+/** Group slots by their (exact) theme, preserving first-appearance order. The respondent panel
+ *  groups the same way (`answer-panel.ts`), so the editor mirrors the live hierarchy: one theme
+ *  heading over the slots that share it. Each group's React key is its first member's stable id,
+ *  so renaming the theme keeps the group mounted (and the header input focused). */
+interface ThemeGroup {
+  key: string;
+  theme: string;
+  members: { slot: DraftSlot; index: number }[];
+}
+
+function groupByTheme(drafts: DraftSlot[]): ThemeGroup[] {
+  const groups: ThemeGroup[] = [];
+  const byTheme = new Map<string, ThemeGroup>();
+  drafts.forEach((slot, index) => {
+    let group = byTheme.get(slot.theme);
+    if (!group) {
+      group = { key: slot.id, theme: slot.theme, members: [] };
+      byTheme.set(slot.theme, group);
+      groups.push(group);
+    }
+    group.members.push({ slot, index });
+  });
+  return groups;
 }
 
 /**
@@ -133,7 +162,6 @@ function signature(drafts: DraftSlot[]): string {
       description: d.description.trim(),
       theme: d.theme.trim(),
       questionKeys: [...d.questionKeys].sort(),
-      accepted: d.accepted,
     }))
   );
 }
@@ -147,11 +175,24 @@ export function DataSlotsReview({
 }: DataSlotsReviewProps) {
   const router = useRouter();
 
-  const seed = initialDraft ? initialDraft.slots.map(fromGenerated) : initialSlots.map(fromSaved);
+  // Stable client ids for React keys. The SEED ids are index-derived (`slot-0`, `slot-1`, …) so
+  // they're identical on the server render and client hydration — and identical however many times
+  // React invokes the lazy initializer (Strict Mode double-invokes it). The monotonic counter mints
+  // ids only for sets created AFTER mount (generate/save/discard), starting past the seed length so
+  // it can't collide with a seed id.
+  const seedCount = initialDraft ? initialDraft.slots.length : initialSlots.length;
+  const idSeq = useRef(seedCount);
+  const assignIds = (slots: DraftSlotData[]): DraftSlot[] =>
+    slots.map((s) => ({ ...s, id: `slot-${idSeq.current++}` }));
+
   const [liveSlots, setLiveSlots] = useState<DataSlotView[]>(initialSlots);
-  const [drafts, setDrafts] = useState<DraftSlot[]>(seed);
+  const [drafts, setDrafts] = useState<DraftSlot[]>(() =>
+    (initialDraft ? initialDraft.slots.map(fromGenerated) : initialSlots.map(fromSaved)).map(
+      (s, i) => ({ ...s, id: `slot-${i}` })
+    )
+  );
   const [mode, setMode] = useState<SlotMode>(initialDraft ? 'draft' : 'live');
-  const [baseline, setBaseline] = useState<string>(() => signature(seed));
+  const [baseline, setBaseline] = useState<string>(() => signature(drafts));
   const [granularity, setGranularity] = useState<DataSlotGranularity>(
     DEFAULT_DATA_SLOT_GRANULARITY
   );
@@ -163,6 +204,8 @@ export function DataSlotsReview({
   const [notice, setNotice] = useState<string | null>(null);
   // Index of the slot pending a delete confirmation, or null.
   const [deleteIndex, setDeleteIndex] = useState<number | null>(null);
+  // Whether the discard-draft confirmation is open.
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
 
   const dirty = signature(drafts) !== baseline;
   const busy = generating || saving || discarding;
@@ -284,7 +327,7 @@ export function DataSlotsReview({
       if (streamError) {
         setError(streamError);
       } else if (finalSlots && finalSlots.length > 0) {
-        resetTo(finalSlots.map(fromGenerated), 'draft');
+        resetTo(assignIds(finalSlots.map(fromGenerated)), 'draft');
         setNotice(
           `Generated ${finalSlots.length} draft data slot${
             finalSlots.length === 1 ? '' : 's'
@@ -305,6 +348,13 @@ export function DataSlotsReview({
     setDrafts((prev) => prev.map((d, i) => (i === index ? { ...d, ...patch } : d)));
   };
 
+  // Rename a theme on every slot that shares it — theme is one shared group label, not a per-slot
+  // value, so editing it in one place keeps the group together (an exact-string match drives the
+  // respondent panel's grouping). Renaming onto an existing theme merges the two groups.
+  const renameTheme = (from: string, to: string) => {
+    setDrafts((prev) => prev.map((d) => (d.theme === from ? { ...d, theme: to } : d)));
+  };
+
   const toggleQuestion = (index: number, key: string) => {
     setDrafts((prev) =>
       prev.map((d, i) =>
@@ -322,8 +372,29 @@ export function DataSlotsReview({
 
   const remove = (index: number) => setDrafts((prev) => prev.filter((_, i) => i !== index));
 
+  // Splice an AI-refined slot into the working set in place. Keyed by the slot's stable id, NOT its
+  // array index: a refine is async (the LLM call can run for many seconds) and the admin may remove
+  // another slot meanwhile, shifting indices — matching on id lands the result on the right slot.
+  // Like a manual edit, it's client-only until Save (the refine endpoint persists nothing).
+  const refineSlot = (id: string, refined: GeneratedDataSlot) => {
+    setDrafts((prev) =>
+      prev.map((d) =>
+        d.id === id
+          ? {
+              ...d,
+              name: refined.name,
+              description: refined.description,
+              theme: refined.theme,
+              questionKeys: refined.questionKeys,
+            }
+          : d
+      )
+    );
+    setError(null);
+    setNotice('Slot refined — review and save.');
+  };
+
   const save = async () => {
-    const accepted = drafts.filter((d) => d.accepted);
     setSaving(true);
     setError(null);
     setNotice(null);
@@ -332,7 +403,7 @@ export function DataSlotsReview({
         'PUT',
         API.APP.QUESTIONNAIRES.versionDataSlots(questionnaireId, versionId),
         {
-          slots: accepted.map((d) => ({
+          slots: drafts.map((d) => ({
             name: d.name,
             description: d.description,
             theme: d.theme,
@@ -346,7 +417,7 @@ export function DataSlotsReview({
         return;
       }
       setLiveSlots(res.data.slots);
-      resetTo(res.data.slots.map(fromSaved), 'live');
+      resetTo(assignIds(res.data.slots.map(fromSaved)), 'live');
       setNotice(`Saved ${res.data.slots.length} data slots — now live.`);
       router.refresh();
     } catch (err) {
@@ -357,13 +428,6 @@ export function DataSlotsReview({
   };
 
   const discard = async () => {
-    if (
-      !window.confirm(
-        'Discard this generated draft? The proposal is removed and your live data slots are left unchanged.'
-      )
-    ) {
-      return;
-    }
     setDiscarding(true);
     setError(null);
     setNotice(null);
@@ -372,7 +436,7 @@ export function DataSlotsReview({
         'DELETE',
         API.APP.QUESTIONNAIRES.versionDataSlotsDraft(questionnaireId, versionId)
       );
-      resetTo(liveSlots.map(fromSaved), 'live');
+      resetTo(assignIds(liveSlots.map(fromSaved)), 'live');
       setNotice('Draft discarded.');
       router.refresh();
     } catch (err) {
@@ -382,9 +446,8 @@ export function DataSlotsReview({
     }
   };
 
-  const coveredKeys = new Set(drafts.filter((d) => d.accepted).flatMap((d) => d.questionKeys));
+  const coveredKeys = new Set(drafts.flatMap((d) => d.questionKeys));
   const uncovered = questions.filter((q) => !coveredKeys.has(q.key));
-  const acceptedCount = drafts.filter((d) => d.accepted).length;
   const isDraft = mode === 'draft';
 
   return (
@@ -459,79 +522,110 @@ export function DataSlotsReview({
 
       {!generating && uncovered.length > 0 && drafts.length > 0 && (
         <p className="text-muted-foreground text-xs">
-          {uncovered.length} question{uncovered.length === 1 ? '' : 's'} not yet covered by any
-          accepted slot ({uncovered.map((q) => q.key).join(', ')}). The respondent flow will still
-          ask these directly, but covering them keeps the conversation natural.
+          {uncovered.length} question{uncovered.length === 1 ? '' : 's'} not yet covered by any slot
+          ({uncovered.map((q) => q.key).join(', ')}). The respondent flow will still ask these
+          directly, but covering them keeps the conversation natural.
         </p>
       )}
 
       {!generating && (
-        <ul className="space-y-4">
-          {drafts.map((d, i) => (
-            <li
-              key={i}
-              className={`space-y-3 rounded-md border p-4 ${d.accepted ? '' : 'opacity-60'}`}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex flex-1 items-center gap-2">
-                  <Checkbox
-                    checked={d.accepted}
-                    onCheckedChange={(v) => update(i, { accepted: v === true })}
-                    aria-label="Accept this slot"
-                  />
-                  {isDraft ? (
-                    <Badge
-                      variant="outline"
-                      className="border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300"
-                    >
-                      Draft
-                    </Badge>
-                  ) : (
-                    <Badge
-                      variant="outline"
-                      className="border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300"
-                    >
-                      Live
-                    </Badge>
-                  )}
+        <div className="space-y-6">
+          {groupByTheme(drafts).map((group) => (
+            <section key={group.key} className="space-y-3">
+              {/* Theme is one shared label for the whole group — edited here once, not per slot. */}
+              <div className="flex items-end gap-2">
+                <div className="w-full max-w-sm space-y-1">
+                  <Label htmlFor={`theme-${group.key}`} className="text-muted-foreground text-xs">
+                    Theme
+                  </Label>
                   <Input
-                    value={d.name}
-                    onChange={(e) => update(i, { name: e.target.value })}
-                    placeholder="Slot name (1–4 words)"
-                    className="max-w-xs font-medium"
-                  />
-                  <Input
-                    value={d.theme}
-                    onChange={(e) => update(i, { theme: e.target.value })}
+                    id={`theme-${group.key}`}
+                    value={group.theme}
+                    onChange={(e) => renameTheme(group.theme, e.target.value)}
                     placeholder="Theme"
-                    className="max-w-[12rem]"
+                    className="text-base font-semibold"
                   />
                 </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setDeleteIndex(i)}
-                  aria-label="Remove slot"
-                >
-                  <Trash2 className="text-muted-foreground h-4 w-4" />
-                </Button>
+                <span className="text-muted-foreground mb-2.5 text-xs">
+                  {group.members.length} slot{group.members.length === 1 ? '' : 's'}
+                </span>
               </div>
 
-              <AutoTextarea
-                value={d.description}
-                onChange={(e) => update(i, { description: e.target.value })}
-                placeholder="What this slot must capture, why it matters, and what to probe for"
-                className="min-h-24"
-              />
+              <ul className="space-y-4 border-l-2 pl-4">
+                {group.members.map(({ slot: d, index: i }) => (
+                  <li key={d.id} className="space-y-3 rounded-md border p-4">
+                    <div className="flex items-end justify-between gap-3">
+                      <div className="w-full max-w-xs space-y-1">
+                        <Label
+                          htmlFor={`slot-name-${d.id}`}
+                          className="text-muted-foreground text-xs"
+                        >
+                          Name
+                        </Label>
+                        <Input
+                          id={`slot-name-${d.id}`}
+                          value={d.name}
+                          onChange={(e) => update(i, { name: e.target.value })}
+                          placeholder="Slot name (1–4 words)"
+                          className="font-medium"
+                        />
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <DataSlotRefineButton
+                          questionnaireId={questionnaireId}
+                          versionId={versionId}
+                          slot={{
+                            name: d.name,
+                            description: d.description,
+                            theme: d.theme,
+                            questionKeys: d.questionKeys,
+                          }}
+                          // The other slots' names + themes, so the refiner keeps the theme
+                          // consistent with the set and doesn't duplicate a sibling.
+                          siblingSlots={drafts
+                            .filter((s) => s.id !== d.id)
+                            .map((s) => ({ name: s.name, theme: s.theme }))}
+                          disabled={busy}
+                          onRefined={(refined) => refineSlot(d.id, refined)}
+                        />
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => setDeleteIndex(i)}
+                          aria-label="Remove slot"
+                        >
+                          <Trash2 className="text-muted-foreground h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
 
-              <QuestionCoverageEditor
-                questions={questions}
-                selectedKeys={d.questionKeys}
-                onToggle={(key) => toggleQuestion(i, key)}
-              />
-            </li>
+                    <div className="space-y-1">
+                      <Label
+                        htmlFor={`slot-description-${d.id}`}
+                        className="text-muted-foreground text-xs"
+                      >
+                        Description
+                      </Label>
+                      <AutoTextarea
+                        id={`slot-description-${d.id}`}
+                        value={d.description}
+                        onChange={(e) => update(i, { description: e.target.value })}
+                        placeholder="What this slot must capture, why it matters, and what to probe for"
+                        className="min-h-24"
+                      />
+                    </div>
+
+                    <QuestionCoverageEditor
+                      questions={questions}
+                      selectedKeys={d.questionKeys}
+                      onToggle={(key) => toggleQuestion(i, key)}
+                    />
+                  </li>
+                ))}
+              </ul>
+            </section>
           ))}
-        </ul>
+        </div>
       )}
 
       {!generating && drafts.length > 0 && (
@@ -539,10 +633,10 @@ export function DataSlotsReview({
         <div className="bg-background/95 supports-[backdrop-filter]:bg-background/80 sticky bottom-0 z-20 -mx-6 flex items-center gap-3 border-t px-6 py-3 backdrop-blur">
           <Button onClick={() => void save()} disabled={busy || (!isDraft && !dirty)}>
             {saving && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
-            {isDraft ? `Save & make live (${acceptedCount})` : `Save changes (${acceptedCount})`}
+            {isDraft ? `Save & make live (${drafts.length})` : `Save changes (${drafts.length})`}
           </Button>
           {isDraft && (
-            <Button variant="outline" onClick={() => void discard()} disabled={busy}>
+            <Button variant="outline" onClick={() => setConfirmDiscard(true)} disabled={busy}>
               {discarding ? (
                 <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
               ) : (
@@ -581,6 +675,30 @@ export function DataSlotsReview({
               className="bg-red-600 hover:bg-red-700"
             >
               Remove slot
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={confirmDiscard} onOpenChange={setConfirmDiscard}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Discard this generated draft?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The proposal is removed and your live data slots are left unchanged.
+              {liveSlots.length === 0 && ' Launching this version requires saved data slots.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setConfirmDiscard(false);
+                void discard();
+              }}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              Discard draft
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

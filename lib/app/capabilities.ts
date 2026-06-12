@@ -22,6 +22,7 @@ import {
   AppExtractQuestionnaireStructureCapability,
   AppGenerateDataSlotsCapability,
   AppRefineAnswerCapability,
+  AppRefineDataSlotCapability,
 } from '@/lib/app/questionnaire/capabilities';
 
 export function initAppCapabilities(): void {
@@ -64,4 +65,8 @@ export function initAppCapabilities(): void {
   // flag and the APP_QUESTIONNAIRES_DATA_SLOTS sub-flag are both on (only the flag-gated
   // generate-data-slots route dispatches it), so unconditional registration here is safe.
   registerAppCapability(new AppGenerateDataSlotsCapability());
+
+  // Data Slots — single-slot refinement. Reuses the generator agent; inert until the same flags
+  // are on (only the flag-gated refine route dispatches it), so unconditional registration is safe.
+  registerAppCapability(new AppRefineDataSlotCapability());
 }
