@@ -407,7 +407,21 @@ export function DataSlotsReview({
 
       {progress && <DataSlotGenerationProgress progress={progress} />}
 
-      {isDraft && drafts.length > 0 && (
+      {/* Make the fate of the current set explicit while a new one streams in. The existing
+          list is hidden below during generation so it's clear it's being replaced. */}
+      {generating && drafts.length > 0 && (
+        <p className="text-muted-foreground text-sm">
+          {isDraft
+            ? `Generating a new set — it will replace the current unsaved draft of ${drafts.length} data slot${
+                drafts.length === 1 ? '' : 's'
+              } when it finishes.`
+            : `Generating a new set — it will load as a draft to review; your ${drafts.length} live data slot${
+                drafts.length === 1 ? '' : 's'
+              } stay in use until you save the new set.`}
+        </p>
+      )}
+
+      {!generating && isDraft && drafts.length > 0 && (
         <div className="flex items-start gap-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-900/60 dark:bg-amber-950/40">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
           <div className="space-y-1.5">
@@ -437,7 +451,7 @@ export function DataSlotsReview({
         </div>
       )}
 
-      {!isDraft && dirty && (
+      {!generating && !isDraft && dirty && (
         <p className="text-sm text-amber-700 dark:text-amber-400">
           You have unsaved edits to your live data slots. Save to apply them.
         </p>
@@ -446,7 +460,7 @@ export function DataSlotsReview({
       {error && <p className="text-destructive text-sm">{error}</p>}
       {notice && <p className="text-sm text-emerald-600">{notice}</p>}
 
-      {uncovered.length > 0 && drafts.length > 0 && (
+      {!generating && uncovered.length > 0 && drafts.length > 0 && (
         <p className="text-muted-foreground text-xs">
           {uncovered.length} question{uncovered.length === 1 ? '' : 's'} not yet covered by any
           accepted slot ({uncovered.map((q) => q.key).join(', ')}). The respondent flow will still
@@ -454,97 +468,99 @@ export function DataSlotsReview({
         </p>
       )}
 
-      <ul className="space-y-4">
-        {drafts.map((d, i) => (
-          <li
-            key={i}
-            className={`space-y-3 rounded-md border p-4 ${d.accepted ? '' : 'opacity-60'}`}
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex flex-1 items-center gap-2">
-                <Checkbox
-                  checked={d.accepted}
-                  onCheckedChange={(v) => update(i, { accepted: v === true })}
-                  aria-label="Accept this slot"
-                />
-                {isDraft ? (
-                  <Badge
-                    variant="outline"
-                    className="border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300"
-                  >
-                    Draft
-                  </Badge>
-                ) : (
-                  <Badge
-                    variant="outline"
-                    className="border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300"
-                  >
-                    Live
-                  </Badge>
-                )}
-                <Input
-                  value={d.name}
-                  onChange={(e) => update(i, { name: e.target.value })}
-                  placeholder="Slot name (1–4 words)"
-                  className="max-w-xs font-medium"
-                />
-                <Input
-                  value={d.theme}
-                  onChange={(e) => update(i, { theme: e.target.value })}
-                  placeholder="Theme"
-                  className="max-w-[12rem]"
-                />
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => remove(i)}
-                aria-label="Remove slot"
-              >
-                <Trash2 className="text-muted-foreground h-4 w-4" />
-              </Button>
-            </div>
-
-            <Textarea
-              value={d.description}
-              onChange={(e) => update(i, { description: e.target.value })}
-              placeholder="What this slot must capture, why it matters, and what to probe for"
-              rows={4}
-            />
-
-            <div className="space-y-1.5">
-              <Label className="text-muted-foreground text-xs">Covers questions</Label>
-              <div className="flex flex-wrap gap-2">
-                {questions.map((q) => {
-                  const on = d.questionKeys.includes(q.key);
-                  return (
-                    <button
-                      key={q.key}
-                      type="button"
-                      onClick={() => toggleQuestion(i, q.key)}
-                      title={q.prompt}
-                      className={
-                        on
-                          ? 'bg-primary/10 text-foreground rounded-md border border-transparent px-2 py-1 text-xs'
-                          : 'text-muted-foreground hover:bg-accent rounded-md border px-2 py-1 text-xs'
-                      }
+      {!generating && (
+        <ul className="space-y-4">
+          {drafts.map((d, i) => (
+            <li
+              key={i}
+              className={`space-y-3 rounded-md border p-4 ${d.accepted ? '' : 'opacity-60'}`}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex flex-1 items-center gap-2">
+                  <Checkbox
+                    checked={d.accepted}
+                    onCheckedChange={(v) => update(i, { accepted: v === true })}
+                    aria-label="Accept this slot"
+                  />
+                  {isDraft ? (
+                    <Badge
+                      variant="outline"
+                      className="border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300"
                     >
-                      {q.key}
-                    </button>
-                  );
-                })}
+                      Draft
+                    </Badge>
+                  ) : (
+                    <Badge
+                      variant="outline"
+                      className="border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300"
+                    >
+                      Live
+                    </Badge>
+                  )}
+                  <Input
+                    value={d.name}
+                    onChange={(e) => update(i, { name: e.target.value })}
+                    placeholder="Slot name (1–4 words)"
+                    className="max-w-xs font-medium"
+                  />
+                  <Input
+                    value={d.theme}
+                    onChange={(e) => update(i, { theme: e.target.value })}
+                    placeholder="Theme"
+                    className="max-w-[12rem]"
+                  />
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => remove(i)}
+                  aria-label="Remove slot"
+                >
+                  <Trash2 className="text-muted-foreground h-4 w-4" />
+                </Button>
               </div>
-              {d.questionKeys.some((k) => !promptByKey.has(k)) && (
-                <p className="text-destructive text-xs">
-                  Some mapped keys aren’t in this version and will be dropped on save.
-                </p>
-              )}
-            </div>
-          </li>
-        ))}
-      </ul>
 
-      {drafts.length > 0 && (
+              <Textarea
+                value={d.description}
+                onChange={(e) => update(i, { description: e.target.value })}
+                placeholder="What this slot must capture, why it matters, and what to probe for"
+                rows={4}
+              />
+
+              <div className="space-y-1.5">
+                <Label className="text-muted-foreground text-xs">Covers questions</Label>
+                <div className="flex flex-wrap gap-2">
+                  {questions.map((q) => {
+                    const on = d.questionKeys.includes(q.key);
+                    return (
+                      <button
+                        key={q.key}
+                        type="button"
+                        onClick={() => toggleQuestion(i, q.key)}
+                        title={q.prompt}
+                        className={
+                          on
+                            ? 'bg-primary/10 text-foreground rounded-md border border-transparent px-2 py-1 text-xs'
+                            : 'text-muted-foreground hover:bg-accent rounded-md border px-2 py-1 text-xs'
+                        }
+                      >
+                        {q.key}
+                      </button>
+                    );
+                  })}
+                </div>
+                {d.questionKeys.some((k) => !promptByKey.has(k)) && (
+                  <p className="text-destructive text-xs">
+                    Some mapped keys aren’t in this version and will be dropped on save.
+                  </p>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {!generating && drafts.length > 0 && (
         <div className="flex items-center gap-3">
           <Button onClick={() => void save()} disabled={busy || (!isDraft && !dirty)}>
             {saving && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
