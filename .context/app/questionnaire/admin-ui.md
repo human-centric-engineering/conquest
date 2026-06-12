@@ -50,19 +50,62 @@ writes it.
 
 ## Read UI
 
-| Page                                     | What it shows                                                                                   |
-| ---------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `app/admin/questionnaires/page.tsx`      | List: debounced title search, status filter, pagination, row click-through to detail            |
-| `app/admin/questionnaires/[id]/page.tsx` | Detail: SSR `?v=` version selector, goal/audience with `inferred` badges, section/question tree |
+| Page                                              | What it shows                                                                          |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `app/admin/questionnaires/page.tsx`               | List: summary stat tiles, debounced title search, status filter, pagination            |
+| `app/admin/questionnaires/[id]/v/[vid]/page.tsx`  | **Overview** tab — status, launch readiness, quick actions, version timeline           |
+| `app/admin/questionnaires/[id]/v/[vid]/structure` | **Structure** tab — goal/audience with `inferred` badges, section/question tree/editor |
 
 The list page is a thin server component (`serverFetch` the first page → client
 `QuestionnairesTable` for search/filter/pagination, model on the orchestration
-`AgentsTable`). The detail page is fully server-rendered, including version
-switching via the `?v=` query param — no client state. `VersionGraph`
-(`components/admin/questionnaires/`) is a pure presentational render of the graph.
+`AgentsTable`). `VersionGraph` (`components/admin/questionnaires/`) is a pure
+presentational render of the graph.
 
 The nav entry is registered in `lib/app/admin-nav.ts` via `registerNavSection()`
 (seam 4 — no edit to `admin-sidebar.tsx`).
+
+## Workspace layout (tabbed)
+
+The questionnaire detail surface is a **tabbed workspace**, not a single page. The
+version is a **path segment** — `app/admin/questionnaires/[id]/v/[vid]/…` — because
+a Next.js layout can read `params` but never `searchParams`, and the shared layout
+must render the version selector and highlight the active version against `[vid]`.
+
+```
+/admin/questionnaires/[id]                  → redirector → newest version's Overview (honours ?v=)
+/admin/questionnaires/[id]/v/[vid]          → Overview tab (default landing)
+            …/v/[vid]/structure             → Structure (editor/graph, ?edit=1 toggle)
+            …/v/[vid]/data-slots            → (flag: data-slots)
+            …/v/[vid]/invitations           → questionnaire-scoped; vid ignored, targets newest launched
+            …/v/[vid]/analytics
+            …/v/[vid]/evaluations[/[runId]] → (flag: design-evaluation)
+            …/v/[vid]/extraction-changes
+            …/v/[vid]/settings              → demo-client attribution + clone (DEMO-ONLY)
+```
+
+- **`[id]/v/[vid]/layout.tsx`** owns the breadcrumb, sticky header (title + status +
+  `VersionSelector`), and the `QuestionnaireSubNav` tab bar. It resolves the detail
+  and feature flags **once** via `lib/app/questionnaire/workspace-data.ts` and
+  `notFound()`s when the master flag is off, the questionnaire is missing, or `[vid]`
+  isn't a real version. Switching version preserves the active tab segment.
+- **`workspace-data.ts`** wraps the detail / graph / data-slot-count fetchers in
+  React `cache()` so the layout and the active tab share one HTTP call per render
+  (`serverFetch` is `no-store`). `resolveQuestionnaireWorkspaceFlags()` resolves all
+  workspace flags in one `Promise.all` (sub-flags ANDed with the master), instead of
+  the layered per-helper re-queries in `feature-flag.ts`.
+- **`workspace-nav.ts`** is the declarative tab registry; `visibleWorkspaceTabs(flags)`
+  filters by flag (Data slots / Evaluations hidden when their sub-flag is off — the
+  master flag is already enforced by the layout). Each moved tab keeps its own
+  `notFound()` flag gate as defense-in-depth.
+- **Legacy routes** (`[id]`, `[id]/{analytics,data-slots,extraction-changes,evaluations,invitations}`)
+  are thin **redirectors** that resolve `?v=` (or the newest version) and forward to
+  the path-segment URL, so old bookmarks and the editor's fork-redirect keep working.
+
+The list and demo-clients surfaces wear a scoped **app identity** — a display serif
+(`components/admin/cq-fonts.ts`) and accent tokens (`.cq-surface` in `globals.css`),
+applied by the `app/admin/questionnaires/layout.tsx` and `app/admin/demo-clients/layout.tsx`
+wrappers and used by `components/admin/cq-stat-tiles.tsx`. Scoped so orchestration
+and the rest of `/admin` are untouched.
 
 ## Tagging (F2.2)
 
@@ -98,9 +141,10 @@ coloured pill, used by both the editor and the read-only `version-graph.tsx`).
 
 ## Extraction-change review (F2.3)
 
-A dedicated sub-route — `app/admin/questionnaires/[id]/extraction-changes?v=` —
-lists a version's editorial change log (the per-version `changeCount` on the detail
-page links into it) and lets an admin **revert** any change. See
+A workspace tab — `app/admin/questionnaires/[id]/v/[vid]/extraction-changes` (the
+**Changes** tab) — lists a version's editorial change log (the per-version
+`changeCount` on the Overview tab links into it) and lets an admin **revert** any
+change. See
 [`extraction-changes.md`](./extraction-changes.md) for the revert semantics; the
 admin-facing shape:
 
@@ -130,7 +174,7 @@ through the shared `authoringMutate` runner (fork-redirect / `router.refresh()`)
 
 ## Re-ingest (F2.4)
 
-A **Re-ingest** action on the detail page — offered only on **draft** versions —
+A **Re-ingest** action in the **Structure** tab header — offered only on **draft** versions —
 uploads a replacement document and **replaces that draft's structure, change log,
 and tags** with a fresh extraction. `components/admin/questionnaires/reingest-dialog.tsx`
 (file picker + optional goal override + extract-tables toggle, each with

@@ -1,94 +1,47 @@
 /**
- * Admin Data Slots Page tests.
+ * Legacy Data Slots redirect page tests.
  *
- * The page is an async Server Component that gates on both `isQuestionnairesEnabled`
- * and `isDataSlotsEnabled`, fetches the questionnaire detail + version graph + data
- * slots via `serverFetch`, and renders a version-selector and `<DataSlotsReview>` (or
- * graceful empty states when no versions / no questions).
+ * The old data-slots page is now a thin redirector:
+ *   - calls notFound() when the detail fetch returns null
+ *   - calls notFound() when the questionnaire has no versions
+ *   - redirects to `/admin/questionnaires/[id]/v/[vid]/data-slots` using newest version
+ *   - honours ?v= when the named version exists in the detail's versions list
  *
- * Following the same mock architecture as the sibling `page.test.tsx` — `serverFetch`
- * returns a Response-like marker carrying its URL; `parseApiResponse` routes off that
- * URL into the per-test `apiData` registry — so the three fetches (detail, graph,
- * slots) are independently controllable without relying on call order.
- *
- * Heavy children are stubbed to identifiable markers so we assert the page's own
- * branching, not their internals.
+ * Fetching is mocked at the `workspace-data` boundary.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
 
-import DataSlotsPage from '@/app/admin/questionnaires/[id]/data-slots/page';
 import type {
   QuestionnaireDetail,
   QuestionnaireVersionSummary,
-  VersionGraphView,
 } from '@/lib/app/questionnaire/views';
-import type { DataSlotView, DataSlotDraftView } from '@/lib/app/questionnaire/data-slots';
-import { DEFAULT_QUESTIONNAIRE_CONFIG } from '@/lib/app/questionnaire/types';
 
-// ─── Mocks ──────────────────────────────────────────────────────────────────
+// ─── Navigation mocks ────────────────────────────────────────────────────────
 
-vi.mock('next/navigation', () => ({
-  notFound: vi.fn(() => {
+const { mockRedirect, mockNotFound } = vi.hoisted(() => ({
+  mockRedirect: vi.fn((url: string) => {
+    throw new Error(`NEXT_REDIRECT:${url}`);
+  }),
+  mockNotFound: vi.fn(() => {
     throw new Error('NEXT_NOT_FOUND');
   }),
 }));
 
-vi.mock('@/lib/logging', () => ({
-  logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
+vi.mock('next/navigation', () => ({
+  redirect: mockRedirect,
+  notFound: mockNotFound,
 }));
 
-const flagMock = vi.hoisted(() => ({
-  isQuestionnairesEnabled: vi.fn(),
-  isDataSlotsEnabled: vi.fn(),
-}));
-vi.mock('@/lib/app/questionnaire/feature-flag', () => flagMock);
+// ─── Workspace-data mock ──────────────────────────────────────────────────────
 
-// `serverFetch` returns a Response-like marker carrying its URL; `parseApiResponse`
-// routes off that URL into the per-test `apiData` registry.
-interface ApiData {
-  detail: QuestionnaireDetail | null;
-  graph: VersionGraphView | null;
-  slots: { slots: DataSlotView[]; draft: DataSlotDraftView | null } | null;
-}
-const apiData: ApiData = { detail: null, graph: null, slots: null };
-
-vi.mock('@/lib/api/server-fetch', () => ({
-  serverFetch: vi.fn(async (url: string) => ({ ok: true, _url: url })),
-  parseApiResponse: vi.fn(async (res: { _url: string }) => {
-    const url = res._url;
-    if (url.includes('/data-slots')) {
-      return apiData.slots ? { success: true, data: apiData.slots } : { success: false, error: {} };
-    }
-    if (url.includes('/versions/')) {
-      return apiData.graph ? { success: true, data: apiData.graph } : { success: false, error: {} };
-    }
-    return apiData.detail ? { success: true, data: apiData.detail } : { success: false, error: {} };
-  }),
+const workspaceDataMock = vi.hoisted(() => ({
+  getQuestionnaireDetailCached: vi.fn<() => Promise<QuestionnaireDetail | null>>(),
 }));
 
-// Stub DataSlotsReview to an identifiable marker so we assert the page's branching.
-vi.mock('@/components/admin/questionnaires/data-slots-review', () => ({
-  DataSlotsReview: (props: {
-    questionnaireId: string;
-    versionId: string;
-    questions: unknown[];
-    initialSlots: unknown[];
-    initialDraft: unknown;
-  }) => (
-    <div
-      data-testid="data-slots-review"
-      data-qid={props.questionnaireId}
-      data-vid={props.versionId}
-      data-qcount={String(props.questions.length)}
-      data-scount={String(props.initialSlots.length)}
-      data-has-draft={String(props.initialDraft !== null)}
-    />
-  ),
-}));
+vi.mock('@/lib/app/questionnaire/workspace-data', () => workspaceDataMock);
 
-// ─── Factories ───────────────────────────────────────────────────────────────
+// ─── Factories ────────────────────────────────────────────────────────────────
 
 function makeVersion(over: Partial<QuestionnaireVersionSummary> = {}): QuestionnaireVersionSummary {
   return {
@@ -119,65 +72,12 @@ function makeDetail(over: Partial<QuestionnaireDetail> = {}): QuestionnaireDetai
   };
 }
 
-function makeGraph(questionCount = 3, over: Partial<VersionGraphView> = {}): VersionGraphView {
-  const questions = Array.from({ length: questionCount }, (_, i) => ({
-    id: `q-${i}`,
-    ordinal: i,
-    key: `q${i + 1}`,
-    prompt: `Question ${i + 1}?`,
-    guidelines: null,
-    rationale: null,
-    type: 'free_text' as const,
-    typeConfig: {},
-    required: true,
-    weight: 1,
-    extractionConfidence: null,
-    tags: [],
-  }));
+// ─── Page import ──────────────────────────────────────────────────────────────
 
-  return {
-    id: 'ver-1',
-    questionnaireId: 'qn-1',
-    versionNumber: 1,
-    status: 'draft',
-    goal: 'Understand the prospect',
-    audience: null,
-    goalProvenance: null,
-    audienceProvenance: null,
-    sections: [
-      {
-        id: 'sec-1',
-        ordinal: 0,
-        title: 'General',
-        description: null,
-        questions,
-      },
-    ],
-    tags: [],
-    config: {
-      ...DEFAULT_QUESTIONNAIRE_CONFIG,
-      saved: true,
-      anonymousMode: true,
-    },
-    ...over,
-  };
-}
-
-function makeSlots(count = 1): DataSlotView[] {
-  return Array.from({ length: count }, (_, i) => ({
-    id: `slot-${i}`,
-    key: `slot_key_${i}`,
-    name: `Slot ${i}`,
-    description: 'A slot.',
-    theme: 'Goals',
-    ordinal: i,
-    weight: 1,
-    questionKeys: [`q${i + 1}`],
-  }));
-}
+import LegacyDataSlotsRedirect from '@/app/admin/questionnaires/[id]/data-slots/page';
 
 function renderPage(opts: { id?: string; v?: string } = {}) {
-  return DataSlotsPage({
+  return LegacyDataSlotsRedirect({
     params: Promise.resolve({ id: opts.id ?? 'qn-1' }),
     searchParams: Promise.resolve({ v: opts.v }),
   });
@@ -187,187 +87,72 @@ function renderPage(opts: { id?: string; v?: string } = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  apiData.detail = makeDetail();
-  apiData.graph = makeGraph();
-  apiData.slots = { slots: [], draft: null };
-  flagMock.isQuestionnairesEnabled.mockResolvedValue(true);
-  flagMock.isDataSlotsEnabled.mockResolvedValue(true);
+  workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue(makeDetail());
 });
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
-describe('DataSlotsPage', () => {
-  describe('feature-flag gating', () => {
-    it('calls notFound when the questionnaires feature flag is off', async () => {
-      flagMock.isQuestionnairesEnabled.mockResolvedValue(false);
-      await expect(renderPage()).rejects.toThrow('NEXT_NOT_FOUND');
-    });
-
-    it('calls notFound when the data-slots feature flag is off', async () => {
-      flagMock.isDataSlotsEnabled.mockResolvedValue(false);
-      await expect(renderPage()).rejects.toThrow('NEXT_NOT_FOUND');
-    });
-
-    it('calls notFound when both flags are off', async () => {
-      flagMock.isQuestionnairesEnabled.mockResolvedValue(false);
-      flagMock.isDataSlotsEnabled.mockResolvedValue(false);
-      await expect(renderPage()).rejects.toThrow('NEXT_NOT_FOUND');
-    });
-  });
-
-  describe('data-fetch gating', () => {
+describe('LegacyDataSlotsRedirect', () => {
+  describe('gating', () => {
     it('calls notFound when the detail fetch returns null', async () => {
-      apiData.detail = null;
+      workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue(null);
+      await expect(renderPage()).rejects.toThrow('NEXT_NOT_FOUND');
+    });
+
+    it('calls notFound when the questionnaire has no versions', async () => {
+      workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue(
+        makeDetail({ versions: [] })
+      );
       await expect(renderPage()).rejects.toThrow('NEXT_NOT_FOUND');
     });
   });
 
-  describe('breadcrumb and heading', () => {
-    it('renders the questionnaire title as a breadcrumb link', async () => {
-      render(await renderPage());
-      expect(screen.getByRole('link', { name: 'Prospect Discovery' })).toHaveAttribute(
-        'href',
-        '/admin/questionnaires/qn-1'
+  describe('redirect to data-slots tab', () => {
+    it('redirects to the newest version data-slots tab when no ?v= given', async () => {
+      workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue(
+        makeDetail({ versions: [makeVersion({ id: 'ver-1' })] })
+      );
+      await expect(renderPage()).rejects.toThrow(
+        'NEXT_REDIRECT:/admin/questionnaires/qn-1/v/ver-1/data-slots'
       );
     });
 
-    it('renders the "Data slots" heading', async () => {
-      render(await renderPage());
-      expect(screen.getByRole('heading', { name: 'Data slots' })).toBeInTheDocument();
-    });
-
-    it('renders the Questionnaires breadcrumb link', async () => {
-      render(await renderPage());
-      expect(screen.getByRole('link', { name: 'Questionnaires' })).toHaveAttribute(
-        'href',
-        '/admin/questionnaires'
+    it('uses versions[0] (newest) when multiple versions exist and no ?v= given', async () => {
+      workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue(
+        makeDetail({
+          versions: [
+            makeVersion({ id: 'ver-2', versionNumber: 2 }),
+            makeVersion({ id: 'ver-1', versionNumber: 1 }),
+          ],
+        })
+      );
+      await expect(renderPage()).rejects.toThrow(
+        'NEXT_REDIRECT:/admin/questionnaires/qn-1/v/ver-2/data-slots'
       );
     });
-  });
 
-  describe('version selector', () => {
-    it('renders a version-tab link for each version', async () => {
-      apiData.detail = makeDetail({
-        versions: [
-          makeVersion({ id: 'ver-1', versionNumber: 1, status: 'draft' }),
-          makeVersion({ id: 'ver-2', versionNumber: 2, status: 'launched' }),
-        ],
-      });
-      render(await renderPage());
-      expect(screen.getByRole('link', { name: /v1.*draft/i })).toBeInTheDocument();
-      expect(screen.getByRole('link', { name: /v2.*launched/i })).toBeInTheDocument();
+    it('honours ?v= when the named version is in the list', async () => {
+      workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue(
+        makeDetail({
+          versions: [
+            makeVersion({ id: 'ver-2', versionNumber: 2 }),
+            makeVersion({ id: 'ver-1', versionNumber: 1 }),
+          ],
+        })
+      );
+      await expect(renderPage({ v: 'ver-1' })).rejects.toThrow(
+        'NEXT_REDIRECT:/admin/questionnaires/qn-1/v/ver-1/data-slots'
+      );
     });
 
-    it('selects the version named by the ?v= search param', async () => {
-      apiData.detail = makeDetail({
-        versions: [
-          makeVersion({ id: 'ver-1', versionNumber: 1 }),
-          makeVersion({ id: 'ver-2', versionNumber: 2 }),
-        ],
-      });
-      render(await renderPage({ v: 'ver-2' }));
-      // The DataSlotsReview stub carries data-vid so we can check which version was selected
-      const review = screen.getByTestId('data-slots-review');
-      expect(review).toHaveAttribute('data-vid', 'ver-2');
-    });
-
-    it('falls back to the first version when ?v= is absent', async () => {
-      apiData.detail = makeDetail({
-        versions: [makeVersion({ id: 'ver-1', versionNumber: 1 })],
-      });
-      render(await renderPage());
-      const review = screen.getByTestId('data-slots-review');
-      expect(review).toHaveAttribute('data-vid', 'ver-1');
-    });
-  });
-
-  describe('no-versions state', () => {
-    it('renders a "no versions" message and omits the version selector and review', async () => {
-      apiData.detail = makeDetail({ versions: [] });
-      render(await renderPage());
-      expect(screen.getByText('This questionnaire has no versions.')).toBeInTheDocument();
-      expect(screen.queryByTestId('data-slots-review')).not.toBeInTheDocument();
-    });
-  });
-
-  describe('no-questions state', () => {
-    it('renders a "no questions" message when the graph has no sections/questions', async () => {
-      apiData.graph = makeGraph(0);
-      render(await renderPage());
-      expect(
-        screen.getByText('This version has no questions to abstract over yet.')
-      ).toBeInTheDocument();
-      expect(screen.queryByTestId('data-slots-review')).not.toBeInTheDocument();
-    });
-  });
-
-  describe('DataSlotsReview rendering', () => {
-    it('passes the questionnaire ID and version ID to the review component', async () => {
-      render(await renderPage({ id: 'qn-1' }));
-      const review = screen.getByTestId('data-slots-review');
-      expect(review).toHaveAttribute('data-qid', 'qn-1');
-      expect(review).toHaveAttribute('data-vid', 'ver-1');
-    });
-
-    it('passes the flattened question list (key + prompt) to the review component', async () => {
-      apiData.graph = makeGraph(3);
-      render(await renderPage());
-      const review = screen.getByTestId('data-slots-review');
-      // Graph has 3 questions → 3 QuestionRef entries
-      expect(review).toHaveAttribute('data-qcount', '3');
-    });
-
-    it('passes the loaded slots as initialSlots to the review component', async () => {
-      apiData.slots = { slots: makeSlots(2), draft: null };
-      render(await renderPage());
-      const review = screen.getByTestId('data-slots-review');
-      expect(review).toHaveAttribute('data-scount', '2');
-    });
-
-    it('passes initialDraft=null to the review component when no draft exists', async () => {
-      apiData.slots = { slots: [], draft: null };
-      render(await renderPage());
-      const review = screen.getByTestId('data-slots-review');
-      expect(review).toHaveAttribute('data-has-draft', 'false');
-    });
-
-    it('passes the draft object to the review component when a draft exists', async () => {
-      const draft: DataSlotDraftView = {
-        slots: [
-          {
-            name: 'Timeline',
-            description: 'When.',
-            theme: 'Urgency',
-            questionKeys: ['q1'],
-            confidence: 0.9,
-          },
-        ],
-        updatedAt: '2026-01-01T00:00:00.000Z',
-      };
-      apiData.slots = { slots: [], draft };
-      render(await renderPage());
-      const review = screen.getByTestId('data-slots-review');
-      expect(review).toHaveAttribute('data-has-draft', 'true');
-    });
-  });
-
-  describe('graceful degradation on failed sub-fetches', () => {
-    it('renders with empty questions when the graph fetch fails', async () => {
-      apiData.graph = null;
-      render(await renderPage());
-      // No graph → questions is [] → "no questions" message
-      expect(
-        screen.getByText('This version has no questions to abstract over yet.')
-      ).toBeInTheDocument();
-    });
-
-    it('renders with empty slots and no draft when the slots fetch fails', async () => {
-      apiData.slots = null;
-      render(await renderPage());
-      // Graph fetch succeeds → questions present → DataSlotsReview renders with empty slots
-      const review = screen.getByTestId('data-slots-review');
-      expect(review).toHaveAttribute('data-scount', '0');
-      expect(review).toHaveAttribute('data-has-draft', 'false');
+    it('falls back to the newest version when ?v= does not match any version', async () => {
+      workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue(
+        makeDetail({ versions: [makeVersion({ id: 'ver-1' })] })
+      );
+      // ver-nonexistent doesn't exist → falls back to ver-1
+      await expect(renderPage({ v: 'ver-nonexistent' })).rejects.toThrow(
+        'NEXT_REDIRECT:/admin/questionnaires/qn-1/v/ver-1/data-slots'
+      );
     });
   });
 });

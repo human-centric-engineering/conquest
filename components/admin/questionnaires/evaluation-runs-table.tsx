@@ -54,7 +54,7 @@ export function EvaluationRunsTable({
   const [error, setError] = useState<string | null>(null);
 
   const detailHref = (runId: string): string =>
-    `/admin/questionnaires/${questionnaireId}/evaluations/${runId}?v=${versionId}`;
+    `/admin/questionnaires/${questionnaireId}/v/${versionId}/evaluations/${runId}`;
 
   const runEvaluation = async () => {
     setRunning(true);

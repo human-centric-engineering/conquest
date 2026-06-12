@@ -199,7 +199,7 @@ export function DataSlotsReview({
       );
       // A launched version forks a new draft — navigate there so the admin keeps editing.
       if (res.meta?.forked) {
-        router.push(`/admin/questionnaires/${questionnaireId}/data-slots?v=${res.meta.versionId}`);
+        router.push(`/admin/questionnaires/${questionnaireId}/v/${res.meta.versionId}/data-slots`);
         return;
       }
       setLiveSlots(res.data.slots);

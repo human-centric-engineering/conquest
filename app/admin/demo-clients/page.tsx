@@ -15,6 +15,7 @@ import { notFound } from 'next/navigation';
 import { Plus } from 'lucide-react';
 
 import { DemoClientsTable } from '@/components/admin/demo-clients/demo-clients-table';
+import { CqStatTiles, type CqStat } from '@/components/admin/cq-stat-tiles';
 import { Button } from '@/components/ui/button';
 import { FieldHelp } from '@/components/ui/field-help';
 import { API } from '@/lib/api/endpoints';
@@ -45,11 +46,21 @@ export default async function DemoClientsListPage() {
 
   const clients = await getDemoClients();
 
+  const statTiles: CqStat[] = [
+    { label: 'Demo clients', value: clients.length },
+    { label: 'Active', value: clients.filter((c) => c.isActive).length, accent: true },
+    {
+      label: 'Attributed',
+      value: clients.reduce((sum, c) => sum + c.questionnaireCount, 0),
+      hint: 'questionnaires branded',
+    },
+  ];
+
   return (
     <div className="space-y-6">
       <header className="bg-background sticky top-0 z-30 -mx-6 flex items-start justify-between border-b px-6 pt-3 pb-3">
         <div>
-          <h1 className="text-2xl font-semibold">
+          <h1 className="cq-display text-2xl font-semibold">
             Demo clients{' '}
             <FieldHelp title="What are demo clients?" contentClassName="w-96">
               <p>
@@ -73,6 +84,8 @@ export default async function DemoClientsListPage() {
           </Link>
         </Button>
       </header>
+
+      <CqStatTiles stats={statTiles} />
 
       <DemoClientsTable clients={clients} />
     </div>

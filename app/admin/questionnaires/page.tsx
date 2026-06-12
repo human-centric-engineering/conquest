@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 
 import { QuestionnairesTable } from '@/components/admin/questionnaires/questionnaires-table';
 import { UploadQuestionnaireDialog } from '@/components/admin/questionnaires/upload-questionnaire-dialog';
+import { CqStatTiles, type CqStat } from '@/components/admin/cq-stat-tiles';
 import { FieldHelp } from '@/components/ui/field-help';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
@@ -18,6 +19,41 @@ export const metadata: Metadata = {
 };
 
 const EMPTY_META: PaginationMeta = { page: 1, limit: 25, total: 0, totalPages: 1 };
+
+interface QuestionnaireStats {
+  total: number;
+  launched: number;
+  draft: number;
+  archived: number;
+}
+
+/**
+ * Status breakdown for the summary tiles. Fetches a wide page so the launched /
+ * draft / archived split is accurate at demo scale; `total` comes from the
+ * pagination meta so it stays correct even past the sample. Degrades to zeros.
+ */
+async function getQuestionnaireStats(): Promise<QuestionnaireStats> {
+  const empty: QuestionnaireStats = { total: 0, launched: 0, draft: 0, archived: 0 };
+  try {
+    const res = await serverFetch(`${API.APP.QUESTIONNAIRES.ROOT}?page=1&limit=200`);
+    if (!res.ok) return empty;
+    const body = await parseApiResponse<QuestionnaireListItem[]>(res);
+    if (!body.success) return empty;
+    const total = parsePaginationMeta(body.meta)?.total ?? body.data.length;
+    return body.data.reduce<QuestionnaireStats>(
+      (acc, q) => {
+        if (q.status === 'launched') acc.launched += 1;
+        else if (q.status === 'draft') acc.draft += 1;
+        else if (q.status === 'archived') acc.archived += 1;
+        return acc;
+      },
+      { ...empty, total }
+    );
+  } catch (err) {
+    logger.error('questionnaires list page: stats fetch failed', err);
+    return empty;
+  }
+}
 
 /**
  * Admin — Questionnaires list page (P2 / F2.1a).
@@ -48,13 +84,23 @@ export default async function QuestionnairesListPage() {
   // which 404s, so the page doesn't render an empty shell behind a hidden feature.
   if (!(await isQuestionnairesEnabled())) notFound();
 
-  const { items, meta } = await getQuestionnaires();
+  const [{ items, meta }, stats] = await Promise.all([
+    getQuestionnaires(),
+    getQuestionnaireStats(),
+  ]);
+
+  const statTiles: CqStat[] = [
+    { label: 'Questionnaires', value: stats.total },
+    { label: 'Launched', value: stats.launched, accent: true },
+    { label: 'Drafts', value: stats.draft },
+    { label: 'Archived', value: stats.archived },
+  ];
 
   return (
     <div className="space-y-6">
       <header className="bg-background sticky top-0 z-30 -mx-6 flex items-start justify-between gap-4 border-b px-6 pt-3 pb-3">
         <div>
-          <h1 className="text-2xl font-semibold">
+          <h1 className="cq-display text-2xl font-semibold">
             Questionnaires{' '}
             <FieldHelp
               title="What are questionnaires?"
@@ -78,6 +124,8 @@ export default async function QuestionnairesListPage() {
         </div>
         <UploadQuestionnaireDialog />
       </header>
+
+      <CqStatTiles stats={statTiles} />
 
       <QuestionnairesTable initialItems={items} initialMeta={meta} />
     </div>

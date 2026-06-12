@@ -14,6 +14,7 @@ import { ChevronLeft } from 'lucide-react';
 
 import { DemoClientForm } from '@/components/admin/demo-clients/demo-client-form';
 import { DemoClientActions } from '@/components/admin/demo-clients/demo-client-actions';
+import { ResetSessionsDialog } from '@/components/admin/demo-clients/reset-sessions-dialog';
 import { DemoClientThemePreview } from '@/components/admin/demo-clients/demo-client-theme-preview';
 import { QUESTIONNAIRE_STATUS_BADGE } from '@/components/admin/questionnaires/status-badge';
 import { Badge } from '@/components/ui/badge';
@@ -61,17 +62,21 @@ export default async function DemoClientDetailPage({ params }: PageProps) {
           >
             <ChevronLeft className="h-4 w-4" /> Demo clients
           </Link>
-          <h1 className="text-2xl font-semibold">{client.name}</h1>
+          <h1 className="cq-display text-2xl font-semibold">{client.name}</h1>
           <p className="text-muted-foreground text-sm">
             <code className="text-xs">{client.slug}</code> · {client.questionnaireCount} attributed{' '}
             {client.questionnaireCount === 1 ? 'questionnaire' : 'questionnaires'}
           </p>
         </div>
-        <DemoClientActions
-          id={client.id}
-          name={client.name}
-          questionnaireCount={client.questionnaireCount}
-        />
+        <div className="flex items-start gap-2">
+          {/* DEMO-ONLY (F6.4): between-demos session reset. */}
+          <ResetSessionsDialog id={client.id} name={client.name} slug={client.slug} />
+          <DemoClientActions
+            id={client.id}
+            name={client.name}
+            questionnaireCount={client.questionnaireCount}
+          />
+        </div>
       </header>
 
       {/* Attributed questionnaires — the destination the delete guard points at. A

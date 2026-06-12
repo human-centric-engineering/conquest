@@ -64,6 +64,19 @@ answer slots → turns → session events → sessions   (then, opt-in, invitati
 { "sessions": 2, "answerSlots": 5, "turns": 4, "events": 6, "invitations": 0 }
 ```
 
+## Admin UI
+
+The demo-client **detail page** (`app/admin/demo-clients/[id]/page.tsx`) surfaces this
+via `components/admin/demo-clients/reset-sessions-dialog.tsx` (`ResetSessionsDialog`), a
+destructive Dialog next to the Delete action. It mirrors the route's guards in the UI:
+
+- The confirm button is **disabled until the typed input equals the client slug** (the
+  same value the 400 `CONFIRM_SLUG_MISMATCH` guard checks server-side).
+- An optional checkbox sends `?resetInvitations=true`.
+- The `409 ANONYMOUS_MODE_PROTECTED` and `400 CONFIRM_SLUG_MISMATCH` error codes are
+  mapped to inline messages; on success it shows the `deletedCounts` and `router.refresh()`es
+  on close so freshly-cleared session/analytics reads re-fetch.
+
 ## Audit
 
 On success the route fires `logAdminAction({ action: 'app_demo_client.reset_sessions',
@@ -76,6 +89,8 @@ deleted** — a reset never touches `AiAdminAuditLog`.
 - `app/api/v1/app/demo-clients/[id]/reset-sessions/route.ts` — handler + gate order.
 - `app/api/v1/app/demo-clients/_lib/reset.ts` — `loadResetTargets` (version collection +
   `anyAnonymous` signal) + `performReset` (transactional delete).
+- `components/admin/demo-clients/reset-sessions-dialog.tsx` — the admin UI dialog (typed-slug
+  confirmation), mounted on the demo-client detail page.
 - `lib/app/questionnaire/demo-clients/schemas.ts` — `resetSessionsSchema`,
   `resetSessionsQuerySchema`.
 - `lib/app/questionnaire/invitations/types.ts` — `RESET_PRESERVED_INVITATION_STATUSES`.
@@ -84,7 +99,7 @@ deleted** — a reset never touches `AiAdminAuditLog`.
 
 Grep-isolated under the `DEMO-ONLY` marker like the rest of demo tenancy
 (`grep -rl "DEMO-ONLY"`). A fork that drops the demo surface deletes the route +
-`_lib/reset.ts` and the two reset schemas; the `RESET_PRESERVED_INVITATION_STATUSES`
+`_lib/reset.ts`, the `ResetSessionsDialog` component, and the two reset schemas; the `RESET_PRESERVED_INVITATION_STATUSES`
 constant rides with the invitations module. See [demo-clients.md] § "Fork guidance" for
 the full demo-tenancy replacement paths.
 
