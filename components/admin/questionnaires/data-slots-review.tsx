@@ -398,7 +398,7 @@ export function DataSlotsReview({
             ) : (
               <Sparkles className="mr-1.5 h-4 w-4" />
             )}
-            {drafts.length === 0 ? 'Generate' : 'Regenerate'}
+            {drafts.length === 0 ? 'Generate' : 'Discard and regenerate'}
           </Button>
         </div>
 
