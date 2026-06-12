@@ -15,7 +15,9 @@ const nameSchema = z
   .refine((v) => v.split(/\s+/).filter(Boolean).length <= 4, 'Name must be at most 4 words');
 
 const themeSchema = z.string().trim().min(1, 'Theme is required').max(60);
-const descriptionSchema = z.string().trim().min(1, 'Description is required').max(600);
+// Descriptions guide the interviewer, so they must carry the full intent of the
+// question(s) a slot abstracts — generous cap to allow that detail.
+const descriptionSchema = z.string().trim().min(1, 'Description is required').max(1000);
 
 /** One generated slot as the LLM emits it (questions referenced by key). */
 export const generatedDataSlotSchema = z.object({

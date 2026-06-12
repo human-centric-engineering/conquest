@@ -111,6 +111,36 @@ describe('buildDataSlotGenerationPrompt — system prompt rules', () => {
     expect(system).toMatch(/theme/i);
     expect(system).toMatch(/group/i);
   });
+
+  it('demands detailed descriptions that carry the full intent of the questions', () => {
+    expect(system).toMatch(/descriptions are critical/i);
+    expect(system).toMatch(/full intent/i);
+    expect(system).toMatch(/never drop detail/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildDataSlotGenerationPrompt — granularity
+// ---------------------------------------------------------------------------
+
+describe('buildDataSlotGenerationPrompt — granularity', () => {
+  it('injects the balanced guidance by default (no granularity argument)', () => {
+    const system = systemContent(buildDataSlotGenerationPrompt(minimalStructure));
+    expect(system).toMatch(/GRANULARITY for this set:/);
+    expect(system).toMatch(/balance breadth and detail/i);
+  });
+
+  it('injects the broadest guidance when asked to consolidate aggressively', () => {
+    const system = systemContent(buildDataSlotGenerationPrompt(minimalStructure, 'broadest'));
+    expect(system).toMatch(/consolidate aggressively/i);
+    expect(system).not.toMatch(/maximise granularity/i);
+  });
+
+  it('injects the finest guidance when asked for maximum granularity', () => {
+    const system = systemContent(buildDataSlotGenerationPrompt(minimalStructure, 'finest'));
+    expect(system).toMatch(/maximise granularity/i);
+    expect(system).toMatch(/1:1 mapping/i);
+  });
 });
 
 // ---------------------------------------------------------------------------

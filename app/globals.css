@@ -68,8 +68,8 @@
  *
  * Scoped to `.cq-surface`, applied by those two admin layout wrappers — never
  * global, so orchestration and the rest of `/admin` are untouched. Provides a
- * warm editorial accent (distinct from the platform blue) and a display serif
- * via the `--font-display` variable that `components/admin/cq-fonts.ts` sets.
+ * warm editorial accent (distinct from the platform blue); typography stays on
+ * the platform's default sans, matching the rest of `/admin`.
  */
 @layer base {
   .cq-surface {
@@ -83,11 +83,6 @@
     --cq-accent-foreground: #1c1917;
     --cq-accent-muted: color-mix(in oklab, var(--cq-accent) 16%, transparent);
     --cq-accent-ring: color-mix(in oklab, var(--cq-accent) 45%, transparent);
-  }
-  .cq-display {
-    font-family: var(--font-display), Georgia, 'Times New Roman', serif;
-    font-optical-sizing: auto;
-    letter-spacing: -0.015em;
   }
 }
 

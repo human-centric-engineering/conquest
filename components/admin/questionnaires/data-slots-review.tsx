@@ -31,10 +31,13 @@ import {
   AuthoringError,
 } from '@/components/admin/questionnaires/authoring-mutate';
 import { StatusTicker, DATA_SLOT_MESSAGES } from '@/components/admin/questionnaires/status-ticker';
-import type {
-  DataSlotView,
-  DataSlotDraftView,
-  GeneratedDataSlot,
+import { DataSlotGranularityField } from '@/components/admin/questionnaires/data-slot-granularity-field';
+import {
+  DEFAULT_DATA_SLOT_GRANULARITY,
+  type DataSlotView,
+  type DataSlotDraftView,
+  type DataSlotGranularity,
+  type GeneratedDataSlot,
 } from '@/lib/app/questionnaire/data-slots';
 
 interface QuestionRef {
@@ -111,6 +114,9 @@ export function DataSlotsReview({
   const [drafts, setDrafts] = useState<DraftSlot[]>(seed);
   const [mode, setMode] = useState<SlotMode>(initialDraft ? 'draft' : 'live');
   const [baseline, setBaseline] = useState<string>(() => signature(seed));
+  const [granularity, setGranularity] = useState<DataSlotGranularity>(
+    DEFAULT_DATA_SLOT_GRANULARITY
+  );
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [discarding, setDiscarding] = useState(false);
@@ -137,7 +143,8 @@ export function DataSlotsReview({
     try {
       const res = await authoringMutate<{ slots: GeneratedDataSlot[]; diagnostic?: string }>(
         'POST',
-        API.APP.QUESTIONNAIRES.versionDataSlotsGenerate(questionnaireId, versionId)
+        API.APP.QUESTIONNAIRES.versionDataSlotsGenerate(questionnaireId, versionId),
+        { granularity }
       );
       if (res.data.diagnostic || res.data.slots.length === 0) {
         setError(
@@ -246,22 +253,31 @@ export function DataSlotsReview({
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-muted-foreground text-sm">
-          {drafts.length === 0
-            ? 'No data slots yet. Generate a set from this version’s questions.'
-            : isDraft
-              ? `${drafts.length} draft data slot${drafts.length === 1 ? '' : 's'} — not live yet.`
-              : `${drafts.length} live data slot${drafts.length === 1 ? '' : 's'}.`}
-        </p>
-        <Button variant="outline" size="sm" onClick={() => void generate()} disabled={busy}>
-          {generating ? (
-            <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-          ) : (
-            <Sparkles className="mr-1.5 h-4 w-4" />
-          )}
-          {drafts.length === 0 ? 'Generate data slots' : 'Regenerate'}
-        </Button>
+      <div className="bg-muted/30 space-y-4 rounded-lg border p-4">
+        <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
+          <div className="space-y-0.5">
+            <h3 className="text-sm font-medium">
+              {drafts.length === 0 ? 'Generate data slots' : 'Regenerate data slots'}
+            </h3>
+            <p className="text-muted-foreground text-sm">
+              {drafts.length === 0
+                ? 'Propose a set from this version’s questions, then review and save.'
+                : isDraft
+                  ? `${drafts.length} draft slot${drafts.length === 1 ? '' : 's'} — not live yet.`
+                  : `${drafts.length} live slot${drafts.length === 1 ? '' : 's'}.`}
+            </p>
+          </div>
+          <Button onClick={() => void generate()} disabled={busy}>
+            {generating ? (
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+            ) : (
+              <Sparkles className="mr-1.5 h-4 w-4" />
+            )}
+            {drafts.length === 0 ? 'Generate' : 'Regenerate'}
+          </Button>
+        </div>
+
+        <DataSlotGranularityField value={granularity} onChange={setGranularity} disabled={busy} />
       </div>
 
       {generating && <StatusTicker messages={DATA_SLOT_MESSAGES} />}
@@ -367,8 +383,8 @@ export function DataSlotsReview({
             <Textarea
               value={d.description}
               onChange={(e) => update(i, { description: e.target.value })}
-              placeholder="What this slot captures and why it matters"
-              rows={2}
+              placeholder="What this slot must capture, why it matters, and what to probe for"
+              rows={4}
             />
 
             <div className="space-y-1.5">

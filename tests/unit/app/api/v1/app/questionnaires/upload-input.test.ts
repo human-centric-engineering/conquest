@@ -13,6 +13,7 @@ import {
   ALLOWED_EXTENSIONS,
   getExtension,
   hasAllowedExtension,
+  MAX_TITLE_LENGTH,
   parseAdminMetadata,
   parseExtractTablesFlag,
 } from '@/app/api/v1/app/questionnaires/_lib/upload-input';
@@ -40,6 +41,40 @@ describe('extension allowlist', () => {
   it('reads the lowercased extension', () => {
     expect(getExtension('Report.PDF')).toBe('.pdf');
     expect(getExtension('plain')).toBe('');
+  });
+});
+
+describe('parseAdminMetadata — title', () => {
+  it('captures a non-empty name override', () => {
+    expect(parseAdminMetadata(form({ title: 'Customer onboarding' })).title).toBe(
+      'Customer onboarding'
+    );
+  });
+
+  it('treats an empty/whitespace title as absent (falls back to the derived title)', () => {
+    expect(parseAdminMetadata(form({ title: '   ' })).title).toBeUndefined();
+    expect(parseAdminMetadata(form({})).title).toBeUndefined();
+  });
+
+  it('accepts a title exactly at the length cap', () => {
+    const atCap = 'x'.repeat(MAX_TITLE_LENGTH);
+    expect(parseAdminMetadata(form({ title: atCap })).title).toBe(atCap);
+  });
+
+  it('throws ValidationError when the title exceeds the length cap', () => {
+    const tooLong = 'x'.repeat(MAX_TITLE_LENGTH + 1);
+    expect(() => parseAdminMetadata(form({ title: tooLong }))).toThrow(ValidationError);
+  });
+});
+
+describe('parseAdminMetadata — demoClientId', () => {
+  it('captures a non-empty demo client id', () => {
+    expect(parseAdminMetadata(form({ demoClientId: 'client-1' })).demoClientId).toBe('client-1');
+  });
+
+  it('treats an empty/whitespace demo client id as absent', () => {
+    expect(parseAdminMetadata(form({ demoClientId: '  ' })).demoClientId).toBeUndefined();
+    expect(parseAdminMetadata(form({})).demoClientId).toBeUndefined();
   });
 });
 

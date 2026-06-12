@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { getServerSession } from '@/lib/auth/utils';
 import { AdminSidebar } from '@/components/admin/admin-sidebar';
 import { AdminHeader } from '@/components/admin/admin-header';
+import { BreadcrumbProvider } from '@/components/admin/breadcrumb-context';
 import { InFlightExecutionBanner } from '@/components/admin/orchestration/in-flight-execution-banner';
 
 export const metadata: Metadata = {
@@ -38,15 +39,17 @@ export default async function AdminLayout({
   }
 
   return (
-    <div className="bg-background flex h-screen overflow-hidden">
-      <AdminSidebar />
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <AdminHeader />
-        <InFlightExecutionBanner />
-        <main className="flex-1 overflow-y-auto overscroll-contain">
-          <div className="p-6">{children}</div>
-        </main>
+    <BreadcrumbProvider>
+      <div className="bg-background flex h-screen overflow-hidden">
+        <AdminSidebar />
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <AdminHeader />
+          <InFlightExecutionBanner />
+          <main className="flex-1 overflow-y-auto overscroll-contain">
+            <div className="p-6">{children}</div>
+          </main>
+        </div>
       </div>
-    </div>
+    </BreadcrumbProvider>
   );
 }

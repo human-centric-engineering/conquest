@@ -42,6 +42,7 @@ import { parsePaginationMeta } from '@/lib/validations/common';
 import type { PaginationMeta } from '@/types/api';
 import { APP_QUESTIONNAIRE_STATUSES } from '@/lib/app/questionnaire/types';
 import type { QuestionnaireListItem } from '@/lib/app/questionnaire/views';
+import type { AttributedDemoClient } from '@/lib/app/questionnaire/demo-clients';
 import { QUESTIONNAIRE_STATUS_BADGE } from '@/components/admin/questionnaires/status-badge';
 
 const STATUS_FILTER_ALL = '__all__';
@@ -58,9 +59,15 @@ function formatDate(iso: string): string {
 export interface QuestionnairesTableProps {
   initialItems: QuestionnaireListItem[];
   initialMeta: PaginationMeta;
+  /** DEMO-ONLY (F2.5.1): active demo clients for the empty-state upload dialog's attribution picker. */
+  demoClientOptions?: AttributedDemoClient[];
 }
 
-export function QuestionnairesTable({ initialItems, initialMeta }: QuestionnairesTableProps) {
+export function QuestionnairesTable({
+  initialItems,
+  initialMeta,
+  demoClientOptions = [],
+}: QuestionnairesTableProps) {
   const router = useRouter();
   const [items, setItems] = useState(initialItems);
   const [meta, setMeta] = useState(initialMeta);
@@ -175,6 +182,7 @@ export function QuestionnairesTable({ initialItems, initialMeta }: Questionnaire
             <TableRow>
               <TableHead>Title</TableHead>
               <TableHead>Status</TableHead>
+              <TableHead>Demo client</TableHead>
               <TableHead className="text-right">Version</TableHead>
               <TableHead className="text-right">Sections</TableHead>
               <TableHead className="text-right">Questions</TableHead>
@@ -184,12 +192,12 @@ export function QuestionnairesTable({ initialItems, initialMeta }: Questionnaire
           <TableBody>
             {items.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="py-10 text-center">
+                <TableCell colSpan={7} className="py-10 text-center">
                   <div className="flex flex-col items-center gap-3">
                     <p className="text-muted-foreground">
                       No questionnaires yet. Upload a document to create your first one.
                     </p>
-                    <UploadQuestionnaireDialog />
+                    <UploadQuestionnaireDialog demoClientOptions={demoClientOptions} />
                   </div>
                 </TableCell>
               </TableRow>
@@ -205,6 +213,13 @@ export function QuestionnairesTable({ initialItems, initialMeta }: Questionnaire
                     <TableCell className="font-medium">{item.title}</TableCell>
                     <TableCell>
                       <Badge variant={badge.variant}>{badge.label}</Badge>
+                    </TableCell>
+                    <TableCell>
+                      {item.demoClient ? (
+                        item.demoClient.name
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {item.latestVersion ? `v${item.latestVersion.versionNumber}` : '—'}

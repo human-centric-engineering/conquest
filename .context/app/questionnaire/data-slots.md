@@ -36,7 +36,13 @@ below for the draft lifecycle (generate persists it, save promotes + clears it, 
    launched). It links to `/admin/questionnaires/:id/data-slots`.
 2. **Generate** dispatches `app_generate_data_slots` (the `app-questionnaire-data-slots-generator`
    agent) over the version's questions → proposed slots (name + description + theme + question
-   mappings). `POST …/versions/:vid/data-slots/generate` persists the proposal as the version's
+   mappings). The admin picks a **granularity** first — a 5-level knob (`broadest` → `broad` →
+   `balanced` (default) → `granular` → `finest`, see `data-slots/granularity.ts`) sent in the POST
+   body. It controls how many slots the generator aims for and how broad/fine each is (broad
+   consolidates many questions per slot; fine approaches 1:1). The prompt also demands **detailed**
+   descriptions (up to 1000 chars) that carry the full intent of the question(s) a slot abstracts,
+   because the slot description is the brief the runtime interviewer phrases from.
+   `POST …/versions/:vid/data-slots/generate` persists the proposal as the version's
    pending **draft** (`AppDataSlotDraft`, one JSON row per version) so it survives the admin
    navigating away — but the draft is **not live**: runtime, the respondent panel, and the launch
    gate read only the saved set (`AppDataSlot`). The capability itself is still pure (returns

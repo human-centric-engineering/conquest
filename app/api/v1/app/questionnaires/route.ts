@@ -19,9 +19,9 @@
  *
  * Pipeline (the order is load-bearing):
  *   flag-gate → withAdminAuth → per-admin sub-cap → content-length guard →
- *   multipart parse → extension allowlist → admin-metadata parse → SHA-256 dedup →
- *   document parse → scanned/empty detection → capability dispatch → coherence
- *   check → transactional persist → admin audit → 201.
+ *   multipart parse → extension allowlist → admin-metadata parse → demo-client
+ *   existence check → SHA-256 dedup → document parse → scanned/empty detection →
+ *   capability dispatch → coherence check → transactional persist → admin audit → 201.
  *
  * Auth: admin only. Flag: 404 when `APP_QUESTIONNAIRES_ENABLED` is off (the app
  * is dark). Rate limit: inherits the 100/min `api` section cap automatically; adds
@@ -78,6 +78,21 @@ const handleIngest = withAdminAuth(async (request: NextRequest, session) => {
   if (!guard.ok) return guard.response;
   const { file, fileHash, adminMeta } = guard.value;
 
+  // DEMO-ONLY (F2.5.1): when attributing on upload, the target client must exist.
+  // Cheap pre-check (before the expensive extract) for a clean 404 rather than a
+  // foreign-key 500 at persist time — mirrors the PATCH attribution guard.
+  let demoClientId: string | undefined;
+  if (adminMeta.demoClientId !== undefined) {
+    const client = await prisma.appDemoClient.findUnique({
+      where: { id: adminMeta.demoClientId },
+      select: { id: true },
+    });
+    if (!client) {
+      return errorResponse('Demo client not found', { code: 'DEMO_CLIENT_NOT_FOUND', status: 404 });
+    }
+    demoClientId = client.id;
+  }
+
   // SHA-256 dedup — best-effort: the exact same bytes were already ingested, so
   // surface the existing ids instead of creating a near-identical questionnaire.
   // Deliberately NOT backed by a DB unique constraint: F2.4 re-ingest legitimately
@@ -106,9 +121,11 @@ const handleIngest = withAdminAuth(async (request: NextRequest, session) => {
   if (!extracted.ok) return extracted.response;
   const { extraction, parsed } = extracted.value;
 
-  const documentTitle = deriveTitle(parsed.title, file.name);
+  // Admin-supplied name wins over the document-derived title.
+  const documentTitle = adminMeta.title ?? deriveTitle(parsed.title, file.name);
   const result = await persistIngestion({
     documentTitle,
+    ...(demoClientId !== undefined ? { demoClientId } : {}),
     extraction,
     admin: adminMeta,
     source: {
@@ -136,6 +153,7 @@ const handleIngest = withAdminAuth(async (request: NextRequest, session) => {
       changeCount: result.changeCount,
       fileName: file.name,
       fileHash,
+      demoClientId: demoClientId ?? null,
     },
     clientIp: clientIP,
   });

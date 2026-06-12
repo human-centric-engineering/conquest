@@ -28,6 +28,7 @@ vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Header
 vi.mock('@/lib/db/client', () => ({
   prisma: {
     appQuestionnaireSourceDocument: { findFirst: vi.fn() },
+    appDemoClient: { findUnique: vi.fn() },
     aiAgent: { findUnique: vi.fn() },
   },
 }));
@@ -160,6 +161,7 @@ beforeEach(() => {
     reset: 0,
   });
   (prisma.appQuestionnaireSourceDocument.findFirst as Mock).mockResolvedValue(null); // no dup
+  (prisma.appDemoClient.findUnique as Mock).mockResolvedValue({ id: 'client-1' }); // exists by default
   (prisma.aiAgent.findUnique as Mock).mockResolvedValue({
     id: 'agent-1',
     provider: '',
@@ -338,6 +340,64 @@ describe('POST /api/v1/app/questionnaires — admin metadata', () => {
 
     expect(res.status).toBe(400);
     expect(capabilityDispatcher.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('uses the admin-supplied name as the title, overriding the parsed document title', async () => {
+    // Parsed title is 'Onboarding'; the admin override wins.
+    await POST(
+      makeRequest('onboarding.md', '# Form', 'text/markdown', { title: 'Acme onboarding survey' })
+    );
+
+    expect(persistIngestion).toHaveBeenCalledWith(
+      expect.objectContaining({ documentTitle: 'Acme onboarding survey' })
+    );
+  });
+});
+
+// ─── Demo-client attribution on upload (DEMO-ONLY, F2.5.1) ──────────────────────
+
+describe('POST /api/v1/app/questionnaires — demo-client attribution', () => {
+  it('attributes the questionnaire when the demo client exists and audits the id', async () => {
+    const res = await POST(
+      makeRequest('form.md', '# Form', 'text/markdown', { demoClientId: 'client-1' })
+    );
+
+    expect(res.status).toBe(201);
+    // Existence pre-check ran against the supplied id.
+    expect(prisma.appDemoClient.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'client-1' } })
+    );
+    // The validated id flows to the writer and the audit metadata.
+    expect(persistIngestion).toHaveBeenCalledWith(
+      expect.objectContaining({ demoClientId: 'client-1' })
+    );
+    expect(logAdminAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ demoClientId: 'client-1' }),
+      })
+    );
+  });
+
+  it('returns 404 DEMO_CLIENT_NOT_FOUND and does no extraction when the client is unknown', async () => {
+    (prisma.appDemoClient.findUnique as Mock).mockResolvedValue(null);
+
+    const res = await POST(
+      makeRequest('form.md', '# Form', 'text/markdown', { demoClientId: 'ghost' })
+    );
+
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.code).toBe('DEMO_CLIENT_NOT_FOUND');
+    // Rejected before the expensive parse/dispatch/persist work.
+    expect(capabilityDispatcher.dispatch).not.toHaveBeenCalled();
+    expect(persistIngestion).not.toHaveBeenCalled();
+  });
+
+  it('does not look up a demo client when none is supplied, and persists without attribution', async () => {
+    await POST(makeRequest('form.md'));
+
+    expect(prisma.appDemoClient.findUnique).not.toHaveBeenCalled();
+    const arg = (persistIngestion as Mock).mock.calls[0][0] as Record<string, unknown>;
+    expect(arg).not.toHaveProperty('demoClientId');
   });
 });
 

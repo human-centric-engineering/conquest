@@ -10,6 +10,7 @@
  * @see components/admin/questionnaires/upload-questionnaire-dialog.tsx
  */
 
+import type { ComponentProps } from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -77,14 +78,19 @@ function mockFetchError(message: string, status = 409): ReturnType<typeof vi.fn>
 }
 
 /** Open the dialog and return a configured userEvent instance. */
-async function openDialog() {
+async function openDialog(props: Partial<ComponentProps<typeof UploadQuestionnaireDialog>> = {}) {
   const user = userEvent.setup();
-  render(<UploadQuestionnaireDialog />);
+  render(<UploadQuestionnaireDialog {...props} />);
   await user.click(screen.getByRole('button', { name: /upload questionnaire/i }));
   // The submit button only exists once the dialog content is mounted.
   await screen.findByRole('button', { name: /upload & extract/i });
   return user;
 }
+
+const DEMO_CLIENT_OPTIONS = [
+  { id: 'client-1', slug: 'acme-bank', name: 'Acme Bank' },
+  { id: 'client-2', slug: 'globex', name: 'Globex' },
+];
 
 function postedFormData(fetchMock: ReturnType<typeof vi.fn>): FormData {
   const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -144,12 +150,58 @@ describe('UploadQuestionnaireDialog', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     const fd = postedFormData(fetchMock);
+    expect(fd.has('title')).toBe(false);
+    expect(fd.has('demoClientId')).toBe(false);
     expect(fd.has('goal')).toBe(false);
     expect(fd.has('audience.description')).toBe(false);
     // Enum selects left at "Infer" must be omitted entirely (server rejects unknowns).
     expect(fd.has('audience.expertiseLevel')).toBe(false);
     expect(fd.has('audience.sensitivity')).toBe(false);
     expect(fd.has('extractTables')).toBe(false);
+  });
+
+  it('sends the admin-supplied name as the title field', async () => {
+    const fetchMock = mockFetchSuccess();
+    const user = await openDialog();
+
+    await user.upload(fileInput(), makeFile());
+    await user.type(
+      screen.getByPlaceholderText('Leave blank to use the document title'),
+      'Acme onboarding survey'
+    );
+    await user.click(screen.getByRole('button', { name: /upload & extract/i }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(postedFormData(fetchMock).get('title')).toBe('Acme onboarding survey');
+  });
+
+  it('hides the demo-client picker when no options are supplied', async () => {
+    await openDialog();
+    expect(screen.queryByRole('combobox', { name: /demo client/i })).not.toBeInTheDocument();
+  });
+
+  it('attributes the chosen demo client and sends its id as demoClientId', async () => {
+    const fetchMock = mockFetchSuccess();
+    const user = await openDialog({ demoClientOptions: DEMO_CLIENT_OPTIONS });
+
+    await user.upload(fileInput(), makeFile());
+    await user.click(screen.getByRole('combobox', { name: /demo client/i }));
+    await user.click(await screen.findByRole('option', { name: /acme bank/i }));
+    await user.click(screen.getByRole('button', { name: /upload & extract/i }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(postedFormData(fetchMock).get('demoClientId')).toBe('client-1');
+  });
+
+  it('omits demoClientId when the picker is left on "None"', async () => {
+    const fetchMock = mockFetchSuccess();
+    const user = await openDialog({ demoClientOptions: DEMO_CLIENT_OPTIONS });
+
+    await user.upload(fileInput(), makeFile());
+    await user.click(screen.getByRole('button', { name: /upload & extract/i }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(postedFormData(fetchMock).has('demoClientId')).toBe(false);
   });
 
   it('sends extractTables=true when the toggle is checked', async () => {

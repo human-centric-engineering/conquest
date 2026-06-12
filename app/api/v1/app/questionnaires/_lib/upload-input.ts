@@ -38,10 +38,17 @@ export function hasAllowedExtension(name: string): boolean {
   return ALLOWED_EXTENSIONS.some((ext) => lower.endsWith(ext));
 }
 
+/** Upper bound on an admin-supplied questionnaire name (matches the title-search cap). */
+export const MAX_TITLE_LENGTH = 200;
+
 /** Parsed, validated admin-supplied metadata. Absent fields are omitted. */
 export interface AdminMetadata {
+  /** Admin-supplied questionnaire name; wins over the document-derived title. */
+  title?: string;
   goal?: string;
   audience?: Partial<AudienceShape>;
+  /** DEMO-ONLY (F2.5.1): attribute the new questionnaire to this demo client on create. */
+  demoClientId?: string;
 }
 
 /**
@@ -81,8 +88,26 @@ function readTrimmed(formData: FormData, key: string): string | undefined {
 export function parseAdminMetadata(formData: FormData): AdminMetadata {
   const meta: AdminMetadata = {};
 
+  // Optional name override — wins over the document-derived title. Empty/absent
+  // falls back to the parsed title; only the length cap can fail validation.
+  const title = readTrimmed(formData, 'title');
+  if (title !== undefined) {
+    if (title.length > MAX_TITLE_LENGTH) {
+      throw new ValidationError('Invalid questionnaire name', {
+        title: [`Must be at most ${MAX_TITLE_LENGTH} characters`],
+      });
+    }
+    meta.title = title;
+  }
+
   const goal = readTrimmed(formData, 'goal');
   if (goal !== undefined) meta.goal = goal;
+
+  // DEMO-ONLY (F2.5.1): optional attribution. Existence is checked in the route
+  // against the DB (a clean 404), mirroring the PATCH attribution guard — here we
+  // only carry the trimmed id through.
+  const demoClientId = readTrimmed(formData, 'demoClientId');
+  if (demoClientId !== undefined) meta.demoClientId = demoClientId;
 
   // Gather non-empty audience.* fields into a raw object for Zod.
   const rawAudience: Record<string, string> = {};

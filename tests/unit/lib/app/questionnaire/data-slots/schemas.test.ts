@@ -106,7 +106,7 @@ describe('generatedDataSlotSchema', () => {
     });
   });
 
-  describe('description (1–600 char)', () => {
+  describe('description (1–1000 char)', () => {
     it('accepts a non-empty description', () => {
       const result = generatedDataSlotSchema.parse(validGeneratedSlot);
       expect(result.description).toContain('Captures');
@@ -118,15 +118,15 @@ describe('generatedDataSlotSchema', () => {
       ).toBe(false);
     });
 
-    it('rejects a description exceeding 600 characters', () => {
-      const longDesc = 'a'.repeat(601);
+    it('rejects a description exceeding 1000 characters', () => {
+      const longDesc = 'a'.repeat(1001);
       expect(
         generatedDataSlotSchema.safeParse({ ...validGeneratedSlot, description: longDesc }).success
       ).toBe(false);
     });
 
-    it('accepts a description exactly 600 characters', () => {
-      const maxDesc = 'a'.repeat(600);
+    it('accepts a description exactly 1000 characters', () => {
+      const maxDesc = 'a'.repeat(1000);
       expect(
         generatedDataSlotSchema.safeParse({ ...validGeneratedSlot, description: maxDesc }).success
       ).toBe(true);

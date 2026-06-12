@@ -164,6 +164,30 @@ describe('persistIngestion', () => {
     });
   });
 
+  it('attributes the questionnaire to a demo client when demoClientId is supplied', async () => {
+    await persistIngestion(input({ demoClientId: 'client-1' }));
+
+    expect(tx.appQuestionnaire.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          title: 'Onboarding',
+          status: 'draft',
+          demoClientId: 'client-1',
+        }),
+      })
+    );
+  });
+
+  it('omits demoClientId from the create when no attribution is supplied', async () => {
+    await persistIngestion(input());
+
+    const data = (tx.appQuestionnaire.create as Mock).mock.calls[0][0].data as Record<
+      string,
+      unknown
+    >;
+    expect(data).not.toHaveProperty('demoClientId');
+  });
+
   it('maps each question to its section id and denormalises versionId onto slots', async () => {
     await persistIngestion(input());
 

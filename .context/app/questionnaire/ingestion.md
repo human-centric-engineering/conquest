@@ -13,15 +13,19 @@
 document. Admin-only. Synchronous: the request blocks through parse → LLM
 extraction → transactional write, then returns the new ids.
 
-| Field              | In       | Notes                                                                   |
-| ------------------ | -------- | ----------------------------------------------------------------------- |
-| `file`             | required | `.pdf` / `.docx` / `.md` / `.txt`. Extension is the source of truth.    |
-| `goal`             | optional | Admin-set goal. Present ⇒ the extractor must **not** infer it.          |
-| `audience.<field>` | optional | Dotted keys (`audience.role`, `audience.expertiseLevel`, …). Per-field. |
-| `extractTables`    | optional | PDF only — truthy string turns on table extraction.                     |
+| Field              | In       | Notes                                                                           |
+| ------------------ | -------- | ------------------------------------------------------------------------------- |
+| `file`             | required | `.pdf` / `.docx` / `.md` / `.txt`. Extension is the source of truth.            |
+| `title`            | optional | Questionnaire name. Present ⇒ wins over the document-derived title (≤200 char). |
+| `demoClientId`     | optional | DEMO-ONLY (F2.5.1) — attribute the new questionnaire to this demo client.       |
+| `goal`             | optional | Admin-set goal. Present ⇒ the extractor must **not** infer it.                  |
+| `audience.<field>` | optional | Dotted keys (`audience.role`, `audience.expertiseLevel`, …). Per-field.         |
+| `extractTables`    | optional | PDF only — truthy string turns on table extraction.                             |
 
-Empty / whitespace-only `goal` and `audience.*` form values are treated as
-**absent** (an un-filled field, not an intentional override).
+Empty / whitespace-only `title`, `goal`, and `audience.*` form values are treated
+as **absent** (an un-filled field, not an intentional override). A `title` over the
+200-char cap is `400`. When `title` is absent the server falls back to the parsed
+document title, else the filename.
 
 ### Success — `201`
 
@@ -58,17 +62,21 @@ pre-existing` (P2-ready; a fresh ingest never produces `pre-existing`).
    `file.size` check. 25 MB cap. `413 FILE_TOO_LARGE`.
 5. **Extension allowlist** — `400 UNSUPPORTED_FORMAT` for anything off-list.
 6. **Admin metadata** — `parseAdminMetadata` (Zod). `400` on an invalid audience
-   field (bad enum, unknown key, non-positive duration).
-7. **SHA-256 dedup** — `409 DUPLICATE_DOCUMENT` (with the existing ids) when the
+   field (bad enum, unknown key, non-positive duration) or an over-cap `title`.
+7. **Demo-client existence** — DEMO-ONLY: when `demoClientId` is supplied, a cheap
+   `findUnique` pre-check (before the expensive extract) returns
+   `404 DEMO_CLIENT_NOT_FOUND` for an unknown id rather than a foreign-key `500` at
+   persist time — mirrors the `PATCH …/:id` attribution guard.
+8. **SHA-256 dedup** — `409 DUPLICATE_DOCUMENT` (with the existing ids) when the
    exact bytes were already ingested. This is the **global** new-ingest dedup;
    re-ingest-into-an-existing-draft is **F2.4**, which scopes its dedup to the
    target version and short-circuits to a `200` no-op ([`reingest.md`](./reingest.md)).
-8. **Parse** — `parseDocument(buffer, fileName, { extractTables })` directly (not
+9. **Parse** — `parseDocument(buffer, fileName, { extractTables })` directly (not
    the knowledge KB's `previewDocument`/`confirmPreview`, which chunk + embed into
    RAG). `422 PARSE_FAILED` on a parser throw.
-9. **Scanned / empty detection** — `422 SCANNED_DOCUMENT` for a PDF whose pages all
-   report `hasText: false` (or no extractable text); `422 EMPTY_DOCUMENT` otherwise.
-10. **Dispatch** — load the seeded extractor agent, then
+10. **Scanned / empty detection** — `422 SCANNED_DOCUMENT` for a PDF whose pages all
+    report `hasText: false` (or no extractable text); `422 EMPTY_DOCUMENT` otherwise.
+11. **Dispatch** — load the seeded extractor agent, then
     `capabilityDispatcher.dispatch('app_extract_questionnaire_structure', …)` with
     the agent's provider-agnostic binding in `entityContext.extractorAgent`. The
     capability owns the LLM call + cost log; see
@@ -77,13 +85,15 @@ pre-existing` (P2-ready; a fresh ingest never produces `pre-existing`).
     `no_provider_configured`/`provider_unavailable`/`capability_inactive` `→ 503`,
     everything else `→ 502 EXTRACTION_FAILED` (the upstream LLM step failed). The
     underlying capability error code rides in `error.details.capabilityError`.
-11. **Coherence check** — `assertPersistable`: every question's `sectionOrdinal`
+12. **Coherence check** — `assertPersistable`: every question's `sectionOrdinal`
     must resolve to a declared section. A dangling reference is
     `422 EXTRACTION_INCOHERENT` (with the orphan ordinals) **before** any write —
     never a half-written graph, never a silently-dropped question.
-12. **Persist** — `persistIngestion` in one `executeTransaction` (below).
-13. **Audit** — `logAdminAction({ action: 'questionnaire.ingest', entityType:
-'questionnaire', entityId: versionId, metadata: { counts, fileName, fileHash } })`.
+13. **Persist** — `persistIngestion` in one `executeTransaction` (below). The
+    resolved `title` and (when supplied) `demoClientId` are written onto the new
+    `AppQuestionnaire` row.
+14. **Audit** — `logAdminAction({ action: 'questionnaire.ingest', entityType:
+'questionnaire', entityId: versionId, metadata: { counts, fileName, fileHash, demoClientId } })`.
 
 ## The extractor capability (the LLM step)
 

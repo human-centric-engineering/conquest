@@ -32,6 +32,7 @@ import { GENERATE_DATA_SLOTS_FUNCTION_DEFINITION } from '@/lib/app/questionnaire
 import {
   buildDataSlotGenerationPrompt,
   buildDataSlotRetryMessage,
+  dataSlotGranularitySchema,
   dataSlotStructureSchema,
   validateDataSlotGeneration,
   type DataSlotGenerationOutput,
@@ -39,14 +40,20 @@ import {
 
 const SLUG = GENERATE_DATA_SLOTS_FUNCTION_DEFINITION.name;
 
-/** Designing a slot set over a whole questionnaire is a moderate generation. */
-const GENERATE_MAX_TOKENS = 2_048;
-/** One call; 60s covers a slow reasoning model over a large question set. */
-const GENERATE_TIMEOUT_MS = 60_000;
+/**
+ * Designing a slot set over a whole questionnaire, with the DETAILED per-slot
+ * descriptions the interviewer relies on, is a sizable generation — give it room.
+ * Too low and the JSON is truncated mid-array → parse fails → fail-soft empty set.
+ */
+const GENERATE_MAX_TOKENS = 8_192;
+/** One call; a large question set + long descriptions can run well past a minute. */
+const GENERATE_TIMEOUT_MS = 120_000;
 
 const argsSchema = z.object({
   structure: dataSlotStructureSchema,
   versionId: z.string().optional(),
+  // Optional: omitted → the prompt builder applies the default (balanced) level.
+  granularity: dataSlotGranularitySchema.optional(),
 });
 
 export type GenerateDataSlotsArgs = z.infer<typeof argsSchema>;
@@ -114,7 +121,7 @@ export class AppGenerateDataSlotsCapability extends BaseCapability<
       return this.error(errorMessage(err), 'provider_unavailable');
     }
 
-    const messages = buildDataSlotGenerationPrompt(args.structure);
+    const messages = buildDataSlotGenerationPrompt(args.structure, args.granularity);
 
     let lastIssuePaths: string[] = [];
     let completion: StructuredCompletionResult<DataSlotGenerationOutput>;

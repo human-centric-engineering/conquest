@@ -14,7 +14,9 @@
 A **demo client** lets a questionnaire be attributed to a prospect, so the sales
 surface is theirs ("this is the Acme Bank demo"). F2.5.1 ships the **foundation**:
 the identity table, the `AppQuestionnaire` foreign key, the admin CRUD, and the
-attribution control on a questionnaire.
+attribution control on a questionnaire. Attribution can be set **at upload time**
+(the `demoClientId` field on the ingest form) or changed later via the settings-tab
+picker; either way it surfaces as an owner column on the questionnaires list.
 
 | It **is**                                           | It is **not**                                        |
 | --------------------------------------------------- | ---------------------------------------------------- |

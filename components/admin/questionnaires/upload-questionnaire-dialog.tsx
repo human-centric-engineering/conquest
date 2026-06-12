@@ -48,6 +48,7 @@ import {
   AUDIENCE_EXPERTISE_LEVELS,
   AUDIENCE_SENSITIVITY_LEVELS,
 } from '@/lib/app/questionnaire/types';
+import type { AttributedDemoClient } from '@/lib/app/questionnaire/demo-clients';
 
 /** Allowed upload extensions — mirrors the server's `ALLOWED_EXTENSIONS`. */
 const ACCEPT = '.pdf,.docx,.md,.txt';
@@ -58,6 +59,9 @@ const ACCEPT = '.pdf,.docx,.md,.txt';
  * it's never sent to the server (those keys are simply omitted from the FormData).
  */
 const INFER = '__infer__';
+
+/** Sentinel for "no demo client" on the attribution select (Radix forbids empty values). */
+const NO_CLIENT = '__none__';
 
 interface UploadResult {
   questionnaireId: string;
@@ -72,15 +76,24 @@ export interface UploadQuestionnaireDialogProps {
   size?: React.ComponentProps<typeof Button>['size'];
   variant?: React.ComponentProps<typeof Button>['variant'];
   className?: string;
+  /**
+   * DEMO-ONLY (F2.5.1): active demo clients available to attribute the new
+   * questionnaire to. Omitted/empty hides the attribution picker entirely (a fork
+   * that strips demo tenancy, or a deployment with no clients yet).
+   */
+  demoClientOptions?: AttributedDemoClient[];
 }
 
 export function UploadQuestionnaireDialog({
   size = 'default',
   variant = 'default',
   className,
+  demoClientOptions = [],
 }: UploadQuestionnaireDialogProps) {
   const router = useRouter();
   const fileInputId = useId();
+  const nameId = useId();
+  const demoClientFieldId = useId();
   const goalId = useId();
   const descriptionId = useId();
   const roleId = useId();
@@ -93,6 +106,8 @@ export function UploadQuestionnaireDialog({
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [open, setOpen] = useState(false);
+  const [name, setName] = useState('');
+  const [demoClientId, setDemoClientId] = useState<string>(NO_CLIENT);
   const [goal, setGoal] = useState('');
   const [description, setDescription] = useState('');
   const [role, setRole] = useState('');
@@ -106,6 +121,8 @@ export function UploadQuestionnaireDialog({
   const [error, setError] = useState<string | null>(null);
 
   function reset() {
+    setName('');
+    setDemoClientId(NO_CLIENT);
     setGoal('');
     setDescription('');
     setRole('');
@@ -141,6 +158,8 @@ export function UploadQuestionnaireDialog({
         const trimmed = value.trim();
         if (trimmed.length > 0) body.set(key, trimmed);
       };
+      setIfPresent('title', name);
+      if (demoClientId !== NO_CLIENT) body.set('demoClientId', demoClientId);
       setIfPresent('goal', goal);
       setIfPresent('audience.description', description);
       setIfPresent('audience.role', role);
@@ -216,6 +235,50 @@ export function UploadQuestionnaireDialog({
               required
             />
           </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor={nameId}>
+              Name{' '}
+              <FieldHelp title="Questionnaire name">
+                Optional. The name this questionnaire is listed under. Leave blank to use the title
+                the extractor reads from the document.
+              </FieldHelp>
+            </Label>
+            <Input
+              id={nameId}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              disabled={busy}
+              placeholder="Leave blank to use the document title"
+            />
+          </div>
+
+          {/* DEMO-ONLY (F2.5.1): optional attribution. Hidden when there are no active clients. */}
+          {demoClientOptions.length > 0 && (
+            <div className="space-y-1.5">
+              <Label htmlFor={demoClientFieldId}>
+                Demo client{' '}
+                <FieldHelp title="Demo-client attribution">
+                  Optional. Attribute this questionnaire to a demo client so its respondent surface
+                  and invitations wear that brand. “None” is a generic demo. You can change this
+                  later from the questionnaire’s Settings tab.
+                </FieldHelp>
+              </Label>
+              <Select value={demoClientId} onValueChange={setDemoClientId} disabled={busy}>
+                <SelectTrigger id={demoClientFieldId}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_CLIENT}>None (generic demo)</SelectItem>
+                  {demoClientOptions.map((client) => (
+                    <SelectItem key={client.id} value={client.id}>
+                      {client.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           <div className="space-y-1.5">
             <Label htmlFor={goalId}>

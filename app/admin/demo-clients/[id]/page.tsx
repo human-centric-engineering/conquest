@@ -12,6 +12,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ChevronLeft } from 'lucide-react';
 
+import { BreadcrumbLabel } from '@/components/admin/breadcrumb-context';
 import { DemoClientForm } from '@/components/admin/demo-clients/demo-client-form';
 import { DemoClientActions } from '@/components/admin/demo-clients/demo-client-actions';
 import { ResetSessionsDialog } from '@/components/admin/demo-clients/reset-sessions-dialog';
@@ -54,6 +55,8 @@ export default async function DemoClientDetailPage({ params }: PageProps) {
 
   return (
     <div className="space-y-6">
+      {/* Replace the raw id in the admin breadcrumb with the client's name. */}
+      <BreadcrumbLabel segment={client.id} label={client.name} />
       <header className="flex items-start justify-between">
         <div className="space-y-2">
           <Link
@@ -62,7 +65,7 @@ export default async function DemoClientDetailPage({ params }: PageProps) {
           >
             <ChevronLeft className="h-4 w-4" /> Demo clients
           </Link>
-          <h1 className="cq-display text-2xl font-semibold">{client.name}</h1>
+          <h1 className="text-2xl font-semibold">{client.name}</h1>
           <p className="text-muted-foreground text-sm">
             <code className="text-xs">{client.slug}</code> · {client.questionnaireCount} attributed{' '}
             {client.questionnaireCount === 1 ? 'questionnaire' : 'questionnaires'}

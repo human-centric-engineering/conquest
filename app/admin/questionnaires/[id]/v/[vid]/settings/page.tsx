@@ -58,7 +58,7 @@ export default async function SettingsTab({ params }: PageProps) {
       {/* DEMO-ONLY (F2.5.1): demo-client attribution. */}
       <section className="space-y-3">
         <div className="space-y-1">
-          <h2 className="cq-display text-lg font-semibold">Demo client</h2>
+          <h2 className="text-lg font-semibold">Demo client</h2>
           <p className="text-muted-foreground text-sm">
             The brand this questionnaire’s respondent surface and invitations wear. “None” uses the
             generic demo theme.
@@ -74,7 +74,7 @@ export default async function SettingsTab({ params }: PageProps) {
       {/* Clone-for-client (DEMO-ONLY) — duplicate this questionnaire for another prospect. */}
       <section className="space-y-3">
         <div className="space-y-1">
-          <h2 className="cq-display text-lg font-semibold">Clone for another client</h2>
+          <h2 className="text-lg font-semibold">Clone for another client</h2>
           <p className="text-muted-foreground text-sm">
             Duplicate this questionnaire (and its current structure) as a fresh draft, optionally
             attributed to a different demo client.

@@ -11,6 +11,7 @@ import { parsePaginationMeta } from '@/lib/validations/common';
 import { logger } from '@/lib/logging';
 import { isQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import type { QuestionnaireListItem } from '@/lib/app/questionnaire/views';
+import type { AttributedDemoClient, DemoClientView } from '@/lib/app/questionnaire/demo-clients';
 import type { PaginationMeta } from '@/types/api';
 
 export const metadata: Metadata = {
@@ -79,14 +80,35 @@ async function getQuestionnaires(): Promise<{
   }
 }
 
+/**
+ * DEMO-ONLY (F2.5.1): active demo clients for the upload dialog's attribution picker.
+ * Degrades to an empty list — the dialog then hides the picker entirely. Mirrors the
+ * settings tab's loader.
+ */
+async function getActiveDemoClients(): Promise<AttributedDemoClient[]> {
+  try {
+    const res = await serverFetch(API.APP.DEMO_CLIENTS.ROOT);
+    if (!res.ok) return [];
+    const body = await parseApiResponse<DemoClientView[]>(res);
+    if (!body.success) return [];
+    return body.data
+      .filter((client) => client.isActive)
+      .map((client) => ({ id: client.id, slug: client.slug, name: client.name }));
+  } catch (err) {
+    logger.error('questionnaires list page: demo clients fetch failed', err);
+    return [];
+  }
+}
+
 export default async function QuestionnairesListPage() {
   // The whole questionnaire surface is dark when the flag is off — match the API,
   // which 404s, so the page doesn't render an empty shell behind a hidden feature.
   if (!(await isQuestionnairesEnabled())) notFound();
 
-  const [{ items, meta }, stats] = await Promise.all([
+  const [{ items, meta }, stats, demoClientOptions] = await Promise.all([
     getQuestionnaires(),
     getQuestionnaireStats(),
+    getActiveDemoClients(),
   ]);
 
   const statTiles: CqStat[] = [
@@ -100,7 +122,7 @@ export default async function QuestionnairesListPage() {
     <div className="space-y-6">
       <header className="bg-background sticky top-0 z-30 -mx-6 flex items-start justify-between gap-4 border-b px-6 pt-3 pb-3">
         <div>
-          <h1 className="cq-display text-2xl font-semibold">
+          <h1 className="text-2xl font-semibold">
             Questionnaires{' '}
             <FieldHelp
               title="What are questionnaires?"
@@ -122,12 +144,16 @@ export default async function QuestionnairesListPage() {
             Ingest, review, and edit conversational questionnaires.
           </p>
         </div>
-        <UploadQuestionnaireDialog />
+        <UploadQuestionnaireDialog demoClientOptions={demoClientOptions} />
       </header>
 
       <CqStatTiles stats={statTiles} />
 
-      <QuestionnairesTable initialItems={items} initialMeta={meta} />
+      <QuestionnairesTable
+        initialItems={items}
+        initialMeta={meta}
+        demoClientOptions={demoClientOptions}
+      />
     </div>
   );
 }
