@@ -91,7 +91,7 @@ export function EvaluationRunDetail({ run, questionnaireId, versionId, canApply 
           A new draft <strong>v{fork.versionNumber}</strong> was created from this launched version.
           Applied suggestions land there.{' '}
           <Link
-            href={`/admin/questionnaires/${questionnaireId}?v=${fork.versionId}`}
+            href={`/admin/questionnaires/${questionnaireId}/v/${fork.versionId}/structure`}
             className="underline"
           >
             Open the draft →

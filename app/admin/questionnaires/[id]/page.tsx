@@ -1,328 +1,55 @@
+/**
+ * Questionnaire entry point — redirects into the tabbed workspace.
+ *
+ * The detail surface moved to `/admin/questionnaires/[id]/v/[vid]/…`, where the
+ * version is a path segment. This route stays as the canonical entry (the list,
+ * the demo-client detail page, and clone all link here) and forwards to the
+ * newest version's Overview. A `?v=` query — the shape old bookmarks used — is
+ * honoured when present.
+ */
 import type { Metadata } from 'next';
-import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 
-import { VersionGraph } from '@/components/admin/questionnaires/version-graph';
-import { VersionEditor } from '@/components/admin/questionnaires/version-editor';
-import { ReingestDialog } from '@/components/admin/questionnaires/reingest-dialog';
-import { CloneForClientDialog } from '@/components/admin/questionnaires/clone-for-client-dialog';
-import { LaunchChecklist } from '@/components/admin/questionnaires/launch-checklist';
-import { QUESTIONNAIRE_STATUS_BADGE } from '@/components/admin/questionnaires/status-badge';
-import { DemoClientAssign } from '@/components/admin/demo-clients/demo-client-assign';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { API } from '@/lib/api/endpoints';
-import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
-import { logger } from '@/lib/logging';
 import {
-  isAdaptiveSelectionEnabled,
-  isDataSlotsEnabled,
-  isDesignEvaluationEnabled,
-  isLiveSessionsEnabled,
-  isQuestionnairesEnabled,
-} from '@/lib/app/questionnaire/feature-flag';
-import type { AttributedDemoClient, DemoClientView } from '@/lib/app/questionnaire/demo-clients';
-import type { QuestionnaireDetail, VersionGraphView } from '@/lib/app/questionnaire/views';
-import type { DataSlotView } from '@/lib/app/questionnaire/data-slots';
+  getQuestionnaireDetailCached,
+  resolveQuestionnaireWorkspaceFlags,
+} from '@/lib/app/questionnaire/workspace-data';
+import { workspaceVersionBase } from '@/lib/app/questionnaire/workspace-nav';
 
 export const metadata: Metadata = {
   title: 'Questionnaire',
-  description: 'View a questionnaire’s versions and structure.',
 };
 
 interface PageProps {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ v?: string; edit?: string }>;
+  searchParams: Promise<{ v?: string }>;
 }
 
-async function getDetail(id: string): Promise<QuestionnaireDetail | null> {
-  try {
-    const res = await serverFetch(API.APP.QUESTIONNAIRES.byId(id));
-    if (!res.ok) return null;
-    const body = await parseApiResponse<QuestionnaireDetail>(res);
-    return body.success ? body.data : null;
-  } catch (err) {
-    logger.error('questionnaire detail page: fetch failed', err);
-    return null;
-  }
-}
-
-// DEMO-ONLY (F2.5.1): active demo clients for the attribution picker. Fetch
-// failures degrade gracefully — the picker still shows the current attribution
-// and "None".
-async function getActiveDemoClients(): Promise<AttributedDemoClient[]> {
-  try {
-    const res = await serverFetch(API.APP.DEMO_CLIENTS.ROOT);
-    if (!res.ok) return [];
-    const body = await parseApiResponse<DemoClientView[]>(res);
-    if (!body.success) return [];
-    return body.data
-      .filter((client) => client.isActive)
-      .map((client) => ({ id: client.id, slug: client.slug, name: client.name }));
-  } catch (err) {
-    logger.error('questionnaire detail page: demo clients fetch failed', err);
-    return [];
-  }
-}
-
-async function getGraph(id: string, versionId: string): Promise<VersionGraphView | null> {
-  try {
-    const res = await serverFetch(API.APP.QUESTIONNAIRES.versionGraph(id, versionId));
-    if (!res.ok) return null;
-    const body = await parseApiResponse<VersionGraphView>(res);
-    return body.success ? body.data : null;
-  } catch (err) {
-    logger.error('questionnaire version graph: fetch failed', err);
-    return null;
-  }
-}
-
-// Data Slots feature: how many data slots the selected version has (drives the launch
-// gate + the "Data slots" entry). Degrades to 0 on any failure.
-async function getDataSlotCount(id: string, versionId: string): Promise<number> {
-  try {
-    const res = await serverFetch(API.APP.QUESTIONNAIRES.versionDataSlots(id, versionId));
-    if (!res.ok) return 0;
-    const body = await parseApiResponse<{ slots: DataSlotView[] }>(res);
-    return body.success ? body.data.slots.length : 0;
-  } catch (err) {
-    logger.error('questionnaire detail page: data slot count fetch failed', err);
-    return 0;
-  }
-}
-
-export default async function QuestionnaireDetailPage({ params, searchParams }: PageProps) {
-  if (!(await isQuestionnairesEnabled())) notFound();
-
+export default async function QuestionnaireEntryPage({ params, searchParams }: PageProps) {
   const { id } = await params;
-  const { v, edit } = await searchParams;
+  const { v } = await searchParams;
 
-  const detail = await getDetail(id);
+  const [detail, flags] = await Promise.all([
+    getQuestionnaireDetailCached(id),
+    resolveQuestionnaireWorkspaceFlags(),
+  ]);
+  if (!flags.master) notFound();
   if (!detail) notFound();
 
-  // DEMO-ONLY (F2.5.1): attribution picker options.
-  const demoClientOptions = await getActiveDemoClients();
+  const target = detail.versions.find((ver) => ver.id === v)?.id ?? detail.versions[0]?.id ?? null;
 
-  // Version switching is SSR via the `?v=` query param (no client state needed).
-  // Default to the newest version (the detail list is already newest-first).
-  const selected = detail.versions.find((ver) => ver.id === v) ?? detail.versions[0] ?? null;
-  const graph = selected ? await getGraph(id, selected.id) : null;
-  const editing = edit === '1' && graph !== null;
-  // Adaptive selection sub-flag — controls whether the config picker offers it.
-  const adaptiveEnabled = editing ? await isAdaptiveSelectionEnabled() : false;
-  // Design-evaluation sub-flag — gates the Evaluations entry (the run route 404s when off).
-  const designEvalEnabled = selected ? await isDesignEvaluationEnabled() : false;
-  // Live-sessions sub-flag — gates the "Preview as respondent" link (the /q surface 404s when off).
-  const liveSessionsEnabled =
-    selected?.status === 'launched' ? await isLiveSessionsEnabled() : false;
-  // Data-slots sub-flag — gates the "Data slots" entry + makes data slots a launch requirement.
-  const dataSlotsEnabled = selected ? await isDataSlotsEnabled() : false;
-  const dataSlotCount = dataSlotsEnabled && selected ? await getDataSlotCount(id, selected.id) : 0;
-
-  return (
-    <div className="space-y-6">
-      <nav className="text-muted-foreground text-xs">
-        <Link href="/admin/questionnaires" className="hover:underline">
-          Questionnaires
-        </Link>
-        {' / '}
-        <span>{detail.title}</span>
-      </nav>
-
-      <header className="space-y-1">
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-semibold">{detail.title}</h1>
-          <Badge variant={QUESTIONNAIRE_STATUS_BADGE[detail.status].variant}>
-            {QUESTIONNAIRE_STATUS_BADGE[detail.status].label}
-          </Badge>
-        </div>
-        <p className="text-muted-foreground text-sm">
-          {detail.versions.length} version{detail.versions.length === 1 ? '' : 's'}
+  if (!target) {
+    // A questionnaire with no versions is a degenerate state (ingestion always
+    // creates v1). Show a minimal message rather than redirect to a dead URL.
+    return (
+      <div className="space-y-3">
+        <h1 className="cq-display text-2xl font-semibold">{detail.title}</h1>
+        <p className="text-muted-foreground text-sm italic">
+          This questionnaire has no versions yet.
         </p>
-      </header>
+      </div>
+    );
+  }
 
-      {/* DEMO-ONLY (F2.5.1): demo-client attribution. */}
-      <DemoClientAssign
-        questionnaireId={id}
-        current={detail.demoClient}
-        options={demoClientOptions}
-      />
-
-      {detail.versions.length === 0 ? (
-        <p className="text-muted-foreground text-sm italic">This questionnaire has no versions.</p>
-      ) : (
-        <>
-          {/* Version selector — SSR links that set ?v= */}
-          <div className="flex flex-wrap gap-2 border-b pb-3">
-            {detail.versions.map((ver) => {
-              const active = ver.id === selected?.id;
-              return (
-                <Link
-                  key={ver.id}
-                  href={`/admin/questionnaires/${id}?v=${ver.id}`}
-                  scroll={false}
-                  className={
-                    active
-                      ? 'bg-primary text-primary-foreground rounded-md px-3 py-1.5 text-sm font-medium'
-                      : 'hover:bg-accent rounded-md border px-3 py-1.5 text-sm'
-                  }
-                >
-                  v{ver.versionNumber}
-                  <span className={active ? 'opacity-80' : 'text-muted-foreground'}>
-                    {' '}
-                    · {ver.status}
-                  </span>
-                </Link>
-              );
-            })}
-          </div>
-
-          {selected && (
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="text-muted-foreground text-sm">
-                  {selected.sectionCount} section{selected.sectionCount === 1 ? '' : 's'} ·{' '}
-                  {selected.questionCount} question{selected.questionCount === 1 ? '' : 's'} ·{' '}
-                  {selected.changeCount > 0 ? (
-                    <Link
-                      href={`/admin/questionnaires/${id}/extraction-changes?v=${selected.id}`}
-                      className="hover:text-foreground underline"
-                    >
-                      {selected.changeCount} extraction change
-                      {selected.changeCount === 1 ? '' : 's'}
-                    </Link>
-                  ) : (
-                    <>
-                      {selected.changeCount} extraction change
-                      {selected.changeCount === 1 ? '' : 's'}
-                    </>
-                  )}
-                </p>
-                {/* Access mode of the selected version — anonymous mode decides whether the
-                    respondent surface is open (no-login) or invitation-gated, and whether
-                    "Preview as respondent" opens the real surface or an admin preview. */}
-                {graph && (
-                  <Badge
-                    variant={graph.config.anonymousMode ? 'secondary' : 'outline'}
-                    title={
-                      graph.config.anonymousMode
-                        ? 'Anonymous mode: anyone with the link can answer without an account.'
-                        : 'Invitation only: respondents need an invitation. Preview opens an admin-only walkthrough.'
-                    }
-                  >
-                    {graph.config.anonymousMode ? 'Anonymous mode' : 'Invitation only'}
-                  </Badge>
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                {/* Review & Launch (F2.1 surfacing) — a draft's primary action, with the
-                    launch-gate checklist shown before the flip. Outside edit mode so launch
-                    isn't buried behind Edit. */}
-                {selected.status === 'draft' && graph && (
-                  <LaunchChecklist
-                    questionnaireId={id}
-                    versionId={selected.id}
-                    versionNumber={selected.versionNumber}
-                    goal={graph.goal}
-                    audience={graph.audience}
-                    sectionCount={selected.sectionCount}
-                    questionCount={selected.questionCount}
-                    configSaved={graph.config.saved}
-                    dataSlotsRequired={dataSlotsEnabled}
-                    dataSlotsReady={dataSlotCount > 0}
-                  />
-                )}
-                {/* Data slots (Data Slots feature) — generate + review the semantic abstraction
-                    layer; required before launch while the flag is on. */}
-                {dataSlotsEnabled && (
-                  <Button asChild variant="outline" size="sm">
-                    <Link href={`/admin/questionnaires/${id}/data-slots?v=${selected.id}`}>
-                      Data slots{dataSlotCount > 0 ? ` (${dataSlotCount})` : ''}
-                    </Link>
-                  </Button>
-                )}
-                {/* Preview as respondent — one-click "try it" on the live respondent surface.
-                    An anonymous-mode version opens its real no-login surface; an
-                    invitation-gated one opens an admin-only preview (`?preview=1` → the
-                    admin-gated /preview route, isPreview, excluded from analytics), so preview
-                    works regardless of anonymous mode. */}
-                {liveSessionsEnabled && graph && (
-                  <Button asChild variant="outline" size="sm">
-                    <Link
-                      href={
-                        graph.config.anonymousMode
-                          ? `/q/${selected.id}`
-                          : `/q/${selected.id}?preview=1`
-                      }
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      Preview as respondent
-                    </Link>
-                  </Button>
-                )}
-                {/* Invitations (F3.2) are managed per-questionnaire across launched versions. */}
-                <Button asChild variant="outline" size="sm">
-                  <Link href={`/admin/questionnaires/${id}/invitations`}>Invitations</Link>
-                </Button>
-                {/* Analytics (F8.1) — read-side completed-session view, scoped to the
-                    selected version. Always available (read-only, no paid work). */}
-                <Button asChild variant="outline" size="sm">
-                  <Link href={`/admin/questionnaires/${id}/analytics?v=${selected.id}`}>
-                    Analytics
-                  </Link>
-                </Button>
-                {/* Design-time evaluation (F5.2) — only when the sub-flag is on (the run route
-                    404s otherwise), scoped to the selected version. */}
-                {designEvalEnabled && (
-                  <Button asChild variant="outline" size="sm">
-                    <Link href={`/admin/questionnaires/${id}/evaluations?v=${selected.id}`}>
-                      Evaluations
-                    </Link>
-                  </Button>
-                )}
-                {/* Re-ingest is a draft editorial operation (F2.4) — only offered on drafts. */}
-                {selected.status === 'draft' && (
-                  <ReingestDialog
-                    questionnaireId={id}
-                    versionId={selected.id}
-                    versionNumber={selected.versionNumber}
-                  />
-                )}
-                {/* Clone-for-client (DEMO-ONLY) — duplicate the current version for another
-                    prospect; available regardless of the selected version's status. */}
-                <CloneForClientDialog questionnaireId={id} options={demoClientOptions} />
-                {graph && (
-                  <Button asChild variant={editing ? 'outline' : 'default'} size="sm">
-                    <Link
-                      href={`/admin/questionnaires/${id}?v=${selected.id}${editing ? '' : '&edit=1'}`}
-                      scroll={false}
-                    >
-                      {editing ? 'Done' : 'Edit'}
-                    </Link>
-                  </Button>
-                )}
-              </div>
-            </div>
-          )}
-
-          {graph ? (
-            editing ? (
-              <VersionEditor
-                questionnaireId={id}
-                version={graph}
-                adaptiveEnabled={adaptiveEnabled}
-              />
-            ) : (
-              <VersionGraph graph={graph} />
-            )
-          ) : (
-            <p className="text-muted-foreground text-sm italic">
-              Could not load this version’s structure.
-            </p>
-          )}
-        </>
-      )}
-    </div>
-  );
+  redirect(workspaceVersionBase(id, target));
 }

@@ -63,6 +63,58 @@
   }
 }
 
+/*
+ * ConQuest app-surface identity (Questionnaires & Demo clients only).
+ *
+ * Scoped to `.cq-surface`, applied by those two admin layout wrappers — never
+ * global, so orchestration and the rest of `/admin` are untouched. Provides a
+ * warm editorial accent (distinct from the platform blue) and a display serif
+ * via the `--font-display` variable that `components/admin/cq-fonts.ts` sets.
+ */
+@layer base {
+  .cq-surface {
+    --cq-accent: #c2410c; /* burnt amber — confident, editorial, not the platform blue */
+    --cq-accent-foreground: #ffffff;
+    --cq-accent-muted: color-mix(in oklab, var(--cq-accent) 10%, transparent);
+    --cq-accent-ring: color-mix(in oklab, var(--cq-accent) 40%, transparent);
+  }
+  .dark .cq-surface {
+    --cq-accent: #fb923c; /* lift the amber for contrast on dark */
+    --cq-accent-foreground: #1c1917;
+    --cq-accent-muted: color-mix(in oklab, var(--cq-accent) 16%, transparent);
+    --cq-accent-ring: color-mix(in oklab, var(--cq-accent) 45%, transparent);
+  }
+  .cq-display {
+    font-family: var(--font-display), Georgia, 'Times New Roman', serif;
+    font-optical-sizing: auto;
+    letter-spacing: -0.015em;
+  }
+}
+
+@layer utilities {
+  /* Staggered entrance for stat tiles / workspace panels. Pair with an inline
+     `animation-delay` for the stagger; respects reduced-motion. */
+  @keyframes cq-rise {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  .cq-rise {
+    animation: cq-rise 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .cq-rise {
+      animation: none;
+    }
+  }
+}
+
 @layer utilities {
   .text-balance {
     text-wrap: balance;

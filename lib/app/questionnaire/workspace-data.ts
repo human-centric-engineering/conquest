@@ -1,0 +1,130 @@
+/**
+ * Shared server-side data + flag resolution for the questionnaire admin
+ * **workspace** (the tabbed `[id]/v/[vid]/…` surface).
+ *
+ * The workspace layout and each tab page both need the questionnaire detail and
+ * (often) the selected version's graph. `serverFetch` is `cache: 'no-store'`, so
+ * a naive layout-plus-page pair would issue duplicate HTTP calls every render.
+ * Wrapping the fetchers in React `cache()` collapses them to one call per
+ * (argument set) within a single request render pass — the layout fetches the
+ * detail, the Overview/Structure page reuses it for free, and so on.
+ *
+ * Framework-agnostic boundary note: this file imports `serverFetch` through the
+ * `@/lib/api` alias (not a `next/*` runtime import) and `cache` from `react`
+ * (only `react-dom` is banned), so it is allowed under `lib/app/**`. It is still
+ * server-only in practice — call it from server components / route handlers.
+ */
+import { cache } from 'react';
+
+import { API } from '@/lib/api/endpoints';
+import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
+import { isFeatureEnabled } from '@/lib/feature-flags';
+import { logger } from '@/lib/logging';
+import {
+  APP_QUESTIONNAIRES_ADAPTIVE_FLAG,
+  APP_QUESTIONNAIRES_DATA_SLOTS_FLAG,
+  APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG,
+  APP_QUESTIONNAIRES_FLAG,
+  APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG,
+} from '@/lib/app/questionnaire/constants';
+import type { DataSlotView } from '@/lib/app/questionnaire/data-slots';
+import type { QuestionnaireDetail, VersionGraphView } from '@/lib/app/questionnaire/views';
+
+/**
+ * Questionnaire detail (title, status, versions list). `cache()`-wrapped so the
+ * layout and the active tab share one fetch. Returns `null` on any failure — the
+ * caller decides whether that is a `notFound()`.
+ */
+export const getQuestionnaireDetailCached = cache(
+  async (id: string): Promise<QuestionnaireDetail | null> => {
+    try {
+      const res = await serverFetch(API.APP.QUESTIONNAIRES.byId(id));
+      if (!res.ok) return null;
+      const body = await parseApiResponse<QuestionnaireDetail>(res);
+      return body.success ? body.data : null;
+    } catch (err) {
+      logger.error('workspace: questionnaire detail fetch failed', err);
+      return null;
+    }
+  }
+);
+
+/**
+ * Full structural graph for one version (sections, questions, goal, audience,
+ * config). `cache()`-wrapped so tabs that both need the graph (Overview +
+ * Structure) dedup. Returns `null` on any failure.
+ */
+export const getVersionGraphCached = cache(
+  async (id: string, versionId: string): Promise<VersionGraphView | null> => {
+    try {
+      const res = await serverFetch(API.APP.QUESTIONNAIRES.versionGraph(id, versionId));
+      if (!res.ok) return null;
+      const body = await parseApiResponse<VersionGraphView>(res);
+      return body.success ? body.data : null;
+    } catch (err) {
+      logger.error('workspace: version graph fetch failed', err);
+      return null;
+    }
+  }
+);
+
+/**
+ * How many data slots the selected version has — drives the launch gate and the
+ * "Data slots" tab badge. `cache()`-wrapped; degrades to `0` on any failure.
+ * Only meaningful when the data-slots flag is on (callers gate on that first).
+ */
+export const getVersionDataSlotCountCached = cache(
+  async (id: string, versionId: string): Promise<number> => {
+    try {
+      const res = await serverFetch(API.APP.QUESTIONNAIRES.versionDataSlots(id, versionId));
+      if (!res.ok) return 0;
+      const body = await parseApiResponse<{ slots: DataSlotView[] }>(res);
+      return body.success ? body.data.slots.length : 0;
+    } catch (err) {
+      logger.error('workspace: data slot count fetch failed', err);
+      return 0;
+    }
+  }
+);
+
+/** Resolved feature-flag state for the workspace. Sub-flags are already ANDed
+ *  with the master flag, so a caller can read them directly. */
+export interface QuestionnaireWorkspaceFlags {
+  /** Master app flag. When `false` the whole surface should `notFound()`. */
+  master: boolean;
+  /** Data-slots tab + launch requirement. */
+  dataSlots: boolean;
+  /** Design-time evaluation tab. */
+  designEval: boolean;
+  /** "Preview as respondent" affordance (also requires a launched version). */
+  liveSessions: boolean;
+  /** Adaptive selection strategy offered in the config editor. */
+  adaptive: boolean;
+}
+
+/**
+ * Resolve every workspace flag in a single `Promise.all`.
+ *
+ * The per-feature helpers in `feature-flag.ts` each re-resolve the master flag
+ * internally, so calling four of them would query the master flag four times.
+ * The workspace layout needs all of them at once, so it resolves the raw flag
+ * constants once here and ANDs the sub-flags with the master locally.
+ */
+export const resolveQuestionnaireWorkspaceFlags = cache(
+  async (): Promise<QuestionnaireWorkspaceFlags> => {
+    const [master, dataSlots, designEval, liveSessions, adaptive] = await Promise.all([
+      isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
+      isFeatureEnabled(APP_QUESTIONNAIRES_DATA_SLOTS_FLAG),
+      isFeatureEnabled(APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG),
+      isFeatureEnabled(APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG),
+      isFeatureEnabled(APP_QUESTIONNAIRES_ADAPTIVE_FLAG),
+    ]);
+    return {
+      master,
+      dataSlots: master && dataSlots,
+      designEval: master && designEval,
+      liveSessions: master && liveSessions,
+      adaptive: master && adaptive,
+    };
+  }
+);

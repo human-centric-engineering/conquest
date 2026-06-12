@@ -499,6 +499,8 @@ export const API = {
       ROOT: '/api/v1/app/demo-clients',
       /** Detail (GET), edit (PATCH), delete (DELETE). */
       byId: (id: string): string => `/api/v1/app/demo-clients/${id}`,
+      /** DEMO-ONLY (F6.4): reset the session graph for a client's questionnaires (POST). */
+      resetSessions: (id: string): string => `/api/v1/app/demo-clients/${id}/reset-sessions`,
     },
   },
 } as const;

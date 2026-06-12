@@ -155,7 +155,7 @@ export function ExtractionChangesTable({ questionnaireId, versionId, changes, co
       if (meta?.forked) {
         // The launched version forked a draft; its change log lives on the new draft.
         router.replace(
-          `/admin/questionnaires/${questionnaireId}/extraction-changes?v=${meta.versionId}`
+          `/admin/questionnaires/${questionnaireId}/v/${meta.versionId}/extraction-changes`
         );
       } else {
         router.refresh();

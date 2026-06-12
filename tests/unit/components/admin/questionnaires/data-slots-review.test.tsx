@@ -298,6 +298,30 @@ describe('DataSlotsReview', () => {
 
       expect(screen.getByDisplayValue('Outcomes')).toBeInTheDocument();
     });
+
+    it('typing in the description textarea updates the value and marks the form dirty', async () => {
+      const user = userEvent.setup();
+      render(
+        <DataSlotsReview
+          {...baseProps()}
+          initialSlots={[makeSlot({ description: 'Original description.' })]}
+        />
+      );
+
+      const saveBtn = screen.getByRole('button', { name: /save changes/i });
+      expect(saveBtn).toBeDisabled();
+
+      const descTextarea = screen.getByPlaceholderText(
+        'What this slot captures and why it matters'
+      );
+      await user.clear(descTextarea);
+      await user.type(descTextarea, 'Revised description.');
+
+      expect(screen.getByDisplayValue('Revised description.')).toBeInTheDocument();
+      await waitFor(() => {
+        expect(saveBtn).toBeEnabled();
+      });
+    });
   });
 
   // ── Accept/reject checkbox ────────────────────────────────────────────────
@@ -601,7 +625,7 @@ describe('DataSlotsReview', () => {
 
       await waitFor(() => {
         expect(mockRouterPush).toHaveBeenCalledWith(
-          '/admin/questionnaires/qn-1/data-slots?v=ver-2'
+          '/admin/questionnaires/qn-1/v/ver-2/data-slots'
         );
       });
     });

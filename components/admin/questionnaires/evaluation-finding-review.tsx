@@ -122,7 +122,7 @@ export function FindingReviewCard({
   const statusBadge = findingReviewStatusBadge(finding.status);
   const op = finding.editedOverride ?? finding.proposedEdit;
   const isTerminal = finding.status === 'applied' || finding.status === 'declined';
-  const editorHref = `/admin/questionnaires/${questionnaireId}?v=${versionId}`;
+  const editorHref = `/admin/questionnaires/${questionnaireId}/v/${versionId}/structure`;
   const findingPath = API.APP.QUESTIONNAIRES.versionEvaluationFinding(
     questionnaireId,
     versionId,
@@ -206,7 +206,7 @@ export function FindingReviewCard({
         <p className="text-muted-foreground mt-1 text-xs">
           Applied to{' '}
           <Link
-            href={`/admin/questionnaires/${questionnaireId}?v=${finding.appliedToVersionId}`}
+            href={`/admin/questionnaires/${questionnaireId}/v/${finding.appliedToVersionId}/structure`}
             className="underline"
           >
             a draft version

@@ -165,11 +165,11 @@ not-configured 404 when zero judges are seeded. The two **GETs are read-only**: 
 - version-scope only, no sub-flag 404, so persisted history stays readable even if the
   sub-feature is later switched off (the `changes`-list posture).
 
-Admin UI (`app/admin/questionnaires/[id]/evaluations/**`): a runs sub-page mirroring
-`extraction-changes` (the `?v=` version selector) with a "Run evaluation" button, and a
-read-only run-detail page grouping findings by dimension. The entry button on the version
-detail page is gated on the sub-flag (the POST 404s otherwise). No accept/decline yet —
-that's F5.3.
+Admin UI (`app/admin/questionnaires/[id]/v/[vid]/evaluations/**`): the **Evaluations**
+workspace tab with a "Run evaluation" button, and a read-only run-detail page
+(`…/evaluations/[runId]`) grouping findings by dimension. The version is the `[vid]` path
+segment (the shared workspace selector switches it). The tab is hidden — and the POST 404s —
+when the sub-flag is off. No accept/decline yet — that's F5.3.
 
 ## F5.3 — suggestion review
 

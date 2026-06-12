@@ -112,8 +112,10 @@ export function VersionEditor({
       .then(({ meta }) => {
         if (meta?.forked) {
           setForkNotice(meta.versionNumber);
-          // Subsequent edits must target the new draft.
-          router.replace(`/admin/questionnaires/${questionnaireId}?v=${meta.versionId}&edit=1`);
+          // Subsequent edits must target the new draft's Structure tab.
+          router.replace(
+            `/admin/questionnaires/${questionnaireId}/v/${meta.versionId}/structure?edit=1`
+          );
         }
         // Stay busy until the refreshed `version` prop arrives (the [version]
         // effect clears it) — this closes the window where a second action could
