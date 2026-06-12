@@ -87,6 +87,29 @@ function fromSaved(slot: DataSlotView): DraftSlot {
   };
 }
 
+/**
+ * Friendlier guidance for the config/provider diagnostic codes, whose server-side
+ * message is a raw provider error. For the other codes (timeout, incomplete_response,
+ * invalid_response, …) the capability already returns a clear, actionable message,
+ * so we show that verbatim — see `diagnosticToMessage`.
+ */
+const DIAGNOSTIC_GUIDANCE: Record<string, string> = {
+  no_provider_configured:
+    'No LLM provider is configured for the data-slot generator agent. Set one up under AI Orchestration → Providers, then try again.',
+  provider_unavailable:
+    'The data-slot generator agent’s LLM provider is unavailable — check its API key/credentials and status, then try again.',
+  unknown_capability:
+    'The data-slot generator isn’t registered (run the database seed), then try again.',
+};
+
+/** Resolve the most accurate message: code-specific guidance → server message → generic. */
+function diagnosticToMessage(code?: string, message?: string): string {
+  if (!code && !message) return 'Generation did not return any slots. Try again.';
+  if (code && DIAGNOSTIC_GUIDANCE[code]) return DIAGNOSTIC_GUIDANCE[code];
+  if (message) return message;
+  return code ? `Generation failed (${code}). Try again.` : 'Generation failed. Try again.';
+}
+
 /** A stable signature of the editable fields, so we can detect unsaved edits. */
 function signature(drafts: DraftSlot[]): string {
   return JSON.stringify(
@@ -141,17 +164,15 @@ export function DataSlotsReview({
     setError(null);
     setNotice(null);
     try {
-      const res = await authoringMutate<{ slots: GeneratedDataSlot[]; diagnostic?: string }>(
-        'POST',
-        API.APP.QUESTIONNAIRES.versionDataSlotsGenerate(questionnaireId, versionId),
-        { granularity }
-      );
+      const res = await authoringMutate<{
+        slots: GeneratedDataSlot[];
+        diagnostic?: string;
+        diagnosticMessage?: string;
+      }>('POST', API.APP.QUESTIONNAIRES.versionDataSlotsGenerate(questionnaireId, versionId), {
+        granularity,
+      });
       if (res.data.diagnostic || res.data.slots.length === 0) {
-        setError(
-          res.data.diagnostic
-            ? `Generation failed (${res.data.diagnostic}). Check an LLM provider is configured for this agent, then try again.`
-            : 'Generation did not return any slots. Try again.'
-        );
+        setError(diagnosticToMessage(res.data.diagnostic, res.data.diagnosticMessage));
       } else {
         resetTo(res.data.slots.map(fromGenerated), 'draft');
         setNotice(

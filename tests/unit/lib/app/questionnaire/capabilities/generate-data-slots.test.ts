@@ -38,7 +38,7 @@ const { runStructuredCompletion } =
   await import('@/lib/orchestration/evaluations/parse-structured');
 const { logCost } = await import('@/lib/orchestration/llm/cost-tracker');
 const { logger } = await import('@/lib/logging');
-const { AppGenerateDataSlotsCapability } =
+const { AppGenerateDataSlotsCapability, classifyGenerationFailure } =
   await import('@/lib/app/questionnaire/capabilities/generate-data-slots');
 
 type Mock = ReturnType<typeof vi.fn>;
@@ -297,7 +297,7 @@ describe('AppGenerateDataSlotsCapability — error branches', () => {
     );
   });
 
-  it('returns generation_failed when runStructuredCompletion throws', async () => {
+  it('classifies an unparseable (likely truncated) schema failure as incomplete_response', async () => {
     (runStructuredCompletion as Mock).mockRejectedValue(
       new Error('Data-slot generation response was not valid against the schema after one retry')
     );
@@ -305,12 +305,34 @@ describe('AppGenerateDataSlotsCapability — error branches', () => {
     const result = await cap.execute({ structure: VALID_STRUCTURE }, BASE_CONTEXT);
 
     expect(result.success).toBe(false);
-    expect(result.error?.code).toBe('generation_failed');
-    expect(result.error?.message).toContain('not valid against the schema');
+    expect(result.error?.code).toBe('incomplete_response');
+    expect(result.error?.message).toMatch(/cut off|incomplete/i);
     expect(logger.error).toHaveBeenCalledWith(
       'generate_data_slots: structured completion failed',
       expect.objectContaining({ model: 'gpt-4o', provider: 'openai' })
     );
+  });
+
+  it('classifies a timed-out completion as generation_timeout', async () => {
+    (runStructuredCompletion as Mock).mockRejectedValue(
+      new Error('Request timed out after 120000ms')
+    );
+    const cap = new AppGenerateDataSlotsCapability();
+    const result = await cap.execute({ structure: VALID_STRUCTURE }, BASE_CONTEXT);
+
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('generation_timeout');
+    expect(result.error?.message).toMatch(/timed out/i);
+  });
+
+  it('falls back to generation_failed for an unrecognised error', async () => {
+    (runStructuredCompletion as Mock).mockRejectedValue(new Error('socket hang up'));
+    const cap = new AppGenerateDataSlotsCapability();
+    const result = await cap.execute({ structure: VALID_STRUCTURE }, BASE_CONTEXT);
+
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('generation_failed');
+    expect(result.error?.message).toContain('socket hang up');
   });
 
   it('does not call getProvider when resolveAgentProviderAndModel fails', async () => {
@@ -352,6 +374,37 @@ describe('AppGenerateDataSlotsCapability — error branches', () => {
       'generate_data_slots: logCost rejected',
       expect.objectContaining({ error: 'cost log failed' })
     );
+  });
+});
+
+describe('classifyGenerationFailure', () => {
+  it('maps timeout/abort messages to generation_timeout', () => {
+    expect(classifyGenerationFailure('Request timed out', []).code).toBe('generation_timeout');
+    expect(classifyGenerationFailure('The operation was aborted', []).code).toBe(
+      'generation_timeout'
+    );
+  });
+
+  it('maps a schema failure with no issue paths to incomplete_response (likely truncation)', () => {
+    const r = classifyGenerationFailure('response was not valid against the schema', []);
+    expect(r.code).toBe('incomplete_response');
+    expect(r.message).toMatch(/cut off|incomplete/i);
+  });
+
+  it('maps a schema failure WITH issue paths to invalid_response and names them', () => {
+    const r = classifyGenerationFailure('response was not valid against the schema', [
+      'slots.0.name',
+      'slots.2.theme',
+    ]);
+    expect(r.code).toBe('invalid_response');
+    expect(r.message).toContain('slots.0.name');
+    expect(r.message).toContain('slots.2.theme');
+  });
+
+  it('falls back to generation_failed for anything else, echoing the raw message', () => {
+    const r = classifyGenerationFailure('ECONNRESET', []);
+    expect(r.code).toBe('generation_failed');
+    expect(r.message).toContain('ECONNRESET');
   });
 });
 

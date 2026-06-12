@@ -112,10 +112,13 @@ const handleGenerate = withAdminAuth<{ id: string; vid: string }>(
         questionnaireId: id,
         versionId: vid,
         code: dispatch.error?.code,
+        message: dispatch.error?.message,
       });
       return successResponse({
         slots: [],
         diagnostic: dispatch.error?.code ?? 'generation_failed',
+        // The capability's human, actionable explanation (truncated output, timeout, …).
+        diagnosticMessage: dispatch.error?.message,
       });
     }
 
