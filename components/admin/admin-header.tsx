@@ -10,36 +10,58 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { ChevronRight, Home } from 'lucide-react';
 import { HeaderActions } from '@/components/layouts/header-actions';
+import { useBreadcrumbLabels } from '@/components/admin/breadcrumb-context';
 
 interface AdminHeaderProps {
   title?: string;
   description?: string;
 }
 
-// Map route segments to display names
+// Explicit display names for segments whose humanized form would be wrong
+// (acronyms, branded names). Everything else is title-cased from the slug.
 const segmentLabels: Record<string, string> = {
   admin: 'Admin',
   overview: 'Overview',
   users: 'Users',
   logs: 'Logs',
   features: 'Feature Flags',
+  'demo-clients': 'Demo clients',
+  questionnaires: 'Questionnaires',
+  orchestration: 'AI Orchestration',
+  v: 'Version',
 };
+
+// "demo-clients" -> "Demo Clients". Last-resort fallback for unmapped segments.
+function humanizeSegment(segment: string): string {
+  return segment
+    .split('-')
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
 
 export function AdminHeader({ title, description }: AdminHeaderProps) {
   const pathname = usePathname();
+  // Pages register human-readable names for their dynamic id segments here.
+  const labelOverrides = useBreadcrumbLabels();
+
+  const labelFor = (segment: string): string =>
+    labelOverrides[segment] ?? segmentLabels[segment] ?? humanizeSegment(segment);
 
   // Generate breadcrumbs from pathname
   const segments = pathname.split('/').filter(Boolean);
   const breadcrumbs = segments.map((segment, index) => {
     const href = '/' + segments.slice(0, index + 1).join('/');
-    const label = segmentLabels[segment] || segment;
+    const label = labelFor(segment);
     const isLast = index === segments.length - 1;
 
     return { href, label, isLast };
   });
 
-  // Use the last segment as the title if not provided
-  const pageTitle = title || segmentLabels[segments[segments.length - 1]] || 'Admin';
+  // Use the last segment as the title if not provided. Only adopt a known/
+  // registered label — never a raw id, which pages title themselves.
+  const lastSegment = segments[segments.length - 1] ?? '';
+  const pageTitle = title || labelOverrides[lastSegment] || segmentLabels[lastSegment] || 'Admin';
 
   return (
     <header className="bg-background border-b">

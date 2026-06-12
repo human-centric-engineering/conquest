@@ -18,6 +18,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
+import { BreadcrumbLabel } from '@/components/admin/breadcrumb-context';
 import { QuestionnaireSubNav } from '@/components/admin/questionnaires/workspace/questionnaire-sub-nav';
 import { VersionSelector } from '@/components/admin/questionnaires/workspace/version-selector';
 import { QUESTIONNAIRE_STATUS_BADGE } from '@/components/admin/questionnaires/status-badge';
@@ -57,6 +58,9 @@ export default async function QuestionnaireWorkspaceLayout({ params, children }:
 
   return (
     <div className="space-y-6">
+      {/* Make the top admin breadcrumb readable: title for the id, "vN" for the version. */}
+      <BreadcrumbLabel segment={id} label={detail.title} />
+      <BreadcrumbLabel segment={vid} label={`v${selected.versionNumber}`} />
       <nav className="text-muted-foreground -mb-5 text-xs">
         <Link href="/admin/questionnaires" className="hover:underline">
           Questionnaires
@@ -67,7 +71,7 @@ export default async function QuestionnaireWorkspaceLayout({ params, children }:
 
       <header className="bg-background sticky top-0 z-30 -mx-6 space-y-3 border-b px-6 pt-3 pb-0">
         <div className="flex flex-wrap items-center gap-3">
-          <h1 className="cq-display text-2xl font-semibold">{detail.title}</h1>
+          <h1 className="text-2xl font-semibold">{detail.title}</h1>
           <Badge variant={statusBadge.variant}>{statusBadge.label}</Badge>
           <div className="ml-auto">
             <VersionSelector

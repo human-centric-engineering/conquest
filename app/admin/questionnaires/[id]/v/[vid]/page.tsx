@@ -72,7 +72,7 @@ export default async function OverviewTab({ params }: PageProps) {
 
       {/* Launch readiness */}
       <section className="space-y-3">
-        <h2 className="cq-display text-lg font-semibold">Launch readiness</h2>
+        <h2 className="text-lg font-semibold">Launch readiness</h2>
         {isDraft && graph ? (
           <div className="bg-card flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4">
             <p className="text-muted-foreground text-sm">
@@ -120,7 +120,7 @@ export default async function OverviewTab({ params }: PageProps) {
 
       {/* Quick actions */}
       <section className="space-y-3">
-        <h2 className="cq-display text-lg font-semibold">Quick actions</h2>
+        <h2 className="text-lg font-semibold">Quick actions</h2>
         <div className="flex flex-wrap gap-2">
           <Button asChild variant="default" size="sm">
             <Link href={`${base}/structure?edit=1`}>Edit structure</Link>
@@ -159,7 +159,7 @@ export default async function OverviewTab({ params }: PageProps) {
 
       {/* Version timeline */}
       <section className="space-y-3">
-        <h2 className="cq-display text-lg font-semibold">Versions</h2>
+        <h2 className="text-lg font-semibold">Versions</h2>
         <ul className="divide-y rounded-xl border">
           {detail.versions.map((ver) => {
             const active = ver.id === selected.id;

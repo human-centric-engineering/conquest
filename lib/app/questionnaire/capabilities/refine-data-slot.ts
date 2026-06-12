@@ -1,11 +1,12 @@
 /**
- * Data-slot generation capability — infers the semantic abstraction layer over a version's
- * questions (Data Slots feature). Modelled on F5.1's evaluate-structure: one provider-agnostic
- * structured LLM call via `runStructuredCompletion` (call → parse → retry-once-at-temp-0 →
- * cost-sum), validated against the data-slots output schema. Persists nothing — the route
- * returns the proposed slots for admin review.
+ * Refine-a-single-data-slot capability (Data Slots feature). Sibling to
+ * `AppGenerateDataSlotsCapability`: one provider-agnostic structured LLM call via
+ * `runStructuredCompletion` (call → parse → retry-once-at-temp-0 → cost-sum), validated against
+ * the single-slot refinement output schema. Reuses the same data-slot generator agent binding and
+ * `reasoning` tier. Persists nothing — the route returns the one refined slot for the admin to
+ * review and (eventually) save.
  *
- * Input is the **authored structure** (goal, audience, question prompts) — admin content, not
+ * Input is the **authored structure** + the slot + admin instructions — admin content, not
  * respondent PII — so `processesPii = false`. Lives under `lib/app/**`: no Prisma, no Next.
  */
 
@@ -28,38 +29,39 @@ import {
   type StructuredCompletionResult,
 } from '@/lib/orchestration/evaluations/parse-structured';
 
-import { GENERATE_DATA_SLOTS_FUNCTION_DEFINITION } from '@/lib/app/questionnaire/constants';
+import { REFINE_DATA_SLOT_FUNCTION_DEFINITION } from '@/lib/app/questionnaire/constants';
 import {
-  buildDataSlotGenerationPrompt,
-  buildDataSlotRetryMessage,
+  buildDataSlotRefinementPrompt,
+  buildDataSlotRefinementRetryMessage,
   classifyGenerationFailure,
-  dataSlotGranularitySchema,
   dataSlotStructureSchema,
-  validateDataSlotGeneration,
-  type DataSlotGenerationOutput,
+  refineInputSlotSchema,
+  validateDataSlotRefinement,
+  type DataSlotRefinementOutput,
 } from '@/lib/app/questionnaire/data-slots';
 
-const SLUG = GENERATE_DATA_SLOTS_FUNCTION_DEFINITION.name;
+const SLUG = REFINE_DATA_SLOT_FUNCTION_DEFINITION.name;
 
-/**
- * Designing a slot set over a whole questionnaire, with the DETAILED per-slot
- * descriptions the interviewer relies on, is a sizable generation — give it room.
- * Too low and the JSON is truncated mid-array → parse fails → fail-soft empty set.
- */
-const GENERATE_MAX_TOKENS = 8_192;
-/** One call; a large question set + long descriptions can run well past a minute. */
-const GENERATE_TIMEOUT_MS = 120_000;
+/** Refining one slot (with its detailed description) is far smaller than a whole-set generation. */
+const REFINE_MAX_TOKENS = 2_048;
+/** One short call over a single slot — but the full question list is in context, so allow a minute. */
+const REFINE_TIMEOUT_MS = 60_000;
 
 const argsSchema = z.object({
   structure: dataSlotStructureSchema,
+  slot: refineInputSlotSchema,
+  instructions: z.string().trim().min(1).max(2000),
+  /** Other slots' names/themes, so the model keeps the theme consistent and stays distinct. */
+  siblingSlots: z
+    .array(z.object({ name: z.string(), theme: z.string() }))
+    .max(120)
+    .optional(),
   versionId: z.string().optional(),
-  // Optional: omitted → the prompt builder applies the default (balanced) level.
-  granularity: dataSlotGranularitySchema.optional(),
 });
 
-export type GenerateDataSlotsArgs = z.infer<typeof argsSchema>;
-export interface GenerateDataSlotsData {
-  slots: DataSlotGenerationOutput['slots'];
+export type RefineDataSlotArgs = z.infer<typeof argsSchema>;
+export interface RefineDataSlotData {
+  slot: DataSlotRefinementOutput['slot'];
 }
 
 function readGeneratorBinding(entityContext: CapabilityContext['entityContext']): ResolvableAgent {
@@ -80,19 +82,19 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-export class AppGenerateDataSlotsCapability extends BaseCapability<
-  GenerateDataSlotsArgs,
-  GenerateDataSlotsData
+export class AppRefineDataSlotCapability extends BaseCapability<
+  RefineDataSlotArgs,
+  RefineDataSlotData
 > {
   readonly slug = SLUG;
   readonly processesPii = false;
-  readonly functionDefinition = GENERATE_DATA_SLOTS_FUNCTION_DEFINITION;
+  readonly functionDefinition = REFINE_DATA_SLOT_FUNCTION_DEFINITION;
   protected readonly schema = argsSchema;
 
   async execute(
-    args: GenerateDataSlotsArgs,
+    args: RefineDataSlotArgs,
     context: CapabilityContext
-  ): Promise<CapabilityResult<GenerateDataSlotsData>> {
+  ): Promise<CapabilityResult<RefineDataSlotData>> {
     let providerSlug: string;
     let model: string;
     try {
@@ -103,7 +105,7 @@ export class AppGenerateDataSlotsCapability extends BaseCapability<
       providerSlug = resolved.providerSlug;
       model = resolved.model;
     } catch (err) {
-      logger.error('generate_data_slots: no provider resolved', {
+      logger.error('refine_data_slot: no provider resolved', {
         agentId: context.agentId,
         error: errorMessage(err),
       });
@@ -114,7 +116,7 @@ export class AppGenerateDataSlotsCapability extends BaseCapability<
     try {
       provider = await getProvider(providerSlug);
     } catch (err) {
-      logger.error('generate_data_slots: provider unavailable', {
+      logger.error('refine_data_slot: provider unavailable', {
         agentId: context.agentId,
         providerSlug,
         error: errorMessage(err),
@@ -122,35 +124,40 @@ export class AppGenerateDataSlotsCapability extends BaseCapability<
       return this.error(errorMessage(err), 'provider_unavailable');
     }
 
-    const messages = buildDataSlotGenerationPrompt(args.structure, args.granularity);
+    const messages = buildDataSlotRefinementPrompt(
+      args.structure,
+      args.slot,
+      args.instructions,
+      args.siblingSlots ?? []
+    );
 
     let lastIssuePaths: string[] = [];
-    let completion: StructuredCompletionResult<DataSlotGenerationOutput>;
+    let completion: StructuredCompletionResult<DataSlotRefinementOutput>;
     try {
-      completion = await runStructuredCompletion<DataSlotGenerationOutput>({
+      completion = await runStructuredCompletion<DataSlotRefinementOutput>({
         provider,
         model,
         messages,
-        maxTokens: GENERATE_MAX_TOKENS,
-        timeoutMs: GENERATE_TIMEOUT_MS,
+        maxTokens: REFINE_MAX_TOKENS,
+        timeoutMs: REFINE_TIMEOUT_MS,
         parse: (raw) =>
           tryParseJson(raw, (parsed) => {
-            const validation = validateDataSlotGeneration(parsed);
+            const validation = validateDataSlotRefinement(parsed);
             if (validation.ok) return validation.value;
             lastIssuePaths = validation.issues.map((i) =>
               i.path.length > 0 ? i.path.join('.') : '(root)'
             );
             return null;
           }),
-        retryUserMessage: buildDataSlotRetryMessage(),
+        retryUserMessage: buildDataSlotRefinementRetryMessage(),
         onFinalFailure: () =>
           new Error(
-            'Data-slot generation response was not valid against the schema after one retry' +
+            'Data-slot refinement response was not valid against the schema after one retry' +
               (lastIssuePaths.length > 0 ? ` (invalid at: ${lastIssuePaths.join(', ')})` : '')
           ),
       });
     } catch (err) {
-      logger.error('generate_data_slots: structured completion failed', {
+      logger.error('refine_data_slot: structured completion failed', {
         agentId: context.agentId,
         model,
         provider: providerSlug,
@@ -173,12 +180,12 @@ export class AppGenerateDataSlotsCapability extends BaseCapability<
         ...(args.versionId ? { versionId: args.versionId } : {}),
       },
     }).catch((err) => {
-      logger.error('generate_data_slots: logCost rejected', {
+      logger.error('refine_data_slot: logCost rejected', {
         agentId: context.agentId,
         error: errorMessage(err),
       });
     });
 
-    return this.success({ slots: completion.value.slots });
+    return this.success({ slot: completion.value.slot });
   }
 }

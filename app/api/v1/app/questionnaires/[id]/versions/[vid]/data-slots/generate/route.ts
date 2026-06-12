@@ -30,6 +30,11 @@ import {
 } from '@/lib/app/questionnaire/constants';
 import type { GenerateDataSlotsData } from '@/lib/app/questionnaire/capabilities';
 import {
+  DEFAULT_DATA_SLOT_GRANULARITY,
+  dataSlotGranularitySchema,
+  type DataSlotGranularity,
+} from '@/lib/app/questionnaire/data-slots';
+import {
   buildDataSlotStructure,
   upsertDataSlotDraft,
 } from '@/app/api/v1/app/questionnaires/_lib/data-slot-routes';
@@ -49,6 +54,18 @@ const handleGenerate = withAdminAuth<{ id: string; vid: string }>(
     if (!rl.success) {
       log.warn('Data-slots generation rate limit exceeded', { adminId, reset: rl.reset });
       return createRateLimitResponse(rl);
+    }
+
+    // Optional granularity knob from the body — how broad/fine (and how many) slots to aim for.
+    // Back-compat: a missing/empty/invalid body falls back to the default (balanced) level.
+    let granularity: DataSlotGranularity = DEFAULT_DATA_SLOT_GRANULARITY;
+    try {
+      const parsed = dataSlotGranularitySchema.safeParse(
+        ((await request.json()) as { granularity?: unknown } | null)?.granularity
+      );
+      if (parsed.success) granularity = parsed.data;
+    } catch {
+      // No JSON body — keep the default.
     }
 
     const structure = await buildDataSlotStructure(id, vid);
@@ -76,7 +93,7 @@ const handleGenerate = withAdminAuth<{ id: string; vid: string }>(
 
     const dispatch = await capabilityDispatcher.dispatch(
       GENERATE_DATA_SLOTS_CAPABILITY_SLUG,
-      { structure, versionId: vid },
+      { structure, versionId: vid, granularity },
       {
         userId: adminId,
         agentId: agent.id,
@@ -95,10 +112,13 @@ const handleGenerate = withAdminAuth<{ id: string; vid: string }>(
         questionnaireId: id,
         versionId: vid,
         code: dispatch.error?.code,
+        message: dispatch.error?.message,
       });
       return successResponse({
         slots: [],
         diagnostic: dispatch.error?.code ?? 'generation_failed',
+        // The capability's human, actionable explanation (truncated output, timeout, …).
+        diagnosticMessage: dispatch.error?.message,
       });
     }
 
@@ -114,6 +134,7 @@ const handleGenerate = withAdminAuth<{ id: string; vid: string }>(
       questionnaireId: id,
       versionId: vid,
       slotCount: data.slots.length,
+      granularity,
     });
 
     return successResponse({ slots: data.slots });

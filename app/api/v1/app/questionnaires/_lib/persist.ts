@@ -39,8 +39,10 @@ export interface IngestionSourceInput {
 }
 
 export interface PersistIngestionInput {
-  /** Title for the new questionnaire (derived from the parsed document). */
+  /** Title for the new questionnaire (admin-supplied name, else derived from the parsed document). */
   documentTitle: string;
+  /** DEMO-ONLY (F2.5.1): attribute the new questionnaire to this demo client (omit for a generic demo). */
+  demoClientId?: string;
   /** The structured, normalised extractor output. */
   extraction: ExtractQuestionnaireStructureData;
   /** Admin-supplied goal/audience (admin wins per field over inferred). */
@@ -242,7 +244,12 @@ export async function persistIngestion(
 
   return executeTransaction(async (tx) => {
     const questionnaire = await tx.appQuestionnaire.create({
-      data: { title: input.documentTitle, status: 'draft' },
+      data: {
+        title: input.documentTitle,
+        status: 'draft',
+        // DEMO-ONLY (F2.5.1): optional attribution set at create time.
+        ...(input.demoClientId !== undefined ? { demoClientId: input.demoClientId } : {}),
+      },
       select: { id: true },
     });
 

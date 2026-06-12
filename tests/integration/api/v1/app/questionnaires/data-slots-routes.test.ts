@@ -79,6 +79,9 @@ const rateLimitMock = vi.hoisted(() => ({
   dataSlotsGenerationLimiter: {
     check: vi.fn(() => ({ success: true, limit: 20, remaining: 19, reset: 0 })),
   },
+  dataSlotsRefineLimiter: {
+    check: vi.fn(() => ({ success: true, limit: 60, remaining: 59, reset: 0 })),
+  },
 }));
 vi.mock('@/app/api/v1/app/questionnaires/_lib/rate-limit', () => rateLimitMock);
 
@@ -86,6 +89,7 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/rate-limit', () => rateLimitMock);
 
 import { GET, PUT } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/data-slots/route';
 import { POST } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/data-slots/generate/route';
+import { POST as POST_REFINE } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/data-slots/refine/route';
 
 import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
@@ -256,6 +260,12 @@ beforeEach(() => {
     remaining: 19,
     reset: 0,
   });
+  rateLimitMock.dataSlotsRefineLimiter.check.mockReturnValue({
+    success: true,
+    limit: 60,
+    remaining: 59,
+    reset: 0,
+  });
 });
 
 // ─── GET — gate + auth ─────────────────────────────────────────────────────────
@@ -382,6 +392,7 @@ describe('PUT …/data-slots — gate and auth', () => {
 
     expect(res.status).toBe(404);
     const body = await res.json();
+    expect(body.success).toBe(false);
     expect(body.error.code).toBe('NOT_FOUND');
     expect(auth.api.getSession).not.toHaveBeenCalled();
     expect(replaceDataSlots).not.toHaveBeenCalled();
@@ -422,7 +433,9 @@ describe('PUT …/data-slots — gate and auth', () => {
     const res = await PUT(jsonReq(validSlotsBody()), ctx(PARAMS));
 
     expect(res.status).toBe(404);
-    expect((await res.json()).error.code).toBe('NOT_FOUND');
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('NOT_FOUND');
     expect(replaceDataSlots).not.toHaveBeenCalled();
   });
 });
@@ -759,8 +772,9 @@ describe('POST …/data-slots/generate — fail-soft dispatch', () => {
     const body = await res.json();
     expect(body.success).toBe(true);
     expect(body.data.slots).toEqual([]);
-    // The diagnostic carries the capability error code so the UI can surface it.
+    // The diagnostic carries the capability error code AND its human message so the UI can surface it.
     expect(body.data.diagnostic).toBe('generation_failed');
+    expect(body.data.diagnosticMessage).toBe('LLM error');
     // No draft persisted on failure.
     expect(upsertDataSlotDraft).not.toHaveBeenCalled();
   });
@@ -801,4 +815,184 @@ describe('POST …/data-slots/generate — fail-soft dispatch', () => {
       expect(body.data.diagnostic).toBe(expectedDiagnostic);
     }
   );
+});
+
+// ─── POST /refine — single-slot refinement ────────────────────────────────────
+
+/** A valid refine request body. */
+function refineReqBody() {
+  return {
+    instructions: 'Focus on enterprise buyers and fold in pricing.',
+    slot: {
+      name: 'Job Role',
+      description: 'The respondent current role.',
+      theme: 'Career',
+      questionKeys: ['role'],
+    },
+  };
+}
+
+/** A valid refine dispatch success payload (one refined slot). */
+function refineDispatchSuccess() {
+  return {
+    success: true,
+    data: {
+      slot: {
+        name: 'Enterprise Role',
+        description: 'The respondent role and buying authority in an enterprise context.',
+        theme: 'Career',
+        questionKeys: ['role'],
+        confidence: 0.88,
+      },
+    },
+  };
+}
+
+describe('POST …/data-slots/refine — gate and auth', () => {
+  it('returns 404 when the data-slots sub-flag is off (before auth)', async () => {
+    vi.mocked(isFeatureEnabled).mockImplementation((flag) =>
+      Promise.resolve(flag === APP_QUESTIONNAIRES_FLAG)
+    );
+    const res = await POST_REFINE(jsonReq(refineReqBody()), ctx(PARAMS));
+    expect(res.status).toBe(404);
+    expect(dispatchMock.capabilityDispatcher.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 for a non-admin authenticated user', async () => {
+    setAuth(mockAuthenticatedUser());
+    const res = await POST_REFINE(jsonReq(refineReqBody()), ctx(PARAMS));
+    expect(res.status).toBe(403);
+    expect(dispatchMock.capabilityDispatcher.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('returns 401 when unauthenticated', async () => {
+    setAuth(mockUnauthenticatedUser());
+    const res = await POST_REFINE(jsonReq(refineReqBody()), ctx(PARAMS));
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 404 when the version has no questions', async () => {
+    (buildDataSlotStructure as Mock).mockResolvedValue(null);
+    const res = await POST_REFINE(jsonReq(refineReqBody()), ctx(PARAMS));
+    expect(res.status).toBe(404);
+    expect(dispatchMock.capabilityDispatcher.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 when the master questionnaires flag is off (before auth)', async () => {
+    vi.mocked(isFeatureEnabled).mockResolvedValue(false);
+    const res = await POST_REFINE(jsonReq(refineReqBody()), ctx(PARAMS));
+    expect(res.status).toBe(404);
+    expect(auth.api.getSession).not.toHaveBeenCalled();
+    expect(dispatchMock.capabilityDispatcher.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 when the refine agent is not seeded', async () => {
+    prismaMock.aiAgent.findUnique.mockResolvedValue(null);
+    const res = await POST_REFINE(jsonReq(refineReqBody()), ctx(PARAMS));
+    expect(res.status).toBe(404);
+    expect(dispatchMock.capabilityDispatcher.dispatch).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST …/data-slots/refine — validation', () => {
+  it('rejects an empty-instructions body with 400 before dispatching', async () => {
+    const res = await POST_REFINE(
+      jsonReq({ ...refineReqBody(), instructions: '   ' }),
+      ctx(PARAMS)
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(dispatchMock.capabilityDispatcher.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('rejects a missing slot with 400', async () => {
+    const res = await POST_REFINE(jsonReq({ instructions: 'do it' }), ctx(PARAMS));
+    expect(res.status).toBe(400);
+    expect(dispatchMock.capabilityDispatcher.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('rejects a malformed (non-JSON) body with 400 instead of throwing', async () => {
+    const badReq = {
+      url: 'http://localhost:3000/api/v1',
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: () => Promise.reject(new SyntaxError('Unexpected token')),
+    } as unknown as NextRequest;
+    const res = await POST_REFINE(badReq, ctx(PARAMS));
+    expect(res.status).toBe(400);
+    expect(dispatchMock.capabilityDispatcher.dispatch).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST …/data-slots/refine — rate limit', () => {
+  it('returns 429 when the refine sub-cap is exceeded', async () => {
+    rateLimitMock.dataSlotsRefineLimiter.check.mockReturnValue({
+      success: false,
+      limit: 60,
+      remaining: 0,
+      reset: Date.now() + 1000,
+    });
+    const res = await POST_REFINE(jsonReq(refineReqBody()), ctx(PARAMS));
+    expect(res.status).toBe(429);
+    expect(dispatchMock.capabilityDispatcher.dispatch).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST …/data-slots/refine — happy path', () => {
+  it('returns 200 with the single refined slot and dispatches the refine capability', async () => {
+    dispatchMock.capabilityDispatcher.dispatch.mockResolvedValue(refineDispatchSuccess());
+
+    const res = await POST_REFINE(jsonReq(refineReqBody()), ctx(PARAMS));
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    expect(body.data.slot.name).toBe('Enterprise Role');
+
+    const [slug, args] = dispatchMock.capabilityDispatcher.dispatch.mock.calls[0];
+    expect(slug).toBe('app_refine_data_slot');
+    expect(args).toEqual(
+      expect.objectContaining({
+        instructions: refineReqBody().instructions,
+        versionId: PARAMS.vid,
+        slot: expect.objectContaining({ name: 'Job Role' }),
+      })
+    );
+  });
+
+  it('forwards siblingSlots to the dispatched capability when present', async () => {
+    dispatchMock.capabilityDispatcher.dispatch.mockResolvedValue(refineDispatchSuccess());
+    const siblingSlots = [{ name: 'Pricing', theme: 'Money' }];
+
+    const res = await POST_REFINE(jsonReq({ ...refineReqBody(), siblingSlots }), ctx(PARAMS));
+
+    expect(res.status).toBe(200);
+    const [, args] = dispatchMock.capabilityDispatcher.dispatch.mock.calls[0];
+    expect(args).toEqual(expect.objectContaining({ siblingSlots }));
+  });
+
+  it('persists nothing — refine is a client-only working-set edit', async () => {
+    dispatchMock.capabilityDispatcher.dispatch.mockResolvedValue(refineDispatchSuccess());
+    await POST_REFINE(jsonReq(refineReqBody()), ctx(PARAMS));
+    expect(upsertDataSlotDraft).not.toHaveBeenCalled();
+    expect(replaceDataSlots).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST …/data-slots/refine — fail-soft dispatch', () => {
+  it('returns 200 with slot:null and a diagnostic when the refiner fails', async () => {
+    dispatchMock.capabilityDispatcher.dispatch.mockResolvedValue({
+      success: false,
+      error: { code: 'provider_unavailable', message: 'provider offline' },
+    });
+
+    const res = await POST_REFINE(jsonReq(refineReqBody()), ctx(PARAMS));
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    expect(body.data.slot).toBeNull();
+    expect(body.data.diagnostic).toBe('provider_unavailable');
+    expect(body.data.diagnosticMessage).toBe('provider offline');
+  });
 });

@@ -60,7 +60,7 @@ export default async function DemoClientsListPage() {
     <div className="space-y-6">
       <header className="bg-background sticky top-0 z-30 -mx-6 flex items-start justify-between border-b px-6 pt-3 pb-3">
         <div>
-          <h1 className="cq-display text-2xl font-semibold">
+          <h1 className="text-2xl font-semibold">
             Demo clients{' '}
             <FieldHelp title="What are demo clients?" contentClassName="w-96">
               <p>

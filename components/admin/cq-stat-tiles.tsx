@@ -1,11 +1,10 @@
 /**
  * Summary stat tiles for the ConQuest app admin surfaces.
  *
- * A responsive auto-fitting row of figures with the editorial display serif and a
- * staggered entrance (`cq-rise` + per-tile `animation-delay`). Server-renderable
- * (no hooks). Used on the questionnaires and demo-clients list pages and the
- * questionnaire Overview tab. Only meaningful inside a `.cq-surface` wrapper,
- * which supplies `--font-display` and `--cq-accent`.
+ * A responsive auto-fitting row of figures with a staggered entrance (`cq-rise` +
+ * per-tile `animation-delay`). Server-renderable (no hooks). Used on the
+ * questionnaires and demo-clients list pages and the questionnaire Overview tab.
+ * Only meaningful inside a `.cq-surface` wrapper, which supplies `--cq-accent`.
  */
 import { cn } from '@/lib/utils';
 
@@ -36,7 +35,7 @@ export function CqStatTiles({ stats, className }: { stats: CqStat[]; className?:
           </div>
           <div
             className={cn(
-              'cq-display mt-1 text-3xl font-semibold tabular-nums',
+              'mt-1 text-3xl font-semibold tabular-nums',
               stat.accent && 'text-[color:var(--cq-accent)]'
             )}
           >

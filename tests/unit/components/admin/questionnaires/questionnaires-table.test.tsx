@@ -75,3 +75,31 @@ describe('QuestionnairesTable empty state', () => {
     expect(screen.queryByRole('button', { name: /upload questionnaire/i })).not.toBeInTheDocument();
   });
 });
+
+describe('QuestionnairesTable demo-client column', () => {
+  it('renders the attributed demo client name in its own row', () => {
+    render(
+      <QuestionnairesTable
+        initialItems={[
+          item({ demoClient: { id: 'client-1', slug: 'acme-bank', name: 'Acme Bank' } }),
+        ]}
+        initialMeta={{ ...META, total: 1 }}
+      />
+    );
+
+    expect(screen.getByRole('columnheader', { name: /demo client/i })).toBeInTheDocument();
+    expect(screen.getByText('Acme Bank')).toBeInTheDocument();
+  });
+
+  it('shows an em-dash when a questionnaire has no demo client', () => {
+    render(
+      <QuestionnairesTable
+        initialItems={[item({ demoClient: null })]}
+        initialMeta={{ ...META, total: 1 }}
+      />
+    );
+
+    // The owner cell falls back to a muted em-dash rather than rendering blank.
+    expect(screen.getByText('—')).toBeInTheDocument();
+  });
+});

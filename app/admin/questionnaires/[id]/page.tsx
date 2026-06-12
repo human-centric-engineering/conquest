@@ -43,7 +43,7 @@ export default async function QuestionnaireEntryPage({ params, searchParams }: P
     // creates v1). Show a minimal message rather than redirect to a dead URL.
     return (
       <div className="space-y-3">
-        <h1 className="cq-display text-2xl font-semibold">{detail.title}</h1>
+        <h1 className="text-2xl font-semibold">{detail.title}</h1>
         <p className="text-muted-foreground text-sm italic">
           This questionnaire has no versions yet.
         </p>

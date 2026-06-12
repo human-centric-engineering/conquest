@@ -50,11 +50,11 @@ writes it.
 
 ## Read UI
 
-| Page                                              | What it shows                                                                          |
-| ------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| `app/admin/questionnaires/page.tsx`               | List: summary stat tiles, debounced title search, status filter, pagination            |
-| `app/admin/questionnaires/[id]/v/[vid]/page.tsx`  | **Overview** tab — status, launch readiness, quick actions, version timeline           |
-| `app/admin/questionnaires/[id]/v/[vid]/structure` | **Structure** tab — goal/audience with `inferred` badges, section/question tree/editor |
+| Page                                              | What it shows                                                                                                     |
+| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `app/admin/questionnaires/page.tsx`               | List: summary stat tiles, debounced title search, status filter, pagination, demo-client owner column (DEMO-ONLY) |
+| `app/admin/questionnaires/[id]/v/[vid]/page.tsx`  | **Overview** tab — status, launch readiness, quick actions, version timeline                                      |
+| `app/admin/questionnaires/[id]/v/[vid]/structure` | **Structure** tab — goal/audience with `inferred` badges, section/question tree/editor                            |
 
 The list page is a thin server component (`serverFetch` the first page → client
 `QuestionnairesTable` for search/filter/pagination, model on the orchestration
@@ -101,11 +101,11 @@ must render the version selector and highlight the active version against `[vid]
   are thin **redirectors** that resolve `?v=` (or the newest version) and forward to
   the path-segment URL, so old bookmarks and the editor's fork-redirect keep working.
 
-The list and demo-clients surfaces wear a scoped **app identity** — a display serif
-(`components/admin/cq-fonts.ts`) and accent tokens (`.cq-surface` in `globals.css`),
-applied by the `app/admin/questionnaires/layout.tsx` and `app/admin/demo-clients/layout.tsx`
-wrappers and used by `components/admin/cq-stat-tiles.tsx`. Scoped so orchestration
-and the rest of `/admin` are untouched.
+The list and demo-clients surfaces wear a scoped **app identity** — accent tokens
+(`.cq-surface` in `globals.css`), applied by the `app/admin/questionnaires/layout.tsx`
+and `app/admin/demo-clients/layout.tsx` wrappers and used by
+`components/admin/cq-stat-tiles.tsx`. Scoped so orchestration and the rest of
+`/admin` are untouched; typography stays on the platform's default sans.
 
 ## Tagging (F2.2)
 

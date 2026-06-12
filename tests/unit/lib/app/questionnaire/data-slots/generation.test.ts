@@ -17,10 +17,17 @@ import { describe, it, expect } from 'vitest';
 
 import {
   buildDataSlotGenerationPrompt,
+  buildDataSlotMergePrompt,
+  buildDataSlotRefinementPrompt,
+  buildDataSlotRefinementRetryMessage,
   buildDataSlotRetryMessage,
   validateDataSlotGeneration,
+  validateDataSlotRefinement,
 } from '@/lib/app/questionnaire/data-slots/generation';
-import type { DataSlotStructureInput } from '@/lib/app/questionnaire/data-slots/schemas';
+import type {
+  DataSlotStructureInput,
+  RefineInputSlot,
+} from '@/lib/app/questionnaire/data-slots/schemas';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -110,6 +117,119 @@ describe('buildDataSlotGenerationPrompt — system prompt rules', () => {
   it('explains that the theme is a grouping label', () => {
     expect(system).toMatch(/theme/i);
     expect(system).toMatch(/group/i);
+  });
+
+  it('demands detailed descriptions that carry the full intent of the questions', () => {
+    expect(system).toMatch(/descriptions are critical/i);
+    expect(system).toMatch(/full intent/i);
+    expect(system).toMatch(/never drop detail/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildDataSlotGenerationPrompt — granularity
+// ---------------------------------------------------------------------------
+
+describe('buildDataSlotGenerationPrompt — granularity', () => {
+  it('injects the balanced guidance by default (no granularity argument)', () => {
+    const system = systemContent(buildDataSlotGenerationPrompt(minimalStructure));
+    expect(system).toMatch(/GRANULARITY for this set:/);
+    expect(system).toMatch(/balance breadth and detail/i);
+  });
+
+  it('injects the broadest guidance when asked to consolidate aggressively', () => {
+    const system = systemContent(buildDataSlotGenerationPrompt(minimalStructure, 'broadest'));
+    expect(system).toMatch(/consolidate aggressively/i);
+    expect(system).not.toMatch(/maximise granularity/i);
+  });
+
+  it('injects the finest guidance when asked for maximum granularity', () => {
+    const system = systemContent(buildDataSlotGenerationPrompt(minimalStructure, 'finest'));
+    expect(system).toMatch(/maximise granularity/i);
+    expect(system).toMatch(/1:1 mapping/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildDataSlotGenerationPrompt — target slot count
+// ---------------------------------------------------------------------------
+
+describe('buildDataSlotGenerationPrompt — target count', () => {
+  const tenQuestions: DataSlotStructureInput = {
+    questions: Array.from({ length: 10 }, (_, i) => ({ key: `q${i}`, prompt: 'p', type: 'text' })),
+  };
+  const twentyQuestions: DataSlotStructureInput = {
+    questions: Array.from({ length: 20 }, (_, i) => ({ key: `q${i}`, prompt: 'p', type: 'text' })),
+  };
+
+  it('states a slot-count target scaled to the question count (balanced 10 → 5–6)', () => {
+    const system = systemContent(buildDataSlotGenerationPrompt(tenQuestions, 'balanced'));
+    expect(system).toContain('TARGET COUNT');
+    expect(system).toMatch(/roughly 5.{1,3}6 slots/);
+  });
+
+  it('targets far fewer slots at broadest than at finest (20 questions)', () => {
+    const broad = systemContent(buildDataSlotGenerationPrompt(twentyQuestions, 'broadest'));
+    const fine = systemContent(buildDataSlotGenerationPrompt(twentyQuestions, 'finest'));
+    expect(broad).toMatch(/roughly 3.{1,3}5 slots/);
+    expect(fine).toMatch(/roughly 17.{1,3}20 slots/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildDataSlotMergePrompt — reconcile step
+// ---------------------------------------------------------------------------
+
+describe('buildDataSlotMergePrompt', () => {
+  const candidates = [
+    {
+      name: 'Onboarding ease',
+      description: 'How smooth setup felt.',
+      theme: 'Setup',
+      questionKeys: ['q1'],
+    },
+    { name: 'Blockers', description: 'What slowed them.', theme: 'Setup', questionKeys: ['q2'] },
+    {
+      name: 'Recommend',
+      description: 'Would they recommend.',
+      theme: 'Loyalty',
+      questionKeys: ['q3'],
+    },
+  ];
+
+  it('returns a system + user message pair', () => {
+    const messages = buildDataSlotMergePrompt(fullStructure, candidates);
+    expect(messages).toHaveLength(2);
+    expect(messages[0].role).toBe('system');
+    expect(messages[1].role).toBe('user');
+  });
+
+  it('instructs the model to reconcile/merge duplicates and cover every question', () => {
+    const system = systemContent(buildDataSlotMergePrompt(fullStructure, candidates));
+    expect(system).toMatch(/reconciling/i);
+    expect(system).toMatch(/duplicates/i);
+    expect(system).toMatch(/cover every question/i);
+    expect(system).toMatch(/full intent/i);
+  });
+
+  it('lists the candidate slots and all question keys in the user message', () => {
+    const user = userContent(buildDataSlotMergePrompt(fullStructure, candidates));
+    expect(user).toContain('Onboarding ease');
+    expect(user).toContain('Recommend');
+    expect(user).toContain('[q1]');
+    expect(user).toContain('[q3]');
+  });
+
+  it('carries the granularity guidance into the merge system prompt', () => {
+    const system = systemContent(buildDataSlotMergePrompt(fullStructure, candidates, 'broadest'));
+    expect(system).toMatch(/consolidate aggressively/i);
+  });
+
+  it('states a global target count for the final set', () => {
+    // fullStructure has 3 questions; balanced → round(0.45*3)=1 .. round(0.55*3)=2 → "1–2".
+    const system = systemContent(buildDataSlotMergePrompt(fullStructure, candidates, 'balanced'));
+    expect(system).toContain('TARGET COUNT');
+    expect(system).toMatch(/roughly 1.{1,3}2 slots/);
   });
 });
 
@@ -288,5 +408,121 @@ describe('validateDataSlotGeneration', () => {
       })),
     };
     expect(validateDataSlotGeneration(tooMany).ok).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildDataSlotRefinementPrompt — single-slot refine
+// ---------------------------------------------------------------------------
+
+describe('buildDataSlotRefinementPrompt', () => {
+  const slot: RefineInputSlot = {
+    name: 'Onboarding ease',
+    description: 'How smoothly the user got started.',
+    theme: 'Friction',
+    questionKeys: ['q1'],
+  };
+  const instructions = 'Focus on enterprise buyers and split out pricing.';
+
+  it('returns exactly two messages: system then user', () => {
+    const messages = buildDataSlotRefinementPrompt(fullStructure, slot, instructions);
+    expect(messages).toHaveLength(2);
+    expect(messages[0].role).toBe('system');
+    expect(messages[1].role).toBe('user');
+  });
+
+  it('system prompt frames the task as refining ONE slot and allows re-mapping coverage', () => {
+    const system = systemContent(buildDataSlotRefinementPrompt(fullStructure, slot, instructions));
+    expect(system).toMatch(/refine a single data slot/i);
+    expect(system).toMatch(/questionKeys/);
+    expect(system).toMatch(/re-?map/i);
+  });
+
+  it('system prompt keeps the strict JSON { slot } output contract', () => {
+    const system = systemContent(buildDataSlotRefinementPrompt(fullStructure, slot, instructions));
+    expect(system).toContain('"slot"');
+    expect(system).toContain('"name"');
+    expect(system).toContain('"description"');
+    expect(system).toContain('"questionKeys"');
+    expect(system).toMatch(/no prose.*no markdown|JSON only/i);
+  });
+
+  it('user prompt interpolates the instructions, the current slot, and the full question list', () => {
+    const user = userContent(buildDataSlotRefinementPrompt(fullStructure, slot, instructions));
+    expect(user).toContain(instructions);
+    expect(user).toContain('Onboarding ease');
+    expect(user).toContain('How smoothly the user got started.');
+    // every question key is offered so the model can re-suggest coverage
+    expect(user).toContain('[q1]');
+    expect(user).toContain('[q2]');
+    expect(user).toContain('[q3]');
+  });
+
+  it('lists sibling slots (name + theme) when provided so the model stays distinct/harmonized', () => {
+    const user = userContent(
+      buildDataSlotRefinementPrompt(fullStructure, slot, instructions, [
+        { name: 'Pricing clarity', theme: 'Value' },
+      ])
+    );
+    expect(user).toContain('Pricing clarity');
+    expect(user).toContain('Value');
+  });
+
+  it('renders empty placeholders for a blanked slot rather than crashing', () => {
+    const blank: RefineInputSlot = { name: '', description: '', theme: '', questionKeys: [] };
+    const user = userContent(buildDataSlotRefinementPrompt(minimalStructure, blank, instructions));
+    expect(user).toContain('(empty)');
+    expect(user).toContain('(none)');
+  });
+});
+
+describe('buildDataSlotRefinementRetryMessage', () => {
+  it('asks for the JSON { slot } object only', () => {
+    const msg = buildDataSlotRefinementRetryMessage();
+    expect(msg).toContain('"slot"');
+    expect(msg).toMatch(/nothing else/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// validateDataSlotRefinement — output validation
+// ---------------------------------------------------------------------------
+
+describe('validateDataSlotRefinement', () => {
+  const validSlot = {
+    name: 'Onboarding ease',
+    description: 'How smoothly the user got started.',
+    theme: 'Friction',
+    questionKeys: ['q1'],
+    confidence: 0.9,
+  };
+
+  it('accepts a valid { slot } payload', () => {
+    const result = validateDataSlotRefinement({ slot: validSlot });
+    expect(result.ok).toBe(true);
+  });
+
+  it('defaults questionKeys and confidence when omitted', () => {
+    const result = validateDataSlotRefinement({
+      slot: { name: 'X', description: 'd', theme: 'T' },
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.slot.questionKeys).toEqual([]);
+      expect(result.value.slot.confidence).toBe(0.5);
+    }
+  });
+
+  it('rejects a name longer than 4 words', () => {
+    const result = validateDataSlotRefinement({
+      slot: { ...validSlot, name: 'one two three four five' },
+    });
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects a missing slot key and non-object input', () => {
+    expect(validateDataSlotRefinement({}).ok).toBe(false);
+    expect(validateDataSlotRefinement(null).ok).toBe(false);
+    expect(validateDataSlotRefinement({ slots: [validSlot] }).ok).toBe(false);
   });
 });

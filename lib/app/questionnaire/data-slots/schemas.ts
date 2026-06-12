@@ -15,7 +15,9 @@ const nameSchema = z
   .refine((v) => v.split(/\s+/).filter(Boolean).length <= 4, 'Name must be at most 4 words');
 
 const themeSchema = z.string().trim().min(1, 'Theme is required').max(60);
-const descriptionSchema = z.string().trim().min(1, 'Description is required').max(600);
+// Descriptions guide the interviewer, so they must carry the full intent of the
+// question(s) a slot abstracts — generous cap to allow that detail.
+const descriptionSchema = z.string().trim().min(1, 'Description is required').max(1000);
 
 /** One generated slot as the LLM emits it (questions referenced by key). */
 export const generatedDataSlotSchema = z.object({
@@ -32,6 +34,44 @@ export const dataSlotGenerationOutputSchema = z.object({
 });
 
 export type DataSlotGenerationOutput = z.infer<typeof dataSlotGenerationOutputSchema>;
+
+/** The refine-single-slot capability's structured output (exactly one refined slot). */
+export const dataSlotRefinementOutputSchema = z.object({
+  slot: generatedDataSlotSchema,
+});
+
+export type DataSlotRefinementOutput = z.infer<typeof dataSlotRefinementOutputSchema>;
+
+/**
+ * The CURRENT slot a refine call operates on, as the admin sends it. Lenient (the working copy
+ * may be mid-edit — e.g. a blanked name) since it is only context for the model; the model's
+ * OUTPUT is validated strictly by {@link generatedDataSlotSchema}. Length caps bound the payload.
+ */
+export const refineInputSlotSchema = z.object({
+  name: z.string().trim().max(200),
+  description: z.string().trim().max(4000),
+  theme: z.string().trim().max(200),
+  questionKeys: z.array(z.string().min(1)).max(300).default([]),
+});
+
+export type RefineInputSlot = z.infer<typeof refineInputSlotSchema>;
+
+/** Refine-a-single-slot request body (admin review surface → the refine route). */
+export const refineDataSlotRequestSchema = z.object({
+  instructions: z
+    .string()
+    .trim()
+    .min(1, 'Instructions are required')
+    .max(2000, 'Instructions are too long'),
+  slot: refineInputSlotSchema,
+  /** The other slots' names + themes — context so the refiner stays distinct + on-theme. */
+  siblingSlots: z
+    .array(z.object({ name: z.string().max(200), theme: z.string().max(200) }))
+    .max(120)
+    .optional(),
+});
+
+export type RefineDataSlotRequest = z.infer<typeof refineDataSlotRequestSchema>;
 
 /** The questions DTO the generation capability scans (one entry per question). */
 export const questionForGenerationSchema = z.object({
