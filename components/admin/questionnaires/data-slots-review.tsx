@@ -23,6 +23,16 @@ import { Input } from '@/components/ui/input';
 import { AutoTextarea } from '@/components/ui/auto-textarea';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { API } from '@/lib/api/endpoints';
 import { parseSseBlock } from '@/lib/api/sse-parser';
 import { useUnsavedChangesWarning } from '@/lib/hooks/use-unsaved-changes-warning';
@@ -151,6 +161,8 @@ export function DataSlotsReview({
   const [discarding, setDiscarding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // Index of the slot pending a delete confirmation, or null.
+  const [deleteIndex, setDeleteIndex] = useState<number | null>(null);
 
   const dirty = signature(drafts) !== baseline;
   const busy = generating || saving || discarding;
@@ -498,7 +510,7 @@ export function DataSlotsReview({
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => remove(i)}
+                  onClick={() => setDeleteIndex(i)}
                   aria-label="Remove slot"
                 >
                   <Trash2 className="text-muted-foreground h-4 w-4" />
@@ -544,6 +556,35 @@ export function DataSlotsReview({
           </Badge>
         </div>
       )}
+
+      <AlertDialog
+        open={deleteIndex !== null}
+        onOpenChange={(open) => !open && setDeleteIndex(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove this data slot?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteIndex !== null && drafts[deleteIndex]?.name
+                ? `“${drafts[deleteIndex]?.name}” will be removed from this set. `
+                : 'This data slot will be removed from this set. '}
+              You can get it back by regenerating, but it’s gone for good once you save.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (deleteIndex !== null) remove(deleteIndex);
+                setDeleteIndex(null);
+              }}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              Remove slot
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
