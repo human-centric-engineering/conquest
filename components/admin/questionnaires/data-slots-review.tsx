@@ -432,20 +432,6 @@ export function DataSlotsReview({
                 ? `Your ${liveSlots.length} live data slot${liveSlots.length === 1 ? '' : 's'} stay in use until then.`
                 : 'Launching this version requires saved data slots.'}
             </p>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void discard()}
-              disabled={busy}
-              className="mt-1"
-            >
-              {discarding ? (
-                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-              ) : (
-                <Undo2 className="mr-1.5 h-4 w-4" />
-              )}
-              Discard draft
-            </Button>
           </div>
         </div>
       )}
@@ -537,12 +523,23 @@ export function DataSlotsReview({
       )}
 
       {!generating && drafts.length > 0 && (
-        <div className="flex items-center gap-3">
+        // Sticky footer so the primary action stays reachable however long the list is.
+        <div className="bg-background/95 supports-[backdrop-filter]:bg-background/80 sticky bottom-0 z-20 -mx-6 flex items-center gap-3 border-t px-6 py-3 backdrop-blur">
           <Button onClick={() => void save()} disabled={busy || (!isDraft && !dirty)}>
             {saving && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
             {isDraft ? `Save & make live (${acceptedCount})` : `Save changes (${acceptedCount})`}
           </Button>
-          <Badge variant="outline">
+          {isDraft && (
+            <Button variant="outline" onClick={() => void discard()} disabled={busy}>
+              {discarding ? (
+                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+              ) : (
+                <Undo2 className="mr-1.5 h-4 w-4" />
+              )}
+              Discard
+            </Button>
+          )}
+          <Badge variant="outline" className="ml-auto">
             {coveredKeys.size}/{questions.length} questions covered
           </Badge>
         </div>
