@@ -20,7 +20,7 @@ import { AlertTriangle, Loader2, Sparkles, Trash2, Undo2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
+import { AutoTextarea } from '@/components/ui/auto-textarea';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { API } from '@/lib/api/endpoints';
@@ -505,11 +505,11 @@ export function DataSlotsReview({
                 </Button>
               </div>
 
-              <Textarea
+              <AutoTextarea
                 value={d.description}
                 onChange={(e) => update(i, { description: e.target.value })}
                 placeholder="What this slot must capture, why it matters, and what to probe for"
-                rows={4}
+                className="min-h-24"
               />
 
               <QuestionCoverageEditor
