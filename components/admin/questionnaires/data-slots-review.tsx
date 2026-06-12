@@ -20,7 +20,6 @@ import { AlertTriangle, Loader2, Sparkles, Trash2, Undo2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -32,6 +31,7 @@ import {
   AuthoringError,
 } from '@/components/admin/questionnaires/authoring-mutate';
 import { DataSlotGranularityField } from '@/components/admin/questionnaires/data-slot-granularity-field';
+import { QuestionCoverageEditor } from '@/components/admin/questionnaires/question-coverage-editor';
 import {
   DataSlotGenerationProgress,
   type DataSlotGenProgress,
@@ -152,7 +152,6 @@ export function DataSlotsReview({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const promptByKey = new Map(questions.map((q) => [q.key, q.prompt]));
   const dirty = signature(drafts) !== baseline;
   const busy = generating || saving || discarding;
 
@@ -527,34 +526,11 @@ export function DataSlotsReview({
                 rows={4}
               />
 
-              <div className="space-y-1.5">
-                <Label className="text-muted-foreground text-xs">Covers questions</Label>
-                <div className="flex flex-wrap gap-2">
-                  {questions.map((q) => {
-                    const on = d.questionKeys.includes(q.key);
-                    return (
-                      <button
-                        key={q.key}
-                        type="button"
-                        onClick={() => toggleQuestion(i, q.key)}
-                        title={q.prompt}
-                        className={
-                          on
-                            ? 'bg-primary/10 text-foreground rounded-md border border-transparent px-2 py-1 text-xs'
-                            : 'text-muted-foreground hover:bg-accent rounded-md border px-2 py-1 text-xs'
-                        }
-                      >
-                        {q.key}
-                      </button>
-                    );
-                  })}
-                </div>
-                {d.questionKeys.some((k) => !promptByKey.has(k)) && (
-                  <p className="text-destructive text-xs">
-                    Some mapped keys aren’t in this version and will be dropped on save.
-                  </p>
-                )}
-              </div>
+              <QuestionCoverageEditor
+                questions={questions}
+                selectedKeys={d.questionKeys}
+                onToggle={(key) => toggleQuestion(i, key)}
+              />
             </li>
           ))}
         </ul>
