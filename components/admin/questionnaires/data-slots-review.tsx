@@ -25,17 +25,22 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { API } from '@/lib/api/endpoints';
+import { parseSseBlock } from '@/lib/api/sse-parser';
 import { useUnsavedChangesWarning } from '@/lib/hooks/use-unsaved-changes-warning';
 import {
   authoringMutate,
   AuthoringError,
 } from '@/components/admin/questionnaires/authoring-mutate';
-import { StatusTicker, DATA_SLOT_MESSAGES } from '@/components/admin/questionnaires/status-ticker';
 import { DataSlotGranularityField } from '@/components/admin/questionnaires/data-slot-granularity-field';
+import {
+  DataSlotGenerationProgress,
+  type DataSlotGenProgress,
+} from '@/components/admin/questionnaires/data-slot-generation-progress';
 import {
   DEFAULT_DATA_SLOT_GRANULARITY,
   type DataSlotView,
   type DataSlotDraftView,
+  type DataSlotGenEvent,
   type DataSlotGranularity,
   type GeneratedDataSlot,
 } from '@/lib/app/questionnaire/data-slots';
@@ -140,6 +145,7 @@ export function DataSlotsReview({
   const [granularity, setGranularity] = useState<DataSlotGranularity>(
     DEFAULT_DATA_SLOT_GRANULARITY
   );
+  const [progress, setProgress] = useState<DataSlotGenProgress | null>(null);
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [discarding, setDiscarding] = useState(false);
@@ -159,30 +165,128 @@ export function DataSlotsReview({
     setBaseline(signature(next));
   };
 
+  // Apply one streamed progress event to the live progress panel.
+  const applyEvent = (ev: DataSlotGenEvent) => {
+    switch (ev.type) {
+      case 'start':
+        setProgress({
+          phase: 'mapping',
+          totalQuestions: ev.totalQuestions,
+          sections: ev.groups.map((g) => ({
+            index: g.index,
+            title: g.title,
+            questionCount: g.questionCount,
+            status: 'running',
+            slots: [],
+          })),
+        });
+        break;
+      case 'group_done':
+        setProgress((p) =>
+          p
+            ? {
+                ...p,
+                sections: p.sections.map((s) =>
+                  s.index === ev.index ? { ...s, status: 'done', slots: ev.slots } : s
+                ),
+              }
+            : p
+        );
+        break;
+      case 'group_error':
+        setProgress((p) =>
+          p
+            ? {
+                ...p,
+                sections: p.sections.map((s) =>
+                  s.index === ev.index ? { ...s, status: 'error', message: ev.message } : s
+                ),
+              }
+            : p
+        );
+        break;
+      case 'merge_start':
+        setProgress((p) => (p ? { ...p, phase: 'merging', rawSlotCount: ev.rawSlotCount } : p));
+        break;
+      case 'merge_warning':
+        setProgress((p) => (p ? { ...p, mergeWarning: ev.message } : p));
+        break;
+      default:
+        break; // 'done' / 'error' are handled by the reader loop below.
+    }
+  };
+
   const generate = async () => {
     setGenerating(true);
     setError(null);
     setNotice(null);
+    setProgress(null);
     try {
-      const res = await authoringMutate<{
-        slots: GeneratedDataSlot[];
-        diagnostic?: string;
-        diagnosticMessage?: string;
-      }>('POST', API.APP.QUESTIONNAIRES.versionDataSlotsGenerate(questionnaireId, versionId), {
-        granularity,
-      });
-      if (res.data.diagnostic || res.data.slots.length === 0) {
-        setError(diagnosticToMessage(res.data.diagnostic, res.data.diagnosticMessage));
-      } else {
-        resetTo(res.data.slots.map(fromGenerated), 'draft');
+      const res = await fetch(
+        API.APP.QUESTIONNAIRES.versionDataSlotsGenerateStream(questionnaireId, versionId),
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ granularity }),
+        }
+      );
+
+      // A non-2xx (rate limit, flag off, …) returns the standard JSON error envelope, not a stream.
+      if (!res.ok || !res.body) {
+        let message: string | undefined;
+        try {
+          const body = (await res.json()) as { error?: { message?: string } };
+          message = body.error?.message;
+        } catch {
+          // Non-JSON body — fall through to the generic message.
+        }
+        setError(message ?? `Generation failed (${res.status}). Try again.`);
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let finalSlots: GeneratedDataSlot[] | null = null;
+      let streamError: string | null = null;
+
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let boundary = buffer.indexOf('\n\n');
+        while (boundary !== -1) {
+          const block = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          const parsed = parseSseBlock(block);
+          if (parsed) {
+            const ev = parsed.data as unknown as DataSlotGenEvent;
+            if (ev.type === 'done') finalSlots = ev.slots;
+            else if (ev.type === 'error') streamError = diagnosticToMessage(ev.code, ev.message);
+            else applyEvent(ev);
+          }
+          boundary = buffer.indexOf('\n\n');
+        }
+      }
+
+      if (streamError) {
+        setError(streamError);
+      } else if (finalSlots && finalSlots.length > 0) {
+        resetTo(finalSlots.map(fromGenerated), 'draft');
         setNotice(
-          `Generated ${res.data.slots.length} draft data slots — review and save to make them live.`
+          `Generated ${finalSlots.length} draft data slot${
+            finalSlots.length === 1 ? '' : 's'
+          } — review and save to make them live.`
         );
+      } else {
+        setError('Generation did not return any slots. Try again.');
       }
     } catch (err) {
       setError(err instanceof AuthoringError ? err.message : 'Could not generate data slots.');
     } finally {
       setGenerating(false);
+      setProgress(null);
     }
   };
 
@@ -301,7 +405,7 @@ export function DataSlotsReview({
         <DataSlotGranularityField value={granularity} onChange={setGranularity} disabled={busy} />
       </div>
 
-      {generating && <StatusTicker messages={DATA_SLOT_MESSAGES} />}
+      {progress && <DataSlotGenerationProgress progress={progress} />}
 
       {isDraft && drafts.length > 0 && (
         <div className="flex items-start gap-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-900/60 dark:bg-amber-950/40">

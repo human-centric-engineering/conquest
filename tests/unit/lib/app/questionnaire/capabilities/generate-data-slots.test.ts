@@ -38,8 +38,9 @@ const { runStructuredCompletion } =
   await import('@/lib/orchestration/evaluations/parse-structured');
 const { logCost } = await import('@/lib/orchestration/llm/cost-tracker');
 const { logger } = await import('@/lib/logging');
-const { AppGenerateDataSlotsCapability, classifyGenerationFailure } =
+const { AppGenerateDataSlotsCapability } =
   await import('@/lib/app/questionnaire/capabilities/generate-data-slots');
+const { classifyGenerationFailure } = await import('@/lib/app/questionnaire/data-slots');
 
 type Mock = ReturnType<typeof vi.fn>;
 

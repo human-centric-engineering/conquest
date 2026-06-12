@@ -32,6 +32,7 @@ import { GENERATE_DATA_SLOTS_FUNCTION_DEFINITION } from '@/lib/app/questionnaire
 import {
   buildDataSlotGenerationPrompt,
   buildDataSlotRetryMessage,
+  classifyGenerationFailure,
   dataSlotGranularitySchema,
   dataSlotStructureSchema,
   validateDataSlotGeneration,
@@ -77,52 +78,6 @@ function readGeneratorBinding(entityContext: CapabilityContext['entityContext'])
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
-}
-
-/**
- * Turn a raw structured-completion failure into a specific diagnostic code + a
- * human, actionable message. The route forwards both to the admin so the surface
- * says *why* it failed (truncated output vs. timeout vs. bad shape) instead of a
- * generic "generation failed".
- */
-export function classifyGenerationFailure(
-  raw: string,
-  issuePaths: string[]
-): { code: string; message: string } {
-  const lower = raw.toLowerCase();
-
-  if (lower.includes('timed out') || lower.includes('timeout') || lower.includes('abort')) {
-    return {
-      code: 'generation_timeout',
-      message:
-        'The generator timed out. Large questionnaires with detailed descriptions can exceed the ' +
-        'time limit — try a broader granularity (fewer, higher-level slots) and run it again.',
-    };
-  }
-
-  // The retry-exhausted path: empty issuePaths means the JSON itself didn't parse (usually the
-  // response was cut off mid-array); non-empty means it parsed but didn't match the schema.
-  if (lower.includes('not valid against the schema')) {
-    if (issuePaths.length === 0) {
-      return {
-        code: 'incomplete_response',
-        message:
-          'The model returned an incomplete or non-JSON response — it was likely cut off before ' +
-          'finishing. Try a broader granularity so it produces fewer, shorter slots, then retry.',
-      };
-    }
-    return {
-      code: 'invalid_response',
-      message: `The model's response didn't match the expected shape (issues at: ${issuePaths.join(
-        ', '
-      )}). Try again.`,
-    };
-  }
-
-  return {
-    code: 'generation_failed',
-    message: raw || 'Data-slot generation failed unexpectedly. Try again.',
-  };
 }
 
 export class AppGenerateDataSlotsCapability extends BaseCapability<

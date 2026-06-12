@@ -42,11 +42,20 @@ below for the draft lifecycle (generate persists it, save promotes + clears it, 
    consolidates many questions per slot; fine approaches 1:1). The prompt also demands **detailed**
    descriptions (up to 1000 chars) that carry the full intent of the question(s) a slot abstracts,
    because the slot description is the brief the runtime interviewer phrases from.
-   `POST …/versions/:vid/data-slots/generate` persists the proposal as the version's
-   pending **draft** (`AppDataSlotDraft`, one JSON row per version) so it survives the admin
-   navigating away — but the draft is **not live**: runtime, the respondent panel, and the launch
-   gate read only the saved set (`AppDataSlot`). The capability itself is still pure (returns
-   slots); it's the route that persists the draft. A fail-soft (empty) generation persists nothing.
+   The admin UI generates via the **streaming map-reduce** endpoint
+   `POST …/versions/:vid/data-slots/generate/stream` (SSE): the orchestrator
+   (`data-slots/generate-stream.ts`) groups questions by section (splitting sections over ~12
+   questions), generates slots per section **in parallel** (capped concurrency), then runs one
+   **merge** call to reconcile duplicates + guarantee full coverage. This avoids the single-call
+   truncation that large questionnaires hit, and emits progress events (`start` →
+   `group_done`/`group_error`\* → `merge_start` → `done`, see `generation-events.ts`) so the admin
+   watches slots build section by section (`DataSlotGenerationProgress`). If the merge call fails
+   it falls back to a deduped union (`merge_warning`). The non-streaming, single-shot capability
+   (`app_generate_data_slots`, `POST …/data-slots/generate`) stays for API consumers.
+   Either path persists the final set as the version's pending **draft** (`AppDataSlotDraft`, one
+   JSON row per version) so it survives the admin navigating away — but the draft is **not live**:
+   runtime, the respondent panel, and the launch gate read only the saved set (`AppDataSlot`).
+   A fail-soft (empty) generation persists nothing.
 3. The admin reviews/edits/accepts each slot, then **Save** (`PUT …/versions/:vid/data-slots`)
    replaces the version's slots (fork-safe) AND clears the pending draft in the same transaction
    (promoting the reviewed set to live). `theme` is the generator's grouping label. **Discard**

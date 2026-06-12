@@ -408,6 +408,9 @@ export const API = {
       /** Generate proposed data slots for a version (POST — persists the reviewable draft). */
       versionDataSlotsGenerate: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/data-slots/generate`,
+      /** Streaming map-reduce generation (POST → SSE: per-section progress + merge + done). */
+      versionDataSlotsGenerateStream: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/data-slots/generate/stream`,
       /** Pending generated data-slot draft for a version (DELETE — discard the proposal). */
       versionDataSlotsDraft: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/data-slots/draft`,

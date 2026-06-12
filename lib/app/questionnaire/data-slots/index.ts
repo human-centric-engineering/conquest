@@ -8,3 +8,4 @@ export * from '@/lib/app/questionnaire/data-slots/views';
 export * from '@/lib/app/questionnaire/data-slots/schemas';
 export * from '@/lib/app/questionnaire/data-slots/granularity';
 export * from '@/lib/app/questionnaire/data-slots/generation';
+export * from '@/lib/app/questionnaire/data-slots/generation-events';

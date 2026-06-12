@@ -17,6 +17,7 @@ import { describe, it, expect } from 'vitest';
 
 import {
   buildDataSlotGenerationPrompt,
+  buildDataSlotMergePrompt,
   buildDataSlotRetryMessage,
   validateDataSlotGeneration,
 } from '@/lib/app/questionnaire/data-slots/generation';
@@ -140,6 +141,56 @@ describe('buildDataSlotGenerationPrompt — granularity', () => {
     const system = systemContent(buildDataSlotGenerationPrompt(minimalStructure, 'finest'));
     expect(system).toMatch(/maximise granularity/i);
     expect(system).toMatch(/1:1 mapping/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildDataSlotMergePrompt — reconcile step
+// ---------------------------------------------------------------------------
+
+describe('buildDataSlotMergePrompt', () => {
+  const candidates = [
+    {
+      name: 'Onboarding ease',
+      description: 'How smooth setup felt.',
+      theme: 'Setup',
+      questionKeys: ['q1'],
+    },
+    { name: 'Blockers', description: 'What slowed them.', theme: 'Setup', questionKeys: ['q2'] },
+    {
+      name: 'Recommend',
+      description: 'Would they recommend.',
+      theme: 'Loyalty',
+      questionKeys: ['q3'],
+    },
+  ];
+
+  it('returns a system + user message pair', () => {
+    const messages = buildDataSlotMergePrompt(fullStructure, candidates);
+    expect(messages).toHaveLength(2);
+    expect(messages[0].role).toBe('system');
+    expect(messages[1].role).toBe('user');
+  });
+
+  it('instructs the model to reconcile/merge duplicates and cover every question', () => {
+    const system = systemContent(buildDataSlotMergePrompt(fullStructure, candidates));
+    expect(system).toMatch(/reconciling/i);
+    expect(system).toMatch(/duplicates/i);
+    expect(system).toMatch(/cover every question/i);
+    expect(system).toMatch(/full intent/i);
+  });
+
+  it('lists the candidate slots and all question keys in the user message', () => {
+    const user = userContent(buildDataSlotMergePrompt(fullStructure, candidates));
+    expect(user).toContain('Onboarding ease');
+    expect(user).toContain('Recommend');
+    expect(user).toContain('[q1]');
+    expect(user).toContain('[q3]');
+  });
+
+  it('carries the granularity guidance into the merge system prompt', () => {
+    const system = systemContent(buildDataSlotMergePrompt(fullStructure, candidates, 'broadest'));
+    expect(system).toMatch(/consolidate aggressively/i);
   });
 });
 
