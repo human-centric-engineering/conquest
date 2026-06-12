@@ -145,6 +145,32 @@ describe('buildDataSlotGenerationPrompt — granularity', () => {
 });
 
 // ---------------------------------------------------------------------------
+// buildDataSlotGenerationPrompt — target slot count
+// ---------------------------------------------------------------------------
+
+describe('buildDataSlotGenerationPrompt — target count', () => {
+  const tenQuestions: DataSlotStructureInput = {
+    questions: Array.from({ length: 10 }, (_, i) => ({ key: `q${i}`, prompt: 'p', type: 'text' })),
+  };
+  const twentyQuestions: DataSlotStructureInput = {
+    questions: Array.from({ length: 20 }, (_, i) => ({ key: `q${i}`, prompt: 'p', type: 'text' })),
+  };
+
+  it('states a slot-count target scaled to the question count (balanced 10 → 5–6)', () => {
+    const system = systemContent(buildDataSlotGenerationPrompt(tenQuestions, 'balanced'));
+    expect(system).toContain('TARGET COUNT');
+    expect(system).toMatch(/roughly 5.{1,3}6 slots/);
+  });
+
+  it('targets far fewer slots at broadest than at finest (20 questions)', () => {
+    const broad = systemContent(buildDataSlotGenerationPrompt(twentyQuestions, 'broadest'));
+    const fine = systemContent(buildDataSlotGenerationPrompt(twentyQuestions, 'finest'));
+    expect(broad).toMatch(/roughly 3.{1,3}5 slots/);
+    expect(fine).toMatch(/roughly 17.{1,3}20 slots/);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // buildDataSlotMergePrompt — reconcile step
 // ---------------------------------------------------------------------------
 
@@ -191,6 +217,13 @@ describe('buildDataSlotMergePrompt', () => {
   it('carries the granularity guidance into the merge system prompt', () => {
     const system = systemContent(buildDataSlotMergePrompt(fullStructure, candidates, 'broadest'));
     expect(system).toMatch(/consolidate aggressively/i);
+  });
+
+  it('states a global target count for the final set', () => {
+    // fullStructure has 3 questions; balanced → round(0.45*3)=1 .. round(0.55*3)=2 → "1–2".
+    const system = systemContent(buildDataSlotMergePrompt(fullStructure, candidates, 'balanced'));
+    expect(system).toContain('TARGET COUNT');
+    expect(system).toMatch(/roughly 1.{1,3}2 slots/);
   });
 });
 

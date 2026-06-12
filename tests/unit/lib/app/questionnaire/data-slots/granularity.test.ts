@@ -14,6 +14,7 @@ import {
   DEFAULT_DATA_SLOT_GRANULARITY,
   dataSlotGranularitySchema,
   granularityGuidance,
+  targetSlotRange,
 } from '@/lib/app/questionnaire/data-slots/granularity';
 
 describe('DATA_SLOT_GRANULARITY_LEVELS', () => {
@@ -32,12 +33,50 @@ describe('DATA_SLOT_GRANULARITY_LEVELS', () => {
     expect(DEFAULT_DATA_SLOT_GRANULARITY).toBe('balanced');
   });
 
-  it('gives every level a label, summary, and non-empty guidance', () => {
+  it('gives every level a label, summary, non-empty guidance, and a sane ratio band', () => {
     for (const level of DATA_SLOT_GRANULARITY_LEVELS) {
       expect(level.label.length).toBeGreaterThan(0);
       expect(level.summary.length).toBeGreaterThan(0);
       expect(level.guidance.length).toBeGreaterThan(0);
+      expect(level.ratio.min).toBeGreaterThan(0);
+      expect(level.ratio.max).toBeGreaterThanOrEqual(level.ratio.min);
+      expect(level.ratio.max).toBeLessThanOrEqual(1);
     }
+  });
+
+  it('has monotonically increasing ratios broad → fine', () => {
+    const mids = DATA_SLOT_GRANULARITY_LEVELS.map((l) => (l.ratio.min + l.ratio.max) / 2);
+    for (let i = 1; i < mids.length; i += 1) {
+      expect(mids[i]).toBeGreaterThan(mids[i - 1]);
+    }
+  });
+});
+
+describe('targetSlotRange', () => {
+  it('targets about half the question count at balanced (71 → 32–39)', () => {
+    expect(targetSlotRange('balanced', 71)).toEqual({ min: 32, max: 39 });
+  });
+
+  it('targets few slots at broadest and near-1:1 at finest (71)', () => {
+    expect(targetSlotRange('broadest', 71)).toEqual({ min: 11, max: 18 });
+    expect(targetSlotRange('finest', 71)).toEqual({ min: 60, max: 71 });
+  });
+
+  it('increases monotonically across levels for a fixed question count', () => {
+    const mid = (g: Parameters<typeof targetSlotRange>[0]) => {
+      const { min, max } = targetSlotRange(g, 71);
+      return (min + max) / 2;
+    };
+    expect(mid('broadest')).toBeLessThan(mid('broad'));
+    expect(mid('broad')).toBeLessThan(mid('balanced'));
+    expect(mid('balanced')).toBeLessThan(mid('granular'));
+    expect(mid('granular')).toBeLessThan(mid('finest'));
+  });
+
+  it('floors min at 1 and never exceeds the question count', () => {
+    expect(targetSlotRange('broadest', 2).min).toBe(1);
+    const finest = targetSlotRange('finest', 5);
+    expect(finest.max).toBeLessThanOrEqual(5);
   });
 });
 

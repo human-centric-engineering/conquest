@@ -38,8 +38,11 @@ below for the draft lifecycle (generate persists it, save promotes + clears it, 
    agent) over the version's questions → proposed slots (name + description + theme + question
    mappings). The admin picks a **granularity** first — a 5-level knob (`broadest` → `broad` →
    `balanced` (default) → `granular` → `finest`, see `data-slots/granularity.ts`) sent in the POST
-   body. It controls how many slots the generator aims for and how broad/fine each is (broad
-   consolidates many questions per slot; fine approaches 1:1). The prompt also demands **detailed**
+   body. Each level carries a **target ratio** of slots-to-questions (broadest ≈0.15–0.25 …
+   balanced ≈0.45–0.55, i.e. about half … finest ≈0.85–1.0) — `targetSlotRange()` turns that into
+   a concrete count band the prompt tells the model to hit (qualitative guidance alone drifts
+   toward 1:1). The map step gets a per-section target; the merge step gets the **global** target,
+   so it consolidates across sections to land near it. The prompt also demands **detailed**
    descriptions (up to 1000 chars) that carry the full intent of the question(s) a slot abstracts,
    because the slot description is the brief the runtime interviewer phrases from.
    The admin UI generates via the **streaming map-reduce** endpoint

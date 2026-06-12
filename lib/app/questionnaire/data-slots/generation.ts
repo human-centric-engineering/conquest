@@ -17,6 +17,7 @@ import {
 import {
   DEFAULT_DATA_SLOT_GRANULARITY,
   granularityGuidance,
+  targetSlotRange,
   type DataSlotGranularity,
 } from '@/lib/app/questionnaire/data-slots/granularity';
 
@@ -28,13 +29,17 @@ export function buildDataSlotGenerationPrompt(
   structure: DataSlotStructureInput,
   granularity: DataSlotGranularity = DEFAULT_DATA_SLOT_GRANULARITY
 ): LlmMessage[] {
+  const { min, max } = targetSlotRange(granularity, structure.questions.length);
   const system =
     'You design the DATA SLOTS for a conversational questionnaire. A data slot is a short ' +
     '(1–4 word) semantic target — a single meaningful thing we want to learn — paired with a ' +
     'DETAILED description of what it captures and why it matters. Data slots are the abstraction ' +
     'layer over the raw questions: a skilled interviewer fills them naturally in conversation, ' +
     'and filling them well answers the underlying questions.\n\n' +
-    `GRANULARITY for this set: ${granularityGuidance(granularity)}\n\n` +
+    `GRANULARITY for this set: ${granularityGuidance(granularity)}\n` +
+    `TARGET COUNT: aim for roughly ${min}–${max} slots across these ` +
+    `${structure.questions.length} question(s) — consolidate related questions to hit that range. ` +
+    'Treat it as a strong target, not a hard cap: only deviate when the content genuinely demands it.\n\n' +
     'Rules:\n' +
     '- Each slot maps to one OR MORE questions (by their key) that it meaningfully captures.\n' +
     '- Cover every question: each question key must be referenced by at least one slot.\n' +
@@ -79,14 +84,19 @@ export function buildDataSlotMergePrompt(
   candidates: { name: string; description: string; theme: string; questionKeys: string[] }[],
   granularity: DataSlotGranularity = DEFAULT_DATA_SLOT_GRANULARITY
 ): LlmMessage[] {
+  const { min, max } = targetSlotRange(granularity, structure.questions.length);
   const system =
     'You are RECONCILING data slots for a conversational questionnaire. Independent passes over ' +
     'each section proposed the candidate slots below; your job is to merge them into ONE coherent ' +
     'final set. A data slot is a short (1–4 word) semantic target with a DETAILED description.\n\n' +
-    `GRANULARITY for the final set: ${granularityGuidance(granularity)}\n\n` +
+    `GRANULARITY for the final set: ${granularityGuidance(granularity)}\n` +
+    `TARGET COUNT: the final set should contain roughly ${min}–${max} slots for the ` +
+    `${structure.questions.length} questions. The per-section candidates below are almost ` +
+    'certainly too many — merge related ones across sections to reach that range. Treat it as a ' +
+    'strong target, not a hard cap.\n\n' +
     'Rules:\n' +
-    '- Merge duplicates and near-duplicates across sections into a single slot, unioning their ' +
-    'question keys. Keep genuinely distinct slots separate.\n' +
+    '- Merge duplicates AND related slots across sections into a single slot, unioning their ' +
+    'question keys, to reach the target count. Keep genuinely distinct slots separate.\n' +
     '- Cover every question: each question key listed below must be referenced by at least one ' +
     'final slot. Add a slot if the candidates missed one.\n' +
     '- Harmonize `theme` labels so related slots share one grouping label.\n' +
