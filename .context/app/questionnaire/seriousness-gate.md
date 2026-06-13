@@ -60,12 +60,15 @@ Abandonment writes an `app_questionnaire_session_event` with `eventType: 'abando
 session-outcome analytics on that `reason` to count abuse-driven abandonments
 (`ABUSE_ABANDON_REASON` in `lib/app/questionnaire/types.ts` is the single source of truth).
 
+Both orchestrators run the gate: question mode (`runTurn`) and **data-slot mode**
+(`runDataSlotTurn`). In data-slot mode a non-serious verdict disregards both the background
+question answers and the data-slot fills for that turn.
+
 ## Not in scope / limitations
 
-- **Data-slot mode** (`runDataSlotTurn`) does not yet run the gate — it's inert there (question
-  mode is the gated path).
-- The judge piggybacks on extraction's suspicion flag; with **answer extraction off** the gate is
-  inert (no suspicion signal). A real questionnaire runs extraction.
+- The gate needs answer extraction on only to merge real answers; the judge itself runs
+  independently of the extractor's suspicion hint, so it fires even when extraction fails on an
+  abusive message.
 - Mid-stream the composer locks on the next status poll (a beat after the final message), backed
   by the 409 status gate — no separate terminal SSE frame.
 

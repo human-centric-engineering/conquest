@@ -16,6 +16,7 @@ import {
   type TurnState,
 } from '@/lib/app/questionnaire/orchestrator';
 import type { DataSlotFillIntent } from '@/lib/app/questionnaire/extraction/types';
+import { ABUSE_ABANDON_MESSAGE } from '@/lib/app/questionnaire/seriousness';
 import {
   state,
   stubInvokers,
@@ -197,5 +198,53 @@ describe('runDataSlotTurn — side effects', () => {
     if (result.response.kind === 'data_slot') expect(result.response.dataSlotId).toBe('d2');
     // The selection step was recorded.
     expect(result.toolCalls.map((c) => c.slug)).toContain(DATA_SLOT_SELECTION_TOOL_SLUG);
+  });
+});
+
+describe('runDataSlotTurn — seriousness / abuse gate', () => {
+  it('disregards a non-serious answer (both answers and data-slot fills), strikes, and warns', async () => {
+    const { invokers, calls } = stubInvokers({
+      extract: { intents: [intent({ slotKey: 'a' })], dataSlotFills: [fill('d1')] },
+      serious: { verdict: { serious: false, reason: 'hostile' } },
+    });
+
+    const result = await runDataSlotTurn(
+      dsState({
+        userMessage: 'piss off',
+        questions: [q({ id: 'a' })],
+        dataSlots: [ds({ id: 'd1', key: 'd1', theme: 'A' })],
+      }),
+      invokers
+    );
+
+    expect(calls.serious).toHaveLength(1);
+    // Neither the question answer nor the data-slot fill is kept.
+    expect(result.sideEffects.answerUpserts).toHaveLength(0);
+    expect(result.sideEffects.dataSlotFills).toHaveLength(0);
+    expect(result.abuse).toMatchObject({ flagged: true, abandon: false, newStrikeCount: 1 });
+    expect(result.events.some((e) => e.type === 'warning' && e.code === 'seriousness')).toBe(true);
+  });
+
+  it('abandons the session on the threshold strike', async () => {
+    const { invokers } = stubInvokers({
+      extract: { intents: [], dataSlotFills: [fill('d1')] },
+      serious: { verdict: { serious: false, reason: 'hostile' } },
+    });
+
+    const result = await runDataSlotTurn(
+      {
+        ...dsState({
+          userMessage: 'screw you',
+          questions: [q({ id: 'a' })],
+          dataSlots: [ds({ id: 'd1', theme: 'A' })],
+        }),
+        abuseStrikes: 3, // the next strike is the 4th → abandon
+      },
+      invokers
+    );
+
+    expect(result.abuse).toMatchObject({ flagged: true, abandon: true, newStrikeCount: 4 });
+    expect(result.response).toEqual({ kind: 'complete', text: ABUSE_ABANDON_MESSAGE });
+    expect(result.sideEffects.dataSlotFills).toHaveLength(0);
   });
 });

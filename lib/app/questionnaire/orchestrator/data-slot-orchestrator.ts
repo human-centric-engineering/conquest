@@ -22,7 +22,11 @@
  */
 
 import { EXTRACT_ANSWER_SLOTS_CAPABILITY_SLUG } from '@/lib/app/questionnaire/constants';
-import { applyIntents } from '@/lib/app/questionnaire/orchestrator/orchestrator';
+import {
+  applyIntents,
+  ASSESS_SERIOUSNESS_TOOL_SLUG,
+} from '@/lib/app/questionnaire/orchestrator/orchestrator';
+import { evaluateAbuseStrike, ABUSE_ABANDON_MESSAGE } from '@/lib/app/questionnaire/seriousness';
 import { unansweredQuestions } from '@/lib/app/questionnaire/selection/context';
 import type { ChatEvent } from '@/types/orchestration';
 import type {
@@ -169,6 +173,61 @@ export async function runDataSlotTurn(
     }
   }
 
+  // 1.5 Seriousness / abuse gate (parity with question mode). The judge runs on every answered
+  //     turn while the gate is on; a non-serious verdict DISREGARDS both this turn's question
+  //     answers AND its data-slot fills (never persisted), strikes the session, and abandons at the
+  //     configured threshold.
+  let abuse: TurnResult['abuse'];
+  if (hasMessage && state.flags.seriousnessGate && state.config.abuseThreshold > 0) {
+    const judged = await invokers.assessSeriousness(state);
+    costUsd += judged.costUsd;
+    toolCalls.push(
+      toolCall(ASSESS_SERIOUSNESS_TOOL_SLUG, judged.diagnostic === undefined, {
+        ...(judged.latencyMs !== undefined ? { latencyMs: judged.latencyMs } : {}),
+      })
+    );
+    if (judged.verdict && !judged.verdict.serious) {
+      // Disregard — neither the question answers nor the data-slot fills are kept.
+      answerUpserts.length = 0;
+      dataSlotFills = [];
+      const strike = evaluateAbuseStrike(state.abuseStrikes, state.config.abuseThreshold);
+      abuse = {
+        flagged: true,
+        newStrikeCount: strike.newStrikeCount,
+        abandon: strike.abandon,
+        reason: judged.verdict.reason,
+      };
+      if (strike.abandon) {
+        // Terminal: the route abandons the session + locks the surface. The assessment reflects
+        // the UNCHANGED background question coverage (the dropped answers were never merged).
+        const answeredAtAbandon = new Set(state.answered.map((a) => a.questionId));
+        return {
+          response: { kind: 'complete', text: strike.abandonMessage ?? ABUSE_ABANDON_MESSAGE },
+          targetedQuestionId: null,
+          sideEffects: { answerUpserts: [], answerRefinements: [], dataSlotFills: [] },
+          events,
+          toolCalls,
+          costUsd,
+          contradictions: [],
+          assessment: {
+            kind: 'not_ready',
+            coverage:
+              state.questions.length === 0 ? 1 : answeredAtAbandon.size / state.questions.length,
+            answeredCount: answeredAtAbandon.size,
+            requiredUnansweredKeys: [],
+            capReached: false,
+            unmet: ['coverage_below_threshold'],
+            rationale: 'Session abandoned by the seriousness gate.',
+          },
+          abuse,
+        };
+      }
+      // Below threshold: surface the escalating notice; the conversation re-targets below because
+      // the fills were not merged (the data slot stays unfilled).
+      events.push({ type: 'warning', code: 'seriousness', message: strike.noticeMessage });
+    }
+  }
+
   // 2. Merge — so targeting + completion see this turn's fills/answers.
   const effective = applyIntents(state, answerUpserts);
   const effectiveDataAnswered = applyFills(dataSlots, state.dataSlotAnswered ?? [], dataSlotFills);
@@ -243,5 +302,6 @@ export async function runDataSlotTurn(
     costUsd,
     contradictions: [],
     assessment,
+    ...(abuse !== undefined ? { abuse } : {}),
   };
 }
