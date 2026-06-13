@@ -165,6 +165,40 @@ function TypewriterAssistantTurn({
   );
 }
 
+/**
+ * The active assistant turn in the reveal queue: an optional "Thinking…" beat (a person
+ * composing) followed by the typewriter. Self-contained so it owns its own beat timer — once
+ * it's mounted (when the queue reaches it), a parent re-render (e.g. a new turn arriving) can't
+ * restart or skip its beat. `onDone` fires when the message has fully typed in, which the parent
+ * uses to advance the queue to the next turn.
+ */
+function RevealedAssistantTurn({
+  content,
+  beatMs,
+  onDone,
+}: {
+  content: string;
+  /** Pre-type "Thinking…" pause in ms; `0` types immediately (a normal post-answer reply). */
+  beatMs: number;
+  onDone: () => void;
+}) {
+  const [thinking, setThinking] = useState(beatMs > 0);
+  useEffect(() => {
+    if (beatMs <= 0) return;
+    const t = setTimeout(() => setThinking(false), beatMs);
+    return () => clearTimeout(t);
+  }, [beatMs]);
+
+  if (thinking) {
+    return (
+      <AssistantTurn>
+        <ThinkingIndicator />
+      </AssistantTurn>
+    );
+  }
+  return <TypewriterAssistantTurn content={content} onDone={onDone} />;
+}
+
 export function QuestionnaireChat({
   sessionId,
   accessToken,
@@ -188,41 +222,41 @@ export function QuestionnaireChat({
   const attachControls = useRef<{ clear: () => void; remove: (id: string) => void } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
-  // The number of seeded turns present at mount (the welcome greeting). Only these are typed in
-  // when `animateOpening` is set; turns that arrive later already revealed themselves live as
-  // they streamed, so re-typing them would double-animate. Captured once via a lazy initializer.
+  // The number of seeded turns present at mount (a resumed transcript's history). On a resumed
+  // session (`animateOpening` off) these render instantly; the reveal queue starts just past them.
   const [openingTurnCount] = useState(() => turns.length);
-  // When animating the opening, reveal the seeded turns ONE AT A TIME, each preceded by a
-  // "Thinking…" beat: a pause shows the indicator, then the turn types in; only after it finishes
-  // does the next one's beat begin — so the greeting and the first question never type at once.
-  // `openingRevealed` is the count of opening turns allowed to render so far (starts at 0 — even
-  // the first waits for its think beat); `openingThinking` shows the indicator during a pause.
-  // Irrelevant when `animateOpening` is off (history renders instantly).
-  const [openingRevealed, setOpeningRevealed] = useState(0);
-  const [openingThinking, setOpeningThinking] = useState(false);
-  const openingGapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => clearTimeout(openingGapTimer.current ?? undefined), []);
+  // Reveal queue: assistant turns are shown STRICTLY one at a time. `revealCursor` is the index of
+  // the turn currently being revealed — turns before it are settled (typed/instant), the turn at
+  // it is active (beat → type), turns after it stay hidden until the queue reaches them. The active
+  // turn's `onDone` advances the cursor. This serialises even the opening burst, where two
+  // assistant messages (greeting + first question) arrive with no user turn between them and would
+  // otherwise type over each other. On a resumed session, history is already settled, so the queue
+  // begins past it.
+  const [revealCursor, setRevealCursor] = useState(() => (animateOpening ? 0 : turns.length));
 
-  // Pause (showing the indicator), then reveal opening turns up to `count` and clear the pause.
-  const scheduleOpeningReveal = (count: number, delayMs: number) => {
-    clearTimeout(openingGapTimer.current ?? undefined);
-    setOpeningThinking(true);
-    openingGapTimer.current = setTimeout(() => {
-      setOpeningRevealed((cur) => Math.max(cur, count));
-      setOpeningThinking(false);
-    }, delayMs);
+  // The cursor only ever rests on an assistant turn (the one being typed). A user turn at the
+  // cursor is the respondent's own message — already on screen — so step straight over it.
+  useEffect(() => {
+    if (turns[revealCursor]?.role === 'user') setRevealCursor((c) => c + 1);
+  }, [revealCursor, turns]);
+
+  /**
+   * The pre-type "Thinking…" beat for the assistant turn at `index`. Only during the OPENING burst
+   * (animating, and no respondent message has appeared yet): ~1s before the first message, ~1.5s
+   * before each subsequent one. Zero everywhere else — ordinary replies type as soon as they land
+   * (the in-flight `streaming` indicator already covered their compose time).
+   */
+  const beatForTurn = (index: number): number => {
+    if (!animateOpening) return 0;
+    const inOpeningBurst = !turns.slice(0, index).some((t) => t.role === 'user');
+    if (!inOpeningBurst) return 0;
+    return index === 0 ? OPENING_FIRST_THINK_MS : OPENING_GAP_MS;
   };
 
-  // Kick off the opening: a "Thinking…" beat before the very first seeded message types in.
-  useEffect(() => {
-    if (!animateOpening || openingTurnCount === 0) return;
-    scheduleOpeningReveal(1, OPENING_FIRST_THINK_MS);
-  }, [animateOpening, openingTurnCount]);
-
-  // Keep the latest turn / thinking indicator in view (also as each opening beat resolves).
+  // Keep the latest turn / thinking indicator in view (also as the queue advances).
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [turns.length, streaming, openingRevealed, openingThinking]);
+  }, [turns.length, streaming, revealCursor]);
 
   // Refocus the composer when a turn finishes — the textarea is disabled while a reply streams,
   // so we put the cursor back the moment it re-enables, ready for the next answer without a click.
@@ -265,41 +299,40 @@ export function QuestionnaireChat({
           {turns.map((turn, i) => {
             if (turn.role === 'user') return <UserBubble key={i} content={turn.content} />;
 
-            const isOpeningTurn = i < openingTurnCount;
-            // A seeded opening turn types only on a fresh session (`animateOpening`) AND only once
-            // its predecessors have finished — chained one at a time so they don't type at once.
-            if (isOpeningTurn) {
-              if (!animateOpening) {
-                return (
-                  <AssistantTurn key={i}>
-                    <div className="prose prose-sm dark:prose-invert max-w-none">
-                      <Markdown>{turn.content}</Markdown>
-                    </div>
-                  </AssistantTurn>
-                );
-              }
-              if (i >= openingRevealed) return null; // not its turn yet — stays hidden
+            // Reveal queue. Turns past the cursor stay hidden until the queue reaches them, so a
+            // freshly-arrived assistant turn can't type over the one before it.
+            if (i > revealCursor) return null;
+
+            // History on a resumed session settles instantly (rendered before the queue's first
+            // active turn) — no typewriter, no beat.
+            if (i < revealCursor && !animateOpening && i < openingTurnCount) {
               return (
-                <TypewriterAssistantTurn
-                  key={i}
-                  content={turn.content}
-                  // When this finishes, begin the next opening turn's "Thinking…" beat (if any).
-                  onDone={() => {
-                    if (i + 1 < openingTurnCount) scheduleOpeningReveal(i + 2, OPENING_GAP_MS);
-                  }}
-                />
+                <AssistantTurn key={i}>
+                  <div className="prose prose-sm dark:prose-invert max-w-none">
+                    <Markdown>{turn.content}</Markdown>
+                  </div>
+                </AssistantTurn>
               );
             }
 
-            // Replies that arrived after mount always type in (one at a time, no chaining needed).
-            return <TypewriterAssistantTurn key={i} content={turn.content} />;
+            // The active turn (and already-typed ones, which re-render settled): beat → type, and
+            // advance the queue on completion. A settled turn passes beat 0 and a no-op onDone.
+            const isActive = i === revealCursor;
+            return (
+              <RevealedAssistantTurn
+                key={i}
+                content={turn.content}
+                beatMs={isActive ? beatForTurn(i) : 0}
+                onDone={isActive ? () => setRevealCursor((c) => Math.max(c, i + 1)) : () => {}}
+              />
+            );
           })}
 
           {/* Awaiting a reply — a calm "thinking" indicator. The reply then types itself in once
-              it lands as a committed turn (above), so the typing effect is consistent regardless
-              of how the backend chunks the SSE stream. The same indicator fronts each seeded
-              opening message during its pre-message beat (`openingThinking`). */}
-          {(streaming || openingThinking) && (
+              it lands as a committed turn (above). Only shown once the reveal queue has caught up
+              to every committed turn, so it never doubles with an active turn's own beat/typing
+              while earlier opening messages are still revealing. */}
+          {streaming && revealCursor >= turns.length && (
             <AssistantTurn>
               <ThinkingIndicator />
             </AssistantTurn>

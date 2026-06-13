@@ -304,10 +304,12 @@ describe('QuestionnaireChat', () => {
         timeout: 3000,
       });
 
-      // A reply lands as a committed turn (index 1, past the seeded count) — it types itself in.
+      // The respondent answers, then a reply lands — a genuine post-answer reply (a user turn
+      // precedes it), so it types straight in with no artificial opening beat.
       const next = makeReturn({
         turns: [
           { role: 'assistant', content: 'Opening greeting.' },
+          { role: 'user', content: 'My answer.' },
           { role: 'assistant', content: 'A later question.' },
         ],
       });
@@ -358,6 +360,34 @@ describe('QuestionnaireChat', () => {
       });
       // …then, after the longer inter-message beat, the second types in too.
       await waitFor(() => expect(screen.getByText('Second opening message.')).toBeInTheDocument(), {
+        timeout: 5000,
+      });
+    });
+
+    it('queues a second opening turn that ARRIVES AFTER MOUNT behind the first (no overlap)', async () => {
+      // The reported bug: only the greeting is seeded; the first question streams in moments later
+      // (a post-mount turn). It must NOT type over the still-typing greeting — the queue holds it.
+      hookReturn = makeReturn({ turns: [{ role: 'assistant', content: 'First message.' }] });
+      const { rerender } = render(
+        <QuestionnaireChat sessionId="s1" stream={hookReturn} animateOpening />
+      );
+
+      const next = makeReturn({
+        turns: [
+          { role: 'assistant', content: 'First message.' },
+          { role: 'assistant', content: 'Second message.' },
+        ],
+      });
+      rerender(<QuestionnaireChat sessionId="s1" stream={next} animateOpening />);
+
+      // Queued behind the first — not in the DOM while the first is still revealing.
+      expect(screen.queryByText('Second message.')).toBeNull();
+
+      // Both type in, in order.
+      await waitFor(() => expect(screen.getByText('First message.')).toBeInTheDocument(), {
+        timeout: 3000,
+      });
+      await waitFor(() => expect(screen.getByText('Second message.')).toBeInTheDocument(), {
         timeout: 5000,
       });
     });
