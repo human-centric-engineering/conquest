@@ -94,12 +94,12 @@ export default async function OverviewTab({ params }: PageProps) {
           </div>
         ) : isLaunched ? (
           <div className="bg-card flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4">
-            <p className="flex items-center gap-2 text-sm">
+            <div className="flex items-center gap-2 text-sm">
               <Badge variant="default">Launched</Badge>
               <span className="text-muted-foreground">
                 This version is live. Manage respondents and review results below.
               </span>
-            </p>
+            </div>
             <div className="flex gap-2">
               <Button asChild variant="outline" size="sm">
                 <Link href={`${base}/invitations`}>Invitations</Link>
@@ -128,7 +128,10 @@ export default async function OverviewTab({ params }: PageProps) {
           {flags.liveSessions && graph && isLaunched && (
             <Button asChild variant="outline" size="sm">
               <Link
-                href={graph.config.anonymousMode ? `/q/${vid}` : `/q/${vid}?preview=1`}
+                // Always `?preview=1` (anonymous versions included): boots via the admin-gated
+                // `/preview` route, which marks the run `isPreview` (kept out of analytics) and
+                // gives the respondent surface the signal it needs to show an "Exit preview" exit.
+                href={`/q/${vid}?preview=1`}
                 target="_blank"
                 rel="noopener noreferrer"
               >

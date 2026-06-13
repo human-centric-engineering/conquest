@@ -53,6 +53,10 @@ vi.mock('@/lib/app/questionnaire/chat/anonymity', () => ({
   resolveAnonymousForVersion: vi.fn(),
 }));
 
+vi.mock('@/lib/app/questionnaire/chat/preview-nav', () => ({
+  resolveAdminPreviewExitHref: vi.fn(),
+}));
+
 /**
  * Stub AnonymousSessionBoot — exposes all props via data-* attributes so tests
  * can assert on what the page passes without running client-side bootstrap logic.
@@ -101,6 +105,7 @@ import {
 } from '@/lib/app/questionnaire/feature-flag';
 import { resolveThemeForVersion } from '@/lib/app/questionnaire/chat/theme';
 import { resolveAnonymousForVersion } from '@/lib/app/questionnaire/chat/anonymity';
+import { resolveAdminPreviewExitHref } from '@/lib/app/questionnaire/chat/preview-nav';
 import type { ResolvedTheme } from '@/lib/app/questionnaire/theming';
 import type React from 'react';
 
@@ -141,6 +146,9 @@ describe('PublicQuestionnairePage', () => {
     vi.mocked(isAttachmentInputEnabled).mockResolvedValue(false);
     vi.mocked(resolveThemeForVersion).mockResolvedValue(MOCK_THEME);
     vi.mocked(resolveAnonymousForVersion).mockResolvedValue(false);
+    vi.mocked(resolveAdminPreviewExitHref).mockResolvedValue(
+      '/admin/questionnaires/q_abc/v/ver_abc123'
+    );
   });
 
   // -------------------------------------------------------------------------
@@ -355,6 +363,49 @@ describe('PublicQuestionnairePage', () => {
       render(Component);
 
       expect(screen.getByTestId('anonymous-session-boot')).toHaveAttribute('data-preview', 'false');
+    });
+
+    it('renders an "Exit preview" link to the admin workspace in preview mode', async () => {
+      vi.mocked(resolveAdminPreviewExitHref).mockResolvedValue(
+        '/admin/questionnaires/q_xyz/v/ver_abc123'
+      );
+
+      const Component = await PublicQuestionnairePage({
+        params: makeParams(),
+        searchParams: makeSearchParams('1'),
+      });
+      render(Component);
+
+      // Resolved with the version from params.
+      expect(resolveAdminPreviewExitHref).toHaveBeenCalledWith(VERSION_ID);
+      const exit = screen.getByRole('link', { name: /exit preview/i });
+      expect(exit).toHaveAttribute('href', '/admin/questionnaires/q_xyz/v/ver_abc123');
+    });
+
+    it('does not resolve an exit href or render the banner outside preview mode', async () => {
+      const Component = await PublicQuestionnairePage({
+        params: makeParams(),
+        searchParams: makeSearchParams(),
+      });
+      render(Component);
+
+      // The expensive lookup is skipped entirely for real respondents.
+      expect(resolveAdminPreviewExitHref).not.toHaveBeenCalled();
+      expect(screen.queryByRole('link', { name: /exit preview/i })).not.toBeInTheDocument();
+    });
+
+    it('omits the banner when the exit href cannot be resolved (version gone)', async () => {
+      vi.mocked(resolveAdminPreviewExitHref).mockResolvedValue(null);
+
+      const Component = await PublicQuestionnairePage({
+        params: makeParams(),
+        searchParams: makeSearchParams('1'),
+      });
+      render(Component);
+
+      // Still a preview run, but no dangling/broken exit control.
+      expect(screen.getByTestId('anonymous-session-boot')).toHaveAttribute('data-preview', 'true');
+      expect(screen.queryByRole('link', { name: /exit preview/i })).not.toBeInTheDocument();
     });
   });
 

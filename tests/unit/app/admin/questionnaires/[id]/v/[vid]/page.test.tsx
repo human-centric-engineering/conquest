@@ -258,16 +258,18 @@ describe('OverviewTab', () => {
   });
 
   describe('Preview as respondent', () => {
-    it('links to the real /q/<vid> surface when launched + live-sessions on + anonymous mode', async () => {
+    it('links to the admin preview (?preview=1) when launched + live-sessions on, anonymous mode', async () => {
+      // Anonymous versions preview through ?preview=1 too — the admin-gated /preview route marks
+      // the run isPreview (kept out of analytics) and lets the surface show an "Exit preview" exit.
       workspaceDataMock.getVersionGraphCached.mockResolvedValue(makeGraph({ anonymousMode: true }));
       render(await renderPage());
       const link = screen.getByRole('link', { name: /preview as respondent/i });
-      expect(link).toHaveAttribute('href', '/q/ver-1');
+      expect(link).toHaveAttribute('href', '/q/ver-1?preview=1');
       expect(link).toHaveAttribute('target', '_blank');
       expect(link).toHaveAttribute('rel', 'noopener noreferrer');
     });
 
-    it('links to the admin preview (?preview=1) when launched + live-sessions on + anonymous mode off', async () => {
+    it('links to the admin preview (?preview=1) when launched + live-sessions on, anonymous mode off', async () => {
       workspaceDataMock.getVersionGraphCached.mockResolvedValue(
         makeGraph({ anonymousMode: false })
       );
