@@ -11,6 +11,7 @@
  * @see components/app/questionnaire/session-workspace.tsx
  */
 
+import type { ReactNode } from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 
@@ -53,7 +54,15 @@ vi.mock('@/components/app/questionnaire/chat/questionnaire-chat', () => ({
 // Lifecycle-bar stub surfaces the Pause/Resume handlers as buttons so the test can verify
 // the workspace wires them to the hook's actions.
 vi.mock('@/components/app/questionnaire/lifecycle/session-lifecycle-bar', () => ({
-  SessionLifecycleBar: ({ onPause, onResume }: { onPause: () => void; onResume: () => void }) => (
+  SessionLifecycleBar: ({
+    onPause,
+    onResume,
+    trailing,
+  }: {
+    onPause: () => void;
+    onResume: () => void;
+    trailing?: ReactNode;
+  }) => (
     <div data-testid="lifecycle-bar">
       <button type="button" onClick={onPause}>
         bar-pause
@@ -61,6 +70,8 @@ vi.mock('@/components/app/questionnaire/lifecycle/session-lifecycle-bar', () => 
       <button type="button" onClick={onResume}>
         bar-resume
       </button>
+      {/* The mode toggle is passed here as `trailing` — render it so the test can drive it. */}
+      {trailing}
     </div>
   ),
 }));
@@ -374,23 +385,30 @@ describe('SessionWorkspace', () => {
       expect(kickoff).not.toHaveBeenCalled();
     });
 
-    it('both mode shows the toggle, defaults to chat, and switches surfaces', () => {
+    it('both mode mounts BOTH surfaces (carousel) with a toggle defaulting to chat', () => {
       render(<SessionWorkspace sessionId="s1" presentationMode="both" />);
-      // Toggle present; chat is the default surface.
+      // Toggle present and both surfaces are mounted simultaneously (they slide, not mount/unmount).
       const tabs = screen.getAllByRole('tab');
       expect(tabs).toHaveLength(2);
       expect(screen.getByTestId('chat')).toBeInTheDocument();
-      expect(screen.queryByTestId('form')).not.toBeInTheDocument();
-
-      // Switch to form → form renders and the hook is asked to re-seed from the server.
-      fireEvent.click(screen.getByRole('tab', { name: 'Form' }));
       expect(screen.getByTestId('form')).toBeInTheDocument();
-      expect(screen.queryByTestId('chat')).not.toBeInTheDocument();
-      expect(formRefresh).toHaveBeenCalledTimes(1);
+      // Chat is the selected tab by default.
+      expect(screen.getByRole('tab', { name: 'Chat' })).toHaveAttribute('aria-selected', 'true');
+      expect(screen.getByRole('tab', { name: 'Form' })).toHaveAttribute('aria-selected', 'false');
+    });
 
-      // Switch back to chat → panel refetches so it reflects any form edits.
+    it('toggling to Form selects it and re-seeds the form from the server', () => {
+      render(<SessionWorkspace sessionId="s1" presentationMode="both" />);
+      fireEvent.click(screen.getByRole('tab', { name: 'Form' }));
+      expect(screen.getByRole('tab', { name: 'Form' })).toHaveAttribute('aria-selected', 'true');
+      expect(formRefresh).toHaveBeenCalledTimes(1);
+    });
+
+    it('toggling back to Chat refetches the panel so it reflects form edits', () => {
+      render(<SessionWorkspace sessionId="s1" presentationMode="both" />);
+      fireEvent.click(screen.getByRole('tab', { name: 'Form' }));
       fireEvent.click(screen.getByRole('tab', { name: 'Chat' }));
-      expect(screen.getByTestId('chat')).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: 'Chat' })).toHaveAttribute('aria-selected', 'true');
       expect(refetch).toHaveBeenCalled();
     });
   });

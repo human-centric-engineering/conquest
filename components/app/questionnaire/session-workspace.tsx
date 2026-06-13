@@ -23,8 +23,6 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { cn } from '@/lib/utils';
-import { Button } from '@/components/ui/button';
 import { useQuestionnaireSessionStream } from '@/lib/hooks/use-questionnaire-session-stream';
 import { useAnswerPanel } from '@/lib/hooks/use-answer-panel';
 import { useFormAnswers } from '@/lib/hooks/use-form-answers';
@@ -32,6 +30,7 @@ import { useSessionLifecycle } from '@/lib/hooks/use-session-lifecycle';
 import { QuestionnaireChat } from '@/components/app/questionnaire/chat/questionnaire-chat';
 import { AnswerSlotPanel } from '@/components/app/questionnaire/panel/answer-slot-panel';
 import { QuestionnaireForm } from '@/components/app/questionnaire/form/questionnaire-form';
+import { ModeToggle } from '@/components/app/questionnaire/mode-toggle';
 import { SessionLifecycleBar } from '@/components/app/questionnaire/lifecycle/session-lifecycle-bar';
 import { CompletionOffer } from '@/components/app/questionnaire/lifecycle/completion-offer';
 import { SessionComplete } from '@/components/app/questionnaire/lifecycle/session-complete';
@@ -196,7 +195,7 @@ export function SessionWorkspace({
     stream.status === 'expired';
 
   const chatSurface = (
-    <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[1fr_22rem] xl:grid-cols-[1fr_26rem]">
+    <div className="grid h-full min-h-0 gap-4 lg:grid-cols-[1fr_22rem] xl:grid-cols-[1fr_26rem]">
       <div className="flex min-h-0 flex-col gap-3">
         {lifecycle.canSubmit && (
           <CompletionOffer onSubmit={() => void lifecycle.submit()} busy={lifecycle.busy} />
@@ -224,7 +223,7 @@ export function SessionWorkspace({
   );
 
   const formSurface = (
-    <div className="flex min-h-0 flex-1 flex-col gap-3">
+    <div className="flex h-full min-h-0 flex-col gap-3">
       {lifecycle.canSubmit && (
         <CompletionOffer onSubmit={() => void lifecycle.submit()} busy={lifecycle.busy} />
       )}
@@ -243,6 +242,8 @@ export function SessionWorkspace({
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
+      {/* The chat ↔ form toggle rides the lifecycle strip (no dedicated row) and is always
+          visible in "both" mode, so the form escape-hatch reads as ever-present. */}
       <SessionLifecycleBar
         view={lifecycle.view}
         paused={stream.status === 'not_active'}
@@ -252,41 +253,44 @@ export function SessionWorkspace({
         canResume={lifecycle.canResume}
         onPause={() => void lifecycle.pause()}
         onResume={() => void lifecycle.resume()}
+        trailing={
+          presentationMode === 'both' ? (
+            <ModeToggle
+              value={activeView}
+              onChange={(v) => (v === 'form' ? showFormView() : showChatView())}
+            />
+          ) : undefined
+        }
       />
 
-      {/* "both" mode: a segmented chat ↔ form toggle. */}
-      {presentationMode === 'both' && (
-        <div
-          role="tablist"
-          aria-label="Completion mode"
-          className="bg-muted inline-flex w-fit gap-1 self-center rounded-md p-0.5"
-        >
-          <Button
-            type="button"
-            role="tab"
-            aria-selected={activeView === 'chat'}
-            size="sm"
-            variant={activeView === 'chat' ? 'default' : 'ghost'}
-            onClick={showChatView}
-            className={cn(activeView !== 'chat' && 'text-muted-foreground')}
+      {presentationMode === 'both' ? (
+        // Carousel: both surfaces live in one track that slides between them on toggle.
+        <div className="relative min-h-0 flex-1 overflow-hidden">
+          <div
+            className="flex h-full w-[200%] transition-transform duration-300 ease-out motion-reduce:transition-none"
+            style={{ transform: activeView === 'form' ? 'translateX(-50%)' : 'translateX(0)' }}
           >
-            Chat
-          </Button>
-          <Button
-            type="button"
-            role="tab"
-            aria-selected={activeView === 'form'}
-            size="sm"
-            variant={activeView === 'form' ? 'default' : 'ghost'}
-            onClick={showFormView}
-            className={cn(activeView !== 'form' && 'text-muted-foreground')}
-          >
-            Form
-          </Button>
+            <div
+              role="tabpanel"
+              aria-label="Chat"
+              className="h-full min-h-0 w-1/2 shrink-0 overflow-hidden"
+              inert={activeView !== 'chat'}
+            >
+              {chatSurface}
+            </div>
+            <div
+              role="tabpanel"
+              aria-label="Form"
+              className="h-full min-h-0 w-1/2 shrink-0 overflow-hidden"
+              inert={activeView !== 'form'}
+            >
+              {formSurface}
+            </div>
+          </div>
         </div>
+      ) : (
+        <div className="min-h-0 flex-1">{showForm ? formSurface : chatSurface}</div>
       )}
-
-      {showForm && (!showChat || activeView === 'form') ? formSurface : chatSurface}
     </div>
   );
 }

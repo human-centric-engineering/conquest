@@ -51,6 +51,7 @@ vi.mock('@/lib/app/questionnaire/chat/theme', () => ({
 
 vi.mock('@/lib/app/questionnaire/chat/anonymity', () => ({
   resolveAnonymousForVersion: vi.fn(),
+  resolvePresentationModeForVersion: vi.fn(),
 }));
 
 vi.mock('@/lib/app/questionnaire/chat/preview-nav', () => ({
@@ -104,7 +105,10 @@ import {
   isVoiceInputEnabled,
 } from '@/lib/app/questionnaire/feature-flag';
 import { resolveThemeForVersion } from '@/lib/app/questionnaire/chat/theme';
-import { resolveAnonymousForVersion } from '@/lib/app/questionnaire/chat/anonymity';
+import {
+  resolveAnonymousForVersion,
+  resolvePresentationModeForVersion,
+} from '@/lib/app/questionnaire/chat/anonymity';
 import { resolveAdminPreviewExitHref } from '@/lib/app/questionnaire/chat/preview-nav';
 import type { ResolvedTheme } from '@/lib/app/questionnaire/theming';
 import type React from 'react';
@@ -146,6 +150,7 @@ describe('PublicQuestionnairePage', () => {
     vi.mocked(isAttachmentInputEnabled).mockResolvedValue(false);
     vi.mocked(resolveThemeForVersion).mockResolvedValue(MOCK_THEME);
     vi.mocked(resolveAnonymousForVersion).mockResolvedValue(false);
+    vi.mocked(resolvePresentationModeForVersion).mockResolvedValue('chat');
     vi.mocked(resolveAdminPreviewExitHref).mockResolvedValue(
       '/admin/questionnaires/q_abc/v/ver_abc123'
     );
@@ -378,7 +383,7 @@ describe('PublicQuestionnairePage', () => {
 
       // Resolved with the version from params.
       expect(resolveAdminPreviewExitHref).toHaveBeenCalledWith(VERSION_ID);
-      const exit = screen.getByRole('link', { name: /exit preview/i });
+      const exit = screen.getByRole('link', { name: /exit/i });
       expect(exit).toHaveAttribute('href', '/admin/questionnaires/q_xyz/v/ver_abc123');
     });
 
@@ -391,7 +396,7 @@ describe('PublicQuestionnairePage', () => {
 
       // The expensive lookup is skipped entirely for real respondents.
       expect(resolveAdminPreviewExitHref).not.toHaveBeenCalled();
-      expect(screen.queryByRole('link', { name: /exit preview/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: /exit/i })).not.toBeInTheDocument();
     });
 
     it('omits the banner when the exit href cannot be resolved (version gone)', async () => {
@@ -405,7 +410,7 @@ describe('PublicQuestionnairePage', () => {
 
       // Still a preview run, but no dangling/broken exit control.
       expect(screen.getByTestId('anonymous-session-boot')).toHaveAttribute('data-preview', 'true');
-      expect(screen.queryByRole('link', { name: /exit preview/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: /exit/i })).not.toBeInTheDocument();
     });
   });
 

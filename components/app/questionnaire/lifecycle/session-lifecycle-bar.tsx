@@ -13,6 +13,7 @@
  * with platform-default fallbacks.
  */
 
+import type { ReactNode } from 'react';
 import { PauseCircle, PlayCircle, ShieldCheck, Hourglass, AlertTriangle } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
@@ -31,6 +32,12 @@ export interface SessionLifecycleBarProps {
   canResume: boolean;
   onPause: () => void;
   onResume: () => void;
+  /**
+   * Right-aligned control rendered on the strip line (e.g. the chat ↔ form mode toggle). When
+   * present the strip always renders, even before the status view loads, so the control is
+   * available immediately and costs no extra vertical space.
+   */
+  trailing?: ReactNode;
   className?: string;
 }
 
@@ -43,6 +50,7 @@ export function SessionLifecycleBar({
   canResume,
   onPause,
   onResume,
+  trailing,
   className,
 }: SessionLifecycleBarProps) {
   const anonymous = view?.anonymous ?? false;
@@ -55,7 +63,13 @@ export function SessionLifecycleBar({
   // the affordance strip below it stays conditional, so a plain active session shows
   // just the progress bar.
   const showProgress = view !== null;
-  const hasStrip = anonymous || showCostHint || showResume || showPause || actionError !== null;
+  const hasStrip =
+    anonymous ||
+    showCostHint ||
+    showResume ||
+    showPause ||
+    actionError !== null ||
+    trailing != null;
   if (!showProgress && !hasStrip) return null;
 
   return (
@@ -113,6 +127,7 @@ export function SessionLifecycleBar({
                 Pause
               </Button>
             )}
+            {trailing}
           </span>
         </div>
       )}
