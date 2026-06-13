@@ -37,6 +37,15 @@ export interface DemoClientView {
   logoUrl: string | null;
   /** Branded invitation intro line, or null for the Sunrise default copy. */
   welcomeCopy: string | null;
+  // DEMO-ONLY (F7.1+): respondent-session chrome. All optional; null/false = no band.
+  /** Deep brand "chrome" colour (hex) — session header band + default logo backdrop. */
+  surfaceColor: string | null;
+  /** CTA gradient end colour (hex); null = solid ctaColor. */
+  ctaColorEnd: string | null;
+  /** Colour painted behind the logo (hex); null falls back to surfaceColor when enabled. */
+  logoBackgroundColor: string | null;
+  /** Whether to paint the logo-background colour behind the logo. */
+  logoBackgroundEnabled: boolean;
   /** How many questionnaires are attributed to this client (drives the delete guard). */
   questionnaireCount: number;
   createdAt: string;

@@ -317,8 +317,15 @@ export function useQuestionnaireSessionStream(
           onTurnSettledRef.current?.();
         }
       } catch (err) {
-        // Aborted (unmount / navigation) is expected — leave state alone.
-        if (err instanceof DOMException && err.name === 'AbortError') return;
+        // Aborted: a genuine unmount / navigation, or React 19 StrictMode's dev double-invoke
+        // (its effect-cleanup aborts the in-flight kickoff). Recover `status` to idle — unless
+        // a newer turn already took over — so the composer is never stranded in a phantom
+        // `streaming` state (which would leave it permanently disabled) and a proactive kickoff
+        // can re-fire on the remount. On a real unmount this setState is a harmless no-op.
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          if (abortRef.current === controller) setStatus('idle');
+          return;
+        }
         setStatus('error');
         setError({
           code: 'NETWORK_ERROR',

@@ -107,6 +107,9 @@ const MOCK_THEME: ResolvedTheme = {
   accentColor: '#5469d4',
   logoUrl: null,
   welcomeCopy: 'Welcome to our survey — it only takes a few minutes.',
+  surfaceColor: null,
+  ctaColorEnd: null,
+  logoBackgroundColor: null,
 };
 
 function makeParams(versionId: string = VERSION_ID) {

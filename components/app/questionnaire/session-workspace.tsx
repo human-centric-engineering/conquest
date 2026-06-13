@@ -101,17 +101,22 @@ export function SessionWorkspace({
     applyStatus: stream.applyStatus,
   });
 
-  // Proactive opening: fire the kickoff turn exactly once on a fresh session so the agent
-  // streams the first question without the respondent typing. The ref guards against React
-  // 19 StrictMode's double-invoke (which would otherwise mint two kickoff turns) and re-runs
-  // from `kickoff`'s identity churning as status flips to `streaming`.
-  const kickedOffRef = useRef(false);
+  // Proactive opening: stream the first question on a fresh session so the agent opens without
+  // the respondent typing. State-based guard (not a one-shot ref): fire only while the session
+  // is settled (`idle`) and just the greeting turn is present. `streamTurn` flips status to
+  // `streaming` synchronously, so the next render's guard blocks a duplicate; once the first
+  // question arrives (turns grows past the greeting) it stops. This self-heals React 19
+  // StrictMode's dev double-invoke — whose effect-cleanup aborts the first kickoff, after which
+  // the hook recovers status to `idle` with no question — by simply firing again on the remount.
   const kickoff = stream.kickoff;
+  const streamStatus = stream.status;
+  const turnCount = stream.turns?.length ?? 0;
   useEffect(() => {
-    if (!autoStart || kickedOffRef.current) return;
-    kickedOffRef.current = true;
+    if (!autoStart) return;
+    if (streamStatus !== 'idle') return;
+    if (turnCount > 1) return;
     void kickoff();
-  }, [autoStart, kickoff]);
+  }, [autoStart, kickoff, streamStatus, turnCount]);
 
   // Keep the settle targets current without touching refs during render. The stream calls
   // `onTurnSettled` (and thus reads these) only after a turn settles — well after this effect.

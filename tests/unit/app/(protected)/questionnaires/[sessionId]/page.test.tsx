@@ -194,6 +194,9 @@ const MOCK_THEME: ResolvedTheme = {
   logoUrl: null,
   welcomeCopy:
     "It's a short conversation — answer in your own words and we'll take care of the rest.",
+  surfaceColor: null,
+  ctaColorEnd: null,
+  logoBackgroundColor: null,
 };
 
 /** Build a minimal DB row for the session. Defaults to owned + active + no prior answers. */

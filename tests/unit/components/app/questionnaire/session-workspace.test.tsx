@@ -175,10 +175,39 @@ describe('SessionWorkspace', () => {
     lifecycleHook.mockReturnValue(lifecycleReturn());
 
     const { rerender } = render(<SessionWorkspace sessionId="s1" autoStart />);
-    // A re-render must NOT fire a second kickoff (the ref guard holds across renders).
+    // A re-render with unchanged state must NOT fire a second kickoff (the effect deps —
+    // status + turn count — are stable, so it does not re-run).
     rerender(<SessionWorkspace sessionId="s1" autoStart />);
 
     expect(kickoff).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-fires the kickoff after a StrictMode abort (idle again with no question), then stops once a question arrives', () => {
+    const greeting = [{ role: 'assistant', content: 'Welcome' }];
+    const withQuestion = [...greeting, { role: 'assistant', content: 'Q1?' }];
+    const base = { canSend: true, sendMessage, kickoff, applyStatus };
+    panelHook.mockReturnValue({ view: null, loading: false, error: false, refetch });
+    lifecycleHook.mockReturnValue(lifecycleReturn());
+
+    // 1) Fresh + idle + only the greeting → fire the opening kickoff.
+    streamHook.mockReturnValue({ ...base, status: 'idle', turns: greeting });
+    const { rerender } = render(<SessionWorkspace sessionId="s1" autoStart />);
+    expect(kickoff).toHaveBeenCalledTimes(1);
+
+    // 2) Kickoff in flight (streaming) → no duplicate.
+    streamHook.mockReturnValue({ ...base, status: 'streaming', turns: greeting });
+    rerender(<SessionWorkspace sessionId="s1" autoStart />);
+    expect(kickoff).toHaveBeenCalledTimes(1);
+
+    // 3) StrictMode aborted it: status recovered to idle, still only the greeting → re-fire.
+    streamHook.mockReturnValue({ ...base, status: 'idle', turns: greeting });
+    rerender(<SessionWorkspace sessionId="s1" autoStart />);
+    expect(kickoff).toHaveBeenCalledTimes(2);
+
+    // 4) The first question landed (turns grew past the greeting) → never fire again.
+    streamHook.mockReturnValue({ ...base, status: 'idle', turns: withQuestion });
+    rerender(<SessionWorkspace sessionId="s1" autoStart />);
+    expect(kickoff).toHaveBeenCalledTimes(2);
   });
 
   it('threads the session id and access token into all three hooks', () => {

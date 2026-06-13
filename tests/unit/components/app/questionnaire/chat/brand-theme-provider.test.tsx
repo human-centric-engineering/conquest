@@ -15,6 +15,9 @@ const BASE: ResolvedTheme = {
   accentColor: '#445566',
   logoUrl: null,
   welcomeCopy: 'hello',
+  surfaceColor: null,
+  ctaColorEnd: null,
+  logoBackgroundColor: null,
 };
 
 describe('BrandThemeProvider', () => {

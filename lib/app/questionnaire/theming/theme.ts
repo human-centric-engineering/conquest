@@ -1,9 +1,11 @@
 /**
  * DEMO-ONLY (F3.4): the demo-client theming module.
  *
- * A demo client carries four nullable theme columns (ctaColor, accentColor, logoUrl,
- * welcomeCopy). `resolveTheme()` turns that partial, possibly-null brand into a
- * fully-populated {@link ResolvedTheme} by filling each gap with the Sunrise default
+ * A demo client carries a handful of nullable theme columns (ctaColor, accentColor,
+ * logoUrl, welcomeCopy plus the F7.1+ chrome set: surfaceColor, ctaColorEnd,
+ * logoBackgroundColor, logoBackgroundEnabled). `resolveTheme()` turns that partial,
+ * possibly-null brand into a fully-populated {@link ResolvedTheme} by filling each gap
+ * with the Sunrise default
  * — so an unthemed (or absent) client renders exactly as the platform always has.
  * `themeToCssVariables()` projects a resolved theme into the CSS custom properties
  * the F7.1 user UI applies; the invitation email (F3.4's renderer) reads the resolved
@@ -31,6 +33,27 @@ export interface DemoClientTheme {
   logoUrl: string | null;
   /** Branded invitation intro line, or null for the Sunrise default copy. */
   welcomeCopy: string | null;
+  // The F7.1+ chrome columns are OPTIONAL on this raw contract (the original four are
+  // required): they landed later, and `resolveTheme` reads them defensively (`?? null` /
+  // `?? false`). An absent key therefore resolves identically to an explicit null — so a
+  // DB select, a fork, or a test can omit them and still produce a valid theme.
+  /**
+   * Deep brand "chrome" colour (hex) — the respondent session's header band and the
+   * default backdrop the logo sits on. Null/absent = no branded band (plain chrome).
+   */
+  surfaceColor?: string | null;
+  /**
+   * CTA gradient *end* colour (hex). When set, the CTA renders as a `ctaColor →
+   * ctaColorEnd` gradient (a brand pill); null/absent = a solid `ctaColor`.
+   */
+  ctaColorEnd?: string | null;
+  /**
+   * Colour painted behind the logo (hex) when {@link logoBackgroundEnabled}. Null falls
+   * back to `surfaceColor` — many logos are drawn for one specific brand backdrop.
+   */
+  logoBackgroundColor?: string | null;
+  /** The admin's "apply this colour as the logo background" toggle. */
+  logoBackgroundEnabled?: boolean | null;
 }
 
 /**
@@ -43,6 +66,16 @@ export interface ResolvedTheme {
   accentColor: string;
   logoUrl: string | null;
   welcomeCopy: string;
+  /** Brand header-band colour, or null when the client sets no surface (plain chrome). */
+  surfaceColor: string | null;
+  /** CTA gradient end colour, or null for a solid `ctaColor`. */
+  ctaColorEnd: string | null;
+  /**
+   * The colour to paint behind the logo, or null for "no backdrop". Already resolved:
+   * null whenever the backdrop is off; otherwise `logoBackgroundColor` (falling back to
+   * `surfaceColor`). Renderers paint this directly without re-deriving the fallback.
+   */
+  logoBackgroundColor: string | null;
 }
 
 /**
@@ -64,11 +97,21 @@ export const SUNRISE_THEME_DEFAULTS = {
  * identically to the pre-F3.4 plain email.
  */
 export function resolveTheme(theme: DemoClientTheme | null): ResolvedTheme {
+  const surfaceColor = theme?.surfaceColor ?? null;
+  // Resolve the logo backdrop once: null whenever the toggle is off, otherwise the
+  // explicit logoBackgroundColor falling back to the surface colour. Renderers paint
+  // the result directly — they never re-derive the fallback or read the toggle.
+  const logoBackgroundColor = theme?.logoBackgroundEnabled
+    ? (theme.logoBackgroundColor ?? surfaceColor)
+    : null;
   return {
     ctaColor: theme?.ctaColor ?? SUNRISE_THEME_DEFAULTS.ctaColor,
     accentColor: theme?.accentColor ?? SUNRISE_THEME_DEFAULTS.accentColor,
     logoUrl: theme?.logoUrl ?? null,
     welcomeCopy: theme?.welcomeCopy ?? SUNRISE_THEME_DEFAULTS.welcomeCopy,
+    surfaceColor,
+    ctaColorEnd: theme?.ctaColorEnd ?? null,
+    logoBackgroundColor,
   };
 }
 
@@ -88,7 +131,19 @@ export function themeToCssVariables(theme: ResolvedTheme): Record<string, string
   const vars: Record<string, string> = {
     '--app-cta-color': theme.ctaColor,
     '--app-accent-color': theme.accentColor,
+    // A single paint value the CTA can drop into `background`: a linear gradient when an
+    // end colour is set, otherwise the solid CTA colour. Keeping the branch here means
+    // the renderer is just `background: var(--app-cta-gradient)` with no conditionals.
+    '--app-cta-gradient': theme.ctaColorEnd
+      ? `linear-gradient(135deg, ${theme.ctaColor}, ${theme.ctaColorEnd})`
+      : theme.ctaColor,
   };
+  if (theme.surfaceColor) {
+    vars['--app-surface-color'] = theme.surfaceColor;
+  }
+  if (theme.logoBackgroundColor) {
+    vars['--app-logo-bg'] = theme.logoBackgroundColor;
+  }
   if (theme.logoUrl) {
     // CSS string escape: backslash-escape `"`, `\`, and newlines, then wrap in quotes
     // so the URL can't terminate the url() context.

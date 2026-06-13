@@ -379,6 +379,16 @@ model AppDemoClient {
   logoUrl     String? // absolute https URL of the client logo shown in the email header
   welcomeCopy String? // branded intro line for the invitation email body
 
+  // DEMO-ONLY (F7.1+): richer brand chrome for the respondent session. All optional —
+  // each null/false leaves the surface looking as it did before. These let a brand be
+  // *suggested* (a deep "surface" header band, a gradient CTA, a coloured backdrop the
+  // logo was designed to sit on) while staying generic — any client can arrange them
+  // differently. Resolved by resolveTheme(); see lib/app/questionnaire/theming.
+  surfaceColor          String?  // deep brand "chrome" colour (hex); session header band + default logo backdrop
+  ctaColorEnd           String?  // optional CTA gradient end colour (hex); set → CTA renders ctaColor→ctaColorEnd, null → solid ctaColor
+  logoBackgroundColor   String?  // colour painted behind the logo (hex); null falls back to surfaceColor when the backdrop is enabled
+  logoBackgroundEnabled Boolean  @default(false) // "apply this colour as the logo background" — the admin toggle
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

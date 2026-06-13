@@ -29,10 +29,18 @@ const DEMO_CLIENT = {
   isActive: true,
   // Brand snapshot the invitation email + F7.1 chat surface resolve. Valid hex /
   // absolute-https so the themed paths are visibly exercised, not defaulted away.
-  ctaColor: '#2563eb',
-  accentColor: '#0ea5e9',
-  logoUrl: 'https://dummyimage.com/200x48/2563eb/ffffff&text=Northwind',
+  // A distinct navy / blue / cyan / sky logistics palette — every theme colour is a
+  // different hex so the demo exercises the full vocabulary (no field reuses another).
+  ctaColor: '#2563eb', // blue CTA start
+  accentColor: '#38bdf8', // sky accent (dots, user-bubble tint, progress)
+  logoUrl: 'https://dummyimage.com/200x48/0b1f3a/ffffff&text=Northwind',
   welcomeCopy: 'Thanks for trialing Northwind — a few quick questions about your onboarding.',
+  // F7.1+ chrome: a deep surface band, a gradient CTA (blue → cyan), and the logo on its
+  // dark backdrop — so the seeded demo exercises every themed path the session renders.
+  surfaceColor: '#0b1f3a', // deep navy header band
+  ctaColorEnd: '#22d3ee', // cyan gradient end (distinct from the accent)
+  logoBackgroundColor: '#0b1f3a', // logo sits on the navy backdrop
+  logoBackgroundEnabled: true,
 } as const;
 
 // DEMO-ONLY: stable idempotency marker. The seed finds-and-replaces the questionnaire
@@ -189,6 +197,10 @@ const unit: SeedUnit = {
           accentColor: DEMO_CLIENT.accentColor,
           logoUrl: DEMO_CLIENT.logoUrl,
           welcomeCopy: DEMO_CLIENT.welcomeCopy,
+          surfaceColor: DEMO_CLIENT.surfaceColor,
+          ctaColorEnd: DEMO_CLIENT.ctaColorEnd,
+          logoBackgroundColor: DEMO_CLIENT.logoBackgroundColor,
+          logoBackgroundEnabled: DEMO_CLIENT.logoBackgroundEnabled,
         },
         create: { ...DEMO_CLIENT },
         select: { id: true },

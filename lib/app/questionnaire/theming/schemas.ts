@@ -59,12 +59,20 @@ const welcomeCopyField = z
  * The theme field bag, spread into both demo-client schemas. Each is `.optional()`
  * so an omitted field is left untouched (create defaults to null at the DB; update is
  * a partial patch) while a present-but-empty field clears to null.
+ *
+ * The F7.1+ chrome fields (surfaceColor, ctaColorEnd, logoBackgroundColor) are hex
+ * colours with the same empty-string → null coercion; logoBackgroundEnabled is a plain
+ * boolean toggle (no coercion — a checkbox always sends true/false).
  */
 export const themeFields = {
   ctaColor: colorField.optional(),
   accentColor: colorField.optional(),
   logoUrl: logoUrlField.optional(),
   welcomeCopy: welcomeCopyField.optional(),
+  surfaceColor: colorField.optional(),
+  ctaColorEnd: colorField.optional(),
+  logoBackgroundColor: colorField.optional(),
+  logoBackgroundEnabled: z.boolean().optional(),
 };
 
 /** Standalone object schema for the four theme fields (tests + reuse). */

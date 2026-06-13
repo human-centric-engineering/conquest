@@ -1,22 +1,22 @@
 /**
- * DEMO-ONLY (F3.4 gap-fill): visual preview of a demo client's configured brand.
+ * DEMO-ONLY (F3.4 / F7.1+): visual preview of a demo client's configured brand.
  *
- * An admin sets four theme fields on a demo client (CTA colour, accent colour, logo
- * URL, welcome copy) but the admin UI never showed them back — there was no visual
- * confirmation of what the prospect will see. This renders that brand: colour swatches,
- * a logo thumbnail, and (in full mode) the welcome copy.
+ * An admin sets the theme fields on a demo client (CTA colour, accent colour, logo
+ * URL, welcome copy, plus the F7.1+ chrome set: surface colour, CTA gradient end, and
+ * a logo backdrop toggle) but the admin UI never showed them back. This renders that
+ * brand: colour swatches, a logo thumbnail, the welcome copy, and — in full mode — a
+ * miniature of the respondent session chrome so the admin sees, suggestively, what the
+ * respondent will see (the same surface band + gradient CTA the session renders).
  *
  * Reuses the theming module rather than re-deriving anything: `resolveTheme()` fills
- * nulls with the Sunrise defaults, and the logo thumbnail uses the same escaped
- * `--app-logo-url` background approach as {@link BrandThemeProvider} (never a raw
- * `<img src>`), keeping that sink's CSS-injection hardening.
+ * nulls with the Sunrise defaults (and resolves the logo backdrop), and the logo uses
+ * the same escaped `--app-logo-url` background approach as {@link BrandThemeProvider}
+ * (never a raw `<img src>`), keeping that sink's CSS-injection hardening.
  *
  * Two modes:
  *  - `compact` (table rows): show a swatch / thumbnail only for fields the client has
- *    *actually configured* (non-null) — "once they've been configured"; an unthemed
- *    client renders a muted "Default".
- *  - full (detail page): the resolved brand the respondent will see — both colour
- *    swatches with their hex, the logo (or "No logo"), and the welcome copy.
+ *    *actually configured* (non-null) — an unthemed client renders a muted "Default".
+ *  - full (detail page / live form preview): the resolved brand the respondent sees.
  *
  * Pure presentational, no client-only APIs, so it renders in both the server detail
  * page and the `'use client'` table/form. A fork that strips demo tenancy drops it.
@@ -29,10 +29,11 @@ import {
   resolveTheme,
   themeToCssVariables,
   type DemoClientTheme,
+  type ResolvedTheme,
 } from '@/lib/app/questionnaire/theming';
 
 interface DemoClientThemePreviewProps {
-  /** The four nullable theme columns (a `DemoClientView` is structurally compatible). */
+  /** The nullable theme columns (a `DemoClientView` is structurally compatible). */
   theme: DemoClientTheme;
   /** Table-row variant: configured fields only, no labels. */
   compact?: boolean;
@@ -52,22 +53,111 @@ function Swatch({ color, label, compact }: { color: string; label?: string; comp
   );
 }
 
-function LogoThumb({ logoUrl, compact }: { logoUrl: string; compact?: boolean }) {
+function LogoThumb({
+  logoUrl,
+  backdrop,
+  compact,
+}: {
+  logoUrl: string;
+  /** Optional solid colour painted behind the logo (resolved logo backdrop). */
+  backdrop?: string | null;
+  compact?: boolean;
+}) {
   // Reuse the escaped url("…") the theming sink produces, applied as a background so a
-  // hostile stored value can't break out of url() (mirrors BrandThemeProvider).
+  // hostile stored value can't break out of url() (mirrors BrandThemeProvider). The
+  // remaining theme fields are irrelevant to the logo var, so pass nulls/empties.
   const style = themeToCssVariables({
     ctaColor: '',
     accentColor: '',
     logoUrl,
     welcomeCopy: '',
+    surfaceColor: null,
+    ctaColorEnd: null,
+    logoBackgroundColor: null,
   }) as CSSProperties;
   return (
     <span
       role="img"
       aria-label="Brand logo"
-      className={cn('bg-contain bg-center bg-no-repeat', compact ? 'h-5 w-12' : 'h-8 w-32')}
-      style={{ backgroundImage: 'var(--app-logo-url)', ...style }}
+      className={cn(
+        'inline-block bg-contain bg-center bg-no-repeat',
+        compact ? 'h-5 w-12' : 'h-8 w-32',
+        backdrop && 'rounded px-2'
+      )}
+      style={{
+        backgroundImage: 'var(--app-logo-url)',
+        ...(backdrop ? { backgroundColor: backdrop } : {}),
+        ...style,
+      }}
     />
+  );
+}
+
+/**
+ * A miniature of the respondent session chrome the F7.1 surface renders: the surface
+ * header band (with the logo on its backdrop), a sample assistant/user exchange in the
+ * accent colour, and the gradient send button. Suggestive, not pixel-accurate — enough
+ * for the admin to recognise the brand before hitting "Preview as respondent".
+ */
+function ChromePreview({ resolved }: { resolved: ResolvedTheme }) {
+  const vars = themeToCssVariables(resolved) as CSSProperties;
+  return (
+    <div
+      style={vars}
+      className="overflow-hidden rounded-lg border"
+      aria-label="Session preview"
+      role="img"
+    >
+      {/* Surface header band — falls back to a muted strip when no surface is set. */}
+      <div
+        className="flex items-center px-3 py-2.5"
+        style={{ backgroundColor: resolved.surfaceColor ?? 'var(--color-muted)' }}
+      >
+        {resolved.logoUrl ? (
+          <LogoThumb logoUrl={resolved.logoUrl} backdrop={resolved.logoBackgroundColor} />
+        ) : (
+          <span
+            className="text-xs font-medium"
+            style={{ color: resolved.surfaceColor ? '#fff' : 'var(--color-foreground)' }}
+          >
+            Question session
+          </span>
+        )}
+      </div>
+
+      {/* Body: a sample assistant line + a user bubble tinted with the accent. */}
+      <div className="bg-card space-y-2 px-3 py-3">
+        <div className="flex items-start gap-2">
+          <span
+            aria-hidden
+            className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full"
+            style={{ backgroundColor: resolved.accentColor }}
+          />
+          <span className="bg-muted h-2 w-2/3 self-center rounded-full" />
+        </div>
+        <div className="flex justify-end">
+          <span
+            className="rounded-lg rounded-br-sm px-3 py-1.5 text-[11px] text-transparent"
+            style={{
+              backgroundColor: `color-mix(in srgb, ${resolved.accentColor} 14%, transparent)`,
+            }}
+          >
+            Your answer
+          </span>
+        </div>
+      </div>
+
+      {/* Composer: input + the gradient (or solid) send button. */}
+      <div className="bg-card flex items-center gap-2 border-t px-3 py-2">
+        <span className="bg-muted h-6 flex-1 rounded-md" />
+        <span
+          className="inline-flex h-6 w-9 items-center justify-center rounded-md text-[10px] font-semibold text-white"
+          style={{ background: 'var(--app-cta-gradient)' }}
+        >
+          →
+        </span>
+      </div>
+    </div>
   );
 }
 
@@ -76,11 +166,17 @@ export function DemoClientThemePreview({
   compact = false,
   className,
 }: DemoClientThemePreviewProps) {
+  // Truthiness (not `!== null`): the F7.1+ chrome fields are optional on the raw theme
+  // contract, so an unconfigured client passes them as `undefined`, not `null`.
   const configured =
-    theme.ctaColor !== null ||
-    theme.accentColor !== null ||
-    theme.logoUrl !== null ||
-    theme.welcomeCopy !== null;
+    Boolean(theme.ctaColor) ||
+    Boolean(theme.accentColor) ||
+    Boolean(theme.logoUrl) ||
+    Boolean(theme.welcomeCopy) ||
+    Boolean(theme.surfaceColor) ||
+    Boolean(theme.ctaColorEnd) ||
+    Boolean(theme.logoBackgroundColor) ||
+    Boolean(theme.logoBackgroundEnabled);
 
   // Compact (table): show only what the admin actually configured.
   if (compact) {
@@ -89,13 +185,19 @@ export function DemoClientThemePreview({
     }
     return (
       <span className={cn('inline-flex items-center gap-2', className)}>
+        {theme.surfaceColor && <Swatch color={theme.surfaceColor} compact />}
         {theme.ctaColor && <Swatch color={theme.ctaColor} compact />}
+        {theme.ctaColorEnd && <Swatch color={theme.ctaColorEnd} compact />}
         {theme.accentColor && <Swatch color={theme.accentColor} compact />}
         {theme.logoUrl && <LogoThumb logoUrl={theme.logoUrl} compact />}
-        {!theme.ctaColor && !theme.accentColor && !theme.logoUrl && (
-          // Only welcome copy is set — nothing visual to swatch.
-          <span className="text-muted-foreground text-xs">Welcome copy</span>
-        )}
+        {!theme.ctaColor &&
+          !theme.accentColor &&
+          !theme.logoUrl &&
+          !theme.surfaceColor &&
+          !theme.ctaColorEnd && (
+            // Only welcome copy / logo toggle is set — nothing visual to swatch.
+            <span className="text-muted-foreground text-xs">Welcome copy</span>
+          )}
       </span>
     );
   }
@@ -104,17 +206,30 @@ export function DemoClientThemePreview({
   const resolved = resolveTheme(theme);
   return (
     <div className={cn('space-y-3', className)}>
-      <div className="flex flex-wrap items-center gap-6">
-        <Swatch color={resolved.ctaColor} label={`CTA ${resolved.ctaColor}`} />
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+        {resolved.surfaceColor && (
+          <Swatch color={resolved.surfaceColor} label={`Surface ${resolved.surfaceColor}`} />
+        )}
+        <Swatch
+          color={resolved.ctaColor}
+          label={
+            resolved.ctaColorEnd
+              ? `CTA ${resolved.ctaColor} → ${resolved.ctaColorEnd}`
+              : `CTA ${resolved.ctaColor}`
+          }
+        />
         <Swatch color={resolved.accentColor} label={`Accent ${resolved.accentColor}`} />
         <span className="inline-flex items-center gap-2">
           {resolved.logoUrl ? (
-            <LogoThumb logoUrl={resolved.logoUrl} />
+            <LogoThumb logoUrl={resolved.logoUrl} backdrop={resolved.logoBackgroundColor} />
           ) : (
             <span className="text-muted-foreground text-xs">No logo</span>
           )}
         </span>
       </div>
+
+      <ChromePreview resolved={resolved} />
+
       <p className="text-muted-foreground text-sm italic">&ldquo;{resolved.welcomeCopy}&rdquo;</p>
       {!configured && (
         <p className="text-muted-foreground text-xs">

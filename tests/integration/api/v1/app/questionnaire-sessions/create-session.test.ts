@@ -12,7 +12,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => {
   const tx = {
-    appQuestionnaireSession: { create: vi.fn() },
+    appQuestionnaireSession: { create: vi.fn(), deleteMany: vi.fn() },
     appQuestionnaireInvitation: { update: vi.fn() },
   };
   const prisma = {
@@ -43,6 +43,7 @@ const NEW_SESSION = { id: 'sess-new', status: 'active', versionId: 'v1' };
 beforeEach(() => {
   vi.clearAllMocks();
   (mocks.tx.appQuestionnaireSession.create as Mock).mockResolvedValue(NEW_SESSION);
+  (mocks.tx.appQuestionnaireSession.deleteMany as Mock).mockResolvedValue({ count: 0 });
   (mocks.tx.appQuestionnaireInvitation.update as Mock).mockResolvedValue({});
   (mocks.prisma.appQuestionnaireSession.findFirst as Mock).mockResolvedValue(null);
   (seamMock.recordSessionCreated as Mock).mockResolvedValue(undefined);
@@ -256,6 +257,23 @@ describe('createPreviewSession (admin preview)', () => {
       tx: mocks.tx,
       reason: 'admin_preview',
     });
+  });
+
+  it('replaces any prior preview for the version (one-preview-per-version index) before creating', async () => {
+    (mocks.prisma.appQuestionnaireVersion.findUnique as Mock).mockResolvedValue(version());
+
+    await createPreviewSession('v1');
+
+    // The fresh-walkthrough contract: drop the existing preview session (its turns/answers
+    // cascade) so the insert can't collide on the partial unique index, then create anew.
+    expect(mocks.tx.appQuestionnaireSession.deleteMany).toHaveBeenCalledWith({
+      where: { versionId: 'v1', isPreview: true },
+    });
+    const deleteOrder = (mocks.tx.appQuestionnaireSession.deleteMany as Mock).mock
+      .invocationCallOrder[0];
+    const createOrder = (mocks.tx.appQuestionnaireSession.create as Mock).mock
+      .invocationCallOrder[0];
+    expect(deleteOrder).toBeLessThan(createOrder);
   });
 
   it('previews a NON-anonymous version (no anonymous-mode gate) — the whole point', async () => {

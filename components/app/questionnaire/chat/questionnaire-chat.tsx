@@ -14,9 +14,10 @@
  * share one {@link useQuestionnaireSessionStream} instance — that's what lets the
  * panel's "Revisit" action send a turn through this same loop.
  *
- * Brand colours come from CSS custom properties (`--app-accent-color`, `--app-cta-color`)
- * with platform-default fallbacks, so the F7.1-PR4 theming layer activates with no change
- * here. A `<div>` (not a `<form>`) hosts the composer to stay safe if ever embedded.
+ * Brand colours come from CSS custom properties (`--app-accent-color`, `--app-cta-color`,
+ * `--app-cta-gradient`) with platform-default fallbacks, so the theming layer activates with
+ * no change here — the send button picks up a brand gradient when one is configured. A `<div>`
+ * (not a `<form>`) hosts the composer to stay safe if ever embedded.
  */
 
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
@@ -260,7 +261,13 @@ export function QuestionnaireChat({
                 disabled={!canSend || input.trim().length === 0}
                 aria-label="Send"
                 className="shrink-0 text-white"
-                style={{ backgroundColor: 'var(--app-cta-color, var(--color-primary))' }}
+                // The CTA gradient var resolves to a brand gradient (ctaColor→ctaColorEnd)
+                // when set, else the solid CTA colour; a soft brand-tinted glow gives the
+                // pill the lift the email can't. Both fall back to the platform primary.
+                style={{
+                  background: 'var(--app-cta-gradient, var(--app-cta-color, var(--color-primary)))',
+                  boxShadow: '0 8px 18px -8px var(--app-cta-color, var(--color-primary))',
+                }}
               >
                 <SendHorizontal className="h-4 w-4" aria-hidden="true" />
               </Button>

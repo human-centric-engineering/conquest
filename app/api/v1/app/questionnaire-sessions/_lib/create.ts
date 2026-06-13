@@ -229,8 +229,11 @@ export async function createSessionForVersion(
  * `lib/app/questionnaire/analytics/**`), exactly like the F4.4/F4.5 design-time preview. It's
  * left user-less (`respondentUserId: null`) and access is proven by the signed token the
  * route mints — so the token-based turn path (`turn-access.ts`) drives it identically to the
- * no-login surface, regardless of anonymous mode. No resume: each preview mints a fresh
- * session. The calling route is admin-gated; this seam itself trusts the caller.
+ * no-login surface, regardless of anonymous mode. No resume: each preview mints a FRESH
+ * session — and because a partial unique index allows only one preview session per version
+ * (`idx_app_questionnaire_session_preview_per_version`), it first replaces any prior preview
+ * (whose turns/answers/events cascade away) so re-previewing never collides. The calling
+ * route is admin-gated; this seam itself trusts the caller.
  */
 export async function createPreviewSession(versionId: string): Promise<CreateSessionResult> {
   const version = await prisma.appQuestionnaireVersion.findUnique({
@@ -244,6 +247,10 @@ export async function createPreviewSession(versionId: string): Promise<CreateSes
   }
 
   const session = await prisma.$transaction(async (tx) => {
+    // One preview session per version (partial unique index). "Preview as respondent" is a
+    // fresh walkthrough each time, so drop any prior preview (its turns / answers / events
+    // cascade) before minting a new one — otherwise the insert hits a P2002 on a re-preview.
+    await tx.appQuestionnaireSession.deleteMany({ where: { versionId, isPreview: true } });
     const created = await tx.appQuestionnaireSession.create({
       data: { versionId, respondentUserId: null, isPreview: true, status: 'active' },
       select: { id: true, status: true, versionId: true },

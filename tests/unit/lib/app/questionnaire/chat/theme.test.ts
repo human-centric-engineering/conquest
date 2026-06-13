@@ -53,6 +53,9 @@ const SENTINEL_THEME: ResolvedTheme = {
   accentColor: '#sentinel',
   logoUrl: null,
   welcomeCopy: 'sentinel',
+  surfaceColor: null,
+  ctaColorEnd: null,
+  logoBackgroundColor: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -158,7 +161,16 @@ describe('resolveThemeForVersion', () => {
     // Assert: the select matches what the source code requests.
     expect(mockDemoClientFindUnique).toHaveBeenCalledWith(
       expect.objectContaining({
-        select: { ctaColor: true, accentColor: true, logoUrl: true, welcomeCopy: true },
+        select: {
+          ctaColor: true,
+          accentColor: true,
+          logoUrl: true,
+          welcomeCopy: true,
+          surfaceColor: true,
+          ctaColorEnd: true,
+          logoBackgroundColor: true,
+          logoBackgroundEnabled: true,
+        },
       })
     );
   });
