@@ -9,6 +9,7 @@ import {
 import { AnonymousSessionBoot } from '@/components/app/questionnaire/chat/anonymous-session-boot';
 import { BrandThemeProvider } from '@/components/app/questionnaire/chat/brand-theme-provider';
 import { resolveThemeForVersion } from '@/lib/app/questionnaire/chat/theme';
+import { resolveAnonymousForVersion } from '@/lib/app/questionnaire/chat/anonymity';
 
 export const metadata: Metadata = {
   title: 'Questionnaire',
@@ -39,10 +40,11 @@ export default async function PublicQuestionnairePage({
   // the boot's "couldn't start" error, no leak.
   const preview = (await searchParams).preview === '1';
   // Independent reads — resolve in parallel rather than serialising two DB round-trips.
-  const [voiceInputEnabled, attachmentInputEnabled, theme] = await Promise.all([
+  const [voiceInputEnabled, attachmentInputEnabled, theme, anonymous] = await Promise.all([
     isVoiceInputEnabled(),
     isAttachmentInputEnabled(),
     resolveThemeForVersion(versionId),
+    resolveAnonymousForVersion(versionId),
   ]);
 
   return (
@@ -53,6 +55,7 @@ export default async function PublicQuestionnairePage({
           preview={preview}
           voiceInputEnabled={voiceInputEnabled}
           attachmentInputEnabled={attachmentInputEnabled}
+          anonymous={anonymous}
           welcomeCopy={theme.welcomeCopy}
         />
       </BrandThemeProvider>

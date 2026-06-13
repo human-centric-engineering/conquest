@@ -54,6 +54,7 @@ vi.mock('@/lib/app/questionnaire/chat/greeting', () => ({
 // ---------------------------------------------------------------------------
 
 import { AnonymousSessionBoot } from '@/components/app/questionnaire/chat/anonymous-session-boot';
+import { buildWelcomeTurns } from '@/lib/app/questionnaire/chat/greeting';
 import { API } from '@/lib/api/endpoints';
 
 // ---------------------------------------------------------------------------
@@ -183,6 +184,35 @@ describe('AnonymousSessionBoot', () => {
         expect(screen.getByTestId('questionnaire-chat')).toBeInTheDocument();
       });
       expect(fakeFetch).not.toHaveBeenCalled();
+    });
+
+    it('forwards the voice + anonymity guidance flags to the opening turn', async () => {
+      // Arrange: a ready session, with voice and anonymity both on.
+      fakeStorage.setItem(
+        STORAGE_KEY,
+        storedSession('stored-sess-3', 'stored-tok-3', futureExpiry())
+      );
+
+      // Act
+      render(
+        <AnonymousSessionBoot
+          versionId={VERSION_ID}
+          welcomeCopy="Brand intro."
+          voiceInputEnabled
+          anonymous
+        />
+      );
+
+      // Assert: the opening-turn builder receives the flags so it can append the mic nudge
+      // and the "won't be passed on" reassurance.
+      await waitFor(() => {
+        expect(screen.getByTestId('questionnaire-chat')).toBeInTheDocument();
+      });
+      expect(buildWelcomeTurns).toHaveBeenCalledWith({
+        welcomeCopy: 'Brand intro.',
+        voiceInputEnabled: true,
+        anonymous: true,
+      });
     });
   });
 

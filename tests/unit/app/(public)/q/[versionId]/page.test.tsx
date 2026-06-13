@@ -49,6 +49,10 @@ vi.mock('@/lib/app/questionnaire/chat/theme', () => ({
   resolveThemeForVersion: vi.fn(),
 }));
 
+vi.mock('@/lib/app/questionnaire/chat/anonymity', () => ({
+  resolveAnonymousForVersion: vi.fn(),
+}));
+
 /**
  * Stub AnonymousSessionBoot — exposes all props via data-* attributes so tests
  * can assert on what the page passes without running client-side bootstrap logic.
@@ -58,12 +62,14 @@ vi.mock('@/components/app/questionnaire/chat/anonymous-session-boot', () => ({
     versionId,
     voiceInputEnabled,
     attachmentInputEnabled,
+    anonymous,
     welcomeCopy,
     preview,
   }: {
     versionId: string;
     voiceInputEnabled: boolean;
     attachmentInputEnabled: boolean;
+    anonymous: boolean;
     welcomeCopy: string;
     preview: boolean;
   }) => (
@@ -72,6 +78,7 @@ vi.mock('@/components/app/questionnaire/chat/anonymous-session-boot', () => ({
       data-version-id={versionId}
       data-voice-input-enabled={String(voiceInputEnabled)}
       data-attachment-input-enabled={String(attachmentInputEnabled)}
+      data-anonymous={String(anonymous)}
       data-welcome-copy={welcomeCopy}
       data-preview={String(preview)}
     />
@@ -93,6 +100,7 @@ import {
   isVoiceInputEnabled,
 } from '@/lib/app/questionnaire/feature-flag';
 import { resolveThemeForVersion } from '@/lib/app/questionnaire/chat/theme';
+import { resolveAnonymousForVersion } from '@/lib/app/questionnaire/chat/anonymity';
 import type { ResolvedTheme } from '@/lib/app/questionnaire/theming';
 import type React from 'react';
 
@@ -132,6 +140,7 @@ describe('PublicQuestionnairePage', () => {
     vi.mocked(isVoiceInputEnabled).mockResolvedValue(false);
     vi.mocked(isAttachmentInputEnabled).mockResolvedValue(false);
     vi.mocked(resolveThemeForVersion).mockResolvedValue(MOCK_THEME);
+    vi.mocked(resolveAnonymousForVersion).mockResolvedValue(false);
   });
 
   // -------------------------------------------------------------------------
@@ -274,6 +283,40 @@ describe('PublicQuestionnairePage', () => {
 
       expect(screen.getByTestId('anonymous-session-boot')).toHaveAttribute(
         'data-attachment-input-enabled',
+        'false'
+      );
+    });
+
+    it('passes anonymous=true when the version is configured anonymousMode', async () => {
+      // Arrange: the no-login surface resolves the version's anonymity for the opening turn.
+      vi.mocked(resolveAnonymousForVersion).mockResolvedValue(true);
+
+      // Act
+      const Component = await PublicQuestionnairePage({
+        params: makeParams(),
+        searchParams: makeSearchParams(),
+      });
+      render(Component);
+
+      // Assert: the flag is resolved for this version and forwarded to the boot.
+      expect(resolveAnonymousForVersion).toHaveBeenCalledWith(VERSION_ID);
+      expect(screen.getByTestId('anonymous-session-boot')).toHaveAttribute(
+        'data-anonymous',
+        'true'
+      );
+    });
+
+    it('passes anonymous=false when the version is not anonymous', async () => {
+      // Arrange: default mock resolves false.
+      const Component = await PublicQuestionnairePage({
+        params: makeParams(),
+        searchParams: makeSearchParams(),
+      });
+      render(Component);
+
+      // Assert
+      expect(screen.getByTestId('anonymous-session-boot')).toHaveAttribute(
+        'data-anonymous',
         'false'
       );
     });

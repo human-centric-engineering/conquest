@@ -14,7 +14,13 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { buildWelcomeTurns, DEFAULT_WELCOME_COPY } from '@/lib/app/questionnaire/chat/greeting';
+import {
+  buildWelcomeTurns,
+  DEFAULT_WELCOME_COPY,
+  HONESTY_GUIDANCE,
+  VOICE_GUIDANCE,
+  ANONYMOUS_GUIDANCE,
+} from '@/lib/app/questionnaire/chat/greeting';
 
 // ---------------------------------------------------------------------------
 // DEFAULT_WELCOME_COPY
@@ -124,7 +130,7 @@ describe('buildWelcomeTurns -- fresh session with custom welcomeCopy', () => {
     expect(turns[0]?.content).not.toContain(DEFAULT_WELCOME_COPY);
   });
 
-  it('seeds the custom copy alone with NO begin-nudge (the first question is auto-streamed)', () => {
+  it('leads with the custom copy then the honesty guidance, with NO begin-nudge', () => {
     // Arrange
     const customCopy = 'Welcome to the Acme survey.';
     const opts = { welcomeCopy: customCopy };
@@ -132,9 +138,10 @@ describe('buildWelcomeTurns -- fresh session with custom welcomeCopy', () => {
     // Act
     const turns = buildWelcomeTurns(opts);
 
-    // Assert: the fresh seed is exactly the branded intro -- the proactive first question now
-    // arrives via the auto-kickoff turn, so no "send a message to begin" nudge is appended.
-    expect(turns[0]?.content).toBe(customCopy);
+    // Assert: the branded intro leads, the honesty guidance follows in the same turn (a
+    // markdown paragraph break), and the proactive first question still arrives via the
+    // auto-kickoff turn -- so no "send a message to begin" nudge is appended.
+    expect(turns[0]?.content).toBe(`${customCopy}\n\n${HONESTY_GUIDANCE}`);
     expect(turns[0]?.content).not.toContain('send a message to begin');
   });
 });
@@ -156,30 +163,33 @@ describe('buildWelcomeTurns -- fresh session with no welcomeCopy', () => {
     expect(turns[0]?.content).toContain(DEFAULT_WELCOME_COPY);
   });
 
-  it('seeds DEFAULT_WELCOME_COPY alone with NO begin-nudge (the first question is auto-streamed)', () => {
+  it('seeds DEFAULT_WELCOME_COPY then honesty guidance, with NO begin-nudge', () => {
     // Arrange
     const opts = {};
 
     // Act
     const turns = buildWelcomeTurns(opts);
 
-    // Assert: the fresh seed is exactly the default intro -- the proactive first question now
-    // arrives via the auto-kickoff turn, so no "send a message to begin" nudge is appended.
-    expect(turns[0]?.content).toBe(DEFAULT_WELCOME_COPY);
+    // Assert: the default intro leads, the honesty guidance follows -- the proactive first
+    // question still arrives via the auto-kickoff turn, so no "send a message to begin" nudge.
+    expect(turns[0]?.content).toBe(`${DEFAULT_WELCOME_COPY}\n\n${HONESTY_GUIDANCE}`);
     expect(turns[0]?.content).not.toContain('send a message to begin');
   });
 
-  it('produces a single-turn seed of exactly the intro line (no second nudge part)', () => {
+  it('produces a SINGLE turn so the auto-kickoff still fires (guidance folds into the intro turn)', () => {
     // Arrange
     const opts = {};
 
     // Act
     const turns = buildWelcomeTurns(opts);
 
-    // Assert: one assistant turn whose content is the intro line verbatim -- no "\n\n" join.
+    // Assert: exactly one assistant turn -- the kickoff guard fires only while a single
+    // greeting turn is present, so the guidance must share the turn (a "\n\n" markdown break)
+    // rather than become a second turn that would suppress the proactive first question.
     expect(turns).toHaveLength(1);
-    expect(turns[0]?.content).toBe(DEFAULT_WELCOME_COPY);
-    expect(turns[0]?.content).not.toContain('\n\n');
+    expect(turns[0]?.content).toContain('\n\n');
+    expect(turns[0]?.content).toContain(DEFAULT_WELCOME_COPY);
+    expect(turns[0]?.content).toContain(HONESTY_GUIDANCE);
   });
 
   it('uses DEFAULT_WELCOME_COPY when welcomeCopy is undefined explicitly', () => {
@@ -222,16 +232,86 @@ describe('buildWelcomeTurns -- whitespace-only welcomeCopy', () => {
     expect(turns[0]?.content).toContain(DEFAULT_WELCOME_COPY);
   });
 
-  it('seeds the default intro alone (no begin-nudge) when falling back from a whitespace-only copy', () => {
+  it('seeds the default intro + honesty guidance (no begin-nudge) when falling back from whitespace', () => {
     // Arrange
     const opts = { welcomeCopy: '   ' };
 
     // Act
     const turns = buildWelcomeTurns(opts);
 
-    // Assert: fallback yields exactly the default intro -- no nudge, consistent with a fresh seed.
-    expect(turns[0]?.content).toBe(DEFAULT_WELCOME_COPY);
+    // Assert: fallback yields the default intro plus guidance -- consistent with a fresh seed.
+    expect(turns[0]?.content).toBe(`${DEFAULT_WELCOME_COPY}\n\n${HONESTY_GUIDANCE}`);
     expect(turns[0]?.content).not.toContain('send a message to begin');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildWelcomeTurns -- pre-flight guidance (honesty / voice / anonymity)
+// ---------------------------------------------------------------------------
+
+describe('buildWelcomeTurns -- pre-flight guidance', () => {
+  it('always appends the honesty advice on a fresh session', () => {
+    // Arrange / Act: no guidance flags set -- honesty is universal.
+    const turns = buildWelcomeTurns({});
+
+    // Assert
+    expect(turns[0]?.content).toContain(HONESTY_GUIDANCE);
+  });
+
+  it('omits the voice nudge when voice input is disabled', () => {
+    // Arrange / Act
+    const turns = buildWelcomeTurns({ voiceInputEnabled: false });
+
+    // Assert: no mic mention when the affordance is not shown.
+    expect(turns[0]?.content).not.toContain(VOICE_GUIDANCE);
+  });
+
+  it('includes the voice nudge when voice input is enabled', () => {
+    // Arrange / Act
+    const turns = buildWelcomeTurns({ voiceInputEnabled: true });
+
+    // Assert: the mic suggestion appears alongside the honesty advice.
+    expect(turns[0]?.content).toContain(HONESTY_GUIDANCE);
+    expect(turns[0]?.content).toContain(VOICE_GUIDANCE);
+  });
+
+  it('omits the anonymity reassurance when the questionnaire is not anonymous', () => {
+    // Arrange / Act
+    const turns = buildWelcomeTurns({ anonymous: false });
+
+    // Assert: never promise anonymity that the config does not grant.
+    expect(turns[0]?.content).not.toContain(ANONYMOUS_GUIDANCE);
+  });
+
+  it('includes the anonymity reassurance when the questionnaire is anonymous', () => {
+    // Arrange / Act
+    const turns = buildWelcomeTurns({ anonymous: true });
+
+    // Assert: the "won't be passed on" reassurance appears.
+    expect(turns[0]?.content).toContain(ANONYMOUS_GUIDANCE);
+  });
+
+  it('composes honesty + voice + anonymity together in one turn when all apply', () => {
+    // Arrange / Act
+    const turns = buildWelcomeTurns({ voiceInputEnabled: true, anonymous: true });
+
+    // Assert: a single turn carrying all three pieces of guidance after the intro.
+    expect(turns).toHaveLength(1);
+    expect(turns[0]?.content).toContain(DEFAULT_WELCOME_COPY);
+    expect(turns[0]?.content).toContain(HONESTY_GUIDANCE);
+    expect(turns[0]?.content).toContain(VOICE_GUIDANCE);
+    expect(turns[0]?.content).toContain(ANONYMOUS_GUIDANCE);
+  });
+
+  it('skips ALL pre-flight guidance on a resumed session (the respondent already saw it)', () => {
+    // Arrange / Act: resume wins even with guidance flags set.
+    const turns = buildWelcomeTurns({ resumed: true, voiceInputEnabled: true, anonymous: true });
+
+    // Assert: the resume copy stands alone -- no honesty / voice / anonymity lines.
+    expect(turns[0]?.content).toContain('Welcome back');
+    expect(turns[0]?.content).not.toContain(HONESTY_GUIDANCE);
+    expect(turns[0]?.content).not.toContain(VOICE_GUIDANCE);
+    expect(turns[0]?.content).not.toContain(ANONYMOUS_GUIDANCE);
   });
 });
 

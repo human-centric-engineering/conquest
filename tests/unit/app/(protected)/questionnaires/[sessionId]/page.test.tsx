@@ -205,11 +205,13 @@ function makeRow(
     respondentUserId?: string;
     status?: string;
     answerCount?: number;
+    anonymous?: boolean;
   } = {}
 ) {
   return {
     status: overrides.status ?? 'active',
     respondentUserId: overrides.respondentUserId ?? 'user_abc',
+    version: { config: { anonymousMode: overrides.anonymous ?? false } },
     _count: { answers: overrides.answerCount ?? 0 },
   };
 }
