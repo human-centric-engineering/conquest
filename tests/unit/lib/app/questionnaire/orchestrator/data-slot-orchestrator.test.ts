@@ -227,7 +227,9 @@ describe('runDataSlotTurn — seriousness / abuse gate', () => {
 
   it('abandons the session on the threshold strike', async () => {
     const { invokers } = stubInvokers({
-      extract: { intents: [], dataSlotFills: [fill('d1')] },
+      // Extraction also fails this turn → it would push a "couldn't capture" diagnostic notice;
+      // on a terminal abandon turn that side-band must be dropped (only the final message shows).
+      extract: { intents: [], dataSlotFills: [fill('d1')], diagnostic: 'extraction_failed' },
       serious: { verdict: { serious: false, reason: 'hostile' } },
     });
 
@@ -246,5 +248,7 @@ describe('runDataSlotTurn — seriousness / abuse gate', () => {
     expect(result.abuse).toMatchObject({ flagged: true, abandon: true, newStrikeCount: 4 });
     expect(result.response).toEqual({ kind: 'complete', text: ABUSE_ABANDON_MESSAGE });
     expect(result.sideEffects.dataSlotFills).toHaveLength(0);
+    // No side-band notices on the terminal turn (the extraction diagnostic is dropped).
+    expect(result.events).toEqual([]);
   });
 });

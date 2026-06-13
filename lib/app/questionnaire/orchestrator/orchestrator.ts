@@ -204,7 +204,9 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
           response: { kind: 'complete', text: strike.abandonMessage ?? ABUSE_ABANDON_MESSAGE },
           targetedQuestionId: null,
           sideEffects: { answerUpserts: [], answerRefinements: [] },
-          events,
+          // Drop any side-band notice (e.g. the extraction "couldn't capture that" diagnostic) —
+          // on a terminal turn the abandon message is the only thing the respondent should see.
+          events: [],
           toolCalls,
           costUsd,
           contradictions: [],
