@@ -109,6 +109,24 @@ describe('normalizeAnswerIntents — active vs side-effect', () => {
     expect(intents.find((i) => i.slotKey === 'name')?.isActiveQuestion).toBe(true);
     expect(intents.find((i) => i.slotKey === 'city')?.isActiveQuestion).toBe(false);
   });
+
+  it('marks no intent active in data-slot mode (no active question key)', () => {
+    // Data-slot mode has no single active question — the respondent answers an open prompt — so
+    // every captured answer is a background side-effect, never the "active" one.
+    const c = ctx({
+      candidateSlots: [slot({ key: 'name' }), slot({ key: 'city' })],
+      activeQuestionKey: null,
+    });
+    const { intents } = normalizeAnswerIntents(
+      [
+        answer({ slotKey: 'name', value: 'Dana', sourceQuote: 'Dana' }),
+        answer({ slotKey: 'city', value: 'Leeds', sourceQuote: 'Leeds' }),
+      ],
+      c
+    );
+    expect(intents).toHaveLength(2);
+    expect(intents.every((i) => i.isActiveQuestion === false)).toBe(true);
+  });
 });
 
 describe('normalizeAnswerIntents — de-duplication', () => {

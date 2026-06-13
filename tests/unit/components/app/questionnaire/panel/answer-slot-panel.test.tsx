@@ -86,6 +86,24 @@ describe('AnswerSlotPanel', () => {
     expect(screen.getByText('1 captured')).toBeInTheDocument();
   });
 
+  it('shows a blended percentage (not the raw question count) in data-slot mode', () => {
+    render(
+      <AnswerSlotPanel
+        view={view({
+          dataSlotGroups: [{ theme: 'Strategy', slots: [] }],
+          progressPercent: 37,
+          // Background question counts are still present but must NOT be shown to the respondent.
+          answeredCount: 0,
+          totalCount: 71,
+        })}
+      />
+    );
+    expect(screen.getByText('What we’re learning')).toBeInTheDocument();
+    expect(screen.getByText('37% complete')).toBeInTheDocument();
+    expect(screen.queryByText('0 of 71 answered')).not.toBeInTheDocument();
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '37');
+  });
+
   it('renders answered values and pending placeholders', () => {
     render(<AnswerSlotPanel view={view()} />);
     expect(screen.getByText('Engineer')).toBeInTheDocument();

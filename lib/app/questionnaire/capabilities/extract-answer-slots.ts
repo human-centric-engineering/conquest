@@ -117,28 +117,39 @@ const dataSlotCandidateSchema = z.object({
   theme: z.string(),
 });
 
-const argsSchema = z.object({
-  /** The respondent's message to extract from (this turn). */
-  userMessage: z.string().min(1),
-  /** Key of the question being asked — must be one of `candidateSlots`. */
-  activeQuestionKey: z.string().min(1),
-  /** The active slot plus the version's unanswered slots. */
-  candidateSlots: z.array(candidateSlotSchema).min(1).max(MAX_CANDIDATE_SLOTS),
-  /** Data Slots feature: the data slots to also fill this turn (omit for question-only mode). */
-  dataSlotCandidates: z.array(dataSlotCandidateSchema).max(MAX_CANDIDATE_SLOTS).optional(),
-  /** Already-answered state, so the extractor doesn't re-ask. */
-  answered: z
-    .array(
-      z.object({ slotKey: z.string().min(1), confidence: z.number().min(0).max(1).nullable() })
-    )
-    .optional(),
-  /** Recent transcript, oldest first. */
-  recentMessages: z.array(z.string()).max(50).optional(),
-  /** Files attached to this turn (images/documents) — read alongside the message. */
-  attachments: chatAttachmentsArraySchema.optional(),
-  /** Stable session identity, threaded into cost-log metadata. */
-  sessionId: z.string().optional(),
-});
+const argsSchema = z
+  .object({
+    /** The respondent's message to extract from (this turn). */
+    userMessage: z.string().min(1),
+    /**
+     * Key of the question being asked — must be one of `candidateSlots`. Omitted in DATA-SLOT
+     * MODE, where the respondent is answering an open conversational prompt (a data slot) and
+     * there is no single active question to privilege.
+     */
+    activeQuestionKey: z.string().min(1).optional(),
+    /** The active slot plus the version's unanswered slots (may be empty in pure data-slot mode). */
+    candidateSlots: z.array(candidateSlotSchema).max(MAX_CANDIDATE_SLOTS),
+    /** Data Slots feature: the data slots to also fill this turn (omit for question-only mode). */
+    dataSlotCandidates: z.array(dataSlotCandidateSchema).max(MAX_CANDIDATE_SLOTS).optional(),
+    /** Already-answered state, so the extractor doesn't re-ask. */
+    answered: z
+      .array(
+        z.object({ slotKey: z.string().min(1), confidence: z.number().min(0).max(1).nullable() })
+      )
+      .optional(),
+    /** Recent transcript, oldest first. */
+    recentMessages: z.array(z.string()).max(50).optional(),
+    /** Files attached to this turn (images/documents) — read alongside the message. */
+    attachments: chatAttachmentsArraySchema.optional(),
+    /** Stable session identity, threaded into cost-log metadata. */
+    sessionId: z.string().optional(),
+  })
+  // There must be something to extract into: question slots (question mode) and/or data slots
+  // (data-slot mode). An empty call on both would be a no-op dispatch — reject it as malformed.
+  .refine((v) => v.candidateSlots.length > 0 || (v.dataSlotCandidates?.length ?? 0) > 0, {
+    message: 'at least one of candidateSlots or dataSlotCandidates must be non-empty',
+    path: ['candidateSlots'],
+  });
 
 export type ExtractAnswerSlotsArgs = z.infer<typeof argsSchema>;
 
@@ -214,11 +225,11 @@ function toExtractionContext(args: ExtractAnswerSlotsArgs): ExtractionContext {
   }));
 
   return {
-    activeQuestionKey: args.activeQuestionKey,
+    activeQuestionKey: args.activeQuestionKey ?? null,
     candidateSlots,
     answered: args.answered ?? [],
     userMessage: args.userMessage,
-    sessionId: args.sessionId ?? `dispatch-${args.activeQuestionKey}`,
+    sessionId: args.sessionId ?? `dispatch-${args.activeQuestionKey ?? 'data-slot'}`,
     ...(args.recentMessages ? { recentMessages: args.recentMessages } : {}),
     ...(args.attachments && args.attachments.length > 0 ? { attachments: args.attachments } : {}),
     ...(args.dataSlotCandidates && args.dataSlotCandidates.length > 0
@@ -291,7 +302,7 @@ export class AppExtractAnswerSlotsCapability extends BaseCapability<
     result: CapabilityResult<ExtractAnswerSlotsData>
   ): { args: unknown; resultPreview: string } {
     const safeArgs = {
-      activeQuestionKey: args.activeQuestionKey,
+      activeQuestionKey: args.activeQuestionKey ?? null,
       candidateSlotCount: args.candidateSlots.length,
       userMessage: redactedString('userMessage'),
       ...(args.recentMessages !== undefined

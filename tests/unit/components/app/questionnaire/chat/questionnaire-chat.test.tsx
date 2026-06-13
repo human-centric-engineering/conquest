@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 import type { UseQuestionnaireSessionStreamReturn } from '@/lib/hooks/use-questionnaire-session-stream';
 
@@ -257,5 +257,54 @@ describe('QuestionnaireChat', () => {
     fireEvent.click(dismissBtn);
 
     expect(dismissError).toHaveBeenCalledTimes(1);
+  });
+
+  describe('opening animation', () => {
+    it('types the seeded opening turn in (caret first, full text after) when animateOpening is set', async () => {
+      hookReturn = makeReturn({
+        turns: [{ role: 'assistant', content: 'Welcome to the questionnaire.' }],
+      });
+      const { container } = render(
+        <QuestionnaireChat sessionId="s1" stream={hookReturn} animateOpening />
+      );
+
+      // Mid-type: the streaming caret shows and the full greeting isn't revealed yet.
+      expect(container.querySelector('.terminal-caret')).toBeTruthy();
+
+      // The typewriter catches up to the full greeting.
+      await waitFor(() =>
+        expect(screen.getByText('Welcome to the questionnaire.')).toBeInTheDocument()
+      );
+    });
+
+    it('renders the opening turn instantly (no caret) when animateOpening is not set', () => {
+      hookReturn = makeReturn({
+        turns: [{ role: 'assistant', content: 'Welcome to the questionnaire.' }],
+      });
+      const { container } = render(<QuestionnaireChat sessionId="s1" stream={hookReturn} />);
+
+      expect(screen.getByText('Welcome to the questionnaire.')).toBeInTheDocument();
+      expect(container.querySelector('.terminal-caret')).toBeNull();
+    });
+
+    it('does not type turns that arrive after mount (they already streamed live)', async () => {
+      hookReturn = makeReturn({ turns: [{ role: 'assistant', content: 'Opening greeting.' }] });
+      const { rerender } = render(
+        <QuestionnaireChat sessionId="s1" stream={hookReturn} animateOpening />
+      );
+      await waitFor(() => expect(screen.getByText('Opening greeting.')).toBeInTheDocument());
+
+      // A later assistant turn appears (index 1, past the captured opening count) — it renders
+      // immediately, not through the typewriter.
+      const next = makeReturn({
+        turns: [
+          { role: 'assistant', content: 'Opening greeting.' },
+          { role: 'assistant', content: 'A later question.' },
+        ],
+      });
+      rerender(<QuestionnaireChat sessionId="s1" stream={next} animateOpening />);
+
+      expect(screen.getByText('A later question.')).toBeInTheDocument();
+    });
   });
 });

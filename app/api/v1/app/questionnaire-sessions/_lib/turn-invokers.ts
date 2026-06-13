@@ -118,7 +118,13 @@ export async function buildTurnInvokers(opts: {
 
   return {
     async extractAnswers(state): Promise<ExtractOutcome> {
-      if (!activeQuestionKey) return { intents: [], costUsd: 0, diagnostic: 'no_active_question' };
+      // Data-slot mode has NO single active question (the respondent answers an open conversational
+      // prompt), so it drives extraction off the data-slot candidates instead. Only short-circuit
+      // when there's nothing to extract into at all — no active question AND no data slots.
+      const hasDataSlots = (dataSlotCandidates?.length ?? 0) > 0;
+      if (!activeQuestionKey && !hasDataSlots) {
+        return { intents: [], costUsd: 0, diagnostic: 'no_active_question' };
+      }
       if (!extractor) return { intents: [], costUsd: 0, diagnostic: 'extractor_unconfigured' };
 
       const started = Date.now();
@@ -126,7 +132,8 @@ export async function buildTurnInvokers(opts: {
         EXTRACT_ANSWER_SLOTS_CAPABILITY_SLUG,
         {
           userMessage: state.userMessage,
-          activeQuestionKey,
+          // Omit in data-slot mode — the capability treats an absent key as "open prompt".
+          ...(activeQuestionKey ? { activeQuestionKey } : {}),
           candidateSlots,
           answered: state.existingAnswers.map((a) => ({
             slotKey: a.slotKey,

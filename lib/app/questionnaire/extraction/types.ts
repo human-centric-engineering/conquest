@@ -66,9 +66,12 @@ export interface ExtractionAnsweredView {
 export interface ExtractionContext {
   /**
    * The question currently being asked. The message primarily answers this; the
-   * key must resolve to one of {@link candidateSlots}.
+   * key must resolve to one of {@link candidateSlots}. `null` in DATA-SLOT MODE,
+   * where the respondent is answering an open conversational prompt (a data slot)
+   * rather than one fixed question — the extractor then captures every question +
+   * data slot the message supports, with no single "active" question to privilege.
    */
-  activeQuestionKey: string;
+  activeQuestionKey: string | null;
   /**
    * Every slot a value could be extracted into this turn — the active slot plus
    * the version's unanswered slots (re-answering an answered slot is F4.4's

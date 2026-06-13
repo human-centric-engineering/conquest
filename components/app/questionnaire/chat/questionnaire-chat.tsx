@@ -24,6 +24,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { SendHorizontal } from 'lucide-react';
 import Markdown from 'react-markdown';
 
+import { useTypingAnimation } from '@/lib/hooks/use-typing-animation';
 import { cn } from '@/lib/utils';
 import { API } from '@/lib/api/endpoints';
 import { Button } from '@/components/ui/button';
@@ -52,6 +53,12 @@ export interface QuestionnaireChatProps {
   voiceInputEnabled?: boolean;
   /** Show the attachment affordance (gated server-side on the attachment-input flag). */
   attachmentInputEnabled?: boolean;
+  /**
+   * Type the seeded opening turn(s) in (the welcome greeting) instead of snapping them in
+   * fully-formed, so a fresh session reads as one streamed conversation. Set only for fresh
+   * sessions (alongside `autoStart`) — a resumed transcript renders its history instantly.
+   */
+  animateOpening?: boolean;
   className?: string;
 }
 
@@ -85,12 +92,48 @@ function AssistantTurn({ children }: { children: React.ReactNode }) {
   );
 }
 
+/**
+ * An assistant turn that types itself in (the same chunked cadence the live SSE replies use),
+ * then settles to the normal Markdown render once complete. Used for the seeded opening
+ * greeting so a fresh session reads as one continuous streamed conversation rather than the
+ * greeting snapping in fully-formed while the first question types beneath it.
+ */
+function TypewriterAssistantTurn({ content }: { content: string }) {
+  const typing = useTypingAnimation({ chunkSize: 4 });
+  const started = useRef(false);
+
+  useEffect(() => {
+    if (started.current) return;
+    started.current = true;
+    typing.appendDelta(content);
+  }, [content, typing]);
+
+  const done = typing.displayText.length >= content.length;
+  return (
+    <AssistantTurn>
+      {done ? (
+        <div className="prose prose-sm dark:prose-invert max-w-none">
+          <Markdown>{content}</Markdown>
+        </div>
+      ) : (
+        <p className="text-sm leading-relaxed whitespace-pre-wrap">
+          {typing.displayText}
+          <span className="terminal-caret" aria-hidden="true">
+            ▋
+          </span>
+        </p>
+      )}
+    </AssistantTurn>
+  );
+}
+
 export function QuestionnaireChat({
   sessionId,
   accessToken,
   stream,
   voiceInputEnabled = false,
   attachmentInputEnabled = false,
+  animateOpening = false,
   className,
 }: QuestionnaireChatProps) {
   const {
@@ -117,6 +160,10 @@ export function QuestionnaireChat({
   const attachControls = useRef<{ clear: () => void; remove: (id: string) => void } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  // The number of seeded turns present at mount (the welcome greeting). Only these are typed in
+  // when `animateOpening` is set; turns that arrive later already revealed themselves live as
+  // they streamed, so re-typing them would double-animate. Captured once via a lazy initializer.
+  const [openingTurnCount] = useState(() => turns.length);
 
   // Keep the latest turn / streaming tail in view.
   useEffect(() => {
@@ -164,6 +211,8 @@ export function QuestionnaireChat({
           {turns.map((turn, i) =>
             turn.role === 'user' ? (
               <UserBubble key={i} content={turn.content} />
+            ) : animateOpening && i < openingTurnCount ? (
+              <TypewriterAssistantTurn key={i} content={turn.content} />
             ) : (
               <AssistantTurn key={i}>
                 <div className="prose prose-sm dark:prose-invert max-w-none">

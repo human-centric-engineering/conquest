@@ -170,7 +170,9 @@ export const EXTRACT_ANSWER_SLOTS_FUNCTION_DEFINITION: CapabilityFunctionDefinit
       },
       activeQuestionKey: {
         type: 'string',
-        description: 'Key of the question currently being asked (must be one of candidateSlots).',
+        description:
+          'Key of the question currently being asked (must be one of candidateSlots). Omitted in ' +
+          'data-slot mode, where the respondent answers an open prompt with no single active question.',
       },
       candidateSlots: {
         type: 'array',
@@ -193,7 +195,7 @@ export const EXTRACT_ANSWER_SLOTS_FUNCTION_DEFINITION: CapabilityFunctionDefinit
         description: 'Stable session identity, threaded into cost-log metadata.',
       },
     },
-    required: ['userMessage', 'activeQuestionKey', 'candidateSlots'],
+    required: ['userMessage', 'candidateSlots'],
   },
 };
 

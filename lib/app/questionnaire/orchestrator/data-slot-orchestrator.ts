@@ -27,7 +27,7 @@ import {
   ASSESS_SERIOUSNESS_TOOL_SLUG,
 } from '@/lib/app/questionnaire/orchestrator/orchestrator';
 import { evaluateAbuseStrike, ABUSE_ABANDON_MESSAGE } from '@/lib/app/questionnaire/seriousness';
-import { unansweredQuestions } from '@/lib/app/questionnaire/selection/context';
+import { coverageRatio, unansweredQuestions } from '@/lib/app/questionnaire/selection/context';
 import type { ChatEvent } from '@/types/orchestration';
 import type {
   AnswerSlotIntent,
@@ -51,6 +51,14 @@ export const DATA_SLOT_SELECTION_TOOL_SLUG = 'app_select_data_slot';
 
 /** Confidence at/above which a data slot counts as "filled" for targeting + the panel. */
 export const DATA_SLOT_FILLED_THRESHOLD = 0.5;
+
+/**
+ * How far data-slot coverage may run ahead of the BACKGROUND question coverage before the loop
+ * stops deepening the conversation and asks an unanswered REQUIRED question directly. Keeps the
+ * deliverable (the questions) in step with the data-slot conversation, so mandatory answers the
+ * free-flowing chat didn't capture get surfaced mid-stream — not saved for the end-of-run sweep.
+ */
+export const BALANCED_QUESTION_LAG = 0.2;
 
 /** Deterministic fallback prose for the terminal branches (offer phrasing is the LLM's job). */
 export const DATA_SLOT_COMPLETE_MESSAGE =
@@ -261,6 +269,18 @@ export async function runDataSlotTurn(
 
   const unfilled = unfilledDataSlots(dataSlots, effectiveDataAnswered);
 
+  // Balanced progress: surface unanswered REQUIRED questions directly when the background question
+  // coverage falls behind the data-slot coverage — the conversation is filling slots but not
+  // capturing the mandatory answers (data slots are coarser than questions, so some required
+  // questions a theme should have answered slip through). Rather than wait for the end-of-run
+  // sweep, ask the next required question now whenever every data slot is filled OR the question
+  // coverage lags the data-slot coverage by more than {@link BALANCED_QUESTION_LAG}.
+  const requiredRemaining = remainingQuestions.filter((qn) => qn.required);
+  const dataCoverage =
+    dataSlots.length === 0 ? 1 : (dataSlots.length - unfilled.length) / dataSlots.length;
+  const questionCoverage = coverageRatio(effective);
+  const questionsLagging = dataCoverage - questionCoverage > BALANCED_QUESTION_LAG;
+
   if (allQuestionsAnswered) {
     if (effective.flags.completion) {
       response = {
@@ -270,6 +290,12 @@ export async function runDataSlotTurn(
     } else {
       response = { kind: 'complete', text: DATA_SLOT_COMPLETE_MESSAGE };
     }
+  } else if (requiredRemaining.length > 0 && (unfilled.length === 0 || questionsLagging)) {
+    // Interleave a required question directly (kept conversational by the route's phraser).
+    const next = requiredRemaining[0];
+    toolCalls.push(toolCall(DATA_SLOT_SELECTION_TOOL_SLUG, true));
+    response = { kind: 'question', questionId: next.id, text: next.prompt ?? '' };
+    targetedQuestionId = next.id;
   } else if (unfilled.length > 0) {
     // Target the next data slot, topic-local (linger in the current theme).
     const next = pickNextDataSlot(unfilled, state.activeDataSlotKey, dataSlots);

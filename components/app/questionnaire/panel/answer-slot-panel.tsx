@@ -38,8 +38,12 @@ export interface AnswerSlotPanelProps {
 
 function ProgressHeading({ view }: { view: AnswerPanelView }) {
   const dataSlotMode = view.dataSlotGroups !== undefined;
-  const summary =
-    view.scope === 'answered_only' && !dataSlotMode
+  // Data-slot mode shows one balanced percentage (questions + data slots) — never the raw question
+  // count, which the respondent never sees. Question mode keeps the familiar "N of M" / "N captured".
+  const percent = view.progressPercent ?? 0;
+  const summary = dataSlotMode
+    ? `${percent}% complete`
+    : view.scope === 'answered_only'
       ? `${view.answeredCount} captured`
       : `${view.answeredCount} of ${view.totalCount} answered`;
   return (
@@ -48,6 +52,21 @@ function ProgressHeading({ view }: { view: AnswerPanelView }) {
         {dataSlotMode ? 'What we’re learning' : 'Your answers'}
       </h2>
       <p className="text-muted-foreground mt-0.5 text-xs tabular-nums">{summary}</p>
+      {dataSlotMode ? (
+        <div
+          className="bg-muted mt-2 h-1.5 overflow-hidden rounded-full"
+          role="progressbar"
+          aria-valuenow={percent}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label="Completion progress"
+        >
+          <div
+            className="bg-primary h-full rounded-full transition-[width] duration-500 ease-out"
+            style={{ width: `${percent}%` }}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }

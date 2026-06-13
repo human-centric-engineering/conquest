@@ -165,11 +165,49 @@ describe('extractAnswers', () => {
     });
   });
 
-  it('short-circuits with a diagnostic when there is no active question', async () => {
+  it('short-circuits with a diagnostic when there is no active question AND no data slots', async () => {
     const inv = await invokers({ activeQuestionKey: null });
     const out = await inv.extractAnswers(state());
     expect(out).toMatchObject({ intents: [], diagnostic: 'no_active_question' });
     expect(dispatcherMock.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('dispatches in data-slot mode (no active question), omitting activeQuestionKey', async () => {
+    // The bug: data-slot mode has no active question (the target is a data slot), so the old guard
+    // returned `no_active_question` every turn and nothing was ever captured. With data slots
+    // present the call must dispatch — extracting background question answers AND data-slot fills —
+    // and must NOT send an activeQuestionKey (there is none).
+    (dispatcherMock.dispatch as Mock).mockResolvedValue({
+      success: true,
+      data: {
+        intents: [{ slotKey: 'role', value: 'x', isActiveQuestion: false }],
+        dataSlotFills: [
+          {
+            dataSlotKey: 'strategy',
+            value: 'aware',
+            paraphrase: 'p',
+            confidence: 0.9,
+            provenance: 'direct',
+          },
+        ],
+        droppedCount: 0,
+        costUsd: 0,
+      },
+    });
+    const inv = await invokers({
+      activeQuestionKey: null,
+      dataSlotCandidates: [
+        { key: 'strategy', name: 'Strategy Awareness', description: 'd', theme: 'Strategy' },
+      ],
+    });
+    const out = await inv.extractAnswers(state());
+
+    expect(out.diagnostic).toBeUndefined();
+    expect(out.intents).toHaveLength(1);
+    expect(out.dataSlotFills).toHaveLength(1);
+    const [, args] = (dispatcherMock.dispatch as Mock).mock.calls[0];
+    expect(args).not.toHaveProperty('activeQuestionKey');
+    expect(args.dataSlotCandidates).toHaveLength(1);
   });
 
   it('short-circuits when the extractor agent is unconfigured', async () => {

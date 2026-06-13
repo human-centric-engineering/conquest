@@ -45,6 +45,23 @@ describe('buildAnswerExtractionPrompt', () => {
     expect(content).toContain('I am Dana');
   });
 
+  it('frames an open prompt (no "Active question key") in data-slot mode', () => {
+    // activeQuestionKey: null → data-slot mode: the respondent is answering an open conversational
+    // prompt, so the extractor is told there is no single active question (vs naming one).
+    const messages = buildAnswerExtractionPrompt(
+      ctx({
+        candidateSlots: [slot({ key: 'name', prompt: 'What is your name?' })],
+        activeQuestionKey: null,
+        userMessage: 'I am Dana',
+      })
+    );
+    const content = userContent(messages);
+    expect(content).not.toContain('Active question key');
+    expect(content).toContain('there is no single active question');
+    // Still lists the candidate questions to extract background answers into.
+    expect(content).toContain('What is your name?');
+  });
+
   it('renders choice options for a choice slot', () => {
     const messages = buildAnswerExtractionPrompt(
       ctx({ candidateSlots: [choiceSlot('colour', 'single_choice', 'red', 'blue')] })

@@ -139,8 +139,16 @@ export function buildAnswerExtractionPrompt(ctx: ExtractionContext): LlmMessage[
       `part of their answer — extract values they support, citing the file in the rationale.`
     : '';
 
+  // In question mode the respondent is replying to one ACTIVE question; in data-slot mode there is
+  // none (they're answering an open conversational prompt), so frame the task accordingly.
+  const activeLine =
+    ctx.activeQuestionKey !== null
+      ? `Active question key: ${ctx.activeQuestionKey}\n\n`
+      : 'The respondent is answering an open, conversational prompt — there is no single active ' +
+        'question. Capture every question and data slot their message genuinely supports.\n\n';
+
   const userText =
-    `Active question key: ${ctx.activeQuestionKey}\n\n` +
+    activeLine +
     `Candidate questions (extract answers only for these):\n${candidates}` +
     dataSlotSection +
     '\n\n' +

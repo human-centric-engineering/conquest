@@ -168,6 +168,9 @@ export function SessionWorkspace({
             stream={stream}
             voiceInputEnabled={voiceInputEnabled}
             attachmentInputEnabled={attachmentInputEnabled}
+            // Fresh sessions (autoStart) type the seeded greeting in, like a streamed reply;
+            // resumes render their history instantly.
+            animateOpening={autoStart}
             className="min-h-0 flex-1"
           />
         </div>

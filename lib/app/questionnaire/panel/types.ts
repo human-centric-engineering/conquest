@@ -103,4 +103,11 @@ export interface AnswerPanelView {
    * deliverable), while these rows show the data-slot paraphrases + confidence.
    */
   dataSlotGroups?: DataSlotPanelGroup[];
+  /**
+   * Data Slots feature: a single 0–100 progress figure blending background question coverage with
+   * data-slot coverage (see `blendedProgressPercent`). Present only in data-slot mode — the header
+   * shows "{progressPercent}% complete" instead of the raw question count, which the respondent
+   * never sees. Absent in question mode (the header uses `answeredCount` / `totalCount`).
+   */
+  progressPercent?: number;
 }

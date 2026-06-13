@@ -178,6 +178,112 @@ describe('runDataSlotTurn — sweep + completion', () => {
   });
 });
 
+describe('runDataSlotTurn — balanced required-question interleaving', () => {
+  it('interleaves a required question directly when question coverage lags data-slot coverage', async () => {
+    // 2 of 3 data slots filled (data coverage ≈ 0.67) but the required question is unanswered
+    // (question coverage 0) → the lag exceeds the threshold, so surface the required question now
+    // rather than deepening into the last data slot or waiting for the end-of-run sweep.
+    const { invokers } = stubInvokers();
+    const result = await runDataSlotTurn(
+      dsState({
+        questions: [q({ id: 'qReq', required: true, prompt: 'Required one?' })],
+        answered: [],
+        dataSlots: [
+          ds({ id: 'd1', theme: 'A' }),
+          ds({ id: 'd2', theme: 'A' }),
+          ds({ id: 'd3', theme: 'A' }),
+        ],
+        dataSlotAnswered: [
+          { dataSlotId: 'd1', confidence: 0.9 },
+          { dataSlotId: 'd2', confidence: 0.9 },
+        ],
+        activeDataSlotKey: 'd2',
+      }),
+      invokers
+    );
+    expect(result.response.kind).toBe('question');
+    if (result.response.kind === 'question') {
+      expect(result.response.questionId).toBe('qReq');
+      expect(result.response.text).toBe('Required one?');
+    }
+    expect(result.targetedQuestionId).toBe('qReq');
+  });
+
+  it('keeps targeting data slots when question coverage keeps pace (no early required ask)', async () => {
+    // The required question is unanswered, but background question coverage (0.8) is ahead of
+    // data-slot coverage (0.5) — no lag — so the conversation stays in the data-slot flow.
+    const { invokers } = stubInvokers();
+    const result = await runDataSlotTurn(
+      dsState({
+        questions: [
+          q({ id: 'qReq', required: true }),
+          q({ id: 'qA' }),
+          q({ id: 'qB' }),
+          q({ id: 'qC' }),
+          q({ id: 'qD' }),
+        ],
+        answered: [
+          { questionId: 'qA', confidence: 0.9 },
+          { questionId: 'qB', confidence: 0.9 },
+          { questionId: 'qC', confidence: 0.9 },
+          { questionId: 'qD', confidence: 0.9 },
+        ],
+        dataSlots: [ds({ id: 'd1', theme: 'A' }), ds({ id: 'd2', theme: 'A' })],
+        dataSlotAnswered: [{ dataSlotId: 'd1', confidence: 0.9 }],
+        activeDataSlotKey: 'd1',
+      }),
+      invokers
+    );
+    expect(result.response.kind).toBe('data_slot');
+    if (result.response.kind === 'data_slot') {
+      expect(result.response.dataSlotId).toBe('d2');
+    }
+  });
+
+  it('sweeps the required question before an optional one once data slots are filled', async () => {
+    // End-of-run sweep is required-first: even though the optional question sorts earlier, the
+    // mandatory one is asked first.
+    const { invokers } = stubInvokers();
+    const result = await runDataSlotTurn(
+      dsState({
+        questions: [
+          q({ id: 'qOpt', ordinal: 0, prompt: 'Optional?' }),
+          q({ id: 'qReq', ordinal: 1, required: true, prompt: 'Required?' }),
+        ],
+        answered: [],
+        dataSlots: [ds({ id: 'd1', theme: 'A' })],
+        dataSlotAnswered: [{ dataSlotId: 'd1', confidence: 0.9 }],
+      }),
+      invokers
+    );
+    expect(result.response.kind).toBe('question');
+    if (result.response.kind === 'question') {
+      expect(result.response.questionId).toBe('qReq');
+      expect(result.response.text).toBe('Required?');
+    }
+  });
+
+  it('opens on a data slot even when a required question is unanswered', async () => {
+    // The opening turn (no message yet → no coverage, no lag) must start conversationally with a
+    // data slot, not jump straight to a required question.
+    const { invokers } = stubInvokers();
+    const result = await runDataSlotTurn(
+      dsState({
+        userMessage: '',
+        questions: [q({ id: 'qReq', required: true })],
+        answered: [],
+        dataSlots: [ds({ id: 'd1', theme: 'A' }), ds({ id: 'd2', theme: 'B' })],
+        dataSlotAnswered: [],
+      }),
+      invokers
+    );
+    expect(result.response.kind).toBe('data_slot');
+    if (result.response.kind === 'data_slot') {
+      expect(result.response.dataSlotId).toBe('d1');
+    }
+  });
+});
+
 describe('runDataSlotTurn — side effects', () => {
   it('merges this turn’s fills + carries them as side effects, and answers questions in the background', async () => {
     const { invokers } = stubInvokers({

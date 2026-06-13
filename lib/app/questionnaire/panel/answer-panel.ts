@@ -128,3 +128,31 @@ export function buildAnswerPanelView(input: PanelBuilderInput): AnswerPanelView 
     totalCount,
   };
 }
+
+/**
+ * Weight on data-slot coverage when blending it with background question coverage into one
+ * progress figure (the rest weights the questions). `0.5` is an equal balance between the
+ * respondent-facing data slots and the background deliverable.
+ */
+export const DATA_SLOT_PROGRESS_WEIGHT = 0.5;
+
+/**
+ * Blend background question coverage with data-slot coverage into a single 0–100 progress percent
+ * for the respondent panel (Data Slots feature). Data-slot mode deliberately never shows the raw
+ * "N of M" question count — that would leak the question structure the respondent never sees — so
+ * this one balanced figure reflects both the deliverable (questions answered in the background) and
+ * the conversation's visible progress (data slots filled). An empty side counts as fully covered so
+ * a version with only questions, or only data slots, still reports honestly.
+ */
+export function blendedProgressPercent(input: {
+  answeredQuestions: number;
+  totalQuestions: number;
+  filledDataSlots: number;
+  totalDataSlots: number;
+}): number {
+  const qCov = input.totalQuestions === 0 ? 1 : input.answeredQuestions / input.totalQuestions;
+  const dCov = input.totalDataSlots === 0 ? 1 : input.filledDataSlots / input.totalDataSlots;
+  const w = DATA_SLOT_PROGRESS_WEIGHT;
+  const blended = qCov * (1 - w) + dCov * w;
+  return Math.round(Math.min(1, Math.max(0, blended)) * 100);
+}
