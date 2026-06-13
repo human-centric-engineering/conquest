@@ -101,6 +101,21 @@ function DataSlotGroups({ groups }: { groups: DataSlotPanelGroup[] }) {
                         Not covered yet
                       </p>
                     )}
+                    {slot.history.length > 0 ? (
+                      <ul className="mt-1 space-y-0.5">
+                        {slot.history
+                          .filter((h) => h.paraphrase)
+                          .map((h, i) => (
+                            <li
+                              key={i}
+                              className="text-muted-foreground/70 text-xs line-through"
+                              title="An earlier answer you later changed"
+                            >
+                              Earlier: {h.paraphrase}
+                            </li>
+                          ))}
+                      </ul>
+                    ) : null}
                   </div>
                 </div>
               </li>

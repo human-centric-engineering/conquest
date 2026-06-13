@@ -104,6 +104,34 @@ describe('AnswerSlotPanel', () => {
     expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '37');
   });
 
+  it('shows the current data-slot paraphrase and prior values as "Earlier:" history', () => {
+    render(
+      <AnswerSlotPanel
+        view={view({
+          dataSlotGroups: [
+            {
+              theme: 'Demographics',
+              slots: [
+                {
+                  key: 'demographics',
+                  name: 'Employee Demographics',
+                  description: 'Age + gender',
+                  paraphrase: 'A 25-year-old female.',
+                  confidence: 0.95,
+                  filled: true,
+                  history: [{ paraphrase: 'A 25-year-old male.', confidence: 0.9 }],
+                },
+              ],
+            },
+          ],
+          progressPercent: 20,
+        })}
+      />
+    );
+    expect(screen.getByText('A 25-year-old female.')).toBeInTheDocument();
+    expect(screen.getByText('Earlier: A 25-year-old male.')).toBeInTheDocument();
+  });
+
   it('renders answered values and pending placeholders', () => {
     render(<AnswerSlotPanel view={view()} />);
     expect(screen.getByText('Engineer')).toBeInTheDocument();

@@ -30,6 +30,7 @@ import {
 } from '@/lib/app/questionnaire/panel/answer-panel';
 import type {
   AnswerPanelView,
+  DataSlotFillHistoryEntry,
   DataSlotPanelGroup,
   PanelRefinementEntry,
 } from '@/lib/app/questionnaire/panel/types';
@@ -44,6 +45,11 @@ export interface LoadedAnswerPanel {
 /** Cast a stored `refinementHistory` Json column back to our entry array. */
 function asRefinementHistory(value: unknown): PanelRefinementEntry[] {
   return Array.isArray(value) ? (value as PanelRefinementEntry[]) : [];
+}
+
+/** Cast a data-slot fill's stored `refinementHistory` Json column back to its entry array. */
+function asDataSlotHistory(value: unknown): DataSlotFillHistoryEntry[] {
+  return Array.isArray(value) ? (value as DataSlotFillHistoryEntry[]) : [];
 }
 
 /** Narrow a stored `answerSlotPanelScope` to the enum (default when unknown/absent). */
@@ -101,9 +107,10 @@ export async function loadAnswerPanelState(
           questionSlot: { select: { key: true } },
         },
       },
-      // Data Slots feature: the session's fills (the respondent-facing capture).
+      // Data Slots feature: the session's fills (the respondent-facing capture). `refinementHistory`
+      // carries prior values when the respondent changed their answer, surfaced as "Earlier: …".
       dataSlotFills: {
-        select: { dataSlotId: true, paraphrase: true, confidence: true },
+        select: { dataSlotId: true, paraphrase: true, confidence: true, refinementHistory: true },
       },
       turns: { select: { id: true, ordinal: true } },
     },
@@ -149,7 +156,11 @@ export async function loadAnswerPanelState(
     const fillByDataSlotId = new Map(
       row.dataSlotFills.map((f) => [
         f.dataSlotId,
-        { paraphrase: f.paraphrase, confidence: f.confidence },
+        {
+          paraphrase: f.paraphrase,
+          confidence: f.confidence,
+          history: asDataSlotHistory(f.refinementHistory),
+        },
       ])
     );
     const groups: DataSlotPanelGroup[] = [];
@@ -172,6 +183,11 @@ export async function loadAnswerPanelState(
         paraphrase: fill?.paraphrase ?? null,
         confidence: fill?.confidence ?? null,
         filled,
+        // Prior values, oldest first (only present once the answer changed at least once).
+        history: (fill?.history ?? []).map((h) => ({
+          paraphrase: h.previousParaphrase,
+          confidence: h.previousConfidence,
+        })),
       });
     }
     view.dataSlotGroups = groups;

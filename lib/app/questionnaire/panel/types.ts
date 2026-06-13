@@ -61,6 +61,22 @@ export interface PanelSectionView {
 }
 
 /**
+ * One prior state of a data-slot fill, stored on the fill's `refinementHistory` Json column and
+ * appended whenever a later turn CHANGES the captured value (e.g. "male" → "female"). Lets the
+ * panel show how an answer evolved. Oldest first.
+ */
+export interface DataSlotFillHistoryEntry {
+  /** The captured position before this change (free-form). */
+  previousValue: unknown;
+  /** The restatement shown for that prior value, or null. */
+  previousParaphrase: string | null;
+  /** The confidence of that prior value, or null. */
+  previousConfidence: number | null;
+  /** ISO timestamp stamped at the persistence seam when the change was recorded. */
+  changedAt?: string;
+}
+
+/**
  * One data slot in the respondent panel (Data Slots feature). Shows the short name, the
  * agent's paraphrase of the respondent's position, and a confidence indicator. The underlying
  * question answers stay hidden — the respondent sees only this abstraction layer.
@@ -75,6 +91,12 @@ export interface DataSlotPanelSlot {
   confidence: number | null;
   /** True once a fill (≥ the filled threshold) exists for this slot. */
   filled: boolean;
+  /**
+   * Prior paraphrases for this slot when the respondent changed their answer, oldest first. Empty
+   * when the slot was filled once and never changed. Lets the panel show "Earlier: …" so a
+   * correction (e.g. 25-year-old male → female) is visible, not silently overwritten.
+   */
+  history: Array<{ paraphrase: string | null; confidence: number | null }>;
 }
 
 /** A themed group of data slots (the panel groups by the generator's theme). */
