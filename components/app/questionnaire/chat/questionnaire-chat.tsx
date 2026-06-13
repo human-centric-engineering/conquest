@@ -123,6 +123,16 @@ export function QuestionnaireChat({
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [turns.length, streamingText, streaming]);
 
+  // Refocus the composer when a turn finishes — the textarea is disabled while a reply streams,
+  // so we put the cursor back the moment it re-enables, ready for the next answer without a click.
+  const wasStreamingRef = useRef(false);
+  useEffect(() => {
+    if (wasStreamingRef.current && !streaming && canSend) {
+      textareaRef.current?.focus();
+    }
+    wasStreamingRef.current = streaming;
+  }, [streaming, canSend]);
+
   const handleSend = () => {
     if (!canSend || input.trim().length === 0) return;
     setVoiceError(null);
@@ -243,6 +253,8 @@ export function QuestionnaireChat({
                   onAttachmentsChange={setAttachments}
                   onEntriesChange={setAttachEntries}
                   onError={setAttachError}
+                  // Match the Send button's height (h-9) — the picker defaults to size="sm" (h-8).
+                  className="h-9"
                 />
               )}
               {voiceInputEnabled && (
@@ -250,6 +262,8 @@ export function QuestionnaireChat({
                   agentId={sessionId}
                   endpoint={API.APP.QUESTIONNAIRE_SESSIONS.transcribe(sessionId)}
                   disabled={!canSend}
+                  // Match the Send button's height (h-9) — the mic defaults to size="sm" (h-8).
+                  className="h-9"
                   extraHeaders={accessToken ? { 'X-Session-Token': accessToken } : undefined}
                   onTranscript={(text) => {
                     setVoiceError(null);
