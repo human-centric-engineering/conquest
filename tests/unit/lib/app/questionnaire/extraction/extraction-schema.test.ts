@@ -122,8 +122,21 @@ describe('validateAnswerExtraction', () => {
 describe('answerExtractionJsonSchema', () => {
   it('is computed at module load and leaves value open (any JSON)', () => {
     expect(answerExtractionJsonSchema).toBeTypeOf('object');
-    const props = (answerExtractionJsonSchema as { properties?: Record<string, unknown> })
-      .properties;
-    expect(props).toHaveProperty('answers');
+    const schema = answerExtractionJsonSchema as {
+      properties?: {
+        answers?: {
+          items?: {
+            properties?: Record<string, unknown>;
+          };
+        };
+      };
+    };
+    const valueSchema = schema.properties?.answers?.items?.properties?.['value'];
+    // z.unknown() with { unrepresentable: 'any' } must serialise to an open {} —
+    // no 'type' constraint — so any JSON is valid. A regression adding a type
+    // constraint (e.g. "type": "string") would break this assertion.
+    expect(valueSchema).toBeDefined();
+    expect(valueSchema).toEqual({});
+    expect(valueSchema).not.toHaveProperty('type');
   });
 });

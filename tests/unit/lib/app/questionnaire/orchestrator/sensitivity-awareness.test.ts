@@ -51,8 +51,9 @@ describe('runTurn — sensitivity awareness', () => {
   });
 
   it('escalates the running-max level from a prior level (medium → high)', async () => {
-    const med: SensitivityAssessment = { ...HIGH, severity: 'high' };
-    const { invokers } = stubInvokers({ extract: { sensitivity: med } });
+    // Prior session level is 'medium'; this turn discloses HIGH → running max must rise to 'high'.
+    const highDisclosure: SensitivityAssessment = { ...HIGH, severity: 'high' };
+    const { invokers } = stubInvokers({ extract: { sensitivity: highDisclosure } });
     const result = await runTurn(
       state({ userMessage: 'x', questions: Q, sensitivityLevel: 'medium' }),
       invokers

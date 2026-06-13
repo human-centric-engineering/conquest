@@ -54,10 +54,11 @@ const tokenMock = vi.hoisted(() => ({ verifySessionToken: vi.fn() }));
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/session-access-token', () => tokenMock);
 
 import { POST } from '@/app/api/v1/app/questionnaire-sessions/[id]/messages/route';
-import { ABUSE_ABANDON_REASON } from '@/lib/app/questionnaire/types';
+import { ABUSE_ABANDON_REASON, DEFAULT_QUESTIONNAIRE_CONFIG } from '@/lib/app/questionnaire/types';
 import { isFeatureEnabled } from '@/lib/feature-flags';
 import {
   APP_QUESTIONNAIRES_COST_CAP_FLAG,
+  APP_QUESTIONNAIRES_DATA_SLOTS_FLAG,
   APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG,
 } from '@/lib/app/questionnaire/constants';
 import { auth } from '@/lib/auth/config';
@@ -87,17 +88,12 @@ function loadedContext(over: Record<string, unknown> = {}) {
     session: { id: 'sess-1', status: 'active', versionId: 'v1', respondentUserId: USER },
     base: {
       sessionId: 'sess-1',
+      // Spread all defaults so new config fields are automatically covered.
+      // abuseThreshold is explicitly 0 (overriding DEFAULT's 4) so the seriousness
+      // gate stays OFF for standard-turn tests that don't stub assessSeriousness.
       config: {
-        selectionStrategy: 'sequential',
-        minQuestionsAnswered: 0,
-        coverageThreshold: 1,
-        costBudgetUsd: null,
-        maxQuestionsPerSession: null,
-        voiceEnabled: false,
-        contradictionMode: 'off',
-        contradictionWindowN: 0,
-        anonymousMode: false,
-        profileFields: [],
+        ...DEFAULT_QUESTIONNAIRE_CONFIG,
+        abuseThreshold: 0,
       },
       questions: [
         {
@@ -145,6 +141,9 @@ function stubInvokers() {
     selectNext: vi.fn(async () => ({
       decision: { kind: 'ask', questionId: 'q1', rationale: 'first', costUsd: 0 },
     })),
+    // Present for CapabilityInvokers interface completeness; the seriousness gate is off
+    // in default-context tests (abuseThreshold: 0) so this stub is not called.
+    assessSeriousness: vi.fn(async () => ({ verdict: { serious: true, reason: '' }, costUsd: 0 })),
   };
 }
 
@@ -376,6 +375,66 @@ describe('streaming an offer turn', () => {
     // Offer turns target no question; the streamed message is persisted as the reply.
     expect(runMock.persistTurn).toHaveBeenCalledWith(
       expect.objectContaining({ targetedQuestionId: null, agentResponse: 'Ready to submit?' })
+    );
+  });
+});
+
+describe('data-slot mode', () => {
+  /** A context with a single data slot so the route enters data-slot mode. */
+  function dataSlotContext() {
+    const base = loadedContext();
+    return loadedContext({
+      base: {
+        ...base.base,
+        dataSlots: [
+          {
+            id: 'ds-1',
+            key: 'department',
+            name: 'Department',
+            description: 'Which department do you work in?',
+            theme: 'role',
+            ordinal: 0,
+            weight: 1,
+          },
+        ],
+        dataSlotAnswered: [],
+        dataSlotAttempts: {},
+      },
+    });
+  }
+
+  it('calls runDataSlotTurn (not runTurn) and passes dataSlotFills to persistTurn', async () => {
+    // Arrange: data-slots flag is already on globally (isFeatureEnabled → true).
+    // Stub isFeatureEnabled so data-slots is explicitly confirmed on.
+    vi.mocked(isFeatureEnabled).mockImplementation((name: string) =>
+      Promise.resolve(name === APP_QUESTIONNAIRES_DATA_SLOTS_FLAG || true)
+    );
+    ctxMock.buildTurnContext.mockResolvedValue(dataSlotContext());
+
+    // The question-message phraser is called from the data_slot response branch.
+    // Override it to echo the data-slot's name so we can assert the stream path.
+    questionMock.streamQuestionMessage.mockImplementation(async function* (opts: {
+      input: { prompt: string };
+    }) {
+      yield { type: 'content', delta: opts.input.prompt };
+      return { message: opts.input.prompt, costUsd: 0 };
+    });
+
+    // Act
+    const res = await POST(req({ message: 'I work in marketing' }), ctx);
+    expect(res.status).toBe(200);
+    const frames = await drainSse(res);
+
+    // Assert: the stream completes with a done frame (route wired to data-slot orchestrator).
+    const eventNames = frames.map((f) => f.event);
+    expect(eventNames[0]).toBe('start');
+    expect(eventNames[eventNames.length - 1]).toBe('done');
+    expect(eventNames).toContain('content');
+
+    // The route should persist with a dataSlotFills array (data-slot mode wiring).
+    expect(runMock.persistTurn).toHaveBeenCalledTimes(1);
+    expect(runMock.persistTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ dataSlotFills: expect.any(Array) })
     );
   });
 });
@@ -667,11 +726,19 @@ describe('sensitivity awareness / safeguarding', () => {
 
   it('streams a support signpost frame with the configured copy + URL', async () => {
     const frames = await drainSse(await POST(req({ message: 'I was abused by the CEO' }), ctx));
+    // Assert the frame's structured shape — not just that some string contains the copy.
+    // The support signpost is a 'warning' event with code 'support' emitted by the orchestrator.
     const support = frames.find(
-      (f) => f.event === 'warning' && JSON.stringify(f.data).includes('Support is available.')
+      (f) => f.event === 'warning' && (f.data as { code?: string }).code === 'support'
     );
-    expect(support).toBeTruthy();
-    expect(JSON.stringify(support?.data)).toContain('https://help.example');
+    expect(support).toBeDefined();
+    expect((support!.data as { code: string; message: string }).code).toBe('support');
+    expect((support!.data as { code: string; message: string }).message).toContain(
+      'Support is available.'
+    );
+    expect((support!.data as { code: string; message: string }).message).toContain(
+      'https://help.example'
+    );
   });
 
   it('threads the just-detected disclosure into the question phraser (gentle tone this turn)', async () => {
@@ -679,6 +746,21 @@ describe('sensitivity awareness / safeguarding', () => {
     const input = (questionMock.streamQuestionMessage as Mock).mock.calls[0]?.[0]?.input;
     expect(input.sensitivityLevel).toBe('high');
     expect(input.sensitivityNotes).toContain(SUMMARY);
+  });
+
+  it('still emits a done frame when persistSensitivity rejects (fail-soft: already streamed)', async () => {
+    // Arrange: sensitivity persistence fails after the reply has already been streamed.
+    sessionsMock.persistSensitivity.mockRejectedValue(new Error('db write failed'));
+
+    // Act
+    const res = await POST(req({ message: 'I was abused by the CEO' }), ctx);
+    expect(res.status).toBe(200);
+    const frames = await drainSse(res);
+
+    // Assert: the stream completes normally — the bookkeeping failure is swallowed.
+    const events = frames.map((f) => f.event);
+    expect(events).toContain('content');
+    expect(events[events.length - 1]).toBe('done');
   });
 
   it('does nothing when the per-questionnaire toggle is off', async () => {

@@ -23,7 +23,7 @@ object (`extraction/extraction-schema.ts`):
 sensitivity?: { detected: true; severity: 'low'|'medium'|'high'; category: string; summary: string }
 ```
 
-`severity` is from `SENSITIVITY_SEVERITIES` (`types.ts`); `summary` is a **careful, non-graphic**
+`severity` is from `SENSITIVITY_SEVERITIES` (top-level `lib/app/questionnaire/types.ts`); `summary` is a **careful, non-graphic**
 one-line restatement — the only field that carries disclosure content. Off ⇒ the block is not
 appended and the field is ignored, so the feature is **zero added prompt/cost when disabled**.
 

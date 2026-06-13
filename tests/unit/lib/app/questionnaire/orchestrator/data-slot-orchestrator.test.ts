@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   runDataSlotTurn,
+  DATA_SLOT_COMPLETE_MESSAGE,
   DATA_SLOT_SELECTION_TOOL_SLUG,
   PROVISIONAL_FLOOR_CONFIDENCE,
   type DataSlotTarget,
@@ -142,6 +143,7 @@ describe('runDataSlotTurn — targeting', () => {
       }),
       invokers
     );
+    expect(result.response.kind).toBe('data_slot');
     if (result.response.kind === 'data_slot') {
       expect(result.response.dataSlotId).toBe('d1');
       expect(result.response.isReask).toBe(true);
@@ -182,6 +184,51 @@ describe('runDataSlotTurn — sweep + completion', () => {
     );
     expect(result.response.kind).toBe('offer');
     expect(result.assessment.kind).toBe('offer');
+  });
+
+  it('emits DATA_SLOT_COMPLETE_MESSAGE when all questions answered but completion flag is off', async () => {
+    // When flags.completion is false the offer-prose path is disabled, so the orchestrator falls
+    // through to the deterministic DATA_SLOT_COMPLETE_MESSAGE terminal frame instead of invoking
+    // the streaming offer composer. This is a distinct constant from question-mode COMPLETE_MESSAGE.
+    const { invokers } = stubInvokers();
+    const result = await runDataSlotTurn(
+      dsState({
+        questions: [q({ id: 'q1' })],
+        answered: [{ questionId: 'q1', confidence: 0.9 }],
+        dataSlots: [ds({ id: 'd1', theme: 'A' })],
+        dataSlotAnswered: [],
+        flags: { completion: false },
+      }),
+      invokers
+    );
+    expect(result.response.kind).toBe('complete');
+    if (result.response.kind === 'complete') {
+      expect(result.response.text).toBe(DATA_SLOT_COMPLETE_MESSAGE);
+    }
+    expect(result.assessment.kind).toBe('offer');
+  });
+
+  it('includes costWrapUp in the offer input when soft cost pressure is active', async () => {
+    // When state.costPressure === 'soft' and all questions are answered, buildOfferInput adds
+    // costWrapUp: true to the OfferComposeInput so the prose composer can hint the user to wrap up.
+    // dsState() does not forward costPressure, so we spread it on after construction.
+    const { invokers } = stubInvokers();
+    const result = await runDataSlotTurn(
+      {
+        ...dsState({
+          questions: [q({ id: 'q1' })],
+          answered: [{ questionId: 'q1', confidence: 0.9 }],
+          dataSlots: [ds({ id: 'd1', theme: 'A' })],
+          dataSlotAnswered: [],
+        }),
+        costPressure: 'soft' as const,
+      },
+      invokers
+    );
+    expect(result.response.kind).toBe('offer');
+    if (result.response.kind === 'offer') {
+      expect(result.response.input.costWrapUp).toBe(true);
+    }
   });
 });
 
@@ -467,6 +514,31 @@ describe('runDataSlotTurn — move on / provisional park', () => {
     );
     const d1Fill = (result.sideEffects.dataSlotFills ?? []).find((f) => f.dataSlotKey === 'd1');
     expect(d1Fill?.provisional).toBe(true);
+  });
+
+  it('falls through to the parked theme when it is the only remaining theme', async () => {
+    // avoidTheme is set to the just-parked slot's theme (A). pickNextDataSlot first looks for a
+    // slot in a DIFFERENT theme; finding none it falls through and still picks from theme A.
+    // This ensures the conversation never stalls when all remaining slots share the parked theme.
+    const { invokers } = stubInvokers({ extract: { dataSlotFills: [fill('d1', 0.3)] } });
+    const result = await runDataSlotTurn(
+      dsState({
+        questions: [q({ id: 'q1' })],
+        dataSlots: [
+          ds({ id: 'd1', key: 'd1', theme: 'A' }),
+          ds({ id: 'd2', key: 'd2', theme: 'A' }), // only remaining slot, same theme as parked
+        ],
+        activeDataSlotKey: 'd1',
+        dataSlotAttempts: { d1: 2 },
+        config: { maxDataSlotAttempts: 2 },
+      }),
+      invokers
+    );
+    // d2 is picked even though it shares the parked theme (no alternative theme available).
+    expect(result.response.kind).toBe('data_slot');
+    if (result.response.kind === 'data_slot') {
+      expect(result.response.dataSlotId).toBe('d2');
+    }
   });
 
   it('never parks (or keeps any fill) on a disregarded non-genuine turn, even at the cap', async () => {

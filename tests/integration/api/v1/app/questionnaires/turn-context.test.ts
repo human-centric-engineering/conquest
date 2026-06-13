@@ -285,4 +285,114 @@ describe('buildTurnContext', () => {
     expect(loaded!.meta).not.toHaveProperty('audience');
     expect(loaded!.meta).not.toHaveProperty('goal');
   });
+
+  it('maps a valid sensitivityLevel and survives the sensitivityNotes JSON column', async () => {
+    // Arrange: a session carrying a high-severity level plus two persisted disclosure notes.
+    const notes = [
+      {
+        severity: 'high',
+        category: 'distress',
+        summary: 'Mentioned feeling overwhelmed',
+        turnOrdinal: 1,
+        createdAt: '2024-01-01T00:00:00Z',
+      },
+      {
+        severity: 'high',
+        category: 'harassment',
+        summary: 'Described a workplace incident',
+        turnOrdinal: 2,
+        createdAt: '2024-01-01T00:01:00Z',
+      },
+    ];
+    (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionGraph({ sensitivityLevel: 'high', sensitivityNotes: notes })
+    );
+
+    // Act
+    const loaded = await buildTurnContext('sess-1');
+
+    // Assert: loader must narrow 'high' to SensitivitySeverity and extract only the
+    // `summary` strings from the notes array — not pass the raw objects through.
+    expect(loaded!.base.sensitivityLevel).toBe('high');
+    expect(loaded!.base.sensitivityNotes).toEqual([
+      'Mentioned feeling overwhelmed',
+      'Described a workplace incident',
+    ]);
+  });
+
+  it('coerces an unrecognised sensitivityLevel to null', async () => {
+    // Arrange: 'extreme' is not in SENSITIVITY_SEVERITIES (['low','medium','high']).
+    (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionGraph({ sensitivityLevel: 'extreme', sensitivityNotes: null })
+    );
+
+    // Act
+    const loaded = await buildTurnContext('sess-1');
+
+    // Assert: loader must not pass an arbitrary string through — invalid values become null.
+    expect(loaded!.base.sensitivityLevel).toBeNull();
+  });
+
+  it('threads abuseStrikes from the session row into base', async () => {
+    // Arrange: a session that already has three flagged non-genuine answers.
+    (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionGraph({ abuseStrikes: 3 })
+    );
+
+    // Act
+    const loaded = await buildTurnContext('sess-1');
+
+    // Assert: the loader must copy the DB value into base.abuseStrikes unchanged so the
+    // orchestrator can fold a new strike in (not just start from zero).
+    expect(loaded!.base.abuseStrikes).toBe(3);
+  });
+
+  it('maps dataSlotFills into the dataSlotAnswered view with all detail fields', async () => {
+    // Arrange: a session whose version has one data slot, and a fill carrying all fields
+    // the extractor needs to UPDATE/CORRECT the slot across turns (value, paraphrase, provisional).
+    const graph = sessionGraph({
+      version: {
+        config: null,
+        dataSlots: [
+          {
+            id: 'ds1',
+            key: 'satisfaction',
+            name: 'Satisfaction',
+            description: 'Overall satisfaction',
+            theme: 'Wellbeing',
+            ordinal: 0,
+            weight: 1,
+          },
+        ],
+        sections: [{ id: 's1', ordinal: 0, questions: [] }],
+      },
+      answers: [],
+      dataSlotFills: [
+        {
+          dataSlotId: 'ds1',
+          confidence: 0.75,
+          value: 'pretty good',
+          paraphrase: 'The respondent expressed moderate satisfaction',
+          provisional: true,
+        },
+      ],
+      turns: [],
+    });
+    (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(graph);
+
+    // Act
+    const loaded = await buildTurnContext('sess-1');
+
+    // Assert: every field the extractor relies on must survive the mapping — not be stripped
+    // or left as a raw DB row. The loader adds no new fields; it must pass all five through.
+    const fills = loaded!.base.dataSlotAnswered;
+    expect(fills).toHaveLength(1);
+    expect(fills![0]).toMatchObject({
+      dataSlotId: 'ds1',
+      confidence: 0.75,
+      value: 'pretty good',
+      paraphrase: 'The respondent expressed moderate satisfaction',
+      provisional: true,
+    });
+  });
 });

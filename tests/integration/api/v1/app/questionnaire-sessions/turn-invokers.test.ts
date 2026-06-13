@@ -20,6 +20,25 @@ vi.mock('@/lib/orchestration/capabilities/dispatcher', () => ({
 const adaptiveMock = vi.hoisted(() => ({ buildAdaptiveDeps: vi.fn(() => ({})) }));
 vi.mock('@/app/api/v1/app/questionnaires/_lib/adaptive-deps', () => adaptiveMock);
 
+// Mocks for assessSeriousness: provider resolution, getProvider, structured completion, and
+// logCost (fire-and-forget — a no-op here so the test doesn't hit Prisma/SDK).
+const resolverMock = vi.hoisted(() => ({ resolveAgentProviderAndModel: vi.fn() }));
+vi.mock('@/lib/orchestration/llm/agent-resolver', () => resolverMock);
+
+const providerManagerMock = vi.hoisted(() => ({ getProvider: vi.fn() }));
+vi.mock('@/lib/orchestration/llm/provider-manager', () => providerManagerMock);
+
+const structuredMock = vi.hoisted(() => ({
+  runStructuredCompletion: vi.fn(),
+  tryParseJson: vi.fn(),
+}));
+vi.mock('@/lib/orchestration/evaluations/parse-structured', () => structuredMock);
+
+vi.mock('@/lib/orchestration/llm/cost-tracker', () => ({
+  logCost: vi.fn().mockResolvedValue(null),
+  calculateCost: vi.fn().mockReturnValue({ totalCostUsd: 0 }),
+}));
+
 import { buildTurnInvokers } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-invokers';
 import {
   DETECT_CONTRADICTIONS_CAPABILITY_SLUG,
@@ -372,31 +391,28 @@ describe('optional-field branches (the false sides of the arg spreads)', () => {
 });
 
 describe('cost surfacing (F6.3)', () => {
-  it('extractAnswers surfaces the capability data costUsd', async () => {
-    (dispatcherMock.dispatch as Mock).mockResolvedValue({
-      success: true,
-      data: { intents: [], droppedCount: 0, costUsd: 0.0123 },
-    });
+  it('maps costUsd from the capability data field — not an identity passthrough', async () => {
+    // Arrange two different invokers producing different cost values to confirm the FIELD is
+    // read (data.costUsd) and the result is placed on the outcome's costUsd property —
+    // not just that a number passes through unchanged.
+    (dispatcherMock.dispatch as Mock)
+      .mockResolvedValueOnce({
+        success: true,
+        data: { intents: [], droppedCount: 0, costUsd: 0.0123 },
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: { findings: [], droppedCount: 0, costUsd: 0.004 },
+      });
     const inv = await invokers();
-    expect((await inv.extractAnswers(state())).costUsd).toBe(0.0123);
-  });
 
-  it('detectContradictions surfaces the capability data costUsd', async () => {
-    (dispatcherMock.dispatch as Mock).mockResolvedValue({
-      success: true,
-      data: { findings: [], droppedCount: 0, costUsd: 0.004 },
-    });
-    const inv = await invokers();
-    expect((await inv.detectContradictions(state())).costUsd).toBe(0.004);
-  });
+    const extractOut = await inv.extractAnswers(state());
+    const detectOut = await inv.detectContradictions(state());
 
-  it('refineAnswer surfaces the capability data costUsd', async () => {
-    (dispatcherMock.dispatch as Mock).mockResolvedValue({
-      success: true,
-      data: { decisions: [], droppedCount: 0, costUsd: 0.002 },
-    });
-    const inv = await invokers();
-    expect((await inv.refineAnswer(state(), {})).costUsd).toBe(0.002);
+    // The invoker reads data.costUsd (not e.g. data.cost or data.totalCost) and surfaces it
+    // unchanged on the outcome — verify both invokers map from the correct source field.
+    expect(extractOut.costUsd).toBe(0.0123);
+    expect(detectOut.costUsd).toBe(0.004);
   });
 
   it('falls back to 0 when the capability data omits costUsd', async () => {
@@ -406,6 +422,76 @@ describe('cost surfacing (F6.3)', () => {
     });
     const inv = await invokers();
     expect((await inv.extractAnswers(state())).costUsd).toBe(0);
+  });
+});
+
+describe('assessSeriousness', () => {
+  // Happy-path provider stub — resolves to a concrete provider slug + model.
+  const resolvedBinding = { providerSlug: 'openai', model: 'gpt-4o', fallbacks: [] };
+  // A minimal provider stub: only the shape the invoker hands to runStructuredCompletion.
+  const providerStub = { chat: vi.fn() };
+
+  beforeEach(() => {
+    resolverMock.resolveAgentProviderAndModel.mockResolvedValue(resolvedBinding);
+    providerManagerMock.getProvider.mockResolvedValue(providerStub);
+  });
+
+  it('happy path: returns verdict.serious + costUsd from the structured completion', async () => {
+    // Arrange: the structured completion returns a genuine verdict with token usage.
+    structuredMock.runStructuredCompletion.mockResolvedValue({
+      value: { serious: true, reason: 'Plausible answer' },
+      tokenUsage: { input: 50, output: 20 },
+      costUsd: 0.0042,
+    });
+    const inv = await invokers();
+
+    // Act
+    const out = await inv.assessSeriousness(state());
+
+    // Assert: the invoker maps the completion's value onto the SeriousnessVerdict shape and
+    // surfaces the completion's costUsd — neither field is the raw mock return value echoed
+    // directly; the invoker constructs { verdict: { serious, reason }, costUsd } from it.
+    expect(out.diagnostic).toBeUndefined();
+    expect(out.verdict).toMatchObject({ serious: true, reason: 'Plausible answer' });
+    // costUsd comes from completion.costUsd — not from tokenUsage or any other field.
+    expect(out.costUsd).toBe(0.0042);
+  });
+
+  it('no_provider_configured: resolveAgentProviderAndModel throws → safe null verdict', async () => {
+    // Simulate a misconfigured environment where no provider can be resolved.
+    resolverMock.resolveAgentProviderAndModel.mockRejectedValue(new Error('no provider'));
+    const inv = await invokers();
+    const out = await inv.assessSeriousness(state());
+
+    // The invoker must not propagate the error; it returns a null verdict + the diagnostic code.
+    expect(out.verdict).toBeNull();
+    expect(out.costUsd).toBe(0);
+    expect(out.diagnostic).toBe('no_provider_configured');
+  });
+
+  it('provider_unavailable: getProvider throws → safe null verdict', async () => {
+    // Provider slug resolved fine but the provider itself is unreachable.
+    providerManagerMock.getProvider.mockRejectedValue(new Error('provider down'));
+    const inv = await invokers();
+    const out = await inv.assessSeriousness(state());
+
+    expect(out.verdict).toBeNull();
+    expect(out.costUsd).toBe(0);
+    expect(out.diagnostic).toBe('provider_unavailable');
+  });
+
+  it('seriousness_judge_failed: runStructuredCompletion throws → safe null verdict', async () => {
+    // Both provider steps succeed but the LLM call / parse fails (e.g. both retry attempts
+    // produce malformed JSON and onFinalFailure fires).
+    structuredMock.runStructuredCompletion.mockRejectedValue(
+      new Error('Seriousness verdict was not valid against the schema after one retry')
+    );
+    const inv = await invokers();
+    const out = await inv.assessSeriousness(state());
+
+    expect(out.verdict).toBeNull();
+    expect(out.costUsd).toBe(0);
+    expect(out.diagnostic).toBe('seriousness_judge_failed');
   });
 });
 

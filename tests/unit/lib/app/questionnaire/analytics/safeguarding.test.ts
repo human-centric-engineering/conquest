@@ -50,7 +50,11 @@ describe('getSafeguardingSummary', () => {
     await getSafeguardingSummary(scope);
     expect(findManySessions).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ versionId: 'v1', isPreview: false }),
+        where: expect.objectContaining({
+          versionId: 'v1',
+          isPreview: false,
+          createdAt: { gte: scope.from, lt: scope.to },
+        }),
       })
     );
   });
