@@ -11,7 +11,10 @@ import { Button } from '@/components/ui/button';
 import { AnonymousSessionBoot } from '@/components/app/questionnaire/chat/anonymous-session-boot';
 import { BrandThemeProvider } from '@/components/app/questionnaire/chat/brand-theme-provider';
 import { resolveThemeForVersion } from '@/lib/app/questionnaire/chat/theme';
-import { resolveAnonymousForVersion } from '@/lib/app/questionnaire/chat/anonymity';
+import {
+  resolveAnonymousForVersion,
+  resolvePresentationModeForVersion,
+} from '@/lib/app/questionnaire/chat/anonymity';
 import { resolveAdminPreviewExitHref } from '@/lib/app/questionnaire/chat/preview-nav';
 
 export const metadata: Metadata = {
@@ -44,15 +47,15 @@ export default async function PublicQuestionnairePage({
   const preview = (await searchParams).preview === '1';
   // Independent reads — resolve in parallel rather than serialising the DB round-trips. The
   // exit-href lookup runs only in preview mode (a real respondent never needs it).
-  const [voiceInputEnabled, attachmentInputEnabled, theme, anonymous, exitHref] = await Promise.all(
-    [
+  const [voiceInputEnabled, attachmentInputEnabled, theme, anonymous, presentationMode, exitHref] =
+    await Promise.all([
       isVoiceInputEnabled(),
       isAttachmentInputEnabled(),
       resolveThemeForVersion(versionId),
       resolveAnonymousForVersion(versionId),
+      resolvePresentationModeForVersion(versionId),
       preview ? resolveAdminPreviewExitHref(versionId) : Promise.resolve(null),
-    ]
-  );
+    ]);
 
   return (
     <div className="container mx-auto flex h-[calc(100dvh-9rem)] max-w-6xl flex-col px-4 py-6">
@@ -78,6 +81,7 @@ export default async function PublicQuestionnairePage({
             voiceInputEnabled={voiceInputEnabled}
             attachmentInputEnabled={attachmentInputEnabled}
             anonymous={anonymous}
+            presentationMode={presentationMode}
             welcomeCopy={theme.welcomeCopy}
           />
         </BrandThemeProvider>

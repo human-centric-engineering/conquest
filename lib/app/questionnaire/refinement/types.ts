@@ -42,10 +42,17 @@ export type RefinementAction = (typeof REFINEMENT_ACTIONS)[number];
 /**
  * Why a refinement happened — labels the {@link RefinementHistoryEntry} for audit.
  * `contradiction` and `clarification` accompany a `refine` (a genuine evolution);
- * `correction` accompanies an `overwrite` (a mistaken capture being fixed). A
- * `const` tuple for the same single-source reason as {@link REFINEMENT_ACTIONS}.
+ * `correction` accompanies an `overwrite` (a mistaken capture being fixed); `manual`
+ * marks a respondent's own edit in form view (P-presentation) — the strongest source,
+ * authoritative over later agent inference. A `const` tuple for the same single-source
+ * reason as {@link REFINEMENT_ACTIONS}.
  */
-export const REFINEMENT_SOURCES = ['contradiction', 'clarification', 'correction'] as const;
+export const REFINEMENT_SOURCES = [
+  'contradiction',
+  'clarification',
+  'correction',
+  'manual',
+] as const;
 export type RefinementSource = (typeof REFINEMENT_SOURCES)[number];
 
 /**

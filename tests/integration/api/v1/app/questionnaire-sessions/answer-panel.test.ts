@@ -35,8 +35,25 @@ function row(over: Record<string, unknown> = {}) {
           id: 'sec-1',
           title: 'About you',
           questions: [
-            { key: 'name', prompt: 'Your name?', type: 'free_text', required: true },
-            { key: 'colour', prompt: 'Favourite colour?', type: 'single_choice', required: false },
+            {
+              key: 'name',
+              prompt: 'Your name?',
+              type: 'free_text',
+              typeConfig: null,
+              required: true,
+            },
+            {
+              key: 'colour',
+              prompt: 'Favourite colour?',
+              type: 'single_choice',
+              typeConfig: {
+                choices: [
+                  { value: 'r', label: 'Red' },
+                  { value: 'b', label: 'Blue' },
+                ],
+              },
+              required: false,
+            },
           ],
         },
       ],
@@ -150,5 +167,49 @@ describe('loadAnswerPanelState', () => {
     findUnique.mockResolvedValue(row({ status: 'bogus' }));
     const loaded = await loadAnswerPanelState('sess-1');
     expect(loaded?.view.status).toBe('active');
+  });
+
+  it('carries each slot typeConfig through for the form surface', async () => {
+    findUnique.mockResolvedValue(row());
+    const loaded = await loadAnswerPanelState('sess-1');
+    const colour = loaded!.view.sections[0].slots.find((s) => s.slotKey === 'colour')!;
+    expect(colour.typeConfig).toEqual({
+      choices: [
+        { value: 'r', label: 'Red' },
+        { value: 'b', label: 'Blue' },
+      ],
+    });
+    const name = loaded!.view.sections[0].slots.find((s) => s.slotKey === 'name')!;
+    expect(name.typeConfig).toBeNull();
+  });
+
+  describe('forForm (P-presentation)', () => {
+    it('forces full structure even when the version scope is answered_only', async () => {
+      findUnique.mockResolvedValue(
+        row({ version: { ...row().version, config: { answerSlotPanelScope: 'answered_only' } } })
+      );
+      const loaded = await loadAnswerPanelState('sess-1', false, true);
+      // The chat panel would hide the pending `colour` slot under answered_only; the form must not.
+      expect(loaded?.view.scope).toBe('full_progress');
+      expect(loaded?.view.sections[0].slots).toHaveLength(2);
+    });
+
+    it('keeps question sections even when data-slot mode is on', async () => {
+      findUnique.mockResolvedValue(
+        row({
+          version: {
+            ...row().version,
+            dataSlots: [
+              { id: 'ds-1', key: 'goal', name: 'Goal', description: 'Why', theme: 'Goals' },
+            ],
+          },
+          dataSlotFills: [],
+        })
+      );
+      // dataSlotMode = true, but forForm = true → the form stays question-based.
+      const loaded = await loadAnswerPanelState('sess-1', true, true);
+      expect(loaded?.view.dataSlotGroups).toBeUndefined();
+      expect(loaded?.view.sections[0].slots).toHaveLength(2);
+    });
   });
 });

@@ -42,6 +42,12 @@ export interface PanelSlotInput {
   slotKey: string;
   prompt: string;
   type: string;
+  /**
+   * Stored `typeConfig` (opaque JSON) — carried through for the raw form surface.
+   * Optional: callers that don't render a form (e.g. the PDF/export builders) omit
+   * it and the view defaults to `null`.
+   */
+  typeConfig?: unknown;
   required: boolean;
 }
 
@@ -104,6 +110,7 @@ export function buildAnswerPanelView(input: PanelBuilderInput): AnswerPanelView 
         slotKey: slot.slotKey,
         prompt: slot.prompt,
         type: asQuestionType(slot.type),
+        typeConfig: slot.typeConfig ?? null,
         required: slot.required,
         answered,
         value: answered ? answer.value : null,

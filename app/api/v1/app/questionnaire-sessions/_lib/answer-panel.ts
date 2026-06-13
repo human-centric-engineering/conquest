@@ -67,7 +67,8 @@ function asPanelScope(value: string | null | undefined): AnswerSlotPanelScope {
  */
 export async function loadAnswerPanelState(
   sessionId: string,
-  dataSlotMode = false
+  dataSlotMode = false,
+  forForm = false
 ): Promise<LoadedAnswerPanel | null> {
   const row = await prisma.appQuestionnaireSession.findUnique({
     where: { id: sessionId },
@@ -90,7 +91,7 @@ export async function loadAnswerPanelState(
               title: true,
               questions: {
                 orderBy: { ordinal: 'asc' },
-                select: { key: true, prompt: true, type: true, required: true },
+                select: { key: true, prompt: true, type: true, typeConfig: true, required: true },
               },
             },
           },
@@ -133,6 +134,7 @@ export async function loadAnswerPanelState(
       slotKey: q.key,
       prompt: q.prompt,
       type: q.type,
+      typeConfig: q.typeConfig,
       required: q.required,
     })),
   }));
@@ -148,9 +150,13 @@ export async function loadAnswerPanelState(
     refinementHistory: asRefinementHistory(a.refinementHistory),
   }));
 
+  // The raw form (P-presentation) always needs the WHOLE structure: every question,
+  // answered or not, so it can render and let the respondent edit. `answerSlotPanelScope`
+  // is a CHAT-panel setting (it may hide pending prompts there) and must not gate the form
+  // — so the form view forces `full_progress` regardless of the version's scope.
   const view = buildAnswerPanelView({
     status: narrowToEnum(row.status, SESSION_STATUSES, 'active'),
-    scope: asPanelScope(row.version.config?.answerSlotPanelScope),
+    scope: forForm ? 'full_progress' : asPanelScope(row.version.config?.answerSlotPanelScope),
     sections,
     answers,
   });
@@ -158,7 +164,10 @@ export async function loadAnswerPanelState(
   // Data Slots feature: when in data-slot mode, replace the question rows with themed data-slot
   // groups (paraphrase + confidence). The header/progress keep tracking the BACKGROUND questions
   // — the respondent sees the abstraction layer, never the raw question answers.
-  if (dataSlotMode && row.version.dataSlots.length > 0) {
+  // The form surface is always question-based (P-presentation): even when data slots are on,
+  // it edits the underlying questions directly, so it keeps the question sections and never
+  // swaps in the data-slot groups. The chat panel still shows the data-slot abstraction.
+  if (!forForm && dataSlotMode && row.version.dataSlots.length > 0) {
     const fillByDataSlotId = new Map(
       row.dataSlotFills.map((f) => [
         f.dataSlotId,

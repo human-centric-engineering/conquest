@@ -21,13 +21,17 @@
  * prop-drilling.
  */
 
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
 import { useQuestionnaireSessionStream } from '@/lib/hooks/use-questionnaire-session-stream';
 import { useAnswerPanel } from '@/lib/hooks/use-answer-panel';
+import { useFormAnswers } from '@/lib/hooks/use-form-answers';
 import { useSessionLifecycle } from '@/lib/hooks/use-session-lifecycle';
 import { QuestionnaireChat } from '@/components/app/questionnaire/chat/questionnaire-chat';
 import { AnswerSlotPanel } from '@/components/app/questionnaire/panel/answer-slot-panel';
+import { QuestionnaireForm } from '@/components/app/questionnaire/form/questionnaire-form';
 import { SessionLifecycleBar } from '@/components/app/questionnaire/lifecycle/session-lifecycle-bar';
 import { CompletionOffer } from '@/components/app/questionnaire/lifecycle/completion-offer';
 import { SessionComplete } from '@/components/app/questionnaire/lifecycle/session-complete';
@@ -36,6 +40,7 @@ import type {
   QuestionnaireTurn,
 } from '@/lib/app/questionnaire/chat/types';
 import type { AnswerPanelView, PanelSlotView } from '@/lib/app/questionnaire/panel/types';
+import type { PresentationMode } from '@/lib/app/questionnaire/types';
 import type { SessionStatusView } from '@/lib/app/questionnaire/session/status-view';
 
 export interface SessionWorkspaceProps {
@@ -60,6 +65,13 @@ export interface SessionWorkspaceProps {
    * re-asking on every refresh would burn an LLM turn per load.
    */
   autoStart?: boolean;
+  /**
+   * How the respondent completes the session (P-presentation): `chat`, raw `form`, or `both`
+   * (toggle). Defaults to `chat`. Drives which surface renders below the lifecycle bar.
+   */
+  presentationMode?: PresentationMode;
+  /** SSR-resolved full form view (forForm) for `form`/`both` modes; omit for anonymous. */
+  initialFormView?: AnswerPanelView;
 }
 
 export function SessionWorkspace({
@@ -72,7 +84,15 @@ export function SessionWorkspace({
   voiceInputEnabled = false,
   attachmentInputEnabled = false,
   autoStart = false,
+  presentationMode = 'chat',
+  initialFormView,
 }: SessionWorkspaceProps) {
+  const showChat = presentationMode === 'chat' || presentationMode === 'both';
+  const showForm = presentationMode === 'form' || presentationMode === 'both';
+  // "both" mode toggles between surfaces; single-mode pins the view.
+  const [activeView, setActiveView] = useState<'chat' | 'form'>(
+    presentationMode === 'form' ? 'form' : 'chat'
+  );
   // Both reads refetch on each clean turn-settle. The stream reads its `onTurnSettled`
   // through a ref, so routing the refetches through refs here breaks the declaration
   // cycle (stream needs the settle handler; the hooks below need the stream's applyStatus).
@@ -101,6 +121,19 @@ export function SessionWorkspace({
     applyStatus: stream.applyStatus,
   });
 
+  // Raw form surface (P-presentation). Inert in chat-only mode (`enabled: false` → no fetch).
+  // A save refreshes the lifecycle so coverage / submit-readiness reflect the new answer.
+  const onFormSaved = useCallback(() => {
+    lifecycleRefetchRef.current?.();
+  }, []);
+  const form = useFormAnswers({
+    sessionId,
+    accessToken,
+    initialView: initialFormView,
+    enabled: showForm,
+    onSaved: onFormSaved,
+  });
+
   // Proactive opening: stream the first question on a fresh session so the agent opens without
   // the respondent typing. State-based guard (not a one-shot ref): fire only while the session
   // is settled (`idle`) and just the greeting turn is present. `streamTurn` flips status to
@@ -113,10 +146,11 @@ export function SessionWorkspace({
   const turnCount = stream.turns?.length ?? 0;
   useEffect(() => {
     if (!autoStart) return;
+    if (!showChat) return; // form-only mode never opens a chat turn
     if (streamStatus !== 'idle') return;
     if (turnCount > 1) return;
     void kickoff();
-  }, [autoStart, kickoff, streamStatus, turnCount]);
+  }, [autoStart, showChat, kickoff, streamStatus, turnCount]);
 
   // Keep the settle targets current without touching refs during render. The stream calls
   // `onTurnSettled` (and thus reads these) only after a turn settles — well after this effect.
@@ -133,7 +167,18 @@ export function SessionWorkspace({
     [stream]
   );
 
-  // Submitted → the conversation is done; show the confirmation in place of the workspace.
+  // "both" mode toggle. Switching TO the form re-seeds it from the server so chat-inferred
+  // answers appear; switching TO chat refetches the panel so it reflects the form's edits.
+  const showFormView = useCallback(() => {
+    setActiveView('form');
+    form.refresh();
+  }, [form]);
+  const showChatView = useCallback(() => {
+    setActiveView('chat');
+    panel.refetch();
+  }, [panel]);
+
+  // Submitted → the conversation/form is done; show the confirmation in place of the workspace.
   if (stream.status === 'completed') {
     return (
       <SessionComplete
@@ -143,6 +188,58 @@ export function SessionWorkspace({
       />
     );
   }
+
+  // A blocked session (respondent-paused, budget-capped, expired) is read-only for the form.
+  const formBlocked =
+    stream.status === 'not_active' ||
+    stream.status === 'cost_capped' ||
+    stream.status === 'expired';
+
+  const chatSurface = (
+    <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[1fr_22rem] xl:grid-cols-[1fr_26rem]">
+      <div className="flex min-h-0 flex-col gap-3">
+        {lifecycle.canSubmit && (
+          <CompletionOffer onSubmit={() => void lifecycle.submit()} busy={lifecycle.busy} />
+        )}
+        <QuestionnaireChat
+          sessionId={sessionId}
+          accessToken={accessToken}
+          stream={stream}
+          voiceInputEnabled={voiceInputEnabled}
+          attachmentInputEnabled={attachmentInputEnabled}
+          // Fresh sessions (autoStart) type the seeded greeting in, like a streamed reply;
+          // resumes render their history instantly.
+          animateOpening={autoStart}
+          className="min-h-0 flex-1"
+        />
+      </div>
+      <AnswerSlotPanel
+        view={panel.view}
+        loading={panel.loading}
+        onRevisit={handleRevisit}
+        canRevisit={stream.canSend}
+        className="hidden lg:flex"
+      />
+    </div>
+  );
+
+  const formSurface = (
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
+      {lifecycle.canSubmit && (
+        <CompletionOffer onSubmit={() => void lifecycle.submit()} busy={lifecycle.busy} />
+      )}
+      <QuestionnaireForm
+        view={form.view}
+        loading={form.loading}
+        values={form.values}
+        statuses={form.statuses}
+        onChange={form.setValue}
+        onFlush={form.flush}
+        disabled={formBlocked}
+        className="min-h-0 flex-1"
+      />
+    </div>
+  );
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
@@ -157,31 +254,39 @@ export function SessionWorkspace({
         onResume={() => void lifecycle.resume()}
       />
 
-      <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[1fr_22rem] xl:grid-cols-[1fr_26rem]">
-        <div className="flex min-h-0 flex-col gap-3">
-          {lifecycle.canSubmit && (
-            <CompletionOffer onSubmit={() => void lifecycle.submit()} busy={lifecycle.busy} />
-          )}
-          <QuestionnaireChat
-            sessionId={sessionId}
-            accessToken={accessToken}
-            stream={stream}
-            voiceInputEnabled={voiceInputEnabled}
-            attachmentInputEnabled={attachmentInputEnabled}
-            // Fresh sessions (autoStart) type the seeded greeting in, like a streamed reply;
-            // resumes render their history instantly.
-            animateOpening={autoStart}
-            className="min-h-0 flex-1"
-          />
+      {/* "both" mode: a segmented chat ↔ form toggle. */}
+      {presentationMode === 'both' && (
+        <div
+          role="tablist"
+          aria-label="Completion mode"
+          className="bg-muted inline-flex w-fit gap-1 self-center rounded-md p-0.5"
+        >
+          <Button
+            type="button"
+            role="tab"
+            aria-selected={activeView === 'chat'}
+            size="sm"
+            variant={activeView === 'chat' ? 'default' : 'ghost'}
+            onClick={showChatView}
+            className={cn(activeView !== 'chat' && 'text-muted-foreground')}
+          >
+            Chat
+          </Button>
+          <Button
+            type="button"
+            role="tab"
+            aria-selected={activeView === 'form'}
+            size="sm"
+            variant={activeView === 'form' ? 'default' : 'ghost'}
+            onClick={showFormView}
+            className={cn(activeView !== 'form' && 'text-muted-foreground')}
+          >
+            Form
+          </Button>
         </div>
-        <AnswerSlotPanel
-          view={panel.view}
-          loading={panel.loading}
-          onRevisit={handleRevisit}
-          canRevisit={stream.canSend}
-          className="hidden lg:flex"
-        />
-      </div>
+      )}
+
+      {showForm && (!showChat || activeView === 'form') ? formSurface : chatSurface}
     </div>
   );
 }

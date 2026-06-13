@@ -155,6 +155,7 @@ function makeGraph(over: Partial<VersionGraphView> = {}): VersionGraphView {
       supportResourceUrl: '',
       profileFields: [],
       answerSlotPanelScope: 'full_progress',
+      presentationMode: 'chat',
     },
     ...over,
   };

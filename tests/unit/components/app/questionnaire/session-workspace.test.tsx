@@ -22,9 +22,13 @@ const kickoff = vi.fn();
 const refetch = vi.fn();
 const lifecycleRefetch = vi.fn();
 
+const formRefresh = vi.fn();
+const formSetValue = vi.fn();
+
 const streamHook = vi.fn();
 const panelHook = vi.fn();
 const lifecycleHook = vi.fn();
+const formHook = vi.fn();
 
 vi.mock('@/lib/hooks/use-questionnaire-session-stream', () => ({
   useQuestionnaireSessionStream: (opts: unknown) => streamHook(opts),
@@ -34,6 +38,12 @@ vi.mock('@/lib/hooks/use-answer-panel', () => ({
 }));
 vi.mock('@/lib/hooks/use-session-lifecycle', () => ({
   useSessionLifecycle: (opts: unknown) => lifecycleHook(opts),
+}));
+vi.mock('@/lib/hooks/use-form-answers', () => ({
+  useFormAnswers: (opts: unknown) => formHook(opts),
+}));
+vi.mock('@/components/app/questionnaire/form/questionnaire-form', () => ({
+  QuestionnaireForm: () => <div data-testid="form" />,
 }));
 
 // Chat + lifecycle children are irrelevant here — marker stubs keep the render cheap.
@@ -93,6 +103,7 @@ const SLOT: PanelSlotView = {
   slotKey: 'budget',
   prompt: 'What is your budget?',
   type: 'free_text',
+  typeConfig: null,
   required: true,
   answered: true,
   value: '£10k',
@@ -138,8 +149,27 @@ function setup(
   render(<SessionWorkspace sessionId="s1" />);
 }
 
+function formReturn(over: Record<string, unknown> = {}) {
+  return {
+    view: null,
+    loading: false,
+    error: false,
+    values: {},
+    statuses: {},
+    setValue: formSetValue,
+    flush: vi.fn(),
+    refresh: formRefresh,
+    ...over,
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  // Sensible defaults so a render in any mode doesn't crash; mode tests override as needed.
+  streamHook.mockReturnValue({ canSend: true, status: 'idle', sendMessage, kickoff, applyStatus });
+  panelHook.mockReturnValue({ view: null, loading: false, error: false, refetch });
+  lifecycleHook.mockReturnValue(lifecycleReturn());
+  formHook.mockReturnValue(formReturn());
 });
 
 describe('SessionWorkspace', () => {
@@ -320,5 +350,48 @@ describe('SessionWorkspace', () => {
   it('hides the completion offer when the session is not submittable', () => {
     setup({}, {}, { canSubmit: false });
     expect(screen.queryByTestId('completion-offer')).not.toBeInTheDocument();
+  });
+
+  describe('presentation mode (P-presentation)', () => {
+    it('chat mode renders chat + panel, no form, and keeps the form hook inert', () => {
+      render(<SessionWorkspace sessionId="s1" presentationMode="chat" />);
+      expect(screen.getByTestId('chat')).toBeInTheDocument();
+      expect(screen.getByTestId('panel')).toBeInTheDocument();
+      expect(screen.queryByTestId('form')).not.toBeInTheDocument();
+      // The form hook is mounted but disabled (no fetch) in chat-only mode.
+      expect(formHook.mock.calls[0][0]).toMatchObject({ enabled: false });
+    });
+
+    it('form mode renders the form, no chat, and enables the form hook', () => {
+      render(<SessionWorkspace sessionId="s1" presentationMode="form" />);
+      expect(screen.getByTestId('form')).toBeInTheDocument();
+      expect(screen.queryByTestId('chat')).not.toBeInTheDocument();
+      expect(formHook.mock.calls[0][0]).toMatchObject({ enabled: true });
+    });
+
+    it('form mode never fires the chat kickoff even with autoStart', () => {
+      render(<SessionWorkspace sessionId="s1" presentationMode="form" autoStart />);
+      expect(kickoff).not.toHaveBeenCalled();
+    });
+
+    it('both mode shows the toggle, defaults to chat, and switches surfaces', () => {
+      render(<SessionWorkspace sessionId="s1" presentationMode="both" />);
+      // Toggle present; chat is the default surface.
+      const tabs = screen.getAllByRole('tab');
+      expect(tabs).toHaveLength(2);
+      expect(screen.getByTestId('chat')).toBeInTheDocument();
+      expect(screen.queryByTestId('form')).not.toBeInTheDocument();
+
+      // Switch to form → form renders and the hook is asked to re-seed from the server.
+      fireEvent.click(screen.getByRole('tab', { name: 'Form' }));
+      expect(screen.getByTestId('form')).toBeInTheDocument();
+      expect(screen.queryByTestId('chat')).not.toBeInTheDocument();
+      expect(formRefresh).toHaveBeenCalledTimes(1);
+
+      // Switch back to chat → panel refetches so it reflects any form edits.
+      fireEvent.click(screen.getByRole('tab', { name: 'Chat' }));
+      expect(screen.getByTestId('chat')).toBeInTheDocument();
+      expect(refetch).toHaveBeenCalled();
+    });
   });
 });

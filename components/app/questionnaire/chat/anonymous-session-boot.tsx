@@ -27,6 +27,7 @@ import { API } from '@/lib/api/endpoints';
 import { Button } from '@/components/ui/button';
 import { SessionWorkspace } from '@/components/app/questionnaire/session-workspace';
 import { buildWelcomeTurns } from '@/lib/app/questionnaire/chat/greeting';
+import type { PresentationMode } from '@/lib/app/questionnaire/types';
 
 interface AnonymousSessionBootProps {
   versionId: string;
@@ -46,6 +47,11 @@ interface AnonymousSessionBootProps {
    * version, anonymous or not) instead of the public `/anonymous` route. Set by `?preview=1`.
    */
   preview?: boolean;
+  /**
+   * How the respondent completes the session (P-presentation). Forwarded to the workspace; the
+   * form view itself fetches client-side here (no SSR seed — the token is client-only).
+   */
+  presentationMode?: PresentationMode;
 }
 
 interface StoredAnonSession {
@@ -95,6 +101,7 @@ export function AnonymousSessionBoot({
   attachmentInputEnabled = false,
   anonymous = false,
   preview = false,
+  presentationMode = 'chat',
 }: AnonymousSessionBootProps) {
   const [state, setState] = useState<BootState>({ phase: 'creating' });
   // Dedup the create across React 19 StrictMode's double-invoke (which would otherwise mint two
@@ -193,6 +200,7 @@ export function AnonymousSessionBoot({
       // re-asks the next pending question on a restored one (else the greeting has no question
       // to answer beneath it). The live answer panel still reflects real prior progress.
       autoStart
+      presentationMode={presentationMode}
       voiceInputEnabled={voiceInputEnabled}
       attachmentInputEnabled={attachmentInputEnabled}
     />

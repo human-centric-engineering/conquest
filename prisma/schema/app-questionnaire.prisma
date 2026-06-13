@@ -192,6 +192,12 @@ model AppQuestionnaireConfig {
   // answered_only = just captured answers (no pending structure). (ANSWER_SLOT_PANEL_SCOPES)
   answerSlotPanelScope String @default("full_progress") // full_progress | answered_only
 
+  // Presentation mode (P-presentation): how the respondent completes the session.
+  // chat = streaming conversation (incl. data slots); form = raw sectioned form with the
+  // right input per question type; both = offer both and let the respondent toggle. Default
+  // chat so existing launched versions are unchanged. (PRESENTATION_MODES — types.ts)
+  presentationMode String @default("chat") // chat | form | both
+
   // Session-start profile fields (ProfileFieldConfig[] — types.ts).
   profileFields Json @default("[]")
 
@@ -534,6 +540,12 @@ model AppAnswerSlot {
   rationale         String?
   lastUpdatedTurnId String? // F4.6 turn-loop seam; null until the live loop exists
   refinementHistory Json     @default("[]") // RefinementHistoryEntry[] (refinement/types.ts)
+  // Presentation mode (P-presentation): true when the respondent set/edited this answer
+  // themselves in form view. Authoritative — the per-turn extraction/refinement pipeline
+  // must NOT silently overwrite a respondent-edited answer (it may still flag a
+  // contradiction). The "manual" refinement-history source records the edit; this flag is
+  // the cheap guard the pipeline checks.
+  respondentEdited  Boolean  @default(false)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 

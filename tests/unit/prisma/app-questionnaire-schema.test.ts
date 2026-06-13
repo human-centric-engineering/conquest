@@ -304,6 +304,8 @@ describe('questionnaire datamodel (Prisma.dmmf)', () => {
     expect(getField(model, 'anonymousMode').type).toBe('Boolean');
     // F7.2 — respondent answer-panel scope (full_progress | answered_only).
     expect(getField(model, 'answerSlotPanelScope').type).toBe('String');
+    // P-presentation — how the respondent completes the session (chat | form | both).
+    expect(getField(model, 'presentationMode').type).toBe('String');
     // Profile fields are stored as JSON (ProfileFieldConfig[]) — not a relation.
     expect(getField(model, 'profileFields').type).toBe('Json');
 
@@ -407,6 +409,8 @@ describe('questionnaire datamodel (Prisma.dmmf)', () => {
     expect(getField(model, 'confidence').type).toBe('Float');
     expect(getField(model, 'provenanceLabel').type).toBe('String');
     expect(getField(model, 'refinementHistory').type).toBe('Json');
+    // P-presentation — respondent-edited guard (authoritative; pipeline must not overwrite).
+    expect(getField(model, 'respondentEdited').type).toBe('Boolean');
     // The F6.1 turn-loop seam — reserved, null until the live loop exists.
     expect(getField(model, 'lastUpdatedTurnId').type).toBe('String');
     expect(getField(model, 'lastUpdatedTurnId').kind).toBe('scalar');

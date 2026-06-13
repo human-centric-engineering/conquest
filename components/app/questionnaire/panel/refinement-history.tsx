@@ -21,6 +21,7 @@ const SOURCE_LABELS: Record<RefinementSource, string> = {
   contradiction: 'Resolved a contradiction',
   clarification: 'Clarified',
   correction: 'Corrected',
+  manual: 'Edited by you',
 };
 
 export interface RefinementHistoryProps {

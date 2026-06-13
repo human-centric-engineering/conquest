@@ -38,6 +38,13 @@ export interface PanelSlotView {
   slotKey: string;
   prompt: string;
   type: QuestionType;
+  /**
+   * The slot's stored `typeConfig` (choices, likert bounds, numeric range, …) or
+   * `null`. Carried so the raw form surface (P-presentation) can render the right
+   * input control; the chat-side panel ignores it. Opaque JSON — read it via the
+   * `lib/app/questionnaire/form/type-config.ts` helpers.
+   */
+  typeConfig: unknown;
   required: boolean;
   /** True once an answer has been captured for this slot in the session. */
   answered: boolean;
