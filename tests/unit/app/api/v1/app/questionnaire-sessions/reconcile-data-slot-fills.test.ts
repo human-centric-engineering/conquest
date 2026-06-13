@@ -117,6 +117,25 @@ describe('reconcileDataSlotFills', () => {
     expect((fillCreate as Mock).mock.calls[0][0].data.paraphrase).toBe('34; Engineering');
   });
 
+  it('formats array (multi-choice) and object values in the paraphrase', async () => {
+    const { client, fillCreate } = makeClient({
+      links: [{ dataSlotId: 'ds-x' }],
+      mapped: {
+        'ds-x': [
+          { id: 'q1', key: 'tags' },
+          { id: 'q2', key: 'misc' },
+        ],
+      },
+      answers: [
+        { questionSlotId: 'q1', value: ['a', 'b'] },
+        { questionSlotId: 'q2', value: { nested: true } },
+      ],
+    });
+    await reconcileDataSlotFills(client, 'sess-1', ['q1']);
+    // Array → "a, b"; plain object → JSON; joined across questions with "; ".
+    expect((fillCreate as Mock).mock.calls[0][0].data.paraphrase).toBe('a, b; {"nested":true}');
+  });
+
   it('clears the fill when every mapped question is now unanswered', async () => {
     const { client, fillCreate, fillDeleteMany } = makeClient({
       links: [{ dataSlotId: 'ds-age' }],

@@ -183,6 +183,71 @@ describe('loadAnswerPanelState', () => {
     expect(name.typeConfig).toBeNull();
   });
 
+  describe('data-slot mode', () => {
+    it('builds themed data-slot groups (paraphrase, filled, history) and suppresses question sections', async () => {
+      findUnique.mockResolvedValue(
+        row({
+          version: {
+            ...row().version,
+            dataSlots: [
+              { id: 'ds-1', key: 'goal', name: 'Goal', description: 'Why', theme: 'Goals' },
+              { id: 'ds-2', key: 'mood', name: 'Mood', description: 'How', theme: 'Goals' },
+            ],
+          },
+          dataSlotFills: [
+            {
+              dataSlotId: 'ds-1',
+              paraphrase: 'Grow the team',
+              confidence: 0.9,
+              provisional: false,
+              refinementHistory: [{ previousParaphrase: 'Hire', previousConfidence: 0.4 }],
+            },
+            // ds-2 has no fill → unfilled
+          ],
+        })
+      );
+      const loaded = await loadAnswerPanelState('sess-1', true); // dataSlotMode on, forForm off
+
+      expect(loaded?.view.dataSlotGroups).toHaveLength(1); // one theme: "Goals"
+      const group = loaded!.view.dataSlotGroups![0];
+      expect(group.theme).toBe('Goals');
+      const goal = group.slots.find((s) => s.key === 'goal')!;
+      expect(goal.filled).toBe(true);
+      expect(goal.paraphrase).toBe('Grow the team');
+      expect(goal.history).toEqual([{ paraphrase: 'Hire', confidence: 0.4 }]);
+      const mood = group.slots.find((s) => s.key === 'mood')!;
+      expect(mood.filled).toBe(false);
+      expect(mood.paraphrase).toBeNull();
+      // Question rows are suppressed; a blended progress percent is shown instead.
+      expect(loaded?.view.sections).toEqual([]);
+      expect(typeof loaded?.view.progressPercent).toBe('number');
+    });
+
+    it('counts a provisional fill as filled even below the confidence threshold', async () => {
+      findUnique.mockResolvedValue(
+        row({
+          version: {
+            ...row().version,
+            dataSlots: [{ id: 'ds-1', key: 'goal', name: 'Goal', description: 'd', theme: 'T' }],
+          },
+          dataSlotFills: [
+            {
+              dataSlotId: 'ds-1',
+              paraphrase: 'maybe',
+              confidence: 0.1,
+              provisional: true,
+              refinementHistory: [],
+            },
+          ],
+        })
+      );
+      const loaded = await loadAnswerPanelState('sess-1', true);
+      const slot = loaded!.view.dataSlotGroups![0].slots[0];
+      expect(slot.filled).toBe(true);
+      expect(slot.provisional).toBe(true);
+    });
+  });
+
   describe('forForm (P-presentation)', () => {
     it('forces full structure even when the version scope is answered_only', async () => {
       findUnique.mockResolvedValue(

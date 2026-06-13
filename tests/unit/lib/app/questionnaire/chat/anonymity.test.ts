@@ -26,7 +26,10 @@ vi.mock('@/lib/db/client', () => ({
 }));
 
 import { prisma } from '@/lib/db/client';
-import { resolveAnonymousForVersion } from '@/lib/app/questionnaire/chat/anonymity';
+import {
+  resolveAnonymousForVersion,
+  resolvePresentationModeForVersion,
+} from '@/lib/app/questionnaire/chat/anonymity';
 
 describe('resolveAnonymousForVersion', () => {
   beforeEach(() => {
@@ -108,5 +111,48 @@ describe('resolveAnonymousForVersion', () => {
 
     // Assert: no redundant queries
     expect(prisma.appQuestionnaireVersion.findUnique).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('resolvePresentationModeForVersion', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns the stored presentation mode (form / both)', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: { presentationMode: 'both' },
+    } as never);
+    expect(await resolvePresentationModeForVersion('ver-abc')).toBe('both');
+  });
+
+  it('defaults to chat when the config row is absent', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: null,
+    } as never);
+    expect(await resolvePresentationModeForVersion('ver-abc')).toBe('chat');
+  });
+
+  it('defaults to chat when the version is absent', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue(null);
+    expect(await resolvePresentationModeForVersion('ver-missing')).toBe('chat');
+  });
+
+  it('narrows an unrecognised stored value to chat', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: { presentationMode: 'telepathy' },
+    } as never);
+    expect(await resolvePresentationModeForVersion('ver-abc')).toBe('chat');
+  });
+
+  it('selects only the presentationMode field for the given version', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: { presentationMode: 'form' },
+    } as never);
+    await resolvePresentationModeForVersion('ver-xyz');
+    expect(prisma.appQuestionnaireVersion.findUnique).toHaveBeenCalledWith({
+      where: { id: 'ver-xyz' },
+      select: { config: { select: { presentationMode: true } } },
+    });
   });
 });

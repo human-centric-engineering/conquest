@@ -113,4 +113,60 @@ describe('QuestionField', () => {
     fireEvent.change(input, { target: { value: '2026-06-13' } });
     expect(onChange).toHaveBeenCalledWith('2026-06-13');
   });
+
+  it('likert: falls back to a numeric input when the config is malformed', () => {
+    const onChange = vi.fn();
+    // max ≤ min → readLikertConfig returns null → numeric fallback.
+    render(
+      <QuestionField slot={slot('likert', { min: 5, max: 1 })} value={null} onChange={onChange} />
+    );
+    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '3' } });
+    expect(onChange).toHaveBeenCalledWith(3);
+  });
+
+  it('single_choice (allowOther): Other reveals a free-text input that emits', () => {
+    const onChange = vi.fn();
+    const cfg = {
+      choices: [
+        { value: 'r', label: 'Red' },
+        { value: 'b', label: 'Blue' },
+      ],
+      allowOther: true,
+    };
+    const { rerender } = render(
+      <QuestionField slot={slot('single_choice', cfg)} value={null} onChange={onChange} />
+    );
+    fireEvent.click(screen.getByLabelText('Other…'));
+    expect(onChange).toHaveBeenCalledWith(''); // selecting Other clears to an empty free value
+    // A non-choice value renders the free-text input, which emits what's typed.
+    rerender(
+      <QuestionField slot={slot('single_choice', cfg)} value="custom" onChange={onChange} />
+    );
+    fireEvent.change(screen.getByPlaceholderText('Your answer…'), { target: { value: 'Teal' } });
+    expect(onChange).toHaveBeenCalledWith('Teal');
+  });
+
+  it('multi_choice (allowOther): typing in the other box appends a free value', () => {
+    const onChange = vi.fn();
+    const cfg = {
+      choices: [
+        { value: 'a', label: 'A' },
+        { value: 'b', label: 'B' },
+      ],
+      allowOther: true,
+    };
+    render(<QuestionField slot={slot('multi_choice', cfg)} value={['a']} onChange={onChange} />);
+    fireEvent.change(screen.getByPlaceholderText('Other…'), { target: { value: 'Custom' } });
+    expect(onChange).toHaveBeenCalledWith(['a', 'Custom']);
+  });
+
+  it('renders a "no options" notice when a choice config is missing', () => {
+    render(<QuestionField slot={slot('single_choice', null)} value={null} onChange={vi.fn()} />);
+    expect(screen.getByText('No options configured.')).toBeInTheDocument();
+  });
+
+  it('passes the disabled state to the control', () => {
+    render(<QuestionField slot={slot('free_text')} value="" onChange={vi.fn()} disabled />);
+    expect(screen.getByPlaceholderText('Type your answer…')).toBeDisabled();
+  });
 });

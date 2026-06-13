@@ -144,4 +144,52 @@ describe('QuestionnaireForm', () => {
     });
     expect(onChange).toHaveBeenCalledWith('role', 'Engineer');
   });
+
+  it('shows a loading message before the view arrives', () => {
+    render(
+      <QuestionnaireForm
+        view={null}
+        loading
+        values={{}}
+        statuses={{}}
+        onChange={noop}
+        onFlush={noop}
+      />
+    );
+    expect(screen.getByText('Loading questionnaire…')).toBeInTheDocument();
+  });
+
+  it('shows an empty-state message when there are no questions', () => {
+    render(
+      <QuestionnaireForm
+        view={{
+          status: 'active',
+          scope: 'full_progress',
+          sections: [],
+          answeredCount: 0,
+          totalCount: 0,
+        }}
+        loading={false}
+        values={{}}
+        statuses={{}}
+        onChange={noop}
+        onFlush={noop}
+      />
+    );
+    expect(screen.getByText('This questionnaire has no questions yet.')).toBeInTheDocument();
+  });
+
+  it('surfaces a per-slot save status hint', () => {
+    render(
+      <QuestionnaireForm
+        view={view()}
+        loading={false}
+        values={{ role: 'Eng' }}
+        statuses={{ role: 'saving' }}
+        onChange={noop}
+        onFlush={noop}
+      />
+    );
+    expect(screen.getByText('Saving…')).toBeInTheDocument();
+  });
 });

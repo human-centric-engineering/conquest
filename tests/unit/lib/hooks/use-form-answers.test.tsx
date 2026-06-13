@@ -44,6 +44,20 @@ function view(): AnswerPanelView {
   };
 }
 
+/** Same shape as view() but with the `role` slot answered, so seedValues populates it. */
+function answeredView(): AnswerPanelView {
+  const v = view();
+  v.sections[0].slots[0] = {
+    ...v.sections[0].slots[0],
+    answered: true,
+    value: 'Engineer',
+    provenance: 'direct',
+    confidence: 1,
+  };
+  v.answeredCount = 1;
+  return v;
+}
+
 let fetchMock: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
@@ -133,5 +147,103 @@ describe('useFormAnswers', () => {
     });
     // The PUT response carries the seed view (no value), but the local input value stays.
     expect(result.current.values.role).toBe('Engineer');
+  });
+
+  it('fetches and seeds values on mount when enabled with no SSR seed', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ data: answeredView() }),
+    });
+    const { result } = renderHook(() => useFormAnswers({ sessionId: 'sess-1', enabled: true }));
+    await act(async () => {});
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('view=form'),
+      expect.objectContaining({ method: 'GET' })
+    );
+    expect(result.current.values.role).toBe('Engineer');
+  });
+
+  it('does not fetch on mount when disabled (chat-only mode)', async () => {
+    renderHook(() => useFormAnswers({ sessionId: 'sess-1', enabled: false }));
+    await act(async () => {});
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('marks the slot status "error" when a save fails', async () => {
+    fetchMock.mockResolvedValue({ ok: false, json: () => Promise.resolve({}) });
+    const { result } = renderHook(() =>
+      useFormAnswers({ sessionId: 'sess-1', initialView: view() })
+    );
+    act(() => result.current.setValue('role', 'Eng'));
+    await act(async () => {
+      vi.advanceTimersByTime(400);
+    });
+    expect(result.current.statuses.role).toBe('error');
+  });
+
+  it('flush is a no-op when nothing is pending for the slot', () => {
+    const { result } = renderHook(() =>
+      useFormAnswers({ sessionId: 'sess-1', initialView: view() })
+    );
+    act(() => result.current.flush('role'));
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('refresh re-seeds values from a fresh server view', async () => {
+    const { result } = renderHook(() =>
+      useFormAnswers({ sessionId: 'sess-1', initialView: view() })
+    );
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ data: answeredView() }),
+    });
+    await act(async () => {
+      result.current.refresh();
+    });
+    expect(result.current.values.role).toBe('Engineer');
+  });
+
+  it('sends the X-Session-Token header for an anonymous/preview session', async () => {
+    const { result } = renderHook(() =>
+      useFormAnswers({ sessionId: 'sess-1', accessToken: 'tok-9', initialView: view() })
+    );
+    act(() => result.current.setValue('role', 'Eng'));
+    await act(async () => {
+      vi.advanceTimersByTime(400);
+    });
+    const headers = fetchMock.mock.calls.at(-1)![1].headers as Record<string, string>;
+    expect(headers['X-Session-Token']).toBe('tok-9');
+  });
+
+  it('sets the error flag when the initial fetch fails', async () => {
+    fetchMock.mockResolvedValue({ ok: false, json: () => Promise.resolve({}) });
+    const { result } = renderHook(() =>
+      useFormAnswers({ sessionId: 'sess-1', accessToken: 'tok-9', enabled: true })
+    );
+    await act(async () => {});
+    expect(result.current.error).toBe(true);
+  });
+
+  it('treats a non-empty object value as an answer (not a clear)', async () => {
+    const { result } = renderHook(() =>
+      useFormAnswers({ sessionId: 'sess-1', initialView: view() })
+    );
+    act(() => result.current.setValue('role', { x: 1 }));
+    await act(async () => {
+      vi.advanceTimersByTime(400);
+    });
+    expect(lastPutBody()).toEqual({ answers: [{ questionKey: 'role', value: { x: 1 } }] });
+  });
+
+  it('cancels a pending debounced save when unmounted', async () => {
+    const { result, unmount } = renderHook(() =>
+      useFormAnswers({ sessionId: 'sess-1', initialView: view() })
+    );
+    act(() => result.current.setValue('role', 'Eng'));
+    unmount(); // cleanup clears the pending timer
+    await act(async () => {
+      vi.advanceTimersByTime(400);
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
