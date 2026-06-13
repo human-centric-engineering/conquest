@@ -24,7 +24,11 @@ import { resolveAgentProviderAndModel } from '@/lib/orchestration/llm/agent-reso
 import { getProvider } from '@/lib/orchestration/llm/provider-manager';
 import { calculateCost, logCost } from '@/lib/orchestration/llm/cost-tracker';
 import type { LlmMessage } from '@/lib/orchestration/llm/types';
-import { QUESTION_TYPE_LABELS, type QuestionType } from '@/lib/app/questionnaire/types';
+import {
+  QUESTION_TYPE_LABELS,
+  type QuestionType,
+  type SensitivitySeverity,
+} from '@/lib/app/questionnaire/types';
 import { QUESTIONNAIRE_INTERVIEWER_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
 
 /** Token budget + timeout for the (short) conversational question prose. */
@@ -67,6 +71,17 @@ export interface QuestionComposeInput {
    * grow a little warmer/fuller once rapport has built — never convoluted at any point.
    */
   questionsAsked: number;
+  /**
+   * Sensitivity awareness / safeguarding: the session's running-max disclosure severity, set once
+   * something sensitive has been remembered. When present it switches on a "tread carefully" tone
+   * for THIS and every later question (the route threads it from session memory each turn).
+   */
+  sensitivityLevel?: SensitivitySeverity | null;
+  /**
+   * The careful, non-graphic summaries of what was disclosed this session (newest folded in by the
+   * route). Used to remind the interviewer what to be gentle about — never re-raised verbatim.
+   */
+  sensitivityNotes?: string[];
   /**
    * Data Slots feature — topic rhythm. `true` = we just moved to a NEW subject area (bridge with
    * a natural segue); `false`/absent = staying in the same area (deepen — the skilled-interviewer
@@ -133,6 +148,19 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
     : 'Keep it concise — one or two sentences. Rapport has built, so you may be a little warmer ' +
       'or add light context, but never long-winded or convoluted. ';
 
+  // Sensitivity awareness / safeguarding: once a sensitive disclosure has been remembered this
+  // session, every later question is asked more gently. The latest summary reminds the interviewer
+  // what to be careful about (kept non-graphic by construction); the specifics are not re-raised.
+  const lastNote = input.sensitivityNotes?.[input.sensitivityNotes.length - 1];
+  const treadCarefully = input.sensitivityLevel
+    ? 'IMPORTANT — earlier in this conversation the respondent shared something sensitive or ' +
+      'difficult' +
+      (lastNote ? ` (${lastNote})` : '') +
+      '. Continue with extra care and warmth: acknowledge gently where natural, never press for ' +
+      'detail they did not offer, avoid blunt or clinical phrasing, and give them room. Do not ' +
+      're-raise the specifics unless they bring them up. '
+    : '';
+
   const system =
     'You are a warm, conversational interviewer guiding someone through a questionnaire. ' +
     'Ask the ONE question provided, naturally — never as a numbered form field, never restate ' +
@@ -161,6 +189,7 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
             'ONE light follow-up ("What made you say that?", "Can you give an example?"). ') +
     (input.goal ? `Questionnaire goal: ${input.goal}. ` : '') +
     (calibration.length > 0 ? calibration.join(' ') + ' ' : '') +
+    treadCarefully +
     'Match the respondent’s tone. ' +
     brevity +
     'Reply with plain conversational prose only: no JSON, no lists, no headings, no preamble, no quotation marks.';

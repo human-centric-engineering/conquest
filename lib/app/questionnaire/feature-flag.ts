@@ -15,6 +15,7 @@ import {
   APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG,
   APP_QUESTIONNAIRES_DATA_SLOTS_FLAG,
   APP_QUESTIONNAIRES_SERIOUSNESS_GATE_FLAG,
+  APP_QUESTIONNAIRES_SENSITIVITY_AWARENESS_FLAG,
   APP_QUESTIONNAIRES_FLAG,
 } from '@/lib/app/questionnaire/constants';
 import { isFeatureEnabled } from '@/lib/feature-flags';
@@ -37,6 +38,7 @@ export {
   APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG,
   APP_QUESTIONNAIRES_DATA_SLOTS_FLAG,
   APP_QUESTIONNAIRES_SERIOUSNESS_GATE_FLAG,
+  APP_QUESTIONNAIRES_SENSITIVITY_AWARENESS_FLAG,
 };
 
 /**
@@ -408,4 +410,22 @@ export async function isSeriousnessGateEnabled(): Promise<boolean> {
     isFeatureEnabled(APP_QUESTIONNAIRES_SERIOUSNESS_GATE_FLAG),
   ]);
   return app && live && gate;
+}
+
+/**
+ * Whether **sensitivity awareness / safeguarding** may run for the live turn loop. Requires the
+ * master app flag, the **live-sessions** flag, AND the sensitivity-awareness sub-flag. Like the
+ * seriousness gate it gates a behaviour *inside* the `/messages` route; the per-questionnaire
+ * `config.sensitivityAwareness` toggle is the second gate (the route ANDs them). When `false`,
+ * turns run with no disclosure detection or tone-softening even if a version opts in.
+ *
+ * Server-only (resolves the flags from the database).
+ */
+export async function isSensitivityAwarenessEnabled(): Promise<boolean> {
+  const [app, live, aware] = await Promise.all([
+    isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_SENSITIVITY_AWARENESS_FLAG),
+  ]);
+  return app && live && aware;
 }

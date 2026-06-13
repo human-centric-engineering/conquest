@@ -68,6 +68,10 @@ function state(over: Partial<TurnState> = {}): TurnState {
       contradictionEveryNTurns: 1,
       anonymousMode: false,
       abuseThreshold: 4,
+      maxDataSlotAttempts: 2,
+      sensitivityAwareness: false,
+      supportMessage: '',
+      supportResourceUrl: '',
       profileFields: [],
       answerSlotPanelScope: 'full_progress',
     },
@@ -116,6 +120,7 @@ function state(over: Partial<TurnState> = {}): TurnState {
       refinement: true,
       completion: true,
       seriousnessGate: false,
+      sensitivityAwareness: false,
     },
     ...over,
   };

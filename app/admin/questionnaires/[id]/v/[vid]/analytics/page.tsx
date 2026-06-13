@@ -21,6 +21,7 @@ import type {
   CompletionFunnelResult,
   QuestionDistributionsResult,
   QuestionnaireCostResult,
+  SafeguardingSummary,
 } from '@/lib/app/questionnaire/analytics';
 import type { TagView } from '@/lib/app/questionnaire/views';
 
@@ -97,6 +98,24 @@ async function getCost(
   }
 }
 
+async function getSafeguarding(
+  id: string,
+  versionId: string,
+  query: string
+): Promise<SafeguardingSummary | null> {
+  try {
+    const res = await serverFetch(
+      `${API.APP.QUESTIONNAIRES.versionAnalyticsSafeguarding(id, versionId)}${query}`
+    );
+    if (!res.ok) return null;
+    const body = await parseApiResponse<SafeguardingSummary>(res);
+    return body.success ? body.data : null;
+  } catch (err) {
+    logger.error('analytics tab: safeguarding fetch failed', err);
+    return null;
+  }
+}
+
 export default async function AnalyticsTab({ params, searchParams }: PageProps) {
   if (!(await isQuestionnairesEnabled())) notFound();
 
@@ -113,10 +132,11 @@ export default async function AnalyticsTab({ params, searchParams }: PageProps) 
 
   const graph = await getVersionGraphCached(id, vid);
   const tagVocabulary: TagView[] = graph?.tags ?? [];
-  const [distributions, funnel, cost] = await Promise.all([
+  const [distributions, funnel, cost, safeguarding] = await Promise.all([
     getDistributions(id, vid, query),
     getFunnel(id, vid, query),
     getCost(id, vid, query),
+    getSafeguarding(id, vid, query),
   ]);
 
   return (
@@ -128,6 +148,21 @@ export default async function AnalyticsTab({ params, searchParams }: PageProps) 
         </p>
         <ExportButtons questionnaireId={id} versionId={vid} query={query} />
       </div>
+
+      {/* Safeguarding signal (sensitivity awareness): a lightweight count of sessions that flagged
+          a sensitive disclosure. Counts only — never a summary or identity. Hidden when there's
+          nothing flagged (or the cohort is k-anon suppressed) so it doesn't add noise. */}
+      {safeguarding && !safeguarding.suppressed && safeguarding.flagged > 0 && (
+        <div className="rounded-lg border border-teal-300/60 bg-teal-50/50 px-4 py-3 text-sm dark:border-teal-500/30 dark:bg-teal-500/10">
+          <p className="text-foreground font-medium">Safeguarding</p>
+          <p className="text-muted-foreground mt-0.5">
+            {safeguarding.flagged} session{safeguarding.flagged === 1 ? '' : 's'} flagged a
+            sensitive disclosure
+            {safeguarding.serious > 0 ? ` (${safeguarding.serious} serious)` : ''}. Specifics are
+            never shown here — handle with care.
+          </p>
+        </div>
+      )}
 
       <AnalyticsView
         tagVocabulary={tagVocabulary}

@@ -561,6 +561,17 @@ export const APP_QUESTIONNAIRES_SERIOUSNESS_GATE_FLAG =
   'APP_QUESTIONNAIRES_SERIOUSNESS_GATE_ENABLED';
 
 /**
+ * Sub-flag gating **sensitivity awareness / safeguarding** — per answered turn, the extractor also
+ * flags a genuine sensitive/contentious disclosure; the core remembers it (running-max level +
+ * notes), softens later phrasing, and signposts support once on a serious disclosure. Disabled by
+ * default (dark-launch); requires the master app flag AND the live-sessions flag (it only runs in
+ * the live `/messages` turn loop) AND this sub-flag, AND the per-questionnaire `sensitivityAwareness`
+ * config toggle. Seeded by `prisma/seeds/app-questionnaire/030-sensitivity-awareness-flag.ts`.
+ */
+export const APP_QUESTIONNAIRES_SENSITIVITY_AWARENESS_FLAG =
+  'APP_QUESTIONNAIRES_SENSITIVITY_AWARENESS_ENABLED';
+
+/**
  * Slug of the **data-slot generator** agent. Dispatched programmatically by the
  * generate-data-slots route to infer short (1–4 word) data slots + descriptions + question
  * mappings from a version's approved questions. Provider-agnostic empty binding (resolves at

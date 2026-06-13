@@ -38,6 +38,7 @@ export function ctx(input: {
   recentMessages?: string[];
   attachments?: ExtractionAttachment[];
   sessionId?: string;
+  sensitivityAware?: boolean;
 }): ExtractionContext {
   return {
     activeQuestionKey:
@@ -50,6 +51,7 @@ export function ctx(input: {
     sessionId: input.sessionId ?? 'sess-1',
     ...(input.recentMessages ? { recentMessages: input.recentMessages } : {}),
     ...(input.attachments ? { attachments: input.attachments } : {}),
+    ...(input.sensitivityAware ? { sensitivityAware: true } : {}),
   };
 }
 

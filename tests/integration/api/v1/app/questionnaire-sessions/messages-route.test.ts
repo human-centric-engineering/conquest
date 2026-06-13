@@ -43,6 +43,8 @@ const sessionsMock = vi.hoisted(() => ({
   hasCostCapReachedEvent: vi.fn(() => Promise.resolve(false)),
   abandonSession: vi.fn(() => Promise.resolve('abandoned')),
   persistAbuseStrikes: vi.fn(() => Promise.resolve()),
+  persistSensitivity: vi.fn(() => Promise.resolve()),
+  recordSensitivityFlagged: vi.fn(() => Promise.resolve()),
 }));
 vi.mock('@/app/api/v1/app/questionnaires/_lib/sessions', () => sessionsMock);
 
@@ -607,5 +609,82 @@ describe('POST /messages — seriousness / abuse gate', () => {
       'sess-1',
       expect.objectContaining({ reason: ABUSE_ABANDON_REASON })
     );
+  });
+});
+
+describe('sensitivity awareness / safeguarding', () => {
+  const SUMMARY = 'Reports mistreatment by a senior colleague.';
+
+  /** A context with sensitivity awareness on + a support message configured. */
+  function sensitiveContext() {
+    const base = loadedContext();
+    return loadedContext({
+      activeQuestionKey: 'q1',
+      base: {
+        ...base.base,
+        config: {
+          ...base.base.config,
+          sensitivityAwareness: true,
+          supportMessage: 'Support is available.',
+          supportResourceUrl: 'https://help.example',
+        },
+      },
+    });
+  }
+
+  /** Invokers whose extractor flags a high-severity disclosure; selection still asks q1. */
+  function disclosingInvokers() {
+    const inv = stubInvokers();
+    inv.extractAnswers = vi.fn(async () => ({
+      intents: [],
+      costUsd: 0,
+      sensitivity: { detected: true, severity: 'high', category: 'harassment', summary: SUMMARY },
+    }));
+    return inv;
+  }
+
+  beforeEach(() => {
+    ctxMock.buildTurnContext.mockResolvedValue(sensitiveContext());
+    invokersMock.buildTurnInvokers.mockResolvedValue(disclosingInvokers());
+  });
+
+  it('persists the disclosure (level + note) and writes a flagged event without the summary', async () => {
+    await drainSse(await POST(req({ message: 'I was abused by the CEO' }), ctx));
+
+    expect(sessionsMock.persistSensitivity).toHaveBeenCalledWith(
+      'sess-1',
+      'high',
+      expect.objectContaining({ severity: 'high', category: 'harassment', summary: SUMMARY })
+    );
+    // The event carries severity + category ONLY — never the summary (PII).
+    expect(sessionsMock.recordSensitivityFlagged).toHaveBeenCalledWith('sess-1', {
+      severity: 'high',
+      category: 'harassment',
+    });
+    const eventArg = (sessionsMock.recordSensitivityFlagged as Mock).mock.calls[0]?.[1];
+    expect(JSON.stringify(eventArg)).not.toContain('colleague');
+  });
+
+  it('streams a support signpost frame with the configured copy + URL', async () => {
+    const frames = await drainSse(await POST(req({ message: 'I was abused by the CEO' }), ctx));
+    const support = frames.find(
+      (f) => f.event === 'warning' && JSON.stringify(f.data).includes('Support is available.')
+    );
+    expect(support).toBeTruthy();
+    expect(JSON.stringify(support?.data)).toContain('https://help.example');
+  });
+
+  it('threads the just-detected disclosure into the question phraser (gentle tone this turn)', async () => {
+    await drainSse(await POST(req({ message: 'I was abused by the CEO' }), ctx));
+    const input = (questionMock.streamQuestionMessage as Mock).mock.calls[0]?.[0]?.input;
+    expect(input.sensitivityLevel).toBe('high');
+    expect(input.sensitivityNotes).toContain(SUMMARY);
+  });
+
+  it('does nothing when the per-questionnaire toggle is off', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(loadedContext({ activeQuestionKey: 'q1' }));
+    await drainSse(await POST(req({ message: 'I was abused by the CEO' }), ctx));
+    expect(sessionsMock.persistSensitivity).not.toHaveBeenCalled();
+    expect(sessionsMock.recordSensitivityFlagged).not.toHaveBeenCalled();
   });
 });

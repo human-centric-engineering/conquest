@@ -40,6 +40,7 @@ import type { UseQuestionnaireSessionStreamReturn } from '@/lib/hooks/use-questi
 import { ChatErrorPanel } from '@/components/app/questionnaire/chat/chat-error-panel';
 import { ContradictionNotice } from '@/components/app/questionnaire/chat/contradiction-notice';
 import { SeriousnessNotice } from '@/components/app/questionnaire/chat/seriousness-notice';
+import { SupportNotice } from '@/components/app/questionnaire/chat/support-notice';
 
 export interface QuestionnaireChatProps {
   /** The session id powering `/questionnaire-sessions/:id/messages` (used by the mic). */
@@ -346,6 +347,8 @@ export function QuestionnaireChat({
               <ContradictionNotice message={warning.message} />
             ) : warning.code === 'seriousness' ? (
               <SeriousnessNotice message={warning.message} />
+            ) : warning.code === 'support' ? (
+              <SupportNotice message={warning.message} />
             ) : (
               <div
                 role="status"

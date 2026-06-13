@@ -19,8 +19,12 @@
  */
 
 import type { ChatEvent } from '@/types/orchestration';
-import type { AnswerProvenance } from '@/lib/app/questionnaire/types';
+import type { AnswerProvenance, SensitivitySeverity } from '@/lib/app/questionnaire/types';
 import type { QuestionnaireConfigShape } from '@/lib/app/questionnaire/types';
+import type {
+  SensitivityAssessment,
+  SensitivityOutcome,
+} from '@/lib/app/questionnaire/sensitivity/types';
 import type {
   AnsweredView,
   QuestionView,
@@ -71,6 +75,12 @@ export interface TurnFlags {
    * strikes the session, and (at the threshold) abandons it.
    */
   seriousnessGate: boolean;
+  /**
+   * Sensitivity awareness / safeguarding (platform sub-flag AND per-questionnaire toggle). When on,
+   * the extractor emits a `sensitivity` assessment; the core remembers it (running-max level +
+   * notes), softens later phrasing, and signposts support once on a serious disclosure.
+   */
+  sensitivityAwareness: boolean;
 }
 
 /** One base64-encoded attachment on a turn (mirrors the platform `chatAttachmentSchema`). */
@@ -146,6 +156,15 @@ export interface TurnState {
    * folds a new strike in and returns the updated count for the route to persist.
    */
   abuseStrikes: number;
+  /**
+   * Sensitivity awareness / safeguarding: the session's remembered disclosures BEFORE this turn,
+   * loaded by the route from `AppQuestionnaireSession`. `sensitivityLevel` is the running-max
+   * severity (null until first detection); `sensitivityNotes` are the careful summaries, threaded
+   * into the phraser so EVERY later question stays gentle (not just the disclosure turn). Absent
+   * when the feature is off.
+   */
+  sensitivityLevel?: SensitivitySeverity | null;
+  sensitivityNotes?: string[];
   /** Which sub-features are enabled this turn. */
   flags: TurnFlags;
   /**
@@ -193,6 +212,11 @@ export interface ExtractOutcome {
   suspectedNonGenuine?: boolean;
   /** A short reason the extractor was suspicious (for logs/trace). */
   suspicionReason?: string;
+  /**
+   * Sensitivity awareness: the extractor's assessment of a sensitive/contentious disclosure this
+   * turn, when one was detected (and the feature is on). Absent = nothing detected.
+   */
+  sensitivity?: SensitivityAssessment;
   costUsd: number;
   latencyMs?: number;
   diagnostic?: string;
@@ -340,4 +364,12 @@ export interface TurnResult {
     /** The judge's short reason — recorded in the abandonment metadata. */
     reason: string;
   };
+  /**
+   * Sensitivity awareness / safeguarding outcome, present only when a disclosure was detected this
+   * turn. The route appends a note (`{ ...summary, turnOrdinal, createdAt }`), persists `newLevel`
+   * on the session, and writes a `sensitivity_flagged` event ({ severity, category } only — never
+   * the summary). The support signpost (when `signpost`) is already streamed by the core as a
+   * side-band `support` event.
+   */
+  sensitivity?: SensitivityOutcome;
 }

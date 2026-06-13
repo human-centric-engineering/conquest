@@ -31,6 +31,21 @@ describe('buildAnswerExtractionPrompt', () => {
     expect(system).not.toContain('refined');
   });
 
+  it('omits the sensitivity block by default (zero added prompt when the feature is off)', () => {
+    const messages = buildAnswerExtractionPrompt(ctx({ candidateSlots: [slot({ key: 'q1' })] }));
+    const system = typeof messages[0]?.content === 'string' ? messages[0].content : '';
+    expect(system).not.toMatch(/Sensitivity awareness/i);
+  });
+
+  it('appends the sensitivity block only when sensitivityAware is set', () => {
+    const messages = buildAnswerExtractionPrompt(
+      ctx({ candidateSlots: [slot({ key: 'q1' })], sensitivityAware: true })
+    );
+    const system = typeof messages[0]?.content === 'string' ? messages[0].content : '';
+    expect(system).toMatch(/Sensitivity awareness/i);
+    expect(system).toMatch(/"sensitivity"/);
+  });
+
   it('carries the active key, candidate prompts, and the respondent message', () => {
     const messages = buildAnswerExtractionPrompt(
       ctx({

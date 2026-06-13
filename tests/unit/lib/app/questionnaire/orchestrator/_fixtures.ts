@@ -38,6 +38,7 @@ export function flags(partial: Partial<TurnFlags> = {}): TurnFlags {
     refinement: true,
     completion: true,
     seriousnessGate: true,
+    sensitivityAwareness: true,
     ...partial,
   };
 }
@@ -52,6 +53,8 @@ export function state(input: {
   recentMessages?: string[];
   selectionRound?: number;
   abuseStrikes?: number;
+  sensitivityLevel?: TurnState['sensitivityLevel'];
+  sensitivityNotes?: string[];
   flags?: Partial<TurnFlags>;
   sessionId?: string;
   costPressure?: 'soft';
@@ -66,6 +69,8 @@ export function state(input: {
     recentMessages: input.recentMessages ?? [],
     selectionRound: input.selectionRound ?? 0,
     abuseStrikes: input.abuseStrikes ?? 0,
+    ...(input.sensitivityLevel !== undefined ? { sensitivityLevel: input.sensitivityLevel } : {}),
+    ...(input.sensitivityNotes !== undefined ? { sensitivityNotes: input.sensitivityNotes } : {}),
     flags: flags(input.flags),
     ...(input.costPressure ? { costPressure: input.costPressure } : {}),
   };

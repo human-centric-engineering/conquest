@@ -68,6 +68,55 @@ describe('validateAnswerExtraction', () => {
       expect(result.ok, `${provenance} should validate`).toBe(true);
     }
   });
+
+  describe('sensitivity (awareness / safeguarding)', () => {
+    it('validates with no sensitivity object (the common case — nothing disclosed)', () => {
+      expect(validateAnswerExtraction({ answers: [] }).ok).toBe(true);
+    });
+
+    it('accepts a well-formed sensitivity object', () => {
+      const result = validateAnswerExtraction({
+        answers: [],
+        sensitivity: {
+          detected: true,
+          severity: 'high',
+          category: 'harassment',
+          summary: 'Reports mistreatment by a senior colleague.',
+        },
+      });
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.value.sensitivity?.severity).toBe('high');
+    });
+
+    it('rejects a partial sensitivity object (missing severity)', () => {
+      const result = validateAnswerExtraction({
+        answers: [],
+        sensitivity: { detected: true, category: 'x', summary: 'y' },
+      });
+      expect(result.ok).toBe(false);
+    });
+
+    it('rejects an out-of-vocabulary severity', () => {
+      const result = validateAnswerExtraction({
+        answers: [],
+        sensitivity: { detected: true, severity: 'critical', category: 'x', summary: 'y' },
+      });
+      expect(result.ok).toBe(false);
+    });
+
+    it('rejects an over-long summary (>300 chars)', () => {
+      const result = validateAnswerExtraction({
+        answers: [],
+        sensitivity: {
+          detected: true,
+          severity: 'low',
+          category: 'x',
+          summary: 'a'.repeat(301),
+        },
+      });
+      expect(result.ok).toBe(false);
+    });
+  });
 });
 
 describe('answerExtractionJsonSchema', () => {

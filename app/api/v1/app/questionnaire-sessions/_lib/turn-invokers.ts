@@ -104,8 +104,21 @@ export async function buildTurnInvokers(opts: {
     theme: string;
     current?: { value: unknown; paraphrase: string | null; confidence: number | null };
   }>;
+  /**
+   * Sensitivity awareness / safeguarding: when true, the extractor is asked to ALSO flag a genuine
+   * sensitive disclosure. Resolved by the route from the platform flag AND the per-questionnaire
+   * toggle; off (default) keeps the prompt and behaviour unchanged.
+   */
+  sensitivityAware?: boolean;
 }): Promise<CapabilityInvokers> {
-  const { userId, slots, activeQuestionKey, adaptiveEnabled, dataSlotCandidates } = opts;
+  const {
+    userId,
+    slots,
+    activeQuestionKey,
+    adaptiveEnabled,
+    dataSlotCandidates,
+    sensitivityAware,
+  } = opts;
 
   // Flush the built-in + app capability handlers into the dispatcher before any
   // invoker dispatches. The turn loop calls `capabilityDispatcher.dispatch()` directly
@@ -152,6 +165,8 @@ export async function buildTurnInvokers(opts: {
             : {}),
           // Data Slots feature: when present, the same call also returns data-slot fills.
           ...(dataSlotCandidates && dataSlotCandidates.length > 0 ? { dataSlotCandidates } : {}),
+          // Sensitivity awareness: ask the extractor to also flag a sensitive disclosure.
+          ...(sensitivityAware ? { sensitivityAware: true } : {}),
           sessionId: state.sessionId,
         },
         {
@@ -176,6 +191,8 @@ export async function buildTurnInvokers(opts: {
         dataSlotFills: data.dataSlotFills ?? [],
         costUsd: data.costUsd ?? 0,
         latencyMs,
+        // Sensitivity awareness: surface the disclosure assessment for the orchestrator's step 1.6.
+        ...(data.sensitivity !== undefined ? { sensitivity: data.sensitivity } : {}),
       };
     },
 

@@ -26,11 +26,14 @@ import { prisma } from '@/lib/db/client';
 import { NotFoundError } from '@/lib/api/errors';
 import {
   ANSWER_PROVENANCES,
+  SENSITIVITY_FLAGGED_EVENT,
   SESSION_STATUSES,
   narrowToEnum,
   type AnswerProvenance,
+  type SensitivitySeverity,
   type SessionStatus,
 } from '@/lib/app/questionnaire/types';
+import type { SensitivityNote } from '@/lib/app/questionnaire/sensitivity/types';
 import { classifyTransition, eventTypeFor } from '@/lib/app/questionnaire/session/session-logic';
 import { SessionTransitionError } from '@/lib/app/questionnaire/session/types';
 
@@ -170,6 +173,55 @@ export async function persistAbuseStrikes(sessionId: string, strikes: number): P
   await prisma.appQuestionnaireSession.update({
     where: { id: sessionId },
     data: { abuseStrikes: strikes },
+  });
+}
+
+/**
+ * Persist a sensitive-disclosure capture on a session (sensitivity awareness / safeguarding):
+ * set the running-max `sensitivityLevel` and append one careful, non-graphic {@link SensitivityNote}
+ * to the append-only `sensitivityNotes` JSON array. Read-modify-write inside a transaction so a
+ * concurrent turn can't drop a note (respondent turns are serial, but the transaction is cheap
+ * insurance). Plain column write — the `sensitivity_flagged` audit event is a separate
+ * {@link recordSensitivityFlagged} call. Best-effort at the call site, like {@link persistAbuseStrikes}.
+ */
+export async function persistSensitivity(
+  sessionId: string,
+  level: SensitivitySeverity,
+  note: SensitivityNote
+): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    const row = await tx.appQuestionnaireSession.findUnique({
+      where: { id: sessionId },
+      select: { sensitivityNotes: true },
+    });
+    const existing = Array.isArray(row?.sensitivityNotes)
+      ? (row.sensitivityNotes as unknown as SensitivityNote[])
+      : [];
+    await tx.appQuestionnaireSession.update({
+      where: { id: sessionId },
+      data: {
+        sensitivityLevel: level,
+        sensitivityNotes: [...existing, note] as unknown as Prisma.InputJsonValue,
+      },
+    });
+  });
+}
+
+/**
+ * Record that a sensitive disclosure was flagged this turn — a non-transition event (no status
+ * change), mirroring {@link recordCostCapReached}. Metadata carries ONLY `{ severity, category }`
+ * — never the summary, which restates personal/distressing content (PII discipline).
+ */
+export async function recordSensitivityFlagged(
+  sessionId: string,
+  detail: { severity: SensitivitySeverity; category: string }
+): Promise<void> {
+  await prisma.appQuestionnaireSessionEvent.create({
+    data: {
+      sessionId,
+      eventType: SENSITIVITY_FLAGGED_EVENT,
+      metadata: { severity: detail.severity, category: detail.category },
+    },
   });
 }
 

@@ -27,6 +27,12 @@ import {
   ASSESS_SERIOUSNESS_TOOL_SLUG,
 } from '@/lib/app/questionnaire/orchestrator/orchestrator';
 import { evaluateAbuseStrike, ABUSE_ABANDON_MESSAGE } from '@/lib/app/questionnaire/seriousness';
+import {
+  runningMaxLevel,
+  shouldSignpost,
+  composeSupportMessage,
+} from '@/lib/app/questionnaire/sensitivity';
+import type { SensitivityAssessment } from '@/lib/app/questionnaire/sensitivity/types';
 import { coverageRatio, unansweredQuestions } from '@/lib/app/questionnaire/selection/context';
 import type { ChatEvent } from '@/types/orchestration';
 import type {
@@ -160,6 +166,8 @@ export async function runDataSlotTurn(
   let costUsd = 0;
 
   const hasMessage = state.userMessage.trim().length > 0;
+  // Sensitivity awareness: the extractor's disclosure assessment this turn, captured for step 1.6.
+  let extractedSensitivity: SensitivityAssessment | undefined;
 
   // 1. Combined extraction — question answers (background) + data-slot fills (respondent-facing).
   if (hasMessage && state.flags.extraction) {
@@ -172,6 +180,7 @@ export async function runDataSlotTurn(
     );
     answerUpserts.push(...out.intents);
     dataSlotFills = out.dataSlotFills ?? [];
+    extractedSensitivity = out.sensitivity;
     if (out.diagnostic !== undefined) {
       events.push({
         type: 'warning',
@@ -186,6 +195,7 @@ export async function runDataSlotTurn(
   //     answers AND its data-slot fills (never persisted), strikes the session, and abandons at the
   //     configured threshold.
   let abuse: TurnResult['abuse'];
+  let disregarded = false;
   if (hasMessage && state.flags.seriousnessGate && state.config.abuseThreshold > 0) {
     const judged = await invokers.assessSeriousness(state);
     costUsd += judged.costUsd;
@@ -196,6 +206,7 @@ export async function runDataSlotTurn(
     );
     if (judged.verdict && !judged.verdict.serious) {
       // Disregard — neither the question answers nor the data-slot fills are kept.
+      disregarded = true;
       answerUpserts.length = 0;
       dataSlotFills = [];
       const strike = evaluateAbuseStrike(state.abuseStrikes, state.config.abuseThreshold);
@@ -236,6 +247,22 @@ export async function runDataSlotTurn(
       // the fills were not merged (the data slot stays unfilled).
       events.push({ type: 'warning', code: 'seriousness', message: strike.noticeMessage });
     }
+  }
+
+  // 1.6 Sensitivity awareness / safeguarding (parity with question mode). Remember a genuine
+  //     disclosure flagged by the extractor (when the turn wasn't disregarded); the route persists
+  //     the running-max level + note and the phraser softens every later turn. Support frame pushed
+  //     last (below).
+  let sensitivity: TurnResult['sensitivity'];
+  if (hasMessage && state.flags.sensitivityAwareness && !disregarded && extractedSensitivity) {
+    sensitivity = {
+      detected: true,
+      severity: extractedSensitivity.severity,
+      category: extractedSensitivity.category,
+      summary: extractedSensitivity.summary,
+      newLevel: runningMaxLevel(state.sensitivityLevel, extractedSensitivity.severity),
+      signpost: shouldSignpost(state.sensitivityLevel, extractedSensitivity.severity),
+    };
   }
 
   // 2. Merge — so targeting + completion see this turn's fills/answers.
@@ -321,6 +348,15 @@ export async function runDataSlotTurn(
     targetedQuestionId = next.id;
   }
 
+  // Signpost support LAST so it wins the chat's single notice slot (the hook keeps one warning).
+  if (sensitivity?.signpost && state.config.supportMessage.trim().length > 0) {
+    events.push({
+      type: 'warning',
+      code: 'support',
+      message: composeSupportMessage(state.config.supportMessage, state.config.supportResourceUrl),
+    });
+  }
+
   return {
     response,
     targetedQuestionId,
@@ -331,5 +367,6 @@ export async function runDataSlotTurn(
     contradictions: [],
     assessment,
     ...(abuse !== undefined ? { abuse } : {}),
+    ...(sensitivity !== undefined ? { sensitivity } : {}),
   };
 }

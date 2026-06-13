@@ -71,6 +71,7 @@ import type {
   ExtractionContext,
   ExtractionSlotView,
 } from '@/lib/app/questionnaire/extraction/types';
+import type { SensitivityAssessment } from '@/lib/app/questionnaire/sensitivity/types';
 
 const SLUG = EXTRACT_ANSWER_SLOTS_CAPABILITY_SLUG;
 
@@ -152,6 +153,12 @@ const argsSchema = z
     attachments: chatAttachmentsArraySchema.optional(),
     /** Stable session identity, threaded into cost-log metadata. */
     sessionId: z.string().optional(),
+    /**
+     * Sensitivity awareness / safeguarding: when true, the prompt asks the extractor to ALSO flag
+     * a genuine sensitive/contentious disclosure. The route sets this from the platform flag AND
+     * the per-questionnaire toggle; off (default) adds no prompt text or behaviour.
+     */
+    sensitivityAware: z.boolean().optional(),
   })
   // There must be something to extract into: question slots (question mode) and/or data slots
   // (data-slot mode). An empty call on both would be a no-op dispatch — reject it as malformed.
@@ -190,6 +197,13 @@ export interface ExtractAnswerSlotsData {
    */
   suspectedNonGenuine?: boolean;
   suspicionReason?: string;
+  /**
+   * Sensitivity awareness / safeguarding: the extractor's assessment of a sensitive/contentious
+   * disclosure this turn, present only when one was detected (and `sensitivityAware` was set).
+   * `summary` is a careful, non-graphic restatement — the orchestrator remembers it; it never
+   * enters the provenance audit row, event metadata, or analytics.
+   */
+  sensitivity?: SensitivityAssessment;
 }
 
 /**
@@ -239,6 +253,7 @@ function toExtractionContext(args: ExtractAnswerSlotsArgs): ExtractionContext {
     answered: args.answered ?? [],
     userMessage: args.userMessage,
     sessionId: args.sessionId ?? `dispatch-${args.activeQuestionKey ?? 'data-slot'}`,
+    ...(args.sensitivityAware ? { sensitivityAware: true } : {}),
     ...(args.recentMessages ? { recentMessages: args.recentMessages } : {}),
     ...(args.attachments && args.attachments.length > 0 ? { attachments: args.attachments } : {}),
     ...(args.dataSlotCandidates && args.dataSlotCandidates.length > 0
@@ -346,6 +361,7 @@ export class AppExtractAnswerSlotsCapability extends BaseCapability<
       for (const intent of intents) {
         provenanceCounts[intent.provenance] = (provenanceCounts[intent.provenance] ?? 0) + 1;
       }
+      const { sensitivity } = result.data;
       preview = JSON.stringify({
         success: true,
         data: {
@@ -354,6 +370,10 @@ export class AppExtractAnswerSlotsCapability extends BaseCapability<
           sideEffectCount: intents.filter((i) => !i.isActiveQuestion).length,
           droppedCount: result.data.droppedCount,
           provenanceCounts,
+          // Sensitivity awareness: severity + category only — NEVER the summary (it restates PII).
+          ...(sensitivity
+            ? { sensitivity: { severity: sensitivity.severity, category: sensitivity.category } }
+            : {}),
         },
       });
     } else {
@@ -513,6 +533,10 @@ export class AppExtractAnswerSlotsCapability extends BaseCapability<
         : {}),
       ...(completion.value.suspicionReason !== undefined
         ? { suspicionReason: completion.value.suspicionReason }
+        : {}),
+      // Sensitivity awareness — pass the disclosure assessment through (when detected).
+      ...(completion.value.sensitivity !== undefined
+        ? { sensitivity: completion.value.sensitivity }
         : {}),
     });
   }

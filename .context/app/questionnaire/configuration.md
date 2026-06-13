@@ -35,6 +35,9 @@ single JSON column for the profile fields:
 | Contradiction cadence (every N turns) | `contradictionEveryNTurns` | Int                    | `1`               |
 | Anonymous mode                        | `anonymousMode`            | Boolean                | `false`           |
 | Abuse threshold (seriousness gate)    | `abuseThreshold`           | Int (0 = off)          | `4`               |
+| Sensitivity awareness (safeguarding)  | `sensitivityAwareness`     | Boolean                | `false`           |
+| Support message (signpost copy)       | `supportMessage`           | String (empty = off)   | `''`              |
+| Support resource URL                  | `supportResourceUrl`       | String (URL)           | `''`              |
 | Session-start profile fields          | `profileFields`            | Json (array)           | `[]`              |
 | Answer panel scope                    | `answerSlotPanelScope`     | String (enum)          | `'full_progress'` |
 

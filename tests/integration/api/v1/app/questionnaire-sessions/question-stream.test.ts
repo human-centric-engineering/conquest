@@ -294,4 +294,21 @@ describe('buildStreamingQuestionPrompt', () => {
     expect(opening).not.toMatch(/brief or surface-level/i);
     expect(transition).not.toMatch(/brief or surface-level/i);
   });
+
+  it('adds a tread-carefully block (with the latest note) when a sensitivity level is set', () => {
+    const system = text(
+      buildStreamingQuestionPrompt({
+        ...INPUT,
+        sensitivityLevel: 'high',
+        sensitivityNotes: ['Reports mistreatment by a senior colleague.'],
+      })[0].content
+    );
+    expect(system).toMatch(/sensitive or difficult/i);
+    expect(system).toContain('Reports mistreatment by a senior colleague.');
+  });
+
+  it('omits the tread-carefully block when no sensitivity level is set', () => {
+    const system = text(buildStreamingQuestionPrompt(INPUT)[0].content);
+    expect(system).not.toMatch(/sensitive or difficult/i);
+  });
 });

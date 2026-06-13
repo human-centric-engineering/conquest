@@ -86,6 +86,15 @@ export const updateConfigSchema = z
     // Seriousness / abuse gate: non-genuine answers tolerated before the session is abandoned.
     // 0 = off; capped to keep the escalation meaningful.
     abuseThreshold: z.number().int().min(0).max(50).optional(),
+    // Data Slots feature: re-ask attempts before a slot is parked with a provisional fill.
+    // Min 1 (ask once, immediately provisional if unanswered); capped to keep momentum.
+    maxDataSlotAttempts: z.number().int().min(1).max(10).optional(),
+    // Sensitivity awareness / safeguarding: detect + remember a sensitive disclosure and soften
+    // later phrasing. `supportMessage` (with optional `supportResourceUrl`) is the verbatim copy
+    // signposted once on a serious disclosure; empty message = no signpost.
+    sensitivityAwareness: z.boolean().optional(),
+    supportMessage: z.string().trim().max(500).optional(),
+    supportResourceUrl: z.string().trim().max(500).optional(),
     profileFields: z.array(profileFieldSchema).optional(),
     answerSlotPanelScope: z.enum(ANSWER_SLOT_PANEL_SCOPES).optional(),
   })
@@ -109,6 +118,17 @@ export const updateConfigSchema = z
           code: 'custom',
           message: 'Window N must be at least 1 when contradiction detection is on',
           path: ['contradictionWindowN'],
+        });
+      }
+    }
+
+    // A support resource URL, when provided non-empty, must be a valid URL (empty = no link).
+    if (cfg.supportResourceUrl !== undefined && cfg.supportResourceUrl.length > 0) {
+      if (!URL.canParse(cfg.supportResourceUrl)) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Support resource URL must be a valid URL',
+          path: ['supportResourceUrl'],
         });
       }
     }

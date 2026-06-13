@@ -33,6 +33,9 @@ export const SESSION_EVENT_TYPES = [
   'completed',
   'abandoned',
   'cost_cap_reached',
+  // Sensitivity awareness / safeguarding: a non-transition event recorded when a sensitive
+  // disclosure is flagged (metadata: { severity, category } — never the summary).
+  'sensitivity_flagged',
 ] as const;
 export type SessionEventType = (typeof SESSION_EVENT_TYPES)[number];
 

@@ -21,6 +21,7 @@ export {
 } from '@/lib/app/questionnaire/analytics/distributions';
 export { getCompletionFunnel } from '@/lib/app/questionnaire/analytics/funnel';
 export { getQuestionnaireCostBreakdown } from '@/lib/app/questionnaire/analytics/cost';
+export { getSafeguardingSummary } from '@/lib/app/questionnaire/analytics/safeguarding';
 
 export {
   K_ANONYMITY_THRESHOLD,
@@ -43,4 +44,5 @@ export type {
   CostDayPoint,
   SessionCostRow,
   QuestionnaireCostResult,
+  SafeguardingSummary,
 } from '@/lib/app/questionnaire/analytics/views';

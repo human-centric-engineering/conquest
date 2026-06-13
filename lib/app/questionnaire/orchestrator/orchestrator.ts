@@ -27,6 +27,12 @@ import {
 import { assessCompletion } from '@/lib/app/questionnaire/completion/completion-logic';
 import { shouldRunDetection } from '@/lib/app/questionnaire/contradiction';
 import { evaluateAbuseStrike, ABUSE_ABANDON_MESSAGE } from '@/lib/app/questionnaire/seriousness';
+import {
+  runningMaxLevel,
+  shouldSignpost,
+  composeSupportMessage,
+} from '@/lib/app/questionnaire/sensitivity';
+import type { SensitivityAssessment } from '@/lib/app/questionnaire/sensitivity/types';
 import { unansweredQuestions } from '@/lib/app/questionnaire/selection/context';
 import type { AnsweredView, QuestionView } from '@/lib/app/questionnaire/selection/types';
 import type { AnswerSlotIntent } from '@/lib/app/questionnaire/extraction/types';
@@ -148,6 +154,8 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
   let costUsd = 0;
 
   const hasMessage = state.userMessage.trim().length > 0;
+  // Sensitivity awareness: the extractor's disclosure assessment this turn, captured for step 1.6.
+  let extractedSensitivity: SensitivityAssessment | undefined;
 
   // 1. Extract answer slots from the message. The extractor also emits a `suspectedNonGenuine`
   //    hint, but it proved an unreliable GATE (an optional flag the model often omits even for
@@ -162,6 +170,7 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
       })
     );
     answerUpserts.push(...out.intents);
+    extractedSensitivity = out.sensitivity;
     if (out.diagnostic !== undefined) {
       events.push({
         type: 'warning',
@@ -177,6 +186,7 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
   //     verdict DISREGARDS the answer (never merged/persisted), strikes the session, and escalates
   //     → abandon at the configured threshold. A genuine answer (incl. colloquial/lazy) passes.
   let abuse: TurnResult['abuse'];
+  let disregarded = false;
   if (hasMessage && state.flags.seriousnessGate && state.config.abuseThreshold > 0) {
     const judged = await invokers.assessSeriousness(state);
     costUsd += judged.costUsd;
@@ -188,6 +198,7 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
     );
     if (judged.verdict && !judged.verdict.serious) {
       // Disregard — a non-genuine answer is never merged or persisted.
+      disregarded = true;
       answerUpserts.length = 0;
       const strike = evaluateAbuseStrike(state.abuseStrikes, state.config.abuseThreshold);
       abuse = {
@@ -223,6 +234,24 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
       // (still-unanswered) question because the answer was not merged.
       events.push({ type: 'warning', code: 'seriousness', message: strike.noticeMessage });
     }
+  }
+
+  // 1.6 Sensitivity awareness / safeguarding. When the extractor flagged a genuine disclosure (and
+  //     the turn wasn't disregarded as non-genuine), remember it: compute the session's running-max
+  //     level, decide whether to signpost support (first time it reaches `high`), and return the
+  //     outcome for the route to persist. Tone-softening itself happens in the phraser, which reads
+  //     the persisted notes every later turn. The support frame is pushed LAST (below) so it wins
+  //     the chat's single notice slot over any other warning this turn.
+  let sensitivity: TurnResult['sensitivity'];
+  if (hasMessage && state.flags.sensitivityAwareness && !disregarded && extractedSensitivity) {
+    sensitivity = {
+      detected: true,
+      severity: extractedSensitivity.severity,
+      category: extractedSensitivity.category,
+      summary: extractedSensitivity.summary,
+      newLevel: runningMaxLevel(state.sensitivityLevel, extractedSensitivity.severity),
+      signpost: shouldSignpost(state.sensitivityLevel, extractedSensitivity.severity),
+    };
   }
 
   // 2. Merge the extracted intents so the rest of the pipeline sees the answer just given.
@@ -346,6 +375,16 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
     }
   }
 
+  // Signpost support LAST so it wins the chat's single notice slot (the hook keeps one warning).
+  // Only when a serious disclosure was first reached this turn AND the admin authored copy.
+  if (sensitivity?.signpost && state.config.supportMessage.trim().length > 0) {
+    events.push({
+      type: 'warning',
+      code: 'support',
+      message: composeSupportMessage(state.config.supportMessage, state.config.supportResourceUrl),
+    });
+  }
+
   return {
     response,
     targetedQuestionId,
@@ -356,5 +395,6 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
     contradictions,
     assessment,
     ...(abuse !== undefined ? { abuse } : {}),
+    ...(sensitivity !== undefined ? { sensitivity } : {}),
   };
 }

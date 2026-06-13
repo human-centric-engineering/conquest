@@ -86,6 +86,10 @@ export const CONFIG_SELECT = {
   contradictionEveryNTurns: true,
   anonymousMode: true,
   abuseThreshold: true,
+  maxDataSlotAttempts: true,
+  sensitivityAwareness: true,
+  supportMessage: true,
+  supportResourceUrl: true,
   profileFields: true,
   answerSlotPanelScope: true,
 } as const;
@@ -102,6 +106,10 @@ type ConfigRow = {
   contradictionEveryNTurns: number;
   anonymousMode: boolean;
   abuseThreshold: number;
+  maxDataSlotAttempts: number;
+  sensitivityAwareness: boolean;
+  supportMessage: string;
+  supportResourceUrl: string;
   profileFields: Prisma.JsonValue;
   answerSlotPanelScope: string;
 };
@@ -153,6 +161,10 @@ export function toConfigView(row: ConfigRow | null): ConfigView {
     contradictionEveryNTurns: row.contradictionEveryNTurns,
     anonymousMode: row.anonymousMode,
     abuseThreshold: row.abuseThreshold,
+    maxDataSlotAttempts: row.maxDataSlotAttempts,
+    sensitivityAwareness: row.sensitivityAwareness,
+    supportMessage: row.supportMessage,
+    supportResourceUrl: row.supportResourceUrl,
     profileFields: asProfileFields(row.profileFields),
     answerSlotPanelScope: asAnswerSlotPanelScope(row.answerSlotPanelScope),
     saved: true,

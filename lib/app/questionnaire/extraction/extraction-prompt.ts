@@ -82,6 +82,27 @@ keep the age, change the gender), and reflect the corrected state in value + par
 a fill for a slot the latest message genuinely informs; if it informs no data slots, return an \
 empty "dataSlotFills" array.`;
 
+/**
+ * Appended to the system rules ONLY when sensitivity awareness is on (gated by the platform flag +
+ * per-questionnaire toggle, threaded as `ctx.sensitivityAware`). Asks the extractor to flag a
+ * genuine sensitive/contentious disclosure so the conversation can tread carefully. Kept off the
+ * default prompt so the feature adds zero tokens/behaviour when disabled.
+ */
+const SENSITIVITY_RULES = `
+
+Sensitivity awareness: a respondent may disclose something sensitive or contentious — abuse, \
+harassment, discrimination, self-harm, threats, bereavement, a safeguarding or serious legal/safety \
+concern. When the message contains a GENUINE personal disclosure of this kind, ALSO output a \
+"sensitivity" object:
+- "detected": true.
+- "severity": "high" for a serious disclosure (abuse, self-harm, threats, safeguarding); "medium" \
+or "low" for lesser sensitivity.
+- "category": a short label, e.g. "harassment", "self-harm", "bereavement".
+- "summary": a careful, CLINICAL, NON-GRAPHIC one-line restatement (e.g. "Reports mistreatment by a \
+senior colleague."). Never quote graphic or distressing detail.
+OMIT the "sensitivity" field entirely when there is no genuine sensitive disclosure — a neutral, \
+negative, or merely critical answer is NOT a disclosure. When in doubt, omit it.`;
+
 /** Render one data-slot candidate as a compact, model-readable line. */
 function describeDataSlot(slot: DataSlotCandidateView): string {
   const lines = [
@@ -153,7 +174,10 @@ export function buildAnswerExtractionPrompt(ctx: ExtractionContext): LlmMessage[
   // Data Slots feature: when present, the system rules + a candidate section are added so the
   // model fills data slots in the same call.
   const hasDataSlots = ctx.dataSlotCandidates !== undefined && ctx.dataSlotCandidates.length > 0;
-  const systemContent = hasDataSlots ? SYSTEM_RULES + DATA_SLOT_RULES : SYSTEM_RULES;
+  const systemContent =
+    (hasDataSlots ? SYSTEM_RULES + DATA_SLOT_RULES : SYSTEM_RULES) +
+    // Sensitivity block only when the feature is on — zero added prompt/tokens otherwise.
+    (ctx.sensitivityAware ? SENSITIVITY_RULES : '');
   const dataSlotSection = hasDataSlots
     ? `\n\nData slots (fill these too):\n${ctx.dataSlotCandidates!.map(describeDataSlot).join('\n')}`
     : '';

@@ -102,6 +102,13 @@ export interface ExtractionContext {
   attachments?: ExtractionAttachment[];
   /** Stable session identity — threaded into cost-log metadata. */
   sessionId: string;
+  /**
+   * Sensitivity awareness / safeguarding: when true, the prompt asks the extractor to ALSO emit a
+   * `sensitivity` assessment for a genuine sensitive/contentious disclosure. Off (the default) adds
+   * no prompt text and no behaviour, so the feature is zero-cost when disabled. The route sets this
+   * from the platform flag AND the per-questionnaire config toggle.
+   */
+  sensitivityAware?: boolean;
 }
 
 /** One base64-encoded attachment on a respondent turn (mirrors `chatAttachmentSchema`). */

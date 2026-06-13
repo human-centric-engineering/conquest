@@ -149,6 +149,10 @@ function makeGraph(over: Partial<VersionGraphView> = {}): VersionGraphView {
       contradictionEveryNTurns: 1,
       anonymousMode: false,
       abuseThreshold: 4,
+      maxDataSlotAttempts: 2,
+      sensitivityAwareness: false,
+      supportMessage: '',
+      supportResourceUrl: '',
       profileFields: [],
       answerSlotPanelScope: 'full_progress',
     },
@@ -441,12 +445,13 @@ describe('AnalyticsTab', () => {
       // Act
       render(await renderPage());
 
-      // Assert: all null, error logged three times (one per fetch)
+      // Assert: all null, error logged once per parallel fetch (distributions, funnel, cost,
+      // safeguarding).
       const view = screen.getByTestId('analytics-view');
       expect(view).toHaveAttribute('data-has-distributions', 'false');
       expect(view).toHaveAttribute('data-has-funnel', 'false');
       expect(view).toHaveAttribute('data-has-cost', 'false');
-      expect(loggerMock.logger.error).toHaveBeenCalledTimes(3);
+      expect(loggerMock.logger.error).toHaveBeenCalledTimes(4);
     });
 
     it('does not call parseApiResponse for a fetch that returns !ok', async () => {

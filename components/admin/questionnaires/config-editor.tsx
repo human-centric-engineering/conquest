@@ -25,6 +25,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Select,
   SelectContent,
@@ -186,6 +187,9 @@ export function ConfigEditor({
   );
   const [anonymousMode, setAnonymousMode] = useState(config.anonymousMode);
   const [abuseThreshold, setAbuseThreshold] = useState(String(config.abuseThreshold));
+  const [sensitivityAwareness, setSensitivityAwareness] = useState(config.sensitivityAwareness);
+  const [supportMessage, setSupportMessage] = useState(config.supportMessage);
+  const [supportResourceUrl, setSupportResourceUrl] = useState(config.supportResourceUrl);
   const [answerSlotPanelScope, setAnswerSlotPanelScope] = useState<AnswerSlotPanelScope>(
     config.answerSlotPanelScope
   );
@@ -208,6 +212,9 @@ export function ConfigEditor({
     setContradictionEveryNTurns(String(config.contradictionEveryNTurns));
     setAnonymousMode(config.anonymousMode);
     setAbuseThreshold(String(config.abuseThreshold));
+    setSensitivityAwareness(config.sensitivityAwareness);
+    setSupportMessage(config.supportMessage);
+    setSupportResourceUrl(config.supportResourceUrl);
     setAnswerSlotPanelScope(config.answerSlotPanelScope);
     setProfileFields(config.profileFields.map(toRow));
   }, [config]);
@@ -262,6 +269,11 @@ export function ConfigEditor({
         // Seriousness / abuse gate: non-genuine answers tolerated before abandon. Blank/invalid
         // falls back to the stored value (never silently 0); 0 = off.
         abuseThreshold: boundedNumber(abuseThreshold, 0, 50, config.abuseThreshold, true),
+        // Sensitivity awareness / safeguarding. Trim the copy; an empty support message disables
+        // the signpost. Requires the platform sensitivity-awareness flag to take effect.
+        sensitivityAwareness,
+        supportMessage: supportMessage.trim(),
+        supportResourceUrl: supportResourceUrl.trim(),
         answerSlotPanelScope,
         profileFields: profileFields.map((f) => ({
           key: f.key.trim(),
@@ -505,6 +517,62 @@ export function ConfigEditor({
             onChange={(e) => setAbuseThreshold(e.target.value)}
             disabled={busy}
           />
+        </div>
+        <div className="space-y-3 sm:col-span-2">
+          <div className="flex items-center gap-2">
+            <Switch
+              checked={sensitivityAwareness}
+              onCheckedChange={setSensitivityAwareness}
+              disabled={busy}
+            />
+            <Label className="text-sm font-medium">
+              Sensitivity awareness{' '}
+              <FieldHelp title="Sensitivity awareness">
+                When on, the agent notices a sensitive or contentious disclosure (e.g. abuse,
+                distress, a safeguarding concern), remembers it, and treads carefully in how it
+                phrases every later question. Best-effort awareness, not a guaranteed safeguarding
+                net. Requires the platform sensitivity-awareness flag to be on.
+              </FieldHelp>
+            </Label>
+          </div>
+          {sensitivityAwareness && (
+            <div className="space-y-3 pl-1">
+              <div className="space-y-1.5">
+                <Label className="text-sm font-medium">
+                  Support message{' '}
+                  <FieldHelp title="Support message">
+                    Shown once, gently, when a serious disclosure is detected — verbatim, so it
+                    can&apos;t be reworded by the agent. Leave blank to never signpost. e.g.
+                    &ldquo;If anything here has been difficult, support is available — you can reach
+                    our team or a helpline at any time.&rdquo;
+                  </FieldHelp>
+                </Label>
+                <Textarea
+                  rows={2}
+                  value={supportMessage}
+                  onChange={(e) => setSupportMessage(e.target.value)}
+                  placeholder="If anything here has been difficult, support is available…"
+                  disabled={busy}
+                />
+              </div>
+              <div className="space-y-1.5 sm:max-w-md">
+                <Label className="text-sm font-medium">
+                  Support resource URL{' '}
+                  <FieldHelp title="Support resource URL">
+                    Optional link appended to the support message (e.g. a helpline or wellbeing
+                    page). Must be a valid URL.
+                  </FieldHelp>
+                </Label>
+                <Input
+                  type="url"
+                  value={supportResourceUrl}
+                  onChange={(e) => setSupportResourceUrl(e.target.value)}
+                  placeholder="https://…"
+                  disabled={busy}
+                />
+              </div>
+            </div>
+          )}
         </div>
         <div className="space-y-1.5 sm:max-w-xs">
           <Label className="text-sm font-medium">
