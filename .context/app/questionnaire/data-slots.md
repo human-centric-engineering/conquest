@@ -83,6 +83,32 @@ below for the draft lifecycle (generate persists it, save promotes + clears it, 
    rows — a pending draft does not satisfy the gate — so every launched questionnaire runs in
    data-slot mode.
 
+## Backfilling pre-existing questionnaires (headless generate → save live)
+
+Questionnaires created before data slots shipped have none. To give them their abstraction
+without admin clicks there's a headless seam, `generateAndSaveDataSlots(questionnaireId,
+versionId, { granularity? })` (`app/api/v1/app/questionnaires/_lib/generate-data-slots.ts`). It
+runs the **same** `app-questionnaire-data-slots-generator` agent via the single-shot
+`app_generate_data_slots` capability, then writes the result **live** (`replaceDataSlots`) —
+skipping the draft/review step the admin UI uses. It's fail-soft: a question-less version, a
+missing agent (`db:seed` not run), or a generator failure (no provider / timeout / parse) returns
+a structured `{ status, slotCount, diagnostic?, message? }` instead of throwing. (It uses the
+single-shot capability, not the streaming map-reduce orchestrator, so a very large questionnaire
+could truncate — fine for test/demo content; use the admin streaming UI for big real ones.)
+
+Two callers:
+
+- **Backfill script** — `scripts/migrations/2026-06-13-backfill-data-slots.ts`
+  (`npm run db:backfill:data-slots`). Finds every version with ≥1 question and 0 live slots and
+  backfills each; idempotent (skips versions that already have slots; `--force` regenerates).
+  Flags: `--dry-run`, `--force`, `--version=<id>`, `--questionnaire=<id>`, `--granularity=<level>`.
+  Per-version fail-soft — one broken version never aborts the batch. Needs an LLM provider
+  configured. WARNS if the data-slots flag is off (backfilled slots stay dormant until it's on).
+- **Demo seed** — `prisma/seeds/app-questionnaire/025-demo-content.ts` calls it once **after** its
+  transaction commits (an LLM call must not run inside a DB transaction), so a fresh
+  `LOAD_DEMO_CONTENT=1` seed produces a demo that already has slots. Fail-soft: with no provider it
+  logs a warning and leaves the demo usable without slots; re-seed or run the backfill script later.
+
 ## Runtime: the data-slot conversation (`runDataSlotTurn`)
 
 Data-slot mode is active when the flag is on AND the version has ≥1 data slot. The `/messages`

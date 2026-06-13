@@ -11,6 +11,7 @@
 import type { SeedUnit } from '@/prisma/runner';
 import { executeTransaction } from '@/lib/db/utils';
 import { assertPersistable, writeGraph } from '@/app/api/v1/app/questionnaires/_lib/persist';
+import { generateAndSaveDataSlots } from '@/app/api/v1/app/questionnaires/_lib/generate-data-slots';
 import { slugifyDemoClient } from '@/lib/app/questionnaire/demo-clients/slug';
 import type { ExtractQuestionnaireStructureData } from '@/lib/app/questionnaire/capabilities';
 import {
@@ -185,6 +186,11 @@ const unit: SeedUnit = {
     // Fail fast before touching the DB if the hand-authored graph is incoherent.
     assertPersistable(DEMO_EXTRACTION);
 
+    // Captured inside the transaction so the post-commit data-slot generation (an LLM call,
+    // deliberately kept OUT of the DB transaction) can target the freshly seeded version.
+    let demoQuestionnaireId = '';
+    let demoVersionId = '';
+
     await executeTransaction(async (tx) => {
       // Demo client — upsert by unique slug (idempotent on every field).
       const demoClient = await tx.appDemoClient.upsert({
@@ -228,6 +234,7 @@ const unit: SeedUnit = {
         },
         select: { id: true },
       });
+      demoQuestionnaireId = questionnaire.id;
 
       // Version 1 — carries the launch-gate goal + audience (+ provenance).
       const version = await tx.appQuestionnaireVersion.create({
@@ -242,6 +249,7 @@ const unit: SeedUnit = {
         },
         select: { id: true },
       });
+      demoVersionId = version.id;
 
       // Section + slot graph — same writer the ingestion route uses.
       const counts = await writeGraph(tx, version.id, DEMO_EXTRACTION);
@@ -284,6 +292,31 @@ const unit: SeedUnit = {
           `${counts.questionCount} questions, launched and attributed to ${DEMO_CLIENT.slug}`
       );
     });
+
+    // DEMO-ONLY: give the demo its data-slot abstraction so the seeded questionnaire exercises
+    // the data-slots conversation, not just the raw questions. Runs the SAME generator agent the
+    // admin "Generate" button uses and saves the result LIVE (no draft/review step). Deliberately
+    // AFTER the transaction — it makes an LLM call, which must not run inside a DB transaction.
+    //
+    // Fail-soft by design: with no provider/API key configured (e.g. a bare CI or a local seed
+    // without LLM creds) generation returns a non-`saved` outcome; we log it and leave the demo
+    // fully usable WITHOUT slots rather than failing the seed. Re-running the seed (or the
+    // `db:backfill:data-slots` script) backfills the slots once a provider is available.
+    //
+    // The data-slots sub-flag still has to be ON at runtime for these to surface — the F9.2
+    // runbook flips it alongside the live-sessions + contradiction flags.
+    const slotResult = await generateAndSaveDataSlots(demoQuestionnaireId, demoVersionId, {
+      granularity: 'balanced',
+    });
+    if (slotResult.status === 'saved') {
+      logger.info(`✅ DEMO-ONLY: generated ${slotResult.slotCount} data slots for the demo`);
+    } else {
+      logger.warn(
+        `⚠️  DEMO-ONLY: data slots not generated (${slotResult.status}: ${slotResult.diagnostic ?? 'n/a'}). ` +
+          `The demo is still usable; run "npm run db:backfill:data-slots" once an LLM provider is configured.`,
+        slotResult.message ? { message: slotResult.message } : undefined
+      );
+    }
   },
 };
 
