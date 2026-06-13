@@ -43,6 +43,7 @@ const INPUT: QuestionComposeInput = {
   lastUserMessage: 'it was a nightmare',
   isReask: false,
   isOpening: false,
+  questionsAsked: 4,
 };
 
 /** Drain the generator into its yielded content deltas + its return value. */
@@ -258,5 +259,39 @@ describe('buildStreamingQuestionPrompt', () => {
       buildStreamingQuestionPrompt({ ...INPUT, audience: { locale: 'en-GB' } })[0].content
     );
     expect(system).not.toMatch(/Respond entirely/i);
+  });
+
+  it('always instructs to ask one thing at a time and not bundle sub-questions', () => {
+    const system = text(buildStreamingQuestionPrompt(INPUT)[0].content);
+    expect(system).toMatch(/ONE thing at a time/i);
+    expect(system).toMatch(/do not bundle/i);
+  });
+
+  it('keeps early questions VERY tight (first few of the session)', () => {
+    const system = text(buildStreamingQuestionPrompt({ ...INPUT, questionsAsked: 0 })[0].content);
+    expect(system).toMatch(/very short and tight/i);
+    expect(system).not.toMatch(/rapport has built/i);
+  });
+
+  it('relaxes length once rapport has built (later in the session)', () => {
+    const system = text(buildStreamingQuestionPrompt({ ...INPUT, questionsAsked: 6 })[0].content);
+    expect(system).toMatch(/concise/i);
+    expect(system).toMatch(/rapport has built/i);
+    expect(system).not.toMatch(/very short and tight/i);
+  });
+
+  it('prods for nuance on a normal deepen turn instead of bundling more questions', () => {
+    const system = text(buildStreamingQuestionPrompt(INPUT)[0].content);
+    expect(system).toMatch(/brief or surface-level/i);
+    expect(system).toMatch(/one light follow-up/i);
+  });
+
+  it('does not add the nuance prod on an opening or transition turn', () => {
+    const opening = text(buildStreamingQuestionPrompt({ ...INPUT, isOpening: true })[0].content);
+    const transition = text(
+      buildStreamingQuestionPrompt({ ...INPUT, isTransition: true })[0].content
+    );
+    expect(opening).not.toMatch(/brief or surface-level/i);
+    expect(transition).not.toMatch(/brief or surface-level/i);
   });
 });
