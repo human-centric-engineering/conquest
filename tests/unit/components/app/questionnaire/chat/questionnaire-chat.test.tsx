@@ -105,11 +105,14 @@ describe('QuestionnaireChat', () => {
     expect(screen.getByRole('status', { name: 'Thinking…' })).toBeInTheDocument();
   });
 
-  it('shows the streaming text while a reply is in flight', () => {
+  it('shows the thinking indicator (not raw partial text) while a reply is in flight', () => {
+    // The reply is no longer rendered token-by-token; it types itself in once it lands as a
+    // committed turn, so an in-flight stream shows only the thinking indicator.
     hookReturn = makeReturn({ streaming: true, streamingText: 'Let me think', canSend: false });
     render(<QuestionnaireChat sessionId="s1" stream={hookReturn} />);
 
-    expect(screen.getByText(/Let me think/)).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Thinking…' })).toBeInTheDocument();
+    expect(screen.queryByText(/Let me think/)).not.toBeInTheDocument();
   });
 
   it('renders a generic side-band warning as a quiet line', () => {
@@ -287,15 +290,15 @@ describe('QuestionnaireChat', () => {
       expect(container.querySelector('.terminal-caret')).toBeNull();
     });
 
-    it('does not type turns that arrive after mount (they already streamed live)', async () => {
+    it('types in a reply that arrives after mount (caret first, full text after)', async () => {
+      // Fresh mount with just the seeded greeting.
       hookReturn = makeReturn({ turns: [{ role: 'assistant', content: 'Opening greeting.' }] });
-      const { rerender } = render(
+      const { container, rerender } = render(
         <QuestionnaireChat sessionId="s1" stream={hookReturn} animateOpening />
       );
       await waitFor(() => expect(screen.getByText('Opening greeting.')).toBeInTheDocument());
 
-      // A later assistant turn appears (index 1, past the captured opening count) — it renders
-      // immediately, not through the typewriter.
+      // A reply lands as a committed turn (index 1, past the seeded count) — it types itself in.
       const next = makeReturn({
         turns: [
           { role: 'assistant', content: 'Opening greeting.' },
@@ -304,7 +307,31 @@ describe('QuestionnaireChat', () => {
       });
       rerender(<QuestionnaireChat sessionId="s1" stream={next} animateOpening />);
 
-      expect(screen.getByText('A later question.')).toBeInTheDocument();
+      // Mid-type: a caret is present and the full reply isn't shown yet…
+      expect(container.querySelector('.terminal-caret')).toBeTruthy();
+      // …then it catches up.
+      await waitFor(() => expect(screen.getByText('A later question.')).toBeInTheDocument());
+    });
+
+    it('types in a reply even on a resumed session (animateOpening off)', async () => {
+      // Resume seeds prior history (rendered instantly); a new reply still types in.
+      hookReturn = makeReturn({ turns: [{ role: 'assistant', content: 'Earlier history.' }] });
+      const { container, rerender } = render(
+        <QuestionnaireChat sessionId="s1" stream={hookReturn} />
+      );
+      // Seeded history is instant (no caret).
+      expect(screen.getByText('Earlier history.')).toBeInTheDocument();
+      expect(container.querySelector('.terminal-caret')).toBeNull();
+
+      const next = makeReturn({
+        turns: [
+          { role: 'assistant', content: 'Earlier history.' },
+          { role: 'assistant', content: 'A fresh reply.' },
+        ],
+      });
+      rerender(<QuestionnaireChat sessionId="s1" stream={next} />);
+
+      await waitFor(() => expect(screen.getByText('A fresh reply.')).toBeInTheDocument());
     });
   });
 });

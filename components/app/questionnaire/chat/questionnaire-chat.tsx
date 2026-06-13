@@ -24,7 +24,6 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { SendHorizontal } from 'lucide-react';
 import Markdown from 'react-markdown';
 
-import { useTypingAnimation } from '@/lib/hooks/use-typing-animation';
 import { cn } from '@/lib/utils';
 import { API } from '@/lib/api/endpoints';
 import { Button } from '@/components/ui/button';
@@ -55,8 +54,9 @@ export interface QuestionnaireChatProps {
   attachmentInputEnabled?: boolean;
   /**
    * Type the seeded opening turn(s) in (the welcome greeting) instead of snapping them in
-   * fully-formed, so a fresh session reads as one streamed conversation. Set only for fresh
-   * sessions (alongside `autoStart`) — a resumed transcript renders its history instantly.
+   * fully-formed. Replies that arrive *after* mount always type in regardless; this flag only
+   * governs the pre-seeded turns, so set it for fresh sessions (alongside `autoStart`) and leave
+   * it off on resume so a restored transcript renders its history instantly.
    */
   animateOpening?: boolean;
   className?: string;
@@ -92,23 +92,36 @@ function AssistantTurn({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** Typing cadence — chars revealed per tick and the gap between ticks (~150 chars/s). */
+const TYPE_CHARS_PER_TICK = 3;
+const TYPE_TICK_MS = 20;
+
 /**
- * An assistant turn that types itself in (the same chunked cadence the live SSE replies use),
- * then settles to the normal Markdown render once complete. Used for the seeded opening
- * greeting so a fresh session reads as one continuous streamed conversation rather than the
- * greeting snapping in fully-formed while the first question types beneath it.
+ * An assistant turn that types itself in a few characters at a time — then settles to the
+ * normal Markdown render once complete — so questions and replies arrive like streamed LLM
+ * output rather than snapping in as a finished block.
+ *
+ * A plain `setInterval` (not the SSE rAF animator) is used deliberately: it's resilient to
+ * React 19 StrictMode's mount→cleanup→remount in dev (cleanup clears the timer, the re-run
+ * restarts cleanly from zero) where the ref-driven rAF animator would be cancelled and never
+ * re-kicked, leaving a frozen caret with no text.
  */
 function TypewriterAssistantTurn({ content }: { content: string }) {
-  const typing = useTypingAnimation({ chunkSize: 4 });
-  const started = useRef(false);
+  const [shown, setShown] = useState(0);
 
   useEffect(() => {
-    if (started.current) return;
-    started.current = true;
-    typing.appendDelta(content);
-  }, [content, typing]);
+    setShown(0);
+    if (content.length === 0) return;
+    let revealed = 0;
+    const id = setInterval(() => {
+      revealed = Math.min(revealed + TYPE_CHARS_PER_TICK, content.length);
+      setShown(revealed);
+      if (revealed >= content.length) clearInterval(id);
+    }, TYPE_TICK_MS);
+    return () => clearInterval(id);
+  }, [content]);
 
-  const done = typing.displayText.length >= content.length;
+  const done = shown >= content.length;
   return (
     <AssistantTurn>
       {done ? (
@@ -117,7 +130,7 @@ function TypewriterAssistantTurn({ content }: { content: string }) {
         </div>
       ) : (
         <p className="text-sm leading-relaxed whitespace-pre-wrap">
-          {typing.displayText}
+          {content.slice(0, shown)}
           <span className="terminal-caret" aria-hidden="true">
             ▋
           </span>
@@ -136,17 +149,7 @@ export function QuestionnaireChat({
   animateOpening = false,
   className,
 }: QuestionnaireChatProps) {
-  const {
-    turns,
-    streaming,
-    streamingText,
-    status,
-    warning,
-    error,
-    canSend,
-    sendMessage,
-    dismissError,
-  } = stream;
+  const { turns, streaming, status, warning, error, canSend, sendMessage, dismissError } = stream;
 
   const [input, setInput] = useState('');
   const [voiceError, setVoiceError] = useState<string | null>(null);
@@ -165,10 +168,10 @@ export function QuestionnaireChat({
   // they streamed, so re-typing them would double-animate. Captured once via a lazy initializer.
   const [openingTurnCount] = useState(() => turns.length);
 
-  // Keep the latest turn / streaming tail in view.
+  // Keep the latest turn / thinking indicator in view.
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [turns.length, streamingText, streaming]);
+  }, [turns.length, streaming]);
 
   // Refocus the composer when a turn finishes — the textarea is disabled while a reply streams,
   // so we put the cursor back the moment it re-enables, ready for the next answer without a click.
@@ -211,7 +214,10 @@ export function QuestionnaireChat({
           {turns.map((turn, i) =>
             turn.role === 'user' ? (
               <UserBubble key={i} content={turn.content} />
-            ) : animateOpening && i < openingTurnCount ? (
+            ) : // Replies that arrived after mount (i ≥ the seeded count) always type in; the
+            // pre-seeded opening turns type only on a fresh session (`animateOpening`), so a
+            // resumed transcript's history renders instantly.
+            animateOpening || i >= openingTurnCount ? (
               <TypewriterAssistantTurn key={i} content={turn.content} />
             ) : (
               <AssistantTurn key={i}>
@@ -222,19 +228,12 @@ export function QuestionnaireChat({
             )
           )}
 
-          {/* In-flight assistant turn */}
+          {/* Awaiting a reply — a calm "thinking" indicator. The reply then types itself in once
+              it lands as a committed turn (above), so the typing effect is consistent regardless
+              of how the backend chunks the SSE stream. */}
           {streaming && (
             <AssistantTurn>
-              {streamingText.length === 0 ? (
-                <ThinkingIndicator />
-              ) : (
-                <p className="text-sm leading-relaxed whitespace-pre-wrap">
-                  {streamingText}
-                  <span className="terminal-caret" aria-hidden="true">
-                    ▋
-                  </span>
-                </p>
-              )}
+              <ThinkingIndicator />
             </AssistantTurn>
           )}
 
