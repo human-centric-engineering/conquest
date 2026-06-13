@@ -115,6 +115,15 @@ const dataSlotCandidateSchema = z.object({
   name: z.string().min(1),
   description: z.string(),
   theme: z.string(),
+  // What's already recorded for this slot this session (when any) so the extractor can update or
+  // correct it rather than re-deriving from scratch. `value` is free-form (Json-shaped).
+  current: z
+    .object({
+      value: z.unknown(),
+      paraphrase: z.string().nullable(),
+      confidence: z.number().min(0).max(1).nullable(),
+    })
+    .optional(),
 });
 
 const argsSchema = z
@@ -233,7 +242,23 @@ function toExtractionContext(args: ExtractAnswerSlotsArgs): ExtractionContext {
     ...(args.recentMessages ? { recentMessages: args.recentMessages } : {}),
     ...(args.attachments && args.attachments.length > 0 ? { attachments: args.attachments } : {}),
     ...(args.dataSlotCandidates && args.dataSlotCandidates.length > 0
-      ? { dataSlotCandidates: args.dataSlotCandidates }
+      ? {
+          dataSlotCandidates: args.dataSlotCandidates.map((c) => ({
+            key: c.key,
+            name: c.name,
+            description: c.description,
+            theme: c.theme,
+            ...(c.current
+              ? {
+                  current: {
+                    value: c.current.value,
+                    paraphrase: c.current.paraphrase,
+                    confidence: c.current.confidence,
+                  },
+                }
+              : {}),
+          })),
+        }
       : {}),
   };
 }

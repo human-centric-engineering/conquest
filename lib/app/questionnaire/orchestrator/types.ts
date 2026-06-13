@@ -101,6 +101,14 @@ export interface DataSlotAnsweredView {
   /** `DataSlotTarget.id`. */
   dataSlotId: string;
   confidence: number | null;
+  /**
+   * The fill's captured position + restatement, when loaded. Threaded into the extractor (as a
+   * data-slot candidate's `current`) so it can UPDATE/CORRECT the slot rather than re-deriving it.
+   * Targeting itself only reads `confidence`; these are optional so pure targeting tests can omit
+   * them.
+   */
+  value?: unknown;
+  paraphrase?: string | null;
 }
 
 /**

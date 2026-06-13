@@ -95,8 +95,15 @@ export async function buildTurnInvokers(opts: {
   slots: CapabilitySlotView[];
   activeQuestionKey: string | null;
   adaptiveEnabled: boolean;
-  /** Data Slots feature: the data slots to also fill (omit for question-only mode). */
-  dataSlotCandidates?: Array<{ key: string; name: string; description: string; theme: string }>;
+  /** Data Slots feature: the data slots to also fill (omit for question-only mode). Each carries
+   *  its `current` fill when one exists, so the extractor can update/correct it across turns. */
+  dataSlotCandidates?: Array<{
+    key: string;
+    name: string;
+    description: string;
+    theme: string;
+    current?: { value: unknown; paraphrase: string | null; confidence: number | null };
+  }>;
 }): Promise<CapabilityInvokers> {
   const { userId, slots, activeQuestionKey, adaptiveEnabled, dataSlotCandidates } = opts;
 

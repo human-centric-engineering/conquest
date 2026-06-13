@@ -125,6 +125,16 @@ export interface DataSlotCandidateView {
   description: string;
   /** Group label (for the model's sense of the area). */
   theme: string;
+  /**
+   * What's already recorded for this slot this session, when any — so the extractor can UPDATE or
+   * CORRECT it (merge still-true details with a correction) rather than re-deriving from scratch
+   * and dropping prior detail. Absent until the slot has a fill.
+   */
+  current?: {
+    value: unknown;
+    paraphrase: string | null;
+    confidence: number | null;
+  };
 }
 
 /**

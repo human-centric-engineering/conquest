@@ -197,7 +197,14 @@ describe('extractAnswers', () => {
     const inv = await invokers({
       activeQuestionKey: null,
       dataSlotCandidates: [
-        { key: 'strategy', name: 'Strategy Awareness', description: 'd', theme: 'Strategy' },
+        {
+          key: 'strategy',
+          name: 'Strategy Awareness',
+          description: 'd',
+          theme: 'Strategy',
+          // Existing fill → the extractor must see it so a correction updates rather than re-derives.
+          current: { value: 'aware', paraphrase: 'Aware of the strategy.', confidence: 0.8 },
+        },
       ],
     });
     const out = await inv.extractAnswers(state());
@@ -208,6 +215,9 @@ describe('extractAnswers', () => {
     const [, args] = (dispatcherMock.dispatch as Mock).mock.calls[0];
     expect(args).not.toHaveProperty('activeQuestionKey');
     expect(args.dataSlotCandidates).toHaveLength(1);
+    expect(args.dataSlotCandidates[0].current).toMatchObject({
+      paraphrase: 'Aware of the strategy.',
+    });
   });
 
   it('short-circuits when the extractor agent is unconfigured', async () => {

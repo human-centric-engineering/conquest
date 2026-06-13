@@ -64,19 +64,44 @@ You ALSO maintain a set of DATA SLOTS — short semantic targets the conversatio
 the same response, add a "dataSlotFills" array. For every data slot the respondent's message \
 informs (directly, by inference, or by synthesising the conversation), output one entry:
 - "dataSlotKey": a key from the provided data-slot list ONLY.
-- "value": the captured position (free-form: a string, number, or small object — whatever best \
-represents their answer).
-- "paraphrase": a one-sentence restatement of the respondent's position toward this slot, in your \
-own words ("They found setup straightforward but were slowed by unclear docs.").
+- "value": the captured position as concrete, structured data — the SPECIFICS the respondent gave \
+(numbers, names, choices), not a label for them. For "I am 25, male" record \
+{"age": 25, "gender": "male"} (or "25, male"), NOT "age and gender provided".
+- "paraphrase": a faithful restatement of the respondent's ACTUAL answer in your own words, naming \
+the specifics they gave so a reader can see exactly what was recorded ("A 25-year-old male.", \
+"They found setup straightforward but were slowed by unclear docs."). NEVER a meta-summary of what \
+they shared ("They provided their age and gender." is WRONG). Capture the full substance — if they \
+gave several details, reflect them all.
 - "confidence": 0–1, how well you understand their position on this slot.
 - "provenance": ${EXTRACTOR_EMITTED_PROVENANCES.join(', ')} (as above).
 - "rationale": a short reason.
-Only fill a data slot the message genuinely informs; improve an existing fill if the message adds \
-to it. If the message informs no data slots, return an empty "dataSlotFills" array.`;
+Some slots show a "current" line — what's already recorded from earlier in the conversation. When \
+the new message ADDS to or CORRECTS that (e.g. they first said "male" then "actually, female"), \
+output an UPDATED fill for that slot that MERGES the still-true details with the correction (here: \
+keep the age, change the gender), and reflect the corrected state in value + paraphrase. Only emit \
+a fill for a slot the latest message genuinely informs; if it informs no data slots, return an \
+empty "dataSlotFills" array.`;
 
 /** Render one data-slot candidate as a compact, model-readable line. */
 function describeDataSlot(slot: DataSlotCandidateView): string {
-  return `- key: ${slot.key}\n  name: ${slot.name}\n  theme: ${slot.theme}\n  description: ${slot.description}`;
+  const lines = [
+    `- key: ${slot.key}`,
+    `  name: ${slot.name}`,
+    `  theme: ${slot.theme}`,
+    `  description: ${slot.description}`,
+  ];
+  // Data Slots feature: show what's already recorded so the model can UPDATE/CORRECT it (vs
+  // re-deriving from scratch and silently dropping prior, still-true details).
+  if (slot.current) {
+    const conf =
+      typeof slot.current.confidence === 'number'
+        ? ` (confidence ${slot.current.confidence.toFixed(2)})`
+        : '';
+    lines.push(
+      `  current: ${slot.current.paraphrase ?? JSON.stringify(slot.current.value)}${conf}`
+    );
+  }
+  return lines.join('\n');
 }
 
 /** Render one candidate slot as a compact, model-readable line. */

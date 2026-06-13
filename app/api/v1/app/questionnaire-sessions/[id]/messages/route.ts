@@ -221,20 +221,39 @@ async function handleMessage(
       ...(costPressure ? { costPressure } : {}),
     };
 
+    // Data Slots feature: the current fill per data slot id, so the extractor sees what's already
+    // recorded (to update/correct it across turns), keyed for the candidate build below.
+    const dataSlotFillByDataSlotId = new Map(
+      (loaded.base.dataSlotAnswered ?? []).map((f) => [f.dataSlotId, f])
+    );
+
     const invokers = await buildTurnInvokers({
       userId,
       slots: loaded.slots,
       activeQuestionKey: loaded.activeQuestionKey,
       adaptiveEnabled: adaptive,
-      // Data Slots feature: feed the data slots so the SAME extraction call fills them too.
+      // Data Slots feature: feed the data slots so the SAME extraction call fills them too. Each
+      // carries its `current` fill (when any) so a correction merges/updates rather than re-derives.
       ...(dataSlotMode
         ? {
-            dataSlotCandidates: dataSlots.map((s) => ({
-              key: s.key,
-              name: s.name,
-              description: s.description,
-              theme: s.theme,
-            })),
+            dataSlotCandidates: dataSlots.map((s) => {
+              const fill = dataSlotFillByDataSlotId.get(s.id);
+              return {
+                key: s.key,
+                name: s.name,
+                description: s.description,
+                theme: s.theme,
+                ...(fill
+                  ? {
+                      current: {
+                        value: fill.value,
+                        paraphrase: fill.paraphrase ?? null,
+                        confidence: fill.confidence,
+                      },
+                    }
+                  : {}),
+              };
+            }),
           }
         : {}),
     });

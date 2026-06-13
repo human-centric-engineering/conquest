@@ -160,8 +160,12 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
           questionSlot: { select: { id: true, key: true } },
         },
       },
-      // Data Slots feature: this session's data-slot fills (the respondent-facing capture).
-      dataSlotFills: { select: { dataSlotId: true, confidence: true } },
+      // Data Slots feature: this session's data-slot fills (the respondent-facing capture). The
+      // value + paraphrase are loaded so the extractor can see what's already recorded and
+      // UPDATE/CORRECT it across turns (not just whether the slot is filled).
+      dataSlotFills: {
+        select: { dataSlotId: true, confidence: true, value: true, paraphrase: true },
+      },
       turns: {
         orderBy: { ordinal: 'desc' },
         take: RECENT_TURNS_WINDOW,
@@ -249,6 +253,8 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
   const dataSlotAnswered: DataSlotAnsweredView[] = session.dataSlotFills.map((f) => ({
     dataSlotId: f.dataSlotId,
     confidence: f.confidence,
+    value: f.value,
+    paraphrase: f.paraphrase,
   }));
   const byDataSlotId = new Map(dataSlots.map((s) => [s.id, s]));
 

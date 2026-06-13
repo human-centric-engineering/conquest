@@ -167,6 +167,54 @@ describe('attachmentsToContentParts', () => {
   });
 });
 
+describe('buildAnswerExtractionPrompt — data slots', () => {
+  function systemContent(messages: ReturnType<typeof buildAnswerExtractionPrompt>): string {
+    const sys = messages.find((m) => m.role === 'system');
+    return typeof sys?.content === 'string' ? sys.content : '';
+  }
+
+  it('lists data-slot candidates and demands specific, non-meta paraphrases', () => {
+    const messages = buildAnswerExtractionPrompt({
+      ...ctx({ candidateSlots: [slot({ key: 'q1' })], activeQuestionKey: null }),
+      dataSlotCandidates: [
+        {
+          key: 'demographics',
+          name: 'Employee Demographics',
+          description: 'Age + gender',
+          theme: 'About',
+        },
+      ],
+    });
+    expect(userContent(messages)).toContain('demographics');
+    const system = systemContent(messages);
+    // The rules must steer away from meta-summaries toward the actual values.
+    expect(system).toContain('25-year-old male');
+    expect(system).toMatch(/specifics/i);
+  });
+
+  it("renders a slot's current fill so the model can update/correct it", () => {
+    const messages = buildAnswerExtractionPrompt({
+      ...ctx({ candidateSlots: [slot({ key: 'q1' })], activeQuestionKey: null }),
+      dataSlotCandidates: [
+        {
+          key: 'demographics',
+          name: 'Employee Demographics',
+          description: 'Age + gender',
+          theme: 'About',
+          current: {
+            value: { age: 25, gender: 'male' },
+            paraphrase: 'A 25-year-old male.',
+            confidence: 0.9,
+          },
+        },
+      ],
+    });
+    const content = userContent(messages);
+    expect(content).toContain('current: A 25-year-old male.');
+    expect(systemContent(messages)).toMatch(/CORRECTS?/);
+  });
+});
+
 describe('buildAnswerExtractionRetryMessage', () => {
   it('names the invalid field paths when provided', () => {
     const msg = buildAnswerExtractionRetryMessage(['answers.0.confidence']);
