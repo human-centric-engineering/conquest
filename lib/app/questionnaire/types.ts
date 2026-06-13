@@ -261,9 +261,23 @@ export type QuestionnaireConfigShape = {
   /** Run contradiction detection every N respondent turns; 1 = every turn. */
   contradictionEveryNTurns: number;
   anonymousMode: boolean;
+  /**
+   * Seriousness / abuse gate: how many non-genuine (preposterous / abusive / off-topic)
+   * answers a session tolerates before it is abandoned. `0` = off for this questionnaire.
+   * Escalating warnings precede the abandon strike. Only takes effect when the platform
+   * flag `APP_QUESTIONNAIRES_SERIOUSNESS_GATE_ENABLED` is on.
+   */
+  abuseThreshold: number;
   profileFields: ProfileFieldConfig[];
   answerSlotPanelScope: AnswerSlotPanelScope;
 };
+
+/**
+ * The `AppQuestionnaireSessionEvent.reason` written when the seriousness/abuse gate abandons
+ * a session (status → `abandoned`). A single constant so the route that writes it, the analytics
+ * reader that filters on it, and the tests all derive from one source.
+ */
+export const ABUSE_ABANDON_REASON = 'abuse_threshold_exceeded';
 
 /**
  * The resolved config for a version that has never been saved — mirrors the
@@ -283,6 +297,7 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   contradictionWindowN: 0,
   contradictionEveryNTurns: 1,
   anonymousMode: false,
+  abuseThreshold: 4,
   profileFields: [],
   answerSlotPanelScope: 'full_progress',
 };

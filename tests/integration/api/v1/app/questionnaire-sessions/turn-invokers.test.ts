@@ -67,6 +67,7 @@ function state(over: Partial<TurnState> = {}): TurnState {
       contradictionWindowN: 3,
       contradictionEveryNTurns: 1,
       anonymousMode: false,
+      abuseThreshold: 4,
       profileFields: [],
       answerSlotPanelScope: 'full_progress',
     },
@@ -108,7 +109,14 @@ function state(over: Partial<TurnState> = {}): TurnState {
     ],
     recentMessages: ['hi', 'Role?'],
     selectionRound: 1,
-    flags: { extraction: true, contradiction: true, refinement: true, completion: true },
+    abuseStrikes: 0,
+    flags: {
+      extraction: true,
+      contradiction: true,
+      refinement: true,
+      completion: true,
+      seriousnessGate: false,
+    },
     ...over,
   };
 }

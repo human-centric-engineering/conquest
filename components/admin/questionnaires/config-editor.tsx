@@ -185,6 +185,7 @@ export function ConfigEditor({
     String(config.contradictionEveryNTurns)
   );
   const [anonymousMode, setAnonymousMode] = useState(config.anonymousMode);
+  const [abuseThreshold, setAbuseThreshold] = useState(String(config.abuseThreshold));
   const [answerSlotPanelScope, setAnswerSlotPanelScope] = useState<AnswerSlotPanelScope>(
     config.answerSlotPanelScope
   );
@@ -206,6 +207,7 @@ export function ConfigEditor({
     setContradictionWindowN(String(config.contradictionWindowN));
     setContradictionEveryNTurns(String(config.contradictionEveryNTurns));
     setAnonymousMode(config.anonymousMode);
+    setAbuseThreshold(String(config.abuseThreshold));
     setAnswerSlotPanelScope(config.answerSlotPanelScope);
     setProfileFields(config.profileFields.map(toRow));
   }, [config]);
@@ -257,6 +259,9 @@ export function ConfigEditor({
           true
         ),
         anonymousMode,
+        // Seriousness / abuse gate: non-genuine answers tolerated before abandon. Blank/invalid
+        // falls back to the stored value (never silently 0); 0 = off.
+        abuseThreshold: boundedNumber(abuseThreshold, 0, 50, config.abuseThreshold, true),
         answerSlotPanelScope,
         profileFields: profileFields.map((f) => ({
           key: f.key.trim(),
@@ -480,6 +485,26 @@ export function ConfigEditor({
               disabled={busy || contradictionOff}
             />
           </div>
+        </div>
+        <div className="space-y-1.5 sm:max-w-xs">
+          <Label className="text-sm font-medium">
+            Abuse threshold{' '}
+            <FieldHelp title="Abuse threshold">
+              How many non-genuine answers (preposterous, abusive, or off-topic) a respondent may
+              give before the session is automatically ended. Earlier strikes get escalating
+              warnings and the answer is set aside; the Nth ends the session. Colloquial or lazy
+              answers are tolerated. Set to <code className="text-xs">0</code> to turn the gate off.
+              Requires the platform seriousness-gate flag to be on.
+            </FieldHelp>
+          </Label>
+          <Input
+            type="number"
+            min={0}
+            max={50}
+            value={abuseThreshold}
+            onChange={(e) => setAbuseThreshold(e.target.value)}
+            disabled={busy}
+          />
         </div>
         <div className="space-y-1.5 sm:max-w-xs">
           <Label className="text-sm font-medium">

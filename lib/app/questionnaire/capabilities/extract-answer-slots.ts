@@ -163,6 +163,13 @@ export interface ExtractAnswerSlotsData {
    * (F6.3) — the same figure already logged fire-and-forget to `AiCostLog`.
    */
   costUsd: number;
+  /**
+   * Seriousness gate — stage 1: the extractor's suspicion that this answer is non-genuine
+   * (preposterous / abusive / off-topic). The orchestrator only pays for the dedicated judge
+   * when this is `true`. Absent/`false` = no suspicion. `suspicionReason` is a short log note.
+   */
+  suspectedNonGenuine?: boolean;
+  suspicionReason?: string;
 }
 
 /**
@@ -464,6 +471,13 @@ export class AppExtractAnswerSlotsCapability extends BaseCapability<
       dataSlotFills,
       droppedCount: dropped.length,
       costUsd: completion.costUsd,
+      // Stage 1 of the seriousness gate — pass the model's suspicion flag through (when set).
+      ...(completion.value.suspectedNonGenuine !== undefined
+        ? { suspectedNonGenuine: completion.value.suspectedNonGenuine }
+        : {}),
+      ...(completion.value.suspicionReason !== undefined
+        ? { suspicionReason: completion.value.suspicionReason }
+        : {}),
     });
   }
 }

@@ -34,6 +34,7 @@ single JSON column for the profile fields:
 | Contradiction look-back window N      | `contradictionWindowN`     | Int                    | `0`               |
 | Contradiction cadence (every N turns) | `contradictionEveryNTurns` | Int                    | `1`               |
 | Anonymous mode                        | `anonymousMode`            | Boolean                | `false`           |
+| Abuse threshold (seriousness gate)    | `abuseThreshold`           | Int (0 = off)          | `4`               |
 | Session-start profile fields          | `profileFields`            | Json (array)           | `[]`              |
 | Answer panel scope                    | `answerSlotPanelScope`     | String (enum)          | `'full_progress'` |
 

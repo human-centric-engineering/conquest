@@ -148,6 +148,7 @@ function makeGraph(over: Partial<VersionGraphView> = {}): VersionGraphView {
       contradictionWindowN: 0,
       contradictionEveryNTurns: 1,
       anonymousMode: false,
+      abuseThreshold: 4,
       profileFields: [],
       answerSlotPanelScope: 'full_progress',
     },

@@ -33,6 +33,7 @@ import type {
 import type { ContradictionFinding } from '@/lib/app/questionnaire/contradiction/types';
 import type { RefinementDecision } from '@/lib/app/questionnaire/refinement/types';
 import type { CompletionAssessment } from '@/lib/app/questionnaire/completion/types';
+import type { SeriousnessVerdict } from '@/lib/app/questionnaire/seriousness/types';
 
 /**
  * One existing answer's full value, as the refiner reads it. Richer than the
@@ -64,6 +65,12 @@ export interface TurnFlags {
   refinement: boolean;
   /** F4.5 completion-offer phrasing (the deterministic gate is always free). */
   completion: boolean;
+  /**
+   * Seriousness / abuse gate (platform sub-flag). When on AND `config.abuseThreshold > 0`,
+   * a turn the extractor flags as suspicious is judged; a non-serious verdict is disregarded,
+   * strikes the session, and (at the threshold) abandons it.
+   */
+  seriousnessGate: boolean;
 }
 
 /** One base64-encoded attachment on a turn (mirrors the platform `chatAttachmentSchema`). */
@@ -125,6 +132,12 @@ export interface TurnState {
   attachments?: TurnAttachment[];
   /** Zero-based selection round — the number of prior question picks. */
   selectionRound: number;
+  /**
+   * Seriousness / abuse gate: the session's strike count BEFORE this turn (flagged non-genuine
+   * answers so far). The route loads it from `AppQuestionnaireSession.abuseStrikes`; the core
+   * folds a new strike in and returns the updated count for the route to persist.
+   */
+  abuseStrikes: number;
   /** Which sub-features are enabled this turn. */
   flags: TurnFlags;
   /**
@@ -164,6 +177,22 @@ export interface ExtractOutcome {
   intents: AnswerSlotIntent[];
   /** Data Slots feature: fills captured this turn (present only in data-slot mode). */
   dataSlotFills?: DataSlotFillIntent[];
+  /**
+   * Seriousness gate — stage 1 ("the main agent suspects"): the extractor flags an answer that
+   * reads as possibly non-genuine (preposterous / abusive / off-topic), so the orchestrator only
+   * pays for the dedicated judge when it's worth a second look. Absent/`false` = no suspicion.
+   */
+  suspectedNonGenuine?: boolean;
+  /** A short reason the extractor was suspicious (for logs/trace). */
+  suspicionReason?: string;
+  costUsd: number;
+  latencyMs?: number;
+  diagnostic?: string;
+}
+
+/** Seriousness-judge invoker outcome — stage 2. `verdict: null` on a fail-soft diagnostic. */
+export interface SeriousnessOutcome {
+  verdict: SeriousnessVerdict | null;
   costUsd: number;
   latencyMs?: number;
   diagnostic?: string;
@@ -209,6 +238,12 @@ export interface CapabilityInvokers {
   detectContradictions(state: TurnState): Promise<DetectOutcome>;
   refineAnswer(state: TurnState, trigger: RefinementTrigger): Promise<RefineOutcome>;
   selectNext(state: TurnState): Promise<SelectOutcome>;
+  /**
+   * Seriousness gate — stage 2: rule on whether this turn's answer is a genuine attempt. The
+   * invoker resolves the active question + transcript from its own closure; the core just gates
+   * the call and acts on the verdict. Fail-soft (returns `verdict: null` + a diagnostic).
+   */
+  assessSeriousness(state: TurnState): Promise<SeriousnessOutcome>;
 }
 
 /**
@@ -284,4 +319,17 @@ export interface TurnResult {
   contradictions: ContradictionFinding[];
   /** The deterministic completion assessment computed this turn. */
   assessment: CompletionAssessment;
+  /**
+   * Seriousness / abuse gate outcome for this turn, present only when an answer was flagged
+   * non-genuine. The route persists `newStrikeCount` to the session and, when `abandon`, ends
+   * the session (status → `abandoned`, reason `abuse_threshold_exceeded`) + streams a terminal
+   * frame. Absent on a normal (serious / un-gated) turn.
+   */
+  abuse?: {
+    flagged: boolean;
+    newStrikeCount: number;
+    abandon: boolean;
+    /** The judge's short reason — recorded in the abandonment metadata. */
+    reason: string;
+  };
 }

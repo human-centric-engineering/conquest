@@ -39,17 +39,21 @@ import {
   isCostCapEnforcementEnabled,
   isDataSlotsEnabled,
   isQuestionPhrasingEnabled,
+  isSeriousnessGateEnabled,
   withLiveSessionsEnabled,
 } from '@/lib/app/questionnaire/feature-flag';
 import { classifyCostCap } from '@/lib/app/questionnaire/session';
+import { ABUSE_ABANDON_REASON } from '@/lib/app/questionnaire/types';
 import { runTurn, runDataSlotTurn, type TurnState } from '@/lib/app/questionnaire/orchestrator';
 import type { ChatEvent } from '@/types/orchestration';
 import { turnLimiter } from '@/app/api/v1/app/questionnaire-sessions/_lib/rate-limit';
 import { buildTurnContext } from '@/app/api/v1/app/questionnaires/_lib/turn-context';
 import { sumSessionTurnCost } from '@/app/api/v1/app/questionnaires/_lib/turns';
 import {
+  abandonSession,
   hasCostCapReachedEvent,
   pauseSession,
+  persistAbuseStrikes,
   recordCostCapReached,
 } from '@/app/api/v1/app/questionnaires/_lib/sessions';
 import { buildTurnInvokers } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-invokers';
@@ -175,6 +179,7 @@ async function handleMessage(
       attachmentInput,
       questionPhrasing,
       dataSlotsFlag,
+      seriousnessGate,
     ] = await Promise.all([
       isAnswerExtractionEnabled(),
       isContradictionDetectionEnabled(),
@@ -184,6 +189,7 @@ async function handleMessage(
       isAttachmentInputEnabled(),
       isQuestionPhrasingEnabled(),
       isDataSlotsEnabled(),
+      isSeriousnessGateEnabled(),
     ]);
 
     // Data Slots feature: run in data-slot mode when the flag is on AND the version actually has
@@ -208,6 +214,8 @@ async function handleMessage(
         contradiction,
         refinement,
         completion,
+        // A kickoff has no answer to judge; otherwise the gate runs when its flag is on.
+        seriousnessGate: body.kickoff ? false : seriousnessGate,
       },
       ...(attachments ? { attachments } : {}),
       ...(costPressure ? { costPressure } : {}),
@@ -352,6 +360,39 @@ async function handleMessage(
           sessionId,
           error: err instanceof Error ? err.message : String(err),
         });
+      }
+
+      // Seriousness / abuse gate: persist the new strike count and, at the threshold, abandon the
+      // session (status → `abandoned`, reason `abuse_threshold_exceeded` + metadata for analytics).
+      // Best-effort: a bookkeeping failure here must not retro-fail an already-streamed reply. Once
+      // abandoned, the status gate 409s every later turn and the lifecycle poll locks the composer.
+      if (result.abuse?.flagged) {
+        try {
+          await persistAbuseStrikes(sessionId, result.abuse.newStrikeCount);
+          if (result.abuse.abandon) {
+            await abandonSession(sessionId, {
+              reason: ABUSE_ABANDON_REASON,
+              metadata: {
+                strikes: result.abuse.newStrikeCount,
+                threshold: state.config.abuseThreshold,
+                judgeReason: result.abuse.reason,
+              },
+            });
+            log.info('Live turn: session abandoned by abuse gate', {
+              sessionId,
+              strikes: result.abuse.newStrikeCount,
+              threshold: state.config.abuseThreshold,
+            });
+            // The polite final message already streamed as the agent's reply; the session is now
+            // `abandoned`, so the lifecycle status poll locks the composer and every later turn
+            // 409s (status gate). No extra terminal frame needed.
+          }
+        } catch (err) {
+          log.error('Abuse gate: strike/abandon write failed (reply already streamed)', {
+            sessionId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
 
       yield {

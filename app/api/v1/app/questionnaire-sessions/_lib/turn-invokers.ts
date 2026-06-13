@@ -11,8 +11,18 @@
  */
 
 import { prisma } from '@/lib/db/client';
+import { logger } from '@/lib/logging';
+import { CostOperation } from '@/types/orchestration';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
 import { registerBuiltInCapabilities } from '@/lib/orchestration/capabilities';
+import { resolveAgentProviderAndModel } from '@/lib/orchestration/llm/agent-resolver';
+import { getProvider } from '@/lib/orchestration/llm/provider-manager';
+import { logCost } from '@/lib/orchestration/llm/cost-tracker';
+import type { LlmMessage } from '@/lib/orchestration/llm/types';
+import {
+  runStructuredCompletion,
+  tryParseJson,
+} from '@/lib/orchestration/evaluations/parse-structured';
 import {
   DETECT_CONTRADICTIONS_CAPABILITY_SLUG,
   EXTRACT_ANSWER_SLOTS_CAPABILITY_SLUG,
@@ -21,6 +31,12 @@ import {
   QUESTIONNAIRE_CONTRADICTION_DETECTOR_AGENT_SLUG,
   REFINE_ANSWER_CAPABILITY_SLUG,
 } from '@/lib/app/questionnaire/constants';
+import { ASSESS_SERIOUSNESS_TOOL_SLUG } from '@/lib/app/questionnaire/orchestrator';
+import {
+  buildSeriousnessJudgePrompt,
+  validateSeriousnessVerdict,
+  type SeriousnessVerdictRaw,
+} from '@/lib/app/questionnaire/seriousness';
 import {
   getStrategy,
   type SelectionContext,
@@ -32,6 +48,7 @@ import type {
   ExtractOutcome,
   RefineOutcome,
   SelectOutcome,
+  SeriousnessOutcome,
 } from '@/lib/app/questionnaire/orchestrator';
 import type {
   DetectContradictionsData,
@@ -254,6 +271,124 @@ export async function buildTurnInvokers(opts: {
       const started = Date.now();
       const decision = await getStrategy(state.config.selectionStrategy).select(ctx, deps);
       return { decision, latencyMs: Date.now() - started };
+    },
+
+    async assessSeriousness(state): Promise<SeriousnessOutcome> {
+      // Stage 2 of the seriousness gate — a direct structured LLM call (not a registered
+      // capability): rule on whether this turn's answer is a genuine attempt. Reuses the
+      // answer-extractor's provider/model binding (per-turn chat-tier work); an absent binding
+      // resolves to the system default. Fail-soft: any failure returns a null verdict + a
+      // diagnostic, so the gate never crashes a turn.
+      const started = Date.now();
+      const questionPrompt = activeQuestionKey
+        ? (slots.find((s) => s.key === activeQuestionKey)?.prompt ?? '')
+        : '';
+
+      let providerSlug: string;
+      let model: string;
+      try {
+        const resolved = await resolveAgentProviderAndModel(
+          extractor
+            ? {
+                provider: extractor.provider,
+                model: extractor.model,
+                fallbackProviders: extractor.fallbackProviders,
+              }
+            : { provider: '', model: '', fallbackProviders: [] },
+          'chat'
+        );
+        providerSlug = resolved.providerSlug;
+        model = resolved.model;
+      } catch (err) {
+        logger.error('assess_seriousness: no provider resolved', {
+          sessionId: state.sessionId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return {
+          verdict: null,
+          costUsd: 0,
+          latencyMs: Date.now() - started,
+          diagnostic: 'no_provider_configured',
+        };
+      }
+
+      let provider: Awaited<ReturnType<typeof getProvider>>;
+      try {
+        provider = await getProvider(providerSlug);
+      } catch {
+        return {
+          verdict: null,
+          costUsd: 0,
+          latencyMs: Date.now() - started,
+          diagnostic: 'provider_unavailable',
+        };
+      }
+
+      const { system, user } = buildSeriousnessJudgePrompt({
+        questionPrompt,
+        userMessage: state.userMessage,
+        sessionId: state.sessionId,
+        ...(state.recentMessages.length > 0 ? { recentMessages: state.recentMessages } : {}),
+      });
+      const messages: LlmMessage[] = [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ];
+
+      try {
+        const completion = await runStructuredCompletion<SeriousnessVerdictRaw>({
+          provider,
+          model,
+          messages,
+          maxTokens: 600,
+          timeoutMs: 30_000,
+          parse: (raw) =>
+            tryParseJson(raw, (parsed) => {
+              const validation = validateSeriousnessVerdict(parsed);
+              return validation.ok ? validation.value : null;
+            }),
+          retryUserMessage: 'Return ONLY the JSON object {"serious": boolean, "reason": string}.',
+          onFinalFailure: () =>
+            new Error('Seriousness verdict was not valid against the schema after one retry'),
+        });
+
+        void logCost({
+          ...(extractor ? { agentId: extractor.id } : {}),
+          operation: CostOperation.CHAT,
+          model,
+          provider: providerSlug,
+          inputTokens: completion.tokenUsage.input,
+          outputTokens: completion.tokenUsage.output,
+          metadata: {
+            capability: ASSESS_SERIOUSNESS_TOOL_SLUG,
+            appQuestionnaireSessionId: state.sessionId,
+          },
+        }).catch((err) => {
+          logger.error('assess_seriousness: logCost rejected', {
+            sessionId: state.sessionId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+
+        return {
+          verdict: { serious: completion.value.serious, reason: completion.value.reason ?? '' },
+          costUsd: completion.costUsd,
+          latencyMs: Date.now() - started,
+        };
+      } catch (err) {
+        logger.error('assess_seriousness: structured completion failed', {
+          sessionId: state.sessionId,
+          model,
+          provider: providerSlug,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return {
+          verdict: null,
+          costUsd: 0,
+          latencyMs: Date.now() - started,
+          diagnostic: 'seriousness_judge_failed',
+        };
+      }
     },
   };
 }

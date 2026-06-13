@@ -44,8 +44,14 @@ small talk, "I don't know"), return an empty "answers" array — do not guess.
 message doesn't support.
 - Prefer the respondent's own words; do not normalise away meaning.
 
-Output: respond with ONLY a single JSON object: { "answers": [ ... ] }. Do not wrap the JSON in \
-prose or code fences.`;
+Genuineness check: ALSO judge whether the message is a genuine attempt to answer. Set \
+"suspectedNonGenuine": true (and a one-line "suspicionReason") ONLY when the answer is clearly \
+abusive, absurd or impossible for the question (e.g. a tenure of "543 years"), gibberish/spam, or \
+plainly off-topic. Be tolerant: brief, blunt, colloquial, lazy, or "prefer not to say" answers \
+are GENUINE — leave the flag false/omitted for those. When in doubt, omit it.
+
+Output: respond with ONLY a single JSON object: { "answers": [ ... ] } (optionally with \
+"suspectedNonGenuine" and "suspicionReason"). Do not wrap the JSON in prose or code fences.`;
 
 /**
  * Appended to the system rules when the turn carries data slots (Data Slots feature). The

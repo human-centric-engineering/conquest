@@ -61,6 +61,14 @@ export const answerExtractionSchema = z.object({
   answers: z.array(extractedAnswerSchema),
   /** Data Slots feature: present only when the prompt carried data-slot candidates. */
   dataSlotFills: z.array(dataSlotFillSchema).optional(),
+  /**
+   * Seriousness gate — stage 1: the extractor flags an answer that reads as possibly
+   * non-genuine (preposterous / abusive / off-topic), so the dedicated judge only runs when
+   * it's worth a second look. Optional + tolerant: an omitted flag means "no suspicion", and a
+   * model that doesn't know about it still validates. `suspicionReason` is a short note for logs.
+   */
+  suspectedNonGenuine: z.boolean().optional(),
+  suspicionReason: z.string().max(400).optional(),
 });
 
 export type ExtractedAnswer = z.infer<typeof extractedAnswerSchema>;

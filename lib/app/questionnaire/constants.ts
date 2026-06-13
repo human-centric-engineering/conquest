@@ -548,6 +548,17 @@ export const QUESTIONNAIRE_INTERVIEWER_AGENT_SLUG = 'app-questionnaire-interview
 export const APP_QUESTIONNAIRES_DATA_SLOTS_FLAG = 'APP_QUESTIONNAIRES_DATA_SLOTS_ENABLED';
 
 /**
+ * Sub-flag gating the **seriousness / abuse gate** — per answered turn, a respondent answer the
+ * extractor flags as non-genuine is judged; a non-serious verdict is disregarded, strikes the
+ * session, and (at `config.abuseThreshold`) abandons it. Disabled by default (dark-launch);
+ * requires the master app flag AND the live-sessions flag (the gate only runs inside the live
+ * `/messages` turn loop) AND this sub-flag. Seeded by
+ * `prisma/seeds/app-questionnaire/029-seriousness-gate-flag.ts`.
+ */
+export const APP_QUESTIONNAIRES_SERIOUSNESS_GATE_FLAG =
+  'APP_QUESTIONNAIRES_SERIOUSNESS_GATE_ENABLED';
+
+/**
  * Slug of the **data-slot generator** agent. Dispatched programmatically by the
  * generate-data-slots route to infer short (1–4 word) data slots + descriptions + question
  * mappings from a version's approved questions. Provider-agnostic empty binding (resolves at

@@ -106,6 +106,8 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
       status: true,
       versionId: true,
       respondentUserId: true,
+      // Seriousness / abuse gate: the prior strike count the orchestrator folds a new strike into.
+      abuseStrikes: true,
       version: {
         select: {
           // Version framing for the conversational question phraser (F6 interviewer).
@@ -286,6 +288,8 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
       dataSlots,
       dataSlotAnswered,
       activeDataSlotKey,
+      // Seriousness / abuse gate: the session's strikes so far (the core returns the updated count).
+      abuseStrikes: session.abuseStrikes,
       // Monotonic per-turn counter (the engine contract selection-context.ts calls out):
       // the TRUE number of turns already taken (not the windowed `turns` array, whose length
       // saturates at RECENT_TURNS_WINDOW), so the `random` strategy's session+round seed keeps

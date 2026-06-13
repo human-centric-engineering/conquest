@@ -8,6 +8,7 @@ export {
   runTurn,
   applyIntents,
   SELECTION_TOOL_SLUG,
+  ASSESS_SERIOUSNESS_TOOL_SLUG,
   COMPLETE_MESSAGE,
   NONE_MESSAGE,
 } from '@/lib/app/questionnaire/orchestrator/orchestrator';
@@ -28,6 +29,7 @@ export type {
   RefineOutcome,
   RefinementTrigger,
   SelectOutcome,
+  SeriousnessOutcome,
   ToolCallRecord,
   TurnFlags,
   TurnResponse,

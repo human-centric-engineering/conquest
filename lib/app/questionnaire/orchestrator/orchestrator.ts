@@ -26,6 +26,7 @@ import {
 } from '@/lib/app/questionnaire/constants';
 import { assessCompletion } from '@/lib/app/questionnaire/completion/completion-logic';
 import { shouldRunDetection } from '@/lib/app/questionnaire/contradiction';
+import { evaluateAbuseStrike, ABUSE_ABANDON_MESSAGE } from '@/lib/app/questionnaire/seriousness';
 import { unansweredQuestions } from '@/lib/app/questionnaire/selection/context';
 import type { AnsweredView, QuestionView } from '@/lib/app/questionnaire/selection/types';
 import type { AnswerSlotIntent } from '@/lib/app/questionnaire/extraction/types';
@@ -43,6 +44,9 @@ import type {
 
 /** Synthetic slug recorded on a turn's `toolCalls` for the (non-capability) selection step. */
 export const SELECTION_TOOL_SLUG = 'app_select_question';
+
+/** Synthetic slug recorded on a turn's `toolCalls` for the seriousness-judge step. */
+export const ASSESS_SERIOUSNESS_TOOL_SLUG = 'app_assess_seriousness';
 
 /** Fewest answers a contradiction pass needs — the detector capability enforces `min(2)`. */
 export const MIN_CONTRADICTION_ANSWERS = 2;
@@ -146,6 +150,7 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
   const hasMessage = state.userMessage.trim().length > 0;
 
   // 1. Extract answer slots from the message.
+  let suspectedNonGenuine = false;
   if (hasMessage && state.flags.extraction) {
     const out = await invokers.extractAnswers(state);
     costUsd += out.costUsd;
@@ -156,12 +161,71 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
       })
     );
     answerUpserts.push(...out.intents);
+    // Stage 1 of the seriousness gate — the extractor (the pass already reading the answer)
+    // flags whether it looks non-genuine, so the dedicated judge only runs when worth a look.
+    suspectedNonGenuine = out.suspectedNonGenuine === true;
     if (out.diagnostic !== undefined) {
       events.push({
         type: 'warning',
         code: out.diagnostic,
         message: "I couldn't capture an answer from that — we can revisit it.",
       });
+    }
+  }
+
+  // 1.5 Seriousness / abuse gate. Stage 2: only when the gate is on, the questionnaire tolerates
+  //     a finite number of strikes, AND stage 1 was suspicious, pay for the judge. A non-serious
+  //     verdict DISREGARDS the answer (never merged/persisted), strikes the session, and escalates
+  //     → abandon at the configured threshold.
+  let abuse: TurnResult['abuse'];
+  if (
+    hasMessage &&
+    state.flags.seriousnessGate &&
+    state.config.abuseThreshold > 0 &&
+    suspectedNonGenuine
+  ) {
+    const judged = await invokers.assessSeriousness(state);
+    costUsd += judged.costUsd;
+    toolCalls.push(
+      toolCall(ASSESS_SERIOUSNESS_TOOL_SLUG, judged.diagnostic === undefined, {
+        ...(judged.diagnostic !== undefined ? { code: judged.diagnostic } : {}),
+        ...(judged.latencyMs !== undefined ? { latencyMs: judged.latencyMs } : {}),
+      })
+    );
+    if (judged.verdict && !judged.verdict.serious) {
+      // Disregard — a non-genuine answer is never merged or persisted.
+      answerUpserts.length = 0;
+      const strike = evaluateAbuseStrike(state.abuseStrikes, state.config.abuseThreshold);
+      abuse = {
+        flagged: true,
+        newStrikeCount: strike.newStrikeCount,
+        abandon: strike.abandon,
+        reason: judged.verdict.reason,
+      };
+      if (strike.abandon) {
+        // Terminal: stream a polite final message; the route abandons the session + emits the
+        // terminal frame. Skip the rest of the pipeline (no detect / refine / select). The
+        // assessment reflects the UNCHANGED state (the bogus answer was dropped).
+        return {
+          response: { kind: 'complete', text: strike.abandonMessage ?? ABUSE_ABANDON_MESSAGE },
+          targetedQuestionId: null,
+          sideEffects: { answerUpserts: [], answerRefinements: [] },
+          events,
+          toolCalls,
+          costUsd,
+          contradictions: [],
+          assessment: assessCompletion({
+            questions: state.questions,
+            answered: state.answered,
+            config: state.config,
+            sessionId: state.sessionId,
+          }),
+          abuse,
+        };
+      }
+      // Below threshold: surface the escalating notice; the pipeline re-asks the same
+      // (still-unanswered) question because the answer was not merged.
+      events.push({ type: 'warning', code: 'seriousness', message: strike.noticeMessage });
     }
   }
 
@@ -295,5 +359,6 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
     costUsd,
     contradictions,
     assessment,
+    ...(abuse !== undefined ? { abuse } : {}),
   };
 }

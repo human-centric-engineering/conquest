@@ -162,6 +162,18 @@ export async function recordCostCapReached(
 }
 
 /**
+ * Persist the seriousness/abuse-gate strike count on a session (a plain column write, no event).
+ * The route calls this after a turn the gate flagged; the `abandoned` event itself — when the
+ * threshold is hit — is a separate {@link abandonSession} call carrying the abuse metadata.
+ */
+export async function persistAbuseStrikes(sessionId: string, strikes: number): Promise<void> {
+  await prisma.appQuestionnaireSession.update({
+    where: { id: sessionId },
+    data: { abuseStrikes: strikes },
+  });
+}
+
+/**
  * Whether a `cost_cap_reached` event of the given `tier` has already been written for this
  * session — used by the turn boundary to fire the soft-cap event only once (the soft tier
  * persists across every turn between 90% and 100%, so a naive write would spam the audit

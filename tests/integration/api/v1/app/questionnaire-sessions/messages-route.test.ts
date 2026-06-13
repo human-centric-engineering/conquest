@@ -41,6 +41,8 @@ const sessionsMock = vi.hoisted(() => ({
   recordCostCapReached: vi.fn(() => Promise.resolve()),
   pauseSession: vi.fn(() => Promise.resolve('paused')),
   hasCostCapReachedEvent: vi.fn(() => Promise.resolve(false)),
+  abandonSession: vi.fn(() => Promise.resolve('abandoned')),
+  persistAbuseStrikes: vi.fn(() => Promise.resolve()),
 }));
 vi.mock('@/app/api/v1/app/questionnaires/_lib/sessions', () => sessionsMock);
 
@@ -50,6 +52,7 @@ const tokenMock = vi.hoisted(() => ({ verifySessionToken: vi.fn() }));
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/session-access-token', () => tokenMock);
 
 import { POST } from '@/app/api/v1/app/questionnaire-sessions/[id]/messages/route';
+import { ABUSE_ABANDON_REASON } from '@/lib/app/questionnaire/types';
 import { isFeatureEnabled } from '@/lib/feature-flags';
 import {
   APP_QUESTIONNAIRES_COST_CAP_FLAG,
@@ -112,6 +115,7 @@ function loadedContext(over: Record<string, unknown> = {}) {
       existingAnswers: [],
       recentMessages: [],
       selectionRound: 0,
+      abuseStrikes: 0,
     },
     slots: [
       {
@@ -538,5 +542,70 @@ describe('cost cap (F6.3)', () => {
     expect(turnsMock.sumSessionTurnCost).not.toHaveBeenCalled();
     expect(sessionsMock.recordCostCapReached).not.toHaveBeenCalled();
     expect(runMock.persistTurn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('POST /messages — seriousness / abuse gate', () => {
+  /** Invokers where the extractor flags suspicion and the judge rules the answer non-serious. */
+  function abusiveInvokers() {
+    return {
+      extractAnswers: vi.fn(async () => ({
+        intents: [
+          {
+            slotKey: 'q1',
+            questionType: 'free_text',
+            value: '543 years',
+            confidence: 0.9,
+            provenance: 'direct',
+            rationale: 'stated',
+            isActiveQuestion: true,
+          },
+        ],
+        suspectedNonGenuine: true,
+        costUsd: 0,
+      })),
+      detectContradictions: vi.fn(async () => ({ findings: [], costUsd: 0 })),
+      refineAnswer: vi.fn(async () => ({ decisions: [], costUsd: 0 })),
+      selectNext: vi.fn(async () => ({
+        decision: { kind: 'ask', questionId: 'q1', rationale: 'x', costUsd: 0 },
+      })),
+      assessSeriousness: vi.fn(async () => ({
+        verdict: { serious: false, reason: 'That tenure is not possible.' },
+        costUsd: 0,
+      })),
+    };
+  }
+
+  function gateContext(abuseStrikes: number) {
+    const ctx = loadedContext();
+    return loadedContext({
+      activeQuestionKey: 'q1',
+      base: { ...ctx.base, abuseStrikes, config: { ...ctx.base.config, abuseThreshold: 4 } },
+    });
+  }
+
+  it('disregards a non-serious answer and persists the strike (below threshold)', async () => {
+    invokersMock.buildTurnInvokers.mockResolvedValue(abusiveInvokers());
+    ctxMock.buildTurnContext.mockResolvedValue(gateContext(0));
+
+    await drainSse(await POST(req({ message: '543 years' }), ctx));
+
+    expect(sessionsMock.persistAbuseStrikes).toHaveBeenCalledWith('sess-1', 1);
+    expect(sessionsMock.abandonSession).not.toHaveBeenCalled();
+    // The disregarded answer is never handed to persistence as an upsert.
+    expect(runMock.persistTurn).toHaveBeenCalledWith(expect.objectContaining({ upserts: [] }));
+  });
+
+  it('abandons the session on the threshold strike, recording the analytics reason', async () => {
+    invokersMock.buildTurnInvokers.mockResolvedValue(abusiveInvokers());
+    ctxMock.buildTurnContext.mockResolvedValue(gateContext(3)); // next strike is the 4th
+
+    await drainSse(await POST(req({ message: 'garbage' }), ctx));
+
+    expect(sessionsMock.persistAbuseStrikes).toHaveBeenCalledWith('sess-1', 4);
+    expect(sessionsMock.abandonSession).toHaveBeenCalledWith(
+      'sess-1',
+      expect.objectContaining({ reason: ABUSE_ABANDON_REASON })
+    );
   });
 });

@@ -83,6 +83,9 @@ export const updateConfigSchema = z
     contradictionWindowN: z.number().int().nonnegative().optional(),
     contradictionEveryNTurns: z.number().int().min(1).optional(),
     anonymousMode: z.boolean().optional(),
+    // Seriousness / abuse gate: non-genuine answers tolerated before the session is abandoned.
+    // 0 = off; capped to keep the escalation meaningful.
+    abuseThreshold: z.number().int().min(0).max(50).optional(),
     profileFields: z.array(profileFieldSchema).optional(),
     answerSlotPanelScope: z.enum(ANSWER_SLOT_PANEL_SCOPES).optional(),
   })

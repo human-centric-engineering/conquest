@@ -218,3 +218,17 @@ describe('profileFieldSchema', () => {
     expect(res.success).toBe(false);
   });
 });
+
+describe('updateConfigSchema — abuseThreshold (seriousness gate)', () => {
+  it('accepts 0 (off) and a positive value within the cap', () => {
+    expect(updateConfigSchema.safeParse({ abuseThreshold: 0 }).success).toBe(true);
+    expect(updateConfigSchema.safeParse({ abuseThreshold: 4 }).success).toBe(true);
+    expect(updateConfigSchema.safeParse({ abuseThreshold: 50 }).success).toBe(true);
+  });
+
+  it('rejects negative, over-cap, or non-integer values', () => {
+    expect(updateConfigSchema.safeParse({ abuseThreshold: -1 }).success).toBe(false);
+    expect(updateConfigSchema.safeParse({ abuseThreshold: 51 }).success).toBe(false);
+    expect(updateConfigSchema.safeParse({ abuseThreshold: 2.5 }).success).toBe(false);
+  });
+});

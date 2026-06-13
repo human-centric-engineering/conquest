@@ -169,6 +169,12 @@ model AppQuestionnaireConfig {
   contradictionEveryNTurns Int     @default(1) // run detection every N respondent turns; 1 = every turn
   anonymousMode            Boolean @default(false) // don't collect identifying profile fields
 
+  // Seriousness / abuse gate: how many non-genuine (preposterous / abusive / off-topic)
+  // answers a session tolerates before it is abandoned. 0 = off for this questionnaire.
+  // Escalating warnings precede the abandon strike. Globally gated by the platform flag
+  // APP_QUESTIONNAIRES_SERIOUSNESS_GATE_ENABLED — inert until the operator turns it on.
+  abuseThreshold Int @default(4)
+
   // Respondent answer-slot panel (F7.2): how much of the questionnaire the live
   // panel shows. full_progress = every slot grouped by section (X-of-N progress);
   // answered_only = just captured answers (no pending structure). (ANSWER_SLOT_PANEL_SCOPES)
@@ -423,6 +429,9 @@ model AppQuestionnaireSession {
   status           String   @default("active") // SESSION_STATUSES (types.ts): active | paused | completed | abandoned
   isPreview        Boolean  @default(false) // true = admin refine-answer exercise, not a respondent run
   respondentUserId String? // respondent User.id; plain String, no FK (UG-1); set in F4.6
+  // Seriousness / abuse gate: cumulative count of non-genuine answers flagged this session.
+  // The route increments it; at `config.abuseThreshold` the session is abandoned.
+  abuseStrikes     Int      @default(0)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 

@@ -14,6 +14,7 @@ import {
   APP_QUESTIONNAIRES_ATTACHMENT_INPUT_FLAG,
   APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG,
   APP_QUESTIONNAIRES_DATA_SLOTS_FLAG,
+  APP_QUESTIONNAIRES_SERIOUSNESS_GATE_FLAG,
   APP_QUESTIONNAIRES_FLAG,
 } from '@/lib/app/questionnaire/constants';
 import { isFeatureEnabled } from '@/lib/feature-flags';
@@ -35,6 +36,7 @@ export {
   APP_QUESTIONNAIRES_ATTACHMENT_INPUT_FLAG,
   APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG,
   APP_QUESTIONNAIRES_DATA_SLOTS_FLAG,
+  APP_QUESTIONNAIRES_SERIOUSNESS_GATE_FLAG,
 };
 
 /**
@@ -388,4 +390,22 @@ export async function isCostCapEnforcementEnabled(): Promise<boolean> {
     isFeatureEnabled(APP_QUESTIONNAIRES_COST_CAP_FLAG),
   ]);
   return app && live && costCap;
+}
+
+/**
+ * Whether the **seriousness / abuse gate** may run for the live turn loop. Requires the master
+ * app flag, the **live-sessions** flag, AND the seriousness-gate sub-flag. Like cost-cap it gates
+ * a behaviour *inside* the already-gated `/messages` route (not a route of its own), so when this
+ * returns `false` turns run with no seriousness judging even if a version sets `abuseThreshold`.
+ * Depends on live-sessions because the gate only matters inside the respondent turn loop.
+ *
+ * Server-only (resolves the flags from the database).
+ */
+export async function isSeriousnessGateEnabled(): Promise<boolean> {
+  const [app, live, gate] = await Promise.all([
+    isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_SERIOUSNESS_GATE_FLAG),
+  ]);
+  return app && live && gate;
 }
