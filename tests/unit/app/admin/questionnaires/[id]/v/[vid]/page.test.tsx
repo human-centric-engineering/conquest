@@ -77,6 +77,7 @@ function makeVersion(over: Partial<QuestionnaireVersionSummary> = {}): Questionn
     audience: null,
     sectionCount: 2,
     questionCount: 5,
+    dataSlotCount: 0,
     changeCount: 0,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-02T00:00:00.000Z',
@@ -211,15 +212,15 @@ describe('OverviewTab', () => {
       expect(screen.queryByTestId('launch-checklist')).not.toBeInTheDocument();
     });
 
-    it('shows the launch readiness message on a draft version', async () => {
+    it('delegates the draft readiness panel to the LaunchChecklist under the readiness heading', async () => {
       workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue(
         makeDetail({ versions: [makeVersion({ id: 'ver-1', status: 'draft' })] })
       );
       render(await renderPage());
-      // The page renders "This version is a draft. Review the launch checklist…"
-      // The phrase crosses two text nodes (one wrapping <p> + an inline <span>),
-      // so match the containing <p> by substring.
-      expect(screen.getByText(/launch checklist before going live/i)).toBeInTheDocument();
+      // The draft intro + step checklist now live inside the LaunchChecklist component (so the
+      // page no longer hard-codes the message); the page's job is to mount it in the box.
+      expect(screen.getByRole('heading', { name: /launch readiness/i })).toBeInTheDocument();
+      expect(screen.getByTestId('launch-checklist')).toBeInTheDocument();
     });
   });
 

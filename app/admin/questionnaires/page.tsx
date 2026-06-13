@@ -9,7 +9,7 @@ import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { parsePaginationMeta } from '@/lib/validations/common';
 import { logger } from '@/lib/logging';
-import { isQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
+import { isDataSlotsEnabled, isQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import type { QuestionnaireListItem } from '@/lib/app/questionnaire/views';
 import type { AttributedDemoClient, DemoClientView } from '@/lib/app/questionnaire/demo-clients';
 import type { PaginationMeta } from '@/types/api';
@@ -105,10 +105,11 @@ export default async function QuestionnairesListPage() {
   // which 404s, so the page doesn't render an empty shell behind a hidden feature.
   if (!(await isQuestionnairesEnabled())) notFound();
 
-  const [{ items, meta }, stats, demoClientOptions] = await Promise.all([
+  const [{ items, meta }, stats, demoClientOptions, dataSlotsEnabled] = await Promise.all([
     getQuestionnaires(),
     getQuestionnaireStats(),
     getActiveDemoClients(),
+    isDataSlotsEnabled(),
   ]);
 
   const statTiles: CqStat[] = [
@@ -153,6 +154,7 @@ export default async function QuestionnairesListPage() {
         initialItems={items}
         initialMeta={meta}
         demoClientOptions={demoClientOptions}
+        showDataSlots={dataSlotsEnabled}
       />
     </div>
   );

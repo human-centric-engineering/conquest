@@ -61,12 +61,15 @@ export interface QuestionnairesTableProps {
   initialMeta: PaginationMeta;
   /** DEMO-ONLY (F2.5.1): active demo clients for the empty-state upload dialog's attribution picker. */
   demoClientOptions?: AttributedDemoClient[];
+  /** Show the Data slots column — only when the data-slots feature is enabled. */
+  showDataSlots?: boolean;
 }
 
 export function QuestionnairesTable({
   initialItems,
   initialMeta,
   demoClientOptions = [],
+  showDataSlots = false,
 }: QuestionnairesTableProps) {
   const router = useRouter();
   const [items, setItems] = useState(initialItems);
@@ -186,13 +189,14 @@ export function QuestionnairesTable({
               <TableHead className="text-right">Version</TableHead>
               <TableHead className="text-right">Sections</TableHead>
               <TableHead className="text-right">Questions</TableHead>
+              {showDataSlots && <TableHead className="text-right">Data slots</TableHead>}
               <TableHead className="text-right">Last activity</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {items.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="py-10 text-center">
+                <TableCell colSpan={showDataSlots ? 8 : 7} className="py-10 text-center">
                   <div className="flex flex-col items-center gap-3">
                     <p className="text-muted-foreground">
                       No questionnaires yet. Upload a document to create your first one.
@@ -226,6 +230,11 @@ export function QuestionnairesTable({
                     </TableCell>
                     <TableCell className="text-right tabular-nums">{item.sectionCount}</TableCell>
                     <TableCell className="text-right tabular-nums">{item.questionCount}</TableCell>
+                    {showDataSlots && (
+                      <TableCell className="text-right tabular-nums">
+                        {item.dataSlotCount}
+                      </TableCell>
+                    )}
                     <TableCell className="text-muted-foreground text-right">
                       {formatDate(item.updatedAt)}
                     </TableCell>

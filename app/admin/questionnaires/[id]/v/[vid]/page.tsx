@@ -53,7 +53,16 @@ export default async function OverviewTab({ params }: PageProps) {
 
   const stats: CqStat[] = [
     { label: 'Sections', value: selected.sectionCount },
-    { label: 'Questions', value: selected.questionCount, accent: true },
+    {
+      label: 'Questions',
+      value: selected.questionCount,
+      accent: true,
+      // Data slots (the abstraction layer over the questions) share the Questions tile when the
+      // feature is on — one box, two figures.
+      ...(flags.dataSlots
+        ? { secondary: { label: 'Data slots', value: selected.dataSlotCount } }
+        : {}),
+    },
     {
       label: 'Versions',
       value: detail.versions.length,
@@ -74,11 +83,7 @@ export default async function OverviewTab({ params }: PageProps) {
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">Launch readiness</h2>
         {isDraft && graph ? (
-          <div className="bg-card flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4">
-            <p className="text-muted-foreground text-sm">
-              This version is a <span className="text-foreground font-medium">draft</span>. Review
-              the launch checklist before going live.
-            </p>
+          <div className="bg-card rounded-xl border p-4">
             <LaunchChecklist
               questionnaireId={id}
               versionId={selected.id}
@@ -181,6 +186,9 @@ export default async function OverviewTab({ params }: PageProps) {
                 <div className="text-muted-foreground flex items-center gap-3 text-xs">
                   <span>
                     {ver.sectionCount} sections · {ver.questionCount} questions
+                    {flags.dataSlots
+                      ? ` · ${ver.dataSlotCount} data slot${ver.dataSlotCount === 1 ? '' : 's'}`
+                      : ''}
                   </span>
                   <Badge variant="outline">{ver.status}</Badge>
                 </div>

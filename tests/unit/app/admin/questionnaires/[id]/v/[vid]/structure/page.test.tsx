@@ -106,6 +106,7 @@ function makeVersion(over: Partial<QuestionnaireVersionSummary> = {}): Questionn
     audience: null,
     sectionCount: 3,
     questionCount: 7,
+    dataSlotCount: 0,
     changeCount: 0,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-02T00:00:00.000Z',
@@ -235,12 +236,32 @@ describe('StructureTab', () => {
       expect(screen.queryByTestId('version-editor')).not.toBeInTheDocument();
     });
 
-    it('does not resolve workspace flags when not editing', async () => {
-      // Arrange: no edit param — adaptiveEnabled branch should be skipped
+    it('resolves workspace flags even when not editing (to gate the header data-slot count)', async () => {
+      // Arrange: no edit param. Flags are still resolved so the header can decide whether to
+      // surface the data-slot count (the adaptive branch is what's gated on editing, not the read).
       render(await renderPage());
 
-      // Assert: resolveQuestionnaireWorkspaceFlags was not called
-      expect(workspaceDataMock.resolveQuestionnaireWorkspaceFlags).not.toHaveBeenCalled();
+      expect(workspaceDataMock.resolveQuestionnaireWorkspaceFlags).toHaveBeenCalled();
+    });
+
+    it('surfaces the data-slot count in the header when the data-slots feature is on', async () => {
+      workspaceDataMock.resolveQuestionnaireWorkspaceFlags.mockResolvedValue(
+        makeFlags({ dataSlots: true })
+      );
+      workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue(
+        makeDetail({ versions: [makeVersion({ dataSlotCount: 3 })] })
+      );
+
+      render(await renderPage());
+
+      expect(screen.getByText(/3 data slots/)).toBeInTheDocument();
+    });
+
+    it('omits the data-slot count from the header when the feature is off', async () => {
+      // Default flags have dataSlots: false.
+      render(await renderPage());
+
+      expect(screen.queryByText(/data slot/)).not.toBeInTheDocument();
     });
   });
 

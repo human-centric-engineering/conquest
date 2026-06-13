@@ -42,6 +42,7 @@ function item(over: Partial<QuestionnaireListItem> = {}): QuestionnaireListItem 
     latestVersion: { id: 'v-1', versionNumber: 1, status: 'draft' },
     sectionCount: 2,
     questionCount: 9,
+    dataSlotCount: 0,
     demoClient: null,
     createdAt: '2026-06-05T00:00:00.000Z',
     updatedAt: '2026-06-05T00:00:00.000Z',

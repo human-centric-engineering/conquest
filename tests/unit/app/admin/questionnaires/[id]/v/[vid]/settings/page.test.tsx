@@ -104,6 +104,7 @@ function makeVersion(over: Partial<QuestionnaireVersionSummary> = {}): Questionn
     audience: null,
     sectionCount: 0,
     questionCount: 0,
+    dataSlotCount: 0,
     changeCount: 0,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-02T00:00:00.000Z',

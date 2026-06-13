@@ -205,7 +205,7 @@ export async function getQuestionnaireDetail(id: string): Promise<QuestionnaireD
   if (!questionnaire) return null;
 
   const versionIds = questionnaire.versions.map((v) => v.id);
-  const [sectionGroups, questionGroups, changeCountByVersion] = await Promise.all([
+  const [sectionGroups, questionGroups, dataSlotGroups, changeCountByVersion] = await Promise.all([
     versionIds.length > 0
       ? prisma.appQuestionnaireSection.groupBy({
           by: ['versionId'],
@@ -220,11 +220,19 @@ export async function getQuestionnaireDetail(id: string): Promise<QuestionnaireD
           _count: { _all: true },
         })
       : Promise.resolve([]),
+    versionIds.length > 0
+      ? prisma.appDataSlot.groupBy({
+          by: ['versionId'],
+          where: { versionId: { in: versionIds } },
+          _count: { _all: true },
+        })
+      : Promise.resolve([]),
     countAppliedChanges(versionIds),
   ]);
 
   const sectionCountByVersion = new Map(sectionGroups.map((g) => [g.versionId, g._count._all]));
   const questionCountByVersion = new Map(questionGroups.map((g) => [g.versionId, g._count._all]));
+  const dataSlotCountByVersion = new Map(dataSlotGroups.map((g) => [g.versionId, g._count._all]));
 
   const versions: QuestionnaireVersionSummary[] = questionnaire.versions.map((v) => ({
     id: v.id,
@@ -234,6 +242,7 @@ export async function getQuestionnaireDetail(id: string): Promise<QuestionnaireD
     audience: asAudience(v.audience),
     sectionCount: sectionCountByVersion.get(v.id) ?? 0,
     questionCount: questionCountByVersion.get(v.id) ?? 0,
+    dataSlotCount: dataSlotCountByVersion.get(v.id) ?? 0,
     changeCount: changeCountByVersion.get(v.id) ?? 0,
     createdAt: v.createdAt.toISOString(),
     updatedAt: v.updatedAt.toISOString(),

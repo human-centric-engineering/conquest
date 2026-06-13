@@ -89,7 +89,7 @@ export async function listQuestionnaires(
     .map((r) => r.versions[0]?.id)
     .filter((id): id is string => typeof id === 'string');
 
-  const [sectionGroups, questionGroups] =
+  const [sectionGroups, questionGroups, dataSlotGroups] =
     latestVersionIds.length > 0
       ? await Promise.all([
           prisma.appQuestionnaireSection.groupBy({
@@ -102,11 +102,17 @@ export async function listQuestionnaires(
             where: { versionId: { in: latestVersionIds } },
             _count: { _all: true },
           }),
+          prisma.appDataSlot.groupBy({
+            by: ['versionId'],
+            where: { versionId: { in: latestVersionIds } },
+            _count: { _all: true },
+          }),
         ])
-      : [[], []];
+      : [[], [], []];
 
   const sectionCountByVersion = new Map(sectionGroups.map((g) => [g.versionId, g._count._all]));
   const questionCountByVersion = new Map(questionGroups.map((g) => [g.versionId, g._count._all]));
+  const dataSlotCountByVersion = new Map(dataSlotGroups.map((g) => [g.versionId, g._count._all]));
 
   const items: QuestionnaireListItem[] = rows.map((row) => {
     const latest = row.versions[0] ?? null;
@@ -124,6 +130,7 @@ export async function listQuestionnaires(
         : null,
       sectionCount: latest ? (sectionCountByVersion.get(latest.id) ?? 0) : 0,
       questionCount: latest ? (questionCountByVersion.get(latest.id) ?? 0) : 0,
+      dataSlotCount: latest ? (dataSlotCountByVersion.get(latest.id) ?? 0) : 0,
       demoClient: row.demoClient,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
