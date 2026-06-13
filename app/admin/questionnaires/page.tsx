@@ -9,7 +9,7 @@ import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { parsePaginationMeta } from '@/lib/validations/common';
 import { logger } from '@/lib/logging';
-import { isQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
+import { isDataSlotsEnabled, isQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import type { QuestionnaireListItem } from '@/lib/app/questionnaire/views';
 import type { AttributedDemoClient, DemoClientView } from '@/lib/app/questionnaire/demo-clients';
 import type { PaginationMeta } from '@/types/api';
@@ -29,14 +29,16 @@ interface QuestionnaireStats {
 }
 
 /**
- * Status breakdown for the summary tiles. Fetches a wide page so the launched /
- * draft / archived split is accurate at demo scale; `total` comes from the
- * pagination meta so it stays correct even past the sample. Degrades to zeros.
+ * Status breakdown for the summary tiles. Fetches the widest page the list endpoint
+ * allows (its `limit` is capped at 100 — asking for more 400s and the tiles silently
+ * read zero) so the launched / draft / archived split is accurate at demo scale;
+ * `total` comes from the pagination meta so it stays correct even past the sample.
+ * Degrades to zeros.
  */
 async function getQuestionnaireStats(): Promise<QuestionnaireStats> {
   const empty: QuestionnaireStats = { total: 0, launched: 0, draft: 0, archived: 0 };
   try {
-    const res = await serverFetch(`${API.APP.QUESTIONNAIRES.ROOT}?page=1&limit=200`);
+    const res = await serverFetch(`${API.APP.QUESTIONNAIRES.ROOT}?page=1&limit=100`);
     if (!res.ok) return empty;
     const body = await parseApiResponse<QuestionnaireListItem[]>(res);
     if (!body.success) return empty;
@@ -105,10 +107,11 @@ export default async function QuestionnairesListPage() {
   // which 404s, so the page doesn't render an empty shell behind a hidden feature.
   if (!(await isQuestionnairesEnabled())) notFound();
 
-  const [{ items, meta }, stats, demoClientOptions] = await Promise.all([
+  const [{ items, meta }, stats, demoClientOptions, dataSlotsEnabled] = await Promise.all([
     getQuestionnaires(),
     getQuestionnaireStats(),
     getActiveDemoClients(),
+    isDataSlotsEnabled(),
   ]);
 
   const statTiles: CqStat[] = [
@@ -153,6 +156,7 @@ export default async function QuestionnairesListPage() {
         initialItems={items}
         initialMeta={meta}
         demoClientOptions={demoClientOptions}
+        showDataSlots={dataSlotsEnabled}
       />
     </div>
   );

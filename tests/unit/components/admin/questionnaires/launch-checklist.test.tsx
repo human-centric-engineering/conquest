@@ -4,7 +4,9 @@
  * Anti-green-bar: asserts the readiness gate mirrors `assertLaunchable` — Launch is
  * disabled until all five criteria (goal, audience with ≥1 field, ≥1 section, ≥1 question,
  * saved config) pass, an empty audience `{}` counts as not-ready, and a ready checklist
- * PATCHes the version status to `launched` via the shared authoring mutation.
+ * PATCHes the version status to `launched` via the shared authoring mutation. Also asserts
+ * the inline panel: each step renders a green check when done (a muted "todo" marker when not)
+ * and a "Configure" link to the page that satisfies it (Structure editor, or the data-slots tab).
  *
  * @see components/admin/questionnaires/launch-checklist.tsx
  */
@@ -90,5 +92,50 @@ describe('LaunchChecklist', () => {
     await openDialog();
 
     expect(screen.getByRole('button', { name: /^launch$/i })).toBeDisabled();
+  });
+
+  it('renders the steps inline (no dialog) with a Configure link per step', () => {
+    render(<LaunchChecklist {...READY} />);
+
+    // The five base steps show without opening the dialog.
+    for (const label of [
+      'A goal is set',
+      'An audience is described',
+      'At least one section',
+      'At least one question',
+      'Configuration saved',
+    ]) {
+      expect(screen.getByText(label)).toBeInTheDocument();
+    }
+
+    // Each step links to the page that satisfies it — the base steps all open the Structure editor.
+    const goalLink = screen.getByRole('link', { name: /configure: a goal is set/i });
+    expect(goalLink).toHaveAttribute('href', '/admin/questionnaires/qn-1/v/v-1/structure?edit=1');
+    expect(screen.getByRole('link', { name: /configure: configuration saved/i })).toHaveAttribute(
+      'href',
+      '/admin/questionnaires/qn-1/v/v-1/structure?edit=1'
+    );
+  });
+
+  it('marks a done step ready and an outstanding step not-ready inline', () => {
+    render(<LaunchChecklist {...READY} goal="Understand onboarding" configSaved={false} />);
+
+    // The done/not-done state is exposed via the sr-only marker next to each row.
+    const goalRow = screen.getByText('A goal is set').closest('li');
+    const configRow = screen.getByText('Configuration saved').closest('li');
+    expect(goalRow).toHaveTextContent('(ready)');
+    expect(configRow).toHaveTextContent('(not ready)');
+  });
+
+  it('shows a data-slots step linking to the data-slots tab only when required', () => {
+    const { rerender } = render(<LaunchChecklist {...READY} />);
+    expect(screen.queryByText('Data slots generated')).not.toBeInTheDocument();
+
+    rerender(<LaunchChecklist {...READY} dataSlotsRequired dataSlotsReady={false} />);
+    expect(screen.getByText('Data slots generated')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /configure: data slots generated/i })).toHaveAttribute(
+      'href',
+      '/admin/questionnaires/qn-1/v/v-1/data-slots'
+    );
   });
 });

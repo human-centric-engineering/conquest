@@ -66,6 +66,11 @@ const formSchema = z.object({
     message: 'Absolute https:// URL (or leave blank)',
   }),
   welcomeCopy: z.string().trim().max(WELCOME_COPY_MAX),
+  // DEMO-ONLY (F7.1+): respondent-session chrome. All optional; blank = no band.
+  surfaceColor: hexOrBlank,
+  ctaColorEnd: hexOrBlank,
+  logoBackgroundColor: hexOrBlank,
+  logoBackgroundEnabled: z.boolean(),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -99,24 +104,45 @@ export function DemoClientForm({ client }: DemoClientFormProps) {
       accentColor: client?.accentColor ?? '',
       logoUrl: client?.logoUrl ?? '',
       welcomeCopy: client?.welcomeCopy ?? '',
+      surfaceColor: client?.surfaceColor ?? '',
+      ctaColorEnd: client?.ctaColorEnd ?? '',
+      logoBackgroundColor: client?.logoBackgroundColor ?? '',
+      logoBackgroundEnabled: client?.logoBackgroundEnabled ?? false,
     },
   });
 
   const isActive = watch('isActive');
+  const logoBackgroundEnabled = watch('logoBackgroundEnabled');
 
   // Live brand preview: reflect only valid inputs (a half-typed hex / non-https URL
   // shows the default rather than a broken swatch); blank → null → Sunrise default.
-  const [ctaColor, accentColor, logoUrl, welcomeCopy] = watch([
+  const [
+    ctaColor,
+    accentColor,
+    logoUrl,
+    welcomeCopy,
+    surfaceColor,
+    ctaColorEnd,
+    logoBackgroundColor,
+  ] = watch([
     'ctaColor',
     'accentColor',
     'logoUrl',
     'welcomeCopy',
+    'surfaceColor',
+    'ctaColorEnd',
+    'logoBackgroundColor',
   ]);
+  const validHex = (v: string) => (HEX_COLOR_PATTERN.test(v.trim()) ? v.trim() : null);
   const livePreviewTheme = {
-    ctaColor: HEX_COLOR_PATTERN.test(ctaColor.trim()) ? ctaColor.trim() : null,
-    accentColor: HEX_COLOR_PATTERN.test(accentColor.trim()) ? accentColor.trim() : null,
+    ctaColor: validHex(ctaColor),
+    accentColor: validHex(accentColor),
     logoUrl: isHttpsUrl(logoUrl.trim()) ? logoUrl.trim() : null,
     welcomeCopy: welcomeCopy.trim() === '' ? null : welcomeCopy.trim(),
+    surfaceColor: validHex(surfaceColor),
+    ctaColorEnd: validHex(ctaColorEnd),
+    logoBackgroundColor: validHex(logoBackgroundColor),
+    logoBackgroundEnabled,
   };
 
   const onSubmit = async (values: FormValues) => {
@@ -134,6 +160,10 @@ export function DemoClientForm({ client }: DemoClientFormProps) {
         accentColor: themeOrNull(values.accentColor),
         logoUrl: themeOrNull(values.logoUrl),
         welcomeCopy: themeOrNull(values.welcomeCopy),
+        surfaceColor: themeOrNull(values.surfaceColor),
+        ctaColorEnd: themeOrNull(values.ctaColorEnd),
+        logoBackgroundColor: themeOrNull(values.logoBackgroundColor),
+        logoBackgroundEnabled: values.logoBackgroundEnabled,
       };
 
       if (isEdit) {
@@ -222,31 +252,34 @@ export function DemoClientForm({ client }: DemoClientFormProps) {
         />
       </div>
 
-      {/* DEMO-ONLY (F3.4): invitation-email branding. Every field is optional — blank
-          falls back to the Sunrise default, so an unthemed client sends the plain email. */}
+      {/* DEMO-ONLY (F3.4 / F7.1+): brand theming. Every field is optional — blank falls
+          back to the Sunrise default, so an unthemed client sends the plain email and shows
+          the plain session chrome. Colours apply to BOTH the invitation email and the
+          respondent question session (and the admin "Preview as respondent"). */}
       <fieldset className="space-y-4 rounded-md border px-4 py-4">
-        <legend className="px-1 text-sm font-medium">Invitation branding</legend>
+        <legend className="px-1 text-sm font-medium">Brand theming</legend>
         <p className="text-muted-foreground -mt-1 text-xs">
-          Optional. Used in the invitation email sent to this client&apos;s respondents. Leave a
-          field blank to use the Sunrise default.
+          Optional. Applied to the invitation email and the respondent question session (visible via
+          &ldquo;Preview as respondent&rdquo;). Leave a field blank to use the Sunrise default.
         </p>
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
-            <Label htmlFor="ctaColor" className="flex items-center gap-1">
-              CTA colour
-              <FieldHelp title="Call-to-action colour">
-                Hex colour for the email&apos;s primary button (e.g.{' '}
-                <code className="text-xs">#5469d4</code>). Blank uses the Sunrise default.
+            <Label htmlFor="surfaceColor" className="flex items-center gap-1">
+              Surface colour
+              <FieldHelp title="Surface colour">
+                Deep brand colour for the band behind the logo at the top of the question session
+                (e.g. <code className="text-xs">#280039</code>). Blank shows no band — the session
+                keeps its plain chrome.
               </FieldHelp>
             </Label>
             <Input
-              id="ctaColor"
-              placeholder="#5469d4"
+              id="surfaceColor"
+              placeholder="#280039"
               disabled={isLoading}
-              {...register('ctaColor')}
+              {...register('surfaceColor')}
             />
-            <FormError message={errors.ctaColor?.message} />
+            <FormError message={errors.surfaceColor?.message} />
           </div>
 
           <div className="space-y-2">
@@ -268,29 +301,110 @@ export function DemoClientForm({ client }: DemoClientFormProps) {
           </div>
         </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="logoUrl" className="flex items-center gap-1">
-            Logo URL
-            <FieldHelp title="Logo URL">
-              Absolute <code className="text-xs">https://</code> URL of the client logo shown at the
-              top of the invitation email. Blank shows no logo.
-            </FieldHelp>
-          </Label>
-          <Input
-            id="logoUrl"
-            placeholder="https://acme.example/logo.png"
-            disabled={isLoading}
-            {...register('logoUrl')}
-          />
-          <FormError message={errors.logoUrl?.message} />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="ctaColor" className="flex items-center gap-1">
+              CTA colour
+              <FieldHelp title="Call-to-action colour">
+                Hex colour for the email&apos;s primary button (e.g.{' '}
+                <code className="text-xs">#5469d4</code>). Blank uses the Sunrise default.
+              </FieldHelp>
+            </Label>
+            <Input
+              id="ctaColor"
+              placeholder="#5469d4"
+              disabled={isLoading}
+              {...register('ctaColor')}
+            />
+            <FormError message={errors.ctaColor?.message} />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="ctaColorEnd" className="flex items-center gap-1">
+              CTA gradient end
+              <FieldHelp title="CTA gradient end colour">
+                Optional second colour for the send button. When set, the button becomes a{' '}
+                <em>CTA colour → this</em> gradient (e.g. <code className="text-xs">#FF03DF</code>).
+                Blank keeps a solid CTA colour.
+              </FieldHelp>
+            </Label>
+            <Input
+              id="ctaColorEnd"
+              placeholder="#FF03DF"
+              disabled={isLoading}
+              {...register('ctaColorEnd')}
+            />
+            <FormError message={errors.ctaColorEnd?.message} />
+          </div>
         </div>
 
-        <div className="space-y-2">
+        {/* DEMO-ONLY (F7.1+): respondent-session chrome. The logo sits at the top of the
+            session header; the toggle below paints a backdrop for logos drawn to sit on one. */}
+        <div className="space-y-4 border-t pt-4">
+          <div className="space-y-2">
+            <Label htmlFor="logoUrl" className="flex items-center gap-1">
+              Logo URL
+              <FieldHelp title="Logo URL">
+                Absolute <code className="text-xs">https://</code> URL of the client logo shown at
+                the top of the invitation email and the respondent session header. Blank shows no
+                logo.
+              </FieldHelp>
+            </Label>
+            <Input
+              id="logoUrl"
+              placeholder="https://acme.example/logo.png"
+              disabled={isLoading}
+              {...register('logoUrl')}
+            />
+            <FormError message={errors.logoUrl?.message} />
+          </div>
+
+          {/* The requested device: a checkbox to paint a solid colour behind the logo —
+              for logos (like Merlin5's) drawn to sit on their brand backdrop. */}
+          <div className="space-y-3 rounded-md border px-3 py-3">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="logoBackgroundEnabled" className="flex items-center gap-1">
+                Apply a colour behind the logo
+                <FieldHelp title="Logo background">
+                  Many logos are drawn to sit on a specific brand colour and look wrong on white.
+                  Turn this on to paint a solid backdrop behind the logo. Leave the colour blank to
+                  reuse the surface colour.
+                </FieldHelp>
+              </Label>
+              <Switch
+                id="logoBackgroundEnabled"
+                checked={logoBackgroundEnabled}
+                onCheckedChange={(checked) =>
+                  setValue('logoBackgroundEnabled', checked, { shouldDirty: true })
+                }
+                disabled={isLoading}
+                aria-label="Apply a colour behind the logo"
+              />
+            </div>
+            {logoBackgroundEnabled && (
+              <div className="space-y-2">
+                <Label htmlFor="logoBackgroundColor" className="text-xs">
+                  Logo background colour
+                </Label>
+                <Input
+                  id="logoBackgroundColor"
+                  placeholder="Leave blank to use the surface colour"
+                  disabled={isLoading}
+                  {...register('logoBackgroundColor')}
+                />
+                <FormError message={errors.logoBackgroundColor?.message} />
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="space-y-2 border-t pt-4">
           <Label htmlFor="welcomeCopy" className="flex items-center gap-1">
             Welcome copy
             <FieldHelp title="Welcome copy">
-              A short branded intro line in the invitation email body, after &ldquo;You&apos;ve been
-              invited to complete &lt;questionnaire&gt;.&rdquo; Blank uses the Sunrise default copy.
+              A short branded intro line shown in the invitation email body and as the
+              session&apos;s opening greeting, after &ldquo;You&apos;ve been invited to complete
+              &lt;questionnaire&gt;.&rdquo; Blank uses the Sunrise default copy.
             </FieldHelp>
           </Label>
           <Textarea

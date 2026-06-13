@@ -77,6 +77,7 @@ function makeVersion(over: Partial<QuestionnaireVersionSummary> = {}): Questionn
     audience: null,
     sectionCount: 2,
     questionCount: 5,
+    dataSlotCount: 0,
     changeCount: 0,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-02T00:00:00.000Z',
@@ -97,14 +98,16 @@ function makeDetail(over: Partial<QuestionnaireDetail> = {}): QuestionnaireDetai
   };
 }
 
-function makeGraph(over: { anonymousMode?: boolean; saved?: boolean } = {}): VersionGraphView {
+function makeGraph(
+  over: { anonymousMode?: boolean; saved?: boolean; audience?: VersionGraphView['audience'] } = {}
+): VersionGraphView {
   return {
     id: 'ver-1',
     questionnaireId: 'qn-1',
     versionNumber: 1,
     status: 'launched',
     goal: 'Understand the prospect',
-    audience: null,
+    audience: over.audience ?? null,
     goalProvenance: null,
     audienceProvenance: null,
     sections: [],
@@ -115,6 +118,19 @@ function makeGraph(over: { anonymousMode?: boolean; saved?: boolean } = {}): Ver
       anonymousMode: over.anonymousMode ?? true,
     },
   };
+}
+
+/** A draft that passes every launch-readiness check — so the pre-launch preview is offered. */
+function launchReadyDraft() {
+  workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue(
+    makeDetail({
+      versions: [makeVersion({ id: 'ver-1', status: 'draft', sectionCount: 2, questionCount: 5 })],
+    })
+  );
+  // isDraft is read from the version summary; the graph only supplies goal/audience/config.
+  workspaceDataMock.getVersionGraphCached.mockResolvedValue(
+    makeGraph({ audience: { description: 'Prospective customers' } })
+  );
 }
 
 function makeFlags(over: Partial<QuestionnaireWorkspaceFlags> = {}): QuestionnaireWorkspaceFlags {
@@ -211,15 +227,15 @@ describe('OverviewTab', () => {
       expect(screen.queryByTestId('launch-checklist')).not.toBeInTheDocument();
     });
 
-    it('shows the launch readiness message on a draft version', async () => {
+    it('delegates the draft readiness panel to the LaunchChecklist under the readiness heading', async () => {
       workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue(
         makeDetail({ versions: [makeVersion({ id: 'ver-1', status: 'draft' })] })
       );
       render(await renderPage());
-      // The page renders "This version is a draft. Review the launch checklist…"
-      // The phrase crosses two text nodes (one wrapping <p> + an inline <span>),
-      // so match the containing <p> by substring.
-      expect(screen.getByText(/launch checklist before going live/i)).toBeInTheDocument();
+      // The draft intro + step checklist now live inside the LaunchChecklist component (so the
+      // page no longer hard-codes the message); the page's job is to mount it in the box.
+      expect(screen.getByRole('heading', { name: /launch readiness/i })).toBeInTheDocument();
+      expect(screen.getByTestId('launch-checklist')).toBeInTheDocument();
     });
   });
 
@@ -258,16 +274,18 @@ describe('OverviewTab', () => {
   });
 
   describe('Preview as respondent', () => {
-    it('links to the real /q/<vid> surface when launched + live-sessions on + anonymous mode', async () => {
+    it('links to the admin preview (?preview=1) when launched + live-sessions on, anonymous mode', async () => {
+      // Anonymous versions preview through ?preview=1 too — the admin-gated /preview route marks
+      // the run isPreview (kept out of analytics) and lets the surface show an "Exit preview" exit.
       workspaceDataMock.getVersionGraphCached.mockResolvedValue(makeGraph({ anonymousMode: true }));
       render(await renderPage());
       const link = screen.getByRole('link', { name: /preview as respondent/i });
-      expect(link).toHaveAttribute('href', '/q/ver-1');
+      expect(link).toHaveAttribute('href', '/q/ver-1?preview=1');
       expect(link).toHaveAttribute('target', '_blank');
       expect(link).toHaveAttribute('rel', 'noopener noreferrer');
     });
 
-    it('links to the admin preview (?preview=1) when launched + live-sessions on + anonymous mode off', async () => {
+    it('links to the admin preview (?preview=1) when launched + live-sessions on, anonymous mode off', async () => {
       workspaceDataMock.getVersionGraphCached.mockResolvedValue(
         makeGraph({ anonymousMode: false })
       );
@@ -287,7 +305,8 @@ describe('OverviewTab', () => {
       ).not.toBeInTheDocument();
     });
 
-    it('is absent when the version is a draft (not launched)', async () => {
+    it('is absent for a draft that is NOT launch-ready (audience missing)', async () => {
+      // Default draft fixture has audience: null → not launch-ready → no pre-launch preview.
       workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue(
         makeDetail({ versions: [makeVersion({ id: 'ver-1', status: 'draft' })] })
       );
@@ -295,6 +314,16 @@ describe('OverviewTab', () => {
       expect(
         screen.queryByRole('link', { name: /preview as respondent/i })
       ).not.toBeInTheDocument();
+      // It explains the gate instead of offering the link.
+      expect(screen.getByText(/not available yet/i)).toBeInTheDocument();
+    });
+
+    it('IS offered for a launch-READY draft (preview before launch, opens ?preview=1)', async () => {
+      launchReadyDraft();
+      render(await renderPage());
+      const link = screen.getByRole('link', { name: /preview as respondent/i });
+      expect(link).toHaveAttribute('href', '/q/ver-1?preview=1');
+      expect(link).toHaveAttribute('target', '_blank');
     });
 
     it('is absent when the graph is null even with live-sessions on + launched', async () => {
@@ -327,31 +356,55 @@ describe('OverviewTab', () => {
     });
   });
 
-  describe('data-slots quick action', () => {
-    it('shows the Data slots quick-action button when the dataSlots flag is on', async () => {
+  describe('data-slots stat tile', () => {
+    it('merges Questions + Data slots into one tile when the dataSlots flag is on', async () => {
       workspaceDataMock.resolveQuestionnaireWorkspaceFlags.mockResolvedValue(
         makeFlags({ dataSlots: true })
       );
-      workspaceDataMock.getVersionDataSlotCountCached.mockResolvedValue(0);
+      workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue(
+        makeDetail({
+          versions: [makeVersion({ id: 'ver-1', questionCount: 5, dataSlotCount: 3 })],
+        })
+      );
       render(await renderPage());
-      expect(screen.getByRole('link', { name: /data slots/i })).toBeInTheDocument();
+      const tile = screen.getByTestId('stat-Questions / Data slots');
+      expect(tile).toHaveTextContent('5');
+      expect(tile).toHaveTextContent('3');
+      // No separate plain "Questions" tile when the two are merged.
+      expect(screen.queryByTestId('stat-Questions')).not.toBeInTheDocument();
     });
 
-    it('hides the Data slots quick-action button when the dataSlots flag is off', async () => {
+    it('keeps a standalone Questions tile when the dataSlots flag is off', async () => {
       workspaceDataMock.resolveQuestionnaireWorkspaceFlags.mockResolvedValue(
         makeFlags({ dataSlots: false })
       );
       render(await renderPage());
-      expect(screen.queryByRole('link', { name: /data slots/i })).not.toBeInTheDocument();
+      expect(screen.getByTestId('stat-Questions')).toBeInTheDocument();
+      expect(screen.queryByTestId('stat-Questions / Data slots')).not.toBeInTheDocument();
     });
+  });
 
-    it('shows the data-slot count when non-zero', async () => {
+  describe('version timeline — data slots', () => {
+    it('appends the data-slot count to each row when the dataSlots flag is on', async () => {
       workspaceDataMock.resolveQuestionnaireWorkspaceFlags.mockResolvedValue(
         makeFlags({ dataSlots: true })
       );
-      workspaceDataMock.getVersionDataSlotCountCached.mockResolvedValue(3);
+      workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue(
+        makeDetail({ versions: [makeVersion({ id: 'ver-1', dataSlotCount: 3 })] })
+      );
       render(await renderPage());
-      expect(screen.getByRole('link', { name: /data slots \(3\)/i })).toBeInTheDocument();
+      expect(screen.getByText(/3 data slots/)).toBeInTheDocument();
+    });
+
+    it('omits the data-slot count from the timeline when the dataSlots flag is off', async () => {
+      workspaceDataMock.resolveQuestionnaireWorkspaceFlags.mockResolvedValue(
+        makeFlags({ dataSlots: false })
+      );
+      workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue(
+        makeDetail({ versions: [makeVersion({ id: 'ver-1', dataSlotCount: 3 })] })
+      );
+      render(await renderPage());
+      expect(screen.queryByText(/data slots?/i)).not.toBeInTheDocument();
     });
   });
 });

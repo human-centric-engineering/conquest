@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 import type { UseQuestionnaireSessionStreamReturn } from '@/lib/hooks/use-questionnaire-session-stream';
 
@@ -105,11 +105,14 @@ describe('QuestionnaireChat', () => {
     expect(screen.getByRole('status', { name: 'Thinking…' })).toBeInTheDocument();
   });
 
-  it('shows the streaming text while a reply is in flight', () => {
+  it('shows the thinking indicator (not raw partial text) while a reply is in flight', () => {
+    // The reply is no longer rendered token-by-token; it types itself in once it lands as a
+    // committed turn, so an in-flight stream shows only the thinking indicator.
     hookReturn = makeReturn({ streaming: true, streamingText: 'Let me think', canSend: false });
     render(<QuestionnaireChat sessionId="s1" stream={hookReturn} />);
 
-    expect(screen.getByText(/Let me think/)).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Thinking…' })).toBeInTheDocument();
+    expect(screen.queryByText(/Let me think/)).not.toBeInTheDocument();
   });
 
   it('renders a generic side-band warning as a quiet line', () => {
@@ -257,5 +260,136 @@ describe('QuestionnaireChat', () => {
     fireEvent.click(dismissBtn);
 
     expect(dismissError).toHaveBeenCalledTimes(1);
+  });
+
+  describe('opening animation', () => {
+    it('shows a "Thinking…" beat before the seeded opening message, then types it in', async () => {
+      hookReturn = makeReturn({
+        turns: [{ role: 'assistant', content: 'Welcome to the questionnaire.' }],
+      });
+      const { container } = render(
+        <QuestionnaireChat sessionId="s1" stream={hookReturn} animateOpening />
+      );
+
+      // The opening is fronted by a "Thinking…" indicator — the greeting hasn't started yet.
+      expect(screen.getByRole('status', { name: 'Thinking…' })).toBeInTheDocument();
+      expect(container.querySelector('.terminal-caret')).toBeNull();
+      expect(screen.queryByText('Welcome to the questionnaire.')).toBeNull();
+
+      // After the beat it types in to the full greeting.
+      await waitFor(
+        () => expect(screen.getByText('Welcome to the questionnaire.')).toBeInTheDocument(),
+        { timeout: 3000 }
+      );
+    });
+
+    it('renders the opening turn instantly (no caret) when animateOpening is not set', () => {
+      hookReturn = makeReturn({
+        turns: [{ role: 'assistant', content: 'Welcome to the questionnaire.' }],
+      });
+      const { container } = render(<QuestionnaireChat sessionId="s1" stream={hookReturn} />);
+
+      expect(screen.getByText('Welcome to the questionnaire.')).toBeInTheDocument();
+      expect(container.querySelector('.terminal-caret')).toBeNull();
+    });
+
+    it('types in a reply that arrives after mount (caret first, full text after)', async () => {
+      // Fresh mount with just the seeded greeting.
+      hookReturn = makeReturn({ turns: [{ role: 'assistant', content: 'Opening greeting.' }] });
+      const { container, rerender } = render(
+        <QuestionnaireChat sessionId="s1" stream={hookReturn} animateOpening />
+      );
+      // The greeting types in after its opening "Thinking…" beat.
+      await waitFor(() => expect(screen.getByText('Opening greeting.')).toBeInTheDocument(), {
+        timeout: 3000,
+      });
+
+      // The respondent answers, then a reply lands — a genuine post-answer reply (a user turn
+      // precedes it), so it types straight in with no artificial opening beat.
+      const next = makeReturn({
+        turns: [
+          { role: 'assistant', content: 'Opening greeting.' },
+          { role: 'user', content: 'My answer.' },
+          { role: 'assistant', content: 'A later question.' },
+        ],
+      });
+      rerender(<QuestionnaireChat sessionId="s1" stream={next} animateOpening />);
+
+      // Mid-type: a caret is present and the full reply isn't shown yet…
+      expect(container.querySelector('.terminal-caret')).toBeTruthy();
+      // …then it catches up.
+      await waitFor(() => expect(screen.getByText('A later question.')).toBeInTheDocument());
+    });
+
+    it('types in a reply even on a resumed session (animateOpening off)', async () => {
+      // Resume seeds prior history (rendered instantly); a new reply still types in.
+      hookReturn = makeReturn({ turns: [{ role: 'assistant', content: 'Earlier history.' }] });
+      const { container, rerender } = render(
+        <QuestionnaireChat sessionId="s1" stream={hookReturn} />
+      );
+      // Seeded history is instant (no caret).
+      expect(screen.getByText('Earlier history.')).toBeInTheDocument();
+      expect(container.querySelector('.terminal-caret')).toBeNull();
+
+      const next = makeReturn({
+        turns: [
+          { role: 'assistant', content: 'Earlier history.' },
+          { role: 'assistant', content: 'A fresh reply.' },
+        ],
+      });
+      rerender(<QuestionnaireChat sessionId="s1" stream={next} />);
+
+      await waitFor(() => expect(screen.getByText('A fresh reply.')).toBeInTheDocument());
+    });
+
+    it('reveals two seeded opening turns one at a time (the second waits for the first)', async () => {
+      hookReturn = makeReturn({
+        turns: [
+          { role: 'assistant', content: 'First opening message.' },
+          { role: 'assistant', content: 'Second opening message.' },
+        ],
+      });
+      render(<QuestionnaireChat sessionId="s1" stream={hookReturn} animateOpening />);
+
+      // The second opening turn is gated — it isn't even in the DOM until the first finishes.
+      expect(screen.queryByText('Second opening message.')).toBeNull();
+
+      // The first types in after its opening beat…
+      await waitFor(() => expect(screen.getByText('First opening message.')).toBeInTheDocument(), {
+        timeout: 3000,
+      });
+      // …then, after the longer inter-message beat, the second types in too.
+      await waitFor(() => expect(screen.getByText('Second opening message.')).toBeInTheDocument(), {
+        timeout: 5000,
+      });
+    });
+
+    it('queues a second opening turn that ARRIVES AFTER MOUNT behind the first (no overlap)', async () => {
+      // The reported bug: only the greeting is seeded; the first question streams in moments later
+      // (a post-mount turn). It must NOT type over the still-typing greeting — the queue holds it.
+      hookReturn = makeReturn({ turns: [{ role: 'assistant', content: 'First message.' }] });
+      const { rerender } = render(
+        <QuestionnaireChat sessionId="s1" stream={hookReturn} animateOpening />
+      );
+
+      const next = makeReturn({
+        turns: [
+          { role: 'assistant', content: 'First message.' },
+          { role: 'assistant', content: 'Second message.' },
+        ],
+      });
+      rerender(<QuestionnaireChat sessionId="s1" stream={next} animateOpening />);
+
+      // Queued behind the first — not in the DOM while the first is still revealing.
+      expect(screen.queryByText('Second message.')).toBeNull();
+
+      // Both type in, in order.
+      await waitFor(() => expect(screen.getByText('First message.')).toBeInTheDocument(), {
+        timeout: 3000,
+      });
+      await waitFor(() => expect(screen.getByText('Second message.')).toBeInTheDocument(), {
+        timeout: 5000,
+      });
+    });
   });
 });

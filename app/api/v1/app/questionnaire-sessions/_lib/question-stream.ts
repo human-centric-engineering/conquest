@@ -24,7 +24,11 @@ import { resolveAgentProviderAndModel } from '@/lib/orchestration/llm/agent-reso
 import { getProvider } from '@/lib/orchestration/llm/provider-manager';
 import { calculateCost, logCost } from '@/lib/orchestration/llm/cost-tracker';
 import type { LlmMessage } from '@/lib/orchestration/llm/types';
-import { QUESTION_TYPE_LABELS, type QuestionType } from '@/lib/app/questionnaire/types';
+import {
+  QUESTION_TYPE_LABELS,
+  type QuestionType,
+  type SensitivitySeverity,
+} from '@/lib/app/questionnaire/types';
 import { QUESTIONNAIRE_INTERVIEWER_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
 
 /** Token budget + timeout for the (short) conversational question prose. */
@@ -62,11 +66,39 @@ export interface QuestionComposeInput {
   /** True for the first question of the session (nothing to acknowledge yet). */
   isOpening: boolean;
   /**
+   * How many questions/slots have already been asked this session (the selection round, 0-based).
+   * Calibrates length: early questions are kept very tight (a single, effortless sentence) and may
+   * grow a little warmer/fuller once rapport has built — never convoluted at any point.
+   */
+  questionsAsked: number;
+  /**
+   * Sensitivity awareness / safeguarding: the session's running-max disclosure severity, set once
+   * something sensitive has been remembered. When present it switches on a "tread carefully" tone
+   * for THIS and every later question (the route threads it from session memory each turn).
+   */
+  sensitivityLevel?: SensitivitySeverity | null;
+  /**
+   * The careful, non-graphic summaries of what was disclosed this session (newest folded in by the
+   * route). Used to remind the interviewer what to be gentle about — never re-raised verbatim.
+   */
+  sensitivityNotes?: string[];
+  /**
    * Data Slots feature — topic rhythm. `true` = we just moved to a NEW subject area (bridge with
    * a natural segue); `false`/absent = staying in the same area (deepen — the skilled-interviewer
    * "linger before moving on"). Only consulted on a normal acknowledge-and-ask turn.
    */
   isTransition?: boolean;
+  /**
+   * Move-on (Data Slots feature): on a re-ask, the agent's CURRENT (weak) understanding of the
+   * slot — its paraphrase — so the follow-up gets specific about the gap instead of repeating the
+   * same open question. Only consulted when `isReask`.
+   */
+  currentUnderstanding?: string;
+  /**
+   * Move-on (Data Slots feature): the LAST allowed attempt before the slot is parked and the
+   * conversation moves on — frame it as a light, pressure-free final try.
+   */
+  isFinalAttempt?: boolean;
 }
 
 /** What {@link streamQuestionMessage} returns once the stream completes. */
@@ -118,27 +150,69 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
   if (a.locale && a.locale.toLowerCase() !== 'en' && !a.locale.toLowerCase().startsWith('en-'))
     calibration.push(`Respond entirely in the respondent's language (locale "${a.locale}").`);
 
+  // Length is calibrated by how far into the conversation we are: the first few questions stay
+  // very tight (effortless to answer), and later ones may be a touch warmer — but never long.
+  const isEarly = input.questionsAsked < 3;
+  const brevity = isEarly
+    ? 'This is early in the conversation, so keep it VERY short and tight — ideally a single, ' +
+      'simple, easy-to-answer sentence. The opening questions must feel effortless. '
+    : 'Keep it concise — one or two sentences. Rapport has built, so you may be a little warmer ' +
+      'or add light context, but never long-winded or convoluted. ';
+
+  // Sensitivity awareness / safeguarding: once a sensitive disclosure has been remembered this
+  // session, every later question is asked more gently. The latest summary reminds the interviewer
+  // what to be careful about (kept non-graphic by construction); the specifics are not re-raised.
+  const lastNote = input.sensitivityNotes?.[input.sensitivityNotes.length - 1];
+  const treadCarefully = input.sensitivityLevel
+    ? 'IMPORTANT — earlier in this conversation the respondent shared something sensitive or ' +
+      'difficult' +
+      (lastNote ? ` (${lastNote})` : '') +
+      '. Continue with extra care and warmth: acknowledge gently where natural, never press for ' +
+      'detail they did not offer, avoid blunt or clinical phrasing, and give them room. Do not ' +
+      're-raise the specifics unless they bring them up. '
+    : '';
+
   const system =
     'You are a warm, conversational interviewer guiding someone through a questionnaire. ' +
     'Ask the ONE question provided, naturally — never as a numbered form field, never restate ' +
     'the whole survey, never invent new questions, and never answer on their behalf. ' +
+    // The single most important rule for readable questions: one ask, stated plainly.
+    'Ask about ONE thing at a time. Do NOT bundle several sub-questions into one message or ' +
+    'pre-list everything you hope to learn (e.g. do not tack on "…and tell me what was good, any ' +
+    'challenges, and what changed"). State the core question simply and let them answer; you can ' +
+    'always draw out more on the next turn. ' +
     (input.isOpening
       ? 'This is the very first message of the conversation — be proactive and set the scene. ' +
         'Open with a short, warm scene-setting line ("Let\'s start by…", "To begin, we\'ll explore…") ' +
-        'and then ease straight into this first question gently — keep it light and easy to answer, ' +
-        'the kind of opener a thoughtful human interviewer would lead with. There is no prior answer ' +
-        'to acknowledge. Do not tell them to "send a message to begin" — you are starting the conversation. '
+        'and then ease straight into this first question gently with a single, light, easy-to-answer ' +
+        'ask. There is no prior answer to acknowledge. Do not tell them to "send a message to ' +
+        'begin" — you are starting the conversation. '
       : input.isReask
         ? 'You already asked about this but could not capture a usable answer from their last ' +
-          'reply — gently say you want to make sure you get it right, then ask again clearly. '
+          'reply. ' +
+          (input.currentUnderstanding
+            ? `So far you understand: "${input.currentUnderstanding}". Do NOT repeat the same broad ` +
+              'question — ask a SHARPER, narrower follow-up that targets the specific piece still ' +
+              'missing. '
+            : 'Gently say you want to make sure you get it right, then ask again clearly, more ' +
+              'specifically than before. ') +
+          (input.isFinalAttempt
+            ? "This is a last, light try on this topic — keep it pressure-free; if they still can't " +
+              "say, that's completely fine and you'll move on. "
+            : '')
         : input.isTransition
           ? 'Briefly acknowledge what they just said, then bridge naturally into a NEW area and ' +
             'ask about it — like a skilled interviewer changing subject without it feeling abrupt. '
           : 'Briefly acknowledge what they just said, then ask the next question — stay in the ' +
-            'same subject area and let their answer lead naturally into it (deepen before moving on). ') +
+            'same subject area and let their answer lead naturally into it (deepen before moving on). ' +
+            'If their last answer was brief or surface-level, do not move on or pile on more ' +
+            'questions: gently invite them to say a little more about what they just shared, with ' +
+            'ONE light follow-up ("What made you say that?", "Can you give an example?"). ') +
     (input.goal ? `Questionnaire goal: ${input.goal}. ` : '') +
     (calibration.length > 0 ? calibration.join(' ') + ' ' : '') +
-    'Match the respondent’s tone. Keep it to one or two sentences. ' +
+    treadCarefully +
+    'Match the respondent’s tone. ' +
+    brevity +
     'Reply with plain conversational prose only: no JSON, no lists, no headings, no preamble, no quotation marks.';
 
   const options = extractOptionLabels(input.typeConfig);

@@ -41,6 +41,10 @@ const sessionsMock = vi.hoisted(() => ({
   recordCostCapReached: vi.fn(() => Promise.resolve()),
   pauseSession: vi.fn(() => Promise.resolve('paused')),
   hasCostCapReachedEvent: vi.fn(() => Promise.resolve(false)),
+  abandonSession: vi.fn(() => Promise.resolve('abandoned')),
+  persistAbuseStrikes: vi.fn(() => Promise.resolve()),
+  persistSensitivity: vi.fn(() => Promise.resolve()),
+  recordSensitivityFlagged: vi.fn(() => Promise.resolve()),
 }));
 vi.mock('@/app/api/v1/app/questionnaires/_lib/sessions', () => sessionsMock);
 
@@ -50,9 +54,11 @@ const tokenMock = vi.hoisted(() => ({ verifySessionToken: vi.fn() }));
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/session-access-token', () => tokenMock);
 
 import { POST } from '@/app/api/v1/app/questionnaire-sessions/[id]/messages/route';
+import { ABUSE_ABANDON_REASON, DEFAULT_QUESTIONNAIRE_CONFIG } from '@/lib/app/questionnaire/types';
 import { isFeatureEnabled } from '@/lib/feature-flags';
 import {
   APP_QUESTIONNAIRES_COST_CAP_FLAG,
+  APP_QUESTIONNAIRES_DATA_SLOTS_FLAG,
   APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG,
 } from '@/lib/app/questionnaire/constants';
 import { auth } from '@/lib/auth/config';
@@ -82,17 +88,12 @@ function loadedContext(over: Record<string, unknown> = {}) {
     session: { id: 'sess-1', status: 'active', versionId: 'v1', respondentUserId: USER },
     base: {
       sessionId: 'sess-1',
+      // Spread all defaults so new config fields are automatically covered.
+      // abuseThreshold is explicitly 0 (overriding DEFAULT's 4) so the seriousness
+      // gate stays OFF for standard-turn tests that don't stub assessSeriousness.
       config: {
-        selectionStrategy: 'sequential',
-        minQuestionsAnswered: 0,
-        coverageThreshold: 1,
-        costBudgetUsd: null,
-        maxQuestionsPerSession: null,
-        voiceEnabled: false,
-        contradictionMode: 'off',
-        contradictionWindowN: 0,
-        anonymousMode: false,
-        profileFields: [],
+        ...DEFAULT_QUESTIONNAIRE_CONFIG,
+        abuseThreshold: 0,
       },
       questions: [
         {
@@ -112,6 +113,7 @@ function loadedContext(over: Record<string, unknown> = {}) {
       existingAnswers: [],
       recentMessages: [],
       selectionRound: 0,
+      abuseStrikes: 0,
     },
     slots: [
       {
@@ -139,6 +141,9 @@ function stubInvokers() {
     selectNext: vi.fn(async () => ({
       decision: { kind: 'ask', questionId: 'q1', rationale: 'first', costUsd: 0 },
     })),
+    // Present for CapabilityInvokers interface completeness; the seriousness gate is off
+    // in default-context tests (abuseThreshold: 0) so this stub is not called.
+    assessSeriousness: vi.fn(async () => ({ verdict: { serious: true, reason: '' }, costUsd: 0 })),
   };
 }
 
@@ -374,6 +379,66 @@ describe('streaming an offer turn', () => {
   });
 });
 
+describe('data-slot mode', () => {
+  /** A context with a single data slot so the route enters data-slot mode. */
+  function dataSlotContext() {
+    const base = loadedContext();
+    return loadedContext({
+      base: {
+        ...base.base,
+        dataSlots: [
+          {
+            id: 'ds-1',
+            key: 'department',
+            name: 'Department',
+            description: 'Which department do you work in?',
+            theme: 'role',
+            ordinal: 0,
+            weight: 1,
+          },
+        ],
+        dataSlotAnswered: [],
+        dataSlotAttempts: {},
+      },
+    });
+  }
+
+  it('calls runDataSlotTurn (not runTurn) and passes dataSlotFills to persistTurn', async () => {
+    // Arrange: data-slots flag is already on globally (isFeatureEnabled → true).
+    // Stub isFeatureEnabled so data-slots is explicitly confirmed on.
+    vi.mocked(isFeatureEnabled).mockImplementation((name: string) =>
+      Promise.resolve(name === APP_QUESTIONNAIRES_DATA_SLOTS_FLAG || true)
+    );
+    ctxMock.buildTurnContext.mockResolvedValue(dataSlotContext());
+
+    // The question-message phraser is called from the data_slot response branch.
+    // Override it to echo the data-slot's name so we can assert the stream path.
+    questionMock.streamQuestionMessage.mockImplementation(async function* (opts: {
+      input: { prompt: string };
+    }) {
+      yield { type: 'content', delta: opts.input.prompt };
+      return { message: opts.input.prompt, costUsd: 0 };
+    });
+
+    // Act
+    const res = await POST(req({ message: 'I work in marketing' }), ctx);
+    expect(res.status).toBe(200);
+    const frames = await drainSse(res);
+
+    // Assert: the stream completes with a done frame (route wired to data-slot orchestrator).
+    const eventNames = frames.map((f) => f.event);
+    expect(eventNames[0]).toBe('start');
+    expect(eventNames[eventNames.length - 1]).toBe('done');
+    expect(eventNames).toContain('content');
+
+    // The route should persist with a dataSlotFills array (data-slot mode wiring).
+    expect(runMock.persistTurn).toHaveBeenCalledTimes(1);
+    expect(runMock.persistTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ dataSlotFills: expect.any(Array) })
+    );
+  });
+});
+
 describe('anonymous (no-login) access', () => {
   it('grants a session-token-bearing anonymous caller and streams the turn', async () => {
     setAuth(null); // no cookie session
@@ -538,5 +603,170 @@ describe('cost cap (F6.3)', () => {
     expect(turnsMock.sumSessionTurnCost).not.toHaveBeenCalled();
     expect(sessionsMock.recordCostCapReached).not.toHaveBeenCalled();
     expect(runMock.persistTurn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('POST /messages — seriousness / abuse gate', () => {
+  /** Invokers where the extractor flags suspicion and the judge rules the answer non-serious. */
+  function abusiveInvokers() {
+    return {
+      extractAnswers: vi.fn(async () => ({
+        intents: [
+          {
+            slotKey: 'q1',
+            questionType: 'free_text',
+            value: '543 years',
+            confidence: 0.9,
+            provenance: 'direct',
+            rationale: 'stated',
+            isActiveQuestion: true,
+          },
+        ],
+        suspectedNonGenuine: true,
+        costUsd: 0,
+      })),
+      detectContradictions: vi.fn(async () => ({ findings: [], costUsd: 0 })),
+      refineAnswer: vi.fn(async () => ({ decisions: [], costUsd: 0 })),
+      selectNext: vi.fn(async () => ({
+        decision: { kind: 'ask', questionId: 'q1', rationale: 'x', costUsd: 0 },
+      })),
+      assessSeriousness: vi.fn(async () => ({
+        verdict: { serious: false, reason: 'That tenure is not possible.' },
+        costUsd: 0,
+      })),
+    };
+  }
+
+  function gateContext(abuseStrikes: number) {
+    const ctx = loadedContext();
+    return loadedContext({
+      activeQuestionKey: 'q1',
+      base: { ...ctx.base, abuseStrikes, config: { ...ctx.base.config, abuseThreshold: 4 } },
+    });
+  }
+
+  it('disregards a non-serious answer and persists the strike (below threshold)', async () => {
+    invokersMock.buildTurnInvokers.mockResolvedValue(abusiveInvokers());
+    ctxMock.buildTurnContext.mockResolvedValue(gateContext(0));
+
+    await drainSse(await POST(req({ message: '543 years' }), ctx));
+
+    expect(sessionsMock.persistAbuseStrikes).toHaveBeenCalledWith('sess-1', 1);
+    expect(sessionsMock.abandonSession).not.toHaveBeenCalled();
+    // The disregarded answer is never handed to persistence as an upsert.
+    expect(runMock.persistTurn).toHaveBeenCalledWith(expect.objectContaining({ upserts: [] }));
+  });
+
+  it('abandons the session on the threshold strike, recording the analytics reason', async () => {
+    invokersMock.buildTurnInvokers.mockResolvedValue(abusiveInvokers());
+    ctxMock.buildTurnContext.mockResolvedValue(gateContext(3)); // next strike is the 4th
+
+    await drainSse(await POST(req({ message: 'garbage' }), ctx));
+
+    expect(sessionsMock.persistAbuseStrikes).toHaveBeenCalledWith('sess-1', 4);
+    expect(sessionsMock.abandonSession).toHaveBeenCalledWith(
+      'sess-1',
+      expect.objectContaining({ reason: ABUSE_ABANDON_REASON })
+    );
+  });
+});
+
+describe('sensitivity awareness / safeguarding', () => {
+  const SUMMARY = 'Reports mistreatment by a senior colleague.';
+
+  /** A context with sensitivity awareness on + a support message configured. */
+  function sensitiveContext() {
+    const base = loadedContext();
+    return loadedContext({
+      activeQuestionKey: 'q1',
+      base: {
+        ...base.base,
+        config: {
+          ...base.base.config,
+          sensitivityAwareness: true,
+          supportMessage: 'Support is available.',
+          supportResourceUrl: 'https://help.example',
+        },
+      },
+    });
+  }
+
+  /** Invokers whose extractor flags a high-severity disclosure; selection still asks q1. */
+  function disclosingInvokers() {
+    const inv = stubInvokers();
+    inv.extractAnswers = vi.fn(async () => ({
+      intents: [],
+      costUsd: 0,
+      sensitivity: { detected: true, severity: 'high', category: 'harassment', summary: SUMMARY },
+    }));
+    return inv;
+  }
+
+  beforeEach(() => {
+    ctxMock.buildTurnContext.mockResolvedValue(sensitiveContext());
+    invokersMock.buildTurnInvokers.mockResolvedValue(disclosingInvokers());
+  });
+
+  it('persists the disclosure (level + note) and writes a flagged event without the summary', async () => {
+    await drainSse(await POST(req({ message: 'I was abused by the CEO' }), ctx));
+
+    expect(sessionsMock.persistSensitivity).toHaveBeenCalledWith(
+      'sess-1',
+      'high',
+      expect.objectContaining({ severity: 'high', category: 'harassment', summary: SUMMARY })
+    );
+    // The event carries severity + category ONLY — never the summary (PII).
+    expect(sessionsMock.recordSensitivityFlagged).toHaveBeenCalledWith('sess-1', {
+      severity: 'high',
+      category: 'harassment',
+    });
+    const eventArg = (sessionsMock.recordSensitivityFlagged as Mock).mock.calls[0]?.[1];
+    expect(JSON.stringify(eventArg)).not.toContain('colleague');
+  });
+
+  it('streams a support signpost frame with the configured copy + URL', async () => {
+    const frames = await drainSse(await POST(req({ message: 'I was abused by the CEO' }), ctx));
+    // Assert the frame's structured shape — not just that some string contains the copy.
+    // The support signpost is a 'warning' event with code 'support' emitted by the orchestrator.
+    const support = frames.find(
+      (f) => f.event === 'warning' && (f.data as { code?: string }).code === 'support'
+    );
+    expect(support).toBeDefined();
+    expect((support!.data as { code: string; message: string }).code).toBe('support');
+    expect((support!.data as { code: string; message: string }).message).toContain(
+      'Support is available.'
+    );
+    expect((support!.data as { code: string; message: string }).message).toContain(
+      'https://help.example'
+    );
+  });
+
+  it('threads the just-detected disclosure into the question phraser (gentle tone this turn)', async () => {
+    await drainSse(await POST(req({ message: 'I was abused by the CEO' }), ctx));
+    const input = (questionMock.streamQuestionMessage as Mock).mock.calls[0]?.[0]?.input;
+    expect(input.sensitivityLevel).toBe('high');
+    expect(input.sensitivityNotes).toContain(SUMMARY);
+  });
+
+  it('still emits a done frame when persistSensitivity rejects (fail-soft: already streamed)', async () => {
+    // Arrange: sensitivity persistence fails after the reply has already been streamed.
+    sessionsMock.persistSensitivity.mockRejectedValue(new Error('db write failed'));
+
+    // Act
+    const res = await POST(req({ message: 'I was abused by the CEO' }), ctx);
+    expect(res.status).toBe(200);
+    const frames = await drainSse(res);
+
+    // Assert: the stream completes normally — the bookkeeping failure is swallowed.
+    const events = frames.map((f) => f.event);
+    expect(events).toContain('content');
+    expect(events[events.length - 1]).toBe('done');
+  });
+
+  it('does nothing when the per-questionnaire toggle is off', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(loadedContext({ activeQuestionKey: 'q1' }));
+    await drainSse(await POST(req({ message: 'I was abused by the CEO' }), ctx));
+    expect(sessionsMock.persistSensitivity).not.toHaveBeenCalled();
+    expect(sessionsMock.recordSensitivityFlagged).not.toHaveBeenCalled();
   });
 });

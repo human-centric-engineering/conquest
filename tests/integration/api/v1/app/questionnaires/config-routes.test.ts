@@ -136,6 +136,12 @@ describe('validation + scope', () => {
     expect(prismaMock.appQuestionnaireConfig.upsert).not.toHaveBeenCalled();
   });
 
+  it('400s when maxDataSlotAttempts is out of range (1–10)', async () => {
+    expect((await configPATCH(req({ maxDataSlotAttempts: 0 }), ctx(PARAMS))).status).toBe(400);
+    expect((await configPATCH(req({ maxDataSlotAttempts: 11 }), ctx(PARAMS))).status).toBe(400);
+    expect(prismaMock.appQuestionnaireConfig.upsert).not.toHaveBeenCalled();
+  });
+
   it('400s on an incoherent contradiction mode/N', async () => {
     const res = await configPATCH(
       req({ contradictionMode: 'flag', contradictionWindowN: 0 }),
@@ -167,6 +173,19 @@ describe('upsert + response', () => {
     expect(logAdminAction).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'questionnaire_config.update', entityId: 'v1' })
     );
+  });
+
+  it('round-trips maxDataSlotAttempts through the upsert payload', async () => {
+    prismaMock.appQuestionnaireConfig.upsert.mockResolvedValue(
+      configRow({ maxDataSlotAttempts: 3 })
+    );
+
+    const res = await configPATCH(req({ maxDataSlotAttempts: 3 }), ctx(PARAMS));
+    expect(res.status).toBe(200);
+    const call = prismaMock.appQuestionnaireConfig.upsert.mock.calls[0][0];
+    expect(call.create).toMatchObject({ maxDataSlotAttempts: 3 });
+    expect(call.update).toMatchObject({ maxDataSlotAttempts: 3 });
+    expect((await res.json()).data.maxDataSlotAttempts).toBe(3);
   });
 
   it('updates an existing config and audits the before/after diff', async () => {

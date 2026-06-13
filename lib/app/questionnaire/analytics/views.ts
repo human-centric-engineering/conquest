@@ -155,6 +155,25 @@ export interface CompletionFunnelResult {
   suppressed: boolean;
 }
 
+/* ── Safeguarding (sensitivity awareness) ───────────────────────────────── */
+
+/**
+ * A lightweight safeguarding signal for the analytics tab (sensitivity awareness): how many
+ * sessions in the window flagged a sensitive disclosure, and how many were serious (high
+ * severity). COUNTS ONLY — never a summary or a session identity (those never cross the analytics
+ * boundary). `suppressed` zeroes the counts when the non-preview session cohort is non-empty but
+ * below {@link K_ANONYMITY_THRESHOLD}, since "1 of 3 respondents flagged" is itself re-identifying.
+ */
+export interface SafeguardingSummary {
+  versionId: string;
+  range: AnalyticsRange;
+  /** Sessions with any remembered disclosure (`sensitivityLevel` set). */
+  flagged: number;
+  /** Sessions whose running-max severity reached `high` (a serious disclosure). */
+  serious: number;
+  suppressed: boolean;
+}
+
 /* ── Cost actuals ───────────────────────────────────────────────────────── */
 
 /** Spend grouped by the capability (or LLM operation) that incurred it. */

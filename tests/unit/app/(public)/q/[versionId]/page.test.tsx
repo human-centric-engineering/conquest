@@ -49,6 +49,14 @@ vi.mock('@/lib/app/questionnaire/chat/theme', () => ({
   resolveThemeForVersion: vi.fn(),
 }));
 
+vi.mock('@/lib/app/questionnaire/chat/anonymity', () => ({
+  resolveAnonymousForVersion: vi.fn(),
+}));
+
+vi.mock('@/lib/app/questionnaire/chat/preview-nav', () => ({
+  resolveAdminPreviewExitHref: vi.fn(),
+}));
+
 /**
  * Stub AnonymousSessionBoot — exposes all props via data-* attributes so tests
  * can assert on what the page passes without running client-side bootstrap logic.
@@ -58,12 +66,14 @@ vi.mock('@/components/app/questionnaire/chat/anonymous-session-boot', () => ({
     versionId,
     voiceInputEnabled,
     attachmentInputEnabled,
+    anonymous,
     welcomeCopy,
     preview,
   }: {
     versionId: string;
     voiceInputEnabled: boolean;
     attachmentInputEnabled: boolean;
+    anonymous: boolean;
     welcomeCopy: string;
     preview: boolean;
   }) => (
@@ -72,6 +82,7 @@ vi.mock('@/components/app/questionnaire/chat/anonymous-session-boot', () => ({
       data-version-id={versionId}
       data-voice-input-enabled={String(voiceInputEnabled)}
       data-attachment-input-enabled={String(attachmentInputEnabled)}
+      data-anonymous={String(anonymous)}
       data-welcome-copy={welcomeCopy}
       data-preview={String(preview)}
     />
@@ -93,6 +104,8 @@ import {
   isVoiceInputEnabled,
 } from '@/lib/app/questionnaire/feature-flag';
 import { resolveThemeForVersion } from '@/lib/app/questionnaire/chat/theme';
+import { resolveAnonymousForVersion } from '@/lib/app/questionnaire/chat/anonymity';
+import { resolveAdminPreviewExitHref } from '@/lib/app/questionnaire/chat/preview-nav';
 import type { ResolvedTheme } from '@/lib/app/questionnaire/theming';
 import type React from 'react';
 
@@ -107,6 +120,9 @@ const MOCK_THEME: ResolvedTheme = {
   accentColor: '#5469d4',
   logoUrl: null,
   welcomeCopy: 'Welcome to our survey — it only takes a few minutes.',
+  surfaceColor: null,
+  ctaColorEnd: null,
+  logoBackgroundColor: null,
 };
 
 function makeParams(versionId: string = VERSION_ID) {
@@ -129,6 +145,10 @@ describe('PublicQuestionnairePage', () => {
     vi.mocked(isVoiceInputEnabled).mockResolvedValue(false);
     vi.mocked(isAttachmentInputEnabled).mockResolvedValue(false);
     vi.mocked(resolveThemeForVersion).mockResolvedValue(MOCK_THEME);
+    vi.mocked(resolveAnonymousForVersion).mockResolvedValue(false);
+    vi.mocked(resolveAdminPreviewExitHref).mockResolvedValue(
+      '/admin/questionnaires/q_abc/v/ver_abc123'
+    );
   });
 
   // -------------------------------------------------------------------------
@@ -274,6 +294,40 @@ describe('PublicQuestionnairePage', () => {
         'false'
       );
     });
+
+    it('passes anonymous=true when the version is configured anonymousMode', async () => {
+      // Arrange: the no-login surface resolves the version's anonymity for the opening turn.
+      vi.mocked(resolveAnonymousForVersion).mockResolvedValue(true);
+
+      // Act
+      const Component = await PublicQuestionnairePage({
+        params: makeParams(),
+        searchParams: makeSearchParams(),
+      });
+      render(Component);
+
+      // Assert: the flag is resolved for this version and forwarded to the boot.
+      expect(resolveAnonymousForVersion).toHaveBeenCalledWith(VERSION_ID);
+      expect(screen.getByTestId('anonymous-session-boot')).toHaveAttribute(
+        'data-anonymous',
+        'true'
+      );
+    });
+
+    it('passes anonymous=false when the version is not anonymous', async () => {
+      // Arrange: default mock resolves false.
+      const Component = await PublicQuestionnairePage({
+        params: makeParams(),
+        searchParams: makeSearchParams(),
+      });
+      render(Component);
+
+      // Assert
+      expect(screen.getByTestId('anonymous-session-boot')).toHaveAttribute(
+        'data-anonymous',
+        'false'
+      );
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -309,6 +363,49 @@ describe('PublicQuestionnairePage', () => {
       render(Component);
 
       expect(screen.getByTestId('anonymous-session-boot')).toHaveAttribute('data-preview', 'false');
+    });
+
+    it('renders an "Exit preview" link to the admin workspace in preview mode', async () => {
+      vi.mocked(resolveAdminPreviewExitHref).mockResolvedValue(
+        '/admin/questionnaires/q_xyz/v/ver_abc123'
+      );
+
+      const Component = await PublicQuestionnairePage({
+        params: makeParams(),
+        searchParams: makeSearchParams('1'),
+      });
+      render(Component);
+
+      // Resolved with the version from params.
+      expect(resolveAdminPreviewExitHref).toHaveBeenCalledWith(VERSION_ID);
+      const exit = screen.getByRole('link', { name: /exit preview/i });
+      expect(exit).toHaveAttribute('href', '/admin/questionnaires/q_xyz/v/ver_abc123');
+    });
+
+    it('does not resolve an exit href or render the banner outside preview mode', async () => {
+      const Component = await PublicQuestionnairePage({
+        params: makeParams(),
+        searchParams: makeSearchParams(),
+      });
+      render(Component);
+
+      // The expensive lookup is skipped entirely for real respondents.
+      expect(resolveAdminPreviewExitHref).not.toHaveBeenCalled();
+      expect(screen.queryByRole('link', { name: /exit preview/i })).not.toBeInTheDocument();
+    });
+
+    it('omits the banner when the exit href cannot be resolved (version gone)', async () => {
+      vi.mocked(resolveAdminPreviewExitHref).mockResolvedValue(null);
+
+      const Component = await PublicQuestionnairePage({
+        params: makeParams(),
+        searchParams: makeSearchParams('1'),
+      });
+      render(Component);
+
+      // Still a preview run, but no dangling/broken exit control.
+      expect(screen.getByTestId('anonymous-session-boot')).toHaveAttribute('data-preview', 'true');
+      expect(screen.queryByRole('link', { name: /exit preview/i })).not.toBeInTheDocument();
     });
   });
 

@@ -5,6 +5,9 @@
  * per-tile `animation-delay`). Server-renderable (no hooks). Used on the
  * questionnaires and demo-clients list pages and the questionnaire Overview tab.
  * Only meaningful inside a `.cq-surface` wrapper, which supplies `--cq-accent`.
+ *
+ * `value` (and `label`) are `ReactNode`/string, so a tile can fold two related figures
+ * into one — e.g. a "Questions / Data slots" tile showing "5 / 4".
  */
 import { cn } from '@/lib/utils';
 

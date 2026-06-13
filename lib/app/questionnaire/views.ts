@@ -52,9 +52,11 @@ export interface QuestionnaireListItem {
     versionNumber: number;
     status: AppQuestionnaireStatus;
   } | null;
-  /** Section / question counts for the latest version (0 when no version yet). */
+  /** Section / question / data-slot counts for the latest version (0 when no version yet). */
   sectionCount: number;
   questionCount: number;
+  /** Data slots generated for the latest version (0 when none / feature unused). */
+  dataSlotCount: number;
   /** DEMO-ONLY (F2.5.1): the attributed demo client, or null for a generic Sunrise demo. */
   demoClient: AttributedDemoClient | null;
   createdAt: string;
@@ -71,6 +73,8 @@ export interface QuestionnaireVersionSummary {
   audience: AudienceShape | null;
   sectionCount: number;
   questionCount: number;
+  /** Data slots generated for this version (0 when none / feature unused). */
+  dataSlotCount: number;
   /** Applied (not-yet-reverted) extraction-change records on this version. */
   changeCount: number;
   createdAt: string;

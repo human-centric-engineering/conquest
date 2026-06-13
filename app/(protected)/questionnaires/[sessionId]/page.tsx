@@ -74,6 +74,7 @@ export default async function QuestionnaireSessionPage({
     select: {
       status: true,
       respondentUserId: true,
+      version: { select: { config: { select: { anonymousMode: true } } } },
       _count: { select: { answers: true } },
     },
   });
@@ -82,6 +83,7 @@ export default async function QuestionnaireSessionPage({
   if (!row || row.respondentUserId !== session.user.id) notFound();
 
   const resumed = row._count.answers > 0;
+  const anonymous = row.version.config?.anonymousMode ?? false;
   // Independent reads — resolve in parallel rather than serialising the round-trips. The
   // panel + lifecycle status are SSR-seeded here (the user is already verified as owner),
   // so they paint with no fetch flash; the live updates after each turn come from the
@@ -100,7 +102,12 @@ export default async function QuestionnaireSessionPage({
       <BrandThemeProvider theme={theme}>
         <SessionWorkspace
           sessionId={sessionId}
-          initialTurns={buildWelcomeTurns({ resumed, welcomeCopy: theme.welcomeCopy })}
+          initialTurns={buildWelcomeTurns({
+            resumed,
+            welcomeCopy: theme.welcomeCopy,
+            voiceInputEnabled,
+            anonymous,
+          })}
           autoStart={!resumed}
           initialStatus={initialStatus}
           initialPanel={panel?.view}

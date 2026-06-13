@@ -110,6 +110,26 @@ describe('useQuestionnaireSessionStream', () => {
     expect(JSON.parse(init.body as string)).toEqual({ kickoff: true });
   });
 
+  it('recovers status to idle when the stream is aborted, never stranding the composer on streaming', async () => {
+    // An abort (genuine navigation, or React 19 StrictMode's dev double-invoke aborting the
+    // kickoff) must NOT leave the session pinned in a phantom `streaming` state — otherwise the
+    // composer (`canSend`) is permanently disabled with no error shown.
+    fetchMock.mockRejectedValue(new DOMException('The user aborted a request.', 'AbortError'));
+
+    const { result } = renderHook(() => useQuestionnaireSessionStream({ sessionId: SESSION_ID }));
+
+    await act(async () => {
+      await result.current.kickoff();
+    });
+
+    expect(result.current.turns).toEqual([]);
+    expect(result.current.streaming).toBe(false);
+    expect(result.current.status).toBe('idle');
+    expect(result.current.canSend).toBe(true);
+    // An abort is not an error surface — no banner.
+    expect(result.current.error).toBeNull();
+  });
+
   it('POSTs to the messages endpoint with the trimmed message and no token header by default', async () => {
     fetchMock.mockResolvedValue(streamResponse(HAPPY_FRAMES));
 

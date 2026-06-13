@@ -44,8 +44,14 @@ small talk, "I don't know"), return an empty "answers" array — do not guess.
 message doesn't support.
 - Prefer the respondent's own words; do not normalise away meaning.
 
-Output: respond with ONLY a single JSON object: { "answers": [ ... ] }. Do not wrap the JSON in \
-prose or code fences.`;
+Genuineness check: ALSO judge whether the message is a genuine attempt to answer. Set \
+"suspectedNonGenuine": true (and a one-line "suspicionReason") ONLY when the answer is clearly \
+abusive, absurd or impossible for the question (e.g. a tenure of "543 years"), gibberish/spam, or \
+plainly off-topic. Be tolerant: brief, blunt, colloquial, lazy, or "prefer not to say" answers \
+are GENUINE — leave the flag false/omitted for those. When in doubt, omit it.
+
+Output: respond with ONLY a single JSON object: { "answers": [ ... ] } (optionally with \
+"suspectedNonGenuine" and "suspicionReason"). Do not wrap the JSON in prose or code fences.`;
 
 /**
  * Appended to the system rules when the turn carries data slots (Data Slots feature). The
@@ -58,19 +64,81 @@ You ALSO maintain a set of DATA SLOTS — short semantic targets the conversatio
 the same response, add a "dataSlotFills" array. For every data slot the respondent's message \
 informs (directly, by inference, or by synthesising the conversation), output one entry:
 - "dataSlotKey": a key from the provided data-slot list ONLY.
-- "value": the captured position (free-form: a string, number, or small object — whatever best \
-represents their answer).
-- "paraphrase": a one-sentence restatement of the respondent's position toward this slot, in your \
-own words ("They found setup straightforward but were slowed by unclear docs.").
+- "value": the captured position as concrete, structured data — the SPECIFICS the respondent gave \
+(numbers, names, choices), not a label for them. For "I am 25, male" record \
+{"age": 25, "gender": "male"} (or "25, male"), NOT "age and gender provided".
+- "paraphrase": a faithful restatement of the respondent's ACTUAL answer in your own words, naming \
+the specifics they gave so a reader can see exactly what was recorded ("A 25-year-old male.", \
+"They found setup straightforward but were slowed by unclear docs."). NEVER a meta-summary of what \
+they shared ("They provided their age and gender." is WRONG). Capture the full substance — if they \
+gave several details, reflect them all.
 - "confidence": 0–1, how well you understand their position on this slot.
 - "provenance": ${EXTRACTOR_EMITTED_PROVENANCES.join(', ')} (as above).
 - "rationale": a short reason.
-Only fill a data slot the message genuinely informs; improve an existing fill if the message adds \
-to it. If the message informs no data slots, return an empty "dataSlotFills" array.`;
+Some slots show a "current" line — what's already recorded from earlier in the conversation. When \
+the new message ADDS to or CORRECTS that (e.g. they first said "male" then "actually, female"), \
+output an UPDATED fill for that slot that MERGES the still-true details with the correction (here: \
+keep the age, change the gender), and reflect the corrected state in value + paraphrase. \
+RE-SCAN EVERY slot against the new message each turn, not only the one the conversation is currently \
+about: when the new answer adds context to ANY slot that already has a "current" value — even one \
+from another theme — emit an updated fill whose value + paraphrase is a SUPERSET of the prior \
+"current" (carry forward every still-true detail and fold in the new), and raise "confidence" only \
+when the new context genuinely sharpens your understanding. Otherwise only emit a fill for a slot \
+the latest message genuinely informs; if it informs no data slots, return an empty "dataSlotFills" \
+array.
+Some slots show a "status: asked N× without a clear answer" line — the conversation has tried \
+repeatedly and is about to move on. For EACH such slot you MUST output a fill: infer the most \
+plausible position from the ENTIRE conversation even if the signal is weak, set a LOW "confidence" \
+(≤ 0.4), and use provenance "inferred" or "synthesised". Never leave one of these slots empty — \
+a tentative reading we can revisit is better than nothing.`;
+
+/**
+ * Appended to the system rules ONLY when sensitivity awareness is on (gated by the platform flag +
+ * per-questionnaire toggle, threaded as `ctx.sensitivityAware`). Asks the extractor to flag a
+ * genuine sensitive/contentious disclosure so the conversation can tread carefully. Kept off the
+ * default prompt so the feature adds zero tokens/behaviour when disabled.
+ */
+const SENSITIVITY_RULES = `
+
+Sensitivity awareness: a respondent may disclose something sensitive or contentious — abuse, \
+harassment, discrimination, self-harm, threats, bereavement, a safeguarding or serious legal/safety \
+concern. When the message contains a GENUINE personal disclosure of this kind, ALSO output a \
+"sensitivity" object:
+- "detected": true.
+- "severity": "high" for a serious disclosure (abuse, self-harm, threats, safeguarding); "medium" \
+or "low" for lesser sensitivity.
+- "category": a short label, e.g. "harassment", "self-harm", "bereavement".
+- "summary": a careful, CLINICAL, NON-GRAPHIC one-line restatement (e.g. "Reports mistreatment by a \
+senior colleague."). Never quote graphic or distressing detail.
+OMIT the "sensitivity" field entirely when there is no genuine sensitive disclosure — a neutral, \
+negative, or merely critical answer is NOT a disclosure. When in doubt, omit it.`;
 
 /** Render one data-slot candidate as a compact, model-readable line. */
 function describeDataSlot(slot: DataSlotCandidateView): string {
-  return `- key: ${slot.key}\n  name: ${slot.name}\n  theme: ${slot.theme}\n  description: ${slot.description}`;
+  const lines = [
+    `- key: ${slot.key}`,
+    `  name: ${slot.name}`,
+    `  theme: ${slot.theme}`,
+    `  description: ${slot.description}`,
+  ];
+  // Data Slots feature: show what's already recorded so the model can UPDATE/CORRECT it (vs
+  // re-deriving from scratch and silently dropping prior, still-true details).
+  if (slot.current) {
+    const conf =
+      typeof slot.current.confidence === 'number'
+        ? ` (confidence ${slot.current.confidence.toFixed(2)})`
+        : '';
+    lines.push(
+      `  current: ${slot.current.paraphrase ?? JSON.stringify(slot.current.value)}${conf}`
+    );
+  }
+  // Move-on: a slot about to be parked — the model must give a best-effort inference now.
+  if (slot.parkPending) {
+    lines.push(
+      `  status: asked ${slot.attempts ?? 1}× without a clear answer — give your BEST-EFFORT inference now (low confidence is fine; do not leave it empty)`
+    );
+  }
+  return lines.join('\n');
 }
 
 /** Render one candidate slot as a compact, model-readable line. */
@@ -122,7 +190,10 @@ export function buildAnswerExtractionPrompt(ctx: ExtractionContext): LlmMessage[
   // Data Slots feature: when present, the system rules + a candidate section are added so the
   // model fills data slots in the same call.
   const hasDataSlots = ctx.dataSlotCandidates !== undefined && ctx.dataSlotCandidates.length > 0;
-  const systemContent = hasDataSlots ? SYSTEM_RULES + DATA_SLOT_RULES : SYSTEM_RULES;
+  const systemContent =
+    (hasDataSlots ? SYSTEM_RULES + DATA_SLOT_RULES : SYSTEM_RULES) +
+    // Sensitivity block only when the feature is on — zero added prompt/tokens otherwise.
+    (ctx.sensitivityAware ? SENSITIVITY_RULES : '');
   const dataSlotSection = hasDataSlots
     ? `\n\nData slots (fill these too):\n${ctx.dataSlotCandidates!.map(describeDataSlot).join('\n')}`
     : '';
@@ -133,8 +204,16 @@ export function buildAnswerExtractionPrompt(ctx: ExtractionContext): LlmMessage[
       `part of their answer — extract values they support, citing the file in the rationale.`
     : '';
 
+  // In question mode the respondent is replying to one ACTIVE question; in data-slot mode there is
+  // none (they're answering an open conversational prompt), so frame the task accordingly.
+  const activeLine =
+    ctx.activeQuestionKey !== null
+      ? `Active question key: ${ctx.activeQuestionKey}\n\n`
+      : 'The respondent is answering an open, conversational prompt — there is no single active ' +
+        'question. Capture every question and data slot their message genuinely supports.\n\n';
+
   const userText =
-    `Active question key: ${ctx.activeQuestionKey}\n\n` +
+    activeLine +
     `Candidate questions (extract answers only for these):\n${candidates}` +
     dataSlotSection +
     '\n\n' +

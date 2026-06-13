@@ -22,8 +22,18 @@
  */
 
 import { EXTRACT_ANSWER_SLOTS_CAPABILITY_SLUG } from '@/lib/app/questionnaire/constants';
-import { applyIntents } from '@/lib/app/questionnaire/orchestrator/orchestrator';
-import { unansweredQuestions } from '@/lib/app/questionnaire/selection/context';
+import {
+  applyIntents,
+  ASSESS_SERIOUSNESS_TOOL_SLUG,
+} from '@/lib/app/questionnaire/orchestrator/orchestrator';
+import { evaluateAbuseStrike, ABUSE_ABANDON_MESSAGE } from '@/lib/app/questionnaire/seriousness';
+import {
+  runningMaxLevel,
+  shouldSignpost,
+  composeSupportMessage,
+} from '@/lib/app/questionnaire/sensitivity';
+import type { SensitivityAssessment } from '@/lib/app/questionnaire/sensitivity/types';
+import { coverageRatio, unansweredQuestions } from '@/lib/app/questionnaire/selection/context';
 import type { ChatEvent } from '@/types/orchestration';
 import type {
   AnswerSlotIntent,
@@ -48,11 +58,30 @@ export const DATA_SLOT_SELECTION_TOOL_SLUG = 'app_select_data_slot';
 /** Confidence at/above which a data slot counts as "filled" for targeting + the panel. */
 export const DATA_SLOT_FILLED_THRESHOLD = 0.5;
 
+/**
+ * Confidence stamped on a synthesised provisional fill when a slot is parked and the extractor
+ * returned nothing for it — low (below the filled threshold) so the panel shows it as a tentative
+ * reading, while the `provisional` flag still marks the slot covered so it isn't re-asked.
+ */
+export const PROVISIONAL_FLOOR_CONFIDENCE = 0.2;
+
+/**
+ * How far data-slot coverage may run ahead of the BACKGROUND question coverage before the loop
+ * stops deepening the conversation and asks an unanswered REQUIRED question directly. Keeps the
+ * deliverable (the questions) in step with the data-slot conversation, so mandatory answers the
+ * free-flowing chat didn't capture get surfaced mid-stream — not saved for the end-of-run sweep.
+ */
+export const BALANCED_QUESTION_LAG = 0.2;
+
 /** Deterministic fallback prose for the terminal branches (offer phrasing is the LLM's job). */
 export const DATA_SLOT_COMPLETE_MESSAGE =
   "Thanks — that's everything we need. You can submit your responses whenever you're ready.";
 
-/** Merge this turn's data-slot fills into the answered set (filled = confidence ≥ threshold). */
+/**
+ * Merge this turn's data-slot fills into the answered set. A slot counts as covered at
+ * confidence ≥ threshold OR when its fill is `provisional` (a parked best-effort inference). The
+ * `provisional` flag is carried so targeting can exclude parked slots and the panel can mark them.
+ */
 function applyFills(
   dataSlots: DataSlotTarget[],
   answered: DataSlotAnsweredView[],
@@ -64,9 +93,18 @@ function applyFills(
   for (const fill of fills) {
     const id = idByKey.get(fill.dataSlotKey);
     if (!id) continue;
-    byId.set(id, { dataSlotId: id, confidence: fill.confidence });
+    byId.set(id, {
+      dataSlotId: id,
+      confidence: fill.confidence,
+      provisional: fill.provisional ?? false,
+    });
   }
   return [...byId.values()];
+}
+
+/** True once a slot is "covered" for targeting — a confident fill OR a parked provisional one. */
+function isCovered(a: DataSlotAnsweredView): boolean {
+  return (a.confidence ?? 0) >= DATA_SLOT_FILLED_THRESHOLD || a.provisional === true;
 }
 
 /** The unfilled data slots, theme-ordered (the loader already orders by theme then ordinal). */
@@ -74,24 +112,28 @@ function unfilledDataSlots(
   dataSlots: DataSlotTarget[],
   answered: DataSlotAnsweredView[]
 ): DataSlotTarget[] {
-  const filled = new Set(
-    answered
-      .filter((a) => (a.confidence ?? 0) >= DATA_SLOT_FILLED_THRESHOLD)
-      .map((a) => a.dataSlotId)
-  );
-  return dataSlots.filter((s) => !filled.has(s.id));
+  const covered = new Set(answered.filter(isCovered).map((a) => a.dataSlotId));
+  return dataSlots.filter((s) => !covered.has(s.id));
 }
 
 /**
  * Topic-local pick: prefer an unfilled slot in the CURRENT theme (the one the previous turn
  * targeted) so the interviewer lingers in an area; only when that area is exhausted move to the
- * next theme. Falls back to the first unfilled slot when there's no active theme.
+ * next theme. Falls back to the first unfilled slot when there's no active theme. When `avoidTheme`
+ * is set (we just PARKED a slot and want to bridge to a fresh topic), prefer a slot in a DIFFERENT
+ * theme — explicit forward movement instead of lingering on the area we just gave up on.
  */
 function pickNextDataSlot(
   unfilled: DataSlotTarget[],
   activeDataSlotKey: string | null | undefined,
-  dataSlots: DataSlotTarget[]
+  dataSlots: DataSlotTarget[],
+  avoidTheme?: string
 ): DataSlotTarget {
+  if (avoidTheme) {
+    const elsewhere = unfilled.find((s) => s.theme !== avoidTheme);
+    if (elsewhere) return elsewhere;
+    // Only the just-parked theme remains — fall through (still better to keep asking than stall).
+  }
   const activeTheme = activeDataSlotKey
     ? dataSlots.find((s) => s.key === activeDataSlotKey)?.theme
     : undefined;
@@ -148,6 +190,8 @@ export async function runDataSlotTurn(
   let costUsd = 0;
 
   const hasMessage = state.userMessage.trim().length > 0;
+  // Sensitivity awareness: the extractor's disclosure assessment this turn, captured for step 1.6.
+  let extractedSensitivity: SensitivityAssessment | undefined;
 
   // 1. Combined extraction — question answers (background) + data-slot fills (respondent-facing).
   if (hasMessage && state.flags.extraction) {
@@ -160,6 +204,7 @@ export async function runDataSlotTurn(
     );
     answerUpserts.push(...out.intents);
     dataSlotFills = out.dataSlotFills ?? [];
+    extractedSensitivity = out.sensitivity;
     if (out.diagnostic !== undefined) {
       events.push({
         type: 'warning',
@@ -169,9 +214,126 @@ export async function runDataSlotTurn(
     }
   }
 
+  // 1.5 Seriousness / abuse gate (parity with question mode). The judge runs on every answered
+  //     turn while the gate is on; a non-serious verdict DISREGARDS both this turn's question
+  //     answers AND its data-slot fills (never persisted), strikes the session, and abandons at the
+  //     configured threshold.
+  let abuse: TurnResult['abuse'];
+  let disregarded = false;
+  if (hasMessage && state.flags.seriousnessGate && state.config.abuseThreshold > 0) {
+    const judged = await invokers.assessSeriousness(state);
+    costUsd += judged.costUsd;
+    toolCalls.push(
+      toolCall(ASSESS_SERIOUSNESS_TOOL_SLUG, judged.diagnostic === undefined, {
+        ...(judged.latencyMs !== undefined ? { latencyMs: judged.latencyMs } : {}),
+      })
+    );
+    if (judged.verdict && !judged.verdict.serious) {
+      // Disregard — neither the question answers nor the data-slot fills are kept.
+      disregarded = true;
+      answerUpserts.length = 0;
+      dataSlotFills = [];
+      const strike = evaluateAbuseStrike(state.abuseStrikes, state.config.abuseThreshold);
+      abuse = {
+        flagged: true,
+        newStrikeCount: strike.newStrikeCount,
+        abandon: strike.abandon,
+        reason: judged.verdict.reason,
+      };
+      if (strike.abandon) {
+        // Terminal: the route abandons the session + locks the surface. The assessment reflects
+        // the UNCHANGED background question coverage (the dropped answers were never merged).
+        const answeredAtAbandon = new Set(state.answered.map((a) => a.questionId));
+        return {
+          response: { kind: 'complete', text: strike.abandonMessage ?? ABUSE_ABANDON_MESSAGE },
+          targetedQuestionId: null,
+          sideEffects: { answerUpserts: [], answerRefinements: [], dataSlotFills: [] },
+          // Drop any side-band notice (e.g. the extraction "couldn't capture that" diagnostic) —
+          // on a terminal turn the abandon message is the only thing the respondent should see.
+          events: [],
+          toolCalls,
+          costUsd,
+          contradictions: [],
+          assessment: {
+            kind: 'not_ready',
+            coverage:
+              state.questions.length === 0 ? 1 : answeredAtAbandon.size / state.questions.length,
+            answeredCount: answeredAtAbandon.size,
+            requiredUnansweredKeys: [],
+            capReached: false,
+            unmet: ['coverage_below_threshold'],
+            rationale: 'Session abandoned by the seriousness gate.',
+          },
+          abuse,
+        };
+      }
+      // Below threshold: surface the escalating notice; the conversation re-targets below because
+      // the fills were not merged (the data slot stays unfilled).
+      events.push({ type: 'warning', code: 'seriousness', message: strike.noticeMessage });
+    }
+  }
+
+  // 1.6 Sensitivity awareness / safeguarding (parity with question mode). Remember a genuine
+  //     disclosure flagged by the extractor (when the turn wasn't disregarded); the route persists
+  //     the running-max level + note and the phraser softens every later turn. Support frame pushed
+  //     last (below).
+  let sensitivity: TurnResult['sensitivity'];
+  if (hasMessage && state.flags.sensitivityAwareness && !disregarded && extractedSensitivity) {
+    sensitivity = {
+      detected: true,
+      severity: extractedSensitivity.severity,
+      category: extractedSensitivity.category,
+      summary: extractedSensitivity.summary,
+      newLevel: runningMaxLevel(state.sensitivityLevel, extractedSensitivity.severity),
+      signpost: shouldSignpost(state.sensitivityLevel, extractedSensitivity.severity),
+    };
+  }
+
   // 2. Merge — so targeting + completion see this turn's fills/answers.
   const effective = applyIntents(state, answerUpserts);
-  const effectiveDataAnswered = applyFills(dataSlots, state.dataSlotAnswered ?? [], dataSlotFills);
+  let effectiveDataAnswered = applyFills(dataSlots, state.dataSlotAnswered ?? [], dataSlotFills);
+
+  // 2.5 Move-on / park: when the active slot has been asked `maxDataSlotAttempts` times and is
+  //     STILL unfilled, stop re-asking it — record a best-effort PROVISIONAL fill (so it reads as
+  //     covered and the respondent keeps moving) and bridge to a fresh topic. Never on a
+  //     disregarded (abusive) turn — the gate already cleared the fills there. The extractor was
+  //     asked to infer this slot this turn (`parkPending`); if it returned nothing, synthesise a
+  //     floor fill so progress is guaranteed regardless of model compliance.
+  const activeSlot = state.activeDataSlotKey
+    ? dataSlots.find((s) => s.key === state.activeDataSlotKey)
+    : undefined;
+  let parkedTheme: string | undefined;
+  if (
+    hasMessage &&
+    !disregarded &&
+    activeSlot !== undefined &&
+    (state.dataSlotAttempts?.[activeSlot.id] ?? 0) >= state.config.maxDataSlotAttempts
+  ) {
+    const merged = effectiveDataAnswered.find((a) => a.dataSlotId === activeSlot.id);
+    if (merged === undefined || !isCovered(merged)) {
+      const inferred = dataSlotFills.find((f) => f.dataSlotKey === activeSlot.key);
+      if (inferred) {
+        inferred.provisional = true;
+      } else {
+        const prior = (state.dataSlotAnswered ?? []).find((a) => a.dataSlotId === activeSlot.id);
+        dataSlotFills.push({
+          dataSlotKey: activeSlot.key,
+          value: prior?.value ?? null,
+          paraphrase:
+            prior?.paraphrase && prior.paraphrase.trim().length > 0
+              ? prior.paraphrase
+              : 'Not clearly answered yet — recorded a tentative reading to revisit.',
+          confidence: PROVISIONAL_FLOOR_CONFIDENCE,
+          provenance: 'inferred',
+          provisional: true,
+          rationale: 'Parked after the re-ask limit; best-effort placeholder to keep moving.',
+        });
+      }
+      parkedTheme = activeSlot.theme;
+      // Recompute so the just-parked slot counts as covered for targeting + the assessment below.
+      effectiveDataAnswered = applyFills(dataSlots, state.dataSlotAnswered ?? [], dataSlotFills);
+    }
+  }
 
   // Background deliverable: completion is gated on ALL questions being answered.
   const answeredIds = new Set(effective.answered.map((a) => a.questionId));
@@ -200,6 +362,18 @@ export async function runDataSlotTurn(
 
   const unfilled = unfilledDataSlots(dataSlots, effectiveDataAnswered);
 
+  // Balanced progress: surface unanswered REQUIRED questions directly when the background question
+  // coverage falls behind the data-slot coverage — the conversation is filling slots but not
+  // capturing the mandatory answers (data slots are coarser than questions, so some required
+  // questions a theme should have answered slip through). Rather than wait for the end-of-run
+  // sweep, ask the next required question now whenever every data slot is filled OR the question
+  // coverage lags the data-slot coverage by more than {@link BALANCED_QUESTION_LAG}.
+  const requiredRemaining = remainingQuestions.filter((qn) => qn.required);
+  const dataCoverage =
+    dataSlots.length === 0 ? 1 : (dataSlots.length - unfilled.length) / dataSlots.length;
+  const questionCoverage = coverageRatio(effective);
+  const questionsLagging = dataCoverage - questionCoverage > BALANCED_QUESTION_LAG;
+
   if (allQuestionsAnswered) {
     if (effective.flags.completion) {
       response = {
@@ -209,9 +383,16 @@ export async function runDataSlotTurn(
     } else {
       response = { kind: 'complete', text: DATA_SLOT_COMPLETE_MESSAGE };
     }
+  } else if (requiredRemaining.length > 0 && (unfilled.length === 0 || questionsLagging)) {
+    // Interleave a required question directly (kept conversational by the route's phraser).
+    const next = requiredRemaining[0];
+    toolCalls.push(toolCall(DATA_SLOT_SELECTION_TOOL_SLUG, true));
+    response = { kind: 'question', questionId: next.id, text: next.prompt ?? '' };
+    targetedQuestionId = next.id;
   } else if (unfilled.length > 0) {
-    // Target the next data slot, topic-local (linger in the current theme).
-    const next = pickNextDataSlot(unfilled, state.activeDataSlotKey, dataSlots);
+    // Target the next data slot, topic-local (linger in the current theme) — but when we just
+    // parked a slot, bridge to a DIFFERENT theme so the move-on reads as forward progress.
+    const next = pickNextDataSlot(unfilled, state.activeDataSlotKey, dataSlots, parkedTheme);
     const activeTheme = state.activeDataSlotKey
       ? dataSlots.find((s) => s.key === state.activeDataSlotKey)?.theme
       : undefined;
@@ -234,6 +415,15 @@ export async function runDataSlotTurn(
     targetedQuestionId = next.id;
   }
 
+  // Signpost support LAST so it wins the chat's single notice slot (the hook keeps one warning).
+  if (sensitivity?.signpost && state.config.supportMessage.trim().length > 0) {
+    events.push({
+      type: 'warning',
+      code: 'support',
+      message: composeSupportMessage(state.config.supportMessage, state.config.supportResourceUrl),
+    });
+  }
+
   return {
     response,
     targetedQuestionId,
@@ -243,5 +433,7 @@ export async function runDataSlotTurn(
     costUsd,
     contradictions: [],
     assessment,
+    ...(abuse !== undefined ? { abuse } : {}),
+    ...(sensitivity !== undefined ? { sensitivity } : {}),
   };
 }

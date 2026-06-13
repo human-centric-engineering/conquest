@@ -24,11 +24,13 @@ import {
 } from '@/lib/app/questionnaire/types';
 import {
   buildAnswerPanelView,
+  blendedProgressPercent,
   type PanelAnswerInput,
   type PanelSectionInput,
 } from '@/lib/app/questionnaire/panel/answer-panel';
 import type {
   AnswerPanelView,
+  DataSlotFillHistoryEntry,
   DataSlotPanelGroup,
   PanelRefinementEntry,
 } from '@/lib/app/questionnaire/panel/types';
@@ -43,6 +45,11 @@ export interface LoadedAnswerPanel {
 /** Cast a stored `refinementHistory` Json column back to our entry array. */
 function asRefinementHistory(value: unknown): PanelRefinementEntry[] {
   return Array.isArray(value) ? (value as PanelRefinementEntry[]) : [];
+}
+
+/** Cast a data-slot fill's stored `refinementHistory` Json column back to its entry array. */
+function asDataSlotHistory(value: unknown): DataSlotFillHistoryEntry[] {
+  return Array.isArray(value) ? (value as DataSlotFillHistoryEntry[]) : [];
 }
 
 /** Narrow a stored `answerSlotPanelScope` to the enum (default when unknown/absent). */
@@ -100,9 +107,16 @@ export async function loadAnswerPanelState(
           questionSlot: { select: { key: true } },
         },
       },
-      // Data Slots feature: the session's fills (the respondent-facing capture).
+      // Data Slots feature: the session's fills (the respondent-facing capture). `refinementHistory`
+      // carries prior values when the respondent changed their answer, surfaced as "Earlier: …".
       dataSlotFills: {
-        select: { dataSlotId: true, paraphrase: true, confidence: true },
+        select: {
+          dataSlotId: true,
+          paraphrase: true,
+          confidence: true,
+          provisional: true,
+          refinementHistory: true,
+        },
       },
       turns: { select: { id: true, ordinal: true } },
     },
@@ -148,14 +162,24 @@ export async function loadAnswerPanelState(
     const fillByDataSlotId = new Map(
       row.dataSlotFills.map((f) => [
         f.dataSlotId,
-        { paraphrase: f.paraphrase, confidence: f.confidence },
+        {
+          paraphrase: f.paraphrase,
+          confidence: f.confidence,
+          provisional: f.provisional,
+          history: asDataSlotHistory(f.refinementHistory),
+        },
       ])
     );
     const groups: DataSlotPanelGroup[] = [];
     const byTheme = new Map<string, DataSlotPanelGroup>();
+    let filledDataSlots = 0;
     for (const ds of row.version.dataSlots) {
       const fill = fillByDataSlotId.get(ds.id);
-      const filled = (fill?.confidence ?? 0) >= DATA_SLOT_FILLED_THRESHOLD;
+      // A slot is covered at a confident fill OR when parked with a provisional best-effort one
+      // (the respondent sees forward progress; the marker flags it as tentative).
+      const provisional = fill?.provisional ?? false;
+      const filled = (fill?.confidence ?? 0) >= DATA_SLOT_FILLED_THRESHOLD || provisional;
+      if (filled) filledDataSlots += 1;
       let group = byTheme.get(ds.theme);
       if (!group) {
         group = { theme: ds.theme, slots: [] };
@@ -169,11 +193,26 @@ export async function loadAnswerPanelState(
         paraphrase: fill?.paraphrase ?? null,
         confidence: fill?.confidence ?? null,
         filled,
+        provisional,
+        // Prior values, oldest first (only present once the answer changed at least once).
+        history: (fill?.history ?? []).map((h) => ({
+          paraphrase: h.previousParaphrase,
+          confidence: h.previousConfidence,
+        })),
       });
     }
     view.dataSlotGroups = groups;
-    // Question rows are suppressed in data-slot mode; the header/progress use the question counts
-    // (answeredCount/totalCount) which the pure builder already computed from `answers`/`sections`.
+    // Balanced progress: blend the background question coverage (answeredCount/totalCount, already
+    // computed by the pure builder) with the data-slot coverage into one percentage. Data-slot mode
+    // shows this — never the raw question count, which would leak the structure the respondent
+    // never sees.
+    view.progressPercent = blendedProgressPercent({
+      answeredQuestions: view.answeredCount,
+      totalQuestions: view.totalCount,
+      filledDataSlots,
+      totalDataSlots: row.version.dataSlots.length,
+    });
+    // Question rows are suppressed in data-slot mode; the header/progress use the blended percent.
     view.sections = [];
   }
 

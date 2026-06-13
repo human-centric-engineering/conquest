@@ -12,6 +12,7 @@ vi.mock('@/lib/db/client', () => ({
     appQuestionnaire: { findMany: vi.fn(), count: vi.fn() },
     appQuestionnaireSection: { groupBy: vi.fn() },
     appQuestionSlot: { groupBy: vi.fn() },
+    appDataSlot: { groupBy: vi.fn() },
   },
 }));
 
@@ -24,6 +25,7 @@ const findMany = prisma.appQuestionnaire.findMany as unknown as Mock;
 const count = prisma.appQuestionnaire.count as unknown as Mock;
 const sectionGroupBy = prisma.appQuestionnaireSection.groupBy as unknown as Mock;
 const slotGroupBy = prisma.appQuestionSlot.groupBy as unknown as Mock;
+const dataSlotGroupBy = prisma.appDataSlot.groupBy as unknown as Mock;
 
 const D1 = new Date('2026-01-01T00:00:00.000Z');
 const D2 = new Date('2026-01-02T00:00:00.000Z');
@@ -55,6 +57,10 @@ describe('listQuestionnaires', () => {
     slotGroupBy.mockResolvedValue([
       { versionId: 'ver-1', _count: { _all: 7 } },
       { versionId: 'ver-2', _count: { _all: 9 } },
+    ]);
+    dataSlotGroupBy.mockResolvedValue([
+      { versionId: 'ver-1', _count: { _all: 3 } },
+      { versionId: 'ver-2', _count: { _all: 5 } },
     ]);
 
     const { items, total } = await listQuestionnaires({

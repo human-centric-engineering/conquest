@@ -31,6 +31,21 @@ describe('buildAnswerExtractionPrompt', () => {
     expect(system).not.toContain('refined');
   });
 
+  it('omits the sensitivity block by default (zero added prompt when the feature is off)', () => {
+    const messages = buildAnswerExtractionPrompt(ctx({ candidateSlots: [slot({ key: 'q1' })] }));
+    const system = typeof messages[0]?.content === 'string' ? messages[0].content : '';
+    expect(system).not.toMatch(/Sensitivity awareness/i);
+  });
+
+  it('appends the sensitivity block only when sensitivityAware is set', () => {
+    const messages = buildAnswerExtractionPrompt(
+      ctx({ candidateSlots: [slot({ key: 'q1' })], sensitivityAware: true })
+    );
+    const system = typeof messages[0]?.content === 'string' ? messages[0].content : '';
+    expect(system).toMatch(/Sensitivity awareness/i);
+    expect(system).toMatch(/"sensitivity"/);
+  });
+
   it('carries the active key, candidate prompts, and the respondent message', () => {
     const messages = buildAnswerExtractionPrompt(
       ctx({
@@ -43,6 +58,23 @@ describe('buildAnswerExtractionPrompt', () => {
     expect(content).toContain('Active question key: name');
     expect(content).toContain('What is your name?');
     expect(content).toContain('I am Dana');
+  });
+
+  it('frames an open prompt (no "Active question key") in data-slot mode', () => {
+    // activeQuestionKey: null → data-slot mode: the respondent is answering an open conversational
+    // prompt, so the extractor is told there is no single active question (vs naming one).
+    const messages = buildAnswerExtractionPrompt(
+      ctx({
+        candidateSlots: [slot({ key: 'name', prompt: 'What is your name?' })],
+        activeQuestionKey: null,
+        userMessage: 'I am Dana',
+      })
+    );
+    const content = userContent(messages);
+    expect(content).not.toContain('Active question key');
+    expect(content).toContain('there is no single active question');
+    // Still lists the candidate questions to extract background answers into.
+    expect(content).toContain('What is your name?');
   });
 
   it('renders choice options for a choice slot', () => {
@@ -147,6 +179,85 @@ describe('attachmentsToContentParts', () => {
       source: { type: 'base64', mediaType: 'text/plain', data: 'dHh0' },
       name: 'notes.txt',
     });
+  });
+});
+
+describe('buildAnswerExtractionPrompt — data slots', () => {
+  function systemContent(messages: ReturnType<typeof buildAnswerExtractionPrompt>): string {
+    const sys = messages.find((m) => m.role === 'system');
+    return typeof sys?.content === 'string' ? sys.content : '';
+  }
+
+  it('lists data-slot candidates and demands specific, non-meta paraphrases', () => {
+    const messages = buildAnswerExtractionPrompt({
+      ...ctx({ candidateSlots: [slot({ key: 'q1' })], activeQuestionKey: null }),
+      dataSlotCandidates: [
+        {
+          key: 'demographics',
+          name: 'Employee Demographics',
+          description: 'Age + gender',
+          theme: 'About',
+        },
+      ],
+    });
+    expect(userContent(messages)).toContain('demographics');
+    const system = systemContent(messages);
+    // The rules must steer away from meta-summaries toward the actual values.
+    expect(system).toContain('25-year-old male');
+    expect(system).toMatch(/specifics/i);
+  });
+
+  it("renders a slot's current fill so the model can update/correct it", () => {
+    const messages = buildAnswerExtractionPrompt({
+      ...ctx({ candidateSlots: [slot({ key: 'q1' })], activeQuestionKey: null }),
+      dataSlotCandidates: [
+        {
+          key: 'demographics',
+          name: 'Employee Demographics',
+          description: 'Age + gender',
+          theme: 'About',
+          current: {
+            value: { age: 25, gender: 'male' },
+            paraphrase: 'A 25-year-old male.',
+            confidence: 0.9,
+          },
+        },
+      ],
+    });
+    const content = userContent(messages);
+    expect(content).toContain('current: A 25-year-old male.');
+    expect(systemContent(messages)).toMatch(/CORRECTS?/);
+  });
+
+  it('instructs the model to re-scan every slot and keep the paraphrase a superset', () => {
+    const messages = buildAnswerExtractionPrompt({
+      ...ctx({ candidateSlots: [slot({ key: 'q1' })], activeQuestionKey: null }),
+      dataSlotCandidates: [{ key: 'demographics', name: 'Demo', description: 'd', theme: 'About' }],
+    });
+    const system = systemContent(messages);
+    expect(system).toMatch(/RE-SCAN EVERY slot/i);
+    expect(system).toMatch(/SUPERSET/i);
+  });
+
+  it('renders a park status line and demands a best-effort inference for a parked slot', () => {
+    const messages = buildAnswerExtractionPrompt({
+      ...ctx({ candidateSlots: [slot({ key: 'q1' })], activeQuestionKey: null }),
+      dataSlotCandidates: [
+        {
+          key: 'blockers',
+          name: 'Workplace Blockers',
+          description: 'What gets in the way',
+          theme: 'Wellbeing',
+          parkPending: true,
+          attempts: 2,
+        },
+      ],
+    });
+    const content = userContent(messages);
+    expect(content).toMatch(/status: asked 2× without a clear answer/);
+    expect(content).toMatch(/BEST-EFFORT inference/i);
+    // The system rules require a fill for such a slot rather than leaving it empty.
+    expect(systemContent(messages)).toMatch(/MUST output a fill/i);
   });
 });
 

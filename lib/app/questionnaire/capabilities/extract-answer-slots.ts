@@ -71,6 +71,7 @@ import type {
   ExtractionContext,
   ExtractionSlotView,
 } from '@/lib/app/questionnaire/extraction/types';
+import type { SensitivityAssessment } from '@/lib/app/questionnaire/sensitivity/types';
 
 const SLUG = EXTRACT_ANSWER_SLOTS_CAPABILITY_SLUG;
 
@@ -115,30 +116,60 @@ const dataSlotCandidateSchema = z.object({
   name: z.string().min(1),
   description: z.string(),
   theme: z.string(),
+  // What's already recorded for this slot this session (when any) so the extractor can update or
+  // correct it rather than re-deriving from scratch. `value` is free-form (Json-shaped).
+  current: z
+    .object({
+      value: z.unknown(),
+      paraphrase: z.string().nullable(),
+      confidence: z.number().min(0).max(1).nullable(),
+    })
+    .optional(),
+  // Move-on (Data Slots feature): this slot has hit the re-ask cap and is about to be parked —
+  // the extractor must best-effort-infer it. `attempts` is surfaced in the prompt's status line.
+  parkPending: z.boolean().optional(),
+  attempts: z.number().int().nonnegative().optional(),
 });
 
-const argsSchema = z.object({
-  /** The respondent's message to extract from (this turn). */
-  userMessage: z.string().min(1),
-  /** Key of the question being asked — must be one of `candidateSlots`. */
-  activeQuestionKey: z.string().min(1),
-  /** The active slot plus the version's unanswered slots. */
-  candidateSlots: z.array(candidateSlotSchema).min(1).max(MAX_CANDIDATE_SLOTS),
-  /** Data Slots feature: the data slots to also fill this turn (omit for question-only mode). */
-  dataSlotCandidates: z.array(dataSlotCandidateSchema).max(MAX_CANDIDATE_SLOTS).optional(),
-  /** Already-answered state, so the extractor doesn't re-ask. */
-  answered: z
-    .array(
-      z.object({ slotKey: z.string().min(1), confidence: z.number().min(0).max(1).nullable() })
-    )
-    .optional(),
-  /** Recent transcript, oldest first. */
-  recentMessages: z.array(z.string()).max(50).optional(),
-  /** Files attached to this turn (images/documents) — read alongside the message. */
-  attachments: chatAttachmentsArraySchema.optional(),
-  /** Stable session identity, threaded into cost-log metadata. */
-  sessionId: z.string().optional(),
-});
+const argsSchema = z
+  .object({
+    /** The respondent's message to extract from (this turn). */
+    userMessage: z.string().min(1),
+    /**
+     * Key of the question being asked — must be one of `candidateSlots`. Omitted in DATA-SLOT
+     * MODE, where the respondent is answering an open conversational prompt (a data slot) and
+     * there is no single active question to privilege.
+     */
+    activeQuestionKey: z.string().min(1).optional(),
+    /** The active slot plus the version's unanswered slots (may be empty in pure data-slot mode). */
+    candidateSlots: z.array(candidateSlotSchema).max(MAX_CANDIDATE_SLOTS),
+    /** Data Slots feature: the data slots to also fill this turn (omit for question-only mode). */
+    dataSlotCandidates: z.array(dataSlotCandidateSchema).max(MAX_CANDIDATE_SLOTS).optional(),
+    /** Already-answered state, so the extractor doesn't re-ask. */
+    answered: z
+      .array(
+        z.object({ slotKey: z.string().min(1), confidence: z.number().min(0).max(1).nullable() })
+      )
+      .optional(),
+    /** Recent transcript, oldest first. */
+    recentMessages: z.array(z.string()).max(50).optional(),
+    /** Files attached to this turn (images/documents) — read alongside the message. */
+    attachments: chatAttachmentsArraySchema.optional(),
+    /** Stable session identity, threaded into cost-log metadata. */
+    sessionId: z.string().optional(),
+    /**
+     * Sensitivity awareness / safeguarding: when true, the prompt asks the extractor to ALSO flag
+     * a genuine sensitive/contentious disclosure. The route sets this from the platform flag AND
+     * the per-questionnaire toggle; off (default) adds no prompt text or behaviour.
+     */
+    sensitivityAware: z.boolean().optional(),
+  })
+  // There must be something to extract into: question slots (question mode) and/or data slots
+  // (data-slot mode). An empty call on both would be a no-op dispatch — reject it as malformed.
+  .refine((v) => v.candidateSlots.length > 0 || (v.dataSlotCandidates?.length ?? 0) > 0, {
+    message: 'at least one of candidateSlots or dataSlotCandidates must be non-empty',
+    path: ['candidateSlots'],
+  });
 
 export type ExtractAnswerSlotsArgs = z.infer<typeof argsSchema>;
 
@@ -163,6 +194,20 @@ export interface ExtractAnswerSlotsData {
    * (F6.3) — the same figure already logged fire-and-forget to `AiCostLog`.
    */
   costUsd: number;
+  /**
+   * Seriousness gate — stage 1: the extractor's suspicion that this answer is non-genuine
+   * (preposterous / abusive / off-topic). The orchestrator only pays for the dedicated judge
+   * when this is `true`. Absent/`false` = no suspicion. `suspicionReason` is a short log note.
+   */
+  suspectedNonGenuine?: boolean;
+  suspicionReason?: string;
+  /**
+   * Sensitivity awareness / safeguarding: the extractor's assessment of a sensitive/contentious
+   * disclosure this turn, present only when one was detected (and `sensitivityAware` was set).
+   * `summary` is a careful, non-graphic restatement — the orchestrator remembers it; it never
+   * enters the provenance audit row, event metadata, or analytics.
+   */
+  sensitivity?: SensitivityAssessment;
 }
 
 /**
@@ -207,15 +252,33 @@ function toExtractionContext(args: ExtractAnswerSlotsArgs): ExtractionContext {
   }));
 
   return {
-    activeQuestionKey: args.activeQuestionKey,
+    activeQuestionKey: args.activeQuestionKey ?? null,
     candidateSlots,
     answered: args.answered ?? [],
     userMessage: args.userMessage,
-    sessionId: args.sessionId ?? `dispatch-${args.activeQuestionKey}`,
+    sessionId: args.sessionId ?? `dispatch-${args.activeQuestionKey ?? 'data-slot'}`,
+    ...(args.sensitivityAware ? { sensitivityAware: true } : {}),
     ...(args.recentMessages ? { recentMessages: args.recentMessages } : {}),
     ...(args.attachments && args.attachments.length > 0 ? { attachments: args.attachments } : {}),
     ...(args.dataSlotCandidates && args.dataSlotCandidates.length > 0
-      ? { dataSlotCandidates: args.dataSlotCandidates }
+      ? {
+          dataSlotCandidates: args.dataSlotCandidates.map((c) => ({
+            key: c.key,
+            name: c.name,
+            description: c.description,
+            theme: c.theme,
+            ...(c.current
+              ? {
+                  current: {
+                    value: c.current.value,
+                    paraphrase: c.current.paraphrase,
+                    confidence: c.current.confidence,
+                  },
+                }
+              : {}),
+            ...(c.parkPending ? { parkPending: true, attempts: c.attempts ?? 1 } : {}),
+          })),
+        }
       : {}),
   };
 }
@@ -284,7 +347,7 @@ export class AppExtractAnswerSlotsCapability extends BaseCapability<
     result: CapabilityResult<ExtractAnswerSlotsData>
   ): { args: unknown; resultPreview: string } {
     const safeArgs = {
-      activeQuestionKey: args.activeQuestionKey,
+      activeQuestionKey: args.activeQuestionKey ?? null,
       candidateSlotCount: args.candidateSlots.length,
       userMessage: redactedString('userMessage'),
       ...(args.recentMessages !== undefined
@@ -303,6 +366,7 @@ export class AppExtractAnswerSlotsCapability extends BaseCapability<
       for (const intent of intents) {
         provenanceCounts[intent.provenance] = (provenanceCounts[intent.provenance] ?? 0) + 1;
       }
+      const { sensitivity } = result.data;
       preview = JSON.stringify({
         success: true,
         data: {
@@ -311,6 +375,10 @@ export class AppExtractAnswerSlotsCapability extends BaseCapability<
           sideEffectCount: intents.filter((i) => !i.isActiveQuestion).length,
           droppedCount: result.data.droppedCount,
           provenanceCounts,
+          // Sensitivity awareness: severity + category only — NEVER the summary (it restates PII).
+          ...(sensitivity
+            ? { sensitivity: { severity: sensitivity.severity, category: sensitivity.category } }
+            : {}),
         },
       });
     } else {
@@ -464,6 +532,17 @@ export class AppExtractAnswerSlotsCapability extends BaseCapability<
       dataSlotFills,
       droppedCount: dropped.length,
       costUsd: completion.costUsd,
+      // Stage 1 of the seriousness gate — pass the model's suspicion flag through (when set).
+      ...(completion.value.suspectedNonGenuine !== undefined
+        ? { suspectedNonGenuine: completion.value.suspectedNonGenuine }
+        : {}),
+      ...(completion.value.suspicionReason !== undefined
+        ? { suspicionReason: completion.value.suspicionReason }
+        : {}),
+      // Sensitivity awareness — pass the disclosure assessment through (when detected).
+      ...(completion.value.sensitivity !== undefined
+        ? { sensitivity: completion.value.sensitivity }
+        : {}),
     });
   }
 }

@@ -143,7 +143,7 @@ describe('eventTypeFor', () => {
 });
 
 describe('SESSION_EVENT_TYPES vocabulary', () => {
-  it('carries the transition events plus created and cost_cap_reached', () => {
+  it('carries the transition events plus created, cost_cap_reached, and sensitivity_flagged', () => {
     expect(SESSION_EVENT_TYPES).toEqual([
       'created',
       'paused',
@@ -151,6 +151,7 @@ describe('SESSION_EVENT_TYPES vocabulary', () => {
       'completed',
       'abandoned',
       'cost_cap_reached',
+      'sensitivity_flagged',
     ]);
   });
 });

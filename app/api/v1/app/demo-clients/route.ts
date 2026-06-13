@@ -59,6 +59,15 @@ const handleCreate = withAdminAuth(async (request: NextRequest, session) => {
         ...(body.accentColor !== undefined ? { accentColor: body.accentColor } : {}),
         ...(body.logoUrl !== undefined ? { logoUrl: body.logoUrl } : {}),
         ...(body.welcomeCopy !== undefined ? { welcomeCopy: body.welcomeCopy } : {}),
+        // DEMO-ONLY (F7.1+): respondent-session chrome columns.
+        ...(body.surfaceColor !== undefined ? { surfaceColor: body.surfaceColor } : {}),
+        ...(body.ctaColorEnd !== undefined ? { ctaColorEnd: body.ctaColorEnd } : {}),
+        ...(body.logoBackgroundColor !== undefined
+          ? { logoBackgroundColor: body.logoBackgroundColor }
+          : {}),
+        ...(body.logoBackgroundEnabled !== undefined
+          ? { logoBackgroundEnabled: body.logoBackgroundEnabled }
+          : {}),
       },
       select: DEMO_CLIENT_SELECT,
     });

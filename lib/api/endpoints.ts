@@ -454,6 +454,9 @@ export const API = {
       /** Per-version cost actuals from `AiCostLog` (GET — F8.1). */
       versionAnalyticsCost: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/analytics/cost`,
+      /** Safeguarding summary — flagged/serious sensitive-disclosure session counts (GET). */
+      versionAnalyticsSafeguarding: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/analytics/safeguarding`,
       /** Completed-session results export, CSV or JSON via `?format=` (GET — F8.2). */
       versionExport: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/export`,

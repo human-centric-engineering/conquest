@@ -66,9 +66,12 @@ export interface ExtractionAnsweredView {
 export interface ExtractionContext {
   /**
    * The question currently being asked. The message primarily answers this; the
-   * key must resolve to one of {@link candidateSlots}.
+   * key must resolve to one of {@link candidateSlots}. `null` in DATA-SLOT MODE,
+   * where the respondent is answering an open conversational prompt (a data slot)
+   * rather than one fixed question — the extractor then captures every question +
+   * data slot the message supports, with no single "active" question to privilege.
    */
-  activeQuestionKey: string;
+  activeQuestionKey: string | null;
   /**
    * Every slot a value could be extracted into this turn — the active slot plus
    * the version's unanswered slots (re-answering an answered slot is F4.4's
@@ -99,6 +102,13 @@ export interface ExtractionContext {
   attachments?: ExtractionAttachment[];
   /** Stable session identity — threaded into cost-log metadata. */
   sessionId: string;
+  /**
+   * Sensitivity awareness / safeguarding: when true, the prompt asks the extractor to ALSO emit a
+   * `sensitivity` assessment for a genuine sensitive/contentious disclosure. Off (the default) adds
+   * no prompt text and no behaviour, so the feature is zero-cost when disabled. The route sets this
+   * from the platform flag AND the per-questionnaire config toggle.
+   */
+  sensitivityAware?: boolean;
 }
 
 /** One base64-encoded attachment on a respondent turn (mirrors `chatAttachmentSchema`). */
@@ -122,6 +132,25 @@ export interface DataSlotCandidateView {
   description: string;
   /** Group label (for the model's sense of the area). */
   theme: string;
+  /**
+   * What's already recorded for this slot this session, when any — so the extractor can UPDATE or
+   * CORRECT it (merge still-true details with a correction) rather than re-deriving from scratch
+   * and dropping prior detail. Absent until the slot has a fill.
+   */
+  current?: {
+    value: unknown;
+    paraphrase: string | null;
+    confidence: number | null;
+  };
+  /**
+   * Move-on signal (Data Slots feature): this slot has been asked about `attempts` times without a
+   * clear answer and is about to be PARKED. The extractor must emit a best-effort, low-confidence
+   * fill for it from the WHOLE conversation even if this turn's message barely informs it — the
+   * orchestrator then marks that fill provisional and moves on, so the respondent keeps progressing.
+   */
+  parkPending?: boolean;
+  /** How many consecutive turns have already targeted this slot (surfaced when `parkPending`). */
+  attempts?: number;
 }
 
 /**
@@ -138,6 +167,12 @@ export interface DataSlotFillIntent {
   confidence: number;
   provenance: AnswerProvenance;
   rationale?: string;
+  /**
+   * Move-on (Data Slots feature): the orchestrator marks a fill provisional when it parks a slot
+   * after the re-ask cap (a best-effort inference, shown "provisional · may revisit"). Set by the
+   * orchestrator, never the model. A later confident fill clears it.
+   */
+  provisional?: boolean;
 }
 
 /**

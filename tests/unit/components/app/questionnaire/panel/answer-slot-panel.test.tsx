@@ -86,6 +86,82 @@ describe('AnswerSlotPanel', () => {
     expect(screen.getByText('1 captured')).toBeInTheDocument();
   });
 
+  it('shows a blended percentage (not the raw question count) in data-slot mode', () => {
+    render(
+      <AnswerSlotPanel
+        view={view({
+          dataSlotGroups: [{ theme: 'Strategy', slots: [] }],
+          progressPercent: 37,
+          // Background question counts are still present but must NOT be shown to the respondent.
+          answeredCount: 0,
+          totalCount: 71,
+        })}
+      />
+    );
+    expect(screen.getByText('What we’re learning')).toBeInTheDocument();
+    expect(screen.getByText('37% complete')).toBeInTheDocument();
+    expect(screen.queryByText('0 of 71 answered')).not.toBeInTheDocument();
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '37');
+  });
+
+  it('shows the current data-slot paraphrase and prior values as "Earlier:" history', () => {
+    render(
+      <AnswerSlotPanel
+        view={view({
+          dataSlotGroups: [
+            {
+              theme: 'Demographics',
+              slots: [
+                {
+                  key: 'demographics',
+                  name: 'Employee Demographics',
+                  description: 'Age + gender',
+                  paraphrase: 'A 25-year-old female.',
+                  confidence: 0.95,
+                  filled: true,
+                  provisional: false,
+                  history: [{ paraphrase: 'A 25-year-old male.', confidence: 0.9 }],
+                },
+              ],
+            },
+          ],
+          progressPercent: 20,
+        })}
+      />
+    );
+    expect(screen.getByText('A 25-year-old female.')).toBeInTheDocument();
+    expect(screen.getByText('Earlier: A 25-year-old male.')).toBeInTheDocument();
+  });
+
+  it('marks a provisional data slot as "provisional · may revisit"', () => {
+    render(
+      <AnswerSlotPanel
+        view={view({
+          dataSlotGroups: [
+            {
+              theme: 'Wellbeing',
+              slots: [
+                {
+                  key: 'blockers',
+                  name: 'Workplace Blockers',
+                  description: 'What gets in the way',
+                  paraphrase: 'A tentative reading of what slows them down.',
+                  confidence: 0.2,
+                  filled: true,
+                  provisional: true,
+                  history: [],
+                },
+              ],
+            },
+          ],
+          progressPercent: 30,
+        })}
+      />
+    );
+    expect(screen.getByText('A tentative reading of what slows them down.')).toBeInTheDocument();
+    expect(screen.getByText(/provisional · may revisit/i)).toBeInTheDocument();
+  });
+
   it('renders answered values and pending placeholders', () => {
     render(<AnswerSlotPanel view={view()} />);
     expect(screen.getByText('Engineer')).toBeInTheDocument();

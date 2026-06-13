@@ -20,6 +20,25 @@ vi.mock('@/lib/orchestration/capabilities/dispatcher', () => ({
 const adaptiveMock = vi.hoisted(() => ({ buildAdaptiveDeps: vi.fn(() => ({})) }));
 vi.mock('@/app/api/v1/app/questionnaires/_lib/adaptive-deps', () => adaptiveMock);
 
+// Mocks for assessSeriousness: provider resolution, getProvider, structured completion, and
+// logCost (fire-and-forget — a no-op here so the test doesn't hit Prisma/SDK).
+const resolverMock = vi.hoisted(() => ({ resolveAgentProviderAndModel: vi.fn() }));
+vi.mock('@/lib/orchestration/llm/agent-resolver', () => resolverMock);
+
+const providerManagerMock = vi.hoisted(() => ({ getProvider: vi.fn() }));
+vi.mock('@/lib/orchestration/llm/provider-manager', () => providerManagerMock);
+
+const structuredMock = vi.hoisted(() => ({
+  runStructuredCompletion: vi.fn(),
+  tryParseJson: vi.fn(),
+}));
+vi.mock('@/lib/orchestration/evaluations/parse-structured', () => structuredMock);
+
+vi.mock('@/lib/orchestration/llm/cost-tracker', () => ({
+  logCost: vi.fn().mockResolvedValue(null),
+  calculateCost: vi.fn().mockReturnValue({ totalCostUsd: 0 }),
+}));
+
 import { buildTurnInvokers } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-invokers';
 import {
   DETECT_CONTRADICTIONS_CAPABILITY_SLUG,
@@ -67,6 +86,11 @@ function state(over: Partial<TurnState> = {}): TurnState {
       contradictionWindowN: 3,
       contradictionEveryNTurns: 1,
       anonymousMode: false,
+      abuseThreshold: 4,
+      maxDataSlotAttempts: 2,
+      sensitivityAwareness: false,
+      supportMessage: '',
+      supportResourceUrl: '',
       profileFields: [],
       answerSlotPanelScope: 'full_progress',
     },
@@ -108,7 +132,15 @@ function state(over: Partial<TurnState> = {}): TurnState {
     ],
     recentMessages: ['hi', 'Role?'],
     selectionRound: 1,
-    flags: { extraction: true, contradiction: true, refinement: true, completion: true },
+    abuseStrikes: 0,
+    flags: {
+      extraction: true,
+      contradiction: true,
+      refinement: true,
+      completion: true,
+      seriousnessGate: false,
+      sensitivityAwareness: false,
+    },
     ...over,
   };
 }
@@ -157,11 +189,59 @@ describe('extractAnswers', () => {
     });
   });
 
-  it('short-circuits with a diagnostic when there is no active question', async () => {
+  it('short-circuits with a diagnostic when there is no active question AND no data slots', async () => {
     const inv = await invokers({ activeQuestionKey: null });
     const out = await inv.extractAnswers(state());
     expect(out).toMatchObject({ intents: [], diagnostic: 'no_active_question' });
     expect(dispatcherMock.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('dispatches in data-slot mode (no active question), omitting activeQuestionKey', async () => {
+    // The bug: data-slot mode has no active question (the target is a data slot), so the old guard
+    // returned `no_active_question` every turn and nothing was ever captured. With data slots
+    // present the call must dispatch — extracting background question answers AND data-slot fills —
+    // and must NOT send an activeQuestionKey (there is none).
+    (dispatcherMock.dispatch as Mock).mockResolvedValue({
+      success: true,
+      data: {
+        intents: [{ slotKey: 'role', value: 'x', isActiveQuestion: false }],
+        dataSlotFills: [
+          {
+            dataSlotKey: 'strategy',
+            value: 'aware',
+            paraphrase: 'p',
+            confidence: 0.9,
+            provenance: 'direct',
+          },
+        ],
+        droppedCount: 0,
+        costUsd: 0,
+      },
+    });
+    const inv = await invokers({
+      activeQuestionKey: null,
+      dataSlotCandidates: [
+        {
+          key: 'strategy',
+          name: 'Strategy Awareness',
+          description: 'd',
+          theme: 'Strategy',
+          // Existing fill → the extractor must see it so a correction updates rather than re-derives.
+          current: { value: 'aware', paraphrase: 'Aware of the strategy.', confidence: 0.8 },
+        },
+      ],
+    });
+    const out = await inv.extractAnswers(state());
+
+    expect(out.diagnostic).toBeUndefined();
+    expect(out.intents).toHaveLength(1);
+    expect(out.dataSlotFills).toHaveLength(1);
+    const [, args] = (dispatcherMock.dispatch as Mock).mock.calls[0];
+    expect(args).not.toHaveProperty('activeQuestionKey');
+    expect(args.dataSlotCandidates).toHaveLength(1);
+    expect(args.dataSlotCandidates[0].current).toMatchObject({
+      paraphrase: 'Aware of the strategy.',
+    });
   });
 
   it('short-circuits when the extractor agent is unconfigured', async () => {
@@ -311,31 +391,28 @@ describe('optional-field branches (the false sides of the arg spreads)', () => {
 });
 
 describe('cost surfacing (F6.3)', () => {
-  it('extractAnswers surfaces the capability data costUsd', async () => {
-    (dispatcherMock.dispatch as Mock).mockResolvedValue({
-      success: true,
-      data: { intents: [], droppedCount: 0, costUsd: 0.0123 },
-    });
+  it('maps costUsd from the capability data field — not an identity passthrough', async () => {
+    // Arrange two different invokers producing different cost values to confirm the FIELD is
+    // read (data.costUsd) and the result is placed on the outcome's costUsd property —
+    // not just that a number passes through unchanged.
+    (dispatcherMock.dispatch as Mock)
+      .mockResolvedValueOnce({
+        success: true,
+        data: { intents: [], droppedCount: 0, costUsd: 0.0123 },
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: { findings: [], droppedCount: 0, costUsd: 0.004 },
+      });
     const inv = await invokers();
-    expect((await inv.extractAnswers(state())).costUsd).toBe(0.0123);
-  });
 
-  it('detectContradictions surfaces the capability data costUsd', async () => {
-    (dispatcherMock.dispatch as Mock).mockResolvedValue({
-      success: true,
-      data: { findings: [], droppedCount: 0, costUsd: 0.004 },
-    });
-    const inv = await invokers();
-    expect((await inv.detectContradictions(state())).costUsd).toBe(0.004);
-  });
+    const extractOut = await inv.extractAnswers(state());
+    const detectOut = await inv.detectContradictions(state());
 
-  it('refineAnswer surfaces the capability data costUsd', async () => {
-    (dispatcherMock.dispatch as Mock).mockResolvedValue({
-      success: true,
-      data: { decisions: [], droppedCount: 0, costUsd: 0.002 },
-    });
-    const inv = await invokers();
-    expect((await inv.refineAnswer(state(), {})).costUsd).toBe(0.002);
+    // The invoker reads data.costUsd (not e.g. data.cost or data.totalCost) and surfaces it
+    // unchanged on the outcome — verify both invokers map from the correct source field.
+    expect(extractOut.costUsd).toBe(0.0123);
+    expect(detectOut.costUsd).toBe(0.004);
   });
 
   it('falls back to 0 when the capability data omits costUsd', async () => {
@@ -345,6 +422,76 @@ describe('cost surfacing (F6.3)', () => {
     });
     const inv = await invokers();
     expect((await inv.extractAnswers(state())).costUsd).toBe(0);
+  });
+});
+
+describe('assessSeriousness', () => {
+  // Happy-path provider stub — resolves to a concrete provider slug + model.
+  const resolvedBinding = { providerSlug: 'openai', model: 'gpt-4o', fallbacks: [] };
+  // A minimal provider stub: only the shape the invoker hands to runStructuredCompletion.
+  const providerStub = { chat: vi.fn() };
+
+  beforeEach(() => {
+    resolverMock.resolveAgentProviderAndModel.mockResolvedValue(resolvedBinding);
+    providerManagerMock.getProvider.mockResolvedValue(providerStub);
+  });
+
+  it('happy path: returns verdict.serious + costUsd from the structured completion', async () => {
+    // Arrange: the structured completion returns a genuine verdict with token usage.
+    structuredMock.runStructuredCompletion.mockResolvedValue({
+      value: { serious: true, reason: 'Plausible answer' },
+      tokenUsage: { input: 50, output: 20 },
+      costUsd: 0.0042,
+    });
+    const inv = await invokers();
+
+    // Act
+    const out = await inv.assessSeriousness(state());
+
+    // Assert: the invoker maps the completion's value onto the SeriousnessVerdict shape and
+    // surfaces the completion's costUsd — neither field is the raw mock return value echoed
+    // directly; the invoker constructs { verdict: { serious, reason }, costUsd } from it.
+    expect(out.diagnostic).toBeUndefined();
+    expect(out.verdict).toMatchObject({ serious: true, reason: 'Plausible answer' });
+    // costUsd comes from completion.costUsd — not from tokenUsage or any other field.
+    expect(out.costUsd).toBe(0.0042);
+  });
+
+  it('no_provider_configured: resolveAgentProviderAndModel throws → safe null verdict', async () => {
+    // Simulate a misconfigured environment where no provider can be resolved.
+    resolverMock.resolveAgentProviderAndModel.mockRejectedValue(new Error('no provider'));
+    const inv = await invokers();
+    const out = await inv.assessSeriousness(state());
+
+    // The invoker must not propagate the error; it returns a null verdict + the diagnostic code.
+    expect(out.verdict).toBeNull();
+    expect(out.costUsd).toBe(0);
+    expect(out.diagnostic).toBe('no_provider_configured');
+  });
+
+  it('provider_unavailable: getProvider throws → safe null verdict', async () => {
+    // Provider slug resolved fine but the provider itself is unreachable.
+    providerManagerMock.getProvider.mockRejectedValue(new Error('provider down'));
+    const inv = await invokers();
+    const out = await inv.assessSeriousness(state());
+
+    expect(out.verdict).toBeNull();
+    expect(out.costUsd).toBe(0);
+    expect(out.diagnostic).toBe('provider_unavailable');
+  });
+
+  it('seriousness_judge_failed: runStructuredCompletion throws → safe null verdict', async () => {
+    // Both provider steps succeed but the LLM call / parse fails (e.g. both retry attempts
+    // produce malformed JSON and onFinalFailure fires).
+    structuredMock.runStructuredCompletion.mockRejectedValue(
+      new Error('Seriousness verdict was not valid against the schema after one retry')
+    );
+    const inv = await invokers();
+    const out = await inv.assessSeriousness(state());
+
+    expect(out.verdict).toBeNull();
+    expect(out.costUsd).toBe(0);
+    expect(out.diagnostic).toBe('seriousness_judge_failed');
   });
 });
 

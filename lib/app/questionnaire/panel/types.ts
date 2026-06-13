@@ -61,6 +61,22 @@ export interface PanelSectionView {
 }
 
 /**
+ * One prior state of a data-slot fill, stored on the fill's `refinementHistory` Json column and
+ * appended whenever a later turn CHANGES the captured value (e.g. "male" → "female"). Lets the
+ * panel show how an answer evolved. Oldest first.
+ */
+export interface DataSlotFillHistoryEntry {
+  /** The captured position before this change (free-form). */
+  previousValue: unknown;
+  /** The restatement shown for that prior value, or null. */
+  previousParaphrase: string | null;
+  /** The confidence of that prior value, or null. */
+  previousConfidence: number | null;
+  /** ISO timestamp stamped at the persistence seam when the change was recorded. */
+  changedAt?: string;
+}
+
+/**
  * One data slot in the respondent panel (Data Slots feature). Shows the short name, the
  * agent's paraphrase of the respondent's position, and a confidence indicator. The underlying
  * question answers stay hidden — the respondent sees only this abstraction layer.
@@ -73,8 +89,20 @@ export interface DataSlotPanelSlot {
   paraphrase: string | null;
   /** 0–1; null when not yet filled. */
   confidence: number | null;
-  /** True once a fill (≥ the filled threshold) exists for this slot. */
+  /** True once the slot is covered — a confident fill (≥ threshold) OR a parked provisional one. */
   filled: boolean;
+  /**
+   * Move-on (Data Slots feature): the fill is a best-effort inference recorded after the agent
+   * tried a few times and moved on. Shown as covered with a subtle "provisional · may revisit"
+   * marker; a later confident answer clears it.
+   */
+  provisional: boolean;
+  /**
+   * Prior paraphrases for this slot when the respondent changed their answer, oldest first. Empty
+   * when the slot was filled once and never changed. Lets the panel show "Earlier: …" so a
+   * correction (e.g. 25-year-old male → female) is visible, not silently overwritten.
+   */
+  history: Array<{ paraphrase: string | null; confidence: number | null }>;
 }
 
 /** A themed group of data slots (the panel groups by the generator's theme). */
@@ -103,4 +131,11 @@ export interface AnswerPanelView {
    * deliverable), while these rows show the data-slot paraphrases + confidence.
    */
   dataSlotGroups?: DataSlotPanelGroup[];
+  /**
+   * Data Slots feature: a single 0–100 progress figure blending background question coverage with
+   * data-slot coverage (see `blendedProgressPercent`). Present only in data-slot mode — the header
+   * shows "{progressPercent}% complete" instead of the raw question count, which the respondent
+   * never sees. Absent in question mode (the header uses `answeredCount` / `totalCount`).
+   */
+  progressPercent?: number;
 }

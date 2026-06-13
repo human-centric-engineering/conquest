@@ -33,25 +33,34 @@ Sunrise's [multi-tenancy doc][mt] warns against.
 
 `AppDemoClient` (`app_demo_client`) — identity (F2.5.1) + theme (F3.4):
 
-| Field         | Type     | Notes                                                                          |
-| ------------- | -------- | ------------------------------------------------------------------------------ |
-| `id`          | cuid     |                                                                                |
-| `slug`        | String   | `@unique`, kebab-case ("acme-bank"); admin URLs                                |
-| `name`        | String   | display name ("Acme Bank Demo")                                                |
-| `description` | String?  | internal admin note                                                            |
-| `isActive`    | Boolean  | soft-disable; excluded from the attribution picker                             |
-| `ctaColor`    | String?  | **F3.4** hex CTA / button colour; null → Sunrise default                       |
-| `accentColor` | String?  | **F3.4** hex accent; email fallback-link colour + F7.1 CSS var; null → default |
-| `logoUrl`     | String?  | **F3.4** absolute https logo for the invitation email; null → none             |
-| `welcomeCopy` | String?  | **F3.4** branded invitation intro line; null → default copy                    |
-| timestamps    | DateTime |                                                                                |
+| Field                   | Type     | Notes                                                                                             |
+| ----------------------- | -------- | ------------------------------------------------------------------------------------------------- |
+| `id`                    | cuid     |                                                                                                   |
+| `slug`                  | String   | `@unique`, kebab-case ("acme-bank"); admin URLs                                                   |
+| `name`                  | String   | display name ("Acme Bank Demo")                                                                   |
+| `description`           | String?  | internal admin note                                                                               |
+| `isActive`              | Boolean  | soft-disable; excluded from the attribution picker                                                |
+| `ctaColor`              | String?  | **F3.4** hex CTA / button colour; null → Sunrise default                                          |
+| `accentColor`           | String?  | **F3.4** hex accent; email fallback-link colour + F7.1 CSS var; null → default                    |
+| `logoUrl`               | String?  | **F3.4** absolute https logo for the invitation email; null → none                                |
+| `welcomeCopy`           | String?  | **F3.4** branded invitation intro line; null → default copy                                       |
+| `surfaceColor`          | String?  | **F7.1+** hex brand "chrome" colour — session header band + default logo backdrop; null → no band |
+| `ctaColorEnd`           | String?  | **F7.1+** hex CTA gradient end; set → CTA renders `ctaColor → ctaColorEnd`; null → solid CTA      |
+| `logoBackgroundColor`   | String?  | **F7.1+** hex colour painted behind the logo (when enabled); null → falls back to `surfaceColor`  |
+| `logoBackgroundEnabled` | Boolean  | **F7.1+** "apply this colour as the logo background" toggle; default `false`                      |
+| timestamps              | DateTime |                                                                                                   |
 
 `AppQuestionnaire.demoClientId String?` — nullable FK, `onDelete: SetNull`, indexed.
 `null` = a "Generic Sunrise demo" (defaults end-to-end). Pre-F2.5.1 questionnaires
 keep working; **no backfill**.
 
-**Theme columns (F3.4) are all nullable** — null on any field means "use the Sunrise
-default" (`resolveTheme()` fills it), so an unthemed client renders exactly as before.
+**Theme columns are all nullable** (`logoBackgroundEnabled` defaults `false`) — null/off
+on any field means "use the Sunrise default" (`resolveTheme()` fills it), so an unthemed
+client renders exactly as before. The **F7.1+ chrome set** (`surfaceColor`, `ctaColorEnd`,
+`logoBackgroundColor`, `logoBackgroundEnabled`) makes a brand _suggestive_ — a deep header
+band, a gradient CTA, a backdrop for logos drawn to sit on one — without trying to clone the
+client's site. They are optional on the raw `DemoClientTheme` contract (absent === null), so
+older DB selects / forks / tests that pass only the F3.4 four still resolve cleanly.
 `reset-sessions` (F6.4) is now built ([demo-session-reset.md](./demo-session-reset.md));
 clone-for-client (P3+) is the remaining distributed P2.5 work. See the
 [development plan][plan] P2.5 distributed-work table.
@@ -64,12 +73,17 @@ columns into a usable brand:
 - `resolveTheme(client | null)` → a `ResolvedTheme` with every gap filled by
   `SUNRISE_THEME_DEFAULTS` (`logoUrl` stays nullable — there is no default logo).
   `null` (generic demo) resolves to the all-defaults theme.
-- `themeToCssVariables(theme)` → `--app-cta-color` / `--app-accent-color` (+
-  `--app-logo-url` when a logo is set) for the **F7.1** user UI to spread onto a
-  container. The invitation email reads the resolved values inline instead.
-- `themeFields` (Zod) validate hex colours + an absolute https logo URL; they spread
-  into the demo-client create/update schemas. An empty form field coerces to null
-  (= reset to the Sunrise default).
+- `themeToCssVariables(theme)` → `--app-cta-color` / `--app-accent-color` /
+  `--app-cta-gradient` (always; a `linear-gradient(...)` when `ctaColorEnd` is set, else
+  the solid CTA colour) plus, when set, `--app-surface-color`, `--app-logo-bg`, and
+  `--app-logo-url`. The **F7.1** user UI spreads these onto a container; the invitation
+  email reads the resolved values inline instead.
+- `resolveTheme` also resolves the **logo backdrop** once: `logoBackgroundColor` is null
+  whenever `logoBackgroundEnabled` is off, otherwise the explicit colour falling back to
+  `surfaceColor` — so renderers paint it directly without re-deriving the toggle.
+- `themeFields` (Zod) validate hex colours + an absolute https logo URL (+ the boolean
+  toggle); they spread into the demo-client create/update schemas. An empty colour form
+  field coerces to null (= reset to the Sunrise default).
 
 **First renderer = the invitation email (F3.4).** The send seam resolves the theme
 from the invitation's denormalised `demoClientId` snapshot — see [invitations.md].
@@ -122,15 +136,20 @@ a typed-confirmation guard and an anonymous-mode refusal. See
 - `/admin/demo-clients/:id` — edit form + delete (disabled with an explanation
   while attributed) + an **"Attributed questionnaires"** list (each row links to the
   questionnaire editor) so the admin can act on the delete guard's instruction.
-- Both forms carry an **"Invitation branding"** fieldset (F3.4): CTA colour, accent
-  colour, logo URL, welcome copy — each optional with a `<FieldHelp>`; blank = the
-  Sunrise default. The edit form shows a **live `<DemoClientThemePreview>`** under the
-  fieldset (valid inputs only — a half-typed hex shows the default, not a broken
-  swatch).
+- Both forms carry a **"Brand theming"** fieldset (F3.4 / F7.1+): CTA colour, accent
+  colour, logo URL, welcome copy, plus a **"Session chrome"** sub-block — surface colour,
+  CTA gradient end, and an **"Apply a colour behind the logo"** toggle (the requested
+  device, with an optional colour that defaults to the surface colour). Each field is
+  optional with a `<FieldHelp>`; blank = the Sunrise default. Colours apply to **both** the
+  invitation email and the respondent question session (visible via "Preview as
+  respondent"). The edit form shows a **live `<DemoClientThemePreview>`** under the fieldset
+  (valid inputs only — a half-typed hex shows the default, not a broken swatch).
 - **Brand preview (`<DemoClientThemePreview>`).** Surfaces the configured brand back
-  to the admin — the gap that a client could set four theme fields and see nothing.
-  Reuses `resolveTheme()` and the same escaped `--app-logo-url` background as
-  `BrandThemeProvider` (never a raw `<img src>`). Two modes: **compact** on the list's
+  to the admin — the gap that a client could set theme fields and see nothing. Reuses
+  `resolveTheme()` and the same escaped `--app-logo-url` background as `BrandThemeProvider`
+  (never a raw `<img src>`), and renders a **miniature of the session chrome** (surface
+  band + logo backdrop + gradient send button) so the admin recognises the brand before
+  opening "Preview as respondent". Two modes: **compact** on the list's
   _Branding_ column (a swatch/thumbnail only for fields actually set; "Default" when
   none) and **full** on the detail page / live form preview (the resolved brand the
   respondent sees, defaults filled).

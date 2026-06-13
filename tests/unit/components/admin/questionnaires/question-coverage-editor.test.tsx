@@ -41,15 +41,40 @@ describe('QuestionCoverageEditor', () => {
     expect(await screen.findByText(/short, stable identifier/i)).toBeInTheDocument();
   });
 
-  it('renders a removable chip per selected key and fires onToggle on remove', async () => {
+  it('renders a removable chip per selected key', () => {
+    renderEditor(['q1', 'q2']);
+    expect(screen.getByText('q1')).toBeInTheDocument();
+    expect(screen.getByText('q2')).toBeInTheDocument();
+  });
+
+  it('does not remove a chip until the "are you sure" is confirmed', async () => {
     const user = userEvent.setup();
     const { onToggle } = renderEditor(['q1', 'q2']);
 
-    expect(screen.getByText('q1')).toBeInTheDocument();
-    expect(screen.getByText('q2')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Remove q1' }));
+
+    // Guarded — nothing is removed on the bare click.
+    expect(onToggle).not.toHaveBeenCalled();
+
+    const dialog = await screen.findByRole('alertdialog');
+    expect(within(dialog).getByText(/remove this question key/i)).toBeInTheDocument();
+    // The warning spells out the targeting risk.
+    expect(within(dialog).getByText(/no longer be targeted/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/inadvisable/i)).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole('button', { name: /remove anyway/i }));
+    expect(onToggle).toHaveBeenCalledWith('q1');
+  });
+
+  it('keeps the chip when the confirmation is cancelled', async () => {
+    const user = userEvent.setup();
+    const { onToggle } = renderEditor(['q1', 'q2']);
 
     await user.click(screen.getByRole('button', { name: 'Remove q1' }));
-    expect(onToggle).toHaveBeenCalledWith('q1');
+    const dialog = await screen.findByRole('alertdialog');
+    await user.click(within(dialog).getByRole('button', { name: /keep it/i }));
+
+    expect(onToggle).not.toHaveBeenCalled();
   });
 
   it('shows the empty-state hint when no keys are mapped', () => {

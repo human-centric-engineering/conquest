@@ -169,6 +169,24 @@ model AppQuestionnaireConfig {
   contradictionEveryNTurns Int     @default(1) // run detection every N respondent turns; 1 = every turn
   anonymousMode            Boolean @default(false) // don't collect identifying profile fields
 
+  // Seriousness / abuse gate: how many non-genuine (preposterous / abusive / off-topic)
+  // answers a session tolerates before it is abandoned. 0 = off for this questionnaire.
+  // Escalating warnings precede the abandon strike. Globally gated by the platform flag
+  // APP_QUESTIONNAIRES_SERIOUSNESS_GATE_ENABLED — inert until the operator turns it on.
+  abuseThreshold Int @default(4)
+
+  // Data Slots feature: how many times a data slot is targeted before the agent records a
+  // best-effort provisional fill and moves on. 2 = ask once, re-ask once specifically, then park.
+  maxDataSlotAttempts Int @default(2)
+
+  // Sensitivity awareness / safeguarding: when on (AND the platform flag
+  // APP_QUESTIONNAIRES_SENSITIVITY_AWARENESS_ENABLED), the agent detects + remembers a sensitive
+  // disclosure and softens later phrasing. supportMessage (with optional supportResourceUrl) is
+  // the verbatim copy signposted once on a serious disclosure; empty message = no signpost.
+  sensitivityAwareness Boolean @default(false)
+  supportMessage       String  @default("")
+  supportResourceUrl   String  @default("")
+
   // Respondent answer-slot panel (F7.2): how much of the questionnaire the live
   // panel shows. full_progress = every slot grouped by section (X-of-N progress);
   // answered_only = just captured answers (no pending structure). (ANSWER_SLOT_PANEL_SCOPES)
@@ -379,6 +397,16 @@ model AppDemoClient {
   logoUrl     String? // absolute https URL of the client logo shown in the email header
   welcomeCopy String? // branded intro line for the invitation email body
 
+  // DEMO-ONLY (F7.1+): richer brand chrome for the respondent session. All optional —
+  // each null/false leaves the surface looking as it did before. These let a brand be
+  // *suggested* (a deep "surface" header band, a gradient CTA, a coloured backdrop the
+  // logo was designed to sit on) while staying generic — any client can arrange them
+  // differently. Resolved by resolveTheme(); see lib/app/questionnaire/theming.
+  surfaceColor          String?  // deep brand "chrome" colour (hex); session header band + default logo backdrop
+  ctaColorEnd           String?  // optional CTA gradient end colour (hex); set → CTA renders ctaColor→ctaColorEnd, null → solid ctaColor
+  logoBackgroundColor   String?  // colour painted behind the logo (hex); null falls back to surfaceColor when the backdrop is enabled
+  logoBackgroundEnabled Boolean  @default(false) // "apply this colour as the logo background" — the admin toggle
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -413,6 +441,16 @@ model AppQuestionnaireSession {
   status           String   @default("active") // SESSION_STATUSES (types.ts): active | paused | completed | abandoned
   isPreview        Boolean  @default(false) // true = admin refine-answer exercise, not a respondent run
   respondentUserId String? // respondent User.id; plain String, no FK (UG-1); set in F4.6
+  // Seriousness / abuse gate: cumulative count of non-genuine answers flagged this session.
+  // The route increments it; at `config.abuseThreshold` the session is abandoned.
+  abuseStrikes     Int      @default(0)
+  // Sensitivity awareness / safeguarding: the session's running-max disclosure severity
+  // (null until first detection; "low" | "medium" | "high" — SENSITIVITY_SEVERITIES) and an
+  // append-only array of remembered disclosures (SensitivityNote[]). The summaries are threaded
+  // into the phraser so every later question stays gentle. Carries careful, non-graphic summaries
+  // only; never surfaced raw to analytics or event metadata.
+  sensitivityLevel String?
+  sensitivityNotes Json     @default("[]")
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -600,6 +638,7 @@ model AppDataSlotFill {
   confidence        Float? // 0–1; the agent's confidence in its understanding
   provenanceLabel   String   @default("direct") // ANSWER_PROVENANCES (types.ts)
   rationale         String?
+  provisional       Boolean  @default(false) // best-effort inference recorded after the re-ask cap; shown "provisional · may revisit". Cleared by a later confident fill.
   lastUpdatedTurnId String?
   refinementHistory Json     @default("[]") // RefinementHistoryEntry[] (refinement/types.ts)
   createdAt         DateTime @default(now())
@@ -665,6 +704,7 @@ model AppQuestionnaireTurn {
   userMessage           String   @db.Text // respondent's message (PII)
   agentResponse         String   @db.Text // composed agent reply streamed back
   targetedQuestionId    String? // AppQuestionSlot.id asked for; null = completion/offer turn
+  targetedDataSlotId    String? // AppDataSlot.id targeted this turn (data-slot mode); null otherwise — drives the per-slot re-ask/park counter
   toolCalls             Json     @default("[]") // [{ slug, success, code?, latencyMs? }] ordered
   sideEffectAnswerIds   Json     @default("[]") // AppAnswerSlot.id[] this turn created/updated
   sideEffectDataSlotIds Json     @default("[]") // AppDataSlotFill.id[] this turn created/updated (data-slot mode)

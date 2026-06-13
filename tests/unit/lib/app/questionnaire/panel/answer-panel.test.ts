@@ -11,6 +11,7 @@ import { describe, it, expect } from 'vitest';
 
 import {
   buildAnswerPanelView,
+  blendedProgressPercent,
   type PanelBuilderInput,
 } from '@/lib/app/questionnaire/panel/answer-panel';
 
@@ -162,5 +163,54 @@ describe('buildAnswerPanelView — narrowing & history', () => {
       })
     );
     expect(view.sections[0].slots[0].refinementHistory).toEqual(history);
+  });
+});
+
+describe('blendedProgressPercent', () => {
+  it('blends question and data-slot coverage at an equal weight, rounding to a percent', () => {
+    // q: 1/2 = 0.5, d: 1/4 = 0.25 → 0.5·0.5 + 0.25·0.5 = 0.375 → 38%.
+    expect(
+      blendedProgressPercent({
+        answeredQuestions: 1,
+        totalQuestions: 2,
+        filledDataSlots: 1,
+        totalDataSlots: 4,
+      })
+    ).toBe(38);
+  });
+
+  it('reports 100% only when both sides are fully covered', () => {
+    expect(
+      blendedProgressPercent({
+        answeredQuestions: 3,
+        totalQuestions: 3,
+        filledDataSlots: 5,
+        totalDataSlots: 5,
+      })
+    ).toBe(100);
+  });
+
+  it('treats an empty side as fully covered (no division by zero)', () => {
+    // No data slots → data coverage counts as 1; questions at 0.5 → 0.5·0.5 + 1·0.5 = 75%.
+    expect(
+      blendedProgressPercent({
+        answeredQuestions: 1,
+        totalQuestions: 2,
+        filledDataSlots: 0,
+        totalDataSlots: 0,
+      })
+    ).toBe(75);
+  });
+
+  it('reflects data-slot progress even with zero questions answered', () => {
+    // q: 0, d: 2/4 = 0.5 → 0·0.5 + 0.5·0.5 = 25%. Data slots move the bar on their own.
+    expect(
+      blendedProgressPercent({
+        answeredQuestions: 0,
+        totalQuestions: 6,
+        filledDataSlots: 2,
+        totalDataSlots: 4,
+      })
+    ).toBe(25);
   });
 });

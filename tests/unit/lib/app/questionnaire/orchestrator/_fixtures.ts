@@ -22,6 +22,7 @@ import type {
   RefineOutcome,
   RefinementTrigger,
   SelectOutcome,
+  SeriousnessOutcome,
   TurnFlags,
   TurnState,
 } from '@/lib/app/questionnaire/orchestrator';
@@ -31,7 +32,15 @@ export { q };
 
 /** All sub-features on by default; override per case. */
 export function flags(partial: Partial<TurnFlags> = {}): TurnFlags {
-  return { extraction: true, contradiction: true, refinement: true, completion: true, ...partial };
+  return {
+    extraction: true,
+    contradiction: true,
+    refinement: true,
+    completion: true,
+    seriousnessGate: true,
+    sensitivityAwareness: true,
+    ...partial,
+  };
 }
 
 /** Build a `TurnState`, merging config over the resolved defaults. */
@@ -43,6 +52,9 @@ export function state(input: {
   config?: Partial<QuestionnaireConfigShape>;
   recentMessages?: string[];
   selectionRound?: number;
+  abuseStrikes?: number;
+  sensitivityLevel?: TurnState['sensitivityLevel'];
+  sensitivityNotes?: string[];
   flags?: Partial<TurnFlags>;
   sessionId?: string;
   costPressure?: 'soft';
@@ -56,6 +68,9 @@ export function state(input: {
     existingAnswers: input.existingAnswers ?? [],
     recentMessages: input.recentMessages ?? [],
     selectionRound: input.selectionRound ?? 0,
+    abuseStrikes: input.abuseStrikes ?? 0,
+    ...(input.sensitivityLevel !== undefined ? { sensitivityLevel: input.sensitivityLevel } : {}),
+    ...(input.sensitivityNotes !== undefined ? { sensitivityNotes: input.sensitivityNotes } : {}),
     flags: flags(input.flags),
     ...(input.costPressure ? { costPressure: input.costPressure } : {}),
   };
@@ -107,6 +122,8 @@ export interface StubConfig {
   detect?: Partial<DetectOutcome>;
   refine?: Partial<RefineOutcome>;
   select?: Partial<SelectOutcome>;
+  /** Seriousness-judge outcome; defaults to a "serious" verdict so the gate is inert. */
+  serious?: Partial<SeriousnessOutcome>;
 }
 
 export interface StubCalls {
@@ -114,6 +131,7 @@ export interface StubCalls {
   detect: TurnState[];
   refine: Array<{ state: TurnState; trigger: RefinementTrigger }>;
   select: TurnState[];
+  serious: TurnState[];
 }
 
 /** Stub invokers that record calls and return configured outcomes. */
@@ -121,7 +139,7 @@ export function stubInvokers(cfg: StubConfig = {}): {
   invokers: CapabilityInvokers;
   calls: StubCalls;
 } {
-  const calls: StubCalls = { extract: [], detect: [], refine: [], select: [] };
+  const calls: StubCalls = { extract: [], detect: [], refine: [], select: [], serious: [] };
   const invokers: CapabilityInvokers = {
     async extractAnswers(s) {
       calls.extract.push(s);
@@ -146,6 +164,10 @@ export function stubInvokers(cfg: StubConfig = {}): {
         },
         ...cfg.select,
       };
+    },
+    async assessSeriousness(s) {
+      calls.serious.push(s);
+      return { verdict: { serious: true, reason: '' }, costUsd: 0, ...cfg.serious };
     },
   };
   return { invokers, calls };

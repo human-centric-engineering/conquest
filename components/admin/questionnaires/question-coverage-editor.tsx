@@ -18,6 +18,16 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { FieldHelp } from '@/components/ui/field-help';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { cn } from '@/lib/utils';
 
 interface QuestionRef {
@@ -40,6 +50,9 @@ export function QuestionCoverageEditor({
   const [open, setOpen] = useState(false);
   const [viewOpen, setViewOpen] = useState(false);
   const [filter, setFilter] = useState('');
+  // The key whose removal is awaiting confirmation. Removing coverage is deliberately
+  // friction-ed (an "are you sure"): unmapping a question risks it never being targeted.
+  const [pendingRemove, setPendingRemove] = useState<string | null>(null);
 
   const promptByKey = new Map(questions.map((q) => [q.key, q.prompt]));
   const selected = new Set(selectedKeys);
@@ -177,7 +190,7 @@ export function QuestionCoverageEditor({
                 {key}
                 <button
                   type="button"
-                  onClick={() => onToggle(key)}
+                  onClick={() => setPendingRemove(key)}
                   aria-label={`Remove ${key}`}
                   className="hover:text-foreground opacity-70"
                 >
@@ -195,6 +208,43 @@ export function QuestionCoverageEditor({
           and will be dropped on save.
         </p>
       )}
+
+      {/* Removing coverage is risky — confirm before unmapping a question from this slot. */}
+      <AlertDialog
+        open={pendingRemove !== null}
+        onOpenChange={(next) => !next && setPendingRemove(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove this question key?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingRemove && (
+                <>
+                  Removing <code className="font-mono">{pendingRemove}</code>
+                  {promptByKey.get(pendingRemove)
+                    ? ` (“${promptByKey.get(pendingRemove)}”)`
+                    : ''}{' '}
+                  unmaps it from this data slot. Unless another slot covers it, this question may no
+                  longer be targeted naturally in the conversation — it risks going unanswered.
+                  Removing a key is usually inadvisable.
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep it</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (pendingRemove) onToggle(pendingRemove);
+                setPendingRemove(null);
+              }}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              Remove anyway
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

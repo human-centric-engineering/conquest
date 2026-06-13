@@ -43,6 +43,9 @@ export interface TurnWriteInput {
   agentResponse: string;
   /** The `AppQuestionSlot.id` this turn asked for; `null` for a completion/offer turn. */
   targetedQuestionId: string | null;
+  /** Data Slots feature: the `AppDataSlot.id` this turn targeted (data-slot mode); `null` otherwise.
+   *  Counted across recent turns to detect when a slot has been asked repeatedly (re-ask/park). */
+  targetedDataSlotId?: string | null;
   /** The capabilities dispatched this turn, in order. */
   toolCalls: ToolCallRecord[];
   /** The `AppAnswerSlot.id`s this turn created or updated — back-stamped with the turn id. */
@@ -78,6 +81,9 @@ export async function recordTurn(input: TurnWriteInput): Promise<string> {
         userMessage: input.userMessage,
         agentResponse: input.agentResponse,
         targetedQuestionId: input.targetedQuestionId,
+        ...(input.targetedDataSlotId !== undefined
+          ? { targetedDataSlotId: input.targetedDataSlotId }
+          : {}),
         toolCalls: jsonInput(input.toolCalls),
         sideEffectAnswerIds: jsonInput(input.sideEffectAnswerIds),
         ...(input.sideEffectDataSlotIds

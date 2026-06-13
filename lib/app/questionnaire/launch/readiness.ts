@@ -1,0 +1,79 @@
+/**
+ * Launch / preview readiness — the single source of the criteria a version must meet before it
+ * can be launched OR previewed.
+ *
+ * Pure (no Prisma / Next): given the version's resolved facts, it returns the per-check results.
+ * Consumed by the launch checklist (UI), the status route's launch gate (server), the
+ * "Preview as respondent" gate (server), and the overview page (to decide whether to offer the
+ * preview before launch). One definition so the four can't drift.
+ */
+
+export interface LaunchReadinessInput {
+  goal: string | null;
+  /**
+   * The version's `audience` JSON — `unknown` because callers pass either the typed
+   * `AudienceShape | null` (UI / overview page) or raw Prisma JSON (the server seam). An empty
+   * `{}` does NOT count as described — see {@link hasAudience}.
+   */
+  audience: unknown;
+  sectionCount: number;
+  questionCount: number;
+  /** True once a config row exists (the launch gate's deliberate "opt-in" signal). */
+  configSaved: boolean;
+  /** When the data-slots feature is on, readiness also requires generated data slots. */
+  dataSlotsRequired: boolean;
+  /** True when the version has ≥1 saved data slot (only checked when required). */
+  dataSlotsReady: boolean;
+}
+
+/** Stable identifier for each check — maps to the server `missing` detail and a UI configure link. */
+export type LaunchCheckKey =
+  | 'goal'
+  | 'audience'
+  | 'sections'
+  | 'questions'
+  | 'config'
+  | 'dataSlots';
+
+export interface LaunchReadinessCheck {
+  key: LaunchCheckKey;
+  ok: boolean;
+  /** Short, admin-facing label (e.g. "A goal is set"). */
+  label: string;
+}
+
+/**
+ * An audience JSON counts only when it carries at least one defined field — the editor may persist
+ * an empty `{}`, which isn't a described audience.
+ */
+export function hasAudience(audience: unknown): boolean {
+  return (
+    typeof audience === 'object' &&
+    audience !== null &&
+    !Array.isArray(audience) &&
+    Object.values(audience as Record<string, unknown>).some((v) => v !== undefined && v !== null)
+  );
+}
+
+/** The ordered readiness checks for a version. The data-slots row appears only when required. */
+export function launchReadinessChecks(input: LaunchReadinessInput): LaunchReadinessCheck[] {
+  return [
+    {
+      key: 'goal',
+      ok: Boolean(input.goal && input.goal.trim().length > 0),
+      label: 'A goal is set',
+    },
+    { key: 'audience', ok: hasAudience(input.audience), label: 'An audience is described' },
+    { key: 'sections', ok: input.sectionCount >= 1, label: 'At least one section' },
+    { key: 'questions', ok: input.questionCount >= 1, label: 'At least one question' },
+    { key: 'config', ok: input.configSaved, label: 'Configuration saved' },
+    ...(input.dataSlotsRequired
+      ? [{ key: 'dataSlots' as const, ok: input.dataSlotsReady, label: 'Data slots generated' }]
+      : []),
+  ];
+}
+
+/** True when every readiness check passes — the bar for launch AND for a pre-launch preview. */
+export function isLaunchReady(input: LaunchReadinessInput): boolean {
+  return launchReadinessChecks(input).every((c) => c.ok);
+}

@@ -17,7 +17,16 @@ async function loadClientTheme(demoClientId: string | null): Promise<ResolvedThe
   if (!demoClientId) return resolveTheme(null);
   const client = await prisma.appDemoClient.findUnique({
     where: { id: demoClientId },
-    select: { ctaColor: true, accentColor: true, logoUrl: true, welcomeCopy: true },
+    select: {
+      ctaColor: true,
+      accentColor: true,
+      logoUrl: true,
+      welcomeCopy: true,
+      surfaceColor: true,
+      ctaColorEnd: true,
+      logoBackgroundColor: true,
+      logoBackgroundEnabled: true,
+    },
   });
   return resolveTheme(client);
 }

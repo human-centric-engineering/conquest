@@ -39,7 +39,7 @@ function toIntent(
   answer: ExtractedAnswer,
   slot: ExtractionSlotView,
   normalisedValue: unknown,
-  activeQuestionKey: string
+  activeQuestionKey: string | null
 ): AnswerSlotIntent {
   // A `direct` claim needs a span to substantiate it. A missing OR blank quote
   // (the model omitted it, or sent an empty/whitespace string) can't substantiate
@@ -55,7 +55,7 @@ function toIntent(
     confidence: answer.confidence,
     provenance,
     rationale: answer.rationale,
-    isActiveQuestion: slot.key === activeQuestionKey,
+    isActiveQuestion: activeQuestionKey !== null && slot.key === activeQuestionKey,
   };
   // Keep the quote only when it still substantiates a `direct` value (omitting the
   // key when absent, matching the F1.1 baseIntent discipline).

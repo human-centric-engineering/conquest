@@ -37,6 +37,11 @@ interface AnonymousSessionBootProps {
   /** Show the attachment affordance (gated server-side on the attachment-input flag). */
   attachmentInputEnabled?: boolean;
   /**
+   * Version is configured `anonymousMode` — drives the opening turn's "your name and details
+   * won't be passed on" reassurance. Resolved server-side from the version config.
+   */
+  anonymous?: boolean;
+  /**
    * Admin preview mode: create via the admin-gated `/preview` route (works on any launched
    * version, anonymous or not) instead of the public `/anonymous` route. Set by `?preview=1`.
    */
@@ -88,6 +93,7 @@ export function AnonymousSessionBoot({
   welcomeCopy,
   voiceInputEnabled = false,
   attachmentInputEnabled = false,
+  anonymous = false,
   preview = false,
 }: AnonymousSessionBootProps) {
   const [state, setState] = useState<BootState>({ phase: 'creating' });
@@ -181,7 +187,7 @@ export function AnonymousSessionBoot({
     <SessionWorkspace
       sessionId={state.sessionId}
       accessToken={state.accessToken}
-      initialTurns={buildWelcomeTurns({ welcomeCopy })}
+      initialTurns={buildWelcomeTurns({ welcomeCopy, voiceInputEnabled, anonymous })}
       // This surface always shows the fresh greeting and never replays the transcript, so the
       // kickoff always fires: it streams the opening question on a new session, and proactively
       // re-asks the next pending question on a restored one (else the greeting has no question

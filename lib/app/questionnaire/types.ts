@@ -261,9 +261,57 @@ export type QuestionnaireConfigShape = {
   /** Run contradiction detection every N respondent turns; 1 = every turn. */
   contradictionEveryNTurns: number;
   anonymousMode: boolean;
+  /**
+   * Seriousness / abuse gate: how many non-genuine (preposterous / abusive / off-topic)
+   * answers a session tolerates before it is abandoned. `0` = off for this questionnaire.
+   * Escalating warnings precede the abandon strike. Only takes effect when the platform
+   * flag `APP_QUESTIONNAIRES_SERIOUSNESS_GATE_ENABLED` is on.
+   */
+  abuseThreshold: number;
+  /**
+   * Data Slots feature: how many times the agent targets one data slot before it records a
+   * best-effort PROVISIONAL fill and moves on to a fresh topic — so the respondent always feels
+   * forward progress instead of being asked the same thing repeatedly. `2` = ask once, one sharper
+   * re-ask, then park. Minimum `1` (ask once, immediately provisional if unanswered).
+   */
+  maxDataSlotAttempts: number;
+  /**
+   * Sensitivity awareness / safeguarding: when on, the agent detects a sensitive or contentious
+   * disclosure (abuse, distress, safeguarding) each turn, remembers it at session level, and asks
+   * every later question more gently. Off by default; only takes effect when the platform flag
+   * `APP_QUESTIONNAIRES_SENSITIVITY_AWARENESS_ENABLED` is on. See [[feature-flags-are-db-rows]].
+   */
+  sensitivityAwareness: boolean;
+  /**
+   * Verbatim support message gently surfaced once when a SERIOUS (high-severity) disclosure is
+   * detected and {@link sensitivityAwareness} is on. Authored by the admin so the safeguarding copy
+   * is never paraphrased by the LLM. Empty (the default) suppresses the signpost entirely.
+   */
+  supportMessage: string;
+  /** Optional support resource URL appended to {@link supportMessage} when set. */
+  supportResourceUrl: string;
   profileFields: ProfileFieldConfig[];
   answerSlotPanelScope: AnswerSlotPanelScope;
 };
+
+/**
+ * The `AppQuestionnaireSessionEvent.reason` written when the seriousness/abuse gate abandons
+ * a session (status → `abandoned`). A single constant so the route that writes it, the analytics
+ * reader that filters on it, and the tests all derive from one source.
+ */
+export const ABUSE_ABANDON_REASON = 'abuse_threshold_exceeded';
+
+/**
+ * Severity of a sensitive/contentious disclosure the extractor flags (sensitivity awareness).
+ * Ordered low → high; `high` = a serious disclosure (abuse, self-harm, threats, safeguarding)
+ * that triggers the support signpost. The single source of truth for the extractor schema enum,
+ * the session-carried running-max level, and the pure escalation logic.
+ */
+export const SENSITIVITY_SEVERITIES = ['low', 'medium', 'high'] as const;
+export type SensitivitySeverity = (typeof SENSITIVITY_SEVERITIES)[number];
+
+/** The `AppQuestionnaireSessionEvent.eventType` written when a sensitive disclosure is flagged. */
+export const SENSITIVITY_FLAGGED_EVENT = 'sensitivity_flagged';
 
 /**
  * The resolved config for a version that has never been saved — mirrors the
@@ -283,6 +331,11 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   contradictionWindowN: 0,
   contradictionEveryNTurns: 1,
   anonymousMode: false,
+  abuseThreshold: 4,
+  maxDataSlotAttempts: 2,
+  sensitivityAwareness: false,
+  supportMessage: '',
+  supportResourceUrl: '',
   profileFields: [],
   answerSlotPanelScope: 'full_progress',
 };

@@ -18,9 +18,12 @@ import {
   ANSWER_PROVENANCES,
   DEFAULT_QUESTIONNAIRE_CONFIG,
   QUESTION_TYPES,
+  SENSITIVITY_SEVERITIES,
   narrowToEnum,
   type QuestionType,
+  type SensitivitySeverity,
 } from '@/lib/app/questionnaire/types';
+import type { SensitivityNote } from '@/lib/app/questionnaire/sensitivity/types';
 import { toConfigView, CONFIG_SELECT } from '@/app/api/v1/app/questionnaires/_lib/detail';
 import type { AnsweredView, QuestionView } from '@/lib/app/questionnaire/selection';
 import type {
@@ -106,6 +109,12 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
       status: true,
       versionId: true,
       respondentUserId: true,
+      // Seriousness / abuse gate: the prior strike count the orchestrator folds a new strike into.
+      abuseStrikes: true,
+      // Sensitivity awareness / safeguarding: the session's remembered disclosures, threaded into
+      // the phraser so EVERY later question stays gentle (not just the disclosure turn).
+      sensitivityLevel: true,
+      sensitivityNotes: true,
       version: {
         select: {
           // Version framing for the conversational question phraser (F6 interviewer).
@@ -158,12 +167,28 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
           questionSlot: { select: { id: true, key: true } },
         },
       },
-      // Data Slots feature: this session's data-slot fills (the respondent-facing capture).
-      dataSlotFills: { select: { dataSlotId: true, confidence: true } },
+      // Data Slots feature: this session's data-slot fills (the respondent-facing capture). The
+      // value + paraphrase are loaded so the extractor can see what's already recorded and
+      // UPDATE/CORRECT it across turns (not just whether the slot is filled).
+      dataSlotFills: {
+        select: {
+          dataSlotId: true,
+          confidence: true,
+          value: true,
+          paraphrase: true,
+          provisional: true,
+        },
+      },
       turns: {
         orderBy: { ordinal: 'desc' },
         take: RECENT_TURNS_WINDOW,
-        select: { userMessage: true, agentResponse: true, targetedQuestionId: true, ordinal: true },
+        select: {
+          userMessage: true,
+          agentResponse: true,
+          targetedQuestionId: true,
+          targetedDataSlotId: true,
+          ordinal: true,
+        },
       },
       // The TRUE turn count — `turns` above is windowed (take), so its length saturates at
       // RECENT_TURNS_WINDOW and can't seed the monotonic selection round past that.
@@ -247,8 +272,26 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
   const dataSlotAnswered: DataSlotAnsweredView[] = session.dataSlotFills.map((f) => ({
     dataSlotId: f.dataSlotId,
     confidence: f.confidence,
+    value: f.value,
+    paraphrase: f.paraphrase,
+    provisional: f.provisional,
   }));
   const byDataSlotId = new Map(dataSlots.map((s) => [s.id, s]));
+
+  // Data Slots feature: how many times in a row the most-recently targeted data slot has been
+  // asked about (the re-ask/park signal). `session.turns` is newest-first; count the leading run
+  // of turns targeting the same data-slot id. Only the active slot gets a count (others are 0);
+  // the orchestrator parks it once this reaches `maxDataSlotAttempts` and it's still unfilled.
+  const dataSlotAttempts: Record<string, number> = {};
+  const headTargetedSlotId = session.turns[0]?.targetedDataSlotId ?? null;
+  if (headTargetedSlotId && byDataSlotId.has(headTargetedSlotId)) {
+    let run = 0;
+    for (const t of session.turns) {
+      if (t.targetedDataSlotId === headTargetedSlotId) run += 1;
+      else break;
+    }
+    dataSlotAttempts[headTargetedSlotId] = run;
+  }
 
   // The active target is whatever the most recent turn asked for (newest-first → [0]). The
   // generic `targetedQuestionId` column holds a QUESTION id in question mode and a DATA-SLOT id
@@ -260,6 +303,20 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
 
   const { saved: _saved, ...config } = toConfigView(session.version.config);
   void _saved;
+
+  // Sensitivity awareness / safeguarding: the session's remembered disclosures. The running-max
+  // level switches the phraser to a gentle tone; the note summaries remind it what to be careful
+  // about. Carries summaries only — the rest of each note stays on the row for analytics/events.
+  const sensitivityLevel: SensitivitySeverity | null =
+    session.sensitivityLevel &&
+    (SENSITIVITY_SEVERITIES as readonly string[]).includes(session.sensitivityLevel)
+      ? (session.sensitivityLevel as SensitivitySeverity)
+      : null;
+  const sensitivityNotes: string[] = Array.isArray(session.sensitivityNotes)
+    ? (session.sensitivityNotes as unknown as SensitivityNote[])
+        .map((n) => n?.summary)
+        .filter((s): s is string => typeof s === 'string' && s.length > 0)
+    : [];
 
   const audience = toTurnAudience(session.version.audience);
   const meta: TurnMeta = {
@@ -286,6 +343,12 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
       dataSlots,
       dataSlotAnswered,
       activeDataSlotKey,
+      dataSlotAttempts,
+      // Seriousness / abuse gate: the session's strikes so far (the core returns the updated count).
+      abuseStrikes: session.abuseStrikes,
+      // Sensitivity awareness: the remembered disclosure level + summaries (gentle-tone memory).
+      sensitivityLevel,
+      sensitivityNotes,
       // Monotonic per-turn counter (the engine contract selection-context.ts calls out):
       // the TRUE number of turns already taken (not the windowed `turns` array, whose length
       // saturates at RECENT_TURNS_WINDOW), so the `random` strategy's session+round seed keeps

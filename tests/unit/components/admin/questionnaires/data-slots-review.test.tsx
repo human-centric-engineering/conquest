@@ -408,6 +408,9 @@ describe('DataSlotsReview', () => {
       expect(screen.getByText('2/3 questions covered')).toBeInTheDocument();
 
       await user.click(screen.getByRole('button', { name: 'Remove q1' }));
+      // Removing coverage is guarded by an "are you sure" — confirm it.
+      const dialog = await screen.findByRole('alertdialog');
+      await user.click(within(dialog).getByRole('button', { name: /remove anyway/i }));
 
       await waitFor(() => expect(screen.getByText('1/3 questions covered')).toBeInTheDocument());
     });

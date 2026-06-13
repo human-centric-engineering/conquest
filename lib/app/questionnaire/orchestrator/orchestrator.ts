@@ -26,6 +26,13 @@ import {
 } from '@/lib/app/questionnaire/constants';
 import { assessCompletion } from '@/lib/app/questionnaire/completion/completion-logic';
 import { shouldRunDetection } from '@/lib/app/questionnaire/contradiction';
+import { evaluateAbuseStrike, ABUSE_ABANDON_MESSAGE } from '@/lib/app/questionnaire/seriousness';
+import {
+  runningMaxLevel,
+  shouldSignpost,
+  composeSupportMessage,
+} from '@/lib/app/questionnaire/sensitivity';
+import type { SensitivityAssessment } from '@/lib/app/questionnaire/sensitivity/types';
 import { unansweredQuestions } from '@/lib/app/questionnaire/selection/context';
 import type { AnsweredView, QuestionView } from '@/lib/app/questionnaire/selection/types';
 import type { AnswerSlotIntent } from '@/lib/app/questionnaire/extraction/types';
@@ -43,6 +50,9 @@ import type {
 
 /** Synthetic slug recorded on a turn's `toolCalls` for the (non-capability) selection step. */
 export const SELECTION_TOOL_SLUG = 'app_select_question';
+
+/** Synthetic slug recorded on a turn's `toolCalls` for the seriousness-judge step. */
+export const ASSESS_SERIOUSNESS_TOOL_SLUG = 'app_assess_seriousness';
 
 /** Fewest answers a contradiction pass needs — the detector capability enforces `min(2)`. */
 export const MIN_CONTRADICTION_ANSWERS = 2;
@@ -144,8 +154,12 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
   let costUsd = 0;
 
   const hasMessage = state.userMessage.trim().length > 0;
+  // Sensitivity awareness: the extractor's disclosure assessment this turn, captured for step 1.6.
+  let extractedSensitivity: SensitivityAssessment | undefined;
 
-  // 1. Extract answer slots from the message.
+  // 1. Extract answer slots from the message. The extractor also emits a `suspectedNonGenuine`
+  //    hint, but it proved an unreliable GATE (an optional flag the model often omits even for
+  //    blatant abuse) — so it is no longer what decides whether the judge runs; see 1.5.
   if (hasMessage && state.flags.extraction) {
     const out = await invokers.extractAnswers(state);
     costUsd += out.costUsd;
@@ -156,6 +170,7 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
       })
     );
     answerUpserts.push(...out.intents);
+    extractedSensitivity = out.sensitivity;
     if (out.diagnostic !== undefined) {
       events.push({
         type: 'warning',
@@ -163,6 +178,80 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
         message: "I couldn't capture an answer from that — we can revisit it.",
       });
     }
+  }
+
+  // 1.5 Seriousness / abuse gate. The judge runs on EVERY answered turn while the gate is on and
+  //     the questionnaire tolerates a finite number of strikes — a dedicated, cheap LLM call, so we
+  //     don't depend on the extractor's (unreliable) suspicion flag to trigger it. A non-serious
+  //     verdict DISREGARDS the answer (never merged/persisted), strikes the session, and escalates
+  //     → abandon at the configured threshold. A genuine answer (incl. colloquial/lazy) passes.
+  let abuse: TurnResult['abuse'];
+  let disregarded = false;
+  if (hasMessage && state.flags.seriousnessGate && state.config.abuseThreshold > 0) {
+    const judged = await invokers.assessSeriousness(state);
+    costUsd += judged.costUsd;
+    toolCalls.push(
+      toolCall(ASSESS_SERIOUSNESS_TOOL_SLUG, judged.diagnostic === undefined, {
+        ...(judged.diagnostic !== undefined ? { code: judged.diagnostic } : {}),
+        ...(judged.latencyMs !== undefined ? { latencyMs: judged.latencyMs } : {}),
+      })
+    );
+    if (judged.verdict && !judged.verdict.serious) {
+      // Disregard — a non-genuine answer is never merged or persisted.
+      disregarded = true;
+      answerUpserts.length = 0;
+      const strike = evaluateAbuseStrike(state.abuseStrikes, state.config.abuseThreshold);
+      abuse = {
+        flagged: true,
+        newStrikeCount: strike.newStrikeCount,
+        abandon: strike.abandon,
+        reason: judged.verdict.reason,
+      };
+      if (strike.abandon) {
+        // Terminal: stream a polite final message; the route abandons the session + emits the
+        // terminal frame. Skip the rest of the pipeline (no detect / refine / select). The
+        // assessment reflects the UNCHANGED state (the bogus answer was dropped).
+        return {
+          response: { kind: 'complete', text: strike.abandonMessage ?? ABUSE_ABANDON_MESSAGE },
+          targetedQuestionId: null,
+          sideEffects: { answerUpserts: [], answerRefinements: [] },
+          // Drop any side-band notice (e.g. the extraction "couldn't capture that" diagnostic) —
+          // on a terminal turn the abandon message is the only thing the respondent should see.
+          events: [],
+          toolCalls,
+          costUsd,
+          contradictions: [],
+          assessment: assessCompletion({
+            questions: state.questions,
+            answered: state.answered,
+            config: state.config,
+            sessionId: state.sessionId,
+          }),
+          abuse,
+        };
+      }
+      // Below threshold: surface the escalating notice; the pipeline re-asks the same
+      // (still-unanswered) question because the answer was not merged.
+      events.push({ type: 'warning', code: 'seriousness', message: strike.noticeMessage });
+    }
+  }
+
+  // 1.6 Sensitivity awareness / safeguarding. When the extractor flagged a genuine disclosure (and
+  //     the turn wasn't disregarded as non-genuine), remember it: compute the session's running-max
+  //     level, decide whether to signpost support (first time it reaches `high`), and return the
+  //     outcome for the route to persist. Tone-softening itself happens in the phraser, which reads
+  //     the persisted notes every later turn. The support frame is pushed LAST (below) so it wins
+  //     the chat's single notice slot over any other warning this turn.
+  let sensitivity: TurnResult['sensitivity'];
+  if (hasMessage && state.flags.sensitivityAwareness && !disregarded && extractedSensitivity) {
+    sensitivity = {
+      detected: true,
+      severity: extractedSensitivity.severity,
+      category: extractedSensitivity.category,
+      summary: extractedSensitivity.summary,
+      newLevel: runningMaxLevel(state.sensitivityLevel, extractedSensitivity.severity),
+      signpost: shouldSignpost(state.sensitivityLevel, extractedSensitivity.severity),
+    };
   }
 
   // 2. Merge the extracted intents so the rest of the pipeline sees the answer just given.
@@ -286,6 +375,16 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
     }
   }
 
+  // Signpost support LAST so it wins the chat's single notice slot (the hook keeps one warning).
+  // Only when a serious disclosure was first reached this turn AND the admin authored copy.
+  if (sensitivity?.signpost && state.config.supportMessage.trim().length > 0) {
+    events.push({
+      type: 'warning',
+      code: 'support',
+      message: composeSupportMessage(state.config.supportMessage, state.config.supportResourceUrl),
+    });
+  }
+
   return {
     response,
     targetedQuestionId,
@@ -295,5 +394,7 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
     costUsd,
     contradictions,
     assessment,
+    ...(abuse !== undefined ? { abuse } : {}),
+    ...(sensitivity !== undefined ? { sensitivity } : {}),
   };
 }

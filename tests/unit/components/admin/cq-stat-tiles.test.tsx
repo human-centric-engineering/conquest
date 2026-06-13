@@ -168,6 +168,32 @@ describe('CqStatTiles', () => {
     });
   });
 
+  describe('composite value (one tile, two figures)', () => {
+    it('renders a ReactNode value in a single tile', () => {
+      // The "Questions / Data slots" tile passes a composite node as its value.
+      const stats: CqStat[] = [
+        makeStat({
+          label: 'Questions / Data slots',
+          value: (
+            <span>
+              <span>5</span>
+              <span> / </span>
+              <span>4</span>
+            </span>
+          ),
+        }),
+      ];
+
+      const { container } = render(<CqStatTiles stats={stats} />);
+
+      // One tile, one title, both figures inside it.
+      expect((container.firstChild as HTMLElement).children).toHaveLength(1);
+      expect(screen.getByText('Questions / Data slots')).toBeInTheDocument();
+      expect(screen.getByText('5')).toBeInTheDocument();
+      expect(screen.getByText('4')).toBeInTheDocument();
+    });
+  });
+
   describe('empty stats array', () => {
     it('renders the grid container but no tile children when stats is empty', () => {
       // Arrange

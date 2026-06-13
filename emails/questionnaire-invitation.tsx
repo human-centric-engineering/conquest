@@ -70,7 +70,20 @@ export default function QuestionnaireInvitationEmail({
       <Body style={main}>
         <Container style={container}>
           {theme.logoUrl ? (
-            <Section style={logoContainer}>
+            <Section
+              style={
+                // DEMO-ONLY (F7.1+): paint the resolved logo backdrop behind the email
+                // logo too (gradients/surface bands don't render reliably in email, but a
+                // solid backdrop does) — so a logo drawn for a dark brand colour reads here.
+                theme.logoBackgroundColor
+                  ? {
+                      ...logoContainer,
+                      backgroundColor: theme.logoBackgroundColor,
+                      padding: '16px 48px',
+                    }
+                  : logoContainer
+              }
+            >
               <Img src={theme.logoUrl} alt={questionnaireTitle} height={40} style={logo} />
             </Section>
           ) : null}

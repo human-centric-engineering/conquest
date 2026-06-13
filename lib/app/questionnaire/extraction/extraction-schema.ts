@@ -20,7 +20,10 @@
 
 import { z } from 'zod';
 
-import { EXTRACTOR_EMITTED_PROVENANCES } from '@/lib/app/questionnaire/types';
+import {
+  EXTRACTOR_EMITTED_PROVENANCES,
+  SENSITIVITY_SEVERITIES,
+} from '@/lib/app/questionnaire/types';
 
 /**
  * One LLM-reported answer. STRUCTURAL checks (here, in Zod): `slotKey` present,
@@ -61,6 +64,30 @@ export const answerExtractionSchema = z.object({
   answers: z.array(extractedAnswerSchema),
   /** Data Slots feature: present only when the prompt carried data-slot candidates. */
   dataSlotFills: z.array(dataSlotFillSchema).optional(),
+  /**
+   * Seriousness gate — stage 1: the extractor flags an answer that reads as possibly
+   * non-genuine (preposterous / abusive / off-topic), so the dedicated judge only runs when
+   * it's worth a second look. Optional + tolerant: an omitted flag means "no suspicion", and a
+   * model that doesn't know about it still validates. `suspicionReason` is a short note for logs.
+   */
+  suspectedNonGenuine: z.boolean().optional(),
+  suspicionReason: z.string().max(400).optional(),
+  /**
+   * Sensitivity awareness / safeguarding (emitted only when the feature is on; the prompt block is
+   * gated). Present ONLY when the message carries a genuine sensitive/contentious disclosure
+   * (abuse, distress, safeguarding). The object is optional (absence = nothing detected) but its
+   * fields are required so a half-populated object is rejected and the retry names the gap.
+   * `summary` is a careful, NON-GRAPHIC one-line restatement — the only field that may carry
+   * disclosure content.
+   */
+  sensitivity: z
+    .object({
+      detected: z.literal(true),
+      severity: z.enum(SENSITIVITY_SEVERITIES),
+      category: z.string().min(1).max(80),
+      summary: z.string().min(1).max(300),
+    })
+    .optional(),
 });
 
 export type ExtractedAnswer = z.infer<typeof extractedAnswerSchema>;

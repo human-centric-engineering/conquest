@@ -26,24 +26,32 @@ export function slot(partial: Partial<ExtractionSlotView> & { key: string }): Ex
   };
 }
 
-/** Build an `ExtractionContext`, defaulting the active key to the first candidate. */
+/**
+ * Build an `ExtractionContext`, defaulting the active key to the first candidate. Pass
+ * `activeQuestionKey: null` explicitly for DATA-SLOT MODE (open prompt, no active question).
+ */
 export function ctx(input: {
   candidateSlots: ExtractionSlotView[];
-  activeQuestionKey?: string;
+  activeQuestionKey?: string | null;
   answered?: ExtractionAnsweredView[];
   userMessage?: string;
   recentMessages?: string[];
   attachments?: ExtractionAttachment[];
   sessionId?: string;
+  sensitivityAware?: boolean;
 }): ExtractionContext {
   return {
-    activeQuestionKey: input.activeQuestionKey ?? input.candidateSlots[0]?.key ?? 'q1',
+    activeQuestionKey:
+      input.activeQuestionKey === undefined
+        ? (input.candidateSlots[0]?.key ?? 'q1')
+        : input.activeQuestionKey,
     candidateSlots: input.candidateSlots,
     answered: input.answered ?? [],
     userMessage: input.userMessage ?? 'a respondent message',
     sessionId: input.sessionId ?? 'sess-1',
     ...(input.recentMessages ? { recentMessages: input.recentMessages } : {}),
     ...(input.attachments ? { attachments: input.attachments } : {}),
+    ...(input.sensitivityAware ? { sensitivityAware: true } : {}),
   };
 }
 

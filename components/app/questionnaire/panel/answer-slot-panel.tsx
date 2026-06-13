@@ -38,8 +38,12 @@ export interface AnswerSlotPanelProps {
 
 function ProgressHeading({ view }: { view: AnswerPanelView }) {
   const dataSlotMode = view.dataSlotGroups !== undefined;
-  const summary =
-    view.scope === 'answered_only' && !dataSlotMode
+  // Data-slot mode shows one balanced percentage (questions + data slots) — never the raw question
+  // count, which the respondent never sees. Question mode keeps the familiar "N of M" / "N captured".
+  const percent = view.progressPercent ?? 0;
+  const summary = dataSlotMode
+    ? `${percent}% complete`
+    : view.scope === 'answered_only'
       ? `${view.answeredCount} captured`
       : `${view.answeredCount} of ${view.totalCount} answered`;
   return (
@@ -48,6 +52,21 @@ function ProgressHeading({ view }: { view: AnswerPanelView }) {
         {dataSlotMode ? 'What we’re learning' : 'Your answers'}
       </h2>
       <p className="text-muted-foreground mt-0.5 text-xs tabular-nums">{summary}</p>
+      {dataSlotMode ? (
+        <div
+          className="bg-muted mt-2 h-1.5 overflow-hidden rounded-full"
+          role="progressbar"
+          aria-valuenow={percent}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label="Completion progress"
+        >
+          <div
+            className="bg-primary h-full rounded-full transition-[width] duration-500 ease-out"
+            style={{ width: `${percent}%` }}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -82,6 +101,29 @@ function DataSlotGroups({ groups }: { groups: DataSlotPanelGroup[] }) {
                         Not covered yet
                       </p>
                     )}
+                    {slot.provisional ? (
+                      <p
+                        className="text-muted-foreground/60 mt-0.5 text-[11px] italic"
+                        title="A best guess we recorded so we could keep moving — we may revisit it"
+                      >
+                        provisional · may revisit
+                      </p>
+                    ) : null}
+                    {slot.history.length > 0 ? (
+                      <ul className="mt-1 space-y-0.5">
+                        {slot.history
+                          .filter((h) => h.paraphrase)
+                          .map((h, i) => (
+                            <li
+                              key={i}
+                              className="text-muted-foreground/70 text-xs line-through"
+                              title="An earlier answer you later changed"
+                            >
+                              Earlier: {h.paraphrase}
+                            </li>
+                          ))}
+                      </ul>
+                    ) : null}
                   </div>
                 </div>
               </li>

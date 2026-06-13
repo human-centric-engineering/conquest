@@ -23,6 +23,7 @@ import type { Prisma } from '@prisma/client';
 import { hashInvitationToken } from '@/lib/app/questionnaire/invitations';
 import { findResumableSession } from '@/lib/app/questionnaire/chat/resumable-session';
 import { recordSessionCreated } from '@/app/api/v1/app/questionnaires/_lib/sessions';
+import { loadLaunchReadiness } from '@/app/api/v1/app/questionnaires/_lib/launchability';
 import {
   parseProfileFields,
   validateProfileValues,
@@ -222,15 +223,21 @@ export async function createSessionForVersion(
 }
 
 /**
- * Create an admin **preview** session for a launched version — the "Preview as respondent"
- * walkthrough. Unlike {@link createAnonymousSession} it does NOT require `anonymousMode`: an
- * admin may preview any launched questionnaire, invitation-gated or not. The session is
+ * Create an admin **preview** session for the "Preview as respondent" walkthrough. Allowed for a
+ * **launched** version OR a **launchable draft** (one that passes the launch readiness gate —
+ * goal, audience, sections, questions, saved config, and data slots when required), so an admin
+ * can rehearse the conversation before launching. Archived versions are retired and not
+ * previewable. Unlike {@link createAnonymousSession} it does NOT require `anonymousMode`: an
+ * admin may preview any eligible questionnaire, invitation-gated or not. The session is
  * marked `isPreview: true` so it is excluded from analytics (the `isPreview: false` filter in
  * `lib/app/questionnaire/analytics/**`), exactly like the F4.4/F4.5 design-time preview. It's
  * left user-less (`respondentUserId: null`) and access is proven by the signed token the
  * route mints — so the token-based turn path (`turn-access.ts`) drives it identically to the
- * no-login surface, regardless of anonymous mode. No resume: each preview mints a fresh
- * session. The calling route is admin-gated; this seam itself trusts the caller.
+ * no-login surface, regardless of anonymous mode. No resume: each preview mints a FRESH
+ * session — and because a partial unique index allows only one preview session per version
+ * (`idx_app_questionnaire_session_preview_per_version`), it first replaces any prior preview
+ * (whose turns/answers/events cascade away) so re-previewing never collides. The calling
+ * route is admin-gated; this seam itself trusts the caller.
  */
 export async function createPreviewSession(versionId: string): Promise<CreateSessionResult> {
   const version = await prisma.appQuestionnaireVersion.findUnique({
@@ -238,12 +245,29 @@ export async function createPreviewSession(versionId: string): Promise<CreateSes
     select: { id: true, status: true },
   });
 
-  // Preview mirrors the live respondent surface, which only serves launched versions.
-  if (!version || version.status !== 'launched') {
+  // Non-existent or archived (retired) versions are not previewable — 404, don't reveal them.
+  if (!version || version.status === 'archived') {
     return { ok: false, status: 404, code: 'NOT_FOUND', message: 'Questionnaire not found' };
+  }
+  // A launched version is always previewable; a draft is previewable once it passes the same
+  // readiness gate as launch (so an admin can rehearse it before going live).
+  if (version.status !== 'launched') {
+    const { ready } = await loadLaunchReadiness(versionId);
+    if (!ready) {
+      return {
+        ok: false,
+        status: 409,
+        code: 'NOT_READY_FOR_PREVIEW',
+        message: 'This version is not ready to preview yet — complete the launch checklist first.',
+      };
+    }
   }
 
   const session = await prisma.$transaction(async (tx) => {
+    // One preview session per version (partial unique index). "Preview as respondent" is a
+    // fresh walkthrough each time, so drop any prior preview (its turns / answers / events
+    // cascade) before minting a new one — otherwise the insert hits a P2002 on a re-preview.
+    await tx.appQuestionnaireSession.deleteMany({ where: { versionId, isPreview: true } });
     const created = await tx.appQuestionnaireSession.create({
       data: { versionId, respondentUserId: null, isPreview: true, status: 'active' },
       select: { id: true, status: true, versionId: true },

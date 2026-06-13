@@ -58,6 +58,7 @@ function ctx(
     base: {
       sessionId: 'sess-1',
       config: { ...DEFAULT_QUESTIONNAIRE_CONFIG, ...over.config },
+      abuseStrikes: 0,
       questions: [
         {
           id: 'q1',

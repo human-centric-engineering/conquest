@@ -19,8 +19,12 @@
  */
 
 import type { ChatEvent } from '@/types/orchestration';
-import type { AnswerProvenance } from '@/lib/app/questionnaire/types';
+import type { AnswerProvenance, SensitivitySeverity } from '@/lib/app/questionnaire/types';
 import type { QuestionnaireConfigShape } from '@/lib/app/questionnaire/types';
+import type {
+  SensitivityAssessment,
+  SensitivityOutcome,
+} from '@/lib/app/questionnaire/sensitivity/types';
 import type {
   AnsweredView,
   QuestionView,
@@ -33,6 +37,7 @@ import type {
 import type { ContradictionFinding } from '@/lib/app/questionnaire/contradiction/types';
 import type { RefinementDecision } from '@/lib/app/questionnaire/refinement/types';
 import type { CompletionAssessment } from '@/lib/app/questionnaire/completion/types';
+import type { SeriousnessVerdict } from '@/lib/app/questionnaire/seriousness/types';
 
 /**
  * One existing answer's full value, as the refiner reads it. Richer than the
@@ -64,6 +69,18 @@ export interface TurnFlags {
   refinement: boolean;
   /** F4.5 completion-offer phrasing (the deterministic gate is always free). */
   completion: boolean;
+  /**
+   * Seriousness / abuse gate (platform sub-flag). When on AND `config.abuseThreshold > 0`,
+   * a turn the extractor flags as suspicious is judged; a non-serious verdict is disregarded,
+   * strikes the session, and (at the threshold) abandons it.
+   */
+  seriousnessGate: boolean;
+  /**
+   * Sensitivity awareness / safeguarding (platform sub-flag AND per-questionnaire toggle). When on,
+   * the extractor emits a `sensitivity` assessment; the core remembers it (running-max level +
+   * notes), softens later phrasing, and signposts support once on a serious disclosure.
+   */
+  sensitivityAwareness: boolean;
 }
 
 /** One base64-encoded attachment on a turn (mirrors the platform `chatAttachmentSchema`). */
@@ -94,6 +111,20 @@ export interface DataSlotAnsweredView {
   /** `DataSlotTarget.id`. */
   dataSlotId: string;
   confidence: number | null;
+  /**
+   * The fill's captured position + restatement, when loaded. Threaded into the extractor (as a
+   * data-slot candidate's `current`) so it can UPDATE/CORRECT the slot rather than re-deriving it.
+   * Targeting itself only reads `confidence`; these are optional so pure targeting tests can omit
+   * them.
+   */
+  value?: unknown;
+  paraphrase?: string | null;
+  /**
+   * Move-on (Data Slots feature): true when this fill is a best-effort inference recorded after the
+   * re-ask cap. A provisional slot counts as "covered" for targeting (so it isn't re-asked) but at
+   * low confidence; a later confident fill clears it. Absent in pure targeting tests.
+   */
+  provisional?: boolean;
 }
 
 /**
@@ -125,6 +156,21 @@ export interface TurnState {
   attachments?: TurnAttachment[];
   /** Zero-based selection round — the number of prior question picks. */
   selectionRound: number;
+  /**
+   * Seriousness / abuse gate: the session's strike count BEFORE this turn (flagged non-genuine
+   * answers so far). The route loads it from `AppQuestionnaireSession.abuseStrikes`; the core
+   * folds a new strike in and returns the updated count for the route to persist.
+   */
+  abuseStrikes: number;
+  /**
+   * Sensitivity awareness / safeguarding: the session's remembered disclosures BEFORE this turn,
+   * loaded by the route from `AppQuestionnaireSession`. `sensitivityLevel` is the running-max
+   * severity (null until first detection); `sensitivityNotes` are the careful summaries, threaded
+   * into the phraser so EVERY later question stays gentle (not just the disclosure turn). Absent
+   * when the feature is off.
+   */
+  sensitivityLevel?: SensitivitySeverity | null;
+  sensitivityNotes?: string[];
   /** Which sub-features are enabled this turn. */
   flags: TurnFlags;
   /**
@@ -136,6 +182,13 @@ export interface TurnState {
   dataSlots?: DataSlotTarget[];
   dataSlotAnswered?: DataSlotAnsweredView[];
   activeDataSlotKey?: string | null;
+  /**
+   * Move-on (Data Slots feature): consecutive re-ask count per data-slot id (turns that targeted
+   * the slot without a confident fill). Only the most-recently targeted slot carries a non-zero
+   * count. When it reaches `config.maxDataSlotAttempts` and the slot is still unfilled, the
+   * orchestrator parks it (records a provisional fill, moves on). Absent in question mode.
+   */
+  dataSlotAttempts?: Record<string, number>;
   /**
    * Cost-cap pressure for this turn, set by the route when the session's spend so far crosses
    * the soft threshold (F6.3). `'soft'` biases the core toward offering completion early (so the
@@ -164,6 +217,27 @@ export interface ExtractOutcome {
   intents: AnswerSlotIntent[];
   /** Data Slots feature: fills captured this turn (present only in data-slot mode). */
   dataSlotFills?: DataSlotFillIntent[];
+  /**
+   * Seriousness gate — stage 1 ("the main agent suspects"): the extractor flags an answer that
+   * reads as possibly non-genuine (preposterous / abusive / off-topic), so the orchestrator only
+   * pays for the dedicated judge when it's worth a second look. Absent/`false` = no suspicion.
+   */
+  suspectedNonGenuine?: boolean;
+  /** A short reason the extractor was suspicious (for logs/trace). */
+  suspicionReason?: string;
+  /**
+   * Sensitivity awareness: the extractor's assessment of a sensitive/contentious disclosure this
+   * turn, when one was detected (and the feature is on). Absent = nothing detected.
+   */
+  sensitivity?: SensitivityAssessment;
+  costUsd: number;
+  latencyMs?: number;
+  diagnostic?: string;
+}
+
+/** Seriousness-judge invoker outcome — stage 2. `verdict: null` on a fail-soft diagnostic. */
+export interface SeriousnessOutcome {
+  verdict: SeriousnessVerdict | null;
   costUsd: number;
   latencyMs?: number;
   diagnostic?: string;
@@ -209,6 +283,12 @@ export interface CapabilityInvokers {
   detectContradictions(state: TurnState): Promise<DetectOutcome>;
   refineAnswer(state: TurnState, trigger: RefinementTrigger): Promise<RefineOutcome>;
   selectNext(state: TurnState): Promise<SelectOutcome>;
+  /**
+   * Seriousness gate — stage 2: rule on whether this turn's answer is a genuine attempt. The
+   * invoker resolves the active question + transcript from its own closure; the core just gates
+   * the call and acts on the verdict. Fail-soft (returns `verdict: null` + a diagnostic).
+   */
+  assessSeriousness(state: TurnState): Promise<SeriousnessOutcome>;
 }
 
 /**
@@ -284,4 +364,25 @@ export interface TurnResult {
   contradictions: ContradictionFinding[];
   /** The deterministic completion assessment computed this turn. */
   assessment: CompletionAssessment;
+  /**
+   * Seriousness / abuse gate outcome for this turn, present only when an answer was flagged
+   * non-genuine. The route persists `newStrikeCount` to the session and, when `abandon`, ends
+   * the session (status → `abandoned`, reason `abuse_threshold_exceeded`) + streams a terminal
+   * frame. Absent on a normal (serious / un-gated) turn.
+   */
+  abuse?: {
+    flagged: boolean;
+    newStrikeCount: number;
+    abandon: boolean;
+    /** The judge's short reason — recorded in the abandonment metadata. */
+    reason: string;
+  };
+  /**
+   * Sensitivity awareness / safeguarding outcome, present only when a disclosure was detected this
+   * turn. The route appends a note (`{ ...summary, turnOrdinal, createdAt }`), persists `newLevel`
+   * on the session, and writes a `sensitivity_flagged` event ({ severity, category } only — never
+   * the summary). The support signpost (when `signpost`) is already streamed by the core as a
+   * side-band `support` event.
+   */
+  sensitivity?: SensitivityOutcome;
 }
