@@ -9,11 +9,16 @@ import { notFound } from 'next/navigation';
 
 import { DemoClientAssign } from '@/components/admin/demo-clients/demo-client-assign';
 import { CloneForClientDialog } from '@/components/admin/questionnaires/clone-for-client-dialog';
+import { ConfigSettingsPanel } from '@/components/admin/questionnaires/config-settings-panel';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
 import { isQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
-import { getQuestionnaireDetailCached } from '@/lib/app/questionnaire/workspace-data';
+import {
+  getQuestionnaireDetailCached,
+  getVersionGraphCached,
+  resolveQuestionnaireWorkspaceFlags,
+} from '@/lib/app/questionnaire/workspace-data';
 import type { AttributedDemoClient, DemoClientView } from '@/lib/app/questionnaire/demo-clients';
 
 export const metadata: Metadata = {
@@ -45,16 +50,42 @@ async function getActiveDemoClients(): Promise<AttributedDemoClient[]> {
 export default async function SettingsTab({ params }: PageProps) {
   if (!(await isQuestionnairesEnabled())) notFound();
 
-  const { id } = await params;
+  const { id, vid } = await params;
 
-  const [detail, demoClientOptions] = await Promise.all([
+  const [detail, demoClientOptions, graph, flags] = await Promise.all([
     getQuestionnaireDetailCached(id),
     getActiveDemoClients(),
+    getVersionGraphCached(id, vid),
+    resolveQuestionnaireWorkspaceFlags(),
   ]);
   if (!detail) notFound();
 
+  const questionCount = graph ? graph.sections.reduce((n, s) => n + s.questions.length, 0) : 0;
+
   return (
     <div className="max-w-2xl space-y-8">
+      {/* Run-time configuration (F3.1 + F9.7) — version-scoped session settings. Editing a
+          launched version forks a new draft (the panel surfaces the notice). */}
+      {graph && (
+        <section className="space-y-3">
+          <div className="space-y-1">
+            <h2 className="text-lg font-semibold">Configuration</h2>
+            <p className="text-muted-foreground text-sm">
+              How a session runs for this version — question selection, completion thresholds,
+              budget caps, modes, and how the respondent completes it (chat, form, or both). Editing
+              a launched version saves the changes to a new draft.
+            </p>
+          </div>
+          <ConfigSettingsPanel
+            questionnaireId={id}
+            versionId={vid}
+            config={graph.config}
+            questionCount={questionCount}
+            adaptiveEnabled={flags.adaptive}
+          />
+        </section>
+      )}
+
       {/* DEMO-ONLY (F2.5.1): demo-client attribution. */}
       <section className="space-y-3">
         <div className="space-y-1">

@@ -60,16 +60,11 @@ vi.mock('@/lib/logging', () => loggerMock);
 // ─── Stub heavy children to identifiable markers ──────────────────────────────
 
 vi.mock('@/components/admin/questionnaires/version-editor', () => ({
-  VersionEditor: (props: {
-    questionnaireId: string;
-    version: VersionGraphView;
-    adaptiveEnabled?: boolean;
-  }) => (
+  VersionEditor: (props: { questionnaireId: string; version: VersionGraphView }) => (
     <div
       data-testid="version-editor"
       data-qid={props.questionnaireId}
       data-vid={props.version.id}
-      data-adaptive={String(props.adaptiveEnabled ?? false)}
     />
   ),
 }));
@@ -287,28 +282,6 @@ describe('StructureTab', () => {
       const editor = screen.getByTestId('version-editor');
       expect(editor).toHaveAttribute('data-qid', 'qn-42');
       expect(editor).toHaveAttribute('data-vid', 'ver-99');
-    });
-
-    it('passes adaptiveEnabled=false when the adaptive flag is off', async () => {
-      // Arrange
-      workspaceDataMock.resolveQuestionnaireWorkspaceFlags.mockResolvedValue(
-        makeFlags({ adaptive: false })
-      );
-      render(await renderPage({ edit: '1' }));
-
-      // Assert: the adaptive prop threaded through from the flags
-      expect(screen.getByTestId('version-editor')).toHaveAttribute('data-adaptive', 'false');
-    });
-
-    it('passes adaptiveEnabled=true when the adaptive flag is on', async () => {
-      // Arrange
-      workspaceDataMock.resolveQuestionnaireWorkspaceFlags.mockResolvedValue(
-        makeFlags({ adaptive: true })
-      );
-      render(await renderPage({ edit: '1' }));
-
-      // Assert: the adaptive prop threaded through from the flags
-      expect(screen.getByTestId('version-editor')).toHaveAttribute('data-adaptive', 'true');
     });
 
     it('falls back to read-only VersionGraph when ?edit=1 but graph is null', async () => {

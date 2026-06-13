@@ -45,7 +45,6 @@ import type { VersionGraphView } from '@/lib/app/questionnaire/views';
 
 import { SectionEditor } from '@/components/admin/questionnaires/section-editor';
 import { TagVocabularyEditor } from '@/components/admin/questionnaires/tag-vocabulary-editor';
-import { ConfigEditor } from '@/components/admin/questionnaires/config-editor';
 import { authoringMutate } from '@/components/admin/questionnaires/authoring-mutate';
 import type {
   MutationSpec,
@@ -71,12 +70,9 @@ const STATUS_ACTIONS: Record<
 export function VersionEditor({
   questionnaireId,
   version,
-  adaptiveEnabled = true,
 }: {
   questionnaireId: string;
   version: VersionGraphView;
-  /** Adaptive selection sub-flag state, threaded to the config editor's strategy picker. */
-  adaptiveEnabled?: boolean;
 }) {
   const router = useRouter();
   const versionId = version.id;
@@ -250,16 +246,7 @@ export function VersionEditor({
         </Button>
       </section>
 
-      {/* Run-time configuration (F3.1) */}
-      <ConfigEditor
-        questionnaireId={questionnaireId}
-        versionId={versionId}
-        config={version.config}
-        questionCount={version.sections.reduce((n, s) => n + s.questions.length, 0)}
-        adaptiveEnabled={adaptiveEnabled}
-        run={run}
-        busy={busy}
-      />
+      {/* Run-time configuration lives on the Settings tab (it's version config, not structure). */}
 
       {/* Tag vocabulary */}
       <TagVocabularyEditor

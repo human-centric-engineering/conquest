@@ -20,15 +20,15 @@ flows through the same `SessionWorkspace`.
 
 ## Where it's wired
 
-| Concern             | Location                                                                                                                        |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| Config field + enum | `lib/app/questionnaire/types.ts` (`PRESENTATION_MODES`, `QuestionnaireConfigShape.presentationMode`, default `chat`)            |
-| Zod (PATCH)         | `lib/app/questionnaire/authoring/config-schema.ts`                                                                              |
-| Schema column       | `AppQuestionnaireConfig.presentationMode` (migration `…_add_presentation_mode_and_respondent_edited`)                           |
-| Read projection     | `app/api/v1/app/questionnaires/_lib/detail.ts` (`toConfigView`)                                                                 |
-| Admin control       | `components/admin/questionnaires/config-editor.tsx` (Presentation mode `<Select>`)                                              |
-| Mode dispatch       | `components/app/questionnaire/session-workspace.tsx` (three-way render + the `both` toggle)                                     |
-| Server pages        | `app/(protected)/questionnaires/[sessionId]/page.tsx`, `app/(public)/q/[versionId]/page.tsx` (resolve mode, seed the form view) |
+| Concern             | Location                                                                                                                                             |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Config field + enum | `lib/app/questionnaire/types.ts` (`PRESENTATION_MODES`, `QuestionnaireConfigShape.presentationMode`, default `chat`)                                 |
+| Zod (PATCH)         | `lib/app/questionnaire/authoring/config-schema.ts`                                                                                                   |
+| Schema column       | `AppQuestionnaireConfig.presentationMode` (migration `…_add_presentation_mode_and_respondent_edited`)                                                |
+| Read projection     | `app/api/v1/app/questionnaires/_lib/detail.ts` (`toConfigView`)                                                                                      |
+| Admin control       | `components/admin/questionnaires/config-editor.tsx` (Presentation mode `<Select>`), surfaced on the **Settings** tab via `config-settings-panel.tsx` |
+| Mode dispatch       | `components/app/questionnaire/session-workspace.tsx` (three-way render + the `both` toggle)                                                          |
+| Server pages        | `app/(protected)/questionnaires/[sessionId]/page.tsx`, `app/(public)/q/[versionId]/page.tsx` (resolve mode, seed the form view)                      |
 
 ## The raw form surface
 
