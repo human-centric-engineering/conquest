@@ -34,6 +34,7 @@ const seamMock = vi.hoisted(() => ({
   loadVersionSlotsByKey: vi.fn(),
   recordManualAnswer: vi.fn(),
   clearAnswer: vi.fn(),
+  reconcileDataSlotFills: vi.fn(),
 }));
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/form-answers', () => seamMock);
 
@@ -93,6 +94,7 @@ beforeEach(() => {
   seamMock.loadVersionSlotsByKey.mockResolvedValue(slots());
   seamMock.recordManualAnswer.mockResolvedValue('created');
   seamMock.clearAnswer.mockResolvedValue(undefined);
+  seamMock.reconcileDataSlotFills.mockResolvedValue(undefined);
   panelMock.loadAnswerPanelState.mockResolvedValue({
     session: { id: 'sess-1', respondentUserId: USER },
     view: emptyView(),
@@ -217,5 +219,32 @@ describe('persistence', () => {
     expect(res.status).toBe(200);
     expect(seamMock.clearAnswer).toHaveBeenCalledWith(expect.anything(), 'sess-1', 'slot-role');
     expect(seamMock.recordManualAnswer).not.toHaveBeenCalled();
+  });
+
+  it('reconciles the data-slot fills for the edited questions (data slots on)', async () => {
+    await PUT(
+      req({
+        answers: [
+          { questionKey: 'role', value: 'Engineer' },
+          { questionKey: 'score', value: 4 },
+        ],
+      }),
+      ctx
+    );
+    // Both edited slot ids are handed to the reconciler so the chat data-slot panel stays in sync.
+    expect(seamMock.reconcileDataSlotFills).toHaveBeenCalledWith(expect.anything(), 'sess-1', [
+      'slot-role',
+      'slot-score',
+    ]);
+  });
+
+  it('skips data-slot reconciliation when the data-slots feature is off', async () => {
+    // The live-sessions gate stays on; only the data-slots flag is off. The route reads both via
+    // isFeatureEnabled, so toggle it per-call: live-sessions check → true, data-slots check → false.
+    vi.mocked(isFeatureEnabled).mockImplementation(async (name: string) =>
+      name.includes('DATA_SLOTS') ? false : true
+    );
+    await PUT(req({ answers: [{ questionKey: 'role', value: 'Engineer' }] }), ctx);
+    expect(seamMock.reconcileDataSlotFills).not.toHaveBeenCalled();
   });
 });

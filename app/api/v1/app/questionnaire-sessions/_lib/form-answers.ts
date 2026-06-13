@@ -27,6 +27,10 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db/client';
 import { ANSWER_PROVENANCES, narrowToEnum, type QuestionType } from '@/lib/app/questionnaire/types';
 import type { RefinementHistoryEntry } from '@/lib/app/questionnaire/refinement/types';
+import {
+  upsertDataSlotFill,
+  clearDataSlotFill,
+} from '@/app/api/v1/app/questionnaires/_lib/data-slot-fills';
 
 /** Minimal session shape the PUT route needs: access fields + status + version. */
 export interface SessionForFormWrite {
@@ -191,4 +195,91 @@ export async function clearAnswer(
   await client.appAnswerSlot.deleteMany({
     where: { sessionId, questionSlotId },
   });
+}
+
+/** Deterministic, panel-facing restatement of one answered value (no LLM). */
+function formatFillValue(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  if (Array.isArray(value))
+    return value
+      .map((v) => formatFillValue(v))
+      .filter(Boolean)
+      .join(', ');
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'bigint') {
+    return String(value).trim();
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Reconcile the data-slot fills affected by a set of just-written question edits (P-presentation).
+ *
+ * Data slots are the chat-facing abstraction over questions (M:N via `AppDataSlotQuestion`); the
+ * form edits the underlying questions directly. So after a form write, recompute each data slot
+ * that maps to an edited question from the session's CURRENT answers to ALL its mapped questions:
+ *
+ *  - some mapped questions answered → upsert the fill with a deterministic paraphrase (joined
+ *    formatted values), `direct` provenance, full confidence, non-provisional — so the chat panel
+ *    reflects the respondent's edit immediately (not just on the next chat turn).
+ *  - none answered (all cleared) → clear the fill, so the slot reverts to "not covered yet".
+ *
+ * Runs on the form-write transaction client so the answer + its fills commit atomically. A no-op
+ * when the version has no data slots (the mapping query returns empty).
+ */
+export async function reconcileDataSlotFills(
+  client: Prisma.TransactionClient,
+  sessionId: string,
+  editedQuestionSlotIds: string[]
+): Promise<void> {
+  if (editedQuestionSlotIds.length === 0) return;
+
+  // Which data slots does any edited question feed?
+  const links = await client.appDataSlotQuestion.findMany({
+    where: { questionSlotId: { in: editedQuestionSlotIds } },
+    select: { dataSlotId: true },
+  });
+  const dataSlotIds = [...new Set(links.map((l) => l.dataSlotId))];
+
+  for (const dataSlotId of dataSlotIds) {
+    // All questions this slot maps to (a slot can cover several), and the session's answers to them.
+    const mapped = await client.appDataSlotQuestion.findMany({
+      where: { dataSlotId },
+      select: { questionSlot: { select: { id: true, key: true } } },
+    });
+    const mappedIds = mapped.map((m) => m.questionSlot.id);
+    const answers = await client.appAnswerSlot.findMany({
+      where: { sessionId, questionSlotId: { in: mappedIds } },
+      select: { questionSlotId: true, value: true },
+    });
+    const valueByQid = new Map(answers.map((a) => [a.questionSlotId, a.value]));
+
+    const answered = mapped
+      .filter((m) => valueByQid.has(m.questionSlot.id))
+      .map((m) => ({ key: m.questionSlot.key, value: valueByQid.get(m.questionSlot.id) }));
+
+    if (answered.length === 0) {
+      await clearDataSlotFill(sessionId, dataSlotId, client);
+      continue;
+    }
+
+    // Structured, diffable value (keyed by question) drives the fill's change-history; the
+    // paraphrase is the joined human restatement the panel shows.
+    const value = Object.fromEntries(answered.map((a) => [a.key, a.value]));
+    const paraphrase = answered
+      .map((a) => formatFillValue(a.value))
+      .filter(Boolean)
+      .join('; ');
+
+    await upsertDataSlotFill(
+      sessionId,
+      dataSlotId,
+      { value, paraphrase, confidence: 1, provenance: 'direct', provisional: false },
+      client
+    );
+  }
 }

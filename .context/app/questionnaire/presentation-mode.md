@@ -83,16 +83,24 @@ extraction/refinement. `respondentEdited` is the cheap guard: `persistTurn`
 extraction/refinement write targeting an edited slot. Contradiction _detection_ still
 runs (it's a read on its own warning channel) — only the silent overwrite is suppressed.
 
-## Data slots (V1 behaviour + known limitation)
+## Data slots (immediate reconciliation)
 
 The form is always **question-based** (edits `AppAnswerSlot`), even when the data-slots
 feature is on — the `?view=form` path keeps question sections and never swaps in the
-data-slot groups. A form edit to a question that maps to a data slot does NOT
-immediately rewrite the data-slot paraphrase shown in chat; the next chat turn's
-extractor/refiner reads the updated `AppAnswerSlot` and the paraphrase **self-heals**
-then. In "both" mode the chat panel and the form can therefore diverge briefly until
-the next turn. A reconciliation pass that eagerly re-paraphrases on a form edit is a
-possible follow-up, not in V1.
+data-slot groups. When data slots are enabled, a form write also **reconciles the
+chat-facing data-slot fills in the same transaction** (`reconcileDataSlotFills`): for each
+data slot that maps (via `AppDataSlotQuestion`) to an edited question, it recomputes the
+fill from the session's current answers to all the slot's mapped questions —
+
+- some answered → upsert the `AppDataSlotFill` with a deterministic paraphrase (the
+  answered values, joined), `direct` provenance, full confidence, non-provisional;
+- none answered (all cleared) → delete the fill, reverting the slot to "not covered yet".
+
+So a form edit shows up in the chat data-slot panel immediately, not just on the next turn.
+The paraphrase is deterministic (no LLM); a later chat turn may re-paraphrase it. Note the
+data-slot fill itself is not protected from a subsequent chat-turn overwrite (only the
+underlying `AppAnswerSlot` carries `respondentEdited`); fill-level protection is a possible
+follow-up.
 
 ## Gating
 

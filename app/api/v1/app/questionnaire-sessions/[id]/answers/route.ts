@@ -41,6 +41,7 @@ import {
   loadVersionSlotsByKey,
   recordManualAnswer,
   clearAnswer,
+  reconcileDataSlotFills,
   type ManualAnswerOutcome,
 } from '@/app/api/v1/app/questionnaire-sessions/_lib/form-answers';
 
@@ -173,6 +174,11 @@ async function handlePutAnswers(
       });
     }
 
+    // Data Slots feature: keep the chat-facing data-slot fills in sync with form edits in the
+    // same transaction (when on), so a form change is reflected in the data-slot panel
+    // immediately rather than only on the next chat turn.
+    const dataSlotsOn = await isDataSlotsEnabled();
+
     // Persist atomically: all reads + writes share one transaction.
     const outcomes = await prisma.$transaction(async (tx) => {
       const results: Array<{ questionKey: string; outcome: ManualAnswerOutcome | 'cleared' }> = [];
@@ -184,6 +190,13 @@ async function handlePutAnswers(
           const outcome = await recordManualAnswer(tx, sessionId, w.slotId, w.value);
           results.push({ questionKey: w.questionKey, outcome });
         }
+      }
+      if (dataSlotsOn) {
+        await reconcileDataSlotFills(
+          tx,
+          sessionId,
+          writes.map((w) => w.slotId)
+        );
       }
       return results;
     });
