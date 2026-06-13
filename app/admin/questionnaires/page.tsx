@@ -29,14 +29,16 @@ interface QuestionnaireStats {
 }
 
 /**
- * Status breakdown for the summary tiles. Fetches a wide page so the launched /
- * draft / archived split is accurate at demo scale; `total` comes from the
- * pagination meta so it stays correct even past the sample. Degrades to zeros.
+ * Status breakdown for the summary tiles. Fetches the widest page the list endpoint
+ * allows (its `limit` is capped at 100 — asking for more 400s and the tiles silently
+ * read zero) so the launched / draft / archived split is accurate at demo scale;
+ * `total` comes from the pagination meta so it stays correct even past the sample.
+ * Degrades to zeros.
  */
 async function getQuestionnaireStats(): Promise<QuestionnaireStats> {
   const empty: QuestionnaireStats = { total: 0, launched: 0, draft: 0, archived: 0 };
   try {
-    const res = await serverFetch(`${API.APP.QUESTIONNAIRES.ROOT}?page=1&limit=200`);
+    const res = await serverFetch(`${API.APP.QUESTIONNAIRES.ROOT}?page=1&limit=100`);
     if (!res.ok) return empty;
     const body = await parseApiResponse<QuestionnaireListItem[]>(res);
     if (!body.success) return empty;
