@@ -11,8 +11,8 @@
  * drag reorder, which updates locally for responsiveness then refetches).
  *
  * Hydrated from the same `VersionGraphView` the detail page already fetched (no
- * second fetch). Goal/audience edits carry `<FieldHelp>` per the contextual-help
- * directive.
+ * second fetch). Structure only — goal/audience and run-time config live on the
+ * Settings tab (they're version settings, not structure).
  */
 
 import { useEffect, useState } from 'react';
@@ -35,12 +35,8 @@ import {
 import { Plus } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { Label } from '@/components/ui/label';
-import { FieldHelp } from '@/components/ui/field-help';
 import { API } from '@/lib/api/endpoints';
-import type { AppQuestionnaireStatus, AudienceShape } from '@/lib/app/questionnaire/types';
+import type { AppQuestionnaireStatus } from '@/lib/app/questionnaire/types';
 import type { VersionGraphView } from '@/lib/app/questionnaire/views';
 
 import { SectionEditor } from '@/components/admin/questionnaires/section-editor';
@@ -81,16 +77,12 @@ export function VersionEditor({
   const [error, setError] = useState<string | null>(null);
   const [forkNotice, setForkNotice] = useState<number | null>(null);
 
-  const [goal, setGoal] = useState(version.goal ?? '');
-  const [audience, setAudience] = useState<AudienceShape>(version.audience ?? {});
   const [sections, setSections] = useState(version.sections);
 
   // Resync local state whenever the server graph changes (after a refetch), and
   // release the busy lock — `run` keeps the editor disabled until this fires, so
   // a forked edit can't re-fire against the now-stale `version.id`.
   useEffect(() => {
-    setGoal(version.goal ?? '');
-    setAudience(version.audience ?? {});
     setSections(version.sections);
     setBusy(false);
   }, [version]);
@@ -124,16 +116,6 @@ export function VersionEditor({
         setBusy(false);
       });
   };
-
-  const saveMeta = () =>
-    run(() => [
-      'PATCH',
-      API.APP.QUESTIONNAIRES.versionGraph(questionnaireId, versionId),
-      {
-        goal: goal.trim() === '' ? null : goal,
-        audience: Object.keys(audience).length ? audience : null,
-      },
-    ]);
 
   const setStatus = (to: AppQuestionnaireStatus) =>
     run(() => [
@@ -198,55 +180,8 @@ export function VersionEditor({
         </div>
       </div>
 
-      {/* Goal + audience */}
-      <section className="space-y-4 rounded-md border p-4">
-        <div className="space-y-1.5">
-          <Label className="text-sm font-medium">
-            Goal{' '}
-            <FieldHelp title="Questionnaire goal">
-              What this questionnaire is trying to learn. Judges (P5) score the structure against
-              this. Leave blank to clear it.
-            </FieldHelp>
-          </Label>
-          <Textarea
-            value={goal}
-            onChange={(e) => setGoal(e.target.value)}
-            rows={2}
-            disabled={busy}
-          />
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="space-y-1.5">
-            <Label className="text-sm font-medium">
-              Audience role{' '}
-              <FieldHelp title="Audience role">
-                Who completes this questionnaire (e.g. “patient”, “new hire”). Used to tune tone and
-                judge audience-fit.
-              </FieldHelp>
-            </Label>
-            <Input
-              value={audience.role ?? ''}
-              onChange={(e) => setAudience({ ...audience, role: e.target.value || undefined })}
-              disabled={busy}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-sm font-medium">Audience description</Label>
-            <Input
-              value={audience.description ?? ''}
-              onChange={(e) =>
-                setAudience({ ...audience, description: e.target.value || undefined })
-              }
-              disabled={busy}
-            />
-          </div>
-        </div>
-        <Button size="sm" disabled={busy} onClick={saveMeta}>
-          Save goal &amp; audience
-        </Button>
-      </section>
-
-      {/* Run-time configuration lives on the Settings tab (it's version config, not structure). */}
+      {/* Goal/audience and run-time config live on the Settings tab (version settings, not
+          structure). This editor is structure-only: tags + sections → questions. */}
 
       {/* Tag vocabulary */}
       <TagVocabularyEditor

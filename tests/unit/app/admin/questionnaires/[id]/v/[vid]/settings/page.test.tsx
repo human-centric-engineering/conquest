@@ -97,18 +97,17 @@ vi.mock('@/components/admin/questionnaires/clone-for-client-dialog', () => ({
   ),
 }));
 
-vi.mock('@/components/admin/questionnaires/config-settings-panel', () => ({
-  ConfigSettingsPanel: (props: {
+vi.mock('@/components/admin/questionnaires/version-settings-panel', () => ({
+  VersionSettingsPanel: (props: {
     questionnaireId: string;
-    versionId: string;
-    questionCount: number;
+    graph: VersionGraphView;
     adaptiveEnabled: boolean;
   }) => (
     <div
-      data-testid="config-settings-panel"
+      data-testid="version-settings-panel"
       data-qid={props.questionnaireId}
-      data-vid={props.versionId}
-      data-question-count={String(props.questionCount)}
+      data-vid={props.graph.id}
+      data-goal={props.graph.goal ?? ''}
       data-adaptive={String(props.adaptiveEnabled)}
     />
   ),
@@ -413,49 +412,27 @@ describe('SettingsTab', () => {
     });
   });
 
-  describe('run-time configuration (moved from Structure)', () => {
-    it('renders the Configuration section with the version config + adaptive flag', async () => {
+  describe('version settings (goal/audience + run-time config, moved from Structure)', () => {
+    it('renders the version-settings panel with the graph + adaptive flag', async () => {
       workspaceDataMock.getVersionGraphCached.mockResolvedValue(
-        makeGraph({ id: 'ver-9', sections: [] })
+        makeGraph({ id: 'ver-9', goal: 'Understand churn' })
       );
       workspaceDataMock.resolveQuestionnaireWorkspaceFlags.mockResolvedValue(
         makeFlags({ adaptive: true })
       );
       render(await renderPage({ id: 'qn-3', vid: 'ver-9' }));
 
-      const panel = screen.getByTestId('config-settings-panel');
+      const panel = screen.getByTestId('version-settings-panel');
       expect(panel).toHaveAttribute('data-qid', 'qn-3');
       expect(panel).toHaveAttribute('data-vid', 'ver-9');
+      expect(panel).toHaveAttribute('data-goal', 'Understand churn');
       expect(panel).toHaveAttribute('data-adaptive', 'true');
-      expect(screen.getByText('Configuration')).toBeInTheDocument();
     });
 
-    it('passes the live question count from the graph to the config panel', async () => {
-      workspaceDataMock.getVersionGraphCached.mockResolvedValue(
-        makeGraph({
-          sections: [
-            {
-              id: 'sec-1',
-              ordinal: 0,
-              title: 'A',
-              description: null,
-
-              questions: [{}, {}] as any,
-            },
-          ],
-        })
-      );
-      render(await renderPage());
-      expect(screen.getByTestId('config-settings-panel')).toHaveAttribute(
-        'data-question-count',
-        '2'
-      );
-    });
-
-    it('omits the Configuration section when the version graph is unavailable', async () => {
+    it('omits the version-settings panel when the version graph is unavailable', async () => {
       workspaceDataMock.getVersionGraphCached.mockResolvedValue(null);
       render(await renderPage());
-      expect(screen.queryByTestId('config-settings-panel')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('version-settings-panel')).not.toBeInTheDocument();
       // Demo-client settings still render — a missing graph doesn't break the tab.
       expect(screen.getByTestId('demo-client-assign')).toBeInTheDocument();
     });
