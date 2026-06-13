@@ -13,6 +13,11 @@
  */
 
 import { prisma } from '@/lib/db/client';
+import {
+  narrowToEnum,
+  PRESENTATION_MODES,
+  type PresentationMode,
+} from '@/lib/app/questionnaire/types';
 
 /** Resolve `anonymousMode` for a launched version (no-login / preview respondent surface). */
 export async function resolveAnonymousForVersion(versionId: string): Promise<boolean> {
@@ -21,4 +26,19 @@ export async function resolveAnonymousForVersion(versionId: string): Promise<boo
     select: { config: { select: { anonymousMode: true } } },
   });
   return version?.config?.anonymousMode ?? false;
+}
+
+/**
+ * Resolve `presentationMode` (chat | form | both) for a launched version (no-login / preview
+ * respondent surface). Config is 1:1 and lazy — an absent row defaults to `chat`. The
+ * authenticated surface reads it off its session-ownership query instead.
+ */
+export async function resolvePresentationModeForVersion(
+  versionId: string
+): Promise<PresentationMode> {
+  const version = await prisma.appQuestionnaireVersion.findUnique({
+    where: { id: versionId },
+    select: { config: { select: { presentationMode: true } } },
+  });
+  return narrowToEnum(version?.config?.presentationMode ?? 'chat', PRESENTATION_MODES, 'chat');
 }

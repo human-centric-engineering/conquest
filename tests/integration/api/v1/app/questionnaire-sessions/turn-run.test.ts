@@ -11,15 +11,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const seamMock = vi.hoisted(() => ({
   upsertAnswerSlot: vi.fn(),
   loadAnswerSlot: vi.fn(),
+  loadRespondentEditedSlotIds: vi.fn(),
   persistRefinement: vi.fn(),
   recordTurn: vi.fn(),
 }));
 vi.mock('@/app/api/v1/app/questionnaires/_lib/answer-slots', () => ({
   upsertAnswerSlot: seamMock.upsertAnswerSlot,
   loadAnswerSlot: seamMock.loadAnswerSlot,
+  loadRespondentEditedSlotIds: seamMock.loadRespondentEditedSlotIds,
   persistRefinement: seamMock.persistRefinement,
 }));
 vi.mock('@/app/api/v1/app/questionnaires/_lib/turns', () => ({ recordTurn: seamMock.recordTurn }));
+
+const dataSlotMock = vi.hoisted(() => ({ upsertDataSlotFill: vi.fn() }));
+vi.mock('@/app/api/v1/app/questionnaires/_lib/data-slot-fills', () => dataSlotMock);
 
 import { persistTurn } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-run';
 import type { AnswerSlotIntent } from '@/lib/app/questionnaire/extraction/types';
@@ -68,6 +73,9 @@ beforeEach(() => {
   (seamMock.recordTurn as Mock).mockResolvedValue('turn-1');
   // Default: no existing answer for a refinement (overridden per-test).
   (seamMock.loadAnswerSlot as Mock).mockResolvedValue(null);
+  // Default: no respondent-edited slots (P-presentation protection; overridden per-test).
+  (seamMock.loadRespondentEditedSlotIds as Mock).mockResolvedValue(new Set<string>());
+  (dataSlotMock.upsertDataSlotFill as Mock).mockResolvedValue('ds-fill-1');
 });
 
 describe('persistTurn', () => {
@@ -215,6 +223,120 @@ describe('persistTurn', () => {
     );
     expect(seamMock.recordTurn).toHaveBeenCalledWith(
       expect.objectContaining({ sideEffectAnswerIds: ['ans-q1'] })
+    );
+  });
+
+  describe('respondent-edited protection (P-presentation)', () => {
+    it('does not overwrite an extraction intent targeting a respondent-edited slot', async () => {
+      (seamMock.loadRespondentEditedSlotIds as Mock).mockResolvedValue(new Set(['slot-q1']));
+
+      await persistTurn({
+        sessionId: 'sess-1',
+        userMessage: 'I do sales',
+        agentResponse: 'r',
+        targetedQuestionId: null,
+        toolCalls: [],
+        costUsd: 0,
+        upserts: [intent('role', 'sales'), intent('team', 5)],
+        refinements: [],
+        keyToSlotId: new Map([
+          ['role', 'slot-q1'], // respondent-edited → protected
+          ['team', 'slot-q2'],
+        ]),
+      });
+
+      // Only the non-protected slot is written; the respondent's own answer is left intact.
+      expect(seamMock.upsertAnswerSlot).toHaveBeenCalledTimes(1);
+      expect(seamMock.upsertAnswerSlot).toHaveBeenCalledWith(
+        'sess-1',
+        'slot-q2',
+        expect.anything()
+      );
+    });
+
+    it('does not refine a respondent-edited slot', async () => {
+      (seamMock.loadRespondentEditedSlotIds as Mock).mockResolvedValue(new Set(['slot-q1']));
+      (seamMock.loadAnswerSlot as Mock).mockResolvedValue(loaded('ans-q1'));
+
+      await persistTurn({
+        sessionId: 'sess-1',
+        userMessage: 'm',
+        agentResponse: 'r',
+        targetedQuestionId: null,
+        toolCalls: [],
+        costUsd: 0,
+        upserts: [],
+        refinements: [decision('role', 'corrected')],
+        keyToSlotId: new Map([['role', 'slot-q1']]),
+      });
+
+      expect(seamMock.loadAnswerSlot).not.toHaveBeenCalled();
+      expect(seamMock.persistRefinement).not.toHaveBeenCalled();
+      expect(seamMock.recordTurn).toHaveBeenCalledWith(
+        expect.objectContaining({ sideEffectAnswerIds: [] })
+      );
+    });
+  });
+
+  it('upserts data-slot fills (data-slot mode) and records their ids on the turn', async () => {
+    await persistTurn({
+      sessionId: 'sess-1',
+      userMessage: 'I want to grow the team',
+      agentResponse: 'r',
+      targetedQuestionId: null,
+      targetedDataSlotId: 'ds-1',
+      toolCalls: [],
+      costUsd: 0,
+      upserts: [],
+      refinements: [],
+      keyToSlotId: new Map(),
+      dataSlotFills: [
+        {
+          dataSlotKey: 'goal',
+          value: 'grow',
+          paraphrase: 'Grow the team',
+          confidence: 0.9,
+          provenance: 'direct',
+        },
+      ],
+      dataSlotKeyToId: new Map([['goal', 'ds-1']]),
+    });
+
+    expect(dataSlotMock.upsertDataSlotFill).toHaveBeenCalledWith(
+      'sess-1',
+      'ds-1',
+      expect.objectContaining({ paraphrase: 'Grow the team', confidence: 0.9 })
+    );
+    expect(seamMock.recordTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ sideEffectDataSlotIds: ['ds-fill-1'], targetedDataSlotId: 'ds-1' })
+    );
+  });
+
+  it('skips a data-slot fill whose key does not resolve', async () => {
+    await persistTurn({
+      sessionId: 'sess-1',
+      userMessage: 'm',
+      agentResponse: 'r',
+      targetedQuestionId: null,
+      toolCalls: [],
+      costUsd: 0,
+      upserts: [],
+      refinements: [],
+      keyToSlotId: new Map(),
+      dataSlotFills: [
+        {
+          dataSlotKey: 'stale',
+          value: 'x',
+          paraphrase: 'x',
+          confidence: 0.5,
+          provenance: 'direct',
+        },
+      ],
+      dataSlotKeyToId: new Map([['goal', 'ds-1']]),
+    });
+    expect(dataSlotMock.upsertDataSlotFill).not.toHaveBeenCalled();
+    expect(seamMock.recordTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ sideEffectDataSlotIds: [] })
     );
   });
 

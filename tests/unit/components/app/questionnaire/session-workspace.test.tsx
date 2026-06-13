@@ -11,6 +11,7 @@
  * @see components/app/questionnaire/session-workspace.tsx
  */
 
+import type { ReactNode } from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 
@@ -22,9 +23,13 @@ const kickoff = vi.fn();
 const refetch = vi.fn();
 const lifecycleRefetch = vi.fn();
 
+const formRefresh = vi.fn();
+const formSetValue = vi.fn();
+
 const streamHook = vi.fn();
 const panelHook = vi.fn();
 const lifecycleHook = vi.fn();
+const formHook = vi.fn();
 
 vi.mock('@/lib/hooks/use-questionnaire-session-stream', () => ({
   useQuestionnaireSessionStream: (opts: unknown) => streamHook(opts),
@@ -35,6 +40,12 @@ vi.mock('@/lib/hooks/use-answer-panel', () => ({
 vi.mock('@/lib/hooks/use-session-lifecycle', () => ({
   useSessionLifecycle: (opts: unknown) => lifecycleHook(opts),
 }));
+vi.mock('@/lib/hooks/use-form-answers', () => ({
+  useFormAnswers: (opts: unknown) => formHook(opts),
+}));
+vi.mock('@/components/app/questionnaire/form/questionnaire-form', () => ({
+  QuestionnaireForm: () => <div data-testid="form" />,
+}));
 
 // Chat + lifecycle children are irrelevant here — marker stubs keep the render cheap.
 vi.mock('@/components/app/questionnaire/chat/questionnaire-chat', () => ({
@@ -43,7 +54,15 @@ vi.mock('@/components/app/questionnaire/chat/questionnaire-chat', () => ({
 // Lifecycle-bar stub surfaces the Pause/Resume handlers as buttons so the test can verify
 // the workspace wires them to the hook's actions.
 vi.mock('@/components/app/questionnaire/lifecycle/session-lifecycle-bar', () => ({
-  SessionLifecycleBar: ({ onPause, onResume }: { onPause: () => void; onResume: () => void }) => (
+  SessionLifecycleBar: ({
+    onPause,
+    onResume,
+    trailing,
+  }: {
+    onPause: () => void;
+    onResume: () => void;
+    trailing?: ReactNode;
+  }) => (
     <div data-testid="lifecycle-bar">
       <button type="button" onClick={onPause}>
         bar-pause
@@ -51,6 +70,8 @@ vi.mock('@/components/app/questionnaire/lifecycle/session-lifecycle-bar', () => 
       <button type="button" onClick={onResume}>
         bar-resume
       </button>
+      {/* The mode toggle is passed here as `trailing` — render it so the test can drive it. */}
+      {trailing}
     </div>
   ),
 }));
@@ -93,6 +114,7 @@ const SLOT: PanelSlotView = {
   slotKey: 'budget',
   prompt: 'What is your budget?',
   type: 'free_text',
+  typeConfig: null,
   required: true,
   answered: true,
   value: '£10k',
@@ -138,8 +160,27 @@ function setup(
   render(<SessionWorkspace sessionId="s1" />);
 }
 
+function formReturn(over: Record<string, unknown> = {}) {
+  return {
+    view: null,
+    loading: false,
+    error: false,
+    values: {},
+    statuses: {},
+    setValue: formSetValue,
+    flush: vi.fn(),
+    refresh: formRefresh,
+    ...over,
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  // Sensible defaults so a render in any mode doesn't crash; mode tests override as needed.
+  streamHook.mockReturnValue({ canSend: true, status: 'idle', sendMessage, kickoff, applyStatus });
+  panelHook.mockReturnValue({ view: null, loading: false, error: false, refetch });
+  lifecycleHook.mockReturnValue(lifecycleReturn());
+  formHook.mockReturnValue(formReturn());
 });
 
 describe('SessionWorkspace', () => {
@@ -320,5 +361,55 @@ describe('SessionWorkspace', () => {
   it('hides the completion offer when the session is not submittable', () => {
     setup({}, {}, { canSubmit: false });
     expect(screen.queryByTestId('completion-offer')).not.toBeInTheDocument();
+  });
+
+  describe('presentation mode (P-presentation)', () => {
+    it('chat mode renders chat + panel, no form, and keeps the form hook inert', () => {
+      render(<SessionWorkspace sessionId="s1" presentationMode="chat" />);
+      expect(screen.getByTestId('chat')).toBeInTheDocument();
+      expect(screen.getByTestId('panel')).toBeInTheDocument();
+      expect(screen.queryByTestId('form')).not.toBeInTheDocument();
+      // The form hook is mounted but disabled (no fetch) in chat-only mode.
+      expect(formHook.mock.calls[0][0]).toMatchObject({ enabled: false });
+    });
+
+    it('form mode renders the form, no chat, and enables the form hook', () => {
+      render(<SessionWorkspace sessionId="s1" presentationMode="form" />);
+      expect(screen.getByTestId('form')).toBeInTheDocument();
+      expect(screen.queryByTestId('chat')).not.toBeInTheDocument();
+      expect(formHook.mock.calls[0][0]).toMatchObject({ enabled: true });
+    });
+
+    it('form mode never fires the chat kickoff even with autoStart', () => {
+      render(<SessionWorkspace sessionId="s1" presentationMode="form" autoStart />);
+      expect(kickoff).not.toHaveBeenCalled();
+    });
+
+    it('both mode mounts BOTH surfaces (carousel) with a toggle defaulting to chat', () => {
+      render(<SessionWorkspace sessionId="s1" presentationMode="both" />);
+      // Toggle present and both surfaces are mounted simultaneously (they slide, not mount/unmount).
+      const tabs = screen.getAllByRole('tab');
+      expect(tabs).toHaveLength(2);
+      expect(screen.getByTestId('chat')).toBeInTheDocument();
+      expect(screen.getByTestId('form')).toBeInTheDocument();
+      // Chat is the selected tab by default.
+      expect(screen.getByRole('tab', { name: 'Chat' })).toHaveAttribute('aria-selected', 'true');
+      expect(screen.getByRole('tab', { name: 'Form' })).toHaveAttribute('aria-selected', 'false');
+    });
+
+    it('toggling to Form selects it and re-seeds the form from the server', () => {
+      render(<SessionWorkspace sessionId="s1" presentationMode="both" />);
+      fireEvent.click(screen.getByRole('tab', { name: 'Form' }));
+      expect(screen.getByRole('tab', { name: 'Form' })).toHaveAttribute('aria-selected', 'true');
+      expect(formRefresh).toHaveBeenCalledTimes(1);
+    });
+
+    it('toggling back to Chat refetches the panel so it reflects form edits', () => {
+      render(<SessionWorkspace sessionId="s1" presentationMode="both" />);
+      fireEvent.click(screen.getByRole('tab', { name: 'Form' }));
+      fireEvent.click(screen.getByRole('tab', { name: 'Chat' }));
+      expect(screen.getByRole('tab', { name: 'Chat' })).toHaveAttribute('aria-selected', 'true');
+      expect(refetch).toHaveBeenCalled();
+    });
   });
 });

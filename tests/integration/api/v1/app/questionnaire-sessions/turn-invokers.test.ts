@@ -93,6 +93,7 @@ function state(over: Partial<TurnState> = {}): TurnState {
       supportResourceUrl: '',
       profileFields: [],
       answerSlotPanelScope: 'full_progress',
+      presentationMode: 'chat',
     },
     questions: [
       {

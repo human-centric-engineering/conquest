@@ -35,8 +35,25 @@ function row(over: Record<string, unknown> = {}) {
           id: 'sec-1',
           title: 'About you',
           questions: [
-            { key: 'name', prompt: 'Your name?', type: 'free_text', required: true },
-            { key: 'colour', prompt: 'Favourite colour?', type: 'single_choice', required: false },
+            {
+              key: 'name',
+              prompt: 'Your name?',
+              type: 'free_text',
+              typeConfig: null,
+              required: true,
+            },
+            {
+              key: 'colour',
+              prompt: 'Favourite colour?',
+              type: 'single_choice',
+              typeConfig: {
+                choices: [
+                  { value: 'r', label: 'Red' },
+                  { value: 'b', label: 'Blue' },
+                ],
+              },
+              required: false,
+            },
           ],
         },
       ],
@@ -150,5 +167,114 @@ describe('loadAnswerPanelState', () => {
     findUnique.mockResolvedValue(row({ status: 'bogus' }));
     const loaded = await loadAnswerPanelState('sess-1');
     expect(loaded?.view.status).toBe('active');
+  });
+
+  it('carries each slot typeConfig through for the form surface', async () => {
+    findUnique.mockResolvedValue(row());
+    const loaded = await loadAnswerPanelState('sess-1');
+    const colour = loaded!.view.sections[0].slots.find((s) => s.slotKey === 'colour')!;
+    expect(colour.typeConfig).toEqual({
+      choices: [
+        { value: 'r', label: 'Red' },
+        { value: 'b', label: 'Blue' },
+      ],
+    });
+    const name = loaded!.view.sections[0].slots.find((s) => s.slotKey === 'name')!;
+    expect(name.typeConfig).toBeNull();
+  });
+
+  describe('data-slot mode', () => {
+    it('builds themed data-slot groups (paraphrase, filled, history) and suppresses question sections', async () => {
+      findUnique.mockResolvedValue(
+        row({
+          version: {
+            ...row().version,
+            dataSlots: [
+              { id: 'ds-1', key: 'goal', name: 'Goal', description: 'Why', theme: 'Goals' },
+              { id: 'ds-2', key: 'mood', name: 'Mood', description: 'How', theme: 'Goals' },
+            ],
+          },
+          dataSlotFills: [
+            {
+              dataSlotId: 'ds-1',
+              paraphrase: 'Grow the team',
+              confidence: 0.9,
+              provisional: false,
+              refinementHistory: [{ previousParaphrase: 'Hire', previousConfidence: 0.4 }],
+            },
+            // ds-2 has no fill → unfilled
+          ],
+        })
+      );
+      const loaded = await loadAnswerPanelState('sess-1', true); // dataSlotMode on, forForm off
+
+      expect(loaded?.view.dataSlotGroups).toHaveLength(1); // one theme: "Goals"
+      const group = loaded!.view.dataSlotGroups![0];
+      expect(group.theme).toBe('Goals');
+      const goal = group.slots.find((s) => s.key === 'goal')!;
+      expect(goal.filled).toBe(true);
+      expect(goal.paraphrase).toBe('Grow the team');
+      expect(goal.history).toEqual([{ paraphrase: 'Hire', confidence: 0.4 }]);
+      const mood = group.slots.find((s) => s.key === 'mood')!;
+      expect(mood.filled).toBe(false);
+      expect(mood.paraphrase).toBeNull();
+      // Question rows are suppressed; a blended progress percent is shown instead.
+      expect(loaded?.view.sections).toEqual([]);
+      expect(typeof loaded?.view.progressPercent).toBe('number');
+    });
+
+    it('counts a provisional fill as filled even below the confidence threshold', async () => {
+      findUnique.mockResolvedValue(
+        row({
+          version: {
+            ...row().version,
+            dataSlots: [{ id: 'ds-1', key: 'goal', name: 'Goal', description: 'd', theme: 'T' }],
+          },
+          dataSlotFills: [
+            {
+              dataSlotId: 'ds-1',
+              paraphrase: 'maybe',
+              confidence: 0.1,
+              provisional: true,
+              refinementHistory: [],
+            },
+          ],
+        })
+      );
+      const loaded = await loadAnswerPanelState('sess-1', true);
+      const slot = loaded!.view.dataSlotGroups![0].slots[0];
+      expect(slot.filled).toBe(true);
+      expect(slot.provisional).toBe(true);
+    });
+  });
+
+  describe('forForm (P-presentation)', () => {
+    it('forces full structure even when the version scope is answered_only', async () => {
+      findUnique.mockResolvedValue(
+        row({ version: { ...row().version, config: { answerSlotPanelScope: 'answered_only' } } })
+      );
+      const loaded = await loadAnswerPanelState('sess-1', false, true);
+      // The chat panel would hide the pending `colour` slot under answered_only; the form must not.
+      expect(loaded?.view.scope).toBe('full_progress');
+      expect(loaded?.view.sections[0].slots).toHaveLength(2);
+    });
+
+    it('keeps question sections even when data-slot mode is on', async () => {
+      findUnique.mockResolvedValue(
+        row({
+          version: {
+            ...row().version,
+            dataSlots: [
+              { id: 'ds-1', key: 'goal', name: 'Goal', description: 'Why', theme: 'Goals' },
+            ],
+          },
+          dataSlotFills: [],
+        })
+      );
+      // dataSlotMode = true, but forForm = true → the form stays question-based.
+      const loaded = await loadAnswerPanelState('sess-1', true, true);
+      expect(loaded?.view.dataSlotGroups).toBeUndefined();
+      expect(loaded?.view.sections[0].slots).toHaveLength(2);
+    });
   });
 });

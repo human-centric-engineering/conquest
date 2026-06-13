@@ -20,6 +20,7 @@ import { z } from 'zod';
 import {
   ANSWER_SLOT_PANEL_SCOPES,
   CONTRADICTION_MODES,
+  PRESENTATION_MODES,
   PROFILE_FIELD_TYPES,
   SELECTION_STRATEGIES,
 } from '@/lib/app/questionnaire/types';
@@ -97,6 +98,9 @@ export const updateConfigSchema = z
     supportResourceUrl: z.string().trim().max(500).optional(),
     profileFields: z.array(profileFieldSchema).optional(),
     answerSlotPanelScope: z.enum(ANSWER_SLOT_PANEL_SCOPES).optional(),
+    // How the respondent completes the session: chat (conversation), form (raw sectioned
+    // form), or both (toggle between them). Defaults to chat for existing versions.
+    presentationMode: z.enum(PRESENTATION_MODES).optional(),
   })
   .refine((b) => Object.values(b).some((v) => v !== undefined), {
     message: 'Provide at least one field to update',

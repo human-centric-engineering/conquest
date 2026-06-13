@@ -21,8 +21,10 @@ import { render, screen } from '@testing-library/react';
 import type {
   QuestionnaireDetail,
   QuestionnaireVersionSummary,
+  VersionGraphView,
 } from '@/lib/app/questionnaire/views';
 import type { AttributedDemoClient, DemoClientView } from '@/lib/app/questionnaire/demo-clients';
+import type { QuestionnaireWorkspaceFlags } from '@/lib/app/questionnaire/workspace-data';
 
 // ─── Navigation mock ──────────────────────────────────────────────────────────
 
@@ -48,6 +50,8 @@ vi.mock('@/lib/app/questionnaire/feature-flag', () => flagMock);
 
 const workspaceDataMock = vi.hoisted(() => ({
   getQuestionnaireDetailCached: vi.fn<() => Promise<QuestionnaireDetail | null>>(),
+  getVersionGraphCached: vi.fn<() => Promise<VersionGraphView | null>>(),
+  resolveQuestionnaireWorkspaceFlags: vi.fn<() => Promise<QuestionnaireWorkspaceFlags>>(),
 }));
 vi.mock('@/lib/app/questionnaire/workspace-data', () => workspaceDataMock);
 
@@ -93,6 +97,22 @@ vi.mock('@/components/admin/questionnaires/clone-for-client-dialog', () => ({
   ),
 }));
 
+vi.mock('@/components/admin/questionnaires/version-settings-panel', () => ({
+  VersionSettingsPanel: (props: {
+    questionnaireId: string;
+    graph: VersionGraphView;
+    adaptiveEnabled: boolean;
+  }) => (
+    <div
+      data-testid="version-settings-panel"
+      data-qid={props.questionnaireId}
+      data-vid={props.graph.id}
+      data-goal={props.graph.goal ?? ''}
+      data-adaptive={String(props.adaptiveEnabled)}
+    />
+  ),
+}));
+
 // ─── Factories ────────────────────────────────────────────────────────────────
 
 function makeVersion(over: Partial<QuestionnaireVersionSummary> = {}): QuestionnaireVersionSummary {
@@ -123,6 +143,60 @@ function makeDetail(over: Partial<QuestionnaireDetail> = {}): QuestionnaireDetai
     versions: [makeVersion()],
     ...over,
   };
+}
+
+function makeGraph(over: Partial<VersionGraphView> = {}): VersionGraphView {
+  return {
+    id: 'ver-1',
+    questionnaireId: 'qn-1',
+    versionNumber: 1,
+    status: 'launched',
+    goal: null,
+    audience: null,
+    goalProvenance: null,
+    audienceProvenance: null,
+    sections: [
+      {
+        id: 'sec-1',
+        ordinal: 0,
+        title: 'About',
+        description: null,
+        questions: [],
+      },
+    ],
+    tags: [],
+    config: {
+      saved: true,
+      selectionStrategy: 'sequential',
+      minQuestionsAnswered: 0,
+      coverageThreshold: 1,
+      costBudgetUsd: null,
+      maxQuestionsPerSession: null,
+      voiceEnabled: false,
+      contradictionMode: 'off',
+      contradictionWindowN: 0,
+      contradictionEveryNTurns: 1,
+      anonymousMode: false,
+      abuseThreshold: 4,
+      maxDataSlotAttempts: 2,
+      sensitivityAwareness: false,
+      supportMessage: '',
+      supportResourceUrl: '',
+      profileFields: [],
+      answerSlotPanelScope: 'full_progress',
+      presentationMode: 'chat',
+    },
+    ...over,
+  };
+}
+
+function makeFlags(over: Partial<QuestionnaireWorkspaceFlags> = {}): QuestionnaireWorkspaceFlags {
+  return {
+    adaptive: false,
+    dataSlots: false,
+    designEval: false,
+    ...over,
+  } as QuestionnaireWorkspaceFlags;
 }
 
 /** Build a DemoClientView row as the API would return — isActive controls the filter. */
@@ -163,6 +237,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   flagMock.isQuestionnairesEnabled.mockResolvedValue(true);
   workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue(makeDetail());
+  workspaceDataMock.getVersionGraphCached.mockResolvedValue(makeGraph());
+  workspaceDataMock.resolveQuestionnaireWorkspaceFlags.mockResolvedValue(makeFlags());
   apiMock.serverFetch.mockResolvedValue({ ok: true });
   apiMock.parseApiResponse.mockResolvedValue({ success: true, data: [] });
 });
@@ -333,6 +409,32 @@ describe('SettingsTab', () => {
     it('renders the "Clone for another client" section heading', async () => {
       render(await renderPage());
       expect(screen.getByText('Clone for another client')).toBeInTheDocument();
+    });
+  });
+
+  describe('version settings (goal/audience + run-time config, moved from Structure)', () => {
+    it('renders the version-settings panel with the graph + adaptive flag', async () => {
+      workspaceDataMock.getVersionGraphCached.mockResolvedValue(
+        makeGraph({ id: 'ver-9', goal: 'Understand churn' })
+      );
+      workspaceDataMock.resolveQuestionnaireWorkspaceFlags.mockResolvedValue(
+        makeFlags({ adaptive: true })
+      );
+      render(await renderPage({ id: 'qn-3', vid: 'ver-9' }));
+
+      const panel = screen.getByTestId('version-settings-panel');
+      expect(panel).toHaveAttribute('data-qid', 'qn-3');
+      expect(panel).toHaveAttribute('data-vid', 'ver-9');
+      expect(panel).toHaveAttribute('data-goal', 'Understand churn');
+      expect(panel).toHaveAttribute('data-adaptive', 'true');
+    });
+
+    it('omits the version-settings panel when the version graph is unavailable', async () => {
+      workspaceDataMock.getVersionGraphCached.mockResolvedValue(null);
+      render(await renderPage());
+      expect(screen.queryByTestId('version-settings-panel')).not.toBeInTheDocument();
+      // Demo-client settings still render — a missing graph doesn't break the tab.
+      expect(screen.getByTestId('demo-client-assign')).toBeInTheDocument();
     });
   });
 });

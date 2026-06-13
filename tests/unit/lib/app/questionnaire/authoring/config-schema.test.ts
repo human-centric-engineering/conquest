@@ -67,6 +67,16 @@ describe('updateConfigSchema', () => {
     );
   });
 
+  it('accepts each presentation mode (P-presentation)', () => {
+    for (const mode of ['chat', 'form', 'both'] as const) {
+      expect(updateConfigSchema.safeParse({ presentationMode: mode }).success).toBe(true);
+    }
+  });
+
+  it('rejects an unknown presentation mode', () => {
+    expect(updateConfigSchema.safeParse({ presentationMode: 'telepathy' }).success).toBe(false);
+  });
+
   it('accepts null budget / cap as "no cap"', () => {
     const res = updateConfigSchema.safeParse({ costBudgetUsd: null, maxQuestionsPerSession: null });
     expect(res.success).toBe(true);

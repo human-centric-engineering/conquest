@@ -40,19 +40,28 @@ single JSON column for the profile fields:
 | Support resource URL                  | `supportResourceUrl`       | String (URL)           | `''`              |
 | Session-start profile fields          | `profileFields`            | Json (array)           | `[]`              |
 | Answer panel scope                    | `answerSlotPanelScope`     | String (enum)          | `'full_progress'` |
+| Presentation mode                     | `presentationMode`         | String (enum)          | `'chat'`          |
 
 The enums are `const` tuples in `lib/app/questionnaire/types.ts` (single source of
 truth — the Zod schema, the read-view narrowing, and the editor's `<Select>`
 options all derive from them): `SELECTION_STRATEGIES`
 (`sequential | weighted | adaptive`), `CONTRADICTION_MODES` (`off | flag | probe`),
 `PROFILE_FIELD_TYPES` (`text | email | number | select`), `ANSWER_SLOT_PANEL_SCOPES`
-(`full_progress | answered_only`).
+(`full_progress | answered_only`), `PRESENTATION_MODES` (`chat | form | both`).
 
 `answerSlotPanelScope` (F7.2) is read by the respondent answer-panel endpoint
 (`GET …/questionnaire-sessions/:id/answers`), not the turn engine: `full_progress`
 returns every slot grouped by section (an X-of-N progress view), `answered_only`
 returns just the captured answers so the pending structure is never sent to the
 client. See `.context/app/questionnaire/answer-slot-panel.md`.
+
+`presentationMode` (F9.7) chooses how the respondent completes the session: `chat`
+(the streaming conversation), `form` (a raw, sectioned form rendering each question
+with the right input control), or `both` (a chat ↔ form toggle). It is read by the
+respondent server pages (authenticated `[sessionId]` + public `/q/[versionId]`),
+which dispatch the surface and seed the full form view for `form`/`both`. Defaults
+to `chat` so existing launched versions are unchanged. See
+`.context/app/questionnaire/presentation-mode.md`.
 
 ### Profile fields (JSON, not a relational model)
 

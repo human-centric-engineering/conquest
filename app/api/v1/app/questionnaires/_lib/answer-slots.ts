@@ -137,6 +137,21 @@ export async function upsertAnswerSlot(
 }
 
 /**
+ * The set of `questionSlotId`s in a session that the respondent set/edited themselves in
+ * form view (P-presentation) — `AppAnswerSlot.respondentEdited = true`. The per-turn
+ * pipeline checks this before writing: a respondent's own answer is authoritative, so
+ * extraction/refinement must NOT silently overwrite it (contradiction detection still
+ * surfaces a warning through its own channel — that's a read, not a write).
+ */
+export async function loadRespondentEditedSlotIds(sessionId: string): Promise<Set<string>> {
+  const rows = await prisma.appAnswerSlot.findMany({
+    where: { sessionId, respondentEdited: true },
+    select: { questionSlotId: true },
+  });
+  return new Set(rows.map((r) => r.questionSlotId));
+}
+
+/**
  * Load the answer for a slot within a session, shaped for {@link applyRefinement}.
  * Returns `null` when the slot has no answer in the session.
  */

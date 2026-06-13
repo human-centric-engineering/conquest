@@ -45,10 +45,9 @@ export default async function StructureTab({ params, searchParams }: PageProps) 
   if (!selected) notFound();
 
   const editing = edit === '1' && graph !== null;
-  // Workspace flags (cached): `adaptive` controls the config picker; `dataSlots` whether the
-  // header surfaces the data-slot count beside the question count.
+  // Workspace flags (cached): `dataSlots` controls whether the header surfaces the data-slot count
+  // beside the question count. (Run-time config — incl. the adaptive picker — lives on Settings.)
   const flags = await resolveQuestionnaireWorkspaceFlags();
-  const adaptiveEnabled = editing ? flags.adaptive : false;
 
   return (
     <div className="space-y-4">
@@ -98,7 +97,7 @@ export default async function StructureTab({ params, searchParams }: PageProps) 
 
       {graph ? (
         editing ? (
-          <VersionEditor questionnaireId={id} version={graph} adaptiveEnabled={adaptiveEnabled} />
+          <VersionEditor questionnaireId={id} version={graph} />
         ) : (
           <VersionGraph graph={graph} />
         )

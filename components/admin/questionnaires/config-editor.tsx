@@ -39,10 +39,12 @@ import { API } from '@/lib/api/endpoints';
 import {
   ANSWER_SLOT_PANEL_SCOPES,
   CONTRADICTION_MODES,
+  PRESENTATION_MODES,
   PROFILE_FIELD_TYPES,
   SELECTION_STRATEGIES,
   type AnswerSlotPanelScope,
   type ContradictionMode,
+  type PresentationMode,
   type ProfileFieldConfig,
   type ProfileFieldType,
   type SelectionStrategy,
@@ -73,6 +75,12 @@ const PROFILE_FIELD_TYPE_LABELS: Record<ProfileFieldType, string> = {
 const ANSWER_SLOT_PANEL_SCOPE_LABELS: Record<AnswerSlotPanelScope, string> = {
   full_progress: 'Full progress (all questions)',
   answered_only: 'Answered only',
+};
+
+const PRESENTATION_MODE_LABELS: Record<PresentationMode, string> = {
+  chat: 'Chat (conversation)',
+  form: 'Form (sectioned)',
+  both: 'Both (toggle)',
 };
 
 /** A profile-field row in local edit state — `options` carried as raw text. */
@@ -196,6 +204,9 @@ export function ConfigEditor({
   const [answerSlotPanelScope, setAnswerSlotPanelScope] = useState<AnswerSlotPanelScope>(
     config.answerSlotPanelScope
   );
+  const [presentationMode, setPresentationMode] = useState<PresentationMode>(
+    config.presentationMode
+  );
   const [profileFields, setProfileFields] = useState<ProfileFieldRow[]>(
     config.profileFields.map(toRow)
   );
@@ -220,6 +231,7 @@ export function ConfigEditor({
     setSupportMessage(config.supportMessage);
     setSupportResourceUrl(config.supportResourceUrl);
     setAnswerSlotPanelScope(config.answerSlotPanelScope);
+    setPresentationMode(config.presentationMode);
     setProfileFields(config.profileFields.map(toRow));
   }, [config]);
 
@@ -287,6 +299,7 @@ export function ConfigEditor({
         supportMessage: supportMessage.trim(),
         supportResourceUrl: supportResourceUrl.trim(),
         answerSlotPanelScope,
+        presentationMode,
         profileFields: profileFields.map((f) => ({
           key: f.key.trim(),
           label: f.label.trim(),
@@ -627,6 +640,36 @@ export function ConfigEditor({
               {ANSWER_SLOT_PANEL_SCOPES.map((s) => (
                 <SelectItem key={s} value={s}>
                   {ANSWER_SLOT_PANEL_SCOPE_LABELS[s]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1.5 sm:max-w-xs">
+          <Label className="text-sm font-medium">
+            Presentation mode{' '}
+            <FieldHelp title="Presentation mode">
+              How the respondent completes this questionnaire. Chat is the streaming conversation.
+              Form presents the questions as a raw, sectioned form with the right input per type
+              (likert, choices, yes/no, text…). Both offers a chat ↔ form toggle so the respondent
+              can navigate sections, see what&apos;s already answered, and edit answers the agent
+              inferred — a useful escape hatch when the chat struggles. Form mode is question-based:
+              for questionnaires using data slots, editing a question reconciles into the chat on
+              the next turn.
+            </FieldHelp>
+          </Label>
+          <Select
+            value={presentationMode}
+            onValueChange={(v) => setPresentationMode(v as PresentationMode)}
+            disabled={busy}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PRESENTATION_MODES.map((m) => (
+                <SelectItem key={m} value={m}>
+                  {PRESENTATION_MODE_LABELS[m]}
                 </SelectItem>
               ))}
             </SelectContent>

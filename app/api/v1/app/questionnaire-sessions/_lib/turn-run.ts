@@ -15,6 +15,7 @@ import { applyRefinement } from '@/lib/app/questionnaire/refinement';
 import type { ToolCallRecord } from '@/lib/app/questionnaire/orchestrator';
 import {
   loadAnswerSlot,
+  loadRespondentEditedSlotIds,
   persistRefinement,
   upsertAnswerSlot,
 } from '@/app/api/v1/app/questionnaires/_lib/answer-slots';
@@ -47,9 +48,16 @@ export async function persistTurn(opts: {
   const sideEffectAnswerIds: string[] = [];
   const sideEffectDataSlotIds: string[] = [];
 
+  // P-presentation: answers the respondent set themselves in form view are authoritative.
+  // The per-turn pipeline must not silently overwrite them — skip any extraction/refinement
+  // write that targets a respondent-edited slot (contradiction detection still warns; that's
+  // a read on its own channel, not a write here).
+  const respondentEdited = await loadRespondentEditedSlotIds(opts.sessionId);
+
   for (const intent of opts.upserts) {
     const slotId = opts.keyToSlotId.get(intent.slotKey);
     if (!slotId) continue;
+    if (respondentEdited.has(slotId)) continue; // respondent's own answer wins
     const id = await upsertAnswerSlot(opts.sessionId, slotId, {
       value: intent.value,
       provenance: intent.provenance,
@@ -62,6 +70,7 @@ export async function persistTurn(opts: {
   for (const decision of opts.refinements) {
     const slotId = opts.keyToSlotId.get(decision.slotKey);
     if (!slotId) continue;
+    if (respondentEdited.has(slotId)) continue; // respondent's own answer wins
     // Mirror the F4.4 refine-answer route: load the existing answer, merge it via the
     // pure `applyRefinement`, and write the new value + provenance + the *appended*
     // refinementHistory back. The live loop previously persisted only the corrected

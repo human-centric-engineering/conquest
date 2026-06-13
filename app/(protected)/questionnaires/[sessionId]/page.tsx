@@ -15,6 +15,7 @@ import { buildWelcomeTurns } from '@/lib/app/questionnaire/chat/greeting';
 import { resolveThemeForSession } from '@/lib/app/questionnaire/chat/theme';
 import { loadAnswerPanelState } from '@/app/api/v1/app/questionnaire-sessions/_lib/answer-panel';
 import { loadSessionStatus } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-status';
+import { narrowToEnum, PRESENTATION_MODES } from '@/lib/app/questionnaire/types';
 import type { QuestionnaireChatStatus } from '@/lib/app/questionnaire/chat/types';
 import type { SessionStatusView } from '@/lib/app/questionnaire/session/status-view';
 
@@ -74,7 +75,9 @@ export default async function QuestionnaireSessionPage({
     select: {
       status: true,
       respondentUserId: true,
-      version: { select: { config: { select: { anonymousMode: true } } } },
+      version: {
+        select: { config: { select: { anonymousMode: true, presentationMode: true } } },
+      },
       _count: { select: { answers: true } },
     },
   });
@@ -84,17 +87,27 @@ export default async function QuestionnaireSessionPage({
 
   const resumed = row._count.answers > 0;
   const anonymous = row.version.config?.anonymousMode ?? false;
+  const presentationMode = narrowToEnum(
+    row.version.config?.presentationMode ?? 'chat',
+    PRESENTATION_MODES,
+    'chat'
+  );
+  const wantsForm = presentationMode === 'form' || presentationMode === 'both';
   // Independent reads — resolve in parallel rather than serialising the round-trips. The
   // panel + lifecycle status are SSR-seeded here (the user is already verified as owner),
   // so they paint with no fetch flash; the live updates after each turn come from the
   // client hooks.
-  const [voiceInputEnabled, attachmentInputEnabled, theme, panel, status] = await Promise.all([
-    isVoiceInputEnabled(),
-    isAttachmentInputEnabled(),
-    resolveThemeForSession(sessionId),
-    loadAnswerPanelState(sessionId),
-    loadSessionStatus(sessionId),
-  ]);
+  const [voiceInputEnabled, attachmentInputEnabled, theme, panel, status, formPanel] =
+    await Promise.all([
+      isVoiceInputEnabled(),
+      isAttachmentInputEnabled(),
+      resolveThemeForSession(sessionId),
+      loadAnswerPanelState(sessionId),
+      loadSessionStatus(sessionId),
+      // Seed the full form structure for form/both modes (forForm = full structure, no data-slot
+      // swap); chat-only mode skips this round-trip.
+      wantsForm ? loadAnswerPanelState(sessionId, false, true) : Promise.resolve(null),
+    ]);
   const initialStatus = initialChatStatus(status?.view, row.status === 'active');
 
   return (
@@ -112,6 +125,8 @@ export default async function QuestionnaireSessionPage({
           initialStatus={initialStatus}
           initialPanel={panel?.view}
           initialStatusView={status?.view}
+          initialFormView={formPanel?.view}
+          presentationMode={presentationMode}
           voiceInputEnabled={voiceInputEnabled}
           attachmentInputEnabled={attachmentInputEnabled}
         />

@@ -21,6 +21,7 @@ import {
   CONTRADICTION_MODES,
   DEFAULT_QUESTIONNAIRE_CONFIG,
   FIELD_PROVENANCES,
+  PRESENTATION_MODES,
   SELECTION_STRATEGIES,
   type AnswerSlotPanelScope,
   type AudienceProvenance,
@@ -28,6 +29,7 @@ import {
   type AudienceShape,
   type ContradictionMode,
   type FieldProvenance,
+  type PresentationMode,
   type ProfileFieldConfig,
   type SelectionStrategy,
 } from '@/lib/app/questionnaire/types';
@@ -92,6 +94,7 @@ export const CONFIG_SELECT = {
   supportResourceUrl: true,
   profileFields: true,
   answerSlotPanelScope: true,
+  presentationMode: true,
 } as const;
 
 type ConfigRow = {
@@ -112,6 +115,7 @@ type ConfigRow = {
   supportResourceUrl: string;
   profileFields: Prisma.JsonValue;
   answerSlotPanelScope: string;
+  presentationMode: string;
 };
 
 /** Narrow a stored `selectionStrategy` to the enum (default when unknown). */
@@ -138,6 +142,13 @@ function asAnswerSlotPanelScope(value: string): AnswerSlotPanelScope {
   return (ANSWER_SLOT_PANEL_SCOPES as readonly string[]).includes(value)
     ? (value as AnswerSlotPanelScope)
     : DEFAULT_QUESTIONNAIRE_CONFIG.answerSlotPanelScope;
+}
+
+/** Narrow a stored `presentationMode` to the enum (default when unknown). */
+function asPresentationMode(value: string): PresentationMode {
+  return (PRESENTATION_MODES as readonly string[]).includes(value)
+    ? (value as PresentationMode)
+    : DEFAULT_QUESTIONNAIRE_CONFIG.presentationMode;
 }
 
 /**
@@ -167,6 +178,7 @@ export function toConfigView(row: ConfigRow | null): ConfigView {
     supportResourceUrl: row.supportResourceUrl,
     profileFields: asProfileFields(row.profileFields),
     answerSlotPanelScope: asAnswerSlotPanelScope(row.answerSlotPanelScope),
+    presentationMode: asPresentationMode(row.presentationMode),
     saved: true,
   };
 }

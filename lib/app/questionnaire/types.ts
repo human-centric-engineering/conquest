@@ -215,6 +215,19 @@ export const ANSWER_SLOT_PANEL_SCOPES = ['full_progress', 'answered_only'] as co
 export type AnswerSlotPanelScope = (typeof ANSWER_SLOT_PANEL_SCOPES)[number];
 
 /**
+ * How a respondent completes a session (P-presentation). `chat` is the streaming
+ * conversation (the original surface, incl. the data-slots experience); `form`
+ * renders the questionnaire as a raw, sectioned form with the right input per
+ * question type; `both` offers both and lets the respondent toggle between them
+ * mid-session (navigate sections, see a completeness map, and edit answers the
+ * agent inferred — also an escape hatch when the chat struggles). An admin chooses
+ * per version in the config editor; the server pages dispatch on it. `chat` is the
+ * default so existing launched versions are unchanged.
+ */
+export const PRESENTATION_MODES = ['chat', 'form', 'both'] as const;
+export type PresentationMode = (typeof PRESENTATION_MODES)[number];
+
+/**
  * Lifecycle status of an `AppQuestionnaireSession` (the respondent's run over a
  * version). F4.4 introduced a minimal slice (`active | completed | abandoned`) to
  * anchor answer rows; F4.6 completes the lifecycle by adding `paused` — `active`
@@ -292,6 +305,11 @@ export type QuestionnaireConfigShape = {
   supportResourceUrl: string;
   profileFields: ProfileFieldConfig[];
   answerSlotPanelScope: AnswerSlotPanelScope;
+  /**
+   * How the respondent completes the session: `chat`, raw `form`, or `both`
+   * (toggle between them). See {@link PRESENTATION_MODES}.
+   */
+  presentationMode: PresentationMode;
 };
 
 /**
@@ -338,4 +356,5 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   supportResourceUrl: '',
   profileFields: [],
   answerSlotPanelScope: 'full_progress',
+  presentationMode: 'chat',
 };

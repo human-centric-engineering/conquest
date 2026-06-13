@@ -74,13 +74,13 @@ must render the version selector and highlight the active version against `[vid]
 ```
 /admin/questionnaires/[id]                  → redirector → newest version's Overview (honours ?v=)
 /admin/questionnaires/[id]/v/[vid]          → Overview tab (default landing)
-            …/v/[vid]/structure             → Structure (editor/graph, ?edit=1 toggle)
+            …/v/[vid]/structure             → Structure only (sections/questions/tags; editor/graph, ?edit=1 toggle)
             …/v/[vid]/data-slots            → (flag: data-slots)
             …/v/[vid]/invitations           → questionnaire-scoped; vid ignored, targets newest launched
             …/v/[vid]/analytics
             …/v/[vid]/evaluations[/[runId]] → (flag: design-evaluation)
             …/v/[vid]/extraction-changes
-            …/v/[vid]/settings              → demo-client attribution + clone (DEMO-ONLY)
+            …/v/[vid]/settings              → version settings: goal/audience + run-time Configuration (F3.1, version-scoped, fork-on-launch) + demo-client attribution + clone (DEMO-ONLY)
 ```
 
 - **`[id]/v/[vid]/layout.tsx`** owns the breadcrumb, sticky header (title + status +
