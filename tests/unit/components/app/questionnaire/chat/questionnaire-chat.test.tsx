@@ -333,5 +333,25 @@ describe('QuestionnaireChat', () => {
 
       await waitFor(() => expect(screen.getByText('A fresh reply.')).toBeInTheDocument());
     });
+
+    it('reveals two seeded opening turns one at a time (the second waits for the first)', async () => {
+      hookReturn = makeReturn({
+        turns: [
+          { role: 'assistant', content: 'First opening message.' },
+          { role: 'assistant', content: 'Second opening message.' },
+        ],
+      });
+      render(<QuestionnaireChat sessionId="s1" stream={hookReturn} animateOpening />);
+
+      // The second opening turn is gated — it isn't even in the DOM until the first finishes.
+      expect(screen.queryByText('Second opening message.')).toBeNull();
+
+      // The first types in…
+      await waitFor(() => expect(screen.getByText('First opening message.')).toBeInTheDocument());
+      // …then, after the inter-message beat, the second types in too.
+      await waitFor(() => expect(screen.getByText('Second opening message.')).toBeInTheDocument(), {
+        timeout: 4000,
+      });
+    });
   });
 });

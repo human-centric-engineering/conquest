@@ -84,7 +84,7 @@ function AssistantTurn({ children }: { children: React.ReactNode }) {
     <div className="flex gap-3">
       <span
         aria-hidden="true"
-        className="mt-1.5 h-2 w-2 shrink-0 rounded-full"
+        className="mt-2.5 h-2 w-2 shrink-0 rounded-full"
         style={{ backgroundColor: 'var(--app-accent-color, var(--color-primary))' }}
       />
       <div className="min-w-0 flex-1 pt-0.5">{children}</div>
@@ -95,6 +95,8 @@ function AssistantTurn({ children }: { children: React.ReactNode }) {
 /** Typing cadence — chars revealed per tick and the gap between ticks (~150 chars/s). */
 const TYPE_CHARS_PER_TICK = 3;
 const TYPE_TICK_MS = 20;
+/** A short, natural beat between seeded opening turns finishing and the next starting to type. */
+const OPENING_GAP_MS = 500;
 
 /**
  * An assistant turn that types itself in a few characters at a time — then settles to the
@@ -106,17 +108,35 @@ const TYPE_TICK_MS = 20;
  * restarts cleanly from zero) where the ref-driven rAF animator would be cancelled and never
  * re-kicked, leaving a frozen caret with no text.
  */
-function TypewriterAssistantTurn({ content }: { content: string }) {
+function TypewriterAssistantTurn({
+  content,
+  onDone,
+}: {
+  content: string;
+  /** Fired once when the message has fully typed in (used to chain the opening turns). */
+  onDone?: () => void;
+}) {
   const [shown, setShown] = useState(0);
+  // Keep the latest callback without re-running the typing effect (which would restart the timer).
+  const onDoneRef = useRef(onDone);
+  useEffect(() => {
+    onDoneRef.current = onDone;
+  });
 
   useEffect(() => {
     setShown(0);
-    if (content.length === 0) return;
+    if (content.length === 0) {
+      onDoneRef.current?.();
+      return;
+    }
     let revealed = 0;
     const id = setInterval(() => {
       revealed = Math.min(revealed + TYPE_CHARS_PER_TICK, content.length);
       setShown(revealed);
-      if (revealed >= content.length) clearInterval(id);
+      if (revealed >= content.length) {
+        clearInterval(id);
+        onDoneRef.current?.();
+      }
     }, TYPE_TICK_MS);
     return () => clearInterval(id);
   }, [content]);
@@ -167,11 +187,26 @@ export function QuestionnaireChat({
   // when `animateOpening` is set; turns that arrive later already revealed themselves live as
   // they streamed, so re-typing them would double-animate. Captured once via a lazy initializer.
   const [openingTurnCount] = useState(() => turns.length);
+  // When animating the opening, reveal the seeded turns ONE AT A TIME: turn i types in, and only
+  // after it finishes (plus a short beat) does turn i+1 start — so the greeting and the first
+  // question don't type over each other. `openingRevealed` is the count of opening turns allowed
+  // to render so far; the first starts immediately, each subsequent one is unlocked on its
+  // predecessor's `onDone`. Irrelevant when `animateOpening` is off (history renders instantly).
+  const [openingRevealed, setOpeningRevealed] = useState(1);
+  const openingGapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => clearTimeout(openingGapTimer.current ?? undefined), []);
+  const unlockOpeningTurn = (count: number) => {
+    clearTimeout(openingGapTimer.current ?? undefined);
+    openingGapTimer.current = setTimeout(
+      () => setOpeningRevealed((cur) => Math.max(cur, count)),
+      OPENING_GAP_MS
+    );
+  };
 
-  // Keep the latest turn / thinking indicator in view.
+  // Keep the latest turn / thinking indicator in view (also as each opening turn unlocks).
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [turns.length, streaming]);
+  }, [turns.length, streaming, openingRevealed]);
 
   // Refocus the composer when a turn finishes — the textarea is disabled while a reply streams,
   // so we put the cursor back the moment it re-enables, ready for the next answer without a click.
@@ -211,22 +246,36 @@ export function QuestionnaireChat({
       {/* Transcript */}
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6">
         <div className="mx-auto flex max-w-2xl flex-col gap-6">
-          {turns.map((turn, i) =>
-            turn.role === 'user' ? (
-              <UserBubble key={i} content={turn.content} />
-            ) : // Replies that arrived after mount (i ≥ the seeded count) always type in; the
-            // pre-seeded opening turns type only on a fresh session (`animateOpening`), so a
-            // resumed transcript's history renders instantly.
-            animateOpening || i >= openingTurnCount ? (
-              <TypewriterAssistantTurn key={i} content={turn.content} />
-            ) : (
-              <AssistantTurn key={i}>
-                <div className="prose prose-sm dark:prose-invert max-w-none">
-                  <Markdown>{turn.content}</Markdown>
-                </div>
-              </AssistantTurn>
-            )
-          )}
+          {turns.map((turn, i) => {
+            if (turn.role === 'user') return <UserBubble key={i} content={turn.content} />;
+
+            const isOpeningTurn = i < openingTurnCount;
+            // A seeded opening turn types only on a fresh session (`animateOpening`) AND only once
+            // its predecessors have finished — chained one at a time so they don't type at once.
+            if (isOpeningTurn) {
+              if (!animateOpening) {
+                return (
+                  <AssistantTurn key={i}>
+                    <div className="prose prose-sm dark:prose-invert max-w-none">
+                      <Markdown>{turn.content}</Markdown>
+                    </div>
+                  </AssistantTurn>
+                );
+              }
+              if (i >= openingRevealed) return null; // not its turn yet — stays hidden
+              return (
+                <TypewriterAssistantTurn
+                  key={i}
+                  content={turn.content}
+                  // Unlock the next opening turn (after a short beat) when this one finishes typing.
+                  onDone={() => unlockOpeningTurn(i + 2)}
+                />
+              );
+            }
+
+            // Replies that arrived after mount always type in (one at a time, no chaining needed).
+            return <TypewriterAssistantTurn key={i} content={turn.content} />;
+          })}
 
           {/* Awaiting a reply — a calm "thinking" indicator. The reply then types itself in once
               it lands as a committed turn (above), so the typing effect is consistent regardless
