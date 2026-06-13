@@ -45,7 +45,12 @@ import {
 } from '@/lib/app/questionnaire/feature-flag';
 import { classifyCostCap } from '@/lib/app/questionnaire/session';
 import { ABUSE_ABANDON_REASON } from '@/lib/app/questionnaire/types';
-import { runTurn, runDataSlotTurn, type TurnState } from '@/lib/app/questionnaire/orchestrator';
+import {
+  runTurn,
+  runDataSlotTurn,
+  DATA_SLOT_FILLED_THRESHOLD,
+  type TurnState,
+} from '@/lib/app/questionnaire/orchestrator';
 import type { ChatEvent } from '@/types/orchestration';
 import { turnLimiter } from '@/app/api/v1/app/questionnaire-sessions/_lib/rate-limit';
 import { buildTurnContext } from '@/app/api/v1/app/questionnaires/_lib/turn-context';
@@ -251,6 +256,14 @@ async function handleMessage(
         ? {
             dataSlotCandidates: dataSlots.map((s) => {
               const fill = dataSlotFillByDataSlotId.get(s.id);
+              // Move-on: when this slot has hit the re-ask cap and still isn't confidently filled,
+              // tell the extractor to best-effort-infer it this turn — the orchestrator then parks
+              // it (records the inference as provisional, moves on). Only the active slot can be at
+              // the cap, so at most one candidate is flagged.
+              const attempts = loaded.base.dataSlotAttempts?.[s.id] ?? 0;
+              const parkPending =
+                attempts >= loaded.base.config.maxDataSlotAttempts &&
+                (fill?.confidence ?? 0) < DATA_SLOT_FILLED_THRESHOLD;
               return {
                 key: s.key,
                 name: s.name,
@@ -265,6 +278,7 @@ async function handleMessage(
                       },
                     }
                   : {}),
+                ...(parkPending ? { parkPending: true, attempts } : {}),
               };
             }),
           }
@@ -277,6 +291,10 @@ async function handleMessage(
     const slotById = new Map(loaded.slots.map((s) => [s.id, s]));
     const dataSlotKeyToId = new Map(dataSlots.map((s) => [s.key, s.id]));
     const { byId, activeQuestionKey, meta } = loaded;
+    // Data Slots feature: hoisted for the generator (loses `loaded`'s narrowing) — the per-slot
+    // re-ask counts + the configured cap, used to frame a sharper/final re-ask.
+    const dataSlotAttempts = loaded.base.dataSlotAttempts ?? {};
+    const maxDataSlotAttempts = loaded.base.config.maxDataSlotAttempts;
 
     log.info('Live turn started', { sessionId, versionId: loaded.session.versionId, userId });
 
@@ -318,6 +336,9 @@ async function handleMessage(
       // The generic `targetedQuestionId` column holds a QUESTION id (question/sweep turns) or a
       // DATA-SLOT id (data-slot turns) — the loader resolves whichever matches next turn.
       let persistedTargetedId: string | null = result.targetedQuestionId;
+      // Data Slots feature: the data-slot id this turn targeted (set in the data_slot branch),
+      // persisted separately so the per-slot re-ask/park counter is unambiguous.
+      let targetedDataSlotId: string | null = null;
       if (result.response.kind === 'offer') {
         const offer = yield* streamOfferMessage({
           input: result.response.input,
@@ -330,6 +351,12 @@ async function handleMessage(
         // Data Slots feature: phrase the targeted data slot as a natural interview question
         // (acknowledge prior answer · deepen vs bridge to a new area · re-ask when uncaptured).
         const r = result.response;
+        // Move-on: on a re-ask, hand the phraser our current (weak) understanding so it asks a
+        // SHARPER, narrower follow-up instead of repeating the same open question; flag the final
+        // allowed attempt so it stays pressure-free before we move on.
+        const currentUnderstanding = dataSlotFillByDataSlotId.get(r.dataSlotId)?.paraphrase ?? null;
+        const attemptsForTarget = dataSlotAttempts[r.dataSlotId] ?? 0;
+        const isFinalAttempt = r.isReask && attemptsForTarget + 1 >= maxDataSlotAttempts;
         const phrased = yield* streamQuestionMessage({
           input: {
             prompt: `${r.name} — ${r.description}`,
@@ -342,6 +369,8 @@ async function handleMessage(
             isOpening: state.selectionRound === 0,
             questionsAsked: state.selectionRound,
             isTransition: r.isTransition,
+            ...(r.isReask && currentUnderstanding ? { currentUnderstanding } : {}),
+            ...(isFinalAttempt ? { isFinalAttempt: true } : {}),
             ...sensitivityPhraserInput,
           },
           userId,
@@ -350,6 +379,7 @@ async function handleMessage(
         agentResponse = phrased.message;
         extraCostUsd = phrased.costUsd;
         persistedTargetedId = r.dataSlotId;
+        targetedDataSlotId = r.dataSlotId;
       } else if (result.response.kind === 'question' && (questionPhrasing || dataSlotMode)) {
         // Conversational interviewer pass: acknowledge the prior answer + ask the targeted
         // question naturally. Re-ask = this turn re-selected the question the previous turn
@@ -399,11 +429,13 @@ async function handleMessage(
           upserts: result.sideEffects.answerUpserts,
           refinements: result.sideEffects.answerRefinements,
           keyToSlotId,
-          // Data Slots feature: persist the respondent-facing fills captured this turn.
+          // Data Slots feature: persist the respondent-facing fills captured this turn + which
+          // data slot this turn targeted (the re-ask/park counter source).
           ...(dataSlotMode
             ? {
                 dataSlotFills: result.sideEffects.dataSlotFills ?? [],
                 dataSlotKeyToId,
+                targetedDataSlotId,
               }
             : {}),
         });

@@ -119,6 +119,7 @@ describe('AnswerSlotPanel', () => {
                   paraphrase: 'A 25-year-old female.',
                   confidence: 0.95,
                   filled: true,
+                  provisional: false,
                   history: [{ paraphrase: 'A 25-year-old male.', confidence: 0.9 }],
                 },
               ],
@@ -130,6 +131,35 @@ describe('AnswerSlotPanel', () => {
     );
     expect(screen.getByText('A 25-year-old female.')).toBeInTheDocument();
     expect(screen.getByText('Earlier: A 25-year-old male.')).toBeInTheDocument();
+  });
+
+  it('marks a provisional data slot as "provisional · may revisit"', () => {
+    render(
+      <AnswerSlotPanel
+        view={view({
+          dataSlotGroups: [
+            {
+              theme: 'Wellbeing',
+              slots: [
+                {
+                  key: 'blockers',
+                  name: 'Workplace Blockers',
+                  description: 'What gets in the way',
+                  paraphrase: 'A tentative reading of what slows them down.',
+                  confidence: 0.2,
+                  filled: true,
+                  provisional: true,
+                  history: [],
+                },
+              ],
+            },
+          ],
+          progressPercent: 30,
+        })}
+      />
+    );
+    expect(screen.getByText('A tentative reading of what slows them down.')).toBeInTheDocument();
+    expect(screen.getByText(/provisional · may revisit/i)).toBeInTheDocument();
   });
 
   it('renders answered values and pending placeholders', () => {

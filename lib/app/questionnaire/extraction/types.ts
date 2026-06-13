@@ -142,6 +142,15 @@ export interface DataSlotCandidateView {
     paraphrase: string | null;
     confidence: number | null;
   };
+  /**
+   * Move-on signal (Data Slots feature): this slot has been asked about `attempts` times without a
+   * clear answer and is about to be PARKED. The extractor must emit a best-effort, low-confidence
+   * fill for it from the WHOLE conversation even if this turn's message barely informs it — the
+   * orchestrator then marks that fill provisional and moves on, so the respondent keeps progressing.
+   */
+  parkPending?: boolean;
+  /** How many consecutive turns have already targeted this slot (surfaced when `parkPending`). */
+  attempts?: number;
 }
 
 /**
@@ -158,6 +167,12 @@ export interface DataSlotFillIntent {
   confidence: number;
   provenance: AnswerProvenance;
   rationale?: string;
+  /**
+   * Move-on (Data Slots feature): the orchestrator marks a fill provisional when it parks a slot
+   * after the re-ask cap (a best-effort inference, shown "provisional · may revisit"). Set by the
+   * orchestrator, never the model. A later confident fill clears it.
+   */
+  provisional?: boolean;
 }
 
 /**

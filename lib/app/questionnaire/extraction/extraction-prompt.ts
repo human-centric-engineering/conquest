@@ -78,9 +78,19 @@ gave several details, reflect them all.
 Some slots show a "current" line — what's already recorded from earlier in the conversation. When \
 the new message ADDS to or CORRECTS that (e.g. they first said "male" then "actually, female"), \
 output an UPDATED fill for that slot that MERGES the still-true details with the correction (here: \
-keep the age, change the gender), and reflect the corrected state in value + paraphrase. Only emit \
-a fill for a slot the latest message genuinely informs; if it informs no data slots, return an \
-empty "dataSlotFills" array.`;
+keep the age, change the gender), and reflect the corrected state in value + paraphrase. \
+RE-SCAN EVERY slot against the new message each turn, not only the one the conversation is currently \
+about: when the new answer adds context to ANY slot that already has a "current" value — even one \
+from another theme — emit an updated fill whose value + paraphrase is a SUPERSET of the prior \
+"current" (carry forward every still-true detail and fold in the new), and raise "confidence" only \
+when the new context genuinely sharpens your understanding. Otherwise only emit a fill for a slot \
+the latest message genuinely informs; if it informs no data slots, return an empty "dataSlotFills" \
+array.
+Some slots show a "status: asked N× without a clear answer" line — the conversation has tried \
+repeatedly and is about to move on. For EACH such slot you MUST output a fill: infer the most \
+plausible position from the ENTIRE conversation even if the signal is weak, set a LOW "confidence" \
+(≤ 0.4), and use provenance "inferred" or "synthesised". Never leave one of these slots empty — \
+a tentative reading we can revisit is better than nothing.`;
 
 /**
  * Appended to the system rules ONLY when sensitivity awareness is on (gated by the platform flag +
@@ -120,6 +130,12 @@ function describeDataSlot(slot: DataSlotCandidateView): string {
         : '';
     lines.push(
       `  current: ${slot.current.paraphrase ?? JSON.stringify(slot.current.value)}${conf}`
+    );
+  }
+  // Move-on: a slot about to be parked — the model must give a best-effort inference now.
+  if (slot.parkPending) {
+    lines.push(
+      `  status: asked ${slot.attempts ?? 1}× without a clear answer — give your BEST-EFFORT inference now (low confidence is fine; do not leave it empty)`
     );
   }
   return lines.join('\n');

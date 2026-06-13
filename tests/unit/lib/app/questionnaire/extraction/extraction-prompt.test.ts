@@ -228,6 +228,37 @@ describe('buildAnswerExtractionPrompt — data slots', () => {
     expect(content).toContain('current: A 25-year-old male.');
     expect(systemContent(messages)).toMatch(/CORRECTS?/);
   });
+
+  it('instructs the model to re-scan every slot and keep the paraphrase a superset', () => {
+    const messages = buildAnswerExtractionPrompt({
+      ...ctx({ candidateSlots: [slot({ key: 'q1' })], activeQuestionKey: null }),
+      dataSlotCandidates: [{ key: 'demographics', name: 'Demo', description: 'd', theme: 'About' }],
+    });
+    const system = systemContent(messages);
+    expect(system).toMatch(/RE-SCAN EVERY slot/i);
+    expect(system).toMatch(/SUPERSET/i);
+  });
+
+  it('renders a park status line and demands a best-effort inference for a parked slot', () => {
+    const messages = buildAnswerExtractionPrompt({
+      ...ctx({ candidateSlots: [slot({ key: 'q1' })], activeQuestionKey: null }),
+      dataSlotCandidates: [
+        {
+          key: 'blockers',
+          name: 'Workplace Blockers',
+          description: 'What gets in the way',
+          theme: 'Wellbeing',
+          parkPending: true,
+          attempts: 2,
+        },
+      ],
+    });
+    const content = userContent(messages);
+    expect(content).toMatch(/status: asked 2× without a clear answer/);
+    expect(content).toMatch(/BEST-EFFORT inference/i);
+    // The system rules require a fill for such a slot rather than leaving it empty.
+    expect(systemContent(messages)).toMatch(/MUST output a fill/i);
+  });
 });
 
 describe('buildAnswerExtractionRetryMessage', () => {

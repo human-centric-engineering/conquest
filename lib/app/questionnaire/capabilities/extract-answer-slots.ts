@@ -125,6 +125,10 @@ const dataSlotCandidateSchema = z.object({
       confidence: z.number().min(0).max(1).nullable(),
     })
     .optional(),
+  // Move-on (Data Slots feature): this slot has hit the re-ask cap and is about to be parked —
+  // the extractor must best-effort-infer it. `attempts` is surfaced in the prompt's status line.
+  parkPending: z.boolean().optional(),
+  attempts: z.number().int().nonnegative().optional(),
 });
 
 const argsSchema = z
@@ -272,6 +276,7 @@ function toExtractionContext(args: ExtractAnswerSlotsArgs): ExtractionContext {
                   },
                 }
               : {}),
+            ...(c.parkPending ? { parkPending: true, attempts: c.attempts ?? 1 } : {}),
           })),
         }
       : {}),

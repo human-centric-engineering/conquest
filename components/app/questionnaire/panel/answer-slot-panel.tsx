@@ -101,6 +101,14 @@ function DataSlotGroups({ groups }: { groups: DataSlotPanelGroup[] }) {
                         Not covered yet
                       </p>
                     )}
+                    {slot.provisional ? (
+                      <p
+                        className="text-muted-foreground/60 mt-0.5 text-[11px] italic"
+                        title="A best guess we recorded so we could keep moving — we may revisit it"
+                      >
+                        provisional · may revisit
+                      </p>
+                    ) : null}
                     {slot.history.length > 0 ? (
                       <ul className="mt-1 space-y-0.5">
                         {slot.history

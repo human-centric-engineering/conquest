@@ -88,6 +88,17 @@ export interface QuestionComposeInput {
    * "linger before moving on"). Only consulted on a normal acknowledge-and-ask turn.
    */
   isTransition?: boolean;
+  /**
+   * Move-on (Data Slots feature): on a re-ask, the agent's CURRENT (weak) understanding of the
+   * slot — its paraphrase — so the follow-up gets specific about the gap instead of repeating the
+   * same open question. Only consulted when `isReask`.
+   */
+  currentUnderstanding?: string;
+  /**
+   * Move-on (Data Slots feature): the LAST allowed attempt before the slot is parked and the
+   * conversation moves on — frame it as a light, pressure-free final try.
+   */
+  isFinalAttempt?: boolean;
 }
 
 /** What {@link streamQuestionMessage} returns once the stream completes. */
@@ -178,7 +189,17 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
         'begin" — you are starting the conversation. '
       : input.isReask
         ? 'You already asked about this but could not capture a usable answer from their last ' +
-          'reply — gently say you want to make sure you get it right, then ask again clearly. '
+          'reply. ' +
+          (input.currentUnderstanding
+            ? `So far you understand: "${input.currentUnderstanding}". Do NOT repeat the same broad ` +
+              'question — ask a SHARPER, narrower follow-up that targets the specific piece still ' +
+              'missing. '
+            : 'Gently say you want to make sure you get it right, then ask again clearly, more ' +
+              'specifically than before. ') +
+          (input.isFinalAttempt
+            ? "This is a last, light try on this topic — keep it pressure-free; if they still can't " +
+              "say, that's completely fine and you'll move on. "
+            : '')
         : input.isTransition
           ? 'Briefly acknowledge what they just said, then bridge naturally into a NEW area and ' +
             'ask about it — like a skilled interviewer changing subject without it feeling abrupt. '

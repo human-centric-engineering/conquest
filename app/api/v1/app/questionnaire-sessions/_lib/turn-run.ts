@@ -32,6 +32,9 @@ export async function persistTurn(opts: {
   userMessage: string;
   agentResponse: string;
   targetedQuestionId: string | null;
+  /** Data Slots feature: the `AppDataSlot.id` this turn targeted (data-slot mode) — drives the
+   *  per-slot re-ask/park counter. Null for question/sweep/offer turns. */
+  targetedDataSlotId?: string | null;
   toolCalls: ToolCallRecord[];
   costUsd: number;
   upserts: AnswerSlotIntent[];
@@ -94,6 +97,7 @@ export async function persistTurn(opts: {
         confidence: fill.confidence,
         provenance: fill.provenance,
         ...(fill.rationale !== undefined ? { rationale: fill.rationale } : {}),
+        ...(fill.provisional !== undefined ? { provisional: fill.provisional } : {}),
       });
       sideEffectDataSlotIds.push(id);
     }
@@ -104,6 +108,9 @@ export async function persistTurn(opts: {
     userMessage: opts.userMessage,
     agentResponse: opts.agentResponse,
     targetedQuestionId: opts.targetedQuestionId,
+    ...(opts.targetedDataSlotId !== undefined
+      ? { targetedDataSlotId: opts.targetedDataSlotId }
+      : {}),
     toolCalls: opts.toolCalls,
     sideEffectAnswerIds,
     sideEffectDataSlotIds,

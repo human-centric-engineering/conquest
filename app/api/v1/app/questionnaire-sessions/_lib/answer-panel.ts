@@ -110,7 +110,13 @@ export async function loadAnswerPanelState(
       // Data Slots feature: the session's fills (the respondent-facing capture). `refinementHistory`
       // carries prior values when the respondent changed their answer, surfaced as "Earlier: …".
       dataSlotFills: {
-        select: { dataSlotId: true, paraphrase: true, confidence: true, refinementHistory: true },
+        select: {
+          dataSlotId: true,
+          paraphrase: true,
+          confidence: true,
+          provisional: true,
+          refinementHistory: true,
+        },
       },
       turns: { select: { id: true, ordinal: true } },
     },
@@ -159,6 +165,7 @@ export async function loadAnswerPanelState(
         {
           paraphrase: f.paraphrase,
           confidence: f.confidence,
+          provisional: f.provisional,
           history: asDataSlotHistory(f.refinementHistory),
         },
       ])
@@ -168,7 +175,10 @@ export async function loadAnswerPanelState(
     let filledDataSlots = 0;
     for (const ds of row.version.dataSlots) {
       const fill = fillByDataSlotId.get(ds.id);
-      const filled = (fill?.confidence ?? 0) >= DATA_SLOT_FILLED_THRESHOLD;
+      // A slot is covered at a confident fill OR when parked with a provisional best-effort one
+      // (the respondent sees forward progress; the marker flags it as tentative).
+      const provisional = fill?.provisional ?? false;
+      const filled = (fill?.confidence ?? 0) >= DATA_SLOT_FILLED_THRESHOLD || provisional;
       if (filled) filledDataSlots += 1;
       let group = byTheme.get(ds.theme);
       if (!group) {
@@ -183,6 +193,7 @@ export async function loadAnswerPanelState(
         paraphrase: fill?.paraphrase ?? null,
         confidence: fill?.confidence ?? null,
         filled,
+        provisional,
         // Prior values, oldest first (only present once the answer changed at least once).
         history: (fill?.history ?? []).map((h) => ({
           paraphrase: h.previousParaphrase,

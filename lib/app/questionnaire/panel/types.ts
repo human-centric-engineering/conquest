@@ -89,8 +89,14 @@ export interface DataSlotPanelSlot {
   paraphrase: string | null;
   /** 0–1; null when not yet filled. */
   confidence: number | null;
-  /** True once a fill (≥ the filled threshold) exists for this slot. */
+  /** True once the slot is covered — a confident fill (≥ threshold) OR a parked provisional one. */
   filled: boolean;
+  /**
+   * Move-on (Data Slots feature): the fill is a best-effort inference recorded after the agent
+   * tried a few times and moved on. Shown as covered with a subtle "provisional · may revisit"
+   * marker; a later confident answer clears it.
+   */
+  provisional: boolean;
   /**
    * Prior paraphrases for this slot when the respondent changed their answer, oldest first. Empty
    * when the slot was filled once and never changed. Lets the panel show "Earlier: …" so a

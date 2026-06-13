@@ -15,6 +15,7 @@ vi.mock('@/lib/db/client', () => ({
     appQuestionnaireVersion: { findFirst: vi.fn() },
     appQuestionnaireSection: { groupBy: vi.fn() },
     appQuestionSlot: { groupBy: vi.fn() },
+    appDataSlot: { groupBy: vi.fn() },
     appQuestionnaireExtractionChange: { groupBy: vi.fn() },
   },
 }));
@@ -31,6 +32,7 @@ const findUnique = prisma.appQuestionnaire.findUnique as unknown as Mock;
 const findFirst = prisma.appQuestionnaireVersion.findFirst as unknown as Mock;
 const sectionGroupBy = prisma.appQuestionnaireSection.groupBy as unknown as Mock;
 const slotGroupBy = prisma.appQuestionSlot.groupBy as unknown as Mock;
+const dataSlotGroupBy = prisma.appDataSlot.groupBy as unknown as Mock;
 const changeGroupBy = prisma.appQuestionnaireExtractionChange.groupBy as unknown as Mock;
 
 const D1 = new Date('2026-01-01T00:00:00.000Z');
@@ -76,6 +78,7 @@ describe('getQuestionnaireDetail', () => {
     });
     sectionGroupBy.mockResolvedValue([{ versionId: 'ver-2', _count: { _all: 3 } }]);
     slotGroupBy.mockResolvedValue([{ versionId: 'ver-2', _count: { _all: 8 } }]);
+    dataSlotGroupBy.mockResolvedValue([{ versionId: 'ver-2', _count: { _all: 4 } }]);
     changeGroupBy.mockResolvedValue([
       { versionId: 'ver-2', _count: { _all: 5 } },
       { versionId: 'ver-1', _count: { _all: 1 } },

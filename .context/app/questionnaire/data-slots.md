@@ -114,43 +114,63 @@ Two callers:
 Data-slot mode is active when the flag is on AND the version has ≥1 data slot. The `/messages`
 route then drives `runDataSlotTurn` (`orchestrator/data-slot-orchestrator.ts`) instead of `runTurn`:
 
-1. **Combined extraction** — the F4.2 extractor, given `dataSlotCandidates`, returns BOTH the
-   background question answers AND `dataSlotFills` (a paraphrase + confidence per informed slot) in
-   ONE call.
+1. **Combined extraction (re-scan + enrich)** — the F4.2 extractor, given `dataSlotCandidates`
+   (each carrying its `current` fill), returns BOTH the background question answers AND
+   `dataSlotFills` in ONE call. The prompt tells it to **re-scan every slot each turn**, not just
+   the active one: when a new answer adds context to any slot that already has a `current` value
+   (even another theme), it emits an updated fill whose value+paraphrase is a **superset** of the
+   prior one — so the panel summaries keep sharpening as the conversation accrues, instead of going
+   stale.
 2. **Targeting (topic-local)** — pick the next unfilled data slot, preferring the **current theme**
-   (linger in an area before moving on); only transition to a new theme when the area is exhausted.
-   The targeted slot's name+description feed the **interviewer phraser** (`question-stream.ts`),
-   which acknowledges the prior answer and either deepens (same area) or bridges (transition), with
-   re-ask framing when a slot's fill wasn't captured.
-3. **Late-stage sweep** — once every data slot is filled (confidence ≥ `DATA_SLOT_FILLED_THRESHOLD`),
-   ask any still-unanswered **questions** directly.
-4. **Completion** — offer to submit only when **all questions** are answered. The respondent
+   (linger before moving on); transition to a new theme when the area is exhausted. The targeted
+   slot feeds the **interviewer phraser** (`question-stream.ts`): deepen (same area), bridge
+   (transition), or — on a re-ask — ask a **sharper, narrower** follow-up using the slot's current
+   paraphrase (`currentUnderstanding`) rather than repeating the same open question.
+3. **Move on / park (anti-repetition)** — a slot is only asked about `config.maxDataSlotAttempts`
+   times (default 2 = ask once, one sharper re-ask). The per-turn re-ask count comes from
+   `AppQuestionnaireTurn.targetedDataSlotId` (a consecutive leading-run, computed in
+   `turn-context.ts` → `TurnState.dataSlotAttempts`). When the cap is hit and the slot is still
+   below `DATA_SLOT_FILLED_THRESHOLD`, the route flags the candidate `parkPending` so the extractor
+   makes a **best-effort low-confidence inference**, and the orchestrator **parks** it: marks that
+   fill `provisional` (synthesising a floor fill if the model returned none), excludes it from
+   targeting, and **bridges to a different theme**. So the respondent always moves forward instead
+   of being asked the same thing repeatedly. A provisional slot counts as covered; a later
+   confident answer **promotes** it (clears `provisional` via the upsert's shared write).
+   The seriousness gate still runs first — a disregarded (abusive) turn never parks or records a
+   provisional fill.
+4. **Late-stage sweep** — once every data slot is covered, ask any still-unanswered **questions**
+   directly.
+5. **Completion** — offer to submit only when **all questions** are answered. The respondent
    progress bar + panel header track question completion (`answeredCount / total`), via a
    data-slot-mode override in `loadSessionStatus`.
 
-Persistence: `persistTurn` upserts the data-slot fills (`upsertDataSlotFill`) alongside the question
-answers; `recordTurn` back-stamps `AppQuestionnaireTurn.sideEffectDataSlotIds`. The generic
-`targetedQuestionId` column carries the targeted **data-slot id** on a data-slot turn (the loader
-resolves it to the active data slot for re-ask/transition next turn).
+Persistence: `persistTurn` upserts the data-slot fills (`upsertDataSlotFill`, carrying
+`provisional`) alongside the question answers; `recordTurn` back-stamps
+`AppQuestionnaireTurn.sideEffectDataSlotIds` and stores `targetedDataSlotId` (the unambiguous park
+counter). The generic `targetedQuestionId` column ALSO carries the targeted data-slot id on a
+data-slot turn (the loader resolves it to the active data slot for re-ask/transition next turn).
 
 > Contradiction/refinement (F4.3/F4.4) are not run in data-slot mode v1 — the combined extractor
-> improves fills/answers each turn. Reconciliation over data slots is future work.
+> improves fills/answers each turn. Active re-targeting of parked slots (vs the passive cross-turn
+> enrichment above) is future work.
 
 ## Respondent panel
 
-`GET …/:id/answers` returns themed `dataSlotGroups` (name + paraphrase + confidence + filled) in
-data-slot mode; `AnswerSlotPanel` renders them grouped by theme. The question rows are suppressed —
-the respondent only ever sees the abstraction layer.
+`GET …/:id/answers` returns themed `dataSlotGroups` (name + paraphrase + confidence + filled +
+`provisional`) in data-slot mode; `AnswerSlotPanel` renders them grouped by theme. A parked
+slot shows its inferred summary with a subtle **"provisional · may revisit"** marker and counts
+toward the blended progress. The question rows are suppressed — the respondent only ever sees the
+abstraction layer.
 
 ## Key files
 
-| Concern                          | Path                                                                                                                                        |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| Models                           | `prisma/schema/app-questionnaire.prisma` (`AppDataSlot`, `AppDataSlotQuestion`, `AppDataSlotFill`)                                          |
-| Domain (pure)                    | `lib/app/questionnaire/data-slots/**` (views, schemas, generation prompt)                                                                   |
-| Generator / refiner capabilities | `lib/app/questionnaire/capabilities/generate-data-slots.ts`, `refine-data-slot.ts`                                                          |
-| Generate / refine / CRUD routes  | `app/api/v1/app/questionnaires/[id]/versions/[vid]/data-slots/**` (`generate`, `generate/stream`, `refine`, `draft`)                        |
-| Admin review UI                  | `app/admin/questionnaires/[id]/data-slots/page.tsx`, `components/admin/questionnaires/data-slots-review.tsx`, `data-slot-refine-button.tsx` |
-| Engine                           | `orchestrator/data-slot-orchestrator.ts`, `extraction/**` (combined), `_lib/turn-context.ts`, `_lib/data-slot-fills.ts`                     |
-| Respondent panel                 | `_lib/answer-panel.ts`, `components/app/questionnaire/panel/answer-slot-panel.tsx`                                                          |
-| Seeds                            | `prisma/seeds/app-questionnaire/028-031` (031 = refine capability row, bound to the generator agent)                                        |
+| Concern                          | Path                                                                                                                                                                                                    |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Models                           | `prisma/schema/app-questionnaire.prisma` (`AppDataSlot`, `AppDataSlotQuestion`, `AppDataSlotFill.provisional`, `AppQuestionnaireTurn.targetedDataSlotId`, `AppQuestionnaireConfig.maxDataSlotAttempts`) |
+| Domain (pure)                    | `lib/app/questionnaire/data-slots/**` (views, schemas, generation prompt)                                                                                                                               |
+| Generator / refiner capabilities | `lib/app/questionnaire/capabilities/generate-data-slots.ts`, `refine-data-slot.ts`                                                                                                                      |
+| Generate / refine / CRUD routes  | `app/api/v1/app/questionnaires/[id]/versions/[vid]/data-slots/**` (`generate`, `generate/stream`, `refine`, `draft`)                                                                                    |
+| Admin review UI                  | `app/admin/questionnaires/[id]/data-slots/page.tsx`, `components/admin/questionnaires/data-slots-review.tsx`, `data-slot-refine-button.tsx`                                                             |
+| Engine                           | `orchestrator/data-slot-orchestrator.ts`, `extraction/**` (combined), `_lib/turn-context.ts`, `_lib/data-slot-fills.ts`                                                                                 |
+| Respondent panel                 | `_lib/answer-panel.ts`, `components/app/questionnaire/panel/answer-slot-panel.tsx`                                                                                                                      |
+| Seeds                            | `prisma/seeds/app-questionnaire/028-031` (031 = refine capability row, bound to the generator agent)                                                                                                    |

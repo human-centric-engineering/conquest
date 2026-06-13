@@ -17,6 +17,12 @@ export interface DataSlotFillInput {
   confidence: number;
   provenance: AnswerProvenance;
   rationale?: string;
+  /**
+   * Move-on (Data Slots feature): a best-effort inference recorded when the orchestrator parks the
+   * slot after the re-ask cap. Defaults to `false`; a later confident (non-provisional) fill clears
+   * it (promotion). Shown in the panel as "provisional · may revisit".
+   */
+  provisional?: boolean;
 }
 
 /** Narrow a stored `refinementHistory` Json column back to the data-slot history entries. */
@@ -43,6 +49,8 @@ export async function upsertDataSlotFill(
     confidence: fill.confidence,
     provenanceLabel: fill.provenance,
     rationale: fill.rationale ?? null,
+    // Move-on: a later confident fill writes `false`, promoting a parked slot back to a real answer.
+    provisional: fill.provisional ?? false,
   };
 
   const existing = await prisma.appDataSlotFill.findUnique({

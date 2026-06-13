@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 import {
   runDataSlotTurn,
   DATA_SLOT_SELECTION_TOOL_SLUG,
+  PROVISIONAL_FLOOR_CONFIDENCE,
   type DataSlotTarget,
   type DataSlotAnsweredView,
   type TurnState,
@@ -36,7 +37,7 @@ function ds(over: Partial<DataSlotTarget> & { id: string; theme: string }): Data
   };
 }
 
-/** A data-slot-mode TurnState: base state + data slots / fills / active slot. */
+/** A data-slot-mode TurnState: base state + data slots / fills / active slot / re-ask counts. */
 function dsState(input: {
   userMessage?: string;
   questions: TurnState['questions'];
@@ -44,16 +45,22 @@ function dsState(input: {
   dataSlots: DataSlotTarget[];
   dataSlotAnswered?: DataSlotAnsweredView[];
   activeDataSlotKey?: string | null;
+  dataSlotAttempts?: Record<string, number>;
+  config?: Partial<TurnState['config']>;
+  flags?: Partial<TurnState['flags']>;
 }): TurnState {
   return {
     ...state({
       userMessage: input.userMessage ?? 'hi',
       questions: input.questions,
       answered: input.answered ?? [],
+      ...(input.config ? { config: input.config } : {}),
+      ...(input.flags ? { flags: input.flags } : {}),
     }),
     dataSlots: input.dataSlots,
     dataSlotAnswered: input.dataSlotAnswered ?? [],
     activeDataSlotKey: input.activeDataSlotKey ?? null,
+    ...(input.dataSlotAttempts ? { dataSlotAttempts: input.dataSlotAttempts } : {}),
   };
 }
 
@@ -356,5 +363,128 @@ describe('runDataSlotTurn — seriousness / abuse gate', () => {
     expect(result.sideEffects.dataSlotFills).toHaveLength(0);
     // No side-band notices on the terminal turn (the extraction diagnostic is dropped).
     expect(result.events).toEqual([]);
+  });
+});
+
+describe('runDataSlotTurn — move on / provisional park', () => {
+  it('parks the active slot at the attempts cap, marks the fill provisional, and bridges to a new theme', async () => {
+    // d1 (theme A) was asked twice and only weakly answered again this turn; d2 (theme B) is open.
+    const { invokers } = stubInvokers({ extract: { dataSlotFills: [fill('d1', 0.3)] } });
+    const result = await runDataSlotTurn(
+      dsState({
+        questions: [q({ id: 'q1' })],
+        dataSlots: [
+          ds({ id: 'd1', key: 'd1', theme: 'A' }),
+          ds({ id: 'd2', key: 'd2', theme: 'B' }),
+        ],
+        activeDataSlotKey: 'd1',
+        dataSlotAttempts: { d1: 2 },
+        config: { maxDataSlotAttempts: 2 },
+      }),
+      invokers
+    );
+    // The weak fill for d1 is recorded as provisional so we can move on.
+    const d1Fill = (result.sideEffects.dataSlotFills ?? []).find((f) => f.dataSlotKey === 'd1');
+    expect(d1Fill?.provisional).toBe(true);
+    // …and the conversation bridges to the other theme rather than re-asking d1.
+    expect(result.response.kind).toBe('data_slot');
+    if (result.response.kind === 'data_slot') {
+      expect(result.response.dataSlotId).toBe('d2');
+      expect(result.response.isTransition).toBe(true);
+      expect(result.response.isReask).toBe(false);
+    }
+  });
+
+  it('synthesises a floor provisional fill when the extractor returns nothing for the parked slot', async () => {
+    const { invokers } = stubInvokers({ extract: { dataSlotFills: [] } });
+    const result = await runDataSlotTurn(
+      dsState({
+        questions: [q({ id: 'q1' })],
+        dataSlots: [ds({ id: 'd1', key: 'd1', theme: 'A' })],
+        activeDataSlotKey: 'd1',
+        dataSlotAttempts: { d1: 2 },
+        config: { maxDataSlotAttempts: 2 },
+      }),
+      invokers
+    );
+    const d1Fill = (result.sideEffects.dataSlotFills ?? []).find((f) => f.dataSlotKey === 'd1');
+    expect(d1Fill).toBeDefined();
+    expect(d1Fill?.provisional).toBe(true);
+    expect(d1Fill?.confidence).toBe(PROVISIONAL_FLOOR_CONFIDENCE);
+    expect(d1Fill?.provenance).toBe('inferred');
+  });
+
+  it('does not re-target a slot parked on a prior turn (a provisional fill counts as covered)', async () => {
+    const { invokers } = stubInvokers();
+    const result = await runDataSlotTurn(
+      dsState({
+        questions: [q({ id: 'q1' })],
+        dataSlots: [
+          ds({ id: 'd1', key: 'd1', theme: 'A' }),
+          ds({ id: 'd2', key: 'd2', theme: 'B' }),
+        ],
+        // d1 was parked earlier (provisional, low confidence); d2 is still open.
+        dataSlotAnswered: [{ dataSlotId: 'd1', confidence: 0.2, provisional: true }],
+        activeDataSlotKey: null,
+      }),
+      invokers
+    );
+    expect(result.response.kind).toBe('data_slot');
+    if (result.response.kind === 'data_slot') expect(result.response.dataSlotId).toBe('d2');
+  });
+
+  it('keeps a later confident answer non-provisional (promotes a parked slot)', async () => {
+    // d1 was parked (provisional); this turn the respondent finally answers it clearly.
+    const { invokers } = stubInvokers({ extract: { dataSlotFills: [fill('d1', 0.95)] } });
+    const result = await runDataSlotTurn(
+      dsState({
+        questions: [q({ id: 'q1' })],
+        dataSlots: [ds({ id: 'd1', key: 'd1', theme: 'A' })],
+        dataSlotAnswered: [{ dataSlotId: 'd1', confidence: 0.2, provisional: true }],
+        activeDataSlotKey: 'd1',
+        dataSlotAttempts: { d1: 2 },
+        config: { maxDataSlotAttempts: 2 },
+      }),
+      invokers
+    );
+    const d1Fill = (result.sideEffects.dataSlotFills ?? []).find((f) => f.dataSlotKey === 'd1');
+    // The confident fill is NOT re-marked provisional — persistence then clears the flag (promotion).
+    expect(d1Fill?.confidence).toBe(0.95);
+    expect(d1Fill?.provisional).not.toBe(true);
+  });
+
+  it('parks after a single ask when maxDataSlotAttempts is 1', async () => {
+    const { invokers } = stubInvokers({ extract: { dataSlotFills: [fill('d1', 0.3)] } });
+    const result = await runDataSlotTurn(
+      dsState({
+        questions: [q({ id: 'q1' })],
+        dataSlots: [ds({ id: 'd1', key: 'd1', theme: 'A' })],
+        activeDataSlotKey: 'd1',
+        dataSlotAttempts: { d1: 1 },
+        config: { maxDataSlotAttempts: 1 },
+      }),
+      invokers
+    );
+    const d1Fill = (result.sideEffects.dataSlotFills ?? []).find((f) => f.dataSlotKey === 'd1');
+    expect(d1Fill?.provisional).toBe(true);
+  });
+
+  it('never parks (or keeps any fill) on a disregarded non-genuine turn, even at the cap', async () => {
+    const { invokers } = stubInvokers({
+      extract: { dataSlotFills: [fill('d1', 0.3)] },
+      serious: { verdict: { serious: false, reason: 'gibberish' } },
+    });
+    const result = await runDataSlotTurn(
+      dsState({
+        questions: [q({ id: 'q1' })],
+        dataSlots: [ds({ id: 'd1', key: 'd1', theme: 'A' })],
+        activeDataSlotKey: 'd1',
+        dataSlotAttempts: { d1: 2 },
+        config: { maxDataSlotAttempts: 2, abuseThreshold: 4 },
+      }),
+      invokers
+    );
+    // The seriousness gate cleared the fills first — nothing (provisional or otherwise) is kept.
+    expect(result.sideEffects.dataSlotFills).toHaveLength(0);
   });
 });

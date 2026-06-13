@@ -117,6 +117,50 @@ describe('buildTurnContext', () => {
     expect(loaded!.activeQuestionKey).toBe('team');
   });
 
+  it('counts the consecutive re-ask run for the most-recently targeted data slot', async () => {
+    // A real data-slot turn stamps the slot id on BOTH targetedQuestionId (overloaded active
+    // target) and targetedDataSlotId (the unambiguous park counter source).
+    (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionGraph({
+        version: {
+          config: null,
+          dataSlots: [
+            {
+              id: 'd1',
+              key: 'satisfaction',
+              name: 'Satisfaction',
+              description: 'd',
+              theme: 'Wellbeing',
+              ordinal: 0,
+              weight: 1,
+            },
+            {
+              id: 'd2',
+              key: 'blockers',
+              name: 'Blockers',
+              description: 'd',
+              theme: 'Wellbeing',
+              ordinal: 1,
+              weight: 1,
+            },
+          ],
+          sections: [{ id: 's1', ordinal: 0, questions: [] }],
+        },
+        answers: [],
+        dataSlotFills: [],
+        turns: [
+          { userMessage: 'dunno', agentResponse: '…', targetedQuestionId: 'd1', targetedDataSlotId: 'd1', ordinal: 3 }, // prettier-ignore
+          { userMessage: 'meh', agentResponse: '…', targetedQuestionId: 'd1', targetedDataSlotId: 'd1', ordinal: 2 }, // prettier-ignore
+          { userMessage: 'hi', agentResponse: '…', targetedQuestionId: 'd2', targetedDataSlotId: 'd2', ordinal: 1 }, // prettier-ignore
+        ],
+      })
+    );
+    const loaded = await buildTurnContext('sess-1');
+    expect(loaded!.base.activeDataSlotKey).toBe('satisfaction');
+    // d1 was targeted in the two most-recent turns consecutively → 2; d2 broke the run before that.
+    expect(loaded!.base.dataSlotAttempts).toEqual({ d1: 2 });
+  });
+
   it('builds coverage + value answer views and the oldest→newest transcript', async () => {
     (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(sessionGraph());
     const loaded = await buildTurnContext('sess-1');

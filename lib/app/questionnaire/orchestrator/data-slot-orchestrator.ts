@@ -59,6 +59,13 @@ export const DATA_SLOT_SELECTION_TOOL_SLUG = 'app_select_data_slot';
 export const DATA_SLOT_FILLED_THRESHOLD = 0.5;
 
 /**
+ * Confidence stamped on a synthesised provisional fill when a slot is parked and the extractor
+ * returned nothing for it — low (below the filled threshold) so the panel shows it as a tentative
+ * reading, while the `provisional` flag still marks the slot covered so it isn't re-asked.
+ */
+export const PROVISIONAL_FLOOR_CONFIDENCE = 0.2;
+
+/**
  * How far data-slot coverage may run ahead of the BACKGROUND question coverage before the loop
  * stops deepening the conversation and asks an unanswered REQUIRED question directly. Keeps the
  * deliverable (the questions) in step with the data-slot conversation, so mandatory answers the
@@ -70,7 +77,11 @@ export const BALANCED_QUESTION_LAG = 0.2;
 export const DATA_SLOT_COMPLETE_MESSAGE =
   "Thanks — that's everything we need. You can submit your responses whenever you're ready.";
 
-/** Merge this turn's data-slot fills into the answered set (filled = confidence ≥ threshold). */
+/**
+ * Merge this turn's data-slot fills into the answered set. A slot counts as covered at
+ * confidence ≥ threshold OR when its fill is `provisional` (a parked best-effort inference). The
+ * `provisional` flag is carried so targeting can exclude parked slots and the panel can mark them.
+ */
 function applyFills(
   dataSlots: DataSlotTarget[],
   answered: DataSlotAnsweredView[],
@@ -82,9 +93,18 @@ function applyFills(
   for (const fill of fills) {
     const id = idByKey.get(fill.dataSlotKey);
     if (!id) continue;
-    byId.set(id, { dataSlotId: id, confidence: fill.confidence });
+    byId.set(id, {
+      dataSlotId: id,
+      confidence: fill.confidence,
+      provisional: fill.provisional ?? false,
+    });
   }
   return [...byId.values()];
+}
+
+/** True once a slot is "covered" for targeting — a confident fill OR a parked provisional one. */
+function isCovered(a: DataSlotAnsweredView): boolean {
+  return (a.confidence ?? 0) >= DATA_SLOT_FILLED_THRESHOLD || a.provisional === true;
 }
 
 /** The unfilled data slots, theme-ordered (the loader already orders by theme then ordinal). */
@@ -92,24 +112,28 @@ function unfilledDataSlots(
   dataSlots: DataSlotTarget[],
   answered: DataSlotAnsweredView[]
 ): DataSlotTarget[] {
-  const filled = new Set(
-    answered
-      .filter((a) => (a.confidence ?? 0) >= DATA_SLOT_FILLED_THRESHOLD)
-      .map((a) => a.dataSlotId)
-  );
-  return dataSlots.filter((s) => !filled.has(s.id));
+  const covered = new Set(answered.filter(isCovered).map((a) => a.dataSlotId));
+  return dataSlots.filter((s) => !covered.has(s.id));
 }
 
 /**
  * Topic-local pick: prefer an unfilled slot in the CURRENT theme (the one the previous turn
  * targeted) so the interviewer lingers in an area; only when that area is exhausted move to the
- * next theme. Falls back to the first unfilled slot when there's no active theme.
+ * next theme. Falls back to the first unfilled slot when there's no active theme. When `avoidTheme`
+ * is set (we just PARKED a slot and want to bridge to a fresh topic), prefer a slot in a DIFFERENT
+ * theme — explicit forward movement instead of lingering on the area we just gave up on.
  */
 function pickNextDataSlot(
   unfilled: DataSlotTarget[],
   activeDataSlotKey: string | null | undefined,
-  dataSlots: DataSlotTarget[]
+  dataSlots: DataSlotTarget[],
+  avoidTheme?: string
 ): DataSlotTarget {
+  if (avoidTheme) {
+    const elsewhere = unfilled.find((s) => s.theme !== avoidTheme);
+    if (elsewhere) return elsewhere;
+    // Only the just-parked theme remains — fall through (still better to keep asking than stall).
+  }
   const activeTheme = activeDataSlotKey
     ? dataSlots.find((s) => s.key === activeDataSlotKey)?.theme
     : undefined;
@@ -267,7 +291,49 @@ export async function runDataSlotTurn(
 
   // 2. Merge — so targeting + completion see this turn's fills/answers.
   const effective = applyIntents(state, answerUpserts);
-  const effectiveDataAnswered = applyFills(dataSlots, state.dataSlotAnswered ?? [], dataSlotFills);
+  let effectiveDataAnswered = applyFills(dataSlots, state.dataSlotAnswered ?? [], dataSlotFills);
+
+  // 2.5 Move-on / park: when the active slot has been asked `maxDataSlotAttempts` times and is
+  //     STILL unfilled, stop re-asking it — record a best-effort PROVISIONAL fill (so it reads as
+  //     covered and the respondent keeps moving) and bridge to a fresh topic. Never on a
+  //     disregarded (abusive) turn — the gate already cleared the fills there. The extractor was
+  //     asked to infer this slot this turn (`parkPending`); if it returned nothing, synthesise a
+  //     floor fill so progress is guaranteed regardless of model compliance.
+  const activeSlot = state.activeDataSlotKey
+    ? dataSlots.find((s) => s.key === state.activeDataSlotKey)
+    : undefined;
+  let parkedTheme: string | undefined;
+  if (
+    hasMessage &&
+    !disregarded &&
+    activeSlot !== undefined &&
+    (state.dataSlotAttempts?.[activeSlot.id] ?? 0) >= state.config.maxDataSlotAttempts
+  ) {
+    const merged = effectiveDataAnswered.find((a) => a.dataSlotId === activeSlot.id);
+    if (merged === undefined || !isCovered(merged)) {
+      const inferred = dataSlotFills.find((f) => f.dataSlotKey === activeSlot.key);
+      if (inferred) {
+        inferred.provisional = true;
+      } else {
+        const prior = (state.dataSlotAnswered ?? []).find((a) => a.dataSlotId === activeSlot.id);
+        dataSlotFills.push({
+          dataSlotKey: activeSlot.key,
+          value: prior?.value ?? null,
+          paraphrase:
+            prior?.paraphrase && prior.paraphrase.trim().length > 0
+              ? prior.paraphrase
+              : 'Not clearly answered yet — recorded a tentative reading to revisit.',
+          confidence: PROVISIONAL_FLOOR_CONFIDENCE,
+          provenance: 'inferred',
+          provisional: true,
+          rationale: 'Parked after the re-ask limit; best-effort placeholder to keep moving.',
+        });
+      }
+      parkedTheme = activeSlot.theme;
+      // Recompute so the just-parked slot counts as covered for targeting + the assessment below.
+      effectiveDataAnswered = applyFills(dataSlots, state.dataSlotAnswered ?? [], dataSlotFills);
+    }
+  }
 
   // Background deliverable: completion is gated on ALL questions being answered.
   const answeredIds = new Set(effective.answered.map((a) => a.questionId));
@@ -324,8 +390,9 @@ export async function runDataSlotTurn(
     response = { kind: 'question', questionId: next.id, text: next.prompt ?? '' };
     targetedQuestionId = next.id;
   } else if (unfilled.length > 0) {
-    // Target the next data slot, topic-local (linger in the current theme).
-    const next = pickNextDataSlot(unfilled, state.activeDataSlotKey, dataSlots);
+    // Target the next data slot, topic-local (linger in the current theme) — but when we just
+    // parked a slot, bridge to a DIFFERENT theme so the move-on reads as forward progress.
+    const next = pickNextDataSlot(unfilled, state.activeDataSlotKey, dataSlots, parkedTheme);
     const activeTheme = state.activeDataSlotKey
       ? dataSlots.find((s) => s.key === state.activeDataSlotKey)?.theme
       : undefined;

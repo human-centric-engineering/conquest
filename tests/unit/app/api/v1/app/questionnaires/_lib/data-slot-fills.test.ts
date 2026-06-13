@@ -86,6 +86,21 @@ describe('upsertDataSlotFill — first capture (CREATE)', () => {
     const call = (prismaMock.appDataSlotFill.create as Mock).mock.calls[0]?.[0];
     expect(call?.data?.rationale).toBeNull();
   });
+
+  it('defaults provisional to false, and persists it when the fill is parked', async () => {
+    await upsertDataSlotFill(SESSION_ID, SLOT_ID, FILL);
+    expect((prismaMock.appDataSlotFill.create as Mock).mock.calls[0]?.[0]?.data?.provisional).toBe(
+      false
+    );
+
+    vi.clearAllMocks();
+    prismaMock.appDataSlotFill.findUnique.mockResolvedValue(null);
+    prismaMock.appDataSlotFill.create.mockResolvedValue({ id: 'created-2' });
+    await upsertDataSlotFill(SESSION_ID, SLOT_ID, { ...FILL, provisional: true });
+    expect((prismaMock.appDataSlotFill.create as Mock).mock.calls[0]?.[0]?.data?.provisional).toBe(
+      true
+    );
+  });
 });
 
 describe('upsertDataSlotFill — update + history', () => {
@@ -159,5 +174,26 @@ describe('upsertDataSlotFill — update + history', () => {
     const call = (prismaMock.appDataSlotFill.update as Mock).mock.calls[0]?.[0];
     expect(call?.data?.refinementHistory).toHaveLength(2);
     expect(call?.data?.refinementHistory[1]).toMatchObject({ previousValue: 'female' });
+  });
+
+  it('clears provisional on a later confident (non-provisional) fill (promotion)', async () => {
+    prismaMock.appDataSlotFill.findUnique.mockResolvedValue({
+      id: 'existing-1',
+      value: 'tentative',
+      paraphrase: 'A tentative reading.',
+      confidence: 0.2,
+      refinementHistory: [],
+    });
+
+    // A real answer arrives (provisional omitted → defaults false) — the row's provisional clears.
+    await upsertDataSlotFill(SESSION_ID, SLOT_ID, {
+      value: 'clear answer',
+      paraphrase: 'A clear answer.',
+      confidence: 0.95,
+      provenance: 'direct',
+    });
+
+    const call = (prismaMock.appDataSlotFill.update as Mock).mock.calls[0]?.[0];
+    expect(call?.data?.provisional).toBe(false);
   });
 });

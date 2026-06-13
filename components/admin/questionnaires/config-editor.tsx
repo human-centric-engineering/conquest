@@ -187,6 +187,9 @@ export function ConfigEditor({
   );
   const [anonymousMode, setAnonymousMode] = useState(config.anonymousMode);
   const [abuseThreshold, setAbuseThreshold] = useState(String(config.abuseThreshold));
+  const [maxDataSlotAttempts, setMaxDataSlotAttempts] = useState(
+    String(config.maxDataSlotAttempts)
+  );
   const [sensitivityAwareness, setSensitivityAwareness] = useState(config.sensitivityAwareness);
   const [supportMessage, setSupportMessage] = useState(config.supportMessage);
   const [supportResourceUrl, setSupportResourceUrl] = useState(config.supportResourceUrl);
@@ -212,6 +215,7 @@ export function ConfigEditor({
     setContradictionEveryNTurns(String(config.contradictionEveryNTurns));
     setAnonymousMode(config.anonymousMode);
     setAbuseThreshold(String(config.abuseThreshold));
+    setMaxDataSlotAttempts(String(config.maxDataSlotAttempts));
     setSensitivityAwareness(config.sensitivityAwareness);
     setSupportMessage(config.supportMessage);
     setSupportResourceUrl(config.supportResourceUrl);
@@ -269,6 +273,14 @@ export function ConfigEditor({
         // Seriousness / abuse gate: non-genuine answers tolerated before abandon. Blank/invalid
         // falls back to the stored value (never silently 0); 0 = off.
         abuseThreshold: boundedNumber(abuseThreshold, 0, 50, config.abuseThreshold, true),
+        // Data Slots feature: re-ask attempts before a slot is parked with a provisional fill.
+        maxDataSlotAttempts: boundedNumber(
+          maxDataSlotAttempts,
+          1,
+          10,
+          config.maxDataSlotAttempts,
+          true
+        ),
         // Sensitivity awareness / safeguarding. Trim the copy; an empty support message disables
         // the signpost. Requires the platform sensitivity-awareness flag to take effect.
         sensitivityAwareness,
@@ -515,6 +527,26 @@ export function ConfigEditor({
             max={50}
             value={abuseThreshold}
             onChange={(e) => setAbuseThreshold(e.target.value)}
+            disabled={busy}
+          />
+        </div>
+        <div className="space-y-1.5 sm:max-w-xs">
+          <Label className="text-sm font-medium">
+            Data-slot attempts{' '}
+            <FieldHelp title="Data-slot attempts">
+              How many times the agent asks about one data slot (topic) before it records its best
+              guess and moves on — so a respondent never gets stuck being asked the same thing.{' '}
+              <code className="text-xs">2</code> = ask once, then one sharper re-ask. The best guess
+              is shown as &ldquo;provisional · may revisit&rdquo; and can still be refined later.
+              Only applies in data-slot mode.
+            </FieldHelp>
+          </Label>
+          <Input
+            type="number"
+            min={1}
+            max={10}
+            value={maxDataSlotAttempts}
+            onChange={(e) => setMaxDataSlotAttempts(e.target.value)}
             disabled={busy}
           />
         </div>

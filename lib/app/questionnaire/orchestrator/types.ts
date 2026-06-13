@@ -119,6 +119,12 @@ export interface DataSlotAnsweredView {
    */
   value?: unknown;
   paraphrase?: string | null;
+  /**
+   * Move-on (Data Slots feature): true when this fill is a best-effort inference recorded after the
+   * re-ask cap. A provisional slot counts as "covered" for targeting (so it isn't re-asked) but at
+   * low confidence; a later confident fill clears it. Absent in pure targeting tests.
+   */
+  provisional?: boolean;
 }
 
 /**
@@ -176,6 +182,13 @@ export interface TurnState {
   dataSlots?: DataSlotTarget[];
   dataSlotAnswered?: DataSlotAnsweredView[];
   activeDataSlotKey?: string | null;
+  /**
+   * Move-on (Data Slots feature): consecutive re-ask count per data-slot id (turns that targeted
+   * the slot without a confident fill). Only the most-recently targeted slot carries a non-zero
+   * count. When it reaches `config.maxDataSlotAttempts` and the slot is still unfilled, the
+   * orchestrator parks it (records a provisional fill, moves on). Absent in question mode.
+   */
+  dataSlotAttempts?: Record<string, number>;
   /**
    * Cost-cap pressure for this turn, set by the route when the session's spend so far crosses
    * the soft threshold (F6.3). `'soft'` biases the core toward offering completion early (so the
