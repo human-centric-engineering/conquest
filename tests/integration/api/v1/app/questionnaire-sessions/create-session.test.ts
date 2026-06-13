@@ -28,6 +28,10 @@ vi.mock('@/lib/db/client', () => ({ prisma: mocks.prisma }));
 const seamMock = vi.hoisted(() => ({ recordSessionCreated: vi.fn() }));
 vi.mock('@/app/api/v1/app/questionnaires/_lib/sessions', () => seamMock);
 
+// Preview readiness seam — a launchable draft is previewable; the gate calls this for non-launched.
+const launchabilityMock = vi.hoisted(() => ({ loadLaunchReadiness: vi.fn() }));
+vi.mock('@/app/api/v1/app/questionnaires/_lib/launchability', () => launchabilityMock);
+
 import {
   createAnonymousSession,
   createPreviewSession,
@@ -47,6 +51,7 @@ beforeEach(() => {
   (mocks.tx.appQuestionnaireInvitation.update as Mock).mockResolvedValue({});
   (mocks.prisma.appQuestionnaireSession.findFirst as Mock).mockResolvedValue(null);
   (seamMock.recordSessionCreated as Mock).mockResolvedValue(undefined);
+  (launchabilityMock.loadLaunchReadiness as Mock).mockResolvedValue({ ready: true, checks: [] });
 });
 
 describe('createSessionFromInvitation', () => {
@@ -285,12 +290,48 @@ describe('createPreviewSession (admin preview)', () => {
     expect(mocks.tx.appQuestionnaireSession.create).toHaveBeenCalledTimes(1);
   });
 
-  it('404s an unknown or unlaunched version (preview mirrors the live surface)', async () => {
-    (mocks.prisma.appQuestionnaireVersion.findUnique as Mock).mockResolvedValue(
-      version({ status: 'draft' })
-    );
+  it('404s an unknown version', async () => {
+    (mocks.prisma.appQuestionnaireVersion.findUnique as Mock).mockResolvedValue(null);
     const result = await createPreviewSession('v1');
     expect(result).toMatchObject({ ok: false, status: 404, code: 'NOT_FOUND' });
     expect(mocks.tx.appQuestionnaireSession.create).not.toHaveBeenCalled();
+  });
+
+  it('404s an archived (retired) version — never previewable', async () => {
+    (mocks.prisma.appQuestionnaireVersion.findUnique as Mock).mockResolvedValue(
+      version({ status: 'archived' })
+    );
+    const result = await createPreviewSession('v1');
+    expect(result).toMatchObject({ ok: false, status: 404, code: 'NOT_FOUND' });
+    // A retired version short-circuits before the readiness gate is consulted.
+    expect(launchabilityMock.loadLaunchReadiness).not.toHaveBeenCalled();
+    expect(mocks.tx.appQuestionnaireSession.create).not.toHaveBeenCalled();
+  });
+
+  it('409s a draft that is NOT launch-ready (complete the checklist first)', async () => {
+    (mocks.prisma.appQuestionnaireVersion.findUnique as Mock).mockResolvedValue(
+      version({ status: 'draft' })
+    );
+    (launchabilityMock.loadLaunchReadiness as Mock).mockResolvedValue({ ready: false, checks: [] });
+    const result = await createPreviewSession('v1');
+    expect(result).toMatchObject({ ok: false, status: 409, code: 'NOT_READY_FOR_PREVIEW' });
+    expect(launchabilityMock.loadLaunchReadiness).toHaveBeenCalledWith('v1');
+    expect(mocks.tx.appQuestionnaireSession.create).not.toHaveBeenCalled();
+  });
+
+  it('previews a launch-READY draft (rehearse before going live) without launching', async () => {
+    (mocks.prisma.appQuestionnaireVersion.findUnique as Mock).mockResolvedValue(
+      version({ status: 'draft' })
+    );
+    (launchabilityMock.loadLaunchReadiness as Mock).mockResolvedValue({ ready: true, checks: [] });
+    const result = await createPreviewSession('v1');
+    expect(result).toEqual({ ok: true, session: NEW_SESSION, resumed: false });
+    expect(mocks.tx.appQuestionnaireSession.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT consult the readiness gate for a launched version (always previewable)', async () => {
+    (mocks.prisma.appQuestionnaireVersion.findUnique as Mock).mockResolvedValue(version());
+    await createPreviewSession('v1');
+    expect(launchabilityMock.loadLaunchReadiness).not.toHaveBeenCalled();
   });
 });

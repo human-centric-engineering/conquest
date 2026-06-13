@@ -27,15 +27,14 @@ import { getClientIP } from '@/lib/security/ip';
 import { prisma } from '@/lib/db/client';
 import { computeChanges, logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import {
-  isDataSlotsEnabled,
-  withQuestionnairesEnabled,
-} from '@/lib/app/questionnaire/feature-flag';
+import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { updateVersionStatusSchema } from '@/lib/app/questionnaire/authoring';
 import {
   countLaunchBlockers,
   hasLaunchBlockers,
 } from '@/app/api/v1/app/questionnaires/_lib/launch-blockers';
+import { loadLaunchReadiness } from '@/app/api/v1/app/questionnaires/_lib/launchability';
+import type { LaunchCheckKey } from '@/lib/app/questionnaire/launch/readiness';
 import type { AppQuestionnaireStatus } from '@/lib/app/questionnaire/types';
 import { loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
 
@@ -46,48 +45,27 @@ const ALLOWED_TRANSITIONS: Record<AppQuestionnaireStatus, AppQuestionnaireStatus
   archived: [],
 };
 
-/**
- * True when a stored audience JSON carries at least one defined field. The editor
- * may persist an empty `{}` (it holds the full audience in state but exposes only a
- * couple of inputs), which must count as "not populated" for the launch gate.
- */
-function hasAudience(audience: unknown): boolean {
-  return (
-    typeof audience === 'object' &&
-    audience !== null &&
-    !Array.isArray(audience) &&
-    Object.values(audience as Record<string, unknown>).some((v) => v !== undefined && v !== null)
-  );
-}
+/** Per-check launch-gate error messages, keyed by the shared readiness check key. */
+const LAUNCH_MISSING_MESSAGE: Record<LaunchCheckKey, string> = {
+  goal: 'A goal is required to launch',
+  audience: 'An audience is required to launch',
+  sections: 'At least one section is required',
+  questions: 'At least one question is required',
+  config: 'Configuration must be saved before launch',
+  dataSlots: 'Generate data slots before launch',
+};
 
 /**
- * Readiness check for `draft → launched` (F3.1): goal + audience + ≥1 section +
- * ≥1 question + a saved config row. "Config saved" (a row exists) is the launch
- * signal — an unsaved config resolves to defaults, so requiring the row makes the
- * admin opt in deliberately.
+ * Readiness check for `draft → launched` (F3.1): goal + audience + ≥1 section + ≥1 question + a
+ * saved config row (+ data slots when the feature is on). Delegates to the shared
+ * {@link loadLaunchReadiness} — the same criteria the "Preview as respondent" gate uses — and
+ * maps any failed check to the launch-gate's `missing` validation detail.
  */
 async function assertLaunchable(versionId: string): Promise<void> {
-  const [version, sectionCount, questionCount, configCount, dataSlotsEnabled, dataSlotCount] =
-    await Promise.all([
-      prisma.appQuestionnaireVersion.findUnique({
-        where: { id: versionId },
-        select: { goal: true, audience: true },
-      }),
-      prisma.appQuestionnaireSection.count({ where: { versionId } }),
-      prisma.appQuestionSlot.count({ where: { versionId } }),
-      prisma.appQuestionnaireConfig.count({ where: { versionId } }),
-      isDataSlotsEnabled(),
-      prisma.appDataSlot.count({ where: { versionId } }),
-    ]);
+  const { checks } = await loadLaunchReadiness(versionId);
   const missing: Record<string, string[]> = {};
-  if (!version?.goal) missing.goal = ['A goal is required to launch'];
-  if (!hasAudience(version?.audience)) missing.audience = ['An audience is required to launch'];
-  if (sectionCount < 1) missing.sections = ['At least one section is required'];
-  if (questionCount < 1) missing.questions = ['At least one question is required'];
-  if (configCount < 1) missing.config = ['Configuration must be saved before launch'];
-  // Data Slots feature: when the flag is on, every launch requires generated data slots.
-  if (dataSlotsEnabled && dataSlotCount < 1) {
-    missing.dataSlots = ['Generate data slots before launch'];
+  for (const check of checks) {
+    if (!check.ok) missing[check.key] = [LAUNCH_MISSING_MESSAGE[check.key]];
   }
   if (Object.keys(missing).length > 0) {
     throw new ValidationError('Version is not ready to launch', missing);

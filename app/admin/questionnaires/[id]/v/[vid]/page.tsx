@@ -22,10 +22,11 @@ import {
   resolveQuestionnaireWorkspaceFlags,
 } from '@/lib/app/questionnaire/workspace-data';
 import { workspaceVersionBase } from '@/lib/app/questionnaire/workspace-nav';
+import { isLaunchReady } from '@/lib/app/questionnaire/launch/readiness';
 
 export const metadata: Metadata = {
   title: 'Overview · Questionnaire',
-  description: 'Status, launch readiness, and quick actions for a questionnaire version.',
+  description: 'Status, launch readiness, and a respondent preview for a questionnaire version.',
 };
 
 interface PageProps {
@@ -51,18 +52,40 @@ export default async function OverviewTab({ params }: PageProps) {
   const isDraft = selected.status === 'draft';
   const isLaunched = selected.status === 'launched';
 
+  // Preview is available for a launched version OR a launchable draft (passes the same readiness
+  // gate as launch — so an admin can rehearse before going live), and only when the live-sessions
+  // surface is on. The server `createPreviewSession` enforces the same rule.
+  const draftPreviewReady =
+    isDraft &&
+    graph !== null &&
+    isLaunchReady({
+      goal: graph.goal,
+      audience: graph.audience,
+      sectionCount: selected.sectionCount,
+      questionCount: selected.questionCount,
+      configSaved: graph.config.saved,
+      dataSlotsRequired: flags.dataSlots,
+      dataSlotsReady: dataSlotCount > 0,
+    });
+  const previewAvailable =
+    flags.liveSessions && graph !== null && (isLaunched || draftPreviewReady);
+
   const stats: CqStat[] = [
     { label: 'Sections', value: selected.sectionCount },
-    {
-      label: 'Questions',
-      value: selected.questionCount,
-      accent: true,
-      // Data slots (the abstraction layer over the questions) share the Questions tile when the
-      // feature is on — one box, two figures.
-      ...(flags.dataSlots
-        ? { secondary: { label: 'Data slots', value: selected.dataSlotCount } }
-        : {}),
-    },
+    // Data slots are the abstraction layer over the questions, so when the feature is on the two
+    // counts share one tile: a single "Questions / Data slots" title over a "5 / 4" figure.
+    flags.dataSlots
+      ? {
+          label: 'Questions / Data slots',
+          value: (
+            <span>
+              <span className="text-[color:var(--cq-accent)]">{selected.questionCount}</span>
+              <span className="text-muted-foreground/50"> / </span>
+              <span>{selected.dataSlotCount}</span>
+            </span>
+          ),
+        }
+      : { label: 'Questions', value: selected.questionCount, accent: true },
     {
       label: 'Versions',
       value: detail.versions.length,
@@ -123,44 +146,45 @@ export default async function OverviewTab({ params }: PageProps) {
         )}
       </section>
 
-      {/* Quick actions */}
+      {/* Preview as respondent */}
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold">Quick actions</h2>
-        <div className="flex flex-wrap gap-2">
-          <Button asChild variant="default" size="sm">
-            <Link href={`${base}/structure?edit=1`}>Edit structure</Link>
-          </Button>
-          {flags.liveSessions && graph && isLaunched && (
-            <Button asChild variant="outline" size="sm">
-              <Link
-                // Always `?preview=1` (anonymous versions included): boots via the admin-gated
-                // `/preview` route, which marks the run `isPreview` (kept out of analytics) and
-                // gives the respondent surface the signal it needs to show an "Exit preview" exit.
-                href={`/q/${vid}?preview=1`}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                Preview as respondent
-              </Link>
-            </Button>
-          )}
-          <Button asChild variant="outline" size="sm">
-            <Link href={`${base}/invitations`}>Invitations</Link>
-          </Button>
-          <Button asChild variant="outline" size="sm">
-            <Link href={`${base}/analytics`}>Analytics</Link>
-          </Button>
-          {flags.dataSlots && (
-            <Button asChild variant="outline" size="sm">
-              <Link href={`${base}/data-slots`}>
-                Data slots{dataSlotCount > 0 ? ` (${dataSlotCount})` : ''}
-              </Link>
-            </Button>
-          )}
-          {flags.designEval && (
-            <Button asChild variant="outline" size="sm">
-              <Link href={`${base}/evaluations`}>Evaluations</Link>
-            </Button>
+        <h2 className="text-lg font-semibold">Preview as respondent</h2>
+        <div className="bg-card rounded-xl border p-4">
+          {previewAvailable ? (
+            // Mirror the Launch readiness row exactly (gap-3, intro left, sm button top-right with
+            // shrink-0) so the "Preview as respondent" button lines up with "Review & Launch".
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-muted-foreground min-w-0 text-sm">
+                Walk through the questionnaire exactly as a respondent will. It opens in a new tab
+                and isn&apos;t recorded in analytics
+                {isDraft ? ' — you’re previewing this draft before launch.' : '.'}
+              </p>
+              {/* Always `?preview=1`: boots via the admin-gated `/preview` route, which marks the
+                  run `isPreview` (kept out of analytics) and lets the surface show an exit link. */}
+              <Button asChild size="sm" className="shrink-0">
+                <Link href={`/q/${vid}?preview=1`} target="_blank" rel="noopener noreferrer">
+                  Preview as respondent
+                </Link>
+              </Button>
+            </div>
+          ) : !flags.liveSessions ? (
+            <p className="text-muted-foreground text-sm">
+              Preview is unavailable while live respondent sessions are switched off.
+            </p>
+          ) : selected.status === 'archived' ? (
+            <p className="text-muted-foreground text-sm">Archived versions can’t be previewed.</p>
+          ) : isDraft ? (
+            <div className="space-y-1">
+              <p className="text-foreground text-sm font-medium">Not available yet</p>
+              <p className="text-muted-foreground max-w-prose text-sm">
+                You can preview this draft before launching — as soon as it’s ready. Complete the
+                launch checklist above
+                {flags.dataSlots ? ', including confirming its data slots' : ''}; you don’t need to
+                actually launch.
+              </p>
+            </div>
+          ) : (
+            <p className="text-muted-foreground text-sm">Preview is temporarily unavailable.</p>
           )}
         </div>
       </section>
