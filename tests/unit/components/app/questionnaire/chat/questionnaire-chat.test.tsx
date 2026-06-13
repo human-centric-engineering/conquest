@@ -263,7 +263,7 @@ describe('QuestionnaireChat', () => {
   });
 
   describe('opening animation', () => {
-    it('types the seeded opening turn in (caret first, full text after) when animateOpening is set', async () => {
+    it('shows a "Thinking…" beat before the seeded opening message, then types it in', async () => {
       hookReturn = makeReturn({
         turns: [{ role: 'assistant', content: 'Welcome to the questionnaire.' }],
       });
@@ -271,12 +271,15 @@ describe('QuestionnaireChat', () => {
         <QuestionnaireChat sessionId="s1" stream={hookReturn} animateOpening />
       );
 
-      // Mid-type: the streaming caret shows and the full greeting isn't revealed yet.
-      expect(container.querySelector('.terminal-caret')).toBeTruthy();
+      // The opening is fronted by a "Thinking…" indicator — the greeting hasn't started yet.
+      expect(screen.getByRole('status', { name: 'Thinking…' })).toBeInTheDocument();
+      expect(container.querySelector('.terminal-caret')).toBeNull();
+      expect(screen.queryByText('Welcome to the questionnaire.')).toBeNull();
 
-      // The typewriter catches up to the full greeting.
-      await waitFor(() =>
-        expect(screen.getByText('Welcome to the questionnaire.')).toBeInTheDocument()
+      // After the beat it types in to the full greeting.
+      await waitFor(
+        () => expect(screen.getByText('Welcome to the questionnaire.')).toBeInTheDocument(),
+        { timeout: 3000 }
       );
     });
 
@@ -296,7 +299,10 @@ describe('QuestionnaireChat', () => {
       const { container, rerender } = render(
         <QuestionnaireChat sessionId="s1" stream={hookReturn} animateOpening />
       );
-      await waitFor(() => expect(screen.getByText('Opening greeting.')).toBeInTheDocument());
+      // The greeting types in after its opening "Thinking…" beat.
+      await waitFor(() => expect(screen.getByText('Opening greeting.')).toBeInTheDocument(), {
+        timeout: 3000,
+      });
 
       // A reply lands as a committed turn (index 1, past the seeded count) — it types itself in.
       const next = makeReturn({
@@ -346,11 +352,13 @@ describe('QuestionnaireChat', () => {
       // The second opening turn is gated — it isn't even in the DOM until the first finishes.
       expect(screen.queryByText('Second opening message.')).toBeNull();
 
-      // The first types in…
-      await waitFor(() => expect(screen.getByText('First opening message.')).toBeInTheDocument());
-      // …then, after the inter-message beat, the second types in too.
+      // The first types in after its opening beat…
+      await waitFor(() => expect(screen.getByText('First opening message.')).toBeInTheDocument(), {
+        timeout: 3000,
+      });
+      // …then, after the longer inter-message beat, the second types in too.
       await waitFor(() => expect(screen.getByText('Second opening message.')).toBeInTheDocument(), {
-        timeout: 4000,
+        timeout: 5000,
       });
     });
   });

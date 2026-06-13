@@ -95,8 +95,13 @@ function AssistantTurn({ children }: { children: React.ReactNode }) {
 /** Typing cadence — chars revealed per tick and the gap between ticks (~150 chars/s). */
 const TYPE_CHARS_PER_TICK = 3;
 const TYPE_TICK_MS = 20;
-/** A short, natural beat between seeded opening turns finishing and the next starting to type. */
-const OPENING_GAP_MS = 500;
+/**
+ * Opening choreography: a "Thinking…" indicator precedes each seeded opening message. A ~1s beat
+ * before the FIRST message types, then a ~1.5s beat before each subsequent one — so the greeting
+ * and the first question land like a person composing them, not all at once.
+ */
+const OPENING_FIRST_THINK_MS = 1000;
+const OPENING_GAP_MS = 1500;
 
 /**
  * An assistant turn that types itself in a few characters at a time — then settles to the
@@ -187,26 +192,37 @@ export function QuestionnaireChat({
   // when `animateOpening` is set; turns that arrive later already revealed themselves live as
   // they streamed, so re-typing them would double-animate. Captured once via a lazy initializer.
   const [openingTurnCount] = useState(() => turns.length);
-  // When animating the opening, reveal the seeded turns ONE AT A TIME: turn i types in, and only
-  // after it finishes (plus a short beat) does turn i+1 start — so the greeting and the first
-  // question don't type over each other. `openingRevealed` is the count of opening turns allowed
-  // to render so far; the first starts immediately, each subsequent one is unlocked on its
-  // predecessor's `onDone`. Irrelevant when `animateOpening` is off (history renders instantly).
-  const [openingRevealed, setOpeningRevealed] = useState(1);
+  // When animating the opening, reveal the seeded turns ONE AT A TIME, each preceded by a
+  // "Thinking…" beat: a pause shows the indicator, then the turn types in; only after it finishes
+  // does the next one's beat begin — so the greeting and the first question never type at once.
+  // `openingRevealed` is the count of opening turns allowed to render so far (starts at 0 — even
+  // the first waits for its think beat); `openingThinking` shows the indicator during a pause.
+  // Irrelevant when `animateOpening` is off (history renders instantly).
+  const [openingRevealed, setOpeningRevealed] = useState(0);
+  const [openingThinking, setOpeningThinking] = useState(false);
   const openingGapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => clearTimeout(openingGapTimer.current ?? undefined), []);
-  const unlockOpeningTurn = (count: number) => {
+
+  // Pause (showing the indicator), then reveal opening turns up to `count` and clear the pause.
+  const scheduleOpeningReveal = (count: number, delayMs: number) => {
     clearTimeout(openingGapTimer.current ?? undefined);
-    openingGapTimer.current = setTimeout(
-      () => setOpeningRevealed((cur) => Math.max(cur, count)),
-      OPENING_GAP_MS
-    );
+    setOpeningThinking(true);
+    openingGapTimer.current = setTimeout(() => {
+      setOpeningRevealed((cur) => Math.max(cur, count));
+      setOpeningThinking(false);
+    }, delayMs);
   };
 
-  // Keep the latest turn / thinking indicator in view (also as each opening turn unlocks).
+  // Kick off the opening: a "Thinking…" beat before the very first seeded message types in.
+  useEffect(() => {
+    if (!animateOpening || openingTurnCount === 0) return;
+    scheduleOpeningReveal(1, OPENING_FIRST_THINK_MS);
+  }, [animateOpening, openingTurnCount]);
+
+  // Keep the latest turn / thinking indicator in view (also as each opening beat resolves).
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [turns.length, streaming, openingRevealed]);
+  }, [turns.length, streaming, openingRevealed, openingThinking]);
 
   // Refocus the composer when a turn finishes — the textarea is disabled while a reply streams,
   // so we put the cursor back the moment it re-enables, ready for the next answer without a click.
@@ -267,8 +283,10 @@ export function QuestionnaireChat({
                 <TypewriterAssistantTurn
                   key={i}
                   content={turn.content}
-                  // Unlock the next opening turn (after a short beat) when this one finishes typing.
-                  onDone={() => unlockOpeningTurn(i + 2)}
+                  // When this finishes, begin the next opening turn's "Thinking…" beat (if any).
+                  onDone={() => {
+                    if (i + 1 < openingTurnCount) scheduleOpeningReveal(i + 2, OPENING_GAP_MS);
+                  }}
                 />
               );
             }
@@ -279,8 +297,9 @@ export function QuestionnaireChat({
 
           {/* Awaiting a reply — a calm "thinking" indicator. The reply then types itself in once
               it lands as a committed turn (above), so the typing effect is consistent regardless
-              of how the backend chunks the SSE stream. */}
-          {streaming && (
+              of how the backend chunks the SSE stream. The same indicator fronts each seeded
+              opening message during its pre-message beat (`openingThinking`). */}
+          {(streaming || openingThinking) && (
             <AssistantTurn>
               <ThinkingIndicator />
             </AssistantTurn>
