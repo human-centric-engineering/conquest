@@ -100,14 +100,15 @@ describe('runTurn — seriousness / abuse gate', () => {
     expect(result.sideEffects.answerUpserts).toHaveLength(1);
   });
 
-  it('does not run the judge when the extractor is not suspicious', async () => {
+  it('runs the judge on every answered turn (no suspicion pre-gate); a genuine answer passes', async () => {
     const { invokers, calls } = stubInvokers({
-      extract: { intents: [intent({ slotKey: 'a' })] }, // suspectedNonGenuine omitted
+      extract: { intents: [intent({ slotKey: 'a' })] }, // no suspicion flag — judge still runs
+      // stub judge defaults to a serious verdict
     });
 
     const result = await runTurn(state({ userMessage: 'fine', questions: Q }), invokers);
 
-    expect(calls.serious).toHaveLength(0);
+    expect(calls.serious).toHaveLength(1); // judged regardless of the (absent) suspicion flag
     expect(result.abuse).toBeUndefined();
     expect(result.sideEffects.answerUpserts).toHaveLength(1);
   });

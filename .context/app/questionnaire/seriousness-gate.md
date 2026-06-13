@@ -8,19 +8,20 @@ questionnaire's `abuseThreshold` **abandon** the session. Colloquial / lazy / br
 end-to-end: a per-turn judge whose result becomes a `warning` SSE frame, gated by a platform
 flag + a per-questionnaire config knob, rendered as a side-band notice.
 
-## Two-stage design (cost-efficient)
+## The judge
 
-1. **Suspicion (the "main agent")** — the **answer-extractor** capability
-   (`lib/app/questionnaire/capabilities/extract-answer-slots.ts`), the pass that already reads the
-   answer, also emits `suspectedNonGenuine` (+ `suspicionReason`) — **no extra LLM call**. Its
-   prompt is tolerant: only abuse / absurd-or-impossible / gibberish / off-topic trip the flag.
-2. **Judge (only on suspicion)** — when stage 1 flags suspicion AND the gate is on AND
-   `abuseThreshold > 0`, the orchestrator calls `invokers.assessSeriousness` — a direct structured
-   LLM call (`app/api/v1/app/questionnaire-sessions/_lib/turn-invokers.ts`) reusing the
-   extractor's provider/model binding — returning a `{ serious, reason }` verdict
-   (`lib/app/questionnaire/seriousness/`). Fail-soft: a null verdict skips the gate.
+The **judge** (`invokers.assessSeriousness`, a direct structured LLM call in
+`app/api/v1/app/questionnaire-sessions/_lib/turn-invokers.ts` reusing the answer-extractor's
+provider/model binding) runs on **every answered turn** while the gate is on AND
+`abuseThreshold > 0`, returning a `{ serious, reason }` verdict (`lib/app/questionnaire/seriousness/`).
+It's a cheap (~$0.0001) gpt-4o-mini-tier call. Fail-soft: a null verdict skips the gate.
 
-The judge runs **at most once per turn, only when suspected** → near-zero cost on normal turns.
+> **History / why not "only on suspicion".** The first design was two-stage to save cost: the
+> answer-extractor also emitted a `suspectedNonGenuine` hint and the judge ran only when it was
+> set. In practice that optional flag was unreliable — the model omitted it even for blatant abuse
+> ("543 years", "you're shit"), so the judge never fired. The extractor still emits the hint (for
+> trace) but it **no longer gates** the judge; running the (cheap) judge every answered turn is the
+> reliable path.
 
 ## On a NOT-serious verdict (pure orchestrator, `orchestrator.ts`)
 

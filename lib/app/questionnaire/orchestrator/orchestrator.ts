@@ -149,8 +149,9 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
 
   const hasMessage = state.userMessage.trim().length > 0;
 
-  // 1. Extract answer slots from the message.
-  let suspectedNonGenuine = false;
+  // 1. Extract answer slots from the message. The extractor also emits a `suspectedNonGenuine`
+  //    hint, but it proved an unreliable GATE (an optional flag the model often omits even for
+  //    blatant abuse) — so it is no longer what decides whether the judge runs; see 1.5.
   if (hasMessage && state.flags.extraction) {
     const out = await invokers.extractAnswers(state);
     costUsd += out.costUsd;
@@ -161,9 +162,6 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
       })
     );
     answerUpserts.push(...out.intents);
-    // Stage 1 of the seriousness gate — the extractor (the pass already reading the answer)
-    // flags whether it looks non-genuine, so the dedicated judge only runs when worth a look.
-    suspectedNonGenuine = out.suspectedNonGenuine === true;
     if (out.diagnostic !== undefined) {
       events.push({
         type: 'warning',
@@ -173,17 +171,13 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
     }
   }
 
-  // 1.5 Seriousness / abuse gate. Stage 2: only when the gate is on, the questionnaire tolerates
-  //     a finite number of strikes, AND stage 1 was suspicious, pay for the judge. A non-serious
+  // 1.5 Seriousness / abuse gate. The judge runs on EVERY answered turn while the gate is on and
+  //     the questionnaire tolerates a finite number of strikes — a dedicated, cheap LLM call, so we
+  //     don't depend on the extractor's (unreliable) suspicion flag to trigger it. A non-serious
   //     verdict DISREGARDS the answer (never merged/persisted), strikes the session, and escalates
-  //     → abandon at the configured threshold.
+  //     → abandon at the configured threshold. A genuine answer (incl. colloquial/lazy) passes.
   let abuse: TurnResult['abuse'];
-  if (
-    hasMessage &&
-    state.flags.seriousnessGate &&
-    state.config.abuseThreshold > 0 &&
-    suspectedNonGenuine
-  ) {
+  if (hasMessage && state.flags.seriousnessGate && state.config.abuseThreshold > 0) {
     const judged = await invokers.assessSeriousness(state);
     costUsd += judged.costUsd;
     toolCalls.push(
