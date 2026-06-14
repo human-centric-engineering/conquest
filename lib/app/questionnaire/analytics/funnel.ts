@@ -57,54 +57,72 @@ function buildStages(counts: Record<FunnelStageKey, number>): FunnelStage[] {
 export async function getCompletionFunnel(scope: AnalyticsScope): Promise<CompletionFunnelResult> {
   const range = { from: scope.from.toISOString(), to: scope.to.toISOString() };
 
-  // Invitations in scope, excluding revoked. `userId` links to the respondent.
+  // Invitations in scope, excluding revoked. A respondent links to a session two ways:
+  // `userId` (account-bound accept flow) or `invitationId` (frictionless token flow, no account).
   const invitations = await prisma.appQuestionnaireInvitation.findMany({
     where: {
       versionId: scope.versionId,
       createdAt: { gte: scope.from, lt: scope.to },
       revokedAt: null,
     },
-    select: { sentAt: true, openedAt: true, userId: true },
+    select: { id: true, sentAt: true, openedAt: true, userId: true },
   });
 
-  // Non-preview sessions in scope, grouped by respondent.
+  // Non-preview sessions in scope. Counts-only: status + the two linkage keys (never answers) —
+  // reading `invitationId` here is the allowed STATUS projection, not answer attribution.
   const sessions = await prisma.appQuestionnaireSession.findMany({
     where: {
       versionId: scope.versionId,
       isPreview: false,
       createdAt: { gte: scope.from, lt: scope.to },
     },
-    select: { respondentUserId: true, status: true },
+    select: { respondentUserId: true, invitationId: true, status: true },
   });
 
-  // Which respondents have any session / a completed session.
+  // Which respondents / invitations have any session / a completed session.
   const startedUsers = new Set<string>();
   const completedUsers = new Set<string>();
+  const startedInvitationIds = new Set<string>();
+  const completedInvitationIds = new Set<string>();
   for (const s of sessions) {
-    if (!s.respondentUserId) continue;
-    startedUsers.add(s.respondentUserId);
-    if (s.status === 'completed') completedUsers.add(s.respondentUserId);
+    if (s.respondentUserId) {
+      startedUsers.add(s.respondentUserId);
+      if (s.status === 'completed') completedUsers.add(s.respondentUserId);
+    }
+    if (s.invitationId) {
+      startedInvitationIds.add(s.invitationId);
+      if (s.status === 'completed') completedInvitationIds.add(s.invitationId);
+    }
   }
 
   const invitedUserIds = new Set(
     invitations.map((i) => i.userId).filter((id): id is string => id !== null)
   );
+  const invitedInvitationIds = new Set(invitations.map((i) => i.id).filter(Boolean));
+
+  // An invitation counts as started/completed if it matches a session by EITHER linkage key.
+  const invStarted = (inv: { id: string; userId: string | null }) =>
+    startedInvitationIds.has(inv.id) || (inv.userId !== null && startedUsers.has(inv.userId));
+  const invCompleted = (inv: { id: string; userId: string | null }) =>
+    completedInvitationIds.has(inv.id) || (inv.userId !== null && completedUsers.has(inv.userId));
 
   const invited = invitations.filter((i) => i.sentAt !== null).length;
   const opened = invitations.filter((i) => i.openedAt !== null).length;
   let started = 0;
   let completed = 0;
-  for (const userId of invitedUserIds) {
-    if (startedUsers.has(userId)) started += 1;
-    if (completedUsers.has(userId)) completed += 1;
+  for (const inv of invitations) {
+    if (invStarted(inv)) started += 1;
+    if (invCompleted(inv)) completed += 1;
   }
 
-  // Anonymous sessions: those whose respondent was never invited (incl. no userId).
+  // Anonymous sessions: those NOT attributable to any in-scope invitation (by either key).
   let anonStarted = 0;
   let anonCompleted = 0;
   for (const s of sessions) {
-    const invitedRespondent = s.respondentUserId !== null && invitedUserIds.has(s.respondentUserId);
-    if (invitedRespondent) continue;
+    const isInvited =
+      (s.invitationId !== null && invitedInvitationIds.has(s.invitationId)) ||
+      (s.respondentUserId !== null && invitedUserIds.has(s.respondentUserId));
+    if (isInvited) continue;
     anonStarted += 1;
     if (s.status === 'completed') anonCompleted += 1;
   }

@@ -108,6 +108,7 @@ model AppQuestionnaireInvitation {
   versionId       String
   email           String // recipient address; the invitation is keyed by token, not email
   name            String? // optional recipient display name (prefills registration)
+  profile         Json? // InviteeProfile — captured per-invitee detail fields (firstName, jobTitle, …) per config.inviteeFields; email/name stay as columns
   tokenHash       String    @unique // sha256 of the opaque token; plaintext only in the email URL
   status          String    @default("pending") // APP_INVITATION_STATUSES (invitations/types.ts)
   userId          String? // respondent User.id, set on registration; plain String, no FK (UG-1)
@@ -450,6 +451,12 @@ model AppQuestionnaireSession {
   status           String   @default("active") // SESSION_STATUSES (types.ts): active | paused | completed | abandoned
   isPreview        Boolean  @default(false) // true = admin refine-answer exercise, not a respondent run
   respondentUserId String? // respondent User.id; plain String, no FK (UG-1); set in F4.6
+  // Invitations: the invitation this session was booted from (frictionless token flow), or null
+  // for a walk-up/public/authenticated-direct session. Plain String, no @relation (UG-1) — and
+  // deliberately so: it must NEVER become a graph edge that joins identity to answer content. Read
+  // ONLY for per-invitee STATUS (started/completed); under anonymousMode, never to attribute answers
+  // (the completion-tracking-only invariant — see invitations/linkage.ts).
+  invitationId     String?
   // Seriousness / abuse gate: cumulative count of non-genuine answers flagged this session.
   // The route increments it; at `config.abuseThreshold` the session is abandoned.
   abuseStrikes     Int      @default(0)
@@ -472,6 +479,7 @@ model AppQuestionnaireSession {
 
   @@index([versionId])
   @@index([versionId, isPreview])
+  @@index([invitationId])
   // DRIFT WARNING: a raw-SQL PARTIAL UNIQUE INDEX
   // (idx_app_questionnaire_session_preview_per_version, migration
   // 20260605141500) enforces at most one preview session per version
