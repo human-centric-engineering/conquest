@@ -189,7 +189,8 @@ function toNewQuestion(obj: Record<string, unknown>): NewQuestionSpec | null {
     type: asQuestionType(obj.type) ?? 'free_text',
     typeConfig: isRecord(obj.typeConfig) ? obj.typeConfig : null,
     required: typeof obj.required === 'boolean' ? obj.required : false,
-    weight: typeof obj.weight === 'number' ? obj.weight : 1.0,
+    // Neutral midpoint of the 0.1–1.0 weight scale when the snapshot carries none.
+    weight: typeof obj.weight === 'number' ? obj.weight : 0.5,
   };
 }
 

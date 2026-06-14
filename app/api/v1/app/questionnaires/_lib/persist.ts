@@ -152,7 +152,8 @@ export async function writeGraph(
           prompt: q.prompt,
           type: q.suggestedType,
           required: false,
-          weight: 1.0,
+          // Neutral midpoint of the 0.1–1.0 weight scale; admins tune it in the Structure editor.
+          weight: 0.5,
           ...(q.guidelines !== undefined ? { guidelines: q.guidelines } : {}),
           ...(q.rationale !== undefined ? { rationale: q.rationale } : {}),
           ...(q.suggestedTypeConfig !== undefined

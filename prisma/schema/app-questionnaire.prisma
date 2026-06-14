@@ -257,7 +257,7 @@ model AppQuestionSlot {
   type                 String                       @default("free_text") // free_text|single_choice|multi_choice|likert|numeric|date|boolean
   typeConfig           Json? // choices, likert bounds, etc.
   required             Boolean                      @default(false)
-  weight               Float                        @default(1.0)
+  weight               Float                        @default(0.5) // 0.1–1.0 slider scale; 0.5 neutral midpoint
   extractionConfidence Float? // 0–1, set by the extractor
   // F4.1 adaptive selection: cosine-similarity vector over `prompt` (+`guidelines`).
   // Width matches the platform embedding model (AiKnowledgeChunk.embedding). Raw-SQL

@@ -96,7 +96,7 @@ const handleCreateQuestion = withAdminAuth<Params>(async (request, session, { pa
         prompt: body.prompt,
         type: body.type,
         required: body.required ?? false,
-        weight: body.weight ?? 1.0,
+        weight: body.weight ?? 0.5,
         typeConfig: tc.value == null ? Prisma.JsonNull : jsonInput(tc.value),
         ...(body.guidelines != null ? { guidelines: body.guidelines } : {}),
         ...(body.rationale != null ? { rationale: body.rationale } : {}),
