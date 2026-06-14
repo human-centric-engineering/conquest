@@ -36,12 +36,17 @@ describe('isInvitationTransitionAllowed', () => {
     expect(isInvitationTransitionAllowed('pending', 'registered')).toBe(false);
   });
 
-  it('keeps the P6/P7 started/completed edges as seam states', () => {
+  it('keeps the started/completed edges, incl. frictionless direct-to-started', () => {
     expect(isInvitationTransitionAllowed('registered', 'started')).toBe(true);
     expect(isInvitationTransitionAllowed('started', 'completed')).toBe(true);
-    // …but you cannot jump straight there.
-    expect(isInvitationTransitionAllowed('opened', 'started')).toBe(false);
+    // Frictionless invites boot a no-login session, skipping `registered`: pending/sent/opened
+    // may go straight to `started`.
+    expect(isInvitationTransitionAllowed('pending', 'started')).toBe(true);
+    expect(isInvitationTransitionAllowed('sent', 'started')).toBe(true);
+    expect(isInvitationTransitionAllowed('opened', 'started')).toBe(true);
+    // …but you still cannot jump straight to completed.
     expect(isInvitationTransitionAllowed('registered', 'completed')).toBe(false);
+    expect(isInvitationTransitionAllowed('opened', 'completed')).toBe(false);
   });
 });
 

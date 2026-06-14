@@ -52,13 +52,38 @@ pending → sent → opened → registered → started → completed
 ```
 
 - **F3.2 drives `pending → sent → opened → registered`** and `revoked`.
-- **`started`/`completed` are seam states** — enum values only; P6/P7 sessions
-  transition them. The pure transition table (`invitations/status.ts`) already
-  encodes the edges, but no F3.2 route walks them.
+- **`started`/`completed`** are walked by sessions: the frictionless flow advances
+  `→ started` on first boot, and `transitionSession` stamps `→ completed` when the
+  bound session completes.
+- **Frictionless (no-account) direct-to-started:** `pending | sent | opened → started`
+  edges exist so a token can boot a session WITHOUT the account-registration
+  `registered` step (see below).
 
 Transition legality is pure (`isInvitationTransitionAllowed`,
 `isInvitationResendable` in `lib/app/questionnaire/invitations/`); the routes map an
 illegal transition to a 409 and the UI never offers an action the server would reject.
+
+## Frictionless invite links (Phase B)
+
+Gated by `APP_QUESTIONNAIRES_FRICTIONLESS_INVITES_ENABLED` (+ live-sessions). A per-invitee
+token boots a **no-login** session — the respondent answers without creating an account:
+
+- `POST /api/v1/app/questionnaire-sessions/from-invite { inviteToken }` →
+  `createSessionFromInviteToken` resolves the invitation by `tokenHash`, validates
+  not-revoked / not-expired / version-launched, then creates a session with
+  `respondentUserId: null` and `invitationId` set, mints the HMAC `accessToken`, and
+  advances the invitation `→ started`. Idempotent: a re-opened link resumes the existing
+  non-terminal session (`findResumableSessionByInvitation`).
+- **Turns are unchanged**: a frictionless session is `respondentUserId: null`, so the
+  existing anonymous turn path (`X-Session-Token`) drives every turn.
+- The public page reads `?i=<token>` and forwards it to `AnonymousSessionBoot`, which POSTs
+  `/from-invite` (storage keyed on the token, so a shared device never crosses invitees).
+- **No profile snapshot** is written — the admin captured invitee details at invite time
+  (`invitation.profile`); identity lives on the invitation and is read only for STATUS
+  (the completion-tracking-only invariant, `invitations/linkage.ts`).
+- The account-registration accept flow still works (optional, for cross-device resume);
+  when off, invitations fall back to it. (Linking a token-bound session to a later-created
+  account for cross-device resume is a follow-up.)
 
 ## Token security
 

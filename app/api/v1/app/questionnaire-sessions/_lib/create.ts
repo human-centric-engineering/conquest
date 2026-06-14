@@ -21,7 +21,16 @@
 import { prisma } from '@/lib/db/client';
 import type { Prisma } from '@prisma/client';
 import { hashInvitationToken } from '@/lib/app/questionnaire/invitations';
-import { findResumableSession } from '@/lib/app/questionnaire/chat/resumable-session';
+import { isInvitationTransitionAllowed } from '@/lib/app/questionnaire/invitations/status';
+import { narrowToEnum } from '@/lib/app/questionnaire/types';
+import {
+  APP_INVITATION_STATUSES,
+  type AppInvitationStatus,
+} from '@/lib/app/questionnaire/invitations/types';
+import {
+  findResumableSession,
+  findResumableSessionByInvitation,
+} from '@/lib/app/questionnaire/chat/resumable-session';
 import { recordSessionCreated } from '@/app/api/v1/app/questionnaires/_lib/sessions';
 import { loadLaunchReadiness } from '@/app/api/v1/app/questionnaires/_lib/launchability';
 import {
@@ -314,6 +323,98 @@ export async function createAnonymousSession(versionId: string): Promise<CreateS
       select: { id: true, status: true, versionId: true },
     });
     await recordSessionCreated(created.id, { tx });
+    return created;
+  });
+
+  return { ok: true, session, resumed: false };
+}
+
+/**
+ * Create (or resume) a NO-LOGIN session from a per-invitee token — the frictionless invite flow
+ * (Phase B). The token IS the credential: a valid, non-revoked, non-expired invitation for a
+ * launched version boots a session with `respondentUserId: null` and `invitationId` set, so the
+ * existing anonymous turn path (HMAC `X-Session-Token`) drives every turn unchanged. The invitee
+ * never registers an account; the admin captured their details at invite time (`invitation.profile`)
+ * so NO profile snapshot is written here — identity lives on the invitation, read only for status
+ * (the completion-tracking-only invariant). Idempotent: a re-opened link resumes the existing
+ * non-terminal session (keyed on `invitationId`). On first start the invitation advances to
+ * `started`. Gated by the frictionless-invites flag at the route.
+ */
+export async function createSessionFromInviteToken(token: string): Promise<CreateSessionResult> {
+  const invitation = await prisma.appQuestionnaireInvitation.findUnique({
+    where: { tokenHash: hashInvitationToken(token) },
+    select: {
+      id: true,
+      status: true,
+      versionId: true,
+      revokedAt: true,
+      expiresAt: true,
+      version: { select: { status: true } },
+    },
+  });
+
+  if (!invitation) {
+    return {
+      ok: false,
+      status: 404,
+      code: 'INVITATION_NOT_FOUND',
+      message: 'Invitation not found',
+    };
+  }
+  if (invitation.revokedAt !== null || invitation.status === 'revoked') {
+    return {
+      ok: false,
+      status: 410,
+      code: 'INVITATION_REVOKED',
+      message: 'This invitation link has been revoked',
+    };
+  }
+  if (invitation.expiresAt.getTime() <= Date.now()) {
+    return {
+      ok: false,
+      status: 410,
+      code: 'INVITATION_EXPIRED',
+      message: 'This invitation link has expired',
+    };
+  }
+  if (invitation.version.status !== 'launched') {
+    return {
+      ok: false,
+      status: 409,
+      code: 'VERSION_NOT_LAUNCHED',
+      message: 'This questionnaire is not currently open',
+    };
+  }
+
+  // Idempotent re-entry: a previously-booted, still-open session for this invitation.
+  const existing = await findResumableSessionByInvitation(invitation.id);
+  if (existing) return { ok: true, session: existing, resumed: true };
+
+  const from = narrowToEnum<AppInvitationStatus>(
+    invitation.status,
+    APP_INVITATION_STATUSES,
+    'sent'
+  );
+  const advance = isInvitationTransitionAllowed(from, 'started');
+
+  const session = await prisma.$transaction(async (tx) => {
+    const created = await tx.appQuestionnaireSession.create({
+      data: {
+        versionId: invitation.versionId,
+        respondentUserId: null,
+        invitationId: invitation.id,
+        isPreview: false,
+        status: 'active',
+      },
+      select: { id: true, status: true, versionId: true },
+    });
+    await recordSessionCreated(created.id, { tx });
+    if (advance) {
+      await tx.appQuestionnaireInvitation.update({
+        where: { id: invitation.id },
+        data: { status: 'started' },
+      });
+    }
     return created;
   });
 

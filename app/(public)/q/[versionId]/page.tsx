@@ -36,7 +36,7 @@ export default async function PublicQuestionnairePage({
   searchParams,
 }: {
   params: Promise<{ versionId: string }>;
-  searchParams: Promise<{ preview?: string }>;
+  searchParams: Promise<{ preview?: string; i?: string }>;
 }) {
   if (!(await isLiveSessionsEnabled())) notFound();
 
@@ -45,7 +45,11 @@ export default async function PublicQuestionnairePage({
   // which works on any launched version (anonymous or invitation-gated) and marks the run
   // `isPreview`. The route enforces admin auth — a non-admin who forges the param just gets
   // the boot's "couldn't start" error, no leak.
-  const preview = (await searchParams).preview === '1';
+  const sp = await searchParams;
+  const preview = sp.preview === '1';
+  // Frictionless invite link: `?i=<token>` boots a no-login session bound to that invitation
+  // (the boot POSTs `/from-invite`). Ignored in preview mode (admins use the preview boot).
+  const inviteToken = !preview && typeof sp.i === 'string' && sp.i.length > 0 ? sp.i : undefined;
   // Independent reads — resolve in parallel rather than serialising the DB round-trips. The
   // exit-href lookup runs only in preview mode (a real respondent never needs it). Voice and
   // attachments each need BOTH the platform flag (capability dark-launch) AND the version's
@@ -97,6 +101,7 @@ export default async function PublicQuestionnairePage({
           <AnonymousSessionBoot
             versionId={versionId}
             preview={preview}
+            inviteToken={inviteToken}
             voiceInputEnabled={voiceInputEnabled}
             attachmentInputEnabled={attachmentInputEnabled}
             anonymous={anonymous}

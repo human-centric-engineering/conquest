@@ -69,7 +69,7 @@ export async function transitionSession(
   return prisma.$transaction(async (tx) => {
     const row = await tx.appQuestionnaireSession.findUnique({
       where: { id: sessionId },
-      select: { status: true },
+      select: { status: true, invitationId: true },
     });
     if (!row) throw new NotFoundError('Session not found');
 
@@ -97,6 +97,15 @@ export async function transitionSession(
         ...(opts.metadata !== undefined ? { metadata: opts.metadata } : {}),
       },
     });
+    // Invitations: stamp the frictionless invite as completed when its bound session completes
+    // (status-only, invariant-safe — see invitations/linkage.ts). `updateMany` with a non-terminal
+    // guard keeps it idempotent and never resurrects a revoked invitation.
+    if (to === 'completed' && row.invitationId) {
+      await tx.appQuestionnaireInvitation.updateMany({
+        where: { id: row.invitationId, status: { notIn: ['completed', 'revoked'] } },
+        data: { status: 'completed' },
+      });
+    }
     return to;
   });
 }

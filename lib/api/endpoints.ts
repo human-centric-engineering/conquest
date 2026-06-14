@@ -478,6 +478,8 @@ export const API = {
       ROOT: '/api/v1/app/questionnaire-sessions',
       /** Create a no-login anonymous session (POST `{ versionId }` → `{ session, accessToken }`). */
       ANONYMOUS: '/api/v1/app/questionnaire-sessions/anonymous',
+      /** Create a no-login session from a per-invitee token (POST `{ inviteToken }` → `{ session, accessToken }`). */
+      FROM_INVITE: '/api/v1/app/questionnaire-sessions/from-invite',
       /** Admin "Preview as respondent" session (POST `{ versionId }` → `{ session, accessToken }`); bypasses the anonymous-mode gate, `isPreview`. */
       PREVIEW: '/api/v1/app/questionnaire-sessions/preview',
       /** Respondent turn — SSE stream (POST `{ message }`). */

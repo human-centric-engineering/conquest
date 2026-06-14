@@ -50,6 +50,12 @@ interface AnonymousSessionBootProps {
    */
   preview?: boolean;
   /**
+   * Frictionless invite token (`?i=`): when set, boot a no-login session bound to THIS invitation
+   * via `/from-invite` instead of the public `/anonymous` route. Stored under a token-namespaced key
+   * so a shared device never crosses two invitees' sessions.
+   */
+  inviteToken?: string;
+  /**
    * How the respondent completes the session (P-presentation). Forwarded to the workspace; the
    * form view itself fetches client-side here (no SSR seed — the token is client-only).
    */
@@ -118,13 +124,19 @@ async function fetchTranscript(
   }
 }
 
-function storageKey(versionId: string, preview: boolean): string {
+function storageKey(versionId: string, preview: boolean, inviteToken?: string): string {
+  // Invite sessions key on the token (truncated) — a shared device must not cross two invitees.
+  if (inviteToken) return `qn.invite.${inviteToken.slice(0, 16)}`;
   return `${preview ? 'qn.preview' : 'qn.anon'}.${versionId}`;
 }
 
-function readStored(versionId: string, preview: boolean): StoredAnonSession | null {
+function readStored(
+  versionId: string,
+  preview: boolean,
+  inviteToken?: string
+): StoredAnonSession | null {
   try {
-    const raw = window.sessionStorage.getItem(storageKey(versionId, preview));
+    const raw = window.sessionStorage.getItem(storageKey(versionId, preview, inviteToken));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<StoredAnonSession>;
     if (
@@ -148,6 +160,7 @@ export function AnonymousSessionBoot({
   attachmentInputEnabled = false,
   anonymous = false,
   preview = false,
+  inviteToken,
   presentationMode = 'chat',
 }: AnonymousSessionBootProps) {
   const [state, setState] = useState<BootState>({ phase: 'creating' });
@@ -169,19 +182,22 @@ export function AnonymousSessionBoot({
       let sessionId: string;
       let accessToken: string;
 
-      const existing = readStored(versionId, preview);
+      const existing = readStored(versionId, preview, inviteToken);
       if (existing) {
         sessionId = existing.sessionId;
         accessToken = existing.accessToken;
       } else {
         try {
-          const endpoint = preview
-            ? API.APP.QUESTIONNAIRE_SESSIONS.PREVIEW
-            : API.APP.QUESTIONNAIRE_SESSIONS.ANONYMOUS;
+          // Frictionless invite link → /from-invite ({ inviteToken }); else preview / public anon.
+          const endpoint = inviteToken
+            ? API.APP.QUESTIONNAIRE_SESSIONS.FROM_INVITE
+            : preview
+              ? API.APP.QUESTIONNAIRE_SESSIONS.PREVIEW
+              : API.APP.QUESTIONNAIRE_SESSIONS.ANONYMOUS;
           const res = await fetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ versionId }),
+            body: JSON.stringify(inviteToken ? { inviteToken } : { versionId }),
           });
           const body = (await res.json()) as AnonCreateResponse;
 
@@ -199,7 +215,10 @@ export function AnonymousSessionBoot({
             expiresAt: body.data.expiresAt,
           };
           try {
-            window.sessionStorage.setItem(storageKey(versionId, preview), JSON.stringify(stored));
+            window.sessionStorage.setItem(
+              storageKey(versionId, preview, inviteToken),
+              JSON.stringify(stored)
+            );
           } catch {
             // Storage unavailable (private mode) — the in-memory token still works for this load.
           }
@@ -231,7 +250,7 @@ export function AnonymousSessionBoot({
         autoStart: !resumed,
       });
     })();
-  }, [versionId, preview, welcomeCopy, voiceInputEnabled, anonymous]);
+  }, [versionId, preview, inviteToken, welcomeCopy, voiceInputEnabled, anonymous]);
 
   if (state.phase === 'creating') {
     return (
