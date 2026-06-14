@@ -67,14 +67,13 @@ export default async function EvaluationRunTab({ params }: PageProps) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex items-center gap-3">
         <Link
           href={`${workspaceVersionBase(id, vid)}/evaluations`}
           className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-sm"
         >
           <ChevronLeft className="h-4 w-4" /> Evaluations
         </Link>
-        <p className="text-muted-foreground text-sm">{new Date(run.createdAt).toLocaleString()}</p>
       </div>
 
       <EvaluationRunDetail
