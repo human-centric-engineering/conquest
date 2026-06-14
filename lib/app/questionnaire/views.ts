@@ -204,6 +204,22 @@ export interface EvaluationFindingView {
   applicable: FindingApplicability;
 }
 
+/**
+ * A drafted question carried from an `add_question` finding into the structure editor (F5.3, the
+ * "Open in editor" refine path). The structure page resolves it from the
+ * `?seedFinding=<runId>:<findingId>` deep-link and hands it to the seed composer, which pre-fills a
+ * highlighted new-question form. `sectionKey` is the suggested section title (or `null` → the admin
+ * picks); `runId`/`findingId` let the composer stamp the finding applied once the question is saved.
+ */
+export interface EvaluationSeed {
+  runId: string;
+  findingId: string;
+  prompt: string;
+  type: QuestionType;
+  guidelines: string | null;
+  sectionKey: string | null;
+}
+
 /** One row in the evaluation-runs list for a version (F5.2), newest-first. */
 export interface EvaluationRunListItem {
   id: string;

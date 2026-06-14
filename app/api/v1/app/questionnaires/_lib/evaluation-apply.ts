@@ -22,7 +22,12 @@ import { Prisma } from '@prisma/client';
 
 import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
-import { validateTypeConfig } from '@/lib/app/questionnaire/authoring';
+import {
+  defaultTypeConfig,
+  nextAvailableKey,
+  slugifyKey,
+  validateTypeConfig,
+} from '@/lib/app/questionnaire/authoring';
 import {
   coerceProposedEdit,
   parseAudienceShape,
@@ -142,15 +147,15 @@ export async function applyFinding(args: {
   const { finding, runId, scoped, snapshot, current, audit } = args;
   const op = resolveEffectiveOp(finding);
 
-  // 1. Prose-only, or an `add_question` draft → needs authoring (the UI deep-links the editor).
+  // 1. Prose-only → needs authoring (the UI deep-links the editor with the prose suggestion).
   if (!op)
     return { status: 'unapplicable', reason: 'needs_authoring', detail: 'No structured edit' };
+
+  // An `add_question` draft is created (not edited in place), so it has its own apply path: it
+  // resolves a *section* target rather than a slot, and derives a fresh key. The "Open in editor"
+  // deep-link routes to the same draft when the admin wants to refine the wording first.
   if (op.op === 'add_question') {
-    return {
-      status: 'unapplicable',
-      reason: 'needs_authoring',
-      detail: 'add_question is authored, not auto-applied',
-    };
+    return applyAddQuestion({ finding, op, runId, scoped, audit });
   }
 
   // 2. Apply-time staleness re-check (optimistic concurrency) — the read-time flag may be minutes old.
@@ -206,6 +211,161 @@ export async function applyFinding(args: {
   // 5. Execute the op + stamp the finding applied, in one transaction.
   await prisma.$transaction(async (tx) => {
     await writeOp(tx, op, { editVersionId, editSlotId });
+    await tx.appQuestionnaireEvaluationFinding.update({
+      where: { id: finding.id },
+      data: {
+        status: 'applied',
+        appliedAt: new Date(),
+        appliedToVersionId: editVersionId,
+        decidedByUserId: audit.userId,
+        decidedAt: new Date(),
+      },
+    });
+  });
+
+  logAdminAction({
+    userId: audit.userId,
+    action: 'questionnaire_evaluation_finding.apply',
+    entityType: 'questionnaire_evaluation_finding',
+    entityId: finding.id,
+    metadata: {
+      op: op.op,
+      targetKey: finding.targetKey,
+      appliedToVersionId: editVersionId,
+      forked,
+    },
+    clientIp: audit.clientIp ?? null,
+  });
+
+  return {
+    status: 'applied',
+    appliedToVersionId: editVersionId,
+    forked,
+    versionNumber: editVersionNumber,
+  };
+}
+
+/** The `section:` prefix a finding's `targetKey` uses to address a section by title. */
+const SECTION_PREFIX = 'section:';
+
+/** The section title an `add_question` targets, from the op's `sectionKey` or a `section:` target. */
+function resolveTargetSectionTitle(
+  op: Extract<ProposedEdit, { op: 'add_question' }>,
+  targetKey: string
+): string | null {
+  if (op.sectionKey) return op.sectionKey;
+  return targetKey.startsWith(SECTION_PREFIX) ? targetKey.slice(SECTION_PREFIX.length) : null;
+}
+
+/**
+ * Validate the section an `add_question` will land in, on a concrete version. A named title must
+ * resolve to exactly one section (gone → `target_gone`, ambiguous → `op_invalid`); an unnamed draft
+ * appends to the last section and only fails when the version has no sections at all (→ needs
+ * authoring: the admin must add a section first). Returns the blocking reason, or `null` when clear.
+ */
+async function validateSectionTarget(
+  versionId: string,
+  title: string | null
+): Promise<UnapplicableReason | null> {
+  if (title !== null) {
+    const matches = await prisma.appQuestionnaireSection.count({ where: { versionId, title } });
+    if (matches === 0) return 'target_gone';
+    if (matches > 1) return 'op_invalid';
+    return null;
+  }
+  const any = await prisma.appQuestionnaireSection.count({ where: { versionId } });
+  return any === 0 ? 'needs_authoring' : null;
+}
+
+/**
+ * Apply an `add_question` finding: create the drafted question on the (possibly forked) draft and
+ * stamp the finding applied. Unlike the in-place ops, the judge's draft carries no ids — the
+ * section is resolved by title (or the last section), the `key` is derived from the prompt, and the
+ * `typeConfig` falls back to the type's default when the judge's draft omitted/botched it (so a
+ * one-click add of a choice question lands with placeholder options the admin refines in the
+ * editor). Same fork-lineage convergence + validate-before-fork discipline as {@link applyFinding}.
+ */
+async function applyAddQuestion(args: {
+  finding: ApplyFindingRow;
+  op: Extract<ProposedEdit, { op: 'add_question' }>;
+  runId: string;
+  scoped: ScopedVersion;
+  audit: ApplyAuditContext;
+}): Promise<ApplyOutcome> {
+  const { finding, op, runId, scoped, audit } = args;
+
+  // Validate (and default) the drafted type config before any write — the question-route boundary.
+  let tc = validateTypeConfig(op.type, op.typeConfig);
+  if (!tc.ok) tc = validateTypeConfig(op.type, defaultTypeConfig(op.type));
+  if (!tc.ok) return { status: 'unapplicable', reason: 'op_invalid' };
+
+  const title = resolveTargetSectionTitle(op, finding.targetKey);
+
+  // Resolve the editable version: reuse this run's existing review draft, else fork-if-launched.
+  // Validate the section target on the pre-fork version first, so a doomed add never strands a draft.
+  const reuseDraft = await findRunReviewDraft(runId, scoped.questionnaireId);
+  const reason = await validateSectionTarget(reuseDraft?.id ?? scoped.id, title);
+  if (reason) return { status: 'unapplicable', reason };
+
+  let editVersionId: string;
+  let forked: boolean;
+  let editVersionNumber: number;
+  if (reuseDraft) {
+    editVersionId = reuseDraft.id;
+    forked = false;
+    editVersionNumber = reuseDraft.versionNumber;
+  } else {
+    const fork = await forkVersionIfLaunched(scoped, {
+      userId: audit.userId,
+      clientIp: audit.clientIp,
+    });
+    editVersionId = fork.versionId;
+    forked = fork.forked;
+    editVersionNumber = fork.versionNumber;
+  }
+
+  // Resolve the concrete section on the editable version (by title — fork-stable — or the last one).
+  const section = title
+    ? await prisma.appQuestionnaireSection.findFirst({
+        where: { versionId: editVersionId, title },
+        select: { id: true },
+      })
+    : await prisma.appQuestionnaireSection.findFirst({
+        where: { versionId: editVersionId },
+        orderBy: { ordinal: 'desc' },
+        select: { id: true },
+      });
+  if (!section) return { status: 'unapplicable', reason: 'target_gone' };
+
+  // Prefer the judge's concise `key` (slugified so "Work morale" → `work_morale`); fall back to the
+  // prompt. Either way it's collision-suffixed against the version's keys — a suggestion, never an
+  // admin-chosen explicit key, so we disambiguate rather than 409 on clash.
+  const existingKeys = await prisma.appQuestionSlot.findMany({
+    where: { versionId: editVersionId },
+    select: { key: true },
+  });
+  const key = nextAvailableKey(
+    slugifyKey(op.key ?? op.prompt),
+    new Set(existingKeys.map((e) => e.key))
+  );
+  const ordinal = await prisma.appQuestionSlot.count({ where: { sectionId: section.id } });
+  const typeConfigData = tc.value == null ? Prisma.JsonNull : jsonInput(tc.value);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.appQuestionSlot.create({
+      data: {
+        versionId: editVersionId,
+        sectionId: section.id,
+        ordinal,
+        key,
+        prompt: op.prompt,
+        type: op.type,
+        required: false,
+        weight: 0.5,
+        typeConfig: typeConfigData,
+        ...(op.guidelines != null ? { guidelines: op.guidelines } : {}),
+      },
+    });
     await tx.appQuestionnaireEvaluationFinding.update({
       where: { id: finding.id },
       data: {

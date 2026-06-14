@@ -38,8 +38,16 @@ vi.mock('next/navigation', () => ({
 const flagMock = vi.hoisted(() => ({
   isQuestionnairesEnabled: vi.fn(),
   isDesignEvaluationEnabled: vi.fn(),
+  isDataSlotsEnabled: vi.fn(),
 }));
 vi.mock('@/lib/app/questionnaire/feature-flag', () => flagMock);
+
+// ─── workspace-data mock (data-slot count drives the "slot the new question" affordance) ──────
+
+const workspaceDataMock = vi.hoisted(() => ({
+  getVersionDataSlotCountCached: vi.fn(),
+}));
+vi.mock('@/lib/app/questionnaire/workspace-data', () => workspaceDataMock);
 
 // ─── workspace-nav mock ───────────────────────────────────────────────────────
 
@@ -126,6 +134,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   flagMock.isQuestionnairesEnabled.mockResolvedValue(true);
   flagMock.isDesignEvaluationEnabled.mockResolvedValue(true);
+  flagMock.isDataSlotsEnabled.mockResolvedValue(false);
+  workspaceDataMock.getVersionDataSlotCountCached.mockResolvedValue(0);
   apiMock.serverFetch.mockResolvedValue({ ok: true });
   apiMock.parseApiResponse.mockResolvedValue({ success: true, data: makeRun() });
 });

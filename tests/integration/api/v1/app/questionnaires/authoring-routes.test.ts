@@ -431,10 +431,10 @@ describe('question create', () => {
     expect(prismaMock.appQuestionSlot.create).not.toHaveBeenCalled();
   });
 
-  it('derives a key from the prompt and creates the question (201)', async () => {
+  it('derives a concise key from the prompt and creates the question (201)', async () => {
     prismaMock.appQuestionSlot.create.mockResolvedValue({
       id: 'q-1',
-      key: 'do_you_smoke',
+      key: 'smoke',
       sectionId: 'sec-1',
     });
 
@@ -444,7 +444,8 @@ describe('question create', () => {
     );
     expect(res.status).toBe(201);
     const data = prismaMock.appQuestionSlot.create.mock.calls[0][0].data;
-    expect(data.key).toBe('do_you_smoke');
+    // slugifyKey drops grammatical stopwords ("do", "you") → the meaningful word only.
+    expect(data.key).toBe('smoke');
     expect(logAdminAction).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'questionnaire_question.create' })
     );

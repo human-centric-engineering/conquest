@@ -192,7 +192,7 @@ the F5.1 findings contract: alongside the prose `proposedChange`, a judge may at
 | `reorder`         | slot `key`        | ordering               | move to a 0-based ordinal (± section)         |
 | `edit_goal`       | `goal`            | goal_match             | replace the version goal                      |
 | `edit_audience`   | `audience`        | audience_match         | merge-patch the named audience sub-fields     |
-| `add_question`    | `goal`/`section:` | coverage               | **draft only** — opens a pre-filled editor    |
+| `add_question`    | `goal`/`section:` | coverage               | create the drafted question (or refine first) |
 
 The op is an **accelerator, never a trust boundary**: it is prompt-guided, _not_
 provider-enforced (the JSON schema is never sent to the model — `runStructuredCompletion` is plain
@@ -208,17 +208,50 @@ prompt + Zod parse). So it is optional (a nuanced finding stays prose-only), sof
 provenance stamps) rather than the HTTP handlers — the load-bearing validation is shared; only the
 `targetKey`→entity resolution is apply-specific. The order matters:
 
-1. prose-only / `add_question` → `needs_authoring` (the UI deep-links the editor — these are never blind-applied).
-2. **Apply-time staleness re-check** (optimistic concurrency) — reject if the structure drifted.
-3. Resolve the editable version: if a prior apply from this run already forked (or edited) a live
+1. prose-only (no op) → `needs_authoring` (the UI deep-links the editor — there's nothing to
+   blind-apply).
+2. `add_question` → `applyAddQuestion` (see below) — it creates a slot rather than editing one, so
+   it has its own path.
+3. **Apply-time staleness re-check** (optimistic concurrency) — reject if the structure drifted.
+4. Resolve the editable version: if a prior apply from this run already forked (or edited) a live
    draft, **reuse it** — repeated applies converge on one draft instead of re-forking the launched
    original each time (the fork-lineage rule). Otherwise validate the op against the original
    _before_ forking (no orphan drafts), then `forkVersionIfLaunched`.
-4. Retarget the slot on the editable version (keys copy 1:1 across a fork), execute the op + stamp
+5. Retarget the slot on the editable version (keys copy 1:1 across a fork), execute the op + stamp
    the finding `applied` (`appliedAt`, `appliedToVersionId`) in one transaction.
+
+**`add_question` apply (`applyAddQuestion`)** — unlike the in-place ops the judge's draft carries no
+ids, so the path is: validate (and default) the drafted `typeConfig` — a choice/scale type the judge
+left bare falls back to `defaultTypeConfig`, landing placeholder options the admin refines after;
+resolve the target **section by title** (`op.sectionKey`, else the finding's `section:<title>`, else
+the last section — fork-stable, so it survives a fork), failing `target_gone`/`op_invalid` for a
+gone/ambiguous title and `needs_authoring` only when the version has no sections at all; derive the
+`key` from the judge's optional concise `key` (slugified) falling back to the prompt, collision-
+suffixed against the version's keys; then create the slot + stamp the finding applied in one
+transaction. Same fork-lineage convergence as the in-place ops.
+
+The judge is prompted to attach a concise `snake_case` `key` and to pick a `type` that fits the
+answer (free_text for open-ended, likert only for fixed scales, etc.) rather than defaulting to
+likert. Independently, the shared key deriver (`slugifyKey`) now drops grammatical stopwords and
+keeps the first few content words, so **every** key path — extraction, hand-authoring, data slots,
+this apply — yields concise keys (`describe_current_morale_work`, not the whole sentence) instead of
+a slugified sentence.
 
 An unapplicable apply returns **409** with a reason the UI acts on: `stale` (re-run),
 `target_gone` (deleted), `op_invalid` (e.g. incompatible type config), `needs_authoring`.
+
+### "Open in editor" — the refine path
+
+The one-click apply lands the drafted question as-is; when the wording (or a choice list) needs work
+first, the card's secondary **"Open in editor"** deep-links the structure editor with
+`?edit=1&seedFinding=<runId>:<findingId>`. The structure page resolves that ref
+(`getEvaluationAddQuestionSeed`, gated on the design-eval flag) into an `EvaluationSeed` and renders
+a highlighted, pre-filled `EvaluationSeedComposer` at the top of the editor. The admin tweaks
+prompt/type/section/guidelines and clicks "Add to questionnaire": the question is created through the
+ordinary authoring route (forking a launched version like any edit), then the finding is stamped via
+`PATCH … { action: 'mark_applied', appliedToVersionId }` — a review action that records the terminal
+state + the (possibly forked) draft it landed in **without** mutating structure itself (the editor
+already did the authoring). The editor then navigates to that draft with the seed cleared.
 
 ### Staleness — derived, never stored
 
@@ -237,12 +270,20 @@ structure mutates under the findings.
   `editedOverride`, `decidedByUserId`, `decidedAt`, `appliedAt`, `appliedToVersionId`; and
   `AppQuestionnaireEvaluationRun.structureSnapshot`. The detail GET is now staleness-aware (no new
   read endpoint).
-- `PATCH …/evaluations/:runId/findings/:findingId` — accept / decline / edit (sub-flag gated;
-  `applied` is terminal → 409). `POST …/findings/:findingId/apply` — apply (sub-flag gated +
-  `evaluationApplyLimiter` 60/min; may fork). Accept is triage, **not** apply — kept distinct so an
-  admin can agree across a run, then apply against one consistent fork lineage.
-- The run-detail admin component became the interactive queue: per-finding accept/decline/edit/apply
-  gated on the derived `applicable` (`apply` | `deep-link` | `manual`) and `stale`, a typed
-  edit-override mini-form (text ops + type + ordinal), a status filter, and a fork banner pointing at
+- `PATCH …/evaluations/:runId/findings/:findingId` — accept / decline / edit / `mark_applied`
+  (sub-flag gated; `applied` is terminal → 409). `mark_applied` validates `appliedToVersionId`
+  belongs to this questionnaire and records the terminal state for the editor refine path — it does
+  **not** mutate structure. `POST …/findings/:findingId/apply` — apply (sub-flag gated +
+  `evaluationApplyLimiter` 60/min; may fork; handles `add_question` too). Accept is triage, **not**
+  apply — kept distinct so an admin can agree across a run, then apply against one consistent fork
+  lineage.
+- The run-detail admin component is the interactive queue. Each card leads with the **primary
+  work-action** sized by the effective op — **"Add to questionnaire"** for an `add_question`
+  (one-click apply) plus a secondary **"Open in editor"** (the seeded refine deep-link); **"Apply"**
+  (with an inline edit-override mini-form for text ops + type + ordinal) for other structured ops;
+  **"Open in editor"** for prose-only — with **Accept / Dismiss** kept as quiet secondary triage so
+  the work-action is never mistaken for "do it". Plus a status filter and a fork banner pointing at
   the new draft when an apply forks a launched version. Reads stay master-flag; apply buttons gate on
   the sub-flag (`canApply`).
+- `EvaluationSeedComposer` (`components/admin/questionnaires/`) renders the pre-filled new-question
+  form for the "Open in editor" deep-link; the structure page resolves the seed and forces edit mode.

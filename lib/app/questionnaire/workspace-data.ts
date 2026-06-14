@@ -28,7 +28,12 @@ import {
   APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG,
 } from '@/lib/app/questionnaire/constants';
 import type { DataSlotView } from '@/lib/app/questionnaire/data-slots';
-import type { QuestionnaireDetail, VersionGraphView } from '@/lib/app/questionnaire/views';
+import type {
+  EvaluationRunDetail,
+  EvaluationSeed,
+  QuestionnaireDetail,
+  VersionGraphView,
+} from '@/lib/app/questionnaire/views';
 
 /**
  * Questionnaire detail (title, status, versions list). `cache()`-wrapped so the
@@ -86,6 +91,58 @@ export const getVersionDataSlotCountCached = cache(
     }
   }
 );
+
+/**
+ * Resolve the editor seed for an `add_question` finding deep-link (F5.3 "Open in editor").
+ *
+ * The structure page receives `?seedFinding=<runId>:<findingId>` from the review queue. This loads
+ * the run detail (HTTP, admin-scoped), finds the finding, and — only when its effective op is a
+ * still-actionable `add_question` draft — returns the {@link EvaluationSeed} the composer pre-fills.
+ * Returns `null` on any miss (bad ref, finding gone, not an add_question, already terminal), so the
+ * editor just opens normally. The caller gates on the design-eval flag before calling.
+ */
+export async function getEvaluationAddQuestionSeed(
+  id: string,
+  versionId: string,
+  ref: string
+): Promise<EvaluationSeed | null> {
+  const sep = ref.indexOf(':');
+  if (sep <= 0) return null;
+  const runId = ref.slice(0, sep);
+  const findingId = ref.slice(sep + 1);
+  if (!runId || !findingId) return null;
+
+  try {
+    const res = await serverFetch(
+      API.APP.QUESTIONNAIRES.versionEvaluationById(id, versionId, runId)
+    );
+    if (!res.ok) return null;
+    const body = await parseApiResponse<EvaluationRunDetail>(res);
+    if (!body.success) return null;
+
+    const finding = body.data.findings.find((f) => f.id === findingId);
+    if (!finding || finding.status === 'applied' || finding.status === 'declined') return null;
+
+    const op = finding.editedOverride ?? finding.proposedEdit;
+    if (!op || op.op !== 'add_question') return null;
+
+    return {
+      runId,
+      findingId,
+      prompt: op.prompt,
+      type: op.type,
+      guidelines: op.guidelines ?? null,
+      sectionKey:
+        op.sectionKey ??
+        (finding.targetKey.startsWith('section:')
+          ? finding.targetKey.slice('section:'.length)
+          : null),
+    };
+  } catch (err) {
+    logger.error('workspace: evaluation seed fetch failed', err);
+    return null;
+  }
+}
 
 /** Resolved feature-flag state for the workspace. Sub-flags are already ANDed
  *  with the master flag, so a caller can read them directly. */

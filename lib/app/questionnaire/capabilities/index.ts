@@ -61,3 +61,9 @@ export {
   type RefineDataSlotArgs,
   type RefineDataSlotData,
 } from '@/lib/app/questionnaire/capabilities/refine-data-slot';
+
+export {
+  AppAssignDataSlotsCapability,
+  type AssignDataSlotsArgs,
+  type AssignDataSlotsData,
+} from '@/lib/app/questionnaire/capabilities/assign-data-slots';

@@ -12,7 +12,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const prismaMock = vi.hoisted(() => ({
   appQuestionnaireEvaluationFinding: { findFirst: vi.fn(), update: vi.fn() },
   appQuestionnaireVersion: { findFirst: vi.fn(), update: vi.fn(), findUniqueOrThrow: vi.fn() },
-  appQuestionSlot: { findFirst: vi.fn(), update: vi.fn(), delete: vi.fn() },
+  appQuestionSlot: {
+    findFirst: vi.fn(),
+    findMany: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
+    create: vi.fn(),
+    count: vi.fn(),
+  },
   appQuestionnaireSection: { count: vi.fn(), findFirst: vi.fn() },
   $transaction: vi.fn(),
 }));
@@ -88,7 +95,9 @@ describe('applyFinding — early returns', () => {
     });
   });
 
-  it('is needs_authoring for an add_question draft', async () => {
+  it('is needs_authoring for an add_question when the version has no sections to add into', async () => {
+    // No sectionKey + a slot-keyed targetKey → no named section; an empty version can't host it.
+    prismaMock.appQuestionnaireSection.count.mockResolvedValue(0);
     const res = await applyFinding({
       finding: finding({ proposedEdit: { op: 'add_question', prompt: 'New?', type: 'free_text' } }),
       runId: 'run-1',
@@ -315,6 +324,152 @@ describe('applyFinding — each op writes the right thing', () => {
         data: expect.objectContaining({ audience: expect.objectContaining({ role: 'manager' }) }),
       })
     );
+  });
+});
+
+describe('applyFinding — add_question', () => {
+  beforeEach(() => {
+    // A section to host the new question, no existing slots in it (key derivation + ordinal).
+    prismaMock.appQuestionnaireSection.count.mockResolvedValue(1);
+    prismaMock.appQuestionnaireSection.findFirst.mockResolvedValue({ id: 'sec-1' });
+    prismaMock.appQuestionSlot.findMany.mockResolvedValue([]);
+    prismaMock.appQuestionSlot.count.mockResolvedValue(0);
+  });
+
+  it('creates the drafted question in the named section and marks the finding applied', async () => {
+    const res = await applyFinding({
+      finding: finding({
+        targetKey: 'section:Background',
+        proposedEdit: {
+          op: 'add_question',
+          prompt: 'How big is your team?',
+          type: 'free_text',
+          sectionKey: 'Background',
+        },
+      }),
+      runId: 'run-1',
+      scoped,
+      snapshot: structure(),
+      current: structure(),
+      audit,
+    });
+
+    expect(res.status).toBe('applied');
+    expect(prismaMock.appQuestionSlot.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          prompt: 'How big is your team?',
+          type: 'free_text',
+          sectionId: 'sec-1',
+          versionId: 'v1',
+        }),
+      })
+    );
+    expect(prismaMock.appQuestionnaireEvaluationFinding.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'find-1' },
+        data: expect.objectContaining({ status: 'applied', appliedToVersionId: 'v1' }),
+      })
+    );
+  });
+
+  it('honors the judge-proposed key (slugified + collision-suffixed)', async () => {
+    prismaMock.appQuestionSlot.findMany.mockResolvedValue([{ key: 'work_morale' }]);
+    await applyFinding({
+      finding: finding({
+        targetKey: 'section:Background',
+        proposedEdit: {
+          op: 'add_question',
+          prompt: 'How would you describe your current morale at work?',
+          type: 'free_text',
+          key: 'Work Morale',
+          sectionKey: 'Background',
+        },
+      }),
+      runId: 'run-1',
+      scoped,
+      snapshot: structure(),
+      current: structure(),
+      audit,
+    });
+    // 'Work Morale' → slug 'work_morale', already taken → '_2'; never the whole-prompt slug.
+    expect(prismaMock.appQuestionSlot.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ key: 'work_morale_2' }) })
+    );
+  });
+
+  it('defaults the typeConfig for a choice type the judge drafted without options', async () => {
+    const res = await applyFinding({
+      finding: finding({
+        targetKey: 'section:Background',
+        proposedEdit: {
+          op: 'add_question',
+          prompt: 'Pick one',
+          type: 'single_choice',
+          sectionKey: 'Background',
+        },
+      }),
+      runId: 'run-1',
+      scoped,
+      snapshot: structure(),
+      current: structure(),
+      audit,
+    });
+
+    expect(res.status).toBe('applied');
+    expect(prismaMock.appQuestionSlot.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          type: 'single_choice',
+          typeConfig: expect.objectContaining({ choices: expect.any(Array) }),
+        }),
+      })
+    );
+  });
+
+  it('is target_gone when the named section no longer resolves', async () => {
+    prismaMock.appQuestionnaireSection.count.mockResolvedValue(0);
+    const res = await applyFinding({
+      finding: finding({
+        targetKey: 'section:Gone',
+        proposedEdit: {
+          op: 'add_question',
+          prompt: 'x',
+          type: 'free_text',
+          sectionKey: 'Gone',
+        },
+      }),
+      runId: 'run-1',
+      scoped,
+      snapshot: structure(),
+      current: structure(),
+      audit,
+    });
+    expect(res.status).toBe('unapplicable');
+    if (res.status === 'unapplicable') expect(res.reason).toBe('target_gone');
+    expect(prismaMock.appQuestionSlot.create).not.toHaveBeenCalled();
+  });
+
+  it('is op_invalid when the named section title is ambiguous', async () => {
+    prismaMock.appQuestionnaireSection.count.mockResolvedValue(2);
+    const res = await applyFinding({
+      finding: finding({
+        targetKey: 'section:Dup',
+        proposedEdit: {
+          op: 'add_question',
+          prompt: 'x',
+          type: 'free_text',
+          sectionKey: 'Dup',
+        },
+      }),
+      runId: 'run-1',
+      scoped,
+      snapshot: structure(),
+      current: structure(),
+      audit,
+    });
+    expect(res.status).toBe('unapplicable');
+    if (res.status === 'unapplicable') expect(res.reason).toBe('op_invalid');
   });
 });
 

@@ -116,6 +116,8 @@ export type ProposedEdit =
       op: 'add_question';
       prompt: string;
       type: QuestionType;
+      /** A concise `snake_case` key the judge proposes; slugified + collision-suffixed at apply. */
+      key?: string;
       sectionKey?: string;
       guidelines?: string;
       typeConfig?: unknown;

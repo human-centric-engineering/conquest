@@ -38,11 +38,19 @@ interface Props {
   questionnaireId: string;
   versionId: string;
   canApply: boolean;
+  /** Whether the version has data slots — drives the "slot the new question" checkbox on add_question. */
+  dataSlotsAvailable?: boolean;
 }
 
 const STATUS_FILTERS: ('all' | FindingReviewStatus)[] = ['all', ...FINDING_REVIEW_STATUSES];
 
-export function EvaluationRunDetail({ run, questionnaireId, versionId, canApply }: Props) {
+export function EvaluationRunDetail({
+  run,
+  questionnaireId,
+  versionId,
+  canApply,
+  dataSlotsAvailable = false,
+}: Props) {
   const badge = runStatusBadge(run.status);
   const [findings, setFindings] = useState<EvaluationFindingView[]>(run.findings);
   const [fork, setFork] = useState<ForkNotice | null>(null);
@@ -147,6 +155,7 @@ export function EvaluationRunDetail({ run, questionnaireId, versionId, canApply 
                   versionId={versionId}
                   runId={run.id}
                   canApply={canApply}
+                  dataSlotsAvailable={dataSlotsAvailable}
                   onUpdate={handleUpdate}
                 />
               ))}

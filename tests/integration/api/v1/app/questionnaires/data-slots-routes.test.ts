@@ -82,6 +82,9 @@ const rateLimitMock = vi.hoisted(() => ({
   dataSlotsRefineLimiter: {
     check: vi.fn(() => ({ success: true, limit: 60, remaining: 59, reset: 0 })),
   },
+  dataSlotsAssignLimiter: {
+    check: vi.fn(() => ({ success: true, limit: 20, remaining: 19, reset: 0 })),
+  },
 }));
 vi.mock('@/app/api/v1/app/questionnaires/_lib/rate-limit', () => rateLimitMock);
 
@@ -90,6 +93,7 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/rate-limit', () => rateLimitMock);
 import { GET, PUT } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/data-slots/route';
 import { POST } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/data-slots/generate/route';
 import { POST as POST_REFINE } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/data-slots/refine/route';
+import { POST as POST_ASSIGN } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/data-slots/assign/route';
 
 import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
@@ -264,6 +268,12 @@ beforeEach(() => {
     success: true,
     limit: 60,
     remaining: 59,
+    reset: 0,
+  });
+  rateLimitMock.dataSlotsAssignLimiter.check.mockReturnValue({
+    success: true,
+    limit: 20,
+    remaining: 19,
     reset: 0,
   });
 });
@@ -994,5 +1004,122 @@ describe('POST …/data-slots/refine — fail-soft dispatch', () => {
     expect(body.data.slot).toBeNull();
     expect(body.data.diagnostic).toBe('provider_unavailable');
     expect(body.data.diagnosticMessage).toBe('provider offline');
+  });
+});
+
+// ─── POST …/data-slots/assign ──────────────────────────────────────────────────
+
+/** A dispatch payload placing the orphan 'role' into the existing 'personal_info' slot. */
+function assignDispatchSuccess() {
+  return {
+    success: true,
+    data: {
+      placements: [{ questionKey: 'role', target: { kind: 'existing', slotKey: 'personal_info' } }],
+    },
+  };
+}
+
+describe('POST …/data-slots/assign — happy path', () => {
+  beforeEach(() => {
+    dispatchMock.capabilityDispatcher.dispatch.mockResolvedValue(assignDispatchSuccess());
+  });
+
+  it('assigns the orphaned question and writes the merged set live', async () => {
+    const res = await POST_ASSIGN(jsonReq({}), ctx(PARAMS));
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    expect(body.data.assigned).toBe(1);
+
+    // The deterministic merge ran (real) and the result was persisted via replaceDataSlots, with the
+    // orphan 'role' folded into the existing 'personal_info' slot's question keys.
+    expect(replaceDataSlots).toHaveBeenCalledTimes(1);
+    const [, merged] = (replaceDataSlots as Mock).mock.calls[0];
+    const personal = merged.find((s: { name: string }) => s.name === 'Personal Info');
+    expect(personal.questionKeys).toContain('role');
+
+    expect(logAdminAction).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'questionnaire_data_slots.assign' })
+    );
+  });
+
+  it('restricts to the requested question keys', async () => {
+    await POST_ASSIGN(jsonReq({ questionKeys: ['role'] }), ctx(PARAMS));
+    const [, args] = dispatchMock.capabilityDispatcher.dispatch.mock.calls[0];
+    expect(args.orphanQuestionKeys).toEqual(['role']);
+  });
+});
+
+describe('POST …/data-slots/assign — nothing to do', () => {
+  it('returns assigned:0 without dispatching when no questions are orphaned', async () => {
+    // Every question is already covered by an existing slot.
+    (buildDataSlotStructure as Mock).mockResolvedValue({
+      goal: 'g',
+      questions: [
+        { key: 'full_name', prompt: 'Name?', type: 'free_text', sectionTitle: 'Background' },
+      ],
+    });
+
+    const res = await POST_ASSIGN(jsonReq({}), ctx(PARAMS));
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data.assigned).toBe(0);
+    expect(dispatchMock.capabilityDispatcher.dispatch).not.toHaveBeenCalled();
+    expect(replaceDataSlots).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST …/data-slots/assign — fork + fail-soft + rate limit', () => {
+  it('forks a launched version and assigns on the new draft', async () => {
+    (loadScopedVersion as Mock).mockResolvedValue(scopedVersion('launched'));
+    (forkVersionIfLaunched as Mock).mockResolvedValue(forkResult());
+    dispatchMock.capabilityDispatcher.dispatch.mockResolvedValue(assignDispatchSuccess());
+
+    const res = await POST_ASSIGN(jsonReq({}), ctx(PARAMS));
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.meta.forked).toBe(true);
+    expect(body.meta.versionId).toBe('ver-2');
+  });
+
+  it('returns 200 with a diagnostic and writes nothing when the assigner fails', async () => {
+    dispatchMock.capabilityDispatcher.dispatch.mockResolvedValue({
+      success: false,
+      error: { code: 'provider_unavailable', message: 'provider offline' },
+    });
+
+    const res = await POST_ASSIGN(jsonReq({}), ctx(PARAMS));
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data.assigned).toBe(0);
+    expect(body.data.diagnostic).toBe('provider_unavailable');
+    expect(replaceDataSlots).not.toHaveBeenCalled();
+  });
+
+  it('returns 429 when the per-admin assign rate limit is exceeded', async () => {
+    rateLimitMock.dataSlotsAssignLimiter.check.mockReturnValue({
+      success: false,
+      limit: 20,
+      remaining: 0,
+      reset: Date.now() + 1000,
+    });
+
+    const res = await POST_ASSIGN(jsonReq({}), ctx(PARAMS));
+
+    expect(res.status).toBe(429);
+  });
+
+  it('returns 404 when the data-slots sub-flag is off', async () => {
+    vi.mocked(isFeatureEnabled).mockImplementation((flag) =>
+      Promise.resolve(flag === APP_QUESTIONNAIRES_FLAG)
+    );
+
+    const res = await POST_ASSIGN(jsonReq({}), ctx(PARAMS));
+
+    expect(res.status).toBe(404);
   });
 });

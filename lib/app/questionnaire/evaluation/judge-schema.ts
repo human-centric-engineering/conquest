@@ -35,6 +35,8 @@ const RATIONALE_MAX = 2_000;
 const SOURCE_QUOTE_MAX = 2_000;
 /** Caps on the structured-edit text fields, mirroring the prose caps above. */
 const EDIT_TEXT_MAX = 2_000;
+/** Cap on a judge-proposed slot `key` — slugified + collision-suffixed at apply, so generous. */
+const KEY_MAX = 80;
 
 /**
  * The structured `proposedEdit` contract (F5.3) — a discriminated union on `op` mirroring
@@ -67,6 +69,7 @@ export const proposedEditSchema = z.discriminatedUnion('op', [
     op: z.literal('add_question'),
     prompt: z.string().min(1).max(EDIT_TEXT_MAX),
     type: z.enum(QUESTION_TYPES),
+    key: z.string().min(1).max(KEY_MAX).optional(),
     sectionKey: z.string().min(1).max(TARGET_KEY_MAX).optional(),
     guidelines: z.string().min(1).max(EDIT_TEXT_MAX).optional(),
     typeConfig: z.unknown().optional(),

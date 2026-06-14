@@ -16,15 +16,19 @@
 import { describe, it, expect } from 'vitest';
 
 import {
+  buildDataSlotAssignmentPrompt,
+  buildDataSlotAssignmentRetryMessage,
   buildDataSlotGenerationPrompt,
   buildDataSlotMergePrompt,
   buildDataSlotRefinementPrompt,
   buildDataSlotRefinementRetryMessage,
   buildDataSlotRetryMessage,
+  validateDataSlotAssignment,
   validateDataSlotGeneration,
   validateDataSlotRefinement,
 } from '@/lib/app/questionnaire/data-slots/generation';
 import type {
+  AssignExistingSlot,
   DataSlotStructureInput,
   RefineInputSlot,
 } from '@/lib/app/questionnaire/data-slots/schemas';
@@ -524,5 +528,73 @@ describe('validateDataSlotRefinement', () => {
     expect(validateDataSlotRefinement({}).ok).toBe(false);
     expect(validateDataSlotRefinement(null).ok).toBe(false);
     expect(validateDataSlotRefinement({ slots: [validSlot] }).ok).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildDataSlotAssignmentPrompt + validateDataSlotAssignment
+// ---------------------------------------------------------------------------
+
+describe('buildDataSlotAssignmentPrompt', () => {
+  const existingSlots: AssignExistingSlot[] = [
+    {
+      key: 'onboarding_ease',
+      name: 'Onboarding ease',
+      theme: 'Setup',
+      description: 'How smoothly the user got started.',
+      questionKeys: ['q1'],
+    },
+  ];
+
+  it('returns system + user messages carrying the existing slots and the orphan questions', () => {
+    const messages = buildDataSlotAssignmentPrompt(fullStructure, existingSlots, ['q2']);
+    expect(messages).toHaveLength(2);
+    const sys = systemContent(messages);
+    const user = userContent(messages);
+    // Steers away from snake_case names.
+    expect(sys).toMatch(/not a snake_case key|NOT a snake_case/i);
+    expect(user).toContain('Onboarding ease'); // existing slot name
+    expect(user).toContain('onboarding_ease'); // existing slot key
+    expect(user).toContain('What would you improve?'); // the orphan's prompt (q2)
+  });
+
+  it('notes when an orphan key is not present in the structure', () => {
+    const user = userContent(
+      buildDataSlotAssignmentPrompt(fullStructure, existingSlots, ['ghost'])
+    );
+    expect(user).toContain('question not found');
+  });
+
+  it('builds a retry nudge naming the placements shape', () => {
+    expect(buildDataSlotAssignmentRetryMessage()).toContain('placements');
+  });
+});
+
+describe('validateDataSlotAssignment', () => {
+  it('accepts existing- and new-target placements', () => {
+    const ok = validateDataSlotAssignment({
+      placements: [
+        { questionKey: 'q2', target: { kind: 'existing', slotKey: 'onboarding_ease' } },
+        {
+          questionKey: 'q3',
+          target: {
+            kind: 'new',
+            name: 'Recommendation',
+            description: 'Would they recommend us.',
+            theme: 'Advocacy',
+          },
+        },
+      ],
+    });
+    expect(ok.ok).toBe(true);
+  });
+
+  it('rejects an unknown target kind and non-object input', () => {
+    expect(
+      validateDataSlotAssignment({ placements: [{ questionKey: 'q', target: { kind: 'bogus' } }] })
+        .ok
+    ).toBe(false);
+    expect(validateDataSlotAssignment(null).ok).toBe(false);
+    expect(validateDataSlotAssignment({ slots: [] }).ok).toBe(false);
   });
 });

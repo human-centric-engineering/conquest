@@ -78,6 +78,20 @@ below for the draft lifecycle (generate persists it, save promotes + clears it, 
    It's a thin compute endpoint — **persists nothing**; the result splices into the working set in
    place (like a manual edit) and commits with the next Save. Fail-soft: a refiner failure returns
    `slot: null` + a diagnostic, not a 5xx. Per-admin sub-cap `dataSlotsRefineLimiter` (60/min).
+   3b. **Assign orphaned questions** — a question added _after_ the slots were generated (a hand-add,
+   a re-ingest, or a design-evaluation `add_question` suggestion) is covered by no slot. `POST
+…/versions/:vid/data-slots/assign` (body `{ questionKeys? }`, default = all orphans) dispatches
+   `app_assign_data_slots` (the same generator agent, `reasoning` tier): for each orphan it decides
+   an EXISTING slot (by `key`) or a NEW one, returning **placements only** — the route's
+   deterministic `mergeAssignments` does the writing, so existing slots are preserved verbatim and
+   only gain keys (a `new` name that matches an existing slot folds in; an orphan the model misses
+   gets a prompt-derived fallback slot — never left behind). Unlike refine, this **writes live**
+   (`replaceDataSlots`, fork-if-launched) — it's the automated "slot it" action. Fail-soft (returns
+   unchanged slots + a diagnostic). Per-admin sub-cap `dataSlotsAssignLimiter` (20/min). Surfaced
+   three ways: a pre-ticked **"Add to a data slot (create one if needed)"** checkbox on the two
+   add-a-question paths (the design-evaluation finding card's one-click "Add to questionnaire" and
+   the structure editor's seed composer — both shown only when the version already has slots), and a
+   catch-all **"Assign … with AI"** button on this review surface's unslotted-questions banner.
 4. **Launch gate:** when the flag is on, "Data slots generated" is a launch-checklist item
    (client `LaunchChecklist` + server `assertLaunchable`), counting only **saved** `AppDataSlot`
    rows — a pending draft does not satisfy the gate — so every launched questionnaire runs in
@@ -175,13 +189,13 @@ message doesn't bear on is simply **omitted**, and the panel shows "Not covered 
 
 ## Key files
 
-| Concern                          | Path                                                                                                                                                                                                    |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Models                           | `prisma/schema/app-questionnaire.prisma` (`AppDataSlot`, `AppDataSlotQuestion`, `AppDataSlotFill.provisional`, `AppQuestionnaireTurn.targetedDataSlotId`, `AppQuestionnaireConfig.maxDataSlotAttempts`) |
-| Domain (pure)                    | `lib/app/questionnaire/data-slots/**` (views, schemas, generation prompt)                                                                                                                               |
-| Generator / refiner capabilities | `lib/app/questionnaire/capabilities/generate-data-slots.ts`, `refine-data-slot.ts`                                                                                                                      |
-| Generate / refine / CRUD routes  | `app/api/v1/app/questionnaires/[id]/versions/[vid]/data-slots/**` (`generate`, `generate/stream`, `refine`, `draft`)                                                                                    |
-| Admin review UI                  | `app/admin/questionnaires/[id]/data-slots/page.tsx`, `components/admin/questionnaires/data-slots-review.tsx`, `data-slot-refine-button.tsx`                                                             |
-| Engine                           | `orchestrator/data-slot-orchestrator.ts`, `extraction/**` (combined), `_lib/turn-context.ts`, `_lib/data-slot-fills.ts`                                                                                 |
-| Respondent panel                 | `_lib/answer-panel.ts`, `components/app/questionnaire/panel/answer-slot-panel.tsx`                                                                                                                      |
-| Seeds                            | `prisma/seeds/app-questionnaire/028-031` (031 = refine capability row, bound to the generator agent)                                                                                                    |
+| Concern                                  | Path                                                                                                                                                                                                                             |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Models                                   | `prisma/schema/app-questionnaire.prisma` (`AppDataSlot`, `AppDataSlotQuestion`, `AppDataSlotFill.provisional`, `AppQuestionnaireTurn.targetedDataSlotId`, `AppQuestionnaireConfig.maxDataSlotAttempts`)                          |
+| Domain (pure)                            | `lib/app/questionnaire/data-slots/**` (views, schemas, generation prompt, `assignment.ts` merge)                                                                                                                                 |
+| Generator / refiner / assigner           | `lib/app/questionnaire/capabilities/generate-data-slots.ts`, `refine-data-slot.ts`, `assign-data-slots.ts`                                                                                                                       |
+| Generate / refine / assign / CRUD routes | `app/api/v1/app/questionnaires/[id]/versions/[vid]/data-slots/**` (`generate`, `generate/stream`, `refine`, `assign`, `draft`)                                                                                                   |
+| Admin review UI                          | `app/admin/questionnaires/[id]/data-slots/page.tsx`, `components/admin/questionnaires/data-slots-review.tsx`, `data-slot-refine-button.tsx`; assign checkbox in `evaluation-finding-review.tsx` + `evaluation-seed-composer.tsx` |
+| Engine                                   | `orchestrator/data-slot-orchestrator.ts`, `extraction/**` (combined), `_lib/turn-context.ts`, `_lib/data-slot-fills.ts`                                                                                                          |
+| Respondent panel                         | `_lib/answer-panel.ts`, `components/app/questionnaire/panel/answer-slot-panel.tsx`                                                                                                                                               |
+| Seeds                                    | `prisma/seeds/app-questionnaire/028-032` (031 = refine capability row, 032 = assign capability row, both bound to the generator agent)                                                                                           |

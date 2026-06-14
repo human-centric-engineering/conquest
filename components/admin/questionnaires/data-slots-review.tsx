@@ -201,6 +201,7 @@ export function DataSlotsReview({
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [discarding, setDiscarding] = useState(false);
+  const [assigning, setAssigning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   // Index of the slot pending a delete confirmation, or null.
@@ -209,7 +210,7 @@ export function DataSlotsReview({
   const [confirmDiscard, setConfirmDiscard] = useState(false);
 
   const dirty = signature(drafts) !== baseline;
-  const busy = generating || saving || discarding;
+  const busy = generating || saving || discarding || assigning;
 
   // Warn before leaving with unsaved edits (a generated draft itself is persisted and safe).
   useUnsavedChangesWarning(dirty);
@@ -449,6 +450,50 @@ export function DataSlotsReview({
     }
   };
 
+  /**
+   * AI-assign the version's unslotted (orphaned) questions — placing each into an existing slot or a
+   * new one — and refresh to the new live set. The catch-all for questions added after the slots were
+   * generated. Only offered on a clean live set (no unsaved draft to clobber). Live-write, like save.
+   */
+  const assignOrphans = async () => {
+    setAssigning(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await authoringMutate<{
+        slots: DataSlotView[];
+        assigned: number;
+        created: number;
+        diagnostic?: string;
+        diagnosticMessage?: string;
+      }>('POST', API.APP.QUESTIONNAIRES.versionDataSlotsAssign(questionnaireId, versionId), {});
+      if (res.meta?.forked) {
+        router.push(`/admin/questionnaires/${questionnaireId}/v/${res.meta.versionId}/data-slots`);
+        return;
+      }
+      if (res.data.diagnostic) {
+        setError(
+          res.data.diagnosticMessage ?? 'Could not assign the unslotted questions. Try again.'
+        );
+        return;
+      }
+      setLiveSlots(res.data.slots);
+      resetTo(assignIds(res.data.slots.map(fromSaved)), 'live');
+      const parts = [`Assigned ${res.data.assigned} question${res.data.assigned === 1 ? '' : 's'}`];
+      if (res.data.created > 0) {
+        parts.push(`${res.data.created} new slot${res.data.created === 1 ? '' : 's'} created`);
+      }
+      setNotice(`${parts.join(' · ')}.`);
+      router.refresh();
+    } catch (err) {
+      setError(
+        err instanceof AuthoringError ? err.message : 'Could not assign the unslotted questions.'
+      );
+    } finally {
+      setAssigning(false);
+    }
+  };
+
   const coveredKeys = new Set(drafts.flatMap((d) => d.questionKeys));
   const uncovered = questions.filter((q) => !coveredKeys.has(q.key));
   const isDraft = mode === 'draft';
@@ -542,11 +587,27 @@ export function DataSlotsReview({
       )}
 
       {!generating && uncovered.length > 0 && drafts.length > 0 && (
-        <p className="text-muted-foreground text-xs">
-          {uncovered.length} question{uncovered.length === 1 ? '' : 's'} not yet covered by any slot
-          ({uncovered.map((q) => q.key).join(', ')}). The respondent flow will still ask these
-          directly, but covering them keeps the conversation natural.
-        </p>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-amber-300 bg-amber-50/60 p-3 dark:border-amber-500/40 dark:bg-amber-500/10">
+          <p className="text-muted-foreground flex-1 text-xs">
+            <span className="text-foreground font-medium">
+              {uncovered.length} question{uncovered.length === 1 ? '' : 's'} not in any data slot
+            </span>{' '}
+            ({uncovered.map((q) => q.key).join(', ')}). The respondent flow still asks these
+            directly, but slotting them keeps the conversation natural.
+          </p>
+          {mode === 'live' && !dirty && liveSlots.length > 0 && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() => void assignOrphans()}
+            >
+              {assigning
+                ? 'Assigning…'
+                : `Assign ${uncovered.length === 1 ? 'it' : 'them'} with AI`}
+            </Button>
+          )}
+        </div>
       )}
 
       {!generating && (

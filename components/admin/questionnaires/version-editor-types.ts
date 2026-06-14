@@ -13,6 +13,12 @@
 export type MutationSpec = ['POST' | 'PUT' | 'PATCH' | 'DELETE', string, unknown];
 
 /**
+ * Re-exported from the shared view types so editor components can keep importing it from here (the
+ * composer fills it into a highlighted new-question form). See {@link EvaluationSeed} for the shape.
+ */
+export type { EvaluationSeed } from '@/lib/app/questionnaire/views';
+
+/**
  * Run a mutation described by the thunk. Resolves `true` on success and `false` on
  * failure (the runner surfaces the error itself). Fire-and-forget callers can ignore
  * the result; save buttons await it to flash a "Saved" confirmation only on success.

@@ -35,6 +35,52 @@ describe('deriveApplicability', () => {
   });
 });
 
+describe('deriveFindingState — add_question', () => {
+  it('is not stale when the named section still resolves uniquely', () => {
+    const result = deriveFindingState(
+      {
+        targetKey: 'section:Background',
+        op: {
+          op: 'add_question',
+          prompt: 'Team size?',
+          type: 'free_text',
+          sectionKey: 'Background',
+        },
+      },
+      structure(),
+      structure()
+    );
+    expect(result.stale).toBe(false);
+    expect(result.applicable).toBe('deep-link');
+  });
+
+  it('is stale when the named section is gone', () => {
+    const result = deriveFindingState(
+      {
+        targetKey: 'section:Background',
+        op: {
+          op: 'add_question',
+          prompt: 'Team size?',
+          type: 'free_text',
+          sectionKey: 'Background',
+        },
+      },
+      structure(),
+      structure({ sections: [] })
+    );
+    expect(result.stale).toBe(true);
+  });
+
+  it('is NOT stale for a goal-targeted add even when the goal text changed', () => {
+    const result = deriveFindingState(
+      { targetKey: 'goal', op: { op: 'add_question', prompt: 'New?', type: 'free_text' } },
+      structure(),
+      structure({ goal: 'A completely rewritten goal' })
+    );
+    expect(result.stale).toBe(false);
+  });
+});
+
 describe('deriveFindingState — slot targets', () => {
   it('is not stale when the targeted prompt is unchanged', () => {
     const snap = structure();

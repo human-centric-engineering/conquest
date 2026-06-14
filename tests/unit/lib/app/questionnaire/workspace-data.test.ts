@@ -48,9 +48,14 @@ vi.mock('@/lib/logging', () => ({
 
 // ─── Imports (after mocks) ────────────────────────────────────────────────────
 
-import type { QuestionnaireDetail, VersionGraphView } from '@/lib/app/questionnaire/views';
+import type {
+  EvaluationFindingView,
+  QuestionnaireDetail,
+  VersionGraphView,
+} from '@/lib/app/questionnaire/views';
 import type { DataSlotView } from '@/lib/app/questionnaire/data-slots';
 import {
+  getEvaluationAddQuestionSeed,
   getQuestionnaireDetailCached,
   getVersionGraphCached,
   getVersionDataSlotCountCached,
@@ -471,6 +476,124 @@ describe('getVersionDataSlotCountCached', () => {
         fetchError
       );
     });
+  });
+});
+
+// ─── getEvaluationAddQuestionSeed ─────────────────────────────────────────────
+
+function makeFinding(over: Partial<EvaluationFindingView> = {}): EvaluationFindingView {
+  return {
+    id: 'find-1',
+    dimension: 'coverage',
+    ordinal: 0,
+    targetKey: 'section:Background',
+    severity: 'minor',
+    proposedChange: 'Add a team-size question.',
+    rationale: 'The goal segments by org size.',
+    sourceQuote: null,
+    status: 'pending',
+    proposedEdit: {
+      op: 'add_question',
+      prompt: 'How big is your team?',
+      type: 'free_text',
+      sectionKey: 'Background',
+    },
+    editedOverride: null,
+    decidedByUserId: null,
+    decidedAt: null,
+    appliedAt: null,
+    appliedToVersionId: null,
+    stale: false,
+    applicable: 'deep-link',
+    ...over,
+  };
+}
+
+function runDetailWith(findings: EvaluationFindingView[]) {
+  return { id: 'run-1', findings };
+}
+
+describe('getEvaluationAddQuestionSeed', () => {
+  it('returns the seed for an actionable add_question finding', async () => {
+    mockServerFetch.mockResolvedValueOnce(makeOkResponse());
+    mockParseApiResponse.mockResolvedValueOnce({
+      success: true,
+      data: runDetailWith([makeFinding()]),
+    });
+
+    const seed = await getEvaluationAddQuestionSeed('qn-1', 'ver-1', 'run-1:find-1');
+
+    expect(seed).toEqual({
+      runId: 'run-1',
+      findingId: 'find-1',
+      prompt: 'How big is your team?',
+      type: 'free_text',
+      guidelines: null,
+      sectionKey: 'Background',
+    });
+  });
+
+  it('prefers the admin override op over the judge draft', async () => {
+    mockServerFetch.mockResolvedValueOnce(makeOkResponse());
+    mockParseApiResponse.mockResolvedValueOnce({
+      success: true,
+      data: runDetailWith([
+        makeFinding({
+          editedOverride: {
+            op: 'add_question',
+            prompt: 'Edited prompt',
+            type: 'single_choice',
+            guidelines: 'Pick the closest band.',
+          },
+        }),
+      ]),
+    });
+
+    const seed = await getEvaluationAddQuestionSeed('qn-1', 'ver-1', 'run-1:find-1');
+
+    expect(seed).toMatchObject({
+      prompt: 'Edited prompt',
+      type: 'single_choice',
+      guidelines: 'Pick the closest band.',
+      // No sectionKey on the override op → derived from the finding's `section:` targetKey.
+      sectionKey: 'Background',
+    });
+  });
+
+  it('returns null for a malformed ref (no separator)', async () => {
+    const seed = await getEvaluationAddQuestionSeed('qn-1', 'ver-1', 'not-a-ref');
+    expect(seed).toBeNull();
+    expect(mockServerFetch).not.toHaveBeenCalled();
+  });
+
+  it('returns null when the finding is already terminal (applied)', async () => {
+    mockServerFetch.mockResolvedValueOnce(makeOkResponse());
+    mockParseApiResponse.mockResolvedValueOnce({
+      success: true,
+      data: runDetailWith([makeFinding({ status: 'applied' })]),
+    });
+
+    const seed = await getEvaluationAddQuestionSeed('qn-1', 'ver-1', 'run-1:find-1');
+    expect(seed).toBeNull();
+  });
+
+  it('returns null when the finding is not an add_question', async () => {
+    mockServerFetch.mockResolvedValueOnce(makeOkResponse());
+    mockParseApiResponse.mockResolvedValueOnce({
+      success: true,
+      data: runDetailWith([
+        makeFinding({ proposedEdit: { op: 'replace_prompt', prompt: 'x' }, applicable: 'apply' }),
+      ]),
+    });
+
+    const seed = await getEvaluationAddQuestionSeed('qn-1', 'ver-1', 'run-1:find-1');
+    expect(seed).toBeNull();
+  });
+
+  it('returns null when the run fetch fails', async () => {
+    mockServerFetch.mockResolvedValueOnce(makeErrorResponse());
+    const seed = await getEvaluationAddQuestionSeed('qn-1', 'ver-1', 'run-1:find-1');
+    expect(seed).toBeNull();
   });
 });
 
