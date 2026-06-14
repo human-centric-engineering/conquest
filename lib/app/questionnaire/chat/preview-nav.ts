@@ -1,9 +1,11 @@
 /**
- * Resolve the admin "Exit preview" target for the no-login respondent surface (`/q/[versionId]`).
+ * Resolve the admin preview banner's metadata for the no-login respondent surface
+ * (`/q/[versionId]`).
  *
  * When an admin previews a launched questionnaire (`?preview=1`) the surface has only a
- * `versionId`; to send them back to the admin workspace we need the owning questionnaire id.
- * This is the one extra lookup the preview banner needs — it runs only in preview mode.
+ * `versionId`; the banner names which version is being previewed (number + status) and
+ * links back to the admin workspace, both of which need the owning version row. This is
+ * the one extra lookup the preview banner needs — it runs only in preview mode.
  *
  * Server-only. A fork that strips the demo respondent surfaces drops this file with them.
  *
@@ -12,16 +14,31 @@
 
 import { prisma } from '@/lib/db/client';
 import { workspaceVersionBase } from '@/lib/app/questionnaire/workspace-nav';
+import type { AppQuestionnaireStatus } from '@/lib/app/questionnaire/types';
+
+/** What the admin preview banner needs to identify the version it's previewing. */
+export interface AdminPreviewMeta {
+  /** Admin workspace URL for the version (`/admin/questionnaires/:id/v/:vid`). */
+  exitHref: string;
+  /** 1-based version number shown to the admin (e.g. "v3"). */
+  versionNumber: number;
+  /** Version lifecycle status (`draft` | `launched` | `archived`). */
+  status: AppQuestionnaireStatus;
+}
 
 /**
- * Admin workspace URL for a version (`/admin/questionnaires/:id/v/:vid`), or `null` if the
- * version no longer exists — in which case the preview banner simply omits the exit link.
+ * Version metadata for the admin preview banner, or `null` if the version no longer exists —
+ * in which case the banner simply renders without the exit link or version detail.
  */
-export async function resolveAdminPreviewExitHref(versionId: string): Promise<string | null> {
+export async function resolveAdminPreviewMeta(versionId: string): Promise<AdminPreviewMeta | null> {
   const version = await prisma.appQuestionnaireVersion.findUnique({
     where: { id: versionId },
-    select: { questionnaireId: true },
+    select: { questionnaireId: true, versionNumber: true, status: true },
   });
   if (!version) return null;
-  return workspaceVersionBase(version.questionnaireId, versionId);
+  return {
+    exitHref: workspaceVersionBase(version.questionnaireId, versionId),
+    versionNumber: version.versionNumber,
+    status: version.status as AppQuestionnaireStatus,
+  };
 }

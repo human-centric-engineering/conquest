@@ -31,6 +31,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import { SaveButton } from '@/components/admin/questionnaires/save-button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
@@ -884,9 +885,9 @@ export function ConfigEditor({
         {!config.saved && (
           <span className="text-muted-foreground text-xs">Unsaved — required before launch</span>
         )}
-        <Button size="sm" disabled={busy} onClick={save}>
+        <SaveButton size="sm" disabled={busy} onSave={save}>
           Save configuration
-        </Button>
+        </SaveButton>
       </div>
     </section>
   );

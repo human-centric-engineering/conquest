@@ -16,7 +16,7 @@ import {
   resolvePresentationModeForVersion,
   resolveVoiceEnabledForVersion,
 } from '@/lib/app/questionnaire/chat/anonymity';
-import { resolveAdminPreviewExitHref } from '@/lib/app/questionnaire/chat/preview-nav';
+import { resolveAdminPreviewMeta } from '@/lib/app/questionnaire/chat/preview-nav';
 
 export const metadata: Metadata = {
   title: 'Questionnaire',
@@ -58,7 +58,7 @@ export default async function PublicQuestionnairePage({
     presentationMode,
     voiceConfigured,
     attachmentsConfigured,
-    exitHref,
+    previewMeta,
   ] = await Promise.all([
     isVoiceInputEnabled(),
     isAttachmentInputEnabled(),
@@ -67,7 +67,7 @@ export default async function PublicQuestionnairePage({
     resolvePresentationModeForVersion(versionId),
     resolveVoiceEnabledForVersion(versionId),
     resolveAttachmentsEnabledForVersion(versionId),
-    preview ? resolveAdminPreviewExitHref(versionId) : Promise.resolve(null),
+    preview ? resolveAdminPreviewMeta(versionId) : Promise.resolve(null),
   ]);
   const voiceInputEnabled = voicePlatform && voiceConfigured;
   const attachmentInputEnabled = attachmentPlatform && attachmentsConfigured;
@@ -77,13 +77,15 @@ export default async function PublicQuestionnairePage({
       {/* Admin preview chrome — a slim strip above the brand surface (it's admin meta, not the
           respondent experience), persisting across every session state so the admin always has a
           way back. Kept deliberately low-profile so it barely costs vertical space. */}
-      {preview && exitHref && (
+      {preview && previewMeta && (
         <div className="text-muted-foreground mb-2 flex shrink-0 items-center gap-2 px-1 text-[11px]">
           <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-[color:var(--cq-accent)]" />
-          <span className="text-foreground font-medium">Preview</span>
+          <span className="text-foreground font-medium">
+            Preview · v{previewMeta.versionNumber} ({previewMeta.status})
+          </span>
           <span className="truncate">· not recorded in analytics</span>
           <Link
-            href={exitHref}
+            href={previewMeta.exitHref}
             className="hover:text-foreground ml-auto shrink-0 underline underline-offset-2"
           >
             Exit

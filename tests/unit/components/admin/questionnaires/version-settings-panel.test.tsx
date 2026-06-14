@@ -97,7 +97,12 @@ beforeEach(() => {
 describe('VersionSettingsPanel', () => {
   it('renders both editors with the derived version id, question count, and adaptive flag', () => {
     render(
-      <VersionSettingsPanel questionnaireId="qn-1" graph={graph({ id: 'ver-9' })} adaptiveEnabled />
+      <VersionSettingsPanel
+        questionnaireId="qn-1"
+        graph={graph({ id: 'ver-9' })}
+        adaptiveEnabled
+        designEvalEnabled={false}
+      />
     );
     expect(screen.getByText('Goal & audience')).toBeInTheDocument();
     expect(screen.getByText('Configuration')).toBeInTheDocument();
@@ -106,8 +111,47 @@ describe('VersionSettingsPanel', () => {
     expect(screen.getByTestId('cfg')).toHaveAttribute('data-qcount', '2');
   });
 
+  it('explains the structure review and offers the reviewer help only when design eval is on', () => {
+    const { rerender } = render(
+      <VersionSettingsPanel
+        questionnaireId="qn-1"
+        graph={graph()}
+        adaptiveEnabled={false}
+        designEvalEnabled={false}
+      />
+    );
+    // Off: copy stops at tone-tuning, no structure-review mention, no help affordance.
+    expect(screen.getByText(/tunes its tone to the audience\.$/)).toBeInTheDocument();
+    expect(screen.queryByText(/structure review on the Evaluations tab/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /how goal and audience are used/i })
+    ).not.toBeInTheDocument();
+
+    // On: copy names the structure review and the help popover lists the reviewers.
+    rerender(
+      <VersionSettingsPanel
+        questionnaireId="qn-1"
+        graph={graph()}
+        adaptiveEnabled={false}
+        designEvalEnabled
+      />
+    );
+    expect(screen.getByText(/structure review on the Evaluations tab/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /how goal and audience are used/i }));
+    expect(screen.getByText('Coverage')).toBeInTheDocument();
+    expect(screen.getByText('Goal match')).toBeInTheDocument();
+    expect(screen.getByText('Audience match')).toBeInTheDocument();
+  });
+
   it('runs an edit through authoringMutate and refreshes', async () => {
-    render(<VersionSettingsPanel questionnaireId="qn-1" graph={graph()} adaptiveEnabled={false} />);
+    render(
+      <VersionSettingsPanel
+        questionnaireId="qn-1"
+        graph={graph()}
+        adaptiveEnabled={false}
+        designEvalEnabled={false}
+      />
+    );
     fireEvent.click(screen.getByTestId('cfg'));
     await waitFor(() =>
       expect(mutateMock.authoringMutate).toHaveBeenCalledWith('PATCH', '/cfg', {})
@@ -121,7 +165,14 @@ describe('VersionSettingsPanel', () => {
       data: {},
       meta: { forked: true, versionId: 'ver-2', versionNumber: 2 },
     });
-    render(<VersionSettingsPanel questionnaireId="qn-1" graph={graph()} adaptiveEnabled={false} />);
+    render(
+      <VersionSettingsPanel
+        questionnaireId="qn-1"
+        graph={graph()}
+        adaptiveEnabled={false}
+        designEvalEnabled={false}
+      />
+    );
     fireEvent.click(screen.getByTestId('ga'));
     await waitFor(() =>
       expect(router.replace).toHaveBeenCalledWith('/admin/questionnaires/qn-1/v/ver-2/settings')
@@ -131,7 +182,14 @@ describe('VersionSettingsPanel', () => {
 
   it('surfaces an error when the mutation fails', async () => {
     mutateMock.authoringMutate.mockRejectedValue(new Error('nope'));
-    render(<VersionSettingsPanel questionnaireId="qn-1" graph={graph()} adaptiveEnabled={false} />);
+    render(
+      <VersionSettingsPanel
+        questionnaireId="qn-1"
+        graph={graph()}
+        adaptiveEnabled={false}
+        designEvalEnabled={false}
+      />
+    );
     fireEvent.click(screen.getByTestId('cfg'));
     await waitFor(() => expect(screen.getByText('nope')).toBeInTheDocument());
   });

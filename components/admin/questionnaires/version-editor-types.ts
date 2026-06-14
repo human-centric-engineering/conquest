@@ -12,5 +12,9 @@
 /** A pending mutation described as `[method, path, body]`. */
 export type MutationSpec = ['POST' | 'PUT' | 'PATCH' | 'DELETE', string, unknown];
 
-/** Run a mutation described by the thunk. Fire-and-forget from the caller's view. */
-export type RunMutation = (spec: () => MutationSpec) => void;
+/**
+ * Run a mutation described by the thunk. Resolves `true` on success and `false` on
+ * failure (the runner surfaces the error itself). Fire-and-forget callers can ignore
+ * the result; save buttons await it to flash a "Saved" confirmation only on success.
+ */
+export type RunMutation = (spec: () => MutationSpec) => Promise<boolean>;

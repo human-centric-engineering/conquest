@@ -1,11 +1,13 @@
 /**
- * resolveAdminPreviewExitHref — unit tests.
+ * resolveAdminPreviewMeta — unit tests.
  *
- * The function looks up the questionnaireId for a version and then builds the
- * admin workspace URL.  It returns null when the version no longer exists.
+ * The function looks up the questionnaireId, versionNumber, and status for a
+ * version, then builds the admin workspace URL and returns it alongside the
+ * version detail the preview banner names. It returns null when the version no
+ * longer exists.
  *
  * Test Coverage:
- * - Returns the constructed workspace URL when the version is found
+ * - Returns the workspace URL plus versionNumber + status when the version is found
  * - Returns null when the version is not found
  * - Calls Prisma with the correct versionId and field selector
  * - Delegates URL construction to workspaceVersionBase with correct arguments
@@ -35,24 +37,31 @@ vi.mock('@/lib/app/questionnaire/workspace-nav', () => ({
 
 import { prisma } from '@/lib/db/client';
 import { workspaceVersionBase } from '@/lib/app/questionnaire/workspace-nav';
-import { resolveAdminPreviewExitHref } from '@/lib/app/questionnaire/chat/preview-nav';
+import { resolveAdminPreviewMeta } from '@/lib/app/questionnaire/chat/preview-nav';
 
-describe('resolveAdminPreviewExitHref', () => {
+describe('resolveAdminPreviewMeta', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('returns the admin workspace URL when the version exists', async () => {
+  it('returns the workspace URL plus version number and status when the version exists', async () => {
     // Arrange
     vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
       questionnaireId: 'qn-1',
+      versionNumber: 3,
+      status: 'launched',
     } as never);
 
     // Act
-    const result = await resolveAdminPreviewExitHref('ver-1');
+    const result = await resolveAdminPreviewMeta('ver-1');
 
-    // Assert: the function computes a URL from the fetched questionnaireId, not just returns the mock
-    expect(result).toBe('/admin/questionnaires/qn-1/v/ver-1');
+    // Assert: the function computes a URL from the fetched questionnaireId and
+    // carries the version detail the banner names — not just the URL.
+    expect(result).toEqual({
+      exitHref: '/admin/questionnaires/qn-1/v/ver-1',
+      versionNumber: 3,
+      status: 'launched',
+    });
   });
 
   it('returns null when the version does not exist', async () => {
@@ -60,25 +69,27 @@ describe('resolveAdminPreviewExitHref', () => {
     vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue(null);
 
     // Act
-    const result = await resolveAdminPreviewExitHref('ver-missing');
+    const result = await resolveAdminPreviewMeta('ver-missing');
 
     // Assert: early return on null version
     expect(result).toBeNull();
   });
 
-  it('queries Prisma with the correct versionId and selects only questionnaireId', async () => {
+  it('queries Prisma with the correct versionId and selects only the banner fields', async () => {
     // Arrange
     vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
       questionnaireId: 'qn-1',
+      versionNumber: 1,
+      status: 'draft',
     } as never);
 
     // Act
-    await resolveAdminPreviewExitHref('ver-1');
+    await resolveAdminPreviewMeta('ver-1');
 
     // Assert: minimal projection — not a full-row fetch
     expect(prisma.appQuestionnaireVersion.findUnique).toHaveBeenCalledWith({
       where: { id: 'ver-1' },
-      select: { questionnaireId: true },
+      select: { questionnaireId: true, versionNumber: true, status: true },
     });
   });
 
@@ -86,10 +97,12 @@ describe('resolveAdminPreviewExitHref', () => {
     // Arrange
     vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
       questionnaireId: 'qn-42',
+      versionNumber: 2,
+      status: 'draft',
     } as never);
 
     // Act
-    await resolveAdminPreviewExitHref('ver-99');
+    await resolveAdminPreviewMeta('ver-99');
 
     // Assert: the lookup result (questionnaireId) and the original param (versionId) are
     // both threaded into the URL builder — not hardcoded or swapped
@@ -101,7 +114,7 @@ describe('resolveAdminPreviewExitHref', () => {
     vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue(null);
 
     // Act
-    await resolveAdminPreviewExitHref('ver-missing');
+    await resolveAdminPreviewMeta('ver-missing');
 
     // Assert: early-return prevents the URL build from running
     expect(workspaceVersionBase).not.toHaveBeenCalled();
@@ -111,10 +124,12 @@ describe('resolveAdminPreviewExitHref', () => {
     // Arrange
     vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
       questionnaireId: 'qn-1',
+      versionNumber: 1,
+      status: 'draft',
     } as never);
 
     // Act
-    await resolveAdminPreviewExitHref('ver-1');
+    await resolveAdminPreviewMeta('ver-1');
 
     // Assert
     expect(prisma.appQuestionnaireVersion.findUnique).toHaveBeenCalledTimes(1);

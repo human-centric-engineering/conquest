@@ -112,7 +112,7 @@ export function VersionEditor({
     setError(null);
     setSaveState('saving');
     pendingSaveRef.current = true;
-    authoringMutate(method, path, body)
+    return authoringMutate(method, path, body)
       .then(({ meta }) => {
         if (meta?.forked) {
           setForkNotice(meta.versionNumber);
@@ -125,6 +125,7 @@ export function VersionEditor({
         // effect clears it + confirms the save) — this closes the window where a
         // second action could fire against the pre-fork version id and fork again.
         router.refresh();
+        return true;
       })
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : 'Something went wrong');
@@ -132,22 +133,25 @@ export function VersionEditor({
         setSaveState('error');
         router.refresh(); // resync optimistic UI from the server
         setBusy(false);
+        return false;
       });
   };
 
-  const setStatus = (to: AppQuestionnaireStatus) =>
-    run(() => [
+  const setStatus = (to: AppQuestionnaireStatus) => {
+    void run(() => [
       'PATCH',
       API.APP.QUESTIONNAIRES.versionStatus(questionnaireId, versionId),
       { status: to },
     ]);
+  };
 
-  const addSection = () =>
-    run(() => [
+  const addSection = () => {
+    void run(() => [
       'POST',
       API.APP.QUESTIONNAIRES.versionSections(questionnaireId, versionId),
       { title: 'New section' },
     ]);
+  };
 
   const onDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
@@ -157,7 +161,7 @@ export function VersionEditor({
     if (oldIndex < 0 || newIndex < 0) return;
     const reordered = arrayMove(sections, oldIndex, newIndex);
     setSections(reordered); // optimistic
-    run(() => [
+    void run(() => [
       'PATCH',
       API.APP.QUESTIONNAIRES.versionSectionsReorder(questionnaireId, versionId),
       { order: reordered.map((s) => s.id) },

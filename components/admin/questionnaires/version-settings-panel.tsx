@@ -19,6 +19,7 @@ import { useRouter } from 'next/navigation';
 
 import { GoalAudienceEditor } from '@/components/admin/questionnaires/goal-audience-editor';
 import { ConfigEditor } from '@/components/admin/questionnaires/config-editor';
+import { FieldHelp } from '@/components/ui/field-help';
 import { authoringMutate } from '@/components/admin/questionnaires/authoring-mutate';
 import type {
   MutationSpec,
@@ -31,12 +32,20 @@ export interface VersionSettingsPanelProps {
   graph: VersionGraphView;
   /** Adaptive selection sub-flag state, threaded to the strategy picker. */
   adaptiveEnabled: boolean;
+  /**
+   * Design-time evaluation sub-flag state. When on, the structure review (Evaluations tab)
+   * is active for this questionnaire — so the goal/audience copy explains that the review
+   * scores against these fields and lists which reviewers read them. When off, the copy
+   * omits the review so it doesn't dangle a feature whose tab 404s.
+   */
+  designEvalEnabled: boolean;
 }
 
 export function VersionSettingsPanel({
   questionnaireId,
   graph,
   adaptiveEnabled,
+  designEvalEnabled,
 }: VersionSettingsPanelProps) {
   const router = useRouter();
   const versionId = graph.id;
@@ -56,7 +65,7 @@ export function VersionSettingsPanel({
     const [method, path, body]: MutationSpec = spec();
     setBusy(true);
     setError(null);
-    authoringMutate(method, path, body)
+    return authoringMutate(method, path, body)
       .then(({ meta }) => {
         if (meta?.forked) {
           setForkNotice(meta.versionNumber);
@@ -64,11 +73,13 @@ export function VersionSettingsPanel({
           router.replace(`/admin/questionnaires/${questionnaireId}/v/${meta.versionId}/settings`);
         }
         router.refresh();
+        return true;
       })
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : 'Something went wrong');
         router.refresh();
         setBusy(false);
+        return false;
       });
   };
 
@@ -88,10 +99,43 @@ export function VersionSettingsPanel({
 
       <section className="space-y-3">
         <div className="space-y-1">
-          <h2 className="text-lg font-semibold">Goal &amp; audience</h2>
+          <div className="flex items-center gap-1.5">
+            <h2 className="text-lg font-semibold">Goal &amp; audience</h2>
+            {designEvalEnabled && (
+              <FieldHelp
+                title="How the structure review uses this"
+                ariaLabel="How goal and audience are used by the structure review"
+                contentClassName="w-80"
+              >
+                <p>
+                  When you run a <strong>structure review</strong> on the{' '}
+                  <strong>Evaluations</strong> tab, these AI reviewers read the goal and audience to
+                  score your questions before launch:
+                </p>
+                <ul className="mt-1 list-disc space-y-1 pl-4">
+                  <li>
+                    <strong>Coverage</strong> — do the questions cover the whole goal? Flags gaps.
+                  </li>
+                  <li>
+                    <strong>Goal match</strong> — does every question serve the goal? Flags
+                    off-mission questions.
+                  </li>
+                  <li>
+                    <strong>Audience match</strong> — is the wording, reading level, and length
+                    right for this audience?
+                  </li>
+                </ul>
+                <p className="mt-1">
+                  The other reviewers (clarity, duplicates, type fit, ordering) don’t rely on these
+                  fields.
+                </p>
+              </FieldHelp>
+            )}
+          </div>
           <p className="text-muted-foreground text-sm">
-            What this questionnaire is trying to learn and who answers it. Used to tune tone and to
-            score the structure (P5 judges).
+            {designEvalEnabled
+              ? 'What this questionnaire is trying to learn and who answers it. The conversation tunes its tone to the audience, and the structure review on the Evaluations tab scores your questions against this goal and audience.'
+              : 'What this questionnaire is trying to learn and who answers it. The conversation tunes its tone to the audience.'}
           </p>
         </div>
         <GoalAudienceEditor

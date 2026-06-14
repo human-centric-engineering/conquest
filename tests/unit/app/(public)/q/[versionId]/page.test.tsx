@@ -57,7 +57,7 @@ vi.mock('@/lib/app/questionnaire/chat/anonymity', () => ({
 }));
 
 vi.mock('@/lib/app/questionnaire/chat/preview-nav', () => ({
-  resolveAdminPreviewExitHref: vi.fn(),
+  resolveAdminPreviewMeta: vi.fn(),
 }));
 
 /**
@@ -113,7 +113,7 @@ import {
   resolvePresentationModeForVersion,
   resolveVoiceEnabledForVersion,
 } from '@/lib/app/questionnaire/chat/anonymity';
-import { resolveAdminPreviewExitHref } from '@/lib/app/questionnaire/chat/preview-nav';
+import { resolveAdminPreviewMeta } from '@/lib/app/questionnaire/chat/preview-nav';
 import type { ResolvedTheme } from '@/lib/app/questionnaire/theming';
 import type React from 'react';
 
@@ -160,9 +160,11 @@ describe('PublicQuestionnairePage', () => {
     // exercise the config-off path.
     vi.mocked(resolveVoiceEnabledForVersion).mockResolvedValue(true);
     vi.mocked(resolveAttachmentsEnabledForVersion).mockResolvedValue(true);
-    vi.mocked(resolveAdminPreviewExitHref).mockResolvedValue(
-      '/admin/questionnaires/q_abc/v/ver_abc123'
-    );
+    vi.mocked(resolveAdminPreviewMeta).mockResolvedValue({
+      exitHref: '/admin/questionnaires/q_abc/v/ver_abc123',
+      versionNumber: 1,
+      status: 'draft',
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -416,9 +418,11 @@ describe('PublicQuestionnairePage', () => {
     });
 
     it('renders an "Exit preview" link to the admin workspace in preview mode', async () => {
-      vi.mocked(resolveAdminPreviewExitHref).mockResolvedValue(
-        '/admin/questionnaires/q_xyz/v/ver_abc123'
-      );
+      vi.mocked(resolveAdminPreviewMeta).mockResolvedValue({
+        exitHref: '/admin/questionnaires/q_xyz/v/ver_abc123',
+        versionNumber: 1,
+        status: 'draft',
+      });
 
       const Component = await PublicQuestionnairePage({
         params: makeParams(),
@@ -427,12 +431,29 @@ describe('PublicQuestionnairePage', () => {
       render(Component);
 
       // Resolved with the version from params.
-      expect(resolveAdminPreviewExitHref).toHaveBeenCalledWith(VERSION_ID);
+      expect(resolveAdminPreviewMeta).toHaveBeenCalledWith(VERSION_ID);
       const exit = screen.getByRole('link', { name: /exit/i });
       expect(exit).toHaveAttribute('href', '/admin/questionnaires/q_xyz/v/ver_abc123');
     });
 
-    it('does not resolve an exit href or render the banner outside preview mode', async () => {
+    it('names the previewed version number and status in the banner', async () => {
+      vi.mocked(resolveAdminPreviewMeta).mockResolvedValue({
+        exitHref: '/admin/questionnaires/q_xyz/v/ver_abc123',
+        versionNumber: 4,
+        status: 'launched',
+      });
+
+      const Component = await PublicQuestionnairePage({
+        params: makeParams(),
+        searchParams: makeSearchParams('1'),
+      });
+      render(Component);
+
+      // The banner makes the previewed version unambiguous — number AND status.
+      expect(screen.getByText(/Preview · v4 \(launched\)/)).toBeInTheDocument();
+    });
+
+    it('does not resolve preview metadata or render the banner outside preview mode', async () => {
       const Component = await PublicQuestionnairePage({
         params: makeParams(),
         searchParams: makeSearchParams(),
@@ -440,12 +461,12 @@ describe('PublicQuestionnairePage', () => {
       render(Component);
 
       // The expensive lookup is skipped entirely for real respondents.
-      expect(resolveAdminPreviewExitHref).not.toHaveBeenCalled();
+      expect(resolveAdminPreviewMeta).not.toHaveBeenCalled();
       expect(screen.queryByRole('link', { name: /exit/i })).not.toBeInTheDocument();
     });
 
-    it('omits the banner when the exit href cannot be resolved (version gone)', async () => {
-      vi.mocked(resolveAdminPreviewExitHref).mockResolvedValue(null);
+    it('omits the banner when the preview metadata cannot be resolved (version gone)', async () => {
+      vi.mocked(resolveAdminPreviewMeta).mockResolvedValue(null);
 
       const Component = await PublicQuestionnairePage({
         params: makeParams(),

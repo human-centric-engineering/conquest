@@ -4,6 +4,7 @@
  */
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
+import { Wand2 } from 'lucide-react';
 
 import { ExtractionChangesTable } from '@/components/admin/questionnaires/extraction-changes-table';
 import { API } from '@/lib/api/endpoints';
@@ -43,11 +44,33 @@ export default async function ExtractionChangesTab({ params }: PageProps) {
   const changes = await getChanges(id, vid);
 
   return (
-    <div className="space-y-4">
-      <p className="text-muted-foreground max-w-2xl text-sm">
-        Every editorial decision the extractor made — review the before/after and revert any of
-        them. Reverting a launched version creates a new draft.
-      </p>
+    <div className="space-y-5">
+      {/* Explainer band — names the surface and, crucially, says what "the extractor" is: the
+          ingestion agent that built this structure from the uploaded document. Mirrors the
+          Structure / Data-slots blueprint header so the workspace reads as one tool. */}
+      <div className="cq-blueprint relative overflow-hidden rounded-xl border">
+        <div className="bg-card/70 p-4 backdrop-blur-sm">
+          <div className="flex items-start gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--cq-accent)] text-[var(--cq-accent-foreground)]">
+              <Wand2 className="h-5 w-5" />
+            </span>
+            <div className="space-y-1.5">
+              <h2 className="text-sm font-semibold tracking-tight">Extraction changes</h2>
+              <p className="text-muted-foreground max-w-3xl text-sm">
+                When this version’s source document was uploaded, an{' '}
+                <span className="text-foreground font-medium">extraction agent</span> read it and
+                built the questionnaire’s structure for you — it’s opinionated, not a verbatim copy.
+              </p>
+              <p className="text-muted-foreground max-w-3xl text-sm">
+                This log records every editorial decision the extractor made — pruning boilerplate,
+                fixing typos, rewriting terse prompts, and inferring question types, the goal, and
+                the audience. Review the before / after of each and revert anything you disagree
+                with. Reverting a launched version creates a new draft.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
 
       {changes ? (
         <ExtractionChangesTable

@@ -15,7 +15,17 @@
 
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Loader2, RotateCcw } from 'lucide-react';
+import {
+  ArrowRight,
+  Blocks,
+  FileCheck,
+  Lightbulb,
+  Loader2,
+  PenLine,
+  RotateCcw,
+  Scissors,
+  type LucideIcon,
+} from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -70,12 +80,27 @@ const CHANGE_TYPE_LABELS: Record<ChangeType, string> = {
   infer_audience: 'Inferred audience',
 };
 
-/** The four display families, in render order. */
-const FAMILIES: { key: string; label: string; types: ChangeType[] }[] = [
-  { key: 'prunes', label: 'Pruned content', types: ['prune_section', 'prune_question'] },
+/** The four display families, in render order. Each carries an icon so the kind of edit
+ *  reads at a glance — pruning, wording, inference, or restructuring. */
+const FAMILIES: {
+  key: string;
+  label: string;
+  hint: string;
+  icon: LucideIcon;
+  types: ChangeType[];
+}[] = [
+  {
+    key: 'prunes',
+    label: 'Pruned content',
+    hint: 'Boilerplate the extractor dropped — kept here so you can restore it.',
+    icon: Scissors,
+    types: ['prune_section', 'prune_question'],
+  },
   {
     key: 'edits',
     label: 'Edits',
+    hint: 'Wording the extractor tidied or sharpened, and types it inferred.',
+    icon: PenLine,
     types: [
       'correct_spelling',
       'correct_grammar',
@@ -84,10 +109,18 @@ const FAMILIES: { key: string; label: string; types: ChangeType[] }[] = [
       'augment_question',
     ],
   },
-  { key: 'inferences', label: 'Inferences', types: ['infer_goal', 'infer_audience'] },
+  {
+    key: 'inferences',
+    label: 'Inferences',
+    hint: 'Goal and audience the extractor read between the lines of the document.',
+    icon: Lightbulb,
+    types: ['infer_goal', 'infer_audience'],
+  },
   {
     key: 'structural',
     label: 'Structural',
+    hint: 'Where the extractor merged, split, or added sections and questions.',
+    icon: Blocks,
     types: ['merge_questions', 'split_question', 'add_section'],
   },
 ];
@@ -204,25 +237,51 @@ export function ExtractionChangesTable({ questionnaireId, versionId, changes, co
         {error && <p className="text-destructive text-sm">{error}</p>}
 
         {filtered.length === 0 ? (
-          <p className="text-muted-foreground text-sm italic">
-            {changes.length === 0
-              ? 'No extraction changes were recorded for this version.'
-              : 'No changes match the current filters.'}
-          </p>
+          changes.length === 0 ? (
+            // No records at all — explain *why* that's the expected, healthy outcome (a verbatim
+            // extraction leaves nothing to log) rather than a bare line that reads like an error.
+            <div className="bg-card/40 rounded-xl border border-dashed px-6 py-10 text-center">
+              <span className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full border border-[var(--cq-accent-ring)] bg-[var(--cq-accent-muted)] text-[var(--cq-accent)]">
+                <FileCheck className="h-5 w-5" />
+              </span>
+              <p className="text-sm font-semibold tracking-tight">
+                No editorial changes — the extractor used your document as-is
+              </p>
+              <p className="text-muted-foreground mx-auto mt-1.5 max-w-md text-sm">
+                The extraction agent didn’t need to prune, rewrite, or infer anything for this
+                version — every section and question matches the source document. A verbatim
+                extraction produces no change records.
+              </p>
+            </div>
+          ) : (
+            <p className="text-muted-foreground text-sm italic">
+              No changes match the current filters.
+            </p>
+          )
         ) : (
           FAMILIES.map((family) => {
             const rows = filtered.filter((c) => family.types.includes(c.changeType));
             if (rows.length === 0) return null;
+            const FamilyIcon = family.icon;
             return (
               <section key={family.key} className="space-y-3">
-                <h3 className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
-                  {family.label} ({rows.length})
-                </h3>
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-md bg-[var(--cq-accent-muted)] text-[var(--cq-accent)]">
+                      <FamilyIcon className="h-3.5 w-3.5" />
+                    </span>
+                    <h3 className="text-sm font-semibold tracking-tight">{family.label}</h3>
+                    <span className="text-muted-foreground text-xs tabular-nums">
+                      {rows.length}
+                    </span>
+                  </div>
+                  <p className="text-muted-foreground pl-8 text-xs">{family.hint}</p>
+                </div>
                 <ul className="space-y-3">
                   {rows.map((change) => (
                     <li
                       key={change.id}
-                      className={`rounded-md border p-3 ${change.status === 'reverted' ? 'opacity-60' : ''}`}
+                      className={`group bg-card rounded-lg border p-3 transition-shadow hover:border-[var(--cq-accent-ring)] hover:shadow-sm ${change.status === 'reverted' ? 'opacity-60' : ''}`}
                     >
                       <div className="flex flex-wrap items-center gap-2">
                         <Badge variant="secondary" className="text-xs">
@@ -263,9 +322,17 @@ export function ExtractionChangesTable({ questionnaireId, versionId, changes, co
                         </blockquote>
                       )}
 
-                      <div className="mt-3 flex flex-col gap-3 sm:flex-row">
+                      <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-stretch sm:gap-3">
                         {change.beforeJson !== null && (
                           <JsonBlock label="Before" value={change.beforeJson} />
+                        )}
+                        {change.beforeJson !== null && change.afterJson !== null && (
+                          <div
+                            className="text-muted-foreground/60 hidden items-center sm:flex"
+                            aria-hidden
+                          >
+                            <ArrowRight className="h-4 w-4" />
+                          </div>
                         )}
                         {change.afterJson !== null && (
                           <JsonBlock label="After" value={change.afterJson} />

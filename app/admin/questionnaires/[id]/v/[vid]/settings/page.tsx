@@ -65,7 +65,12 @@ export default async function SettingsTab({ params }: PageProps) {
       {/* Version-scoped settings (F3.1 + F9.7) — goal/audience + run-time config. Editing a
           launched version forks a new draft (the panel surfaces the notice). */}
       {graph && (
-        <VersionSettingsPanel questionnaireId={id} graph={graph} adaptiveEnabled={flags.adaptive} />
+        <VersionSettingsPanel
+          questionnaireId={id}
+          graph={graph}
+          adaptiveEnabled={flags.adaptive}
+          designEvalEnabled={flags.designEval}
+        />
       )}
 
       {/* DEMO-ONLY (F2.5.1): demo-client attribution. */}
