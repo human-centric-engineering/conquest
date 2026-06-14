@@ -127,6 +127,16 @@ export function deriveFindingState(
   const applicable = deriveApplicability(op);
   if (!snapshot) return { stale: false, applicable };
 
+  // An `add_question` draft is stale only when it names a section target that's gone or now
+  // ambiguous — the place it wanted to land no longer resolves. A goal-targeted add (or one whose
+  // section still resolves) stays applyable: adding a question isn't invalidated by edits to the
+  // goal text or to existing questions, so those must not falsely stale it.
+  if (op?.op === 'add_question') {
+    const title = op.sectionKey ?? asSectionTitle(input.targetKey);
+    const stale = title !== null ? countSectionsByTitle(current, title) !== 1 : false;
+    return { stale, applicable };
+  }
+
   const sectionTitle = asSectionTitle(input.targetKey);
   let stale: boolean;
 

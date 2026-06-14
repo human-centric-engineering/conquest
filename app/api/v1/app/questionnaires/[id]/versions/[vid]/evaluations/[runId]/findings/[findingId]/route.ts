@@ -2,12 +2,16 @@
  * Review one design-evaluation finding (F5.3).
  *
  * PATCH /api/v1/app/questionnaires/:id/versions/:vid/evaluations/:runId/findings/:findingId
- *   body: { action: 'accept' | 'decline' } | { action: 'edit', editedOverride: ProposedEdit }
+ *   body: { action: 'accept' | 'decline' }
+ *       | { action: 'edit', editedOverride: ProposedEdit }
+ *       | { action: 'mark_applied', appliedToVersionId: string }
  *
- *   Admin-only. Triage a finding: `accept` (agree, not yet applied), `decline` (dismiss), or
- *   `edit` (store an admin-edited override op that takes precedence at apply). This is the
- *   review-queue write; it never mutates the questionnaire structure (that's the explicit
- *   `…/apply` POST). Sub-flag gated — a decision is part of the paid design-evaluation
+ *   Admin-only. Triage a finding: `accept` (agree, not yet applied), `decline` (dismiss),
+ *   `edit` (store an admin-edited override op that takes precedence at apply), or `mark_applied`
+ *   (the suggestion was authored by hand in the editor — stamp the finding's terminal state +
+ *   the version it landed in). This is the review-queue write; it never mutates the questionnaire
+ *   structure (that's the explicit `…/apply` POST — `mark_applied` only records that the editor
+ *   already did the authoring). Sub-flag gated — a decision is part of the paid design-evaluation
  *   sub-feature, so it 404s when the sub-flag is off (the reads stay master-flag only).
  *
  *   A finding already `applied` is terminal → 409.
@@ -20,6 +24,8 @@ import { withAdminAuth } from '@/lib/auth/guards';
 import { validateRequestBody } from '@/lib/api/validation';
 import { getClientIP } from '@/lib/security/ip';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
+
+import { Prisma } from '@prisma/client';
 
 import { prisma } from '@/lib/db/client';
 import {
@@ -54,16 +60,34 @@ const handleReview = withAdminAuth<Params>(async (request, session, { params }) 
 
   const body = await validateRequestBody(request, reviewFindingSchema);
 
-  const data =
-    body.action === 'accept'
-      ? { status: 'accepted', decidedByUserId: session.user.id, decidedAt: new Date() }
-      : body.action === 'decline'
-        ? { status: 'declined', decidedByUserId: session.user.id, decidedAt: new Date() }
-        : {
-            editedOverride: jsonInput(body.editedOverride),
-            decidedByUserId: session.user.id,
-            decidedAt: new Date(),
-          };
+  let data: Prisma.AppQuestionnaireEvaluationFindingUncheckedUpdateInput;
+  if (body.action === 'accept') {
+    data = { status: 'accepted', decidedByUserId: session.user.id, decidedAt: new Date() };
+  } else if (body.action === 'decline') {
+    data = { status: 'declined', decidedByUserId: session.user.id, decidedAt: new Date() };
+  } else if (body.action === 'edit') {
+    data = {
+      editedOverride: jsonInput(body.editedOverride),
+      decidedByUserId: session.user.id,
+      decidedAt: new Date(),
+    };
+  } else {
+    // mark_applied: the question was authored in the editor. Pin it to a draft of THIS
+    // questionnaire so a caller can't mark a finding applied against an unrelated version.
+    const target = await prisma.appQuestionnaireVersion.findFirst({
+      where: { id: body.appliedToVersionId, questionnaireId: id },
+      select: { id: true },
+    });
+    if (!target)
+      return errorResponse('Target version not found', { code: 'NOT_FOUND', status: 404 });
+    data = {
+      status: 'applied',
+      appliedAt: new Date(),
+      appliedToVersionId: body.appliedToVersionId,
+      decidedByUserId: session.user.id,
+      decidedAt: new Date(),
+    };
+  }
 
   await prisma.appQuestionnaireEvaluationFinding.update({ where: { id: findingId }, data });
 

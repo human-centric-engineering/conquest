@@ -33,6 +33,9 @@ import {
   saveDataSlotsSchema,
   refineInputSlotSchema,
   refineDataSlotRequestSchema,
+  dataSlotPlacementSchema,
+  dataSlotAssignmentOutputSchema,
+  assignExistingSlotSchema,
 } from '@/lib/app/questionnaire/data-slots/schemas';
 
 // ---------------------------------------------------------------------------
@@ -595,5 +598,74 @@ describe('refineDataSlotRequestSchema', () => {
       siblingSlots: [{ name: 'Pricing', theme: 'Money' }],
     });
     expect(result.success).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Assign-orphans schemas
+// ---------------------------------------------------------------------------
+
+describe('dataSlotPlacementSchema', () => {
+  it('accepts an existing-slot placement', () => {
+    const r = dataSlotPlacementSchema.safeParse({
+      questionKey: 'q_new',
+      target: { kind: 'existing', slotKey: 'work_morale' },
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it('accepts a new-slot placement (name word-cap + required fields enforced)', () => {
+    const r = dataSlotPlacementSchema.safeParse({
+      questionKey: 'q_new',
+      target: {
+        kind: 'new',
+        name: 'Current morale',
+        description: 'How they feel.',
+        theme: 'Wellbeing',
+      },
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it('rejects an unknown target kind and a new target missing its description', () => {
+    expect(
+      dataSlotPlacementSchema.safeParse({ questionKey: 'q', target: { kind: 'bogus' } }).success
+    ).toBe(false);
+    expect(
+      dataSlotPlacementSchema.safeParse({
+        questionKey: 'q',
+        target: { kind: 'new', name: 'X', theme: 'Y' },
+      }).success
+    ).toBe(false);
+  });
+});
+
+describe('dataSlotAssignmentOutputSchema', () => {
+  it('accepts a placements array', () => {
+    const r = dataSlotAssignmentOutputSchema.safeParse({
+      placements: [{ questionKey: 'q', target: { kind: 'existing', slotKey: 's' } }],
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it('rejects more than 60 placements', () => {
+    const many = Array.from({ length: 61 }, (_, i) => ({
+      questionKey: `q${i}`,
+      target: { kind: 'existing' as const, slotKey: 's' },
+    }));
+    expect(dataSlotAssignmentOutputSchema.safeParse({ placements: many }).success).toBe(false);
+  });
+});
+
+describe('assignExistingSlotSchema', () => {
+  it('defaults questionKeys to an empty array and requires name/theme/description', () => {
+    const r = assignExistingSlotSchema.safeParse({
+      key: 'k',
+      name: 'Name',
+      theme: 'Theme',
+      description: 'Desc',
+    });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.questionKeys).toEqual([]);
   });
 });

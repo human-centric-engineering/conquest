@@ -43,6 +43,46 @@ export const dataSlotRefinementOutputSchema = z.object({
 export type DataSlotRefinementOutput = z.infer<typeof dataSlotRefinementOutputSchema>;
 
 /**
+ * Where one orphaned (unslotted) question should land: an EXISTING slot (by its stable `key`)
+ * when it captures the same data point, or a NEW slot (name/description/theme) for a genuinely
+ * distinct one. The question is referenced by `questionKey`; the deterministic merge then either
+ * unions the key into the named slot or creates the new slot — the LLM never rewrites existing
+ * slots, it only places.
+ */
+export const dataSlotPlacementSchema = z.object({
+  questionKey: z.string().min(1),
+  target: z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('existing'), slotKey: z.string().min(1) }),
+    z.object({
+      kind: z.literal('new'),
+      name: nameSchema,
+      description: descriptionSchema,
+      theme: themeSchema,
+    }),
+  ]),
+});
+
+export type DataSlotPlacement = z.infer<typeof dataSlotPlacementSchema>;
+
+/** The assign-orphans capability's structured output — one placement per question it was given. */
+export const dataSlotAssignmentOutputSchema = z.object({
+  placements: z.array(dataSlotPlacementSchema).max(60),
+});
+
+export type DataSlotAssignmentOutput = z.infer<typeof dataSlotAssignmentOutputSchema>;
+
+/** One existing slot as context for the assigner (what the new question might join). */
+export const assignExistingSlotSchema = z.object({
+  key: z.string().min(1),
+  name: z.string().min(1).max(200),
+  theme: z.string().min(1).max(200),
+  description: z.string().min(1).max(4000),
+  questionKeys: z.array(z.string().min(1)).max(300).default([]),
+});
+
+export type AssignExistingSlot = z.infer<typeof assignExistingSlotSchema>;
+
+/**
  * The CURRENT slot a refine call operates on, as the admin sends it. Lenient (the working copy
  * may be mid-edit — e.g. a blanked name) since it is only context for the model; the model's
  * OUTPUT is validated strictly by {@link generatedDataSlotSchema}. Length caps bound the payload.

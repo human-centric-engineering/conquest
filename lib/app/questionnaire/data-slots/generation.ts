@@ -10,8 +10,11 @@
 import { z } from 'zod';
 import type { LlmMessage } from '@/lib/orchestration/llm/types';
 import {
+  dataSlotAssignmentOutputSchema,
   dataSlotGenerationOutputSchema,
   dataSlotRefinementOutputSchema,
+  type AssignExistingSlot,
+  type DataSlotAssignmentOutput,
   type DataSlotGenerationOutput,
   type DataSlotRefinementOutput,
   type DataSlotStructureInput,
@@ -197,6 +200,71 @@ export function buildDataSlotRefinementPrompt(
   ];
 }
 
+/**
+ * Build the ASSIGN prompt: place one or more NEW (unslotted) questions into the existing data-slot
+ * set. For each new question the model decides whether it belongs in an existing slot (by its stable
+ * `key`) or needs a new slot. It does NOT rewrite existing slots — the route's deterministic merge
+ * does the writing, so this call only emits placements. Output is JSON parsed by the capability.
+ */
+export function buildDataSlotAssignmentPrompt(
+  structure: DataSlotStructureInput,
+  existingSlots: AssignExistingSlot[],
+  orphanQuestionKeys: string[]
+): LlmMessage[] {
+  const system =
+    'You maintain the DATA SLOTS for a conversational questionnaire. A data slot is a short ' +
+    '(1–4 word) semantic target — a single meaningful thing we want to learn — with a detailed ' +
+    'description and the question(s) it abstracts over. The questionnaire already has a set of ' +
+    'data slots; some NEW questions were added afterwards and are not yet covered by any slot.\n\n' +
+    'For EACH new question, decide where it belongs:\n' +
+    '- Prefer an EXISTING slot when the question captures the SAME data point as that slot ' +
+    '(return that slot’s `key`). A question can extend a slot that already spans related questions.\n' +
+    '- Create a NEW slot only when the question is a genuinely distinct data point no existing slot ' +
+    'covers. Give it a 1–4 word human `name` in Title or sentence case (e.g. "Current morale", ' +
+    '"Time to value") — NOT a snake_case key like "current_morale"; match the style of the existing ' +
+    'slot names above. Add a short `theme` (reuse an existing theme when it fits) and a DETAILED ' +
+    '`description` (3–5 sentences) stating exactly what to capture and why it matters.\n' +
+    '- If two new questions are the same distinct data point, give them the SAME new slot `name` ' +
+    'so they merge into one slot.\n' +
+    'Return one placement for EVERY new question — never drop one.\n' +
+    'Reply with JSON only: { "placements": [ { "questionKey", "target": ' +
+    '{ "kind": "existing", "slotKey" } | { "kind": "new", "name", "description", "theme" } } ] }. ' +
+    'No prose, no markdown.';
+
+  const slotLines = existingSlots.map(
+    (s) =>
+      `- [key: ${s.key}] "${s.name}" [theme: ${s.theme}] (covers: ${
+        s.questionKeys.join(', ') || 'none'
+      }) — ${s.description}`
+  );
+  const byKey = new Map(structure.questions.map((q) => [q.key, q]));
+  const orphanLines = orphanQuestionKeys.map((key) => {
+    const q = byKey.get(key);
+    return q
+      ? `- [${q.key}] (${q.type}${q.sectionTitle ? `, section: ${q.sectionTitle}` : ''}) ${q.prompt}`
+      : `- [${key}] (question not found)`;
+  });
+  const user =
+    (structure.goal ? `Questionnaire goal: ${structure.goal}\n\n` : '') +
+    `Existing data slots (${existingSlots.length}):\n${slotLines.join('\n') || '(none)'}\n\n` +
+    `New questions to place (${orphanQuestionKeys.length}):\n${orphanLines.join('\n')}\n\n` +
+    'Place every new question now.';
+
+  return [
+    { role: 'system', content: system },
+    { role: 'user', content: user },
+  ];
+}
+
+/** Retry nudge (user-message text) when an assign response wasn't valid JSON / schema. */
+export function buildDataSlotAssignmentRetryMessage(): string {
+  return (
+    'Your previous reply was not valid. Reply with ONLY the JSON object ' +
+    '{ "placements": [ { "questionKey", "target": { "kind": "existing", "slotKey" } | ' +
+    '{ "kind": "new", "name", "description", "theme" } } ] } and nothing else.'
+  );
+}
+
 /** Retry nudge (user-message text) when a refine response wasn't valid JSON / schema. */
 export function buildDataSlotRefinementRetryMessage(): string {
   return (
@@ -280,6 +348,18 @@ export type DataSlotRefinementValidation =
 /** Validate a parsed refine response ({ slot }) against the refinement output schema. */
 export function validateDataSlotRefinement(parsed: unknown): DataSlotRefinementValidation {
   const result = dataSlotRefinementOutputSchema.safeParse(parsed);
+  return result.success
+    ? { ok: true, value: result.data }
+    : { ok: false, issues: result.error.issues };
+}
+
+export type DataSlotAssignmentValidation =
+  | { ok: true; value: DataSlotAssignmentOutput }
+  | { ok: false; issues: z.ZodIssue[] };
+
+/** Validate a parsed assign response ({ placements }) against the assignment output schema. */
+export function validateDataSlotAssignment(parsed: unknown): DataSlotAssignmentValidation {
+  const result = dataSlotAssignmentOutputSchema.safeParse(parsed);
   return result.success
     ? { ok: true, value: result.data }
     : { ok: false, issues: result.error.issues };

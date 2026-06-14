@@ -676,6 +676,52 @@ export const REFINE_DATA_SLOT_FUNCTION_DEFINITION: CapabilityFunctionDefinition 
   },
 };
 
+/** Slug of the assign-data-slots capability (source of truth for class + seed row). */
+export const ASSIGN_DATA_SLOTS_CAPABILITY_SLUG = 'app_assign_data_slots';
+
+/** `AiCapability.executionHandler` for the assign-data-slots capability — the class name. */
+export const ASSIGN_DATA_SLOTS_HANDLER = 'AppAssignDataSlotsCapability';
+
+/**
+ * The assign-data-slots capability's OpenAI-compatible function definition — shared by the
+ * `BaseCapability` subclass and the `AiCapability` seed row so the two can't drift. Reuses the
+ * data-slot generator agent ({@link QUESTIONNAIRE_DATA_SLOTS_AGENT_SLUG}); dispatched
+ * programmatically by the assign route. Places newly-added (unslotted) questions into existing
+ * slots or new ones — it only emits placements; the route's deterministic merge does the writing.
+ */
+export const ASSIGN_DATA_SLOTS_FUNCTION_DEFINITION: CapabilityFunctionDefinition = {
+  name: ASSIGN_DATA_SLOTS_CAPABILITY_SLUG,
+  description:
+    "Place newly-added (unslotted) questions into a questionnaire version's existing data slots — or propose new slots for genuinely distinct data points — via a provider-agnostic structured LLM call. Returns one placement per question (existing slot key, or a new slot's name/description/theme); the caller merges deterministically and persists.",
+  parameters: {
+    type: 'object',
+    properties: {
+      structure: {
+        type: 'object',
+        description:
+          'The version structure DTO: { goal, audience, questions[] } — context for placing the new questions.',
+        additionalProperties: true,
+      },
+      existingSlots: {
+        type: 'array',
+        description:
+          'The version’s current data slots: [{ key, name, theme, description, questionKeys[] }] — what a new question may join.',
+        items: { type: 'object', additionalProperties: true },
+      },
+      orphanQuestionKeys: {
+        type: 'array',
+        description: 'Keys of the new questions not yet covered by any slot — place each one.',
+        items: { type: 'string' },
+      },
+      versionId: {
+        type: 'string',
+        description: 'Stable version identity, threaded into cost-log metadata.',
+      },
+    },
+    required: ['structure', 'existingSlots', 'orphanQuestionKeys'],
+  },
+};
+
 /**
  * Slug of the evaluate-structure capability (F5.1). One source of truth shared by the
  * `BaseCapability` subclass, its `AiCapability` seed row, and the evaluate-preview

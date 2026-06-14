@@ -217,7 +217,7 @@ describe('DataSlotsReview', () => {
       render(
         <DataSlotsReview {...baseProps()} initialSlots={[makeSlot({ questionKeys: ['q1'] })]} />
       );
-      expect(screen.getByText(/not yet covered by any slot/i)).toBeInTheDocument();
+      expect(screen.getByText(/not in any data slot/i)).toBeInTheDocument();
       expect(screen.getByText(/q2, q3/)).toBeInTheDocument();
     });
 
@@ -739,6 +739,54 @@ describe('DataSlotsReview', () => {
       await user.click(btn);
 
       await waitFor(() => expect(btn).toBeDisabled());
+    });
+  });
+
+  // ── Assign orphaned questions (catch-all) ─────────────────────────────────
+
+  describe('assign unslotted questions', () => {
+    it('offers an AI-assign button when a live set has uncovered questions', () => {
+      render(
+        <DataSlotsReview {...baseProps()} initialSlots={[makeSlot({ questionKeys: ['q1'] })]} />
+      );
+      expect(screen.getByRole('button', { name: /assign .* with ai/i })).toBeInTheDocument();
+    });
+
+    it('calls the assign endpoint and refreshes to the new live set', async () => {
+      const fetchMock = mockFetchSuccess({
+        slots: [makeSlot({ questionKeys: ['q1', 'q2', 'q3'] })],
+        assigned: 2,
+        created: 0,
+      });
+      render(
+        <DataSlotsReview {...baseProps()} initialSlots={[makeSlot({ questionKeys: ['q1'] })]} />
+      );
+
+      await userEvent.click(screen.getByRole('button', { name: /assign .* with ai/i }));
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        API.APP.QUESTIONNAIRES.versionDataSlotsAssign('qn-1', 'ver-1'),
+        expect.objectContaining({ method: 'POST' })
+      );
+      await waitFor(() => expect(screen.getByText(/Assigned 2 questions/)).toBeInTheDocument());
+      await waitFor(() => expect(mockRouterRefresh).toHaveBeenCalled());
+    });
+
+    it('surfaces a fail-soft diagnostic without changing the set', async () => {
+      mockFetchSuccess({
+        slots: [makeSlot({ questionKeys: ['q1'] })],
+        assigned: 0,
+        created: 0,
+        diagnostic: 'assign_failed',
+        diagnosticMessage: 'The assigner timed out.',
+      });
+      render(
+        <DataSlotsReview {...baseProps()} initialSlots={[makeSlot({ questionKeys: ['q1'] })]} />
+      );
+
+      await userEvent.click(screen.getByRole('button', { name: /assign .* with ai/i }));
+
+      await waitFor(() => expect(screen.getByText('The assigner timed out.')).toBeInTheDocument());
     });
   });
 });

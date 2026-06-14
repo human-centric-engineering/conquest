@@ -169,4 +169,15 @@ describe('coerceProposedEdit', () => {
     const op = coerceProposedEdit({ op: 'edit_audience', audience: { expertiseLevel: 'novice' } });
     expect(op).toEqual({ op: 'edit_audience', audience: { expertiseLevel: 'novice' } });
   });
+
+  it('accepts the optional judge-proposed key on add_question', () => {
+    const op = coerceProposedEdit({
+      op: 'add_question',
+      prompt: 'How would you describe your current morale at work?',
+      type: 'free_text',
+      key: 'work_morale',
+      sectionKey: 'Background',
+    });
+    expect(op).toMatchObject({ op: 'add_question', key: 'work_morale', type: 'free_text' });
+  });
 });

@@ -67,15 +67,29 @@ function run(findings: EvaluationFindingView[]): EvaluationRunDetailView {
   };
 }
 
-function renderQueue(findings: EvaluationFindingView[], canApply = true) {
+function renderQueue(
+  findings: EvaluationFindingView[],
+  canApply = true,
+  dataSlotsAvailable = false
+) {
   return render(
     <EvaluationRunDetail
       run={run(findings)}
       questionnaireId="qn1"
       versionId="v1"
       canApply={canApply}
+      dataSlotsAvailable={dataSlotsAvailable}
     />
   );
+}
+
+function addQuestionFinding(over: Partial<EvaluationFindingView> = {}): EvaluationFindingView {
+  // Keep dimension = 'duplicates' so it renders under the test run's single dimension summary.
+  return finding({
+    applicable: 'deep-link',
+    proposedEdit: { op: 'add_question', prompt: 'How big is your team?', type: 'free_text' },
+    ...over,
+  });
 }
 
 function mockFetchOnce(data: unknown, meta?: unknown) {
@@ -145,15 +159,97 @@ describe('EvaluationRunDetail review queue', () => {
     expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled();
   });
 
-  it('shows an "Open in editor" link instead of Apply for a deep-link finding', () => {
+  it('offers one-click "Add to questionnaire" + a seeded "Open in editor" link for an add_question', () => {
+    renderQueue([
+      finding({
+        applicable: 'deep-link',
+        proposedEdit: { op: 'add_question', prompt: 'How big is your team?', type: 'free_text' },
+      }),
+    ]);
+    // Not the generic "Apply" — a question-specific primary action, plus the drafted prompt preview.
+    expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add to questionnaire' })).toBeInTheDocument();
+    expect(screen.getByText('How big is your team?')).toBeInTheDocument();
+    // The editor link carries the finding ref so the editor can pre-fill the composer.
+    const link = screen.getByRole('link', { name: /open in editor/i });
+    expect(link.getAttribute('href')).toContain('seedFinding=run1%3Af1');
+  });
+
+  it('"Add to questionnaire" calls the apply endpoint and updates the card on success', async () => {
     renderQueue([
       finding({
         applicable: 'deep-link',
         proposedEdit: { op: 'add_question', prompt: 'New?', type: 'free_text' },
       }),
     ]);
-    expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /open in editor/i })).toBeInTheDocument();
+    mockFetchOnce({ finding: finding({ status: 'applied', appliedToVersionId: 'v1' }) });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Add to questionnaire' }));
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      '/api/v1/app/questionnaires/qn1/versions/v1/evaluations/run1/findings/f1/apply',
+      expect.objectContaining({ method: 'POST' })
+    );
+  });
+
+  it('omits Accept for an add_question (the work-actions imply it) but keeps Dismiss', () => {
+    renderQueue([addQuestionFinding()]);
+    expect(screen.queryByRole('button', { name: 'Accept' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Dismiss' })).toBeInTheDocument();
+    // Other op types still offer Accept (batch agree-then-apply).
+    expect(screen.getByRole('button', { name: 'Add to questionnaire' })).toBeInTheDocument();
+  });
+
+  it('disables "Add to questionnaire" when the add_question finding is stale', () => {
+    renderQueue([
+      finding({
+        applicable: 'deep-link',
+        stale: true,
+        proposedEdit: { op: 'add_question', prompt: 'New?', type: 'free_text' },
+      }),
+    ]);
+    expect(screen.getByRole('button', { name: 'Add to questionnaire' })).toBeDisabled();
+  });
+
+  it('shows the data-slot checkbox for an add_question only when the version has data slots', () => {
+    const { unmount } = renderQueue([addQuestionFinding()], true, false);
+    expect(screen.queryByLabelText(/add to a data slot/i)).not.toBeInTheDocument();
+    unmount();
+    renderQueue([addQuestionFinding()], true, true);
+    expect(screen.getByLabelText(/add to a data slot/i)).toBeChecked();
+  });
+
+  it('assigns the new question to a data slot after a one-click add when the checkbox is on', async () => {
+    renderQueue([addQuestionFinding()], true, true);
+    // Apply response (the finding, now applied to v1) then the follow-up assign call.
+    mockFetchOnce({ finding: addQuestionFinding({ status: 'applied', appliedToVersionId: 'v1' }) });
+    (global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ success: true, data: { slots: [], assigned: 1, created: 0 } }),
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Add to questionnaire' }));
+
+    await waitFor(() =>
+      expect(global.fetch).toHaveBeenCalledWith(
+        '/api/v1/app/questionnaires/qn1/versions/v1/data-slots/assign',
+        expect.objectContaining({ method: 'POST' })
+      )
+    );
+  });
+
+  it('does not assign after a one-click add when the data-slot checkbox is unticked', async () => {
+    renderQueue([addQuestionFinding()], true, true);
+    await userEvent.click(screen.getByLabelText(/add to a data slot/i)); // untick
+    mockFetchOnce({ finding: addQuestionFinding({ status: 'applied', appliedToVersionId: 'v1' }) });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Add to questionnaire' }));
+
+    await waitFor(() => expect(screen.getByText(/Applied to/)).toBeInTheDocument());
+    const calledAssign = (global.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.some(
+      (c) => typeof c[0] === 'string' && c[0].includes('/data-slots/assign')
+    );
+    expect(calledAssign).toBe(false);
   });
 
   it('filters findings by status', async () => {
@@ -169,10 +265,10 @@ describe('EvaluationRunDetail review queue', () => {
     );
   });
 
-  it('decline calls PATCH with { action: "decline" }', async () => {
+  it('dismiss calls PATCH with { action: "decline" }', async () => {
     renderQueue([finding()]);
     mockFetchOnce(finding({ status: 'declined' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Decline' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
     expect(global.fetch).toHaveBeenCalledWith(
       expect.stringContaining('/findings/f1'),
       expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ action: 'decline' }) })

@@ -15,6 +15,7 @@
  */
 import { registerAppCapability } from '@/lib/orchestration/capabilities/registry';
 import {
+  AppAssignDataSlotsCapability,
   AppComposeCompletionOfferCapability,
   AppDetectContradictionsCapability,
   AppEvaluateStructureCapability,
@@ -69,4 +70,9 @@ export function initAppCapabilities(): void {
   // Data Slots — single-slot refinement. Reuses the generator agent; inert until the same flags
   // are on (only the flag-gated refine route dispatches it), so unconditional registration is safe.
   registerAppCapability(new AppRefineDataSlotCapability());
+
+  // Data Slots — assign newly-added (orphaned) questions to existing slots or new ones. Reuses the
+  // generator agent; inert until the same flags are on (only the flag-gated assign route dispatches
+  // it), so unconditional registration here is safe.
+  registerAppCapability(new AppAssignDataSlotsCapability());
 }

@@ -17,7 +17,9 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ACCESS_MODE_LABELS } from '@/lib/app/questionnaire/types';
 import {
+  getEvaluationAddQuestionSeed,
   getQuestionnaireDetailCached,
+  getVersionDataSlotCountCached,
   getVersionGraphCached,
   resolveQuestionnaireWorkspaceFlags,
 } from '@/lib/app/questionnaire/workspace-data';
@@ -29,12 +31,12 @@ export const metadata: Metadata = {
 
 interface PageProps {
   params: Promise<{ id: string; vid: string }>;
-  searchParams: Promise<{ edit?: string }>;
+  searchParams: Promise<{ edit?: string; seedFinding?: string }>;
 }
 
 export default async function StructureTab({ params, searchParams }: PageProps) {
   const { id, vid } = await params;
-  const { edit } = await searchParams;
+  const { edit, seedFinding } = await searchParams;
 
   const [detail, graph] = await Promise.all([
     getQuestionnaireDetailCached(id),
@@ -45,10 +47,22 @@ export default async function StructureTab({ params, searchParams }: PageProps) 
   const selected = detail.versions.find((ver) => ver.id === vid);
   if (!selected) notFound();
 
-  const editing = edit === '1' && graph !== null;
   // Workspace flags (cached): `dataSlots` controls whether the header surfaces the data-slot count
   // beside the question count. (Run-time config — incl. the adaptive picker — lives on Settings.)
   const flags = await resolveQuestionnaireWorkspaceFlags();
+
+  // A design-evaluation "Open in editor" deep-link (?seedFinding=<runId>:<findingId>) pre-fills a
+  // suggested question. Loading it forces edit mode so the composer is visible immediately.
+  const seed =
+    seedFinding && flags.designEval && graph
+      ? await getEvaluationAddQuestionSeed(id, vid, seedFinding)
+      : null;
+  const editing = (edit === '1' || seed !== null) && graph !== null;
+
+  // When the version already has data slots, the seed composer offers to slot a newly-added
+  // question (a question added afterwards would otherwise be orphaned from the slots).
+  const hasDataSlots =
+    flags.dataSlots && editing ? (await getVersionDataSlotCountCached(id, vid)) > 0 : false;
 
   return (
     <div className="space-y-4">
@@ -114,7 +128,12 @@ export default async function StructureTab({ params, searchParams }: PageProps) 
 
       {graph ? (
         editing ? (
-          <VersionEditor questionnaireId={id} version={graph} />
+          <VersionEditor
+            questionnaireId={id}
+            version={graph}
+            seed={seed}
+            hasDataSlots={hasDataSlots}
+          />
         ) : (
           <VersionGraph graph={graph} />
         )

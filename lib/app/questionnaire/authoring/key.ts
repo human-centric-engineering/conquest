@@ -16,6 +16,15 @@
 /** Max slug length — keeps keys readable and well under any column limit. */
 const MAX_KEY_LENGTH = 60;
 
+/**
+ * Max number of content words kept in a derived key. A whole prompt slugified is a
+ * mouthful (`how_would_you_describe_your_current_morale_at_work`); keeping the first
+ * few content words yields the concise, scannable keys the editor expects
+ * (`describe_current_morale_work`). Authors who want an exact key still pass one
+ * explicitly (the route honours it verbatim); this only shapes the *derived* default.
+ */
+const MAX_KEY_WORDS = 4;
+
 /** Fallback when a prompt has no slug-able characters (e.g. only punctuation). */
 const FALLBACK_KEY = 'question';
 
@@ -23,20 +32,113 @@ const FALLBACK_KEY = 'question';
 const COMBINING_MARKS = /[\u0300-\u036f]/g;
 
 /**
- * Derive a `snake_case` ascii slug from a question prompt: lowercase, strip
- * accents, collapse any run of non-alphanumerics to a single `_`, trim leading/
- * trailing `_`, and truncate to {@link MAX_KEY_LENGTH}. Returns {@link FALLBACK_KEY}
+ * Grammatical function words dropped when deriving a key so the slug keeps the
+ * *meaningful* nouns/verbs, not the scaffolding of a question. Interrogatives,
+ * articles, pronouns, auxiliaries/copulas, and the most common prepositions/
+ * conjunctions — intentionally conservative (no content verbs/nouns), so a key
+ * never loses its subject. Lowercase; matched word-for-word after tokenisation.
+ */
+const STOPWORDS = new Set([
+  'what',
+  'which',
+  'who',
+  'whom',
+  'whose',
+  'when',
+  'where',
+  'why',
+  'how',
+  'is',
+  'are',
+  'am',
+  'was',
+  'were',
+  'be',
+  'been',
+  'being',
+  'do',
+  'does',
+  'did',
+  'will',
+  'would',
+  'shall',
+  'should',
+  'can',
+  'could',
+  'may',
+  'might',
+  'must',
+  'have',
+  'has',
+  'had',
+  'i',
+  'you',
+  'your',
+  'yours',
+  'we',
+  'our',
+  'ours',
+  'they',
+  'their',
+  'theirs',
+  'he',
+  'she',
+  'it',
+  'its',
+  'his',
+  'her',
+  'hers',
+  'my',
+  'mine',
+  'me',
+  'us',
+  'the',
+  'a',
+  'an',
+  'of',
+  'to',
+  'in',
+  'on',
+  'at',
+  'for',
+  'with',
+  'from',
+  'by',
+  'as',
+  'and',
+  'or',
+  'but',
+  'if',
+  'that',
+  'this',
+  'these',
+  'those',
+  'please',
+]);
+
+/**
+ * Derive a concise `snake_case` ascii slug from a question prompt: lowercase, strip
+ * accents, tokenise, drop grammatical {@link STOPWORDS}, and keep the first
+ * {@link MAX_KEY_WORDS} content words (so `"How would you describe your current morale
+ * at work?"` → `describe_current_morale_work`, not the whole sentence). When the prompt
+ * is *all* stopwords (e.g. `"How are you?"`) it falls back to the leading raw words so a
+ * key is never empty. Truncates to {@link MAX_KEY_LENGTH}; returns {@link FALLBACK_KEY}
  * when nothing slug-able remains.
  */
 export function slugifyKey(prompt: string): string {
-  const slug = prompt
+  const words = prompt
     .normalize('NFKD')
     .replace(COMBINING_MARKS, '')
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .slice(0, MAX_KEY_LENGTH)
-    .replace(/_+$/g, ''); // re-trim if truncation left a trailing _
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+
+  const content = words.filter((w) => !STOPWORDS.has(w));
+  // Keep the meaningful words; if a prompt is nothing but stopwords, keep the raw ones
+  // rather than emit the bare fallback (those words are still better than `question`).
+  const chosen = (content.length > 0 ? content : words).slice(0, MAX_KEY_WORDS);
+
+  const slug = chosen.join('_').slice(0, MAX_KEY_LENGTH).replace(/_+$/g, ''); // re-trim if truncation split mid-word
   return slug.length > 0 ? slug : FALLBACK_KEY;
 }
 

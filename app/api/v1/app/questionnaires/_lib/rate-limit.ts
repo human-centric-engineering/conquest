@@ -203,3 +203,19 @@ export const dataSlotsRefineLimiter = createRateLimiter({
   interval: DATA_SLOTS_REFINE_RATE_LIMIT_INTERVAL_MS,
   maxRequests: DATA_SLOTS_REFINE_RATE_LIMIT_MAX,
 });
+
+/**
+ * Assign-orphans sub-cap (Data Slots feature). One reasoning-model call places the version's newly
+ * added (unslotted) questions into slots. Triggered automatically when a question is added (the
+ * pre-ticked checkbox) and from the admin catch-all button — a few per minute at most, so the
+ * generation cap (20/min) is plenty. Keyed on the admin user id, who owns the spend.
+ */
+export const DATA_SLOTS_ASSIGN_RATE_LIMIT_MAX = 20;
+
+/** Sliding-window length for {@link dataSlotsAssignLimiter}, in milliseconds. */
+export const DATA_SLOTS_ASSIGN_RATE_LIMIT_INTERVAL_MS = 60_000;
+
+export const dataSlotsAssignLimiter = createRateLimiter({
+  interval: DATA_SLOTS_ASSIGN_RATE_LIMIT_INTERVAL_MS,
+  maxRequests: DATA_SLOTS_ASSIGN_RATE_LIMIT_MAX,
+});

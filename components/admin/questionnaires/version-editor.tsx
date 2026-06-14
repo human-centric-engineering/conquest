@@ -43,7 +43,9 @@ import { SectionEditor } from '@/components/admin/questionnaires/section-editor'
 import { TagVocabularyEditor } from '@/components/admin/questionnaires/tag-vocabulary-editor';
 import { SaveStatus, type SaveState } from '@/components/admin/questionnaires/save-status';
 import { authoringMutate } from '@/components/admin/questionnaires/authoring-mutate';
+import { EvaluationSeedComposer } from '@/components/admin/questionnaires/evaluation-seed-composer';
 import type {
+  EvaluationSeed,
   MutationSpec,
   RunMutation,
 } from '@/components/admin/questionnaires/version-editor-types';
@@ -67,9 +69,15 @@ const STATUS_ACTIONS: Record<
 export function VersionEditor({
   questionnaireId,
   version,
+  seed = null,
+  hasDataSlots = false,
 }: {
   questionnaireId: string;
   version: VersionGraphView;
+  /** A suggested question carried in from a design-evaluation finding (F5.3 "Open in editor"). */
+  seed?: EvaluationSeed | null;
+  /** Whether the version already has data slots (drives the seed composer's "slot it" checkbox). */
+  hasDataSlots?: boolean;
 }) {
   const router = useRouter();
   const versionId = version.id;
@@ -223,6 +231,18 @@ export function VersionEditor({
         <div className="border-destructive/40 bg-destructive/10 text-destructive rounded-md border p-3 text-sm">
           {error}
         </div>
+      )}
+
+      {/* A suggested question deep-linked from the design-evaluation review queue, pre-filled for
+          review before it's added (the one-click "Add to questionnaire" path skips this). */}
+      {seed && (
+        <EvaluationSeedComposer
+          questionnaireId={questionnaireId}
+          versionId={versionId}
+          sections={sections.map((s) => ({ id: s.id, title: s.title }))}
+          seed={seed}
+          hasDataSlots={hasDataSlots}
+        />
       )}
 
       {/* Goal/audience and run-time config live on the Settings tab (version settings, not

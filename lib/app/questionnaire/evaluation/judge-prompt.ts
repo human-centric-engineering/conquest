@@ -78,7 +78,9 @@ const DIMENSION_RUBRICS: Record<EvaluationDimension, DimensionRubric> = {
     ignore:
       'Redundancy (Duplicates judge that), wording (Clarity), and whether existing questions are on-mission (Goal-Match). Score gaps only — what is MISSING.',
     editGuidance:
-      'For a gap, target `"goal"` and attach `"proposedEdit": { "op": "add_question", "prompt": "<the question to add>", "type": "<one of the answer types>", "sectionKey": "<existing section title, optional>" }`. This drafts a new question for the admin to confirm.',
+      'For a gap, target `"goal"` and attach `"proposedEdit": { "op": "add_question", "prompt": "<the question>", "type": "<answer type>", "key": "<concise snake_case key>", "sectionKey": "<existing section title, optional>" }`. ' +
+      'Choose `type` to fit the answer the question actually invites — do NOT default to `likert`: use `free_text` for open-ended or descriptive answers ("How would you describe…", "What challenges…"); `likert` ONLY for agreement / satisfaction / frequency on a fixed scale ("Rate your morale from 1–5"); `single_choice` / `multi_choice` for a fixed option set (add the options in `typeConfig`); `numeric`, `date`, or `boolean` when the answer is a number, a date, or yes/no. ' +
+      'Make `key` a short, scannable `snake_case` slug of the essential noun(s) — not the whole sentence (e.g. `work_morale`, not `how_would_you_describe_your_current_morale_at_work`). This drafts a new question for the admin to confirm.',
   },
   duplicates: {
     focus:
