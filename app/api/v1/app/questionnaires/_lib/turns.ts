@@ -20,6 +20,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db/client';
 import { NotFoundError } from '@/lib/api/errors';
 import type { ToolCallRecord } from '@/lib/app/questionnaire/orchestrator';
+import type { SessionWarning } from '@/lib/app/questionnaire/chat/types';
 
 export type { ToolCallRecord };
 
@@ -52,6 +53,12 @@ export interface TurnWriteInput {
   sideEffectAnswerIds: string[];
   /** Data Slots feature: the `AppDataSlotFill.id`s this turn touched — back-stamped likewise. */
   sideEffectDataSlotIds?: string[];
+  /**
+   * Side-band notices this turn surfaced (`{ code, message }` — seriousness / support /
+   * contradiction). Persisted so the respondent surface replays them inline beneath the turn
+   * on resume rather than losing them on the next input. Empty/omitted for a turn with none.
+   */
+  warnings?: SessionWarning[];
   /** Summed per-turn LLM spend in USD; `null` until cost-summing is wired. */
   costUsd: number | null;
 }
@@ -88,6 +95,9 @@ export async function recordTurn(input: TurnWriteInput): Promise<string> {
         sideEffectAnswerIds: jsonInput(input.sideEffectAnswerIds),
         ...(input.sideEffectDataSlotIds
           ? { sideEffectDataSlotIds: jsonInput(input.sideEffectDataSlotIds) }
+          : {}),
+        ...(input.warnings && input.warnings.length > 0
+          ? { warnings: jsonInput(input.warnings) }
           : {}),
         costUsd: input.costUsd,
       },

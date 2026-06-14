@@ -11,6 +11,14 @@
 export interface QuestionnaireTurn {
   role: 'user' | 'assistant';
   content: string;
+  /**
+   * Side-band notices surfaced with this (assistant) turn — the seriousness / support /
+   * contradiction callouts rendered inline beneath it. Attached to the turn (rather than held
+   * as one transient banner) so they persist as the conversation scrolls on AND replay on
+   * resume from {@link AppQuestionnaireTurn.warnings}. Absent/empty on user turns and turns
+   * that raised none.
+   */
+  warnings?: SessionWarning[];
 }
 
 /**

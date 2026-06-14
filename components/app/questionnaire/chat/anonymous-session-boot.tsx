@@ -21,6 +21,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { z } from 'zod';
 import { Loader2 } from 'lucide-react';
 
 import { API } from '@/lib/api/endpoints';
@@ -28,6 +29,7 @@ import { Button } from '@/components/ui/button';
 import { SessionWorkspace } from '@/components/app/questionnaire/session-workspace';
 import { buildWelcomeTurns } from '@/lib/app/questionnaire/chat/greeting';
 import type { PresentationMode } from '@/lib/app/questionnaire/types';
+import type { QuestionnaireTurn } from '@/lib/app/questionnaire/chat/types';
 
 interface AnonymousSessionBootProps {
   versionId: string;
@@ -68,8 +70,53 @@ interface AnonCreateResponse {
 
 type BootState =
   | { phase: 'creating' }
-  | { phase: 'ready'; sessionId: string; accessToken: string }
+  | {
+      phase: 'ready';
+      sessionId: string;
+      accessToken: string;
+      /** Seeded transcript: a replayed conversation on resume, else the fresh welcome turn. */
+      initialTurns: QuestionnaireTurn[];
+      /** Open proactively only on a fresh session (no prior turns to replay). */
+      autoStart: boolean;
+    }
   | { phase: 'error'; message: string };
+
+/** The transcript-read response shape — validated at the fetch boundary (no `as` on the wire). */
+const transcriptResponseSchema = z.object({
+  success: z.boolean(),
+  data: z
+    .object({
+      turns: z.array(
+        z.object({
+          role: z.enum(['user', 'assistant']),
+          content: z.string(),
+          warnings: z.array(z.object({ code: z.string(), message: z.string() })).optional(),
+        })
+      ),
+    })
+    .optional(),
+});
+
+/**
+ * Fetch the session's replayed transcript (token-authed). Fails soft to an empty transcript on any
+ * error — a transcript read must never block the surface from opening; the worst case is a fresh
+ * greeting + a re-asked opening question, exactly the pre-replay behaviour.
+ */
+async function fetchTranscript(
+  sessionId: string,
+  accessToken: string
+): Promise<QuestionnaireTurn[]> {
+  try {
+    const res = await fetch(API.APP.QUESTIONNAIRE_SESSIONS.transcript(sessionId), {
+      headers: { 'X-Session-Token': accessToken },
+    });
+    if (!res.ok) return [];
+    const parsed = transcriptResponseSchema.safeParse(await res.json());
+    return parsed.success ? (parsed.data.data?.turns ?? []) : [];
+  } catch {
+    return [];
+  }
+}
 
 function storageKey(versionId: string, preview: boolean): string {
   return `${preview ? 'qn.preview' : 'qn.anon'}.${versionId}`;
@@ -116,56 +163,75 @@ export function AnonymousSessionBoot({
     if (startedRef.current) return;
     startedRef.current = true;
 
-    const existing = readStored(versionId, preview);
-    if (existing) {
-      setState({
-        phase: 'ready',
-        sessionId: existing.sessionId,
-        accessToken: existing.accessToken,
-      });
-      return;
-    }
-
     void (async () => {
-      try {
-        const endpoint = preview
-          ? API.APP.QUESTIONNAIRE_SESSIONS.PREVIEW
-          : API.APP.QUESTIONNAIRE_SESSIONS.ANONYMOUS;
-        const res = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ versionId }),
-        });
-        const body = (await res.json()) as AnonCreateResponse;
+      // Resolve a session + token: reuse a still-valid stored one (refresh within the 24h TTL),
+      // else mint a fresh session.
+      let sessionId: string;
+      let accessToken: string;
 
-        if (!res.ok || !body.success || !body.data) {
+      const existing = readStored(versionId, preview);
+      if (existing) {
+        sessionId = existing.sessionId;
+        accessToken = existing.accessToken;
+      } else {
+        try {
+          const endpoint = preview
+            ? API.APP.QUESTIONNAIRE_SESSIONS.PREVIEW
+            : API.APP.QUESTIONNAIRE_SESSIONS.ANONYMOUS;
+          const res = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ versionId }),
+          });
+          const body = (await res.json()) as AnonCreateResponse;
+
+          if (!res.ok || !body.success || !body.data) {
+            setState({
+              phase: 'error',
+              message: body.error?.message ?? 'This questionnaire is not available right now.',
+            });
+            return;
+          }
+
+          const stored: StoredAnonSession = {
+            sessionId: body.data.session.id,
+            accessToken: body.data.accessToken,
+            expiresAt: body.data.expiresAt,
+          };
+          try {
+            window.sessionStorage.setItem(storageKey(versionId, preview), JSON.stringify(stored));
+          } catch {
+            // Storage unavailable (private mode) — the in-memory token still works for this load.
+          }
+          sessionId = stored.sessionId;
+          accessToken = stored.accessToken;
+        } catch {
           setState({
             phase: 'error',
-            message: body.error?.message ?? 'This questionnaire is not available right now.',
+            message:
+              'We could not start the questionnaire. Please check your connection and try again.',
           });
           return;
         }
-
-        const stored: StoredAnonSession = {
-          sessionId: body.data.session.id,
-          accessToken: body.data.accessToken,
-          expiresAt: body.data.expiresAt,
-        };
-        try {
-          window.sessionStorage.setItem(storageKey(versionId, preview), JSON.stringify(stored));
-        } catch {
-          // Storage unavailable (private mode) — the in-memory token still works for this load.
-        }
-        setState({ phase: 'ready', sessionId: stored.sessionId, accessToken: stored.accessToken });
-      } catch {
-        setState({
-          phase: 'error',
-          message:
-            'We could not start the questionnaire. Please check your connection and try again.',
-        });
       }
+
+      // Replay a prior conversation (incl. its persisted side-band notices) when this session
+      // already has turns — e.g. a refresh of a session in progress. A fresh session has none, so
+      // it shows the branded welcome and auto-opens the first question. (The token is client-only,
+      // so unlike the authenticated page this can't SSR-seed — hence the on-boot fetch.)
+      const turns = await fetchTranscript(sessionId, accessToken);
+      const resumed = turns.length > 0;
+      setState({
+        phase: 'ready',
+        sessionId,
+        accessToken,
+        initialTurns: resumed
+          ? turns
+          : buildWelcomeTurns({ welcomeCopy, voiceInputEnabled, anonymous }),
+        autoStart: !resumed,
+      });
     })();
-  }, [versionId, preview]);
+  }, [versionId, preview, welcomeCopy, voiceInputEnabled, anonymous]);
 
   if (state.phase === 'creating') {
     return (
@@ -194,12 +260,11 @@ export function AnonymousSessionBoot({
     <SessionWorkspace
       sessionId={state.sessionId}
       accessToken={state.accessToken}
-      initialTurns={buildWelcomeTurns({ welcomeCopy, voiceInputEnabled, anonymous })}
-      // This surface always shows the fresh greeting and never replays the transcript, so the
-      // kickoff always fires: it streams the opening question on a new session, and proactively
-      // re-asks the next pending question on a restored one (else the greeting has no question
-      // to answer beneath it). The live answer panel still reflects real prior progress.
-      autoStart
+      // A fresh session seeds the welcome turn and auto-opens the first question; a resumed one
+      // seeds its replayed transcript (so the prior conversation + its notices are restored) and
+      // does NOT auto-open — the last asked question is already on screen from the replay.
+      initialTurns={state.initialTurns}
+      autoStart={state.autoStart}
       presentationMode={presentationMode}
       voiceInputEnabled={voiceInputEnabled}
       attachmentInputEnabled={attachmentInputEnabled}

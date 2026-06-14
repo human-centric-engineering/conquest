@@ -484,6 +484,8 @@ export const API = {
       messages: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/messages`,
       /** Voice transcription (POST multipart `{ audio, language? }`). */
       transcribe: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/transcribe`,
+      /** Replayed transcript — prior turns + their persisted side-band notices (GET — F7.1 resume). */
+      transcript: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/transcript`,
       /** Answer-slot panel state — live read for the respondent panel (GET) (F7.2). */
       answers: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/answers`,
       /** Session lifecycle/status — completion-offer + cost tier + anon (GET) (F7.3). */

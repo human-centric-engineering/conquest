@@ -533,6 +533,9 @@ describe('questionnaire datamodel (Prisma.dmmf)', () => {
     expect(getField(model, 'targetedQuestionId').kind).toBe('scalar');
     expect(getField(model, 'toolCalls').type).toBe('Json');
     expect(getField(model, 'sideEffectAnswerIds').type).toBe('Json');
+    // Per-turn side-band notices ({ code, message }[]) — persisted so the respondent
+    // surface replays them inline on resume (not just transiently in the moment).
+    expect(getField(model, 'warnings').type).toBe('Json');
     expect(getField(model, 'costUsd').type).toBe('Float');
     expect(getField(model, 'createdAt').type).toBe('DateTime');
 
@@ -1033,6 +1036,30 @@ describe('app_questionnaire_turn migration SQL (F6.1)', () => {
     expect(executableSql).not.toContain('ai_knowledge');
     expect(executableSql).not.toContain('ai_message');
     expect(executableSql).not.toContain('searchVector');
+  });
+});
+
+describe('app_questionnaire_turn_warnings migration SQL', () => {
+  const sql = readMigrationSql('_app_questionnaire_turn_warnings');
+  const executableSql = executableLines(sql);
+
+  it('adds the warnings JSON column defaulting to an empty array', () => {
+    expect(sql).toMatch(
+      /ALTER TABLE "app_questionnaire_turn" ADD COLUMN\s+"warnings" JSONB NOT NULL DEFAULT '\[\]'/
+    );
+  });
+
+  it('is additive only — no table create/drop and no platform DDL', () => {
+    // Same schema-fold footgun as the sibling app migrations: `migrate dev` re-emitted the
+    // four pgvector DROP INDEX + the GENERATED searchVector ALTER. Stripped by hand; this
+    // guard fails if a regeneration leaks them back in.
+    expect(executableSql).not.toContain('CREATE TABLE');
+    expect(executableSql).not.toContain('DROP INDEX');
+    expect(executableSql).not.toContain('ai_knowledge');
+    expect(executableSql).not.toContain('ai_message');
+    expect(executableSql).not.toContain('searchVector');
+    // Exactly one executable statement — our single ALTER TABLE.
+    expect(executableSql.match(/ALTER TABLE/g) ?? []).toHaveLength(1);
   });
 });
 

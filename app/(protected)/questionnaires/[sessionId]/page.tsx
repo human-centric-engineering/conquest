@@ -15,6 +15,7 @@ import { buildWelcomeTurns } from '@/lib/app/questionnaire/chat/greeting';
 import { resolveThemeForSession } from '@/lib/app/questionnaire/chat/theme';
 import { loadAnswerPanelState } from '@/app/api/v1/app/questionnaire-sessions/_lib/answer-panel';
 import { loadSessionStatus } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-status';
+import { loadTranscript } from '@/app/api/v1/app/questionnaire-sessions/_lib/transcript';
 import { narrowToEnum, PRESENTATION_MODES } from '@/lib/app/questionnaire/types';
 import type { QuestionnaireChatStatus } from '@/lib/app/questionnaire/chat/types';
 import type { SessionStatusView } from '@/lib/app/questionnaire/session/status-view';
@@ -87,14 +88,12 @@ export default async function QuestionnaireSessionPage({
           },
         },
       },
-      _count: { select: { answers: true } },
     },
   });
 
   // Not found, or not this user's session — 404 either way (don't confirm existence).
   if (!row || row.respondentUserId !== session.user.id) notFound();
 
-  const resumed = row._count.answers > 0;
   const anonymous = row.version.config?.anonymousMode ?? false;
   const presentationMode = narrowToEnum(
     row.version.config?.presentationMode ?? 'chat',
@@ -110,31 +109,43 @@ export default async function QuestionnaireSessionPage({
   // panel + lifecycle status are SSR-seeded here (the user is already verified as owner),
   // so they paint with no fetch flash; the live updates after each turn come from the
   // client hooks.
-  const [voicePlatform, attachmentPlatform, theme, panel, status, formPanel] = await Promise.all([
-    isVoiceInputEnabled(),
-    isAttachmentInputEnabled(),
-    resolveThemeForSession(sessionId),
-    loadAnswerPanelState(sessionId),
-    loadSessionStatus(sessionId),
-    // Seed the full form structure for form/both modes (forForm = full structure, no data-slot
-    // swap); chat-only mode skips this round-trip.
-    wantsForm ? loadAnswerPanelState(sessionId, false, true) : Promise.resolve(null),
-  ]);
+  const [voicePlatform, attachmentPlatform, theme, panel, status, formPanel, transcript] =
+    await Promise.all([
+      isVoiceInputEnabled(),
+      isAttachmentInputEnabled(),
+      resolveThemeForSession(sessionId),
+      loadAnswerPanelState(sessionId),
+      loadSessionStatus(sessionId),
+      // Seed the full form structure for form/both modes (forForm = full structure, no data-slot
+      // swap); chat-only mode skips this round-trip.
+      wantsForm ? loadAnswerPanelState(sessionId, false, true) : Promise.resolve(null),
+      // Replay the prior conversation (incl. its persisted side-band notices) on resume.
+      loadTranscript(sessionId),
+    ]);
   const voiceInputEnabled = voicePlatform && voiceConfigured;
   const attachmentInputEnabled = attachmentPlatform && attachmentsConfigured;
   const initialStatus = initialChatStatus(status?.view, row.status === 'active');
+
+  // Resumed = the session already has turns. Replay them (transcript-only — the conversation is
+  // its own context); a fresh session shows the branded welcome + guidance and auto-opens. Keyed
+  // on turn count, not answers: a session can have turns with no captured answer yet (e.g. an
+  // opening question the respondent hasn't answered), and re-asking on every reload would burn a turn.
+  const resumed = transcript.length > 0;
+  const initialTurns = resumed
+    ? transcript
+    : buildWelcomeTurns({
+        resumed: false,
+        welcomeCopy: theme.welcomeCopy,
+        voiceInputEnabled,
+        anonymous,
+      });
 
   return (
     <div className="mx-auto h-[calc(100vh-12rem)] max-w-6xl">
       <BrandThemeProvider theme={theme}>
         <SessionWorkspace
           sessionId={sessionId}
-          initialTurns={buildWelcomeTurns({
-            resumed,
-            welcomeCopy: theme.welcomeCopy,
-            voiceInputEnabled,
-            anonymous,
-          })}
+          initialTurns={initialTurns}
           autoStart={!resumed}
           initialStatus={initialStatus}
           initialPanel={panel?.view}

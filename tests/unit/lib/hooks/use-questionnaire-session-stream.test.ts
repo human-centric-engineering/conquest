@@ -2,8 +2,9 @@
  * useQuestionnaireSessionStream — the respondent turn loop.
  *
  * Fakes the streaming fetch so we can assert optimistic append, content accumulation, the
- * side-band warning banner, and the pre-stream HTTP failure mapping (402/409/429) without a
- * real network or rAF (the committed turn uses the raw accumulator, not the typing buffer).
+ * per-turn side-band notices (attached to the committed turn), and the pre-stream HTTP failure
+ * mapping (402/409/429) without a real network or rAF (the committed turn uses the raw
+ * accumulator, not the typing buffer).
  *
  * @see lib/hooks/use-questionnaire-session-stream.ts
  */
@@ -159,7 +160,7 @@ describe('useQuestionnaireSessionStream', () => {
     expect((init.headers as Record<string, string>)['X-Session-Token']).toBe('tok-123');
   });
 
-  it('surfaces a warning frame without blocking the turn', async () => {
+  it('attaches a warning frame to the committed turn without blocking it', async () => {
     fetchMock.mockResolvedValue(
       streamResponse([
         frame('start', { conversationId: SESSION_ID, messageId: SESSION_ID }),
@@ -174,11 +175,13 @@ describe('useQuestionnaireSessionStream', () => {
       await result.current.sendMessage('hi');
     });
 
-    expect(result.current.warning).toEqual({
-      code: 'CONTRADICTION',
-      message: 'That differs from earlier.',
+    // The notice rides on the assistant turn it belongs to (so it persists past the next send),
+    // not a transient top-level banner.
+    expect(result.current.turns.at(-1)).toEqual({
+      role: 'assistant',
+      content: 'Noted.',
+      warnings: [{ code: 'CONTRADICTION', message: 'That differs from earlier.' }],
     });
-    expect(result.current.turns.at(-1)).toEqual({ role: 'assistant', content: 'Noted.' });
     expect(result.current.status).toBe('idle');
   });
 

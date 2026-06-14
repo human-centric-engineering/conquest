@@ -7,11 +7,17 @@
  * (3) create failure → renders the error UI with the server message and a "Try again" button;
  * (4) fetch throws → renders the connection error UI;
  * (5) StrictMode double-invoke → resolves (no spinner hang) and creates exactly one session;
- * (6) preview mode → POSTs to the admin `/preview` endpoint under its own storage key.
+ * (6) preview mode → POSTs to the admin `/preview` endpoint under its own storage key;
+ * (7) resume → a transcript read returning prior turns seeds them and suppresses the auto-open.
  *
- * `SessionWorkspace` (chat + answer panel) is replaced with a stub that writes its
- * sessionId and accessToken into `data-*` attributes so we can assert props without
- * mounting the full hook+SSE tree. `buildWelcomeTurns` is mocked to a no-op so the
+ * After resolving a session+token (stored or freshly created), the boot reads `GET …/transcript`
+ * to decide whether to replay a prior conversation. The default fake `fetch` dispatches by URL:
+ * a transcript read returns an empty transcript (fresh), and a create POST returns a success body;
+ * individual tests override via `mockResolvedValue`/`mockRejectedValue` as before.
+ *
+ * `SessionWorkspace` (chat + answer panel) is replaced with a stub that writes its sessionId,
+ * accessToken, the seeded turn count, and autoStart into `data-*` attributes so we can assert
+ * props without mounting the full hook+SSE tree. `buildWelcomeTurns` is mocked to a no-op so the
  * greeting module is not exercised here.
  *
  * @see components/app/questionnaire/chat/anonymous-session-boot.tsx
@@ -32,11 +38,18 @@ import type { SessionWorkspaceProps } from '@/components/app/questionnaire/sessi
  * tests can assert they were forwarded without mounting the full streaming component.
  */
 vi.mock('@/components/app/questionnaire/session-workspace', () => ({
-  SessionWorkspace: ({ sessionId, accessToken }: SessionWorkspaceProps) => (
+  SessionWorkspace: ({
+    sessionId,
+    accessToken,
+    autoStart,
+    initialTurns,
+  }: SessionWorkspaceProps) => (
     <div
       data-testid="questionnaire-chat"
       data-session-id={sessionId}
       data-access-token={accessToken ?? ''}
+      data-auto-start={String(autoStart ?? false)}
+      data-turn-count={String(initialTurns?.length ?? 0)}
     />
   ),
 }));
@@ -120,6 +133,16 @@ function jsonResponse(body: unknown, ok = true): Response {
   } as unknown as Response;
 }
 
+/** A transcript-read response body (`GET …/transcript`). */
+function transcriptResponse(turns: Array<{ role: string; content: string }>) {
+  return { success: true, data: { turns } };
+}
+
+/** Was a create POST (anonymous or preview) issued? Transcript GETs don't count. */
+function createCalls(): unknown[][] {
+  return fakeFetch.mock.calls.filter((c) => (c[1] as RequestInit | undefined)?.method === 'POST');
+}
+
 // ---------------------------------------------------------------------------
 // Setup / teardown
 // ---------------------------------------------------------------------------
@@ -128,7 +151,16 @@ let fakeFetch: ReturnType<typeof vi.fn>;
 let fakeStorage: Storage;
 
 beforeEach(() => {
-  fakeFetch = vi.fn();
+  // Default: dispatch by URL — a transcript read returns an empty transcript (fresh session), a
+  // create POST returns a generic success body. Tests that exercise create explicitly override
+  // with `mockResolvedValue`/`mockRejectedValue` (which then applies to every call, incl. the
+  // follow-up transcript read — whose non-transcript body fails to parse and degrades to fresh).
+  fakeFetch = vi.fn((url: unknown) => {
+    if (typeof url === 'string' && url.includes('/transcript')) {
+      return Promise.resolve(jsonResponse(transcriptResponse([])));
+    }
+    return Promise.resolve(jsonResponse(successBody('default-sess', 'default-tok')));
+  });
   vi.stubGlobal('fetch', fakeFetch);
 
   fakeStorage = makeSessionStorage();
@@ -169,7 +201,7 @@ describe('AnonymousSessionBoot', () => {
       expect(chat).toHaveAttribute('data-access-token', 'stored-tok-1');
     });
 
-    it('does NOT call fetch when a valid stored token is found', async () => {
+    it('does NOT POST a create when a valid stored token is found (reads the transcript only)', async () => {
       // Arrange
       fakeStorage.setItem(
         STORAGE_KEY,
@@ -179,11 +211,43 @@ describe('AnonymousSessionBoot', () => {
       // Act
       render(<AnonymousSessionBoot versionId={VERSION_ID} />);
 
-      // Assert: no network call — the stored token is sufficient.
+      // Assert: the stored token is sufficient — no create POST is issued (the only call is the
+      // transcript read that decides replay-vs-fresh).
       await waitFor(() => {
         expect(screen.getByTestId('questionnaire-chat')).toBeInTheDocument();
       });
-      expect(fakeFetch).not.toHaveBeenCalled();
+      expect(createCalls()).toHaveLength(0);
+    });
+
+    it('replays a prior transcript and suppresses the auto-open when the session has turns', async () => {
+      // Arrange: a stored token (so the only fetch is the transcript read) whose response carries
+      // prior turns.
+      fakeStorage.setItem(STORAGE_KEY, storedSession('resume-sess', 'resume-tok', futureExpiry()));
+      fakeFetch.mockResolvedValueOnce(
+        jsonResponse(
+          transcriptResponse([
+            { role: 'assistant', content: 'Earlier question?' },
+            { role: 'user', content: 'An earlier answer' },
+          ])
+        )
+      );
+
+      // The greeting mock accumulates across tests (no global clearMocks) — reset it so the
+      // "not called on resume" assertion reflects only this render.
+      vi.mocked(buildWelcomeTurns).mockClear();
+
+      // Act
+      render(<AnonymousSessionBoot versionId={VERSION_ID} />);
+      await waitFor(() => {
+        expect(screen.getByTestId('questionnaire-chat')).toBeInTheDocument();
+      });
+
+      // Assert: the replayed turns are seeded and the kickoff is suppressed (the last asked
+      // question is already on screen); the fresh greeting is NOT built on resume.
+      const chat = screen.getByTestId('questionnaire-chat');
+      expect(chat).toHaveAttribute('data-turn-count', '2');
+      expect(chat).toHaveAttribute('data-auto-start', 'false');
+      expect(buildWelcomeTurns).not.toHaveBeenCalled();
     });
 
     it('forwards the voice + anonymity guidance flags to the opening turn', async () => {
@@ -452,8 +516,9 @@ describe('AnonymousSessionBoot', () => {
         'data-session-id',
         'sm-sess'
       );
-      // …and the create ran once despite the double-invoke (no duplicate session).
-      expect(fakeFetch).toHaveBeenCalledTimes(1);
+      // …and the create POST ran once despite the double-invoke (no duplicate session) — the
+      // follow-up transcript read is a separate GET and doesn't count as a create.
+      expect(createCalls()).toHaveLength(1);
     });
   });
 
@@ -492,8 +557,8 @@ describe('AnonymousSessionBoot', () => {
         expect(screen.getByTestId('questionnaire-chat')).toBeInTheDocument();
       });
 
-      // Assert: the stored preview token is sufficient — no network call.
-      expect(fakeFetch).not.toHaveBeenCalled();
+      // Assert: the stored preview token is sufficient — no create POST (only the transcript read).
+      expect(createCalls()).toHaveLength(0);
       expect(screen.getByTestId('questionnaire-chat')).toHaveAttribute(
         'data-session-id',
         'pv-stored'

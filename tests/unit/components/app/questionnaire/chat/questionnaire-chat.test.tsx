@@ -3,8 +3,9 @@
  *
  * The stream state is now owned by `SessionWorkspace` and passed in as the `stream`
  * prop, so the test supplies it directly (no hook mock). Verifies the component renders
- * turns, the in-flight states (thinking / streaming caret), the warning banner, the
- * blocking panels, and that the composer wires Enter / click to `sendMessage`.
+ * turns, the in-flight states (thinking / streaming caret), the per-turn side-band notices
+ * (attached to the turn they belong to, so they persist), the blocking panels, and that the
+ * composer wires Enter / click to `sendMessage`.
  *
  * @see components/app/questionnaire/chat/questionnaire-chat.tsx
  */
@@ -68,7 +69,6 @@ function makeReturn(
     streaming: false,
     streamingText: '',
     status: 'idle',
-    warning: null,
     error: null,
     canSend: true,
     sendMessage,
@@ -115,9 +115,16 @@ describe('QuestionnaireChat', () => {
     expect(screen.queryByText(/Let me think/)).not.toBeInTheDocument();
   });
 
-  it('renders a generic side-band warning as a quiet line', () => {
+  it('renders a generic side-band notice as a quiet line beneath its turn', () => {
+    // Notices ride on the assistant turn that raised them (settled history renders them inline).
     hookReturn = makeReturn({
-      warning: { code: 'fail_soft', message: 'A detail could not be checked.' },
+      turns: [
+        {
+          role: 'assistant',
+          content: 'A question.',
+          warnings: [{ code: 'fail_soft', message: 'A detail could not be checked.' }],
+        },
+      ],
     });
     render(<QuestionnaireChat sessionId="s1" stream={hookReturn} />);
 
@@ -126,15 +133,42 @@ describe('QuestionnaireChat', () => {
     expect(screen.queryByText(/I noticed something/i)).not.toBeInTheDocument();
   });
 
-  it('renders a flagged contradiction as the "I noticed something" callout', () => {
+  it('renders a flagged contradiction as the "I noticed something" callout beneath its turn', () => {
     // The orchestrator emits a `contradiction`-coded warning whose message is the agent's probe.
     hookReturn = makeReturn({
-      warning: { code: 'contradiction', message: 'That differs from your earlier answer.' },
+      turns: [
+        {
+          role: 'assistant',
+          content: 'A question.',
+          warnings: [{ code: 'contradiction', message: 'That differs from your earlier answer.' }],
+        },
+      ],
     });
     render(<QuestionnaireChat sessionId="s1" stream={hookReturn} />);
 
     expect(screen.getByText(/I noticed something/i)).toBeInTheDocument();
     expect(screen.getByText('That differs from your earlier answer.')).toBeInTheDocument();
+  });
+
+  it('keeps an earlier turn’s notice on screen once a later turn is added', () => {
+    // The core fix: a notice is pinned to its turn, so a subsequent turn no longer wipes it
+    // (the prior bug — the single transient banner cleared on the next input).
+    hookReturn = makeReturn({
+      turns: [
+        {
+          role: 'assistant',
+          content: 'First question.',
+          warnings: [{ code: 'seriousness', message: "Let's keep it genuine please." }],
+        },
+        { role: 'user', content: 'a real answer' },
+        { role: 'assistant', content: 'Second question.' },
+      ],
+    });
+    render(<QuestionnaireChat sessionId="s1" stream={hookReturn} />);
+
+    // Both the later turn AND the earlier turn's notice are present.
+    expect(screen.getByText('Second question.')).toBeInTheDocument();
+    expect(screen.getByText("Let's keep it genuine please.")).toBeInTheDocument();
   });
 
   it('sends on Send click and clears the composer', () => {

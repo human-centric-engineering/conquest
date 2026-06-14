@@ -313,6 +313,12 @@ async function handleMessage(
       // Side-band frames the core determined (contradiction warnings, fail-soft notices).
       for (const ev of result.events) yield ev;
 
+      // Capture the same warning frames to persist on the turn, so the respondent surface can
+      // replay them inline beneath this turn on resume rather than losing them on the next input.
+      const turnWarnings = result.events
+        .filter((ev): ev is Extract<ChatEvent, { type: 'warning' }> => ev.type === 'warning')
+        .map((ev) => ({ code: ev.code, message: ev.message }));
+
       // Sensitivity awareness: the gentle-tone memory threaded into the phraser this turn. Fold the
       // JUST-detected disclosure in (the route persists it only after the run) so the disclosure
       // turn's OWN reply already treads carefully; later turns inherit it from session memory.
@@ -428,6 +434,7 @@ async function handleMessage(
           agentResponse,
           targetedQuestionId: persistedTargetedId,
           toolCalls: result.toolCalls,
+          ...(turnWarnings.length > 0 ? { warnings: turnWarnings } : {}),
           costUsd,
           upserts: result.sideEffects.answerUpserts,
           refinements: result.sideEffects.answerRefinements,
