@@ -12,7 +12,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { Home, Info, Mail } from 'lucide-react';
+import { Home, Info, Mail, MessagesSquare } from 'lucide-react';
 
 const navItems = [
   {
@@ -25,6 +25,11 @@ const navItems = [
     href: '/about',
     label: 'About',
     icon: Info,
+  },
+  {
+    href: '/about-conquest',
+    label: 'About ConQuest',
+    icon: MessagesSquare,
   },
   {
     href: '/contact',
