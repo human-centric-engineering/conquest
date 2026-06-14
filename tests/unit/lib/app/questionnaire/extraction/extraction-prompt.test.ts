@@ -207,6 +207,22 @@ describe('buildAnswerExtractionPrompt — data slots', () => {
     expect(system).toMatch(/specifics/i);
   });
 
+  it('forbids absence fills and demands hedged, low-confidence inferences', () => {
+    const messages = buildAnswerExtractionPrompt({
+      ...ctx({ candidateSlots: [slot({ key: 'q1' })], activeQuestionKey: null }),
+      dataSlotCandidates: [
+        { key: 'demographics', name: 'Employee Demographics', description: 'd', theme: 'About' },
+      ],
+    });
+    const system = systemContent(messages);
+    // Issue #2: never record what's missing — omit the slot so the panel shows "Not covered yet".
+    expect(system).toMatch(/ABSENCE/i);
+    expect(system).toContain('Not covered yet');
+    // Issue #1: inferred fills must be hedged, not asserted as fact, and honestly low confidence.
+    expect(system).toMatch(/HEDGED/i);
+    expect(system).toMatch(/≤ 0\.4/);
+  });
+
   it("renders a slot's current fill so the model can update/correct it", () => {
     const messages = buildAnswerExtractionPrompt({
       ...ctx({ candidateSlots: [slot({ key: 'q1' })], activeQuestionKey: null }),

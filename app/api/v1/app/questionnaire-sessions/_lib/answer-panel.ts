@@ -16,10 +16,12 @@
 
 import { prisma } from '@/lib/db/client';
 import {
+  ANSWER_PROVENANCES,
   ANSWER_SLOT_PANEL_SCOPES,
   DEFAULT_QUESTIONNAIRE_CONFIG,
   SESSION_STATUSES,
   narrowToEnum,
+  type AnswerProvenance,
   type AnswerSlotPanelScope,
 } from '@/lib/app/questionnaire/types';
 import {
@@ -50,6 +52,13 @@ function asRefinementHistory(value: unknown): PanelRefinementEntry[] {
 /** Cast a data-slot fill's stored `refinementHistory` Json column back to its entry array. */
 function asDataSlotHistory(value: unknown): DataSlotFillHistoryEntry[] {
   return Array.isArray(value) ? (value as DataSlotFillHistoryEntry[]) : [];
+}
+
+/** Narrow a stored `provenanceLabel` (free String column) to the provenance enum, or null. */
+function asProvenance(value: string | null | undefined): AnswerProvenance | null {
+  return value != null && (ANSWER_PROVENANCES as readonly string[]).includes(value)
+    ? (value as AnswerProvenance)
+    : null;
 }
 
 /** Narrow a stored `answerSlotPanelScope` to the enum (default when unknown/absent). */
@@ -114,6 +123,7 @@ export async function loadAnswerPanelState(
         select: {
           dataSlotId: true,
           paraphrase: true,
+          provenanceLabel: true,
           confidence: true,
           provisional: true,
           refinementHistory: true,
@@ -173,6 +183,8 @@ export async function loadAnswerPanelState(
         f.dataSlotId,
         {
           paraphrase: f.paraphrase,
+          // The stored column is a free String; narrow to the provenance enum (null when unrecognised).
+          provenance: asProvenance(f.provenanceLabel),
           confidence: f.confidence,
           provisional: f.provisional,
           history: asDataSlotHistory(f.refinementHistory),
@@ -200,6 +212,7 @@ export async function loadAnswerPanelState(
         name: ds.name,
         description: ds.description,
         paraphrase: fill?.paraphrase ?? null,
+        provenance: fill?.provenance ?? null,
         confidence: fill?.confidence ?? null,
         filled,
         provisional,

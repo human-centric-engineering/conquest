@@ -156,11 +156,22 @@ data-slot turn (the loader resolves it to the active data slot for re-ask/transi
 
 ## Respondent panel
 
-`GET …/:id/answers` returns themed `dataSlotGroups` (name + paraphrase + confidence + filled +
-`provisional`) in data-slot mode; `AnswerSlotPanel` renders them grouped by theme. A parked
-slot shows its inferred summary with a subtle **"provisional · may revisit"** marker and counts
-toward the blended progress. The question rows are suppressed — the respondent only ever sees the
-abstraction layer.
+`GET …/:id/answers` returns themed `dataSlotGroups` (name + paraphrase + **provenance** + confidence
+
+- filled + `provisional`) in data-slot mode; `AnswerSlotPanel` renders them grouped by theme. A
+  parked slot shows its inferred summary with a subtle **"provisional · may revisit"** marker and
+  counts toward the blended progress. The question rows are suppressed — the respondent only ever sees
+  the abstraction layer.
+
+**Inferred vs stated (honesty in the panel).** A fill carries the extractor's `provenance` — `direct`
+(stated), `inferred` (single-step reasoning), or `synthesised` (across turns). The panel flags
+`inferred`/`synthesised` fills with an **"Inferred · {confidence band}"** pill (e.g. _Inferred ·
+unsure_) so a tentative reading is never mistaken for something the respondent said. Two prompt rules
+keep these honest: (1) an inferred paraphrase must be **hedged** ("may", "seems") and never asserted
+as fact; (2) a loose inference from a brief/vague message must carry **low confidence (≤ 0.4)**.
+Low-confidence inferences stay **visible** (labelled), so the respondent can see — and correct — what
+we're guessing. The extractor must **never record absence** ("tenure not provided"): a slot the
+message doesn't bear on is simply **omitted**, and the panel shows "Not covered yet" on its own.
 
 ## Key files
 

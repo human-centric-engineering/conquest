@@ -19,6 +19,7 @@
 import { cn } from '@/lib/utils';
 import { AnswerSlotItem } from '@/components/app/questionnaire/panel/answer-slot-item';
 import { ConfidenceIndicator } from '@/components/app/questionnaire/panel/confidence-indicator';
+import { confidenceBand, confidenceBandLabel } from '@/lib/app/questionnaire/panel/confidence';
 import type {
   AnswerPanelView,
   DataSlotPanelGroup,
@@ -95,7 +96,18 @@ function DataSlotGroups({ groups }: { groups: DataSlotPanelGroup[] }) {
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium">{slot.name}</p>
                     {slot.paraphrase ? (
-                      <p className="text-muted-foreground mt-0.5 text-sm">{slot.paraphrase}</p>
+                      <>
+                        <p className="text-muted-foreground mt-0.5 text-sm">{slot.paraphrase}</p>
+                        {slot.provenance === 'inferred' || slot.provenance === 'synthesised' ? (
+                          <span
+                            className="bg-muted text-muted-foreground mt-1 inline-flex items-center rounded-full px-1.5 py-0.5 text-[11px] font-medium"
+                            title="We didn't capture this directly — it's our reading of the conversation, not something you stated"
+                          >
+                            Inferred ·{' '}
+                            {confidenceBandLabel(confidenceBand(slot.confidence)).toLowerCase()}
+                          </span>
+                        ) : null}
+                      </>
                     ) : (
                       <p className="text-muted-foreground/70 mt-0.5 text-xs italic">
                         Not covered yet

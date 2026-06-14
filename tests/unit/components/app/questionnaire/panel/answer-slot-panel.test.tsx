@@ -119,6 +119,7 @@ describe('AnswerSlotPanel', () => {
                   name: 'Employee Demographics',
                   description: 'Age + gender',
                   paraphrase: 'A 25-year-old female.',
+                  provenance: 'direct',
                   confidence: 0.95,
                   filled: true,
                   provisional: false,
@@ -148,6 +149,7 @@ describe('AnswerSlotPanel', () => {
                   name: 'Workplace Blockers',
                   description: 'What gets in the way',
                   paraphrase: 'A tentative reading of what slows them down.',
+                  provenance: 'synthesised',
                   confidence: 0.2,
                   filled: true,
                   provisional: true,
@@ -162,6 +164,67 @@ describe('AnswerSlotPanel', () => {
     );
     expect(screen.getByText('A tentative reading of what slows them down.')).toBeInTheDocument();
     expect(screen.getByText(/provisional · may revisit/i)).toBeInTheDocument();
+  });
+
+  it('flags an inferred data-slot fill with an "Inferred · {band}" marker', () => {
+    render(
+      <AnswerSlotPanel
+        view={view({
+          dataSlotGroups: [
+            {
+              theme: 'Wellbeing',
+              slots: [
+                {
+                  key: 'blockers',
+                  name: 'Work Blockers',
+                  description: 'What gets in the way',
+                  paraphrase: 'They may be feeling blocked in their role.',
+                  provenance: 'inferred',
+                  confidence: 0.3,
+                  filled: false,
+                  provisional: false,
+                  history: [],
+                },
+              ],
+            },
+          ],
+          progressPercent: 25,
+        })}
+      />
+    );
+    // The reading is shown (low-confidence inferences stay visible) but clearly marked as inferred.
+    expect(screen.getByText('They may be feeling blocked in their role.')).toBeInTheDocument();
+    expect(screen.getByText('Inferred · unsure')).toBeInTheDocument();
+  });
+
+  it('does not mark a directly-stated data-slot fill as inferred', () => {
+    render(
+      <AnswerSlotPanel
+        view={view({
+          dataSlotGroups: [
+            {
+              theme: 'Wellbeing',
+              slots: [
+                {
+                  key: 'satisfaction',
+                  name: 'Role Satisfaction',
+                  description: 'How they feel',
+                  paraphrase: 'They are not satisfied with their role.',
+                  provenance: 'direct',
+                  confidence: 0.9,
+                  filled: true,
+                  provisional: false,
+                  history: [],
+                },
+              ],
+            },
+          ],
+          progressPercent: 25,
+        })}
+      />
+    );
+    expect(screen.getByText('They are not satisfied with their role.')).toBeInTheDocument();
+    expect(screen.queryByText(/^Inferred ·/)).not.toBeInTheDocument();
   });
 
   it('renders answered values and pending placeholders', () => {
