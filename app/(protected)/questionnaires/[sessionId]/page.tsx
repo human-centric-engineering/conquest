@@ -76,7 +76,16 @@ export default async function QuestionnaireSessionPage({
       status: true,
       respondentUserId: true,
       version: {
-        select: { config: { select: { anonymousMode: true, presentationMode: true } } },
+        select: {
+          config: {
+            select: {
+              anonymousMode: true,
+              presentationMode: true,
+              voiceEnabled: true,
+              attachmentsEnabled: true,
+            },
+          },
+        },
       },
       _count: { select: { answers: true } },
     },
@@ -93,21 +102,26 @@ export default async function QuestionnaireSessionPage({
     'chat'
   );
   const wantsForm = presentationMode === 'form' || presentationMode === 'both';
+  // Voice and attachments each need BOTH the platform flag (capability dark-launch) AND the
+  // version's per-questionnaire opt-in, so the affordance shows only when the author turned it on.
+  const voiceConfigured = row.version.config?.voiceEnabled ?? false;
+  const attachmentsConfigured = row.version.config?.attachmentsEnabled ?? false;
   // Independent reads — resolve in parallel rather than serialising the round-trips. The
   // panel + lifecycle status are SSR-seeded here (the user is already verified as owner),
   // so they paint with no fetch flash; the live updates after each turn come from the
   // client hooks.
-  const [voiceInputEnabled, attachmentInputEnabled, theme, panel, status, formPanel] =
-    await Promise.all([
-      isVoiceInputEnabled(),
-      isAttachmentInputEnabled(),
-      resolveThemeForSession(sessionId),
-      loadAnswerPanelState(sessionId),
-      loadSessionStatus(sessionId),
-      // Seed the full form structure for form/both modes (forForm = full structure, no data-slot
-      // swap); chat-only mode skips this round-trip.
-      wantsForm ? loadAnswerPanelState(sessionId, false, true) : Promise.resolve(null),
-    ]);
+  const [voicePlatform, attachmentPlatform, theme, panel, status, formPanel] = await Promise.all([
+    isVoiceInputEnabled(),
+    isAttachmentInputEnabled(),
+    resolveThemeForSession(sessionId),
+    loadAnswerPanelState(sessionId),
+    loadSessionStatus(sessionId),
+    // Seed the full form structure for form/both modes (forForm = full structure, no data-slot
+    // swap); chat-only mode skips this round-trip.
+    wantsForm ? loadAnswerPanelState(sessionId, false, true) : Promise.resolve(null),
+  ]);
+  const voiceInputEnabled = voicePlatform && voiceConfigured;
+  const attachmentInputEnabled = attachmentPlatform && attachmentsConfigured;
   const initialStatus = initialChatStatus(status?.view, row.status === 'active');
 
   return (

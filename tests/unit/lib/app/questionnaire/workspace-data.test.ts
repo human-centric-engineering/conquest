@@ -92,6 +92,7 @@ function makeGraph(over: Partial<VersionGraphView> = {}): VersionGraphView {
       costBudgetUsd: null,
       maxQuestionsPerSession: null,
       voiceEnabled: false,
+      attachmentsEnabled: false,
       contradictionMode: 'off',
       contradictionWindowN: 0,
       contradictionEveryNTurns: 1,

@@ -269,6 +269,13 @@ export type QuestionnaireConfigShape = {
   costBudgetUsd: number | null;
   maxQuestionsPerSession: number | null;
   voiceEnabled: boolean;
+  /**
+   * Let respondents attach files (images, documents) to their answers — surfaces a paperclip
+   * button in the composer. Off by default; only takes effect when the platform flag
+   * `APP_QUESTIONNAIRES_ATTACHMENT_INPUT_ENABLED` is on. The respondent surfaces AND the live
+   * `/messages` turn gate both honour it, so attachments sent while off are ignored.
+   */
+  attachmentsEnabled: boolean;
   contradictionMode: ContradictionMode;
   contradictionWindowN: number;
   /** Run contradiction detection every N respondent turns; 1 = every turn. */
@@ -345,6 +352,7 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   costBudgetUsd: null,
   maxQuestionsPerSession: null,
   voiceEnabled: false,
+  attachmentsEnabled: false,
   contradictionMode: 'off',
   contradictionWindowN: 0,
   contradictionEveryNTurns: 1,

@@ -82,6 +82,7 @@ function state(over: Partial<TurnState> = {}): TurnState {
       costBudgetUsd: null,
       maxQuestionsPerSession: null,
       voiceEnabled: false,
+      attachmentsEnabled: false,
       contradictionMode: 'flag',
       contradictionWindowN: 3,
       contradictionEveryNTurns: 1,

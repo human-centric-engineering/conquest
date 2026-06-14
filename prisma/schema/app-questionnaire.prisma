@@ -164,6 +164,7 @@ model AppQuestionnaireConfig {
 
   // Modes.
   voiceEnabled             Boolean @default(false) // allow voice input (F6.2)
+  attachmentsEnabled       Boolean @default(false) // allow respondent file attachments (paperclip); gated also by the platform attachment-input flag
   contradictionMode        String  @default("off") // off | flag | probe (CONTRADICTION_MODES)
   contradictionWindowN     Int     @default(0) // N prior answers to check against; 0 when mode=off
   contradictionEveryNTurns Int     @default(1) // run detection every N respondent turns; 1 = every turn

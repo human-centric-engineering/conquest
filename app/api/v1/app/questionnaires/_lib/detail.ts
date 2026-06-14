@@ -83,6 +83,7 @@ export const CONFIG_SELECT = {
   costBudgetUsd: true,
   maxQuestionsPerSession: true,
   voiceEnabled: true,
+  attachmentsEnabled: true,
   contradictionMode: true,
   contradictionWindowN: true,
   contradictionEveryNTurns: true,
@@ -104,6 +105,7 @@ type ConfigRow = {
   costBudgetUsd: number | null;
   maxQuestionsPerSession: number | null;
   voiceEnabled: boolean;
+  attachmentsEnabled: boolean;
   contradictionMode: string;
   contradictionWindowN: number;
   contradictionEveryNTurns: number;
@@ -167,6 +169,7 @@ export function toConfigView(row: ConfigRow | null): ConfigView {
     costBudgetUsd: row.costBudgetUsd,
     maxQuestionsPerSession: row.maxQuestionsPerSession,
     voiceEnabled: row.voiceEnabled,
+    attachmentsEnabled: row.attachmentsEnabled,
     contradictionMode: asContradictionMode(row.contradictionMode),
     contradictionWindowN: row.contradictionWindowN,
     contradictionEveryNTurns: row.contradictionEveryNTurns,

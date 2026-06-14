@@ -80,6 +80,9 @@ export const updateConfigSchema = z
     costBudgetUsd: z.number().positive().nullable().optional(),
     maxQuestionsPerSession: z.number().int().positive().nullable().optional(),
     voiceEnabled: z.boolean().optional(),
+    // Respondent file attachments (paperclip in the composer). Gated additionally by the platform
+    // attachment-input flag; off by default.
+    attachmentsEnabled: z.boolean().optional(),
     contradictionMode: z.enum(CONTRADICTION_MODES).optional(),
     contradictionWindowN: z.number().int().nonnegative().optional(),
     contradictionEveryNTurns: z.number().int().min(1).optional(),

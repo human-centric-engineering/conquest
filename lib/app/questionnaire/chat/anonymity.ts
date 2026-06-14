@@ -29,6 +29,32 @@ export async function resolveAnonymousForVersion(versionId: string): Promise<boo
 }
 
 /**
+ * Resolve `voiceEnabled` for a launched version (no-login / preview respondent surface). This is
+ * the per-questionnaire opt-in; the caller ANDs it with the platform voice-input flag before
+ * deciding whether to show the mic and advise its use. Config is 1:1 and lazy — absent = off.
+ */
+export async function resolveVoiceEnabledForVersion(versionId: string): Promise<boolean> {
+  const version = await prisma.appQuestionnaireVersion.findUnique({
+    where: { id: versionId },
+    select: { config: { select: { voiceEnabled: true } } },
+  });
+  return version?.config?.voiceEnabled ?? false;
+}
+
+/**
+ * Resolve `attachmentsEnabled` for a launched version (no-login / preview respondent surface). The
+ * per-questionnaire opt-in; the caller ANDs it with the platform attachment-input flag before
+ * showing the paperclip. Config is 1:1 and lazy — absent = off.
+ */
+export async function resolveAttachmentsEnabledForVersion(versionId: string): Promise<boolean> {
+  const version = await prisma.appQuestionnaireVersion.findUnique({
+    where: { id: versionId },
+    select: { config: { select: { attachmentsEnabled: true } } },
+  });
+  return version?.config?.attachmentsEnabled ?? false;
+}
+
+/**
  * Resolve `presentationMode` (chat | form | both) for a launched version (no-login / preview
  * respondent surface). Config is 1:1 and lazy — an absent row defaults to `chat`. The
  * authenticated surface reads it off its session-ownership query instead.

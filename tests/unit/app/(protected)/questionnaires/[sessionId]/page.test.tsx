@@ -206,12 +206,22 @@ function makeRow(
     status?: string;
     answerCount?: number;
     anonymous?: boolean;
+    voiceEnabled?: boolean;
+    attachmentsEnabled?: boolean;
   } = {}
 ) {
   return {
     status: overrides.status ?? 'active',
     respondentUserId: overrides.respondentUserId ?? 'user_abc',
-    version: { config: { anonymousMode: overrides.anonymous ?? false } },
+    version: {
+      config: {
+        anonymousMode: overrides.anonymous ?? false,
+        // Per-questionnaire opt-ins default ON so the flag tests isolate the platform flag; the
+        // page ANDs platform flag AND config opt-in, exercised by dedicated tests below.
+        voiceEnabled: overrides.voiceEnabled ?? true,
+        attachmentsEnabled: overrides.attachmentsEnabled ?? true,
+      },
+    },
     _count: { answers: overrides.answerCount ?? 0 },
   };
 }
@@ -583,6 +593,23 @@ describe('QuestionnaireSessionPage', () => {
         'false'
       );
     });
+
+    it('passes voiceInputEnabled=false when the platform flag is on but the version opted out', async () => {
+      // Both gates required: platform capability AND the author's per-questionnaire opt-in.
+      // Platform on + config off must still resolve to off (the reported mic-always-on bug).
+      vi.mocked(isVoiceInputEnabled).mockResolvedValue(true);
+      vi.mocked(prisma.appQuestionnaireSession.findUnique).mockResolvedValue(
+        makeRow({ voiceEnabled: false }) as never
+      );
+
+      const Component = await QuestionnaireSessionPage({ params: makeParams() });
+      render(Component);
+
+      expect(screen.getByTestId('questionnaire-chat')).toHaveAttribute(
+        'data-voice-input-enabled',
+        'false'
+      );
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -603,6 +630,21 @@ describe('QuestionnaireSessionPage', () => {
     });
 
     it('passes attachmentInputEnabled=false when the flag is off', async () => {
+      const Component = await QuestionnaireSessionPage({ params: makeParams() });
+      render(Component);
+
+      expect(screen.getByTestId('questionnaire-chat')).toHaveAttribute(
+        'data-attachment-input-enabled',
+        'false'
+      );
+    });
+
+    it('passes attachmentInputEnabled=false when the platform flag is on but the version opted out', async () => {
+      vi.mocked(isAttachmentInputEnabled).mockResolvedValue(true);
+      vi.mocked(prisma.appQuestionnaireSession.findUnique).mockResolvedValue(
+        makeRow({ attachmentsEnabled: false }) as never
+      );
+
       const Component = await QuestionnaireSessionPage({ params: makeParams() });
       render(Component);
 

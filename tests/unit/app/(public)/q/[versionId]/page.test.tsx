@@ -52,6 +52,8 @@ vi.mock('@/lib/app/questionnaire/chat/theme', () => ({
 vi.mock('@/lib/app/questionnaire/chat/anonymity', () => ({
   resolveAnonymousForVersion: vi.fn(),
   resolvePresentationModeForVersion: vi.fn(),
+  resolveVoiceEnabledForVersion: vi.fn(),
+  resolveAttachmentsEnabledForVersion: vi.fn(),
 }));
 
 vi.mock('@/lib/app/questionnaire/chat/preview-nav', () => ({
@@ -107,7 +109,9 @@ import {
 import { resolveThemeForVersion } from '@/lib/app/questionnaire/chat/theme';
 import {
   resolveAnonymousForVersion,
+  resolveAttachmentsEnabledForVersion,
   resolvePresentationModeForVersion,
+  resolveVoiceEnabledForVersion,
 } from '@/lib/app/questionnaire/chat/anonymity';
 import { resolveAdminPreviewExitHref } from '@/lib/app/questionnaire/chat/preview-nav';
 import type { ResolvedTheme } from '@/lib/app/questionnaire/theming';
@@ -151,6 +155,11 @@ describe('PublicQuestionnairePage', () => {
     vi.mocked(resolveThemeForVersion).mockResolvedValue(MOCK_THEME);
     vi.mocked(resolveAnonymousForVersion).mockResolvedValue(false);
     vi.mocked(resolvePresentationModeForVersion).mockResolvedValue('chat');
+    // Per-questionnaire opt-ins default ON, so these tests isolate the platform flag as the
+    // deciding factor. The page ANDs platform flag AND config opt-in; dedicated tests below
+    // exercise the config-off path.
+    vi.mocked(resolveVoiceEnabledForVersion).mockResolvedValue(true);
+    vi.mocked(resolveAttachmentsEnabledForVersion).mockResolvedValue(true);
     vi.mocked(resolveAdminPreviewExitHref).mockResolvedValue(
       '/admin/questionnaires/q_abc/v/ver_abc123'
     );
@@ -294,6 +303,42 @@ describe('PublicQuestionnairePage', () => {
       });
       render(Component);
 
+      expect(screen.getByTestId('anonymous-session-boot')).toHaveAttribute(
+        'data-attachment-input-enabled',
+        'false'
+      );
+    });
+
+    it('passes voiceInputEnabled=false when the platform flag is on but the version opted out', async () => {
+      // The affordance needs BOTH gates: platform capability AND the author's per-questionnaire
+      // opt-in. Platform on + config off must still resolve to off (the reported mic-always-on bug).
+      vi.mocked(isVoiceInputEnabled).mockResolvedValue(true);
+      vi.mocked(resolveVoiceEnabledForVersion).mockResolvedValue(false);
+
+      const Component = await PublicQuestionnairePage({
+        params: makeParams(),
+        searchParams: makeSearchParams(),
+      });
+      render(Component);
+
+      expect(resolveVoiceEnabledForVersion).toHaveBeenCalledWith(VERSION_ID);
+      expect(screen.getByTestId('anonymous-session-boot')).toHaveAttribute(
+        'data-voice-input-enabled',
+        'false'
+      );
+    });
+
+    it('passes attachmentInputEnabled=false when the platform flag is on but the version opted out', async () => {
+      vi.mocked(isAttachmentInputEnabled).mockResolvedValue(true);
+      vi.mocked(resolveAttachmentsEnabledForVersion).mockResolvedValue(false);
+
+      const Component = await PublicQuestionnairePage({
+        params: makeParams(),
+        searchParams: makeSearchParams(),
+      });
+      render(Component);
+
+      expect(resolveAttachmentsEnabledForVersion).toHaveBeenCalledWith(VERSION_ID);
       expect(screen.getByTestId('anonymous-session-boot')).toHaveAttribute(
         'data-attachment-input-enabled',
         'false'

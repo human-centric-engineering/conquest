@@ -12,7 +12,9 @@ import { BrandThemeProvider } from '@/components/app/questionnaire/chat/brand-th
 import { resolveThemeForVersion } from '@/lib/app/questionnaire/chat/theme';
 import {
   resolveAnonymousForVersion,
+  resolveAttachmentsEnabledForVersion,
   resolvePresentationModeForVersion,
+  resolveVoiceEnabledForVersion,
 } from '@/lib/app/questionnaire/chat/anonymity';
 import { resolveAdminPreviewExitHref } from '@/lib/app/questionnaire/chat/preview-nav';
 
@@ -45,16 +47,30 @@ export default async function PublicQuestionnairePage({
   // the boot's "couldn't start" error, no leak.
   const preview = (await searchParams).preview === '1';
   // Independent reads — resolve in parallel rather than serialising the DB round-trips. The
-  // exit-href lookup runs only in preview mode (a real respondent never needs it).
-  const [voiceInputEnabled, attachmentInputEnabled, theme, anonymous, presentationMode, exitHref] =
-    await Promise.all([
-      isVoiceInputEnabled(),
-      isAttachmentInputEnabled(),
-      resolveThemeForVersion(versionId),
-      resolveAnonymousForVersion(versionId),
-      resolvePresentationModeForVersion(versionId),
-      preview ? resolveAdminPreviewExitHref(versionId) : Promise.resolve(null),
-    ]);
+  // exit-href lookup runs only in preview mode (a real respondent never needs it). Voice and
+  // attachments each need BOTH the platform flag (capability dark-launch) AND the version's
+  // per-questionnaire opt-in, so the affordance shows only when the author turned it on.
+  const [
+    voicePlatform,
+    attachmentPlatform,
+    theme,
+    anonymous,
+    presentationMode,
+    voiceConfigured,
+    attachmentsConfigured,
+    exitHref,
+  ] = await Promise.all([
+    isVoiceInputEnabled(),
+    isAttachmentInputEnabled(),
+    resolveThemeForVersion(versionId),
+    resolveAnonymousForVersion(versionId),
+    resolvePresentationModeForVersion(versionId),
+    resolveVoiceEnabledForVersion(versionId),
+    resolveAttachmentsEnabledForVersion(versionId),
+    preview ? resolveAdminPreviewExitHref(versionId) : Promise.resolve(null),
+  ]);
+  const voiceInputEnabled = voicePlatform && voiceConfigured;
+  const attachmentInputEnabled = attachmentPlatform && attachmentsConfigured;
 
   return (
     <div className="container mx-auto flex h-[calc(100dvh-9rem)] max-w-6xl flex-col px-4 py-6">

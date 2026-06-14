@@ -54,6 +54,23 @@ you are flipping a row, and the change is live without a redeploy.
 | 11  | `APP_QUESTIONNAIRES_SERIOUSNESS_GATE_ENABLED`        | `isSeriousnessGateEnabled`                                | master **+ live-sessions** | F9.5 seriousness / abuse gate — judge + disregard + strike/abandon on the `/messages` turn loop                | turns run with **no seriousness judging** even when a version sets `abuseThreshold` (no 404 — it gates a behaviour inside the messages route). See [seriousness-gate.md](./seriousness-gate.md)                                    |
 | 12  | `APP_QUESTIONNAIRES_SENSITIVITY_AWARENESS_ENABLED`   | `isSensitivityAwarenessEnabled`                           | master **+ live-sessions** | F9.6 sensitivity awareness — detect + remember a sensitive disclosure, soften later phrasing, signpost support | turns run with **no disclosure detection or tone-softening** even when a version sets `sensitivityAwareness` (no 404 — it gates a behaviour inside the messages route). See [sensitivity-awareness.md](./sensitivity-awareness.md) |
 
+## Per-questionnaire opt-in (voice & attachments)
+
+Flags 8 and 9 are the platform _capability_ switch only — they are **ANDed with a per-version
+config opt-in** before the respondent affordance appears:
+
+- **Voice** — `config.voiceEnabled` (Settings → _Respondent experience_). The mic button and the
+  greeting's "tap the mic to talk" nudge show only when `isVoiceInputEnabled() && config.voiceEnabled`.
+- **Attachments** — `config.attachmentsEnabled`. The paperclip shows only when
+  `isAttachmentInputEnabled() && config.attachmentsEnabled`; the `/messages` route applies the same
+  AND before honouring any attachments a client sends.
+
+Both default off, so a launched version opts in deliberately. The respondent surfaces resolve the
+config via `resolveVoiceEnabledForVersion` / `resolveAttachmentsEnabledForVersion` (no-login path)
+or off the session-ownership query (authenticated path). This mirrors the value-bearing flags
+(`costBudgetUsd`, `abuseThreshold`, `sensitivityAwareness`): the platform flag gates the behaviour,
+the config carries the per-questionnaire decision.
+
 ## The three off-behaviour shapes
 
 Reading the table, every sub-flag falls into one of three shapes — know which one you are
