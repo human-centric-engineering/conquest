@@ -34,6 +34,13 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { InvitationStatusBadge } from '@/components/admin/questionnaires/invitation-status-badge';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse } from '@/lib/api/parse-response';
@@ -42,6 +49,8 @@ import {
   isInvitationTransitionAllowed,
   type InvitationView,
 } from '@/lib/app/questionnaire/invitations';
+
+const ALL = '__all__';
 
 function formatDate(iso: string | null): string {
   if (!iso) return '—';
@@ -76,6 +85,8 @@ export function InvitationsTable({ questionnaireId, invitations }: InvitationsTa
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [versionFilter, setVersionFilter] = useState<string>(ALL);
+  const [statusFilter, setStatusFilter] = useState<string>(ALL);
 
   async function copyLink(id: string) {
     setBusyId(id);
@@ -154,12 +165,53 @@ export function InvitationsTable({ questionnaireId, invitations }: InvitationsTa
     );
   }
 
-  const tally = stageCounts(invitations);
+  // Per-version + status filtering (client-side — the list is already loaded, capped at 100).
+  const versions = [...new Set(invitations.map((i) => i.versionNumber))].sort((a, b) => b - a);
+  const statuses = [...new Set(invitations.map((i) => i.status))];
+  const filtered = invitations.filter(
+    (i) =>
+      (versionFilter === ALL || i.versionNumber === Number(versionFilter)) &&
+      (statusFilter === ALL || i.status === statusFilter)
+  );
+  const tally = stageCounts(filtered);
 
   return (
     <div className="space-y-3">
       {error && <p className="text-destructive text-sm">{error}</p>}
-      {/* Roster funnel: who was invited → started → completed (across this questionnaire's versions). */}
+
+      {/* Roster filters — narrow to a specific version ("who was invited to vN") and/or status. */}
+      <div className="flex flex-wrap items-center gap-2">
+        {versions.length > 1 && (
+          <Select value={versionFilter} onValueChange={setVersionFilter}>
+            <SelectTrigger className="h-8 w-40 text-xs" aria-label="Filter by version">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>All versions</SelectItem>
+              {versions.map((v) => (
+                <SelectItem key={v} value={String(v)}>
+                  v{v}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger className="h-8 w-40 text-xs" aria-label="Filter by status">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>All statuses</SelectItem>
+            {statuses.map((s) => (
+              <SelectItem key={s} value={s}>
+                {s}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Roster funnel: who was invited → started → completed (for the current filter). */}
       <div className="text-muted-foreground flex flex-wrap gap-4 text-sm">
         <span>
           <span className="text-foreground font-semibold tabular-nums">{tally.invited}</span>{' '}
@@ -188,7 +240,14 @@ export function InvitationsTable({ questionnaireId, invitations }: InvitationsTa
           </TableRow>
         </TableHeader>
         <TableBody>
-          {invitations.map((inv) => {
+          {filtered.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={6} className="text-muted-foreground py-6 text-center text-sm">
+                No invitations match this filter.
+              </TableCell>
+            </TableRow>
+          )}
+          {filtered.map((inv) => {
             const busy = busyId === inv.id;
             const canResend = isInvitationResendable(inv.status);
             const canRevoke = isInvitationTransitionAllowed(inv.status, 'revoked');

@@ -20,6 +20,7 @@ import {
   Image as ImageIcon,
   Plus,
   Trash2,
+  UserPlus,
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -209,164 +210,191 @@ export function InviteImportWizard({
   ];
 
   return (
-    <div className="space-y-4 rounded-lg border p-4">
-      {error && <p className="text-destructive text-sm">{error}</p>}
+    <div className="bg-card space-y-4 rounded-xl border shadow-sm">
+      {/* Editorial header band (cq-surface) with a two-step indicator. */}
+      <div className="flex items-center gap-3 border-b px-4 py-3">
+        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--cq-accent)] text-[var(--cq-accent-foreground)]">
+          <UserPlus className="h-4 w-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold tracking-tight">Add invitations</p>
+          <p className="text-muted-foreground text-xs">Import a list, review it, then send.</p>
+        </div>
+        <ol className="flex items-center gap-2 text-xs font-medium">
+          {(['import', 'verify'] as const).map((s, i) => (
+            <li key={s} className="flex items-center gap-2">
+              <span className={step === s ? 'text-[var(--cq-accent)]' : 'text-muted-foreground/60'}>
+                {i + 1}. {s === 'import' ? 'Import' : 'Verify'}
+              </span>
+              {i === 0 ? (
+                <span className="text-muted-foreground/40" aria-hidden>
+                  →
+                </span>
+              ) : null}
+            </li>
+          ))}
+        </ol>
+      </div>
 
-      {step === 'import' && (
-        <div className="space-y-3">
-          <div className="flex flex-wrap gap-2">
-            {methods
-              .filter((m) => m.show)
-              .map((m) => (
-                <Button
-                  key={m.key}
-                  type="button"
-                  size="sm"
-                  variant={method === m.key ? 'default' : 'outline'}
-                  onClick={() => setMethod(m.key)}
-                >
-                  <m.icon className="mr-1.5 h-3.5 w-3.5" />
-                  {m.label}
-                </Button>
-              ))}
-          </div>
+      <div className="space-y-4 px-4 pb-4">
+        {error && <p className="text-destructive text-sm">{error}</p>}
 
-          {method === 'paste' && (
-            <div className="space-y-2">
-              <Textarea
-                value={pasteText}
-                onChange={(e) => setPasteText(e.target.value)}
-                rows={6}
-                placeholder={'Ada Lovelace <ada@example.com>\nGrace Hopper, grace@navy.mil\n…'}
-                aria-label="Paste a list of people"
-              />
-              <Button
-                size="sm"
-                disabled={!pasteText.trim()}
-                onClick={() => toVerify(parsePastedInvitees(pasteText))}
-              >
-                Parse list
-              </Button>
+        {step === 'import' && (
+          <div className="space-y-3">
+            <div className="flex flex-wrap gap-2">
+              {methods
+                .filter((m) => m.show)
+                .map((m) => (
+                  <Button
+                    key={m.key}
+                    type="button"
+                    size="sm"
+                    variant={method === m.key ? 'default' : 'outline'}
+                    onClick={() => setMethod(m.key)}
+                  >
+                    <m.icon className="mr-1.5 h-3.5 w-3.5" />
+                    {m.label}
+                  </Button>
+                ))}
             </div>
-          )}
 
-          {method === 'csv' && (
-            <Input
-              type="file"
-              accept=".csv,text/csv"
-              aria-label="Upload a CSV"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) void onCsvFile(f);
-              }}
-            />
-          )}
+            {method === 'paste' && (
+              <div className="space-y-2">
+                <Textarea
+                  value={pasteText}
+                  onChange={(e) => setPasteText(e.target.value)}
+                  rows={6}
+                  placeholder={'Ada Lovelace <ada@example.com>\nGrace Hopper, grace@navy.mil\n…'}
+                  aria-label="Paste a list of people"
+                />
+                <Button
+                  size="sm"
+                  disabled={!pasteText.trim()}
+                  onClick={() => toVerify(parsePastedInvitees(pasteText))}
+                >
+                  Parse list
+                </Button>
+              </div>
+            )}
 
-          {(method === 'pdf' || method === 'image') && (
-            <div className="space-y-2">
+            {method === 'csv' && (
               <Input
                 type="file"
-                accept={
-                  method === 'pdf' ? '.pdf,application/pdf' : 'image/png,image/jpeg,image/webp'
-                }
-                disabled={busy}
-                aria-label={`Upload a ${method}`}
+                accept=".csv,text/csv"
+                aria-label="Upload a CSV"
                 onChange={(e) => {
                   const f = e.target.files?.[0];
-                  if (f) void onExtractFile(f);
+                  if (f) void onCsvFile(f);
                 }}
               />
-              {busy && (
-                <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
-                  <Loader2 className="h-3 w-3 animate-spin" /> Extracting people…
-                </p>
-              )}
-            </div>
-          )}
-        </div>
-      )}
+            )}
 
-      {step === 'verify' && (
-        <div className="space-y-3">
-          {warnings.length > 0 && (
-            <ul className="text-muted-foreground space-y-0.5 text-xs">
-              {warnings.map((w, i) => (
-                <li key={i}>• {w}</li>
-              ))}
-            </ul>
-          )}
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-muted-foreground text-left text-xs">
-                  {shown.map((f) => (
-                    <th key={f.key} className="px-1 pb-1 font-medium">
-                      {INVITEE_FIELD_LABELS[f.key]}
-                      {f.required ? ' *' : ''}
-                    </th>
-                  ))}
-                  <th className="pb-1" />
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row, i) => (
-                  <tr key={i}>
-                    <td className="px-1 py-0.5">
-                      <Input
-                        value={row.email ?? ''}
-                        className="h-8 text-xs"
-                        onChange={(e) => updateCell(i, 'email', e.target.value)}
-                        aria-label={`Email row ${i + 1}`}
-                      />
-                    </td>
-                    {shownProfile.map((f) => (
-                      <td key={f.key} className="px-1 py-0.5">
+            {(method === 'pdf' || method === 'image') && (
+              <div className="space-y-2">
+                <Input
+                  type="file"
+                  accept={
+                    method === 'pdf' ? '.pdf,application/pdf' : 'image/png,image/jpeg,image/webp'
+                  }
+                  disabled={busy}
+                  aria-label={`Upload a ${method}`}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) void onExtractFile(f);
+                  }}
+                />
+                {busy && (
+                  <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
+                    <Loader2 className="h-3 w-3 animate-spin" /> Extracting people…
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {step === 'verify' && (
+          <div className="space-y-3">
+            {warnings.length > 0 && (
+              <ul className="text-muted-foreground space-y-0.5 text-xs">
+                {warnings.map((w, i) => (
+                  <li key={i}>• {w}</li>
+                ))}
+              </ul>
+            )}
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-muted-foreground text-left text-xs">
+                    {shown.map((f) => (
+                      <th key={f.key} className="px-1 pb-1 font-medium">
+                        {INVITEE_FIELD_LABELS[f.key]}
+                        {f.required ? ' *' : ''}
+                      </th>
+                    ))}
+                    <th className="pb-1" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row, i) => (
+                    <tr key={i}>
+                      <td className="px-1 py-0.5">
                         <Input
-                          value={row[f.key] ?? ''}
+                          value={row.email ?? ''}
                           className="h-8 text-xs"
-                          onChange={(e) => updateCell(i, f.key, e.target.value)}
-                          aria-label={`${INVITEE_FIELD_LABELS[f.key]} row ${i + 1}`}
+                          onChange={(e) => updateCell(i, 'email', e.target.value)}
+                          aria-label={`Email row ${i + 1}`}
                         />
                       </td>
-                    ))}
-                    <td className="px-1 py-0.5">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7"
-                        aria-label={`Remove row ${i + 1}`}
-                        onClick={() => setRows((prev) => prev.filter((_, j) => j !== i))}
-                      >
-                        <Trash2 className="text-destructive h-3.5 w-3.5" />
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                      {shownProfile.map((f) => (
+                        <td key={f.key} className="px-1 py-0.5">
+                          <Input
+                            value={row[f.key] ?? ''}
+                            className="h-8 text-xs"
+                            onChange={(e) => updateCell(i, f.key, e.target.value)}
+                            aria-label={`${INVITEE_FIELD_LABELS[f.key]} row ${i + 1}`}
+                          />
+                        </td>
+                      ))}
+                      <td className="px-1 py-0.5">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          aria-label={`Remove row ${i + 1}`}
+                          onClick={() => setRows((prev) => prev.filter((_, j) => j !== i))}
+                        >
+                          <Trash2 className="text-destructive h-3.5 w-3.5" />
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setRows((prev) => [...prev, { email: '' }])}
-            >
-              <Plus className="mr-1 h-3.5 w-3.5" /> Add row
-            </Button>
-            <Label className="text-muted-foreground ml-auto text-xs">
-              {rows.length} recipient(s)
-            </Label>
-            <Button variant="ghost" size="sm" onClick={restart} disabled={busy}>
-              Start over
-            </Button>
-            <Button size="sm" onClick={() => void send()} disabled={busy || rows.length === 0}>
-              {busy && <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />}
-              Send {rows.length} invitation{rows.length === 1 ? '' : 's'}
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setRows((prev) => [...prev, { email: '' }])}
+              >
+                <Plus className="mr-1 h-3.5 w-3.5" /> Add row
+              </Button>
+              <Label className="text-muted-foreground ml-auto text-xs">
+                {rows.length} recipient(s)
+              </Label>
+              <Button variant="ghost" size="sm" onClick={restart} disabled={busy}>
+                Start over
+              </Button>
+              <Button size="sm" onClick={() => void send()} disabled={busy || rows.length === 0}>
+                {busy && <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />}
+                Send {rows.length} invitation{rows.length === 1 ? '' : 's'}
+              </Button>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
