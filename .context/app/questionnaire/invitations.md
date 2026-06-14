@@ -111,17 +111,27 @@ The seam splits across the `lib/app` boundary:
 
 Admin (flag-gate → `withAdminAuth` → audit):
 
-| Route                                                   | Method | Purpose                                                 |
-| ------------------------------------------------------- | ------ | ------------------------------------------------------- |
-| `…/questionnaires/:id/invitations`                      | GET    | List (status filter, pagination). Never returns tokens. |
-| `…/questionnaires/:id/invitations`                      | POST   | Send single/bulk. `inviteLimiter` sub-cap.              |
-| `…/questionnaires/:id/invitations/:invitationId`        | PATCH  | Revoke (`{ action: "revoke" }`).                        |
-| `…/questionnaires/:id/invitations/:invitationId/resend` | POST   | Regenerate token + re-send.                             |
+| Route                                                   | Method | Purpose                                                        |
+| ------------------------------------------------------- | ------ | -------------------------------------------------------------- |
+| `…/questionnaires/:id/invitations`                      | GET    | List (status filter, pagination). Never returns tokens.        |
+| `…/questionnaires/:id/invitations`                      | POST   | Send single/bulk. `inviteLimiter` sub-cap.                     |
+| `…/questionnaires/:id/invitations/:invitationId`        | PATCH  | Revoke (`{ action: "revoke" }`).                               |
+| `…/questionnaires/:id/invitations/:invitationId/resend` | POST   | Regenerate token + re-send (email).                            |
+| `…/questionnaires/:id/invitations/:invitationId/link`   | POST   | Rotate token, return a copy-able frictionless link (no email). |
 
 `POST` resolves the questionnaire's launched version (`409 INVITE_NO_LAUNCHED_VERSION`
-if none), then per recipient: app-layer dedup (live invite → `skipped`), mint, create,
-send. A send failure keeps the row at `pending` (resend later) and does **not** fail
-the request — the response is a per-recipient result array (`sent`/`skipped`/`failed`).
+if none), then per recipient: validate the supplied details against the version's
+`inviteeFields` (required fields present, email valid → per-recipient `failed` on a miss),
+derive `name` from first/last, store the captured fields as the invitation's `profile`,
+app-layer dedup (live invite → `skipped`), mint, create, send. A send failure keeps the
+row at `pending` (resend later) and does **not** fail the request — the response is a
+per-recipient result array (`sent`/`skipped`/`failed`).
+
+The **copy-link** route (`/link`) is the "didn't get the email?" escape hatch: it mints a
+fresh token and returns the no-login frictionless URL (`/q/:versionId?i=<token>`) for the
+admin to share manually. It does NOT email. ⚠️ It **rotates the token**, so any previously
+emailed/copied link stops working (an in-flight session survives — resume keys on
+`invitationId`). Refused (`409`) for revoked/completed invitations.
 
 Public, token-gated (F3.2 PR2 — no auth guard, rate-limited):
 

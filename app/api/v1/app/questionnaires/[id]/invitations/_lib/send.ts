@@ -25,6 +25,16 @@ export function buildInvitationUrl(token: string): string {
   return `${base}${INVITATION_ACCEPT_PATH}?token=${token}`;
 }
 
+/**
+ * Absolute FRICTIONLESS invite URL — the no-login link an admin copies (`/q/:versionId?i=<token>`).
+ * Opens the respondent surface and boots a session bound to the invitation (no account). Distinct
+ * from {@link buildInvitationUrl}, which targets the account-registration accept page.
+ */
+export function buildFrictionlessInviteUrl(versionId: string, token: string): string {
+  const base = env.NEXT_PUBLIC_APP_URL || process.env.BETTER_AUTH_URL || 'http://localhost:3000';
+  return `${base}/q/${versionId}?i=${token}`;
+}
+
 export interface LaunchedVersionTarget {
   versionId: string;
   versionNumber: number;

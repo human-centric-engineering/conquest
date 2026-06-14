@@ -468,6 +468,9 @@ export const API = {
       /** Resend one invitation, regenerating its token (POST — F3.2). */
       invitationResend: (id: string, invitationId: string): string =>
         `/api/v1/app/questionnaires/${id}/invitations/${invitationId}/resend`,
+      /** Generate a copy-able frictionless link, rotating the token (POST — invitations P-E). */
+      invitationLink: (id: string, invitationId: string): string =>
+        `/api/v1/app/questionnaires/${id}/invitations/${invitationId}/link`,
       /** Admin download of one session's results as a branded PDF (GET — F7.4). */
       sessionExportPdf: (id: string, sessionId: string): string =>
         `/api/v1/app/questionnaires/${id}/sessions/${sessionId}/export.pdf`,

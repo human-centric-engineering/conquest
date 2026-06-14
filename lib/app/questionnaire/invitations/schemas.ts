@@ -31,9 +31,33 @@ const nameField = z
   .transform((v) => (v.length === 0 ? undefined : v))
   .optional();
 
+/** A short, optional invitee detail field (firstName, surname, jobTitle, team, organisation). */
+const detailField = z
+  .string()
+  .trim()
+  .max(200)
+  .transform((v) => (v.length === 0 ? undefined : v))
+  .optional();
+
+/**
+ * The configurable per-invitee detail fields (email is the top-level `email`; `name` is derived
+ * from first/last at the route). Validated for shown/required against the version's `inviteeFields`
+ * in the route — the schema only bounds shapes/lengths.
+ */
+const inviteeProfileSchema = z
+  .object({
+    firstName: detailField,
+    surname: detailField,
+    jobTitle: detailField,
+    team: detailField,
+    organisation: detailField,
+  })
+  .optional();
+
 const recipientSchema = z.object({
   email: emailField,
   name: nameField,
+  profile: inviteeProfileSchema,
 });
 
 /** Create body: 1..MAX recipients, emails unique within the batch. */
