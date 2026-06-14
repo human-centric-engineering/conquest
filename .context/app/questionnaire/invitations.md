@@ -63,6 +63,23 @@ Transition legality is pure (`isInvitationTransitionAllowed`,
 `isInvitationResendable` in `lib/app/questionnaire/invitations/`); the routes map an
 illegal transition to a 409 and the UI never offers an action the server would reject.
 
+## Import wizard (Phase D)
+
+The admin adds invitees through a two-step **Import → Verify & send** wizard
+(`InviteImportWizard`), four methods converging on one editable grid:
+
+- **Paste** a scruffy list — `parsePastedInvitees` (heuristic, client-side, no AI).
+- **CSV** upload — `parseCsvInvitees` (header-synonym column mapping, client-side).
+- **PDF / image** upload — `POST …/invitations/import/extract` (multipart) runs the AI
+  people-extractor (`extract/extract-people.ts`: PDF→text, image→vision; structured output,
+  cost-logged). Gated by `APP_QUESTIONNAIRES_INVITE_IMPORT_ENABLED` (paid + PII); the two AI
+  method buttons are hidden when off.
+
+All methods produce `ParsedInvitee[]`; the **verify grid** renders a column per _shown_
+`inviteeField`, lets the admin edit/add/remove rows, then sends via `POST …/invitations`
+(which re-validates against the config and stores `invitation.profile`). Nothing sends without
+passing the grid. (The earlier single-textarea `InviteForm` is superseded but retained.)
+
 ## Frictionless invite links (Phase B)
 
 Gated by `APP_QUESTIONNAIRES_FRICTIONLESS_INVITES_ENABLED` (+ live-sessions). A per-invitee

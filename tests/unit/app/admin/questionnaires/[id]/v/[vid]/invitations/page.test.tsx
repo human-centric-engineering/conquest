@@ -45,13 +45,15 @@ vi.mock('next/navigation', () => ({
 
 const flagMock = vi.hoisted(() => ({
   isQuestionnairesEnabled: vi.fn(),
+  isInvitationImportEnabled: vi.fn(),
 }));
 vi.mock('@/lib/app/questionnaire/feature-flag', () => flagMock);
 
-// ─── workspace-data mock (for getQuestionnaireDetailCached) ───────────────────
+// ─── workspace-data mock (for getQuestionnaireDetailCached + getVersionGraphCached) ───
 
 const workspaceDataMock = vi.hoisted(() => ({
   getQuestionnaireDetailCached: vi.fn<() => Promise<QuestionnaireDetail | null>>(),
+  getVersionGraphCached: vi.fn<() => Promise<null>>(),
 }));
 vi.mock('@/lib/app/questionnaire/workspace-data', () => workspaceDataMock);
 
@@ -72,12 +74,12 @@ vi.mock('@/lib/logging', () => loggerMock);
 
 // ─── Stub heavy children ──────────────────────────────────────────────────────
 
-vi.mock('@/components/admin/questionnaires/invite-form', () => ({
-  InviteForm: (props: { questionnaireId: string; hasLaunchedVersion: boolean }) => (
+vi.mock('@/components/admin/questionnaires/invite-import-wizard', () => ({
+  InviteImportWizard: (props: { questionnaireId: string; disabled: boolean }) => (
     <div
-      data-testid="invite-form"
+      data-testid="invite-wizard"
       data-qid={props.questionnaireId}
-      data-has-launched={String(props.hasLaunchedVersion)}
+      data-disabled={String(props.disabled)}
     />
   ),
 }));
@@ -168,7 +170,9 @@ function renderPage(opts: { id?: string; vid?: string } = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   flagMock.isQuestionnairesEnabled.mockResolvedValue(true);
+  flagMock.isInvitationImportEnabled.mockResolvedValue(true);
   workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue(makeDetail());
+  workspaceDataMock.getVersionGraphCached.mockResolvedValue(null); // → default invitee fields
   apiMock.serverFetch.mockResolvedValue({ ok: true });
   apiMock.parseApiResponse.mockResolvedValue({
     success: true,
@@ -201,13 +205,13 @@ describe('InvitationsTab', () => {
   });
 
   describe('happy path — child component props', () => {
-    it('renders InviteForm with the correct questionnaireId', async () => {
+    it('renders the import wizard with the correct questionnaireId', async () => {
       // Act
       render(await renderPage({ id: 'qn-42' }));
 
-      // Assert: the page derived the id from params and passed it to the form
-      const form = screen.getByTestId('invite-form');
-      expect(form).toHaveAttribute('data-qid', 'qn-42');
+      // Assert: the page derived the id from params and passed it to the wizard
+      const wizard = screen.getByTestId('invite-wizard');
+      expect(wizard).toHaveAttribute('data-qid', 'qn-42');
     });
 
     it('renders InvitationsTable with the correct questionnaireId', async () => {
@@ -219,17 +223,17 @@ describe('InvitationsTab', () => {
       expect(table).toHaveAttribute('data-qid', 'qn-42');
     });
 
-    it('passes hasLaunchedVersion=true to InviteForm when the detail has a launched version', async () => {
+    it('enables the wizard (disabled=false) when the detail has a launched version', async () => {
       // Arrange: default setup has one launched version
       // Act
       render(await renderPage());
 
       // Assert: the page computed the boolean from the versions list
-      const form = screen.getByTestId('invite-form');
-      expect(form).toHaveAttribute('data-has-launched', 'true');
+      const wizard = screen.getByTestId('invite-wizard');
+      expect(wizard).toHaveAttribute('data-disabled', 'false');
     });
 
-    it('passes hasLaunchedVersion=false to InviteForm when no launched version exists', async () => {
+    it('disables the wizard (disabled=true) when no launched version exists', async () => {
       // Arrange: all versions are drafts
       workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue(
         makeDetail({ versions: [makeVersion({ id: 'ver-1', status: 'draft' })] })
@@ -239,8 +243,8 @@ describe('InvitationsTab', () => {
       render(await renderPage());
 
       // Assert
-      const form = screen.getByTestId('invite-form');
-      expect(form).toHaveAttribute('data-has-launched', 'false');
+      const wizard = screen.getByTestId('invite-wizard');
+      expect(wizard).toHaveAttribute('data-disabled', 'true');
     });
 
     it('renders the invitations list in the table', async () => {
