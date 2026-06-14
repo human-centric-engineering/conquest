@@ -468,6 +468,12 @@ export const API = {
       /** Resend one invitation, regenerating its token (POST — F3.2). */
       invitationResend: (id: string, invitationId: string): string =>
         `/api/v1/app/questionnaires/${id}/invitations/${invitationId}/resend`,
+      /** Generate a copy-able frictionless link, rotating the token (POST — invitations P-E). */
+      invitationLink: (id: string, invitationId: string): string =>
+        `/api/v1/app/questionnaires/${id}/invitations/${invitationId}/link`,
+      /** AI-extract invitees from an uploaded PDF/image (POST multipart — invitations P-D). */
+      invitationImportExtract: (id: string): string =>
+        `/api/v1/app/questionnaires/${id}/invitations/import/extract`,
       /** Admin download of one session's results as a branded PDF (GET — F7.4). */
       sessionExportPdf: (id: string, sessionId: string): string =>
         `/api/v1/app/questionnaires/${id}/sessions/${sessionId}/export.pdf`,
@@ -478,12 +484,16 @@ export const API = {
       ROOT: '/api/v1/app/questionnaire-sessions',
       /** Create a no-login anonymous session (POST `{ versionId }` → `{ session, accessToken }`). */
       ANONYMOUS: '/api/v1/app/questionnaire-sessions/anonymous',
+      /** Create a no-login session from a per-invitee token (POST `{ inviteToken }` → `{ session, accessToken }`). */
+      FROM_INVITE: '/api/v1/app/questionnaire-sessions/from-invite',
       /** Admin "Preview as respondent" session (POST `{ versionId }` → `{ session, accessToken }`); bypasses the anonymous-mode gate, `isPreview`. */
       PREVIEW: '/api/v1/app/questionnaire-sessions/preview',
       /** Respondent turn — SSE stream (POST `{ message }`). */
       messages: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/messages`,
       /** Voice transcription (POST multipart `{ audio, language? }`). */
       transcribe: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/transcribe`,
+      /** Replayed transcript — prior turns + their persisted side-band notices (GET — F7.1 resume). */
+      transcript: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/transcript`,
       /** Answer-slot panel state — live read for the respondent panel (GET) (F7.2). */
       answers: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/answers`,
       /** Session lifecycle/status — completion-offer + cost tier + anon (GET) (F7.3). */

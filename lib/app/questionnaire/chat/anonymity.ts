@@ -14,8 +14,10 @@
 
 import { prisma } from '@/lib/db/client';
 import {
+  ACCESS_MODES,
   narrowToEnum,
   PRESENTATION_MODES,
+  type AccessMode,
   type PresentationMode,
 } from '@/lib/app/questionnaire/types';
 
@@ -26,6 +28,50 @@ export async function resolveAnonymousForVersion(versionId: string): Promise<boo
     select: { config: { select: { anonymousMode: true } } },
   });
   return version?.config?.anonymousMode ?? false;
+}
+
+/**
+ * Resolve `accessMode` (who may START) for a launched version — the access axis, orthogonal to
+ * {@link resolveAnonymousForVersion}. Config is 1:1 and lazy; an absent row defaults to the safe
+ * `invitation_only`. The public `/q/[versionId]` page calls this to decide whether a no-token
+ * walk-up may boot a session (`public`/`both`) or must be turned away (`invitation_only`).
+ */
+export async function resolveAccessModeForVersion(versionId: string): Promise<AccessMode> {
+  const version = await prisma.appQuestionnaireVersion.findUnique({
+    where: { id: versionId },
+    select: { config: { select: { accessMode: true } } },
+  });
+  return narrowToEnum(
+    version?.config?.accessMode ?? 'invitation_only',
+    ACCESS_MODES,
+    'invitation_only'
+  );
+}
+
+/**
+ * Resolve `voiceEnabled` for a launched version (no-login / preview respondent surface). This is
+ * the per-questionnaire opt-in; the caller ANDs it with the platform voice-input flag before
+ * deciding whether to show the mic and advise its use. Config is 1:1 and lazy — absent = off.
+ */
+export async function resolveVoiceEnabledForVersion(versionId: string): Promise<boolean> {
+  const version = await prisma.appQuestionnaireVersion.findUnique({
+    where: { id: versionId },
+    select: { config: { select: { voiceEnabled: true } } },
+  });
+  return version?.config?.voiceEnabled ?? false;
+}
+
+/**
+ * Resolve `attachmentsEnabled` for a launched version (no-login / preview respondent surface). The
+ * per-questionnaire opt-in; the caller ANDs it with the platform attachment-input flag before
+ * showing the paperclip. Config is 1:1 and lazy — absent = off.
+ */
+export async function resolveAttachmentsEnabledForVersion(versionId: string): Promise<boolean> {
+  const version = await prisma.appQuestionnaireVersion.findUnique({
+    where: { id: versionId },
+    select: { config: { select: { attachmentsEnabled: true } } },
+  });
+  return version?.config?.attachmentsEnabled ?? false;
 }
 
 /**

@@ -109,10 +109,11 @@ export async function copyVersionGraph(
     await tx.appQuestionnaireConfig.create({
       data: {
         versionId: targetVersionId,
-        // Spread the selected columns (CONFIG_SELECT) verbatim; only the JSON column
-        // needs the null-sentinel wrapper. New columns ride along.
+        // Spread the selected columns (CONFIG_SELECT) verbatim; only the JSON columns
+        // need the null-sentinel wrapper. New scalar columns (accessMode) ride along.
         ...source.config,
         profileFields: jsonInput(source.config.profileFields),
+        inviteeFields: jsonInput(source.config.inviteeFields),
       },
     });
   }

@@ -67,14 +67,25 @@ informs (directly, by inference, or by synthesising the conversation), output on
 - "value": the captured position as concrete, structured data — the SPECIFICS the respondent gave \
 (numbers, names, choices), not a label for them. For "I am 25, male" record \
 {"age": 25, "gender": "male"} (or "25, male"), NOT "age and gender provided".
-- "paraphrase": a faithful restatement of the respondent's ACTUAL answer in your own words, naming \
-the specifics they gave so a reader can see exactly what was recorded ("A 25-year-old male.", \
-"They found setup straightforward but were slowed by unclear docs."). NEVER a meta-summary of what \
-they shared ("They provided their age and gender." is WRONG). Capture the full substance — if they \
-gave several details, reflect them all.
-- "confidence": 0–1, how well you understand their position on this slot.
+- "paraphrase": a restatement of the respondent's position on this slot, naming the specifics so a \
+reader sees exactly what was recorded. Match the wording to the provenance: a "direct" fill is a \
+faithful, declarative restatement of what they actually said ("A 25-year-old male.", "They found \
+setup straightforward but were slowed by unclear docs."); an "inferred" or "synthesised" fill MUST \
+be HEDGED — read it as a tentative reading, not an established fact ("They may be feeling blocked \
+in their role.", NOT "Their dissatisfaction is a blocker to their best work."). Use "may", "seems", \
+"possibly". NEVER a meta-summary of what they shared ("They provided their age and gender." is \
+WRONG), and NEVER a statement of ABSENCE — what is missing, not yet covered, or not provided ("Their \
+tenure and department are not provided." is WRONG; omit the slot instead). Capture the full \
+substance — if they gave several details, reflect them all.
+- "confidence": 0–1, how well you understand their position on this slot. Be honest about weak \
+signal: a single, loose inference from a brief or vague message (e.g. reading "blockers" out of "not \
+satisfied") is LOW confidence (≤ 0.4), not moderate. Reserve high confidence for positions the \
+respondent stated plainly.
 - "provenance": ${EXTRACTOR_EMITTED_PROVENANCES.join(', ')} (as above).
 - "rationale": a short reason.
+ONLY emit a fill for a slot the latest message actually bears on — a position the respondent stated, \
+or one that genuinely follows from something they said. If the message says nothing about a slot, \
+OMIT it entirely (do not record its absence) — the panel shows "Not covered yet" on its own.
 Some slots show a "current" line — what's already recorded from earlier in the conversation. When \
 the new message ADDS to or CORRECTS that (e.g. they first said "male" then "actually, female"), \
 output an UPDATED fill for that slot that MERGES the still-true details with the correction (here: \

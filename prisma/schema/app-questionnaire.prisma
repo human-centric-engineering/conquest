@@ -108,6 +108,7 @@ model AppQuestionnaireInvitation {
   versionId       String
   email           String // recipient address; the invitation is keyed by token, not email
   name            String? // optional recipient display name (prefills registration)
+  profile         Json? // InviteeProfile — captured per-invitee detail fields (firstName, jobTitle, …) per config.inviteeFields; email/name stay as columns
   tokenHash       String    @unique // sha256 of the opaque token; plaintext only in the email URL
   status          String    @default("pending") // APP_INVITATION_STATUSES (invitations/types.ts)
   userId          String? // respondent User.id, set on registration; plain String, no FK (UG-1)
@@ -164,10 +165,13 @@ model AppQuestionnaireConfig {
 
   // Modes.
   voiceEnabled             Boolean @default(false) // allow voice input (F6.2)
+  attachmentsEnabled       Boolean @default(false) // allow respondent file attachments (paperclip); gated also by the platform attachment-input flag
   contradictionMode        String  @default("off") // off | flag | probe (CONTRADICTION_MODES)
   contradictionWindowN     Int     @default(0) // N prior answers to check against; 0 when mode=off
   contradictionEveryNTurns Int     @default(1) // run detection every N respondent turns; 1 = every turn
-  anonymousMode            Boolean @default(false) // don't collect identifying profile fields
+  anonymousMode            Boolean @default(false) // don't collect identifying profile fields (IDENTITY axis)
+  accessMode               String  @default("invitation_only") // invitation_only | public | both (ACCESS_MODES) — who may START (access axis, orthogonal to anonymousMode)
+  inviteeFields            Json    @default("[{\"key\":\"firstName\",\"shown\":true,\"required\":false},{\"key\":\"surname\",\"shown\":true,\"required\":false},{\"key\":\"email\",\"shown\":true,\"required\":true},{\"key\":\"jobTitle\",\"shown\":false,\"required\":false},{\"key\":\"team\",\"shown\":false,\"required\":false},{\"key\":\"organisation\",\"shown\":false,\"required\":false}]") // InviteeFieldConfig[] — per-invitee detail fields the admin captures (email forced on)
 
   // Seriousness / abuse gate: how many non-genuine (preposterous / abusive / off-topic)
   // answers a session tolerates before it is abandoned. 0 = off for this questionnaire.
@@ -257,7 +261,7 @@ model AppQuestionSlot {
   type                 String                       @default("free_text") // free_text|single_choice|multi_choice|likert|numeric|date|boolean
   typeConfig           Json? // choices, likert bounds, etc.
   required             Boolean                      @default(false)
-  weight               Float                        @default(1.0)
+  weight               Float                        @default(0.5) // 0.1–1.0 slider scale; 0.5 neutral midpoint
   extractionConfidence Float? // 0–1, set by the extractor
   // F4.1 adaptive selection: cosine-similarity vector over `prompt` (+`guidelines`).
   // Width matches the platform embedding model (AiKnowledgeChunk.embedding). Raw-SQL
@@ -447,6 +451,12 @@ model AppQuestionnaireSession {
   status           String   @default("active") // SESSION_STATUSES (types.ts): active | paused | completed | abandoned
   isPreview        Boolean  @default(false) // true = admin refine-answer exercise, not a respondent run
   respondentUserId String? // respondent User.id; plain String, no FK (UG-1); set in F4.6
+  // Invitations: the invitation this session was booted from (frictionless token flow), or null
+  // for a walk-up/public/authenticated-direct session. Plain String, no @relation (UG-1) — and
+  // deliberately so: it must NEVER become a graph edge that joins identity to answer content. Read
+  // ONLY for per-invitee STATUS (started/completed); under anonymousMode, never to attribute answers
+  // (the completion-tracking-only invariant — see invitations/linkage.ts).
+  invitationId     String?
   // Seriousness / abuse gate: cumulative count of non-genuine answers flagged this session.
   // The route increments it; at `config.abuseThreshold` the session is abandoned.
   abuseStrikes     Int      @default(0)
@@ -469,6 +479,7 @@ model AppQuestionnaireSession {
 
   @@index([versionId])
   @@index([versionId, isPreview])
+  @@index([invitationId])
   // DRIFT WARNING: a raw-SQL PARTIAL UNIQUE INDEX
   // (idx_app_questionnaire_session_preview_per_version, migration
   // 20260605141500) enforces at most one preview session per version
@@ -705,7 +716,10 @@ model AppQuestionnaireSessionEvent {
 /// second slot-prune `onDelete` policy. `toolCalls` (the ordered capability outcomes —
 /// `{ slug, success, code?, latencyMs? }`) and `sideEffectAnswerIds` (the AppAnswerSlot
 /// ids this turn created/updated) are JSON arrays read wholesale, like the answer's
-/// `refinementHistory`. `costUsd` is the summed per-turn LLM spend; null until set.
+/// `refinementHistory`. `warnings` (`{ code, message }[]`) are the side-band notices the
+/// turn surfaced (seriousness / support / contradiction) — persisted so the respondent
+/// surface can replay them inline beneath the turn on resume, not just in the moment.
+/// `costUsd` is the summed per-turn LLM spend; null until set.
 /// `ordinal` is the 1-based turn index, derived `count+1` inside the write transaction
 /// (no `@@unique([sessionId, ordinal])` — a unique can throw under a retried turn; rare
 /// gaps are acceptable). No `respondentUserId` here — it's reachable via the session.
@@ -720,6 +734,7 @@ model AppQuestionnaireTurn {
   toolCalls             Json     @default("[]") // [{ slug, success, code?, latencyMs? }] ordered
   sideEffectAnswerIds   Json     @default("[]") // AppAnswerSlot.id[] this turn created/updated
   sideEffectDataSlotIds Json     @default("[]") // AppDataSlotFill.id[] this turn created/updated (data-slot mode)
+  warnings              Json     @default("[]") // [{ code, message }] side-band notices shown beneath this turn (seriousness/support/contradiction) — replayed inline on resume
   costUsd               Float? // summed per-turn LLM spend; null until set
   createdAt             DateTime @default(now())
 

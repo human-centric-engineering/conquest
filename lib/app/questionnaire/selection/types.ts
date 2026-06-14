@@ -48,7 +48,11 @@ export interface QuestionView {
   required: boolean;
   /** Question type; carried for future heuristics (e.g. variety), not yet scored. */
   type: QuestionType;
-  /** `AppQuestionTag` ids assigned to this slot (F2.2); read by `adaptive`. */
+  /**
+   * `AppQuestionTag` ids assigned to this slot (F2.2). Plumbed into the context for a
+   * future tag-aware strategy, but currently read by NO selection strategy — tags only
+   * drive analytics/export filtering. (Per-question `weight`, not tags, steers selection.)
+   */
   tagIds: string[];
   /**
    * The question prompt text. Optional because only `adaptive` needs it (to give

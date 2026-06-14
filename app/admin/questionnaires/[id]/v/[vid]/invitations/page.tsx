@@ -9,14 +9,21 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 
-import { InviteForm } from '@/components/admin/questionnaires/invite-form';
+import { InviteImportWizard } from '@/components/admin/questionnaires/invite-import-wizard';
 import { InvitationsTable } from '@/components/admin/questionnaires/invitations-table';
 import { CostEstimateCard } from '@/components/admin/questionnaires/cost-estimate-card';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
-import { isQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
-import { getQuestionnaireDetailCached } from '@/lib/app/questionnaire/workspace-data';
+import {
+  isQuestionnairesEnabled,
+  isInvitationImportEnabled,
+} from '@/lib/app/questionnaire/feature-flag';
+import {
+  getQuestionnaireDetailCached,
+  getVersionGraphCached,
+} from '@/lib/app/questionnaire/workspace-data';
+import { DEFAULT_INVITEE_FIELDS } from '@/lib/app/questionnaire/types';
 import type { InvitationView } from '@/lib/app/questionnaire/invitations';
 
 export const metadata: Metadata = {
@@ -65,6 +72,13 @@ export default async function InvitationsTab({ params }: PageProps) {
   const { invitations, total } = await getInvitations(id);
   const truncated = total > invitations.length;
 
+  // Invitee-field config drives the verify-grid columns; AI import gated by its sub-flag.
+  const [graph, importEnabled] = await Promise.all([
+    launchedVersion ? getVersionGraphCached(id, launchedVersion.id) : Promise.resolve(null),
+    isInvitationImportEnabled(),
+  ]);
+  const inviteeFields = graph?.config.inviteeFields ?? DEFAULT_INVITEE_FIELDS;
+
   return (
     <div className="space-y-4">
       <p className="text-muted-foreground max-w-2xl text-sm">
@@ -76,7 +90,12 @@ export default async function InvitationsTab({ params }: PageProps) {
         <CostEstimateCard questionnaireId={id} versionId={launchedVersion.id} variant="banner" />
       )}
 
-      <InviteForm questionnaireId={id} hasLaunchedVersion={hasLaunchedVersion} />
+      <InviteImportWizard
+        questionnaireId={id}
+        inviteeFields={inviteeFields}
+        importEnabled={importEnabled}
+        disabled={!hasLaunchedVersion}
+      />
 
       {truncated && (
         <p className="text-muted-foreground text-sm">

@@ -340,6 +340,45 @@ describe('persistTurn', () => {
     );
   });
 
+  it('forwards the turn’s side-band warnings to recordTurn for persistence', async () => {
+    await persistTurn({
+      sessionId: 'sess-1',
+      userMessage: 'lol the ceo',
+      agentResponse: "Let's keep it genuine.",
+      targetedQuestionId: 'q1',
+      toolCalls: [],
+      warnings: [{ code: 'seriousness', message: "That doesn't seem like a serious answer." }],
+      costUsd: 0,
+      upserts: [],
+      refinements: [],
+      keyToSlotId: new Map(),
+    });
+
+    expect(seamMock.recordTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        warnings: [{ code: 'seriousness', message: "That doesn't seem like a serious answer." }],
+      })
+    );
+  });
+
+  it('omits warnings from the recordTurn payload when the turn raised none', async () => {
+    await persistTurn({
+      sessionId: 'sess-1',
+      userMessage: 'a real answer',
+      agentResponse: 'Thanks.',
+      targetedQuestionId: 'q1',
+      toolCalls: [],
+      warnings: [],
+      costUsd: 0,
+      upserts: [],
+      refinements: [],
+      keyToSlotId: new Map(),
+    });
+
+    expect(seamMock.recordTurn).toHaveBeenCalledTimes(1);
+    expect((seamMock.recordTurn as Mock).mock.calls[0][0]).not.toHaveProperty('warnings');
+  });
+
   it('skips a refinement whose slotKey does not resolve to a slot', async () => {
     await persistTurn({
       sessionId: 'sess-1',

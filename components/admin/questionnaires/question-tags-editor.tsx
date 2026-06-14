@@ -54,7 +54,7 @@ export function QuestionTagsEditor({
     if (next.has(tagId)) next.delete(tagId);
     else next.add(tagId);
     pendingRef.current = next;
-    run(() => ['PUT', path, { tagIds: [...next] }]);
+    void run(() => ['PUT', path, { tagIds: [...next] }]);
   };
 
   return (

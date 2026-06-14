@@ -17,7 +17,10 @@ import type { MutationSpec } from '@/components/admin/questionnaires/version-edi
 /** Capture the [method, path, body] the editor hands to `run`. */
 function setup(over: { goal?: string | null; audience?: Record<string, unknown> | null } = {}) {
   const specs: MutationSpec[] = [];
-  const run = vi.fn((thunk: () => MutationSpec) => specs.push(thunk()));
+  const run = vi.fn((thunk: () => MutationSpec): Promise<boolean> => {
+    specs.push(thunk());
+    return Promise.resolve(true);
+  });
   render(
     <GoalAudienceEditor
       questionnaireId="qn-1"
@@ -56,15 +59,18 @@ describe('GoalAudienceEditor', () => {
     expect(specs[0][2]).toMatchObject({ goal: null });
   });
 
-  it('sends the audience object when a role is entered, null when empty', () => {
+  it('sends audience: null when no role is entered', () => {
     const { specs } = setup();
-    // Empty → null
     fireEvent.click(screen.getByRole('button', { name: /save goal/i }));
     expect(specs[0][2]).toMatchObject({ audience: null });
+  });
 
-    // With a role → object
+  it('sends the audience object when a role is entered', () => {
+    // The Save button flashes a "Saved" check and self-disables briefly after a save,
+    // so a fresh render isolates this single save action.
+    const { specs } = setup();
     fireEvent.change(screen.getAllByRole('textbox')[ROLE], { target: { value: 'new hire' } });
     fireEvent.click(screen.getByRole('button', { name: /save goal/i }));
-    expect(specs[1][2]).toMatchObject({ audience: { role: 'new hire' } });
+    expect(specs[0][2]).toMatchObject({ audience: { role: 'new hire' } });
   });
 });

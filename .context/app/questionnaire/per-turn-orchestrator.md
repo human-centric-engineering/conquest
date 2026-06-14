@@ -93,6 +93,7 @@ phrasing); when off, there's no extra spend and behaviour is unchanged. The vers
 | `POST /api/v1/app/questionnaire-sessions`                | `withAuth`  | Create (invitation-bound or logged-in-anonymous), idempotent resume |
 | `POST /api/v1/app/questionnaire-sessions/anonymous`      | **public**  | No-login anonymous create → returns a signed `accessToken`          |
 | `POST /api/v1/app/questionnaire-sessions/:id/messages`   | per-session | The streaming turn loop                                             |
+| `GET /api/v1/app/questionnaire-sessions/:id/transcript`  | per-session | Replayed transcript (prior turns + persisted notices) for resume    |
 | `POST /api/v1/app/questionnaire-sessions/:id/transcribe` | per-session | Voice input (F6.2) — audio → `{ text, durationMs, language? }`      |
 | `GET /api/v1/app/questionnaire-sessions/:id/status`      | per-session | Lifecycle status (F7.3) — completion-offer + cost tier + anon       |
 | `POST /api/v1/app/questionnaire-sessions/:id/lifecycle`  | per-session | Pause/resume (F7.3) — **signed-in respondents only** (403 for anon) |
@@ -160,6 +161,27 @@ signed with `BETTER_AUTH_SECRET`, constant-time verify, 24h). There is **no bett
 anonymous plugin**, so the no-login path can't unify under `withAuth`; the token is the only
 credential (NOT the bare session cuid, which isn't cryptographically random). The closest
 existing precedent is the embed widget (`lib/embed/auth.ts`).
+
+### Resume replay & per-turn notices
+
+A resumed session used to open with only a synthetic "welcome back" greeting — the prior
+conversation, and the seriousness / support / contradiction notices it raised, were gone. Those
+side-band notices were also transient _within_ a live session: the chat kept one top-level banner
+slot that the next send cleared. Both are now persisted and replayed.
+
+- **Persisted on the turn.** Each `warning` frame the core emits is collected from `result.events`
+  and written on the turn row (`AppQuestionnaireTurn.warnings` — `{ code, message }[]`, via
+  `persistTurn` → `recordTurn`). The chat attaches them to the assistant turn they belong to
+  (`QuestionnaireTurn.warnings`) and renders them inline beneath that reply (`<TurnNotices>`), so a
+  notice stays pinned as the conversation scrolls on instead of vanishing on the next input.
+- **Replayed on resume.** `loadTranscript(sessionId)` (`_lib/transcript.ts`) rebuilds the rendered
+  transcript from the ordinal-ordered turn rows — user bubble (skipped for the empty-message
+  kickoff turn) + assistant reply + its notices — and seeds it as `initialTurns` (transcript-only;
+  the conversation is its own context, so no "welcome back" line). `autoStart` is off on resume, so
+  no kickoff re-asks. The authenticated page SSR-seeds it; the no-login surface fetches
+  `GET …/transcript` on boot (its token is client-only, so it can't SSR-seed) and falls soft to a
+  fresh greeting if that read fails. The `warnings` JSON is validated at the loader boundary and
+  degrades to no notices if a row is malformed — a replayed transcript never throws.
 
 ## Gating
 

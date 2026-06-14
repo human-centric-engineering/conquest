@@ -61,10 +61,13 @@ On the **first** turn the running level reaches `high` (`shouldSignpost`), and o
 configured a non-empty `supportMessage`, the orchestrator pushes a side-band `warning` with
 `code: 'support'` (the verbatim author copy + optional `supportResourceUrl`), rendered by
 `components/app/questionnaire/chat/support-notice.tsx`. It's a **deterministic frame**, not phraser
-prose, so the safeguarding copy can't be paraphrased or hallucinated. Pushed **last** in
-`result.events` (the chat keeps a single notice slot). Dedupe is implicit: the route persists
-`'high'`, so `state.sensitivityLevel === 'high'` on every later turn ⇒ `signpost` is false.
-Fail-open: if the persist write fails it may re-signpost, which is safer than missing it.
+prose, so the safeguarding copy can't be paraphrased or hallucinated. The route collects every
+`warning` frame in `result.events` and persists them on the turn (`AppQuestionnaireTurn.warnings`),
+so the support notice is **attached to the turn that raised it** — it stays pinned beneath that
+reply as the conversation scrolls on, and replays inline when the surface resumes (see
+`per-turn-orchestrator.md` § resume replay). Dedupe is implicit: the route persists `'high'`, so
+`state.sensitivityLevel === 'high'` on every later turn ⇒ `signpost` is false. Fail-open: if the
+persist write fails it may re-signpost, which is safer than missing it.
 
 ## Gating
 

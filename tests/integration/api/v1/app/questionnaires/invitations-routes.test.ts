@@ -40,6 +40,7 @@ vi.mock('@/lib/security/rate-limit', async (importOriginal) => {
 const prismaMock = vi.hoisted(() => ({
   appQuestionnaire: { findUnique: vi.fn() },
   appQuestionnaireVersion: { findFirst: vi.fn() },
+  appQuestionnaireConfig: { findUnique: vi.fn() },
   appDemoClient: { findUnique: vi.fn() },
   appQuestionnaireInvitation: {
     findFirst: vi.fn(),
@@ -61,6 +62,7 @@ import {
 } from '@/app/api/v1/app/questionnaires/[id]/invitations/route';
 import { PATCH as revokePATCH } from '@/app/api/v1/app/questionnaires/[id]/invitations/[invitationId]/route';
 import { POST as resendPOST } from '@/app/api/v1/app/questionnaires/[id]/invitations/[invitationId]/resend/route';
+import { POST as linkPOST } from '@/app/api/v1/app/questionnaires/[id]/invitations/[invitationId]/link/route';
 
 import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
@@ -141,6 +143,7 @@ beforeEach(() => {
     questionnaire: { title: 'Customer Satisfaction', demoClientId: null },
   });
   prismaMock.appDemoClient.findUnique.mockResolvedValue(null);
+  prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue(null); // lazy config → default invitee fields
   prismaMock.appQuestionnaireInvitation.findFirst.mockResolvedValue(null); // no dedup hit
   prismaMock.appQuestionnaireInvitation.create.mockResolvedValue({ id: 'inv-new' });
   prismaMock.appQuestionnaireInvitation.update.mockResolvedValue(invitationRow());
@@ -531,5 +534,42 @@ describe('POST — resend', () => {
     const res = await resendPOST(req(undefined), ctx(SINGLE));
     expect(res.status).toBe(200);
     expect(prismaMock.appQuestionnaireInvitation.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST — copy link', () => {
+  it('rotates the token and returns the frictionless /q/:versionId?i= URL (no email)', async () => {
+    prismaMock.appQuestionnaireInvitation.findFirst.mockResolvedValue(
+      scopedRow({ status: 'sent' })
+    );
+    prismaMock.appQuestionnaireInvitation.update.mockResolvedValue({});
+
+    const res = await linkPOST(req(undefined), ctx(SINGLE));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data.url).toMatch(/\/q\/v1\?i=[0-9a-f]{64}$/);
+    // Token rotated (fresh hash + refreshed expiry); no email sent.
+    const updateArg = prismaMock.appQuestionnaireInvitation.update.mock.calls[0][0];
+    expect(updateArg.data.tokenHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(updateArg.data.expiresAt).toEqual(expect.any(Date));
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(logAdminAction).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'questionnaire_invitation.link' })
+    );
+  });
+
+  it('409s for a revoked or completed invitation', async () => {
+    prismaMock.appQuestionnaireInvitation.findFirst.mockResolvedValue(
+      scopedRow({ status: 'revoked' })
+    );
+    const res = await linkPOST(req(undefined), ctx(SINGLE));
+    expect(res.status).toBe(409);
+    expect(prismaMock.appQuestionnaireInvitation.update).not.toHaveBeenCalled();
+  });
+
+  it('404s when the invitation does not resolve in scope', async () => {
+    prismaMock.appQuestionnaireInvitation.findFirst.mockResolvedValue(null);
+    const res = await linkPOST(req(undefined), ctx(SINGLE));
+    expect(res.status).toBe(404);
   });
 });

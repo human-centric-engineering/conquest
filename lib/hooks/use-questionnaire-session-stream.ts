@@ -7,7 +7,8 @@
  * authenticated sessions ride the cookie (sent via `credentials: 'include'`); the no-login
  * anonymous mode passes the signed `accessToken` as `X-Session-Token`. The hook owns the
  * rendered transcript, the in-flight streaming text (animated via {@link useTypingAnimation}),
- * the side-band warning banner, and the blocking/error status.
+ * the per-turn side-band warnings (attached to the assistant turn they belong to, so they
+ * persist as the conversation scrolls on), and the blocking/error status.
  *
  * Turn POSTs are NOT idempotent — a re-send would mint a duplicate turn server-side — so a
  * transport failure mid-stream is surfaced as an error for the respondent to retry manually
@@ -63,7 +64,6 @@ export interface UseQuestionnaireSessionStreamReturn {
   /** The animated assistant text for the in-flight turn (empty until the first delta). */
   streamingText: string;
   status: QuestionnaireChatStatus;
-  warning: SessionWarning | null;
   error: ChatErrorState | null;
   /** Whether the composer should accept input. */
   canSend: boolean;
@@ -190,7 +190,6 @@ export function useQuestionnaireSessionStream(
   const [turns, setTurns] = useState<QuestionnaireTurn[]>(initialTurns ?? []);
   const [streaming, setStreaming] = useState(false);
   const [status, setStatus] = useState<QuestionnaireChatStatus>(initialStatus ?? 'idle');
-  const [warning, setWarning] = useState<SessionWarning | null>(null);
   const [error, setError] = useState<ChatErrorState | null>(() =>
     initialStatus ? defaultBlockingError(initialStatus) : null
   );
@@ -227,7 +226,6 @@ export function useQuestionnaireSessionStream(
       if (opts.userTurn !== undefined) {
         setTurns((prev) => [...prev, { role: 'user', content: opts.userTurn as string }]);
       }
-      setWarning(null);
       setError(null);
       setStatus('streaming');
       setStreaming(true);
@@ -237,6 +235,10 @@ export function useQuestionnaireSessionStream(
       abortRef.current = controller;
 
       let fullText = '';
+      // Accumulate the turn's warning frames (they arrive before the content deltas) so they can
+      // be attached to the committed assistant turn — pinned beneath that reply, not a transient
+      // banner that the next send wipes.
+      const streamWarnings: SessionWarning[] = [];
       let streamError: ChatErrorState | null = null;
 
       try {
@@ -288,7 +290,7 @@ export function useQuestionnaireSessionStream(
                 fullText += ev.delta;
                 typing.appendDelta(ev.delta);
               } else if (ev.type === 'warning') {
-                setWarning({ code: ev.code, message: ev.message });
+                streamWarnings.push({ code: ev.code, message: ev.message });
               } else if (ev.type === 'error') {
                 streamError = {
                   code: ev.code,
@@ -305,7 +307,14 @@ export function useQuestionnaireSessionStream(
         // without an explicit `done` frame, as long as we accumulated text).
         typing.flush();
         if (fullText.length > 0) {
-          setTurns((prev) => [...prev, { role: 'assistant', content: fullText }]);
+          setTurns((prev) => [
+            ...prev,
+            {
+              role: 'assistant',
+              content: fullText,
+              ...(streamWarnings.length > 0 ? { warnings: streamWarnings } : {}),
+            },
+          ]);
         }
 
         if (streamError) {
@@ -375,7 +384,6 @@ export function useQuestionnaireSessionStream(
     streaming,
     streamingText: typing.displayText,
     status,
-    warning,
     error,
     canSend,
     sendMessage,

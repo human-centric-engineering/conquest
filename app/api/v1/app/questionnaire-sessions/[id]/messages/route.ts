@@ -211,10 +211,13 @@ async function handleMessage(
     const dataSlots = loaded.base.dataSlots ?? [];
     const dataSlotMode = dataSlotsFlag && dataSlots.length > 0;
 
-    // Attachments only flow when the sub-flag is on (dark-launch): with it off, a client
-    // that sends attachments anyway gets a text-only turn — the paid multimodal path stays shut.
+    // Attachments only flow when the platform sub-flag is on (dark-launch) AND this questionnaire
+    // opted in via config: with either off, a client that sends attachments anyway gets a
+    // text-only turn — the paid multimodal path stays shut. This server gate mirrors the composer
+    // hiding the paperclip, so a crafted request can't bypass an author's "attachments off".
+    const attachmentsAllowed = attachmentInput && loaded.base.config.attachmentsEnabled;
     const attachments =
-      attachmentInput && body.attachments && body.attachments.length > 0
+      attachmentsAllowed && body.attachments && body.attachments.length > 0
         ? body.attachments
         : undefined;
 
@@ -309,6 +312,12 @@ async function handleMessage(
 
       // Side-band frames the core determined (contradiction warnings, fail-soft notices).
       for (const ev of result.events) yield ev;
+
+      // Capture the same warning frames to persist on the turn, so the respondent surface can
+      // replay them inline beneath this turn on resume rather than losing them on the next input.
+      const turnWarnings = result.events
+        .filter((ev): ev is Extract<ChatEvent, { type: 'warning' }> => ev.type === 'warning')
+        .map((ev) => ({ code: ev.code, message: ev.message }));
 
       // Sensitivity awareness: the gentle-tone memory threaded into the phraser this turn. Fold the
       // JUST-detected disclosure in (the route persists it only after the run) so the disclosure
@@ -425,6 +434,7 @@ async function handleMessage(
           agentResponse,
           targetedQuestionId: persistedTargetedId,
           toolCalls: result.toolCalls,
+          ...(turnWarnings.length > 0 ? { warnings: turnWarnings } : {}),
           costUsd,
           upserts: result.sideEffects.answerUpserts,
           refinements: result.sideEffects.answerRefinements,

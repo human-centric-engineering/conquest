@@ -37,6 +37,7 @@ import {
 import { type AttachmentEntry } from '@/lib/hooks/use-attachments';
 import type { ChatAttachment } from '@/lib/orchestration/chat/types';
 import type { UseQuestionnaireSessionStreamReturn } from '@/lib/hooks/use-questionnaire-session-stream';
+import type { SessionWarning } from '@/lib/app/questionnaire/chat/types';
 import { ChatErrorPanel } from '@/components/app/questionnaire/chat/chat-error-panel';
 import { ContradictionNotice } from '@/components/app/questionnaire/chat/contradiction-notice';
 import { SeriousnessNotice } from '@/components/app/questionnaire/chat/seriousness-notice';
@@ -61,6 +62,39 @@ export interface QuestionnaireChatProps {
    */
   animateOpening?: boolean;
   className?: string;
+}
+
+/**
+ * The side-band notices that belong to one assistant turn, rendered inline beneath it. A flagged
+ * contradiction (F4.3) gets a tasteful callout — the clearest "the agent is reasoning about your
+ * answers" signal; seriousness/support get their bespoke notices; every other code stays a quiet
+ * fail-soft line. Attached to the turn (not a transient banner), so they persist as the
+ * conversation scrolls on and replay on resume. Renders nothing when the turn raised none.
+ */
+function TurnNotices({ warnings }: { warnings?: SessionWarning[] }) {
+  if (!warnings || warnings.length === 0) return null;
+  return (
+    <div className="mt-3 flex flex-col gap-2">
+      {warnings.map((warning, i) =>
+        warning.code === 'contradiction' ? (
+          <ContradictionNotice key={i} message={warning.message} />
+        ) : warning.code === 'seriousness' ? (
+          <SeriousnessNotice key={i} message={warning.message} />
+        ) : warning.code === 'support' ? (
+          <SupportNotice key={i} message={warning.message} />
+        ) : (
+          <div
+            key={i}
+            role="status"
+            className="border-l-2 pl-3 text-xs"
+            style={{ borderColor: 'var(--app-accent-color, var(--color-primary))' }}
+          >
+            <span className="text-muted-foreground">{warning.message}</span>
+          </div>
+        )
+      )}
+    </div>
+  );
 }
 
 function UserBubble({ content }: { content: string }) {
@@ -116,9 +150,12 @@ const OPENING_GAP_MS = 1500;
  */
 function TypewriterAssistantTurn({
   content,
+  warnings,
   onDone,
 }: {
   content: string;
+  /** Side-band notices to render beneath the reply once it has finished typing in. */
+  warnings?: SessionWarning[];
   /** Fired once when the message has fully typed in (used to chain the opening turns). */
   onDone?: () => void;
 }) {
@@ -151,9 +188,14 @@ function TypewriterAssistantTurn({
   return (
     <AssistantTurn>
       {done ? (
-        <div className="prose prose-sm dark:prose-invert max-w-none">
-          <Markdown>{content}</Markdown>
-        </div>
+        <>
+          <div className="prose prose-sm dark:prose-invert max-w-none">
+            <Markdown>{content}</Markdown>
+          </div>
+          {/* The notices only land once the reply has fully typed in — they read as the agent's
+              considered aside, not something racing the message itself. */}
+          <TurnNotices warnings={warnings} />
+        </>
       ) : (
         <p className="text-sm leading-relaxed whitespace-pre-wrap">
           {content.slice(0, shown)}
@@ -175,10 +217,13 @@ function TypewriterAssistantTurn({
  */
 function RevealedAssistantTurn({
   content,
+  warnings,
   beatMs,
   onDone,
 }: {
   content: string;
+  /** Side-band notices to render beneath the reply once it has finished typing in. */
+  warnings?: SessionWarning[];
   /** Pre-type "Thinking…" pause in ms; `0` types immediately (a normal post-answer reply). */
   beatMs: number;
   onDone: () => void;
@@ -197,7 +242,7 @@ function RevealedAssistantTurn({
       </AssistantTurn>
     );
   }
-  return <TypewriterAssistantTurn content={content} onDone={onDone} />;
+  return <TypewriterAssistantTurn content={content} warnings={warnings} onDone={onDone} />;
 }
 
 export function QuestionnaireChat({
@@ -209,7 +254,7 @@ export function QuestionnaireChat({
   animateOpening = false,
   className,
 }: QuestionnaireChatProps) {
-  const { turns, streaming, status, warning, error, canSend, sendMessage, dismissError } = stream;
+  const { turns, streaming, status, error, canSend, sendMessage, dismissError } = stream;
 
   const [input, setInput] = useState('');
   const [voiceError, setVoiceError] = useState<string | null>(null);
@@ -312,6 +357,8 @@ export function QuestionnaireChat({
                   <div className="prose prose-sm dark:prose-invert max-w-none">
                     <Markdown>{turn.content}</Markdown>
                   </div>
+                  {/* Replayed transcript: its persisted notices render inline beneath the turn. */}
+                  <TurnNotices warnings={turn.warnings} />
                 </AssistantTurn>
               );
             }
@@ -323,6 +370,7 @@ export function QuestionnaireChat({
               <RevealedAssistantTurn
                 key={i}
                 content={turn.content}
+                warnings={turn.warnings}
                 beatMs={isActive ? beatForTurn(i) : 0}
                 onDone={isActive ? () => setRevealCursor((c) => Math.max(c, i + 1)) : () => {}}
               />
@@ -338,26 +386,6 @@ export function QuestionnaireChat({
               <ThinkingIndicator />
             </AssistantTurn>
           )}
-
-          {/* Side-band notice. A flagged contradiction (F4.3) gets a tasteful callout —
-              the clearest "the agent is reasoning about your answers" signal; every other
-              warning stays a quiet fail-soft line. */}
-          {warning &&
-            (warning.code === 'contradiction' ? (
-              <ContradictionNotice message={warning.message} />
-            ) : warning.code === 'seriousness' ? (
-              <SeriousnessNotice message={warning.message} />
-            ) : warning.code === 'support' ? (
-              <SupportNotice message={warning.message} />
-            ) : (
-              <div
-                role="status"
-                className="border-l-2 pl-3 text-xs"
-                style={{ borderColor: 'var(--app-accent-color, var(--color-primary))' }}
-              >
-                <span className="text-muted-foreground">{warning.message}</span>
-              </div>
-            ))}
 
           {/* Blocking / error state */}
           {error && (

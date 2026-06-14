@@ -37,6 +37,7 @@ import {
   createPreviewSession,
   createSessionForVersion,
   createSessionFromInvitation,
+  createSessionFromInviteToken,
 } from '@/app/api/v1/app/questionnaire-sessions/_lib/create';
 import { hashInvitationToken } from '@/lib/app/questionnaire/invitations';
 
@@ -151,7 +152,7 @@ describe('createSessionForVersion (authed anonymous-direct)', () => {
   const version = (overrides = {}) => ({
     id: 'v1',
     status: 'launched',
-    config: { anonymousMode: true },
+    config: { accessMode: 'public' },
     ...overrides,
   });
 
@@ -179,7 +180,7 @@ describe('createSessionForVersion (authed anonymous-direct)', () => {
 
   it('403s a non-anonymous questionnaire (requires an invitation)', async () => {
     (mocks.prisma.appQuestionnaireVersion.findUnique as Mock).mockResolvedValue(
-      version({ config: { anonymousMode: false } })
+      version({ config: { accessMode: 'invitation_only' } })
     );
     const result = await createSessionForVersion('v1', USER);
     expect(result).toMatchObject({ ok: false, status: 403, code: 'INVITATION_REQUIRED' });
@@ -210,7 +211,7 @@ describe('createAnonymousSession (no-login)', () => {
   const version = (overrides = {}) => ({
     id: 'v1',
     status: 'launched',
-    config: { anonymousMode: true },
+    config: { accessMode: 'public' },
     ...overrides,
   });
 
@@ -238,7 +239,7 @@ describe('createAnonymousSession (no-login)', () => {
 
   it('403s a non-anonymous questionnaire (requires an invitation)', async () => {
     (mocks.prisma.appQuestionnaireVersion.findUnique as Mock).mockResolvedValue(
-      version({ config: { anonymousMode: false } })
+      version({ config: { accessMode: 'invitation_only' } })
     );
     const result = await createAnonymousSession('v1');
     expect(result).toMatchObject({ ok: false, status: 403, code: 'INVITATION_REQUIRED' });
@@ -333,5 +334,81 @@ describe('createPreviewSession (admin preview)', () => {
     (mocks.prisma.appQuestionnaireVersion.findUnique as Mock).mockResolvedValue(version());
     await createPreviewSession('v1');
     expect(launchabilityMock.loadLaunchReadiness).not.toHaveBeenCalled();
+  });
+});
+
+describe('createSessionFromInviteToken (frictionless, no-login)', () => {
+  const future = new Date(Date.now() + 60_000);
+  const past = new Date(Date.now() - 60_000);
+  const invite = (overrides = {}) => ({
+    id: 'inv-1',
+    status: 'sent',
+    versionId: 'v1',
+    revokedAt: null,
+    expiresAt: future,
+    version: { status: 'launched' },
+    ...overrides,
+  });
+
+  it('404s on an unknown token', async () => {
+    (mocks.prisma.appQuestionnaireInvitation.findUnique as Mock).mockResolvedValue(null);
+    const result = await createSessionFromInviteToken('tok');
+    expect(result).toMatchObject({ ok: false, status: 404, code: 'INVITATION_NOT_FOUND' });
+  });
+
+  it('410s on a revoked invitation', async () => {
+    (mocks.prisma.appQuestionnaireInvitation.findUnique as Mock).mockResolvedValue(
+      invite({ revokedAt: past })
+    );
+    const result = await createSessionFromInviteToken('tok');
+    expect(result).toMatchObject({ ok: false, status: 410, code: 'INVITATION_REVOKED' });
+  });
+
+  it('410s on an expired invitation', async () => {
+    (mocks.prisma.appQuestionnaireInvitation.findUnique as Mock).mockResolvedValue(
+      invite({ expiresAt: past })
+    );
+    const result = await createSessionFromInviteToken('tok');
+    expect(result).toMatchObject({ ok: false, status: 410, code: 'INVITATION_EXPIRED' });
+  });
+
+  it('409s when the version is not launched', async () => {
+    (mocks.prisma.appQuestionnaireInvitation.findUnique as Mock).mockResolvedValue(
+      invite({ version: { status: 'draft' } })
+    );
+    const result = await createSessionFromInviteToken('tok');
+    expect(result).toMatchObject({ ok: false, status: 409, code: 'VERSION_NOT_LAUNCHED' });
+  });
+
+  it('creates a no-login session bound to the invitation + advances it to started', async () => {
+    (mocks.prisma.appQuestionnaireInvitation.findUnique as Mock).mockResolvedValue(invite());
+    const result = await createSessionFromInviteToken('tok');
+
+    expect(result).toEqual({ ok: true, session: NEW_SESSION, resumed: false });
+    // Session is null-user, invitation-bound.
+    expect(mocks.tx.appQuestionnaireSession.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          versionId: 'v1',
+          respondentUserId: null,
+          invitationId: 'inv-1',
+          isPreview: false,
+        }),
+      })
+    );
+    // Invitation advanced sent → started.
+    expect(mocks.tx.appQuestionnaireInvitation.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'inv-1' }, data: { status: 'started' } })
+    );
+  });
+
+  it('resumes an existing non-terminal invite session (idempotent re-entry)', async () => {
+    (mocks.prisma.appQuestionnaireInvitation.findUnique as Mock).mockResolvedValue(invite());
+    const existing = { id: 'sess-existing', status: 'active', versionId: 'v1' };
+    (mocks.prisma.appQuestionnaireSession.findFirst as Mock).mockResolvedValue(existing);
+
+    const result = await createSessionFromInviteToken('tok');
+    expect(result).toEqual({ ok: true, session: existing, resumed: true });
+    expect(mocks.tx.appQuestionnaireSession.create).not.toHaveBeenCalled();
   });
 });

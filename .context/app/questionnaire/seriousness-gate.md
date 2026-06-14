@@ -29,7 +29,9 @@ It's a cheap (~$0.0001) gpt-4o-mini-tier call. Fail-soft: a null verdict skips t
 - **Strike** — `evaluateAbuseStrike(state.abuseStrikes, threshold)` (`seriousness/seriousness-logic.ts`).
 - **Below threshold** — emit a `warning` (`code: 'seriousness'`) with escalating copy (gentle →
   firm); because the answer wasn't merged, selection **re-asks the same still-unanswered question**.
-  Rendered by `SeriousnessNotice` above the re-asked question.
+  Rendered by `SeriousnessNotice` inline beneath the re-asked turn. The route persists the frame on
+  the turn (`AppQuestionnaireTurn.warnings`), so the notice survives the next input and replays on
+  resume rather than vanishing (see `per-turn-orchestrator.md` § resume replay).
 - **At/over threshold** — `result.abuse.abandon = true` + a deterministic polite final message;
   the pure core skips detect/refine/select.
 

@@ -77,8 +77,11 @@ async function acceptInvitation(
 
   const invitation = resolution.invitation;
 
-  // Registration is legal only before the invitation is bound (sent | opened).
-  if (!isInvitationTransitionAllowed(invitation.status, 'registered')) {
+  // Registration is legal before the invitation is bound (sent | opened), OR as a frictionless
+  // UPGRADE: a no-account invitee who already `started` may create an account so their in-flight
+  // session resumes across devices. An invitation already bound to an account (userId set) is used.
+  const isUpgrade = invitation.status === 'started' && invitation.userId === null;
+  if (!isUpgrade && !isInvitationTransitionAllowed(invitation.status, 'registered')) {
     return errorResponse('This invitation has already been used', {
       code: 'INVITATION_ALREADY_USED',
       status: 409,
@@ -148,21 +151,29 @@ async function acceptInvitation(
     });
   }
 
-  // 4. Bind the invitation to the account: registered. After sign-in, so a wrong
-  // password on the claim path never binds.
+  // 4. Bind the invitation to the account. After sign-in, so a wrong password never binds.
+  // A frictionless upgrade keeps `started` (the session is already in progress — don't rewind the
+  // lifecycle); a fresh registration advances to `registered`.
   await prisma.appQuestionnaireInvitation.update({
     where: { id: invitation.id },
     data: {
       userId,
-      status: 'registered',
+      ...(isUpgrade ? {} : { status: 'registered' }),
       registeredAt: new Date(),
       ...(invitation.openedAt ? {} : { openedAt: new Date() }),
     },
+  });
+  // 5. Cross-device resume: adopt any no-account session this invitation already booted (the
+  // frictionless flow) into the new account, so signing in elsewhere resumes it. No-op otherwise.
+  await prisma.appQuestionnaireSession.updateMany({
+    where: { invitationId: invitation.id, respondentUserId: null },
+    data: { respondentUserId: userId },
   });
   log.info('Invitation registered', {
     invitationId: invitation.id,
     userId,
     claimed: Boolean(existing),
+    upgrade: isUpgrade,
   });
 
   const response = successResponse({ message: 'Registered. Redirecting…' }, undefined, {

@@ -12,7 +12,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Plus, Trash2 } from 'lucide-react';
+import { Plus, Tag as TagIcon, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -62,18 +62,31 @@ export function TagVocabularyEditor({
     const label = newLabel.trim();
     if (!label) return;
     setNewLabel('');
-    run(() => ['POST', collectionPath, { label }]);
+    void run(() => ['POST', collectionPath, { label }]);
   };
 
   return (
-    <section className="space-y-3 rounded-md border p-4">
-      <Label className="text-sm font-medium">
-        Tags{' '}
-        <FieldHelp title="Question tags">
-          A per-version vocabulary you can assign to questions. Used by analytics filtering and the
-          adaptive selection strategy. Editing a launched version&rsquo;s tags forks a new draft.
-        </FieldHelp>
-      </Label>
+    <section className="bg-card space-y-3 rounded-xl border p-4 shadow-sm">
+      <div className="flex items-center gap-2">
+        <span className="flex h-7 w-7 items-center justify-center rounded-md border border-[var(--cq-accent-ring)] bg-[var(--cq-accent-muted)] text-[var(--cq-accent)]">
+          <TagIcon className="h-3.5 w-3.5" />
+        </span>
+        <div>
+          <Label className="text-sm font-semibold">
+            Tag legend{' '}
+            <FieldHelp title="Question tags">
+              A per-version vocabulary you assign to questions purely to <strong>organise</strong>{' '}
+              them and <strong>filter analytics</strong> by topic. Tags do <strong>not</strong>{' '}
+              affect question weighting, completion, or which questions the agent asks — set a
+              question&rsquo;s <em>Weight</em> for that. Editing a launched version&rsquo;s tags
+              forks a new draft.
+            </FieldHelp>
+          </Label>
+          <p className="text-muted-foreground text-xs">
+            Labels for organising &amp; filtering analytics — they don’t change agent behaviour.
+          </p>
+        </div>
+      </div>
 
       {tags.length === 0 ? (
         <p className="text-muted-foreground text-sm italic">No tags yet.</p>
@@ -84,9 +97,9 @@ export function TagVocabularyEditor({
               key={tag.id}
               tag={tag}
               busy={busy}
-              onRename={(label) => run(() => ['PATCH', tagPath(tag.id), { label }])}
-              onRecolour={(color) => run(() => ['PATCH', tagPath(tag.id), { color }])}
-              onDelete={() => run(() => ['DELETE', tagPath(tag.id), undefined])}
+              onRename={(label) => void run(() => ['PATCH', tagPath(tag.id), { label }])}
+              onRecolour={(color) => void run(() => ['PATCH', tagPath(tag.id), { color }])}
+              onDelete={() => void run(() => ['DELETE', tagPath(tag.id), undefined])}
             />
           ))}
         </ul>

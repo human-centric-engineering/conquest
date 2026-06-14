@@ -52,13 +52,58 @@ pending → sent → opened → registered → started → completed
 ```
 
 - **F3.2 drives `pending → sent → opened → registered`** and `revoked`.
-- **`started`/`completed` are seam states** — enum values only; P6/P7 sessions
-  transition them. The pure transition table (`invitations/status.ts`) already
-  encodes the edges, but no F3.2 route walks them.
+- **`started`/`completed`** are walked by sessions: the frictionless flow advances
+  `→ started` on first boot, and `transitionSession` stamps `→ completed` when the
+  bound session completes.
+- **Frictionless (no-account) direct-to-started:** `pending | sent | opened → started`
+  edges exist so a token can boot a session WITHOUT the account-registration
+  `registered` step (see below).
 
 Transition legality is pure (`isInvitationTransitionAllowed`,
 `isInvitationResendable` in `lib/app/questionnaire/invitations/`); the routes map an
 illegal transition to a 409 and the UI never offers an action the server would reject.
+
+## Import wizard (Phase D)
+
+The admin adds invitees through a two-step **Import → Verify & send** wizard
+(`InviteImportWizard`), four methods converging on one editable grid:
+
+- **Paste** a scruffy list — `parsePastedInvitees` (heuristic, client-side, no AI).
+- **CSV** upload — `parseCsvInvitees` (header-synonym column mapping, client-side).
+- **PDF / image** upload — `POST …/invitations/import/extract` (multipart) runs the AI
+  people-extractor (`extract/extract-people.ts`: PDF→text, image→vision; structured output,
+  cost-logged). Gated by `APP_QUESTIONNAIRES_INVITE_IMPORT_ENABLED` (paid + PII); the two AI
+  method buttons are hidden when off.
+
+All methods produce `ParsedInvitee[]`; the **verify grid** renders a column per _shown_
+`inviteeField`, lets the admin edit/add/remove rows, then sends via `POST …/invitations`
+(which re-validates against the config and stores `invitation.profile`). Nothing sends without
+passing the grid. (The earlier single-textarea `InviteForm` is superseded but retained.)
+
+## Frictionless invite links (Phase B)
+
+Gated by `APP_QUESTIONNAIRES_FRICTIONLESS_INVITES_ENABLED` (+ live-sessions). A per-invitee
+token boots a **no-login** session — the respondent answers without creating an account:
+
+- `POST /api/v1/app/questionnaire-sessions/from-invite { inviteToken }` →
+  `createSessionFromInviteToken` resolves the invitation by `tokenHash`, validates
+  not-revoked / not-expired / version-launched, then creates a session with
+  `respondentUserId: null` and `invitationId` set, mints the HMAC `accessToken`, and
+  advances the invitation `→ started`. Idempotent: a re-opened link resumes the existing
+  non-terminal session (`findResumableSessionByInvitation`).
+- **Turns are unchanged**: a frictionless session is `respondentUserId: null`, so the
+  existing anonymous turn path (`X-Session-Token`) drives every turn.
+- The public page reads `?i=<token>` and forwards it to `AnonymousSessionBoot`, which POSTs
+  `/from-invite` (storage keyed on the token, so a shared device never crosses invitees).
+- **No profile snapshot** is written — the admin captured invitee details at invite time
+  (`invitation.profile`); identity lives on the invitation and is read only for STATUS
+  (the completion-tracking-only invariant, `invitations/linkage.ts`).
+- The account-registration accept flow still works (optional, for cross-device resume); when
+  off, invitations fall back to it. **Cross-device upgrade:** a frictionless invitee (status
+  `started`, no account) can register via the accept route — it keeps `started` (doesn't rewind
+  the lifecycle), binds the account, and **adopts the in-flight no-account session** (sets its
+  `respondentUserId`) so signing in elsewhere resumes it. An already account-bound invite is
+  rejected as used. (An in-session "save my progress" affordance to reach this is still UI work.)
 
 ## Token security
 
@@ -86,17 +131,27 @@ The seam splits across the `lib/app` boundary:
 
 Admin (flag-gate → `withAdminAuth` → audit):
 
-| Route                                                   | Method | Purpose                                                 |
-| ------------------------------------------------------- | ------ | ------------------------------------------------------- |
-| `…/questionnaires/:id/invitations`                      | GET    | List (status filter, pagination). Never returns tokens. |
-| `…/questionnaires/:id/invitations`                      | POST   | Send single/bulk. `inviteLimiter` sub-cap.              |
-| `…/questionnaires/:id/invitations/:invitationId`        | PATCH  | Revoke (`{ action: "revoke" }`).                        |
-| `…/questionnaires/:id/invitations/:invitationId/resend` | POST   | Regenerate token + re-send.                             |
+| Route                                                   | Method | Purpose                                                        |
+| ------------------------------------------------------- | ------ | -------------------------------------------------------------- |
+| `…/questionnaires/:id/invitations`                      | GET    | List (status filter, pagination). Never returns tokens.        |
+| `…/questionnaires/:id/invitations`                      | POST   | Send single/bulk. `inviteLimiter` sub-cap.                     |
+| `…/questionnaires/:id/invitations/:invitationId`        | PATCH  | Revoke (`{ action: "revoke" }`).                               |
+| `…/questionnaires/:id/invitations/:invitationId/resend` | POST   | Regenerate token + re-send (email).                            |
+| `…/questionnaires/:id/invitations/:invitationId/link`   | POST   | Rotate token, return a copy-able frictionless link (no email). |
 
 `POST` resolves the questionnaire's launched version (`409 INVITE_NO_LAUNCHED_VERSION`
-if none), then per recipient: app-layer dedup (live invite → `skipped`), mint, create,
-send. A send failure keeps the row at `pending` (resend later) and does **not** fail
-the request — the response is a per-recipient result array (`sent`/`skipped`/`failed`).
+if none), then per recipient: validate the supplied details against the version's
+`inviteeFields` (required fields present, email valid → per-recipient `failed` on a miss),
+derive `name` from first/last, store the captured fields as the invitation's `profile`,
+app-layer dedup (live invite → `skipped`), mint, create, send. A send failure keeps the
+row at `pending` (resend later) and does **not** fail the request — the response is a
+per-recipient result array (`sent`/`skipped`/`failed`).
+
+The **copy-link** route (`/link`) is the "didn't get the email?" escape hatch: it mints a
+fresh token and returns the no-login frictionless URL (`/q/:versionId?i=<token>`) for the
+admin to share manually. It does NOT email. ⚠️ It **rotates the token**, so any previously
+emailed/copied link stops working (an in-flight session survives — resume keys on
+`invitationId`). Refused (`409`) for revoked/completed invitations.
 
 Public, token-gated (F3.2 PR2 — no auth guard, rate-limited):
 

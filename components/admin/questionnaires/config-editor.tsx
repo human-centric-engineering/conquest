@@ -19,9 +19,20 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Plus, X } from 'lucide-react';
+import {
+  ClipboardList,
+  Gauge,
+  ListChecks,
+  Mail,
+  MessageSquareText,
+  Plus,
+  ShieldCheck,
+  X,
+} from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import { SaveButton } from '@/components/admin/questionnaires/save-button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
@@ -33,17 +44,24 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { FieldHelp } from '@/components/ui/field-help';
+import { cn } from '@/lib/utils';
 import { CostEstimateCard } from '@/components/admin/questionnaires/cost-estimate-card';
 import { API } from '@/lib/api/endpoints';
 import {
+  ACCESS_MODES,
+  ACCESS_MODE_LABELS,
   ANSWER_SLOT_PANEL_SCOPES,
   CONTRADICTION_MODES,
+  INVITEE_FIELD_LABELS,
   PRESENTATION_MODES,
   PROFILE_FIELD_TYPES,
   SELECTION_STRATEGIES,
+  type AccessMode,
   type AnswerSlotPanelScope,
   type ContradictionMode,
+  type InviteeFieldConfig,
   type PresentationMode,
   type ProfileFieldConfig,
   type ProfileFieldType,
@@ -147,6 +165,46 @@ function boundedNumber(
   return integer ? Math.floor(clamped) : clamped;
 }
 
+/**
+ * A titled, icon-led group of related settings — the unit of organisation on the Settings tab.
+ * Purely presentational: a card with a tinted icon chip, a one-line description, and the fields as
+ * children. Grouping + ordering (most-used first) is what makes the long config scannable.
+ */
+function SettingsGroup({
+  icon: Icon,
+  accent,
+  title,
+  description,
+  children,
+}: {
+  icon: LucideIcon;
+  /** Tailwind classes tinting the icon chip — one hue per group, for at-a-glance scanning. */
+  accent: string;
+  title: string;
+  description: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <Card className="overflow-hidden shadow-sm">
+      <CardHeader className="bg-muted/30 flex-row items-start gap-3 space-y-0 border-b p-4">
+        <span
+          className={cn(
+            'mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
+            accent
+          )}
+        >
+          <Icon className="h-4 w-4" />
+        </span>
+        <div className="space-y-0.5">
+          <CardTitle className="text-sm font-semibold">{title}</CardTitle>
+          <CardDescription className="text-xs leading-relaxed">{description}</CardDescription>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4 p-4">{children}</CardContent>
+    </Card>
+  );
+}
+
 export function ConfigEditor({
   questionnaireId,
   versionId,
@@ -184,6 +242,7 @@ export function ConfigEditor({
     config.maxQuestionsPerSession === null ? '' : String(config.maxQuestionsPerSession)
   );
   const [voiceEnabled, setVoiceEnabled] = useState(config.voiceEnabled);
+  const [attachmentsEnabled, setAttachmentsEnabled] = useState(config.attachmentsEnabled);
   const [contradictionMode, setContradictionMode] = useState<ContradictionMode>(
     config.contradictionMode
   );
@@ -194,6 +253,8 @@ export function ConfigEditor({
     String(config.contradictionEveryNTurns)
   );
   const [anonymousMode, setAnonymousMode] = useState(config.anonymousMode);
+  const [accessMode, setAccessMode] = useState<AccessMode>(config.accessMode);
+  const [inviteeFields, setInviteeFields] = useState<InviteeFieldConfig[]>(config.inviteeFields);
   const [abuseThreshold, setAbuseThreshold] = useState(String(config.abuseThreshold));
   const [maxDataSlotAttempts, setMaxDataSlotAttempts] = useState(
     String(config.maxDataSlotAttempts)
@@ -221,10 +282,13 @@ export function ConfigEditor({
       config.maxQuestionsPerSession === null ? '' : String(config.maxQuestionsPerSession)
     );
     setVoiceEnabled(config.voiceEnabled);
+    setAttachmentsEnabled(config.attachmentsEnabled);
     setContradictionMode(config.contradictionMode);
     setContradictionWindowN(String(config.contradictionWindowN));
     setContradictionEveryNTurns(String(config.contradictionEveryNTurns));
     setAnonymousMode(config.anonymousMode);
+    setAccessMode(config.accessMode);
+    setInviteeFields(config.inviteeFields);
     setAbuseThreshold(String(config.abuseThreshold));
     setMaxDataSlotAttempts(String(config.maxDataSlotAttempts));
     setSensitivityAwareness(config.sensitivityAwareness);
@@ -268,6 +332,7 @@ export function ConfigEditor({
         costBudgetUsd: capOrNull(costBudgetUsd, false),
         maxQuestionsPerSession: capOrNull(maxQuestionsPerSession, true),
         voiceEnabled,
+        attachmentsEnabled,
         contradictionMode,
         // The schema forces N=0 when off and ≥1 otherwise — keep the body coherent.
         contradictionWindowN: contradictionOff
@@ -282,6 +347,9 @@ export function ConfigEditor({
           true
         ),
         anonymousMode,
+        // Access mode (who may start) + invitee fields — email is forced shown+required server-side.
+        accessMode,
+        inviteeFields,
         // Seriousness / abuse gate: non-genuine answers tolerated before abandon. Blank/invalid
         // falls back to the stored value (never silently 0); 0 = off.
         abuseThreshold: boundedNumber(abuseThreshold, 0, 50, config.abuseThreshold, true),
@@ -311,23 +379,23 @@ export function ConfigEditor({
     ]);
 
   return (
-    <section className="space-y-5 rounded-md border p-4">
-      <div className="flex items-center gap-2">
-        <h3 className="text-sm font-semibold">Configuration</h3>
-        <FieldHelp title="Run-time configuration">
-          Controls how a session runs once this version is launched. A configuration must be saved
-          at least once before the version can be launched.
-        </FieldHelp>
-        {!config.saved && (
-          <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-900">
-            Not yet saved
-          </span>
-        )}
-      </div>
+    <section className="space-y-4">
+      {!config.saved && (
+        <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+          <span className="font-medium">Not yet saved.</span>
+          <span>Save this configuration at least once before the version can be launched.</span>
+        </div>
+      )}
 
-      {/* Selection + completion */}
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-1.5">
+      {/* ── 1. Questions & completion — the core run loop: how questions are chosen and when a
+             session is allowed to finish. Most-used knobs, so they lead. ── */}
+      <SettingsGroup
+        icon={ListChecks}
+        accent="bg-blue-500/10 text-blue-600 dark:text-blue-400"
+        title="Questions & completion"
+        description="How the agent chooses the next question and when a session is allowed to finish."
+      >
+        <div className="space-y-1.5 sm:max-w-sm">
           <Label className="text-sm font-medium">
             Selection strategy{' '}
             <FieldHelp title="Selection strategy">
@@ -357,191 +425,41 @@ export function ConfigEditor({
             </SelectContent>
           </Select>
         </div>
-        <div className="space-y-1.5">
-          <Label className="text-sm font-medium">
-            Min questions answered{' '}
-            <FieldHelp title="Minimum questions answered">
-              A session can&apos;t complete until at least this many questions have been answered. 0
-              means no minimum.
-            </FieldHelp>
-          </Label>
-          <Input
-            type="number"
-            min={0}
-            value={minQuestionsAnswered}
-            onChange={(e) => setMinQuestionsAnswered(e.target.value)}
-            disabled={busy}
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label className="text-sm font-medium">
-            Coverage threshold{' '}
-            <FieldHelp title="Coverage threshold">
-              Fraction of (weighted) questions that must be covered to consider the session
-              complete. 1 = all questions; 0.8 = 80%.
-            </FieldHelp>
-          </Label>
-          <Input
-            type="number"
-            min={0}
-            max={1}
-            step={0.05}
-            value={coverageThreshold}
-            onChange={(e) => setCoverageThreshold(e.target.value)}
-            disabled={busy}
-          />
-        </div>
-      </div>
-
-      {/* Budget & caps */}
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-1.5">
-          <Label className="text-sm font-medium">
-            Cost budget (USD / session){' '}
-            <FieldHelp title="Cost budget">
-              Optional per-session spend cap in US dollars. Leave blank for no cap. (Enforcement
-              lands with the turn engine; the estimate below shows projected spend against this
-              cap.)
-            </FieldHelp>
-          </Label>
-          <Input
-            type="number"
-            min={0}
-            step={0.01}
-            placeholder="No cap"
-            value={costBudgetUsd}
-            onChange={(e) => setCostBudgetUsd(e.target.value)}
-            disabled={busy}
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label className="text-sm font-medium">
-            Max questions / session{' '}
-            <FieldHelp title="Per-session question cap">
-              Hard limit on how many questions a single session will ask. Leave blank for no cap.
-            </FieldHelp>
-          </Label>
-          <Input
-            type="number"
-            min={1}
-            placeholder="No cap"
-            value={maxQuestionsPerSession}
-            onChange={(e) => setMaxQuestionsPerSession(e.target.value)}
-            disabled={busy}
-          />
-        </div>
-      </div>
-
-      {/* Pre-launch cost estimate (F3.3) — reads persisted config, so it re-fetches
-          when the saved cap/floor change. Compares against the live (possibly
-          unsaved) budget input. */}
-      <CostEstimateCard
-        questionnaireId={questionnaireId}
-        versionId={versionId}
-        reloadKey={`${config.saved}:${config.maxQuestionsPerSession}:${config.minQuestionsAnswered}:${questionCount}`}
-        costBudgetUsd={capOrNull(costBudgetUsd, false)}
-      />
-
-      {/* Modes */}
-      <div className="space-y-3">
-        <div className="flex items-center gap-2">
-          <Switch checked={voiceEnabled} onCheckedChange={setVoiceEnabled} disabled={busy} />
-          <Label className="text-sm font-medium">
-            Voice input{' '}
-            <FieldHelp title="Voice input">
-              Let respondents answer by voice as well as text.
-            </FieldHelp>
-          </Label>
-        </div>
-        <div className="flex items-center gap-2">
-          <Switch checked={anonymousMode} onCheckedChange={setAnonymousMode} disabled={busy} />
-          <Label className="text-sm font-medium">
-            Anonymous mode{' '}
-            <FieldHelp title="Anonymous mode">
-              Don&apos;t collect identifying profile fields at session start — responses aren&apos;t
-              tied to a named individual.
-            </FieldHelp>
-          </Label>
-        </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-1.5">
             <Label className="text-sm font-medium">
-              Contradiction detection{' '}
-              <FieldHelp title="Contradiction detection">
-                Whether the agent watches for answers that contradict earlier ones — off, flag them,
-                or probe with a follow-up.
+              Min questions answered{' '}
+              <FieldHelp title="Minimum questions answered">
+                A session can&apos;t complete until at least this many questions have been answered.
+                0 means no minimum.
               </FieldHelp>
             </Label>
-            <Select
-              value={contradictionMode}
-              onValueChange={(v) => setContradictionMode(v as ContradictionMode)}
+            <Input
+              type="number"
+              min={0}
+              value={minQuestionsAnswered}
+              onChange={(e) => setMinQuestionsAnswered(e.target.value)}
               disabled={busy}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {CONTRADICTION_MODES.map((m) => (
-                  <SelectItem key={m} value={m}>
-                    {CONTRADICTION_MODE_LABELS[m]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-sm font-medium">
-              Look-back window (N){' '}
-              <FieldHelp title="Look-back window">
-                How many prior answers to check each new answer against. Must be at least 1 when
-                detection is on.
-              </FieldHelp>
-            </Label>
-            <Input
-              type="number"
-              min={contradictionOff ? 0 : 1}
-              value={contradictionOff ? 0 : contradictionWindowN}
-              onChange={(e) => setContradictionWindowN(e.target.value)}
-              disabled={busy || contradictionOff}
             />
           </div>
           <div className="space-y-1.5">
             <Label className="text-sm font-medium">
-              Detection cadence (every N turns){' '}
-              <FieldHelp title="Detection cadence">
-                How often to run contradiction detection during the conversation — every N
-                respondent turns. 1 runs it every turn (most thorough); a higher value trades some
-                immediacy for lower per-turn cost. The completion sweep always runs regardless.
+              Coverage threshold{' '}
+              <FieldHelp title="Coverage threshold">
+                Fraction of (weighted) questions that must be covered to consider the session
+                complete. 1 = all questions; 0.8 = 80%.
               </FieldHelp>
             </Label>
             <Input
               type="number"
-              min={1}
-              value={contradictionEveryNTurns}
-              onChange={(e) => setContradictionEveryNTurns(e.target.value)}
-              disabled={busy || contradictionOff}
+              min={0}
+              max={1}
+              step={0.05}
+              value={coverageThreshold}
+              onChange={(e) => setCoverageThreshold(e.target.value)}
+              disabled={busy}
             />
           </div>
-        </div>
-        <div className="space-y-1.5 sm:max-w-xs">
-          <Label className="text-sm font-medium">
-            Abuse threshold{' '}
-            <FieldHelp title="Abuse threshold">
-              How many non-genuine answers (preposterous, abusive, or off-topic) a respondent may
-              give before the session is automatically ended. Earlier strikes get escalating
-              warnings and the answer is set aside; the Nth ends the session. Colloquial or lazy
-              answers are tolerated. Set to <code className="text-xs">0</code> to turn the gate off.
-              Requires the platform seriousness-gate flag to be on.
-            </FieldHelp>
-          </Label>
-          <Input
-            type="number"
-            min={0}
-            max={50}
-            value={abuseThreshold}
-            onChange={(e) => setAbuseThreshold(e.target.value)}
-            disabled={busy}
-          />
         </div>
         <div className="space-y-1.5 sm:max-w-xs">
           <Label className="text-sm font-medium">
@@ -563,7 +481,215 @@ export function ConfigEditor({
             disabled={busy}
           />
         </div>
-        <div className="space-y-3 sm:col-span-2">
+      </SettingsGroup>
+
+      {/* ── 2. Respondent experience — how a person actually completes it (format, input, what
+             they see, whether they're identified). ── */}
+      <SettingsGroup
+        icon={MessageSquareText}
+        accent="bg-violet-500/10 text-violet-600 dark:text-violet-400"
+        title="Respondent experience"
+        description="How a respondent completes the questionnaire — format, input, and what they see alongside the chat."
+      >
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label className="text-sm font-medium">
+              Presentation mode{' '}
+              <FieldHelp title="Presentation mode">
+                How the respondent completes this questionnaire. Chat is the streaming conversation.
+                Form presents the questions as a raw, sectioned form with the right input per type
+                (likert, choices, yes/no, text…). Both offers a chat ↔ form toggle so the respondent
+                can navigate sections, see what&apos;s already answered, and edit answers the agent
+                inferred — a useful escape hatch when the chat struggles. Form mode is
+                question-based: for questionnaires using data slots, editing a question reconciles
+                into the chat on the next turn.
+              </FieldHelp>
+            </Label>
+            <Select
+              value={presentationMode}
+              onValueChange={(v) => setPresentationMode(v as PresentationMode)}
+              disabled={busy}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PRESENTATION_MODES.map((m) => (
+                  <SelectItem key={m} value={m}>
+                    {PRESENTATION_MODE_LABELS[m]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-sm font-medium">
+              Answer panel scope{' '}
+              <FieldHelp title="Answer panel scope">
+                How much of the questionnaire the live answer panel shows the respondent beside the
+                chat. Full progress lists every question grouped by section with an answered-count;
+                answered only shows just the answers captured so far.
+              </FieldHelp>
+            </Label>
+            <Select
+              value={answerSlotPanelScope}
+              onValueChange={(v) => setAnswerSlotPanelScope(v as AnswerSlotPanelScope)}
+              disabled={busy}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {ANSWER_SLOT_PANEL_SCOPES.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {ANSWER_SLOT_PANEL_SCOPE_LABELS[s]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Switch checked={voiceEnabled} onCheckedChange={setVoiceEnabled} disabled={busy} />
+          <Label className="text-sm font-medium">
+            Voice input{' '}
+            <FieldHelp title="Voice input">
+              Let respondents answer by voice as well as text — shows a mic button in the composer
+              and tells them they can talk through their answers. When off, the mic is hidden and
+              the agent never suggests it. Also requires the platform voice-input flag.
+            </FieldHelp>
+          </Label>
+        </div>
+        <div className="flex items-center gap-2">
+          <Switch
+            checked={attachmentsEnabled}
+            onCheckedChange={setAttachmentsEnabled}
+            disabled={busy}
+          />
+          <Label className="text-sm font-medium">
+            Attachments{' '}
+            <FieldHelp title="Attachments">
+              Let respondents attach files (images, documents) to their answers — shows a paperclip
+              button in the composer. When off, the button is hidden and any attachments sent anyway
+              are ignored. Also requires the platform attachment-input flag.
+            </FieldHelp>
+          </Label>
+        </div>
+        <div className="flex items-center gap-2">
+          <Switch checked={anonymousMode} onCheckedChange={setAnonymousMode} disabled={busy} />
+          <Label className="text-sm font-medium">
+            Anonymous mode{' '}
+            <FieldHelp title="Anonymous mode">
+              Don&apos;t collect identifying profile fields at session start — responses aren&apos;t
+              tied to a named individual. This is the <em>identity</em> axis and is independent of{' '}
+              <em>Access</em> (who may start): an anonymous questionnaire can still be
+              invitation-only, and a named one can still be public. When anonymous, invitees are
+              tracked only as started/completed — never linked to their answers.
+            </FieldHelp>
+          </Label>
+        </div>
+      </SettingsGroup>
+
+      {/* ── 3. Access & invitations — who may start, and the invitee detail fields captured. ── */}
+      <SettingsGroup
+        icon={Mail}
+        accent="bg-amber-500/10 text-amber-600 dark:text-amber-400"
+        title="Access & invitations"
+        description="Who may start this questionnaire, and which invitee details the Invitations tab captures. Independent of Anonymous mode (the identity axis)."
+      >
+        <div className="space-y-1.5">
+          <Label className="text-sm font-medium">
+            Access mode{' '}
+            <FieldHelp title="Access mode">
+              Who may start a session. Invitation only: a per-invitee link is required. Public link:
+              anyone with the URL can answer. Both: either works. This is the <em>access</em> axis —
+              separate from Anonymous mode (whether identity is collected).
+            </FieldHelp>
+          </Label>
+          <Select
+            value={accessMode}
+            onValueChange={(v) => setAccessMode(v as AccessMode)}
+            disabled={busy}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {ACCESS_MODES.map((m) => (
+                <SelectItem key={m} value={m}>
+                  {ACCESS_MODE_LABELS[m]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-2">
+          <Label className="text-sm font-medium">
+            Invitee details{' '}
+            <FieldHelp title="Invitee details">
+              Which fields the Invitations tab captures per person (and which are required). Email
+              is always collected. Shown fields appear as columns in the import/verify grid;
+              required fields must be filled before sending.
+            </FieldHelp>
+          </Label>
+          <ul className="divide-border/60 divide-y rounded-md border">
+            {inviteeFields.map((field) => {
+              const locked = field.key === 'email';
+              return (
+                <li key={field.key} className="flex items-center gap-3 px-3 py-2 text-sm">
+                  <span className="min-w-28 flex-1 font-medium">
+                    {INVITEE_FIELD_LABELS[field.key]}
+                    {locked ? (
+                      <span className="text-muted-foreground ml-1 text-xs">(always on)</span>
+                    ) : null}
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <Switch
+                      aria-label={`${INVITEE_FIELD_LABELS[field.key]} shown`}
+                      checked={locked ? true : field.shown}
+                      disabled={busy || locked}
+                      onCheckedChange={(shown) =>
+                        setInviteeFields((prev) =>
+                          prev.map((f) =>
+                            f.key === field.key
+                              ? { ...f, shown, required: shown ? f.required : false }
+                              : f
+                          )
+                        )
+                      }
+                    />
+                    <span className="text-muted-foreground text-xs">Shown</span>
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <Switch
+                      aria-label={`${INVITEE_FIELD_LABELS[field.key]} required`}
+                      checked={locked ? true : field.required}
+                      disabled={busy || locked || !field.shown}
+                      onCheckedChange={(required) =>
+                        setInviteeFields((prev) =>
+                          prev.map((f) => (f.key === field.key ? { ...f, required } : f))
+                        )
+                      }
+                    />
+                    <span className="text-muted-foreground text-xs">Required</span>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      </SettingsGroup>
+
+      {/* ── 4. Answer quality & safeguarding — protective / data-integrity features: sensitive
+             disclosures, the seriousness gate, and contradiction detection. ── */}
+      <SettingsGroup
+        icon={ShieldCheck}
+        accent="bg-rose-500/10 text-rose-600 dark:text-rose-400"
+        title="Answer quality & safeguarding"
+        description="Protective and data-integrity features: handling sensitive disclosures, ending abusive sessions, and catching contradictions. Each also requires its platform flag."
+      >
+        <div className="space-y-3">
           <div className="flex items-center gap-2">
             <Switch
               checked={sensitivityAwareness}
@@ -581,7 +707,7 @@ export function ConfigEditor({
             </Label>
           </div>
           {sensitivityAwareness && (
-            <div className="space-y-3 pl-1">
+            <div className="border-border/60 ml-1 space-y-3 border-l pl-4">
               <div className="space-y-1.5">
                 <Label className="text-sm font-medium">
                   Support message{' '}
@@ -619,81 +745,164 @@ export function ConfigEditor({
             </div>
           )}
         </div>
-        <div className="space-y-1.5 sm:max-w-xs">
-          <Label className="text-sm font-medium">
-            Answer panel scope{' '}
-            <FieldHelp title="Answer panel scope">
-              How much of the questionnaire the live answer panel shows the respondent beside the
-              chat. Full progress lists every question grouped by section with an answered-count;
-              answered only shows just the answers captured so far.
-            </FieldHelp>
-          </Label>
-          <Select
-            value={answerSlotPanelScope}
-            onValueChange={(v) => setAnswerSlotPanelScope(v as AnswerSlotPanelScope)}
-            disabled={busy}
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {ANSWER_SLOT_PANEL_SCOPES.map((s) => (
-                <SelectItem key={s} value={s}>
-                  {ANSWER_SLOT_PANEL_SCOPE_LABELS[s]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-1.5 sm:max-w-xs">
-          <Label className="text-sm font-medium">
-            Presentation mode{' '}
-            <FieldHelp title="Presentation mode">
-              How the respondent completes this questionnaire. Chat is the streaming conversation.
-              Form presents the questions as a raw, sectioned form with the right input per type
-              (likert, choices, yes/no, text…). Both offers a chat ↔ form toggle so the respondent
-              can navigate sections, see what&apos;s already answered, and edit answers the agent
-              inferred — a useful escape hatch when the chat struggles. Form mode is question-based:
-              for questionnaires using data slots, editing a question reconciles into the chat on
-              the next turn.
-            </FieldHelp>
-          </Label>
-          <Select
-            value={presentationMode}
-            onValueChange={(v) => setPresentationMode(v as PresentationMode)}
-            disabled={busy}
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {PRESENTATION_MODES.map((m) => (
-                <SelectItem key={m} value={m}>
-                  {PRESENTATION_MODE_LABELS[m]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
 
-      {/* Profile fields */}
-      <div className="space-y-3">
-        <div className="flex items-center gap-2">
+        <div className="space-y-1.5 sm:max-w-xs">
           <Label className="text-sm font-medium">
-            Session-start profile fields{' '}
-            <FieldHelp title="Profile fields">
-              Fields collected from the respondent before the questionnaire starts (name, email,
-              role, organisation, or any custom field). Each needs a unique key.
+            Abuse threshold{' '}
+            <FieldHelp title="Abuse threshold">
+              How many non-genuine answers (preposterous, abusive, or off-topic) a respondent may
+              give before the session is automatically ended. Earlier strikes get escalating
+              warnings and the answer is set aside; the Nth ends the session. Colloquial or lazy
+              answers are tolerated. Set to <code className="text-xs">0</code> to turn the gate off.
+              Requires the platform seriousness-gate flag to be on.
             </FieldHelp>
           </Label>
+          <Input
+            type="number"
+            min={0}
+            max={50}
+            value={abuseThreshold}
+            onChange={(e) => setAbuseThreshold(e.target.value)}
+            disabled={busy}
+          />
         </div>
+
+        <div className="space-y-4">
+          <div className="space-y-1.5 sm:max-w-sm">
+            <Label className="text-sm font-medium">
+              Contradiction detection{' '}
+              <FieldHelp title="Contradiction detection">
+                Whether the agent watches for answers that contradict earlier ones — off, flag them,
+                or probe with a follow-up.
+              </FieldHelp>
+            </Label>
+            <Select
+              value={contradictionMode}
+              onValueChange={(v) => setContradictionMode(v as ContradictionMode)}
+              disabled={busy}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {CONTRADICTION_MODES.map((m) => (
+                  <SelectItem key={m} value={m}>
+                    {CONTRADICTION_MODE_LABELS[m]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {!contradictionOff && (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label className="text-sm font-medium">
+                  Look-back window (N){' '}
+                  <FieldHelp title="Look-back window">
+                    How many prior answers to check each new answer against. Must be at least 1 when
+                    detection is on.
+                  </FieldHelp>
+                </Label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={contradictionWindowN}
+                  onChange={(e) => setContradictionWindowN(e.target.value)}
+                  disabled={busy}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-sm font-medium">
+                  Detection cadence (every N turns){' '}
+                  <FieldHelp title="Detection cadence">
+                    How often to run contradiction detection during the conversation — every N
+                    respondent turns. 1 runs it every turn (most thorough); a higher value trades
+                    some immediacy for lower per-turn cost. The completion sweep always runs
+                    regardless.
+                  </FieldHelp>
+                </Label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={contradictionEveryNTurns}
+                  onChange={(e) => setContradictionEveryNTurns(e.target.value)}
+                  disabled={busy}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      </SettingsGroup>
+
+      {/* ── 4. Budget & limits — cost control and hard caps, with the pre-launch estimate. ── */}
+      <SettingsGroup
+        icon={Gauge}
+        accent="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+        title="Budget & limits"
+        description="Cost control and hard caps on a single session, with a pre-launch spend estimate."
+      >
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label className="text-sm font-medium">
+              Cost budget (USD / session){' '}
+              <FieldHelp title="Cost budget">
+                Optional per-session spend cap in US dollars. Leave blank for no cap. (Enforcement
+                lands with the turn engine; the estimate below shows projected spend against this
+                cap.)
+              </FieldHelp>
+            </Label>
+            <Input
+              type="number"
+              min={0}
+              step={0.01}
+              placeholder="No cap"
+              value={costBudgetUsd}
+              onChange={(e) => setCostBudgetUsd(e.target.value)}
+              disabled={busy}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-sm font-medium">
+              Max questions / session{' '}
+              <FieldHelp title="Per-session question cap">
+                Hard limit on how many questions a single session will ask. Leave blank for no cap.
+              </FieldHelp>
+            </Label>
+            <Input
+              type="number"
+              min={1}
+              placeholder="No cap"
+              value={maxQuestionsPerSession}
+              onChange={(e) => setMaxQuestionsPerSession(e.target.value)}
+              disabled={busy}
+            />
+          </div>
+        </div>
+        {/* Pre-launch cost estimate (F3.3) — reads persisted config, so it re-fetches
+            when the saved cap/floor change. Compares against the live (possibly
+            unsaved) budget input. */}
+        <CostEstimateCard
+          questionnaireId={questionnaireId}
+          versionId={versionId}
+          reloadKey={`${config.saved}:${config.maxQuestionsPerSession}:${config.minQuestionsAnswered}:${questionCount}`}
+          costBudgetUsd={capOrNull(costBudgetUsd, false)}
+        />
+      </SettingsGroup>
+
+      {/* ── 5. Session-start profile fields — what to collect before the questionnaire begins.
+             Last: optional, set-up-once metadata rather than run-time behaviour. ── */}
+      <SettingsGroup
+        icon={ClipboardList}
+        accent="bg-slate-500/10 text-slate-600 dark:text-slate-300"
+        title="Session-start profile fields"
+        description="Fields collected from the respondent before the questionnaire begins. Optional — leave empty to start straight into the conversation."
+      >
         {profileFields.length === 0 ? (
           <p className="text-muted-foreground text-sm italic">No profile fields.</p>
         ) : (
           <div className="space-y-3">
             {profileFields.map((field, index) => (
-              <div key={index} className="space-y-2 rounded-md border p-3">
+              <div key={index} className="bg-muted/20 space-y-2 rounded-md border p-3">
                 <div className="grid gap-2 sm:grid-cols-2">
                   <div className="space-y-1">
                     <Label className="text-xs">Key</Label>
@@ -775,11 +984,18 @@ export function ConfigEditor({
         <Button type="button" variant="outline" size="sm" onClick={addField} disabled={busy}>
           <Plus className="mr-1 h-4 w-4" /> Add profile field
         </Button>
-      </div>
+      </SettingsGroup>
 
-      <Button size="sm" disabled={busy} onClick={save}>
-        Save configuration
-      </Button>
+      {/* Save footer — one mutation sends the whole config; sticks to the bottom of the panel so
+          the action is reachable without scrolling back up through five groups. */}
+      <div className="bg-background/80 supports-[backdrop-filter]:bg-background/60 sticky bottom-0 -mx-1 flex items-center justify-end gap-3 border-t px-1 py-3 backdrop-blur">
+        {!config.saved && (
+          <span className="text-muted-foreground text-xs">Unsaved — required before launch</span>
+        )}
+        <SaveButton size="sm" disabled={busy} onSave={save}>
+          Save configuration
+        </SaveButton>
+      </div>
     </section>
   );
 }

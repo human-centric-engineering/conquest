@@ -52,10 +52,12 @@ vi.mock('@/lib/app/questionnaire/chat/theme', () => ({
 vi.mock('@/lib/app/questionnaire/chat/anonymity', () => ({
   resolveAnonymousForVersion: vi.fn(),
   resolvePresentationModeForVersion: vi.fn(),
+  resolveVoiceEnabledForVersion: vi.fn(),
+  resolveAttachmentsEnabledForVersion: vi.fn(),
 }));
 
 vi.mock('@/lib/app/questionnaire/chat/preview-nav', () => ({
-  resolveAdminPreviewExitHref: vi.fn(),
+  resolveAdminPreviewMeta: vi.fn(),
 }));
 
 /**
@@ -107,9 +109,11 @@ import {
 import { resolveThemeForVersion } from '@/lib/app/questionnaire/chat/theme';
 import {
   resolveAnonymousForVersion,
+  resolveAttachmentsEnabledForVersion,
   resolvePresentationModeForVersion,
+  resolveVoiceEnabledForVersion,
 } from '@/lib/app/questionnaire/chat/anonymity';
-import { resolveAdminPreviewExitHref } from '@/lib/app/questionnaire/chat/preview-nav';
+import { resolveAdminPreviewMeta } from '@/lib/app/questionnaire/chat/preview-nav';
 import type { ResolvedTheme } from '@/lib/app/questionnaire/theming';
 import type React from 'react';
 
@@ -151,9 +155,16 @@ describe('PublicQuestionnairePage', () => {
     vi.mocked(resolveThemeForVersion).mockResolvedValue(MOCK_THEME);
     vi.mocked(resolveAnonymousForVersion).mockResolvedValue(false);
     vi.mocked(resolvePresentationModeForVersion).mockResolvedValue('chat');
-    vi.mocked(resolveAdminPreviewExitHref).mockResolvedValue(
-      '/admin/questionnaires/q_abc/v/ver_abc123'
-    );
+    // Per-questionnaire opt-ins default ON, so these tests isolate the platform flag as the
+    // deciding factor. The page ANDs platform flag AND config opt-in; dedicated tests below
+    // exercise the config-off path.
+    vi.mocked(resolveVoiceEnabledForVersion).mockResolvedValue(true);
+    vi.mocked(resolveAttachmentsEnabledForVersion).mockResolvedValue(true);
+    vi.mocked(resolveAdminPreviewMeta).mockResolvedValue({
+      exitHref: '/admin/questionnaires/q_abc/v/ver_abc123',
+      versionNumber: 1,
+      status: 'draft',
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -300,6 +311,42 @@ describe('PublicQuestionnairePage', () => {
       );
     });
 
+    it('passes voiceInputEnabled=false when the platform flag is on but the version opted out', async () => {
+      // The affordance needs BOTH gates: platform capability AND the author's per-questionnaire
+      // opt-in. Platform on + config off must still resolve to off (the reported mic-always-on bug).
+      vi.mocked(isVoiceInputEnabled).mockResolvedValue(true);
+      vi.mocked(resolveVoiceEnabledForVersion).mockResolvedValue(false);
+
+      const Component = await PublicQuestionnairePage({
+        params: makeParams(),
+        searchParams: makeSearchParams(),
+      });
+      render(Component);
+
+      expect(resolveVoiceEnabledForVersion).toHaveBeenCalledWith(VERSION_ID);
+      expect(screen.getByTestId('anonymous-session-boot')).toHaveAttribute(
+        'data-voice-input-enabled',
+        'false'
+      );
+    });
+
+    it('passes attachmentInputEnabled=false when the platform flag is on but the version opted out', async () => {
+      vi.mocked(isAttachmentInputEnabled).mockResolvedValue(true);
+      vi.mocked(resolveAttachmentsEnabledForVersion).mockResolvedValue(false);
+
+      const Component = await PublicQuestionnairePage({
+        params: makeParams(),
+        searchParams: makeSearchParams(),
+      });
+      render(Component);
+
+      expect(resolveAttachmentsEnabledForVersion).toHaveBeenCalledWith(VERSION_ID);
+      expect(screen.getByTestId('anonymous-session-boot')).toHaveAttribute(
+        'data-attachment-input-enabled',
+        'false'
+      );
+    });
+
     it('passes anonymous=true when the version is configured anonymousMode', async () => {
       // Arrange: the no-login surface resolves the version's anonymity for the opening turn.
       vi.mocked(resolveAnonymousForVersion).mockResolvedValue(true);
@@ -371,9 +418,11 @@ describe('PublicQuestionnairePage', () => {
     });
 
     it('renders an "Exit preview" link to the admin workspace in preview mode', async () => {
-      vi.mocked(resolveAdminPreviewExitHref).mockResolvedValue(
-        '/admin/questionnaires/q_xyz/v/ver_abc123'
-      );
+      vi.mocked(resolveAdminPreviewMeta).mockResolvedValue({
+        exitHref: '/admin/questionnaires/q_xyz/v/ver_abc123',
+        versionNumber: 1,
+        status: 'draft',
+      });
 
       const Component = await PublicQuestionnairePage({
         params: makeParams(),
@@ -382,12 +431,29 @@ describe('PublicQuestionnairePage', () => {
       render(Component);
 
       // Resolved with the version from params.
-      expect(resolveAdminPreviewExitHref).toHaveBeenCalledWith(VERSION_ID);
+      expect(resolveAdminPreviewMeta).toHaveBeenCalledWith(VERSION_ID);
       const exit = screen.getByRole('link', { name: /exit/i });
       expect(exit).toHaveAttribute('href', '/admin/questionnaires/q_xyz/v/ver_abc123');
     });
 
-    it('does not resolve an exit href or render the banner outside preview mode', async () => {
+    it('names the previewed version number and status in the banner', async () => {
+      vi.mocked(resolveAdminPreviewMeta).mockResolvedValue({
+        exitHref: '/admin/questionnaires/q_xyz/v/ver_abc123',
+        versionNumber: 4,
+        status: 'launched',
+      });
+
+      const Component = await PublicQuestionnairePage({
+        params: makeParams(),
+        searchParams: makeSearchParams('1'),
+      });
+      render(Component);
+
+      // The banner makes the previewed version unambiguous — number AND status.
+      expect(screen.getByText(/Preview · v4 \(launched\)/)).toBeInTheDocument();
+    });
+
+    it('does not resolve preview metadata or render the banner outside preview mode', async () => {
       const Component = await PublicQuestionnairePage({
         params: makeParams(),
         searchParams: makeSearchParams(),
@@ -395,12 +461,12 @@ describe('PublicQuestionnairePage', () => {
       render(Component);
 
       // The expensive lookup is skipped entirely for real respondents.
-      expect(resolveAdminPreviewExitHref).not.toHaveBeenCalled();
+      expect(resolveAdminPreviewMeta).not.toHaveBeenCalled();
       expect(screen.queryByRole('link', { name: /exit/i })).not.toBeInTheDocument();
     });
 
-    it('omits the banner when the exit href cannot be resolved (version gone)', async () => {
-      vi.mocked(resolveAdminPreviewExitHref).mockResolvedValue(null);
+    it('omits the banner when the preview metadata cannot be resolved (version gone)', async () => {
+      vi.mocked(resolveAdminPreviewMeta).mockResolvedValue(null);
 
       const Component = await PublicQuestionnairePage({
         params: makeParams(),

@@ -37,3 +37,22 @@ export async function findResumableSession(
     select: { id: true, status: true, versionId: true },
   });
 }
+
+/**
+ * Find the non-terminal session a frictionless invitee already booted from their invitation (the
+ * resume target keyed on `invitationId`, since a no-account respondent has no `respondentUserId`).
+ * Lets a re-opened invite link resume rather than minting a second session. Most-recent first.
+ */
+export async function findResumableSessionByInvitation(
+  invitationId: string
+): Promise<ResumableSession | null> {
+  return prisma.appQuestionnaireSession.findFirst({
+    where: {
+      invitationId,
+      isPreview: false,
+      status: { in: ['active', 'paused'] },
+    },
+    orderBy: { createdAt: 'desc' },
+    select: { id: true, status: true, versionId: true },
+  });
+}

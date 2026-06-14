@@ -19,6 +19,7 @@ import { useRouter } from 'next/navigation';
 import { AlertTriangle, Loader2, Sparkles, Trash2, Undo2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import { SaveButton } from '@/components/admin/questionnaires/save-button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AutoTextarea } from '@/components/ui/auto-textarea';
@@ -394,7 +395,7 @@ export function DataSlotsReview({
     setNotice('Slot refined — review and save.');
   };
 
-  const save = async () => {
+  const save = async (): Promise<boolean> => {
     setSaving(true);
     setError(null);
     setNotice(null);
@@ -414,14 +415,16 @@ export function DataSlotsReview({
       // A launched version forks a new draft — navigate there so the admin keeps editing.
       if (res.meta?.forked) {
         router.push(`/admin/questionnaires/${questionnaireId}/v/${res.meta.versionId}/data-slots`);
-        return;
+        return true;
       }
       setLiveSlots(res.data.slots);
       resetTo(assignIds(res.data.slots.map(fromSaved)), 'live');
       setNotice(`Saved ${res.data.slots.length} data slots — now live.`);
       router.refresh();
+      return true;
     } catch (err) {
       setError(err instanceof AuthoringError ? err.message : 'Could not save data slots.');
+      return false;
     } finally {
       setSaving(false);
     }
@@ -452,31 +455,41 @@ export function DataSlotsReview({
 
   return (
     <div className="space-y-5">
-      <div className="bg-muted/30 space-y-4 rounded-lg border p-4">
-        <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
-          <div className="space-y-0.5">
-            <h3 className="text-sm font-medium">
-              {drafts.length === 0 ? 'Generate data slots' : 'Regenerate data slots'}
-            </h3>
-            <p className="text-muted-foreground text-sm">
-              {drafts.length === 0
-                ? 'Propose a set from this version’s questions, then review and save.'
-                : isDraft
-                  ? `${drafts.length} draft slot${drafts.length === 1 ? '' : 's'} — not live yet.`
-                  : `${drafts.length} live slot${drafts.length === 1 ? '' : 's'}.`}
-            </p>
+      {/* Generation band — mirrors the Structure editor's blueprint header: a faint drafting
+          grid that names the surface, carries the primary Generate action, and houses the
+          granularity control. */}
+      <div className="cq-blueprint relative overflow-hidden rounded-xl border">
+        <div className="bg-card/70 space-y-4 p-4 backdrop-blur-sm">
+          <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
+            <div className="flex items-center gap-2.5">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--cq-accent)] text-[var(--cq-accent-foreground)]">
+                <Sparkles className="h-4 w-4" />
+              </span>
+              <div>
+                <h3 className="text-sm font-semibold tracking-tight">
+                  {drafts.length === 0 ? 'Generate data slots' : 'Regenerate data slots'}
+                </h3>
+                <p className="text-muted-foreground text-xs">
+                  {drafts.length === 0
+                    ? 'Propose a set from this version’s questions, then review and save.'
+                    : isDraft
+                      ? `${drafts.length} draft slot${drafts.length === 1 ? '' : 's'} — not live yet.`
+                      : `${drafts.length} live slot${drafts.length === 1 ? '' : 's'}.`}
+                </p>
+              </div>
+            </div>
+            <Button onClick={() => void generate()} disabled={busy}>
+              {generating ? (
+                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+              ) : (
+                <Sparkles className="mr-1.5 h-4 w-4" />
+              )}
+              {drafts.length === 0 ? 'Generate' : 'Discard and regenerate'}
+            </Button>
           </div>
-          <Button onClick={() => void generate()} disabled={busy}>
-            {generating ? (
-              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-            ) : (
-              <Sparkles className="mr-1.5 h-4 w-4" />
-            )}
-            {drafts.length === 0 ? 'Generate' : 'Discard and regenerate'}
-          </Button>
-        </div>
 
-        <DataSlotGranularityField value={granularity} onChange={setGranularity} disabled={busy} />
+          <DataSlotGranularityField value={granularity} onChange={setGranularity} disabled={busy} />
+        </div>
       </div>
 
       {progress && <DataSlotGenerationProgress progress={progress} />}
@@ -496,7 +509,7 @@ export function DataSlotsReview({
       )}
 
       {!generating && isDraft && drafts.length > 0 && (
-        <div className="flex items-start gap-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-900/60 dark:bg-amber-950/40">
+        <div className="flex items-start gap-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-500/40 dark:bg-amber-500/10">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
           <div className="space-y-1.5">
             <p className="font-medium text-amber-900 dark:text-amber-200">Draft — not live yet</p>
@@ -517,8 +530,16 @@ export function DataSlotsReview({
         </p>
       )}
 
-      {error && <p className="text-destructive text-sm">{error}</p>}
-      {notice && <p className="text-sm text-emerald-600">{notice}</p>}
+      {error && (
+        <div className="border-destructive/40 bg-destructive/10 text-destructive rounded-md border p-3 text-sm">
+          {error}
+        </div>
+      )}
+      {notice && (
+        <div className="rounded-md border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-300">
+          {notice}
+        </div>
+      )}
 
       {!generating && uncovered.length > 0 && drafts.length > 0 && (
         <p className="text-muted-foreground text-xs">
@@ -529,100 +550,111 @@ export function DataSlotsReview({
       )}
 
       {!generating && (
-        <div className="space-y-6">
-          {groupByTheme(drafts).map((group) => (
-            <section key={group.key} className="space-y-3">
-              {/* Theme is one shared label for the whole group — edited here once, not per slot. */}
-              <div className="flex items-end gap-2">
-                <div className="w-full max-w-sm space-y-1">
-                  <Label htmlFor={`theme-${group.key}`} className="text-muted-foreground text-xs">
-                    Theme
-                  </Label>
-                  <Input
-                    id={`theme-${group.key}`}
-                    value={group.theme}
-                    onChange={(e) => renameTheme(group.theme, e.target.value)}
-                    placeholder="Theme"
-                    className="text-base font-semibold"
-                  />
-                </div>
-                <span className="text-muted-foreground mb-2.5 text-xs">
+        <div className="space-y-5">
+          {groupByTheme(drafts).map((group, groupIndex) => (
+            // Theme group as a plated card — same chrome as a Structure section: a mono index
+            // plate, an inline-editable title, a count, and a spine connecting it to its slots.
+            <section key={group.key} className="bg-card rounded-xl border shadow-sm">
+              {/* Theme plate header. Theme is one shared label for the whole group — edited here
+                  once, not per slot — so it reads as the section title, not a form field. */}
+              <div className="flex items-center gap-2.5 border-b px-4 py-3">
+                <span
+                  className="flex h-7 min-w-7 items-center justify-center rounded-md border border-[var(--cq-accent-ring)] bg-[var(--cq-accent-muted)] px-1.5 font-mono text-xs font-semibold text-[var(--cq-accent)]"
+                  aria-hidden
+                >
+                  {String(groupIndex + 1).padStart(2, '0')}
+                </span>
+                <Input
+                  id={`theme-${group.key}`}
+                  value={group.theme}
+                  onChange={(e) => renameTheme(group.theme, e.target.value)}
+                  placeholder="Theme"
+                  aria-label="Theme"
+                  className="h-8 border-transparent bg-transparent text-base font-semibold tracking-tight shadow-none focus-visible:border-[var(--color-input)] focus-visible:bg-[var(--color-background)]"
+                />
+                <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
                   {group.members.length} slot{group.members.length === 1 ? '' : 's'}
                 </span>
               </div>
 
-              <ul className="space-y-4 border-l-2 pl-4">
-                {group.members.map(({ slot: d, index: i }) => (
-                  <li key={d.id} className="space-y-3 rounded-md border p-4">
-                    <div className="flex items-end justify-between gap-3">
-                      <div className="w-full max-w-xs space-y-1">
-                        <Label
-                          htmlFor={`slot-name-${d.id}`}
-                          className="text-muted-foreground text-xs"
-                        >
-                          Name
-                        </Label>
+              <div className="p-4">
+                {/* Outline spine connecting the plate to its slots (mirrors the section editor). */}
+                <ul className="cq-spine ml-3 space-y-2.5 pl-4">
+                  {group.members.map(({ slot: d, index: i }) => (
+                    <li
+                      key={d.id}
+                      className="group bg-card relative space-y-3 rounded-lg border p-3 transition-shadow hover:border-[var(--cq-accent-ring)] hover:shadow-sm"
+                    >
+                      {/* Connector tick onto the theme spine. */}
+                      <span
+                        className="absolute top-6 -left-4 h-px w-4 bg-[var(--cq-accent-muted)]"
+                        aria-hidden
+                      />
+                      <div className="flex items-start justify-between gap-2">
+                        {/* Slot name reads as the card's title (inline-edit), like a question prompt. */}
                         <Input
                           id={`slot-name-${d.id}`}
                           value={d.name}
                           onChange={(e) => update(i, { name: e.target.value })}
                           placeholder="Slot name (1–4 words)"
-                          className="font-medium"
+                          aria-label="Slot name"
+                          className="h-8 border-transparent bg-transparent text-sm font-semibold tracking-tight shadow-none focus-visible:border-[var(--color-input)] focus-visible:bg-[var(--color-background)]"
                         />
+                        <div className="flex shrink-0 items-center gap-1">
+                          <DataSlotRefineButton
+                            questionnaireId={questionnaireId}
+                            versionId={versionId}
+                            slot={{
+                              name: d.name,
+                              description: d.description,
+                              theme: d.theme,
+                              questionKeys: d.questionKeys,
+                            }}
+                            // The other slots' names + themes, so the refiner keeps the theme
+                            // consistent with the set and doesn't duplicate a sibling.
+                            siblingSlots={drafts
+                              .filter((s) => s.id !== d.id)
+                              .map((s) => ({ name: s.name, theme: s.theme }))}
+                            disabled={busy}
+                            onRefined={(refined) => refineSlot(d.id, refined)}
+                          />
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => setDeleteIndex(i)}
+                            aria-label="Remove slot"
+                          >
+                            <Trash2 className="text-muted-foreground h-4 w-4" />
+                          </Button>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-1">
-                        <DataSlotRefineButton
-                          questionnaireId={questionnaireId}
-                          versionId={versionId}
-                          slot={{
-                            name: d.name,
-                            description: d.description,
-                            theme: d.theme,
-                            questionKeys: d.questionKeys,
-                          }}
-                          // The other slots' names + themes, so the refiner keeps the theme
-                          // consistent with the set and doesn't duplicate a sibling.
-                          siblingSlots={drafts
-                            .filter((s) => s.id !== d.id)
-                            .map((s) => ({ name: s.name, theme: s.theme }))}
-                          disabled={busy}
-                          onRefined={(refined) => refineSlot(d.id, refined)}
-                        />
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => setDeleteIndex(i)}
-                          aria-label="Remove slot"
+
+                      <div className="space-y-1">
+                        <Label
+                          htmlFor={`slot-description-${d.id}`}
+                          className="text-muted-foreground text-xs"
                         >
-                          <Trash2 className="text-muted-foreground h-4 w-4" />
-                        </Button>
+                          Description
+                        </Label>
+                        <AutoTextarea
+                          id={`slot-description-${d.id}`}
+                          value={d.description}
+                          onChange={(e) => update(i, { description: e.target.value })}
+                          placeholder="What this slot must capture, why it matters, and what to probe for"
+                          className="min-h-24"
+                        />
                       </div>
-                    </div>
 
-                    <div className="space-y-1">
-                      <Label
-                        htmlFor={`slot-description-${d.id}`}
-                        className="text-muted-foreground text-xs"
-                      >
-                        Description
-                      </Label>
-                      <AutoTextarea
-                        id={`slot-description-${d.id}`}
-                        value={d.description}
-                        onChange={(e) => update(i, { description: e.target.value })}
-                        placeholder="What this slot must capture, why it matters, and what to probe for"
-                        className="min-h-24"
+                      <QuestionCoverageEditor
+                        questions={questions}
+                        selectedKeys={d.questionKeys}
+                        onToggle={(key) => toggleQuestion(i, key)}
                       />
-                    </div>
-
-                    <QuestionCoverageEditor
-                      questions={questions}
-                      selectedKeys={d.questionKeys}
-                      onToggle={(key) => toggleQuestion(i, key)}
-                    />
-                  </li>
-                ))}
-              </ul>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             </section>
           ))}
         </div>
@@ -631,10 +663,9 @@ export function DataSlotsReview({
       {!generating && drafts.length > 0 && (
         // Sticky footer so the primary action stays reachable however long the list is.
         <div className="bg-background/95 supports-[backdrop-filter]:bg-background/80 sticky bottom-0 z-20 -mx-6 flex items-center gap-3 border-t px-6 py-3 backdrop-blur">
-          <Button onClick={() => void save()} disabled={busy || (!isDraft && !dirty)}>
-            {saving && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
+          <SaveButton onSave={save} disabled={busy || (!isDraft && !dirty)}>
             {isDraft ? `Save & make live (${drafts.length})` : `Save changes (${drafts.length})`}
-          </Button>
+          </SaveButton>
           {isDraft && (
             <Button variant="outline" onClick={() => setConfirmDiscard(true)} disabled={busy}>
               {discarding ? (

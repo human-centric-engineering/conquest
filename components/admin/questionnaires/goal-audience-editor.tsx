@@ -3,16 +3,17 @@
 /**
  * GoalAudienceEditor — the version's goal + audience metadata, edited on the Settings tab.
  *
- * Goal/audience describe what the questionnaire is trying to learn and who answers it (judges
- * score the structure against them). They're version-scoped settings, not structure, so they
- * live on Settings alongside the run-time config. Presentational: controlled state seeded from
+ * Goal/audience describe what the questionnaire is trying to learn and who answers it (the
+ * structure review scores the questions against them). They're version-scoped settings, not
+ * structure, so they live on Settings alongside the run-time config. Presentational: controlled
+ * state seeded from
  * props, saved through the parent's `run` mutation runner (which applies the fork-on-launch
  * discipline) — same pattern as {@link ConfigEditor}.
  */
 
 import { useEffect, useState } from 'react';
 
-import { Button } from '@/components/ui/button';
+import { SaveButton } from '@/components/admin/questionnaires/save-button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
@@ -63,8 +64,8 @@ export function GoalAudienceEditor({
         <Label className="text-sm font-medium">
           Goal{' '}
           <FieldHelp title="Questionnaire goal">
-            What this questionnaire is trying to learn. Judges (P5) score the structure against
-            this. Leave blank to clear it.
+            What this questionnaire is trying to learn. The structure review (Evaluations tab)
+            scores your questions against this. Leave blank to clear it.
           </FieldHelp>
         </Label>
         <Textarea value={goal} onChange={(e) => setGoal(e.target.value)} rows={2} disabled={busy} />
@@ -74,8 +75,9 @@ export function GoalAudienceEditor({
           <Label className="text-sm font-medium">
             Audience role{' '}
             <FieldHelp title="Audience role">
-              Who completes this questionnaire (e.g. “patient”, “new hire”). Used to tune tone and
-              judge audience-fit.
+              Who completes this questionnaire (e.g. “patient”, “new hire”). Tunes the
+              conversation’s tone, and lets the structure review check the questions fit this
+              audience.
             </FieldHelp>
           </Label>
           <Input
@@ -93,9 +95,9 @@ export function GoalAudienceEditor({
           />
         </div>
       </div>
-      <Button size="sm" disabled={busy} onClick={save}>
+      <SaveButton size="sm" disabled={busy} onSave={save}>
         Save goal &amp; audience
-      </Button>
+      </SaveButton>
     </section>
   );
 }

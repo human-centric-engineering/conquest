@@ -94,6 +94,12 @@ export interface DataSlotPanelSlot {
   description: string;
   /** The agent's restatement of the respondent's position, or null when not yet filled. */
   paraphrase: string | null;
+  /**
+   * How the position was captured — `direct` (stated), `inferred` (single-step reasoning), or
+   * `synthesised` (across turns). Null when not yet filled. The panel flags `inferred`/`synthesised`
+   * fills with an "Inferred" marker so a tentative reading isn't read as something the respondent said.
+   */
+  provenance: AnswerProvenance | null;
   /** 0–1; null when not yet filled. */
   confidence: number | null;
   /** True once the slot is covered — a confident fill (≥ threshold) OR a parked provisional one. */

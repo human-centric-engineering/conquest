@@ -54,7 +54,13 @@ export default async function QuestionnaireWorkspaceLayout({ params, children }:
   if (!selected) notFound();
 
   const tabs = visibleWorkspaceTabs(flags);
-  const statusBadge = QUESTIONNAIRE_STATUS_BADGE[detail.status];
+  // The pill must describe what's actually on screen. A questionnaire-level "Launched"
+  // badge next to the draft you're editing reads as a lie — so show the pill only when the
+  // selected version IS the live one, and orient everything else with a subtitle that names
+  // the live version. `versions` is newest-first, so the first launched one is the latest.
+  const viewingLive = selected.status === 'launched';
+  const liveBadge = QUESTIONNAIRE_STATUS_BADGE.launched;
+  const latestLaunched = detail.versions.find((ver) => ver.status === 'launched') ?? null;
 
   return (
     <div className="space-y-6">
@@ -70,20 +76,30 @@ export default async function QuestionnaireWorkspaceLayout({ params, children }:
       </nav>
 
       <header className="bg-background sticky top-0 z-30 -mx-6 space-y-3 border-b px-6 pt-3 pb-0">
-        <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-2xl font-semibold">{detail.title}</h1>
-          <Badge variant={statusBadge.variant}>{statusBadge.label}</Badge>
-          <div className="ml-auto">
-            <VersionSelector
-              questionnaireId={id}
-              versionId={selected.id}
-              versions={detail.versions.map((ver) => ({
-                id: ver.id,
-                versionNumber: ver.versionNumber,
-                status: ver.status,
-              }))}
-            />
+        <div>
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-2xl font-semibold">{detail.title}</h1>
+            {viewingLive && <Badge variant={liveBadge.variant}>{liveBadge.label}</Badge>}
+            <div className="ml-auto">
+              <VersionSelector
+                questionnaireId={id}
+                versionId={selected.id}
+                versions={detail.versions.map((ver) => ({
+                  id: ver.id,
+                  versionNumber: ver.versionNumber,
+                  status: ver.status,
+                }))}
+              />
+            </div>
           </div>
+          {!viewingLive && (
+            <p className="text-muted-foreground mt-1 text-xs">
+              You’re viewing v{selected.versionNumber} ({selected.status}) ·{' '}
+              {latestLaunched
+                ? `live version is v${latestLaunched.versionNumber}`
+                : 'not yet launched'}
+            </p>
+          )}
         </div>
         <QuestionnaireSubNav questionnaireId={id} versionId={selected.id} tabs={tabs} />
       </header>

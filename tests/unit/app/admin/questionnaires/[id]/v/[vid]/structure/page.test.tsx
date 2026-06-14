@@ -123,9 +123,12 @@ function makeDetail(over: Partial<QuestionnaireDetail> = {}): QuestionnaireDetai
 }
 
 function makeGraph(
-  over: Partial<VersionGraphView> & { anonymousMode?: boolean } = {}
+  over: Partial<VersionGraphView> & {
+    anonymousMode?: boolean;
+    accessMode?: 'invitation_only' | 'public' | 'both';
+  } = {}
 ): VersionGraphView {
-  const { anonymousMode = false, ...rest } = over;
+  const { anonymousMode = false, accessMode = 'invitation_only', ...rest } = over;
   return {
     id: 'ver-1',
     questionnaireId: 'qn-1',
@@ -141,6 +144,7 @@ function makeGraph(
       ...DEFAULT_QUESTIONNAIRE_CONFIG,
       saved: true,
       anonymousMode,
+      accessMode,
     },
     ...rest,
   };
@@ -385,36 +389,42 @@ describe('StructureTab', () => {
     });
   });
 
-  describe('anonymous mode badge', () => {
-    it('shows "Anonymous mode" badge when graph.config.anonymousMode is true', async () => {
-      // Arrange
+  describe('access + identity badges', () => {
+    it('shows the "Anonymous" identity badge when anonymousMode is true', async () => {
       workspaceDataMock.getVersionGraphCached.mockResolvedValue(makeGraph({ anonymousMode: true }));
       render(await renderPage());
 
-      // Assert: badge reflects the graph config
-      expect(screen.getByText('Anonymous mode')).toBeInTheDocument();
-      expect(screen.queryByText('Invitation only')).not.toBeInTheDocument();
+      expect(screen.getByText('Anonymous')).toBeInTheDocument();
+      expect(screen.queryByText('Identified')).not.toBeInTheDocument();
     });
 
-    it('shows "Invitation only" badge when graph.config.anonymousMode is false', async () => {
-      // Arrange
+    it('shows the "Identified" identity badge when anonymousMode is false', async () => {
       workspaceDataMock.getVersionGraphCached.mockResolvedValue(
         makeGraph({ anonymousMode: false })
       );
       render(await renderPage());
 
-      // Assert
-      expect(screen.getByText('Invitation only')).toBeInTheDocument();
-      expect(screen.queryByText('Anonymous mode')).not.toBeInTheDocument();
+      expect(screen.getByText('Identified')).toBeInTheDocument();
+      expect(screen.queryByText('Anonymous')).not.toBeInTheDocument();
     });
 
-    it('renders no anonymous-mode badge when the graph is null', async () => {
-      // Arrange
+    it('shows the access-mode badge independently of identity', async () => {
+      workspaceDataMock.getVersionGraphCached.mockResolvedValue(
+        makeGraph({ accessMode: 'public', anonymousMode: false })
+      );
+      render(await renderPage());
+
+      // Access axis and identity axis are orthogonal: a public, identified questionnaire.
+      expect(screen.getByText('Public link')).toBeInTheDocument();
+      expect(screen.getByText('Identified')).toBeInTheDocument();
+    });
+
+    it('renders no access/identity badges when the graph is null', async () => {
       workspaceDataMock.getVersionGraphCached.mockResolvedValue(null);
       render(await renderPage());
 
-      // Assert: badge is conditional on graph presence
-      expect(screen.queryByText('Anonymous mode')).not.toBeInTheDocument();
+      expect(screen.queryByText('Anonymous')).not.toBeInTheDocument();
+      expect(screen.queryByText('Identified')).not.toBeInTheDocument();
       expect(screen.queryByText('Invitation only')).not.toBeInTheDocument();
     });
   });

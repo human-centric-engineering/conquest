@@ -21,7 +21,16 @@
 import { prisma } from '@/lib/db/client';
 import type { Prisma } from '@prisma/client';
 import { hashInvitationToken } from '@/lib/app/questionnaire/invitations';
-import { findResumableSession } from '@/lib/app/questionnaire/chat/resumable-session';
+import { isInvitationTransitionAllowed } from '@/lib/app/questionnaire/invitations/status';
+import { narrowToEnum } from '@/lib/app/questionnaire/types';
+import {
+  APP_INVITATION_STATUSES,
+  type AppInvitationStatus,
+} from '@/lib/app/questionnaire/invitations/types';
+import {
+  findResumableSession,
+  findResumableSessionByInvitation,
+} from '@/lib/app/questionnaire/chat/resumable-session';
 import { recordSessionCreated } from '@/app/api/v1/app/questionnaires/_lib/sessions';
 import { loadLaunchReadiness } from '@/app/api/v1/app/questionnaires/_lib/launchability';
 import {
@@ -178,8 +187,13 @@ export async function createSessionFromInvitation(
 
 /**
  * Create (or resume) a real session straight from a `versionId` for an authenticated
- * respondent. Allowed only for a launched version whose config has `anonymousMode = true`
- * (the open, no-invitation surface). The respondent is bound as `respondentUserId`.
+ * respondent. Allowed only for a launched version whose `accessMode` permits a direct
+ * (no-invitation) start — `public` or `both`. The respondent is bound as `respondentUserId`.
+ *
+ * Profile capture is skipped on this direct-start surface (no profile form precedes a
+ * walk-up start); identity, when wanted, is collected on the invitation path. A non-anonymous
+ * `public` questionnaire therefore won't collect a profile from a walk-up respondent — a
+ * deliberate scoping gap (public walk-up profile capture is a follow-up).
  */
 export async function createSessionForVersion(
   versionId: string,
@@ -187,18 +201,16 @@ export async function createSessionForVersion(
 ): Promise<CreateSessionResult> {
   const version = await prisma.appQuestionnaireVersion.findUnique({
     where: { id: versionId },
-    select: { id: true, status: true, config: { select: { anonymousMode: true } } },
+    select: { id: true, status: true, config: { select: { accessMode: true } } },
   });
 
   // A non-existent or unlaunched version is a 404 — don't reveal draft/archived versions.
   if (!version || version.status !== 'launched') {
     return { ok: false, status: 404, code: 'NOT_FOUND', message: 'Questionnaire not found' };
   }
-  // Direct (no-invitation) starts are only for the anonymous-mode surface; an
-  // invitation-gated questionnaire requires the invitation path. Because this surface is
-  // anonymous by definition, NO profile snapshot is ever captured here (F8.3 invariant) —
-  // only the invitation path (always non-anonymous) collects profile data.
-  if (!version.config?.anonymousMode) {
+  // Direct (no-invitation) starts need an access mode that permits them; an invitation_only
+  // questionnaire requires the invitation path. Unconfigured versions default to invitation_only.
+  if ((version.config?.accessMode ?? 'invitation_only') === 'invitation_only') {
     return {
       ok: false,
       status: 403,
@@ -280,22 +292,23 @@ export async function createPreviewSession(versionId: string): Promise<CreateSes
 }
 
 /**
- * Create a NO-LOGIN anonymous session for a launched `anonymousMode` version — the public
- * pop-up/demo surface (F6.1, PR6). Unlike the authenticated paths, `respondentUserId` is
- * left null; access is later proven by the signed token the route mints. No resume here:
- * an anonymous caller can't be re-identified across requests without the token, so each
- * create mints a fresh session.
+ * Create a NO-LOGIN session for a launched version whose `accessMode` permits a public start
+ * (`public` or `both`) — the public pop-up/demo surface (F6.1, PR6). Unlike the authenticated
+ * paths, `respondentUserId` is left null; access is later proven by the signed token the route
+ * mints. No resume here: a no-login caller can't be re-identified across requests without the
+ * token, so each create mints a fresh session. (Access, not anonymity: a `public` questionnaire
+ * may still be non-anonymous — but a no-login walk-up has no account to attach a profile to.)
  */
 export async function createAnonymousSession(versionId: string): Promise<CreateSessionResult> {
   const version = await prisma.appQuestionnaireVersion.findUnique({
     where: { id: versionId },
-    select: { id: true, status: true, config: { select: { anonymousMode: true } } },
+    select: { id: true, status: true, config: { select: { accessMode: true } } },
   });
 
   if (!version || version.status !== 'launched') {
     return { ok: false, status: 404, code: 'NOT_FOUND', message: 'Questionnaire not found' };
   }
-  if (!version.config?.anonymousMode) {
+  if ((version.config?.accessMode ?? 'invitation_only') === 'invitation_only') {
     return {
       ok: false,
       status: 403,
@@ -310,6 +323,98 @@ export async function createAnonymousSession(versionId: string): Promise<CreateS
       select: { id: true, status: true, versionId: true },
     });
     await recordSessionCreated(created.id, { tx });
+    return created;
+  });
+
+  return { ok: true, session, resumed: false };
+}
+
+/**
+ * Create (or resume) a NO-LOGIN session from a per-invitee token — the frictionless invite flow
+ * (Phase B). The token IS the credential: a valid, non-revoked, non-expired invitation for a
+ * launched version boots a session with `respondentUserId: null` and `invitationId` set, so the
+ * existing anonymous turn path (HMAC `X-Session-Token`) drives every turn unchanged. The invitee
+ * never registers an account; the admin captured their details at invite time (`invitation.profile`)
+ * so NO profile snapshot is written here — identity lives on the invitation, read only for status
+ * (the completion-tracking-only invariant). Idempotent: a re-opened link resumes the existing
+ * non-terminal session (keyed on `invitationId`). On first start the invitation advances to
+ * `started`. Gated by the frictionless-invites flag at the route.
+ */
+export async function createSessionFromInviteToken(token: string): Promise<CreateSessionResult> {
+  const invitation = await prisma.appQuestionnaireInvitation.findUnique({
+    where: { tokenHash: hashInvitationToken(token) },
+    select: {
+      id: true,
+      status: true,
+      versionId: true,
+      revokedAt: true,
+      expiresAt: true,
+      version: { select: { status: true } },
+    },
+  });
+
+  if (!invitation) {
+    return {
+      ok: false,
+      status: 404,
+      code: 'INVITATION_NOT_FOUND',
+      message: 'Invitation not found',
+    };
+  }
+  if (invitation.revokedAt !== null || invitation.status === 'revoked') {
+    return {
+      ok: false,
+      status: 410,
+      code: 'INVITATION_REVOKED',
+      message: 'This invitation link has been revoked',
+    };
+  }
+  if (invitation.expiresAt.getTime() <= Date.now()) {
+    return {
+      ok: false,
+      status: 410,
+      code: 'INVITATION_EXPIRED',
+      message: 'This invitation link has expired',
+    };
+  }
+  if (invitation.version.status !== 'launched') {
+    return {
+      ok: false,
+      status: 409,
+      code: 'VERSION_NOT_LAUNCHED',
+      message: 'This questionnaire is not currently open',
+    };
+  }
+
+  // Idempotent re-entry: a previously-booted, still-open session for this invitation.
+  const existing = await findResumableSessionByInvitation(invitation.id);
+  if (existing) return { ok: true, session: existing, resumed: true };
+
+  const from = narrowToEnum<AppInvitationStatus>(
+    invitation.status,
+    APP_INVITATION_STATUSES,
+    'sent'
+  );
+  const advance = isInvitationTransitionAllowed(from, 'started');
+
+  const session = await prisma.$transaction(async (tx) => {
+    const created = await tx.appQuestionnaireSession.create({
+      data: {
+        versionId: invitation.versionId,
+        respondentUserId: null,
+        invitationId: invitation.id,
+        isPreview: false,
+        status: 'active',
+      },
+      select: { id: true, status: true, versionId: true },
+    });
+    await recordSessionCreated(created.id, { tx });
+    if (advance) {
+      await tx.appQuestionnaireInvitation.update({
+        where: { id: invitation.id },
+        data: { status: 'started' },
+      });
+    }
     return created;
   });
 

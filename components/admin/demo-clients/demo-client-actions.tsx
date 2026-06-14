@@ -1,13 +1,15 @@
 'use client';
 
 /**
- * DEMO-ONLY (F2.5.1): delete action for a demo client.
+ * DEMO-ONLY (F2.5.1): delete control for a demo client.
  *
  * The server refuses (409 `DEMO_CLIENT_IN_USE`) while any questionnaire is still
- * attributed. The UI mirrors that: the button is disabled with an explanation when
- * the attributed count is non-zero, and a confirm dialog guards the destructive
- * action when it's zero. The 409 is still handled defensively (a race could attach
- * a questionnaire between render and click).
+ * attributed. The UI mirrors that: the button is disabled when the attributed count
+ * is non-zero (the surrounding "Demo management" card explains the unblock and points
+ * at the inline row actions), and a confirm dialog guards the destructive action when
+ * the count is zero. The 409 is still handled defensively (a race could attach a
+ * questionnaire between render and click). Renders just the button + inline error so it
+ * drops into a management-card row.
  */
 
 import { useState } from 'react';
@@ -56,22 +58,15 @@ export function DemoClientActions({ id, name, questionnaireCount }: DemoClientAc
 
   if (inUse) {
     return (
-      <div className="space-y-1">
-        <Button variant="outline" disabled className="text-destructive">
-          <Trash2 className="mr-2 h-4 w-4" />
-          Delete
-        </Button>
-        <p className="text-muted-foreground max-w-[15rem] text-right text-xs">
-          Detach or reassign the {questionnaireCount} attributed{' '}
-          {questionnaireCount === 1 ? 'questionnaire' : 'questionnaires'} listed below before
-          deleting.
-        </p>
-      </div>
+      <Button variant="outline" disabled className="text-destructive">
+        <Trash2 className="mr-2 h-4 w-4" />
+        Delete demo client
+      </Button>
     );
   }
 
   return (
-    <div className="space-y-1">
+    <div className="flex flex-col items-end gap-1">
       <AlertDialog>
         <AlertDialogTrigger asChild>
           <Button variant="outline" className="text-destructive" disabled={isDeleting}>
@@ -80,7 +75,7 @@ export function DemoClientActions({ id, name, questionnaireCount }: DemoClientAc
             ) : (
               <Trash2 className="mr-2 h-4 w-4" />
             )}
-            Delete
+            Delete demo client
           </Button>
         </AlertDialogTrigger>
         <AlertDialogContent>

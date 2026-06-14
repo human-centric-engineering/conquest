@@ -37,7 +37,7 @@ export const QUESTIONNAIRE_WORKSPACE_TABS: readonly WorkspaceTab[] = [
   { id: 'invitations', label: 'Invitations', segment: 'invitations' },
   { id: 'analytics', label: 'Analytics', segment: 'analytics' },
   { id: 'evaluations', label: 'Evaluations', segment: 'evaluations', flag: 'designEval' },
-  { id: 'extraction-changes', label: 'Changes', segment: 'extraction-changes' },
+  { id: 'extraction-changes', label: 'Extraction log', segment: 'extraction-changes' },
   { id: 'settings', label: 'Settings', segment: 'settings' },
 ];
 

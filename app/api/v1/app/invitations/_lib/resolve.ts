@@ -22,6 +22,8 @@ export interface ResolvedInvitation {
   questionnaireTitle: string;
   expiresAt: Date;
   openedAt: Date | null;
+  /** Respondent account bound at registration; null for an unbound (incl. frictionless) invite. */
+  userId: string | null;
 }
 
 export type InvitationResolution =
@@ -41,6 +43,7 @@ export async function resolveInvitationByToken(token: string): Promise<Invitatio
       versionId: true,
       expiresAt: true,
       openedAt: true,
+      userId: true,
       version: { select: { questionnaire: { select: { title: true } } } },
     },
   });
@@ -60,6 +63,7 @@ export async function resolveInvitationByToken(token: string): Promise<Invitatio
       questionnaireTitle: row.version.questionnaire.title,
       expiresAt: row.expiresAt,
       openedAt: row.openedAt,
+      userId: row.userId,
     },
   };
 }

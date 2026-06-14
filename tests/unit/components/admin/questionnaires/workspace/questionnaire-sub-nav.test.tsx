@@ -232,7 +232,7 @@ describe('QuestionnaireSubNav', () => {
       expect(screen.getByRole('link', { name: 'Structure' })).toBeInTheDocument();
       expect(screen.getByRole('link', { name: 'Invitations' })).toBeInTheDocument();
       expect(screen.getByRole('link', { name: 'Analytics' })).toBeInTheDocument();
-      expect(screen.getByRole('link', { name: 'Changes' })).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'Extraction log' })).toBeInTheDocument();
       expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument();
     });
   });

@@ -36,6 +36,11 @@ import {
   type AppInvitationStatus,
   type InvitationSendResult,
 } from '@/lib/app/questionnaire/invitations';
+import {
+  parseInviteeFields,
+  validateInviteeProfile,
+} from '@/lib/app/questionnaire/invitations/invitee-fields';
+import { jsonInput } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
 import { listInvitations } from '@/app/api/v1/app/questionnaires/[id]/invitations/_lib/read';
 import {
   findLiveInvitation,
@@ -91,8 +96,34 @@ const handleCreate = withAdminAuth<{ id: string }>(async (request, session, { pa
   // recipient on this questionnaire shares its attributed demo client.
   const theme = await resolveDemoClientTheme(target.demoClientId);
 
+  // The version's configurable invitee fields drive per-recipient validation (email is forced
+  // shown+required by parseInviteeFields). Lazy config → defaults.
+  const cfg = await prisma.appQuestionnaireConfig.findUnique({
+    where: { versionId: target.versionId },
+    select: { inviteeFields: true },
+  });
+  const inviteeFields = parseInviteeFields(cfg?.inviteeFields);
+
   const results: InvitationSendResult[] = [];
   for (const recipient of body.recipients) {
+    // Validate the recipient's details against the version's invitee-field config (required
+    // fields present, email valid). A failure is a per-recipient outcome, not a batch abort.
+    const validation = validateInviteeProfile(inviteeFields, {
+      ...(recipient.profile ?? {}),
+      email: recipient.email,
+    });
+    if (!validation.ok) {
+      results.push({ email: recipient.email, outcome: 'failed', reason: validation.message });
+      continue;
+    }
+    // Derive a display name from first/last when not given explicitly (prefills registration).
+    const derivedName =
+      recipient.name ??
+      ([validation.values.firstName, validation.values.surname].filter(Boolean).join(' ') || null);
+    // Store the captured detail fields (sans email — it has its own column) as the profile JSON.
+    const { email: _email, ...profileRest } = validation.values;
+    const profileJson = Object.keys(profileRest).length > 0 ? profileRest : null;
+
     // App-layer dedup — a live invite to this address on this version is a no-op.
     const existing = await findLiveInvitation(target.versionId, recipient.email);
     if (existing) {
@@ -110,7 +141,8 @@ const handleCreate = withAdminAuth<{ id: string }>(async (request, session, { pa
       data: {
         versionId: target.versionId,
         email: recipient.email,
-        name: recipient.name ?? null,
+        name: derivedName,
+        profile: profileJson === null ? undefined : jsonInput(profileJson),
         tokenHash,
         status: 'pending',
         invitedByUserId: session.user.id,
@@ -126,7 +158,7 @@ const handleCreate = withAdminAuth<{ id: string }>(async (request, session, { pa
     // with a 500 — the admin still gets the full per-recipient outcome.
     const emailResult = await sendInvitationEmail({
       to: recipient.email,
-      inviteeName: recipient.name ?? null,
+      inviteeName: derivedName,
       questionnaireTitle: target.questionnaireTitle,
       token,
       expiresAt,

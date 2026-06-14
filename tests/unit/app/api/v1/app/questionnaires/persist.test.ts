@@ -204,7 +204,7 @@ describe('persistIngestion', () => {
       type: 'free_text',
       ordinal: 0,
       required: false,
-      weight: 1.0,
+      weight: 0.5,
     });
     expect(data[1]).toMatchObject({
       key: 'years',

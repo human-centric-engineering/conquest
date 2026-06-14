@@ -15,6 +15,7 @@ import { VersionEditor } from '@/components/admin/questionnaires/version-editor'
 import { ReingestDialog } from '@/components/admin/questionnaires/reingest-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { ACCESS_MODE_LABELS } from '@/lib/app/questionnaire/types';
 import {
   getQuestionnaireDetailCached,
   getVersionGraphCached,
@@ -61,16 +62,32 @@ export default async function StructureTab({ params, searchParams }: PageProps) 
               : ''}
           </p>
           {graph && (
-            <Badge
-              variant={graph.config.anonymousMode ? 'secondary' : 'outline'}
-              title={
-                graph.config.anonymousMode
-                  ? 'Anonymous mode: anyone with the link can answer without an account.'
-                  : 'Invitation only: respondents need an invitation. Preview opens an admin-only walkthrough.'
-              }
-            >
-              {graph.config.anonymousMode ? 'Anonymous mode' : 'Invitation only'}
-            </Badge>
+            <>
+              {/* Access axis (who may start) and identity axis (whether responses are named) are
+                  orthogonal — show them as two distinct badges. */}
+              <Badge
+                variant="outline"
+                title={
+                  graph.config.accessMode === 'public'
+                    ? 'Public link: anyone with the URL can answer.'
+                    : graph.config.accessMode === 'both'
+                      ? 'Both: a public link and per-invitee links both work.'
+                      : 'Invitation only: respondents need a per-invitee link.'
+                }
+              >
+                {ACCESS_MODE_LABELS[graph.config.accessMode]}
+              </Badge>
+              <Badge
+                variant={graph.config.anonymousMode ? 'secondary' : 'outline'}
+                title={
+                  graph.config.anonymousMode
+                    ? 'Anonymous: responses are not tied to a named individual.'
+                    : 'Identified: identifying profile fields are collected.'
+                }
+              >
+                {graph.config.anonymousMode ? 'Anonymous' : 'Identified'}
+              </Badge>
+            </>
           )}
         </div>
         <div className="flex items-center gap-2">

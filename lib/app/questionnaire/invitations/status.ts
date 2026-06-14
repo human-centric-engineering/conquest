@@ -14,11 +14,14 @@ import { INVITATION_RESENDABLE_STATUSES } from '@/lib/app/questionnaire/invitati
  * `started`/`completed` edges exist for P6/P7 but no F3.2 route walks them.
  */
 const INVITATION_TRANSITIONS: Record<AppInvitationStatus, readonly AppInvitationStatus[]> = {
-  pending: ['sent', 'revoked'],
-  sent: ['opened', 'registered', 'revoked'],
-  opened: ['registered', 'revoked'],
-  registered: ['started'], // P6/P7
-  started: ['completed'], // P6/P7
+  // `→ started` direct from pending/sent/opened: the frictionless token flow boots a session with
+  // no account, so it skips `registered` (which means "bound a better-auth account"). `pending →
+  // started` covers a copy-link that was never emailed.
+  pending: ['sent', 'revoked', 'started'],
+  sent: ['opened', 'registered', 'revoked', 'started'],
+  opened: ['registered', 'revoked', 'started'],
+  registered: ['started'],
+  started: ['completed'],
   completed: [],
   revoked: [],
 };

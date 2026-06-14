@@ -74,6 +74,31 @@ describe('getCompletionFunnel', () => {
     expect(result.anonymous).toEqual({ started: 2, completed: 1 });
   });
 
+  it('matches frictionless (no-account) invitees to sessions by invitationId', async () => {
+    // Frictionless invitees never register, so they have no userId — they're linked to a session
+    // only by `invitationId`. The funnel must still count them as started/completed.
+    findManyInvitations.mockResolvedValue([
+      { id: 'inv1', sentAt: new Date(), openedAt: new Date(), userId: null },
+      { id: 'inv2', sentAt: new Date(), openedAt: new Date(), userId: null },
+      { id: 'inv3', sentAt: new Date(), openedAt: new Date(), userId: null },
+      { id: 'inv4', sentAt: new Date(), openedAt: new Date(), userId: null },
+      { id: 'inv5', sentAt: new Date(), openedAt: null, userId: null },
+    ]);
+    findManySessions.mockResolvedValue([
+      { respondentUserId: null, invitationId: 'inv1', status: 'completed' },
+      { respondentUserId: null, invitationId: 'inv2', status: 'completed' },
+      { respondentUserId: null, invitationId: 'inv3', status: 'active' },
+      { respondentUserId: null, invitationId: null, status: 'active' }, // a true anonymous walk-up
+    ]);
+
+    const result = await getCompletionFunnel(scope);
+    const byKey = Object.fromEntries(result.stages.map((s) => [s.key, s.count]));
+    // 5 sent, 4 opened, inv1–3 started (3), inv1–2 completed (2). cohort 5+1 ≥ k, so not suppressed.
+    expect(byKey).toEqual({ invited: 5, opened: 4, started: 3, completed: 2 });
+    // Only the un-linked walk-up session is anonymous.
+    expect(result.anonymous).toEqual({ started: 1, completed: 0 });
+  });
+
   it('excludes preview sessions and revoked invitations in its queries', async () => {
     await getCompletionFunnel(scope);
     expect(findManySessions.mock.calls[0][0].where.isPreview).toBe(false);

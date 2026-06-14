@@ -213,7 +213,13 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
     treadCarefully +
     'Match the respondent’s tone. ' +
     brevity +
-    'Reply with plain conversational prose only: no JSON, no lists, no headings, no preamble, no quotation marks.';
+    'Reply with conversational prose only: no JSON, no lists, no headings, no preamble, no quotation marks. ' +
+    // Markdown bold IS rendered in the chat UI. Used sparingly it helps the respondent see the
+    // single thing being asked at a glance; overused it reads as shouty, so cap it hard.
+    'You may use Markdown **bold** sparingly — at most one short phrase per message — to gently ' +
+    'emphasise the specific area of focus you are asking about (e.g. **recommend the workplace**). ' +
+    'Never bold a whole sentence, never bold more than one phrase, and skip it entirely when no ' +
+    'single phrase is the clear focus.';
 
   const options = extractOptionLabels(input.typeConfig);
   const transcript = input.recentMessages.slice(-6).join('\n');

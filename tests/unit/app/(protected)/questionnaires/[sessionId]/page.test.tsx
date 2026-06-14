@@ -61,6 +61,9 @@ vi.mock('@/lib/db/client', () => ({
     appQuestionnaireSession: {
       findUnique: vi.fn(),
     },
+    appQuestionnaireTurn: {
+      findMany: vi.fn(),
+    },
   },
 }));
 
@@ -206,12 +209,22 @@ function makeRow(
     status?: string;
     answerCount?: number;
     anonymous?: boolean;
+    voiceEnabled?: boolean;
+    attachmentsEnabled?: boolean;
   } = {}
 ) {
   return {
     status: overrides.status ?? 'active',
     respondentUserId: overrides.respondentUserId ?? 'user_abc',
-    version: { config: { anonymousMode: overrides.anonymous ?? false } },
+    version: {
+      config: {
+        anonymousMode: overrides.anonymous ?? false,
+        // Per-questionnaire opt-ins default ON so the flag tests isolate the platform flag; the
+        // page ANDs platform flag AND config opt-in, exercised by dedicated tests below.
+        voiceEnabled: overrides.voiceEnabled ?? true,
+        attachmentsEnabled: overrides.attachmentsEnabled ?? true,
+      },
+    },
     _count: { answers: overrides.answerCount ?? 0 },
   };
 }
@@ -259,6 +272,8 @@ describe('QuestionnaireSessionPage', () => {
     vi.mocked(resolveThemeForSession).mockResolvedValue(MOCK_THEME);
     vi.mocked(getServerSession).mockResolvedValue(MOCK_SESSION);
     vi.mocked(prisma.appQuestionnaireSession.findUnique).mockResolvedValue(makeRow() as never);
+    // No prior turns by default → fresh (non-resumed) session, matching the happy-path tests.
+    vi.mocked(prisma.appQuestionnaireTurn.findMany).mockResolvedValue([] as never);
     vi.mocked(loadAnswerPanelState).mockResolvedValue({
       session: { id: SESSION_ID, respondentUserId: 'user_abc' },
       view: {
@@ -402,30 +417,34 @@ describe('QuestionnaireSessionPage', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Resumed session (answers already exist)
+  // Resumed session (prior turns exist) — the page replays the persisted
+  // transcript rather than synthesizing a "Welcome back" greeting.
   // -------------------------------------------------------------------------
 
   describe('resumed session', () => {
-    it('passes a resume welcome turn when the session has prior answers', async () => {
-      // Arrange: session has existing answers
-      vi.mocked(prisma.appQuestionnaireSession.findUnique).mockResolvedValue(
-        makeRow({ answerCount: 3 }) as never
-      );
+    it('replays the persisted transcript when the session has prior turns', async () => {
+      // Arrange: two persisted turns — an empty-message kickoff turn (assistant only)
+      // followed by an answered turn (user + assistant).
+      vi.mocked(prisma.appQuestionnaireTurn.findMany).mockResolvedValue([
+        { userMessage: '', agentResponse: 'First question?', warnings: [] },
+        { userMessage: 'My answer', agentResponse: 'Next question?', warnings: [] },
+      ] as never);
 
       // Act
       const Component = await QuestionnaireSessionPage({ params: makeParams() });
       render(Component);
 
-      // Assert: page computed resumed=true and built the resume turn
+      // Assert: page computed resumed=true and replayed the transcript verbatim.
       const chat = screen.getByTestId('questionnaire-chat');
       const turns = JSON.parse(chat.getAttribute('data-initial-turns') ?? '[]') as Array<{
         role: string;
         content: string;
       }>;
-      expect(turns).toHaveLength(1);
-      expect(turns[0].role).toBe('assistant');
-      // Resume greeting distinguishes itself from the fresh greeting
-      expect(turns[0].content).toContain('Welcome back');
+      expect(turns).toEqual([
+        { role: 'assistant', content: 'First question?' },
+        { role: 'user', content: 'My answer' },
+        { role: 'assistant', content: 'Next question?' },
+      ]);
     });
   });
 
@@ -583,6 +602,23 @@ describe('QuestionnaireSessionPage', () => {
         'false'
       );
     });
+
+    it('passes voiceInputEnabled=false when the platform flag is on but the version opted out', async () => {
+      // Both gates required: platform capability AND the author's per-questionnaire opt-in.
+      // Platform on + config off must still resolve to off (the reported mic-always-on bug).
+      vi.mocked(isVoiceInputEnabled).mockResolvedValue(true);
+      vi.mocked(prisma.appQuestionnaireSession.findUnique).mockResolvedValue(
+        makeRow({ voiceEnabled: false }) as never
+      );
+
+      const Component = await QuestionnaireSessionPage({ params: makeParams() });
+      render(Component);
+
+      expect(screen.getByTestId('questionnaire-chat')).toHaveAttribute(
+        'data-voice-input-enabled',
+        'false'
+      );
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -603,6 +639,21 @@ describe('QuestionnaireSessionPage', () => {
     });
 
     it('passes attachmentInputEnabled=false when the flag is off', async () => {
+      const Component = await QuestionnaireSessionPage({ params: makeParams() });
+      render(Component);
+
+      expect(screen.getByTestId('questionnaire-chat')).toHaveAttribute(
+        'data-attachment-input-enabled',
+        'false'
+      );
+    });
+
+    it('passes attachmentInputEnabled=false when the platform flag is on but the version opted out', async () => {
+      vi.mocked(isAttachmentInputEnabled).mockResolvedValue(true);
+      vi.mocked(prisma.appQuestionnaireSession.findUnique).mockResolvedValue(
+        makeRow({ attachmentsEnabled: false }) as never
+      );
+
       const Component = await QuestionnaireSessionPage({ params: makeParams() });
       render(Component);
 
