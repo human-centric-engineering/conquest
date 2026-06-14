@@ -481,7 +481,7 @@ describe('question create', () => {
         guidelines: '1–5',
         rationale: 'satisfaction',
         required: true,
-        weight: 2,
+        weight: 1,
         ordinal: 0,
         typeConfig: { min: 1, max: 5 },
       }),
@@ -492,7 +492,7 @@ describe('question create', () => {
       key: 'rating',
       ordinal: 0,
       required: true,
-      weight: 2,
+      weight: 1,
       guidelines: '1–5',
       rationale: 'satisfaction',
       typeConfig: { min: 1, max: 5 },
@@ -895,7 +895,7 @@ describe('question edit/delete', () => {
         guidelines: 'g',
         rationale: 'r',
         required: true,
-        weight: 3,
+        weight: 0.8,
         ordinal: 1,
       }),
       ctx(QUESTION_PARAMS)
@@ -906,7 +906,7 @@ describe('question edit/delete', () => {
       guidelines: 'g',
       rationale: 'r',
       required: true,
-      weight: 3,
+      weight: 0.8,
       ordinal: 1,
     });
     expect(data).not.toHaveProperty('section'); // no move

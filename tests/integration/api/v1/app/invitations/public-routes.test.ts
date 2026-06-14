@@ -29,6 +29,7 @@ vi.mock('@/lib/security/rate-limit', async (importOriginal) => {
 
 const prismaMock = vi.hoisted(() => ({
   appQuestionnaireInvitation: { findUnique: vi.fn(), update: vi.fn() },
+  appQuestionnaireSession: { updateMany: vi.fn() },
   user: { findUnique: vi.fn(), update: vi.fn() },
 }));
 vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
@@ -70,6 +71,7 @@ function invitationRow(overrides: Record<string, unknown> = {}) {
     versionId: 'v1',
     expiresAt: new Date(Date.now() + 7 * 86400_000),
     openedAt: null,
+    userId: null,
     version: { questionnaire: { title: 'Customer Satisfaction' } },
     ...overrides,
   };
@@ -80,6 +82,7 @@ beforeEach(() => {
   (isFeatureEnabled as unknown as Mock).mockResolvedValue(true);
   prismaMock.appQuestionnaireInvitation.findUnique.mockResolvedValue(invitationRow());
   prismaMock.appQuestionnaireInvitation.update.mockResolvedValue({});
+  prismaMock.appQuestionnaireSession.updateMany.mockResolvedValue({ count: 0 });
   prismaMock.user.findUnique.mockResolvedValue(null);
   prismaMock.user.update.mockResolvedValue({});
   (auth.api.signUpEmail as unknown as Mock).mockResolvedValue({ user: { id: 'user-new' } });
@@ -321,5 +324,35 @@ describe('POST accept', () => {
       expect(body.success).toBe(false);
       expect(body.error.code).toBe('ACCOUNT_EXISTS');
     }
+  });
+
+  it('upgrades a frictionless (started, no-account) invite: keeps started + adopts its session', async () => {
+    prismaMock.appQuestionnaireInvitation.findUnique.mockResolvedValue(
+      invitationRow({ status: 'started', userId: null })
+    );
+    prismaMock.appQuestionnaireSession.updateMany.mockResolvedValue({ count: 1 });
+
+    const res = await acceptPOST(acceptReq({ token: TOKEN, password: 'longenough1' }));
+    expect(res.status).toBe(200);
+
+    // Lifecycle not rewound — stays `started`, just binds the account.
+    const updateData = prismaMock.appQuestionnaireInvitation.update.mock.calls[0][0].data;
+    expect(updateData.userId).toBe('user-new');
+    expect(updateData.status).toBeUndefined();
+    // The in-flight no-account session is adopted into the new account.
+    expect(prismaMock.appQuestionnaireSession.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { invitationId: 'inv-1', respondentUserId: null },
+        data: { respondentUserId: 'user-new' },
+      })
+    );
+  });
+
+  it('rejects an already account-bound invitation (used)', async () => {
+    prismaMock.appQuestionnaireInvitation.findUnique.mockResolvedValue(
+      invitationRow({ status: 'started', userId: 'someone-else' })
+    );
+    const res = await acceptPOST(acceptReq({ token: TOKEN, password: 'longenough1' }));
+    expect(res.status).toBe(409);
   });
 });

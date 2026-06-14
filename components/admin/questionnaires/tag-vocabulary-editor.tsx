@@ -62,7 +62,7 @@ export function TagVocabularyEditor({
     const label = newLabel.trim();
     if (!label) return;
     setNewLabel('');
-    run(() => ['POST', collectionPath, { label }]);
+    void run(() => ['POST', collectionPath, { label }]);
   };
 
   return (
@@ -97,9 +97,9 @@ export function TagVocabularyEditor({
               key={tag.id}
               tag={tag}
               busy={busy}
-              onRename={(label) => run(() => ['PATCH', tagPath(tag.id), { label }])}
-              onRecolour={(color) => run(() => ['PATCH', tagPath(tag.id), { color }])}
-              onDelete={() => run(() => ['DELETE', tagPath(tag.id), undefined])}
+              onRename={(label) => void run(() => ['PATCH', tagPath(tag.id), { label }])}
+              onRecolour={(color) => void run(() => ['PATCH', tagPath(tag.id), { color }])}
+              onDelete={() => void run(() => ['DELETE', tagPath(tag.id), undefined])}
             />
           ))}
         </ul>

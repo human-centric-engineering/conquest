@@ -79,17 +79,18 @@ export function SectionEditor({
   );
 
   const saveTitle = () => {
-    if (title.trim() && title !== section.title) run(() => ['PATCH', sectionPath, { title }]);
+    if (title.trim() && title !== section.title) void run(() => ['PATCH', sectionPath, { title }]);
   };
 
-  const addQuestion = () =>
-    run(() => [
+  const addQuestion = () => {
+    void run(() => [
       'POST',
       API.APP.QUESTIONNAIRES.versionSectionQuestions(questionnaireId, versionId, section.id),
       // Start at the neutral midpoint of the 0.1–1.0 weight scale, leaving room to push
       // either way (the slider in the question row).
       { prompt: 'New question', type: 'free_text', weight: 0.5 },
     ]);
+  };
 
   const onDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
@@ -99,7 +100,7 @@ export function SectionEditor({
     if (oldIndex < 0 || newIndex < 0) return;
     const reordered = arrayMove(questions, oldIndex, newIndex);
     setQuestions(reordered); // optimistic
-    run(() => [
+    void run(() => [
       'PATCH',
       API.APP.QUESTIONNAIRES.versionSectionQuestionsReorder(questionnaireId, versionId, section.id),
       { order: reordered.map((q) => q.id) },
@@ -148,7 +149,7 @@ export function SectionEditor({
           className="h-8 w-8 shrink-0"
           disabled={busy}
           aria-label="Delete section"
-          onClick={() => run(() => ['DELETE', sectionPath, undefined])}
+          onClick={() => void run(() => ['DELETE', sectionPath, undefined])}
         >
           <Trash2 className="text-destructive h-4 w-4" />
         </Button>

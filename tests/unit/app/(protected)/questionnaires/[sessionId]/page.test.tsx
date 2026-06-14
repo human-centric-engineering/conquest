@@ -61,6 +61,9 @@ vi.mock('@/lib/db/client', () => ({
     appQuestionnaireSession: {
       findUnique: vi.fn(),
     },
+    appQuestionnaireTurn: {
+      findMany: vi.fn(),
+    },
   },
 }));
 
@@ -269,6 +272,8 @@ describe('QuestionnaireSessionPage', () => {
     vi.mocked(resolveThemeForSession).mockResolvedValue(MOCK_THEME);
     vi.mocked(getServerSession).mockResolvedValue(MOCK_SESSION);
     vi.mocked(prisma.appQuestionnaireSession.findUnique).mockResolvedValue(makeRow() as never);
+    // No prior turns by default → fresh (non-resumed) session, matching the happy-path tests.
+    vi.mocked(prisma.appQuestionnaireTurn.findMany).mockResolvedValue([] as never);
     vi.mocked(loadAnswerPanelState).mockResolvedValue({
       session: { id: SESSION_ID, respondentUserId: 'user_abc' },
       view: {
@@ -412,30 +417,34 @@ describe('QuestionnaireSessionPage', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Resumed session (answers already exist)
+  // Resumed session (prior turns exist) — the page replays the persisted
+  // transcript rather than synthesizing a "Welcome back" greeting.
   // -------------------------------------------------------------------------
 
   describe('resumed session', () => {
-    it('passes a resume welcome turn when the session has prior answers', async () => {
-      // Arrange: session has existing answers
-      vi.mocked(prisma.appQuestionnaireSession.findUnique).mockResolvedValue(
-        makeRow({ answerCount: 3 }) as never
-      );
+    it('replays the persisted transcript when the session has prior turns', async () => {
+      // Arrange: two persisted turns — an empty-message kickoff turn (assistant only)
+      // followed by an answered turn (user + assistant).
+      vi.mocked(prisma.appQuestionnaireTurn.findMany).mockResolvedValue([
+        { userMessage: '', agentResponse: 'First question?', warnings: [] },
+        { userMessage: 'My answer', agentResponse: 'Next question?', warnings: [] },
+      ] as never);
 
       // Act
       const Component = await QuestionnaireSessionPage({ params: makeParams() });
       render(Component);
 
-      // Assert: page computed resumed=true and built the resume turn
+      // Assert: page computed resumed=true and replayed the transcript verbatim.
       const chat = screen.getByTestId('questionnaire-chat');
       const turns = JSON.parse(chat.getAttribute('data-initial-turns') ?? '[]') as Array<{
         role: string;
         content: string;
       }>;
-      expect(turns).toHaveLength(1);
-      expect(turns[0].role).toBe('assistant');
-      // Resume greeting distinguishes itself from the fresh greeting
-      expect(turns[0].content).toContain('Welcome back');
+      expect(turns).toEqual([
+        { role: 'assistant', content: 'First question?' },
+        { role: 'user', content: 'My answer' },
+        { role: 'assistant', content: 'Next question?' },
+      ]);
     });
   });
 

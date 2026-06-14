@@ -98,9 +98,12 @@ token boots a **no-login** session — the respondent answers without creating a
 - **No profile snapshot** is written — the admin captured invitee details at invite time
   (`invitation.profile`); identity lives on the invitation and is read only for STATUS
   (the completion-tracking-only invariant, `invitations/linkage.ts`).
-- The account-registration accept flow still works (optional, for cross-device resume);
-  when off, invitations fall back to it. (Linking a token-bound session to a later-created
-  account for cross-device resume is a follow-up.)
+- The account-registration accept flow still works (optional, for cross-device resume); when
+  off, invitations fall back to it. **Cross-device upgrade:** a frictionless invitee (status
+  `started`, no account) can register via the accept route — it keeps `started` (doesn't rewind
+  the lifecycle), binds the account, and **adopts the in-flight no-account session** (sets its
+  `respondentUserId`) so signing in elsewhere resumes it. An already account-bound invite is
+  rejected as used. (An in-session "save my progress" affordance to reach this is still UI work.)
 
 ## Token security
 

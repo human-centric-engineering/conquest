@@ -90,7 +90,9 @@ export function QuestionEditor({
 
   const path = API.APP.QUESTIONNAIRES.versionQuestionById(questionnaireId, versionId, question.id);
 
-  const patch = (body: Record<string, unknown>) => run(() => ['PATCH', path, body]);
+  const patch = (body: Record<string, unknown>) => {
+    void run(() => ['PATCH', path, body]);
+  };
 
   const savePrompt = () => {
     if (prompt.trim() && prompt !== question.prompt) patch({ prompt });
@@ -211,7 +213,7 @@ export function QuestionEditor({
               className="h-7 w-7 opacity-60 group-hover:opacity-100"
               disabled={busy}
               aria-label="Delete question"
-              onClick={() => run(() => ['DELETE', path, undefined])}
+              onClick={() => void run(() => ['DELETE', path, undefined])}
             >
               <Trash2 className="text-destructive h-4 w-4" />
             </Button>
