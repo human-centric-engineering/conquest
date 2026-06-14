@@ -111,6 +111,42 @@
 }
 
 @layer utilities {
+  /* Structure editor (cq-surface): a faint blueprint grid for the "Editing structure"
+     band — reads as an architect's drafting sheet, scoped to the editor only. */
+  .cq-blueprint {
+    background-image:
+      linear-gradient(to right, var(--cq-accent-muted) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--cq-accent-muted) 1px, transparent 1px);
+    background-size: 1.5rem 1.5rem;
+  }
+
+  /* Spine connecting a section plate to its questions (outline tree). */
+  .cq-spine {
+    border-left: 2px solid var(--cq-accent-muted);
+  }
+
+  /* Soft attention pulse for the floating autosave pill while a write is in flight. */
+  @keyframes cq-pulse {
+    0%,
+    100% {
+      box-shadow: 0 0 0 0 var(--cq-accent-ring);
+    }
+    50% {
+      box-shadow: 0 0 0 4px transparent;
+    }
+  }
+  .cq-pulse {
+    animation: cq-pulse 1.4s ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .cq-pulse {
+      animation: none;
+    }
+  }
+}
+
+@layer utilities {
   .text-balance {
     text-wrap: balance;
   }

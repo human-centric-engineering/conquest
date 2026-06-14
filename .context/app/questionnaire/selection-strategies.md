@@ -79,6 +79,19 @@ constants in `selection/types.ts`, not config fields — tuned in code like the
 cost-estimation token constants. `weightedScores(ctx)` is exported so the math is
 directly unit-testable.
 
+**Where `weight` comes from.** `AppQuestionSlot.weight` is the base above and the
+numerator of `coverageRatio`. Admins set it per question in the **Structure editor** via a
+bounded **slider** — `0.1` (lightest) … `1.0` (heaviest) in `0.1` steps — which PATCHes
+`…/questions/:id`; the authoring create/update schemas enforce that range. New questions
+added in the editor start at the neutral midpoint `0.5` (leaving headroom both ways); the
+DB column default stays `1.0`, so questions created off the authoring path (ingestion)
+land at the top of the scale. Because scoring is relative/scale-invariant, the absolute
+value is a UX choice, not a behavioural one. Weight is independent of **tags** — tags are
+organisational labels for analytics/export filtering only and are read by no selection
+strategy (`SelectionContext.tagIds` is plumbed but currently unused). Weight only changes
+behaviour under `weighted`; the other strategies ignore the base but every strategy still
+completes via the weighted `coverageRatio`.
+
 ## Adaptive (LLM + pgvector)
 
 Gated behind the `APP_QUESTIONNAIRES_ADAPTIVE_STRATEGY_ENABLED` sub-flag (opt-in

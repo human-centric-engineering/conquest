@@ -15,7 +15,7 @@
  * Settings tab (they're version settings, not structure).
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   DndContext,
@@ -32,7 +32,7 @@ import {
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
-import { Plus } from 'lucide-react';
+import { PenLine, Plus } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { API } from '@/lib/api/endpoints';
@@ -41,6 +41,7 @@ import type { VersionGraphView } from '@/lib/app/questionnaire/views';
 
 import { SectionEditor } from '@/components/admin/questionnaires/section-editor';
 import { TagVocabularyEditor } from '@/components/admin/questionnaires/tag-vocabulary-editor';
+import { SaveStatus, type SaveState } from '@/components/admin/questionnaires/save-status';
 import { authoringMutate } from '@/components/admin/questionnaires/authoring-mutate';
 import type {
   MutationSpec,
@@ -77,6 +78,13 @@ export function VersionEditor({
   const [error, setError] = useState<string | null>(null);
   const [forkNotice, setForkNotice] = useState<number | null>(null);
 
+  // Autosave indicator: the editor has no Save button (every edit writes on its own),
+  // so we surface the live state instead. `pendingSaveRef` distinguishes a real save
+  // landing (flip to "saved") from the initial mount / unrelated refetches.
+  const [saveState, setSaveState] = useState<SaveState>('idle');
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
+  const pendingSaveRef = useRef(false);
+
   const [sections, setSections] = useState(version.sections);
 
   // Resync local state whenever the server graph changes (after a refetch), and
@@ -85,6 +93,12 @@ export function VersionEditor({
   useEffect(() => {
     setSections(version.sections);
     setBusy(false);
+    // A pending write's refetch just landed → confirm it saved.
+    if (pendingSaveRef.current) {
+      pendingSaveRef.current = false;
+      setSaveState('saved');
+      setLastSavedAt(Date.now());
+    }
   }, [version]);
 
   const sensors = useSensors(
@@ -96,6 +110,8 @@ export function VersionEditor({
     const [method, path, body]: MutationSpec = spec();
     setBusy(true);
     setError(null);
+    setSaveState('saving');
+    pendingSaveRef.current = true;
     authoringMutate(method, path, body)
       .then(({ meta }) => {
         if (meta?.forked) {
@@ -106,12 +122,14 @@ export function VersionEditor({
           );
         }
         // Stay busy until the refreshed `version` prop arrives (the [version]
-        // effect clears it) — this closes the window where a second action could
-        // fire against the pre-fork version id and fork again.
+        // effect clears it + confirms the save) — this closes the window where a
+        // second action could fire against the pre-fork version id and fork again.
         router.refresh();
       })
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : 'Something went wrong');
+        pendingSaveRef.current = false;
+        setSaveState('error');
         router.refresh(); // resync optimistic UI from the server
         setBusy(false);
       });
@@ -146,10 +164,53 @@ export function VersionEditor({
     ]);
   };
 
+  const questionCount = sections.reduce((n, s) => n + s.questions.length, 0);
+
   return (
     <div className="space-y-6">
+      {/* Editing band — an architect's drafting sheet. Names the mode, explains the
+          (otherwise invisible) autosave, and carries the status + lifecycle actions. */}
+      <div className="cq-blueprint relative overflow-hidden rounded-xl border">
+        <div className="bg-card/70 flex flex-wrap items-center gap-x-4 gap-y-3 p-4 backdrop-blur-sm">
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--cq-accent)] text-[var(--cq-accent-foreground)]">
+              <PenLine className="h-4 w-4" />
+            </span>
+            <div>
+              <p className="text-sm font-semibold tracking-tight">Editing structure</p>
+              <p className="text-muted-foreground text-xs">
+                {sections.length} section{sections.length === 1 ? '' : 's'} · {questionCount}{' '}
+                question{questionCount === 1 ? '' : 's'} · no Save button — every change saves
+                itself
+              </p>
+            </div>
+          </div>
+
+          <div className="ml-auto flex items-center gap-3">
+            <SaveStatus state={saveState} lastSavedAt={lastSavedAt} />
+            <span className="bg-border h-6 w-px" aria-hidden />
+            <div className="flex items-center gap-1.5">
+              <span className="text-muted-foreground text-xs">
+                Status <span className="text-foreground font-medium">{version.status}</span>
+              </span>
+              {STATUS_ACTIONS[version.status].map((a) => (
+                <Button
+                  key={a.to}
+                  variant={a.variant}
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => setStatus(a.to)}
+                >
+                  {a.label}
+                </Button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
       {forkNotice !== null && (
-        <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+        <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
           You edited a launched version — your changes were saved to a new draft (v{forkNotice}).
           You are now editing that draft.
         </div>
@@ -159,26 +220,6 @@ export function VersionEditor({
           {error}
         </div>
       )}
-
-      {/* Status controls */}
-      <div className="flex items-center gap-2">
-        <span className="text-muted-foreground text-sm">
-          Status: <span className="font-medium">{version.status}</span>
-        </span>
-        <div className="ml-auto flex gap-2">
-          {STATUS_ACTIONS[version.status].map((a) => (
-            <Button
-              key={a.to}
-              variant={a.variant}
-              size="sm"
-              disabled={busy}
-              onClick={() => setStatus(a.to)}
-            >
-              {a.label}
-            </Button>
-          ))}
-        </div>
-      </div>
 
       {/* Goal/audience and run-time config live on the Settings tab (version settings, not
           structure). This editor is structure-only: tags + sections → questions. */}
@@ -194,14 +235,17 @@ export function VersionEditor({
 
       {/* Sections → questions */}
       {sections.length === 0 ? (
-        <p className="text-muted-foreground text-sm italic">No sections yet.</p>
+        <p className="text-muted-foreground rounded-lg border border-dashed p-6 text-center text-sm italic">
+          No sections yet — add one to begin.
+        </p>
       ) : (
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
           <SortableContext items={sections.map((s) => s.id)} strategy={verticalListSortingStrategy}>
-            <div className="space-y-4">
-              {sections.map((section) => (
+            <div className="space-y-5">
+              {sections.map((section, i) => (
                 <SectionEditor
                   key={section.id}
+                  index={i}
                   questionnaireId={questionnaireId}
                   versionId={versionId}
                   section={section}
@@ -219,6 +263,9 @@ export function VersionEditor({
       <Button variant="outline" size="sm" disabled={busy} onClick={addSection}>
         <Plus className="mr-1 h-4 w-4" /> Add section
       </Button>
+
+      {/* Always-visible autosave reassurance while scrolling a long structure. */}
+      <SaveStatus state={saveState} lastSavedAt={lastSavedAt} variant="floating" />
     </div>
   );
 }

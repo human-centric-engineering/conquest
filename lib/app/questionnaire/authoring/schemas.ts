@@ -66,6 +66,15 @@ export const reorderSchema = z.object({
 });
 
 /** POST a new question under a section. `key` is derived from `prompt` when omitted. */
+/**
+ * Per-question selection weight — bounded to the Structure editor's slider scale:
+ * `0.1` (lightest) … `1.0` (heaviest), in `0.1` steps. The admin authoring routes are
+ * the only writers of this field (ingestion persists weights on its own path), so the
+ * bound matches the only control that sets it. Relative/scale-invariant in scoring, so
+ * the absolute range is a UX choice, not a behavioural one.
+ */
+const questionWeightSchema = z.number().min(0.1).max(1);
+
 export const createQuestionSchema = z.object({
   prompt: z.string().min(1),
   type: z.enum(QUESTION_TYPES),
@@ -73,7 +82,7 @@ export const createQuestionSchema = z.object({
   guidelines: z.string().min(1).nullable().optional(),
   rationale: z.string().min(1).nullable().optional(),
   required: z.boolean().optional(),
-  weight: z.number().positive().optional(),
+  weight: questionWeightSchema.optional(),
   /** Validated against `type` by `validateTypeConfig` in the route. */
   typeConfig: z.unknown().optional(),
   ordinal: z.number().int().nonnegative().optional(),
@@ -92,7 +101,7 @@ export const updateQuestionSchema = z
     guidelines: z.string().min(1).nullable().optional(),
     rationale: z.string().min(1).nullable().optional(),
     required: z.boolean().optional(),
-    weight: z.number().positive().optional(),
+    weight: questionWeightSchema.optional(),
     typeConfig: z.unknown().optional(),
     sectionId: idSchema.optional(),
     ordinal: z.number().int().nonnegative().optional(),

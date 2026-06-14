@@ -18,7 +18,7 @@
 import { useEffect, useState } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { GripVertical, Trash2 } from 'lucide-react';
+import { GripVertical, Scale, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -32,6 +32,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
+import { Slider } from '@/components/ui/slider';
+import { FieldHelp } from '@/components/ui/field-help';
 import { API } from '@/lib/api/endpoints';
 import {
   QUESTION_TYPES,
@@ -102,16 +104,22 @@ export function QuestionEditor({
   // Preserve any sibling config keys (e.g. `allowOther` on choices) when saving.
   const saveTypeConfig = (config: unknown) => patch({ typeConfig: config });
 
+  const currentSectionId = sections.find((s) => s.questions.some((q) => q.id === question.id))?.id;
+
   return (
     <li
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
-      className={`bg-card rounded-md border p-3 ${isDragging ? 'opacity-60' : ''}`}
+      className={`group bg-card relative rounded-lg border p-3 transition-shadow hover:border-[var(--cq-accent-ring)] hover:shadow-sm ${
+        isDragging ? 'opacity-60 shadow-md' : ''
+      }`}
     >
+      {/* Connector tick onto the section spine. */}
+      <span className="absolute top-6 -left-4 h-px w-4 bg-[var(--cq-accent-muted)]" aria-hidden />
       <div className="flex items-start gap-2">
         <button
           type="button"
-          className="text-muted-foreground hover:text-foreground mt-1 cursor-grab"
+          className="text-muted-foreground/50 hover:text-foreground mt-1.5 cursor-grab"
           aria-label="Drag to reorder question"
           {...attributes}
           {...listeners}
@@ -119,7 +127,7 @@ export function QuestionEditor({
           <GripVertical className="h-4 w-4" />
         </button>
 
-        <div className="min-w-0 flex-1 space-y-2">
+        <div className="min-w-0 flex-1 space-y-2.5">
           <Textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
@@ -127,21 +135,28 @@ export function QuestionEditor({
             rows={2}
             disabled={busy}
             aria-label="Question prompt"
+            className="resize-none border-transparent bg-transparent text-sm font-medium shadow-none focus-visible:border-[var(--color-input)] focus-visible:bg-[var(--color-background)]"
           />
 
-          <div className="flex flex-wrap items-center gap-3">
-            <Select value={question.type} onValueChange={(v) => changeType(v as QuestionType)}>
-              <SelectTrigger className="h-8 w-40 text-xs" aria-label="Question type">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {QUESTION_TYPES.map((t) => (
-                  <SelectItem key={t} value={t}>
-                    {QUESTION_TYPE_LABELS[t]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          {/* Meta row — grouped, labelled controls so each affordance is self-explanatory. */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <div className="flex items-center gap-1.5">
+              <span className="text-muted-foreground text-[11px] font-medium tracking-wide uppercase">
+                Type
+              </span>
+              <Select value={question.type} onValueChange={(v) => changeType(v as QuestionType)}>
+                <SelectTrigger className="h-8 w-36 text-xs" aria-label="Question type">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {QUESTION_TYPES.map((t) => (
+                    <SelectItem key={t} value={t}>
+                      {QUESTION_TYPE_LABELS[t]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
 
             <div className="flex items-center gap-1.5">
               <Switch
@@ -155,29 +170,45 @@ export function QuestionEditor({
               </Label>
             </div>
 
+            <WeightControl
+              weight={question.weight}
+              busy={busy}
+              onSave={(w) => patch({ weight: w })}
+            />
+
             {sections.length > 1 && (
-              <Select
-                value={sections.find((s) => s.questions.some((q) => q.id === question.id))?.id}
-                onValueChange={(sectionId) => patch({ sectionId })}
-              >
-                <SelectTrigger className="h-8 w-44 text-xs" aria-label="Move to section">
-                  <SelectValue placeholder="Move to section…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {sections.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>
-                      {s.title}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="flex items-center gap-1.5">
+                <span className="text-muted-foreground text-[11px] font-medium tracking-wide uppercase">
+                  Section
+                </span>
+                <Select
+                  value={currentSectionId}
+                  onValueChange={(sectionId) => patch({ sectionId })}
+                >
+                  <SelectTrigger className="h-8 w-40 text-xs" aria-label="Move to section">
+                    <SelectValue placeholder="Move to section…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {sections.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.title}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             )}
 
-            <span className="text-muted-foreground ml-auto font-mono text-xs">{question.key}</span>
+            <span
+              className="text-muted-foreground/70 ml-auto font-mono text-xs"
+              title="Stable question key (used by exports & the API)"
+            >
+              {question.key}
+            </span>
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7"
+              className="h-7 w-7 opacity-60 group-hover:opacity-100"
               disabled={busy}
               aria-label="Delete question"
               onClick={() => run(() => ['DELETE', path, undefined])}
@@ -216,6 +247,72 @@ export function QuestionEditor({
         </div>
       </div>
     </li>
+  );
+}
+
+/** The question-weight slider's bounds — the lightest/heaviest a question can be. */
+const WEIGHT_MIN = 0.1;
+const WEIGHT_MAX = 1;
+const WEIGHT_STEP = 0.1;
+const WEIGHT_DEFAULT = 0.5;
+
+/** Clamp + round a stored weight onto the slider's 0.1–1.0 grid (out-of-range data clamps in). */
+function clampWeight(weight: number): number {
+  if (!Number.isFinite(weight)) return WEIGHT_DEFAULT;
+  return Math.min(WEIGHT_MAX, Math.max(WEIGHT_MIN, Math.round(weight * 10) / 10));
+}
+
+/**
+ * Per-question weight (F2.1) — the only place the admin can see or set it. Drives the
+ * **weighted** selection strategy's pick score and the coverage/completion ratio; inert
+ * under the other strategies. A bounded slider (0.1 lightest → 1.0 heaviest, 0.1 steps)
+ * so the value is easy to set and can't drift out of range; it commits on release
+ * (`onValueCommit`) — one PATCH per adjustment, not one per pixel. Unrelated to tags.
+ */
+function WeightControl({
+  weight,
+  busy,
+  onSave,
+}: {
+  weight: number;
+  busy: boolean;
+  onSave: (weight: number) => void;
+}) {
+  const [val, setVal] = useState(() => clampWeight(weight));
+  useEffect(() => setVal(clampWeight(weight)), [weight]);
+
+  const commit = (next: number) => {
+    const w = clampWeight(next);
+    setVal(w);
+    if (w !== clampWeight(weight)) onSave(w);
+  };
+
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-muted-foreground flex items-center gap-1 text-[11px] font-medium tracking-wide uppercase">
+        <Scale className="h-3.5 w-3.5" />
+        Weight
+      </span>
+      <Slider
+        value={[val]}
+        min={WEIGHT_MIN}
+        max={WEIGHT_MAX}
+        step={WEIGHT_STEP}
+        disabled={busy}
+        onValueChange={(v) => setVal(v[0] ?? val)}
+        onValueCommit={(v) => commit(v[0] ?? val)}
+        className="w-24"
+        aria-label="Question weight"
+      />
+      <span className="text-foreground w-6 font-mono text-xs tabular-nums">{val.toFixed(1)}</span>
+      <FieldHelp title="Question weight">
+        Drag to set how strongly the <strong>weighted</strong> question-picker favours this
+        question, and how much it counts toward completion. Scale <code>0.1</code> (lightest) →{' '}
+        <code>1.0</code> (heaviest); new questions start at <code>0.5</code>. Only affects versions
+        whose <em>Settings → question selection</em> is set to <strong>Weighted</strong> (other
+        strategies ignore it). Not related to tags.
+      </FieldHelp>
+    </div>
   );
 }
 
