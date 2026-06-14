@@ -149,6 +149,8 @@ function makeGraph(over: Partial<VersionGraphView> = {}): VersionGraphView {
       contradictionWindowN: 0,
       contradictionEveryNTurns: 1,
       anonymousMode: false,
+      accessMode: 'invitation_only',
+      inviteeFields: [],
       abuseThreshold: 4,
       maxDataSlotAttempts: 2,
       sensitivityAwareness: false,

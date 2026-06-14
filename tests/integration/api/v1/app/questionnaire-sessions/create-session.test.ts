@@ -151,7 +151,7 @@ describe('createSessionForVersion (authed anonymous-direct)', () => {
   const version = (overrides = {}) => ({
     id: 'v1',
     status: 'launched',
-    config: { anonymousMode: true },
+    config: { accessMode: 'public' },
     ...overrides,
   });
 
@@ -179,7 +179,7 @@ describe('createSessionForVersion (authed anonymous-direct)', () => {
 
   it('403s a non-anonymous questionnaire (requires an invitation)', async () => {
     (mocks.prisma.appQuestionnaireVersion.findUnique as Mock).mockResolvedValue(
-      version({ config: { anonymousMode: false } })
+      version({ config: { accessMode: 'invitation_only' } })
     );
     const result = await createSessionForVersion('v1', USER);
     expect(result).toMatchObject({ ok: false, status: 403, code: 'INVITATION_REQUIRED' });
@@ -210,7 +210,7 @@ describe('createAnonymousSession (no-login)', () => {
   const version = (overrides = {}) => ({
     id: 'v1',
     status: 'launched',
-    config: { anonymousMode: true },
+    config: { accessMode: 'public' },
     ...overrides,
   });
 
@@ -238,7 +238,7 @@ describe('createAnonymousSession (no-login)', () => {
 
   it('403s a non-anonymous questionnaire (requires an invitation)', async () => {
     (mocks.prisma.appQuestionnaireVersion.findUnique as Mock).mockResolvedValue(
-      version({ config: { anonymousMode: false } })
+      version({ config: { accessMode: 'invitation_only' } })
     );
     const result = await createAnonymousSession('v1');
     expect(result).toMatchObject({ ok: false, status: 403, code: 'INVITATION_REQUIRED' });

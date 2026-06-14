@@ -18,12 +18,21 @@
 import { z } from 'zod';
 
 import {
+  ACCESS_MODES,
   ANSWER_SLOT_PANEL_SCOPES,
   CONTRADICTION_MODES,
+  INVITEE_FIELD_KEYS,
   PRESENTATION_MODES,
   PROFILE_FIELD_TYPES,
   SELECTION_STRATEGIES,
 } from '@/lib/app/questionnaire/types';
+
+/** One invitee-field visibility entry (email's forced shown+required is applied server-side). */
+const inviteeFieldConfigSchema = z.object({
+  key: z.enum(INVITEE_FIELD_KEYS),
+  shown: z.boolean(),
+  required: z.boolean(),
+});
 
 /** A profile-field key: lowercase slug so it's a stable, URL/JSON-safe handle. */
 const profileFieldKeySchema = z
@@ -87,6 +96,10 @@ export const updateConfigSchema = z
     contradictionWindowN: z.number().int().nonnegative().optional(),
     contradictionEveryNTurns: z.number().int().min(1).optional(),
     anonymousMode: z.boolean().optional(),
+    // Access mode: who may start a session (orthogonal to anonymousMode). See ACCESS_MODES.
+    accessMode: z.enum(ACCESS_MODES).optional(),
+    // Admin-configurable invitee detail fields (email forced shown+required server-side).
+    inviteeFields: z.array(inviteeFieldConfigSchema).optional(),
     // Seriousness / abuse gate: non-genuine answers tolerated before the session is abandoned.
     // 0 = off; capped to keep the escalation meaningful.
     abuseThreshold: z.number().int().min(0).max(50).optional(),

@@ -22,25 +22,27 @@ and stores them; the consumers land later (see _Who consumes it_).
 like goal/audience and the section graph. One typed column per setting plus a
 single JSON column for the profile fields:
 
-| Setting                               | Column                     | Type                   | Default           |
-| ------------------------------------- | -------------------------- | ---------------------- | ----------------- |
-| Question selection strategy           | `selectionStrategy`        | String (enum)          | `'sequential'`    |
-| Completion: min questions             | `minQuestionsAnswered`     | Int                    | `0`               |
-| Completion: coverage threshold        | `coverageThreshold`        | Float (0–1)            | `1.0`             |
-| Cost budget (USD / session)           | `costBudgetUsd`            | Float? (null = no cap) | `null`            |
-| Per-session question cap              | `maxQuestionsPerSession`   | Int? (null = no cap)   | `null`            |
-| Voice input                           | `voiceEnabled`             | Boolean                | `false`           |
-| Contradiction-detection mode          | `contradictionMode`        | String (enum)          | `'off'`           |
-| Contradiction look-back window N      | `contradictionWindowN`     | Int                    | `0`               |
-| Contradiction cadence (every N turns) | `contradictionEveryNTurns` | Int                    | `1`               |
-| Anonymous mode                        | `anonymousMode`            | Boolean                | `false`           |
-| Abuse threshold (seriousness gate)    | `abuseThreshold`           | Int (0 = off)          | `4`               |
-| Sensitivity awareness (safeguarding)  | `sensitivityAwareness`     | Boolean                | `false`           |
-| Support message (signpost copy)       | `supportMessage`           | String (empty = off)   | `''`              |
-| Support resource URL                  | `supportResourceUrl`       | String (URL)           | `''`              |
-| Session-start profile fields          | `profileFields`            | Json (array)           | `[]`              |
-| Answer panel scope                    | `answerSlotPanelScope`     | String (enum)          | `'full_progress'` |
-| Presentation mode                     | `presentationMode`         | String (enum)          | `'chat'`          |
+| Setting                               | Column                     | Type                   | Default             |
+| ------------------------------------- | -------------------------- | ---------------------- | ------------------- |
+| Question selection strategy           | `selectionStrategy`        | String (enum)          | `'sequential'`      |
+| Completion: min questions             | `minQuestionsAnswered`     | Int                    | `0`                 |
+| Completion: coverage threshold        | `coverageThreshold`        | Float (0–1)            | `1.0`               |
+| Cost budget (USD / session)           | `costBudgetUsd`            | Float? (null = no cap) | `null`              |
+| Per-session question cap              | `maxQuestionsPerSession`   | Int? (null = no cap)   | `null`              |
+| Voice input                           | `voiceEnabled`             | Boolean                | `false`             |
+| Contradiction-detection mode          | `contradictionMode`        | String (enum)          | `'off'`             |
+| Contradiction look-back window N      | `contradictionWindowN`     | Int                    | `0`                 |
+| Contradiction cadence (every N turns) | `contradictionEveryNTurns` | Int                    | `1`                 |
+| Anonymous mode (identity axis)        | `anonymousMode`            | Boolean                | `false`             |
+| Access mode (who may start)           | `accessMode`               | String (enum)          | `'invitation_only'` |
+| Invitee detail fields                 | `inviteeFields`            | Json (array)           | email + names       |
+| Abuse threshold (seriousness gate)    | `abuseThreshold`           | Int (0 = off)          | `4`                 |
+| Sensitivity awareness (safeguarding)  | `sensitivityAwareness`     | Boolean                | `false`             |
+| Support message (signpost copy)       | `supportMessage`           | String (empty = off)   | `''`                |
+| Support resource URL                  | `supportResourceUrl`       | String (URL)           | `''`                |
+| Session-start profile fields          | `profileFields`            | Json (array)           | `[]`                |
+| Answer panel scope                    | `answerSlotPanelScope`     | String (enum)          | `'full_progress'`   |
+| Presentation mode                     | `presentationMode`         | String (enum)          | `'chat'`            |
 
 The enums are `const` tuples in `lib/app/questionnaire/types.ts` (single source of
 truth — the Zod schema, the read-view narrowing, and the editor's `<Select>`
@@ -54,6 +56,19 @@ options all derive from them): `SELECTION_STRATEGIES`
 returns every slot grouped by section (an X-of-N progress view), `answered_only`
 returns just the captured answers so the pending structure is never sent to the
 client. See `.context/app/questionnaire/answer-slot-panel.md`.
+
+`accessMode` and `anonymousMode` are **orthogonal axes**. `accessMode`
+(`invitation_only` | `public` | `both`) is the _access_ axis — who may start a session;
+the session-create gates (`createAnonymousSession` / `createSessionForVersion`) and the
+public `/q/[versionId]` page dispatch on it (unconfigured versions default to
+`invitation_only`). `anonymousMode` is the _identity_ axis — whether identifying profile
+data is collected; it still drives the `AppRespondentProfileSnapshot` write-skip. A
+questionnaire can be public + identified, or invitation-only + anonymous, in any
+combination. Historically the two were conflated in `anonymousMode` (true ⇒ public); the
+access-mode migration backfilled `accessMode` from it. `inviteeFields`
+(`InviteeFieldConfig[]`) is the admin-configurable set of per-invitee detail fields the
+Invitations surface captures — `email` is always shown + required; see
+[invitations.md](./invitations.md).
 
 `presentationMode` (F9.7) chooses how the respondent completes the session: `chat`
 (the streaming conversation), `form` (a raw, sectioned form rendering each question

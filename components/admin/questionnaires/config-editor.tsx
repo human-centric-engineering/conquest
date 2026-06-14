@@ -23,6 +23,7 @@ import {
   ClipboardList,
   Gauge,
   ListChecks,
+  Mail,
   MessageSquareText,
   Plus,
   ShieldCheck,
@@ -49,13 +50,18 @@ import { cn } from '@/lib/utils';
 import { CostEstimateCard } from '@/components/admin/questionnaires/cost-estimate-card';
 import { API } from '@/lib/api/endpoints';
 import {
+  ACCESS_MODES,
+  ACCESS_MODE_LABELS,
   ANSWER_SLOT_PANEL_SCOPES,
   CONTRADICTION_MODES,
+  INVITEE_FIELD_LABELS,
   PRESENTATION_MODES,
   PROFILE_FIELD_TYPES,
   SELECTION_STRATEGIES,
+  type AccessMode,
   type AnswerSlotPanelScope,
   type ContradictionMode,
+  type InviteeFieldConfig,
   type PresentationMode,
   type ProfileFieldConfig,
   type ProfileFieldType,
@@ -247,6 +253,8 @@ export function ConfigEditor({
     String(config.contradictionEveryNTurns)
   );
   const [anonymousMode, setAnonymousMode] = useState(config.anonymousMode);
+  const [accessMode, setAccessMode] = useState<AccessMode>(config.accessMode);
+  const [inviteeFields, setInviteeFields] = useState<InviteeFieldConfig[]>(config.inviteeFields);
   const [abuseThreshold, setAbuseThreshold] = useState(String(config.abuseThreshold));
   const [maxDataSlotAttempts, setMaxDataSlotAttempts] = useState(
     String(config.maxDataSlotAttempts)
@@ -279,6 +287,8 @@ export function ConfigEditor({
     setContradictionWindowN(String(config.contradictionWindowN));
     setContradictionEveryNTurns(String(config.contradictionEveryNTurns));
     setAnonymousMode(config.anonymousMode);
+    setAccessMode(config.accessMode);
+    setInviteeFields(config.inviteeFields);
     setAbuseThreshold(String(config.abuseThreshold));
     setMaxDataSlotAttempts(String(config.maxDataSlotAttempts));
     setSensitivityAwareness(config.sensitivityAwareness);
@@ -337,6 +347,9 @@ export function ConfigEditor({
           true
         ),
         anonymousMode,
+        // Access mode (who may start) + invitee fields — email is forced shown+required server-side.
+        accessMode,
+        inviteeFields,
         // Seriousness / abuse gate: non-genuine answers tolerated before abandon. Blank/invalid
         // falls back to the stored value (never silently 0); 0 = off.
         abuseThreshold: boundedNumber(abuseThreshold, 0, 50, config.abuseThreshold, true),
@@ -568,13 +581,107 @@ export function ConfigEditor({
             Anonymous mode{' '}
             <FieldHelp title="Anonymous mode">
               Don&apos;t collect identifying profile fields at session start — responses aren&apos;t
-              tied to a named individual.
+              tied to a named individual. This is the <em>identity</em> axis and is independent of{' '}
+              <em>Access</em> (who may start): an anonymous questionnaire can still be
+              invitation-only, and a named one can still be public. When anonymous, invitees are
+              tracked only as started/completed — never linked to their answers.
             </FieldHelp>
           </Label>
         </div>
       </SettingsGroup>
 
-      {/* ── 3. Answer quality & safeguarding — protective / data-integrity features: sensitive
+      {/* ── 3. Access & invitations — who may start, and the invitee detail fields captured. ── */}
+      <SettingsGroup
+        icon={Mail}
+        accent="bg-amber-500/10 text-amber-600 dark:text-amber-400"
+        title="Access & invitations"
+        description="Who may start this questionnaire, and which invitee details the Invitations tab captures. Independent of Anonymous mode (the identity axis)."
+      >
+        <div className="space-y-1.5">
+          <Label className="text-sm font-medium">
+            Access mode{' '}
+            <FieldHelp title="Access mode">
+              Who may start a session. Invitation only: a per-invitee link is required. Public link:
+              anyone with the URL can answer. Both: either works. This is the <em>access</em> axis —
+              separate from Anonymous mode (whether identity is collected).
+            </FieldHelp>
+          </Label>
+          <Select
+            value={accessMode}
+            onValueChange={(v) => setAccessMode(v as AccessMode)}
+            disabled={busy}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {ACCESS_MODES.map((m) => (
+                <SelectItem key={m} value={m}>
+                  {ACCESS_MODE_LABELS[m]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-2">
+          <Label className="text-sm font-medium">
+            Invitee details{' '}
+            <FieldHelp title="Invitee details">
+              Which fields the Invitations tab captures per person (and which are required). Email
+              is always collected. Shown fields appear as columns in the import/verify grid;
+              required fields must be filled before sending.
+            </FieldHelp>
+          </Label>
+          <ul className="divide-border/60 divide-y rounded-md border">
+            {inviteeFields.map((field) => {
+              const locked = field.key === 'email';
+              return (
+                <li key={field.key} className="flex items-center gap-3 px-3 py-2 text-sm">
+                  <span className="min-w-28 flex-1 font-medium">
+                    {INVITEE_FIELD_LABELS[field.key]}
+                    {locked ? (
+                      <span className="text-muted-foreground ml-1 text-xs">(always on)</span>
+                    ) : null}
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <Switch
+                      aria-label={`${INVITEE_FIELD_LABELS[field.key]} shown`}
+                      checked={locked ? true : field.shown}
+                      disabled={busy || locked}
+                      onCheckedChange={(shown) =>
+                        setInviteeFields((prev) =>
+                          prev.map((f) =>
+                            f.key === field.key
+                              ? { ...f, shown, required: shown ? f.required : false }
+                              : f
+                          )
+                        )
+                      }
+                    />
+                    <span className="text-muted-foreground text-xs">Shown</span>
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <Switch
+                      aria-label={`${INVITEE_FIELD_LABELS[field.key]} required`}
+                      checked={locked ? true : field.required}
+                      disabled={busy || locked || !field.shown}
+                      onCheckedChange={(required) =>
+                        setInviteeFields((prev) =>
+                          prev.map((f) => (f.key === field.key ? { ...f, required } : f))
+                        )
+                      }
+                    />
+                    <span className="text-muted-foreground text-xs">Required</span>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      </SettingsGroup>
+
+      {/* ── 4. Answer quality & safeguarding — protective / data-integrity features: sensitive
              disclosures, the seriousness gate, and contradiction detection. ── */}
       <SettingsGroup
         icon={ShieldCheck}

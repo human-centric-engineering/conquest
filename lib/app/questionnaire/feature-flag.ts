@@ -16,6 +16,8 @@ import {
   APP_QUESTIONNAIRES_DATA_SLOTS_FLAG,
   APP_QUESTIONNAIRES_SERIOUSNESS_GATE_FLAG,
   APP_QUESTIONNAIRES_SENSITIVITY_AWARENESS_FLAG,
+  APP_QUESTIONNAIRES_FRICTIONLESS_INVITES_FLAG,
+  APP_QUESTIONNAIRES_INVITE_IMPORT_FLAG,
   APP_QUESTIONNAIRES_FLAG,
 } from '@/lib/app/questionnaire/constants';
 import { isFeatureEnabled } from '@/lib/feature-flags';
@@ -302,6 +304,35 @@ export async function isAttachmentInputEnabled(): Promise<boolean> {
     isFeatureEnabled(APP_QUESTIONNAIRES_ATTACHMENT_INPUT_FLAG),
   ]);
   return app && live && attachments;
+}
+
+/**
+ * Whether **frictionless invite links** may run — a per-invitee token booting a no-login session
+ * (the respondent answers without registering; optional account stays for cross-device resume).
+ * Depends on live-sessions (it only matters for the live turn loop) and its own opt-in. When off,
+ * invitations fall back to the account-registration accept flow. Server-only.
+ */
+export async function isFrictionlessInvitesEnabled(): Promise<boolean> {
+  const [app, live, frictionless] = await Promise.all([
+    isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_FRICTIONLESS_INVITES_FLAG),
+  ]);
+  return app && live && frictionless;
+}
+
+/**
+ * Whether **invitee import + AI extraction** may run — the import wizard's CSV/PDF/image methods and
+ * the paid people-extraction capability. Master app flag AND its own opt-in (the AI paths spend per
+ * call and handle PII). Independent of live-sessions (importing happens at authoring time). When off,
+ * the admin adds invitees by typing them directly. Server-only.
+ */
+export async function isInvitationImportEnabled(): Promise<boolean> {
+  const [app, importing] = await Promise.all([
+    isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_INVITE_IMPORT_FLAG),
+  ]);
+  return app && importing;
 }
 
 /**

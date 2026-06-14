@@ -178,8 +178,13 @@ export async function createSessionFromInvitation(
 
 /**
  * Create (or resume) a real session straight from a `versionId` for an authenticated
- * respondent. Allowed only for a launched version whose config has `anonymousMode = true`
- * (the open, no-invitation surface). The respondent is bound as `respondentUserId`.
+ * respondent. Allowed only for a launched version whose `accessMode` permits a direct
+ * (no-invitation) start — `public` or `both`. The respondent is bound as `respondentUserId`.
+ *
+ * Profile capture is skipped on this direct-start surface (no profile form precedes a
+ * walk-up start); identity, when wanted, is collected on the invitation path. A non-anonymous
+ * `public` questionnaire therefore won't collect a profile from a walk-up respondent — a
+ * deliberate scoping gap (public walk-up profile capture is a follow-up).
  */
 export async function createSessionForVersion(
   versionId: string,
@@ -187,18 +192,16 @@ export async function createSessionForVersion(
 ): Promise<CreateSessionResult> {
   const version = await prisma.appQuestionnaireVersion.findUnique({
     where: { id: versionId },
-    select: { id: true, status: true, config: { select: { anonymousMode: true } } },
+    select: { id: true, status: true, config: { select: { accessMode: true } } },
   });
 
   // A non-existent or unlaunched version is a 404 — don't reveal draft/archived versions.
   if (!version || version.status !== 'launched') {
     return { ok: false, status: 404, code: 'NOT_FOUND', message: 'Questionnaire not found' };
   }
-  // Direct (no-invitation) starts are only for the anonymous-mode surface; an
-  // invitation-gated questionnaire requires the invitation path. Because this surface is
-  // anonymous by definition, NO profile snapshot is ever captured here (F8.3 invariant) —
-  // only the invitation path (always non-anonymous) collects profile data.
-  if (!version.config?.anonymousMode) {
+  // Direct (no-invitation) starts need an access mode that permits them; an invitation_only
+  // questionnaire requires the invitation path. Unconfigured versions default to invitation_only.
+  if ((version.config?.accessMode ?? 'invitation_only') === 'invitation_only') {
     return {
       ok: false,
       status: 403,
@@ -280,22 +283,23 @@ export async function createPreviewSession(versionId: string): Promise<CreateSes
 }
 
 /**
- * Create a NO-LOGIN anonymous session for a launched `anonymousMode` version — the public
- * pop-up/demo surface (F6.1, PR6). Unlike the authenticated paths, `respondentUserId` is
- * left null; access is later proven by the signed token the route mints. No resume here:
- * an anonymous caller can't be re-identified across requests without the token, so each
- * create mints a fresh session.
+ * Create a NO-LOGIN session for a launched version whose `accessMode` permits a public start
+ * (`public` or `both`) — the public pop-up/demo surface (F6.1, PR6). Unlike the authenticated
+ * paths, `respondentUserId` is left null; access is later proven by the signed token the route
+ * mints. No resume here: a no-login caller can't be re-identified across requests without the
+ * token, so each create mints a fresh session. (Access, not anonymity: a `public` questionnaire
+ * may still be non-anonymous — but a no-login walk-up has no account to attach a profile to.)
  */
 export async function createAnonymousSession(versionId: string): Promise<CreateSessionResult> {
   const version = await prisma.appQuestionnaireVersion.findUnique({
     where: { id: versionId },
-    select: { id: true, status: true, config: { select: { anonymousMode: true } } },
+    select: { id: true, status: true, config: { select: { accessMode: true } } },
   });
 
   if (!version || version.status !== 'launched') {
     return { ok: false, status: 404, code: 'NOT_FOUND', message: 'Questionnaire not found' };
   }
-  if (!version.config?.anonymousMode) {
+  if ((version.config?.accessMode ?? 'invitation_only') === 'invitation_only') {
     return {
       ok: false,
       status: 403,

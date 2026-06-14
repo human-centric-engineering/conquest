@@ -228,6 +228,82 @@ export const PRESENTATION_MODES = ['chat', 'form', 'both'] as const;
 export type PresentationMode = (typeof PRESENTATION_MODES)[number];
 
 /**
+ * Who may START a session over a launched version (the access axis — ORTHOGONAL to
+ * {@link QuestionnaireConfigShape.anonymousMode}, which is the identity axis). `invitation_only`
+ * (default): a valid per-invitee token is required to begin. `public`: anyone with the link can
+ * begin, no token. `both`: either works. The session-create gates and the public `/q/[versionId]`
+ * page dispatch on this; the Invitations admin surface reshapes around it. Historically conflated
+ * into `anonymousMode` (true ⇒ public) — the F-invitations migration backfills `accessMode` from it.
+ */
+export const ACCESS_MODES = ['invitation_only', 'public', 'both'] as const;
+export type AccessMode = (typeof ACCESS_MODES)[number];
+
+/** Human labels for the access-mode select in the config editor. */
+export const ACCESS_MODE_LABELS: Record<AccessMode, string> = {
+  invitation_only: 'Invitation only',
+  public: 'Public link',
+  both: 'Both (link + invitations)',
+};
+
+/**
+ * The fixed, closed set of per-invitee detail fields an admin can choose to capture on the
+ * Invitations surface. `email` is always shown + required (the dedup + delivery key); the rest are
+ * admin-configurable via {@link InviteeFieldConfig}. Stored per-invitee as a JSON `profile` on the
+ * invitation, and usable for analytics segmentation.
+ */
+export const INVITEE_FIELD_KEYS = [
+  'firstName',
+  'surname',
+  'email',
+  'jobTitle',
+  'team',
+  'organisation',
+] as const;
+export type InviteeFieldKey = (typeof INVITEE_FIELD_KEYS)[number];
+
+/** Human labels for each invitee field (review grid columns + config toggles). */
+export const INVITEE_FIELD_LABELS: Record<InviteeFieldKey, string> = {
+  firstName: 'First name',
+  surname: 'Surname',
+  email: 'Email',
+  jobTitle: 'Job title',
+  team: 'Team',
+  organisation: 'Organisation',
+};
+
+/**
+ * One invitee field's per-version visibility config (stored as an ordered JSON array on the config,
+ * `inviteeFields`). `email` is forced `shown: true, required: true` at every boundary regardless of
+ * what's stored. Drives the import/verify grid columns and send validation.
+ */
+export type InviteeFieldConfig = {
+  key: InviteeFieldKey;
+  shown: boolean;
+  required: boolean;
+};
+
+/**
+ * The default invitee-field config: email (locked on), first/last name shown but optional, the rest
+ * hidden. Mirrors the schema column default; the read path returns it when no row exists.
+ */
+export const DEFAULT_INVITEE_FIELDS: InviteeFieldConfig[] = [
+  { key: 'firstName', shown: true, required: false },
+  { key: 'surname', shown: true, required: false },
+  { key: 'email', shown: true, required: true },
+  { key: 'jobTitle', shown: false, required: false },
+  { key: 'team', shown: false, required: false },
+  { key: 'organisation', shown: false, required: false },
+];
+
+/**
+ * The ways an admin can bulk-add invitees on the import wizard. `paste` is a heuristic free-text
+ * parse (no AI); `csv` maps columns; `pdf`/`image` extract people via an AI agent (PDF text / vision)
+ * and are gated by `isInvitationImportEnabled`. All converge on the editable verify grid before send.
+ */
+export const IMPORT_METHODS = ['paste', 'csv', 'pdf', 'image'] as const;
+export type ImportMethod = (typeof IMPORT_METHODS)[number];
+
+/**
  * Lifecycle status of an `AppQuestionnaireSession` (the respondent's run over a
  * version). F4.4 introduced a minimal slice (`active | completed | abandoned`) to
  * anchor answer rows; F4.6 completes the lifecycle by adding `paused` — `active`
@@ -281,6 +357,18 @@ export type QuestionnaireConfigShape = {
   /** Run contradiction detection every N respondent turns; 1 = every turn. */
   contradictionEveryNTurns: number;
   anonymousMode: boolean;
+  /**
+   * Who may start a session (the access axis — orthogonal to {@link anonymousMode}). See
+   * {@link ACCESS_MODES}. Default `invitation_only`. The session-create gates and the public
+   * `/q/[versionId]` page dispatch on this.
+   */
+  accessMode: AccessMode;
+  /**
+   * Per-version invitee-detail field config (ordered). `email` is always shown + required; the rest
+   * are admin-configurable. Drives the Invitations import/verify grid + send validation. See
+   * {@link InviteeFieldConfig} / {@link DEFAULT_INVITEE_FIELDS}.
+   */
+  inviteeFields: InviteeFieldConfig[];
   /**
    * Seriousness / abuse gate: how many non-genuine (preposterous / abusive / off-topic)
    * answers a session tolerates before it is abandoned. `0` = off for this questionnaire.
@@ -357,6 +445,8 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   contradictionWindowN: 0,
   contradictionEveryNTurns: 1,
   anonymousMode: false,
+  accessMode: 'invitation_only',
+  inviteeFields: DEFAULT_INVITEE_FIELDS,
   abuseThreshold: 4,
   maxDataSlotAttempts: 2,
   sensitivityAwareness: false,

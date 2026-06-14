@@ -572,6 +572,24 @@ export const APP_QUESTIONNAIRES_SENSITIVITY_AWARENESS_FLAG =
   'APP_QUESTIONNAIRES_SENSITIVITY_AWARENESS_ENABLED';
 
 /**
+ * Sub-flag gating **frictionless invite links** — a per-invitee token that boots a no-login session
+ * directly (the respondent answers without registering an account; optional account creation stays
+ * for cross-device resume). Requires the master app flag AND the live-sessions flag AND this
+ * sub-flag. When off, invitations fall back to the account-registration accept flow. Seeded by
+ * `prisma/seeds/app-questionnaire/033-frictionless-invites-flag.ts`.
+ */
+export const APP_QUESTIONNAIRES_FRICTIONLESS_INVITES_FLAG =
+  'APP_QUESTIONNAIRES_FRICTIONLESS_INVITES_ENABLED';
+
+/**
+ * Sub-flag gating **invitee import + AI extraction** — the import wizard's CSV/PDF/image methods and
+ * the paid LLM people-extraction capability. Requires the master app flag AND this sub-flag (the
+ * AI paths spend per call and handle PII). When off, the admin can still add invitees by typing them
+ * directly. Seeded by `prisma/seeds/app-questionnaire/034-invite-import-flag.ts`.
+ */
+export const APP_QUESTIONNAIRES_INVITE_IMPORT_FLAG = 'APP_QUESTIONNAIRES_INVITE_IMPORT_ENABLED';
+
+/**
  * Slug of the **data-slot generator** agent. Dispatched programmatically by the
  * generate-data-slots route to infer short (1–4 word) data slots + descriptions + question
  * mappings from a version's approved questions. Provider-agnostic empty binding (resolves at

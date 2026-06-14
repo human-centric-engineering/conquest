@@ -14,8 +14,10 @@
 
 import { prisma } from '@/lib/db/client';
 import {
+  ACCESS_MODES,
   narrowToEnum,
   PRESENTATION_MODES,
+  type AccessMode,
   type PresentationMode,
 } from '@/lib/app/questionnaire/types';
 
@@ -26,6 +28,24 @@ export async function resolveAnonymousForVersion(versionId: string): Promise<boo
     select: { config: { select: { anonymousMode: true } } },
   });
   return version?.config?.anonymousMode ?? false;
+}
+
+/**
+ * Resolve `accessMode` (who may START) for a launched version — the access axis, orthogonal to
+ * {@link resolveAnonymousForVersion}. Config is 1:1 and lazy; an absent row defaults to the safe
+ * `invitation_only`. The public `/q/[versionId]` page calls this to decide whether a no-token
+ * walk-up may boot a session (`public`/`both`) or must be turned away (`invitation_only`).
+ */
+export async function resolveAccessModeForVersion(versionId: string): Promise<AccessMode> {
+  const version = await prisma.appQuestionnaireVersion.findUnique({
+    where: { id: versionId },
+    select: { config: { select: { accessMode: true } } },
+  });
+  return narrowToEnum(
+    version?.config?.accessMode ?? 'invitation_only',
+    ACCESS_MODES,
+    'invitation_only'
+  );
 }
 
 /**

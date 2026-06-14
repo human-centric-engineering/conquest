@@ -20,9 +20,11 @@ import {
   ANSWER_SLOT_PANEL_SCOPES,
   CONTRADICTION_MODES,
   DEFAULT_QUESTIONNAIRE_CONFIG,
+  ACCESS_MODES,
   FIELD_PROVENANCES,
   PRESENTATION_MODES,
   SELECTION_STRATEGIES,
+  type AccessMode,
   type AnswerSlotPanelScope,
   type AudienceProvenance,
   type AppQuestionnaireStatus,
@@ -33,6 +35,7 @@ import {
   type ProfileFieldConfig,
   type SelectionStrategy,
 } from '@/lib/app/questionnaire/types';
+import { parseInviteeFields } from '@/lib/app/questionnaire/invitations/invitee-fields';
 import type {
   ConfigView,
   QuestionnaireDetail,
@@ -88,6 +91,8 @@ export const CONFIG_SELECT = {
   contradictionWindowN: true,
   contradictionEveryNTurns: true,
   anonymousMode: true,
+  accessMode: true,
+  inviteeFields: true,
   abuseThreshold: true,
   maxDataSlotAttempts: true,
   sensitivityAwareness: true,
@@ -110,6 +115,8 @@ type ConfigRow = {
   contradictionWindowN: number;
   contradictionEveryNTurns: number;
   anonymousMode: boolean;
+  accessMode: string;
+  inviteeFields: Prisma.JsonValue;
   abuseThreshold: number;
   maxDataSlotAttempts: number;
   sensitivityAwareness: boolean;
@@ -153,6 +160,13 @@ function asPresentationMode(value: string): PresentationMode {
     : DEFAULT_QUESTIONNAIRE_CONFIG.presentationMode;
 }
 
+/** Narrow a stored `accessMode` to the enum (default when unknown). */
+function asAccessMode(value: string): AccessMode {
+  return (ACCESS_MODES as readonly string[]).includes(value)
+    ? (value as AccessMode)
+    : DEFAULT_QUESTIONNAIRE_CONFIG.accessMode;
+}
+
 /**
  * Project a config row (or its absence) to the client-safe {@link ConfigView}.
  * Lazy materialization: a `null` row resolves to `DEFAULT_QUESTIONNAIRE_CONFIG`
@@ -174,6 +188,8 @@ export function toConfigView(row: ConfigRow | null): ConfigView {
     contradictionWindowN: row.contradictionWindowN,
     contradictionEveryNTurns: row.contradictionEveryNTurns,
     anonymousMode: row.anonymousMode,
+    accessMode: asAccessMode(row.accessMode),
+    inviteeFields: parseInviteeFields(row.inviteeFields),
     abuseThreshold: row.abuseThreshold,
     maxDataSlotAttempts: row.maxDataSlotAttempts,
     sensitivityAwareness: row.sensitivityAwareness,

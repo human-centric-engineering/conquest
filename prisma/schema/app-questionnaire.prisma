@@ -168,7 +168,9 @@ model AppQuestionnaireConfig {
   contradictionMode        String  @default("off") // off | flag | probe (CONTRADICTION_MODES)
   contradictionWindowN     Int     @default(0) // N prior answers to check against; 0 when mode=off
   contradictionEveryNTurns Int     @default(1) // run detection every N respondent turns; 1 = every turn
-  anonymousMode            Boolean @default(false) // don't collect identifying profile fields
+  anonymousMode            Boolean @default(false) // don't collect identifying profile fields (IDENTITY axis)
+  accessMode               String  @default("invitation_only") // invitation_only | public | both (ACCESS_MODES) — who may START (access axis, orthogonal to anonymousMode)
+  inviteeFields            Json    @default("[{\"key\":\"firstName\",\"shown\":true,\"required\":false},{\"key\":\"surname\",\"shown\":true,\"required\":false},{\"key\":\"email\",\"shown\":true,\"required\":true},{\"key\":\"jobTitle\",\"shown\":false,\"required\":false},{\"key\":\"team\",\"shown\":false,\"required\":false},{\"key\":\"organisation\",\"shown\":false,\"required\":false}]") // InviteeFieldConfig[] — per-invitee detail fields the admin captures (email forced on)
 
   // Seriousness / abuse gate: how many non-genuine (preposterous / abusive / off-topic)
   // answers a session tolerates before it is abandoned. 0 = off for this questionnaire.
@@ -706,7 +708,10 @@ model AppQuestionnaireSessionEvent {
 /// second slot-prune `onDelete` policy. `toolCalls` (the ordered capability outcomes —
 /// `{ slug, success, code?, latencyMs? }`) and `sideEffectAnswerIds` (the AppAnswerSlot
 /// ids this turn created/updated) are JSON arrays read wholesale, like the answer's
-/// `refinementHistory`. `costUsd` is the summed per-turn LLM spend; null until set.
+/// `refinementHistory`. `warnings` (`{ code, message }[]`) are the side-band notices the
+/// turn surfaced (seriousness / support / contradiction) — persisted so the respondent
+/// surface can replay them inline beneath the turn on resume, not just in the moment.
+/// `costUsd` is the summed per-turn LLM spend; null until set.
 /// `ordinal` is the 1-based turn index, derived `count+1` inside the write transaction
 /// (no `@@unique([sessionId, ordinal])` — a unique can throw under a retried turn; rare
 /// gaps are acceptable). No `respondentUserId` here — it's reachable via the session.
@@ -721,6 +726,7 @@ model AppQuestionnaireTurn {
   toolCalls             Json     @default("[]") // [{ slug, success, code?, latencyMs? }] ordered
   sideEffectAnswerIds   Json     @default("[]") // AppAnswerSlot.id[] this turn created/updated
   sideEffectDataSlotIds Json     @default("[]") // AppDataSlotFill.id[] this turn created/updated (data-slot mode)
+  warnings              Json     @default("[]") // [{ code, message }] side-band notices shown beneath this turn (seriousness/support/contradiction) — replayed inline on resume
   costUsd               Float? // summed per-turn LLM spend; null until set
   createdAt             DateTime @default(now())
 
