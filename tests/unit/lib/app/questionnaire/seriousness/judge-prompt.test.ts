@@ -74,6 +74,14 @@ describe('buildSeriousnessJudgePrompt — system prompt', () => {
     expect(system).toContain('KEEP');
   });
 
+  it('system prompt makes safeguarding disclosures always genuine (override rule)', () => {
+    const { system } = buildSeriousnessJudgePrompt(makeInput());
+    // Defense-in-depth: even when sensitivity awareness is off, the judge must never set a
+    // disclosure of harm aside, however implausible it sounds.
+    expect(system).toMatch(/SAFEGUARDING/i);
+    expect(system).toMatch(/never set a disclosure of harm aside/i);
+  });
+
   it('system prompt names the three failure categories', () => {
     // Arrange / Act
     const { system } = buildSeriousnessJudgePrompt(makeInput());

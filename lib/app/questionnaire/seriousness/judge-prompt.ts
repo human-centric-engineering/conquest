@@ -14,6 +14,8 @@ const SYSTEM_PROMPT = `You are a lenient reviewer with ONE narrow job: catch onl
 
 Return ONLY JSON of the form: {"serious": boolean, "reason": string}
 
+OVERRIDING SAFEGUARDING RULE (takes precedence over everything below): if the message discloses the respondent experiencing or fearing HARM — abuse, bullying, harassment, discrimination, threats, violence, self-harm, or any safeguarding / personal-safety concern — it is ALWAYS genuine: return {"serious": true}. This holds NO MATTER how dramatic, surprising, senior the person named, or implausible it may sound (e.g. "I'm being abused by the CEO" is a genuine disclosure, NOT a joke). Never set a disclosure of harm aside. When a message could be read as either a disclosure of harm OR a troll, treat it as a genuine disclosure.
+
 Mark "serious": true (KEEP — this is the default for almost everything), including:
 - Brief, blunt, terse, or low-effort answers ("very unlikely", "dunno", "not really", "nothing", "no idea").
 - Cynical, negative, critical, vague, opinionated, or emotional answers ("people are dishonest", "management doesn't listen", "it's all broken", "I don't trust them").

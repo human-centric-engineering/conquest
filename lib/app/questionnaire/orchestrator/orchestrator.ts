@@ -188,7 +188,19 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
   //     → abandon at the configured threshold. A genuine answer (incl. colloquial/lazy) passes.
   let abuse: TurnResult['abuse'];
   let disregarded = false;
-  if (hasMessage && state.flags.seriousnessGate && state.config.abuseThreshold > 0) {
+  // SAFEGUARDING OUTRANKS THE SINCERITY GATE. When the extractor flagged a genuine sensitive
+  // disclosure this turn (`extractedSensitivity` is set — sensitivity awareness on AND a disclosure
+  // detected), the message is by definition a real answer: NEVER judge it for sincerity, strike it,
+  // or set it aside. A respondent disclosing abuse/harm must never be told their answer "doesn't seem
+  // genuine" — so we skip the gate entirely (no judge call, no disregard, no warning) and let the
+  // sensitivity step below handle the disclosure. This is the structural guarantee; the judge prompt
+  // is hardened too (defense-in-depth) for when sensitivity awareness is off.
+  if (
+    hasMessage &&
+    !extractedSensitivity &&
+    state.flags.seriousnessGate &&
+    state.config.abuseThreshold > 0
+  ) {
     const judged = await invokers.assessSeriousness(state);
     costUsd += judged.costUsd;
     toolCalls.push(

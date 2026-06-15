@@ -33,6 +33,11 @@ function supportEvent(events: { type: string; code?: string; message?: string }[
   return events.find((e) => e.type === 'warning' && e.code === 'support');
 }
 
+/** A sincerity ("Let's keep it genuine") frame this turn, if any. */
+function seriousnessEvent(events: { type: string; code?: string; message?: string }[]) {
+  return events.find((e) => e.type === 'warning' && e.code === 'seriousness');
+}
+
 describe('runTurn — sensitivity awareness', () => {
   it('returns a sensitivity outcome with the running-max level when the extractor flags a disclosure', async () => {
     const { invokers } = stubInvokers({
@@ -111,17 +116,34 @@ describe('runTurn — sensitivity awareness', () => {
     expect(result.sensitivity).toBeUndefined();
   });
 
-  it('drops the sensitivity outcome when the abuse gate disregards the turn', async () => {
-    // A troll/abusive turn is not a genuine disclosure: the gate zeroes it, sensitivity is skipped.
-    const { invokers } = stubInvokers({
-      extract: { intents: [intent({ slotKey: 'a' })], sensitivity: HIGH },
-      serious: { verdict: { serious: false, reason: 'Not genuine.' } },
+  it('SAFEGUARDING OUTRANKS THE SINCERITY GATE: a detected disclosure is never disregarded, struck, or warned — even if the judge would call it non-genuine', async () => {
+    // The reported bug: "I'm being abused by the CEO" read as implausible by the sincerity judge,
+    // which disregarded the answer + showed "Let's keep it genuine" AND suppressed the signpost.
+    // With the extractor flagging a disclosure, the gate must be skipped entirely.
+    const { invokers, calls } = stubInvokers({
+      extract: { intents: [intent({ slotKey: 'a', value: 'abuse by ceo' })], sensitivity: HIGH },
+      // Even a hostile non-serious verdict must NOT be acted on when a disclosure is present.
+      serious: { verdict: { serious: false, reason: 'Sounds implausible.' } },
     });
     const result = await runTurn(
-      state({ userMessage: 'abuse', questions: Q, config: { abuseThreshold: 4 } }),
+      state({
+        userMessage: "i'm being abused by the ceo",
+        questions: Q,
+        config: { abuseThreshold: 4, supportMessage: 'Support is available.' },
+      }),
       invokers
     );
-    expect(result.sensitivity).toBeUndefined();
+
+    // The sincerity judge is never even called (skipped because a disclosure was detected).
+    expect(calls.serious).toHaveLength(0);
+    // No strike / abandon, no sincerity warning.
+    expect(result.abuse).toBeUndefined();
+    expect(seriousnessEvent(result.events)).toBeUndefined();
+    // The answer is KEPT (not set aside).
+    expect(result.sideEffects.answerUpserts).toHaveLength(1);
+    // Safeguarding is handled: outcome recorded AND the support signpost fires.
+    expect(result.sensitivity?.signpost).toBe(true);
+    expect(supportEvent(result.events)?.message).toBe('Support is available.');
   });
 });
 
@@ -149,6 +171,35 @@ describe('runDataSlotTurn — sensitivity awareness', () => {
     ];
     const result = await runDataSlotTurn(s, invokers);
     expect(result.sensitivity?.newLevel).toBe('high');
+    expect(supportEvent(result.events)?.message).toBe('Help.');
+  });
+
+  it('SAFEGUARDING OUTRANKS THE SINCERITY GATE in data-slot mode too', async () => {
+    const { invokers, calls } = stubInvokers({
+      extract: { sensitivity: HIGH },
+      serious: { verdict: { serious: false, reason: 'Sounds implausible.' } },
+    });
+    const s = withSlots({
+      userMessage: "i'm being abused by the ceo",
+      questions: Q,
+      config: { abuseThreshold: 4, supportMessage: 'Help.' },
+    });
+    s.dataSlots = [
+      {
+        id: 'd1',
+        key: 'ds',
+        name: 'Wellbeing',
+        description: 'how they feel',
+        theme: 'WB',
+        ordinal: 0,
+        weight: 1,
+      },
+    ];
+    const result = await runDataSlotTurn(s, invokers);
+    expect(calls.serious).toHaveLength(0);
+    expect(result.abuse).toBeUndefined();
+    expect(seriousnessEvent(result.events)).toBeUndefined();
+    expect(result.sensitivity?.signpost).toBe(true);
     expect(supportEvent(result.events)?.message).toBe('Help.');
   });
 });

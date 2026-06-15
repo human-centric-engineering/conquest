@@ -221,7 +221,16 @@ export async function runDataSlotTurn(
   //     configured threshold.
   let abuse: TurnResult['abuse'];
   let disregarded = false;
-  if (hasMessage && state.flags.seriousnessGate && state.config.abuseThreshold > 0) {
+  // SAFEGUARDING OUTRANKS THE SINCERITY GATE (parity with question mode): a turn the extractor
+  // flagged as a genuine sensitive disclosure is a real answer — never judged for sincerity, struck,
+  // or set aside. Skip the gate entirely when `extractedSensitivity` is set; the sensitivity step
+  // below handles the disclosure.
+  if (
+    hasMessage &&
+    !extractedSensitivity &&
+    state.flags.seriousnessGate &&
+    state.config.abuseThreshold > 0
+  ) {
     const judged = await invokers.assessSeriousness(state);
     costUsd += judged.costUsd;
     toolCalls.push(
