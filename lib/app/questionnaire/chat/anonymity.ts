@@ -17,8 +17,10 @@ import {
   ACCESS_MODES,
   narrowToEnum,
   PRESENTATION_MODES,
+  REASONING_PLACEMENTS,
   type AccessMode,
   type PresentationMode,
+  type ReasoningPlacement,
 } from '@/lib/app/questionnaire/types';
 
 /** Resolve `anonymousMode` for a launched version (no-login / preview respondent surface). */
@@ -87,4 +89,28 @@ export async function resolvePresentationModeForVersion(
     select: { config: { select: { presentationMode: true } } },
   });
   return narrowToEnum(version?.config?.presentationMode ?? 'chat', PRESENTATION_MODES, 'chat');
+}
+
+/**
+ * Resolve the live "watch it think" reasoning placement (demo feature) for a launched version
+ * (no-login / preview respondent surface), or `null` when the version has the feature turned off.
+ * The per-questionnaire opt-in; the caller ANDs the platform reasoning-stream flag and passes the
+ * effective placement (or null) to the surface. Config is 1:1 and lazy — absent = enabled/overlay.
+ */
+export async function resolveReasoningPlacementForVersion(
+  versionId: string
+): Promise<ReasoningPlacement | null> {
+  const version = await prisma.appQuestionnaireVersion.findUnique({
+    where: { id: versionId },
+    select: {
+      config: { select: { reasoningStreamEnabled: true, reasoningStreamPlacement: true } },
+    },
+  });
+  // No config row → defaults (enabled, overlay). An explicit `enabled: false` disables it.
+  if (version?.config && !version.config.reasoningStreamEnabled) return null;
+  return narrowToEnum(
+    version?.config?.reasoningStreamPlacement ?? 'overlay',
+    REASONING_PLACEMENTS,
+    'overlay'
+  );
 }

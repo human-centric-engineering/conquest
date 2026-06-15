@@ -23,6 +23,7 @@ import {
   ACCESS_MODES,
   FIELD_PROVENANCES,
   PRESENTATION_MODES,
+  REASONING_PLACEMENTS,
   SELECTION_STRATEGIES,
   type AccessMode,
   type AnswerSlotPanelScope,
@@ -33,6 +34,7 @@ import {
   type FieldProvenance,
   type PresentationMode,
   type ProfileFieldConfig,
+  type ReasoningPlacement,
   type SelectionStrategy,
 } from '@/lib/app/questionnaire/types';
 import { parseInviteeFields } from '@/lib/app/questionnaire/invitations/invitee-fields';
@@ -101,6 +103,9 @@ export const CONFIG_SELECT = {
   profileFields: true,
   answerSlotPanelScope: true,
   presentationMode: true,
+  reasoningStreamEnabled: true,
+  reasoningStreamPlacement: true,
+  reasoningStreamPersist: true,
 } as const;
 
 type ConfigRow = {
@@ -125,6 +130,9 @@ type ConfigRow = {
   profileFields: Prisma.JsonValue;
   answerSlotPanelScope: string;
   presentationMode: string;
+  reasoningStreamEnabled: boolean;
+  reasoningStreamPlacement: string;
+  reasoningStreamPersist: boolean;
 };
 
 /** Narrow a stored `selectionStrategy` to the enum (default when unknown). */
@@ -167,6 +175,13 @@ function asAccessMode(value: string): AccessMode {
     : DEFAULT_QUESTIONNAIRE_CONFIG.accessMode;
 }
 
+/** Narrow a stored `reasoningStreamPlacement` to the enum (default when unknown). */
+function asReasoningPlacement(value: string): ReasoningPlacement {
+  return (REASONING_PLACEMENTS as readonly string[]).includes(value)
+    ? (value as ReasoningPlacement)
+    : DEFAULT_QUESTIONNAIRE_CONFIG.reasoningStreamPlacement;
+}
+
 /**
  * Project a config row (or its absence) to the client-safe {@link ConfigView}.
  * Lazy materialization: a `null` row resolves to `DEFAULT_QUESTIONNAIRE_CONFIG`
@@ -198,6 +213,9 @@ export function toConfigView(row: ConfigRow | null): ConfigView {
     profileFields: asProfileFields(row.profileFields),
     answerSlotPanelScope: asAnswerSlotPanelScope(row.answerSlotPanelScope),
     presentationMode: asPresentationMode(row.presentationMode),
+    reasoningStreamEnabled: row.reasoningStreamEnabled,
+    reasoningStreamPlacement: asReasoningPlacement(row.reasoningStreamPlacement),
+    reasoningStreamPersist: row.reasoningStreamPersist,
     saved: true,
   };
 }

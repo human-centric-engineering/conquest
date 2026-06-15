@@ -5,6 +5,7 @@ import { notFound } from 'next/navigation';
 import {
   isAttachmentInputEnabled,
   isLiveSessionsEnabled,
+  isReasoningStreamEnabled,
   isVoiceInputEnabled,
 } from '@/lib/app/questionnaire/feature-flag';
 import { AnonymousSessionBoot } from '@/components/app/questionnaire/chat/anonymous-session-boot';
@@ -14,6 +15,7 @@ import {
   resolveAnonymousForVersion,
   resolveAttachmentsEnabledForVersion,
   resolvePresentationModeForVersion,
+  resolveReasoningPlacementForVersion,
   resolveVoiceEnabledForVersion,
 } from '@/lib/app/questionnaire/chat/anonymity';
 import { resolveAdminPreviewMeta } from '@/lib/app/questionnaire/chat/preview-nav';
@@ -57,24 +59,31 @@ export default async function PublicQuestionnairePage({
   const [
     voicePlatform,
     attachmentPlatform,
+    reasoningPlatform,
     theme,
     anonymous,
     presentationMode,
     voiceConfigured,
     attachmentsConfigured,
+    reasoningPlacementConfigured,
     previewMeta,
   ] = await Promise.all([
     isVoiceInputEnabled(),
     isAttachmentInputEnabled(),
+    isReasoningStreamEnabled(),
     resolveThemeForVersion(versionId),
     resolveAnonymousForVersion(versionId),
     resolvePresentationModeForVersion(versionId),
     resolveVoiceEnabledForVersion(versionId),
     resolveAttachmentsEnabledForVersion(versionId),
+    resolveReasoningPlacementForVersion(versionId),
     preview ? resolveAdminPreviewMeta(versionId) : Promise.resolve(null),
   ]);
   const voiceInputEnabled = voicePlatform && voiceConfigured;
   const attachmentInputEnabled = attachmentPlatform && attachmentsConfigured;
+  // Live "watch it think" reasoning (demo feature): the effective placement, or null when the
+  // platform flag is off or the version turned it off.
+  const reasoningPlacement = reasoningPlatform ? reasoningPlacementConfigured : null;
 
   return (
     <div className="container mx-auto flex h-[calc(100dvh-9rem)] max-w-6xl flex-col px-4 py-6">
@@ -106,6 +115,7 @@ export default async function PublicQuestionnairePage({
             attachmentInputEnabled={attachmentInputEnabled}
             anonymous={anonymous}
             presentationMode={presentationMode}
+            reasoningPlacement={reasoningPlacement}
             welcomeCopy={theme.welcomeCopy}
           />
         </BrandThemeProvider>

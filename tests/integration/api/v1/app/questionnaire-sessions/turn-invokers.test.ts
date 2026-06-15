@@ -97,6 +97,9 @@ function state(over: Partial<TurnState> = {}): TurnState {
       profileFields: [],
       answerSlotPanelScope: 'full_progress',
       presentationMode: 'chat',
+      reasoningStreamEnabled: true,
+      reasoningStreamPlacement: 'overlay',
+      reasoningStreamPersist: true,
     },
     questions: [
       {
@@ -496,6 +499,54 @@ describe('assessSeriousness', () => {
     expect(out.verdict).toBeNull();
     expect(out.costUsd).toBe(0);
     expect(out.diagnostic).toBe('seriousness_judge_failed');
+  });
+
+  it('no context (no active question or data slot): keeps the answer WITHOUT an LLM call', async () => {
+    // The bug this guards: judging blind — with "(no specific question)" — made a terse-but-genuine
+    // answer read as non-genuine. With nothing to anchor on, the gate must keep the answer and skip
+    // the paid call rather than risk a false positive.
+    const inv = await invokers({ activeQuestionKey: null });
+    const out = await inv.assessSeriousness(state({ activeDataSlotKey: null }));
+
+    expect(out.verdict).toEqual({ serious: true, reason: '' });
+    expect(out.costUsd).toBe(0);
+    expect(out.diagnostic).toBeUndefined();
+    expect(structuredMock.runStructuredCompletion).not.toHaveBeenCalled();
+  });
+
+  it('data-slot mode (no active question): judges against the active data slot, not blind', async () => {
+    // In data-slot mode there is no active question; the judge must use the active data slot's
+    // name + description as the "question asked" so a terse answer is judged in context.
+    structuredMock.runStructuredCompletion.mockResolvedValue({
+      value: { serious: true, reason: '' },
+      tokenUsage: { input: 30, output: 10 },
+      costUsd: 0.001,
+    });
+    const inv = await invokers({ activeQuestionKey: null });
+    const out = await inv.assessSeriousness(
+      state({
+        userMessage: '5 year, engineering',
+        activeDataSlotKey: 'demographics',
+        dataSlots: [
+          {
+            id: 'd1',
+            key: 'demographics',
+            name: 'Employee Demographics',
+            description: 'Tenure with the company and department',
+            theme: 'About you',
+            ordinal: 0,
+            weight: 1,
+          },
+        ],
+      })
+    );
+
+    expect(out.verdict).toMatchObject({ serious: true });
+    expect(structuredMock.runStructuredCompletion).toHaveBeenCalledTimes(1);
+    // The data-slot context reached the judge prompt (not "(no specific question)").
+    const messages = structuredMock.runStructuredCompletion.mock.calls[0][0].messages;
+    const userMsg = messages.find((m: { role: string }) => m.role === 'user')?.content ?? '';
+    expect(userMsg).toContain('Employee Demographics');
   });
 });
 

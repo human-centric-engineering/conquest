@@ -11,17 +11,53 @@
  */
 
 import { parseSseBlock } from '@/lib/api/sse-parser';
+import {
+  REASONING_STEP_KINDS,
+  REASONING_TONES,
+  type ReasoningStep,
+} from '@/lib/app/questionnaire/reasoning';
 
 /** The `ChatEvent` variants the respondent `/messages` stream can produce. */
 export type SessionStreamEvent =
   | { type: 'start'; conversationId: string; messageId: string }
   | { type: 'content'; delta: string }
-  | { type: 'warning'; code: string; message: string }
+  | { type: 'warning'; code: string; message: string; detail?: string }
+  | { type: 'reasoning'; steps: ReasoningStep[] }
   | { type: 'done'; costUsd: number }
   | { type: 'error'; code: string; message: string };
 
 function asString(value: unknown): string | null {
   return typeof value === 'string' ? value : null;
+}
+
+/** Narrow one untyped item from the `reasoning` frame to a {@link ReasoningStep}, or drop it. */
+function asReasoningStep(value: unknown): ReasoningStep | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const v = value as Record<string, unknown>;
+  const kind = v.kind;
+  const tone = v.tone;
+  const label = v.label;
+  if (
+    typeof label !== 'string' ||
+    typeof kind !== 'string' ||
+    typeof tone !== 'string' ||
+    !(REASONING_STEP_KINDS as readonly string[]).includes(kind) ||
+    !(REASONING_TONES as readonly string[]).includes(tone)
+  ) {
+    return null;
+  }
+  return {
+    kind: kind as ReasoningStep['kind'],
+    label,
+    tone: tone as ReasoningStep['tone'],
+    ...(typeof v.detail === 'string' ? { detail: v.detail } : {}),
+    ...(typeof v.rationale === 'string' ? { rationale: v.rationale } : {}),
+    ...(typeof v.sourceQuote === 'string' ? { sourceQuote: v.sourceQuote } : {}),
+    ...(typeof v.confidence === 'number' ? { confidence: v.confidence } : {}),
+    ...(typeof v.provenance === 'string'
+      ? { provenance: v.provenance as ReasoningStep['provenance'] }
+      : {}),
+  };
 }
 
 /**
@@ -49,7 +85,14 @@ export function parseSessionEvent(block: string): SessionStreamEvent | null {
       const code = asString(data.code);
       const message = asString(data.message);
       if (code === null || message === null) return null;
-      return { type: 'warning', code, message };
+      const detail = asString(data.detail);
+      return { type: 'warning', code, message, ...(detail !== null ? { detail } : {}) };
+    }
+    case 'reasoning': {
+      if (!Array.isArray(data.steps)) return null;
+      const steps = data.steps.map(asReasoningStep).filter((s): s is ReasoningStep => s !== null);
+      if (steps.length === 0) return null;
+      return { type: 'reasoning', steps };
     }
     case 'done': {
       const costUsd = typeof data.costUsd === 'number' ? data.costUsd : 0;

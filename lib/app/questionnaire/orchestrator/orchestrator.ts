@@ -326,6 +326,10 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
   // 6. Respond.
   let response: TurnResponse;
   let targetedQuestionId: string | null;
+  // Captured for the "watch it think" reasoning trace — the selector's flow rationale, otherwise
+  // dropped after the response is built. Only set on a `question` turn (an offer/complete/none turn
+  // selected nothing). See `lib/app/questionnaire/reasoning`.
+  let selectionRationale: string | undefined;
 
   if (assessment.kind === 'offer' || offerEarly) {
     if (effective.flags.completion) {
@@ -366,6 +370,7 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
         text: promptFor(effective.questions, decision.questionId),
       };
       targetedQuestionId = decision.questionId;
+      selectionRationale = decision.rationale;
     } else if (decision.kind === 'complete') {
       response = { kind: 'complete', text: COMPLETE_MESSAGE };
       targetedQuestionId = null;
@@ -388,6 +393,8 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
   return {
     response,
     targetedQuestionId,
+    ...(selectionRationale !== undefined ? { selectionRationale } : {}),
+    selectionStrategy: state.config.selectionStrategy,
     sideEffects: { answerUpserts, answerRefinements },
     events,
     toolCalls,

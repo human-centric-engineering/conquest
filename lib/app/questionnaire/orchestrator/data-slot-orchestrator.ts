@@ -359,6 +359,10 @@ export async function runDataSlotTurn(
   // 3. Respond.
   let response: TurnResponse;
   let targetedQuestionId: string | null = null;
+  // Captured for the "watch it think" reasoning trace — a friendly, respondent-safe account of why
+  // the conversation moves where it does this turn. Data-slot targeting is deterministic (topic-local
+  // / bridge / sweep), so we phrase the rationale here rather than carry a selector's string.
+  let selectionRationale: string | undefined;
 
   const unfilled = unfilledDataSlots(dataSlots, effectiveDataAnswered);
 
@@ -389,6 +393,7 @@ export async function runDataSlotTurn(
     toolCalls.push(toolCall(DATA_SLOT_SELECTION_TOOL_SLUG, true));
     response = { kind: 'question', questionId: next.id, text: next.prompt ?? '' };
     targetedQuestionId = next.id;
+    selectionRationale = 'Bringing in a required detail we still need to capture.';
   } else if (unfilled.length > 0) {
     // Target the next data slot, topic-local (linger in the current theme) — but when we just
     // parked a slot, bridge to a DIFFERENT theme so the move-on reads as forward progress.
@@ -396,6 +401,8 @@ export async function runDataSlotTurn(
     const activeTheme = state.activeDataSlotKey
       ? dataSlots.find((s) => s.key === state.activeDataSlotKey)?.theme
       : undefined;
+    const isReask = next.key === state.activeDataSlotKey;
+    const isTransition = activeTheme !== undefined && activeTheme !== next.theme;
     toolCalls.push(toolCall(DATA_SLOT_SELECTION_TOOL_SLUG, true));
     response = {
       kind: 'data_slot',
@@ -404,15 +411,21 @@ export async function runDataSlotTurn(
       name: next.name,
       description: next.description,
       theme: next.theme,
-      isReask: next.key === state.activeDataSlotKey,
-      isTransition: activeTheme !== undefined && activeTheme !== next.theme,
+      isReask,
+      isTransition,
     };
+    selectionRationale = isReask
+      ? 'Circling back to understand this a little better.'
+      : isTransition
+        ? `Moving on to a new area: ${next.theme}.`
+        : 'Staying with this topic to go a little deeper.';
   } else {
     // Every data slot is filled, but a background question is still open → ask it directly.
     const next = remainingQuestions[0];
     toolCalls.push(toolCall(DATA_SLOT_SELECTION_TOOL_SLUG, true));
     response = { kind: 'question', questionId: next.id, text: next.prompt ?? '' };
     targetedQuestionId = next.id;
+    selectionRationale = 'Filling in the last few questions we still need.';
   }
 
   // Signpost support LAST so it wins the chat's single notice slot (the hook keeps one warning).
@@ -427,6 +440,7 @@ export async function runDataSlotTurn(
   return {
     response,
     targetedQuestionId,
+    ...(selectionRationale !== undefined ? { selectionRationale } : {}),
     sideEffects: { answerUpserts, answerRefinements: [], dataSlotFills },
     events,
     toolCalls,

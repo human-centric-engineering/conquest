@@ -68,6 +68,7 @@ function makeReturn(
     turns: [],
     streaming: false,
     streamingText: '',
+    streamingReasoning: [],
     status: 'idle',
     error: null,
     canSend: true,

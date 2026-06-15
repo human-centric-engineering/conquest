@@ -7,6 +7,8 @@
  * `parse-session-event.ts`; these types describe the *rendered* transcript.
  */
 
+import type { ReasoningStep } from '@/lib/app/questionnaire/reasoning';
+
 /** One committed turn in the rendered transcript. */
 export interface QuestionnaireTurn {
   role: 'user' | 'assistant';
@@ -19,6 +21,13 @@ export interface QuestionnaireTurn {
    * that raised none.
    */
   warnings?: SessionWarning[];
+  /**
+   * Live "watch it think" reasoning trace persisted with this (assistant) turn — replayed on
+   * resume / scroll-back when the version opted into persistence. Absent on user turns, on turns
+   * with no trace, and when persistence is off (the trace was live-only). See
+   * `lib/app/questionnaire/reasoning`.
+   */
+  reasoning?: ReasoningStep[];
 }
 
 /**
@@ -29,6 +38,13 @@ export interface QuestionnaireTurn {
 export interface SessionWarning {
   code: string;
   message: string;
+  /**
+   * The agent's underlying rationale for the notice — the seriousness judge's `reason`, or a
+   * contradiction's `explanation` when the message shown is the probe. Surfaced behind a small
+   * "Why?" disclosure on the notice so a respondent (and the demo audience) can see *why* the agent
+   * flagged it. Optional — notices without a deeper reason (support signpost, fail-soft) omit it.
+   */
+  detail?: string;
 }
 
 /**

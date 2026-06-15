@@ -125,6 +125,7 @@ export async function loadAnswerPanelState(
           paraphrase: true,
           provenanceLabel: true,
           confidence: true,
+          rationale: true,
           provisional: true,
           refinementHistory: true,
         },
@@ -186,6 +187,7 @@ export async function loadAnswerPanelState(
           // The stored column is a free String; narrow to the provenance enum (null when unrecognised).
           provenance: asProvenance(f.provenanceLabel),
           confidence: f.confidence,
+          rationale: f.rationale,
           provisional: f.provisional,
           history: asDataSlotHistory(f.refinementHistory),
         },
@@ -214,6 +216,7 @@ export async function loadAnswerPanelState(
         paraphrase: fill?.paraphrase ?? null,
         provenance: fill?.provenance ?? null,
         confidence: fill?.confidence ?? null,
+        rationale: fill?.rationale ?? null,
         filled,
         provisional,
         // Prior values, oldest first (only present once the answer changed at least once).

@@ -7,6 +7,7 @@ import { prisma } from '@/lib/db/client';
 import {
   isAttachmentInputEnabled,
   isLiveSessionsEnabled,
+  isReasoningStreamEnabled,
   isVoiceInputEnabled,
 } from '@/lib/app/questionnaire/feature-flag';
 import { SessionWorkspace } from '@/components/app/questionnaire/session-workspace';
@@ -16,7 +17,11 @@ import { resolveThemeForSession } from '@/lib/app/questionnaire/chat/theme';
 import { loadAnswerPanelState } from '@/app/api/v1/app/questionnaire-sessions/_lib/answer-panel';
 import { loadSessionStatus } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-status';
 import { loadTranscript } from '@/app/api/v1/app/questionnaire-sessions/_lib/transcript';
-import { narrowToEnum, PRESENTATION_MODES } from '@/lib/app/questionnaire/types';
+import {
+  narrowToEnum,
+  PRESENTATION_MODES,
+  REASONING_PLACEMENTS,
+} from '@/lib/app/questionnaire/types';
 import type { QuestionnaireChatStatus } from '@/lib/app/questionnaire/chat/types';
 import type { SessionStatusView } from '@/lib/app/questionnaire/session/status-view';
 
@@ -84,6 +89,8 @@ export default async function QuestionnaireSessionPage({
               presentationMode: true,
               voiceEnabled: true,
               attachmentsEnabled: true,
+              reasoningStreamEnabled: true,
+              reasoningStreamPlacement: true,
             },
           },
         },
@@ -105,25 +112,45 @@ export default async function QuestionnaireSessionPage({
   // version's per-questionnaire opt-in, so the affordance shows only when the author turned it on.
   const voiceConfigured = row.version.config?.voiceEnabled ?? false;
   const attachmentsConfigured = row.version.config?.attachmentsEnabled ?? false;
+  const reasoningConfigured = row.version.config?.reasoningStreamEnabled ?? false;
   // Independent reads — resolve in parallel rather than serialising the round-trips. The
   // panel + lifecycle status are SSR-seeded here (the user is already verified as owner),
   // so they paint with no fetch flash; the live updates after each turn come from the
   // client hooks.
-  const [voicePlatform, attachmentPlatform, theme, panel, status, formPanel, transcript] =
-    await Promise.all([
-      isVoiceInputEnabled(),
-      isAttachmentInputEnabled(),
-      resolveThemeForSession(sessionId),
-      loadAnswerPanelState(sessionId),
-      loadSessionStatus(sessionId),
-      // Seed the full form structure for form/both modes (forForm = full structure, no data-slot
-      // swap); chat-only mode skips this round-trip.
-      wantsForm ? loadAnswerPanelState(sessionId, false, true) : Promise.resolve(null),
-      // Replay the prior conversation (incl. its persisted side-band notices) on resume.
-      loadTranscript(sessionId),
-    ]);
+  const [
+    voicePlatform,
+    attachmentPlatform,
+    reasoningPlatform,
+    theme,
+    panel,
+    status,
+    formPanel,
+    transcript,
+  ] = await Promise.all([
+    isVoiceInputEnabled(),
+    isAttachmentInputEnabled(),
+    isReasoningStreamEnabled(),
+    resolveThemeForSession(sessionId),
+    loadAnswerPanelState(sessionId),
+    loadSessionStatus(sessionId),
+    // Seed the full form structure for form/both modes (forForm = full structure, no data-slot
+    // swap); chat-only mode skips this round-trip.
+    wantsForm ? loadAnswerPanelState(sessionId, false, true) : Promise.resolve(null),
+    // Replay the prior conversation (incl. its persisted side-band notices) on resume.
+    loadTranscript(sessionId),
+  ]);
   const voiceInputEnabled = voicePlatform && voiceConfigured;
   const attachmentInputEnabled = attachmentPlatform && attachmentsConfigured;
+  // Live "watch it think" reasoning (demo feature): the effective placement, or null when the
+  // platform flag or version toggle is off (the chat then renders no trace).
+  const reasoningPlacement =
+    reasoningPlatform && reasoningConfigured
+      ? narrowToEnum(
+          row.version.config?.reasoningStreamPlacement ?? 'overlay',
+          REASONING_PLACEMENTS,
+          'overlay'
+        )
+      : null;
   const initialStatus = initialChatStatus(status?.view, row.status === 'active');
 
   // Resumed = the session already has turns. Replay them (transcript-only — the conversation is
@@ -154,6 +181,7 @@ export default async function QuestionnaireSessionPage({
           presentationMode={presentationMode}
           voiceInputEnabled={voiceInputEnabled}
           attachmentInputEnabled={attachmentInputEnabled}
+          reasoningPlacement={reasoningPlacement}
         />
       </BrandThemeProvider>
     </div>

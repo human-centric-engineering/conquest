@@ -20,6 +20,7 @@
 
 import { useEffect, useState } from 'react';
 import {
+  Brain,
   ClipboardList,
   Gauge,
   ListChecks,
@@ -57,6 +58,7 @@ import {
   INVITEE_FIELD_LABELS,
   PRESENTATION_MODES,
   PROFILE_FIELD_TYPES,
+  REASONING_PLACEMENTS,
   SELECTION_STRATEGIES,
   type AccessMode,
   type AnswerSlotPanelScope,
@@ -65,6 +67,7 @@ import {
   type PresentationMode,
   type ProfileFieldConfig,
   type ProfileFieldType,
+  type ReasoningPlacement,
   type SelectionStrategy,
 } from '@/lib/app/questionnaire/types';
 import type { ConfigView } from '@/lib/app/questionnaire/views';
@@ -99,6 +102,11 @@ const PRESENTATION_MODE_LABELS: Record<PresentationMode, string> = {
   chat: 'Chat (conversation)',
   form: 'Form (sectioned)',
   both: 'Both (toggle)',
+};
+
+const REASONING_PLACEMENT_LABELS: Record<ReasoningPlacement, string> = {
+  overlay: 'Live overlay (animates, then tucks away)',
+  inline: 'Inline (quiet, under each turn)',
 };
 
 /** A profile-field row in local edit state — `options` carried as raw text. */
@@ -268,6 +276,15 @@ export function ConfigEditor({
   const [presentationMode, setPresentationMode] = useState<PresentationMode>(
     config.presentationMode
   );
+  const [reasoningStreamEnabled, setReasoningStreamEnabled] = useState(
+    config.reasoningStreamEnabled
+  );
+  const [reasoningStreamPlacement, setReasoningStreamPlacement] = useState<ReasoningPlacement>(
+    config.reasoningStreamPlacement
+  );
+  const [reasoningStreamPersist, setReasoningStreamPersist] = useState(
+    config.reasoningStreamPersist
+  );
   const [profileFields, setProfileFields] = useState<ProfileFieldRow[]>(
     config.profileFields.map(toRow)
   );
@@ -296,6 +313,9 @@ export function ConfigEditor({
     setSupportResourceUrl(config.supportResourceUrl);
     setAnswerSlotPanelScope(config.answerSlotPanelScope);
     setPresentationMode(config.presentationMode);
+    setReasoningStreamEnabled(config.reasoningStreamEnabled);
+    setReasoningStreamPlacement(config.reasoningStreamPlacement);
+    setReasoningStreamPersist(config.reasoningStreamPersist);
     setProfileFields(config.profileFields.map(toRow));
   }, [config]);
 
@@ -368,6 +388,11 @@ export function ConfigEditor({
         supportResourceUrl: supportResourceUrl.trim(),
         answerSlotPanelScope,
         presentationMode,
+        // Live "watch it think" reasoning stream (demo feature). Requires the platform
+        // reasoning-stream flag to take effect.
+        reasoningStreamEnabled,
+        reasoningStreamPlacement,
+        reasoningStreamPersist,
         profileFields: profileFields.map((f) => ({
           key: f.key.trim(),
           label: f.label.trim(),
@@ -588,6 +613,81 @@ export function ConfigEditor({
             </FieldHelp>
           </Label>
         </div>
+      </SettingsGroup>
+
+      {/* ── 2b. Reasoning stream — the live "watch it think" demo feature. Sits with the respondent
+             experience (it's a respondent-facing surface) but in its own group so the marquee toggle
+             and its placement/persistence options are discoverable. ── */}
+      <SettingsGroup
+        icon={Brain}
+        accent="bg-indigo-500/10 text-indigo-600 dark:text-indigo-400"
+        title="Reasoning stream"
+        description="Show a live “watch it think” feed beside the chat — answers captured, contradictions spotted, and why the next question was chosen. Also requires the platform reasoning-stream flag."
+      >
+        <div className="flex items-center gap-2">
+          <Switch
+            checked={reasoningStreamEnabled}
+            onCheckedChange={setReasoningStreamEnabled}
+            disabled={busy}
+          />
+          <Label className="text-sm font-medium">
+            Show the reasoning stream{' '}
+            <FieldHelp title="Reasoning stream">
+              When on, the respondent sees the agent&apos;s per-turn reasoning as it works — answers
+              it captured (and how confident it is), any contradictions it noticed, and why
+              it&apos;s asking the next question. It&apos;s derived from work the conversation
+              already does, so it adds no extra cost or latency. A great demo moment; turn it off
+              for a plainer experience. Also requires the platform reasoning-stream flag to be on.
+            </FieldHelp>
+          </Label>
+        </div>
+        {reasoningStreamEnabled && (
+          <div className="border-border/60 ml-1 space-y-4 border-l pl-4">
+            <div className="space-y-1.5 sm:max-w-sm">
+              <Label className="text-sm font-medium">
+                Placement{' '}
+                <FieldHelp title="Reasoning stream placement">
+                  Where the feed appears. <strong>Live overlay</strong> animates the steps in place
+                  of the typing dots while the agent works, then collapses to a small “reasoning”
+                  chip on the finished turn — the most striking for a live demo.{' '}
+                  <strong>Inline</strong> is quieter: a collapsible note tucked beneath each reply.
+                </FieldHelp>
+              </Label>
+              <Select
+                value={reasoningStreamPlacement}
+                onValueChange={(v) => setReasoningStreamPlacement(v as ReasoningPlacement)}
+                disabled={busy}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {REASONING_PLACEMENTS.map((p) => (
+                    <SelectItem key={p} value={p}>
+                      {REASONING_PLACEMENT_LABELS[p]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={reasoningStreamPersist}
+                onCheckedChange={setReasoningStreamPersist}
+                disabled={busy}
+              />
+              <Label className="text-sm font-medium">
+                Keep the reasoning on each turn{' '}
+                <FieldHelp title="Persist the reasoning trace">
+                  When on, each turn&apos;s reasoning is saved so it replays if the respondent
+                  resumes the session or scrolls back — and is available to you afterwards. When
+                  off, the feed is live-only: it shows as the turn happens, but resumed or earlier
+                  turns show nothing.
+                </FieldHelp>
+              </Label>
+            </div>
+          </div>
+        )}
       </SettingsGroup>
 
       {/* ── 3. Access & invitations — who may start, and the invitee detail fields captured. ── */}

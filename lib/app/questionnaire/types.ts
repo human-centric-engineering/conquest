@@ -215,6 +215,17 @@ export const ANSWER_SLOT_PANEL_SCOPES = ['full_progress', 'answered_only'] as co
 export type AnswerSlotPanelScope = (typeof ANSWER_SLOT_PANEL_SCOPES)[number];
 
 /**
+ * Where the live "watch it think" reasoning trace renders on the respondent surface (demo feature).
+ * `overlay` shows an animated thinking feed in place of the typing dots while the turn runs, then
+ * collapses to a compact chip on the settled turn; `inline` renders a quiet collapsible disclosure
+ * beneath each assistant turn. An admin chooses per version on the Settings tab; both are gated by
+ * the platform flag `APP_QUESTIONNAIRES_REASONING_STREAM_ENABLED`. See
+ * `lib/app/questionnaire/reasoning` and [[feature-flags-are-db-rows]].
+ */
+export const REASONING_PLACEMENTS = ['overlay', 'inline'] as const;
+export type ReasoningPlacement = (typeof REASONING_PLACEMENTS)[number];
+
+/**
  * How a respondent completes a session (P-presentation). `chat` is the streaming
  * conversation (the original surface, incl. the data-slots experience); `form`
  * renders the questionnaire as a raw, sectioned form with the right input per
@@ -405,6 +416,20 @@ export type QuestionnaireConfigShape = {
    * (toggle between them). See {@link PRESENTATION_MODES}.
    */
   presentationMode: PresentationMode;
+  /**
+   * Live "watch it think" reasoning trace (demo feature): show the agent's per-turn reasoning —
+   * answers captured (with provenance + confidence), contradictions spotted, why the next question
+   * was chosen — as a live feed beside the chat. On by default; only takes effect when the platform
+   * flag `APP_QUESTIONNAIRES_REASONING_STREAM_ENABLED` is on. See `lib/app/questionnaire/reasoning`.
+   */
+  reasoningStreamEnabled: boolean;
+  /** Where the reasoning trace renders ({@link REASONING_PLACEMENTS}); default `overlay`. */
+  reasoningStreamPlacement: ReasoningPlacement;
+  /**
+   * Persist each turn's reasoning trace on the turn record so it replays on resume / scroll-back
+   * (and is available to admin later). `false` = live-only (resumed turns show no trace).
+   */
+  reasoningStreamPersist: boolean;
 };
 
 /**
@@ -455,4 +480,7 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   profileFields: [],
   answerSlotPanelScope: 'full_progress',
   presentationMode: 'chat',
+  reasoningStreamEnabled: true,
+  reasoningStreamPlacement: 'overlay',
+  reasoningStreamPersist: true,
 };

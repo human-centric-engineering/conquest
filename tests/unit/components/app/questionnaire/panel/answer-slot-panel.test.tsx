@@ -121,6 +121,7 @@ describe('AnswerSlotPanel', () => {
                   paraphrase: 'A 25-year-old female.',
                   provenance: 'direct',
                   confidence: 0.95,
+                  rationale: 'They stated their age and corrected their gender.',
                   filled: true,
                   provisional: false,
                   history: [{ paraphrase: 'A 25-year-old male.', confidence: 0.9 }],
@@ -151,6 +152,7 @@ describe('AnswerSlotPanel', () => {
                   paraphrase: 'A tentative reading of what slows them down.',
                   provenance: 'synthesised',
                   confidence: 0.2,
+                  rationale: null,
                   filled: true,
                   provisional: true,
                   history: [],
@@ -166,7 +168,7 @@ describe('AnswerSlotPanel', () => {
     expect(screen.getByText(/provisional · may revisit/i)).toBeInTheDocument();
   });
 
-  it('flags an inferred data-slot fill with an "Inferred · {band}" marker', () => {
+  it('flags an inferred data-slot fill with an "Inferred" marker and shows the confidence score', () => {
     render(
       <AnswerSlotPanel
         view={view({
@@ -181,6 +183,7 @@ describe('AnswerSlotPanel', () => {
                   paraphrase: 'They may be feeling blocked in their role.',
                   provenance: 'inferred',
                   confidence: 0.3,
+                  rationale: 'Read from their frustration about management.',
                   filled: false,
                   provisional: false,
                   history: [],
@@ -192,9 +195,11 @@ describe('AnswerSlotPanel', () => {
         })}
       />
     );
-    // The reading is shown (low-confidence inferences stay visible) but clearly marked as inferred.
+    // The reading is shown (low-confidence inferences stay visible) but clearly marked as inferred,
+    // with the actual confidence score surfaced as a chip.
     expect(screen.getByText('They may be feeling blocked in their role.')).toBeInTheDocument();
-    expect(screen.getByText('Inferred · unsure')).toBeInTheDocument();
+    expect(screen.getByText('Inferred')).toBeInTheDocument();
+    expect(screen.getByText(/Unsure · 30%/)).toBeInTheDocument();
   });
 
   it('does not mark a directly-stated data-slot fill as inferred', () => {
@@ -212,6 +217,7 @@ describe('AnswerSlotPanel', () => {
                   paraphrase: 'They are not satisfied with their role.',
                   provenance: 'direct',
                   confidence: 0.9,
+                  rationale: null,
                   filled: true,
                   provisional: false,
                   history: [],

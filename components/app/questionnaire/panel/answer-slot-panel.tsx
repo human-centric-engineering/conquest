@@ -19,7 +19,8 @@
 import { cn } from '@/lib/utils';
 import { AnswerSlotItem } from '@/components/app/questionnaire/panel/answer-slot-item';
 import { ConfidenceIndicator } from '@/components/app/questionnaire/panel/confidence-indicator';
-import { confidenceBand, confidenceBandLabel } from '@/lib/app/questionnaire/panel/confidence';
+import { ConfidenceScore } from '@/components/app/questionnaire/panel/confidence-score';
+import { NoticeWhy } from '@/components/app/questionnaire/chat/notice-why';
 import type {
   AnswerPanelView,
   DataSlotPanelGroup,
@@ -98,15 +99,20 @@ function DataSlotGroups({ groups }: { groups: DataSlotPanelGroup[] }) {
                     {slot.paraphrase ? (
                       <>
                         <p className="text-muted-foreground mt-0.5 text-sm">{slot.paraphrase}</p>
-                        {slot.provenance === 'inferred' || slot.provenance === 'synthesised' ? (
-                          <span
-                            className="bg-muted text-muted-foreground mt-1 inline-flex items-center rounded-full px-1.5 py-0.5 text-[11px] font-medium"
-                            title="We didn't capture this directly — it's our reading of the conversation, not something you stated"
-                          >
-                            Inferred ·{' '}
-                            {confidenceBandLabel(confidenceBand(slot.confidence)).toLowerCase()}
-                          </span>
-                        ) : null}
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                          {/* The actual confidence score (demo panel shows the number). */}
+                          <ConfidenceScore confidence={slot.confidence} />
+                          {slot.provenance === 'inferred' || slot.provenance === 'synthesised' ? (
+                            <span
+                              className="bg-muted text-muted-foreground inline-flex items-center rounded-full px-1.5 py-0.5 text-[11px] font-medium"
+                              title="We didn't capture this directly — it's our reading of the conversation, not something you stated"
+                            >
+                              Inferred
+                            </span>
+                          ) : null}
+                        </div>
+                        {/* The agent's rationale for this reading, behind a "Why?" disclosure. */}
+                        <NoticeWhy detail={slot.rationale ?? undefined} />
                       </>
                     ) : (
                       <p className="text-muted-foreground/70 mt-0.5 text-xs italic">

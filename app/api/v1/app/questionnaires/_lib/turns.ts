@@ -21,6 +21,7 @@ import { prisma } from '@/lib/db/client';
 import { NotFoundError } from '@/lib/api/errors';
 import type { ToolCallRecord } from '@/lib/app/questionnaire/orchestrator';
 import type { SessionWarning } from '@/lib/app/questionnaire/chat/types';
+import type { ReasoningStep } from '@/lib/app/questionnaire/reasoning';
 
 export type { ToolCallRecord };
 
@@ -59,6 +60,12 @@ export interface TurnWriteInput {
    * on resume rather than losing them on the next input. Empty/omitted for a turn with none.
    */
   warnings?: SessionWarning[];
+  /**
+   * Live "watch it think" reasoning trace this turn produced (demo feature) — persisted so the
+   * respondent surface replays it on resume / scroll-back. Only passed when the version opted into
+   * persistence; empty/omitted otherwise (live-only or feature off). Respondent-safe by construction.
+   */
+  reasoning?: ReasoningStep[];
   /** Summed per-turn LLM spend in USD; `null` until cost-summing is wired. */
   costUsd: number | null;
 }
@@ -98,6 +105,9 @@ export async function recordTurn(input: TurnWriteInput): Promise<string> {
           : {}),
         ...(input.warnings && input.warnings.length > 0
           ? { warnings: jsonInput(input.warnings) }
+          : {}),
+        ...(input.reasoning && input.reasoning.length > 0
+          ? { reasoning: jsonInput(input.reasoning) }
           : {}),
         costUsd: input.costUsd,
       },

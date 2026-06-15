@@ -347,6 +347,16 @@ export interface TurnResult {
   response: TurnResponse;
   /** `AppQuestionSlot.id` asked for, or `null` for an offer/completion/none turn. */
   targetedQuestionId: string | null;
+  /**
+   * Why the next question/data-slot was chosen this turn — the selector's `rationale`, lifted onto
+   * the result so the route can surface it in the "watch it think" reasoning trace (the rationale is
+   * otherwise consumed and dropped). Absent on an offer/complete/none turn (nothing was selected).
+   * Respondent-safe by construction (a flow rationale, not internal scoring) — see
+   * `lib/app/questionnaire/reasoning`.
+   */
+  selectionRationale?: string;
+  /** The strategy that made the selection (lets the reasoning trace phrase the "why" per strategy). */
+  selectionStrategy?: import('@/lib/app/questionnaire/types').SelectionStrategy;
   /** The answer writes this turn produced — the route persists them at the slot seam. */
   sideEffects: {
     answerUpserts: AnswerSlotIntent[];

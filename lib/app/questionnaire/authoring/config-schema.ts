@@ -24,6 +24,7 @@ import {
   INVITEE_FIELD_KEYS,
   PRESENTATION_MODES,
   PROFILE_FIELD_TYPES,
+  REASONING_PLACEMENTS,
   SELECTION_STRATEGIES,
 } from '@/lib/app/questionnaire/types';
 
@@ -117,6 +118,11 @@ export const updateConfigSchema = z
     // How the respondent completes the session: chat (conversation), form (raw sectioned
     // form), or both (toggle between them). Defaults to chat for existing versions.
     presentationMode: z.enum(PRESENTATION_MODES).optional(),
+    // Live "watch it think" reasoning trace (demo feature). Gated additionally by the platform
+    // flag APP_QUESTIONNAIRES_REASONING_STREAM_ENABLED. placement = overlay | inline.
+    reasoningStreamEnabled: z.boolean().optional(),
+    reasoningStreamPlacement: z.enum(REASONING_PLACEMENTS).optional(),
+    reasoningStreamPersist: z.boolean().optional(),
   })
   .refine((b) => Object.values(b).some((v) => v !== undefined), {
     message: 'Provide at least one field to update',

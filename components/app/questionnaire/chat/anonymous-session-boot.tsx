@@ -28,8 +28,9 @@ import { API } from '@/lib/api/endpoints';
 import { Button } from '@/components/ui/button';
 import { SessionWorkspace } from '@/components/app/questionnaire/session-workspace';
 import { buildWelcomeTurns } from '@/lib/app/questionnaire/chat/greeting';
-import type { PresentationMode } from '@/lib/app/questionnaire/types';
+import type { PresentationMode, ReasoningPlacement } from '@/lib/app/questionnaire/types';
 import type { QuestionnaireTurn } from '@/lib/app/questionnaire/chat/types';
+import { REASONING_STEP_KINDS, REASONING_TONES } from '@/lib/app/questionnaire/reasoning';
 
 interface AnonymousSessionBootProps {
   versionId: string;
@@ -60,6 +61,12 @@ interface AnonymousSessionBootProps {
    * form view itself fetches client-side here (no SSR seed — the token is client-only).
    */
   presentationMode?: PresentationMode;
+  /**
+   * Live "watch it think" reasoning placement (demo feature) — `overlay` | `inline`, or
+   * `undefined`/null when off. Resolved server-side (platform flag AND version toggle) and
+   * forwarded to the workspace.
+   */
+  reasoningPlacement?: ReasoningPlacement | null;
 }
 
 interface StoredAnonSession {
@@ -96,7 +103,25 @@ const transcriptResponseSchema = z.object({
         z.object({
           role: z.enum(['user', 'assistant']),
           content: z.string(),
-          warnings: z.array(z.object({ code: z.string(), message: z.string() })).optional(),
+          warnings: z
+            .array(
+              z.object({ code: z.string(), message: z.string(), detail: z.string().optional() })
+            )
+            .optional(),
+          reasoning: z
+            .array(
+              z.object({
+                kind: z.enum(REASONING_STEP_KINDS),
+                label: z.string(),
+                tone: z.enum(REASONING_TONES),
+                detail: z.string().optional(),
+                rationale: z.string().optional(),
+                sourceQuote: z.string().optional(),
+                confidence: z.number().optional(),
+                provenance: z.enum(['direct', 'inferred', 'synthesised', 'refined']).optional(),
+              })
+            )
+            .optional(),
         })
       ),
     })
@@ -162,6 +187,7 @@ export function AnonymousSessionBoot({
   preview = false,
   inviteToken,
   presentationMode = 'chat',
+  reasoningPlacement,
 }: AnonymousSessionBootProps) {
   const [state, setState] = useState<BootState>({ phase: 'creating' });
   // Dedup the create across React 19 StrictMode's double-invoke (which would otherwise mint two
@@ -287,6 +313,7 @@ export function AnonymousSessionBoot({
       presentationMode={presentationMode}
       voiceInputEnabled={voiceInputEnabled}
       attachmentInputEnabled={attachmentInputEnabled}
+      reasoningPlacement={reasoningPlacement}
     />
   );
 }

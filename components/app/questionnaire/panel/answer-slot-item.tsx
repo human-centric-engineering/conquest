@@ -16,6 +16,7 @@ import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { ConfidenceIndicator } from '@/components/app/questionnaire/panel/confidence-indicator';
+import { ConfidenceScore } from '@/components/app/questionnaire/panel/confidence-score';
 import { ProvenanceBadge } from '@/components/app/questionnaire/panel/provenance-badge';
 import { RefinementHistory } from '@/components/app/questionnaire/panel/refinement-history';
 import { formatAnswerValue } from '@/components/app/questionnaire/panel/format-answer-value';
@@ -63,9 +64,13 @@ export function AnswerSlotItem({ slot, onRevisit, canRevisit = false }: AnswerSl
         <span className="min-w-0 flex-1">
           <span className="text-foreground block text-sm leading-snug">{slot.prompt}</span>
           {slot.answered ? (
-            <span className="text-muted-foreground mt-0.5 block truncate text-sm">
-              {formatAnswerValue(slot.value)}
-            </span>
+            <>
+              <span className="text-muted-foreground mt-0.5 block truncate text-sm">
+                {formatAnswerValue(slot.value)}
+              </span>
+              {/* The actual confidence score (demo panel shows the number). */}
+              <ConfidenceScore confidence={slot.confidence} className="mt-1" />
+            </>
           ) : (
             <span className="text-muted-foreground/70 mt-0.5 block text-xs italic">
               Not answered yet

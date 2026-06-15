@@ -11,6 +11,7 @@ import {
   confidenceBand,
   confidenceBandClasses,
   confidenceBandLabel,
+  confidencePercent,
 } from '@/lib/app/questionnaire/panel/confidence';
 
 describe('confidenceBand', () => {
@@ -32,6 +33,25 @@ describe('confidenceBand', () => {
   it('treats null and NaN as unscored', () => {
     expect(confidenceBand(null)).toBe('unscored');
     expect(confidenceBand(Number.NaN)).toBe('unscored');
+  });
+});
+
+describe('confidencePercent', () => {
+  it('rounds a 0–1 confidence to a percentage string', () => {
+    expect(confidencePercent(0.3)).toBe('30%');
+    expect(confidencePercent(0.955)).toBe('96%');
+    expect(confidencePercent(1)).toBe('100%');
+    expect(confidencePercent(0)).toBe('0%');
+  });
+
+  it('clamps out-of-range values', () => {
+    expect(confidencePercent(1.4)).toBe('100%');
+    expect(confidencePercent(-0.2)).toBe('0%');
+  });
+
+  it('returns null when unscored', () => {
+    expect(confidencePercent(null)).toBeNull();
+    expect(confidencePercent(Number.NaN)).toBeNull();
   });
 });
 

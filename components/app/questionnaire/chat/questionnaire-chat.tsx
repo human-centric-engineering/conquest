@@ -38,10 +38,13 @@ import { type AttachmentEntry } from '@/lib/hooks/use-attachments';
 import type { ChatAttachment } from '@/lib/orchestration/chat/types';
 import type { UseQuestionnaireSessionStreamReturn } from '@/lib/hooks/use-questionnaire-session-stream';
 import type { SessionWarning } from '@/lib/app/questionnaire/chat/types';
+import type { ReasoningStep } from '@/lib/app/questionnaire/reasoning';
+import type { ReasoningPlacement } from '@/lib/app/questionnaire/types';
 import { ChatErrorPanel } from '@/components/app/questionnaire/chat/chat-error-panel';
 import { ContradictionNotice } from '@/components/app/questionnaire/chat/contradiction-notice';
 import { SeriousnessNotice } from '@/components/app/questionnaire/chat/seriousness-notice';
 import { SupportNotice } from '@/components/app/questionnaire/chat/support-notice';
+import { ReasoningTrace } from '@/components/app/questionnaire/chat/reasoning-trace';
 
 export interface QuestionnaireChatProps {
   /** The session id powering `/questionnaire-sessions/:id/messages` (used by the mic). */
@@ -54,6 +57,13 @@ export interface QuestionnaireChatProps {
   voiceInputEnabled?: boolean;
   /** Show the attachment affordance (gated server-side on the attachment-input flag). */
   attachmentInputEnabled?: boolean;
+  /**
+   * Live "watch it think" reasoning placement (demo feature) — `overlay` shows an animated feed
+   * while a turn streams then collapses it onto the turn; `inline` shows only the quiet collapsed
+   * trace beneath each turn. `undefined`/null = the feature is off (no trace rendered), which is
+   * what the page passes when the platform flag or the version toggle is off.
+   */
+  reasoningPlacement?: ReasoningPlacement | null;
   /**
    * Type the seeded opening turn(s) in (the welcome greeting) instead of snapping them in
    * fully-formed. Replies that arrive *after* mount always type in regardless; this flag only
@@ -77,9 +87,9 @@ function TurnNotices({ warnings }: { warnings?: SessionWarning[] }) {
     <div className="mt-3 flex flex-col gap-2">
       {warnings.map((warning, i) =>
         warning.code === 'contradiction' ? (
-          <ContradictionNotice key={i} message={warning.message} />
+          <ContradictionNotice key={i} message={warning.message} detail={warning.detail} />
         ) : warning.code === 'seriousness' ? (
-          <SeriousnessNotice key={i} message={warning.message} />
+          <SeriousnessNotice key={i} message={warning.message} detail={warning.detail} />
         ) : warning.code === 'support' ? (
           <SupportNotice key={i} message={warning.message} />
         ) : (
@@ -95,6 +105,24 @@ function TurnNotices({ warnings }: { warnings?: SessionWarning[] }) {
       )}
     </div>
   );
+}
+
+/**
+ * The settled (collapsed) reasoning trace for one assistant turn, rendered **above** the reply —
+ * directly under the respondent's message it processed, before the agent's reply. The trace is about
+ * reading that message and choosing what to ask next, so it belongs there, not below the reply.
+ * Shown for BOTH placements' history (overlay collapses to this once the turn settles; inline only
+ * ever shows this). Renders nothing when the feature is off (no placement) or the turn had no trace.
+ */
+function TurnReasoning({
+  steps,
+  placement,
+}: {
+  steps?: ReasoningStep[];
+  placement?: ReasoningPlacement | null;
+}) {
+  if (!placement || !steps || steps.length === 0) return null;
+  return <ReasoningTrace steps={steps} variant="collapsed" className="mb-2.5" />;
 }
 
 function UserBubble({ content }: { content: string }) {
@@ -151,11 +179,16 @@ const OPENING_GAP_MS = 1500;
 function TypewriterAssistantTurn({
   content,
   warnings,
+  reasoning,
+  reasoningPlacement,
   onDone,
 }: {
   content: string;
   /** Side-band notices to render beneath the reply once it has finished typing in. */
   warnings?: SessionWarning[];
+  /** The turn's reasoning trace, rendered collapsed beneath the reply once it has typed in. */
+  reasoning?: ReasoningStep[];
+  reasoningPlacement?: ReasoningPlacement | null;
   /** Fired once when the message has fully typed in (used to chain the opening turns). */
   onDone?: () => void;
 }) {
@@ -187,6 +220,9 @@ function TypewriterAssistantTurn({
   const done = shown >= content.length;
   return (
     <AssistantTurn>
+      {/* Reasoning sits ABOVE the reply — directly under the respondent's message it processed —
+          and shows as the reply types, so it reads as "here's what I worked out, now my question." */}
+      <TurnReasoning steps={reasoning} placement={reasoningPlacement} />
       {done ? (
         <>
           <div className="prose prose-sm dark:prose-invert max-w-none">
@@ -218,12 +254,17 @@ function TypewriterAssistantTurn({
 function RevealedAssistantTurn({
   content,
   warnings,
+  reasoning,
+  reasoningPlacement,
   beatMs,
   onDone,
 }: {
   content: string;
   /** Side-band notices to render beneath the reply once it has finished typing in. */
   warnings?: SessionWarning[];
+  /** The turn's reasoning trace, rendered collapsed beneath the reply once it has typed in. */
+  reasoning?: ReasoningStep[];
+  reasoningPlacement?: ReasoningPlacement | null;
   /** Pre-type "Thinking…" pause in ms; `0` types immediately (a normal post-answer reply). */
   beatMs: number;
   onDone: () => void;
@@ -242,7 +283,15 @@ function RevealedAssistantTurn({
       </AssistantTurn>
     );
   }
-  return <TypewriterAssistantTurn content={content} warnings={warnings} onDone={onDone} />;
+  return (
+    <TypewriterAssistantTurn
+      content={content}
+      warnings={warnings}
+      reasoning={reasoning}
+      reasoningPlacement={reasoningPlacement}
+      onDone={onDone}
+    />
+  );
 }
 
 export function QuestionnaireChat({
@@ -251,10 +300,23 @@ export function QuestionnaireChat({
   stream,
   voiceInputEnabled = false,
   attachmentInputEnabled = false,
+  reasoningPlacement,
   animateOpening = false,
   className,
 }: QuestionnaireChatProps) {
-  const { turns, streaming, status, error, canSend, sendMessage, dismissError } = stream;
+  const {
+    turns,
+    streaming,
+    streamingReasoning,
+    status,
+    error,
+    canSend,
+    sendMessage,
+    dismissError,
+  } = stream;
+  // Overlay placement shows the live feed in place of the thinking dots; inline keeps the plain
+  // dots and only reveals the (collapsed) trace once the turn settles.
+  const showLiveOverlay = reasoningPlacement === 'overlay' && streamingReasoning.length > 0;
 
   const [input, setInput] = useState('');
   const [voiceError, setVoiceError] = useState<string | null>(null);
@@ -354,10 +416,12 @@ export function QuestionnaireChat({
             if (i < revealCursor && !animateOpening && i < openingTurnCount) {
               return (
                 <AssistantTurn key={i}>
+                  {/* Reasoning above the reply — directly under the message it processed. */}
+                  <TurnReasoning steps={turn.reasoning} placement={reasoningPlacement} />
                   <div className="prose prose-sm dark:prose-invert max-w-none">
                     <Markdown>{turn.content}</Markdown>
                   </div>
-                  {/* Replayed transcript: its persisted notices render inline beneath the turn. */}
+                  {/* Replayed transcript: its persisted notices render beneath the turn. */}
                   <TurnNotices warnings={turn.warnings} />
                 </AssistantTurn>
               );
@@ -371,6 +435,8 @@ export function QuestionnaireChat({
                 key={i}
                 content={turn.content}
                 warnings={turn.warnings}
+                reasoning={turn.reasoning}
+                reasoningPlacement={reasoningPlacement}
                 beatMs={isActive ? beatForTurn(i) : 0}
                 onDone={isActive ? () => setRevealCursor((c) => Math.max(c, i + 1)) : () => {}}
               />
@@ -383,7 +449,14 @@ export function QuestionnaireChat({
               while earlier opening messages are still revealing. */}
           {streaming && revealCursor >= turns.length && (
             <AssistantTurn>
-              <ThinkingIndicator />
+              {/* Overlay placement: once the reasoning frame lands, the live feed replaces the dots
+                  so the respondent watches the agent work; until then (and for inline) the calm
+                  thinking dots stand in. */}
+              {showLiveOverlay ? (
+                <ReasoningTrace variant="live" steps={streamingReasoning} />
+              ) : (
+                <ThinkingIndicator />
+              )}
             </AssistantTurn>
           )}
 

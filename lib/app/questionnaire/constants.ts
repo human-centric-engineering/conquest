@@ -791,6 +791,17 @@ export const APP_QUESTIONNAIRES_GENERATIVE_AUTHORING_FLAG =
   'APP_QUESTIONNAIRES_GENERATIVE_AUTHORING_ENABLED';
 
 /**
+ * Platform feature flag gating the live "watch it think" **reasoning stream** (demo feature) —
+ * the per-turn reasoning trace shown beside the respondent chat. DB-backed, seeded disabled by
+ * `036-reasoning-stream-flag.ts`. Depends on live-sessions (it only matters inside the `/messages`
+ * turn loop) and ANDs with the per-version `reasoningStreamEnabled` config toggle. Carries no extra
+ * LLM cost — the trace is derived from work the turn already did — but it's a respondent-facing
+ * surface, so it dark-launches behind its own flag.
+ */
+export const APP_QUESTIONNAIRES_REASONING_STREAM_FLAG =
+  'APP_QUESTIONNAIRES_REASONING_STREAM_ENABLED';
+
+/**
  * Slug of the seeded composer `AiAgent` (generative authoring). A distinct agent
  * from the document extractor: composition and document extraction carry their
  * own budgets and personas. Ships with empty `model`/`provider` so it resolves

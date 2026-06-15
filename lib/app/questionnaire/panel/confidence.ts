@@ -36,6 +36,17 @@ export function confidenceBandClasses(band: ConfidenceBand): string {
   }
 }
 
+/**
+ * Raw 0–1 confidence as a rounded percentage string (or null when unscored). The semantic band
+ * (above) is the default "felt, not totted" language; this is for surfaces that deliberately show
+ * the score — e.g. the demo answer panel, where the operator wants the number visible.
+ */
+export function confidencePercent(confidence: number | null): string | null {
+  if (confidence === null || Number.isNaN(confidence)) return null;
+  const clamped = Math.min(1, Math.max(0, confidence));
+  return `${Math.round(clamped * 100)}%`;
+}
+
 /** Respondent-facing label for a band — semantic, never a raw number. */
 export function confidenceBandLabel(band: ConfidenceBand): string {
   switch (band) {

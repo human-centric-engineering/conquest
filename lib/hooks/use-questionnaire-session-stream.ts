@@ -29,6 +29,7 @@ import {
   type QuestionnaireTurn,
   type SessionWarning,
 } from '@/lib/app/questionnaire/chat/types';
+import type { ReasoningStep } from '@/lib/app/questionnaire/reasoning';
 import type { ChatAttachment } from '@/lib/orchestration/chat/types';
 
 /** A base64-encoded file the respondent attaches to a turn — the platform `ChatAttachment`
@@ -63,6 +64,13 @@ export interface UseQuestionnaireSessionStreamReturn {
   streaming: boolean;
   /** The animated assistant text for the in-flight turn (empty until the first delta). */
   streamingText: string;
+  /**
+   * The live "watch it think" reasoning steps for the in-flight turn (demo feature) — populated
+   * from the single `reasoning` frame the route emits before the reply, so the overlay can reveal
+   * them while the answer types. Empty when no turn is streaming or the feature is off. On settle the
+   * steps move onto the committed assistant turn's `reasoning`.
+   */
+  streamingReasoning: ReasoningStep[];
   status: QuestionnaireChatStatus;
   error: ChatErrorState | null;
   /** Whether the composer should accept input. */
@@ -189,6 +197,9 @@ export function useQuestionnaireSessionStream(
 
   const [turns, setTurns] = useState<QuestionnaireTurn[]>(initialTurns ?? []);
   const [streaming, setStreaming] = useState(false);
+  // Live reasoning steps for the in-flight turn (demo feature). Reset at the start of each turn,
+  // populated from the `reasoning` frame, and cleared on commit (the steps move onto the turn).
+  const [streamingReasoning, setStreamingReasoning] = useState<ReasoningStep[]>([]);
   const [status, setStatus] = useState<QuestionnaireChatStatus>(initialStatus ?? 'idle');
   const [error, setError] = useState<ChatErrorState | null>(() =>
     initialStatus ? defaultBlockingError(initialStatus) : null
@@ -229,6 +240,7 @@ export function useQuestionnaireSessionStream(
       setError(null);
       setStatus('streaming');
       setStreaming(true);
+      setStreamingReasoning([]);
       typing.reset();
 
       const controller = new AbortController();
@@ -239,6 +251,9 @@ export function useQuestionnaireSessionStream(
       // be attached to the committed assistant turn — pinned beneath that reply, not a transient
       // banner that the next send wipes.
       const streamWarnings: SessionWarning[] = [];
+      // The turn's reasoning trace (a single frame, before the content deltas) — surfaced live to
+      // the overlay and attached to the committed turn so it collapses into the turn's history.
+      let streamReasoning: ReasoningStep[] = [];
       let streamError: ChatErrorState | null = null;
 
       try {
@@ -290,7 +305,15 @@ export function useQuestionnaireSessionStream(
                 fullText += ev.delta;
                 typing.appendDelta(ev.delta);
               } else if (ev.type === 'warning') {
-                streamWarnings.push({ code: ev.code, message: ev.message });
+                streamWarnings.push({
+                  code: ev.code,
+                  message: ev.message,
+                  ...(ev.detail ? { detail: ev.detail } : {}),
+                });
+              } else if (ev.type === 'reasoning') {
+                // Single frame before the reply — surface the steps live for the overlay reveal.
+                streamReasoning = ev.steps;
+                setStreamingReasoning(ev.steps);
               } else if (ev.type === 'error') {
                 streamError = {
                   code: ev.code,
@@ -313,9 +336,13 @@ export function useQuestionnaireSessionStream(
               role: 'assistant',
               content: fullText,
               ...(streamWarnings.length > 0 ? { warnings: streamWarnings } : {}),
+              ...(streamReasoning.length > 0 ? { reasoning: streamReasoning } : {}),
             },
           ]);
         }
+        // The steps now live on the committed turn — clear the live buffer so the overlay yields
+        // to the turn's own (collapsed) reasoning view.
+        setStreamingReasoning([]);
 
         if (streamError) {
           setStatus('error');
@@ -383,6 +410,7 @@ export function useQuestionnaireSessionStream(
     turns,
     streaming,
     streamingText: typing.displayText,
+    streamingReasoning,
     status,
     error,
     canSend,

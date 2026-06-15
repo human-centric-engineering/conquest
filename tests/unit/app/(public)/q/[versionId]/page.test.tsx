@@ -40,6 +40,7 @@ vi.mock('@/lib/app/questionnaire/feature-flag', () => ({
   isLiveSessionsEnabled: vi.fn(),
   isVoiceInputEnabled: vi.fn(),
   isAttachmentInputEnabled: vi.fn(),
+  isReasoningStreamEnabled: vi.fn(),
 }));
 
 /**
@@ -54,6 +55,7 @@ vi.mock('@/lib/app/questionnaire/chat/anonymity', () => ({
   resolvePresentationModeForVersion: vi.fn(),
   resolveVoiceEnabledForVersion: vi.fn(),
   resolveAttachmentsEnabledForVersion: vi.fn(),
+  resolveReasoningPlacementForVersion: vi.fn(),
 }));
 
 vi.mock('@/lib/app/questionnaire/chat/preview-nav', () => ({
@@ -104,6 +106,7 @@ import PublicQuestionnairePage, { metadata } from '@/app/(public)/q/[versionId]/
 import {
   isAttachmentInputEnabled,
   isLiveSessionsEnabled,
+  isReasoningStreamEnabled,
   isVoiceInputEnabled,
 } from '@/lib/app/questionnaire/feature-flag';
 import { resolveThemeForVersion } from '@/lib/app/questionnaire/chat/theme';
@@ -111,6 +114,7 @@ import {
   resolveAnonymousForVersion,
   resolveAttachmentsEnabledForVersion,
   resolvePresentationModeForVersion,
+  resolveReasoningPlacementForVersion,
   resolveVoiceEnabledForVersion,
 } from '@/lib/app/questionnaire/chat/anonymity';
 import { resolveAdminPreviewMeta } from '@/lib/app/questionnaire/chat/preview-nav';
@@ -152,9 +156,11 @@ describe('PublicQuestionnairePage', () => {
     vi.mocked(isLiveSessionsEnabled).mockResolvedValue(true);
     vi.mocked(isVoiceInputEnabled).mockResolvedValue(false);
     vi.mocked(isAttachmentInputEnabled).mockResolvedValue(false);
+    vi.mocked(isReasoningStreamEnabled).mockResolvedValue(false);
     vi.mocked(resolveThemeForVersion).mockResolvedValue(MOCK_THEME);
     vi.mocked(resolveAnonymousForVersion).mockResolvedValue(false);
     vi.mocked(resolvePresentationModeForVersion).mockResolvedValue('chat');
+    vi.mocked(resolveReasoningPlacementForVersion).mockResolvedValue('overlay');
     // Per-questionnaire opt-ins default ON, so these tests isolate the platform flag as the
     // deciding factor. The page ANDs platform flag AND config opt-in; dedicated tests below
     // exercise the config-off path.
