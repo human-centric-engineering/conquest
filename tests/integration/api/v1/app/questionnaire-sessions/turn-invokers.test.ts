@@ -34,10 +34,19 @@ const structuredMock = vi.hoisted(() => ({
 }));
 vi.mock('@/lib/orchestration/evaluations/parse-structured', () => structuredMock);
 
-vi.mock('@/lib/orchestration/llm/cost-tracker', () => ({
+const logCostMock = vi.hoisted(() => ({
   logCost: vi.fn().mockResolvedValue(null),
   calculateCost: vi.fn().mockReturnValue({ totalCostUsd: 0 }),
 }));
+vi.mock('@/lib/orchestration/llm/cost-tracker', () => logCostMock);
+
+const loggerMock = vi.hoisted(() => ({
+  error: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  debug: vi.fn(),
+}));
+vi.mock('@/lib/logging', () => ({ logger: loggerMock }));
 
 import { buildTurnInvokers } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-invokers';
 import {
@@ -45,6 +54,7 @@ import {
   EXTRACT_ANSWER_SLOTS_CAPABILITY_SLUG,
   REFINE_ANSWER_CAPABILITY_SLUG,
 } from '@/lib/app/questionnaire/constants';
+import { DEFAULT_TONE_SETTINGS } from '@/lib/app/questionnaire/types';
 import type { TurnState } from '@/lib/app/questionnaire/orchestrator';
 import type { CapabilitySlotView } from '@/app/api/v1/app/questionnaires/_lib/turn-context';
 
@@ -100,6 +110,7 @@ function state(over: Partial<TurnState> = {}): TurnState {
       reasoningStreamEnabled: true,
       reasoningStreamPlacement: 'overlay',
       reasoningStreamPersist: true,
+      tone: DEFAULT_TONE_SETTINGS,
     },
     questions: [
       {
@@ -167,6 +178,8 @@ async function invokers(opts: Partial<Parameters<typeof buildTurnInvokers>[0]> =
 beforeEach(() => {
   vi.clearAllMocks();
   prismaMock.aiAgent.findUnique.mockResolvedValue(binding);
+  // Restore logCost to a no-op default so assessSeriousness happy-path tests aren't affected.
+  logCostMock.logCost.mockResolvedValue(null);
 });
 
 describe('extractAnswers', () => {
@@ -464,6 +477,21 @@ describe('assessSeriousness', () => {
     expect(out.costUsd).toBe(0.0042);
   });
 
+  it('defaults reason to an empty string when the completion omits it', async () => {
+    // L430 `reason: completion.value.reason ?? ''` — guards a verdict whose `reason` is absent
+    // (distinct from a defined empty string, which takes the left arm of `??`).
+    structuredMock.runStructuredCompletion.mockResolvedValue({
+      value: { serious: true },
+      tokenUsage: { input: 10, output: 5 },
+      costUsd: 0.001,
+    });
+    const inv = await invokers();
+    const out = await inv.assessSeriousness(state());
+
+    expect(out.verdict).toEqual({ serious: true, reason: '' });
+    expect(out.diagnostic).toBeUndefined();
+  });
+
   it('no_provider_configured: resolveAgentProviderAndModel throws → safe null verdict', async () => {
     // Simulate a misconfigured environment where no provider can be resolved.
     resolverMock.resolveAgentProviderAndModel.mockRejectedValue(new Error('no provider'));
@@ -547,6 +575,143 @@ describe('assessSeriousness', () => {
     const messages = structuredMock.runStructuredCompletion.mock.calls[0][0].messages;
     const userMsg = messages.find((m: { role: string }) => m.role === 'user')?.content ?? '';
     expect(userMsg).toContain('Employee Demographics');
+  });
+
+  it('parse callback: invokes tryParseJson with the raw string and the validator', async () => {
+    // The `parse` option (lines 399-403) calls tryParseJson(raw, validator) then
+    // validateSeriousnessVerdict on the parsed result. We exercise this path by making
+    // runStructuredCompletion invoke the parse option and then checking that tryParseJson
+    // was called with the raw string — proving the callback body ran.
+    let capturedParseRaw: string | undefined;
+    structuredMock.tryParseJson.mockImplementation((raw: string, fn: (p: unknown) => unknown) => {
+      capturedParseRaw = raw;
+      // Simulate a valid parsed verdict so the validator can run.
+      return fn({ serious: true, reason: 'Good answer' });
+    });
+    structuredMock.runStructuredCompletion.mockImplementation(
+      async (opts: { parse: (raw: string) => unknown }) => {
+        opts.parse('{"serious":true,"reason":"Good answer"}');
+        return {
+          value: { serious: true, reason: 'Good answer' },
+          tokenUsage: { input: 5, output: 5 },
+          costUsd: 0,
+        };
+      }
+    );
+
+    const inv = await invokers();
+    await inv.assessSeriousness(state());
+
+    // The parse callback was invoked and forwarded the raw string to tryParseJson.
+    expect(capturedParseRaw).toBe('{"serious":true,"reason":"Good answer"}');
+  });
+
+  it('onFinalFailure callback: returns an Error describing the schema mismatch', async () => {
+    // The `onFinalFailure` option callback (line 405) is called when runStructuredCompletion
+    // exhausts its retries. Here we invoke it directly via the mock to assert its return value.
+    let capturedOnFinalFailure: (() => Error) | undefined;
+    structuredMock.runStructuredCompletion.mockImplementation(
+      async (opts: { onFinalFailure: () => Error }) => {
+        capturedOnFinalFailure = opts.onFinalFailure;
+        // Simulate a successful completion so the invoker doesn't take the error path.
+        return {
+          value: { serious: true, reason: '' },
+          tokenUsage: { input: 5, output: 5 },
+          costUsd: 0,
+        };
+      }
+    );
+
+    const inv = await invokers();
+    await inv.assessSeriousness(state());
+
+    // Verify the onFinalFailure factory creates an Error with the expected message.
+    expect(capturedOnFinalFailure).toBeDefined();
+    const err = capturedOnFinalFailure!();
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toContain('Seriousness verdict was not valid');
+  });
+
+  it('logCost rejection is swallowed and does not affect the returned verdict', async () => {
+    // The logCost call is fire-and-forget; its .catch() handler must not propagate the error.
+    // Arrange: completion succeeds; logCost rejects.
+    structuredMock.runStructuredCompletion.mockResolvedValue({
+      value: { serious: true, reason: 'Fine' },
+      tokenUsage: { input: 10, output: 5 },
+      costUsd: 0.001,
+    });
+    logCostMock.logCost.mockRejectedValue(new Error('logCost db boom'));
+
+    const inv = await invokers();
+    const out = await inv.assessSeriousness(state());
+
+    // The invoker returns the verdict normally — the cost write failure must not propagate.
+    expect(out.verdict).toMatchObject({ serious: true, reason: 'Fine' });
+    expect(out.costUsd).toBe(0.001);
+    expect(out.diagnostic).toBeUndefined();
+
+    // Allow the microtask to flush so the .catch() fires before we check the logger.
+    await Promise.resolve();
+    expect(loggerMock.error).toHaveBeenCalledWith(
+      'assess_seriousness: logCost rejected',
+      expect.objectContaining({ sessionId: 'sess-1' })
+    );
+  });
+
+  it('omits agentId from logCost call when the extractor binding is null', async () => {
+    // When no extractor is seeded, the logCost call should not include agentId.
+    prismaMock.aiAgent.findUnique.mockResolvedValue(null);
+    structuredMock.runStructuredCompletion.mockResolvedValue({
+      value: { serious: false, reason: 'Joke answer' },
+      tokenUsage: { input: 10, output: 5 },
+      costUsd: 0.001,
+    });
+
+    // Build invokers with activeQuestionKey so the seriousness judge runs (no short-circuit).
+    const inv = await invokers({ activeQuestionKey: 'role' });
+    await inv.assessSeriousness(state());
+
+    // Allow the microtask to flush so the fire-and-forget logCost runs.
+    await Promise.resolve();
+
+    // The logCost call must not include agentId when the extractor binding is absent.
+    expect(logCostMock.logCost).toHaveBeenCalledWith(
+      expect.not.objectContaining({ agentId: expect.anything() })
+    );
+  });
+});
+
+describe('extractAnswers — sensitivity-aware branch', () => {
+  it('passes sensitivityAware: true to the extractor when the invoker was built with that flag', async () => {
+    (dispatcherMock.dispatch as Mock).mockResolvedValue({
+      success: true,
+      data: {
+        intents: [],
+        droppedCount: 0,
+        costUsd: 0,
+        // Sensitivity outcome — the extractor detected a sensitive disclosure.
+        sensitivity: { detected: true, severity: 'medium', category: 'distress', summary: 's' },
+      },
+    });
+    const inv = await invokers({ sensitivityAware: true });
+    const out = await inv.extractAnswers(state());
+
+    // The invoker must pass sensitivityAware to the capability and surface the result.
+    const [, args] = (dispatcherMock.dispatch as Mock).mock.calls[0];
+    expect(args.sensitivityAware).toBe(true);
+    expect(out.sensitivity).toMatchObject({ detected: true, severity: 'medium' });
+  });
+
+  it('omits sensitivityAware from the capability args when the flag is false (default)', async () => {
+    (dispatcherMock.dispatch as Mock).mockResolvedValue({
+      success: true,
+      data: { intents: [], droppedCount: 0, costUsd: 0 },
+    });
+    const inv = await invokers({ sensitivityAware: false });
+    await inv.extractAnswers(state());
+
+    const [, args] = (dispatcherMock.dispatch as Mock).mock.calls[0];
+    expect(args).not.toHaveProperty('sensitivityAware');
   });
 });
 

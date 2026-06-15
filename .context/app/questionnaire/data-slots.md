@@ -135,23 +135,61 @@ route then drives `runDataSlotTurn` (`orchestrator/data-slot-orchestrator.ts`) i
    (even another theme), it emits an updated fill whose value+paraphrase is a **superset** of the
    prior one — so the panel summaries keep sharpening as the conversation accrues, instead of going
    stale.
+
+   **Forward propagation (slot fill → mapped question answer).** Each candidate carries its
+   `mappedQuestionKeys` — the question(s) the `AppDataSlotQuestion` mapping says it captures, loaded
+   in `turn-context.ts` and threaded all the way to the prompt (rendered as an `answers questions:`
+   line on the slot). The prompt makes the contract explicit: **whenever the extractor emits a fill
+   for a mapped slot, it must ALSO emit an `answers` entry for each mapped question the captured
+   position determines**, translating the qualitative position onto that question's own
+   type/scale/options (e.g. "I hate my job" → the bottom of a 1–5 satisfaction scale). These answers
+   use provenance `inferred`/`synthesised` (never `direct` — the respondent didn't state the typed
+   value). **This provenance is judged independently of the data-slot FILL** (the contract fix the
+   eval guards): the FILL can be `direct` (they plainly stated their stance) while the mapped ANSWER
+   is `inferred` (they didn't state the number) — the prompt no longer lets the scale mapping drag
+   the fill's provenance to `inferred`, which was what mislabelled "extremely unlikely" as an
+   inference. Confidence is scored as **clarity** (how plainly the position is expressed), in coarse
+   bands (`clear`/`partial`/`unclear`), with corroboration only ever nudging a clear answer _up_ over
+   turns — never dragging a clearly-stated first answer down. A firmly-pinned mapped value is `clear`
+   even when its provenance is `inferred`. An **appropriateness gate** keeps it from guessing: if the message
+   informs the slot but doesn't pin down a particular question's value, that question is **omitted**
+   rather than invented. The extractor — not a separate agent — is the judge here, since it already
+   sees the message, the captured position, and the mapped question's definition in one call. The
+   answers flow through the normal `normalizeAnswerIntents → upsertAnswerSlot` path, so they stay
+   **updatable**: later corroboration raises confidence, a contradiction corrects the value, and a
+   respondent's own form edit (the `respondentEdited` lock) freezes them. Without this, a slot could
+   fill at high confidence while its form question stayed empty — the panel moved but the deliverable
+   didn't. (The reverse direction — a form edit recomputing its mapped slots — lives in
+   `form-answers.ts`.)
+
 2. **Targeting (topic-local)** — pick the next unfilled data slot, preferring the **current theme**
    (linger before moving on); transition to a new theme when the area is exhausted. The targeted
    slot feeds the **interviewer phraser** (`question-stream.ts`): deepen (same area), bridge
    (transition), or — on a re-ask — ask a **sharper, narrower** follow-up using the slot's current
    paraphrase (`currentUnderstanding`) rather than repeating the same open question.
+   **Coverage is provenance-aware, not confidence-only.** A slot counts as _covered_ (so it is
+   neither re-asked nor parked) when the respondent plainly **stated** a position (`provenance:
+'direct'`) OR the fill cleared `DATA_SLOT_FILLED_THRESHOLD` OR it was already parked
+   (`provisional`) — see `isCovered`. The `direct` clause is deliberate: a clearly-stated answer is
+   answered even when the extractor under-scores its confidence number, so a noisy score can never
+   make a real answer read as missing. (This was a live bug: a blunt "extremely unlikely" was scored
+   `inferred · 0.40`, fell below the threshold, got re-asked to the cap, and was parked
+   `provisional · may revisit` — a clear answer mislabelled a guess.) Provenance is threaded through
+   the loader (`turn-context.ts`), so a direct fill stays covered across turns regardless of its
+   stored confidence.
+
 3. **Move on / park (anti-repetition)** — a slot is only asked about `config.maxDataSlotAttempts`
    times (default 2 = ask once, one sharper re-ask). The per-turn re-ask count comes from
    `AppQuestionnaireTurn.targetedDataSlotId` (a consecutive leading-run, computed in
    `turn-context.ts` → `TurnState.dataSlotAttempts`). When the cap is hit and the slot is still
-   below `DATA_SLOT_FILLED_THRESHOLD`, the route flags the candidate `parkPending` so the extractor
-   makes a **best-effort low-confidence inference**, and the orchestrator **parks** it: marks that
-   fill `provisional` (synthesising a floor fill if the model returned none), excludes it from
-   targeting, and **bridges to a different theme**. So the respondent always moves forward instead
-   of being asked the same thing repeatedly. A provisional slot counts as covered; a later
-   confident answer **promotes** it (clears `provisional` via the upsert's shared write).
-   The seriousness gate still runs first — a disregarded (abusive) turn never parks or records a
-   provisional fill.
+   uncovered (per the rule above — a `direct` fill is never parked), the route flags the candidate
+   `parkPending` so the extractor makes a **best-effort low-confidence inference**, and the
+   orchestrator **parks** it: marks that fill `provisional` (synthesising a floor fill if the model
+   returned none), excludes it from targeting, and **bridges to a different theme**. So the
+   respondent always moves forward instead of being asked the same thing repeatedly. A provisional
+   slot counts as covered; a later confident answer **promotes** it (clears `provisional` via the
+   upsert's shared write). The seriousness gate still runs first — a disregarded (abusive) turn
+   never parks or records a provisional fill.
 4. **Late-stage sweep** — once every data slot is covered, ask any still-unanswered **questions**
    directly.
 5. **Completion** — offer to submit only when **all questions** are answered. The respondent
@@ -187,6 +225,14 @@ Low-confidence inferences stay **visible** (labelled), so the respondent can see
 we're guessing. The extractor must **never record absence** ("tenure not provided"): a slot the
 message doesn't bear on is simply **omitted**, and the panel shows "Not covered yet" on its own.
 
+**Rationale = the evidence ("Why?").** The fill's `rationale` (the panel's _Why?_ expander) must carry
+the actual substance — _what the respondent was asked and what they said_ — framed "When asked about
+&lt;topic&gt;, the respondent said …", so reading paraphrase + rationale lands a reviewer on the **same
+conclusion** they'd reach from the chat. A bare meta-statement ("Their statement about X informs this
+topic.") is forbidden — it tells the reader nothing. The substance may be paraphrased but must uphold
+the meaning expressed in the conversation. Subject wording stays **gender-neutral and varied** ("the
+respondent" / "they" / "this person"), never assuming a gender — this applies to the paraphrase too.
+
 ## Key files
 
 | Concern                                  | Path                                                                                                                                                                                                                             |
@@ -198,4 +244,21 @@ message doesn't bear on is simply **omitted**, and the panel shows "Not covered 
 | Admin review UI                          | `app/admin/questionnaires/[id]/data-slots/page.tsx`, `components/admin/questionnaires/data-slots-review.tsx`, `data-slot-refine-button.tsx`; assign checkbox in `evaluation-finding-review.tsx` + `evaluation-seed-composer.tsx` |
 | Engine                                   | `orchestrator/data-slot-orchestrator.ts`, `extraction/**` (combined), `_lib/turn-context.ts`, `_lib/data-slot-fills.ts`                                                                                                          |
 | Respondent panel                         | `_lib/answer-panel.ts`, `components/app/questionnaire/panel/answer-slot-panel.tsx`                                                                                                                                               |
+| Calibration eval                         | `lib/app/questionnaire/extraction/eval/**` (golden set + pure scorer), `scripts/eval/extraction.ts` (`npm run eval:extraction`)                                                                                                  |
 | Seeds                                    | `prisma/seeds/app-questionnaire/028-032` (031 = refine capability row, 032 = assign capability row, both bound to the generator agent)                                                                                           |
+
+### Calibration eval (golden set)
+
+Extraction's `confidence`/`provenance` judgements were being tuned by anecdote — one prompt clause
+per bug report, never measured — so a fix for one case could silently regress another. The golden
+set (`extraction/eval/golden-set.ts`) is a small hand-labelled corpus of real-shaped extraction
+turns annotated with what a correctly-calibrated extractor should return, scored on three axes by
+the pure `score.ts`: **provenance** (a STATED answer must be `direct`, not `inferred`), **band** (a
+clear answer must land in the `clear` confidence band, not be under-scored), and **covered** (the
+downstream consequence — would it be re-asked/parked?). Confidence is scored as a **coarse band**
+(`clear` ≥ 0.7 / `partial` ≥ 0.4 / `unclear`), never an exact float — an LLM-emitted confidence is
+not calibrated to that resolution. `npm run eval:extraction` runs the live `chat`-tier model over
+the set and prints a scorecard; run it before and after any prompt/model change. Fixtures flagged
+`knownGap` are cases the current prompt is expected to fail (the calibration target) and are
+reported apart from genuine regressions. The scorer + corpus are unit-tested (CI-safe, no LLM);
+only the runner needs provider keys.

@@ -133,6 +133,7 @@ describe('buildTurnContext', () => {
               theme: 'Wellbeing',
               ordinal: 0,
               weight: 1,
+              questions: [],
             },
             {
               id: 'd2',
@@ -142,6 +143,7 @@ describe('buildTurnContext', () => {
               theme: 'Wellbeing',
               ordinal: 1,
               weight: 1,
+              questions: [],
             },
           ],
           sections: [{ id: 's1', ordinal: 0, questions: [] }],
@@ -244,7 +246,8 @@ describe('buildTurnContext', () => {
 
   it('leaves meta empty when the version has no goal or audience', async () => {
     // The default fixture version carries neither — meta is an empty object, not undefined,
-    // so the phraser simply has nothing extra to calibrate on.
+    // so the phraser simply has nothing extra to calibrate on. (Tone reaches the phraser from
+    // config, not meta — see the messages route.)
     (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(sessionGraph());
     const loaded = await buildTurnContext('sess-1');
     expect(loaded!.meta).toEqual({});
@@ -347,6 +350,54 @@ describe('buildTurnContext', () => {
     expect(loaded!.base.abuseStrikes).toBe(3);
   });
 
+  it('populates mappedQuestionKeys from the AppDataSlotQuestion mapping (forward propagation)', async () => {
+    const graph = sessionGraph({
+      version: {
+        config: null,
+        dataSlots: [
+          {
+            id: 'ds1',
+            key: 'role_satisfaction',
+            name: 'Role Satisfaction',
+            description: 'd',
+            theme: 'Wellbeing',
+            ordinal: 0,
+            weight: 1,
+            // The slot captures two questions; the loader flattens to their keys.
+            questions: [
+              { questionSlot: { key: 'satisfaction' } },
+              { questionSlot: { key: 'morale' } },
+            ],
+          },
+          {
+            id: 'ds2',
+            key: 'unmapped',
+            name: 'Unmapped',
+            description: 'd',
+            theme: 'Wellbeing',
+            ordinal: 1,
+            weight: 1,
+            questions: [],
+          },
+        ],
+        sections: [{ id: 's1', ordinal: 0, questions: [] }],
+      },
+      answers: [],
+      dataSlotFills: [],
+      turns: [],
+    });
+    (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(graph);
+
+    const loaded = await buildTurnContext('sess-1');
+    const slots = loaded!.base.dataSlots ?? [];
+    expect(slots.find((s) => s.key === 'role_satisfaction')?.mappedQuestionKeys).toEqual([
+      'satisfaction',
+      'morale',
+    ]);
+    // A slot that maps to nothing carries an empty array (not undefined) — the route reads `.length`.
+    expect(slots.find((s) => s.key === 'unmapped')?.mappedQuestionKeys).toEqual([]);
+  });
+
   it('maps dataSlotFills into the dataSlotAnswered view with all detail fields', async () => {
     // Arrange: a session whose version has one data slot, and a fill carrying all fields
     // the extractor needs to UPDATE/CORRECT the slot across turns (value, paraphrase, provisional).
@@ -362,6 +413,7 @@ describe('buildTurnContext', () => {
             theme: 'Wellbeing',
             ordinal: 0,
             weight: 1,
+            questions: [],
           },
         ],
         sections: [{ id: 's1', ordinal: 0, questions: [] }],

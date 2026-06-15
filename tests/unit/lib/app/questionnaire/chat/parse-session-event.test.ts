@@ -95,6 +95,8 @@ describe('parseSessionEvent', () => {
           },
           { kind: 'not_a_kind', label: 'x', tone: 'insight' }, // bad kind — dropped
           { label: 'no kind or tone' }, // missing required — dropped
+          null, // null element — typeof 'object' but === null guard drops it
+          'just a string', // non-object primitive — dropped
         ],
       })
     );

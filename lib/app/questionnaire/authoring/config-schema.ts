@@ -26,6 +26,9 @@ import {
   PROFILE_FIELD_TYPES,
   REASONING_PLACEMENTS,
   SELECTION_STRATEGIES,
+  TONE_LEVEL_MAX,
+  TONE_LEVEL_MIN,
+  TONE_PERSONA_MAX_LENGTH,
 } from '@/lib/app/questionnaire/types';
 
 /** One invitee-field visibility entry (email's forced shown+required is applied server-side). */
@@ -77,6 +80,38 @@ export const profileFieldSchema = z
     }
   });
 
+/** One tone dimension: an enable toggle + a bounded 1–5 slider level. */
+const toneDimensionSchema = z.object({
+  enabled: z.boolean(),
+  level: z.number().int().min(TONE_LEVEL_MIN).max(TONE_LEVEL_MAX),
+});
+
+/** The free-text persona overlay (toggle + bounded text). */
+const tonePersonaSchema = z.object({
+  enabled: z.boolean(),
+  text: z.string().trim().max(TONE_PERSONA_MAX_LENGTH),
+});
+
+/**
+ * Interviewer tone & persona (F-tone) — the full {@link ToneSettings} block. Sent whole (not
+ * partial) by the editor; every dimension + persona present so a save can clear a toggle. Keys
+ * mirror `TONE_DIMENSION_KEYS` + `persona`; `strict()` rejects unknown keys.
+ */
+const toneSettingsSchema = z
+  .object({
+    empathy: toneDimensionSchema,
+    mirroring: toneDimensionSchema,
+    formality: toneDimensionSchema,
+    mimicry: toneDimensionSchema,
+    verbosity: toneDimensionSchema,
+    warmth: toneDimensionSchema,
+    curiosity: toneDimensionSchema,
+    readingComplexity: toneDimensionSchema,
+    humour: toneDimensionSchema,
+    persona: tonePersonaSchema,
+  })
+  .strict();
+
 /**
  * PATCH a version's configuration. All fields optional (partial save); at least
  * one required. Numbers are bounded to sane authoring ranges; nullable budget/cap
@@ -123,6 +158,9 @@ export const updateConfigSchema = z
     reasoningStreamEnabled: z.boolean().optional(),
     reasoningStreamPlacement: z.enum(REASONING_PLACEMENTS).optional(),
     reasoningStreamPersist: z.boolean().optional(),
+    // Interviewer tone & persona (F-tone). Sent whole when present; gated additionally by the
+    // platform flag APP_QUESTIONNAIRES_TONE_ENABLED.
+    tone: toneSettingsSchema.optional(),
   })
   .refine((b) => Object.values(b).some((v) => v !== undefined), {
     message: 'Provide at least one field to update',

@@ -55,12 +55,14 @@ const handleConfigPatch = withAdminAuth<{ id: string; vid: string }>(
     const editId = fork.versionId;
 
     // Build the write payload from the provided keys only (partial save). `accessMode` is a scalar
-    // (flows through `scalars`); `profileFields` + `inviteeFields` are JSON columns, wrapped below.
-    const { profileFields, inviteeFields, ...scalars } = body;
+    // (flows through `scalars`); `profileFields`, `inviteeFields`, and `tone` are JSON columns,
+    // wrapped below.
+    const { profileFields, inviteeFields, tone, ...scalars } = body;
     const writeData = {
       ...scalars,
       ...(profileFields !== undefined ? { profileFields: jsonInput(profileFields) } : {}),
       ...(inviteeFields !== undefined ? { inviteeFields: jsonInput(inviteeFields) } : {}),
+      ...(tone !== undefined ? { tone: jsonInput(tone) } : {}),
     };
 
     // Read the pre-edit row for the audit diff (null on first save).

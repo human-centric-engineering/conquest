@@ -38,6 +38,7 @@ import {
   type SelectionStrategy,
 } from '@/lib/app/questionnaire/types';
 import { parseInviteeFields } from '@/lib/app/questionnaire/invitations/invitee-fields';
+import { narrowToneSettings } from '@/lib/app/questionnaire/chat/tone';
 import type {
   ConfigView,
   QuestionnaireDetail,
@@ -106,6 +107,7 @@ export const CONFIG_SELECT = {
   reasoningStreamEnabled: true,
   reasoningStreamPlacement: true,
   reasoningStreamPersist: true,
+  tone: true,
 } as const;
 
 type ConfigRow = {
@@ -133,6 +135,7 @@ type ConfigRow = {
   reasoningStreamEnabled: boolean;
   reasoningStreamPlacement: string;
   reasoningStreamPersist: boolean;
+  tone: Prisma.JsonValue;
 };
 
 /** Narrow a stored `selectionStrategy` to the enum (default when unknown). */
@@ -216,6 +219,7 @@ export function toConfigView(row: ConfigRow | null): ConfigView {
     reasoningStreamEnabled: row.reasoningStreamEnabled,
     reasoningStreamPlacement: asReasoningPlacement(row.reasoningStreamPlacement),
     reasoningStreamPersist: row.reasoningStreamPersist,
+    tone: narrowToneSettings(row.tone),
     saved: true,
   };
 }

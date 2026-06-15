@@ -366,6 +366,16 @@ export function QuestionnaireChat({
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [turns.length, streaming, revealCursor]);
 
+  // Auto-grow the composer with its content. Reset to auto so it can shrink when text
+  // is deleted, then size to the scroll height — `max-h-40` caps growth and flips the
+  // textarea to scrolling once the content exceeds the cap.
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, [input]);
+
   // Refocus the composer when a turn finishes — the textarea is disabled while a reply streams,
   // so we put the cursor back the moment it re-enables, ready for the next answer without a click.
   const wasStreamingRef = useRef(false);
@@ -495,7 +505,7 @@ export function QuestionnaireChat({
                 rows={1}
                 placeholder={streaming ? 'Waiting for a reply…' : 'Type your answer…'}
                 aria-label="Your answer"
-                className="max-h-40 min-h-[2.5rem] resize-none"
+                className="max-h-40 min-h-[2.5rem] resize-none overflow-y-auto"
               />
               {attachmentInputEnabled && (
                 <AttachmentPickerButton

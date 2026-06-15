@@ -1,10 +1,10 @@
 /**
- * VersionSettingsPanel — the Settings-tab surface composing goal/audience + run-time config under
- * one fork-on-launch mutation runner. The child editors and the mutation helper are mocked; the
- * assertions pin the panel's OWN responsibilities: it renders both editors with the derived
+ * VersionSettingsPanel — the Settings-tab surface wrapping the run-time config editor under one
+ * fork-on-launch mutation runner. The child editor and the mutation helper are mocked; the
+ * assertions pin the panel's OWN responsibilities: it renders the config editor with the derived
  * version id / question count / adaptive flag, runs edits through `authoringMutate` + `router
  * .refresh()`, and on a launched-version fork shows the notice + redirects to the new draft's
- * Settings tab.
+ * Settings tab. (Goal & audience moved to the Structure tab — see goal-audience-editor.test.tsx.)
  *
  * @see components/admin/questionnaires/version-settings-panel.tsx
  */
@@ -21,25 +21,7 @@ vi.mock('next/navigation', () => ({ useRouter: () => router }));
 const mutateMock = vi.hoisted(() => ({ authoringMutate: vi.fn() }));
 vi.mock('@/components/admin/questionnaires/authoring-mutate', () => mutateMock);
 
-// Child editors → markers that expose their injected `run` as a button + the props the panel derives.
-vi.mock('@/components/admin/questionnaires/goal-audience-editor', () => ({
-  GoalAudienceEditor: ({
-    run,
-    versionId,
-  }: {
-    run: (s: () => unknown) => void;
-    versionId: string;
-  }) => (
-    <button
-      type="button"
-      data-testid="ga"
-      data-vid={versionId}
-      onClick={() => run(() => ['PATCH', '/ga', {}])}
-    >
-      ga-save
-    </button>
-  ),
-}));
+// Config editor → a marker that exposes its injected `run` as a button + the props the panel derives.
 vi.mock('@/components/admin/questionnaires/config-editor', () => ({
   ConfigEditor: ({
     run,
@@ -95,63 +77,22 @@ beforeEach(() => {
 });
 
 describe('VersionSettingsPanel', () => {
-  it('renders both editors with the derived version id, question count, and adaptive flag', () => {
+  it('renders the config editor with the derived version id, question count, and adaptive flag', () => {
     render(
-      <VersionSettingsPanel
-        questionnaireId="qn-1"
-        graph={graph({ id: 'ver-9' })}
-        adaptiveEnabled
-        designEvalEnabled={false}
-      />
+      <VersionSettingsPanel questionnaireId="qn-1" graph={graph({ id: 'ver-9' })} adaptiveEnabled />
     );
-    expect(screen.getByText('Goal & audience')).toBeInTheDocument();
     expect(screen.getByText('Configuration')).toBeInTheDocument();
-    expect(screen.getByTestId('ga')).toHaveAttribute('data-vid', 'ver-9');
     expect(screen.getByTestId('cfg')).toHaveAttribute('data-adaptive', 'true');
     expect(screen.getByTestId('cfg')).toHaveAttribute('data-qcount', '2');
   });
 
-  it('explains the structure review and offers the reviewer help only when design eval is on', () => {
-    const { rerender } = render(
-      <VersionSettingsPanel
-        questionnaireId="qn-1"
-        graph={graph()}
-        adaptiveEnabled={false}
-        designEvalEnabled={false}
-      />
-    );
-    // Off: copy stops at tone-tuning, no structure-review mention, no help affordance.
-    expect(screen.getByText(/tunes its tone to the audience\.$/)).toBeInTheDocument();
-    expect(screen.queryByText(/structure review on the Evaluations tab/)).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: /how goal and audience are used/i })
-    ).not.toBeInTheDocument();
-
-    // On: copy names the structure review and the help popover lists the reviewers.
-    rerender(
-      <VersionSettingsPanel
-        questionnaireId="qn-1"
-        graph={graph()}
-        adaptiveEnabled={false}
-        designEvalEnabled
-      />
-    );
-    expect(screen.getByText(/structure review on the Evaluations tab/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /how goal and audience are used/i }));
-    expect(screen.getByText('Coverage')).toBeInTheDocument();
-    expect(screen.getByText('Goal match')).toBeInTheDocument();
-    expect(screen.getByText('Audience match')).toBeInTheDocument();
+  it('no longer renders the goal/audience editor (moved to the Structure tab)', () => {
+    render(<VersionSettingsPanel questionnaireId="qn-1" graph={graph()} adaptiveEnabled={false} />);
+    expect(screen.queryByText('Goal & audience')).not.toBeInTheDocument();
   });
 
   it('runs an edit through authoringMutate and refreshes', async () => {
-    render(
-      <VersionSettingsPanel
-        questionnaireId="qn-1"
-        graph={graph()}
-        adaptiveEnabled={false}
-        designEvalEnabled={false}
-      />
-    );
+    render(<VersionSettingsPanel questionnaireId="qn-1" graph={graph()} adaptiveEnabled={false} />);
     fireEvent.click(screen.getByTestId('cfg'));
     await waitFor(() =>
       expect(mutateMock.authoringMutate).toHaveBeenCalledWith('PATCH', '/cfg', {})
@@ -165,15 +106,8 @@ describe('VersionSettingsPanel', () => {
       data: {},
       meta: { forked: true, versionId: 'ver-2', versionNumber: 2 },
     });
-    render(
-      <VersionSettingsPanel
-        questionnaireId="qn-1"
-        graph={graph()}
-        adaptiveEnabled={false}
-        designEvalEnabled={false}
-      />
-    );
-    fireEvent.click(screen.getByTestId('ga'));
+    render(<VersionSettingsPanel questionnaireId="qn-1" graph={graph()} adaptiveEnabled={false} />);
+    fireEvent.click(screen.getByTestId('cfg'));
     await waitFor(() =>
       expect(router.replace).toHaveBeenCalledWith('/admin/questionnaires/qn-1/v/ver-2/settings')
     );
@@ -182,14 +116,7 @@ describe('VersionSettingsPanel', () => {
 
   it('surfaces an error when the mutation fails', async () => {
     mutateMock.authoringMutate.mockRejectedValue(new Error('nope'));
-    render(
-      <VersionSettingsPanel
-        questionnaireId="qn-1"
-        graph={graph()}
-        adaptiveEnabled={false}
-        designEvalEnabled={false}
-      />
-    );
+    render(<VersionSettingsPanel questionnaireId="qn-1" graph={graph()} adaptiveEnabled={false} />);
     fireEvent.click(screen.getByTestId('cfg'));
     await waitFor(() => expect(screen.getByText('nope')).toBeInTheDocument());
   });

@@ -31,6 +31,8 @@ import {
   streamQuestionMessage,
   type QuestionComposeInput,
 } from '@/app/api/v1/app/questionnaire-sessions/_lib/question-stream';
+import { narrowToneSettings } from '@/lib/app/questionnaire/chat/tone';
+import { DEFAULT_TONE_SETTINGS, type ToneSettings } from '@/lib/app/questionnaire/types';
 
 type Mock = ReturnType<typeof vi.fn>;
 
@@ -310,5 +312,57 @@ describe('buildStreamingQuestionPrompt', () => {
   it('omits the tread-carefully block when no sensitivity level is set', () => {
     const system = text(buildStreamingQuestionPrompt(INPUT)[0].content);
     expect(system).not.toMatch(/sensitive or difficult/i);
+  });
+
+  // ── Interviewer tone & persona (F-tone) ──
+  const freshTone = (): ToneSettings => narrowToneSettings(DEFAULT_TONE_SETTINGS);
+
+  it('keeps the default "match their tone" line and no tone clauses when no tone is configured', () => {
+    const system = text(buildStreamingQuestionPrompt(INPUT)[0].content);
+    expect(system).toMatch(/match the respondent/i);
+    expect(system).not.toMatch(/adopt this persona/i);
+  });
+
+  it('drops the default "match their tone" line and injects the mimicry clause when mimicry is enabled', () => {
+    const tone = freshTone();
+    tone.mimicry = { enabled: true, level: 5 };
+    const system = text(buildStreamingQuestionPrompt({ ...INPUT, tone })[0].content);
+    expect(system).not.toMatch(/match the respondent/i);
+    expect(system.toLowerCase()).toMatch(/adopt the respondent's own words/i);
+  });
+
+  it('keeps the default "match their tone" line when tone is configured but mimicry is off', () => {
+    const tone = freshTone();
+    tone.warmth = { enabled: true, level: 4 };
+    const system = text(buildStreamingQuestionPrompt({ ...INPUT, tone })[0].content);
+    expect(system).toMatch(/match the respondent/i);
+    expect(system.toLowerCase()).toContain('encouraging');
+  });
+
+  it('leads the tone block with the persona clause when persona is enabled', () => {
+    const tone = freshTone();
+    tone.persona = { enabled: true, text: 'You are a supportive career coach' };
+    const system = text(buildStreamingQuestionPrompt({ ...INPUT, tone })[0].content);
+    expect(system).toMatch(/adopt this persona/i);
+    expect(system).toContain('You are a supportive career coach.');
+  });
+
+  it('replaces the default concise-length line with the verbosity clause on a later turn', () => {
+    const tone = freshTone();
+    tone.verbosity = { enabled: true, level: 5 };
+    const system = text(
+      buildStreamingQuestionPrompt({ ...INPUT, questionsAsked: 6, tone })[0].content
+    );
+    expect(system).not.toMatch(/rapport has built/i);
+    expect(system.toLowerCase()).toContain('expansive');
+  });
+
+  it('still keeps opening questions VERY tight even when verbosity is set high', () => {
+    const tone = freshTone();
+    tone.verbosity = { enabled: true, level: 5 };
+    const system = text(
+      buildStreamingQuestionPrompt({ ...INPUT, questionsAsked: 0, tone })[0].content
+    );
+    expect(system).toMatch(/very short and tight/i);
   });
 });

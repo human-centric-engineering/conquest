@@ -28,6 +28,7 @@ import {
   MessageSquareText,
   Plus,
   ShieldCheck,
+  SlidersHorizontal,
   X,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -37,6 +38,7 @@ import { SaveButton } from '@/components/admin/questionnaires/save-button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Slider } from '@/components/ui/slider';
 import { Textarea } from '@/components/ui/textarea';
 import {
   Select,
@@ -60,6 +62,9 @@ import {
   PROFILE_FIELD_TYPES,
   REASONING_PLACEMENTS,
   SELECTION_STRATEGIES,
+  TONE_LEVEL_MAX,
+  TONE_LEVEL_MIN,
+  TONE_PERSONA_MAX_LENGTH,
   type AccessMode,
   type AnswerSlotPanelScope,
   type ContradictionMode,
@@ -69,6 +74,9 @@ import {
   type ProfileFieldType,
   type ReasoningPlacement,
   type SelectionStrategy,
+  type ToneDimension,
+  type ToneDimensionKey,
+  type ToneSettings,
 } from '@/lib/app/questionnaire/types';
 import type { ConfigView } from '@/lib/app/questionnaire/views';
 import type { RunMutation } from '@/components/admin/questionnaires/version-editor-types';
@@ -213,6 +221,130 @@ function SettingsGroup({
   );
 }
 
+/**
+ * Tone dimensions (F-tone) — display metadata for the nine sliders. `left`/`right` label the 1 and
+ * 5 poles; `help` is the FieldHelp copy. Order matches the on-screen order (mirrors the prompt).
+ */
+const TONE_DIMENSION_META: {
+  key: ToneDimensionKey;
+  label: string;
+  left: string;
+  right: string;
+  help: string;
+}[] = [
+  {
+    key: 'empathy',
+    label: 'Empathy',
+    left: 'Dispassionate',
+    right: 'Highly empathetic',
+    help: 'How much the interviewer acknowledges and validates feelings in an answer. Low keeps a matter-of-fact, clinical manner; high names and gently validates emotion before moving on. The middle is balanced.',
+  },
+  {
+    key: 'mirroring',
+    label: 'Mirroring',
+    left: 'Never',
+    right: 'Always',
+    help: 'How often the interviewer reflects what the respondent said back — reframed in its own words — before the next question. Higher means it confirms understanding more often, which can feel attentive but slows the pace.',
+  },
+  {
+    key: 'formality',
+    label: 'Formality',
+    left: 'Casual',
+    right: 'Formal',
+    help: 'The register. Low is relaxed and conversational (contractions, friendly phrasing); high is polished and businesslike. The middle leaves it unconstrained.',
+  },
+  {
+    key: 'mimicry',
+    label: 'Mimicry',
+    left: 'Own voice',
+    right: 'Mirror them',
+    help: "How much the interviewer adopts the respondent's own vocabulary, register, and speech patterns. Higher makes it sound more like the person it's talking to. When enabled, this replaces the default gentle 'match their tone' behaviour.",
+  },
+  {
+    key: 'verbosity',
+    label: 'Verbosity',
+    left: 'Terse',
+    right: 'Expansive',
+    help: 'How much the interviewer says per turn. Low is the fewest words that ask clearly; high adds context and elaboration. The opening questions are always kept short regardless, so they stay effortless.',
+  },
+  {
+    key: 'warmth',
+    label: 'Warmth & encouragement',
+    left: 'Neutral',
+    right: 'Very encouraging',
+    help: 'How much affirmation and reassurance the interviewer offers. Higher gives generous, genuine encouragement as the conversation goes; this is about positive reinforcement, distinct from empathy (acknowledging difficulty).',
+  },
+  {
+    key: 'curiosity',
+    label: 'Curiosity',
+    left: 'Take at face value',
+    right: 'Probe deeply',
+    help: 'How hard the interviewer digs with follow-ups before moving on. Higher means it consistently probes for detail, examples, and the “why”. Note the move-on cap still parks a question after the configured number of attempts.',
+  },
+  {
+    key: 'readingComplexity',
+    label: 'Reading complexity',
+    left: 'Plain',
+    right: 'Sophisticated',
+    help: 'The language level. Low uses plain, everyday words and short sentences; high uses richer vocabulary and more developed sentences. Audience expertise (set on the Structure tab) also influences this.',
+  },
+  {
+    key: 'humour',
+    label: 'Humour',
+    left: 'Earnest',
+    right: 'Playful',
+    help: 'How much light playfulness the interviewer allows. Low stays strictly earnest; high is good-humoured where it fits (never at the respondent’s expense). Use sparingly on sensitive questionnaires.',
+  },
+];
+
+/**
+ * One tone dimension row: an enable toggle + (when on) a 1–5 slider with pole labels. Kept local —
+ * it's only used by the tone group below and shares its edit-state callbacks.
+ */
+function ToneDimensionRow({
+  meta,
+  value,
+  busy,
+  onToggle,
+  onLevel,
+}: {
+  meta: (typeof TONE_DIMENSION_META)[number];
+  value: ToneDimension;
+  busy: boolean;
+  onToggle: (enabled: boolean) => void;
+  onLevel: (level: number) => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <Switch checked={value.enabled} onCheckedChange={onToggle} disabled={busy} />
+        <Label className="text-sm font-medium">
+          {meta.label} <FieldHelp title={meta.label}>{meta.help}</FieldHelp>
+        </Label>
+      </div>
+      {value.enabled && (
+        <div className="border-border/60 ml-1 space-y-1.5 border-l pl-4">
+          <Slider
+            value={[value.level]}
+            min={TONE_LEVEL_MIN}
+            max={TONE_LEVEL_MAX}
+            step={1}
+            onValueChange={([v]) => onLevel(v)}
+            disabled={busy}
+            className="max-w-xs"
+            aria-label={`${meta.label} level`}
+          />
+          <div className="text-muted-foreground flex max-w-xs justify-between text-xs">
+            <span>{meta.left}</span>
+            <span className="text-foreground font-medium">{value.level}/5</span>
+            <span>{meta.right}</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ConfigEditor({
   questionnaireId,
   versionId,
@@ -288,6 +420,9 @@ export function ConfigEditor({
   const [profileFields, setProfileFields] = useState<ProfileFieldRow[]>(
     config.profileFields.map(toRow)
   );
+  // Interviewer tone & persona (F-tone): the whole block edited as one object. Helpers below patch
+  // a single dimension / the persona immutably.
+  const [tone, setTone] = useState<ToneSettings>(config.tone);
 
   // Resync from the server graph after each refetch (mirrors version-editor.tsx).
   useEffect(() => {
@@ -317,9 +452,16 @@ export function ConfigEditor({
     setReasoningStreamPlacement(config.reasoningStreamPlacement);
     setReasoningStreamPersist(config.reasoningStreamPersist);
     setProfileFields(config.profileFields.map(toRow));
+    setTone(config.tone);
   }, [config]);
 
   const contradictionOff = contradictionMode === 'off';
+
+  // Tone edit helpers — patch one dimension's toggle/level or the persona, immutably.
+  const setToneDimension = (key: ToneDimensionKey, patch: Partial<ToneDimension>) =>
+    setTone((t) => ({ ...t, [key]: { ...t[key], ...patch } }));
+  const setTonePersona = (patch: Partial<ToneSettings['persona']>) =>
+    setTone((t) => ({ ...t, persona: { ...t.persona, ...patch } }));
 
   const updateField = (index: number, patch: Partial<ProfileFieldRow>) =>
     setProfileFields((prev) => prev.map((f, i) => (i === index ? { ...f, ...patch } : f)));
@@ -393,6 +535,9 @@ export function ConfigEditor({
         reasoningStreamEnabled,
         reasoningStreamPlacement,
         reasoningStreamPersist,
+        // Interviewer tone & persona (F-tone). Sent whole; trim the persona text. Requires the
+        // platform tone flag to take effect.
+        tone: { ...tone, persona: { ...tone.persona, text: tone.persona.text.trim() } },
         profileFields: profileFields.map((f) => ({
           key: f.key.trim(),
           label: f.label.trim(),
@@ -688,6 +833,59 @@ export function ConfigEditor({
             </div>
           </div>
         )}
+      </SettingsGroup>
+
+      {/* ── 2c. Interviewer tone & persona — how the conversational interviewer responds. Each
+             dimension is independent (toggle + 1–5 slider); persona casts the agent. Off by default
+             and gated by the platform tone flag, so it's inert until both are switched on. ── */}
+      <SettingsGroup
+        icon={SlidersHorizontal}
+        accent="bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400"
+        title="Interviewer tone & persona"
+        description="Shape how the conversational interviewer responds to answers — empathy, mirroring, formality, mimicry, verbosity and more. Each is off until you enable it; also requires the platform tone flag."
+      >
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <Switch
+              checked={tone.persona.enabled}
+              onCheckedChange={(v) => setTonePersona({ enabled: v })}
+              disabled={busy}
+            />
+            <Label className="text-sm font-medium">
+              Persona{' '}
+              <FieldHelp title="Persona">
+                Cast the interviewer in a role and it will speak from that perspective — for example
+                “You are an experienced, supportive career coach” or “You are a concise management
+                consultant.” Free text; keep it a sentence or two. The tone sliders below still
+                apply on top of the persona.
+              </FieldHelp>
+            </Label>
+          </div>
+          {tone.persona.enabled && (
+            <div className="border-border/60 ml-1 border-l pl-4">
+              <Textarea
+                value={tone.persona.text}
+                onChange={(e) => setTonePersona({ text: e.target.value })}
+                maxLength={TONE_PERSONA_MAX_LENGTH}
+                rows={2}
+                disabled={busy}
+                placeholder="e.g. You are an experienced, supportive career coach."
+                className="max-w-md"
+              />
+            </div>
+          )}
+        </div>
+
+        {TONE_DIMENSION_META.map((meta) => (
+          <ToneDimensionRow
+            key={meta.key}
+            meta={meta}
+            value={tone[meta.key]}
+            busy={busy}
+            onToggle={(enabled) => setToneDimension(meta.key, { enabled })}
+            onLevel={(level) => setToneDimension(meta.key, { level })}
+          />
+        ))}
       </SettingsGroup>
 
       {/* ── 3. Access & invitations — who may start, and the invitee detail fields captured. ── */}

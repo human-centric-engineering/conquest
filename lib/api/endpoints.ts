@@ -350,6 +350,8 @@ export const API = {
     QUESTIONNAIRES: {
       /** List + ingest (GET list, POST multipart ingest). */
       ROOT: '/api/v1/app/questionnaires',
+      /** Read-only prompt library — every agent + the real prompt(s) it sends (GET). */
+      prompts: '/api/v1/app/questionnaires/prompts',
       /** Compose a questionnaire from a plain-English brief (POST JSON — generative authoring). */
       compose: '/api/v1/app/questionnaires/compose',
       /** Streaming compose — watch the structure build via SSE (POST JSON). */

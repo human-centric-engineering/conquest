@@ -17,6 +17,7 @@ import { z } from 'zod';
 import { prisma } from '@/lib/db/client';
 import type { QuestionnaireTurn } from '@/lib/app/questionnaire/chat/types';
 import { REASONING_STEP_KINDS, REASONING_TONES } from '@/lib/app/questionnaire/reasoning';
+import { ANSWER_PROVENANCES } from '@/lib/app/questionnaire/types';
 
 /** Persisted per-turn notices — `{ code, message }[]`; anything malformed degrades to `[]`. */
 const warningsSchema = z
@@ -38,7 +39,7 @@ const reasoningSchema = z
       rationale: z.string().optional(),
       sourceQuote: z.string().optional(),
       confidence: z.number().optional(),
-      provenance: z.enum(['direct', 'inferred', 'synthesised', 'refined']).optional(),
+      provenance: z.enum(ANSWER_PROVENANCES).optional(),
     })
   )
   .catch([]);

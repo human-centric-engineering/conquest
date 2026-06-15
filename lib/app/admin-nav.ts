@@ -13,7 +13,7 @@
  *
  * Full guide + example: CUSTOMIZATION.md §4 · lib/admin-nav/registry.ts
  */
-import { Building2, ClipboardList } from 'lucide-react';
+import { Building2, ClipboardList, MessageSquareText } from 'lucide-react';
 
 import { registerNavSection } from '@/lib/admin-nav/registry';
 
@@ -29,6 +29,15 @@ export function initAppNav(): void {
         label: 'Questionnaires',
         icon: ClipboardList,
         description: 'Ingest, review, and edit conversational questionnaires',
+        // Exact match: sibling pages live under `/admin/questionnaires/*` (e.g. the
+        // prompt library), so a prefix match would light this item up on those too.
+        exact: true,
+      },
+      {
+        href: '/admin/questionnaires/prompts',
+        label: 'Prompt library',
+        icon: MessageSquareText,
+        description: 'Read the exact prompts each questionnaire agent sends',
       },
       // DEMO-ONLY (F2.5.1): demo-client attribution + branding for the sales demo.
       // A real client engagement strips demo tenancy — see forking.md.

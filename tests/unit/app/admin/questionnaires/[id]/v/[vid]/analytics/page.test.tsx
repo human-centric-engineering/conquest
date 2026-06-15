@@ -19,10 +19,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
 import type { VersionGraphView, TagView } from '@/lib/app/questionnaire/views';
+import { DEFAULT_TONE_SETTINGS } from '@/lib/app/questionnaire/types';
 import type {
   QuestionDistributionsResult,
   CompletionFunnelResult,
   QuestionnaireCostResult,
+  SafeguardingSummary,
 } from '@/lib/app/questionnaire/analytics';
 
 // ─── Navigation mock ──────────────────────────────────────────────────────────
@@ -162,6 +164,7 @@ function makeGraph(over: Partial<VersionGraphView> = {}): VersionGraphView {
       reasoningStreamEnabled: true,
       reasoningStreamPlacement: 'overlay',
       reasoningStreamPersist: true,
+      tone: DEFAULT_TONE_SETTINGS,
     },
     ...over,
   };
@@ -199,6 +202,16 @@ function makeCost(): QuestionnaireCostResult {
     trend: [],
     topSessions: [],
     topSessionsSuppressed: false,
+  };
+}
+
+function makeSafeguarding(): SafeguardingSummary {
+  return {
+    versionId: 'ver-1',
+    range: { from: '2026-05-13T00:00:00.000Z', to: '2026-06-12T00:00:00.000Z' },
+    flagged: 0,
+    serious: 0,
+    suppressed: false,
   };
 }
 
@@ -250,11 +263,15 @@ describe('AnalyticsTab', () => {
 
   describe('happy path — child component props', () => {
     beforeEach(() => {
-      // Arrange: provide one successful response per parallel fetch
+      // Arrange: provide one successful response per parallel fetch. The source runs four
+      // fetches in a single Promise.all (distributions, funnel, cost, safeguarding), so all
+      // four must be modelled — omitting safeguarding lets the 4th call fall through to the
+      // default impl and silently return a distributions-shaped object.
       apiMock.parseApiResponse
         .mockResolvedValueOnce({ success: true, data: makeDistributions() })
         .mockResolvedValueOnce({ success: true, data: makeFunnel() })
-        .mockResolvedValueOnce({ success: true, data: makeCost() });
+        .mockResolvedValueOnce({ success: true, data: makeCost() })
+        .mockResolvedValueOnce({ success: true, data: makeSafeguarding() });
     });
 
     it('renders the ExportButtons with the correct questionnaireId and versionId', async () => {

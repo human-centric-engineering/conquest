@@ -322,4 +322,540 @@ describe('buildReasoningTrace', () => {
     expect(blob).not.toContain('SECRET PII DISCLOSURE');
     expect(blob).not.toContain('self-harm');
   });
+
+  // ---------------------------------------------------------------------------
+  // Provenance phrase variants (lines 49-65 in source)
+  // ---------------------------------------------------------------------------
+
+  it('uses "Directly from what you said" phrasing and neutral tone for direct provenance', () => {
+    const steps = buildReasoningTrace(
+      result({
+        sideEffects: {
+          answerUpserts: [intent({ slotKey: 'q1', provenance: 'direct', confidence: 0.9 })],
+          answerRefinements: [],
+        },
+        assessment: assessment({ answeredCount: 1 }),
+      }),
+      { questions: QUESTIONS }
+    );
+    const extraction = steps.find((s) => s.kind === 'extraction');
+    expect(extraction?.detail).toMatch(/Directly from what you said/);
+    expect(extraction?.tone).toBe('neutral');
+  });
+
+  it('uses "Pieced together" phrasing and insight tone for synthesised provenance', () => {
+    const steps = buildReasoningTrace(
+      result({
+        sideEffects: {
+          answerUpserts: [intent({ slotKey: 'q1', provenance: 'synthesised', confidence: 0.85 })],
+          answerRefinements: [],
+        },
+        assessment: assessment({ answeredCount: 1 }),
+      }),
+      { questions: QUESTIONS }
+    );
+    const extraction = steps.find((s) => s.kind === 'extraction');
+    expect(extraction?.detail).toMatch(/Pieced together from the conversation/);
+    expect(extraction?.tone).toBe('insight');
+  });
+
+  it('uses "Updated from later context" phrasing and insight tone for refined provenance', () => {
+    const steps = buildReasoningTrace(
+      result({
+        sideEffects: {
+          answerUpserts: [intent({ slotKey: 'q1', provenance: 'refined', confidence: 0.75 })],
+          answerRefinements: [],
+        },
+        assessment: assessment({ answeredCount: 1 }),
+      }),
+      { questions: QUESTIONS }
+    );
+    const extraction = steps.find((s) => s.kind === 'extraction');
+    expect(extraction?.detail).toMatch(/Updated from later context/);
+    expect(extraction?.tone).toBe('insight');
+  });
+
+  it('labels confidence as "high" at 0.8 and "low" below 0.5', () => {
+    const high = buildReasoningTrace(
+      result({
+        sideEffects: {
+          answerUpserts: [intent({ slotKey: 'q1', provenance: 'direct', confidence: 0.8 })],
+          answerRefinements: [],
+        },
+        assessment: assessment({ answeredCount: 1 }),
+      }),
+      { questions: QUESTIONS }
+    );
+    expect(high.find((s) => s.kind === 'extraction')?.detail).toMatch(/high confidence/);
+
+    const low = buildReasoningTrace(
+      result({
+        sideEffects: {
+          answerUpserts: [intent({ slotKey: 'q1', provenance: 'direct', confidence: 0.3 })],
+          answerRefinements: [],
+        },
+        assessment: assessment({ answeredCount: 1 }),
+      }),
+      { questions: QUESTIONS }
+    );
+    expect(low.find((s) => s.kind === 'extraction')?.detail).toMatch(/low confidence/);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Refinement source phrase variants (lines 69-80 in source)
+  // ---------------------------------------------------------------------------
+
+  it('phrases a clarification refinement correctly', () => {
+    const steps = buildReasoningTrace(
+      result({
+        sideEffects: {
+          answerUpserts: [],
+          answerRefinements: [
+            {
+              slotKey: 'q1',
+              action: 'refine',
+              questionType: 'free_text',
+              newValue: 'x',
+              rationale: '  ', // whitespace-only — cleanRationale returns undefined
+              source: 'clarification',
+              confidence: 0.7,
+            },
+          ],
+        },
+        assessment: assessment({ answeredCount: 1 }),
+      }),
+      { questions: QUESTIONS }
+    );
+    const refinement = steps.find((s) => s.kind === 'refinement');
+    expect(refinement?.detail).toBe('Clarified from later context');
+    // No rationale was provided — the field should be absent.
+    expect(refinement?.rationale).toBeUndefined();
+  });
+
+  it('phrases a correction refinement correctly', () => {
+    const steps = buildReasoningTrace(
+      result({
+        sideEffects: {
+          answerUpserts: [],
+          answerRefinements: [
+            {
+              slotKey: 'q2',
+              action: 'refine',
+              questionType: 'free_text',
+              newValue: 'y',
+              rationale: 'Typo in original capture.',
+              source: 'correction',
+              confidence: 0.9,
+            },
+          ],
+        },
+        assessment: assessment({ answeredCount: 1 }),
+      }),
+      { questions: QUESTIONS }
+    );
+    const refinement = steps.find((s) => s.kind === 'refinement');
+    expect(refinement?.detail).toBe('Corrected an earlier capture');
+    expect(refinement?.rationale).toBe('Typo in original capture.');
+  });
+
+  it('phrases a manual refinement correctly', () => {
+    const steps = buildReasoningTrace(
+      result({
+        sideEffects: {
+          answerUpserts: [],
+          answerRefinements: [
+            {
+              slotKey: 'q1',
+              action: 'refine',
+              questionType: 'free_text',
+              newValue: 'z',
+              rationale: '  ',
+              source: 'manual',
+              confidence: 1,
+            },
+          ],
+        },
+        assessment: assessment({ answeredCount: 1 }),
+      }),
+      { questions: QUESTIONS }
+    );
+    const refinement = steps.find((s) => s.kind === 'refinement');
+    expect(refinement?.detail).toBe('You edited this directly');
+    // Whitespace-only rationale should not appear.
+    expect(refinement?.rationale).toBeUndefined();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Selection strategy variants — random and weighted (lines 98-100 in source)
+  // ---------------------------------------------------------------------------
+
+  it('phrases random strategy selection detail', () => {
+    const steps = buildReasoningTrace(result({ selectionStrategy: 'random' }), {
+      questions: QUESTIONS,
+    });
+    const selection = steps.find((s) => s.kind === 'selection');
+    expect(selection?.detail).toMatch(/varied/);
+  });
+
+  it('phrases weighted strategy selection detail', () => {
+    const steps = buildReasoningTrace(result({ selectionStrategy: 'weighted' }), {
+      questions: QUESTIONS,
+    });
+    const selection = steps.find((s) => s.kind === 'selection');
+    expect(selection?.detail).toMatch(/matter most/);
+  });
+
+  it('uses adaptive fallback phrasing when adaptive strategy has no rationale', () => {
+    const steps = buildReasoningTrace(
+      result({ selectionStrategy: 'adaptive', selectionRationale: undefined }),
+      { questions: QUESTIONS }
+    );
+    const selection = steps.find((s) => s.kind === 'selection');
+    expect(selection?.detail).toMatch(/most naturally/);
+  });
+
+  // ---------------------------------------------------------------------------
+  // response.kind === 'none' — end-of-questions selection step (line 233 in source)
+  // ---------------------------------------------------------------------------
+
+  it('emits an end-of-questions selection step on a "none" response', () => {
+    const steps = buildReasoningTrace(
+      result({
+        response: { kind: 'none', text: 'All done!' },
+        targetedQuestionId: null,
+        assessment: assessment({ answeredCount: 3, coverage: 0.9 }),
+      }),
+      { questions: QUESTIONS }
+    );
+    const selection = steps.find((s) => s.kind === 'selection');
+    expect(selection?.label).toBe("We've reached the end of the questions");
+    expect(selection?.tone).toBe('neutral');
+    // A "none" selection carries no routing detail.
+    expect(selection?.detail).toBeUndefined();
+  });
+
+  // ---------------------------------------------------------------------------
+  // completion step — blocked_on_required label (line 199-205 in source)
+  // ---------------------------------------------------------------------------
+
+  it('labels completion as "required questions still to go" when blocked_on_required', () => {
+    const steps = buildReasoningTrace(
+      result({
+        assessment: assessment({
+          kind: 'blocked_on_required',
+          answeredCount: 2,
+          coverage: 0.4,
+          requiredUnansweredKeys: ['q2'],
+          unmet: [],
+        }),
+      }),
+      { questions: QUESTIONS }
+    );
+    const completion = steps.find((s) => s.kind === 'completion');
+    expect(completion?.label).toMatch(/required questions/);
+    expect(completion?.detail).toMatch(/40% covered so far/);
+    expect(completion?.tone).toBe('neutral');
+  });
+
+  // ---------------------------------------------------------------------------
+  // Data-slot fill with no rationale — rationale field should be absent
+  // ---------------------------------------------------------------------------
+
+  it('omits rationale from a data-slot extraction step when fill has no rationale', () => {
+    const steps = buildReasoningTrace(
+      result({
+        response: {
+          kind: 'data_slot',
+          dataSlotId: 'd1',
+          dataSlotKey: 'timeline',
+          name: 'Timeline',
+          description: '',
+          theme: 't',
+          isReask: false,
+          isTransition: false,
+        },
+        targetedQuestionId: null,
+        selectionStrategy: undefined,
+        sideEffects: {
+          answerUpserts: [],
+          answerRefinements: [],
+          dataSlotFills: [
+            {
+              dataSlotKey: 'timeline',
+              value: 'soon',
+              paraphrase: 'Wants to move quickly',
+              confidence: 0.8,
+              provenance: 'direct',
+              // no rationale field
+            },
+          ],
+        },
+      }),
+      {
+        questions: QUESTIONS,
+        dataSlots: [
+          {
+            id: 'd1',
+            key: 'timeline',
+            name: 'Timeline',
+            description: '',
+            theme: 't',
+            ordinal: 0,
+            weight: 1,
+          },
+        ],
+      }
+    );
+    const extraction = steps.find((s) => s.kind === 'extraction');
+    expect(extraction?.label).toContain('Timeline');
+    expect(extraction?.rationale).toBeUndefined();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Data-slot fill with empty paraphrase — detail field should be absent
+  // ---------------------------------------------------------------------------
+
+  it('omits detail from a data-slot extraction step when paraphrase is blank', () => {
+    const steps = buildReasoningTrace(
+      result({
+        response: {
+          kind: 'data_slot',
+          dataSlotId: 'd1',
+          dataSlotKey: 'timeline',
+          name: 'Timeline',
+          description: '',
+          theme: 't',
+          isReask: false,
+          isTransition: false,
+        },
+        targetedQuestionId: null,
+        selectionStrategy: undefined,
+        sideEffects: {
+          answerUpserts: [],
+          answerRefinements: [],
+          dataSlotFills: [
+            {
+              dataSlotKey: 'timeline',
+              value: 'soon',
+              paraphrase: '   ', // blank — should not appear as detail
+              confidence: 0.7,
+              provenance: 'direct',
+            },
+          ],
+        },
+      }),
+      {
+        questions: QUESTIONS,
+        dataSlots: [
+          {
+            id: 'd1',
+            key: 'timeline',
+            name: 'Timeline',
+            description: '',
+            theme: 't',
+            ordinal: 0,
+            weight: 1,
+          },
+        ],
+      }
+    );
+    const extraction = steps.find((s) => s.kind === 'extraction');
+    expect(extraction).toBeDefined();
+    expect(extraction?.detail).toBeUndefined();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Data-slot fill — resolves the slot name from the dataSlots list, with an
+  // "a detail" fallback when the fill's key isn't among the configured slots.
+  // ---------------------------------------------------------------------------
+
+  it('resolves the data-slot name when the fill key IS in the dataSlots list', () => {
+    const steps = buildReasoningTrace(
+      result({
+        response: {
+          kind: 'data_slot',
+          dataSlotId: 'd9',
+          dataSlotKey: 'unknown_slot',
+          name: 'Unknown',
+          description: '',
+          theme: 'x',
+          isReask: false,
+          isTransition: false,
+        },
+        targetedQuestionId: null,
+        selectionStrategy: undefined,
+        sideEffects: {
+          answerUpserts: [],
+          answerRefinements: [],
+          dataSlotFills: [
+            {
+              dataSlotKey: 'unknown_slot',
+              value: 'v',
+              paraphrase: 'some detail',
+              confidence: 0.6,
+              provenance: 'inferred',
+            },
+          ],
+        },
+      }),
+      {
+        questions: QUESTIONS,
+        dataSlots: [
+          {
+            id: 'd9',
+            key: 'unknown_slot',
+            name: 'Unknown',
+            description: '',
+            theme: 'x',
+            ordinal: 0,
+            weight: 1,
+          },
+        ],
+      }
+    );
+    const extraction = steps.find((s) => s.kind === 'extraction');
+    expect(extraction?.label).toContain('Unknown');
+  });
+
+  it('falls back to "a detail" label when the fill key is absent from the dataSlots list', () => {
+    // dataSlots is non-empty (so the extraction branch runs) but does NOT contain the fill's
+    // key, so dataSlotNameByKey.get(...) misses and the `?? 'a detail'` fallback (L133) fires.
+    const steps = buildReasoningTrace(
+      result({
+        response: {
+          kind: 'data_slot',
+          dataSlotId: 'd1',
+          dataSlotKey: 'configured_slot',
+          name: 'Configured',
+          description: '',
+          theme: 'x',
+          isReask: false,
+          isTransition: false,
+        },
+        targetedQuestionId: null,
+        selectionStrategy: undefined,
+        sideEffects: {
+          answerUpserts: [],
+          answerRefinements: [],
+          dataSlotFills: [
+            {
+              dataSlotKey: 'orphan_slot', // not present in the dataSlots list below
+              value: 'v',
+              paraphrase: 'some detail',
+              confidence: 0.6,
+              provenance: 'inferred',
+            },
+          ],
+        },
+      }),
+      {
+        questions: QUESTIONS,
+        dataSlots: [
+          {
+            id: 'd1',
+            key: 'configured_slot',
+            name: 'Configured',
+            description: '',
+            theme: 'x',
+            ordinal: 0,
+            weight: 1,
+          },
+        ],
+      }
+    );
+    const extraction = steps.find((s) => s.kind === 'extraction');
+    expect(extraction?.label).toContain('a detail');
+  });
+
+  // ---------------------------------------------------------------------------
+  // Question label fallback — unknown slotKey resolves to 'your answer'
+  // ---------------------------------------------------------------------------
+
+  it('falls back to "your answer" when the slotKey is not in the questions list', () => {
+    const steps = buildReasoningTrace(
+      result({
+        sideEffects: {
+          answerUpserts: [
+            intent({ slotKey: 'unknown_key', provenance: 'direct', confidence: 0.9 }),
+          ],
+          answerRefinements: [],
+        },
+        assessment: assessment({ answeredCount: 1 }),
+      }),
+      { questions: QUESTIONS }
+    );
+    const extraction = steps.find((s) => s.kind === 'extraction');
+    expect(extraction?.label).toContain('your answer');
+  });
+
+  // ---------------------------------------------------------------------------
+  // Opening turn — data_slot response uses "Let's start with" phrasing
+  // ---------------------------------------------------------------------------
+
+  it('uses "Let\'s start with" phrasing for data_slot response on opening turn', () => {
+    const steps = buildReasoningTrace(
+      result({
+        response: {
+          kind: 'data_slot',
+          dataSlotId: 'd1',
+          dataSlotKey: 'timeline',
+          name: 'Timeline',
+          description: '',
+          theme: 't',
+          isReask: false,
+          isTransition: false,
+        },
+        targetedQuestionId: null,
+        selectionStrategy: undefined,
+        sideEffects: { answerUpserts: [], answerRefinements: [] },
+        assessment: assessment({ answeredCount: 0 }),
+      }),
+      {
+        questions: QUESTIONS,
+        dataSlots: [
+          {
+            id: 'd1',
+            key: 'timeline',
+            name: 'Timeline',
+            description: '',
+            theme: 't',
+            ordinal: 0,
+            weight: 1,
+          },
+        ],
+        isOpening: true,
+      }
+    );
+    const selection = steps.find((s) => s.kind === 'selection');
+    expect(selection?.label).toMatch(/Let's start with/);
+    expect(selection?.label).toContain('Timeline');
+  });
+
+  // ---------------------------------------------------------------------------
+  // Targeted question label — uses questionLabelById when targetedQuestionId is set
+  // ---------------------------------------------------------------------------
+
+  it('uses the targeted question label in the selection step when targetedQuestionId resolves', () => {
+    const steps = buildReasoningTrace(
+      result({
+        response: { kind: 'question', questionId: 'q1', text: 'Prompt for q1' },
+        targetedQuestionId: 'q1',
+      }),
+      { questions: QUESTIONS }
+    );
+    const selection = steps.find((s) => s.kind === 'selection');
+    expect(selection?.label).toContain('Prompt for q1');
+  });
+
+  it('falls back to "the next question" label when targetedQuestionId is absent', () => {
+    const steps = buildReasoningTrace(
+      result({
+        response: { kind: 'question', questionId: 'q2', text: 'Prompt for q2' },
+        targetedQuestionId: null,
+      }),
+      { questions: QUESTIONS }
+    );
+    const selection = steps.find((s) => s.kind === 'selection');
+    expect(selection?.label).toContain('the next question');
+  });
 });

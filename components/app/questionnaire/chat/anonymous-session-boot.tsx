@@ -29,6 +29,7 @@ import { Button } from '@/components/ui/button';
 import { SessionWorkspace } from '@/components/app/questionnaire/session-workspace';
 import { buildWelcomeTurns } from '@/lib/app/questionnaire/chat/greeting';
 import type { PresentationMode, ReasoningPlacement } from '@/lib/app/questionnaire/types';
+import { ANSWER_PROVENANCES } from '@/lib/app/questionnaire/types';
 import type { QuestionnaireTurn } from '@/lib/app/questionnaire/chat/types';
 import { REASONING_STEP_KINDS, REASONING_TONES } from '@/lib/app/questionnaire/reasoning';
 
@@ -118,7 +119,7 @@ const transcriptResponseSchema = z.object({
                 rationale: z.string().optional(),
                 sourceQuote: z.string().optional(),
                 confidence: z.number().optional(),
-                provenance: z.enum(['direct', 'inferred', 'synthesised', 'refined']).optional(),
+                provenance: z.enum(ANSWER_PROVENANCES).optional(),
               })
             )
             .optional(),

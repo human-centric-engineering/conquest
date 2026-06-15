@@ -42,12 +42,13 @@ import {
   isReasoningStreamEnabled,
   isSeriousnessGateEnabled,
   isSensitivityAwarenessEnabled,
+  isToneEnabled,
   withLiveSessionsEnabled,
 } from '@/lib/app/questionnaire/feature-flag';
 import { buildReasoningTrace, type ReasoningStep } from '@/lib/app/questionnaire/reasoning';
 import type { SessionWarning } from '@/lib/app/questionnaire/chat/types';
 import { classifyCostCap } from '@/lib/app/questionnaire/session';
-import { ABUSE_ABANDON_REASON } from '@/lib/app/questionnaire/types';
+import { ABUSE_ABANDON_REASON, TONE_DIMENSION_KEYS } from '@/lib/app/questionnaire/types';
 import {
   runTurn,
   runDataSlotTurn,
@@ -193,6 +194,7 @@ async function handleMessage(
       seriousnessGate,
       sensitivityAwarenessFlag,
       reasoningStreamFlag,
+      toneFlag,
     ] = await Promise.all([
       isAnswerExtractionEnabled(),
       isContradictionDetectionEnabled(),
@@ -205,6 +207,7 @@ async function handleMessage(
       isSeriousnessGateEnabled(),
       isSensitivityAwarenessEnabled(),
       isReasoningStreamEnabled(),
+      isToneEnabled(),
     ]);
 
     // Sensitivity awareness runs only when the platform flag AND the per-questionnaire config
@@ -221,6 +224,15 @@ async function handleMessage(
     // live but isn't saved, so resumed turns show nothing. Both inert when the flag is off.
     const reasoningStreamOn = reasoningStreamFlag && loaded.base.config.reasoningStreamEnabled;
     const reasoningPersist = reasoningStreamOn && loaded.base.config.reasoningStreamPersist;
+
+    // Interviewer tone & persona (F-tone): the platform flag AND at least one configured dimension
+    // (or the persona) being on. When neither holds the phraser keeps its default voice, so we omit
+    // `tone` from its input entirely. Resolved once and threaded into both phrasing call sites below.
+    const toneConfig = loaded.base.config.tone;
+    const toneActive =
+      toneFlag &&
+      (toneConfig.persona.enabled || TONE_DIMENSION_KEYS.some((key) => toneConfig[key].enabled));
+    const tonePhraserInput = toneActive ? { tone: toneConfig } : {};
 
     // Attachments only flow when the platform sub-flag is on (dark-launch) AND this questionnaire
     // opted in via config: with either off, a client that sends attachments anyway gets a
@@ -283,6 +295,11 @@ async function handleMessage(
                 name: s.name,
                 description: s.description,
                 theme: s.theme,
+                // Forward propagation: the question(s) this slot captures, so filling it in chat
+                // ALSO answers the underlying form questions (the schema-documented contract).
+                ...(s.mappedQuestionKeys && s.mappedQuestionKeys.length > 0
+                  ? { mappedQuestionKeys: s.mappedQuestionKeys }
+                  : {}),
                 ...(fill
                   ? {
                       current: {
@@ -432,6 +449,7 @@ async function handleMessage(
             ...(r.isReask && currentUnderstanding ? { currentUnderstanding } : {}),
             ...(isFinalAttempt ? { isFinalAttempt: true } : {}),
             ...sensitivityPhraserInput,
+            ...tonePhraserInput,
           },
           userId,
           sessionId,
@@ -464,6 +482,7 @@ async function handleMessage(
             isOpening: state.selectionRound === 0,
             questionsAsked: state.selectionRound,
             ...sensitivityPhraserInput,
+            ...tonePhraserInput,
           },
           userId,
           sessionId,

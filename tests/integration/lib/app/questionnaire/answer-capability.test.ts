@@ -372,6 +372,22 @@ describe('AppExtractAnswerSlotsCapability — dispatch', () => {
     expect(provider.chat).toHaveBeenCalledTimes(2);
   });
 
+  it('names the invalid schema paths in the error when both attempts return schema-invalid JSON', async () => {
+    // The model returns parseable JSON (not a JSON.parse error) but missing required fields.
+    // This path sets lastIssuePaths and includes them in the onFinalFailure error message.
+    const schemaInvalidJson = JSON.stringify({ wrongField: true }); // missing `answers`
+    const provider = makeProvider([{ content: schemaInvalidJson }, { content: schemaInvalidJson }]);
+    (getProvider as Mock).mockResolvedValue(provider);
+
+    const result = await capabilityDispatcher.dispatch(SLUG, baseArgs(), baseContext());
+
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('extraction_failed');
+    // The error message must name the invalid field paths — not just "schema invalid after retry"
+    expect(result.error?.message).toMatch(/invalid at:/);
+    expect(provider.chat).toHaveBeenCalledTimes(2);
+  });
+
   it('rejects invalid args (missing userMessage) at the dispatcher boundary', async () => {
     (getProvider as Mock).mockResolvedValue(makeProvider([{ content: VALID_JSON }]));
 
@@ -524,6 +540,395 @@ describe('AppExtractAnswerSlotsCapability — dispatch', () => {
     );
     expect(chatCall).toBeDefined();
     expect(chatCall?.[0]).not.toHaveProperty('agentId');
+  });
+});
+
+describe('AppExtractAnswerSlotsCapability — data-slot mode', () => {
+  it('returns dataSlotFills for known candidate keys and discards unknown keys', async () => {
+    // The model returns fills for known + unknown keys; normalizeDataSlotFills should keep
+    // only the known candidate key and silently drop the unknown one.
+    const payload = JSON.stringify({
+      answers: [],
+      dataSlotFills: [
+        {
+          dataSlotKey: 'career_goal',
+          value: 'Senior Engineer',
+          paraphrase: 'Wants to become a senior engineer',
+          confidence: 0.85,
+          provenance: 'direct',
+          rationale: 'Stated explicitly',
+        },
+        {
+          // This key is NOT in dataSlotCandidates — it must be dropped
+          dataSlotKey: 'unknown_slot',
+          value: 'something',
+          paraphrase: 'irrelevant',
+          confidence: 0.5,
+          provenance: 'inferred',
+        },
+      ],
+    });
+    (getProvider as Mock).mockResolvedValue(makeProvider([{ content: payload }]));
+
+    const result = await capabilityDispatcher.dispatch(
+      SLUG,
+      {
+        userMessage: 'I want to become a senior engineer',
+        candidateSlots: [],
+        dataSlotCandidates: [
+          {
+            key: 'career_goal',
+            name: 'Career Goal',
+            description: 'Their career ambition',
+            theme: 'career',
+          },
+        ],
+      },
+      baseContext()
+    );
+
+    expect(result.success).toBe(true);
+    const data = result.data as {
+      dataSlotFills?: Array<{ dataSlotKey: string; value: unknown; paraphrase: string }>;
+      intents: unknown[];
+    };
+    // The unknown key was dropped — only the candidate key survives
+    expect(data.dataSlotFills).toHaveLength(1);
+    expect(data.dataSlotFills?.[0]?.dataSlotKey).toBe('career_goal');
+    expect(data.dataSlotFills?.[0]?.value).toBe('Senior Engineer');
+    expect(data.dataSlotFills?.[0]?.paraphrase).toBe('Wants to become a senior engineer');
+    // No question answers in pure data-slot mode
+    expect(data.intents).toHaveLength(0);
+  });
+
+  it('returns empty dataSlotFills when the model emits none', async () => {
+    const payload = JSON.stringify({
+      answers: [],
+      dataSlotFills: [],
+    });
+    (getProvider as Mock).mockResolvedValue(makeProvider([{ content: payload }]));
+
+    const result = await capabilityDispatcher.dispatch(
+      SLUG,
+      {
+        userMessage: 'I am not sure',
+        candidateSlots: [],
+        dataSlotCandidates: [
+          {
+            key: 'mood',
+            name: 'Mood',
+            description: 'Current emotional state',
+            theme: 'wellbeing',
+          },
+        ],
+      },
+      baseContext()
+    );
+
+    expect(result.success).toBe(true);
+    const data = result.data as { dataSlotFills?: unknown[] };
+    // dataSlotFills is present (candidates were in the call) but empty (model emitted nothing)
+    expect(data.dataSlotFills).toEqual([]);
+  });
+
+  it('deduplicates fills that reference the same data-slot key', async () => {
+    // The model mistakenly sends the same key twice — normalizeDataSlotFills must keep only the first.
+    const payload = JSON.stringify({
+      answers: [],
+      dataSlotFills: [
+        {
+          dataSlotKey: 'location',
+          value: 'London',
+          paraphrase: 'Based in London',
+          confidence: 0.9,
+          provenance: 'direct',
+        },
+        {
+          // Duplicate key — must be dropped
+          dataSlotKey: 'location',
+          value: 'Manchester',
+          paraphrase: 'Actually Manchester',
+          confidence: 0.7,
+          provenance: 'inferred',
+        },
+      ],
+    });
+    (getProvider as Mock).mockResolvedValue(makeProvider([{ content: payload }]));
+
+    const result = await capabilityDispatcher.dispatch(
+      SLUG,
+      {
+        userMessage: 'I live in London',
+        candidateSlots: [],
+        dataSlotCandidates: [
+          {
+            key: 'location',
+            name: 'Location',
+            description: 'Where they live',
+            theme: 'demographics',
+          },
+        ],
+      },
+      baseContext()
+    );
+
+    expect(result.success).toBe(true);
+    const data = result.data as { dataSlotFills?: Array<{ dataSlotKey: string; value: unknown }> };
+    // Deduplicated — only the first fill is kept
+    expect(data.dataSlotFills).toHaveLength(1);
+    expect(data.dataSlotFills?.[0]?.value).toBe('London');
+  });
+
+  it('passes rationale through when the model includes it on a data-slot fill', async () => {
+    const payload = JSON.stringify({
+      answers: [],
+      dataSlotFills: [
+        {
+          dataSlotKey: 'goals',
+          value: 'Lead a team',
+          paraphrase: 'Aspires to team leadership',
+          confidence: 0.8,
+          provenance: 'inferred',
+          rationale: 'Mentioned wanting to mentor others',
+        },
+      ],
+    });
+    (getProvider as Mock).mockResolvedValue(makeProvider([{ content: payload }]));
+
+    const result = await capabilityDispatcher.dispatch(
+      SLUG,
+      {
+        userMessage: 'I want to mentor others one day',
+        candidateSlots: [],
+        dataSlotCandidates: [
+          { key: 'goals', name: 'Goals', description: 'Career goals', theme: 'career' },
+        ],
+      },
+      baseContext()
+    );
+
+    expect(result.success).toBe(true);
+    const data = result.data as { dataSlotFills?: Array<{ rationale?: string }> };
+    // The normalizer passes rationale through when present
+    expect(data.dataSlotFills?.[0]?.rationale).toBe('Mentioned wanting to mentor others');
+  });
+
+  it('logs data-slot fill diagnostics when candidates are present', async () => {
+    const payload = JSON.stringify({
+      answers: [],
+      dataSlotFills: [
+        {
+          dataSlotKey: 'satisfaction',
+          value: 'high',
+          paraphrase: 'Very satisfied',
+          confidence: 0.9,
+          provenance: 'direct',
+        },
+      ],
+    });
+    (getProvider as Mock).mockResolvedValue(makeProvider([{ content: payload }]));
+
+    await capabilityDispatcher.dispatch(
+      SLUG,
+      {
+        userMessage: 'I am very happy here',
+        candidateSlots: [],
+        dataSlotCandidates: [
+          {
+            key: 'satisfaction',
+            name: 'Satisfaction',
+            description: 'Job satisfaction',
+            theme: 'engagement',
+          },
+        ],
+      },
+      baseContext()
+    );
+
+    // The execute method logs data-slot fill stats when candidates are present.
+    // This verifies the logging block at lines 536-540 runs.
+    expect(logger.info).toHaveBeenCalledWith(
+      'extract_answer_slots: data-slot fills',
+      expect.objectContaining({
+        candidateCount: 1,
+        modelReturnedCount: 1,
+        keptCount: 1,
+      })
+    );
+  });
+
+  it('logs droppedUnknownKeys when the model emits fills for unknown slots', async () => {
+    const payload = JSON.stringify({
+      answers: [],
+      dataSlotFills: [
+        {
+          dataSlotKey: 'unknown_key',
+          value: 'whatever',
+          paraphrase: 'ignored',
+          confidence: 0.5,
+          provenance: 'inferred',
+        },
+      ],
+    });
+    (getProvider as Mock).mockResolvedValue(makeProvider([{ content: payload }]));
+
+    await capabilityDispatcher.dispatch(
+      SLUG,
+      {
+        userMessage: 'blah blah',
+        candidateSlots: [],
+        dataSlotCandidates: [
+          { key: 'known_slot', name: 'Known', description: 'A known slot', theme: 'test' },
+        ],
+      },
+      baseContext()
+    );
+
+    // The logging block records droppedUnknownKeys when keys are out-of-candidate
+    expect(logger.info).toHaveBeenCalledWith(
+      'extract_answer_slots: data-slot fills',
+      expect.objectContaining({
+        droppedUnknownKeys: ['unknown_key'],
+      })
+    );
+  });
+
+  it('combines question answers AND data-slot fills in mixed mode', async () => {
+    const payload = JSON.stringify({
+      answers: [
+        {
+          slotKey: 'full_name',
+          value: 'Alice',
+          confidence: 0.95,
+          provenance: 'direct',
+          rationale: 'stated',
+          sourceQuote: 'Alice',
+        },
+      ],
+      dataSlotFills: [
+        {
+          dataSlotKey: 'sentiment',
+          value: 'positive',
+          paraphrase: 'Positive about the role',
+          confidence: 0.8,
+          provenance: 'inferred',
+        },
+      ],
+    });
+    (getProvider as Mock).mockResolvedValue(makeProvider([{ content: payload }]));
+
+    const result = await capabilityDispatcher.dispatch(
+      SLUG,
+      baseArgs({
+        dataSlotCandidates: [
+          {
+            key: 'sentiment',
+            name: 'Sentiment',
+            description: 'Overall sentiment',
+            theme: 'engagement',
+          },
+        ],
+      }),
+      baseContext()
+    );
+
+    expect(result.success).toBe(true);
+    const data = result.data as {
+      intents: Array<{ slotKey: string }>;
+      dataSlotFills?: Array<{ dataSlotKey: string }>;
+    };
+    // Both paths run: question intent AND data-slot fill
+    expect(data.intents).toHaveLength(1);
+    expect(data.intents[0]?.slotKey).toBe('full_name');
+    expect(data.dataSlotFills).toHaveLength(1);
+    expect(data.dataSlotFills?.[0]?.dataSlotKey).toBe('sentiment');
+  });
+});
+
+describe('AppExtractAnswerSlotsCapability — optional result fields', () => {
+  it('passes suspectedNonGenuine=true through to the result data', async () => {
+    const payload = JSON.stringify({
+      answers: [],
+      suspectedNonGenuine: true,
+      suspicionReason: 'Answer is preposterous',
+    });
+    (getProvider as Mock).mockResolvedValue(makeProvider([{ content: payload }]));
+
+    const result = await capabilityDispatcher.dispatch(SLUG, baseArgs(), baseContext());
+
+    expect(result.success).toBe(true);
+    const data = result.data as {
+      suspectedNonGenuine?: boolean;
+      suspicionReason?: string;
+    };
+    // The capability passes the model's suspicion flag through so the orchestrator can
+    // decide whether to invoke the dedicated judge — it does NOT make the judgement itself.
+    expect(data.suspectedNonGenuine).toBe(true);
+    expect(data.suspicionReason).toBe('Answer is preposterous');
+  });
+
+  it('omits suspectedNonGenuine when the model does not set it', async () => {
+    (getProvider as Mock).mockResolvedValue(makeProvider([{ content: VALID_JSON }]));
+
+    const result = await capabilityDispatcher.dispatch(SLUG, baseArgs(), baseContext());
+
+    expect(result.success).toBe(true);
+    const data = result.data as Record<string, unknown>;
+    // Optional fields absent from the model response must NOT appear on the result.
+    expect(data).not.toHaveProperty('suspectedNonGenuine');
+    expect(data).not.toHaveProperty('suspicionReason');
+  });
+
+  it('passes sensitivity assessment through when the model detects a disclosure', async () => {
+    const sensitivityPayload = JSON.stringify({
+      answers: [
+        {
+          slotKey: 'full_name',
+          value: 'Dana',
+          confidence: 0.9,
+          provenance: 'direct',
+          rationale: 'stated',
+        },
+      ],
+      sensitivity: {
+        detected: true,
+        severity: 'high',
+        category: 'harassment',
+        summary: 'Respondent describes mistreatment',
+      },
+    });
+    (getProvider as Mock).mockResolvedValue(makeProvider([{ content: sensitivityPayload }]));
+
+    const result = await capabilityDispatcher.dispatch(
+      SLUG,
+      baseArgs({ sensitivityAware: true }),
+      baseContext()
+    );
+
+    expect(result.success).toBe(true);
+    const data = result.data as {
+      sensitivity?: { detected: boolean; severity: string; category: string; summary: string };
+    };
+    // The capability passes sensitivity through for the orchestrator to act on (safeguarding).
+    expect(data.sensitivity?.detected).toBe(true);
+    expect(data.sensitivity?.severity).toBe('high');
+    expect(data.sensitivity?.category).toBe('harassment');
+    // The summary is present on the in-memory result (the orchestrator needs it to remember)
+    expect(data.sensitivity?.summary).toBe('Respondent describes mistreatment');
+  });
+
+  it('omits sensitivity when the model does not emit it', async () => {
+    (getProvider as Mock).mockResolvedValue(makeProvider([{ content: VALID_JSON }]));
+
+    const result = await capabilityDispatcher.dispatch(
+      SLUG,
+      baseArgs({ sensitivityAware: true }),
+      baseContext()
+    );
+
+    expect(result.success).toBe(true);
+    const data = result.data as Record<string, unknown>;
+    expect(data).not.toHaveProperty('sensitivity');
   });
 });
 

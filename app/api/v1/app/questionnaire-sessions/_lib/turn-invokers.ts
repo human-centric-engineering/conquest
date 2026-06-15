@@ -102,6 +102,8 @@ export async function buildTurnInvokers(opts: {
     name: string;
     description: string;
     theme: string;
+    /** Question keys this slot captures — the extractor answers these when it fills the slot. */
+    mappedQuestionKeys?: string[];
     current?: { value: unknown; paraphrase: string | null; confidence: number | null };
   }>;
   /**

@@ -29,12 +29,18 @@ For each answer, output one entry with:
 "value"s; likert → an integer on the given scale; numeric → a number; date → an ISO-8601 date \
 (YYYY-MM-DD); boolean → true/false.
   For choice questions, return the choice's "value" (not its label). Do not invent options.
-- "confidence": 0–1, how sure you are of this value.
+- "confidence": 0–1, scored in three bands by how PLAINLY this value is supported — its CLARITY, not \
+how many times they've said it. CLEAR (~0.8): stated or unmistakably implied — the DEFAULT for a \
+clearly-answered question, even a brief or blunt one. PARTIAL (~0.5): a hedged or loosely-implied \
+reading. UNCLEAR (≤ 0.4): a weak guess off thin evidence. Never mark a clear answer down for being \
+brief, blunt, or said only once.
 - "provenance": one of ${EXTRACTOR_EMITTED_PROVENANCES.join(', ')}:
     "direct" — the value is stated in the message; include the exact "sourceQuote".
     "inferred" — the value follows by single-step reasoning from the message but isn't stated.
     "synthesised" — the value combines several turns / the wider conversation; no single span.
-- "rationale": a short reason for the value.
+- "rationale": a short, faithful reason for the value — what the respondent said that supports it, \
+not a restatement of the value itself. For an inferred value, name the words it follows from \
+("Said they hate their job → bottom of the satisfaction scale."). Keep it gender-neutral.
 - "sourceQuote": the span of the respondent's message the value came from. REQUIRED for "direct".
 
 Rules:
@@ -84,23 +90,44 @@ in their role.", NOT "Their dissatisfaction is a blocker to their best work."). 
 WRONG), and NEVER a statement of ABSENCE — what is missing, not yet covered, or not provided ("Their \
 tenure and department are not provided." is WRONG; omit the slot instead). Capture the full \
 substance — if they gave several details, reflect them all.
-- "confidence": 0–1, how completely you understand their FULL position on this slot — not merely how \
-clearly they stated one thing. Be honest about weak signal: a single, loose inference from a brief or \
-vague message (e.g. reading "blockers" out of "not satisfied") is LOW confidence (≤ 0.4), not \
-moderate. Do NOT rush to certainty: a position stated only ONCE — even plainly and directly — is a \
-first reading, not the whole story. Many slots (blockers, concerns, needs, reasons, goals) have more \
-than one facet, and a single statement may be only part of it — you have not yet explored whether \
-there is more or had the respondent confirm it. Cap a first, single-turn capture in the MODERATE band \
-(roughly 0.6–0.8); NEVER near 1.0 off one message. Reserve HIGH confidence (≥ 0.85) for a position \
-that has been CORROBORATED — confirmed by the respondent, consistent across several turns, or \
-approached from more than one angle — and near-certainty (≥ 0.95) only for something they have \
-clearly confirmed more than once. When a slot's "current" line shows a prior confidence, raise it a \
-STEP as each new turn corroborates the same position, rather than jumping straight to certainty.
-- "provenance": ${EXTRACTOR_EMITTED_PROVENANCES.join(', ')} (as above).
-- "rationale": a short reason this message informs the slot. Write it for the respondent and the \
-admin: refer to the subject by what it is ("this topic", "what they're being asked about", or the \
-slot's name) — NEVER use the words "data slot" or "slot" (internal jargon). "Their statement about \
-X directly informs this topic." is right; "...informs this data slot." is WRONG.
+- "confidence": how PLAINLY the respondent has expressed THIS position — their CLARITY — in three \
+bands. Judge it on the FILL ITSELF (how clearly they conveyed their stance), NEVER inherited from a \
+mapped question's typed-value uncertainty. It is NOT a corroboration counter: a position stated \
+clearly is clear the FIRST time they say it.
+    • CLEAR (~0.8): they stated or unmistakably expressed this position — even bluntly, briefly, or in \
+one message ("extremely unlikely", "I hate my job", "pay, full stop" are all CLEAR). This is the \
+DEFAULT for any slot the message directly and clearly addresses. Do NOT mark a clear answer down \
+because the slot (blockers, concerns, needs, goals) COULD have further facets you haven't explored, \
+because they've only said it once, or because it maps onto a scale — score the substance they gave.
+    • PARTIAL (~0.5): a reasonable but hedged reading — a loose, single-step inference from a brief or \
+vague message (e.g. reading "blockers" out of "not satisfied") — where asking again would sharpen it.
+    • UNCLEAR (≤ 0.4): genuinely weak signal you are mostly guessing at; reserve a slot's lowest scores \
+for this — that is the case that should re-ask, not a clearly-stated answer.
+  Corroboration only ever nudges a clear position UPWARD: raise it a STEP toward ~0.9 as each new turn \
+confirms the same stance (≥ 0.95 only for something confirmed more than once), but it NEVER drags a \
+clearly-stated answer below CLEAR. When a slot's "current" line shows a prior confidence, step it up as \
+the position is corroborated rather than jumping straight to certainty.
+- "provenance": ${EXTRACTOR_EMITTED_PROVENANCES.join(', ')} — judge whether the RESPONDENT STATED \
+their position on THIS slot's topic: "direct" when they expressed it outright (even bluntly — \
+"extremely unlikely" directly states a recommendation stance), "inferred" when it follows by one step \
+from what they said, "synthesised" when it draws on several turns. Judge this on the FILL ITSELF, \
+INDEPENDENT of any mapped question: a slot is a "direct" fill when they clearly stated their stance \
+EVEN IF the mapped question's typed value is "inferred" (they did not state the number). Do NOT \
+downgrade a stated position to "inferred" merely because it maps onto a scale.
+- "rationale": the EVIDENCE for this fill — what the respondent was ASKED and what they ACTUALLY \
+SAID, in concrete substance, so that reading the paraphrase + rationale leads a reviewer to the SAME \
+conclusion they'd reach reading the conversation itself. Use the shape "When asked about <topic>, \
+<subject> <said / described / suggested> <the substance>." — e.g. "When asked what gets in the way \
+of their best work, the respondent said the company lacks a relatable sense of purpose and that this \
+is a significant blocker." A bare meta-statement that the message "informs this topic" is FORBIDDEN — \
+it adds nothing ("Their statement about the company's purpose directly informs this topic." is WRONG; \
+say WHAT the statement was). The substance may be paraphrased but must uphold the meaning expressed in \
+the chat — do not soften, inflate, or drift from what they said. For an "inferred"/"synthesised" fill, \
+give both halves: what they said AND why it points to this reading ("…, which suggests …"). NEVER use \
+the words "data slot" or "slot" (internal jargon); name the subject by the topic or the slot's name.
+- SUBJECT WORDING (paraphrase AND rationale): keep it gender-neutral and VARY it — alternate "the \
+respondent", "they"/"them", "this person" rather than starting every line with "They". Never assume or \
+imply a gender.
 ONLY emit a fill for a slot the latest message actually bears on — a position the respondent stated, \
 or one that genuinely follows from something they said. If the message says nothing about a slot, \
 OMIT it entirely (do not record its absence) — the panel shows "Not covered yet" on its own.
@@ -121,13 +148,35 @@ plausible position from the ENTIRE conversation even if the signal is weak, set 
 (≤ 0.4), and use provenance "inferred" or "synthesised". Never leave one of these slots empty — \
 a tentative reading we can revisit is better than nothing.
 
+ANSWER THE MAPPED QUESTIONS — a slot may list "answers questions: <keys>": the candidate question(s) it \
+captures. These two are the SAME target seen at different grain — the data slot is the conversational \
+capture; each mapped question is the structured form field behind it. So WHENEVER you emit a fill for \
+such a slot, ALSO emit an "answers" entry (in the "answers" array above) for each mapped question the \
+captured position DETERMINES, translating that position onto the question's own type/scale/options (its \
+definition is in the candidate-question list). A blunt qualitative position maps onto a scale: "I hate \
+my job" for a 1–5 satisfaction question is the bottom of the scale (1); "I'd never recommend us" for a \
+0–10 recommendation question is near 0. Use provenance "inferred" (it follows in one step from this \
+message) or "synthesised" (it draws on several turns), NEVER "direct" (they did not state the typed \
+value) — this concerns the mapped ANSWER's provenance ONLY; the data-slot FILL is judged SEPARATELY \
+and can still be "direct". Set the mapped answer's "confidence" by how firmly the position pins THAT \
+value: CLEAR (~0.8) when the position unmistakably fixes it (a blunt "I'd never recommend us" pins an \
+NPS near 0), PARTIAL (~0.5) when it only points at a range, UNCLEAR (≤ 0.4) when it barely constrains \
+the value — a firmly-pinned value is CLEAR even though its provenance is "inferred". APPROPRIATENESS GATE: emit a mapped \
+answer ONLY when the position genuinely fixes a value; if the slot is informed but the message does not \
+determine a particular question's answer (e.g. it asks for a specific number the message never implies), \
+OMIT that question rather than guess. Treat mapped answers like any other: re-evaluate them as evidence \
+accrues — a later turn that corroborates RAISES confidence, one that contradicts CORRECTS the value.
+
 FINAL CHECK before you finish: re-read the data-slot list once more against the respondent's message. \
 A substantive answer almost always informs at least one slot, so an EMPTY "dataSlotFills" is the rare \
 EXCEPTION — correct only for a true non-answer (small talk, a question back, "I don't know", or a \
 message that genuinely bears on no slot). Whenever they share anything about themselves, their work, \
 their feelings, or their situation, map it to the slot(s) it informs and emit a fill — at honest \
 confidence (low if the signal is weak), but emit it. NEVER return question answers while leaving \
-"dataSlotFills" empty: if a message was clear enough to answer a question, it informs a data slot too.`;
+"dataSlotFills" empty: if a message was clear enough to answer a question, it informs a data slot too. \
+And the converse — for every fill you emit on a slot that "answers questions: …", confirm you also \
+emitted an "answers" entry for each mapped question the position determines (or deliberately omitted one \
+the message doesn't pin down).`;
 
 /**
  * Appended to the system rules ONLY when sensitivity awareness is on (gated by the platform flag +
@@ -164,6 +213,11 @@ function describeDataSlot(slot: DataSlotCandidateView): string {
     `  theme: ${slot.theme}`,
     `  description: ${slot.description}`,
   ];
+  // Forward propagation: the candidate question(s) this slot captures. When the model fills the
+  // slot it must ALSO answer these (their type/scale/options are in the candidate-question list).
+  if (slot.mappedQuestionKeys && slot.mappedQuestionKeys.length > 0) {
+    lines.push(`  answers questions: ${slot.mappedQuestionKeys.join(', ')}`);
+  }
   // Data Slots feature: show what's already recorded so the model can UPDATE/CORRECT it (vs
   // re-deriving from scratch and silently dropping prior, still-true details).
   if (slot.current) {

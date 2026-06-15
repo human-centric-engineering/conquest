@@ -53,6 +53,7 @@ import type {
   QuestionnaireDetail,
   VersionGraphView,
 } from '@/lib/app/questionnaire/views';
+import { DEFAULT_TONE_SETTINGS } from '@/lib/app/questionnaire/types';
 import type { DataSlotView } from '@/lib/app/questionnaire/data-slots';
 import {
   getEvaluationAddQuestionSeed,
@@ -115,6 +116,7 @@ function makeGraph(over: Partial<VersionGraphView> = {}): VersionGraphView {
       reasoningStreamEnabled: true,
       reasoningStreamPlacement: 'overlay',
       reasoningStreamPersist: true,
+      tone: DEFAULT_TONE_SETTINGS,
     },
     ...over,
   };
@@ -595,6 +597,45 @@ describe('getEvaluationAddQuestionSeed', () => {
 
   it('returns null when the run fetch fails', async () => {
     mockServerFetch.mockResolvedValueOnce(makeErrorResponse());
+    const seed = await getEvaluationAddQuestionSeed('qn-1', 'ver-1', 'run-1:find-1');
+    expect(seed).toBeNull();
+  });
+
+  it('returns null for a ref whose findingId half is empty (trailing separator)', async () => {
+    // `run-1:` → runId 'run-1' but empty findingId; the `!findingId` guard short-circuits
+    // before any fetch. Distinct from the no-separator case (sep <= 0).
+    const seed = await getEvaluationAddQuestionSeed('qn-1', 'ver-1', 'run-1:');
+    expect(seed).toBeNull();
+    expect(mockServerFetch).not.toHaveBeenCalled();
+  });
+
+  it('returns null when the run detail body reports success=false', async () => {
+    // Distinct from the !res.ok path: the HTTP call succeeds but the envelope is an error.
+    mockServerFetch.mockResolvedValueOnce(makeOkResponse());
+    mockParseApiResponse.mockResolvedValueOnce({ success: false, error: { code: 'NOT_FOUND' } });
+
+    const seed = await getEvaluationAddQuestionSeed('qn-1', 'ver-1', 'run-1:find-1');
+    expect(seed).toBeNull();
+  });
+
+  it('returns null when the finding is already terminal (declined)', async () => {
+    mockServerFetch.mockResolvedValueOnce(makeOkResponse());
+    mockParseApiResponse.mockResolvedValueOnce({
+      success: true,
+      data: runDetailWith([makeFinding({ status: 'declined' })]),
+    });
+
+    const seed = await getEvaluationAddQuestionSeed('qn-1', 'ver-1', 'run-1:find-1');
+    expect(seed).toBeNull();
+  });
+
+  it('returns null when no finding in the run matches the ref findingId', async () => {
+    mockServerFetch.mockResolvedValueOnce(makeOkResponse());
+    mockParseApiResponse.mockResolvedValueOnce({
+      success: true,
+      data: runDetailWith([makeFinding({ id: 'a-different-finding' })]),
+    });
+
     const seed = await getEvaluationAddQuestionSeed('qn-1', 'ver-1', 'run-1:find-1');
     expect(seed).toBeNull();
   });

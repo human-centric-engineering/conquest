@@ -32,7 +32,7 @@ export const HONESTY_GUIDANCE = 'Answer honestly — there are no right or wrong
 
 /** Shown only when voice input is enabled (F6.2 mic affordance). */
 export const VOICE_GUIDANCE =
-  'You can type your replies, or tap the mic button to talk through your answers naturally.';
+  'You can type your replies, or **tap the mic button** to talk through your answers naturally.';
 
 /** Shown only when the questionnaire is configured `anonymousMode` (identity is redacted). */
 export const ANONYMOUS_GUIDANCE =

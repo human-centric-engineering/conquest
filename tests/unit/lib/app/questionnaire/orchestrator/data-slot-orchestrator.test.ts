@@ -65,12 +65,16 @@ function dsState(input: {
   };
 }
 
-const fill = (key: string, confidence = 0.9): DataSlotFillIntent => ({
+const fill = (
+  key: string,
+  confidence = 0.9,
+  provenance: DataSlotFillIntent['provenance'] = 'direct'
+): DataSlotFillIntent => ({
   dataSlotKey: key,
   value: 'pos',
   paraphrase: `paraphrase for ${key}`,
   confidence,
-  provenance: 'direct',
+  provenance,
 });
 
 describe('runDataSlotTurn — targeting', () => {
@@ -416,7 +420,11 @@ describe('runDataSlotTurn — seriousness / abuse gate', () => {
 describe('runDataSlotTurn — move on / provisional park', () => {
   it('parks the active slot at the attempts cap, marks the fill provisional, and bridges to a new theme', async () => {
     // d1 (theme A) was asked twice and only weakly answered again this turn; d2 (theme B) is open.
-    const { invokers } = stubInvokers({ extract: { dataSlotFills: [fill('d1', 0.3)] } });
+    // A weak answer is `inferred`, not stated — only such a fill is parkable. A `direct` fill is
+    // covered regardless of its confidence number and is never parked (see the direct-covered tests).
+    const { invokers } = stubInvokers({
+      extract: { dataSlotFills: [fill('d1', 0.3, 'inferred')] },
+    });
     const result = await runDataSlotTurn(
       dsState({
         questions: [q({ id: 'q1' })],
@@ -501,7 +509,11 @@ describe('runDataSlotTurn — move on / provisional park', () => {
   });
 
   it('parks after a single ask when maxDataSlotAttempts is 1', async () => {
-    const { invokers } = stubInvokers({ extract: { dataSlotFills: [fill('d1', 0.3)] } });
+    // A weak answer is `inferred`, not stated — only such a fill is parkable. A `direct` fill is
+    // covered regardless of its confidence number and is never parked (see the direct-covered tests).
+    const { invokers } = stubInvokers({
+      extract: { dataSlotFills: [fill('d1', 0.3, 'inferred')] },
+    });
     const result = await runDataSlotTurn(
       dsState({
         questions: [q({ id: 'q1' })],
@@ -520,7 +532,11 @@ describe('runDataSlotTurn — move on / provisional park', () => {
     // avoidTheme is set to the just-parked slot's theme (A). pickNextDataSlot first looks for a
     // slot in a DIFFERENT theme; finding none it falls through and still picks from theme A.
     // This ensures the conversation never stalls when all remaining slots share the parked theme.
-    const { invokers } = stubInvokers({ extract: { dataSlotFills: [fill('d1', 0.3)] } });
+    // A weak answer is `inferred`, not stated — only such a fill is parkable. A `direct` fill is
+    // covered regardless of its confidence number and is never parked (see the direct-covered tests).
+    const { invokers } = stubInvokers({
+      extract: { dataSlotFills: [fill('d1', 0.3, 'inferred')] },
+    });
     const result = await runDataSlotTurn(
       dsState({
         questions: [q({ id: 'q1' })],
@@ -558,5 +574,74 @@ describe('runDataSlotTurn — move on / provisional park', () => {
     );
     // The seriousness gate cleared the fills first — nothing (provisional or otherwise) is kept.
     expect(result.sideEffects.dataSlotFills).toHaveLength(0);
+  });
+});
+
+describe('runDataSlotTurn — a stated (direct) answer is covered regardless of confidence', () => {
+  it('treats a direct fill below the confidence threshold as covered — moves on, does not re-ask', async () => {
+    // The respondent plainly STATED their position ("extremely unlikely"), but the extractor
+    // under-scored it at 0.4 (< the 0.5 fill threshold). A `direct` fill is covered on its
+    // provenance, so targeting moves to the next slot instead of re-asking the one they answered.
+    const { invokers } = stubInvokers({ extract: { dataSlotFills: [fill('d1', 0.4, 'direct')] } });
+    const result = await runDataSlotTurn(
+      dsState({
+        questions: [q({ id: 'q1' })],
+        dataSlots: [
+          ds({ id: 'd1', key: 'd1', theme: 'A' }),
+          ds({ id: 'd2', key: 'd2', theme: 'B' }),
+        ],
+        activeDataSlotKey: 'd1',
+      }),
+      invokers
+    );
+    expect(result.response.kind).toBe('data_slot');
+    if (result.response.kind === 'data_slot') {
+      expect(result.response.dataSlotId).toBe('d2');
+      expect(result.response.isReask).toBe(false);
+    }
+  });
+
+  it('never parks a slot answered directly this turn, even at the attempts cap (the regression)', async () => {
+    // The exact screenshot bug: the slot hit the re-ask cap, and this turn the respondent FINALLY
+    // answered it clearly ("extremely unlikely") — but the extractor under-scored it at 0.4. Before
+    // the fix this parked the clear answer as `provisional · may revisit`. A direct fill must never
+    // be parked: it stays a real, non-provisional answer.
+    const { invokers } = stubInvokers({ extract: { dataSlotFills: [fill('d1', 0.4, 'direct')] } });
+    const result = await runDataSlotTurn(
+      dsState({
+        questions: [q({ id: 'q1' })],
+        dataSlots: [ds({ id: 'd1', key: 'd1', theme: 'A' })],
+        activeDataSlotKey: 'd1',
+        dataSlotAttempts: { d1: 2 },
+        config: { maxDataSlotAttempts: 2 },
+      }),
+      invokers
+    );
+    const d1Fill = (result.sideEffects.dataSlotFills ?? []).find((f) => f.dataSlotKey === 'd1');
+    expect(d1Fill?.provisional).not.toBe(true);
+    // d1 is covered → the loop does not re-ask it; with q1 still open it sweeps the question directly.
+    expect(result.response.kind).toBe('question');
+    if (result.response.kind === 'question') expect(result.response.questionId).toBe('q1');
+  });
+
+  it('keeps a prior-turn direct fill covered even when its loaded confidence is below the threshold', async () => {
+    // Cross-turn: d1 was answered directly last turn but persisted at 0.4 confidence. The loader
+    // threads provenance, so this turn it is still covered (not re-asked) and targeting picks d2.
+    const { invokers } = stubInvokers();
+    const result = await runDataSlotTurn(
+      dsState({
+        userMessage: '',
+        questions: [q({ id: 'q1' })],
+        dataSlots: [
+          ds({ id: 'd1', key: 'd1', theme: 'A' }),
+          ds({ id: 'd2', key: 'd2', theme: 'B' }),
+        ],
+        dataSlotAnswered: [{ dataSlotId: 'd1', confidence: 0.4, provenance: 'direct' }],
+        activeDataSlotKey: null,
+      }),
+      invokers
+    );
+    expect(result.response.kind).toBe('data_slot');
+    if (result.response.kind === 'data_slot') expect(result.response.dataSlotId).toBe('d2');
   });
 });

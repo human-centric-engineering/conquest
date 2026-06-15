@@ -214,6 +214,12 @@ model AppQuestionnaireConfig {
   reasoningStreamPlacement String  @default("overlay")
   reasoningStreamPersist   Boolean @default(true)
 
+  // Interviewer tone & persona (F-tone): ToneSettings — nine enable-toggle + 1–5 sliders plus a
+  // free-text persona, controlling HOW the conversational interviewer responds. Off per dimension
+  // by default; only takes effect when the platform flag APP_QUESTIONNAIRES_TONE_ENABLED is on.
+  // Fed into the phraser system prompt by buildToneInstructions (lib/.../chat/tone.ts). (types.ts)
+  tone Json @default("{}")
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

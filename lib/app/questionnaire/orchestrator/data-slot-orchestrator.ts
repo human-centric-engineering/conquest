@@ -97,15 +97,28 @@ function applyFills(
     byId.set(id, {
       dataSlotId: id,
       confidence: fill.confidence,
+      // Carry provenance so coverage can honour a STATED answer regardless of the confidence
+      // number — see `isCovered`. A direct fill is never parked, so it carries no provisional flag.
+      provenance: fill.provenance,
       provisional: fill.provisional ?? false,
     });
   }
   return [...byId.values()];
 }
 
-/** True once a slot is "covered" for targeting — a confident fill OR a parked provisional one. */
+/**
+ * True once a slot is "covered" for targeting — so it is neither re-asked nor parked. Covered when:
+ * the respondent plainly STATED a position (`direct`), OR the fill cleared the confidence threshold,
+ * OR it was already parked (provisional). The `direct` clause is deliberate: a clearly-stated answer
+ * is answered even when the extractor under-scores its confidence, so a noisy number can never make a
+ * real answer read as missing (the bug that re-asked "extremely unlikely" and parked it provisional).
+ */
 function isCovered(a: DataSlotAnsweredView): boolean {
-  return (a.confidence ?? 0) >= DATA_SLOT_FILLED_THRESHOLD || a.provisional === true;
+  return (
+    a.provenance === 'direct' ||
+    (a.confidence ?? 0) >= DATA_SLOT_FILLED_THRESHOLD ||
+    a.provisional === true
+  );
 }
 
 /** The unfilled data slots, theme-ordered (the loader already orders by theme then ordinal). */
@@ -154,7 +167,13 @@ function buildOfferInput(
 ): OfferComposeInput {
   const filled = new Set(
     answered
-      .filter((a) => (a.confidence ?? 0) >= DATA_SLOT_FILLED_THRESHOLD)
+      // A genuinely-captured topic for the wrap-up summary: a stated (`direct`) fill or one that
+      // cleared the threshold, but never a provisional park (a best-effort guess, not a real answer).
+      .filter(
+        (a) =>
+          !a.provisional &&
+          (a.provenance === 'direct' || (a.confidence ?? 0) >= DATA_SLOT_FILLED_THRESHOLD)
+      )
       .map((a) => a.dataSlotId)
   );
   return {

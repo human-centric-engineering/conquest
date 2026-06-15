@@ -28,7 +28,9 @@ import {
   QUESTION_TYPE_LABELS,
   type QuestionType,
   type SensitivitySeverity,
+  type ToneSettings,
 } from '@/lib/app/questionnaire/types';
+import { buildToneInstructions } from '@/lib/app/questionnaire/chat/tone';
 import { QUESTIONNAIRE_INTERVIEWER_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
 
 /** Token budget + timeout for the (short) conversational question prose. */
@@ -99,6 +101,13 @@ export interface QuestionComposeInput {
    * conversation moves on — frame it as a light, pressure-free final try.
    */
   isFinalAttempt?: boolean;
+  /**
+   * Interviewer tone & persona (F-tone): the resolved {@link ToneSettings} block the admin
+   * configured. Only present when the platform tone flag is on (the route gates it); absent =
+   * today's default voice. `buildToneInstructions` renders its enabled dimensions into the prompt;
+   * `tone.mimicry.enabled` additionally governs whether the default "match their tone" line is kept.
+   */
+  tone?: ToneSettings;
 }
 
 /** What {@link streamQuestionMessage} returns once the stream completes. */
@@ -150,14 +159,24 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
   if (a.locale && a.locale.toLowerCase() !== 'en' && !a.locale.toLowerCase().startsWith('en-'))
     calibration.push(`Respond entirely in the respondent's language (locale "${a.locale}").`);
 
+  // Tone & persona (F-tone): the admin-configured voice, rendered to imperative clauses. Empty
+  // string when nothing is enabled (or no tone configured) — then the default voice is unchanged.
+  const toneInstructions = input.tone ? buildToneInstructions(input.tone) : '';
+
   // Length is calibrated by how far into the conversation we are: the first few questions stay
   // very tight (effortless to answer), and later ones may be a touch warmer — but never long.
+  // When the admin controls verbosity explicitly, its clause (in `toneInstructions`) governs the
+  // non-opening length instead of the default "keep it concise" line — but the opening-question
+  // brevity floor is always kept so the very first asks stay effortless.
   const isEarly = input.questionsAsked < 3;
+  const verbosityControlled = input.tone?.verbosity.enabled === true;
   const brevity = isEarly
     ? 'This is early in the conversation, so keep it VERY short and tight — ideally a single, ' +
       'simple, easy-to-answer sentence. The opening questions must feel effortless. '
-    : 'Keep it concise — one or two sentences. Rapport has built, so you may be a little warmer ' +
-      'or add light context, but never long-winded or convoluted. ';
+    : verbosityControlled
+      ? ''
+      : 'Keep it concise — one or two sentences. Rapport has built, so you may be a little warmer ' +
+        'or add light context, but never long-winded or convoluted. ';
 
   // Sensitivity awareness / safeguarding: once a sensitive disclosure has been remembered this
   // session, every later question is asked more gently. The latest summary reminds the interviewer
@@ -211,7 +230,11 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
     (input.goal ? `Questionnaire goal: ${input.goal}. ` : '') +
     (calibration.length > 0 ? calibration.join(' ') + ' ' : '') +
     treadCarefully +
-    'Match the respondent’s tone. ' +
+    // Tone & persona clauses (when configured) are more specific than the defaults above and come
+    // later, so they govern. Mimicry, when enabled, owns tone-matching — so the default
+    // "match their tone" line is dropped only then; otherwise it stays as the gentle baseline.
+    (toneInstructions ? toneInstructions + ' ' : '') +
+    (input.tone?.mimicry.enabled ? '' : 'Match the respondent’s tone. ') +
     brevity +
     'Reply with conversational prose only: no JSON, no lists, no headings, no preamble, no quotation marks. ' +
     // Markdown bold IS rendered in the chat UI. Used sparingly it helps the respondent see the

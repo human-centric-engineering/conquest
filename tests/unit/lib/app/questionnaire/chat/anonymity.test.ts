@@ -28,7 +28,11 @@ vi.mock('@/lib/db/client', () => ({
 import { prisma } from '@/lib/db/client';
 import {
   resolveAnonymousForVersion,
+  resolveAccessModeForVersion,
+  resolveVoiceEnabledForVersion,
+  resolveAttachmentsEnabledForVersion,
   resolvePresentationModeForVersion,
+  resolveReasoningPlacementForVersion,
 } from '@/lib/app/questionnaire/chat/anonymity';
 
 describe('resolveAnonymousForVersion', () => {
@@ -153,6 +157,203 @@ describe('resolvePresentationModeForVersion', () => {
     expect(prisma.appQuestionnaireVersion.findUnique).toHaveBeenCalledWith({
       where: { id: 'ver-xyz' },
       select: { config: { select: { presentationMode: true } } },
+    });
+  });
+});
+
+describe('resolveAccessModeForVersion', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns the stored access mode when set to public', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: { accessMode: 'public' },
+    } as never);
+    expect(await resolveAccessModeForVersion('ver-abc')).toBe('public');
+  });
+
+  it('returns the stored access mode when set to both', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: { accessMode: 'both' },
+    } as never);
+    expect(await resolveAccessModeForVersion('ver-abc')).toBe('both');
+  });
+
+  it('defaults to invitation_only when config is null', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: null,
+    } as never);
+    expect(await resolveAccessModeForVersion('ver-abc')).toBe('invitation_only');
+  });
+
+  it('defaults to invitation_only when the version row is null', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue(null);
+    expect(await resolveAccessModeForVersion('ver-missing')).toBe('invitation_only');
+  });
+
+  it('narrows an unrecognised stored value to invitation_only', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: { accessMode: 'open_sesame' },
+    } as never);
+    expect(await resolveAccessModeForVersion('ver-abc')).toBe('invitation_only');
+  });
+
+  it('queries Prisma with the correct versionId and selects only accessMode', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: { accessMode: 'public' },
+    } as never);
+    await resolveAccessModeForVersion('ver-xyz');
+    expect(prisma.appQuestionnaireVersion.findUnique).toHaveBeenCalledWith({
+      where: { id: 'ver-xyz' },
+      select: { config: { select: { accessMode: true } } },
+    });
+  });
+});
+
+describe('resolveVoiceEnabledForVersion', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns true when the config row has voiceEnabled: true', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: { voiceEnabled: true },
+    } as never);
+    expect(await resolveVoiceEnabledForVersion('ver-abc')).toBe(true);
+  });
+
+  it('returns false when the config row has voiceEnabled: false', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: { voiceEnabled: false },
+    } as never);
+    expect(await resolveVoiceEnabledForVersion('ver-abc')).toBe(false);
+  });
+
+  it('defaults to false when config is null', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: null,
+    } as never);
+    expect(await resolveVoiceEnabledForVersion('ver-abc')).toBe(false);
+  });
+
+  it('defaults to false when the version row is null', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue(null);
+    expect(await resolveVoiceEnabledForVersion('ver-missing')).toBe(false);
+  });
+
+  it('queries Prisma with the correct versionId and selects only voiceEnabled', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: { voiceEnabled: true },
+    } as never);
+    await resolveVoiceEnabledForVersion('ver-xyz');
+    expect(prisma.appQuestionnaireVersion.findUnique).toHaveBeenCalledWith({
+      where: { id: 'ver-xyz' },
+      select: { config: { select: { voiceEnabled: true } } },
+    });
+  });
+});
+
+describe('resolveAttachmentsEnabledForVersion', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns true when the config row has attachmentsEnabled: true', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: { attachmentsEnabled: true },
+    } as never);
+    expect(await resolveAttachmentsEnabledForVersion('ver-abc')).toBe(true);
+  });
+
+  it('returns false when the config row has attachmentsEnabled: false', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: { attachmentsEnabled: false },
+    } as never);
+    expect(await resolveAttachmentsEnabledForVersion('ver-abc')).toBe(false);
+  });
+
+  it('defaults to false when config is null', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: null,
+    } as never);
+    expect(await resolveAttachmentsEnabledForVersion('ver-abc')).toBe(false);
+  });
+
+  it('defaults to false when the version row is null', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue(null);
+    expect(await resolveAttachmentsEnabledForVersion('ver-missing')).toBe(false);
+  });
+
+  it('queries Prisma with the correct versionId and selects only attachmentsEnabled', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: { attachmentsEnabled: true },
+    } as never);
+    await resolveAttachmentsEnabledForVersion('ver-xyz');
+    expect(prisma.appQuestionnaireVersion.findUnique).toHaveBeenCalledWith({
+      where: { id: 'ver-xyz' },
+      select: { config: { select: { attachmentsEnabled: true } } },
+    });
+  });
+});
+
+describe('resolveReasoningPlacementForVersion', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns overlay when config is absent (no config row)', async () => {
+    // No config row = defaults: enabled + overlay placement.
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: null,
+    } as never);
+    expect(await resolveReasoningPlacementForVersion('ver-abc')).toBe('overlay');
+  });
+
+  it('returns overlay when the version row is null', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue(null);
+    expect(await resolveReasoningPlacementForVersion('ver-missing')).toBe('overlay');
+  });
+
+  it('returns the stored placement when set to inline', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: { reasoningStreamEnabled: true, reasoningStreamPlacement: 'inline' },
+    } as never);
+    expect(await resolveReasoningPlacementForVersion('ver-abc')).toBe('inline');
+  });
+
+  it('returns the stored placement when set to overlay', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: { reasoningStreamEnabled: true, reasoningStreamPlacement: 'overlay' },
+    } as never);
+    expect(await resolveReasoningPlacementForVersion('ver-abc')).toBe('overlay');
+  });
+
+  it('returns null when reasoningStreamEnabled is explicitly false', async () => {
+    // Explicit opt-out disables the feature regardless of placement value.
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: { reasoningStreamEnabled: false, reasoningStreamPlacement: 'overlay' },
+    } as never);
+    expect(await resolveReasoningPlacementForVersion('ver-abc')).toBeNull();
+  });
+
+  it('narrows an unrecognised placement value to overlay', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: { reasoningStreamEnabled: true, reasoningStreamPlacement: 'sidebar' },
+    } as never);
+    expect(await resolveReasoningPlacementForVersion('ver-abc')).toBe('overlay');
+  });
+
+  it('queries Prisma with the correct versionId and selects both reasoning fields', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: { reasoningStreamEnabled: true, reasoningStreamPlacement: 'overlay' },
+    } as never);
+    await resolveReasoningPlacementForVersion('ver-xyz');
+    expect(prisma.appQuestionnaireVersion.findUnique).toHaveBeenCalledWith({
+      where: { id: 'ver-xyz' },
+      select: {
+        config: { select: { reasoningStreamEnabled: true, reasoningStreamPlacement: true } },
+      },
     });
   });
 });

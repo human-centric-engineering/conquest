@@ -20,6 +20,7 @@ import {
   APP_QUESTIONNAIRES_INVITE_IMPORT_FLAG,
   APP_QUESTIONNAIRES_GENERATIVE_AUTHORING_FLAG,
   APP_QUESTIONNAIRES_REASONING_STREAM_FLAG,
+  APP_QUESTIONNAIRES_TONE_FLAG,
   APP_QUESTIONNAIRES_FLAG,
 } from '@/lib/app/questionnaire/constants';
 import { isFeatureEnabled } from '@/lib/feature-flags';
@@ -531,4 +532,23 @@ export async function isReasoningStreamEnabled(): Promise<boolean> {
     isFeatureEnabled(APP_QUESTIONNAIRES_REASONING_STREAM_FLAG),
   ]);
   return app && live && reasoning;
+}
+
+/**
+ * Whether **interviewer tone & persona** (F-tone) may shape the live turn loop. Requires the
+ * master app flag, the **live-sessions** flag, AND the tone sub-flag. Like the reasoning stream it
+ * gates a behaviour *inside* the already-gated `/messages` route; the per-version per-dimension
+ * toggles are the second gate (the route ANDs them). When `false`, the phraser keeps today's
+ * default voice even if a version has tone dimensions enabled. Depends on live-sessions because
+ * tone only matters inside the respondent turn loop.
+ *
+ * Server-only (resolves the flags from the database).
+ */
+export async function isToneEnabled(): Promise<boolean> {
+  const [app, live, tone] = await Promise.all([
+    isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_TONE_FLAG),
+  ]);
+  return app && live && tone;
 }

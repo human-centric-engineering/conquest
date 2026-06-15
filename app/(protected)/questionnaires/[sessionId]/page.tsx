@@ -3,7 +3,6 @@ import { notFound } from 'next/navigation';
 
 import { getServerSession } from '@/lib/auth/utils';
 import { clearInvalidSession } from '@/lib/auth/clear-session';
-import { prisma } from '@/lib/db/client';
 import {
   isAttachmentInputEnabled,
   isLiveSessionsEnabled,
@@ -16,6 +15,7 @@ import { buildWelcomeTurns } from '@/lib/app/questionnaire/chat/greeting';
 import { resolveThemeForSession } from '@/lib/app/questionnaire/chat/theme';
 import { loadAnswerPanelState } from '@/app/api/v1/app/questionnaire-sessions/_lib/answer-panel';
 import { loadSessionStatus } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-status';
+import { loadSessionSurfaceConfig } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-surface-config';
 import { loadTranscript } from '@/app/api/v1/app/questionnaire-sessions/_lib/transcript';
 import {
   narrowToEnum,
@@ -76,43 +76,23 @@ export default async function QuestionnaireSessionPage({
   const session = await getServerSession();
   if (!session) clearInvalidSession(`/questionnaires/${sessionId}`);
 
-  const row = await prisma.appQuestionnaireSession.findUnique({
-    where: { id: sessionId },
-    select: {
-      status: true,
-      respondentUserId: true,
-      version: {
-        select: {
-          config: {
-            select: {
-              anonymousMode: true,
-              presentationMode: true,
-              voiceEnabled: true,
-              attachmentsEnabled: true,
-              reasoningStreamEnabled: true,
-              reasoningStreamPlacement: true,
-            },
-          },
-        },
-      },
-    },
-  });
+  const row = await loadSessionSurfaceConfig(sessionId);
 
   // Not found, or not this user's session — 404 either way (don't confirm existence).
   if (!row || row.respondentUserId !== session.user.id) notFound();
 
-  const anonymous = row.version.config?.anonymousMode ?? false;
+  const anonymous = row.config?.anonymousMode ?? false;
   const presentationMode = narrowToEnum(
-    row.version.config?.presentationMode ?? 'chat',
+    row.config?.presentationMode ?? 'chat',
     PRESENTATION_MODES,
     'chat'
   );
   const wantsForm = presentationMode === 'form' || presentationMode === 'both';
   // Voice and attachments each need BOTH the platform flag (capability dark-launch) AND the
   // version's per-questionnaire opt-in, so the affordance shows only when the author turned it on.
-  const voiceConfigured = row.version.config?.voiceEnabled ?? false;
-  const attachmentsConfigured = row.version.config?.attachmentsEnabled ?? false;
-  const reasoningConfigured = row.version.config?.reasoningStreamEnabled ?? false;
+  const voiceConfigured = row.config?.voiceEnabled ?? false;
+  const attachmentsConfigured = row.config?.attachmentsEnabled ?? false;
+  const reasoningConfigured = row.config?.reasoningStreamEnabled ?? false;
   // Independent reads — resolve in parallel rather than serialising the round-trips. The
   // panel + lifecycle status are SSR-seeded here (the user is already verified as owner),
   // so they paint with no fetch flash; the live updates after each turn come from the
@@ -146,7 +126,7 @@ export default async function QuestionnaireSessionPage({
   const reasoningPlacement =
     reasoningPlatform && reasoningConfigured
       ? narrowToEnum(
-          row.version.config?.reasoningStreamPlacement ?? 'overlay',
+          row.config?.reasoningStreamPlacement ?? 'overlay',
           REASONING_PLACEMENTS,
           'overlay'
         )

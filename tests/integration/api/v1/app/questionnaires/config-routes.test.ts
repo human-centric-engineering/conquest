@@ -219,6 +219,31 @@ describe('upsert + response', () => {
     expect(call.update.profileFields).toEqual(fields);
   });
 
+  it('writes the tone block through the JSON boundary and narrows it back on the response', async () => {
+    const tone = {
+      empathy: { enabled: true, level: 5 },
+      mirroring: { enabled: false, level: 3 },
+      formality: { enabled: true, level: 1 },
+      mimicry: { enabled: false, level: 3 },
+      verbosity: { enabled: false, level: 3 },
+      warmth: { enabled: true, level: 4 },
+      curiosity: { enabled: false, level: 3 },
+      readingComplexity: { enabled: false, level: 3 },
+      humour: { enabled: false, level: 3 },
+      persona: { enabled: true, text: 'You are a supportive coach.' },
+    };
+    prismaMock.appQuestionnaireConfig.upsert.mockResolvedValue(configRow({ tone }));
+
+    const res = await configPATCH(req({ tone }), ctx(PARAMS));
+    expect(res.status).toBe(200);
+    const call = prismaMock.appQuestionnaireConfig.upsert.mock.calls[0][0];
+    // The JSON column is written on both create + update paths.
+    expect(call.create.tone).toEqual(tone);
+    expect(call.update.tone).toEqual(tone);
+    // The response view carries the narrowed tone back to the editor.
+    expect((await res.json()).data.tone).toEqual(tone);
+  });
+
   it('forks a launched version and writes to the new draft', async () => {
     prismaMock.appQuestionnaireVersion.findFirst.mockResolvedValue({
       id: 'v1',

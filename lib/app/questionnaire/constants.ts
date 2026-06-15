@@ -802,6 +802,15 @@ export const APP_QUESTIONNAIRES_REASONING_STREAM_FLAG =
   'APP_QUESTIONNAIRES_REASONING_STREAM_ENABLED';
 
 /**
+ * Platform feature flag gating **interviewer tone & persona** (F-tone) — the per-version sliders
+ * (empathy, mirroring, formality, mimicry, verbosity, warmth, curiosity, reading complexity,
+ * humour) plus the free-text persona that shape how the conversational interviewer responds.
+ * DB-backed, seeded disabled by `037-tone-flag.ts`. ANDs with each per-version dimension toggle;
+ * when off the phraser keeps today's default voice (`buildToneInstructions` is never consulted).
+ */
+export const APP_QUESTIONNAIRES_TONE_FLAG = 'APP_QUESTIONNAIRES_TONE_ENABLED';
+
+/**
  * Slug of the seeded composer `AiAgent` (generative authoring). A distinct agent
  * from the document extractor: composition and document extraction carry their
  * own budgets and personas. Ships with empty `model`/`provider` so it resolves

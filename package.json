@@ -42,6 +42,7 @@
     "smoke:transcribe": "tsx --env-file=.env.local scripts/smoke/transcribe.ts",
     "smoke:vision": "tsx --env-file=.env.local scripts/smoke/vision.ts",
     "smoke:erasure": "tsx --env-file=.env.local scripts/smoke/erasure.ts",
+    "eval:extraction": "tsx --env-file=.env.local scripts/eval/extraction.ts",
     "postinstall": "prisma generate",
     "prepare": "husky"
   },
