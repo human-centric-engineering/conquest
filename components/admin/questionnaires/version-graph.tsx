@@ -7,6 +7,8 @@
  * `GET …/versions/:vid` endpoint returns.
  */
 
+import { Target } from 'lucide-react';
+
 import { Badge } from '@/components/ui/badge';
 import { AUDIENCE_FIELDS, QUESTION_TYPE_LABELS } from '@/lib/app/questionnaire/types';
 import type { VersionGraphView } from '@/lib/app/questionnaire/views';
@@ -25,9 +27,9 @@ const AUDIENCE_FIELD_LABEL: Record<(typeof AUDIENCE_FIELDS)[number], string> = {
 
 function InferredBadge() {
   return (
-    <Badge variant="outline" className="ml-2 align-middle text-xs font-normal">
+    <span className="inline-flex items-center rounded-full border border-[var(--cq-accent-ring)] bg-[var(--cq-accent-muted)] px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-[var(--cq-accent)] uppercase">
       inferred
-    </Badge>
+    </span>
   );
 }
 
@@ -45,44 +47,71 @@ export function VersionGraph({ graph }: { graph: VersionGraphView }) {
   return (
     <div className="space-y-6">
       {/* Goal + audience */}
-      <section className="space-y-4 rounded-md border p-4">
-        <div>
-          <h3 className="text-sm font-medium">
-            Goal
-            {graph.goalProvenance === 'inferred' && <InferredBadge />}
-          </h3>
-          <p className="text-muted-foreground mt-1 text-sm">
-            {graph.goal ?? <span className="italic">Not set</span>}
-          </p>
-        </div>
-        <div>
-          <h3 className="text-sm font-medium">Audience</h3>
-          {audienceEntries.length > 0 ? (
-            <dl className="mt-1 grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm">
-              {audienceEntries.map((e) => (
-                <div key={e.label} className="contents">
-                  <dt className="text-muted-foreground">{e.label}</dt>
-                  <dd>
-                    {e.value}
-                    {e.inferred && <InferredBadge />}
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          ) : (
-            <p className="text-muted-foreground mt-1 text-sm italic">Not set</p>
-          )}
-        </div>
-        {graph.tags.length > 0 && (
-          <div>
-            <h3 className="text-sm font-medium">Tags</h3>
-            <div className="mt-1 flex flex-wrap gap-1.5">
-              {graph.tags.map((t) => (
-                <TagChip key={t.id} tag={t} />
-              ))}
+      <section className="cq-rise bg-card relative overflow-hidden rounded-xl border shadow-sm">
+        {/* Goal hero band — amber accent + faint blueprint grid, echoing the editor's drafting motif. */}
+        <div className="relative border-b bg-[var(--cq-accent-muted)] p-5">
+          <div
+            className="cq-blueprint pointer-events-none absolute inset-0 opacity-40"
+            aria-hidden
+          />
+          <div className="relative flex items-start gap-3.5">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--cq-accent)] text-[var(--cq-accent-foreground)] shadow-sm">
+              <Target className="h-5 w-5" aria-hidden />
+            </span>
+            <div className="min-w-0 space-y-1.5">
+              <div className="flex items-center gap-2">
+                <p className="text-[10px] font-semibold tracking-[0.18em] text-[var(--cq-accent)] uppercase">
+                  Goal
+                </p>
+                {graph.goalProvenance === 'inferred' && <InferredBadge />}
+              </div>
+              <p className="text-foreground text-base leading-snug font-medium text-balance">
+                {graph.goal ?? (
+                  <span className="text-muted-foreground font-normal italic">Not set</span>
+                )}
+              </p>
             </div>
           </div>
-        )}
+        </div>
+
+        {/* Audience + tags */}
+        <div className="space-y-5 p-5">
+          <div>
+            <h3 className="text-muted-foreground mb-2.5 text-[10px] font-semibold tracking-[0.18em] uppercase">
+              Audience
+            </h3>
+            {audienceEntries.length > 0 ? (
+              <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+                {audienceEntries.map((e) => (
+                  <div
+                    key={e.label}
+                    className="flex flex-col gap-0.5 border-l-2 border-[var(--cq-accent-muted)] pl-3"
+                  >
+                    <dt className="text-muted-foreground text-xs">{e.label}</dt>
+                    <dd className="flex flex-wrap items-center gap-1.5 text-sm font-medium">
+                      {e.value}
+                      {e.inferred && <InferredBadge />}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            ) : (
+              <p className="text-muted-foreground text-sm italic">Not set</p>
+            )}
+          </div>
+          {graph.tags.length > 0 && (
+            <div>
+              <h3 className="text-muted-foreground mb-2.5 text-[10px] font-semibold tracking-[0.18em] uppercase">
+                Tags
+              </h3>
+              <div className="flex flex-wrap gap-1.5">
+                {graph.tags.map((t) => (
+                  <TagChip key={t.id} tag={t} />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       </section>
 
       {/* Sections → questions */}

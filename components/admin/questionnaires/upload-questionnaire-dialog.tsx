@@ -82,6 +82,15 @@ export interface UploadQuestionnaireDialogProps {
    * that strips demo tenancy, or a deployment with no clients yet).
    */
   demoClientOptions?: AttributedDemoClient[];
+  /**
+   * Controlled open state. When provided (with {@link onOpenChange}), the parent
+   * drives the dialog — e.g. opened from a "New questionnaire" dropdown item rather
+   * than this component's own trigger button. Omit for the default self-managed mode.
+   */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  /** Render the built-in trigger button. Set `false` when a parent supplies its own. */
+  showTrigger?: boolean;
 }
 
 export function UploadQuestionnaireDialog({
@@ -89,6 +98,9 @@ export function UploadQuestionnaireDialog({
   variant = 'default',
   className,
   demoClientOptions = [],
+  open: controlledOpen,
+  onOpenChange,
+  showTrigger = true,
 }: UploadQuestionnaireDialogProps) {
   const router = useRouter();
   const fileInputId = useId();
@@ -105,7 +117,12 @@ export function UploadQuestionnaireDialog({
   const tablesId = useId();
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen ?? internalOpen;
+  const setOpen = (next: boolean) => {
+    onOpenChange?.(next);
+    if (controlledOpen === undefined) setInternalOpen(next);
+  };
   const [name, setName] = useState('');
   const [demoClientId, setDemoClientId] = useState<string>(NO_CLIENT);
   const [goal, setGoal] = useState('');
@@ -200,12 +217,14 @@ export function UploadQuestionnaireDialog({
         if (!next) reset();
       }}
     >
-      <DialogTrigger asChild>
-        <Button size={size} variant={variant} className={className}>
-          <Upload className="mr-1.5 h-4 w-4" />
-          Upload questionnaire
-        </Button>
-      </DialogTrigger>
+      {showTrigger && (
+        <DialogTrigger asChild>
+          <Button size={size} variant={variant} className={className}>
+            <Upload className="mr-1.5 h-4 w-4" />
+            Upload questionnaire
+          </Button>
+        </DialogTrigger>
+      )}
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Upload questionnaire</DialogTitle>

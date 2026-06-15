@@ -12,6 +12,8 @@
  * the capability never imports Prisma; the route does, through this module.
  */
 
+import { createHash } from 'node:crypto';
+
 import { Prisma } from '@prisma/client';
 
 import { executeTransaction } from '@/lib/db/utils';
@@ -286,5 +288,69 @@ export async function persistIngestion(
       audience: merged.audience,
       fieldProvenance: merged.provenance,
     };
+  });
+}
+
+/**
+ * Synthesize the source-document provenance row for a **brief-composed**
+ * questionnaire (generative authoring). There is no uploaded file, so the brief
+ * itself is the provenance: it stands in as the "document text". This keeps
+ * {@link persistIngestion}'s contract unchanged (every version gets a source row)
+ * and lets a later re-ingest / diff feature treat a composed questionnaire the
+ * same as an uploaded one. The hash is over the brief, so re-composing from the
+ * exact same brief is detectable, but the compose route deliberately does not
+ * dedup (each generation is intentionally a fresh questionnaire).
+ */
+export function briefSource(brief: string): IngestionSourceInput {
+  return {
+    fileName: 'brief.txt',
+    fileHash: createHash('sha256').update(brief).digest('hex'),
+    byteSize: Buffer.byteLength(brief, 'utf8'),
+    mimeType: 'text/plain',
+    warnings: [],
+    extractedText: brief,
+  };
+}
+
+/**
+ * Replace a draft version's section→slot graph from a freshly-refined structure,
+ * in a single transaction. Used by the conversational-refine turn: the composer
+ * returns the FULL updated structure, so the simplest coherent write is to clear
+ * the prior graph and re-write it (the same delete-then-write shape re-ingest
+ * uses). Optionally re-resolves the version's goal/audience from the refined
+ * inferred values when present.
+ *
+ * Call {@link assertPersistable} first (the route does) — this assumes every
+ * question's `sectionOrdinal` resolves. The caller must ensure the version is a
+ * draft with no respondent sessions (a refine never rewrites a launched graph).
+ */
+export async function replaceVersionStructure(
+  versionId: string,
+  extraction: ExtractQuestionnaireStructureData
+): Promise<GraphCounts> {
+  return executeTransaction(async (tx) => {
+    // Clear the prior graph. Order: change log + sections (cascades slots →
+    // slot-tag joins) first, then the now-unreferenced tag vocabulary — the same
+    // order the re-ingest writer uses.
+    await tx.appQuestionnaireExtractionChange.deleteMany({ where: { versionId } });
+    await tx.appQuestionnaireSection.deleteMany({ where: { versionId } });
+    await tx.appQuestionTag.deleteMany({ where: { versionId } });
+
+    // Refresh goal/audience from the refined structure when the composer inferred
+    // them this turn; otherwise leave the existing values untouched.
+    const data: Prisma.AppQuestionnaireVersionUpdateInput = {};
+    if (extraction.inferredGoal !== undefined) data.goal = extraction.inferredGoal;
+    if (extraction.inferredAudience !== undefined) {
+      data.audience = jsonInput(extraction.inferredAudience);
+    }
+    if (Object.keys(data).length > 0) {
+      await tx.appQuestionnaireVersion.update({
+        where: { id: versionId },
+        data,
+        select: { id: true },
+      });
+    }
+
+    return writeGraph(tx, versionId, extraction);
   });
 }

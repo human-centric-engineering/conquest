@@ -219,3 +219,22 @@ export const dataSlotsAssignLimiter = createRateLimiter({
   interval: DATA_SLOTS_ASSIGN_RATE_LIMIT_INTERVAL_MS,
   maxRequests: DATA_SLOTS_ASSIGN_RATE_LIMIT_MAX,
 });
+
+/**
+ * Generative-authoring sub-cap (compose-from-brief + refine). Each compose run is a
+ * two-phase fan-out (one outline call + one call per section), and each refine turn
+ * is one reasoning-model call — real paid work, like the design-evaluation panel.
+ * Shared by all three generative-authoring routes (compose, compose/stream, refine):
+ * an admin iterating on a brief and refining fires several per minute, so 20/min is
+ * ample while bounding a hammered "Generate"/"Refine" button. Keyed on the admin
+ * user id, who owns the spend.
+ */
+export const COMPOSE_RATE_LIMIT_MAX = 20;
+
+/** Sliding-window length for {@link composeLimiter}, in milliseconds. */
+export const COMPOSE_RATE_LIMIT_INTERVAL_MS = 60_000;
+
+export const composeLimiter = createRateLimiter({
+  interval: COMPOSE_RATE_LIMIT_INTERVAL_MS,
+  maxRequests: COMPOSE_RATE_LIMIT_MAX,
+});

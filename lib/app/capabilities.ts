@@ -17,6 +17,7 @@ import { registerAppCapability } from '@/lib/orchestration/capabilities/registry
 import {
   AppAssignDataSlotsCapability,
   AppComposeCompletionOfferCapability,
+  AppComposeQuestionnaireCapability,
   AppDetectContradictionsCapability,
   AppEvaluateStructureCapability,
   AppExtractAnswerSlotsCapability,
@@ -24,6 +25,7 @@ import {
   AppGenerateDataSlotsCapability,
   AppRefineAnswerCapability,
   AppRefineDataSlotCapability,
+  AppRefineQuestionnaireStructureCapability,
 } from '@/lib/app/questionnaire/capabilities';
 
 export function initAppCapabilities(): void {
@@ -75,4 +77,14 @@ export function initAppCapabilities(): void {
   // generator agent; inert until the same flags are on (only the flag-gated assign route dispatches
   // it), so unconditional registration here is safe.
   registerAppCapability(new AppAssignDataSlotsCapability());
+
+  // Generative authoring — compose a questionnaire from a plain-English brief. Inert until the
+  // APP_QUESTIONNAIRES_ENABLED master flag and the APP_QUESTIONNAIRES_GENERATIVE_AUTHORING sub-flag
+  // are both on (only the flag-gated compose routes dispatch it), so unconditional registration is safe.
+  registerAppCapability(new AppComposeQuestionnaireCapability());
+
+  // Generative authoring — conversational refinement of a composed structure. Reuses the composer
+  // agent; inert until the same flags are on (only the flag-gated refine route dispatches it), so
+  // unconditional registration here is safe.
+  registerAppCapability(new AppRefineQuestionnaireStructureCapability());
 }

@@ -8,6 +8,8 @@
  * without a database. `assertPersistable` is tested as a pure guard.
  */
 
+import { createHash } from 'node:crypto';
+
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Prisma } from '@prisma/client';
 
@@ -16,8 +18,10 @@ vi.mock('@/lib/db/utils', () => ({ executeTransaction: vi.fn() }));
 import { executeTransaction } from '@/lib/db/utils';
 import {
   assertPersistable,
+  briefSource,
   IncoherentExtractionError,
   persistIngestion,
+  replaceVersionStructure,
   type PersistIngestionInput,
 } from '@/app/api/v1/app/questionnaires/_lib/persist';
 import type { ExtractQuestionnaireStructureData } from '@/lib/app/questionnaire/capabilities';
@@ -29,13 +33,21 @@ type Mock = ReturnType<typeof vi.fn>;
 let sectionSeq = 0;
 const tx = {
   appQuestionnaire: { create: vi.fn(async () => ({ id: 'qn-1' })) },
-  appQuestionnaireVersion: { create: vi.fn(async () => ({ id: 'ver-1' })) },
+  appQuestionnaireVersion: {
+    create: vi.fn(async () => ({ id: 'ver-1' })),
+    update: vi.fn(async () => ({ id: 'ver-1' })),
+  },
   appQuestionnaireSection: {
     create: vi.fn(async () => ({ id: `sec-${++sectionSeq}` })),
+    deleteMany: vi.fn(async () => ({ count: 0 })),
   },
   appQuestionSlot: { createMany: vi.fn(async () => ({ count: 0 })) },
-  appQuestionnaireExtractionChange: { createMany: vi.fn(async () => ({ count: 0 })) },
+  appQuestionnaireExtractionChange: {
+    createMany: vi.fn(async () => ({ count: 0 })),
+    deleteMany: vi.fn(async () => ({ count: 0 })),
+  },
   appQuestionnaireSourceDocument: { create: vi.fn(async () => ({ id: 'src-1' })) },
+  appQuestionTag: { deleteMany: vi.fn(async () => ({ count: 0 })) },
 };
 
 function extraction(
@@ -324,6 +336,65 @@ describe('persistIngestion', () => {
     expect(data.warnings).toEqual(['ocr fallback']);
   });
 
+  it('includes guidelines and rationale on a slot when the question supplies them', async () => {
+    // This covers the true-branch of the guidelines/rationale optional spreads (lines 159-160).
+    await persistIngestion(
+      input({
+        extraction: extraction({
+          sections: [{ ordinal: 0, title: 'S' }],
+          questions: [
+            {
+              sectionOrdinal: 0,
+              key: 'guided_q',
+              prompt: 'Describe your role.',
+              suggestedType: 'free_text',
+              extractionConfidence: 0.85,
+              guidelines: 'Be specific about seniority.',
+              rationale: 'Helps segment responses by level.',
+            },
+          ],
+          changes: [],
+        }),
+      })
+    );
+
+    const data = (tx.appQuestionSlot.createMany as Mock).mock.calls[0][0].data as Array<
+      Record<string, unknown>
+    >;
+    // Assert that the CODE spread the optional fields from the question — not just
+    // that createMany was called with some data.
+    expect(data[0]).toMatchObject({
+      key: 'guided_q',
+      guidelines: 'Be specific about seniority.',
+      rationale: 'Helps segment responses by level.',
+    });
+  });
+
+  it('omits afterJson from a change record when the change has no afterJson', async () => {
+    // Covers the false-branch of the afterJson ternary (line 183): when a change only
+    // has beforeJson (e.g. a prune with no after-value), afterJson must not appear.
+    await persistIngestion(
+      input({
+        extraction: extraction({
+          changes: [
+            {
+              changeType: 'prune_question',
+              targetEntityType: 'question',
+              beforeJson: 'old prompt',
+              // no afterJson
+            },
+          ],
+        }),
+      })
+    );
+
+    const data = (tx.appQuestionnaireExtractionChange.createMany as Mock).mock.calls[0][0]
+      .data as Array<Record<string, unknown>>;
+    // The code should NOT include an afterJson key when the change omits it.
+    expect(data[0]).not.toHaveProperty('afterJson');
+    expect(data[0].beforeJson).toBe('old prompt');
+  });
+
   it('carries optional change-record provenance fields when present', async () => {
     await persistIngestion(
       input({
@@ -353,5 +424,167 @@ describe('persistIngestion', () => {
       beforeJson: 'terse',
       afterJson: 'a clearer prompt',
     });
+  });
+});
+
+// ─── briefSource ─────────────────────────────────────────────────────────────
+
+describe('briefSource', () => {
+  it('returns fileName brief.txt with mimeType text/plain and empty warnings', () => {
+    const source = briefSource('Tell me about onboarding.');
+
+    // Verify the static fields the function sets — not just that a mock returned them.
+    expect(source.fileName).toBe('brief.txt');
+    expect(source.mimeType).toBe('text/plain');
+    expect(source.warnings).toEqual([]);
+  });
+
+  it('uses the brief text as extractedText so re-ingest diff has a source to compare', () => {
+    const brief = 'I need a customer-satisfaction questionnaire with 10 questions.';
+    const source = briefSource(brief);
+
+    expect(source.extractedText).toBe(brief);
+  });
+
+  it('sets byteSize to the UTF-8 byte length of the brief', () => {
+    const brief = 'hello'; // 5 ASCII bytes
+    const source = briefSource(brief);
+
+    expect(source.byteSize).toBe(Buffer.byteLength(brief, 'utf8'));
+  });
+
+  it('sets fileHash to the SHA-256 hex digest of the brief', () => {
+    const brief = 'my brief text';
+    const expected = createHash('sha256').update(brief).digest('hex');
+    const source = briefSource(brief);
+
+    // briefSource must COMPUTE the hash from the input — not return an
+    // arbitrary value — so the assertion checks the exact transformation.
+    expect(source.fileHash).toBe(expected);
+    expect(source.fileHash).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('produces different hashes for different briefs (hash is over the brief content)', () => {
+    const s1 = briefSource('Brief A');
+    const s2 = briefSource('Brief B');
+
+    expect(s1.fileHash).not.toBe(s2.fileHash);
+  });
+
+  it('produces different byteSizes for different-length briefs', () => {
+    const short = briefSource('x');
+    const long = briefSource('x'.repeat(100));
+
+    expect(short.byteSize).toBeLessThan(long.byteSize);
+  });
+});
+
+// ─── replaceVersionStructure ──────────────────────────────────────────────────
+
+describe('replaceVersionStructure', () => {
+  it('clears the prior graph before writing the new one', async () => {
+    // Arrange: a fresh extraction with 1 section and 1 question.
+    const freshExtraction = extraction({
+      sections: [{ ordinal: 0, title: 'New Section' }],
+      questions: [
+        {
+          sectionOrdinal: 0,
+          key: 'q1',
+          prompt: 'Refined question?',
+          suggestedType: 'free_text',
+          extractionConfidence: 0.95,
+        },
+      ],
+      changes: [],
+    });
+
+    await replaceVersionStructure('ver-replace-1', freshExtraction);
+
+    // Assert: all three delete operations ran before the new graph was written.
+    expect(tx.appQuestionnaireExtractionChange.deleteMany).toHaveBeenCalledWith({
+      where: { versionId: 'ver-replace-1' },
+    });
+    expect(tx.appQuestionnaireSection.deleteMany).toHaveBeenCalledWith({
+      where: { versionId: 'ver-replace-1' },
+    });
+    expect(tx.appQuestionTag.deleteMany).toHaveBeenCalledWith({
+      where: { versionId: 'ver-replace-1' },
+    });
+  });
+
+  it('returns structural counts from the freshly-written graph', async () => {
+    const freshExtraction = extraction({
+      sections: [
+        { ordinal: 0, title: 'S1' },
+        { ordinal: 1, title: 'S2' },
+      ],
+      questions: [
+        {
+          sectionOrdinal: 0,
+          key: 'q1',
+          prompt: 'Q1?',
+          suggestedType: 'free_text',
+          extractionConfidence: 1,
+        },
+        {
+          sectionOrdinal: 1,
+          key: 'q2',
+          prompt: 'Q2?',
+          suggestedType: 'numeric',
+          extractionConfidence: 0.8,
+        },
+        {
+          sectionOrdinal: 1,
+          key: 'q3',
+          prompt: 'Q3?',
+          suggestedType: 'boolean',
+          extractionConfidence: 0.9,
+        },
+      ],
+      changes: [{ changeType: 'rewrite_prompt', targetEntityType: 'question', afterJson: 'new' }],
+    });
+
+    const counts = await replaceVersionStructure('ver-replace-2', freshExtraction);
+
+    // Counts reflect the NEW graph, not the cleared one — the function must
+    // pass through writeGraph's output, not the deleteMany counts.
+    expect(counts).toEqual({ sectionCount: 2, questionCount: 3, changeCount: 1 });
+  });
+
+  it('updates the version goal/audience when the refined extraction supplies them', async () => {
+    const freshExtraction = extraction({
+      inferredGoal: 'Refined goal',
+      inferredAudience: { role: 'senior engineer' },
+    });
+
+    await replaceVersionStructure('ver-replace-3', freshExtraction);
+
+    expect(tx.appQuestionnaireVersion.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'ver-replace-3' },
+        data: expect.objectContaining({
+          goal: 'Refined goal',
+          // audience passes through jsonInput — the raw object is an InputJsonValue
+          audience: { role: 'senior engineer' },
+        }),
+      })
+    );
+  });
+
+  it('does NOT update the version when the refined extraction omits goal and audience', async () => {
+    // Extraction without inferredGoal/inferredAudience — existing DB values stay.
+    const freshExtraction = extraction({
+      sections: [{ ordinal: 0, title: 'S' }],
+      questions: [],
+      changes: [],
+    });
+    // Strip the inferred fields to make this explicit.
+    delete (freshExtraction as Partial<ExtractQuestionnaireStructureData>).inferredGoal;
+    delete (freshExtraction as Partial<ExtractQuestionnaireStructureData>).inferredAudience;
+
+    await replaceVersionStructure('ver-replace-4', freshExtraction);
+
+    // No update call should fire — the `data` object was empty, so the branch was skipped.
+    expect(tx.appQuestionnaireVersion.update).not.toHaveBeenCalled();
   });
 });

@@ -18,6 +18,7 @@ import {
   APP_QUESTIONNAIRES_SENSITIVITY_AWARENESS_FLAG,
   APP_QUESTIONNAIRES_FRICTIONLESS_INVITES_FLAG,
   APP_QUESTIONNAIRES_INVITE_IMPORT_FLAG,
+  APP_QUESTIONNAIRES_GENERATIVE_AUTHORING_FLAG,
   APP_QUESTIONNAIRES_FLAG,
 } from '@/lib/app/questionnaire/constants';
 import { isFeatureEnabled } from '@/lib/feature-flags';
@@ -41,6 +42,7 @@ export {
   APP_QUESTIONNAIRES_DATA_SLOTS_FLAG,
   APP_QUESTIONNAIRES_SERIOUSNESS_GATE_FLAG,
   APP_QUESTIONNAIRES_SENSITIVITY_AWARENESS_FLAG,
+  APP_QUESTIONNAIRES_GENERATIVE_AUTHORING_FLAG,
 };
 
 /**
@@ -164,6 +166,54 @@ export async function isDesignEvaluationEnabled(): Promise<boolean> {
     isFeatureEnabled(APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG),
   ]);
   return app && evaluation;
+}
+
+/**
+ * Whether **generative authoring** (compose-from-brief + conversational refine)
+ * may run. Requires BOTH the master app flag and the generative-authoring
+ * sub-flag — each compose/refine run is ≥1 reasoning LLM call, so it's opt-in on
+ * top of an already-enabled app (the same shape as {@link isDesignEvaluationEnabled}).
+ * The compose/stream/refine routes consult this and 404 when it's `false`, so a
+ * disabled sub-feature looks like a missing route rather than a 401.
+ *
+ * Server-only (resolves both flags from the database).
+ */
+export async function isGenerativeAuthoringEnabled(): Promise<boolean> {
+  const [app, authoring] = await Promise.all([
+    isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_GENERATIVE_AUTHORING_FLAG),
+  ]);
+  return app && authoring;
+}
+
+/**
+ * Flag gate for the generative-authoring routes. Returns a `404` {@link Response}
+ * when either the master app flag or the generative-authoring sub-flag is off, or
+ * `null` when both are on. Mirrors {@link ensureQuestionnairesEnabled} but for the
+ * compose sub-feature.
+ *
+ * Server-only (resolves both flags from the database).
+ */
+export async function ensureGenerativeAuthoringEnabled(): Promise<Response | null> {
+  if (await isGenerativeAuthoringEnabled()) {
+    return null;
+  }
+  return errorResponse('Not found', { code: 'NOT_FOUND', status: 404 });
+}
+
+/**
+ * Wrap a route handler so the generative-authoring gate runs **before** anything
+ * else (auth, handler work) — the order a disabled sub-feature needs to look like
+ * a missing route rather than a 401. Mirrors {@link withQuestionnairesEnabled}.
+ */
+export function withGenerativeAuthoringEnabled<C>(
+  handler: (request: NextRequest, context: C) => Promise<Response>
+): (request: NextRequest, context: C) => Promise<Response> {
+  return async (request, context) => {
+    const blocked = await ensureGenerativeAuthoringEnabled();
+    if (blocked) return blocked;
+    return handler(request, context);
+  };
 }
 
 /**
