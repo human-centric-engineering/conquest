@@ -21,9 +21,16 @@ place: a launched questionnaire attributed to a demo client, ready to invite aga
 2. **Feature flags are ON.** The questionnaire surface is gated by feature flags that are
    **database rows in the `feature_flag` table, not env vars** — the `APP_*_ENABLED` names look
    like env vars but are not. `npm run db:seed` turns the master flag (`APP_QUESTIONNAIRES_ENABLED`)
-   and the sub-flags on. If a route 404s, the flag is off — see [feature-flags.md] for the full
-   matrix and how to toggle one. Live respondent sessions additionally need
-   `APP_QUESTIONNAIRES_LIVE_SESSIONS_ENABLED`.
+   on, but several capability sub-flags **dark-launch OFF** and must be enabled for the demo to show
+   them. If a route 404s — or a configured behaviour (safeguarding, contradiction) doesn't fire —
+   the flag is off; see [feature-flags.md] for the full matrix and how to toggle one. For the seeded
+   demo, enable these `feature_flag` rows:
+   - `APP_QUESTIONNAIRES_LIVE_SESSIONS_ENABLED` — the respondent chat surface.
+   - `APP_QUESTIONNAIRES_CONTRADICTION_DETECTION_ENABLED` — the "I noticed something" callout.
+   - `APP_QUESTIONNAIRES_SENSITIVITY_AWARENESS_ENABLED` — safeguarding (tone-softening + support
+     signpost on a sensitive disclosure). The demo questionnaire already opts in via its config and
+     authors the support copy; this flag is the runtime gate that lets it run.
+   - `APP_QUESTIONNAIRES_REASONING_STREAM_ENABLED` — the live "watch it think" reasoning feed.
 3. **At least one LLM provider key** (e.g. `ANTHROPIC_API_KEY` in `.env.local`) — the manual
    upload path runs the extractor agent, and every respondent turn calls a model. The seeded
    fast path needs a key only once you start a session, not to seed.
@@ -47,8 +54,10 @@ This creates (idempotently — safe to re-run):
 - **Launched questionnaire** "Northwind Logistics — Onboarding Experience Review" — 2 sections,
   6 questions, attributed to that client. Runs **anonymously** (so "Preview as respondent" opens
   its real no-login surface) with **contradiction flagging** on (give inconsistent answers and the
-  chat surfaces an "I noticed something" callout; needs the contradiction + live-sessions flags on
-  — see §0).
+  chat surfaces an "I noticed something" callout) and **safeguarding** on (disclose something
+  sensitive — e.g. "I'm being abused by my boss" — and the agent softens its tone and signposts
+  support once). Both need their sub-flags + the live-sessions flag on at runtime: the
+  **contradiction-detection**, **sensitivity-awareness**, and **live-sessions** DB flags — see §0.
 
 > **Preview as respondent** (on a launched version's admin page) always works, anonymous or not.
 > An anonymous-mode version opens its real `/q/<versionId>` no-login surface; an invitation-gated

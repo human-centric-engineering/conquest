@@ -260,8 +260,13 @@ const unit: SeedUnit = {
       //     no-login public surface; collects no profile fields (F8.3).
       //   - contradictionMode: 'flag' — so the chat's "I noticed something" callout fires
       //     when a respondent gives inconsistent answers (the most visible sign of the
-      //     agent reasoning about the conversation). The contradiction sub-flag and
-      //     live-sessions flag (DB rows) must also be on at runtime; see the runbook.
+      //     agent reasoning about the conversation).
+      //   - sensitivityAwareness: true + an authored supportMessage — so a sensitive disclosure
+      //     (e.g. "I'm being abused by my boss") softens the agent's tone AND signposts support
+      //     once. Without an authored supportMessage the signpost is suppressed, so the demo ships
+      //     verbatim copy here.
+      // The contradiction / sensitivity-awareness sub-flags and the live-sessions flag (DB rows)
+      // must also be on at runtime; see the runbook.
       await tx.appQuestionnaireConfig.create({
         data: {
           versionId: version.id,
@@ -275,6 +280,15 @@ const unit: SeedUnit = {
           contradictionWindowN: 4,
           contradictionEveryNTurns: 1,
           anonymousMode: true,
+          // Safeguarding: detect + remember a sensitive disclosure, soften later phrasing, and
+          // signpost support once on a serious (high-severity) disclosure. Verbatim, admin-authored
+          // copy (never LLM-reworded) so the safeguarding wording is exact.
+          sensitivityAwareness: true,
+          supportMessage:
+            'If anything you’ve shared here has been difficult, please know you don’t have to ' +
+            'deal with it alone — confidential support is available whenever you need it, and you ' +
+            'can take a break or stop at any time.',
+          supportResourceUrl: 'https://www.mind.org.uk/information-support/',
           answerSlotPanelScope: DEFAULT_QUESTIONNAIRE_CONFIG.answerSlotPanelScope,
           profileFields: [],
         },
