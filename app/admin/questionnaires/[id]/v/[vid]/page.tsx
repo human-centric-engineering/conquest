@@ -22,7 +22,7 @@ import {
   resolveQuestionnaireWorkspaceFlags,
 } from '@/lib/app/questionnaire/workspace-data';
 import { workspaceVersionBase } from '@/lib/app/questionnaire/workspace-nav';
-import { isLaunchReady } from '@/lib/app/questionnaire/launch/readiness';
+import { isPreviewAvailable } from '@/lib/app/questionnaire/launch/readiness';
 
 export const metadata: Metadata = {
   title: 'Overview · Questionnaire',
@@ -54,21 +54,26 @@ export default async function OverviewTab({ params }: PageProps) {
 
   // Preview is available for a launched version OR a launchable draft (passes the same readiness
   // gate as launch — so an admin can rehearse before going live), and only when the live-sessions
-  // surface is on. The server `createPreviewSession` enforces the same rule.
-  const draftPreviewReady =
-    isDraft &&
-    graph !== null &&
-    isLaunchReady({
-      goal: graph.goal,
-      audience: graph.audience,
-      sectionCount: selected.sectionCount,
-      questionCount: selected.questionCount,
-      configSaved: graph.config.saved,
-      dataSlotsRequired: flags.dataSlots,
-      dataSlotsReady: dataSlotCount > 0,
-    });
-  const previewAvailable =
-    flags.liveSessions && graph !== null && (isLaunched || draftPreviewReady);
+  // surface is on. Shared with the workspace-header Preview button; the server
+  // `createPreviewSession` enforces the same rule.
+  const previewAvailable = isPreviewAvailable({
+    status: selected.status,
+    liveSessions: flags.liveSessions,
+    graphPresent: graph !== null,
+    ...(isDraft && graph
+      ? {
+          readiness: {
+            goal: graph.goal,
+            audience: graph.audience,
+            sectionCount: selected.sectionCount,
+            questionCount: selected.questionCount,
+            configSaved: graph.config.saved,
+            dataSlotsRequired: flags.dataSlots,
+            dataSlotsReady: dataSlotCount > 0,
+          },
+        }
+      : {}),
+  });
 
   const stats: CqStat[] = [
     { label: 'Sections', value: selected.sectionCount },

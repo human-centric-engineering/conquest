@@ -21,13 +21,17 @@ import { notFound } from 'next/navigation';
 import { BreadcrumbLabel } from '@/components/admin/breadcrumb-context';
 import { QuestionnaireSubNav } from '@/components/admin/questionnaires/workspace/questionnaire-sub-nav';
 import { VersionSelector } from '@/components/admin/questionnaires/workspace/version-selector';
+import { PreviewRespondentButton } from '@/components/admin/questionnaires/workspace/preview-respondent-button';
 import { QUESTIONNAIRE_STATUS_BADGE } from '@/components/admin/questionnaires/status-badge';
 import { Badge } from '@/components/ui/badge';
 import {
   getQuestionnaireDetailCached,
+  getVersionDataSlotCountCached,
+  getVersionGraphCached,
   resolveQuestionnaireWorkspaceFlags,
 } from '@/lib/app/questionnaire/workspace-data';
 import { visibleWorkspaceTabs } from '@/lib/app/questionnaire/workspace-nav';
+import { isPreviewAvailable } from '@/lib/app/questionnaire/launch/readiness';
 
 export const metadata: Metadata = {
   title: 'Questionnaire',
@@ -42,9 +46,10 @@ interface LayoutProps {
 export default async function QuestionnaireWorkspaceLayout({ params, children }: LayoutProps) {
   const { id, vid } = await params;
 
-  const [detail, flags] = await Promise.all([
+  const [detail, flags, graph] = await Promise.all([
     getQuestionnaireDetailCached(id),
     resolveQuestionnaireWorkspaceFlags(),
+    getVersionGraphCached(id, vid),
   ]);
 
   if (!flags.master) notFound();
@@ -54,6 +59,29 @@ export default async function QuestionnaireWorkspaceLayout({ params, children }:
   if (!selected) notFound();
 
   const tabs = visibleWorkspaceTabs(flags);
+
+  // "Preview as respondent" lives in the header so it's reachable from every tab (not just Overview).
+  // Same availability rule as the Overview section + the server boot — shared `isPreviewAvailable`.
+  // The graph + data-slot count are `cache()`d, so tabs that already load them pay nothing extra.
+  const dataSlotCount = flags.dataSlots && graph ? await getVersionDataSlotCountCached(id, vid) : 0;
+  const previewAvailable = isPreviewAvailable({
+    status: selected.status,
+    liveSessions: flags.liveSessions,
+    graphPresent: graph !== null,
+    ...(selected.status === 'draft' && graph
+      ? {
+          readiness: {
+            goal: graph.goal,
+            audience: graph.audience,
+            sectionCount: selected.sectionCount,
+            questionCount: selected.questionCount,
+            configSaved: graph.config.saved,
+            dataSlotsRequired: flags.dataSlots,
+            dataSlotsReady: dataSlotCount > 0,
+          },
+        }
+      : {}),
+  });
   // The pill must describe what's actually on screen. A questionnaire-level "Launched"
   // badge next to the draft you're editing reads as a lie — so show the pill only when the
   // selected version IS the live one, and orient everything else with a subtitle that names
@@ -80,7 +108,8 @@ export default async function QuestionnaireWorkspaceLayout({ params, children }:
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-2xl font-semibold">{detail.title}</h1>
             {viewingLive && <Badge variant={liveBadge.variant}>{liveBadge.label}</Badge>}
-            <div className="ml-auto">
+            <div className="ml-auto flex items-center gap-2">
+              {previewAvailable && <PreviewRespondentButton versionId={selected.id} />}
               <VersionSelector
                 questionnaireId={id}
                 versionId={selected.id}

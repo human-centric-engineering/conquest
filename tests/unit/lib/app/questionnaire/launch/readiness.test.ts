@@ -13,6 +13,7 @@ import { describe, it, expect } from 'vitest';
 import {
   hasAudience,
   isLaunchReady,
+  isPreviewAvailable,
   launchReadinessChecks,
   type LaunchReadinessInput,
 } from '@/lib/app/questionnaire/launch/readiness';
@@ -106,5 +107,56 @@ describe('isLaunchReady', () => {
     expect(isLaunchReady({ ...READY, audience: {} })).toBe(false);
     expect(isLaunchReady({ ...READY, dataSlotsRequired: true, dataSlotsReady: false })).toBe(false);
     expect(isLaunchReady({ ...READY, dataSlotsRequired: true, dataSlotsReady: true })).toBe(true);
+  });
+});
+
+describe('isPreviewAvailable', () => {
+  it('requires live-sessions on and a resolved graph', () => {
+    expect(
+      isPreviewAvailable({ status: 'launched', liveSessions: false, graphPresent: true })
+    ).toBe(false);
+    expect(
+      isPreviewAvailable({ status: 'launched', liveSessions: true, graphPresent: false })
+    ).toBe(false);
+  });
+
+  it('always allows a launched version (no readiness needed)', () => {
+    expect(isPreviewAvailable({ status: 'launched', liveSessions: true, graphPresent: true })).toBe(
+      true
+    );
+  });
+
+  it('allows a draft only when it passes the launch-readiness bar', () => {
+    expect(
+      isPreviewAvailable({
+        status: 'draft',
+        liveSessions: true,
+        graphPresent: true,
+        readiness: READY,
+      })
+    ).toBe(true);
+    expect(
+      isPreviewAvailable({
+        status: 'draft',
+        liveSessions: true,
+        graphPresent: true,
+        readiness: { ...READY, configSaved: false },
+      })
+    ).toBe(false);
+    // A draft with no readiness supplied is never previewable.
+    expect(isPreviewAvailable({ status: 'draft', liveSessions: true, graphPresent: true })).toBe(
+      false
+    );
+  });
+
+  it('never allows an archived version', () => {
+    expect(
+      isPreviewAvailable({
+        status: 'archived',
+        liveSessions: true,
+        graphPresent: true,
+        readiness: READY,
+      })
+    ).toBe(false);
   });
 });
