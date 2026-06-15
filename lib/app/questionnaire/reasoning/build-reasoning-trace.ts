@@ -18,6 +18,7 @@ import type { RefinementDecision } from '@/lib/app/questionnaire/refinement/type
 import type { AnswerProvenance, SelectionStrategy } from '@/lib/app/questionnaire/types';
 
 import type { ReasoningStep, ReasoningTone } from '@/lib/app/questionnaire/reasoning/types';
+import { confidenceBand } from '@/lib/app/questionnaire/panel/confidence';
 
 /** What the builder reads beyond the result — the labels it resolves slot keys/ids against. */
 export interface ReasoningTraceOptions {
@@ -37,12 +38,6 @@ const MAX_LABEL_CHARS = 64;
 function shortLabel(text: string): string {
   const trimmed = text.trim().replace(/\s+/g, ' ');
   return trimmed.length > MAX_LABEL_CHARS ? `${trimmed.slice(0, MAX_LABEL_CHARS - 1)}…` : trimmed;
-}
-
-function confidenceWord(confidence: number): string {
-  if (confidence >= 0.8) return 'high';
-  if (confidence >= 0.5) return 'medium';
-  return 'low';
 }
 
 /** Respondent-facing phrasing of how a value was arrived at. */
@@ -148,7 +143,7 @@ export function buildReasoningTrace(
       steps.push({
         kind: 'extraction',
         label: `Captured "${questionLabel(intent.slotKey)}"`,
-        detail: `${provenancePhrase(intent.provenance)} · ${confidenceWord(intent.confidence)} confidence`,
+        detail: `${provenancePhrase(intent.provenance)} · ${confidenceBand(intent.confidence)} confidence`,
         ...(rationale ? { rationale } : {}),
         ...(intent.sourceQuote ? { sourceQuote: intent.sourceQuote } : {}),
         confidence: intent.confidence,

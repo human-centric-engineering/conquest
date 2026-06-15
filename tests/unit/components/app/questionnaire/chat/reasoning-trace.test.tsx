@@ -395,31 +395,32 @@ describe('ReasoningTrace — optional affordances', () => {
     expect(allText).not.toContain('"');
   });
 
+  // Pip bands derive from the canonical confidenceBand (high ≥0.85, moderate ≥0.6, low <0.6),
+  // so the trace's aria-label matches the answer-panel confidence chip.
   it('renders confidence pips with aria-label when step.confidence is present', () => {
-    // Arrange: confidence 0.9 → level 3 → "high confidence"
+    // Arrange: confidence 0.9 → band 'high' → 3 pips → "high confidence"
     const steps = [makeStep({ confidence: 0.9, label: 'High-confidence step' })];
 
     // Act
     render(<ReasoningTrace steps={steps} variant="live" />);
 
-    // Assert: the ConfidencePips span has an aria-label that names the level.
-    // The component outputs `aria-label="high confidence"` (from the level→label lookup).
+    // Assert: the ConfidencePips span has an aria-label that names the band.
     expect(screen.getByLabelText(/high confidence/i)).toBeInTheDocument();
   });
 
-  it('renders medium confidence pips when confidence is 0.6', () => {
-    // Arrange: 0.6 >= 0.5 → level 2 → "medium confidence"
-    const steps = [makeStep({ confidence: 0.6, label: 'Medium-confidence step' })];
+  it('renders moderate confidence pips when confidence is 0.6', () => {
+    // Arrange: 0.6 ≥ 0.6 → band 'moderate' → level 2 → "moderate confidence"
+    const steps = [makeStep({ confidence: 0.6, label: 'Moderate-confidence step' })];
 
     // Act
     render(<ReasoningTrace steps={steps} variant="live" />);
 
     // Assert
-    expect(screen.getByLabelText(/medium confidence/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/moderate confidence/i)).toBeInTheDocument();
   });
 
   it('renders low confidence pips when confidence is 0.3', () => {
-    // Arrange: 0.3 < 0.5 → level 1 → "low confidence"
+    // Arrange: 0.3 < 0.6 → band 'low' → level 1 → "low confidence"
     const steps = [makeStep({ confidence: 0.3, label: 'Low-confidence step' })];
 
     // Act

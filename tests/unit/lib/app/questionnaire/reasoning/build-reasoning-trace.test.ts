@@ -93,7 +93,8 @@ describe('buildReasoningTrace', () => {
     // inferred is an "insight" moment, not neutral.
     expect(extraction?.tone).toBe('insight');
     expect(extraction?.detail).toMatch(/Inferred/);
-    expect(extraction?.detail).toMatch(/medium confidence/);
+    // 0.6 → canonical confidenceBand 'moderate' (matches the answer-panel chip).
+    expect(extraction?.detail).toMatch(/moderate confidence/);
     // The extractor's own justification rides the separate rationale line.
     expect(extraction?.rationale).toBe('because');
   });
@@ -375,31 +376,32 @@ describe('buildReasoningTrace', () => {
     expect(extraction?.tone).toBe('insight');
   });
 
-  it('labels confidence as "high" at 0.8 and "low" below 0.5', () => {
-    const high = buildReasoningTrace(
-      result({
-        sideEffects: {
-          answerUpserts: [intent({ slotKey: 'q1', provenance: 'direct', confidence: 0.8 })],
-          answerRefinements: [],
-        },
-        assessment: assessment({ answeredCount: 1 }),
-      }),
-      { questions: QUESTIONS }
-    );
-    expect(high.find((s) => s.kind === 'extraction')?.detail).toMatch(/high confidence/);
-
-    const low = buildReasoningTrace(
-      result({
-        sideEffects: {
-          answerUpserts: [intent({ slotKey: 'q1', provenance: 'direct', confidence: 0.3 })],
-          answerRefinements: [],
-        },
-        assessment: assessment({ answeredCount: 1 }),
-      }),
-      { questions: QUESTIONS }
-    );
-    expect(low.find((s) => s.kind === 'extraction')?.detail).toMatch(/low confidence/);
-  });
+  // Confidence words come from the canonical confidenceBand (high ≥0.85, moderate ≥0.6, low <0.6),
+  // so the trace detail agrees with the answer-panel chip — no per-surface threshold drift.
+  it.each([
+    ['high', 0.85],
+    ['moderate', 0.84],
+    ['moderate', 0.6],
+    ['low', 0.59],
+    ['low', 0.3],
+  ])(
+    'labels confidence as "%s confidence" at %d (canonical band thresholds)',
+    (word, confidence) => {
+      const steps = buildReasoningTrace(
+        result({
+          sideEffects: {
+            answerUpserts: [intent({ slotKey: 'q1', provenance: 'direct', confidence })],
+            answerRefinements: [],
+          },
+          assessment: assessment({ answeredCount: 1 }),
+        }),
+        { questions: QUESTIONS }
+      );
+      expect(steps.find((s) => s.kind === 'extraction')?.detail).toMatch(
+        new RegExp(`${word} confidence`)
+      );
+    }
+  );
 
   // ---------------------------------------------------------------------------
   // Refinement source phrase variants (lines 69-80 in source)

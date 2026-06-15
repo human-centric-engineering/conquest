@@ -35,6 +35,7 @@ import {
 
 import { cn } from '@/lib/utils';
 import type { ReasoningStep, ReasoningStepKind } from '@/lib/app/questionnaire/reasoning';
+import { confidenceBand } from '@/lib/app/questionnaire/panel/confidence';
 
 const STEP_ICONS: Record<ReasoningStepKind, LucideIcon> = {
   extraction: Sparkles,
@@ -46,15 +47,19 @@ const STEP_ICONS: Record<ReasoningStepKind, LucideIcon> = {
 
 const ACCENT = 'var(--app-accent-color, var(--color-primary))';
 
-/** A "signal-strength" confidence pip — 1–3 filled bars for low / medium / high. Compact + glanceable. */
+/**
+ * A "signal-strength" confidence pip — 1–3 filled bars for low / moderate / high. Compact +
+ * glanceable. Bands and thresholds come from the canonical {@link confidenceBand} so the trace
+ * agrees with the answer panel's confidence chip (no per-surface threshold drift).
+ */
 function ConfidencePips({ confidence }: { confidence: number }) {
-  const level = confidence >= 0.8 ? 3 : confidence >= 0.5 ? 2 : 1;
-  const label = level === 3 ? 'high' : level === 2 ? 'medium' : 'low';
+  const band = confidenceBand(confidence);
+  const level = band === 'high' ? 3 : band === 'moderate' ? 2 : 1;
   return (
     <span
       className="ml-auto inline-flex shrink-0 items-end gap-0.5"
-      title={`${label} confidence`}
-      aria-label={`${label} confidence`}
+      title={`${band} confidence`}
+      aria-label={`${band} confidence`}
     >
       {[0, 1, 2].map((i) => (
         <span
