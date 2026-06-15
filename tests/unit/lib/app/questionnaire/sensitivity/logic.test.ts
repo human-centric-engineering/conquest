@@ -12,6 +12,8 @@ import {
   runningMaxLevel,
   shouldSignpost,
   composeSupportMessage,
+  effectiveSupportMessage,
+  DEFAULT_SUPPORT_MESSAGE,
 } from '@/lib/app/questionnaire/sensitivity';
 
 describe('severityRank', () => {
@@ -63,5 +65,16 @@ describe('composeSupportMessage', () => {
     expect(composeSupportMessage('Support is available.', 'https://help.example')).toBe(
       'Support is available. https://help.example'
     );
+  });
+});
+
+describe('effectiveSupportMessage', () => {
+  it('uses the authored message when present', () => {
+    expect(effectiveSupportMessage('  Reach our team anytime.  ')).toBe('Reach our team anytime.');
+  });
+
+  it('falls back to the reviewed default when blank (no silent empty-message footgun)', () => {
+    expect(effectiveSupportMessage('')).toBe(DEFAULT_SUPPORT_MESSAGE);
+    expect(effectiveSupportMessage('   ')).toBe(DEFAULT_SUPPORT_MESSAGE);
   });
 });

@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 
 import { runTurn, runDataSlotTurn } from '@/lib/app/questionnaire/orchestrator';
 import type { SensitivityAssessment } from '@/lib/app/questionnaire/sensitivity/types';
+import { DEFAULT_SUPPORT_MESSAGE } from '@/lib/app/questionnaire/sensitivity';
 import {
   intent,
   state,
@@ -61,7 +62,7 @@ describe('runTurn — sensitivity awareness', () => {
     expect(result.sensitivity?.newLevel).toBe('high');
   });
 
-  it('signposts support (once) only when a support message is configured', async () => {
+  it('signposts the authored support message (once) when one is configured', async () => {
     const { invokers } = stubInvokers({ extract: { sensitivity: HIGH } });
     const withMsg = await runTurn(
       state({
@@ -75,14 +76,15 @@ describe('runTurn — sensitivity awareness', () => {
     expect(ev?.message).toBe('Support is available. https://help.x');
   });
 
-  it('does NOT signpost when the support message is empty', async () => {
+  it('signposts a default message when the support message is empty (no silent footgun)', async () => {
     const { invokers } = stubInvokers({ extract: { sensitivity: HIGH } });
     const result = await runTurn(
       state({ userMessage: 'x', questions: Q, config: { supportMessage: '' } }),
       invokers
     );
-    expect(supportEvent(result.events)).toBeUndefined();
-    expect(result.sensitivity?.signpost).toBe(true); // outcome still records it; just no copy to show
+    const ev = supportEvent(result.events);
+    expect(ev?.message).toBe(DEFAULT_SUPPORT_MESSAGE);
+    expect(result.sensitivity?.signpost).toBe(true);
   });
 
   it('does NOT signpost again once the session has already reached high', async () => {

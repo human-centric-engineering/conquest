@@ -31,6 +31,7 @@ import {
   runningMaxLevel,
   shouldSignpost,
   composeSupportMessage,
+  effectiveSupportMessage,
 } from '@/lib/app/questionnaire/sensitivity';
 import type { SensitivityAssessment } from '@/lib/app/questionnaire/sensitivity/types';
 import { unansweredQuestions } from '@/lib/app/questionnaire/selection/context';
@@ -381,12 +382,17 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
   }
 
   // Signpost support LAST so it wins the chat's single notice slot (the hook keeps one warning).
-  // Only when a serious disclosure was first reached this turn AND the admin authored copy.
-  if (sensitivity?.signpost && state.config.supportMessage.trim().length > 0) {
+  // Fires whenever a serious disclosure is first reached this turn; the copy is the admin's authored
+  // message, or a reviewed default when they left it blank (so enabling sensitivity always signposts
+  // — no silent empty-message footgun).
+  if (sensitivity?.signpost) {
     events.push({
       type: 'warning',
       code: 'support',
-      message: composeSupportMessage(state.config.supportMessage, state.config.supportResourceUrl),
+      message: composeSupportMessage(
+        effectiveSupportMessage(state.config.supportMessage),
+        state.config.supportResourceUrl
+      ),
     });
   }
 

@@ -813,9 +813,9 @@ export function ConfigEditor({
                   Support message{' '}
                   <FieldHelp title="Support message">
                     Shown once, gently, when a serious disclosure is detected — verbatim, so it
-                    can&apos;t be reworded by the agent. Leave blank to never signpost. e.g.
-                    &ldquo;If anything here has been difficult, support is available — you can reach
-                    our team or a helpline at any time.&rdquo;
+                    can&apos;t be reworded by the agent. Leave blank to use a standard support
+                    message; or write your own, e.g. &ldquo;If anything here has been difficult,
+                    support is available — you can reach our team or a helpline at any time.&rdquo;
                   </FieldHelp>
                 </Label>
                 <Textarea
