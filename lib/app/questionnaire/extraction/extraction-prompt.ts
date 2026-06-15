@@ -60,29 +60,47 @@ Output: respond with ONLY a single JSON object: { "answers": [ ... ] } (optional
  */
 const DATA_SLOT_RULES = `
 
-You ALSO maintain a set of DATA SLOTS — short semantic targets the conversation is filling. In \
-the same response, add a "dataSlotFills" array. For every data slot the respondent's message \
+DATA SLOTS ARE A PRIMARY DELIVERABLE — capturing them matters as much as the question answers above, \
+never less. You maintain a set of DATA SLOTS (short semantic targets the conversation is filling) \
+and, in the SAME response, add a "dataSlotFills" array. For every data slot the respondent's message \
 informs (directly, by inference, or by synthesising the conversation), output one entry:
 - "dataSlotKey": a key from the provided data-slot list ONLY.
 - "value": the captured position as concrete, structured data — the SPECIFICS the respondent gave \
 (numbers, names, choices), not a label for them. For "I am 25, male" record \
 {"age": 25, "gender": "male"} (or "25, male"), NOT "age and gender provided".
 - "paraphrase": a restatement of the respondent's position on this slot, naming the specifics so a \
-reader sees exactly what was recorded. Match the wording to the provenance: a "direct" fill is a \
-faithful, declarative restatement of what they actually said ("A 25-year-old male.", "They found \
-setup straightforward but were slowed by unclear docs."); an "inferred" or "synthesised" fill MUST \
-be HEDGED — read it as a tentative reading, not an established fact ("They may be feeling blocked \
+reader sees exactly what was recorded. Always report it as THEIR ACCOUNT — what they said, or the \
+experience they describe — never as an established fact about the world. Match the wording to the \
+provenance: a "direct" fill faithfully restates what they actually said, but ATTRIBUTES any \
+experience, event, feeling, or claim about other people or situations to them with reporting \
+language — "They report experiencing abuse from their boss, which they say is a significant blocker \
+to their work.", "They say setup was straightforward but unclear docs slowed them down." — NOT a \
+bare assertion the platform appears to vouch for ("They are experiencing abuse from their boss." is \
+WRONG; "Setup was straightforward." is WRONG). Plain, neutral self-description needs no reporting \
+verb ("A 25-year-old male." is fine). An "inferred" or "synthesised" fill MUST go further and be \
+HEDGED — read it as a tentative reading, not an established fact ("They may be feeling blocked \
 in their role.", NOT "Their dissatisfaction is a blocker to their best work."). Use "may", "seems", \
 "possibly". NEVER a meta-summary of what they shared ("They provided their age and gender." is \
 WRONG), and NEVER a statement of ABSENCE — what is missing, not yet covered, or not provided ("Their \
 tenure and department are not provided." is WRONG; omit the slot instead). Capture the full \
 substance — if they gave several details, reflect them all.
-- "confidence": 0–1, how well you understand their position on this slot. Be honest about weak \
-signal: a single, loose inference from a brief or vague message (e.g. reading "blockers" out of "not \
-satisfied") is LOW confidence (≤ 0.4), not moderate. Reserve high confidence for positions the \
-respondent stated plainly.
+- "confidence": 0–1, how completely you understand their FULL position on this slot — not merely how \
+clearly they stated one thing. Be honest about weak signal: a single, loose inference from a brief or \
+vague message (e.g. reading "blockers" out of "not satisfied") is LOW confidence (≤ 0.4), not \
+moderate. Do NOT rush to certainty: a position stated only ONCE — even plainly and directly — is a \
+first reading, not the whole story. Many slots (blockers, concerns, needs, reasons, goals) have more \
+than one facet, and a single statement may be only part of it — you have not yet explored whether \
+there is more or had the respondent confirm it. Cap a first, single-turn capture in the MODERATE band \
+(roughly 0.6–0.8); NEVER near 1.0 off one message. Reserve HIGH confidence (≥ 0.85) for a position \
+that has been CORROBORATED — confirmed by the respondent, consistent across several turns, or \
+approached from more than one angle — and near-certainty (≥ 0.95) only for something they have \
+clearly confirmed more than once. When a slot's "current" line shows a prior confidence, raise it a \
+STEP as each new turn corroborates the same position, rather than jumping straight to certainty.
 - "provenance": ${EXTRACTOR_EMITTED_PROVENANCES.join(', ')} (as above).
-- "rationale": a short reason.
+- "rationale": a short reason this message informs the slot. Write it for the respondent and the \
+admin: refer to the subject by what it is ("this topic", "what they're being asked about", or the \
+slot's name) — NEVER use the words "data slot" or "slot" (internal jargon). "Their statement about \
+X directly informs this topic." is right; "...informs this data slot." is WRONG.
 ONLY emit a fill for a slot the latest message actually bears on — a position the respondent stated, \
 or one that genuinely follows from something they said. If the message says nothing about a slot, \
 OMIT it entirely (do not record its absence) — the panel shows "Not covered yet" on its own.
@@ -101,7 +119,15 @@ Some slots show a "status: asked N× without a clear answer" line — the conver
 repeatedly and is about to move on. For EACH such slot you MUST output a fill: infer the most \
 plausible position from the ENTIRE conversation even if the signal is weak, set a LOW "confidence" \
 (≤ 0.4), and use provenance "inferred" or "synthesised". Never leave one of these slots empty — \
-a tentative reading we can revisit is better than nothing.`;
+a tentative reading we can revisit is better than nothing.
+
+FINAL CHECK before you finish: re-read the data-slot list once more against the respondent's message. \
+A substantive answer almost always informs at least one slot, so an EMPTY "dataSlotFills" is the rare \
+EXCEPTION — correct only for a true non-answer (small talk, a question back, "I don't know", or a \
+message that genuinely bears on no slot). Whenever they share anything about themselves, their work, \
+their feelings, or their situation, map it to the slot(s) it informs and emit a fill — at honest \
+confidence (low if the signal is weak), but emit it. NEVER return question answers while leaving \
+"dataSlotFills" empty: if a message was clear enough to answer a question, it informs a data slot too.`;
 
 /**
  * Appended to the system rules ONLY when sensitivity awareness is on (gated by the platform flag +
@@ -112,17 +138,23 @@ a tentative reading we can revisit is better than nothing.`;
 const SENSITIVITY_RULES = `
 
 Sensitivity awareness: a respondent may disclose something sensitive or contentious — abuse, \
-harassment, discrimination, self-harm, threats, bereavement, a safeguarding or serious legal/safety \
-concern. When the message contains a GENUINE personal disclosure of this kind, ALSO output a \
-"sensitivity" object:
+bullying, harassment, discrimination, threats, violence, self-harm, bereavement, or a safeguarding \
+/ serious legal / safety concern (at work or elsewhere). When the message contains a GENUINE \
+personal disclosure of this kind, ALSO output a "sensitivity" object:
 - "detected": true.
-- "severity": "high" for a serious disclosure (abuse, self-harm, threats, safeguarding); "medium" \
-or "low" for lesser sensitivity.
-- "category": a short label, e.g. "harassment", "self-harm", "bereavement".
-- "summary": a careful, CLINICAL, NON-GRAPHIC one-line restatement (e.g. "Reports mistreatment by a \
-senior colleague."). Never quote graphic or distressing detail.
-OMIT the "sensitivity" field entirely when there is no genuine sensitive disclosure — a neutral, \
-negative, or merely critical answer is NOT a disclosure. When in doubt, omit it.`;
+- "severity": "high" for a serious disclosure — being abused, bullied, harassed, threatened, \
+discriminated against, made to feel unsafe, self-harm, or a safeguarding concern; "medium" or \
+"low" for lesser sensitivity.
+- "category": a short label, e.g. "workplace abuse", "harassment", "self-harm", "bereavement".
+- "summary": a careful, CLINICAL, NON-GRAPHIC one-line restatement (e.g. "Reports being mistreated \
+by their manager."). Never quote graphic or distressing detail.
+A FIRST-PERSON statement of being abused, bullied, harassed, threatened, discriminated against, or \
+made to feel unsafe IS a genuine disclosure with severity "high" — even when phrased bluntly or \
+bundled with a complaint (e.g. "I hate my job because my boss abuses me"). Do NOT downgrade such a \
+statement to "merely critical", and do NOT omit it.
+OMIT the "sensitivity" field only for a neutral, negative, or merely critical OPINION that reports \
+no personal harm (e.g. "management doesn't listen", "the tools are clunky"). When a genuine \
+disclosure of harm IS present, always include it.`;
 
 /** Render one data-slot candidate as a compact, model-readable line. */
 function describeDataSlot(slot: DataSlotCandidateView): string {
@@ -206,7 +238,7 @@ export function buildAnswerExtractionPrompt(ctx: ExtractionContext): LlmMessage[
     // Sensitivity block only when the feature is on — zero added prompt/tokens otherwise.
     (ctx.sensitivityAware ? SENSITIVITY_RULES : '');
   const dataSlotSection = hasDataSlots
-    ? `\n\nData slots (fill these too):\n${ctx.dataSlotCandidates!.map(describeDataSlot).join('\n')}`
+    ? `\n\nData slots (capture these — a primary deliverable, fill every one the message informs):\n${ctx.dataSlotCandidates!.map(describeDataSlot).join('\n')}`
     : '';
 
   const hasAttachments = ctx.attachments !== undefined && ctx.attachments.length > 0;
