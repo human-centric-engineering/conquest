@@ -67,3 +67,15 @@ export {
   type AssignDataSlotsArgs,
   type AssignDataSlotsData,
 } from '@/lib/app/questionnaire/capabilities/assign-data-slots';
+
+export {
+  AppComposeQuestionnaireCapability,
+  type ComposeQuestionnaireArgs,
+  type ComposeQuestionnaireData,
+} from '@/lib/app/questionnaire/capabilities/compose-questionnaire';
+
+export {
+  AppRefineQuestionnaireStructureCapability,
+  type RefineQuestionnaireStructureArgs,
+  type RefineQuestionnaireStructureData,
+} from '@/lib/app/questionnaire/capabilities/refine-questionnaire-structure';

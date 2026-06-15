@@ -1164,13 +1164,17 @@ describe('ExecutionDetailView', () => {
     it('Copy button on the Input Data card invokes the handler without crashing when clipboard is unavailable', async () => {
       // The handler wraps `navigator.clipboard.writeText` in a try/catch
       // IIFE specifically so a missing clipboard (insecure contexts,
-      // tests) does not break the UI. Clicking the button exercises
-      // handleCopy + the IIFE; the clipboard API itself is too fiddly
-      // to stub reliably across jsdom builds (the `clipboard` property
-      // is sometimes installed as a non-configurable getter), so we
-      // assert on the survivable side-effect: the button keeps working,
-      // the card stays mounted, no thrown error escapes the IIFE.
+      // tests) does not break the UI. Force the write to reject to drive
+      // the catch path: this both exercises the "unavailable" branch the
+      // test name describes AND avoids the success path's
+      // `setTimeout(() => setCopied(false), 2000)`, which would otherwise
+      // fire after the test tears down jsdom (`window is not defined`) and
+      // leak across files. `userEvent.setup()` installs a resolving
+      // clipboard stub, so we override the method afterwards.
       const user = userEvent.setup();
+      const writeTextSpy = vi
+        .spyOn(navigator.clipboard, 'writeText')
+        .mockRejectedValue(new Error('clipboard unavailable'));
       render(
         <ExecutionDetailView
           execution={makeExecution({ inputData: { prompt: 'hello world' } })}
@@ -1181,6 +1185,12 @@ describe('ExecutionDetailView', () => {
       const copyButton = screen.getByRole('button', { name: 'Copy Input Data' });
       await user.click(copyButton);
 
+      // The handler reached the clipboard call (then swallowed the
+      // rejection in its catch) — no thrown error escaped the IIFE. The
+      // copied text is the card's JSON serialization of the input data.
+      expect(writeTextSpy).toHaveBeenCalledTimes(1);
+      expect(writeTextSpy.mock.calls[0]?.[0]).toContain('hello world');
+      writeTextSpy.mockRestore();
       // Component still renders cleanly; the click did not throw past
       // the IIFE's catch.
       expect(copyButton).toBeInTheDocument();

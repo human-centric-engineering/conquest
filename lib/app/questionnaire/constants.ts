@@ -774,3 +774,103 @@ export const EVALUATE_STRUCTURE_FUNCTION_DEFINITION: CapabilityFunctionDefinitio
     required: ['dimension', 'structure'],
   },
 };
+
+// ---------------------------------------------------------------------------
+// Generative authoring — compose a questionnaire from a plain-English brief, then
+// conversationally refine it (the sibling of document extraction above). Both
+// capabilities reuse the extractor's `extractionSchema` output contract.
+// ---------------------------------------------------------------------------
+
+/**
+ * Sub-flag gating the generative-authoring surface (compose-from-brief + refine).
+ * DB-backed, seeded disabled by `035-generative-authoring-flag.ts`. Opt-in on top
+ * of {@link APP_QUESTIONNAIRES_FLAG}; both must be on. Each compose/refine run is
+ * ≥1 reasoning LLM call, so it dark-launches independently of document ingestion.
+ */
+export const APP_QUESTIONNAIRES_GENERATIVE_AUTHORING_FLAG =
+  'APP_QUESTIONNAIRES_GENERATIVE_AUTHORING_ENABLED';
+
+/**
+ * Slug of the seeded composer `AiAgent` (generative authoring). A distinct agent
+ * from the document extractor: composition and document extraction carry their
+ * own budgets and personas. Ships with empty `model`/`provider` so it resolves
+ * dynamically via `agent-resolver.ts`; the compose/refine routes load it to
+ * populate the dispatch context. App-prefixed to avoid collision with core agents.
+ */
+export const QUESTIONNAIRE_COMPOSER_AGENT_SLUG = 'app-questionnaire-composer';
+
+/** Slug of the compose-from-brief capability. One source of truth shared by the
+ * `BaseCapability` subclass, its `AiCapability` seed row, and the compose routes. */
+export const COMPOSE_QUESTIONNAIRE_CAPABILITY_SLUG = 'app_compose_questionnaire';
+
+/** `AiCapability.executionHandler` for the compose capability — the class name the
+ * dispatcher resolves the in-memory handler by. Must match `lib/app/capabilities.ts`. */
+export const COMPOSE_QUESTIONNAIRE_HANDLER = 'AppComposeQuestionnaireCapability';
+
+/**
+ * The compose capability's OpenAI-compatible function definition — single source
+ * of truth shared by the `BaseCapability` subclass and the `AiCapability` seed row,
+ * so the two can never drift. Dispatched programmatically by the compose route —
+ * not exposed to a chat tool loop.
+ */
+export const COMPOSE_QUESTIONNAIRE_FUNCTION_DEFINITION: CapabilityFunctionDefinition = {
+  name: COMPOSE_QUESTIONNAIRE_CAPABILITY_SLUG,
+  description:
+    'Compose an opinionated, structured questionnaire (sections, questions with inferred types, an inferred goal/audience) from a plain-English brief — no source document. Returns the same structure contract as the extractor with an empty change log (nothing was edited; everything was generated). Dispatched programmatically by the compose route.',
+  parameters: {
+    type: 'object',
+    properties: {
+      brief: {
+        type: 'string',
+        description:
+          'Plain-English description of the questionnaire to build (goal, audience, topics to cover).',
+      },
+      adminProvidedGoal: {
+        type: 'string',
+        description:
+          'Goal the admin set explicitly. When present, the composer uses it verbatim and does NOT infer the goal.',
+      },
+      adminProvidedAudience: {
+        type: 'object',
+        description:
+          'Audience fields the admin set explicitly. Inference is suppressed per supplied field.',
+        additionalProperties: true,
+      },
+    },
+    required: ['brief'],
+  },
+};
+
+/** Slug of the refine-questionnaire-structure capability (the conversational-refine
+ * turn of generative authoring). Reuses the composer agent. */
+export const REFINE_QUESTIONNAIRE_STRUCTURE_CAPABILITY_SLUG = 'app_refine_questionnaire_structure';
+
+/** `AiCapability.executionHandler` for the refine-structure capability. */
+export const REFINE_QUESTIONNAIRE_STRUCTURE_HANDLER = 'AppRefineQuestionnaireStructureCapability';
+
+/**
+ * The refine-structure capability's OpenAI-compatible function definition. Takes
+ * the current structure plus a natural-language instruction and returns the
+ * updated structure (same contract) plus a short human-readable change summary.
+ */
+export const REFINE_QUESTIONNAIRE_STRUCTURE_FUNCTION_DEFINITION: CapabilityFunctionDefinition = {
+  name: REFINE_QUESTIONNAIRE_STRUCTURE_CAPABILITY_SLUG,
+  description:
+    'Apply a natural-language instruction ("make it shorter", "add a section on pricing") to an existing questionnaire structure and return the full updated structure plus a one-line summary of what changed. Dispatched programmatically by the compose-refine route.',
+  parameters: {
+    type: 'object',
+    properties: {
+      currentStructure: {
+        type: 'object',
+        description:
+          'The current questionnaire structure to refine — { goal?, audience?, sections[], questions[] }.',
+        additionalProperties: true,
+      },
+      instruction: {
+        type: 'string',
+        description: "The admin's plain-English refinement instruction for this turn.",
+      },
+    },
+    required: ['currentStructure', 'instruction'],
+  },
+};

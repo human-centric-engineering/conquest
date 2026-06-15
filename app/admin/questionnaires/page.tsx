@@ -2,14 +2,18 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 
 import { QuestionnairesTable } from '@/components/admin/questionnaires/questionnaires-table';
-import { UploadQuestionnaireDialog } from '@/components/admin/questionnaires/upload-questionnaire-dialog';
+import { NewQuestionnaireMenu } from '@/components/admin/questionnaires/new-questionnaire-menu';
 import { CqStatTiles, type CqStat } from '@/components/admin/cq-stat-tiles';
 import { FieldHelp } from '@/components/ui/field-help';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { parsePaginationMeta } from '@/lib/validations/common';
 import { logger } from '@/lib/logging';
-import { isDataSlotsEnabled, isQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
+import {
+  isDataSlotsEnabled,
+  isGenerativeAuthoringEnabled,
+  isQuestionnairesEnabled,
+} from '@/lib/app/questionnaire/feature-flag';
 import type { QuestionnaireListItem } from '@/lib/app/questionnaire/views';
 import type { AttributedDemoClient, DemoClientView } from '@/lib/app/questionnaire/demo-clients';
 import type { PaginationMeta } from '@/types/api';
@@ -107,12 +111,14 @@ export default async function QuestionnairesListPage() {
   // which 404s, so the page doesn't render an empty shell behind a hidden feature.
   if (!(await isQuestionnairesEnabled())) notFound();
 
-  const [{ items, meta }, stats, demoClientOptions, dataSlotsEnabled] = await Promise.all([
-    getQuestionnaires(),
-    getQuestionnaireStats(),
-    getActiveDemoClients(),
-    isDataSlotsEnabled(),
-  ]);
+  const [{ items, meta }, stats, demoClientOptions, dataSlotsEnabled, generativeAuthoringEnabled] =
+    await Promise.all([
+      getQuestionnaires(),
+      getQuestionnaireStats(),
+      getActiveDemoClients(),
+      isDataSlotsEnabled(),
+      isGenerativeAuthoringEnabled(),
+    ]);
 
   const statTiles: CqStat[] = [
     { label: 'Questionnaires', value: stats.total },
@@ -147,7 +153,10 @@ export default async function QuestionnairesListPage() {
             Ingest, review, and edit conversational questionnaires.
           </p>
         </div>
-        <UploadQuestionnaireDialog demoClientOptions={demoClientOptions} />
+        <NewQuestionnaireMenu
+          demoClientOptions={demoClientOptions}
+          generativeAuthoringEnabled={generativeAuthoringEnabled}
+        />
       </header>
 
       <CqStatTiles stats={statTiles} />

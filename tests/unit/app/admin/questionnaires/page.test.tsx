@@ -25,6 +25,7 @@ vi.mock('next/navigation', () => ({
 vi.mock('@/lib/app/questionnaire/feature-flag', () => ({
   isQuestionnairesEnabled: vi.fn(),
   isDataSlotsEnabled: vi.fn(),
+  isGenerativeAuthoringEnabled: vi.fn(),
 }));
 
 vi.mock('@/lib/api/server-fetch', () => ({
@@ -42,8 +43,8 @@ vi.mock('@/components/admin/questionnaires/questionnaires-table', () => ({
     <div data-testid="questionnaires-table" data-row-count={String(props.initialItems.length)} />
   ),
 }));
-vi.mock('@/components/admin/questionnaires/upload-questionnaire-dialog', () => ({
-  UploadQuestionnaireDialog: () => <div data-testid="upload-dialog" />,
+vi.mock('@/components/admin/questionnaires/new-questionnaire-menu', () => ({
+  NewQuestionnaireMenu: () => <div data-testid="new-questionnaire-menu" />,
 }));
 vi.mock('@/components/ui/field-help', () => ({
   FieldHelp: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
@@ -61,7 +62,11 @@ vi.mock('@/components/admin/cq-stat-tiles', () => ({
 }));
 
 import QuestionnairesListPage from '@/app/admin/questionnaires/page';
-import { isQuestionnairesEnabled, isDataSlotsEnabled } from '@/lib/app/questionnaire/feature-flag';
+import {
+  isQuestionnairesEnabled,
+  isDataSlotsEnabled,
+  isGenerativeAuthoringEnabled,
+} from '@/lib/app/questionnaire/feature-flag';
 import { serverFetch, parseApiResponse } from '@/lib/api/server-fetch';
 import type { QuestionnaireListItem } from '@/lib/app/questionnaire/views';
 import type { AppQuestionnaireStatus } from '@/lib/app/questionnaire/types';
@@ -102,6 +107,7 @@ describe('QuestionnairesListPage stat tiles', () => {
     vi.clearAllMocks();
     vi.mocked(isQuestionnairesEnabled).mockResolvedValue(true);
     vi.mocked(isDataSlotsEnabled).mockResolvedValue(false);
+    vi.mocked(isGenerativeAuthoringEnabled).mockResolvedValue(false);
 
     // serverFetch tags the response with its URL so parseApiResponse can branch.
     vi.mocked(serverFetch).mockImplementation(
@@ -142,5 +148,285 @@ describe('QuestionnairesListPage stat tiles', () => {
 
     expect(limits).toContain(100); // the wide stats sweep uses the max allowed page size
     expect(Math.max(...limits)).toBeLessThanOrEqual(100); // never over the list endpoint's cap
+  });
+
+  it('degrades stats to zero when the stats fetch returns a non-ok response', async () => {
+    // Covers the !res.ok branch in getQuestionnaireStats (line 46).
+    // Stats-fetch URL contains limit=100; we make it return not-ok.
+    vi.mocked(serverFetch).mockImplementation(async (url: string) => {
+      const u = String(url);
+      if (u.includes('demo-clients')) return { ok: true, _url: u } as unknown as Response;
+      if (u.includes('limit=100')) return { ok: false, status: 503 } as unknown as Response;
+      return { ok: true, _url: u } as unknown as Response;
+    });
+    vi.mocked(parseApiResponse).mockImplementation(async (res: unknown) => {
+      const url = (res as { _url: string })._url;
+      if (!url) return { success: false as const, error: { code: 'ERR', message: 'fail' } };
+      if (url.includes('demo-clients')) return { success: true as const, data: [] };
+      return {
+        success: true as const,
+        data: ITEMS,
+        meta: { page: 1, limit: 25, total: ITEMS.length, totalPages: 1 },
+      };
+    });
+
+    render(await QuestionnairesListPage());
+
+    // Stats returned empty — the tiles fall to zero.
+    expect(tileValue('Questionnaires')).toBe('0');
+    expect(tileValue('Launched')).toBe('0');
+  });
+
+  it('degrades stats to zero when the stats parseApiResponse returns success:false', async () => {
+    // Covers the !body.success branch in getQuestionnaireStats (line 48).
+    vi.mocked(serverFetch).mockImplementation(
+      async (url: string) => ({ ok: true, _url: String(url) }) as unknown as Response
+    );
+    vi.mocked(parseApiResponse).mockImplementation(async (res: unknown) => {
+      const url = (res as { _url: string })._url;
+      if (url.includes('demo-clients')) return { success: true as const, data: [] };
+      if (url.includes('limit=100'))
+        return { success: false as const, error: { code: 'ERR', message: 'fail' } };
+      return {
+        success: true as const,
+        data: ITEMS,
+        meta: { page: 1, limit: 25, total: ITEMS.length, totalPages: 1 },
+      };
+    });
+
+    render(await QuestionnairesListPage());
+
+    expect(tileValue('Questionnaires')).toBe('0');
+  });
+
+  it('falls back to body.data.length when parsePaginationMeta returns null', async () => {
+    // Covers the `?? body.data.length` fallback in getQuestionnaireStats (line 49).
+    vi.mocked(serverFetch).mockImplementation(
+      async (url: string) => ({ ok: true, _url: String(url) }) as unknown as Response
+    );
+    vi.mocked(parseApiResponse).mockImplementation(async (res: unknown) => {
+      const url = (res as { _url: string })._url;
+      if (url.includes('demo-clients')) return { success: true as const, data: [] };
+      // No `meta` — parsePaginationMeta returns null, so total falls back to data.length.
+      return { success: true as const, data: ITEMS };
+    });
+
+    render(await QuestionnairesListPage());
+
+    // Total comes from ITEMS.length (4) via the fallback path, not from a meta field.
+    expect(tileValue('Questionnaires')).toBe('4');
+  });
+
+  it('degrades to empty table when getQuestionnaires returns non-ok', async () => {
+    // Covers the !res.ok branch in getQuestionnaires (line 79).
+    vi.mocked(serverFetch).mockImplementation(async (url: string) => {
+      const u = String(url);
+      if (u.includes('demo-clients')) return { ok: true, _url: u } as unknown as Response;
+      if (u.includes('limit=25')) return { ok: false, status: 503 } as unknown as Response;
+      return { ok: true, _url: u } as unknown as Response;
+    });
+    vi.mocked(parseApiResponse).mockImplementation(async (res: unknown) => {
+      const url = (res as { _url: string })._url;
+      if (!url) return { success: false as const, error: { code: 'ERR', message: 'fail' } };
+      if (url.includes('demo-clients')) return { success: true as const, data: [] };
+      return {
+        success: true as const,
+        data: ITEMS,
+        meta: { page: 1, limit: 100, total: ITEMS.length, totalPages: 1 },
+      };
+    });
+
+    render(await QuestionnairesListPage());
+
+    // Table renders with zero items from the fallback empty state.
+    expect(screen.getByTestId('questionnaires-table')).toHaveAttribute('data-row-count', '0');
+  });
+
+  it('degrades to empty table when getQuestionnaires parseApiResponse returns success:false', async () => {
+    // Covers the !body.success branch in getQuestionnaires (line 81).
+    vi.mocked(serverFetch).mockImplementation(
+      async (url: string) => ({ ok: true, _url: String(url) }) as unknown as Response
+    );
+    vi.mocked(parseApiResponse).mockImplementation(async (res: unknown) => {
+      const url = (res as { _url: string })._url;
+      if (url.includes('demo-clients')) return { success: true as const, data: [] };
+      if (url.includes('limit=25'))
+        return { success: false as const, error: { code: 'ERR', message: 'fail' } };
+      return {
+        success: true as const,
+        data: ITEMS,
+        meta: { page: 1, limit: 100, total: ITEMS.length, totalPages: 1 },
+      };
+    });
+
+    render(await QuestionnairesListPage());
+
+    expect(screen.getByTestId('questionnaires-table')).toHaveAttribute('data-row-count', '0');
+  });
+
+  it('degrades to empty demo-client list when demo-clients returns non-ok', async () => {
+    // Covers the !res.ok branch in getActiveDemoClients (line 97).
+    vi.mocked(serverFetch).mockImplementation(async (url: string) => {
+      const u = String(url);
+      if (u.includes('demo-clients')) return { ok: false, status: 503 } as unknown as Response;
+      return { ok: true, _url: u } as unknown as Response;
+    });
+    vi.mocked(parseApiResponse).mockImplementation(async (res: unknown) => {
+      const url = (res as { _url: string })._url;
+      if (!url) return { success: false as const, error: { code: 'ERR', message: 'fail' } };
+      return {
+        success: true as const,
+        data: ITEMS,
+        meta: { page: 1, limit: 100, total: ITEMS.length, totalPages: 1 },
+      };
+    });
+
+    // Must render without crashing even when no demo clients are returned.
+    render(await QuestionnairesListPage());
+
+    expect(screen.getByTestId('new-questionnaire-menu')).toBeInTheDocument();
+  });
+
+  it('degrades to empty demo-client list when demo-clients parseApiResponse returns success:false', async () => {
+    // Covers the !body.success branch in getActiveDemoClients (line 99).
+    vi.mocked(serverFetch).mockImplementation(
+      async (url: string) => ({ ok: true, _url: String(url) }) as unknown as Response
+    );
+    vi.mocked(parseApiResponse).mockImplementation(async (res: unknown) => {
+      const url = (res as { _url: string })._url;
+      if (url.includes('demo-clients'))
+        return { success: false as const, error: { code: 'ERR', message: 'fail' } };
+      return {
+        success: true as const,
+        data: ITEMS,
+        meta: { page: 1, limit: 100, total: ITEMS.length, totalPages: 1 },
+      };
+    });
+
+    render(await QuestionnairesListPage());
+
+    expect(screen.getByTestId('new-questionnaire-menu')).toBeInTheDocument();
+  });
+
+  it('counts archived questionnaires in the Archived tile', async () => {
+    // Arrange: include an archived item so the else-if branch at line 54 runs.
+    const withArchived = [...ITEMS, makeItem('archived', 'e')];
+    vi.mocked(parseApiResponse).mockImplementation(async (res: unknown) => {
+      const url = (res as { _url: string })._url;
+      if (url.includes('demo-clients')) {
+        return { success: true as const, data: [] };
+      }
+      return {
+        success: true as const,
+        data: withArchived,
+        meta: { page: 1, limit: 100, total: withArchived.length, totalPages: 1 },
+      };
+    });
+
+    render(await QuestionnairesListPage());
+
+    // The archived tile must reflect the count the reduce computed — not a mock value.
+    expect(tileValue('Archived')).toBe('1');
+    expect(tileValue('Questionnaires')).toBe('5');
+  });
+
+  it('degrades to empty table + zero tiles when the initial questionnaires fetch throws', async () => {
+    // Arrange: the fetch for the questionnaires list throws (covers the catch branch in
+    // getQuestionnaires, lines 83-85 in page.tsx).
+    vi.mocked(serverFetch).mockImplementation(async (url: string) => {
+      if (String(url).includes('demo-clients')) {
+        return { ok: true, _url: url } as unknown as Response;
+      }
+      throw new Error('network error');
+    });
+
+    render(await QuestionnairesListPage());
+
+    // Table receives zero rows — degraded, not crashed.
+    expect(screen.getByTestId('questionnaires-table')).toHaveAttribute('data-row-count', '0');
+    // Tiles also fall back to zero because stats fetch fails the same way.
+    expect(tileValue('Questionnaires')).toBe('0');
+  });
+
+  it('passes active demo clients to the table (filters inactive ones out)', async () => {
+    // Arrange: demo-clients endpoint returns two clients, one active one inactive.
+    // This covers the filter+map path in getActiveDemoClients (lines 100-102).
+    vi.mocked(parseApiResponse).mockImplementation(async (res: unknown) => {
+      const url = (res as { _url: string })._url;
+      if (url.includes('demo-clients')) {
+        return {
+          success: true as const,
+          data: [
+            { id: 'dc-active', slug: 'acme', name: 'Acme Corp', isActive: true },
+            { id: 'dc-inactive', slug: 'old', name: 'Old Co', isActive: false },
+          ],
+        };
+      }
+      return {
+        success: true as const,
+        data: ITEMS,
+        meta: { page: 1, limit: 100, total: ITEMS.length, totalPages: 1 },
+      };
+    });
+
+    render(await QuestionnairesListPage());
+
+    // The NewQuestionnaireMenu stub receives demoClientOptions — assert the page
+    // rendered without crashing (the real value is passed through; stub swallows it).
+    expect(screen.getByTestId('new-questionnaire-menu')).toBeInTheDocument();
+  });
+
+  it('degrades to empty demo-client list when the demo-clients fetch throws', async () => {
+    // Covers the catch branch in getActiveDemoClients (lines 103-105 in page.tsx).
+    vi.mocked(serverFetch).mockImplementation(async (url: string) => {
+      if (String(url).includes('demo-clients')) {
+        throw new Error('demo clients fetch failed');
+      }
+      return { ok: true, _url: url } as unknown as Response;
+    });
+
+    // The page must render without throwing — it degrades to an empty client list.
+    render(await QuestionnairesListPage());
+
+    expect(screen.getByTestId('questionnaires-table')).toBeInTheDocument();
+    expect(screen.getByTestId('new-questionnaire-menu')).toBeInTheDocument();
+  });
+
+  it('renders the page with generativeAuthoringEnabled=true when the sub-flag is on', async () => {
+    // Arrange: generative authoring flag returns true.
+    vi.mocked(isGenerativeAuthoringEnabled).mockResolvedValue(true);
+
+    render(await QuestionnairesListPage());
+
+    // The NewQuestionnaireMenu stub must be present — the page passed the flag through.
+    expect(screen.getByTestId('new-questionnaire-menu')).toBeInTheDocument();
+  });
+
+  it('calls notFound when the questionnaires feature flag is off', async () => {
+    // Covers the !(await isQuestionnairesEnabled()) branch at line 112.
+    vi.mocked(isQuestionnairesEnabled).mockResolvedValue(false);
+
+    // The notFound mock throws 'NEXT_NOT_FOUND' so the page aborts rendering.
+    await expect(QuestionnairesListPage()).rejects.toThrow('NEXT_NOT_FOUND');
+  });
+
+  it('counts draft questionnaires correctly when the list has drafts only', async () => {
+    // Covers the else-if(draft) branch (line 53) explicitly via a drafts-only list.
+    const draftsOnly = [makeItem('draft', 'x'), makeItem('draft', 'y')];
+    vi.mocked(parseApiResponse).mockImplementation(async (res: unknown) => {
+      const url = (res as { _url: string })._url;
+      if (url.includes('demo-clients')) return { success: true as const, data: [] };
+      return {
+        success: true as const,
+        data: draftsOnly,
+        meta: { page: 1, limit: 100, total: draftsOnly.length, totalPages: 1 },
+      };
+    });
+
+    render(await QuestionnairesListPage());
+
+    expect(tileValue('Drafts')).toBe('2');
+    expect(tileValue('Launched')).toBe('0');
+    expect(tileValue('Archived')).toBe('0');
   });
 });

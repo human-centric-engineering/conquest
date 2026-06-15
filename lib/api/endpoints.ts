@@ -350,6 +350,13 @@ export const API = {
     QUESTIONNAIRES: {
       /** List + ingest (GET list, POST multipart ingest). */
       ROOT: '/api/v1/app/questionnaires',
+      /** Compose a questionnaire from a plain-English brief (POST JSON — generative authoring). */
+      compose: '/api/v1/app/questionnaires/compose',
+      /** Streaming compose — watch the structure build via SSE (POST JSON). */
+      composeStream: '/api/v1/app/questionnaires/compose/stream',
+      /** Conversational refine of a draft version's structure (POST JSON). */
+      composeRefine: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/compose/refine`,
       /** Questionnaire detail (questionnaire + version summaries). */
       byId: (id: string): string => `/api/v1/app/questionnaires/${id}`,
       /** One version's full section/question graph (GET); version-meta edit (PATCH). */
