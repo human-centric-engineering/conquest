@@ -42,8 +42,8 @@ function warningCopy(remaining: number): string {
     );
   }
   return (
-    "That doesn't seem like a serious answer, so I'll set it aside for now. " +
-    'Could you give the question another go?'
+    "Your previous answer didn't seem serious, so I'll set it aside for now. " +
+    'Please try to keep the conversation on topic and sincere.'
   );
 }
 
