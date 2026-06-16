@@ -259,6 +259,18 @@ export interface SeriousnessOutcome {
   diagnostic?: string;
 }
 
+/**
+ * Dedicated sensitivity-detector invoker outcome. `assessment: null` means nothing was detected
+ * (or a fail-soft diagnostic — the orchestrator still merges the extractor field + keyword net, so a
+ * detector failure never drops a disclosure the other signals caught).
+ */
+export interface SensitivityDetectOutcome {
+  assessment: SensitivityAssessment | null;
+  costUsd: number;
+  latencyMs?: number;
+  diagnostic?: string;
+}
+
 /** Contradiction-detection invoker outcome. */
 export interface DetectOutcome {
   findings: ContradictionFinding[];
@@ -305,6 +317,14 @@ export interface CapabilityInvokers {
    * the call and acts on the verdict. Fail-soft (returns `verdict: null` + a diagnostic).
    */
   assessSeriousness(state: TurnState): Promise<SeriousnessOutcome>;
+  /**
+   * Sensitivity / safeguarding — dedicated detector: rule on whether this turn's message carries a
+   * genuine sensitive disclosure. Runs every answered turn while the feature is on, independently of
+   * the answer-extractor's (unreliable) `sensitivity` field. The orchestrator merges this with the
+   * extractor field and a deterministic keyword net. Fail-soft (returns `assessment: null` + a
+   * diagnostic).
+   */
+  detectSensitivity(state: TurnState): Promise<SensitivityDetectOutcome>;
 }
 
 /**

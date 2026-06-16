@@ -10,6 +10,7 @@
  */
 
 import type { SensitivitySeverity } from '@/lib/app/questionnaire/types';
+import type { SensitivityAssessment } from '@/lib/app/questionnaire/sensitivity/types';
 
 /**
  * The fallback support-signpost copy, used when sensitivity awareness is on but the admin hasn't
@@ -64,6 +65,26 @@ export function shouldSignpost(
   severity: SensitivitySeverity
 ): boolean {
   return severity === 'high' && prior !== 'high';
+}
+
+/**
+ * Combine the per-turn sensitivity signals (extractor field, dedicated detector, keyword net) into
+ * one assessment. Detection is defence-in-depth: ANY signal that fired means a disclosure, so a
+ * miss by one source is caught by another. The strongest severity wins; on a tie the EARLIER
+ * argument wins, so pass the LLM-derived signals (which carry a better category/summary) before the
+ * keyword net. Returns `undefined` when no signal fired. Pure — both orchestrators share it.
+ */
+export function mergeSensitivitySignals(
+  ...signals: Array<SensitivityAssessment | null | undefined>
+): SensitivityAssessment | undefined {
+  let best: SensitivityAssessment | undefined;
+  for (const signal of signals) {
+    if (!signal) continue;
+    if (!best || severityRank(signal.severity) > severityRank(best.severity)) {
+      best = signal;
+    }
+  }
+  return best;
 }
 
 /**

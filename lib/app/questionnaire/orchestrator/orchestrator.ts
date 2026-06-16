@@ -30,6 +30,8 @@ import { evaluateAbuseStrike, ABUSE_ABANDON_MESSAGE } from '@/lib/app/questionna
 import {
   runningMaxLevel,
   shouldSignpost,
+  mergeSensitivitySignals,
+  keywordSensitivityFloor,
   composeSupportMessage,
   effectiveSupportMessage,
 } from '@/lib/app/questionnaire/sensitivity';
@@ -54,6 +56,9 @@ export const SELECTION_TOOL_SLUG = 'app_select_question';
 
 /** Synthetic slug recorded on a turn's `toolCalls` for the seriousness-judge step. */
 export const ASSESS_SERIOUSNESS_TOOL_SLUG = 'app_assess_seriousness';
+
+/** Synthetic slug recorded on a turn's `toolCalls` for the dedicated sensitivity-detector step. */
+export const DETECT_SENSITIVITY_TOOL_SLUG = 'app_detect_sensitivity';
 
 /** Fewest answers a contradiction pass needs — the detector capability enforces `min(2)`. */
 export const MIN_CONTRADICTION_ANSWERS = 2;
@@ -179,6 +184,30 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
         message: "I couldn't capture an answer from that — we can revisit it.",
       });
     }
+  }
+
+  // 1.4 Sensitivity detection (safeguarding). Detection is too important to ride solely on the
+  //     answer-extractor's optional `sensitivity` field — it gets dropped non-deterministically on
+  //     busy turns (the same failure the seriousness gate's `suspectedNonGenuine` hint showed), so a
+  //     real disclosure ("i'm being abused by my manager") can go unflagged and no support is
+  //     signposted. So when the feature is on we ALSO run a dedicated single-purpose detector AND a
+  //     deterministic keyword floor, and merge all three (strongest signal wins). This runs BEFORE
+  //     the seriousness gate so its `!extractedSensitivity` guard sees the combined result — a
+  //     genuine disclosure must never be judged for sincerity or struck.
+  if (hasMessage && state.flags.sensitivityAwareness) {
+    const detected = await invokers.detectSensitivity(state);
+    costUsd += detected.costUsd;
+    toolCalls.push(
+      toolCall(DETECT_SENSITIVITY_TOOL_SLUG, detected.diagnostic === undefined, {
+        ...(detected.diagnostic !== undefined ? { code: detected.diagnostic } : {}),
+        ...(detected.latencyMs !== undefined ? { latencyMs: detected.latencyMs } : {}),
+      })
+    );
+    extractedSensitivity = mergeSensitivitySignals(
+      extractedSensitivity, // the answer-extractor's field (may be undefined)
+      detected.assessment, // the dedicated detector
+      keywordSensitivityFloor(state.userMessage) // the deterministic net
+    );
   }
 
   // 1.5 Seriousness / abuse gate. The judge runs on EVERY answered turn while the gate is on and

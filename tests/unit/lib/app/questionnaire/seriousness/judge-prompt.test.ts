@@ -82,6 +82,17 @@ describe('buildSeriousnessJudgePrompt — system prompt', () => {
     expect(system).toMatch(/never set a disclosure of harm aside/i);
   });
 
+  it('system prompt scopes the safeguarding rule to the current message, not later abuse', () => {
+    const { system } = buildSeriousnessJudgePrompt(makeInput());
+    // A genuine disclosure earlier in the session must NOT grant blanket immunity to subsequent
+    // pure abuse — the judge has to rule on THIS message's content. This is the fix for the case
+    // where "go fuck yourself" after an abuse disclosure was kept as genuine and never struck.
+    expect(system).toMatch(/SCOPE OF THE SAFEGUARDING RULE/i);
+    expect(system).toMatch(/does NOT grant .* blanket immunity/i);
+    // Pure hostility aimed at the interviewer is still ABUSIVE even after an earlier disclosure.
+    expect(system).toMatch(/EVEN IF an earlier turn contained a genuine disclosure/i);
+  });
+
   it('system prompt names the three failure categories', () => {
     // Arrange / Act
     const { system } = buildSeriousnessJudgePrompt(makeInput());

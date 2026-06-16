@@ -224,7 +224,11 @@ bundled with a complaint (e.g. "I hate my job because my boss abuses me"). Do NO
 statement to "merely critical", and do NOT omit it.
 OMIT the "sensitivity" field only for a neutral, negative, or merely critical OPINION that reports \
 no personal harm (e.g. "management doesn't listen", "the tools are clunky"). When a genuine \
-disclosure of harm IS present, always include it.`;
+disclosure of harm IS present, always include it.
+Judge the CURRENT message only: a disclosure on an earlier turn does NOT make this message \
+sensitive. So OMIT the field for a message that is ONLY hostility, an insult, or profanity aimed at \
+the survey or interviewer with no new disclosure (e.g. "screw you", "oh just fuck off") — even when \
+an earlier turn was a genuine disclosure.`;
 
 /**
  * REPLACES the default framing on the answer-fit RESOLVER pass (`ctx.forceFit`). The candidate list

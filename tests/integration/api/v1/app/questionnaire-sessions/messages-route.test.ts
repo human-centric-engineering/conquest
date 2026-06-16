@@ -157,6 +157,9 @@ function stubInvokers() {
     // Present for CapabilityInvokers interface completeness; the seriousness gate is off
     // in default-context tests (abuseThreshold: 0) so this stub is not called.
     assessSeriousness: vi.fn(async () => ({ verdict: { serious: true, reason: '' }, costUsd: 0 })),
+    // Dedicated sensitivity detector — runs every turn when the feature is on; defaults to
+    // "nothing detected" so default-context tests are unaffected.
+    detectSensitivity: vi.fn(async () => ({ assessment: null, costUsd: 0 })),
   };
 }
 
@@ -763,6 +766,7 @@ describe('POST /messages — seriousness / abuse gate', () => {
         verdict: { serious: false, reason: 'That tenure is not possible.' },
         costUsd: 0,
       })),
+      detectSensitivity: vi.fn(async () => ({ assessment: null, costUsd: 0 })),
     };
   }
 

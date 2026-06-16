@@ -25,11 +25,14 @@ import { EXTRACT_ANSWER_SLOTS_CAPABILITY_SLUG } from '@/lib/app/questionnaire/co
 import {
   applyIntents,
   ASSESS_SERIOUSNESS_TOOL_SLUG,
+  DETECT_SENSITIVITY_TOOL_SLUG,
 } from '@/lib/app/questionnaire/orchestrator/orchestrator';
 import { evaluateAbuseStrike, ABUSE_ABANDON_MESSAGE } from '@/lib/app/questionnaire/seriousness';
 import {
   runningMaxLevel,
   shouldSignpost,
+  mergeSensitivitySignals,
+  keywordSensitivityFloor,
   composeSupportMessage,
   effectiveSupportMessage,
 } from '@/lib/app/questionnaire/sensitivity';
@@ -232,6 +235,27 @@ export async function runDataSlotTurn(
         message: "I couldn't quite capture that — let's keep going.",
       });
     }
+  }
+
+  // 1.4 Sensitivity detection (safeguarding), parity with question mode. The extractor's optional
+  //     `sensitivity` field gets dropped non-deterministically on busy turns, so when the feature is
+  //     on we ALSO run a dedicated detector AND a deterministic keyword floor and merge all three
+  //     (strongest signal wins). Runs before the gate so its `!extractedSensitivity` guard sees the
+  //     combined result — a genuine disclosure is never judged for sincerity or struck.
+  if (hasMessage && state.flags.sensitivityAwareness) {
+    const detected = await invokers.detectSensitivity(state);
+    costUsd += detected.costUsd;
+    toolCalls.push(
+      toolCall(DETECT_SENSITIVITY_TOOL_SLUG, detected.diagnostic === undefined, {
+        ...(detected.diagnostic !== undefined ? { code: detected.diagnostic } : {}),
+        ...(detected.latencyMs !== undefined ? { latencyMs: detected.latencyMs } : {}),
+      })
+    );
+    extractedSensitivity = mergeSensitivitySignals(
+      extractedSensitivity,
+      detected.assessment,
+      keywordSensitivityFloor(state.userMessage)
+    );
   }
 
   // 1.5 Seriousness / abuse gate (parity with question mode). The judge runs on every answered

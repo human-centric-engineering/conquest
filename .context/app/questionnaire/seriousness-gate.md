@@ -23,6 +23,25 @@ It's a cheap (~$0.0001) gpt-4o-mini-tier call. Fail-soft: a null verdict skips t
 > trace) but it **no longer gates** the judge; running the (cheap) judge every answered turn is the
 > reliable path.
 
+### Safeguarding precedence vs. later abuse
+
+Two safeguards interact here. (1) When **sensitivity detection** flags a genuine disclosure _this
+turn_ (`extractedSensitivity` — the merge of the extractor field, the dedicated detector, and the
+keyword net; see [sensitivity awareness](./sensitivity-awareness.md)), the orchestrator **skips the
+judge entirely** — a harm disclosure is by definition a real answer and must never be struck
+(`orchestrator.ts`, the `!extractedSensitivity` guard, evaluated at step 1.5 after the step-1.4
+merge). (2) The judge prompt has its own OVERRIDING SAFEGUARDING RULE as defense-in-depth for when
+sensitivity awareness is off.
+
+But the judge **scopes that rule to the message it is ruling on**. A disclosure on an _earlier_
+turn does **not** grant blanket immunity to _later_ messages: pure hostility / profanity aimed at
+the interviewer with no new disclosure or substantive content (e.g. "go fuck yourself" two turns
+after "I am being abused by my manager") is still **ABUSIVE** and is struck. The recent
+conversation is context for reading the message, not a reason to keep it. Venting that carries
+content or a fresh disclosure ("I'm still being bullied and I'm furious") stays genuine. Note that
+the persisted `sensitivityLevel` still keeps the **phraser** in a warm/careful tone for the rest of
+the session — tone-softening and the strike decision are independent.
+
 ## On a NOT-serious verdict (pure orchestrator, `orchestrator.ts`)
 
 - **Disregard** — clear the turn's `answerUpserts`; the answer is never merged or persisted.

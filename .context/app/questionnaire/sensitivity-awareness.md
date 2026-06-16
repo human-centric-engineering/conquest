@@ -7,25 +7,57 @@ question, and **gently signposts support** once on a serious disclosure. It also
 lightweight flagged-session count. Mirrors the [seriousness gate](./seriousness-gate.md) end-to-end
 (a per-turn signal → session-carried state → pure-orchestrator outcome → the route does the I/O).
 
-> **Best-effort, not a guarantee.** Detection rides on the answer-extractor's structured output
-> (the same place the seriousness gate's `suspectedNonGenuine` hint lives, which proved
-> occasionally unreliable). A miss simply means that turn isn't softened — no hard safeguarding
-> guarantee is claimed.
+## Detection — defence-in-depth (three independent signals)
 
-## Detection — folded into extraction (no extra LLM call)
+Detection is **not** a single best-effort field — that was the original design and it failed: the
+answer-extractor's optional `sensitivity` object was silently dropped on busy turns (the same
+unreliability the seriousness gate's `suspectedNonGenuine` hint showed), so a textbook disclosure
+("i'm being abused by my manager") went unflagged and **no support was signposted**. Detection is
+too safeguarding-critical to ride on one model remembering an optional field.
 
-When the feature is on (platform flag AND the per-questionnaire toggle), the answer-extractor
-prompt gains a conditional "Sensitivity assessment" block (`extraction/extraction-prompt.ts`, gated
-by `ExtractionContext.sensitivityAware`) and the output schema gains an optional `sensitivity`
-object (`extraction/extraction-schema.ts`):
+So when the feature is on, the orchestrator merges **three** per-turn signals (strongest severity
+wins; on a tie the LLM signal beats the keyword net for its better summary) via the pure
+`mergeSensitivitySignals`:
+
+1. **Answer-extractor field** — the extractor prompt still gains a conditional "Sensitivity
+   assessment" block (`extraction/extraction-prompt.ts`, gated by `ExtractionContext.sensitivityAware`)
+   and an optional `sensitivity` object (`extraction/extraction-schema.ts`). Kept as one cheap signal.
+2. **Dedicated detector** — a single-purpose structured LLM call run **every answered turn** the
+   feature is on (`invokers.detectSensitivity`, `_lib/turn-invokers.ts`; prompt + schema in
+   `sensitivity/{detect-prompt,detect-schema}.ts`). Because its only job is the disclosure ruling, it
+   is far more reliable than the field. This is the same lesson the seriousness gate learned by moving
+   its judge to a dedicated every-turn call. Synthetic tool slug `app_detect_sensitivity`.
+3. **Deterministic keyword net** — a pure, non-LLM floor (`sensitivity/keyword-net.ts`) that forces a
+   `high` assessment when the message plainly contains a first-person harm disclosure or an
+   unambiguous self-harm phrase. It backs up the LLM calls when they fail/time out/miss. Tuned to
+   avoid obvious false positives (a bare harm word with no first-person victim marker — "this survey
+   is harassment" — does not trip it); it errs toward catching, since a false positive only adds an
+   unneeded gentle tone + signpost while a false negative could drop a real disclosure.
+
+The merged assessment shape (`SensitivityAssessment`):
 
 ```
-sensitivity?: { detected: true; severity: 'low'|'medium'|'high'; category: string; summary: string }
+{ detected: true; severity: 'low'|'medium'|'high'; category: string; summary: string }
 ```
 
 `severity` is from `SENSITIVITY_SEVERITIES` (top-level `lib/app/questionnaire/types.ts`); `summary` is a **careful, non-graphic**
-one-line restatement — the only field that carries disclosure content. Off ⇒ the block is not
-appended and the field is ignored, so the feature is **zero added prompt/cost when disabled**.
+one-line restatement — the only field that carries disclosure content. Off ⇒ none of the three runs
+(no extractor block, no detector call, no keyword check), so the feature is **zero added prompt/cost
+when disabled**. Cost when on: one extra cheap structured call per answered turn (the detector); on a
+disclosure turn the seriousness judge is skipped, so it is roughly cost-neutral there.
+
+The merge runs at **step 1.4**, before the seriousness gate (step 1.5), so the gate's
+`!extractedSensitivity` guard sees the combined result — a genuine disclosure is never judged for
+sincerity or struck. Pure hostility/profanity with no harm disclosure ("go fuck yourself") is flagged
+by none of the three, so it correctly falls through to the seriousness gate.
+
+**The skip is per-turn, not sticky.** Each turn re-detects from scratch; a disclosure on an earlier
+turn does not suppress the gate on later turns. Both LLM detectors (the dedicated detector and the
+extractor's block) are explicitly **scoped to the current message** — they receive recent
+conversation only to read an oblique disclosure, never to treat later pure abuse as a fresh
+disclosure. Without that scoping, a respondent who disclosed harm then swore at the interviewer had
+every later abusive turn read as "distress", so the gate was skipped — the bug this scoping fixes.
+The deterministic keyword net is current-message-only by construction.
 
 ## Session memory (the load-bearing piece)
 
@@ -95,10 +127,13 @@ on a tiny cohort is itself re-identifying). Surfaced as a small tile on the anal
 
 ## Files
 
-- Pure core: `lib/app/questionnaire/sensitivity/{types,logic,index}.ts`.
-- Detection: `extraction/{extraction-schema,extraction-prompt,types}.ts`,
-  `capabilities/extract-answer-slots.ts`, `_lib/turn-invokers.ts`.
-- Orchestrator: `orchestrator/{orchestrator,data-slot-orchestrator,types}.ts` (step 1.6).
+- Pure core: `lib/app/questionnaire/sensitivity/{types,logic,index}.ts` (`mergeSensitivitySignals` in
+  `logic.ts`).
+- Detection (three signals): the extractor field — `extraction/{extraction-schema,extraction-prompt,types}.ts`,
+  `capabilities/extract-answer-slots.ts`; the dedicated detector — `sensitivity/{detect-prompt,detect-schema}.ts`
+  - `invokers.detectSensitivity` in `_lib/turn-invokers.ts`; the keyword net — `sensitivity/keyword-net.ts`.
+- Orchestrator: `orchestrator/{orchestrator,data-slot-orchestrator,types}.ts` (step 1.4 merge →
+  outcome at step 1.6; `DETECT_SENSITIVITY_TOOL_SLUG`).
 - Phraser: `_lib/question-stream.ts`.
 - Persistence + route: `_lib/sessions.ts`, `_lib/turn-context.ts`, `_lib/detail.ts`,
   `[id]/messages/route.ts`.

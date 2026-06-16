@@ -142,10 +142,21 @@ export default async function OverviewTab({ params }: PageProps) {
               </Button>
             </div>
           </div>
-        ) : (
+        ) : selected.status === 'archived' ? (
           <div className="bg-card rounded-xl border p-4">
             <p className="text-muted-foreground text-sm">
               This version is <span className="text-foreground font-medium">archived</span>.
+            </p>
+          </div>
+        ) : (
+          // A draft whose structural graph failed to load lands here (status is draft, but
+          // `graph` is null). Surface it as a load error with a retry — never as "archived",
+          // which would misrepresent an editable draft as a terminal version.
+          <div className="bg-card rounded-xl border p-4">
+            <p className="text-foreground text-sm font-medium">Couldn’t load this version</p>
+            <p className="text-muted-foreground mt-1 max-w-prose text-sm">
+              We couldn’t load this version’s structure, so its launch readiness is unavailable.
+              This is usually temporary — try reloading the page.
             </p>
           </div>
         )}
@@ -178,6 +189,14 @@ export default async function OverviewTab({ params }: PageProps) {
             </p>
           ) : selected.status === 'archived' ? (
             <p className="text-muted-foreground text-sm">Archived versions can’t be previewed.</p>
+          ) : isDraft && !graph ? (
+            // Mirror the launch-readiness load-error state: the graph failed to load, so we can't
+            // assess readiness or offer a preview. Don't tell them to "complete the checklist" —
+            // it isn't shown.
+            <p className="text-muted-foreground text-sm">
+              Preview is unavailable because this version’s structure couldn’t be loaded. Try
+              reloading the page.
+            </p>
           ) : isDraft ? (
             <div className="space-y-1">
               <p className="text-foreground text-sm font-medium">Not available yet</p>

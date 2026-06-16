@@ -682,6 +682,103 @@ describe('assessSeriousness', () => {
   });
 });
 
+describe('detectSensitivity', () => {
+  const resolvedBinding = { providerSlug: 'openai', model: 'gpt-4o', fallbacks: [] };
+  const providerStub = { chat: vi.fn() };
+
+  beforeEach(() => {
+    resolverMock.resolveAgentProviderAndModel.mockResolvedValue(resolvedBinding);
+    providerManagerMock.getProvider.mockResolvedValue(providerStub);
+  });
+
+  it('happy path: normalises a detected verdict into an assessment + surfaces costUsd', async () => {
+    structuredMock.runStructuredCompletion.mockResolvedValue({
+      value: {
+        detected: true,
+        severity: 'high',
+        category: 'workplace abuse',
+        summary: 'Mistreated.',
+      },
+      tokenUsage: { input: 40, output: 15 },
+      costUsd: 0.0031,
+    });
+    const inv = await invokers();
+
+    const out = await inv.detectSensitivity(state({ userMessage: 'my boss abuses me' }));
+
+    expect(out.diagnostic).toBeUndefined();
+    expect(out.assessment).toEqual({
+      detected: true,
+      severity: 'high',
+      category: 'workplace abuse',
+      summary: 'Mistreated.',
+    });
+    expect(out.costUsd).toBe(0.0031);
+  });
+
+  it('returns assessment: null when the detector finds nothing', async () => {
+    structuredMock.runStructuredCompletion.mockResolvedValue({
+      value: { detected: false },
+      tokenUsage: { input: 20, output: 5 },
+      costUsd: 0.001,
+    });
+    const inv = await invokers();
+
+    const out = await inv.detectSensitivity(state({ userMessage: 'work is fine' }));
+
+    expect(out.assessment).toBeNull();
+    expect(out.diagnostic).toBeUndefined();
+  });
+
+  it('runs the LLM call EVEN with no question/data-slot context (a disclosure needs no question)', async () => {
+    // Unlike the seriousness judge, the detector must NOT short-circuit on absent context — a
+    // disclosure is genuine regardless of what was asked.
+    structuredMock.runStructuredCompletion.mockResolvedValue({
+      value: { detected: true, severity: 'high', category: 'self-harm', summary: 'Distress.' },
+      tokenUsage: { input: 20, output: 10 },
+      costUsd: 0.002,
+    });
+    const inv = await invokers({ activeQuestionKey: null });
+
+    const out = await inv.detectSensitivity(state({ activeDataSlotKey: null }));
+
+    expect(structuredMock.runStructuredCompletion).toHaveBeenCalledTimes(1);
+    expect(out.assessment?.severity).toBe('high');
+  });
+
+  it('no_provider_configured: resolver throws → safe null assessment', async () => {
+    resolverMock.resolveAgentProviderAndModel.mockRejectedValue(new Error('no provider'));
+    const inv = await invokers();
+
+    const out = await inv.detectSensitivity(state());
+
+    expect(out.assessment).toBeNull();
+    expect(out.costUsd).toBe(0);
+    expect(out.diagnostic).toBe('no_provider_configured');
+  });
+
+  it('provider_unavailable: getProvider throws → safe null assessment', async () => {
+    providerManagerMock.getProvider.mockRejectedValue(new Error('provider down'));
+    const inv = await invokers();
+
+    const out = await inv.detectSensitivity(state());
+
+    expect(out.assessment).toBeNull();
+    expect(out.diagnostic).toBe('provider_unavailable');
+  });
+
+  it('sensitivity_detect_failed: runStructuredCompletion throws → safe null assessment', async () => {
+    structuredMock.runStructuredCompletion.mockRejectedValue(new Error('bad json after retry'));
+    const inv = await invokers();
+
+    const out = await inv.detectSensitivity(state());
+
+    expect(out.assessment).toBeNull();
+    expect(out.costUsd).toBe(0);
+    expect(out.diagnostic).toBe('sensitivity_detect_failed');
+  });
+});
+
 describe('extractAnswers — sensitivity-aware branch', () => {
   it('passes sensitivityAware: true to the extractor when the invoker was built with that flag', async () => {
     (dispatcherMock.dispatch as Mock).mockResolvedValue({

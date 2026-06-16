@@ -147,6 +147,91 @@ describe('runTurn — sensitivity awareness', () => {
   });
 });
 
+describe('runTurn — dedicated sensitivity detector + keyword net (defence-in-depth)', () => {
+  it('DETECTS via the dedicated detector even when the extractor MISSED the disclosure (the bug)', async () => {
+    // The reported failure: the extractor's optional `sensitivity` field was dropped, so a real
+    // disclosure went unflagged and the seriousness gate ran instead. The dedicated detector must
+    // catch it: a sensitivity outcome IS produced and the gate is skipped.
+    const { invokers, calls } = stubInvokers({
+      extract: { intents: [] }, // extractor emits NO sensitivity field
+      sensitivity: { assessment: HIGH }, // the dedicated detector catches it
+      serious: { verdict: { serious: false, reason: 'hostile' } },
+    });
+    const result = await runTurn(
+      state({
+        userMessage: "i'm being abused by my manager",
+        questions: Q,
+        config: { abuseThreshold: 4, supportMessage: 'Support is available.' },
+      }),
+      invokers
+    );
+    expect(result.sensitivity?.detected).toBe(true);
+    expect(result.sensitivity?.signpost).toBe(true);
+    // Gate skipped — the detector signal set extractedSensitivity, so the judge never ran.
+    expect(calls.serious).toHaveLength(0);
+    expect(result.abuse).toBeUndefined();
+  });
+
+  it('DETECTS via the deterministic keyword net when BOTH the extractor and detector miss', async () => {
+    // Both LLM signals empty; the keyword floor alone catches the first-person harm disclosure.
+    const { invokers, calls } = stubInvokers({
+      extract: { intents: [] },
+      sensitivity: { assessment: null },
+      serious: { verdict: { serious: false, reason: 'hostile' } },
+    });
+    const result = await runTurn(
+      state({
+        userMessage: 'I am being harassed at work',
+        questions: Q,
+        config: { abuseThreshold: 4 },
+      }),
+      invokers
+    );
+    expect(result.sensitivity?.detected).toBe(true);
+    expect(result.sensitivity?.severity).toBe('high');
+    expect(calls.serious).toHaveLength(0);
+  });
+
+  it('records an app_detect_sensitivity tool call when the feature is on', async () => {
+    const { invokers } = stubInvokers({ sensitivity: { assessment: null } });
+    const result = await runTurn(state({ userMessage: 'work is fine', questions: Q }), invokers);
+    expect(result.toolCalls.some((t) => t.slug === 'app_detect_sensitivity')).toBe(true);
+  });
+
+  it('does NOT run the detector (no call, no tool record) when the feature is off', async () => {
+    const { invokers, calls } = stubInvokers({ sensitivity: { assessment: HIGH } });
+    const result = await runTurn(
+      state({ userMessage: 'x', questions: Q, flags: { sensitivityAwareness: false } }),
+      invokers
+    );
+    expect(calls.sensitivity).toHaveLength(0);
+    expect(result.toolCalls.some((t) => t.slug === 'app_detect_sensitivity')).toBe(false);
+    expect(result.sensitivity).toBeUndefined();
+  });
+
+  it('lets pure hostility ("go fuck yourself") fall through to the seriousness gate (no false disclosure)', async () => {
+    // Neither the detector nor the keyword net should flag bare profanity, so the gate runs and
+    // strikes it — the behaviour the user asked for.
+    const { invokers, calls } = stubInvokers({
+      extract: { intents: [] },
+      sensitivity: { assessment: null },
+      serious: { verdict: { serious: false, reason: 'Abusive.' } },
+    });
+    const result = await runTurn(
+      state({
+        userMessage: 'go fuck yourself',
+        questions: Q,
+        config: { abuseThreshold: 4 },
+      }),
+      invokers
+    );
+    // No disclosure detected → the gate ran and struck.
+    expect(result.sensitivity).toBeUndefined();
+    expect(calls.serious).toHaveLength(1);
+    expect(result.abuse?.flagged).toBe(true);
+  });
+});
+
 describe('runDataSlotTurn — sensitivity awareness', () => {
   const withSlots = (over: Parameters<typeof state>[0]) =>
     state({
