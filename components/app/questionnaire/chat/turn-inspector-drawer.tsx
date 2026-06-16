@@ -12,9 +12,17 @@
  *
  * Aesthetic: an editorial forensic dossier — amber accent on a dark slate console, monospace
  * transcripts, a collapsible timeline of calls per turn. Purely presentational.
+ *
+ * Rendered through a portal to `document.body`. It's mounted inside the chat surface, which in
+ * `both`-presentation mode lives in a `transform`ed, `inert`-toggled carousel track — a
+ * transformed ancestor becomes the containing block for `position: fixed` (so the drawer would
+ * anchor to the 200%-wide track, not the viewport) and `inert` would swallow its clicks when the
+ * form view is active. Portaling to `<body>` escapes both: the drawer is truly viewport-fixed and
+ * stays interactive regardless of which surface is on screen.
  */
 
 import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronDown, ChevronRight, Clock, Coins, Cpu, Lock, ScanSearch, X } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
@@ -54,91 +62,123 @@ export function TurnInspectorDrawer({ turns }: TurnInspectorDrawerProps) {
     }
   }, [turns.length, autoOpened]);
 
-  return (
-    <>
-      {/* Collapsed tab — always reachable on the right edge. */}
-      {!open && (
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          className="fixed top-1/2 right-0 z-50 flex -translate-y-1/2 items-center gap-1.5 rounded-l-md border border-r-0 border-[var(--cq-accent-ring)] bg-zinc-950 py-3 pr-1.5 pl-2 text-[var(--cq-accent)] shadow-lg transition-colors hover:bg-zinc-900"
-          aria-label="Open the admin turn inspector"
-          style={{ writingMode: 'vertical-rl' }}
-        >
-          <ScanSearch className="h-3.5 w-3.5 rotate-90" aria-hidden />
-          <span className="font-mono text-[0.65rem] font-semibold tracking-[0.2em] uppercase">
-            Inspector
-          </span>
-          {totalCalls > 0 && (
-            <span className="rounded-sm bg-[var(--cq-accent)] px-1 py-0.5 font-mono text-[0.6rem] leading-none font-bold text-zinc-950">
-              {totalCalls}
-            </span>
-          )}
-        </button>
-      )}
+  // Esc closes the open drawer — expected of any overlay console.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
 
-      {/* Drawer */}
-      <aside
-        className={cn(
-          'fixed top-0 right-0 z-50 flex h-dvh w-[min(30rem,92vw)] flex-col border-l border-[var(--cq-accent-ring)] bg-zinc-950 text-zinc-200 shadow-2xl transition-transform duration-300 ease-out',
-          open ? 'translate-x-0' : 'pointer-events-none translate-x-full'
-        )}
-        aria-hidden={!open}
-      >
-        {/* Header */}
-        <div className="shrink-0 border-b border-zinc-800 bg-gradient-to-b from-zinc-900 to-zinc-950 px-4 py-3">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <ScanSearch className="h-4 w-4 text-[var(--cq-accent)]" aria-hidden />
-              <h2 className="font-mono text-sm font-semibold tracking-[0.18em] text-zinc-100 uppercase">
-                Turn Inspector
-              </h2>
-            </div>
-            <button
-              type="button"
-              onClick={() => setOpen(false)}
-              className="rounded p-1 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
-              aria-label="Close the turn inspector"
+  // Portal to <body> so `position: fixed` anchors to the viewport (not the transformed carousel
+  // track) and the drawer escapes the `inert` chat panel in `both` mode. Resolve the host on the
+  // client only — `document` is absent during SSR and the first hydration frame.
+  const [host, setHost] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    setHost(document.body);
+  }, []);
+  if (!host) return null;
+
+  return createPortal(
+    // The console chrome is always dark slate, so it should always use the *dark-background* lifted
+    // amber. The outer `dark` makes the descendant `.dark .cq-surface` rule win regardless of the
+    // page theme; `cq-surface` re-establishes the `--cq-accent` tokens — portaled onto <body> we're
+    // outside the questionnaire surface, so without it the accent resolves to nothing and the tab's
+    // text/border vanish in light mode. The wrappers are layout-inert — every child is `fixed`.
+    <div className="dark">
+      <div className="cq-surface">
+        {/* Collapsed tab — always reachable on the right edge. */}
+        {!open && (
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            className="group fixed top-1/2 right-0 z-50 flex -translate-y-1/2 flex-col items-center gap-2 rounded-l-lg border border-r-0 border-[var(--cq-accent-ring)] bg-zinc-950/95 py-3.5 pr-2 pl-2.5 shadow-[0_8px_28px_-12px_rgba(0,0,0,0.7)] backdrop-blur transition-colors hover:bg-zinc-900"
+            aria-label="Open the admin turn inspector"
+          >
+            <ScanSearch
+              className="h-4 w-4 text-[var(--cq-accent)] transition-transform group-hover:scale-110"
+              aria-hidden
+            />
+            <span
+              className="font-mono text-[0.7rem] font-semibold tracking-[0.18em] text-zinc-100 uppercase"
+              style={{ writingMode: 'vertical-rl' }}
             >
-              <X className="h-4 w-4" aria-hidden />
-            </button>
-          </div>
-          <div className="mt-2 flex items-center gap-1.5 rounded border border-[var(--cq-accent-ring)] bg-[var(--cq-accent-muted)] px-2 py-1">
-            <Lock className="h-3 w-3 shrink-0 text-[var(--cq-accent)]" aria-hidden />
-            <p className="text-[0.7rem] leading-tight text-[color:var(--cq-accent)]">
-              <span className="font-semibold">Admin only.</span>{' '}
-              <span className="text-zinc-400">
-                Not shown to respondents — preview session only.
+              Inspector
+            </span>
+            {totalCalls > 0 && (
+              <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--cq-accent)] px-1.5 font-mono text-[0.65rem] leading-none font-bold text-[var(--cq-accent-foreground)]">
+                {totalCalls}
               </span>
-            </p>
-          </div>
-        </div>
+            )}
+          </button>
+        )}
 
-        {/* Body */}
-        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
-          {turns.length === 0 ? (
-            <p className="px-1 py-8 text-center font-mono text-xs text-zinc-500">
-              Waiting for the first turn…
-            </p>
-          ) : (
-            <ol className="space-y-3">
-              {turns.map((turn, i) => (
-                <TurnBlock
-                  key={`${turn.turnIndex}-${i}`}
-                  turn={turn}
-                  defaultOpen={i === turns.length - 1}
-                />
-              ))}
-            </ol>
+        {/* Drawer */}
+        <aside
+          className={cn(
+            'fixed top-0 right-0 z-50 flex h-dvh w-[min(30rem,92vw)] flex-col border-l border-[var(--cq-accent-ring)] bg-zinc-950 text-zinc-200 shadow-2xl transition-transform duration-300 ease-out',
+            open ? 'translate-x-0' : 'pointer-events-none translate-x-full'
           )}
-        </div>
+          aria-hidden={!open}
+        >
+          {/* Header */}
+          <div className="shrink-0 border-b border-zinc-800 bg-gradient-to-b from-zinc-900 to-zinc-950 px-4 py-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <ScanSearch className="h-4 w-4 text-[var(--cq-accent)]" aria-hidden />
+                <h2 className="font-mono text-sm font-semibold tracking-[0.18em] text-zinc-100 uppercase">
+                  Turn Inspector
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="rounded p-1 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+                aria-label="Close the turn inspector"
+              >
+                <X className="h-4 w-4" aria-hidden />
+              </button>
+            </div>
+            <div className="mt-2 flex items-center gap-1.5 rounded border border-[var(--cq-accent-ring)] bg-[var(--cq-accent-muted)] px-2 py-1">
+              <Lock className="h-3 w-3 shrink-0 text-[var(--cq-accent)]" aria-hidden />
+              <p className="text-[0.7rem] leading-tight text-[color:var(--cq-accent)]">
+                <span className="font-semibold">Admin only.</span>{' '}
+                <span className="text-zinc-400">
+                  Not shown to respondents — preview session only.
+                </span>
+              </p>
+            </div>
+          </div>
 
-        <div className="shrink-0 border-t border-zinc-800 px-4 py-2 font-mono text-[0.65rem] text-zinc-500">
-          {turns.length} turn{turns.length === 1 ? '' : 's'} · {totalCalls} agent call
-          {totalCalls === 1 ? '' : 's'} captured this session
-        </div>
-      </aside>
-    </>
+          {/* Body */}
+          <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+            {turns.length === 0 ? (
+              <p className="px-1 py-8 text-center font-mono text-xs text-zinc-500">
+                Waiting for the first turn…
+              </p>
+            ) : (
+              <ol className="space-y-3">
+                {turns.map((turn, i) => (
+                  <TurnBlock
+                    key={`${turn.turnIndex}-${i}`}
+                    turn={turn}
+                    defaultOpen={i === turns.length - 1}
+                  />
+                ))}
+              </ol>
+            )}
+          </div>
+
+          <div className="shrink-0 border-t border-zinc-800 px-4 py-2 font-mono text-[0.65rem] text-zinc-500">
+            {turns.length} turn{turns.length === 1 ? '' : 's'} · {totalCalls} agent call
+            {totalCalls === 1 ? '' : 's'} captured this session
+          </div>
+        </aside>
+      </div>
+    </div>,
+    host
   );
 }
 
