@@ -30,24 +30,46 @@ interface SelectorOutput {
   rationale: string;
 }
 
-/** Render the numbered candidate list + transcript the selector agent judges. */
+/** Render the numbered candidate list + transcript + framing the selector agent judges. */
 export function buildSelectorPrompt(input: LlmPickInput): string {
   const transcript =
     input.recentMessages.length > 0
       ? input.recentMessages.map((m) => `- ${m}`).join('\n')
       : '(no prior messages)';
-  const candidates = input.candidates.map((c, i) => `${i + 1}. ${c.prompt ?? c.key}`).join('\n');
 
-  return [
-    'Recent conversation (oldest first):',
-    transcript,
-    '',
+  // Each candidate: its prompt, then any guidelines / rationale on indented sub-lines
+  // so the model judges on intent, not just wording. Absent fields are simply omitted.
+  const candidates = input.candidates
+    .map((c, i) => {
+      const lines = [`${i + 1}. ${c.prompt ?? c.key}`];
+      if (c.guidelines) lines.push(`   - Looking for: ${c.guidelines}`);
+      if (c.rationale) lines.push(`   - Why it matters: ${c.rationale}`);
+      return lines.join('\n');
+    })
+    .join('\n');
+
+  const sections: string[] = [];
+  if (input.goal) {
+    sections.push(`Questionnaire goal: ${input.goal}`, '');
+  }
+  sections.push('Recent conversation (oldest first):', transcript, '');
+  if (input.answeredQuestions && input.answeredQuestions.length > 0) {
+    sections.push(
+      'Already answered (do not re-tread these):',
+      input.answeredQuestions.map((q) => `- ${q}`).join('\n'),
+      ''
+    );
+  }
+  sections.push(
     'Candidate questions to ask next:',
     candidates,
     '',
-    'Which candidate follows most naturally from the conversation? Reply with ONLY ' +
-      'JSON: {"choice": <1-based number, or 0 if none fits>, "rationale": "<one short sentence>"}.',
-  ].join('\n');
+    'Pick the candidate that follows most naturally from the conversation and best advances ' +
+      'the goal — favour continuity over list order, and choose 0 if none fit. Reply with ONLY ' +
+      'JSON: {"choice": <1-based number, or 0 if none fits>, "rationale": "<one short sentence>"}.'
+  );
+
+  return sections.join('\n');
 }
 
 /** Validate the selector agent's JSON reply into a {@link SelectorOutput}. */

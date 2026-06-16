@@ -30,6 +30,7 @@ import {
   type SessionWarning,
 } from '@/lib/app/questionnaire/chat/types';
 import type { ReasoningStep } from '@/lib/app/questionnaire/reasoning';
+import type { TurnInspectorData } from '@/lib/app/questionnaire/inspector';
 import type { ChatAttachment } from '@/lib/orchestration/chat/types';
 
 /** A base64-encoded file the respondent attaches to a turn — the platform `ChatAttachment`
@@ -71,6 +72,12 @@ export interface UseQuestionnaireSessionStreamReturn {
    * steps move onto the committed assistant turn's `reasoning`.
    */
   streamingReasoning: ReasoningStep[];
+  /**
+   * Preview Turn Inspector (admin-only): the per-turn agent-call traces accumulated this session,
+   * oldest first. Populated only from `inspector` frames, which the server emits solely for a
+   * preview session with the inspector toggle on — so this is always empty for a real respondent.
+   */
+  inspectorTurns: TurnInspectorData[];
   status: QuestionnaireChatStatus;
   error: ChatErrorState | null;
   /** Whether the composer should accept input. */
@@ -200,6 +207,9 @@ export function useQuestionnaireSessionStream(
   // Live reasoning steps for the in-flight turn (demo feature). Reset at the start of each turn,
   // populated from the `reasoning` frame, and cleared on commit (the steps move onto the turn).
   const [streamingReasoning, setStreamingReasoning] = useState<ReasoningStep[]>([]);
+  // Preview Turn Inspector (admin-only): traces accumulate across the session, appended per
+  // `inspector` frame. Never populated for a real respondent (the server gates emission).
+  const [inspectorTurns, setInspectorTurns] = useState<TurnInspectorData[]>([]);
   const [status, setStatus] = useState<QuestionnaireChatStatus>(initialStatus ?? 'idle');
   const [error, setError] = useState<ChatErrorState | null>(() =>
     initialStatus ? defaultBlockingError(initialStatus) : null
@@ -314,6 +324,10 @@ export function useQuestionnaireSessionStream(
                 // Single frame before the reply — surface the steps live for the overlay reveal.
                 streamReasoning = ev.steps;
                 setStreamingReasoning(ev.steps);
+              } else if (ev.type === 'inspector') {
+                // Admin preview only — append this turn's agent-call trace to the session log.
+                const turn = { turnIndex: ev.turnIndex, calls: ev.calls };
+                setInspectorTurns((prev) => [...prev, turn]);
               } else if (ev.type === 'error') {
                 streamError = {
                   code: ev.code,
@@ -411,6 +425,7 @@ export function useQuestionnaireSessionStream(
     streaming,
     streamingText: typing.displayText,
     streamingReasoning,
+    inspectorTurns,
     status,
     error,
     canSend,

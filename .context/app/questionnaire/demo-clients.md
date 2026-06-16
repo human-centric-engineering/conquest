@@ -107,15 +107,15 @@ The F7.1 chat surface is the second consumer (via `themeToCssVariables`).
 All routes are flag-gated (`404` when `APP_QUESTIONNAIRES_ENABLED` is off, before
 auth), `withAdminAuth` (401/403), and audited. Registry: `API.APP.DEMO_CLIENTS`.
 
-| Method + path                                      | Purpose                                  | Notable codes                                               |
-| -------------------------------------------------- | ---------------------------------------- | ----------------------------------------------------------- |
-| `GET /api/v1/app/demo-clients`                     | List (active + inactive)                 | —                                                           |
-| `POST /api/v1/app/demo-clients`                    | Create                                   | `409 SLUG_CONFLICT`                                         |
-| `GET /api/v1/app/demo-clients/:id`                 | Detail (+ attributed-questionnaire list) | `404`                                                       |
-| `PATCH /api/v1/app/demo-clients/:id`               | Edit any identity or theme field         | `404`, `409 SLUG_CONFLICT`                                  |
-| `DELETE /api/v1/app/demo-clients/:id`              | Delete (guarded)                         | `404`, `409 DEMO_CLIENT_IN_USE`                             |
-| `POST /api/v1/app/demo-clients/:id/reset-sessions` | Reset session graph (F6.4)               | `400 CONFIRM_SLUG_MISMATCH`, `409 ANONYMOUS_MODE_PROTECTED` |
-| `PATCH /api/v1/app/questionnaires/:id`             | Attribute / detach (`demoClientId`)      | `404`, `404 DEMO_CLIENT_NOT_FOUND`                          |
+| Method + path                                      | Purpose                                                                            | Notable codes                                               |
+| -------------------------------------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `GET /api/v1/app/demo-clients`                     | List (active + inactive)                                                           | —                                                           |
+| `POST /api/v1/app/demo-clients`                    | Create                                                                             | `409 SLUG_CONFLICT`                                         |
+| `GET /api/v1/app/demo-clients/:id`                 | Detail (+ attributed-questionnaire list)                                           | `404`                                                       |
+| `PATCH /api/v1/app/demo-clients/:id`               | Edit any identity or theme field                                                   | `404`, `409 SLUG_CONFLICT`                                  |
+| `DELETE /api/v1/app/demo-clients/:id`              | Delete (guarded)                                                                   | `404`, `409 DEMO_CLIENT_IN_USE`                             |
+| `POST /api/v1/app/demo-clients/:id/reset-sessions` | Reset session graph (F6.4)                                                         | `400 CONFIRM_SLUG_MISMATCH`, `409 ANONYMOUS_MODE_PROTECTED` |
+| `PATCH /api/v1/app/questionnaires/:id`             | Attribute / detach (`demoClientId`); also renames with `{ title }` (not demo-only) | `404`, `404 DEMO_CLIENT_NOT_FOUND`                          |
 
 **Slug is derive-with-override:** omit it on create and the server derives a
 kebab-case slug from the name (`slugifyDemoClient`); supply it to override. A

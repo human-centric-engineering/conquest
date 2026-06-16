@@ -117,6 +117,7 @@ function makeGraph(over: Partial<VersionGraphView> = {}): VersionGraphView {
       reasoningStreamEnabled: true,
       reasoningStreamPlacement: 'overlay',
       reasoningStreamPersist: true,
+      previewInspectorEnabled: false,
       tone: DEFAULT_TONE_SETTINGS,
     },
     ...over,

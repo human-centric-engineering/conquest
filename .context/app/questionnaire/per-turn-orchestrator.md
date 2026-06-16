@@ -50,6 +50,15 @@ tone to the version's `goal`/`audience` (role, expertise, sensitivity, locale), 
 conversationally** when the prior answer wasn't captured (`isReask` = this turn re-selected the
 question the previous turn asked).
 
+**Continuity from prior answers.** The phraser also receives a short `priorAnswers` digest —
+"what they've already shared this session" — built by `_lib/prior-answers.ts`
+(`buildPriorAnswersDigest`): the confidently-filled, non-provisional data slots rendered as
+`name: paraphrase` (or, in question mode, captured answers as `prompt: value`), excluding the
+slot/question being asked this turn and capped to keep the prompt lean. It's passed as
+**background only** — the interviewer may glance back at one point when it genuinely helps the
+next question land, but the prompt forbids recapping the list or re-asking anything in it. Absent
+when nothing is captured yet → the block is omitted (no behaviour change).
+
 **Infer scales/choices; only spell them out as a last resort.** A choice or Likert question is
 asked **openly** on the first ask — the interviewer asks about the underlying feeling/choice in
 plain language and the extractor (+ the answer-fit resolver, see
@@ -211,6 +220,29 @@ slot that the next send cleared. Both are now persisted and replayed.
   Unlike voice it doesn't gate a dedicated route — the chat surface hides the affordance and the
   `/messages` route **ignores** any attachments a client sends while it's off, so the paid
   multimodal path stays shut.
+
+## Preview Turn Inspector (admin only)
+
+A debugging console for the **"preview as respondent"** mode: per turn, the sequence of agent/LLM
+calls the conversation made, each with its model, latency, estimated cost, token counts, and the
+raw prompt + response. **Two gates, both required** — so it can never reach a real respondent:
+
+1. `AppQuestionnaireSession.isPreview` — set **only** by the admin-gated `/preview` route, loaded by
+   `buildTurnContext` and read in the `/messages` route.
+2. The per-version config toggle `previewInspectorEnabled` (Settings tab; default off).
+
+When both hold, the route passes a `recordInspectorCall` sink into `buildTurnInvokers` and the two
+streamed phrasers (`streamQuestionMessage`/`streamOfferMessage`); each app-owned call site pushes an
+`AgentCallTrace` (`lib/app/questionnaire/inspector`). After the reply streams, the route emits one
+`{ type: 'inspector', turnIndex, calls }` SSE frame (parsed by `parse-session-event.ts`); the chat
+hook accumulates them and `TurnInspectorDrawer` renders the right-edge console. **Live-only** —
+never persisted, and capture is a no-op (zero overhead) for any non-preview session.
+
+Coverage: the answer extractor, contradiction detector, answer refiner (capability dispatches —
+request shown as the dispatched structured args), the seriousness + sensitivity judges (full LLM
+messages + tokens), and the interviewer + completion-offer phrasers. The deterministic selection
+strategies make no LLM call, so they produce no trace; the adaptive selector's LLM call isn't
+captured yet.
 
 ## See also
 

@@ -155,6 +155,82 @@ describe('runDataSlotTurn — targeting', () => {
   });
 });
 
+describe('runDataSlotTurn — adaptive selection (selectDataSlot invoker)', () => {
+  it('targets the slot the adaptive selector chooses, over the deterministic topic-local pick', async () => {
+    // Deterministic would linger in theme A (d2); the selector instead bridges to d3 (theme B).
+    const invokers = {
+      ...stubInvokers().invokers,
+      async selectDataSlot() {
+        return { dataSlotKey: 'd3', rationale: 'flows naturally', costUsd: 0.002 };
+      },
+    };
+    const result = await runDataSlotTurn(
+      dsState({
+        questions: [q({ id: 'q1' })],
+        dataSlots: [
+          ds({ id: 'd1', key: 'd1', theme: 'A', ordinal: 0 }),
+          ds({ id: 'd2', key: 'd2', theme: 'A', ordinal: 1 }),
+          ds({ id: 'd3', key: 'd3', theme: 'B', ordinal: 2 }),
+        ],
+        dataSlotAnswered: [{ dataSlotId: 'd1', confidence: 0.9 }],
+        activeDataSlotKey: 'd1',
+      }),
+      invokers
+    );
+    expect(result.response.kind).toBe('data_slot');
+    if (result.response.kind === 'data_slot') {
+      expect(result.response.dataSlotKey).toBe('d3');
+      expect(result.response.isTransition).toBe(true); // A → B
+    }
+    // The selector's spend is folded into the turn cost.
+    expect(result.costUsd).toBeCloseTo(0.002);
+  });
+
+  it('falls back to the deterministic pick when the selector returns null', async () => {
+    const invokers = {
+      ...stubInvokers().invokers,
+      async selectDataSlot() {
+        return null;
+      },
+    };
+    const result = await runDataSlotTurn(
+      dsState({
+        questions: [q({ id: 'q1' })],
+        dataSlots: [
+          ds({ id: 'd1', key: 'd1', theme: 'A', ordinal: 0 }),
+          ds({ id: 'd2', key: 'd2', theme: 'A', ordinal: 1 }),
+        ],
+        dataSlotAnswered: [{ dataSlotId: 'd1', confidence: 0.9 }],
+        activeDataSlotKey: 'd1',
+      }),
+      invokers
+    );
+    // Deterministic topic-local pick → same theme A, slot d2.
+    expect(result.response.kind === 'data_slot' && result.response.dataSlotId).toBe('d2');
+  });
+
+  it('ignores an off-pool selector pick and falls back to the deterministic order', async () => {
+    const invokers = {
+      ...stubInvokers().invokers,
+      async selectDataSlot() {
+        return { dataSlotKey: 'nope', rationale: 'hallucinated', costUsd: 0.001 };
+      },
+    };
+    const result = await runDataSlotTurn(
+      dsState({
+        questions: [q({ id: 'q1' })],
+        dataSlots: [
+          ds({ id: 'd1', key: 'd1', theme: 'A' }),
+          ds({ id: 'd2', key: 'd2', theme: 'B' }),
+        ],
+      }),
+      invokers
+    );
+    // Off-pool 'nope' is rejected → first unfilled (d1).
+    expect(result.response.kind === 'data_slot' && result.response.dataSlotId).toBe('d1');
+  });
+});
+
 describe('runDataSlotTurn — sweep + completion', () => {
   it('sweeps an unanswered question once every data slot is filled', async () => {
     const { invokers } = stubInvokers();

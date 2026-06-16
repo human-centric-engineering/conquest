@@ -242,14 +242,14 @@ describe('UploadQuestionnaireDialog', () => {
   });
 
   it('shows the server error message inline and does not navigate', async () => {
-    mockFetchError('This document has already been ingested.', 409);
+    mockFetchError('The document could not be parsed.', 422);
     const user = await openDialog();
 
     await user.upload(fileInput(), makeFile());
     await user.click(screen.getByRole('button', { name: /upload & extract/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/already been ingested/i)).toBeInTheDocument();
+      expect(screen.getByText(/could not be parsed/i)).toBeInTheDocument();
     });
     expect(mockPush).not.toHaveBeenCalled(); // test-review:accept no_arg_called — error-path guard
     // The form must re-enable so the admin can fix the input and retry.

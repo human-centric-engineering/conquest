@@ -9,10 +9,15 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 
 import { DataSlotsReview } from '@/components/admin/questionnaires/data-slots-review';
+import { DataSlotEmbeddingStep } from '@/components/admin/questionnaires/data-slot-embedding-step';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
-import { isDataSlotsEnabled, isQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
+import {
+  isAdaptiveDataSlotSelectionEnabled,
+  isDataSlotsEnabled,
+  isQuestionnairesEnabled,
+} from '@/lib/app/questionnaire/feature-flag';
 import { getVersionGraphCached } from '@/lib/app/questionnaire/workspace-data';
 import type { DataSlotView, DataSlotDraftView } from '@/lib/app/questionnaire/data-slots';
 
@@ -50,7 +55,11 @@ export default async function DataSlotsTab({ params }: PageProps) {
 
   const { id, vid } = await params;
 
-  const [graph, loaded] = await Promise.all([getVersionGraphCached(id, vid), getSlots(id, vid)]);
+  const [graph, loaded, dataSlotAdaptive] = await Promise.all([
+    getVersionGraphCached(id, vid),
+    getSlots(id, vid),
+    isAdaptiveDataSlotSelectionEnabled(),
+  ]);
 
   const questions = graph
     ? graph.sections.flatMap((s) => s.questions.map((q) => ({ key: q.key, prompt: q.prompt })))
@@ -76,6 +85,13 @@ export default async function DataSlotsTab({ params }: PageProps) {
           initialSlots={loaded.slots}
           initialDraft={loaded.draft}
         />
+      )}
+
+      {/* Adaptive data-slot selection (50+-slot scale): the explicit embedding step + coverage,
+          shown only when the feature is on. Embeddings rank unfilled slots by similarity so the
+          conversation flows naturally rather than following a fixed order. */}
+      {dataSlotAdaptive && loaded.slots.length > 0 && (
+        <DataSlotEmbeddingStep questionnaireId={id} versionId={vid} />
       )}
     </div>
   );

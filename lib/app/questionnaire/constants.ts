@@ -550,6 +550,17 @@ export const QUESTIONNAIRE_INTERVIEWER_AGENT_SLUG = 'app-questionnaire-interview
 export const APP_QUESTIONNAIRES_DATA_SLOTS_FLAG = 'APP_QUESTIONNAIRES_DATA_SLOTS_ENABLED';
 
 /**
+ * Sub-flag gating **adaptive data-slot selection** — the embedding-ranked LLM selector that picks
+ * the next data slot to pursue in data-slot mode, instead of the deterministic topic-local order.
+ * A paid (embedding + LLM) sub-feature aimed at large questionnaires (50+ data slots): it depends
+ * on the data-slots feature AND live-sessions, and is an independent opt-in on top. When off, the
+ * data-slot turn loop keeps today's deterministic `pickNextDataSlot`. Disabled by default
+ * (dark-launch). Seeded by `prisma/seeds/app-questionnaire/041-adaptive-data-slots-flag.ts`.
+ */
+export const APP_QUESTIONNAIRES_ADAPTIVE_DATA_SLOTS_FLAG =
+  'APP_QUESTIONNAIRES_ADAPTIVE_DATA_SLOTS_ENABLED';
+
+/**
  * Sub-flag gating the **seriousness / abuse gate** — per answered turn, a respondent answer the
  * extractor flags as non-genuine is judged; a non-serious verdict is disregarded, strikes the
  * session, and (at `config.abuseThreshold`) abandons it. Disabled by default (dark-launch);

@@ -36,6 +36,7 @@ vi.mock('next/navigation', () => ({
 const flagMock = vi.hoisted(() => ({
   isQuestionnairesEnabled: vi.fn(),
   isDataSlotsEnabled: vi.fn(),
+  isAdaptiveDataSlotSelectionEnabled: vi.fn(),
 }));
 vi.mock('@/lib/app/questionnaire/feature-flag', () => flagMock);
 
@@ -156,6 +157,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   flagMock.isQuestionnairesEnabled.mockResolvedValue(true);
   flagMock.isDataSlotsEnabled.mockResolvedValue(true);
+  flagMock.isAdaptiveDataSlotSelectionEnabled.mockResolvedValue(false);
   workspaceDataMock.getVersionGraphCached.mockResolvedValue(makeGraph(3));
   apiData.slots = { slots: [], draft: null };
   apiMock.serverFetch.mockImplementation(async (url: string) => ({ ok: true, _url: url }));

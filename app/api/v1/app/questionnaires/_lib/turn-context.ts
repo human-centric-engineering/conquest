@@ -67,7 +67,14 @@ export interface TurnMeta {
 
 /** What {@link buildTurnContext} resolves for one live turn. */
 export interface LoadedTurnContext {
-  session: { id: string; status: string; versionId: string; respondentUserId: string | null };
+  session: {
+    id: string;
+    status: string;
+    versionId: string;
+    respondentUserId: string | null;
+    /** Admin preview session marker — gates the admin-only Turn Inspector. */
+    isPreview: boolean;
+  };
   base: TurnContextBase;
   /** Richer slot views for the capability args (the orchestrator only needs QuestionView). */
   slots: CapabilitySlotView[];
@@ -109,6 +116,8 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
       status: true,
       versionId: true,
       respondentUserId: true,
+      // Admin preview marker — gates the admin-only Turn Inspector telemetry in the route.
+      isPreview: true,
       // Seriousness / abuse gate: the prior strike count the orchestrator folds a new strike into.
       abuseStrikes: true,
       // Sensitivity awareness / safeguarding: the session's remembered disclosures, threaded into
@@ -153,6 +162,8 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
                   type: true,
                   prompt: true,
                   guidelines: true,
+                  // Adaptive-selector framing (`adaptive` only): why this question exists.
+                  rationale: true,
                   typeConfig: true,
                   tags: { select: { tagId: true } },
                 },
@@ -216,6 +227,8 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
         type: asQuestionType(slot.type),
         tagIds: slot.tags.map((t) => t.tagId),
         prompt: slot.prompt,
+        guidelines: slot.guidelines,
+        rationale: slot.rationale,
       });
       slots.push({
         id: slot.id,
@@ -339,6 +352,7 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
       status: session.status,
       versionId: session.versionId,
       respondentUserId: session.respondentUserId,
+      isPreview: session.isPreview,
     },
     base: {
       sessionId: session.id,

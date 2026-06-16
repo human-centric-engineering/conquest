@@ -29,7 +29,10 @@ import {
   mockUnauthenticatedUser,
 } from '@/tests/helpers/auth';
 import { GET } from '@/app/api/v1/app/questionnaires/prompts/route';
-import { QUESTIONNAIRE_ANSWER_EXTRACTOR_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
+import {
+  QUESTIONNAIRE_ANSWER_EXTRACTOR_AGENT_SLUG,
+  QUESTIONNAIRE_SELECTOR_AGENT_SLUG,
+} from '@/lib/app/questionnaire/constants';
 
 type Mock = ReturnType<typeof vi.fn>;
 
@@ -104,7 +107,16 @@ describe('GET /api/v1/app/questionnaires/prompts', () => {
 
     const { agents } = body.data;
     expect(agents.length).toBeGreaterThan(0);
-    expect(agents.every((a) => a.instructionsAreLoadBearing === false)).toBe(true);
+    // Only the streamChat-dispatched selector is load-bearing; every other agent
+    // assembles its prompt in code.
+    expect(
+      agents
+        .filter((a) => a.slug !== QUESTIONNAIRE_SELECTOR_AGENT_SLUG)
+        .every((a) => a.instructionsAreLoadBearing === false)
+    ).toBe(true);
+    expect(
+      agents.find((a) => a.slug === QUESTIONNAIRE_SELECTOR_AGENT_SLUG)?.instructionsAreLoadBearing
+    ).toBe(true);
 
     const extractor = agents.find((a) => a.slug === QUESTIONNAIRE_ANSWER_EXTRACTOR_AGENT_SLUG);
     expect(extractor?.seeded).toBe(true);

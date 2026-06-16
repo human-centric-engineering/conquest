@@ -517,6 +517,14 @@ export type QuestionnaireConfigShape = {
    */
   reasoningStreamPersist: boolean;
   /**
+   * Preview Turn Inspector (admin-only): when on, an admin previewing as a respondent can open a
+   * per-turn console showing the sequence of agent calls, their raw prompts/responses, the model
+   * used, latency, and estimated cost. Off by default. Server-gated to preview sessions
+   * (`AppQuestionnaireSession.isPreview`), so it is never surfaced to a real respondent. See
+   * `lib/app/questionnaire/inspector`.
+   */
+  previewInspectorEnabled: boolean;
+  /**
    * Interviewer tone & persona — how the conversational interviewer responds to answers. See
    * {@link ToneSettings}. Off by default per dimension; only takes effect when the platform flag
    * `APP_QUESTIONNAIRES_TONE_ENABLED` is on. Threaded to the phraser via `buildToneInstructions`.
@@ -576,5 +584,7 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   reasoningStreamEnabled: true,
   reasoningStreamPlacement: 'overlay',
   reasoningStreamPersist: true,
+  // Admin-only debugging surface — off by default; an operator turns it on per version.
+  previewInspectorEnabled: false,
   tone: DEFAULT_TONE_SETTINGS,
 };

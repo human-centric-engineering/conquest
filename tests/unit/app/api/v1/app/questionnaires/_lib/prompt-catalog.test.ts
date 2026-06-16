@@ -17,6 +17,7 @@ import { buildPromptCatalog } from '@/app/api/v1/app/questionnaires/_lib/prompt-
 import {
   QUESTIONNAIRE_ANSWER_EXTRACTOR_AGENT_SLUG,
   QUESTIONNAIRE_INTERVIEWER_AGENT_SLUG,
+  QUESTIONNAIRE_SELECTOR_AGENT_SLUG,
 } from '@/lib/app/questionnaire/constants';
 import { EVALUATION_DIMENSIONS } from '@/lib/app/questionnaire/evaluation/types';
 
@@ -39,8 +40,15 @@ describe('buildPromptCatalog', () => {
     expect(new Set(slugs).size).toBe(slugs.length);
   });
 
-  it('marks every agent as not driven by stored instructions', () => {
-    expect(catalog.every((e) => e.instructionsAreLoadBearing === false)).toBe(true);
+  it('marks only the streamChat-dispatched selector as driven by stored instructions', () => {
+    const loadBearing = catalog.filter((e) => e.instructionsAreLoadBearing);
+    expect(loadBearing.map((e) => e.slug)).toEqual([QUESTIONNAIRE_SELECTOR_AGENT_SLUG]);
+    // Every capability-dispatched agent assembles its prompt in code → not load-bearing.
+    expect(
+      catalog
+        .filter((e) => e.slug !== QUESTIONNAIRE_SELECTOR_AGENT_SLUG)
+        .every((e) => e.instructionsAreLoadBearing === false)
+    ).toBe(true);
   });
 
   it('renders every specimen without error and with at least one non-empty message', () => {

@@ -31,6 +31,7 @@ import { createRateLimitResponse } from '@/lib/security/rate-limit';
 
 import {
   isAdaptiveSelectionEnabled,
+  isAdaptiveDataSlotSelectionEnabled,
   isAnswerExtractionEnabled,
   isAnswerRefinementEnabled,
   isCompletionEnabled,
@@ -46,6 +47,7 @@ import {
   withLiveSessionsEnabled,
 } from '@/lib/app/questionnaire/feature-flag';
 import { buildReasoningTrace, type ReasoningStep } from '@/lib/app/questionnaire/reasoning';
+import type { AgentCallTrace } from '@/lib/app/questionnaire/inspector';
 import type { SessionWarning } from '@/lib/app/questionnaire/chat/types';
 import { classifyCostCap } from '@/lib/app/questionnaire/session';
 import { ABUSE_ABANDON_REASON, TONE_DIMENSION_KEYS } from '@/lib/app/questionnaire/types';
@@ -58,6 +60,8 @@ import {
 import type { ChatEvent } from '@/types/orchestration';
 import { turnLimiter } from '@/app/api/v1/app/questionnaire-sessions/_lib/rate-limit';
 import { buildTurnContext } from '@/app/api/v1/app/questionnaires/_lib/turn-context';
+import { ensureVersionSlotsEmbedded } from '@/app/api/v1/app/questionnaires/_lib/slot-embeddings';
+import { ensureVersionDataSlotsEmbedded } from '@/app/api/v1/app/questionnaires/_lib/data-slot-embeddings';
 import { sumSessionTurnCost } from '@/app/api/v1/app/questionnaires/_lib/turns';
 import {
   abortSession,
@@ -72,6 +76,7 @@ import { buildTurnInvokers } from '@/app/api/v1/app/questionnaire-sessions/_lib/
 import { persistTurn } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-run';
 import { streamOfferMessage } from '@/app/api/v1/app/questionnaire-sessions/_lib/offer-stream';
 import { streamQuestionMessage } from '@/app/api/v1/app/questionnaire-sessions/_lib/question-stream';
+import { buildPriorAnswersDigest } from '@/app/api/v1/app/questionnaire-sessions/_lib/prior-answers';
 import { resolveTurnAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-access';
 
 const bodySchema = z
@@ -195,6 +200,7 @@ async function handleMessage(
       sensitivityAwarenessFlag,
       reasoningStreamFlag,
       toneFlag,
+      dataSlotAdaptive,
     ] = await Promise.all([
       isAnswerExtractionEnabled(),
       isContradictionDetectionEnabled(),
@@ -208,7 +214,30 @@ async function handleMessage(
       isSensitivityAwarenessEnabled(),
       isReasoningStreamEnabled(),
       isToneEnabled(),
+      isAdaptiveDataSlotSelectionEnabled(),
     ]);
+
+    // Adaptive selection ranks unanswered questions by vector similarity, which needs each slot's
+    // embedding — and nothing in the authoring flow generates them, so an `adaptive` version would
+    // otherwise rank against an empty set and silently degrade to `weighted` (sequential-looking)
+    // forever. Generate them the first time an adaptive session runs: a cheap no-op once embedded
+    // (a single COUNT short-circuits), so only the first session of a fresh/edited version pays.
+    // Fail-soft: a missing/misconfigured embedder must never break a turn — adaptive already falls
+    // back to weighted without embeddings, so we log and carry on.
+    if (adaptive && loaded.base.config.selectionStrategy === 'adaptive') {
+      try {
+        await ensureVersionSlotsEmbedded(loaded.session.versionId);
+      } catch (err) {
+        log.warn(
+          'Adaptive: slot embedding failed; selection will fall back to weighted this turn',
+          {
+            sessionId,
+            versionId: loaded.session.versionId,
+            error: err instanceof Error ? err.message : String(err),
+          }
+        );
+      }
+    }
 
     // Sensitivity awareness runs only when the platform flag AND the per-questionnaire config
     // toggle are both on (the second gate is the version author's opt-in).
@@ -219,11 +248,45 @@ async function handleMessage(
     const dataSlots = loaded.base.dataSlots ?? [];
     const dataSlotMode = dataSlotsFlag && dataSlots.length > 0;
 
+    // Adaptive data-slot selection (50+-slot scale): when its sub-flag is on AND we're in data-slot
+    // mode, the orchestrator ranks unfilled slots by embedding similarity + an LLM pick. Like the
+    // question-slot path, ensure the data slots are embedded the first time such a session runs — a
+    // cheap no-op once embedded. Fail-soft: a missing embedder degrades to the deterministic
+    // topic-local pick, so a failure here must never break a turn.
+    const dataSlotAdaptiveActive = dataSlotMode && dataSlotAdaptive;
+    if (dataSlotAdaptiveActive) {
+      try {
+        await ensureVersionDataSlotsEmbedded(loaded.session.versionId);
+      } catch (err) {
+        log.warn(
+          'Adaptive data-slot: embedding failed; selection falls back to deterministic this turn',
+          {
+            sessionId,
+            versionId: loaded.session.versionId,
+            error: err instanceof Error ? err.message : String(err),
+          }
+        );
+      }
+    }
+
     // Live "watch it think" reasoning stream (demo feature): the platform flag AND the per-version
     // config toggle. `persist` additionally requires the version opt-in — when off the trace streams
     // live but isn't saved, so resumed turns show nothing. Both inert when the flag is off.
     const reasoningStreamOn = reasoningStreamFlag && loaded.base.config.reasoningStreamEnabled;
     const reasoningPersist = reasoningStreamOn && loaded.base.config.reasoningStreamPersist;
+
+    // Preview Turn Inspector (admin-only): capture the per-turn agent-call traces ONLY for a preview
+    // session (server-authoritative `isPreview`, set solely by the admin-gated /preview route) with
+    // the version's `previewInspectorEnabled` toggle on. Both gates are required, so a real respondent
+    // never has capture enabled and never receives the `inspector` frame below. Live-only: never
+    // persisted. Capture is a no-op (zero overhead) when the recorder isn't passed.
+    const inspectorOn = loaded.session.isPreview && loaded.base.config.previewInspectorEnabled;
+    const inspectorCalls: AgentCallTrace[] = [];
+    const recordInspectorCall = inspectorOn
+      ? (trace: AgentCallTrace) => {
+          inspectorCalls.push(trace);
+        }
+      : undefined;
 
     // Interviewer tone & persona (F-tone): the platform flag AND at least one configured dimension
     // (or the persona) being on. When neither holds the phraser keeps its default voice, so we omit
@@ -274,6 +337,13 @@ async function handleMessage(
       slots: loaded.slots,
       activeQuestionKey: loaded.activeQuestionKey,
       adaptiveEnabled: adaptive,
+      // Adaptive data-slot selection: wire the embedding-ranked LLM selector only in data-slot mode
+      // with the sub-flag on; otherwise the orchestrator keeps its deterministic topic-local pick.
+      dataSlotAdaptiveEnabled: dataSlotAdaptiveActive,
+      // Adaptive-selector framing: the version goal, so the LLM picks the question that advances it.
+      ...(loaded.meta.goal ? { goal: loaded.meta.goal } : {}),
+      // Preview Turn Inspector (admin-only): capture each capability/judge call's trace (undefined off).
+      ...(recordInspectorCall ? { recordInspectorCall } : {}),
       // Sensitivity awareness: ask the extractor to also flag a sensitive disclosure (kickoff off).
       sensitivityAware: body.kickoff ? false : sensitivityAware,
       // Answer-fit resolver: per-questionnaire mode for the focused free-form → choice/likert pass.
@@ -324,6 +394,11 @@ async function handleMessage(
     const slotById = new Map(loaded.slots.map((s) => [s.id, s]));
     const dataSlotKeyToId = new Map(dataSlots.map((s) => [s.key, s.id]));
     const { byId, activeQuestionKey, meta } = loaded;
+    // Interviewer continuity: `question key → prompt` (a human label for a captured answer in
+    // the question-mode prior-answers digest) and the captured state the digest reads from.
+    const questionPromptByKey = new Map(loaded.slots.map((s) => [s.key, s.prompt]));
+    const dataSlotAnswered = loaded.base.dataSlotAnswered ?? [];
+    const existingAnswers = loaded.base.existingAnswers;
     // Data Slots feature: hoisted for the generator (loses `loaded`'s narrowing) — the per-slot
     // re-ask counts + the configured cap, used to frame a sharper/final re-ask.
     const dataSlotAttempts = loaded.base.dataSlotAttempts ?? {};
@@ -335,6 +410,7 @@ async function handleMessage(
       | ChatEvent
       | { type: 'reasoning'; steps: ReasoningStep[] }
       | { type: 'warning'; code: string; message: string; detail?: string }
+      | { type: 'inspector'; turnIndex: number; calls: AgentCallTrace[] }
     > {
       yield { type: 'start', conversationId: sessionId, messageId: sessionId };
 
@@ -423,6 +499,7 @@ async function handleMessage(
           input: result.response.input,
           userId,
           sessionId,
+          ...(recordInspectorCall ? { recordInspectorCall } : {}),
         });
         agentResponse = offer.message;
         extraCostUsd = offer.costUsd;
@@ -436,6 +513,14 @@ async function handleMessage(
         const currentUnderstanding = dataSlotFillByDataSlotId.get(r.dataSlotId)?.paraphrase ?? null;
         const attemptsForTarget = dataSlotAttempts[r.dataSlotId] ?? 0;
         const isFinalAttempt = r.isReask && attemptsForTarget + 1 >= maxDataSlotAttempts;
+        // Continuity: what they've already shared (other slots), minus the one we're asking now.
+        const priorAnswers = buildPriorAnswersDigest({
+          dataSlots,
+          dataSlotAnswered,
+          existingAnswers,
+          questionPromptByKey,
+          excludeDataSlotId: r.dataSlotId,
+        });
         const phrased = yield* streamQuestionMessage({
           input: {
             prompt: `${r.name} — ${r.description}`,
@@ -448,6 +533,7 @@ async function handleMessage(
             isOpening: state.selectionRound === 0,
             questionsAsked: state.selectionRound,
             isTransition: r.isTransition,
+            ...(priorAnswers.length > 0 ? { priorAnswers } : {}),
             ...(r.isReask && currentUnderstanding ? { currentUnderstanding } : {}),
             ...(isFinalAttempt ? { isFinalAttempt: true } : {}),
             ...sensitivityPhraserInput,
@@ -455,6 +541,7 @@ async function handleMessage(
           },
           userId,
           sessionId,
+          ...(recordInspectorCall ? { recordInspectorCall } : {}),
         });
         agentResponse = phrased.message;
         extraCostUsd = phrased.costUsd;
@@ -470,6 +557,14 @@ async function handleMessage(
         const slot = result.targetedQuestionId
           ? slotById.get(result.targetedQuestionId)
           : undefined;
+        // Continuity: what they've already shared, minus the question we're asking now.
+        const priorAnswers = buildPriorAnswersDigest({
+          dataSlots,
+          dataSlotAnswered,
+          existingAnswers,
+          questionPromptByKey,
+          excludeQuestionKey: targetedKey,
+        });
         const phrased = yield* streamQuestionMessage({
           input: {
             prompt: result.response.text,
@@ -483,11 +578,13 @@ async function handleMessage(
             isReask: targetedKey !== null && targetedKey === activeQuestionKey,
             isOpening: state.selectionRound === 0,
             questionsAsked: state.selectionRound,
+            ...(priorAnswers.length > 0 ? { priorAnswers } : {}),
             ...sensitivityPhraserInput,
             ...tonePhraserInput,
           },
           userId,
           sessionId,
+          ...(recordInspectorCall ? { recordInspectorCall } : {}),
         });
         agentResponse = phrased.message;
         extraCostUsd = phrased.costUsd;
@@ -596,6 +693,13 @@ async function handleMessage(
             error: err instanceof Error ? err.message : String(err),
           });
         }
+      }
+
+      // Preview Turn Inspector (admin-only): emit the captured agent-call sequence for this turn,
+      // AFTER the reply streamed (so the interviewer/offer calls are included). Gated above to a
+      // preview session with the toggle on, so this frame never reaches a real respondent.
+      if (inspectorOn && inspectorCalls.length > 0) {
+        yield { type: 'inspector', turnIndex: state.selectionRound, calls: inspectorCalls };
       }
 
       yield {

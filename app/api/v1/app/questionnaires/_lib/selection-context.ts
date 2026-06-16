@@ -60,6 +60,8 @@ export async function buildSelectionContext(
     where: { id: versionId, questionnaireId },
     select: {
       id: true,
+      // Version goal: framing for the adaptive selector (read only by `adaptive`).
+      goal: true,
       config: { select: CONFIG_SELECT },
       sections: {
         orderBy: { ordinal: 'asc' },
@@ -76,6 +78,9 @@ export async function buildSelectionContext(
               required: true,
               type: true,
               prompt: true,
+              // Adaptive-selector framing (`adaptive` only): what a good answer looks like + why.
+              guidelines: true,
+              rationale: true,
               tags: { select: { tagId: true } },
             },
           },
@@ -99,6 +104,8 @@ export async function buildSelectionContext(
         type: asQuestionType(slot.type),
         tagIds: slot.tags.map((t) => t.tagId),
         prompt: slot.prompt,
+        guidelines: slot.guidelines,
+        rationale: slot.rationale,
       });
     }
   }
@@ -121,6 +128,7 @@ export async function buildSelectionContext(
     questions,
     answered,
     config: { ...DEFAULT_QUESTIONNAIRE_CONFIG, ...config },
+    ...(version.goal !== null ? { goal: version.goal } : {}),
     // `round` seeds `random`. The answered-count default is a convenience for the
     // STATELESS preview only — it advances in lockstep with the shrinking pool, so
     // the preview never re-asks. The real engine (P6) MUST pass a monotonic

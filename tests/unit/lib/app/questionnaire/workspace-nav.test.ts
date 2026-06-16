@@ -24,6 +24,7 @@ function makeFlags(over: Partial<QuestionnaireWorkspaceFlags> = {}): Questionnai
     designEval: true,
     liveSessions: true,
     adaptive: true,
+    adaptiveDataSlots: true,
     ...over,
   };
 }

@@ -1,14 +1,20 @@
 /**
  * Prompt catalog — the single source of truth for the admin "Prompt Library".
  *
- * WHY THIS EXISTS. Every questionnaire agent is dispatched *programmatically*: the
+ * WHY THIS EXISTS. Most questionnaire agents are dispatched *programmatically*: the
  * load-bearing system prompt is assembled in a TypeScript builder (e.g.
  * `buildAnswerExtractionPrompt`), NOT read from the agent's editable
  * `AiAgent.systemInstructions` field (which is descriptive only — see each agent
  * seed's header comment). That makes the real prompts invisible to an operator
  * reading the admin agent form. This catalog closes that gap: it invokes each real
- * builder with a fixed, representative SAMPLE context and returns the exact messages
- * we would send the model, so an admin can read the prompts we actually use.
+ * builder with PLACEHOLDER inputs (`{{ … }}` tokens, filled at run time with the real
+ * questionnaire + transcript) and returns the exact messages we would send the model,
+ * so an admin can read the prompt *shape* we actually use.
+ *
+ * The **Question Selector** is the exception: it runs through `streamChat`, so its
+ * SYSTEM prompt *is* the editable `systemInstructions` field (load-bearing — editing
+ * it changes selection), and only its per-turn USER message is code-built here. Its
+ * `instructionsAreLoadBearing` is therefore `true`.
  *
  * Pure + server-only: it imports the real builders (some of which pull server deps)
  * and is consumed only by the `prompts` route, which layers on each agent's DB row
@@ -97,9 +103,11 @@ export interface PromptAgentCatalogEntry {
   /** Source module the load-bearing prompt is authored in (for "read the code"). */
   builderModule: string;
   /**
-   * Whether the agent's editable `systemInstructions` field drives the prompt. False
-   * for every questionnaire agent — the prompt is assembled in code. Surfaced so the
-   * admin understands the stored field is descriptive, not load-bearing.
+   * Whether the agent's editable `systemInstructions` field drives the prompt.
+   * `false` for the capability-dispatched agents (their whole prompt is assembled in
+   * code, so the stored field is descriptive only). `true` for the `streamChat`-
+   * dispatched Question Selector, whose system prompt *is* that field — editing it
+   * changes behaviour. Surfaced so the admin knows which agents they can tune by hand.
    */
   instructionsAreLoadBearing: boolean;
   specimens: PromptSpecimen[];
@@ -163,45 +171,51 @@ function specimen(opts: {
 }
 
 // ---------------------------------------------------------------------------
-// Shared sample fixtures — small, realistic, gender-neutral
+// Shared sample fixtures.
+//
+// These are deliberately PLACEHOLDERS, not realistic example content: the values
+// you see (`{{ questionnaire goal }}`, `{{ question 1 }}`, …) are template tokens
+// that, at run time, are filled with YOUR questionnaire's goal, questions, and the
+// live respondent transcript. The library renders these so an admin can read the
+// prompt *structure* — the tokens make clear it is a shape, not real data.
 // ---------------------------------------------------------------------------
 
 const SAMPLE_AUDIENCE = {
-  role: 'Recent customer',
+  role: '{{ target audience }}',
   expertiseLevel: 'intermediate' as const,
   locale: 'en-GB',
   sensitivity: 'low' as const,
 };
 
 const SAMPLE_VERSION_STRUCTURE: VersionStructureInput = {
-  goal: 'Understand how new customers experience onboarding and where they get stuck.',
+  goal: '{{ questionnaire goal }}',
   audience: SAMPLE_AUDIENCE,
   sections: [
     {
-      title: 'Getting started',
-      description: 'The first run experience.',
+      title: '{{ section 1 title }}',
+      description: '{{ section 1 description }}',
       questions: [
         {
-          key: 'setup_ease',
-          prompt: 'How easy was it to set up the product?',
+          key: 'q1',
+          prompt: '{{ question 1 }}',
           type: 'likert',
           required: true,
-          guidelines: 'A 1–5 scale where 5 is effortless.',
+          guidelines: '{{ what a good answer looks like }}',
         },
         {
-          key: 'setup_blockers',
-          prompt: 'What, if anything, got in the way during setup?',
+          key: 'q2',
+          prompt: '{{ question 2 }}',
           type: 'free_text',
           required: false,
         },
       ],
     },
     {
-      title: 'Support',
+      title: '{{ section 2 title }}',
       questions: [
         {
-          key: 'needed_help',
-          prompt: 'Did you need to contact support to get going?',
+          key: 'q3',
+          prompt: '{{ question 3 }}',
           type: 'boolean',
           required: false,
         },
@@ -211,11 +225,11 @@ const SAMPLE_VERSION_STRUCTURE: VersionStructureInput = {
 };
 
 const SAMPLE_DATA_SLOT_STRUCTURE = {
-  goal: 'Understand how new customers experience onboarding.',
+  goal: '{{ questionnaire goal }}',
   questions: [
-    { key: 'setup_ease', prompt: 'How easy was it to set up the product?', type: 'likert' },
-    { key: 'setup_blockers', prompt: 'What got in the way during setup?', type: 'free_text' },
-    { key: 'needed_help', prompt: 'Did you need to contact support?', type: 'boolean' },
+    { key: 'q1', prompt: '{{ question 1 }}', type: 'likert' },
+    { key: 'q2', prompt: '{{ question 2 }}', type: 'free_text' },
+    { key: 'q3', prompt: '{{ question 3 }}', type: 'boolean' },
   ],
 };
 
@@ -241,11 +255,11 @@ const STRUCTURE_EXTRACTOR: PromptAgentCatalogEntry = {
         norm(
           buildExtractionPrompt({
             documentText:
-              'Customer Onboarding Survey\n\n1. How easy was setup? (Very hard … Very easy)\n2. What got in the way?\n3. Did you contact support? (Yes/No)',
-            fileName: 'onboarding-survey.pdf',
+              '{{ text extracted from the uploaded document — its questions, sections, and instructions }}',
+            fileName: '{{ uploaded-file.pdf }}',
             mediaType: 'application/pdf',
             adminSupplied: {
-              goal: 'Understand onboarding friction for new customers',
+              goal: '{{ admin-supplied goal, if any }}',
               audience: SAMPLE_AUDIENCE,
             },
           })
@@ -272,8 +286,8 @@ const COMPOSER: PromptAgentCatalogEntry = {
       build: () =>
         norm(
           buildComposeFullPrompt(
-            'A short questionnaire for new customers about their onboarding experience: how easy setup was, what blocked them, and whether they needed support.',
-            { goal: 'Understand onboarding friction', audience: SAMPLE_AUDIENCE }
+            '{{ the admin plain-English brief describing the questionnaire to build }}',
+            { goal: '{{ admin-supplied goal, if any }}', audience: SAMPLE_AUDIENCE }
           )
         ),
     }),
@@ -287,21 +301,25 @@ const COMPOSER: PromptAgentCatalogEntry = {
           buildRefineStructurePrompt(
             {
               sections: [
-                { ordinal: 0, title: 'Getting started', description: 'First run experience.' },
+                {
+                  ordinal: 0,
+                  title: '{{ section 1 title }}',
+                  description: '{{ section 1 description }}',
+                },
               ],
               questions: [
                 {
                   sectionOrdinal: 0,
-                  key: 'setup_ease',
-                  prompt: 'How easy was it to set up the product?',
+                  key: 'q1',
+                  prompt: '{{ question 1 }}',
                   suggestedType: 'likert',
                   extractionConfidence: 0.9,
                 },
               ],
-              inferredGoal: 'Understand onboarding friction',
+              inferredGoal: '{{ questionnaire goal }}',
               inferredAudience: SAMPLE_AUDIENCE,
             },
-            'Add a short section about pricing clarity.'
+            '{{ the admin refinement instruction, e.g. add a section on pricing }}'
           )
         ),
     }),
@@ -333,13 +351,13 @@ const DATA_SLOT_GENERATOR: PromptAgentCatalogEntry = {
           buildDataSlotRefinementPrompt(
             SAMPLE_DATA_SLOT_STRUCTURE,
             {
-              name: 'Setup friction',
-              description: 'What made the initial setup hard or smooth.',
-              theme: 'Onboarding',
-              questionKeys: ['setup_ease', 'setup_blockers'],
+              name: '{{ data slot name }}',
+              description: '{{ what this slot captures }}',
+              theme: '{{ theme }}',
+              questionKeys: ['q1', 'q2'],
             },
-            'Focus on the emotional experience, not just speed.',
-            [{ name: 'Support need', theme: 'Onboarding' }]
+            '{{ the admin instruction for refining this slot }}',
+            [{ name: '{{ another slot name }}', theme: '{{ theme }}' }]
           )
         ),
     }),
@@ -353,14 +371,14 @@ const DATA_SLOT_GENERATOR: PromptAgentCatalogEntry = {
             SAMPLE_DATA_SLOT_STRUCTURE,
             [
               {
-                key: 'slot_setup',
-                name: 'Setup friction',
-                theme: 'Onboarding',
-                description: 'What made setup hard or smooth.',
-                questionKeys: ['setup_ease', 'setup_blockers'],
+                key: 'slot_1',
+                name: '{{ data slot name }}',
+                theme: '{{ theme }}',
+                description: '{{ what this slot captures }}',
+                questionKeys: ['q1', 'q2'],
               },
             ],
-            ['needed_help']
+            ['q3']
           )
         ),
     }),
@@ -376,28 +394,40 @@ const SELECTOR: PromptAgentCatalogEntry = {
   name: 'Question Selector',
   stage: 'live',
   summary:
-    'Adaptive strategy only: picks which of the similarity-ranked candidate questions flows most naturally next. Sends a single plain-text prompt.',
+    'Adaptive strategy only: picks which of the similarity-ranked candidate questions flows most naturally next. Its system prompt is the editable instructions; this per-turn user message carries the goal, transcript, answered set, and candidates.',
   dispatch: 'Per turn when the version uses the adaptive selection strategy.',
   builderModule: 'app/api/v1/app/questionnaires/_lib/adaptive-deps.ts',
-  instructionsAreLoadBearing: false,
+  instructionsAreLoadBearing: true,
   specimens: [
     specimen({
       id: 'select.pick',
       label: 'Adaptive next-question pick',
       description:
-        'A single plain-text prompt asking the model to choose the most natural next question.',
+        "The per-turn user message: the goal, recent transcript, already-answered questions, and the candidate list (each with its guidelines/rationale). The agent's editable system instructions ride above this.",
       build: () => [
         {
           role: 'user',
           content: buildSelectorPrompt({
+            goal: '{{ questionnaire goal }}',
             recentMessages: [
-              'The setup itself was fine, but the docs were confusing.',
-              'I almost gave up on the API keys step.',
+              '{{ an earlier message in the conversation }}',
+              '{{ the respondent most recent message }}',
             ],
+            answeredQuestions: ['{{ a question already answered }}'],
             candidates: [
-              { id: 'q1', key: 'setup_blockers', prompt: 'What got in the way during setup?' },
-              { id: 'q2', key: 'needed_help', prompt: 'Did you need to contact support?' },
-              { id: 'q3', key: 'setup_ease', prompt: 'How easy was setup overall?' },
+              {
+                id: 'q1',
+                key: 'q1',
+                prompt: '{{ candidate question 1 }}',
+                guidelines: '{{ what a good answer looks like }}',
+              },
+              { id: 'q2', key: 'q2', prompt: '{{ candidate question 2 }}' },
+              {
+                id: 'q3',
+                key: 'q3',
+                prompt: '{{ candidate question 3 }}',
+                rationale: '{{ why this question matters }}',
+              },
             ],
             sessionId: 'sample-session',
           }),
@@ -438,11 +468,11 @@ const ANSWER_EXTRACTOR: PromptAgentCatalogEntry = {
             activeQuestionKey: null,
             dataSlotCandidates: [
               {
-                key: 'setup_friction',
-                name: 'Setup friction',
-                description: 'What made setup hard or smooth.',
-                theme: 'Onboarding',
-                mappedQuestionKeys: ['setup_ease', 'setup_blockers'],
+                key: 'slot_1',
+                name: '{{ data slot name }}',
+                description: '{{ what this slot captures }}',
+                theme: '{{ theme }}',
+                mappedQuestionKeys: ['q1', 'q2'],
               },
             ],
           })
@@ -464,9 +494,9 @@ const ANSWER_EXTRACTOR: PromptAgentCatalogEntry = {
       conditions: ['Seriousness gate on'],
       build: () => {
         const { system, user } = buildSeriousnessJudgePrompt({
-          questionPrompt: 'What got in the way during setup?',
-          userMessage: 'asdfasdf lol',
-          recentMessages: ['Setup was fine I guess.'],
+          questionPrompt: '{{ the question the respondent was asked }}',
+          userMessage: '{{ the respondent answer to judge for genuineness }}',
+          recentMessages: ['{{ an earlier message }}'],
           sessionId: 'sample-session',
         });
         return [
@@ -481,26 +511,26 @@ const ANSWER_EXTRACTOR: PromptAgentCatalogEntry = {
 /** Shared answer-extraction context (question mode). */
 function answerCtx() {
   return {
-    activeQuestionKey: 'setup_blockers',
+    activeQuestionKey: 'q2',
     candidateSlots: [
       {
-        key: 'setup_blockers',
+        key: 'q2',
         type: 'free_text' as const,
         typeConfig: null,
-        prompt: 'What, if anything, got in the way during setup?',
+        prompt: '{{ the active (free-text) question }}',
         required: false,
       },
       {
-        key: 'setup_ease',
+        key: 'q1',
         type: 'likert' as const,
         typeConfig: { min: 1, max: 5 },
-        prompt: 'How easy was it to set up the product?',
+        prompt: '{{ another (likert) question }}',
         required: true,
       },
     ],
-    answered: [{ slotKey: 'setup_ease', confidence: 0.8 }],
-    userMessage: 'The docs were confusing — the API keys step nearly made me give up.',
-    recentMessages: ['Setup itself was quick.'],
+    answered: [{ slotKey: 'q1', confidence: 0.8 }],
+    userMessage: '{{ the respondent message to extract answers from }}',
+    recentMessages: ['{{ an earlier message }}'],
     sessionId: 'sample-session',
   };
 }
@@ -524,23 +554,23 @@ const CONTRADICTION_DETECTOR: PromptAgentCatalogEntry = {
           buildContradictionDetectionPrompt({
             slots: [
               {
-                key: 'setup_ease',
+                key: 'q1',
                 type: 'likert',
                 typeConfig: { min: 1, max: 5 },
-                prompt: 'How easy was it to set up the product?',
+                prompt: '{{ a likert question }}',
                 required: true,
               },
               {
-                key: 'needed_help',
+                key: 'q3',
                 type: 'boolean',
                 typeConfig: null,
-                prompt: 'Did you need to contact support?',
+                prompt: '{{ a yes/no question }}',
                 required: false,
               },
             ],
             answers: [
-              { slotKey: 'setup_ease', value: 5, confidence: 0.9, provenance: 'direct' },
-              { slotKey: 'needed_help', value: true, confidence: 0.85, provenance: 'direct' },
+              { slotKey: 'q1', value: 5, confidence: 0.9, provenance: 'direct' },
+              { slotKey: 'q3', value: true, confidence: 0.85, provenance: 'direct' },
             ],
             mode: 'probe',
             windowN: 0,
@@ -571,23 +601,21 @@ const ANSWER_REFINER: PromptAgentCatalogEntry = {
           buildRefinementPrompt({
             slots: [
               {
-                key: 'setup_ease',
+                key: 'q1',
                 type: 'likert',
                 typeConfig: { min: 1, max: 5 },
-                prompt: 'How easy was it to set up the product?',
+                prompt: '{{ a likert question }}',
                 required: true,
               },
             ],
-            existingAnswers: [
-              { slotKey: 'setup_ease', value: 5, provenance: 'direct', confidence: 0.9 },
-            ],
-            userMessage: 'Actually it was pretty rough — I’d say a 2, not a 5.',
+            existingAnswers: [{ slotKey: 'q1', value: 5, provenance: 'direct', confidence: 0.9 }],
+            userMessage: '{{ the respondent clarifying message }}',
             triggeringContradiction: {
-              slotKeys: ['setup_ease'],
-              explanation: 'Rated setup 5/5 but described nearly giving up.',
-              suggestedProbe: 'Would you still rate setup that highly?',
+              slotKeys: ['q1'],
+              explanation: '{{ why the captured answer may now be wrong }}',
+              suggestedProbe: '{{ a follow-up question to reconcile the conflict }}',
             },
-            recentMessages: ['The API keys step nearly made me quit.'],
+            recentMessages: ['{{ an earlier message }}'],
             sessionId: 'sample-session',
           })
         ),
@@ -613,10 +641,10 @@ const INTERVIEWER: PromptAgentCatalogEntry = {
       build: () =>
         norm(
           buildStreamingQuestionPrompt({
-            prompt: 'How easy was it to set up the product?',
+            prompt: '{{ the question to ask, in raw form }}',
             type: 'likert',
             typeConfig: { min: 1, max: 5 },
-            goal: 'Understand onboarding friction',
+            goal: '{{ questionnaire goal }}',
             audience: SAMPLE_AUDIENCE,
             recentMessages: [],
             lastUserMessage: '',
@@ -635,12 +663,16 @@ const INTERVIEWER: PromptAgentCatalogEntry = {
       build: () =>
         norm(
           buildStreamingQuestionPrompt({
-            prompt: 'What got in the way during setup?',
+            prompt: '{{ the next question to ask, in raw form }}',
             type: 'free_text',
-            goal: 'Understand onboarding friction',
+            goal: '{{ questionnaire goal }}',
             audience: SAMPLE_AUDIENCE,
-            recentMessages: ['Setup was a bit of a struggle, honestly.'],
-            lastUserMessage: 'Setup was a bit of a struggle, honestly.',
+            recentMessages: ['{{ the respondent last message }}'],
+            lastUserMessage: '{{ the respondent last message }}',
+            priorAnswers: [
+              '{{ data slot 1 name }}: {{ what they shared about it }}',
+              '{{ data slot 2 name }}: {{ what they shared about it }}',
+            ],
             isReask: false,
             isOpening: false,
             questionsAsked: 2,
@@ -688,11 +720,11 @@ function completionInput() {
     answeredCount: 6,
     capReached: false,
     coveredSlots: [
-      { key: 'setup_ease', prompt: 'How easy was it to set up the product?' },
-      { key: 'setup_blockers', prompt: 'What got in the way during setup?' },
+      { key: 'q1', prompt: '{{ an answered question }}' },
+      { key: 'q2', prompt: '{{ another answered question }}' },
     ],
-    remainingSlots: [{ key: 'needed_help', prompt: 'Did you need to contact support?' }],
-    recentMessages: ['Thanks, that covers most of it.', 'The docs were the main pain point.'],
+    remainingSlots: [{ key: 'q3', prompt: '{{ an optional remaining question }}' }],
+    recentMessages: ['{{ a recent respondent message }}', '{{ another recent message }}'],
   };
 }
 

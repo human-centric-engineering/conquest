@@ -18,6 +18,8 @@ import { Button } from '@/components/ui/button';
 import {
   getQuestionnaireDetailCached,
   getVersionDataSlotCountCached,
+  getVersionDataSlotEmbeddingCoverageCached,
+  getVersionEmbeddingCoverageCached,
   getVersionGraphCached,
   resolveQuestionnaireWorkspaceFlags,
 } from '@/lib/app/questionnaire/workspace-data';
@@ -51,6 +53,27 @@ export default async function OverviewTab({ params }: PageProps) {
   const base = workspaceVersionBase(id, vid);
   const isDraft = selected.status === 'draft';
   const isLaunched = selected.status === 'launched';
+
+  // Adaptive launch gate: an adaptive version must have its question slots embedded before launch
+  // (the live turn loop embeds lazily as a backstop, so this gates launch only — never preview).
+  // Only fetch coverage when it's actually an adaptive draft.
+  const adaptiveStrategy = flags.adaptive && graph?.config.selectionStrategy === 'adaptive';
+  const embeddingCoverage =
+    adaptiveStrategy && isDraft ? await getVersionEmbeddingCoverageCached(id, vid) : null;
+  const embeddingsReady =
+    embeddingCoverage !== null && embeddingCoverage.total > 0 && embeddingCoverage.missing === 0;
+
+  // Adaptive data-slot launch gate: required when the feature is on AND the version has data slots
+  // (the live loop embeds lazily as a backstop, so this gates launch only — never preview).
+  const dataSlotEmbeddingsRequired = flags.adaptiveDataSlots && dataSlotCount > 0;
+  const dataSlotEmbeddingCoverage =
+    dataSlotEmbeddingsRequired && isDraft
+      ? await getVersionDataSlotEmbeddingCoverageCached(id, vid)
+      : null;
+  const dataSlotEmbeddingsReady =
+    dataSlotEmbeddingCoverage !== null &&
+    dataSlotEmbeddingCoverage.total > 0 &&
+    dataSlotEmbeddingCoverage.missing === 0;
 
   // Preview is available for a launched version OR a launchable draft (passes the same readiness
   // gate as launch — so an admin can rehearse before going live), and only when the live-sessions
@@ -123,6 +146,10 @@ export default async function OverviewTab({ params }: PageProps) {
               configSaved={graph.config.saved}
               dataSlotsRequired={flags.dataSlots}
               dataSlotsReady={dataSlotCount > 0}
+              embeddingsRequired={adaptiveStrategy}
+              embeddingsReady={embeddingsReady}
+              dataSlotEmbeddingsRequired={dataSlotEmbeddingsRequired}
+              dataSlotEmbeddingsReady={dataSlotEmbeddingsReady}
             />
           </div>
         ) : isLaunched ? (

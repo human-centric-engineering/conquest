@@ -459,14 +459,31 @@ export async function runDataSlotTurn(
     targetedQuestionId = next.id;
     selectionRationale = 'Bringing in a required detail we still need to capture.';
   } else if (unfilled.length > 0) {
-    // Target the next data slot, topic-local (linger in the current theme) — but when we just
-    // parked a slot, bridge to a DIFFERENT theme so the move-on reads as forward progress.
-    const next = pickNextDataSlot(unfilled, state.activeDataSlotKey, dataSlots, parkedTheme);
+    // Target the next data slot. By default topic-local (linger in the current theme) via the
+    // deterministic pick; when we just parked a slot, bridge to a DIFFERENT theme so the move-on
+    // reads as forward progress. When adaptive data-slot selection is wired (50+-slot scale), let
+    // the embedding-ranked LLM selector choose the slot that flows most naturally from what was
+    // just said instead — fail-soft to the deterministic pick (off-pool / null → deterministic).
     const activeTheme = state.activeDataSlotKey
-      ? dataSlots.find((s) => s.key === state.activeDataSlotKey)?.theme
-      : undefined;
+      ? (dataSlots.find((s) => s.key === state.activeDataSlotKey)?.theme ?? null)
+      : null;
+    const adaptivePick = invokers.selectDataSlot
+      ? await invokers.selectDataSlot(state, unfilled, {
+          activeTheme,
+          parkedTheme: parkedTheme ?? null,
+        })
+      : null;
+    let next: DataSlotTarget;
+    if (adaptivePick) {
+      const chosen = unfilled.find((s) => s.key === adaptivePick.dataSlotKey);
+      // Trust only an in-pool pick; an off-pool key falls back to the deterministic order.
+      next = chosen ?? pickNextDataSlot(unfilled, state.activeDataSlotKey, dataSlots, parkedTheme);
+      costUsd += adaptivePick.costUsd;
+    } else {
+      next = pickNextDataSlot(unfilled, state.activeDataSlotKey, dataSlots, parkedTheme);
+    }
     const isReask = next.key === state.activeDataSlotKey;
-    const isTransition = activeTheme !== undefined && activeTheme !== next.theme;
+    const isTransition = activeTheme !== null && activeTheme !== next.theme;
     toolCalls.push(toolCall(DATA_SLOT_SELECTION_TOOL_SLUG, true));
     response = {
       kind: 'data_slot',

@@ -14,6 +14,7 @@ import {
   APP_QUESTIONNAIRES_ATTACHMENT_INPUT_FLAG,
   APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG,
   APP_QUESTIONNAIRES_DATA_SLOTS_FLAG,
+  APP_QUESTIONNAIRES_ADAPTIVE_DATA_SLOTS_FLAG,
   APP_QUESTIONNAIRES_SERIOUSNESS_GATE_FLAG,
   APP_QUESTIONNAIRES_SENSITIVITY_AWARENESS_FLAG,
   APP_QUESTIONNAIRES_FRICTIONLESS_INVITES_FLAG,
@@ -42,6 +43,7 @@ export {
   APP_QUESTIONNAIRES_ATTACHMENT_INPUT_FLAG,
   APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG,
   APP_QUESTIONNAIRES_DATA_SLOTS_FLAG,
+  APP_QUESTIONNAIRES_ADAPTIVE_DATA_SLOTS_FLAG,
   APP_QUESTIONNAIRES_SERIOUSNESS_GATE_FLAG,
   APP_QUESTIONNAIRES_SENSITIVITY_AWARENESS_FLAG,
   APP_QUESTIONNAIRES_GENERATIVE_AUTHORING_FLAG,
@@ -423,6 +425,29 @@ export async function isDataSlotsEnabled(): Promise<boolean> {
     isFeatureEnabled(APP_QUESTIONNAIRES_DATA_SLOTS_FLAG),
   ]);
   return app && dataSlots;
+}
+
+/**
+ * Whether **adaptive data-slot selection** may run — the embedding-ranked LLM selector that picks
+ * the next data slot in data-slot mode (instead of the deterministic topic-local order). Requires
+ * the master app flag, the **data-slots** flag, the **live-sessions** flag, AND the adaptive
+ * data-slot sub-flag. Depends on data-slots (it only refines data-slot targeting) and live-sessions
+ * (it only matters inside the respondent turn loop); it's an independent paid opt-in on top
+ * (embedding + an LLM selector call per targeted turn). When `false`, the data-slot turn loop keeps
+ * the deterministic `pickNextDataSlot`. The live turn route consults this to decide whether to wire
+ * the selector deps + lazily embed; the launch gate uses it to decide whether to require data-slot
+ * embeddings before launch.
+ *
+ * Server-only (resolves the flags from the database).
+ */
+export async function isAdaptiveDataSlotSelectionEnabled(): Promise<boolean> {
+  const [app, dataSlots, live, adaptive] = await Promise.all([
+    isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_DATA_SLOTS_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_ADAPTIVE_DATA_SLOTS_FLAG),
+  ]);
+  return app && dataSlots && live && adaptive;
 }
 
 /**

@@ -96,12 +96,30 @@ async function select(ctx: SelectionContext, deps?: StrategyDeps): Promise<Selec
     const candidates = rankedIds
       .map((id) => byId.get(id))
       .filter((q): q is QuestionView => q !== undefined)
-      .map((q) => ({ id: q.id, key: q.key, prompt: q.prompt }));
+      .map((q) => ({
+        id: q.id,
+        key: q.key,
+        prompt: q.prompt,
+        guidelines: q.guidelines,
+        rationale: q.rationale,
+      }));
+
+    // Prompts of questions already answered (deterministic order) — so the selector
+    // sees what's covered and doesn't pick a question that re-treads it.
+    const answeredIds = new Set(ctx.answered.map((a) => a.questionId));
+    const answeredQuestions = ctx.questions
+      .filter((q) => answeredIds.has(q.id))
+      .slice()
+      .sort((a, b) => a.sectionOrdinal - b.sectionOrdinal || a.ordinal - b.ordinal)
+      .map((q) => q.prompt)
+      .filter((p): p is string => typeof p === 'string' && p.length > 0);
 
     const pick = await deps.llmPick({
       recentMessages: ctx.recentMessages ?? [],
       candidates,
       sessionId: ctx.sessionId,
+      ...(ctx.goal ? { goal: ctx.goal } : {}),
+      ...(answeredQuestions.length > 0 ? { answeredQuestions } : {}),
     });
 
     // Null pick, or a pick that isn't a live candidate, → weighted (don't trust

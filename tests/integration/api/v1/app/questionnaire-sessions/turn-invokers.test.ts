@@ -111,6 +111,7 @@ function state(over: Partial<TurnState> = {}): TurnState {
       reasoningStreamEnabled: true,
       reasoningStreamPlacement: 'overlay',
       reasoningStreamPersist: true,
+      previewInspectorEnabled: false,
       tone: DEFAULT_TONE_SETTINGS,
     },
     questions: [

@@ -99,6 +99,65 @@ describe('launchReadinessChecks', () => {
     });
     expect(ready.find((c) => c.key === 'dataSlots')?.ok).toBe(true);
   });
+
+  it('adds the embeddings check only when required, reflecting readiness', () => {
+    // Absent by default (a non-adaptive version never needs embeddings).
+    expect(launchReadinessChecks(READY).some((c) => c.key === 'embeddings')).toBe(false);
+
+    const notReady = launchReadinessChecks({
+      ...READY,
+      embeddingsRequired: true,
+      embeddingsReady: false,
+    });
+    expect(notReady.find((c) => c.key === 'embeddings')?.ok).toBe(false);
+
+    const ready = launchReadinessChecks({
+      ...READY,
+      embeddingsRequired: true,
+      embeddingsReady: true,
+    });
+    expect(ready.find((c) => c.key === 'embeddings')?.ok).toBe(true);
+  });
+
+  it('adds the data-slot embeddings check only when required, reflecting readiness', () => {
+    expect(launchReadinessChecks(READY).some((c) => c.key === 'dataSlotEmbeddings')).toBe(false);
+
+    const notReady = launchReadinessChecks({
+      ...READY,
+      dataSlotEmbeddingsRequired: true,
+      dataSlotEmbeddingsReady: false,
+    });
+    expect(notReady.find((c) => c.key === 'dataSlotEmbeddings')?.ok).toBe(false);
+
+    const ready = launchReadinessChecks({
+      ...READY,
+      dataSlotEmbeddingsRequired: true,
+      dataSlotEmbeddingsReady: true,
+    });
+    expect(ready.find((c) => c.key === 'dataSlotEmbeddings')?.ok).toBe(true);
+  });
+
+  it('orders the checks: config, embeddings, data slots, data-slot embeddings', () => {
+    const checks = launchReadinessChecks({
+      ...READY,
+      embeddingsRequired: true,
+      embeddingsReady: true,
+      dataSlotsRequired: true,
+      dataSlotsReady: true,
+      dataSlotEmbeddingsRequired: true,
+      dataSlotEmbeddingsReady: true,
+    });
+    expect(checks.map((c) => c.key)).toEqual([
+      'goal',
+      'audience',
+      'sections',
+      'questions',
+      'config',
+      'embeddings',
+      'dataSlots',
+      'dataSlotEmbeddings',
+    ]);
+  });
 });
 
 describe('isLaunchReady', () => {
@@ -107,6 +166,11 @@ describe('isLaunchReady', () => {
     expect(isLaunchReady({ ...READY, audience: {} })).toBe(false);
     expect(isLaunchReady({ ...READY, dataSlotsRequired: true, dataSlotsReady: false })).toBe(false);
     expect(isLaunchReady({ ...READY, dataSlotsRequired: true, dataSlotsReady: true })).toBe(true);
+    // Embeddings gate launch for an adaptive version, but only when required.
+    expect(isLaunchReady({ ...READY, embeddingsRequired: true, embeddingsReady: false })).toBe(
+      false
+    );
+    expect(isLaunchReady({ ...READY, embeddingsRequired: true, embeddingsReady: true })).toBe(true);
   });
 });
 

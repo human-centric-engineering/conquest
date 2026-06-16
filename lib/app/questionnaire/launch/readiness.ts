@@ -24,6 +24,24 @@ export interface LaunchReadinessInput {
   dataSlotsRequired: boolean;
   /** True when the version has ≥1 saved data slot (only checked when required). */
   dataSlotsReady: boolean;
+  /**
+   * When the version uses the `adaptive` strategy (and the adaptive sub-flag is on), launch
+   * requires the question slots to be embedded — adaptive ranks candidates by vector similarity,
+   * so an un-embedded version would silently fall back to `weighted`. Optional/defaults off: only
+   * the *launch* gate sets this. The preview gate leaves it off so a draft can still be rehearsed
+   * (the live turn loop embeds lazily as a backstop). See [[adaptive selection]].
+   */
+  embeddingsRequired?: boolean;
+  /** True when every question slot is embedded (only checked when required). */
+  embeddingsReady?: boolean;
+  /**
+   * When adaptive data-slot selection is on AND the version has data slots, launch requires the
+   * data slots to be embedded (the data-slot analogue of `embeddingsRequired`). Launch-only; the
+   * preview gate leaves it off (the live loop embeds lazily as a backstop). See [[data slots]].
+   */
+  dataSlotEmbeddingsRequired?: boolean;
+  /** True when every data slot is embedded (only checked when required). */
+  dataSlotEmbeddingsReady?: boolean;
 }
 
 /** Stable identifier for each check — maps to the server `missing` detail and a UI configure link. */
@@ -33,7 +51,9 @@ export type LaunchCheckKey =
   | 'sections'
   | 'questions'
   | 'config'
-  | 'dataSlots';
+  | 'embeddings'
+  | 'dataSlots'
+  | 'dataSlotEmbeddings';
 
 export interface LaunchReadinessCheck {
   key: LaunchCheckKey;
@@ -67,8 +87,26 @@ export function launchReadinessChecks(input: LaunchReadinessInput): LaunchReadin
     { key: 'sections', ok: input.sectionCount >= 1, label: 'At least one section' },
     { key: 'questions', ok: input.questionCount >= 1, label: 'At least one question' },
     { key: 'config', ok: input.configSaved, label: 'Configuration saved' },
+    ...(input.embeddingsRequired
+      ? [
+          {
+            key: 'embeddings' as const,
+            ok: input.embeddingsReady === true,
+            label: 'Questions embedded for adaptive selection',
+          },
+        ]
+      : []),
     ...(input.dataSlotsRequired
       ? [{ key: 'dataSlots' as const, ok: input.dataSlotsReady, label: 'Data slots generated' }]
+      : []),
+    ...(input.dataSlotEmbeddingsRequired
+      ? [
+          {
+            key: 'dataSlotEmbeddings' as const,
+            ok: input.dataSlotEmbeddingsReady === true,
+            label: 'Data slots embedded for adaptive selection',
+          },
+        ]
       : []),
   ];
 }

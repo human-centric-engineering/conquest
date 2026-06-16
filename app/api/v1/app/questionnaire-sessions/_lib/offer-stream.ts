@@ -21,8 +21,9 @@ import type { ChatEvent } from '@/types/orchestration';
 import { resolveAgentProviderAndModel } from '@/lib/orchestration/llm/agent-resolver';
 import { getProvider } from '@/lib/orchestration/llm/provider-manager';
 import { calculateCost, logCost } from '@/lib/orchestration/llm/cost-tracker';
-import type { LlmMessage } from '@/lib/orchestration/llm/types';
+import { getTextContent, type LlmMessage } from '@/lib/orchestration/llm/types';
 import { QUESTIONNAIRE_COMPLETION_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
+import type { RecordAgentCall } from '@/lib/app/questionnaire/inspector';
 import type { OfferComposeInput } from '@/lib/app/questionnaire/orchestrator';
 
 /** Deterministic fallback offer when phrasing is unavailable or fails (fail-soft). */
@@ -78,7 +79,10 @@ export async function* streamOfferMessage(opts: {
   input: OfferComposeInput;
   userId: string;
   sessionId: string;
+  /** Preview Turn Inspector (admin-only): records this offer-composition call's trace when supplied. */
+  recordInspectorCall?: RecordAgentCall;
 }): AsyncGenerator<ChatEvent, StreamedOffer, undefined> {
+  const startedAt = Date.now();
   const agent = await prisma.aiAgent.findUnique({
     where: { slug: QUESTIONNAIRE_COMPLETION_AGENT_SLUG },
     select: { id: true, provider: true, model: true, fallbackProviders: true },
@@ -156,6 +160,19 @@ export async function* streamOfferMessage(opts: {
         sessionId: opts.sessionId,
         error: err instanceof Error ? err.message : String(err),
       });
+    });
+  }
+
+  if (opts.recordInspectorCall) {
+    opts.recordInspectorCall({
+      label: 'Completion offer',
+      model,
+      provider: providerSlug,
+      latencyMs: Date.now() - startedAt,
+      costUsd,
+      ...(usage ? { tokensIn: usage.inputTokens, tokensOut: usage.outputTokens } : {}),
+      prompt: messages.map((m) => ({ role: m.role, content: getTextContent(m.content) })),
+      response: message,
     });
   }
 

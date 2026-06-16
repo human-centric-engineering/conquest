@@ -26,6 +26,8 @@ export function q(partial: Partial<QuestionView> & { id: string }): QuestionView
     type: partial.type ?? 'free_text',
     tagIds: partial.tagIds ?? [],
     ...(partial.prompt !== undefined ? { prompt: partial.prompt } : {}),
+    ...(partial.guidelines !== undefined ? { guidelines: partial.guidelines } : {}),
+    ...(partial.rationale !== undefined ? { rationale: partial.rationale } : {}),
   };
 }
 
@@ -37,6 +39,7 @@ export function ctx(input: {
   round?: number;
   sessionId?: string;
   recentMessages?: string[];
+  goal?: string;
 }): SelectionContext {
   return {
     questions: input.questions,
@@ -45,5 +48,6 @@ export function ctx(input: {
     round: input.round ?? 0,
     sessionId: input.sessionId ?? 'sess-1',
     ...(input.recentMessages ? { recentMessages: input.recentMessages } : {}),
+    ...(input.goal !== undefined ? { goal: input.goal } : {}),
   };
 }

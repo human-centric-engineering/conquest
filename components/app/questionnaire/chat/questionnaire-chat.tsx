@@ -45,6 +45,7 @@ import { ContradictionNotice } from '@/components/app/questionnaire/chat/contrad
 import { SeriousnessNotice } from '@/components/app/questionnaire/chat/seriousness-notice';
 import { SupportNotice } from '@/components/app/questionnaire/chat/support-notice';
 import { ReasoningTrace } from '@/components/app/questionnaire/chat/reasoning-trace';
+import { TurnInspectorDrawer } from '@/components/app/questionnaire/chat/turn-inspector-drawer';
 
 export interface QuestionnaireChatProps {
   /** The session id powering `/questionnaire-sessions/:id/messages` (used by the mic). */
@@ -308,6 +309,7 @@ export function QuestionnaireChat({
     turns,
     streaming,
     streamingReasoning,
+    inspectorTurns,
     status,
     error,
     canSend,
@@ -411,6 +413,10 @@ export function QuestionnaireChat({
 
   return (
     <div className={cn('bg-card flex h-full min-h-0 flex-col rounded-xl border', className)}>
+      {/* Preview Turn Inspector (admin only): a fixed right-edge console, mounted only once the
+          server has emitted inspector frames — which it does solely for a preview session with the
+          toggle on, so it never appears for a real respondent. */}
+      {inspectorTurns.length > 0 && <TurnInspectorDrawer turns={inspectorTurns} />}
       {/* Transcript */}
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6">
         <div className="mx-auto flex max-w-2xl flex-col gap-6">

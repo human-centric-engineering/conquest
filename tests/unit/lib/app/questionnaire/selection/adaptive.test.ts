@@ -89,6 +89,32 @@ describe('adaptive strategy — happy path', () => {
     );
   });
 
+  it('hands the LLM the goal, answered prompts, and per-candidate guidelines/rationale', async () => {
+    const dp = deps();
+    const c = ctx({
+      goal: 'Understand onboarding friction',
+      questions: [
+        q({ id: 'a', ordinal: 0, prompt: 'How did you hear about us?' }),
+        q({ id: 'b', ordinal: 1, prompt: 'What blocked you?', guidelines: 'A specific step' }),
+        q({ id: 'c', ordinal: 2, prompt: 'How easy was it?', rationale: 'Sentiment baseline' }),
+      ],
+      answered: [{ questionId: 'a', confidence: null }],
+      recentMessages: ['docs were confusing'],
+    });
+    await select(c, dp);
+
+    expect(dp.llmPick).toHaveBeenCalledWith(
+      expect.objectContaining({
+        goal: 'Understand onboarding friction',
+        answeredQuestions: ['How did you hear about us?'],
+        candidates: expect.arrayContaining([
+          expect.objectContaining({ id: 'b', guidelines: 'A specific step' }),
+          expect.objectContaining({ id: 'c', rationale: 'Sentiment baseline' }),
+        ]),
+      })
+    );
+  });
+
   it('asks the only remaining candidate directly without spending on the LLM', async () => {
     const dp = deps();
     const c = ctx({

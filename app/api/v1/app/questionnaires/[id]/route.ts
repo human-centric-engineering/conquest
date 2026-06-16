@@ -8,11 +8,13 @@
  *   feature flag is off. Read model: `_lib/detail.ts`. Edit affordances arrive in
  *   F2.1b (PR2).
  *
- * PATCH /api/v1/app/questionnaires/:id  (DEMO-ONLY, F2.5.1)
- *   Attribute the questionnaire to a demo client (or detach with `null`). The only
- *   questionnaire-level mutation today; section/question/version edits live on the
- *   version path. Audited as `questionnaire.assign_demo_client`. A real client
- *   engagement strips demo tenancy — see forking.md § "Replacing demo tenancy".
+ * PATCH /api/v1/app/questionnaires/:id
+ *   Two questionnaire-level mutations, discriminated by the body:
+ *     • `{ title }`        — rename the questionnaire (audited `questionnaire.rename`).
+ *     • `{ demoClientId }` — DEMO-ONLY (F2.5.1) demo-client attribution / detach with
+ *       `null` (audited `questionnaire.assign_demo_client`; a real client engagement
+ *       strips demo tenancy — see forking.md § "Replacing demo tenancy").
+ *   Section/question/version edits live on the version path.
  */
 
 import type { NextRequest } from 'next/server';
@@ -34,7 +36,12 @@ import {
   assignDemoClientSchema,
   type AttributedDemoClient,
 } from '@/lib/app/questionnaire/demo-clients';
+import { renameQuestionnaireSchema } from '@/lib/app/questionnaire/title';
 import { getQuestionnaireDetail } from '@/app/api/v1/app/questionnaires/_lib/detail';
+
+// The PATCH body is one of two questionnaire-level mutations, told apart by which
+// key is present: a rename (`{ title }`) or a demo-client attribution (`{ demoClientId }`).
+const patchQuestionnaireSchema = renameQuestionnaireSchema.or(assignDemoClientSchema);
 
 const handleDetail = withAdminAuth<{ id: string }>(async (request, _session, { params }) => {
   const log = await getRouteLogger(request);
@@ -52,8 +59,9 @@ const handleDetail = withAdminAuth<{ id: string }>(async (request, _session, { p
   return successResponse(detail);
 });
 
-// DEMO-ONLY (F2.5.1): attribute the questionnaire to a demo client (or detach).
-const handleAttribute = withAdminAuth<{ id: string }>(async (request, session, { params }) => {
+// Questionnaire-level mutation: rename (real capability) or demo-client attribution
+// (DEMO-ONLY, F2.5.1), discriminated by the validated body.
+const handlePatch = withAdminAuth<{ id: string }>(async (request, session, { params }) => {
   const log = await getRouteLogger(request);
   const clientIp = getClientIP(request);
   const { id } = await params;
@@ -66,7 +74,30 @@ const handleAttribute = withAdminAuth<{ id: string }>(async (request, session, {
     throw new NotFoundError('Questionnaire not found');
   }
 
-  const body = await validateRequestBody(request, assignDemoClientSchema);
+  const body = await validateRequestBody(request, patchQuestionnaireSchema);
+
+  // Rename: a plain title change. No-op (same title) skips the write + audit but
+  // still 200s so the form treats an unchanged save as success.
+  if ('title' in body) {
+    if (body.title !== before.title) {
+      await prisma.appQuestionnaire.update({
+        where: { id },
+        data: { title: body.title },
+        select: { id: true },
+      });
+      logAdminAction({
+        userId: session.user.id,
+        action: 'questionnaire.rename',
+        entityType: 'questionnaire',
+        entityId: id,
+        entityName: body.title,
+        changes: computeChanges({ title: before.title }, { title: body.title }),
+        clientIp,
+      });
+      log.info('Questionnaire renamed', { questionnaireId: id });
+    }
+    return successResponse({ id, title: body.title });
+  }
 
   // When attaching, the target client must exist. A dangling FK would be rejected
   // by the DB (P2003); pre-check for a clean 404 rather than a 500. Select the
@@ -120,4 +151,4 @@ export async function GET(
   return handleDetail(request, context);
 }
 
-export const PATCH = withQuestionnairesEnabled(handleAttribute);
+export const PATCH = withQuestionnairesEnabled(handlePatch);
