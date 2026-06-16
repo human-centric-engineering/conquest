@@ -112,6 +112,14 @@ async function loadBinding(slug: string): Promise<AgentBinding | null> {
 export async function buildTurnInvokers(opts: {
   userId: string;
   slots: CapabilitySlotView[];
+  /**
+   * Extraction candidate pre-filter: when provided, the EXTRACTOR sees this narrowed question-slot
+   * set instead of the full `slots` — cutting per-turn prompt cost at scale. Everything else
+   * (contradiction detector, refiner, active-prompt lookups) still uses the full `slots`, so their
+   * coverage is unchanged. Absent → the extractor uses the full `slots` (today's behaviour). The
+   * route assembles it via `narrowExtractionCandidates`.
+   */
+  extractionCandidateSlots?: CapabilitySlotView[];
   activeQuestionKey: string | null;
   adaptiveEnabled: boolean;
   /**
@@ -155,6 +163,7 @@ export async function buildTurnInvokers(opts: {
   const {
     userId,
     slots,
+    extractionCandidateSlots,
     activeQuestionKey,
     adaptiveEnabled,
     dataSlotAdaptiveEnabled,
@@ -200,7 +209,10 @@ export async function buildTurnInvokers(opts: {
     loadBinding(QUESTIONNAIRE_ANSWER_REFINER_AGENT_SLUG),
   ]);
 
+  // Full candidate set — used by the contradiction detector + refiner (their coverage must not shrink).
   const candidateSlots = slots.map(toCapabilitySlot);
+  // The EXTRACTOR sees the narrowed set when the route supplied one (the pre-filter), else the full set.
+  const extractionCandidates = (extractionCandidateSlots ?? slots).map(toCapabilitySlot);
 
   return {
     async extractAnswers(state): Promise<ExtractOutcome> {
@@ -218,7 +230,7 @@ export async function buildTurnInvokers(opts: {
         userMessage: state.userMessage,
         // Omit in data-slot mode — the capability treats an absent key as "open prompt".
         ...(activeQuestionKey ? { activeQuestionKey } : {}),
-        candidateSlots,
+        candidateSlots: extractionCandidates,
         answered: state.existingAnswers.map((a) => ({
           slotKey: a.slotKey,
           confidence: a.confidence ?? null,

@@ -32,6 +32,7 @@ import { createRateLimitResponse } from '@/lib/security/rate-limit';
 import {
   isAdaptiveSelectionEnabled,
   isAdaptiveDataSlotSelectionEnabled,
+  isExtractionPrefilterEnabled,
   isAnswerExtractionEnabled,
   isAnswerRefinementEnabled,
   isCompletionEnabled,
@@ -62,6 +63,7 @@ import { turnLimiter } from '@/app/api/v1/app/questionnaire-sessions/_lib/rate-l
 import { buildTurnContext } from '@/app/api/v1/app/questionnaires/_lib/turn-context';
 import { ensureVersionSlotsEmbedded } from '@/app/api/v1/app/questionnaires/_lib/slot-embeddings';
 import { ensureVersionDataSlotsEmbedded } from '@/app/api/v1/app/questionnaires/_lib/data-slot-embeddings';
+import { narrowExtractionCandidates } from '@/app/api/v1/app/questionnaire-sessions/_lib/extraction-candidates';
 import { sumSessionTurnCost } from '@/app/api/v1/app/questionnaires/_lib/turns';
 import {
   abortSession,
@@ -201,6 +203,7 @@ async function handleMessage(
       reasoningStreamFlag,
       toneFlag,
       dataSlotAdaptive,
+      extractionPrefilter,
     ] = await Promise.all([
       isAnswerExtractionEnabled(),
       isContradictionDetectionEnabled(),
@@ -215,6 +218,7 @@ async function handleMessage(
       isReasoningStreamEnabled(),
       isToneEnabled(),
       isAdaptiveDataSlotSelectionEnabled(),
+      isExtractionPrefilterEnabled(),
     ]);
 
     // Adaptive selection ranks unanswered questions by vector similarity, which needs each slot's
@@ -260,6 +264,34 @@ async function handleMessage(
       } catch (err) {
         log.warn(
           'Adaptive data-slot: embedding failed; selection falls back to deterministic this turn',
+          {
+            sessionId,
+            versionId: loaded.session.versionId,
+            error: err instanceof Error ? err.message : String(err),
+          }
+        );
+      }
+    }
+
+    // Extraction candidate pre-filter (50+-slot scale): when on, narrow the combined extractor's
+    // candidate set to the relevant + top-K similar slots, cutting per-turn prompt cost. Only useful
+    // when extraction actually runs (a kickoff forces it off). The pre-filter needs BOTH question and
+    // data-slot embeddings regardless of selection strategy — ensure them here (cheap no-op once
+    // embedded; fail-soft, since the pre-filter degrades to the full set without embeddings).
+    const prefilterActive = extractionPrefilter && extraction && !body.kickoff;
+    const activeDataSlotKey = loaded.base.activeDataSlotKey ?? null;
+    const activeTheme = activeDataSlotKey
+      ? (dataSlots.find((s) => s.key === activeDataSlotKey)?.theme ?? null)
+      : null;
+    if (prefilterActive) {
+      try {
+        await Promise.all([
+          ensureVersionSlotsEmbedded(loaded.session.versionId),
+          ...(dataSlotMode ? [ensureVersionDataSlotsEmbedded(loaded.session.versionId)] : []),
+        ]);
+      } catch (err) {
+        log.warn(
+          'Extraction pre-filter: embedding failed; will send full candidate set this turn',
           {
             sessionId,
             versionId: loaded.session.versionId,
@@ -332,9 +364,85 @@ async function handleMessage(
       (loaded.base.dataSlotAnswered ?? []).map((f) => [f.dataSlotId, f])
     );
 
+    // Build the FULL data-slot candidate set (the extractor's shape) once. Each carries its `current`
+    // fill (when any) so a correction merges/updates rather than re-derives, plus a move-on
+    // `parkPending` flag when the slot has hit the re-ask cap and still isn't confidently filled.
+    const dataSlotCandidatesFull = dataSlots.map((s) => {
+      const fill = dataSlotFillByDataSlotId.get(s.id);
+      const attempts = loaded.base.dataSlotAttempts?.[s.id] ?? 0;
+      const parkPending =
+        attempts >= loaded.base.config.maxDataSlotAttempts &&
+        (fill?.confidence ?? 0) < DATA_SLOT_FILLED_THRESHOLD;
+      return {
+        key: s.key,
+        name: s.name,
+        description: s.description,
+        theme: s.theme,
+        // Forward propagation: the question(s) this slot captures, so filling it in chat ALSO
+        // answers the underlying form questions (the schema-documented contract).
+        ...(s.mappedQuestionKeys && s.mappedQuestionKeys.length > 0
+          ? { mappedQuestionKeys: s.mappedQuestionKeys }
+          : {}),
+        ...(fill
+          ? {
+              current: {
+                value: fill.value,
+                paraphrase: fill.paraphrase ?? null,
+                confidence: fill.confidence,
+              },
+            }
+          : {}),
+        ...(parkPending ? { parkPending: true, attempts } : {}),
+      };
+    });
+
+    // Extraction pre-filter: narrow what the EXTRACTOR sees (question slots + data slots) to the
+    // relevant + top-K similar. Behaviour-preserving (safety rails keep every slot the answer could
+    // inform) and fail-soft (an un-narrowed result keeps the full set). The full `loaded.slots` still
+    // flows to the detector/refiner below — only the extractor's candidate set shrinks.
+    let extractionQuestionSlots = loaded.slots;
+    let extractionDataCandidates = dataSlotCandidatesFull;
+    if (prefilterActive) {
+      const narrowed = await narrowExtractionCandidates({
+        questionSlots: loaded.slots,
+        dataSlots: dataSlots.map((s) => ({
+          id: s.id,
+          key: s.key,
+          name: s.name,
+          description: s.description,
+          theme: s.theme,
+          ...(s.mappedQuestionKeys ? { mappedQuestionKeys: s.mappedQuestionKeys } : {}),
+          hasCurrentFill: dataSlotFillByDataSlotId.has(s.id),
+        })),
+        activeQuestionKey: loaded.activeQuestionKey,
+        activeDataSlotKey,
+        activeTheme,
+        recentMessages: loaded.base.recentMessages,
+        sessionId,
+      });
+      if (narrowed.applied) {
+        const keptQuestionKeys = new Set(narrowed.questionSlots.map((s) => s.key));
+        const keptDataKeys = new Set(narrowed.dataSlots.map((s) => s.key));
+        extractionQuestionSlots = loaded.slots.filter((s) => keptQuestionKeys.has(s.key));
+        extractionDataCandidates = dataSlotCandidatesFull.filter((c) => keptDataKeys.has(c.key));
+      }
+      log.info('Extraction pre-filter', {
+        sessionId,
+        applied: narrowed.applied,
+        reason: narrowed.reason,
+        questionsIn: narrowed.questionsIn,
+        questionsOut: narrowed.questionsOut,
+        dataSlotsIn: narrowed.dataSlotsIn,
+        dataSlotsOut: narrowed.dataSlotsOut,
+      });
+    }
+
     const invokers = await buildTurnInvokers({
       userId,
       slots: loaded.slots,
+      // Extraction pre-filter: the extractor sees the narrowed question slots (when active); the
+      // detector + refiner keep the full `slots` above so their coverage is unchanged.
+      ...(prefilterActive ? { extractionCandidateSlots: extractionQuestionSlots } : {}),
       activeQuestionKey: loaded.activeQuestionKey,
       adaptiveEnabled: adaptive,
       // Adaptive data-slot selection: wire the embedding-ranked LLM selector only in data-slot mode
@@ -348,44 +456,9 @@ async function handleMessage(
       sensitivityAware: body.kickoff ? false : sensitivityAware,
       // Answer-fit resolver: per-questionnaire mode for the focused free-form → choice/likert pass.
       answerFitMode: loaded.base.config.answerFitMode,
-      // Data Slots feature: feed the data slots so the SAME extraction call fills them too. Each
-      // carries its `current` fill (when any) so a correction merges/updates rather than re-derives.
-      ...(dataSlotMode
-        ? {
-            dataSlotCandidates: dataSlots.map((s) => {
-              const fill = dataSlotFillByDataSlotId.get(s.id);
-              // Move-on: when this slot has hit the re-ask cap and still isn't confidently filled,
-              // tell the extractor to best-effort-infer it this turn — the orchestrator then parks
-              // it (records the inference as provisional, moves on). Only the active slot can be at
-              // the cap, so at most one candidate is flagged.
-              const attempts = loaded.base.dataSlotAttempts?.[s.id] ?? 0;
-              const parkPending =
-                attempts >= loaded.base.config.maxDataSlotAttempts &&
-                (fill?.confidence ?? 0) < DATA_SLOT_FILLED_THRESHOLD;
-              return {
-                key: s.key,
-                name: s.name,
-                description: s.description,
-                theme: s.theme,
-                // Forward propagation: the question(s) this slot captures, so filling it in chat
-                // ALSO answers the underlying form questions (the schema-documented contract).
-                ...(s.mappedQuestionKeys && s.mappedQuestionKeys.length > 0
-                  ? { mappedQuestionKeys: s.mappedQuestionKeys }
-                  : {}),
-                ...(fill
-                  ? {
-                      current: {
-                        value: fill.value,
-                        paraphrase: fill.paraphrase ?? null,
-                        confidence: fill.confidence,
-                      },
-                    }
-                  : {}),
-                ...(parkPending ? { parkPending: true, attempts } : {}),
-              };
-            }),
-          }
-        : {}),
+      // Data Slots feature: feed the data slots so the SAME extraction call fills them too (narrowed
+      // by the pre-filter when active).
+      ...(dataSlotMode ? { dataSlotCandidates: extractionDataCandidates } : {}),
     });
 
     const keyToSlotId = new Map(loaded.slots.map((s) => [s.key, s.id]));

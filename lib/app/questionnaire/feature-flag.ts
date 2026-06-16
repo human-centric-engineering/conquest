@@ -15,6 +15,7 @@ import {
   APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG,
   APP_QUESTIONNAIRES_DATA_SLOTS_FLAG,
   APP_QUESTIONNAIRES_ADAPTIVE_DATA_SLOTS_FLAG,
+  APP_QUESTIONNAIRES_EXTRACTION_PREFILTER_FLAG,
   APP_QUESTIONNAIRES_SERIOUSNESS_GATE_FLAG,
   APP_QUESTIONNAIRES_SENSITIVITY_AWARENESS_FLAG,
   APP_QUESTIONNAIRES_FRICTIONLESS_INVITES_FLAG,
@@ -44,6 +45,7 @@ export {
   APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG,
   APP_QUESTIONNAIRES_DATA_SLOTS_FLAG,
   APP_QUESTIONNAIRES_ADAPTIVE_DATA_SLOTS_FLAG,
+  APP_QUESTIONNAIRES_EXTRACTION_PREFILTER_FLAG,
   APP_QUESTIONNAIRES_SERIOUSNESS_GATE_FLAG,
   APP_QUESTIONNAIRES_SENSITIVITY_AWARENESS_FLAG,
   APP_QUESTIONNAIRES_GENERATIVE_AUTHORING_FLAG,
@@ -448,6 +450,26 @@ export async function isAdaptiveDataSlotSelectionEnabled(): Promise<boolean> {
     isFeatureEnabled(APP_QUESTIONNAIRES_ADAPTIVE_DATA_SLOTS_FLAG),
   ]);
   return app && dataSlots && live && adaptive;
+}
+
+/**
+ * Whether the **extraction candidate pre-filter** may run — the embedding-ranked narrowing of the
+ * combined extractor's candidate set on the live turn loop. Requires the master app flag, the
+ * **live-sessions** flag, AND the pre-filter sub-flag. Depends on live-sessions (it only runs inside
+ * the respondent turn loop) but NOT on data-slots — it also helps question-only large questionnaires
+ * (the data-slot half simply no-ops when the version has no data slots). When `false`, the extractor
+ * receives the full candidate list (today's behaviour). The `/messages` route consults this to decide
+ * whether to narrow candidates + lazily embed.
+ *
+ * Server-only (resolves the flags from the database).
+ */
+export async function isExtractionPrefilterEnabled(): Promise<boolean> {
+  const [app, live, prefilter] = await Promise.all([
+    isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_EXTRACTION_PREFILTER_FLAG),
+  ]);
+  return app && live && prefilter;
 }
 
 /**
