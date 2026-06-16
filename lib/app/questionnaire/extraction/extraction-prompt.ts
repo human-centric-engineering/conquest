@@ -85,7 +85,11 @@ informs (directly, by inference, or by synthesising the conversation), output on
 - "dataSlotKey": a key from the provided data-slot list ONLY.
 - "value": the captured position as concrete, structured data — the SPECIFICS the respondent gave \
 (numbers, names, choices), not a label for them. For "I am 25, male" record \
-{"age": 25, "gender": "male"} (or "25, male"), NOT "age and gender provided".
+{"age": 25, "gender": "male"} (or "25, male"), NOT "age and gender provided". Use the respondent's \
+OWN words for these specifics — "Marketing", "10 years" — and NEVER the form's option code or label \
+that the same answer happens to map to ("other", "3+ years"). The "answers" array carries the mapped \
+form value; the data-slot fill carries what the respondent ACTUALLY SAID, in their terms. The panel \
+shows this to the respondent, so it must read like the conversation, not like the form.
 - "paraphrase": a restatement of the respondent's position on this slot, naming the specifics so a \
 reader sees exactly what was recorded. Always report it as THEIR ACCOUNT — what they said, or the \
 experience they describe — never as an established fact about the world. Match the wording to the \
@@ -146,7 +150,12 @@ OMIT it entirely (do not record its absence) — the panel shows "Not covered ye
 Some slots show a "current" line — what's already recorded from earlier in the conversation. When \
 the new message ADDS to or CORRECTS that (e.g. they first said "male" then "actually, female"), \
 output an UPDATED fill for that slot that MERGES the still-true details with the correction (here: \
-keep the age, change the gender), and reflect the corrected state in value + paraphrase. \
+keep the age, change the gender), and reflect the corrected state in value + paraphrase. This \
+applies EQUALLY when the new message answers a DIRECT question whose subject a slot already \
+recorded: if a slot's "current" says the respondent is in engineering and they now answer the \
+department question with "Marketing", you MUST re-emit that slot's fill with department changed to \
+"Marketing" (their word) — do not leave the slot reading the old value just because the form answer \
+was captured separately. \
 RE-SCAN EVERY slot against the new message each turn, not only the one the conversation is currently \
 about: when the new answer adds context to ANY slot that already has a "current" value — even one \
 from another theme — emit an updated fill whose value + paraphrase is a SUPERSET of the prior \

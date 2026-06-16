@@ -220,6 +220,22 @@ describe('buildAnswerExtractionPrompt — data slots', () => {
     expect(system).toMatch(/specifics/i);
   });
 
+  it('keeps the data-slot value in the respondent’s natural words, not the form slug/label', () => {
+    const messages = buildAnswerExtractionPrompt({
+      ...ctx({ candidateSlots: [slot({ key: 'q1' })], activeQuestionKey: null }),
+      dataSlotCandidates: [
+        { key: 'demographics', name: 'Employee Demographics', description: 'd', theme: 'About' },
+      ],
+    });
+    const system = systemContent(messages);
+    // The data slot records "Marketing" (their word), not the mapped form option "other".
+    expect(system).toMatch(/own words/i);
+    expect(system).toMatch(/NEVER the form's option code or label/i);
+    expect(system).toContain('Marketing');
+    // And a direct-question answer that corrects a recorded slot must update the slot too.
+    expect(system).toMatch(/answers a DIRECT question whose subject a slot already recorded/i);
+  });
+
   it('forbids absence fills and demands hedged, low-confidence inferences', () => {
     const messages = buildAnswerExtractionPrompt({
       ...ctx({ candidateSlots: [slot({ key: 'q1' })], activeQuestionKey: null }),
