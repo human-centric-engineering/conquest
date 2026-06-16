@@ -57,7 +57,9 @@ const prismaMock = vi.hoisted(() => ({
     delete: vi.fn(),
   },
   appQuestionnaireConfig: {
-    count: vi.fn(),
+    // The launch gate reads the saved config via findUnique (null = never saved) and the
+    // selectionStrategy it returns drives the adaptive-embedding requirement.
+    findUnique: vi.fn(),
   },
   // Data Slots: the launch gate counts these when the flag is on (default 1 = satisfied).
   appDataSlot: {
@@ -67,6 +69,10 @@ const prismaMock = vi.hoisted(() => ({
   appQuestionnaireInvitation: {
     count: vi.fn(),
   },
+  // Adaptive data-slot embedding coverage (raw SQL) feeds the launch gate when the
+  // adaptive-data-slot flag is on. Default to fully embedded (total=1, embedded=1 → missing=0)
+  // so it never wrongly blocks the core F3.1 readiness assertions.
+  $queryRawUnsafe: vi.fn(async () => [{ total: 1n, embedded: 1n }]),
 }));
 vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
 
@@ -278,7 +284,7 @@ describe('status PATCH', () => {
     prismaMock.appQuestionnaireVersion.findUnique.mockResolvedValue({ goal: null, audience: null });
     prismaMock.appQuestionnaireSection.count.mockResolvedValue(0);
     prismaMock.appQuestionSlot.count.mockResolvedValue(0);
-    prismaMock.appQuestionnaireConfig.count.mockResolvedValue(0);
+    prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue(null);
 
     const res = await statusPATCH(req({ status: 'launched' }), ctx(VERSION_PARAMS));
     const json = await res.json();
@@ -302,7 +308,9 @@ describe('status PATCH', () => {
     });
     prismaMock.appQuestionnaireSection.count.mockResolvedValue(1);
     prismaMock.appQuestionSlot.count.mockResolvedValue(1);
-    prismaMock.appQuestionnaireConfig.count.mockResolvedValue(1);
+    prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue({
+      selectionStrategy: 'sequential',
+    });
 
     const res = await statusPATCH(req({ status: 'launched' }), ctx(VERSION_PARAMS));
     const json = await res.json();
@@ -319,7 +327,7 @@ describe('status PATCH', () => {
     });
     prismaMock.appQuestionnaireSection.count.mockResolvedValue(1);
     prismaMock.appQuestionSlot.count.mockResolvedValue(1);
-    prismaMock.appQuestionnaireConfig.count.mockResolvedValue(0);
+    prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue(null);
 
     const res = await statusPATCH(req({ status: 'launched' }), ctx(VERSION_PARAMS));
     const json = await res.json();
@@ -337,7 +345,9 @@ describe('status PATCH', () => {
     });
     prismaMock.appQuestionnaireSection.count.mockResolvedValue(2);
     prismaMock.appQuestionSlot.count.mockResolvedValue(5);
-    prismaMock.appQuestionnaireConfig.count.mockResolvedValue(1);
+    prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue({
+      selectionStrategy: 'sequential',
+    });
     prismaMock.appQuestionnaireVersion.update.mockResolvedValue({
       id: 'v1',
       versionNumber: 1,
