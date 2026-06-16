@@ -34,6 +34,11 @@ import {
   Plug,
   Check,
   Quote,
+  Telescope,
+  LineChart,
+  MessagesSquare,
+  Gauge,
+  Network,
 } from 'lucide-react';
 import styles from '@/app/(public)/about-conquest/about-conquest.module.css';
 
@@ -253,19 +258,39 @@ const comparison = [
 
 const useCases = [
   {
-    icon: Users,
-    title: 'Employee engagement',
-    body: 'Surveys people actually finish, and answer honestly. Hear what’s really going on, not just where the slider landed.',
-  },
-  {
-    icon: FlaskConical,
-    title: 'Research',
-    body: 'Structured interviews at survey scale. Open-ended depth, with data you can still analyse.',
+    icon: Telescope,
+    title: 'Discovery',
+    body: 'Customer and user discovery that gets past the script — the needs, jobs and frustrations people never think to put on a form.',
   },
   {
     icon: Star,
     title: 'Customer feedback',
     body: 'Move past the star rating to the reason behind it, at a volume no human team could interview.',
+  },
+  {
+    icon: LineChart,
+    title: 'Market research',
+    body: 'Open-ended concept and market testing at survey scale. Not just what people prefer, but the why underneath it.',
+  },
+  {
+    icon: MessagesSquare,
+    title: 'Focus groups',
+    body: 'The depth of a focus group without the scheduling. Hundreds of one-to-one conversations at once, then see what themes emerge.',
+  },
+  {
+    icon: Gauge,
+    title: 'Team sentiment',
+    body: 'Take the temperature of a team in their own words — honest, unhurried check-ins people actually finish.',
+  },
+  {
+    icon: Network,
+    title: 'Organisational alignment',
+    body: 'Find out whether strategy, values and priorities really land. Hear where you’re aligned, and where you quietly aren’t.',
+  },
+  {
+    icon: FlaskConical,
+    title: 'Research',
+    body: 'Structured interviews at survey scale. Open-ended depth, with data you can still analyse.',
   },
   {
     icon: Compass,

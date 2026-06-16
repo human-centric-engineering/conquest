@@ -1,0 +1,608 @@
+/*
+ * Pricing: bespoke marketing page styles.
+ *
+ * Sibling to the About ConQuest page. The page wrapper reuses
+ * about-conquest.module.css (`.page`) for the shared palette, type system and
+ * layout primitives (section, eyebrow, h2, lead, buttons, split panels, feat
+ * grid, faq, finalCta). The CSS custom properties defined on `.page` cascade
+ * into every class below, so all colours here resolve to the same tokens.
+ *
+ * This module only carries the genuinely new pieces: pricing tier cards, the
+ * "included in every plan" strip, dark glass cards for the on-ink sections, and
+ * the hero "core + possibilities" art. Motion keyframes are redeclared locally
+ * because CSS-module keyframes are scoped to their own file.
+ */
+
+/* ---------- Hero art: the ConQuest core, ready to extend ---------- */
+.heroArt {
+  position: relative;
+  min-height: 360px;
+}
+.coreCard {
+  position: relative;
+  z-index: 1;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--line-ink);
+  border-radius: 24px;
+  padding: 24px;
+  backdrop-filter: blur(8px);
+  box-shadow: var(--shadow);
+  animation: floatA 7s ease-in-out infinite;
+}
+.coreBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--yellow);
+}
+.coreBadge::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--yellow);
+  box-shadow: 0 0 0 0 rgba(255, 199, 58, 0.5);
+  animation: pulse 2s infinite;
+}
+.coreTitle {
+  font-family: var(--font-display), Georgia, serif;
+  font-weight: 600;
+  font-size: 24px;
+  letter-spacing: -0.015em;
+  margin: 12px 0 4px;
+  color: #fff;
+}
+.coreSub {
+  font-size: 13.5px;
+  color: var(--t-cream-muted);
+  margin-bottom: 18px;
+}
+.coreTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.coreTag {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 13px;
+  border-radius: 999px;
+  border: 1px solid var(--line-ink);
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--t-cream);
+}
+.coreTag svg {
+  width: 14px;
+  height: 14px;
+  color: var(--yellow);
+}
+.bespokeChip {
+  position: absolute;
+  z-index: 2;
+  right: -8px;
+  bottom: -26px;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 13px 18px;
+  border-radius: 16px;
+  background: var(--yellow);
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 14px;
+  box-shadow: var(--shadow);
+  animation: floatB 8s ease-in-out infinite;
+}
+.bespokeChip svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* ---------- SaaS pricing tiers ---------- */
+.tierGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  align-items: stretch;
+}
+.tier {
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  padding: 32px 28px;
+  box-shadow: var(--shadow-sm);
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    border-color 0.2s ease;
+}
+.tier:hover {
+  transform: translateY(-5px);
+  box-shadow: var(--shadow);
+  border-color: rgba(255, 179, 0, 0.45);
+}
+.tierFeatured {
+  position: relative;
+  overflow: hidden;
+  background: var(--ink);
+  color: var(--t-cream);
+  border-color: transparent;
+  box-shadow: var(--shadow);
+}
+.tierFeatured::before {
+  content: '';
+  position: absolute;
+  width: 320px;
+  height: 320px;
+  top: -150px;
+  right: -120px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 199, 58, 0.18), transparent 70%);
+  pointer-events: none;
+}
+.tierFeatured:hover {
+  transform: translateY(-5px);
+  border-color: transparent;
+}
+.tierBadge {
+  position: absolute;
+  z-index: 1;
+  top: 22px;
+  right: 22px;
+  background: var(--yellow);
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 5px 11px;
+  border-radius: 999px;
+}
+.tierName {
+  position: relative;
+  z-index: 1;
+  font-family: var(--font-display), Georgia, serif;
+  font-weight: 600;
+  font-size: 22px;
+  letter-spacing: -0.01em;
+  color: var(--t-ink);
+}
+.tierFeatured .tierName {
+  color: #fff;
+}
+.tierTagline {
+  position: relative;
+  z-index: 1;
+  margin-top: 6px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--t-muted);
+  min-height: 40px;
+}
+.tierFeatured .tierTagline {
+  color: var(--t-cream-muted);
+}
+.tierPrice {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  margin: 22px 0 2px;
+  font-family: var(--font-display), Georgia, serif;
+}
+.tierCurrency {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--t-muted);
+}
+.tierFeatured .tierCurrency {
+  color: var(--yellow);
+}
+.tierAmount {
+  font-size: 46px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--t-ink);
+}
+.tierFeatured .tierAmount {
+  color: #fff;
+}
+.tierUnit {
+  font-family: var(--font-sans-cq), ui-sans-serif, system-ui, sans-serif;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--t-muted);
+}
+.tierFeatured .tierUnit {
+  color: var(--t-cream-muted);
+}
+.tierBilling {
+  position: relative;
+  z-index: 1;
+  font-size: 13px;
+  color: var(--t-muted);
+  margin-bottom: 4px;
+}
+.tierFeatured .tierBilling {
+  color: var(--t-cream-muted);
+}
+.tierDivide {
+  height: 1px;
+  background: var(--line);
+  margin: 22px 0;
+}
+.tierFeatured .tierDivide {
+  background: var(--line-ink);
+}
+.tierFeatLabel {
+  position: relative;
+  z-index: 1;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--t-muted);
+  margin-bottom: 14px;
+}
+.tierFeatured .tierFeatLabel {
+  color: var(--yellow);
+}
+.tierFeatures {
+  position: relative;
+  z-index: 1;
+  list-style: none;
+  margin: 0 0 28px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+  flex: 1;
+}
+.tierFeat {
+  display: flex;
+  gap: 11px;
+  align-items: flex-start;
+  font-size: 14.5px;
+  line-height: 1.45;
+  color: var(--t-ink);
+}
+.tierFeatured .tierFeat {
+  color: var(--t-cream);
+}
+.tierFeat svg {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  color: #1faa59;
+  margin-top: 1px;
+}
+.tierFeatured .tierFeat svg {
+  color: var(--yellow);
+}
+.tierFeat b {
+  font-weight: 600;
+}
+.tierCta {
+  position: relative;
+  z-index: 1;
+  margin-top: auto;
+}
+.tierBtn {
+  width: 100%;
+  justify-content: center;
+}
+
+/* ---------- Included in every plan ---------- */
+.included {
+  margin-top: clamp(36px, 5vw, 56px);
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--paper);
+  padding: clamp(26px, 4vw, 40px);
+  box-shadow: var(--shadow-sm);
+}
+.includedHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-display), Georgia, serif;
+  font-weight: 600;
+  font-size: 20px;
+  letter-spacing: -0.01em;
+  color: var(--t-ink);
+}
+.includedHead svg {
+  width: 20px;
+  height: 20px;
+  color: var(--yellow-strong);
+}
+.includedGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px 28px;
+  margin-top: 22px;
+}
+.includedItem {
+  display: flex;
+  gap: 11px;
+  align-items: flex-start;
+  font-size: 14.5px;
+  line-height: 1.45;
+  color: var(--t-muted);
+}
+.includedItem svg {
+  flex: none;
+  width: 17px;
+  height: 17px;
+  color: var(--blue);
+  margin-top: 2px;
+}
+.includedItem b {
+  color: var(--t-ink);
+  font-weight: 600;
+}
+
+.priceFoot {
+  margin-top: 26px;
+  text-align: center;
+  font-size: 13.5px;
+  color: var(--t-muted);
+}
+
+/* ---------- Dark glass cards (on ink sections) ---------- */
+.darkGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 18px;
+}
+.darkCard {
+  background: var(--ink-glass);
+  border: 1px solid var(--line-ink);
+  border-radius: var(--r);
+  padding: 28px;
+  transition:
+    transform 0.2s ease,
+    border-color 0.2s ease;
+}
+.darkCard:hover {
+  transform: translateY(-4px);
+  border-color: rgba(255, 199, 58, 0.4);
+}
+.darkIcon {
+  width: 46px;
+  height: 46px;
+  border-radius: 13px;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 199, 58, 0.15);
+  color: var(--yellow);
+  margin-bottom: 16px;
+}
+.darkIcon svg {
+  width: 22px;
+  height: 22px;
+}
+.darkTitle {
+  font-family: var(--font-display), Georgia, serif;
+  font-weight: 600;
+  font-size: 20px;
+  letter-spacing: -0.01em;
+  color: #fff;
+}
+.darkBody {
+  margin-top: 8px;
+  font-size: 14.5px;
+  line-height: 1.55;
+  color: var(--t-cream-muted);
+}
+
+/* ---------- "Choose this if" lists inside split panels ---------- */
+.chooseList {
+  list-style: none;
+  margin: 4px 0 26px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.chooseItem {
+  display: flex;
+  gap: 11px;
+  align-items: flex-start;
+  font-size: 15px;
+  line-height: 1.5;
+}
+.chooseItem svg {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+}
+.panelLight .chooseItem {
+  color: var(--t-ink);
+}
+.panelLight .chooseItem svg {
+  color: var(--blue);
+}
+.panelInk .chooseItem {
+  color: var(--t-cream);
+}
+.panelInk .chooseItem svg {
+  color: var(--yellow);
+}
+.panelLead {
+  font-size: 15.5px;
+  line-height: 1.55;
+  color: var(--t-muted);
+  margin: 0 0 22px;
+}
+.panelInk .panelLead {
+  color: var(--t-cream-muted);
+}
+
+/* ---------- Use-case clusters ---------- */
+.useClusterGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 18px;
+}
+.useCluster {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 26px;
+  box-shadow: var(--shadow-sm);
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
+}
+.useCluster:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow);
+}
+.clusterHead {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.clusterIcon {
+  flex: none;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  background: var(--ink);
+  color: var(--yellow);
+}
+.clusterIcon svg {
+  width: 21px;
+  height: 21px;
+}
+.clusterTitle {
+  font-family: var(--font-display), Georgia, serif;
+  font-weight: 600;
+  font-size: 19px;
+  letter-spacing: -0.01em;
+  color: var(--t-ink);
+}
+.useTagRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.useTag {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--cream);
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--t-ink);
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    transform 0.18s ease;
+}
+.useTag::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--yellow-strong);
+  flex: none;
+}
+.useTag:hover {
+  border-color: var(--yellow);
+  background: var(--paper);
+  transform: translateY(-1px);
+}
+
+/* ---------- Motion (local to this module) ---------- */
+@keyframes floatA {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-12px);
+  }
+}
+@keyframes floatB {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(10px);
+  }
+}
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 199, 58, 0.5);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(255, 199, 58, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 199, 58, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .coreCard,
+  .bespokeChip,
+  .coreBadge::before {
+    animation: none !important;
+  }
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 980px) {
+  .heroArt {
+    min-height: 0;
+    margin-top: 26px;
+  }
+  .bespokeChip {
+    position: static;
+    margin-top: 16px;
+    animation: none;
+  }
+  .coreCard {
+    animation: none;
+  }
+  .tierGrid {
+    grid-template-columns: 1fr;
+    max-width: 460px;
+    margin-inline: auto;
+  }
+  .includedGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .darkGrid {
+    grid-template-columns: 1fr;
+  }
+  .useClusterGrid {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 620px) {
+  .includedGrid {
+    grid-template-columns: 1fr;
+  }
+}
