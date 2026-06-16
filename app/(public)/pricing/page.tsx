@@ -460,7 +460,7 @@ export default function PricingPage() {
               className={`${shared.heroTitle} ${shared.rise}`}
               style={{ animationDelay: '0.08s' }}
             >
-              Subscribe to the&nbsp;core.
+              Subscribe to the&nbsp;platform.
               <br />
               Or <em>build your&nbsp;own.</em>
             </h1>
