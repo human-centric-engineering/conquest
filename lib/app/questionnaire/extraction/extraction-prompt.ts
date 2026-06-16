@@ -28,7 +28,19 @@ For each answer, output one entry with:
     free_text → a string; single_choice → one choice "value"; multi_choice → an array of choice \
 "value"s; likert → an integer on the given scale; numeric → a number; date → an ISO-8601 date \
 (YYYY-MM-DD); boolean → true/false.
-  For choice questions, return the choice's "value" (not its label). Do not invent options.
+  For choice questions, return the choice's "value" (the slug), NEVER its label and NEVER the \
+respondent's raw words. Do not invent options.
+  Map the respondent's MEANING onto an option or scale point — they rarely say the option verbatim:
+    • Quantities, durations and dates → the option whose RANGE contains them. "10 years" for a \
+tenure with options "< 1 year" / "1–3 years" / "3+ years" → the "3+ years" value; a date → the \
+band it falls in.
+    • likert → translate the STRENGTH of what they said into the scale: an enthusiastic reply is \
+near the top, a flat/neutral one mid-scale, a strongly negative one near the bottom. Infer this \
+from sentiment — do NOT expect, or wait for, a numeric rating.
+    • On-topic but matches no specific option → choose the catch-all option ("Other", "None of \
+these", "Prefer not to say") IF the slot offers one (e.g. "Marketing" for a department with \
+options Engineering/Sales/Operations/Other → the "Other" value). Only when no option fits at all \
+and there is no catch-all do you omit the answer.
 - "confidence": 0–1, scored in three bands by how PLAINLY this value is supported — its CLARITY, not \
 how many times they've said it. CLEAR (~0.8): stated or unmistakably implied — the DEFAULT for a \
 clearly-answered question, even a brief or blunt one. PARTIAL (~0.5): a hedged or loosely-implied \

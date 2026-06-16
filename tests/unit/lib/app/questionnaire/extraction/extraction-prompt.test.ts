@@ -31,6 +31,19 @@ describe('buildAnswerExtractionPrompt', () => {
     expect(system).not.toContain('refined');
   });
 
+  it('instructs the model to map meaning onto options/scale (buckets, likert sentiment, catch-all)', () => {
+    const messages = buildAnswerExtractionPrompt(ctx({ candidateSlots: [slot({ key: 'q1' })] }));
+    const system = typeof messages[0]?.content === 'string' ? messages[0].content : '';
+    // Returns the slug, not the label or raw words.
+    expect(system).toMatch(/the slug.*NEVER its label/i);
+    // Quantities/durations → the range bucket.
+    expect(system).toMatch(/option whose RANGE contains them/i);
+    // likert from sentiment strength, never a numeric rating prompt.
+    expect(system).toMatch(/do NOT expect, or wait for, a numeric rating/i);
+    // On-topic-but-unlisted → the catch-all option.
+    expect(system).toMatch(/catch-all option/i);
+  });
+
   it('omits the sensitivity block by default (zero added prompt when the feature is off)', () => {
     const messages = buildAnswerExtractionPrompt(ctx({ candidateSlots: [slot({ key: 'q1' })] }));
     const system = typeof messages[0]?.content === 'string' ? messages[0].content : '';
