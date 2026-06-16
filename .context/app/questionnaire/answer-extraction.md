@@ -73,6 +73,19 @@ userMessage, recentMessages?, sessionId }`, all in memory. `ExtractionSlotView`
   so a `single_choice` value must be one of _that slot's_ choices, a `likert`
   within its scale, etc. Lenient where the LLM is loose (a numeric `"34"`, a
   boolean `"yes"`), strict where correctness matters.
+- **Choice resolution is by value _or_ label.** The extractor is told to emit the
+  choice's `value`, but real model output routinely sends the human **label**
+  (`"Engineering"`) or a cased/spaced variant of the slug. `validateSingleChoice`/
+  `validateMultiChoice` resolve a candidate against each choice's `value` and `label`
+  case-insensitively (trimmed) and **normalise back to the canonical slug** — so a
+  clearly-made choice is kept, not dropped as `value invalid for type`. An exact
+  `value` match always wins a label/value collision; an off-list candidate is still
+  dropped unless the slot sets `allowOther`. This matters most in data-slot mode,
+  where demographic-style `single_choice` questions fill from side-effect extraction
+  of an open conversational answer — a label/casing mismatch there would silently
+  leave the question (and its section progress) unanswered. Note this resolves
+  _surface form_, not _semantics_: mapping `"10 years"` → the `3+ years` bucket is
+  still the model's job (it is given the options), not the validator's.
 
 ### `normalizeAnswerIntents` (the change-records analogue)
 

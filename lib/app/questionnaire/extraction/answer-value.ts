@@ -29,27 +29,55 @@ export type AnswerValueValidation = { ok: true; value: unknown } | { ok: false; 
 const ok = (value: unknown): AnswerValueValidation => ({ ok: true, value });
 const fail = (issue: string): AnswerValueValidation => ({ ok: false, issue });
 
-/** A choice config narrowed to what value-checking needs (membership + allowOther). */
+/** A choice config narrowed to what value-checking needs (resolution + allowOther). */
 interface ChoiceConfig {
-  values: Set<string>;
+  /**
+   * Normalised (lowercased, trimmed) value OR label → the choice's canonical `value`. The
+   * extractor is told to emit the choice's `value`, but real LLM output routinely sends the
+   * human label (`"Engineering"`) or a cased/spaced variant of the slug instead. Resolving
+   * against both — and normalising back to the canonical slug — keeps those answers instead of
+   * silently dropping a perfectly good choice the respondent clearly made.
+   */
+  byNormalised: Map<string, string>;
   allowOther: boolean;
 }
 
+/** Lower-case + trim so a candidate matches a choice regardless of casing / stray whitespace. */
+function normaliseChoiceKey(value: string): string {
+  return value.trim().toLowerCase();
+}
+
 /**
- * Parse a slot's stored `typeConfig` for a choice type into a membership set.
- * The config was validated at write time (F2.1), but we parse defensively: a
- * config that somehow fails to yield choices returns `null`, and the caller
- * treats membership as unconstrained rather than rejecting every answer.
+ * Parse a slot's stored `typeConfig` for a choice type into a value/label resolution map.
+ * The config was validated at write time (F2.1), but we parse defensively: a config that
+ * somehow fails to yield choices returns `null`, and the caller treats membership as
+ * unconstrained rather than rejecting every answer.
  */
 function readChoiceConfig(type: QuestionType, typeConfig: unknown): ChoiceConfig | null {
   const parsed = typeConfigSchemaFor(type).safeParse(typeConfig);
   if (!parsed.success) return null;
-  const cfg = parsed.data as { choices?: Array<{ value: string }>; allowOther?: boolean };
-  if (!Array.isArray(cfg.choices)) return null;
-  return {
-    values: new Set(cfg.choices.map((c) => c.value)),
-    allowOther: cfg.allowOther === true,
+  const cfg = parsed.data as {
+    choices?: Array<{ value: string; label?: string }>;
+    allowOther?: boolean;
   };
+  if (!Array.isArray(cfg.choices)) return null;
+  // Map labels first, then values, so an exact `value` match always wins a normalised
+  // collision between one choice's label and another's value.
+  const byNormalised = new Map<string, string>();
+  for (const c of cfg.choices) {
+    if (typeof c.label === 'string' && c.label.trim().length > 0) {
+      byNormalised.set(normaliseChoiceKey(c.label), c.value);
+    }
+  }
+  for (const c of cfg.choices) {
+    byNormalised.set(normaliseChoiceKey(c.value), c.value);
+  }
+  return { byNormalised, allowOther: cfg.allowOther === true };
+}
+
+/** Resolve a candidate to its canonical choice slug by value-or-label match; `null` if none. */
+function resolveChoice(cfg: ChoiceConfig, candidate: string): string | null {
+  return cfg.byNormalised.get(normaliseChoiceKey(candidate)) ?? null;
 }
 
 /** Read a likert scale's integer bounds from its (write-validated) config. */
@@ -91,15 +119,17 @@ function validateSingleChoice(value: unknown, typeConfig: unknown): AnswerValueV
   if (typeof value !== 'string' || value.trim().length === 0) {
     return fail('single_choice value must be a non-empty string');
   }
-  // Match (and store) the trimmed value so stray whitespace from the model
-  // doesn't fail a membership check against the slot's exact choice slugs.
+  // Trim so stray whitespace from the model doesn't fail resolution against the slot's choices.
   const candidate = value.trim();
   const cfg = readChoiceConfig('single_choice', typeConfig);
   // No readable config → accept any string (defensive; config is normally present).
-  if (cfg && !cfg.allowOther && !cfg.values.has(candidate)) {
-    return fail(`value "${candidate}" is not one of the slot's choices`);
-  }
-  return ok(candidate);
+  if (!cfg) return ok(candidate);
+  // Resolve value-or-label to the canonical slug; an off-list answer is kept only when the
+  // slot allows free "other" answers, otherwise dropped.
+  const resolved = resolveChoice(cfg, candidate);
+  if (resolved !== null) return ok(resolved);
+  if (cfg.allowOther) return ok(candidate);
+  return fail(`value "${candidate}" is not one of the slot's choices`);
 }
 
 function validateMultiChoice(value: unknown, typeConfig: unknown): AnswerValueValidation {
@@ -109,15 +139,26 @@ function validateMultiChoice(value: unknown, typeConfig: unknown): AnswerValueVa
   if (!value.every((v) => typeof v === 'string' && v.trim().length > 0)) {
     return fail('multi_choice value must be an array of non-empty strings');
   }
-  const deduped = [...new Set((value as string[]).map((v) => v.trim()))];
   const cfg = readChoiceConfig('multi_choice', typeConfig);
-  if (cfg && !cfg.allowOther) {
-    const unknownValue = deduped.find((v) => !cfg.values.has(v));
-    if (unknownValue !== undefined) {
-      return fail(`value "${unknownValue}" is not one of the slot's choices`);
+  // No readable config → accept the trimmed, de-duplicated strings as-is (defensive).
+  if (!cfg) {
+    return ok([...new Set((value as string[]).map((v) => v.trim()))]);
+  }
+  // Resolve each member value-or-label to its canonical slug; an off-list member is kept only
+  // when the slot allows free "other" answers, otherwise the whole answer is dropped.
+  const resolved: string[] = [];
+  for (const raw of value as string[]) {
+    const candidate = raw.trim();
+    const match = resolveChoice(cfg, candidate);
+    if (match !== null) {
+      resolved.push(match);
+    } else if (cfg.allowOther) {
+      resolved.push(candidate);
+    } else {
+      return fail(`value "${candidate}" is not one of the slot's choices`);
     }
   }
-  return ok(deduped);
+  return ok([...new Set(resolved)]);
 }
 
 function validateLikert(value: unknown, typeConfig: unknown): AnswerValueValidation {
