@@ -464,7 +464,7 @@ model AppDemoClient {
 model AppQuestionnaireSession {
   id               String   @id @default(cuid())
   versionId        String
-  status           String   @default("active") // SESSION_STATUSES (types.ts): active | paused | completed | abandoned
+  status           String   @default("active") // SESSION_STATUSES (types.ts): active | paused | completed | abandoned | aborted
   isPreview        Boolean  @default(false) // true = admin refine-answer exercise, not a respondent run
   respondentUserId String? // respondent User.id; plain String, no FK (UG-1); set in F4.6
   // Invitations: the invitation this session was booted from (frictionless token flow), or null

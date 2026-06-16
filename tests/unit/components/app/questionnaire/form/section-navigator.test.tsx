@@ -87,7 +87,16 @@ describe('SectionNavigator', () => {
         isInferred={(k) => k === 'a'}
       />
     );
-    // Inferred dots carry a ring; plain answered dots are solid. At least one of each is present.
-    expect(container.querySelector('.ring-primary')).toBeTruthy();
+    // Inferred dots carry a brand-accent ring (inline box-shadow); plain answered dots are solid
+    // (no ring); unanswered dots are hollow (dashed border). Slot 'a' is inferred, 'b' is
+    // answered-stated, 'c' is unanswered. (Background colours use CSS var() which jsdom drops, so we
+    // key off the box-shadow ring and the dashed-border class — both jsdom-stable.)
+    const dots = Array.from(container.querySelectorAll<HTMLElement>('span.rounded-full'));
+    const ringed = dots.filter((d) => d.style.boxShadow !== '');
+    const answeredSolid = dots.filter(
+      (d) => d.style.boxShadow === '' && !d.className.includes('border-dashed')
+    );
+    expect(ringed).toHaveLength(1); // the inferred dot ('a')
+    expect(answeredSolid).toHaveLength(1); // the respondent-stated dot ('b'), no ring
   });
 });

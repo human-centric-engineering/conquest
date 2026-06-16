@@ -278,7 +278,9 @@ describe('VersionEditor', () => {
 
     it('is indeterminate (and unchecked) when only some questions are required', () => {
       render(<VersionEditor questionnaireId="qn-1" version={withQuestions([true, false])} />);
-      const cb = screen.getByRole('checkbox', { name: /all questions required/i });
+      const cb = screen.getByRole<HTMLInputElement>('checkbox', {
+        name: /all questions required/i,
+      });
       expect(cb).not.toBeChecked();
       expect(cb.indeterminate).toBe(true);
     });

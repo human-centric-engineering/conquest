@@ -59,6 +59,21 @@ describe('validateAnswerValue — single_choice', () => {
     });
     expect(validateAnswerValue('single_choice', 'ENG', named)).toEqual({ ok: true, value: 'eng' });
   });
+  it('an exact value wins a normalised collision with another choice’s label', () => {
+    // Choice A's label ("B") normalises to the same key as Choice B's value ("b"). The resolver
+    // maps labels first then values, so the exact value must win — "b" resolves to B, not A. This
+    // pins the documented two-pass ordering so a one-line reorder regression is caught.
+    const colliding = {
+      choices: [
+        { value: 'a', label: 'B' },
+        { value: 'b', label: 'X' },
+      ],
+    };
+    expect(validateAnswerValue('single_choice', 'b', colliding)).toEqual({ ok: true, value: 'b' });
+    // Typing the colliding label "B" also resolves to the value 'b' (value beats label on a tie).
+    expect(validateAnswerValue('single_choice', 'B', colliding)).toEqual({ ok: true, value: 'b' });
+  });
+
   it('accepts an off-list value when allowOther is set', () => {
     expect(validateAnswerValue('single_choice', 'purple', { ...cfg, allowOther: true }).ok).toBe(
       true

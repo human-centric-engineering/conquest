@@ -813,6 +813,44 @@ describe('extractAnswers — sensitivity-aware branch', () => {
   });
 });
 
+describe('extractAnswers — answer-fit resolver threading', () => {
+  it('passes answerFitMode to the extractor when the invoker was built with a non-off mode', async () => {
+    (dispatcherMock.dispatch as Mock).mockResolvedValue({
+      success: true,
+      data: { intents: [], droppedCount: 0, costUsd: 0 },
+    });
+    const inv = await invokers({ answerFitMode: 'always' });
+    await inv.extractAnswers(state());
+
+    const [, args] = (dispatcherMock.dispatch as Mock).mock.calls[0];
+    expect(args.answerFitMode).toBe('always');
+  });
+
+  it('omits answerFitMode from the capability args when the mode is off', async () => {
+    (dispatcherMock.dispatch as Mock).mockResolvedValue({
+      success: true,
+      data: { intents: [], droppedCount: 0, costUsd: 0 },
+    });
+    const inv = await invokers({ answerFitMode: 'off' });
+    await inv.extractAnswers(state());
+
+    const [, args] = (dispatcherMock.dispatch as Mock).mock.calls[0];
+    expect(args).not.toHaveProperty('answerFitMode');
+  });
+
+  it('omits answerFitMode when the option is absent (default)', async () => {
+    (dispatcherMock.dispatch as Mock).mockResolvedValue({
+      success: true,
+      data: { intents: [], droppedCount: 0, costUsd: 0 },
+    });
+    const inv = await invokers();
+    await inv.extractAnswers(state());
+
+    const [, args] = (dispatcherMock.dispatch as Mock).mock.calls[0];
+    expect(args).not.toHaveProperty('answerFitMode');
+  });
+});
+
 describe('selectNext', () => {
   it('runs the deterministic strategy and returns a decision', async () => {
     const inv = await invokers();
