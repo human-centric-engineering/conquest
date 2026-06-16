@@ -25,6 +25,12 @@ export const composeRequestSchema = z.object({
   goal: z.string().trim().min(1).max(1_000).optional(),
   /** Optional admin-set audience — inference suppressed per supplied field. */
   audience: audienceShapeSchema.optional(),
+  /**
+   * Whether every composed question is marked required. Omitted ⇒ `true` (the UI
+   * checkbox is checked by default); `false` ⇒ all optional. The composer infers no
+   * requiredness, so there is no "from source" mode here — it's a pure toggle.
+   */
+  requiredAll: z.boolean().optional(),
   /** DEMO-ONLY: attribute the new questionnaire to this demo client. */
   demoClientId: z.string().min(1).optional(),
 });

@@ -95,6 +95,28 @@ describe('extractionSchema — valid inputs', () => {
     expect(validateExtraction(base).ok).toBe(true);
   });
 
+  it('accepts an optional per-question required flag (true, false, or omitted)', () => {
+    const base = validResult();
+    base.questions[0].required = true;
+    base.questions[1].required = false;
+    const result = validateExtraction(base);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.questions[0].required).toBe(true);
+    expect(result.value.questions[1].required).toBe(false);
+    // The second question in validResult() omits `required` by default → undefined.
+    expect(validResult().questions[0].required).toBeUndefined();
+  });
+
+  it('rejects a non-boolean required flag', () => {
+    const bad = validResult();
+    (bad.questions[0] as { required: unknown }).required = 'yes';
+    const result = validateExtraction(bad);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.issues.some((i) => i.path.join('.') === 'questions.0.required')).toBe(true);
+  });
+
   it('accepts every canonical question type and change type', () => {
     // Drive off the single source of truth so a new QUESTION_TYPES entry is
     // exercised here automatically (no inline list to drift out of sync).

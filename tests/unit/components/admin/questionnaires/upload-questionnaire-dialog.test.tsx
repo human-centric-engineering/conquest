@@ -204,6 +204,31 @@ describe('UploadQuestionnaireDialog', () => {
     expect(postedFormData(fetchMock).has('demoClientId')).toBe(false);
   });
 
+  it("defaults requiredMode to 'all' (the checked radio) on submit", async () => {
+    const fetchMock = mockFetchSuccess();
+    const user = await openDialog();
+
+    await user.upload(fileInput(), makeFile());
+    // The default radio is checked without any interaction.
+    expect(screen.getByRole('radio', { name: /make all fields required/i })).toBeChecked();
+    await user.click(screen.getByRole('button', { name: /upload & extract/i }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(postedFormData(fetchMock).get('requiredMode')).toBe('all');
+  });
+
+  it('sends requiredMode=source when the document-markers radio is selected', async () => {
+    const fetchMock = mockFetchSuccess();
+    const user = await openDialog();
+
+    await user.upload(fileInput(), makeFile());
+    await user.click(screen.getByRole('radio', { name: /use the document.s required markers/i }));
+    await user.click(screen.getByRole('button', { name: /upload & extract/i }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(postedFormData(fetchMock).get('requiredMode')).toBe('source');
+  });
+
   it('sends extractTables=true when the toggle is checked', async () => {
     const fetchMock = mockFetchSuccess();
     const user = await openDialog();

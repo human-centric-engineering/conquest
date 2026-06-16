@@ -44,7 +44,10 @@ export function ModeToggle({ value, onChange, className }: ModeToggleProps) {
           'absolute inset-y-1 left-1 w-[calc(50%-4px)] rounded-full shadow-sm transition-transform duration-300 ease-out motion-reduce:transition-none',
           value === 'form' && 'translate-x-full'
         )}
-        style={{ backgroundColor: 'var(--app-cta-color, var(--cq-accent, var(--color-primary)))' }}
+        style={{
+          background:
+            'var(--app-cta-gradient, var(--app-cta-color, var(--cq-accent, var(--color-primary))))',
+        }}
       />
       {ITEMS.map(({ id, label, Icon }) => {
         const active = id === value;

@@ -76,7 +76,7 @@ const handleIngest = withAdminAuth(async (request: NextRequest, session) => {
   // Guard + identify the upload (size, format, admin metadata, SHA-256).
   const guard = await parseAndGuardUpload(request);
   if (!guard.ok) return guard.response;
-  const { file, fileHash, adminMeta } = guard.value;
+  const { file, fileHash, adminMeta, requiredMode } = guard.value;
 
   // DEMO-ONLY (F2.5.1): when attributing on upload, the target client must exist.
   // Cheap pre-check (before the expensive extract) for a clean 404 rather than a
@@ -128,6 +128,7 @@ const handleIngest = withAdminAuth(async (request: NextRequest, session) => {
     ...(demoClientId !== undefined ? { demoClientId } : {}),
     extraction,
     admin: adminMeta,
+    requiredness: requiredMode,
     source: {
       fileName: file.name,
       fileHash,

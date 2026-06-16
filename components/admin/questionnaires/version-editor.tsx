@@ -35,6 +35,9 @@ import {
 import { PenLine, Plus } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
+import { FieldHelp } from '@/components/ui/field-help';
 import { API } from '@/lib/api/endpoints';
 import type { AppQuestionnaireStatus } from '@/lib/app/questionnaire/types';
 import type { VersionGraphView } from '@/lib/app/questionnaire/views';
@@ -182,6 +185,27 @@ export function VersionEditor({
 
   const questionCount = sections.reduce((n, s) => n + s.questions.length, 0);
 
+  // "All questions required" tri-state: checked when every question is required,
+  // unchecked when none are, indeterminate when mixed. Toggling bulk-sets them all.
+  const requiredCount = sections.reduce(
+    (n, s) => n + s.questions.filter((q) => q.required).length,
+    0
+  );
+  const allRequired = questionCount > 0 && requiredCount === questionCount;
+  const someRequired = requiredCount > 0 && requiredCount < questionCount;
+  const requiredRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (requiredRef.current) requiredRef.current.indeterminate = someRequired;
+  }, [someRequired]);
+
+  const setAllRequired = (required: boolean) => {
+    void run(() => [
+      'PATCH',
+      API.APP.QUESTIONNAIRES.versionQuestions(questionnaireId, versionId),
+      { required },
+    ]);
+  };
+
   return (
     <div className="space-y-6">
       {/* Editing band — an architect's drafting sheet. Names the mode, explains the
@@ -200,6 +224,30 @@ export function VersionEditor({
                 itself
               </p>
             </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Checkbox
+              ref={requiredRef}
+              id="all-questions-required"
+              checked={allRequired}
+              onCheckedChange={setAllRequired}
+              disabled={busy || questionCount === 0}
+            />
+            <Label
+              htmlFor="all-questions-required"
+              className="flex items-center gap-1 text-xs font-normal"
+            >
+              All questions required
+              <FieldHelp title="All questions required">
+                <p>
+                  Bulk-set every question in this version. Checking it marks them all required;
+                  unchecking marks them all optional. The box shows a dash when some are required
+                  and some aren’t. You can still flip any single question with its own Required
+                  switch.
+                </p>
+              </FieldHelp>
+            </Label>
           </div>
 
           <div className="ml-auto flex items-center gap-3">

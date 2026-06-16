@@ -56,6 +56,14 @@ Gate: `withGenerativeAuthoringEnabled` (master `APP_QUESTIONNAIRES_ENABLED` **an
 sub-flag `APP_QUESTIONNAIRES_GENERATIVE_AUTHORING_ENABLED`) — 404 when off, so a dark
 sub-feature looks like a missing route.
 
+### Requiredness (`requiredAll`)
+
+Both compose routes accept an optional `requiredAll` boolean (Compose Studio's
+**Mark all questions as required** checkbox, checked by default). The composer infers
+no requiredness, so there's no "from source" mode — it's a pure toggle:
+omitted/`true` ⇒ `persistIngestion({ requiredness: 'all' })` (every question required);
+`false` ⇒ `'optional'`. See [ingestion.md → Requiredness policy](../app/questionnaire/ingestion.md#requiredness-policy).
+
 ## Feature flag
 
 `APP_QUESTIONNAIRES_GENERATIVE_AUTHORING_ENABLED` is a **DB `feature_flag` row**

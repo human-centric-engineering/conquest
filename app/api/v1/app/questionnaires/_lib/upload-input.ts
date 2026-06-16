@@ -134,6 +134,30 @@ export function parseAdminMetadata(formData: FormData): AdminMetadata {
   return meta;
 }
 
+/**
+ * How imported questions resolve their `required` flag (mirrors the persist
+ * writer's `RequirednessPolicy`). Ingest-only — re-ingest never re-decides
+ * requiredness — so it is parsed separately from the shared {@link AdminMetadata}.
+ */
+export const REQUIRED_MODES = ['all', 'source'] as const;
+export type RequiredMode = (typeof REQUIRED_MODES)[number];
+
+/**
+ * Read the requiredness choice from the upload form. Defaults to `'all'` (the
+ * UI's checked-by-default option) when the field is absent or blank; a
+ * present-but-unrecognised value is a client bug → `400`, not "infer".
+ */
+export function parseRequiredMode(formData: FormData): RequiredMode {
+  const raw = readTrimmed(formData, 'requiredMode');
+  if (raw === undefined) return 'all';
+  if (!(REQUIRED_MODES as readonly string[]).includes(raw)) {
+    throw new ValidationError('Invalid required-fields mode', {
+      requiredMode: [`Must be one of: ${REQUIRED_MODES.join(', ')}`],
+    });
+  }
+  return raw as RequiredMode;
+}
+
 /** Truthy-string form values that turn the PDF table extraction on. */
 const TRUTHY_FLAG_VALUES = new Set(['true', '1', 'on', 'yes']);
 

@@ -334,6 +334,46 @@ describe('ComposeStudio', () => {
       expect(body).not.toHaveProperty('title');
     });
 
+    it('sends requiredAll=true by default (the checked checkbox) in the POST body', async () => {
+      const fetchMock = mockSseStream({ frames: makeHappySseFrames() });
+      const user = userEvent.setup();
+      render(<ComposeStudio />);
+
+      // The checkbox is checked on first render.
+      expect(
+        screen.getByRole('checkbox', { name: /mark all questions as required/i })
+      ).toBeChecked();
+
+      await user.type(
+        screen.getByPlaceholderText('Describe the questionnaire you want to build…'),
+        'Default required survey'
+      );
+      await user.click(screen.getByRole('button', { name: /generate/i }));
+
+      await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      const body = JSON.parse(init.body as string) as Record<string, unknown>;
+      expect(body.requiredAll).toBe(true);
+    });
+
+    it('sends requiredAll=false when the admin unchecks the box', async () => {
+      const fetchMock = mockSseStream({ frames: makeHappySseFrames() });
+      const user = userEvent.setup();
+      render(<ComposeStudio />);
+
+      await user.type(
+        screen.getByPlaceholderText('Describe the questionnaire you want to build…'),
+        'All optional survey'
+      );
+      await user.click(screen.getByRole('checkbox', { name: /mark all questions as required/i }));
+      await user.click(screen.getByRole('button', { name: /generate/i }));
+
+      await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      const body = JSON.parse(init.body as string) as Record<string, unknown>;
+      expect(body.requiredAll).toBe(false);
+    });
+
     it('renders section titles from the outline event in the preview', async () => {
       mockSseStream({ frames: makeHappySseFrames() });
       const user = userEvent.setup();

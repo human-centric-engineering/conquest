@@ -242,6 +242,78 @@ describe('VersionEditor', () => {
     await waitFor(() => expect(mockRefresh).toHaveBeenCalled());
   });
 
+  describe('"All questions required" bulk checkbox', () => {
+    /** Minimal QuestionSlotView — only `required` (+ id) is read by VersionEditor here. */
+    const q = (id: string, required: boolean) =>
+      ({
+        id,
+        ordinal: 0,
+        key: id,
+        prompt: 'P',
+        type: 'free_text',
+        typeConfig: null,
+        required,
+        weight: 0.5,
+      }) as unknown as VersionGraphView['sections'][number]['questions'][number];
+
+    const withQuestions = (reqs: boolean[]) =>
+      graph({
+        sections: [
+          {
+            id: 'sec-1',
+            ordinal: 0,
+            title: 'S',
+            description: null,
+            questions: reqs.map((r, i) => q(`q${i}`, r)),
+          },
+        ],
+      });
+
+    const REQUIRED_PATH = /\/versions\/ver-1\/questions$/;
+
+    it('is checked when every question is required', () => {
+      render(<VersionEditor questionnaireId="qn-1" version={withQuestions([true, true])} />);
+      expect(screen.getByRole('checkbox', { name: /all questions required/i })).toBeChecked();
+    });
+
+    it('is indeterminate (and unchecked) when only some questions are required', () => {
+      render(<VersionEditor questionnaireId="qn-1" version={withQuestions([true, false])} />);
+      const cb = screen.getByRole('checkbox', { name: /all questions required/i });
+      expect(cb).not.toBeChecked();
+      expect(cb.indeterminate).toBe(true);
+    });
+
+    it('marks all required via the bulk PATCH when toggled on from a mixed state', async () => {
+      render(<VersionEditor questionnaireId="qn-1" version={withQuestions([true, false])} />);
+      await userEvent.click(screen.getByRole('checkbox', { name: /all questions required/i }));
+      expect(mockAuthoringMutate).toHaveBeenCalledWith(
+        'PATCH',
+        expect.stringMatching(REQUIRED_PATH),
+        {
+          required: true,
+        }
+      );
+      await waitFor(() => expect(mockRefresh).toHaveBeenCalled());
+    });
+
+    it('marks all optional via the bulk PATCH when unchecked from all-required', async () => {
+      render(<VersionEditor questionnaireId="qn-1" version={withQuestions([true, true])} />);
+      await userEvent.click(screen.getByRole('checkbox', { name: /all questions required/i }));
+      expect(mockAuthoringMutate).toHaveBeenCalledWith(
+        'PATCH',
+        expect.stringMatching(REQUIRED_PATH),
+        {
+          required: false,
+        }
+      );
+    });
+
+    it('is disabled when the version has no questions', () => {
+      render(<VersionEditor questionnaireId="qn-1" version={graph()} />);
+      expect(screen.getByRole('checkbox', { name: /all questions required/i })).toBeDisabled();
+    });
+  });
+
   it('ignores a drag dropped nowhere or onto itself', () => {
     const twoSections = graph({
       sections: [

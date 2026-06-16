@@ -61,6 +61,10 @@ Editorial decisions you SHOULD make:
 - Merge duplicate questions; split a compound question into separate ones.
 - Add a section to group loose questions when the document implies one.
 - Infer the questionnaire's overall goal and its intended audience.
+- Mark a question "required": true ONLY when the source explicitly flags it mandatory \
+(an asterisk "*", "(required)", "mandatory", "must be completed", a "Required" column, …). \
+This is a faithful read of the document, NOT a judgement call — omit "required" when the \
+source gives no such signal. Do not emit a change entry for it.
 
 Conservative default: when you are unsure whether a span is real content or \
 boilerplate, KEEP it. A pruned question is recoverable; a silently dropped one the \
@@ -94,7 +98,8 @@ these top-level keys, using EXACTLY these field names:
       "guidelines": "<optional answering guidance>",
       "rationale": "<optional why-this-question>",
       "extractionConfidence": <number between 0 and 1>,
-      "sourceQuote": "<optional original span>"
+      "sourceQuote": "<optional original span>",
+      "required": <optional boolean — true only when the source marks the field mandatory>
     }
   ],
   "inferredGoal": "<optional string>",

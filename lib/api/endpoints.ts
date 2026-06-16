@@ -399,6 +399,9 @@ export const API = {
       /** Question reorder within a section (PATCH `{ order }`). */
       versionSectionQuestionsReorder: (id: string, versionId: string, sectionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/sections/${sectionId}/questions/reorder`,
+      /** Version-question collection — bulk-set requiredness (PATCH `{ required }`). */
+      versionQuestions: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/questions`,
       /** Single question by flat id (PATCH edit/move, DELETE). */
       versionQuestionById: (id: string, versionId: string, questionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/questions/${questionId}`,

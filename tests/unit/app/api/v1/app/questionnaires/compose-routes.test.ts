@@ -461,6 +461,24 @@ describe('POST /compose (non-streaming)', () => {
       const call = (persistIngestion as Mock).mock.calls[0][0] as Record<string, unknown>;
       expect(call).not.toHaveProperty('demoClientId');
     });
+
+    it("defaults requiredness to 'all' when requiredAll is omitted (checkbox on by default)", async () => {
+      const req = makeRequest({ brief: 'Default required survey' });
+      await composePost(req, ADMIN_SESSION);
+
+      expect(persistIngestion).toHaveBeenCalledWith(
+        expect.objectContaining({ requiredness: 'all' })
+      );
+    });
+
+    it("passes requiredness 'optional' when requiredAll is false", async () => {
+      const req = makeRequest({ brief: 'All optional survey', requiredAll: false });
+      await composePost(req, ADMIN_SESSION);
+
+      expect(persistIngestion).toHaveBeenCalledWith(
+        expect.objectContaining({ requiredness: 'optional' })
+      );
+    });
   });
 
   describe('deriveComposeTitle', () => {
@@ -908,6 +926,60 @@ describe('POST /compose/stream (SSE)', () => {
       const errEvent = events[events.length - 1] as { type: string; code: string };
       expect(errEvent.type).toBe('error');
       expect(errEvent.code).toBe('persist_failed');
+    });
+
+    it("drive() defaults requiredness to 'all' when requiredAll is omitted", async () => {
+      const fakeGen = (async function* () {
+        yield { type: 'outline' as const, sections: [] };
+        return { ...EXTRACTION };
+      })();
+      (streamComposeQuestionnaire as Mock).mockReturnValue(fakeGen);
+
+      let capturedGen: AsyncGenerator<unknown> | null = null;
+      (sseResponse as Mock).mockImplementationOnce((events: AsyncGenerator<unknown>) => {
+        capturedGen = events;
+        return new Response('sse-ok', { status: 200 });
+      });
+
+      const req = makeRequest(
+        { brief: 'Stream default required' },
+        'http://localhost/api/v1/app/questionnaires/compose/stream'
+      );
+      await streamPost(req, ADMIN_SESSION);
+      for await (const _ of capturedGen!) {
+        /* drain */
+      }
+
+      expect(persistIngestion).toHaveBeenCalledWith(
+        expect.objectContaining({ requiredness: 'all' })
+      );
+    });
+
+    it("drive() passes requiredness 'optional' when requiredAll is false", async () => {
+      const fakeGen = (async function* () {
+        yield { type: 'outline' as const, sections: [] };
+        return { ...EXTRACTION };
+      })();
+      (streamComposeQuestionnaire as Mock).mockReturnValue(fakeGen);
+
+      let capturedGen: AsyncGenerator<unknown> | null = null;
+      (sseResponse as Mock).mockImplementationOnce((events: AsyncGenerator<unknown>) => {
+        capturedGen = events;
+        return new Response('sse-ok', { status: 200 });
+      });
+
+      const req = makeRequest(
+        { brief: 'Stream all optional', requiredAll: false },
+        'http://localhost/api/v1/app/questionnaires/compose/stream'
+      );
+      await streamPost(req, ADMIN_SESSION);
+      for await (const _ of capturedGen!) {
+        /* drain */
+      }
+
+      expect(persistIngestion).toHaveBeenCalledWith(
+        expect.objectContaining({ requiredness: 'optional' })
+      );
     });
 
     it('drive() falls back to "Untitled questionnaire" when no title or inferred goal', async () => {

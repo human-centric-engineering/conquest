@@ -13,6 +13,14 @@
 import { cn } from '@/lib/utils';
 import type { PanelSectionView } from '@/lib/app/questionnaire/panel/types';
 
+// Progress affordances carry the brand accent colour (matching the top coverage bar);
+// each falls back to the platform primary token when no brand is defined.
+const BRAND_ACCENT = 'var(--app-accent-color, var(--color-primary))';
+const BRAND_ACCENT_BG =
+  'color-mix(in srgb, var(--app-accent-color, var(--color-primary)) 6%, transparent)';
+const BRAND_ACCENT_DOT =
+  'color-mix(in srgb, var(--app-accent-color, var(--color-primary)) 40%, transparent)';
+
 export interface SectionNavigatorProps {
   sections: PanelSectionView[];
   activeIndex: number;
@@ -47,8 +55,11 @@ export function SectionNavigator({
             aria-current={active ? 'true' : undefined}
             className={cn(
               'w-full rounded-md border px-3 py-2 text-left transition-colors',
-              active ? 'border-primary bg-primary/5' : 'border-input hover:bg-muted'
+              active ? '' : 'border-input hover:bg-muted'
             )}
+            style={
+              active ? { borderColor: BRAND_ACCENT, backgroundColor: BRAND_ACCENT_BG } : undefined
+            }
           >
             <div className="flex items-center justify-between gap-2">
               <span className="text-foreground truncate text-sm font-medium">
@@ -57,8 +68,9 @@ export function SectionNavigator({
               <span
                 className={cn(
                   'shrink-0 text-xs tabular-nums',
-                  complete ? 'text-primary font-medium' : 'text-muted-foreground'
+                  complete ? 'font-medium' : 'text-muted-foreground'
                 )}
+                style={complete ? { color: BRAND_ACCENT } : undefined}
               >
                 {answered}/{total}
               </span>
@@ -74,10 +86,18 @@ export function SectionNavigator({
                       title={slot.prompt}
                       className={cn(
                         'h-2 w-2 rounded-full',
-                        !ans && 'border-muted-foreground/40 border border-dashed',
-                        ans && inferred && 'bg-primary/40 ring-primary ring-1',
-                        ans && !inferred && 'bg-primary'
+                        !ans && 'border-muted-foreground/40 border border-dashed'
                       )}
+                      style={
+                        ans
+                          ? inferred
+                            ? {
+                                backgroundColor: BRAND_ACCENT_DOT,
+                                boxShadow: `0 0 0 1px ${BRAND_ACCENT}`,
+                              }
+                            : { backgroundColor: BRAND_ACCENT }
+                          : undefined
+                      }
                     />
                   );
                 })}

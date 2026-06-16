@@ -101,6 +101,20 @@ must render the version selector and highlight the active version against `[vid]
   are thin **redirectors** that resolve `?v=` (or the newest version) and forward to
   the path-segment URL, so old bookmarks and the editor's fork-redirect keep working.
 
+### Structure editor — bulk requiredness
+
+The editing band (`components/admin/questionnaires/version-editor.tsx`, shown under
+`?edit=1`) carries an **All questions required** tri-state checkbox: checked when every
+question is required, unchecked when none are, indeterminate (a dash) when mixed —
+derived from the live `sections` graph, the dash set on the native input via a `ref`
+(the project's `Checkbox` has no `indeterminate` prop). Toggling it bulk-sets every
+question in one call — `PATCH /api/v1/app/questionnaires/:id/versions/:vid/questions`
+`{ required }` → `updateMany` — routed through the same `run` runner as every other
+edit, so it forks a launched version and redirects to the new draft. Per-question
+`Required` switches (`question-editor.tsx`) still work independently. New questions and
+questionnaires default to required (the import radio / compose checkbox); this checkbox
+is the after-the-fact bulk lever.
+
 The list and demo-clients surfaces wear a scoped **app identity** — accent tokens
 (`.cq-surface` in `globals.css`), applied by the `app/admin/questionnaires/layout.tsx`
 and `app/admin/demo-clients/layout.tsx` wrappers and used by

@@ -23,6 +23,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
 import { FieldHelp } from '@/components/ui/field-help';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse } from '@/lib/api/parse-response';
@@ -78,10 +79,12 @@ export function ComposeStudio() {
   const router = useRouter();
   const briefId = useId();
   const titleId = useId();
+  const requiredAllId = useId();
 
   const [phase, setPhase] = useState<Phase>('brief');
   const [brief, setBrief] = useState('');
   const [title, setTitle] = useState('');
+  const [requiredAll, setRequiredAll] = useState(true);
   const [sections, setSections] = useState<PreviewSection[]>([]);
   const [goal, setGoal] = useState<string | undefined>(undefined);
   const [ids, setIds] = useState<ComposedIds | null>(null);
@@ -171,6 +174,7 @@ export function ComposeStudio() {
         body: JSON.stringify({
           brief: brief.trim(),
           ...(title.trim().length > 0 ? { title: title.trim() } : {}),
+          requiredAll,
         }),
       });
 
@@ -318,6 +322,20 @@ export function ComposeStudio() {
               placeholder="e.g. Churn-risk onboarding survey"
               maxLength={200}
             />
+
+            <div className="flex items-center gap-2 pt-1">
+              <Checkbox id={requiredAllId} checked={requiredAll} onCheckedChange={setRequiredAll} />
+              <Label htmlFor={requiredAllId} className="flex items-center gap-1 font-normal">
+                Mark all questions as required
+                <FieldHelp title="Mark all questions as required">
+                  <p>
+                    On by default — every composed question is marked required. Turn it off to
+                    create them all as optional. You can change any question afterwards in the
+                    editor.
+                  </p>
+                </FieldHelp>
+              </Label>
+            </div>
           </div>
         )}
 
