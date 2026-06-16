@@ -64,7 +64,7 @@ const handleComposeStream = withAdminAuth(async (request: NextRequest, session) 
       details: { issues: body.error.issues },
     });
   }
-  const { brief, title, goal, audience, demoClientId } = body.data;
+  const { brief, title, goal, audience, requiredAll, demoClientId } = body.data;
 
   // DEMO-ONLY: when attributing on create, the target client must exist.
   let resolvedDemoClientId: string | undefined;
@@ -124,6 +124,8 @@ const handleComposeStream = withAdminAuth(async (request: NextRequest, session) 
           ...(goal !== undefined ? { goal } : {}),
           ...(audience !== undefined ? { audience } : {}),
         },
+        // Omitted ⇒ all required (the UI checkbox is checked by default); explicit false ⇒ all optional.
+        requiredness: requiredAll === false ? 'optional' : 'all',
         source: briefSource(brief),
       });
 

@@ -35,6 +35,45 @@ describe('validateAnswerValue — single_choice', () => {
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.issue).toMatch(/not one of the slot's choices/);
   });
+  it('resolves the human LABEL to the canonical slug (the model often emits the label)', () => {
+    // `choices('red', ...)` mirrors labels as the upper-cased slug → label "GREEN".
+    expect(validateAnswerValue('single_choice', 'GREEN', cfg)).toEqual({
+      ok: true,
+      value: 'green',
+    });
+  });
+  it('resolves case-insensitively and normalises to the stored slug', () => {
+    const named = {
+      choices: [
+        { value: 'eng', label: 'Engineering' },
+        { value: 'ops', label: 'Operations' },
+      ],
+    };
+    expect(validateAnswerValue('single_choice', 'engineering', named)).toEqual({
+      ok: true,
+      value: 'eng',
+    });
+    expect(validateAnswerValue('single_choice', 'Engineering', named)).toEqual({
+      ok: true,
+      value: 'eng',
+    });
+    expect(validateAnswerValue('single_choice', 'ENG', named)).toEqual({ ok: true, value: 'eng' });
+  });
+  it('an exact value wins a normalised collision with another choice’s label', () => {
+    // Choice A's label ("B") normalises to the same key as Choice B's value ("b"). The resolver
+    // maps labels first then values, so the exact value must win — "b" resolves to B, not A. This
+    // pins the documented two-pass ordering so a one-line reorder regression is caught.
+    const colliding = {
+      choices: [
+        { value: 'a', label: 'B' },
+        { value: 'b', label: 'X' },
+      ],
+    };
+    expect(validateAnswerValue('single_choice', 'b', colliding)).toEqual({ ok: true, value: 'b' });
+    // Typing the colliding label "B" also resolves to the value 'b' (value beats label on a tie).
+    expect(validateAnswerValue('single_choice', 'B', colliding)).toEqual({ ok: true, value: 'b' });
+  });
+
   it('accepts an off-list value when allowOther is set', () => {
     expect(validateAnswerValue('single_choice', 'purple', { ...cfg, allowOther: true }).ok).toBe(
       true
@@ -67,6 +106,13 @@ describe('validateAnswerValue — multi_choice', () => {
   });
   it('rejects when any member is off-list', () => {
     expect(validateAnswerValue('multi_choice', ['a', 'z'], cfg).ok).toBe(false);
+  });
+  it('resolves member labels/casing to canonical slugs and de-duplicates', () => {
+    // labels mirror upper-cased slugs → 'A','B'. 'A' (label) and 'a' (slug) both resolve to 'a'.
+    expect(validateAnswerValue('multi_choice', ['A', 'a', 'B'], cfg)).toEqual({
+      ok: true,
+      value: ['a', 'b'],
+    });
   });
   it('accepts off-list members when allowOther is set', () => {
     expect(validateAnswerValue('multi_choice', ['a', 'z'], { ...cfg, allowOther: true })).toEqual({

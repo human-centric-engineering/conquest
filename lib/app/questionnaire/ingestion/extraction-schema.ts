@@ -55,6 +55,13 @@ const extractedQuestionSchema = z.object({
   suggestedTypeConfig: typeConfigSchema.optional(),
   extractionConfidence: z.number().min(0).max(1),
   sourceQuote: z.string().optional(),
+  /**
+   * Whether the SOURCE document marks this field mandatory (asterisk, "(required)",
+   * "mandatory", "must provide", …). Only consumed by the import's "use the
+   * document's required markers" mode (`RequirednessPolicy: 'source'`); the default
+   * "all required" mode ignores it. Omitted ⇒ not marked required in the source.
+   */
+  required: z.boolean().optional(),
 });
 
 /**

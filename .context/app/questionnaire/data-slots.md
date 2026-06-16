@@ -24,6 +24,16 @@ Two layers, in parallel:
 one or more questions. Data slots are version-scoped and fork with the version (like tags), copied
 by `copyVersionGraph`.
 
+**The two layers hold two representations of the same answer, and must not be conflated.** The
+data-slot fill records the respondent's answer in their **natural words** — "Marketing", "10 years"
+— because the panel shows it back to them and must read like the conversation. The answer slot
+records the **mapped form value** — the choice slug `other`, the tenure bucket `gt3` — because that
+is the deliverable. The extractor emits BOTH in one call (`answers` = mapped slugs, `dataSlotFills`
+= natural values); the mapping from natural → slug runs in the background and is never surfaced. So
+a fill never carries a form code/label, and a data slot's freshness on a correction (engineering →
+Marketing) is the extractor's job — there is no deterministic answer→fill reconcile on the chat path
+(that would leak the form value into the natural panel).
+
 `AppDataSlot` is exclusively the **saved/live** set. A generated-but-unsaved proposal lives in a
 separate `AppDataSlotDraft` (one JSON-snapshot row per version, `versionId @unique`, cascades with
 the version) so it survives navigation without ever being mistaken for live — runtime targeting, the

@@ -14,10 +14,33 @@
 
 import type { AbuseStrikeOutcome } from '@/lib/app/questionnaire/seriousness/types';
 
-/** The deterministic final message streamed to the respondent when the session is abandoned. */
+/**
+ * The deterministic final message streamed when the session is **aborted** for repeated abuse —
+ * generic fallback used only when no strike count is available (the orchestrator normally streams
+ * the counted {@link abuseAbortMessage}). Kept under its original export name so callers' `??`
+ * fallbacks are unchanged.
+ */
 export const ABUSE_ABANDON_MESSAGE =
-  "Several answers haven't seemed genuine, so we've had to end this session here. " +
-  'Thank you for your time.';
+  'This session has been recorded as aborted after repeated answers that seemed abusive or ' +
+  'lacking in sincerity. Thank you for your time.';
+
+/**
+ * The deterministic final message streamed when the session is aborted, naming how many non-genuine
+ * answers were recorded (`count` = the strike count at abort, i.e. the threshold). Singular-aware so
+ * a threshold of 1 still reads correctly.
+ */
+export function abuseAbortMessage(count: number): string {
+  if (count === 1) {
+    return (
+      'There has now been 1 occasion where your answer seemed to be abusive or lacking in ' +
+      'sincerity so I must now record this session as aborted.'
+    );
+  }
+  return (
+    `There have now been ${count} occasions where your answers seemed to be abusive or lacking ` +
+    'in sincerity so I must now record this session as aborted.'
+  );
+}
 
 /**
  * Whether the gate is live for a turn: the platform sub-feature flag must be on AND the
@@ -35,15 +58,17 @@ export function seriousnessGateActive(flagEnabled: boolean, threshold: number): 
  */
 function warningCopy(remaining: number): string {
   if (remaining <= 1) {
+    // Penultimate strike: the final sentence is wrapped in **bold** (the notice renders it) so the
+    // last-chance consequence stands out.
     return (
-      "That still doesn't seem like a serious answer, so I'll have to set it aside. " +
-      "Please note: if it happens again I'll have to end this session. " +
-      'Could you answer the question genuinely?'
+      "Your previous answer didn't seem serious, so I'll set it aside for now. " +
+      '**I’m sorry, but one more insincere or abusive answer will result in the ' +
+      'termination of this session.**'
     );
   }
   return (
-    "That doesn't seem like a serious answer, so I'll set it aside for now. " +
-    'Could you give the question another go?'
+    "Your previous answer didn't seem serious, so I'll set it aside for now. " +
+    'Please try to keep the conversation on topic and sincere.'
   );
 }
 
@@ -58,7 +83,7 @@ export function evaluateAbuseStrike(priorStrikes: number, threshold: number): Ab
       newStrikeCount,
       abandon: true,
       noticeMessage: '',
-      abandonMessage: ABUSE_ABANDON_MESSAGE,
+      abandonMessage: abuseAbortMessage(newStrikeCount),
     };
   }
   return {

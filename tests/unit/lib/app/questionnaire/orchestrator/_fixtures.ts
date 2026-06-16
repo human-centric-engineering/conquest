@@ -23,6 +23,7 @@ import type {
   RefinementTrigger,
   SelectOutcome,
   SeriousnessOutcome,
+  SensitivityDetectOutcome,
   TurnFlags,
   TurnState,
 } from '@/lib/app/questionnaire/orchestrator';
@@ -124,6 +125,8 @@ export interface StubConfig {
   select?: Partial<SelectOutcome>;
   /** Seriousness-judge outcome; defaults to a "serious" verdict so the gate is inert. */
   serious?: Partial<SeriousnessOutcome>;
+  /** Dedicated sensitivity-detector outcome; defaults to "nothing detected" so the step is inert. */
+  sensitivity?: Partial<SensitivityDetectOutcome>;
 }
 
 export interface StubCalls {
@@ -132,6 +135,7 @@ export interface StubCalls {
   refine: Array<{ state: TurnState; trigger: RefinementTrigger }>;
   select: TurnState[];
   serious: TurnState[];
+  sensitivity: TurnState[];
 }
 
 /** Stub invokers that record calls and return configured outcomes. */
@@ -139,7 +143,14 @@ export function stubInvokers(cfg: StubConfig = {}): {
   invokers: CapabilityInvokers;
   calls: StubCalls;
 } {
-  const calls: StubCalls = { extract: [], detect: [], refine: [], select: [], serious: [] };
+  const calls: StubCalls = {
+    extract: [],
+    detect: [],
+    refine: [],
+    select: [],
+    serious: [],
+    sensitivity: [],
+  };
   const invokers: CapabilityInvokers = {
     async extractAnswers(s) {
       calls.extract.push(s);
@@ -168,6 +179,10 @@ export function stubInvokers(cfg: StubConfig = {}): {
     async assessSeriousness(s) {
       calls.serious.push(s);
       return { verdict: { serious: true, reason: '' }, costUsd: 0, ...cfg.serious };
+    },
+    async detectSensitivity(s) {
+      calls.sensitivity.push(s);
+      return { assessment: null, costUsd: 0, ...cfg.sensitivity };
     },
   };
   return { invokers, calls };

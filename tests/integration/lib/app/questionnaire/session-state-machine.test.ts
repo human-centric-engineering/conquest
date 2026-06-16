@@ -29,6 +29,7 @@ vi.mock('@/lib/db/client', () => ({ prisma: mocks.prisma }));
 
 import {
   abandonSession,
+  abortSession,
   hasCostCapReachedEvent,
   loadSessionResumeState,
   markSessionCompleted,
@@ -215,6 +216,35 @@ describe('lifecycle wrappers map to the right transition + event', () => {
     expect(result).toBe('abandoned');
     expect(mocks.tx.appQuestionnaireSessionEvent.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ eventType: 'abandoned' }) })
+    );
+  });
+
+  it('abortSession from active: active → aborted writes an `aborted` event (distinct from abandoned)', async () => {
+    // The seriousness/abuse-gate terminal — a separate status from admin/manual `abandoned` so
+    // analytics can tell them apart. Exercises the real transition (not the mocked route).
+    currentStatus('active');
+    const result = await abortSession('sess-1');
+    expect(result).toBe('aborted');
+    expect(mocks.tx.appQuestionnaireSession.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: 'aborted' }) })
+    );
+    expect(mocks.tx.appQuestionnaireSessionEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          eventType: 'aborted',
+          fromStatus: 'active',
+          toStatus: 'aborted',
+        }),
+      })
+    );
+  });
+
+  it('abortSession from paused: paused → aborted', async () => {
+    currentStatus('paused');
+    const result = await abortSession('sess-1');
+    expect(result).toBe('aborted');
+    expect(mocks.tx.appQuestionnaireSessionEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ eventType: 'aborted' }) })
     );
   });
 });

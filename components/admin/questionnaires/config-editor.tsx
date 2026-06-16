@@ -55,6 +55,7 @@ import { API } from '@/lib/api/endpoints';
 import {
   ACCESS_MODES,
   ACCESS_MODE_LABELS,
+  ANSWER_FIT_MODES,
   ANSWER_SLOT_PANEL_SCOPES,
   CONTRADICTION_MODES,
   INVITEE_FIELD_LABELS,
@@ -66,6 +67,7 @@ import {
   TONE_LEVEL_MIN,
   TONE_PERSONA_MAX_LENGTH,
   type AccessMode,
+  type AnswerFitMode,
   type AnswerSlotPanelScope,
   type ContradictionMode,
   type InviteeFieldConfig,
@@ -92,6 +94,12 @@ const CONTRADICTION_MODE_LABELS: Record<ContradictionMode, string> = {
   off: 'Off',
   flag: 'Flag contradictions',
   probe: 'Probe (follow up in conversation)',
+};
+
+const ANSWER_FIT_MODE_LABELS: Record<AnswerFitMode, string> = {
+  off: 'Off',
+  fallback: 'Fallback (only when needed)',
+  always: 'Always (every answered turn)',
 };
 
 const PROFILE_FIELD_TYPE_LABELS: Record<ProfileFieldType, string> = {
@@ -392,6 +400,7 @@ export function ConfigEditor({
   const [contradictionEveryNTurns, setContradictionEveryNTurns] = useState(
     String(config.contradictionEveryNTurns)
   );
+  const [answerFitMode, setAnswerFitMode] = useState<AnswerFitMode>(config.answerFitMode);
   const [anonymousMode, setAnonymousMode] = useState(config.anonymousMode);
   const [accessMode, setAccessMode] = useState<AccessMode>(config.accessMode);
   const [inviteeFields, setInviteeFields] = useState<InviteeFieldConfig[]>(config.inviteeFields);
@@ -438,6 +447,7 @@ export function ConfigEditor({
     setContradictionMode(config.contradictionMode);
     setContradictionWindowN(String(config.contradictionWindowN));
     setContradictionEveryNTurns(String(config.contradictionEveryNTurns));
+    setAnswerFitMode(config.answerFitMode);
     setAnonymousMode(config.anonymousMode);
     setAccessMode(config.accessMode);
     setInviteeFields(config.inviteeFields);
@@ -508,6 +518,7 @@ export function ConfigEditor({
           1,
           true
         ),
+        answerFitMode,
         anonymousMode,
         // Access mode (who may start) + invitee fields — email is forced shown+required server-side.
         accessMode,
@@ -1129,6 +1140,36 @@ export function ConfigEditor({
               </div>
             </div>
           )}
+          <div className="space-y-1.5 sm:max-w-sm">
+            <Label className="text-sm font-medium">
+              Answer fit resolver{' '}
+              <FieldHelp title="Answer fit resolver">
+                A second, focused pass that maps a free-form answer onto a choice or scale option
+                the first pass couldn&apos;t place — e.g. &ldquo;Marketing&rdquo; to the
+                &ldquo;Other&rdquo; option, or &ldquo;10 years&rdquo; to the &ldquo;3+ years&rdquo;
+                band. <strong>Fallback</strong> runs it only when a clearly-given answer didn&apos;t
+                map (no extra cost otherwise). <strong>Always</strong> also tries to fill any
+                still-open choice/scale question each turn (more thorough, one extra model call per
+                answered turn). <strong>Off</strong> disables it.
+              </FieldHelp>
+            </Label>
+            <Select
+              value={answerFitMode}
+              onValueChange={(v) => setAnswerFitMode(v as AnswerFitMode)}
+              disabled={busy}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {ANSWER_FIT_MODES.map((m) => (
+                  <SelectItem key={m} value={m}>
+                    {ANSWER_FIT_MODE_LABELS[m]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
       </SettingsGroup>
 

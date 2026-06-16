@@ -9,10 +9,11 @@
  *
  * The matrix:
  *
- *  - `active → {paused, completed, abandoned}`
- *  - `paused → {active (resume), abandoned}` — NOT `completed`: completion runs the
+ *  - `active → {paused, completed, abandoned, aborted}`
+ *  - `paused → {active (resume), abandoned, aborted}` — NOT `completed`: completion runs the
  *    F4.5 gate/sweep over a *live* session, so a paused session must resume first.
- *  - `completed` / `abandoned` are terminal — no outgoing edges.
+ *  - `completed` / `abandoned` / `aborted` are terminal — no outgoing edges. (`aborted` is the
+ *    seriousness-gate terminal; `abandoned` is admin/manual.)
  *  - `from === to` (incl. terminal re-entry) is an idempotent no-op (no event).
  */
 
@@ -29,10 +30,11 @@ import {
  * not as an `apply`, so re-completing a completed session writes no duplicate event.
  */
 const LEGAL_TRANSITIONS: Record<SessionStatus, readonly SessionStatus[]> = {
-  active: ['paused', 'completed', 'abandoned'],
-  paused: ['active', 'abandoned'],
+  active: ['paused', 'completed', 'abandoned', 'aborted'],
+  paused: ['active', 'abandoned', 'aborted'],
   completed: [],
   abandoned: [],
+  aborted: [],
 };
 
 /** The terminal statuses — no outgoing transition is legal from these. */
@@ -85,6 +87,8 @@ export function eventTypeFor(from: SessionStatus, to: SessionStatus): SessionEve
       return 'completed';
     case 'abandoned':
       return 'abandoned';
+    case 'aborted':
+      return 'aborted';
     case 'active':
       throw new SessionTransitionError(from, to);
   }

@@ -73,6 +73,19 @@ userMessage, recentMessages?, sessionId }`, all in memory. `ExtractionSlotView`
   so a `single_choice` value must be one of _that slot's_ choices, a `likert`
   within its scale, etc. Lenient where the LLM is loose (a numeric `"34"`, a
   boolean `"yes"`), strict where correctness matters.
+- **Choice resolution is by value _or_ label.** The extractor is told to emit the
+  choice's `value`, but real model output routinely sends the human **label**
+  (`"Engineering"`) or a cased/spaced variant of the slug. `validateSingleChoice`/
+  `validateMultiChoice` resolve a candidate against each choice's `value` and `label`
+  case-insensitively (trimmed) and **normalise back to the canonical slug** — so a
+  clearly-made choice is kept, not dropped as `value invalid for type`. An exact
+  `value` match always wins a label/value collision; an off-list candidate is still
+  dropped unless the slot sets `allowOther`. This matters most in data-slot mode,
+  where demographic-style `single_choice` questions fill from side-effect extraction
+  of an open conversational answer — a label/casing mismatch there would silently
+  leave the question (and its section progress) unanswered. Note this resolves
+  _surface form_, not _semantics_: mapping `"10 years"` → the `3+ years` bucket is
+  still the model's job (it is given the options), not the validator's.
 
 ### `normalizeAnswerIntents` (the change-records analogue)
 
@@ -109,6 +122,32 @@ parse → retry-once → cost-sum) → fire-and-forget `logCost` → `normalizeA
 - A **distinct agent** (`app-questionnaire-answer-extractor`, seed 006) from the
   document extractor and the selection agent — different job, far higher volume,
   its own monthly budget ceiling. Capability + binding in seed 007.
+
+### Answer-fit resolver (second pass)
+
+A choice/likert answer the respondent clearly gave but phrased loosely can fail the
+strict value validation and get **dropped** ("Marketing" for a department with no
+matching option; "10 years" echoed instead of the `3+ years` bucket). The
+**`answerFitMode`** config (`off | fallback | always`, default `fallback`) controls a
+focused SECOND structured call that recovers these:
+
+- **`fallback`** — after the primary pass, if any choice/likert candidate the
+  respondent addressed was dropped as `value invalid for type`, run one more call over
+  **just those slots** with `forceFit` framing (commit to the closest genuine
+  option/scale point, or omit). No second call when nothing was dropped — zero extra
+  cost on the common path.
+- **`always`** — additionally targets every still-unanswered choice/likert candidate
+  each turn (proactive, one extra call per answered turn).
+- **`off`** — single pass, unchanged behaviour.
+
+The second pass lives **inside the capability** (`resolveAnswerFit`), reusing the same
+agent/model and prompt builder (`forceFit`) and the same `normalizeAnswerIntents`
+validation — so a resolved value is still type-checked. Resolved intents merge into the
+result for slots the primary pass left unanswered; a failure of the fit pass is
+**non-fatal** (the primary intents stand). The mode is threaded route → `buildTurnInvokers`
+→ the `extractAnswers` dispatch. It maps **surface form to a form option**; it never
+changes the data-slot fill, which keeps the respondent's natural words (see
+[`data-slots.md`](./data-slots.md)).
 
 ## The preview route
 

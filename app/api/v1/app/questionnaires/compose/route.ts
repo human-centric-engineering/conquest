@@ -70,7 +70,7 @@ const handleCompose = withAdminAuth(async (request: NextRequest, session) => {
       details: { issues: body.error.issues },
     });
   }
-  const { brief, title, goal, audience, demoClientId } = body.data;
+  const { brief, title, goal, audience, requiredAll, demoClientId } = body.data;
 
   // DEMO-ONLY: when attributing on create, the target client must exist (cheap
   // pre-check before the expensive compose — mirrors the ingest route).
@@ -102,6 +102,8 @@ const handleCompose = withAdminAuth(async (request: NextRequest, session) => {
     ...(resolvedDemoClientId !== undefined ? { demoClientId: resolvedDemoClientId } : {}),
     extraction: composed.value,
     admin: adminMeta,
+    // Omitted ⇒ all required (the UI checkbox is checked by default); explicit false ⇒ all optional.
+    requiredness: requiredAll === false ? 'optional' : 'all',
     source: briefSource(brief),
   });
 

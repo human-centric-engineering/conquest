@@ -27,6 +27,26 @@ import {
 /** The interactive-transaction client `executeTransaction` passes to its callback. */
 type IngestTx = Parameters<Parameters<typeof executeTransaction>[0]>[0];
 
+/**
+ * How a freshly-written question graph resolves each slot's `required` flag.
+ *  - `'all'`      — every question is required (the admin's "mark all required" default).
+ *  - `'optional'` — every question is optional (the historical behaviour; refine keeps it).
+ *  - `'source'`   — honour what the extractor read off the document (`q.required ?? false`).
+ */
+export type RequirednessPolicy = 'all' | 'optional' | 'source';
+
+/** Resolve one slot's `required` flag from the policy and the extracted value. */
+function resolveRequired(policy: RequirednessPolicy, extracted: boolean | undefined): boolean {
+  switch (policy) {
+    case 'all':
+      return true;
+    case 'source':
+      return extracted ?? false;
+    case 'optional':
+      return false;
+  }
+}
+
 /** Parse provenance carried from the route onto the source-document row. */
 export interface IngestionSourceInput {
   fileName: string;
@@ -50,6 +70,12 @@ export interface PersistIngestionInput {
   /** Admin-supplied goal/audience (admin wins per field over inferred). */
   admin: { goal?: string; audience?: Partial<AudienceShape> };
   source: IngestionSourceInput;
+  /**
+   * How each written question's `required` flag is resolved. Defaults to `'all'`
+   * for a new ingest/compose (the admin's "mark all required" default, checked by
+   * default in the UI); pass `'source'` to honour the document's required markers.
+   */
+  requiredness?: RequirednessPolicy;
 }
 
 export interface PersistIngestionResult {
@@ -122,7 +148,8 @@ export interface GraphCounts {
 export async function writeGraph(
   tx: IngestTx,
   versionId: string,
-  extraction: ExtractQuestionnaireStructureData
+  extraction: ExtractQuestionnaireStructureData,
+  requiredness: RequirednessPolicy = 'optional'
 ): Promise<GraphCounts> {
   // Sections first — slots and change records reference them.
   const sectionIdByOrdinal = new Map<number, string>();
@@ -153,7 +180,7 @@ export async function writeGraph(
           key: q.key,
           prompt: q.prompt,
           type: q.suggestedType,
-          required: false,
+          required: resolveRequired(requiredness, q.required),
           // Neutral midpoint of the 0.1–1.0 weight scale; admins tune it in the Structure editor.
           weight: 0.5,
           ...(q.guidelines !== undefined ? { guidelines: q.guidelines } : {}),
@@ -277,7 +304,9 @@ export async function persistIngestion(
     });
     const versionId = version.id;
 
-    const counts = await writeGraph(tx, versionId, extraction);
+    // Default to "all required" for a fresh ingest/compose — the admin's
+    // mark-all-required default (the UI checkbox is checked by default).
+    const counts = await writeGraph(tx, versionId, extraction, input.requiredness ?? 'all');
     await writeSourceDocument(tx, versionId, source);
 
     return {

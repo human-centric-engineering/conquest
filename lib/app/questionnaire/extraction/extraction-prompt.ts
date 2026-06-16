@@ -28,7 +28,19 @@ For each answer, output one entry with:
     free_text → a string; single_choice → one choice "value"; multi_choice → an array of choice \
 "value"s; likert → an integer on the given scale; numeric → a number; date → an ISO-8601 date \
 (YYYY-MM-DD); boolean → true/false.
-  For choice questions, return the choice's "value" (not its label). Do not invent options.
+  For choice questions, return the choice's "value" (the slug), NEVER its label and NEVER the \
+respondent's raw words. Do not invent options.
+  Map the respondent's MEANING onto an option or scale point — they rarely say the option verbatim:
+    • Quantities, durations and dates → the option whose RANGE contains them. "10 years" for a \
+tenure with options "< 1 year" / "1–3 years" / "3+ years" → the "3+ years" value; a date → the \
+band it falls in.
+    • likert → translate the STRENGTH of what they said into the scale: an enthusiastic reply is \
+near the top, a flat/neutral one mid-scale, a strongly negative one near the bottom. Infer this \
+from sentiment — do NOT expect, or wait for, a numeric rating.
+    • On-topic but matches no specific option → choose the catch-all option ("Other", "None of \
+these", "Prefer not to say") IF the slot offers one (e.g. "Marketing" for a department with \
+options Engineering/Sales/Operations/Other → the "Other" value). Only when no option fits at all \
+and there is no catch-all do you omit the answer.
 - "confidence": 0–1, scored in three bands by how PLAINLY this value is supported — its CLARITY, not \
 how many times they've said it. CLEAR (~0.8): stated or unmistakably implied — the DEFAULT for a \
 clearly-answered question, even a brief or blunt one. PARTIAL (~0.5): a hedged or loosely-implied \
@@ -73,7 +85,11 @@ informs (directly, by inference, or by synthesising the conversation), output on
 - "dataSlotKey": a key from the provided data-slot list ONLY.
 - "value": the captured position as concrete, structured data — the SPECIFICS the respondent gave \
 (numbers, names, choices), not a label for them. For "I am 25, male" record \
-{"age": 25, "gender": "male"} (or "25, male"), NOT "age and gender provided".
+{"age": 25, "gender": "male"} (or "25, male"), NOT "age and gender provided". Use the respondent's \
+OWN words for these specifics — "Marketing", "10 years" — and NEVER the form's option code or label \
+that the same answer happens to map to ("other", "3+ years"). The "answers" array carries the mapped \
+form value; the data-slot fill carries what the respondent ACTUALLY SAID, in their terms. The panel \
+shows this to the respondent, so it must read like the conversation, not like the form.
 - "paraphrase": a restatement of the respondent's position on this slot, naming the specifics so a \
 reader sees exactly what was recorded. Always report it as THEIR ACCOUNT — what they said, or the \
 experience they describe — never as an established fact about the world. Match the wording to the \
@@ -134,7 +150,12 @@ OMIT it entirely (do not record its absence) — the panel shows "Not covered ye
 Some slots show a "current" line — what's already recorded from earlier in the conversation. When \
 the new message ADDS to or CORRECTS that (e.g. they first said "male" then "actually, female"), \
 output an UPDATED fill for that slot that MERGES the still-true details with the correction (here: \
-keep the age, change the gender), and reflect the corrected state in value + paraphrase. \
+keep the age, change the gender), and reflect the corrected state in value + paraphrase. This \
+applies EQUALLY when the new message answers a DIRECT question whose subject a slot already \
+recorded: if a slot's "current" says the respondent is in engineering and they now answer the \
+department question with "Marketing", you MUST re-emit that slot's fill with department changed to \
+"Marketing" (their word) — do not leave the slot reading the old value just because the form answer \
+was captured separately. \
 RE-SCAN EVERY slot against the new message each turn, not only the one the conversation is currently \
 about: when the new answer adds context to ANY slot that already has a "current" value — even one \
 from another theme — emit an updated fill whose value + paraphrase is a SUPERSET of the prior \
@@ -203,7 +224,32 @@ bundled with a complaint (e.g. "I hate my job because my boss abuses me"). Do NO
 statement to "merely critical", and do NOT omit it.
 OMIT the "sensitivity" field only for a neutral, negative, or merely critical OPINION that reports \
 no personal harm (e.g. "management doesn't listen", "the tools are clunky"). When a genuine \
-disclosure of harm IS present, always include it.`;
+disclosure of harm IS present, always include it.
+Judge the CURRENT message only: a disclosure on an earlier turn does NOT make this message \
+sensitive. So OMIT the field for a message that is ONLY hostility, an insult, or profanity aimed at \
+the survey or interviewer with no new disclosure (e.g. "screw you", "oh just fuck off") — even when \
+an earlier turn was a genuine disclosure.`;
+
+/**
+ * REPLACES the default framing on the answer-fit RESOLVER pass (`ctx.forceFit`). The candidate list
+ * is a small set of choice/likert questions the respondent already addressed in conversation, but
+ * whose meaning the first pass couldn't pin to an option/scale point. This pass exists to COMMIT to
+ * a fit, so the bar for emitting an answer is lower than the cautious primary pass — but never
+ * invent one the conversation doesn't support.
+ */
+const FORCE_FIT_RULES = `
+
+This is a FOCUSED RESOLUTION pass. Each candidate question below is one the respondent ALREADY \
+addressed in the conversation, but their wording didn't line up with an option or scale point. Your \
+job is to commit to the SINGLE best-fitting value for each, reading the whole conversation:
+- Map the respondent's MEANING, not their exact words — "Marketing" → the "Other" option when the \
+listed choices don't include it; "10 years" → the option whose range contains it ("3+ years"); \
+"I love this place" → the top of the likert scale; "it's a nightmare" → the bottom.
+- Return the choice's "value" (slug), or the integer scale point — NEVER the label or raw words.
+- Prefer committing to the closest genuine fit over omitting. Omit a question ONLY when the \
+conversation truly says nothing that bears on it. A low-but-honest "confidence" is fine.
+- Use provenance "inferred" (or "synthesised" if it draws on several turns); a "direct" value still \
+needs a "sourceQuote".`;
 
 /** Render one data-slot candidate as a compact, model-readable line. */
 function describeDataSlot(slot: DataSlotCandidateView): string {
@@ -290,7 +336,9 @@ export function buildAnswerExtractionPrompt(ctx: ExtractionContext): LlmMessage[
   const systemContent =
     (hasDataSlots ? SYSTEM_RULES + DATA_SLOT_RULES : SYSTEM_RULES) +
     // Sensitivity block only when the feature is on — zero added prompt/tokens otherwise.
-    (ctx.sensitivityAware ? SENSITIVITY_RULES : '');
+    (ctx.sensitivityAware ? SENSITIVITY_RULES : '') +
+    // Answer-fit resolver pass: append the commit-to-a-fit framing (only on the focused 2nd call).
+    (ctx.forceFit ? FORCE_FIT_RULES : '');
   const dataSlotSection = hasDataSlots
     ? `\n\nData slots (capture these — a primary deliverable, fill every one the message informs):\n${ctx.dataSlotCandidates!.map(describeDataSlot).join('\n')}`
     : '';

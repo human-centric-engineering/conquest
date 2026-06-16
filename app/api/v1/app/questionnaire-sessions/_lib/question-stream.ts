@@ -145,6 +145,18 @@ export function extractOptionLabels(typeConfig: unknown): string[] | undefined {
   return undefined;
 }
 
+/**
+ * Best-effort integer bounds from a likert slot's config, for the explicit-scale clarifying
+ * fallback. Likert `typeConfig` is `{ min, max }` (no labels array, so {@link extractOptionLabels}
+ * returns nothing for it). Returns `undefined` when no usable bounds are present.
+ */
+export function extractLikertScale(typeConfig: unknown): { min: number; max: number } | undefined {
+  if (typeConfig === null || typeof typeConfig !== 'object') return undefined;
+  const { min, max } = typeConfig as Record<string, unknown>;
+  if (typeof min === 'number' && typeof max === 'number' && max > min) return { min, max };
+  return undefined;
+}
+
 /** Build the plain-prose interviewer prompt — explicitly NOT JSON, so tokens stream as prose. */
 export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMessage[] {
   const a = input.audience ?? {};
@@ -200,6 +212,13 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
     'pre-list everything you hope to learn (e.g. do not tack on "…and tell me what was good, any ' +
     'challenges, and what changed"). State the core question simply and let them answer; you can ' +
     'always draw out more on the next turn. ' +
+    // Phase 5 — infer scales/choices from natural language; only spell them out as a last resort.
+    'When the question is a rating SCALE, ask about the underlying feeling or judgement in plain, ' +
+    'everyday language and read their level from HOW they answer — unless told below that a ' +
+    'clarification is needed, do NOT ask them to pick a number or recite a numeric scale. When the ' +
+    'question has fixed CHOICES, ask it openly in your own words and let them answer naturally (we ' +
+    'map their reply to an option for them) — unless told below, do NOT read out the list of ' +
+    'options. ' +
     (input.isOpening
       ? 'This is the very first message of the conversation — be proactive and set the scene. ' +
         'Open with a short, warm scene-setting line ("Let\'s start by…", "To begin, we\'ll explore…") ' +
@@ -245,11 +264,22 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
     'single phrase is the clear focus.';
 
   const options = extractOptionLabels(input.typeConfig);
+  const likertScale = extractLikertScale(input.typeConfig);
   const transcript = input.recentMessages.slice(-6).join('\n');
+
+  // Phase 5 — only spell out the choices/scale when we're STRUGGLING (a re-ask after the prior
+  // answer wasn't captured). On the first ask, the standing rules keep it open and we infer.
+  const clarifyGuidance = !input.isReask
+    ? ''
+    : options
+      ? `\n\nThe last reply wasn't clear enough to map, so this time you MAY gently offer the choices to make it easy: ${options.join(', ')}.`
+      : likertScale
+        ? `\n\nThe last reply wasn't clear enough to map, so this time you MAY offer the simple ${likertScale.min}–${likertScale.max} scale (where ${likertScale.max} is the most positive) to make it easy.`
+        : '';
 
   const user =
     `The question to ask (type: ${QUESTION_TYPE_LABELS[input.type]}):\n"${input.prompt}"` +
-    (options ? `\n\nOffer these choices naturally: ${options.join(', ')}.` : '') +
+    clarifyGuidance +
     (input.guidelines
       ? `\n\nAnswer guidance (for you, do not read aloud): ${input.guidelines}`
       : '') +

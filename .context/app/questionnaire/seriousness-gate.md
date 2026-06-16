@@ -3,18 +3,35 @@
 Per answered turn, the gate judges whether a respondent's answer is a **genuine attempt**.
 Non-genuine answers (preposterous, abusive, off-topic — e.g. "**543 years**" of tenure) are
 **disregarded** (never persisted), **strike** the session, escalate a polite warning, and at the
-questionnaire's `abuseThreshold` **abandon** the session. Colloquial / lazy / brief answers
+questionnaire's `abuseThreshold` **abort** the session (terminal status `aborted`). Colloquial / lazy / brief answers
 ("very unlikely", "prefer not to say") are tolerated. Mirrors contradiction detection (F4.3)
 end-to-end: a per-turn judge whose result becomes a `warning` SSE frame, gated by a platform
 flag + a per-questionnaire config knob, rendered as a side-band notice.
 
-## The judge
+## Two layers: a deterministic floor + the LLM judge
 
-The **judge** (`invokers.assessSeriousness`, a direct structured LLM call in
-`app/api/v1/app/questionnaire-sessions/_lib/turn-invokers.ts` reusing the answer-extractor's
-provider/model binding) runs on **every answered turn** while the gate is on AND
-`abuseThreshold > 0`, returning a `{ serious, reason }` verdict (`lib/app/questionnaire/seriousness/`).
-It's a cheap (~$0.0001) gpt-4o-mini-tier call. Fail-soft: a null verdict skips the gate.
+The gate decides "non-genuine?" in two layers, in order:
+
+1. **Deterministic abuse floor** (`keywordAbuseFloor`, `lib/app/questionnaire/seriousness/abuse-net.ts`)
+   — a SHORT message dominated by directed hostility ("oh just fuck off", "screw you", "go fuck
+   yourself", "piss off") is struck **without any LLM call**. This exists because the judge is
+   probabilistic: with a prior disclosure in its recent-conversation context it intermittently reads
+   plain dismissals as the _distress_ of an upset respondent and returns `serious: true`, so clear
+   abuse went unstruck across turns. The floor makes the obvious cases reliable. It is deliberately
+   tight — only directed-dismissal phrases (never bare insults that can sit inside a genuine
+   complaint like "my boss is an asshole"), and only on short messages (a hostile phrase inside a
+   longer sentence — "my manager told me to fuck off" — is a _report_, left to the judge). It fires
+   **even when an LLM flagged the turn sensitive** (an over-eager detector must not shield plain
+   abuse) and is suppressed **only by the deterministic HARM floor** (`keywordSensitivityFloor`), so
+   abuse paired with a real disclosure stays protected. A floor strike records an
+   `app_assess_seriousness` tool call with no `latencyMs` (no LLM call).
+
+2. **The judge** (`invokers.assessSeriousness`, a direct structured LLM call in
+   `app/api/v1/app/questionnaire-sessions/_lib/turn-invokers.ts` reusing the answer-extractor's
+   provider/model binding) runs for the nuanced cases — when the turn was **not** deterministically
+   abusive **and** not flagged a genuine disclosure (`!extractedSensitivity`). It returns a
+   `{ serious, reason }` verdict (`lib/app/questionnaire/seriousness/`); a cheap (~$0.0001)
+   gpt-4o-mini-tier call. Fail-soft: a null verdict skips the gate.
 
 > **History / why not "only on suspicion".** The first design was two-stage to save cost: the
 > answer-extractor also emitted a `suspectedNonGenuine` hint and the judge ran only when it was
@@ -23,17 +40,40 @@ It's a cheap (~$0.0001) gpt-4o-mini-tier call. Fail-soft: a null verdict skips t
 > trace) but it **no longer gates** the judge; running the (cheap) judge every answered turn is the
 > reliable path.
 
+### Safeguarding precedence vs. later abuse
+
+Two safeguards interact here. (1) When **sensitivity detection** flags a genuine disclosure _this
+turn_ (`extractedSensitivity` — the merge of the extractor field, the dedicated detector, and the
+keyword net; see [sensitivity awareness](./sensitivity-awareness.md)), the orchestrator **skips the
+judge entirely** — a harm disclosure is by definition a real answer and must never be struck
+(`orchestrator.ts`, the `!extractedSensitivity` guard, evaluated at step 1.5 after the step-1.4
+merge). (2) The judge prompt has its own OVERRIDING SAFEGUARDING RULE as defense-in-depth for when
+sensitivity awareness is off.
+
+But the judge **scopes that rule to the message it is ruling on**. A disclosure on an _earlier_
+turn does **not** grant blanket immunity to _later_ messages: pure hostility / profanity aimed at
+the interviewer with no new disclosure or substantive content (e.g. "go fuck yourself" two turns
+after "I am being abused by my manager") is still **ABUSIVE** and is struck. The recent
+conversation is context for reading the message, not a reason to keep it. Venting that carries
+content or a fresh disclosure ("I'm still being bullied and I'm furious") stays genuine. Note that
+the persisted `sensitivityLevel` still keeps the **phraser** in a warm/careful tone for the rest of
+the session — tone-softening and the strike decision are independent.
+
 ## On a NOT-serious verdict (pure orchestrator, `orchestrator.ts`)
 
 - **Disregard** — clear the turn's `answerUpserts`; the answer is never merged or persisted.
 - **Strike** — `evaluateAbuseStrike(state.abuseStrikes, threshold)` (`seriousness/seriousness-logic.ts`).
 - **Below threshold** — emit a `warning` (`code: 'seriousness'`) with escalating copy (gentle →
   firm); because the answer wasn't merged, selection **re-asks the same still-unanswered question**.
-  Rendered by `SeriousnessNotice` inline beneath the re-asked turn. The route persists the frame on
-  the turn (`AppQuestionnaireTurn.warnings`), so the notice survives the next input and replays on
-  resume rather than vanishing (see `per-turn-orchestrator.md` § resume replay).
-- **At/over threshold** — `result.abuse.abandon = true` + a deterministic polite final message;
-  the pure core skips detect/refine/select.
+  The **penultimate** warning (the last one before abort, `remaining === 1`) ends with a **bold**
+  last-chance sentence — `warningCopy` wraps it in `**…**` and `SeriousnessNotice` renders the
+  markers as `<strong>` (a tiny system-text-only inline renderer; the notice is otherwise plain).
+  Rendered inline beneath the re-asked turn. The route persists the frame on the turn
+  (`AppQuestionnaireTurn.warnings`), so the notice survives the next input and replays on resume
+  (see `per-turn-orchestrator.md` § resume replay).
+- **At/over threshold** — `result.abuse.abandon = true` + the deterministic `abuseAbortMessage(count)`
+  final message ("There have now been {count} occasions … record this session as aborted.",
+  singular-aware); the pure core skips detect/refine/select.
 
 `runTurn` stays pure: it reads `state.abuseStrikes`, returns
 `result.abuse = { flagged, newStrikeCount, abandon, reason }`; the **route does the I/O**.
@@ -41,9 +81,11 @@ It's a cheap (~$0.0001) gpt-4o-mini-tier call. Fail-soft: a null verdict skips t
 ## Route (`…/questionnaire-sessions/[id]/messages/route.ts`)
 
 After the reply streams + `persistTurn`: when `result.abuse?.flagged`, `persistAbuseStrikes()`;
-when `abandon`, `abandonSession(sessionId, { reason: 'abuse_threshold_exceeded', metadata })`
-(status → `abandoned`). The lifecycle status poll then locks the composer (`abandoned` →
-`not_active`) and every later turn 409s. `seriousnessGate` is forced off on a kickoff turn.
+when `abandon`, `abortSession(sessionId, { reason: 'abuse_threshold_exceeded', metadata })` (status
+→ **`aborted`**). `aborted` is a distinct terminal status set ONLY by the abuse gate — separate from
+the admin/manual `abandoned` — so the outcome reads as "Aborted" and analytics can tell them apart.
+The lifecycle status poll then locks the composer (any non-active terminal status → `not_active`)
+and every later turn 409s. `seriousnessGate` is forced off on a kickoff turn.
 
 ## Config & gating
 
@@ -51,16 +93,20 @@ when `abandon`, `abandonSession(sessionId, { reason: 'abuse_threshold_exceeded',
   (`isSeriousnessGateEnabled()`; requires master + live-sessions flags). Seeded by
   `prisma/seeds/app-questionnaire/029-seriousness-gate-flag.ts`.
 - **Per-questionnaire** `AppQuestionnaireConfig.abuseThreshold` (Int, default **4**; **0 = off**) —
-  non-genuine answers tolerated before abandon. Edited in the config editor ("Abuse threshold").
-  Escalation at the default: strikes 1–3 warn (firming up), the 4th abandons.
+  non-genuine answers tolerated before abort. Edited in the config editor ("Abuse threshold").
+  Escalation at the default: strikes 1–2 warn gently, strike 3 is the firm bold last-chance warning,
+  the 4th aborts.
 - **Per-session** `AppQuestionnaireSession.abuseStrikes` (Int, default 0) — the strike counter.
 
 ## Analytics
 
-Abandonment writes an `app_questionnaire_session_event` with `eventType: 'abandoned'`,
-`reason: 'abuse_threshold_exceeded'`, and `metadata: { strikes, threshold, judgeReason }`. Filter
-session-outcome analytics on that `reason` to count abuse-driven abandonments
-(`ABUSE_ABANDON_REASON` in `lib/app/questionnaire/types.ts` is the single source of truth).
+Abort writes an `app_questionnaire_session_event` with `eventType: 'aborted'`,
+`reason: 'abuse_threshold_exceeded'`, and `metadata: { strikes, threshold, judgeReason }`. The
+session's terminal status is `aborted` (distinct from admin `abandoned`). The completion funnel
+(`analytics/funnel.ts`) counts only `completed` as completed, so an `aborted` session is a
+started-but-not-completed run — it lowers the completion rate exactly like any non-completion, and is
+distinguishable from admin abandonment by status (`ABUSE_ABANDON_REASON` in
+`lib/app/questionnaire/types.ts` remains the reason constant).
 
 Both orchestrators run the gate: question mode (`runTurn`) and **data-slot mode**
 (`runDataSlotTurn`). In data-slot mode a non-serious verdict disregards both the background
@@ -76,7 +122,8 @@ question answers and the data-slot fills for that turn.
 
 ## Files
 
-Pure core: `lib/app/questionnaire/seriousness/**`, `orchestrator/{orchestrator,types}.ts`,
+Pure core: `lib/app/questionnaire/seriousness/**` (incl. `abuse-net.ts` — the deterministic floor),
+`orchestrator/{orchestrator,data-slot-orchestrator,types}.ts`,
 `types.ts` (`abuseThreshold`, `ABUSE_ABANDON_REASON`). Capability/suspicion:
 `capabilities/extract-answer-slots.ts`, `extraction/extraction-{schema,prompt}.ts`. Route seam:
 `turn-invokers.ts`, `turn-context.ts`, `messages/route.ts`, `feature-flag.ts`,

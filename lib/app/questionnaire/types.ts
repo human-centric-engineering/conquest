@@ -199,6 +199,15 @@ export type SelectionStrategy = (typeof SELECTION_STRATEGIES)[number];
 export const CONTRADICTION_MODES = ['off', 'flag', 'probe'] as const;
 export type ContradictionMode = (typeof CONTRADICTION_MODES)[number];
 
+/** Semantic answer-fit resolver mode. A second, focused extraction pass that maps a clearly-given
+ *  free-form answer onto a choice/likert question's options/scale when the primary extractor
+ *  couldn't (e.g. "Marketing" → the `Other` option; "10 years" → the `3+ years` bucket). `off`
+ *  disables it; `fallback` (default) runs it only for questions the respondent addressed but the
+ *  extractor failed to map; `always` additionally resolves still-unanswered choice/likert questions
+ *  each turn. Reuses the answer-extractor agent — no extra cost on the common path under `fallback`. */
+export const ANSWER_FIT_MODES = ['off', 'fallback', 'always'] as const;
+export type AnswerFitMode = (typeof ANSWER_FIT_MODES)[number];
+
 /** Input type of a session-start profile field. Distinct from `QUESTION_TYPES` —
  *  these are lightweight identity/registration inputs, not questionnaire items. */
 export const PROFILE_FIELD_TYPES = ['text', 'email', 'number', 'select'] as const;
@@ -326,7 +335,15 @@ export type ImportMethod = (typeof IMPORT_METHODS)[number];
  * derive from it). The schema keeps `@default("active")` — a new session starts
  * in progress.
  */
-export const SESSION_STATUSES = ['active', 'paused', 'completed', 'abandoned'] as const;
+export const SESSION_STATUSES = [
+  'active',
+  'paused',
+  'completed',
+  'abandoned',
+  // Terminal, set ONLY by the seriousness/abuse gate when the strike threshold is hit. Distinct
+  // from `abandoned` (admin/manual) so it reads as "Aborted" and analytics can tell the two apart.
+  'aborted',
+] as const;
 export type SessionStatus = (typeof SESSION_STATUSES)[number];
 
 /**
@@ -434,6 +451,8 @@ export type QuestionnaireConfigShape = {
   contradictionWindowN: number;
   /** Run contradiction detection every N respondent turns; 1 = every turn. */
   contradictionEveryNTurns: number;
+  /** Semantic answer-fit resolver mode — see {@link ANSWER_FIT_MODES}. Default `fallback`. */
+  answerFitMode: AnswerFitMode;
   anonymousMode: boolean;
   /**
    * Who may start a session (the access axis — orthogonal to {@link anonymousMode}). See
@@ -542,6 +561,7 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   contradictionMode: 'off',
   contradictionWindowN: 0,
   contradictionEveryNTurns: 1,
+  answerFitMode: 'fallback',
   anonymousMode: false,
   accessMode: 'invitation_only',
   inviteeFields: DEFAULT_INVITEE_FIELDS,

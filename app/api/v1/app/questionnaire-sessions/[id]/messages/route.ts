@@ -60,7 +60,7 @@ import { turnLimiter } from '@/app/api/v1/app/questionnaire-sessions/_lib/rate-l
 import { buildTurnContext } from '@/app/api/v1/app/questionnaires/_lib/turn-context';
 import { sumSessionTurnCost } from '@/app/api/v1/app/questionnaires/_lib/turns';
 import {
-  abandonSession,
+  abortSession,
   hasCostCapReachedEvent,
   pauseSession,
   persistAbuseStrikes,
@@ -276,6 +276,8 @@ async function handleMessage(
       adaptiveEnabled: adaptive,
       // Sensitivity awareness: ask the extractor to also flag a sensitive disclosure (kickoff off).
       sensitivityAware: body.kickoff ? false : sensitivityAware,
+      // Answer-fit resolver: per-questionnaire mode for the focused free-form → choice/likert pass.
+      answerFitMode: loaded.base.config.answerFitMode,
       // Data Slots feature: feed the data slots so the SAME extraction call fills them too. Each
       // carries its `current` fill (when any) so a correction merges/updates rather than re-derives.
       ...(dataSlotMode
@@ -529,15 +531,17 @@ async function handleMessage(
         });
       }
 
-      // Seriousness / abuse gate: persist the new strike count and, at the threshold, abandon the
-      // session (status → `abandoned`, reason `abuse_threshold_exceeded` + metadata for analytics).
-      // Best-effort: a bookkeeping failure here must not retro-fail an already-streamed reply. Once
-      // abandoned, the status gate 409s every later turn and the lifecycle poll locks the composer.
+      // Seriousness / abuse gate: persist the new strike count and, at the threshold, ABORT the
+      // session (status → `aborted`, reason `abuse_threshold_exceeded` + metadata for analytics).
+      // `aborted` is distinct from admin `abandoned` so the outcome reads as "Aborted" and analytics
+      // can separate the two. Best-effort: a bookkeeping failure here must not retro-fail an
+      // already-streamed reply. Once aborted, the status gate 409s every later turn and the lifecycle
+      // poll locks the composer.
       if (result.abuse?.flagged) {
         try {
           await persistAbuseStrikes(sessionId, result.abuse.newStrikeCount);
           if (result.abuse.abandon) {
-            await abandonSession(sessionId, {
+            await abortSession(sessionId, {
               reason: ABUSE_ABANDON_REASON,
               metadata: {
                 strikes: result.abuse.newStrikeCount,
@@ -545,17 +549,17 @@ async function handleMessage(
                 judgeReason: result.abuse.reason,
               },
             });
-            log.info('Live turn: session abandoned by abuse gate', {
+            log.info('Live turn: session aborted by abuse gate', {
               sessionId,
               strikes: result.abuse.newStrikeCount,
               threshold: state.config.abuseThreshold,
             });
             // The polite final message already streamed as the agent's reply; the session is now
-            // `abandoned`, so the lifecycle status poll locks the composer and every later turn
+            // `aborted`, so the lifecycle status poll locks the composer and every later turn
             // 409s (status gate). No extra terminal frame needed.
           }
         } catch (err) {
-          log.error('Abuse gate: strike/abandon write failed (reply already streamed)', {
+          log.error('Abuse gate: strike/abort write failed (reply already streamed)', {
             sessionId,
             error: err instanceof Error ? err.message : String(err),
           });

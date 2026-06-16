@@ -18,7 +18,7 @@ import {
   type TurnState,
 } from '@/lib/app/questionnaire/orchestrator';
 import type { DataSlotFillIntent } from '@/lib/app/questionnaire/extraction/types';
-import { ABUSE_ABANDON_MESSAGE } from '@/lib/app/questionnaire/seriousness';
+import { abuseAbortMessage } from '@/lib/app/questionnaire/seriousness';
 import {
   state,
   stubInvokers,
@@ -374,7 +374,7 @@ describe('runDataSlotTurn — seriousness / abuse gate', () => {
 
     const result = await runDataSlotTurn(
       dsState({
-        userMessage: 'piss off',
+        userMessage: '543 years', // preposterous, not keyword-abuse → exercises the LLM judge path
         questions: [q({ id: 'a' })],
         dataSlots: [ds({ id: 'd1', key: 'd1', theme: 'A' })],
       }),
@@ -410,7 +410,7 @@ describe('runDataSlotTurn — seriousness / abuse gate', () => {
     );
 
     expect(result.abuse).toMatchObject({ flagged: true, abandon: true, newStrikeCount: 4 });
-    expect(result.response).toEqual({ kind: 'complete', text: ABUSE_ABANDON_MESSAGE });
+    expect(result.response).toEqual({ kind: 'complete', text: abuseAbortMessage(4) });
     expect(result.sideEffects.dataSlotFills).toHaveLength(0);
     // No side-band notices on the terminal turn (the extraction diagnostic is dropped).
     expect(result.events).toEqual([]);

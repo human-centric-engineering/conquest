@@ -16,6 +16,7 @@ import {
   MAX_TITLE_LENGTH,
   parseAdminMetadata,
   parseExtractTablesFlag,
+  parseRequiredMode,
 } from '@/app/api/v1/app/questionnaires/_lib/upload-input';
 
 function form(fields: Record<string, string>): FormData {
@@ -126,6 +127,28 @@ describe('parseAdminMetadata — audience', () => {
     expect(() => parseAdminMetadata(form({ 'audience.estimatedDurationMinutes': '0' }))).toThrow(
       ValidationError
     );
+  });
+});
+
+describe('parseRequiredMode', () => {
+  it("defaults to 'all' when the form omits requiredMode", () => {
+    expect(parseRequiredMode(form({}))).toBe('all');
+  });
+
+  it("treats an empty/whitespace requiredMode as absent (defaults to 'all')", () => {
+    expect(parseRequiredMode(form({ requiredMode: '   ' }))).toBe('all');
+  });
+
+  it("captures an explicit 'source' choice", () => {
+    expect(parseRequiredMode(form({ requiredMode: 'source' }))).toBe('source');
+  });
+
+  it("captures an explicit 'all' choice", () => {
+    expect(parseRequiredMode(form({ requiredMode: 'all' }))).toBe('all');
+  });
+
+  it('throws ValidationError for an unrecognised requiredMode', () => {
+    expect(() => parseRequiredMode(form({ requiredMode: 'maybe' }))).toThrow(ValidationError);
   });
 });
 

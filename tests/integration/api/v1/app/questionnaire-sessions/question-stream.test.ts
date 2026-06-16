@@ -234,15 +234,66 @@ describe('buildStreamingQuestionPrompt', () => {
     expect(system).toMatch(/could not capture a usable answer|re-ask/i);
   });
 
-  it('offers the scale choices naturally when typeConfig has options', () => {
+  it('keeps choices/scale OPEN on a first ask — infers rather than reciting (Phase 5)', () => {
+    const messages = buildStreamingQuestionPrompt({
+      ...INPUT,
+      isReask: false,
+      type: 'single_choice',
+      typeConfig: {
+        choices: [
+          { value: 'a', label: 'Engineering' },
+          { value: 'b', label: 'Sales' },
+        ],
+      },
+    });
+    const system = text(messages[0].content);
+    const user = text(messages[1].content);
+    // Standing rule: ask openly, infer from natural language, don't read out the option list.
+    expect(system).toMatch(/do NOT read out the list of/i);
+    expect(system).toMatch(/rating SCALE/i);
+    // First ask does not enumerate the options.
+    expect(user).not.toContain('Engineering, Sales');
+  });
+
+  it('offers the options explicitly only on a struggling re-ask (last resort)', () => {
     const user = text(
       buildStreamingQuestionPrompt({
         ...INPUT,
-        type: 'likert',
-        typeConfig: { options: ['easy', 'okay', 'difficult'] },
+        isReask: true,
+        type: 'single_choice',
+        typeConfig: {
+          choices: [
+            { value: 'a', label: 'Engineering' },
+            { value: 'b', label: 'Sales' },
+          ],
+        },
       })[1].content
     );
-    expect(user).toContain('easy, okay, difficult');
+    expect(user).toMatch(/wasn't clear enough to map/i);
+    expect(user).toContain('Engineering, Sales');
+  });
+
+  it('offers the numeric likert scale only on a re-ask, derived from min/max', () => {
+    const first = text(
+      buildStreamingQuestionPrompt({
+        ...INPUT,
+        isReask: false,
+        type: 'likert',
+        typeConfig: { min: 1, max: 5 },
+      })[1].content
+    );
+    // No explicit numeric-scale offer on the first ask (the "Rating scale" type label is fine).
+    expect(first).not.toContain('1–5 scale');
+    expect(first).not.toMatch(/wasn't clear enough to map/i);
+    const reask = text(
+      buildStreamingQuestionPrompt({
+        ...INPUT,
+        isReask: true,
+        type: 'likert',
+        typeConfig: { min: 1, max: 5 },
+      })[1].content
+    );
+    expect(reask).toMatch(/1–5 scale/);
   });
 
   it('calibrates tone to a novice audience and a non-English locale', () => {

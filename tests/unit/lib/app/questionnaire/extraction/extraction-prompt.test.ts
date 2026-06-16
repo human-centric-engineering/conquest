@@ -31,6 +31,32 @@ describe('buildAnswerExtractionPrompt', () => {
     expect(system).not.toContain('refined');
   });
 
+  it('instructs the model to map meaning onto options/scale (buckets, likert sentiment, catch-all)', () => {
+    const messages = buildAnswerExtractionPrompt(ctx({ candidateSlots: [slot({ key: 'q1' })] }));
+    const system = typeof messages[0]?.content === 'string' ? messages[0].content : '';
+    // Returns the slug, not the label or raw words.
+    expect(system).toMatch(/the slug.*NEVER its label/i);
+    // Quantities/durations → the range bucket.
+    expect(system).toMatch(/option whose RANGE contains them/i);
+    // likert from sentiment strength, never a numeric rating prompt.
+    expect(system).toMatch(/do NOT expect, or wait for, a numeric rating/i);
+    // On-topic-but-unlisted → the catch-all option.
+    expect(system).toMatch(/catch-all option/i);
+  });
+
+  it('appends the focused commit-to-a-fit framing only when forceFit is set', () => {
+    const base = ctx({ candidateSlots: [slot({ key: 'department', type: 'single_choice' })] });
+    const without = buildAnswerExtractionPrompt(base);
+    const withFit = buildAnswerExtractionPrompt({ ...base, forceFit: true });
+    const sysOf = (m: ReturnType<typeof buildAnswerExtractionPrompt>) =>
+      typeof m[0]?.content === 'string' ? m[0].content : '';
+    expect(sysOf(without)).not.toMatch(/FOCUSED RESOLUTION/i);
+    const sys = sysOf(withFit);
+    expect(sys).toMatch(/FOCUSED RESOLUTION/i);
+    // Commit to the closest genuine fit rather than omit.
+    expect(sys).toMatch(/Prefer committing to the closest genuine fit/i);
+  });
+
   it('omits the sensitivity block by default (zero added prompt when the feature is off)', () => {
     const messages = buildAnswerExtractionPrompt(ctx({ candidateSlots: [slot({ key: 'q1' })] }));
     const system = typeof messages[0]?.content === 'string' ? messages[0].content : '';
@@ -205,6 +231,22 @@ describe('buildAnswerExtractionPrompt — data slots', () => {
     // The rules must steer away from meta-summaries toward the actual values.
     expect(system).toContain('25-year-old male');
     expect(system).toMatch(/specifics/i);
+  });
+
+  it('keeps the data-slot value in the respondent’s natural words, not the form slug/label', () => {
+    const messages = buildAnswerExtractionPrompt({
+      ...ctx({ candidateSlots: [slot({ key: 'q1' })], activeQuestionKey: null }),
+      dataSlotCandidates: [
+        { key: 'demographics', name: 'Employee Demographics', description: 'd', theme: 'About' },
+      ],
+    });
+    const system = systemContent(messages);
+    // The data slot records "Marketing" (their word), not the mapped form option "other".
+    expect(system).toMatch(/own words/i);
+    expect(system).toMatch(/NEVER the form's option code or label/i);
+    expect(system).toContain('Marketing');
+    // And a direct-question answer that corrects a recorded slot must update the slot too.
+    expect(system).toMatch(/answers a DIRECT question whose subject a slot already recorded/i);
   });
 
   it('forbids absence fills and demands hedged, low-confidence inferences', () => {

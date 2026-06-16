@@ -215,7 +215,8 @@ describe('persistIngestion', () => {
       versionId: 'ver-1',
       type: 'free_text',
       ordinal: 0,
-      required: false,
+      // persistIngestion defaults to the "all required" policy (the UI checkbox is checked by default).
+      required: true,
       weight: 0.5,
     });
     expect(data[1]).toMatchObject({
@@ -424,6 +425,95 @@ describe('persistIngestion', () => {
       beforeJson: 'terse',
       afterJson: 'a clearer prompt',
     });
+  });
+});
+
+// ─── requiredness policy ──────────────────────────────────────────────────────
+
+describe('persistIngestion requiredness policy', () => {
+  /** Read the `required` flags off the slot createMany call, in slot order. */
+  function writtenRequired(): boolean[] {
+    const data = (tx.appQuestionSlot.createMany as Mock).mock.calls[0][0].data as Array<
+      Record<string, unknown>
+    >;
+    return data.map((d) => d.required as boolean);
+  }
+
+  it("defaults to 'all' — every slot required — when requiredness is omitted", async () => {
+    await persistIngestion(input());
+    expect(writtenRequired()).toEqual([true, true]);
+  });
+
+  it("'optional' writes every slot as not required, ignoring the source flag", async () => {
+    await persistIngestion(
+      input({
+        requiredness: 'optional',
+        extraction: extraction({
+          questions: [
+            {
+              sectionOrdinal: 0,
+              key: 'a',
+              prompt: 'A?',
+              suggestedType: 'free_text',
+              extractionConfidence: 1,
+              required: true, // even a source-required question is forced optional
+            },
+          ],
+        }),
+      })
+    );
+    expect(writtenRequired()).toEqual([false]);
+  });
+
+  it("'source' honours each question's extracted required flag (missing ⇒ false)", async () => {
+    await persistIngestion(
+      input({
+        requiredness: 'source',
+        extraction: extraction({
+          sections: [{ ordinal: 0, title: 'S' }],
+          questions: [
+            {
+              sectionOrdinal: 0,
+              key: 'marked',
+              prompt: 'Marked required?',
+              suggestedType: 'free_text',
+              extractionConfidence: 1,
+              required: true,
+            },
+            {
+              sectionOrdinal: 0,
+              key: 'unmarked',
+              prompt: 'Not marked?',
+              suggestedType: 'free_text',
+              extractionConfidence: 1,
+              // no `required` ⇒ falls back to false
+            },
+          ],
+        }),
+      })
+    );
+    expect(writtenRequired()).toEqual([true, false]);
+  });
+
+  it("'all' forces required true even when the source omits or denies it", async () => {
+    await persistIngestion(
+      input({
+        requiredness: 'all',
+        extraction: extraction({
+          sections: [{ ordinal: 0, title: 'S' }],
+          questions: [
+            {
+              sectionOrdinal: 0,
+              key: 'unmarked',
+              prompt: 'Not marked?',
+              suggestedType: 'free_text',
+              extractionConfidence: 1,
+            },
+          ],
+        }),
+      })
+    );
+    expect(writtenRequired()).toEqual([true]);
   });
 });
 

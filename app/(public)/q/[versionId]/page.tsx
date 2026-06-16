@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { Fraunces } from 'next/font/google';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
@@ -10,6 +11,7 @@ import {
 } from '@/lib/app/questionnaire/feature-flag';
 import { AnonymousSessionBoot } from '@/components/app/questionnaire/chat/anonymous-session-boot';
 import { BrandThemeProvider } from '@/components/app/questionnaire/chat/brand-theme-provider';
+import { ConquestWordmark } from '@/components/app/questionnaire/conquest-wordmark';
 import { resolveThemeForVersion } from '@/lib/app/questionnaire/chat/theme';
 import {
   resolveAnonymousForVersion,
@@ -19,6 +21,15 @@ import {
   resolveVoiceEnabledForVersion,
 } from '@/lib/app/questionnaire/chat/anonymity';
 import { resolveAdminPreviewMeta } from '@/lib/app/questionnaire/chat/preview-nav';
+
+// Display serif for the ConQuest wordmark, shown only in the admin "Preview as
+// respondent" header. Exposed as a CSS variable so it mirrors the admin surface
+// (and marketing Pricing / About-ConQuest pages) without touching the body font.
+const display = Fraunces({
+  subsets: ['latin'],
+  variable: '--font-display-cq',
+  display: 'swap',
+});
 
 export const metadata: Metadata = {
   title: 'Questionnaire',
@@ -86,24 +97,33 @@ export default async function PublicQuestionnairePage({
   const reasoningPlacement = reasoningPlatform ? reasoningPlacementConfigured : null;
 
   return (
-    <div className="container mx-auto flex h-[calc(100dvh-9rem)] max-w-6xl flex-col px-4 py-6">
-      {/* Admin preview chrome — a slim strip above the brand surface (it's admin meta, not the
-          respondent experience), persisting across every session state so the admin always has a
-          way back. Kept deliberately low-profile so it barely costs vertical space. */}
-      {preview && previewMeta && (
-        <div className="text-muted-foreground mb-2 flex shrink-0 items-center gap-2 px-1 text-[11px]">
-          <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-[color:var(--cq-accent)]" />
-          <span className="text-foreground font-medium">
-            Preview · v{previewMeta.versionNumber} ({previewMeta.status})
-          </span>
-          <span className="truncate">· not recorded in analytics</span>
-          <Link
-            href={previewMeta.exitHref}
-            className="hover:text-foreground ml-auto shrink-0 underline underline-offset-2"
-          >
-            Exit
-          </Link>
-        </div>
+    <div
+      className={`${display.variable} container mx-auto flex h-[calc(100dvh-9rem)] max-w-6xl flex-col px-4 py-6`}
+    >
+      {/* Admin "Preview as respondent" chrome — the ConQuest signature (mirroring the admin
+          surface) plus a slim meta strip above the brand surface. It's admin meta, not the
+          respondent experience, so it shows only in preview: a real respondent sees just the
+          questionnaire's own (white-labelled) brand. The Exit link persists across every session
+          state so the admin always has a way back. */}
+      {preview && (
+        <header className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 px-1">
+          <ConquestWordmark size="page" showSubtitle />
+          {previewMeta && (
+            <div className="text-muted-foreground flex items-center gap-2 text-[11px]">
+              <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-[color:var(--cq-accent)]" />
+              <span className="text-foreground font-medium">
+                Preview · v{previewMeta.versionNumber} ({previewMeta.status})
+              </span>
+              <span className="truncate">· not recorded in analytics</span>
+              <Link
+                href={previewMeta.exitHref}
+                className="hover:text-foreground shrink-0 underline underline-offset-2"
+              >
+                Exit
+              </Link>
+            </div>
+          )}
+        </header>
       )}
       <div className="min-h-0 flex-1">
         <BrandThemeProvider theme={theme}>

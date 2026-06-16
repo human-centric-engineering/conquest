@@ -95,8 +95,13 @@ export function AdminHeader({ title, description }: AdminHeaderProps) {
           {description && <p className="text-muted-foreground text-sm">{description}</p>}
         </div>
 
-        {/* User actions */}
-        <HeaderActions />
+        {/* Right cluster: an app-agnostic portal slot (a section can inject a
+            brand mark / actions here via `#admin-header-slot`) sits left of the
+            shared theme toggle + user menu. Empty on pages that don't use it. */}
+        <div className="flex items-center gap-3">
+          <div id="admin-header-slot" className="flex items-center" />
+          <HeaderActions />
+        </div>
       </div>
     </header>
   );

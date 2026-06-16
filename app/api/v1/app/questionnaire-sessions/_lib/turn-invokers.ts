@@ -31,17 +31,27 @@ import {
   QUESTIONNAIRE_CONTRADICTION_DETECTOR_AGENT_SLUG,
   REFINE_ANSWER_CAPABILITY_SLUG,
 } from '@/lib/app/questionnaire/constants';
-import { ASSESS_SERIOUSNESS_TOOL_SLUG } from '@/lib/app/questionnaire/orchestrator';
+import {
+  ASSESS_SERIOUSNESS_TOOL_SLUG,
+  DETECT_SENSITIVITY_TOOL_SLUG,
+} from '@/lib/app/questionnaire/orchestrator';
 import {
   buildSeriousnessJudgePrompt,
   validateSeriousnessVerdict,
   type SeriousnessVerdictRaw,
 } from '@/lib/app/questionnaire/seriousness';
 import {
+  buildSensitivityDetectPrompt,
+  validateSensitivityDetectVerdict,
+  normalizeSensitivityVerdict,
+  type SensitivityDetectVerdictRaw,
+} from '@/lib/app/questionnaire/sensitivity';
+import {
   getStrategy,
   type SelectionContext,
   type StrategyDeps,
 } from '@/lib/app/questionnaire/selection';
+import type { AnswerFitMode } from '@/lib/app/questionnaire/types';
 import type {
   CapabilityInvokers,
   DetectOutcome,
@@ -49,6 +59,7 @@ import type {
   RefineOutcome,
   SelectOutcome,
   SeriousnessOutcome,
+  SensitivityDetectOutcome,
 } from '@/lib/app/questionnaire/orchestrator';
 import type {
   DetectContradictionsData,
@@ -112,6 +123,11 @@ export async function buildTurnInvokers(opts: {
    * toggle; off (default) keeps the prompt and behaviour unchanged.
    */
   sensitivityAware?: boolean;
+  /**
+   * Semantic answer-fit resolver mode (per-questionnaire config). Threaded to the extractor so it
+   * can run the focused follow-up pass. `off`/absent → single pass (no behaviour change).
+   */
+  answerFitMode?: AnswerFitMode;
 }): Promise<CapabilityInvokers> {
   const {
     userId,
@@ -120,6 +136,7 @@ export async function buildTurnInvokers(opts: {
     adaptiveEnabled,
     dataSlotCandidates,
     sensitivityAware,
+    answerFitMode,
   } = opts;
 
   // Flush the built-in + app capability handlers into the dispatcher before any
@@ -169,6 +186,8 @@ export async function buildTurnInvokers(opts: {
           ...(dataSlotCandidates && dataSlotCandidates.length > 0 ? { dataSlotCandidates } : {}),
           // Sensitivity awareness: ask the extractor to also flag a sensitive disclosure.
           ...(sensitivityAware ? { sensitivityAware: true } : {}),
+          // Answer-fit resolver: let the extractor run the focused follow-up pass when enabled.
+          ...(answerFitMode && answerFitMode !== 'off' ? { answerFitMode } : {}),
           sessionId: state.sessionId,
         },
         {
@@ -443,6 +462,134 @@ export async function buildTurnInvokers(opts: {
           costUsd: 0,
           latencyMs: Date.now() - started,
           diagnostic: 'seriousness_judge_failed',
+        };
+      }
+    },
+
+    async detectSensitivity(state): Promise<SensitivityDetectOutcome> {
+      // Dedicated safeguarding detector — a direct structured LLM call (not a registered capability),
+      // run every answered turn the feature is on so detection never depends on the answer-extractor
+      // remembering its optional `sensitivity` field. Reuses the extractor's provider/model binding.
+      // Fail-soft: any failure returns a null assessment + a diagnostic, and the orchestrator still
+      // merges the extractor field + keyword net, so a detector miss never drops a real disclosure.
+      const started = Date.now();
+      // Context for reading an oblique disclosure: the active question (or data-slot name + desc).
+      // Unlike the seriousness judge we do NOT short-circuit when context is absent — a disclosure is
+      // genuine regardless of what was asked, so the detector always runs.
+      const activeDataSlot =
+        state.activeDataSlotKey && state.dataSlots
+          ? state.dataSlots.find((s) => s.key === state.activeDataSlotKey)
+          : undefined;
+      const questionPrompt = activeQuestionKey
+        ? (slots.find((s) => s.key === activeQuestionKey)?.prompt ?? '')
+        : activeDataSlot
+          ? `${activeDataSlot.name} — ${activeDataSlot.description}`
+          : '';
+
+      let providerSlug: string;
+      let model: string;
+      try {
+        const resolved = await resolveAgentProviderAndModel(
+          extractor
+            ? {
+                provider: extractor.provider,
+                model: extractor.model,
+                fallbackProviders: extractor.fallbackProviders,
+              }
+            : { provider: '', model: '', fallbackProviders: [] },
+          'chat'
+        );
+        providerSlug = resolved.providerSlug;
+        model = resolved.model;
+      } catch (err) {
+        logger.error('detect_sensitivity: no provider resolved', {
+          sessionId: state.sessionId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return {
+          assessment: null,
+          costUsd: 0,
+          latencyMs: Date.now() - started,
+          diagnostic: 'no_provider_configured',
+        };
+      }
+
+      let provider: Awaited<ReturnType<typeof getProvider>>;
+      try {
+        provider = await getProvider(providerSlug);
+      } catch {
+        return {
+          assessment: null,
+          costUsd: 0,
+          latencyMs: Date.now() - started,
+          diagnostic: 'provider_unavailable',
+        };
+      }
+
+      const { system, user } = buildSensitivityDetectPrompt({
+        questionPrompt,
+        userMessage: state.userMessage,
+        sessionId: state.sessionId,
+        ...(state.recentMessages.length > 0 ? { recentMessages: state.recentMessages } : {}),
+      });
+      const messages: LlmMessage[] = [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ];
+
+      try {
+        const completion = await runStructuredCompletion<SensitivityDetectVerdictRaw>({
+          provider,
+          model,
+          messages,
+          maxTokens: 600,
+          timeoutMs: 30_000,
+          parse: (raw) =>
+            tryParseJson(raw, (parsed) => {
+              const validation = validateSensitivityDetectVerdict(parsed);
+              return validation.ok ? validation.value : null;
+            }),
+          retryUserMessage:
+            'Return ONLY the JSON object {"detected": boolean, "severity": string, "category": string, "summary": string}.',
+          onFinalFailure: () =>
+            new Error('Sensitivity verdict was not valid against the schema after one retry'),
+        });
+
+        void logCost({
+          ...(extractor ? { agentId: extractor.id } : {}),
+          operation: CostOperation.CHAT,
+          model,
+          provider: providerSlug,
+          inputTokens: completion.tokenUsage.input,
+          outputTokens: completion.tokenUsage.output,
+          metadata: {
+            capability: DETECT_SENSITIVITY_TOOL_SLUG,
+            appQuestionnaireSessionId: state.sessionId,
+          },
+        }).catch((err) => {
+          logger.error('detect_sensitivity: logCost rejected', {
+            sessionId: state.sessionId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+
+        return {
+          assessment: normalizeSensitivityVerdict(completion.value),
+          costUsd: completion.costUsd,
+          latencyMs: Date.now() - started,
+        };
+      } catch (err) {
+        logger.error('detect_sensitivity: structured completion failed', {
+          sessionId: state.sessionId,
+          model,
+          provider: providerSlug,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return {
+          assessment: null,
+          costUsd: 0,
+          latencyMs: Date.now() - started,
+          diagnostic: 'sensitivity_detect_failed',
         };
       }
     },

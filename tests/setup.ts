@@ -77,6 +77,24 @@ vi.mock('next/headers', () => ({
 }));
 
 /**
+ * Mock next/font/google
+ *
+ * Font loaders (e.g. `Fraunces`, `Hanken_Grotesk`) are transformed by the Next compiler at build
+ * time; under Vitest there's no compiler, so calling them throws ("X is not a function"). Each
+ * loader is called at module scope (e.g. `const display = Fraunces({...})`) and returns a handle
+ * with `className` / `variable` / `style`, so any page or layout that imports a font fails to load
+ * without this. The stub returns that shape for every loader the app uses.
+ */
+vi.mock('next/font/google', () => {
+  const loader = () => ({
+    className: 'mock-font',
+    variable: '--mock-font',
+    style: { fontFamily: 'mock' },
+  });
+  return { Fraunces: loader, Hanken_Grotesk: loader };
+});
+
+/**
  * Mock Analytics
  *
  * Analytics hooks require AnalyticsProvider context.

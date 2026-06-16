@@ -845,6 +845,138 @@ describe('AppExtractAnswerSlotsCapability — data-slot mode', () => {
   });
 });
 
+describe('AppExtractAnswerSlotsCapability — answer-fit resolver (Phase 3)', () => {
+  // A single_choice slot whose options the respondent's free-form answer ("Marketing") won't
+  // match — the primary pass drops it, the fit pass maps it to "other".
+  const choiceArgs = (overrides: Record<string, unknown> = {}) => ({
+    userMessage: "I'm in Marketing.",
+    activeQuestionKey: 'department',
+    candidateSlots: [
+      {
+        key: 'department',
+        prompt: 'Which department are you in?',
+        type: 'single_choice',
+        typeConfig: {
+          choices: [
+            { value: 'eng', label: 'Engineering' },
+            { value: 'other', label: 'Other' },
+          ],
+        },
+      },
+    ],
+    sessionId: 'sess-fit',
+    ...overrides,
+  });
+
+  // Primary pass: the model emits the free-form "Marketing" → fails choice validation → dropped.
+  const PRIMARY_UNMAPPED = JSON.stringify({
+    answers: [
+      {
+        slotKey: 'department',
+        value: 'Marketing',
+        confidence: 0.9,
+        provenance: 'direct',
+        rationale: 'Said so.',
+        sourceQuote: 'Marketing',
+      },
+    ],
+  });
+  // Fit pass: maps the meaning to the "Other" option slug.
+  const FIT_RESOLVED = JSON.stringify({
+    answers: [
+      {
+        slotKey: 'department',
+        value: 'other',
+        confidence: 0.6,
+        provenance: 'inferred',
+        rationale: 'Marketing is not listed → Other.',
+      },
+    ],
+  });
+
+  it('fallback: runs a 2nd pass for a dropped choice answer and merges the resolved value', async () => {
+    const provider = makeProvider([{ content: PRIMARY_UNMAPPED }, { content: FIT_RESOLVED }]);
+    (getProvider as Mock).mockResolvedValue(provider);
+
+    const result = await capabilityDispatcher.dispatch(
+      SLUG,
+      choiceArgs({ answerFitMode: 'fallback' }),
+      baseContext()
+    );
+
+    expect(result.success).toBe(true);
+    const data = result.data as { intents: Array<{ slotKey: string; value: unknown }> };
+    const dept = data.intents.find((i) => i.slotKey === 'department');
+    expect(dept?.value).toBe('other');
+    // Two model calls: primary + the focused fit pass.
+    expect(provider.chat).toHaveBeenCalledTimes(2);
+  });
+
+  it('off (default): no 2nd pass — the unmapped answer stays dropped', async () => {
+    const provider = makeProvider([{ content: PRIMARY_UNMAPPED }]);
+    (getProvider as Mock).mockResolvedValue(provider);
+
+    const result = await capabilityDispatcher.dispatch(SLUG, choiceArgs(), baseContext());
+
+    expect(result.success).toBe(true);
+    const data = result.data as { intents: unknown[]; droppedCount: number };
+    expect(data.intents).toHaveLength(0);
+    expect(data.droppedCount).toBe(1);
+    expect(provider.chat).toHaveBeenCalledTimes(1);
+  });
+
+  it('always: resolves a still-unanswered choice question even when the primary pass returned nothing', async () => {
+    // Primary returns no answers at all → department is unanswered (not dropped). `always` still
+    // targets it in the fit pass.
+    const provider = makeProvider([
+      { content: JSON.stringify({ answers: [] }) },
+      { content: FIT_RESOLVED },
+    ]);
+    (getProvider as Mock).mockResolvedValue(provider);
+
+    const result = await capabilityDispatcher.dispatch(
+      SLUG,
+      choiceArgs({ answerFitMode: 'always' }),
+      baseContext()
+    );
+
+    const data = result.data as { intents: Array<{ slotKey: string; value: unknown }> };
+    expect(data.intents.find((i) => i.slotKey === 'department')?.value).toBe('other');
+    expect(provider.chat).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not run a 2nd pass when the primary already answered the choice question', async () => {
+    // The primary maps the choice itself → nothing left for the fit pass, even in `always`.
+    const provider = makeProvider([
+      {
+        content: JSON.stringify({
+          answers: [
+            {
+              slotKey: 'department',
+              value: 'eng',
+              confidence: 0.9,
+              provenance: 'direct',
+              rationale: 'Said engineering.',
+              sourceQuote: 'engineering',
+            },
+          ],
+        }),
+      },
+    ]);
+    (getProvider as Mock).mockResolvedValue(provider);
+
+    const result = await capabilityDispatcher.dispatch(
+      SLUG,
+      choiceArgs({ answerFitMode: 'always' }),
+      baseContext()
+    );
+
+    const data = result.data as { intents: Array<{ slotKey: string; value: unknown }> };
+    expect(data.intents.find((i) => i.slotKey === 'department')?.value).toBe('eng');
+    expect(provider.chat).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('AppExtractAnswerSlotsCapability — optional result fields', () => {
   it('passes suspectedNonGenuine=true through to the result data', async () => {
     const payload = JSON.stringify({

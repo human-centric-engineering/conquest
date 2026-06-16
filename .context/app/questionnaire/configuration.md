@@ -33,6 +33,7 @@ single JSON column for the profile fields:
 | Contradiction-detection mode          | `contradictionMode`        | String (enum)          | `'off'`             |
 | Contradiction look-back window N      | `contradictionWindowN`     | Int                    | `0`                 |
 | Contradiction cadence (every N turns) | `contradictionEveryNTurns` | Int                    | `1`                 |
+| Answer-fit resolver mode              | `answerFitMode`            | String (enum)          | `'fallback'`        |
 | Anonymous mode (identity axis)        | `anonymousMode`            | Boolean                | `false`             |
 | Access mode (who may start)           | `accessMode`               | String (enum)          | `'invitation_only'` |
 | Invitee detail fields                 | `inviteeFields`            | Json (array)           | email + names       |

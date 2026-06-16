@@ -10,6 +10,12 @@
 
 import { cn } from '@/lib/utils';
 
+// Selected answers carry the brand CTA colour (matching the chat↔form toggle's selected
+// indicator); each falls back to the platform primary token when no brand is defined.
+const BRAND_CTA = 'var(--app-cta-color, var(--color-primary))';
+const BRAND_CTA_TINT =
+  'color-mix(in srgb, var(--app-cta-color, var(--color-primary)) 12%, transparent)';
+
 export interface RadioOption {
   value: string;
   label: string;
@@ -45,11 +51,12 @@ export function RadioGroup({
             key={opt.value}
             className={cn(
               'flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors',
-              selected
-                ? 'border-primary bg-primary/10 text-foreground'
-                : 'border-input bg-background hover:bg-muted',
+              selected ? 'text-foreground' : 'border-input bg-background hover:bg-muted',
               disabled && 'cursor-not-allowed opacity-60'
             )}
+            style={
+              selected ? { borderColor: BRAND_CTA, backgroundColor: BRAND_CTA_TINT } : undefined
+            }
           >
             <input
               type="radio"
@@ -59,7 +66,8 @@ export function RadioGroup({
               disabled={disabled}
               onChange={() => onChange(opt.value)}
               onBlur={onBlur}
-              className="text-primary focus-visible:ring-ring h-4 w-4"
+              className="focus-visible:ring-ring h-4 w-4"
+              style={{ accentColor: BRAND_CTA }}
             />
             <span>{opt.label}</span>
           </label>

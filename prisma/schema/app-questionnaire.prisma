@@ -169,6 +169,7 @@ model AppQuestionnaireConfig {
   contradictionMode        String  @default("off") // off | flag | probe (CONTRADICTION_MODES)
   contradictionWindowN     Int     @default(0) // N prior answers to check against; 0 when mode=off
   contradictionEveryNTurns Int     @default(1) // run detection every N respondent turns; 1 = every turn
+  answerFitMode            String  @default("fallback") // off | fallback | always (ANSWER_FIT_MODES) — semantic free-form → choice/likert resolver pass
   anonymousMode            Boolean @default(false) // don't collect identifying profile fields (IDENTITY axis)
   accessMode               String  @default("invitation_only") // invitation_only | public | both (ACCESS_MODES) — who may START (access axis, orthogonal to anonymousMode)
   inviteeFields            Json    @default("[{\"key\":\"firstName\",\"shown\":true,\"required\":false},{\"key\":\"surname\",\"shown\":true,\"required\":false},{\"key\":\"email\",\"shown\":true,\"required\":true},{\"key\":\"jobTitle\",\"shown\":false,\"required\":false},{\"key\":\"team\",\"shown\":false,\"required\":false},{\"key\":\"organisation\",\"shown\":false,\"required\":false}]") // InviteeFieldConfig[] — per-invitee detail fields the admin captures (email forced on)
@@ -463,7 +464,7 @@ model AppDemoClient {
 model AppQuestionnaireSession {
   id               String   @id @default(cuid())
   versionId        String
-  status           String   @default("active") // SESSION_STATUSES (types.ts): active | paused | completed | abandoned
+  status           String   @default("active") // SESSION_STATUSES (types.ts): active | paused | completed | abandoned | aborted
   isPreview        Boolean  @default(false) // true = admin refine-answer exercise, not a respondent run
   respondentUserId String? // respondent User.id; plain String, no FK (UG-1); set in F4.6
   // Invitations: the invitation this session was booted from (frictionless token flow), or null

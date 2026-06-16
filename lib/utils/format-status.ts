@@ -13,6 +13,9 @@ export const STATUS_LABELS: Record<string, string> = {
   failed: 'Failed',
   cancelled: 'Cancelled',
   paused_for_approval: 'Paused for approval',
+  // Questionnaire session statuses (the seriousness-gate terminal vs admin/manual abandon).
+  abandoned: 'Abandoned',
+  aborted: 'Aborted',
 };
 
 /**

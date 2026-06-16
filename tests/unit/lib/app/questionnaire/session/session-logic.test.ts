@@ -28,21 +28,52 @@ import {
  *   abandoned     x       x        x          n
  */
 const EXPECTED: Record<SessionStatus, Record<SessionStatus, 'apply' | 'noop' | 'illegal'>> = {
-  active: { active: 'noop', paused: 'apply', completed: 'apply', abandoned: 'apply' },
-  paused: { active: 'apply', paused: 'noop', completed: 'illegal', abandoned: 'apply' },
-  completed: { active: 'illegal', paused: 'illegal', completed: 'noop', abandoned: 'illegal' },
-  abandoned: { active: 'illegal', paused: 'illegal', completed: 'illegal', abandoned: 'noop' },
+  active: {
+    active: 'noop',
+    paused: 'apply',
+    completed: 'apply',
+    abandoned: 'apply',
+    aborted: 'apply',
+  },
+  paused: {
+    active: 'apply',
+    paused: 'noop',
+    completed: 'illegal',
+    abandoned: 'apply',
+    aborted: 'apply',
+  },
+  completed: {
+    active: 'illegal',
+    paused: 'illegal',
+    completed: 'noop',
+    abandoned: 'illegal',
+    aborted: 'illegal',
+  },
+  abandoned: {
+    active: 'illegal',
+    paused: 'illegal',
+    completed: 'illegal',
+    abandoned: 'noop',
+    aborted: 'illegal',
+  },
+  aborted: {
+    active: 'illegal',
+    paused: 'illegal',
+    completed: 'illegal',
+    abandoned: 'illegal',
+    aborted: 'noop',
+  },
 };
 
 /** The event each `apply` edge records (only apply edges have one). */
 const EXPECTED_EVENT: Partial<
   Record<SessionStatus, Partial<Record<SessionStatus, SessionEventType>>>
 > = {
-  active: { paused: 'paused', completed: 'completed', abandoned: 'abandoned' },
-  paused: { active: 'resumed', abandoned: 'abandoned' },
+  active: { paused: 'paused', completed: 'completed', abandoned: 'abandoned', aborted: 'aborted' },
+  paused: { active: 'resumed', abandoned: 'abandoned', aborted: 'aborted' },
 };
 
-describe('classifyTransition — full 4×4 matrix', () => {
+describe('classifyTransition — full matrix', () => {
   for (const from of SESSION_STATUSES) {
     for (const to of SESSION_STATUSES) {
       it(`${from} → ${to} is ${EXPECTED[from][to]}`, () => {
@@ -53,7 +84,7 @@ describe('classifyTransition — full 4×4 matrix', () => {
 
   it('covers every status pair (no gap in the matrix)', () => {
     // Guards against SESSION_STATUSES growing without this test being updated.
-    expect(SESSION_STATUSES).toEqual(['active', 'paused', 'completed', 'abandoned']);
+    expect(SESSION_STATUSES).toEqual(['active', 'paused', 'completed', 'abandoned', 'aborted']);
   });
 });
 
@@ -68,15 +99,16 @@ describe('canTransition', () => {
 });
 
 describe('isTerminal', () => {
-  it('completed and abandoned are terminal; active and paused are not', () => {
+  it('completed, abandoned and aborted are terminal; active and paused are not', () => {
     expect(isTerminal('completed')).toBe(true);
     expect(isTerminal('abandoned')).toBe(true);
+    expect(isTerminal('aborted')).toBe(true);
     expect(isTerminal('active')).toBe(false);
     expect(isTerminal('paused')).toBe(false);
   });
 
   it('a terminal status has no apply edge to any other status', () => {
-    for (const from of ['completed', 'abandoned'] as const) {
+    for (const from of ['completed', 'abandoned', 'aborted'] as const) {
       for (const to of SESSION_STATUSES) {
         expect(canTransition(from, to)).toBe(false);
       }
@@ -150,6 +182,7 @@ describe('SESSION_EVENT_TYPES vocabulary', () => {
       'resumed',
       'completed',
       'abandoned',
+      'aborted',
       'cost_cap_reached',
       'sensitivity_flagged',
     ]);

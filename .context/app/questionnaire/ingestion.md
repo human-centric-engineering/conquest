@@ -20,12 +20,28 @@ extraction → transactional write, then returns the new ids.
 | `demoClientId`     | optional | DEMO-ONLY (F2.5.1) — attribute the new questionnaire to this demo client.       |
 | `goal`             | optional | Admin-set goal. Present ⇒ the extractor must **not** infer it.                  |
 | `audience.<field>` | optional | Dotted keys (`audience.role`, `audience.expertiseLevel`, …). Per-field.         |
+| `requiredMode`     | optional | `all` (default) or `source` — how imported questions are marked required.       |
 | `extractTables`    | optional | PDF only — truthy string turns on table extraction.                             |
 
 Empty / whitespace-only `title`, `goal`, and `audience.*` form values are treated
 as **absent** (an un-filled field, not an intentional override). A `title` over the
 200-char cap is `400`. When `title` is absent the server falls back to the parsed
 document title, else the filename.
+
+### Requiredness (`requiredMode`)
+
+The upload dialog offers two modes, defaulting to **all required** (the checked-by-default
+choice that mirrors create + edit):
+
+- **`all`** (default) — every extracted question is written `required: true`.
+- **`source`** — honour the document's own required markers. The extractor reads an asterisk,
+  `(required)`, `mandatory`, a "Required" column, etc. into an optional per-question `required`
+  flag (`extractedQuestionSchema.required`); questions the source doesn't flag stay optional.
+
+A present-but-unrecognised `requiredMode` is a `400` (it's a client bug, not "infer"). The mode
+maps onto the persist writer's `RequirednessPolicy` (`'all' | 'optional' | 'source'`) — see
+[Persistence](#persistence-_libpersistts). The same policy backs compose (`requiredAll` toggle) and
+the editor's bulk "All questions required" checkbox.
 
 ### Success — `201`
 
@@ -155,6 +171,23 @@ editorial log; see [`extraction-changes.md`](./extraction-changes.md)) →
 The capability stays **storage-agnostic** (no Prisma import — `lib/app/**`
 boundary); this `_lib/` module is the only place the extraction result meets the
 database.
+
+### Requiredness policy
+
+`writeGraph` resolves each slot's `required` flag from a `RequirednessPolicy`
+(`persistIngestion`'s `requiredness` input, default `'all'`):
+
+| Policy       | Slot `required`       | Set by                                                          |
+| ------------ | --------------------- | --------------------------------------------------------------- |
+| `'all'`      | `true`                | upload `requiredMode=all`; compose `requiredAll≠false`          |
+| `'source'`   | `q.required ?? false` | upload `requiredMode=source`                                    |
+| `'optional'` | `false`               | compose `requiredAll=false`; refine (`replaceVersionStructure`) |
+
+`writeGraph`'s own default is `'optional'`, so the conversational-refine path
+(`replaceVersionStructure`) is unchanged — only `persistIngestion` defaults to
+`'all'`. The editor's bulk "All questions required" checkbox writes `required`
+directly via `updateMany` (`PATCH …/versions/:vid/questions`), not through this
+policy.
 
 ### Goal / audience merge (admin-wins-per-field)
 

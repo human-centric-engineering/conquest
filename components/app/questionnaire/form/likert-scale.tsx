@@ -10,6 +10,13 @@
 
 import { cn } from '@/lib/utils';
 
+// A selected point is filled with the brand CTA paint — the CTA gradient when the brand
+// defines one (matching the chat's primary CTA), otherwise the solid CTA colour, falling
+// back to the platform primary token when no brand is defined. The 1px border stays a
+// solid colour (a gradient border-colour isn't expressible).
+const BRAND_CTA = 'var(--app-cta-color, var(--color-primary))';
+const BRAND_CTA_FILL = 'var(--app-cta-gradient, var(--app-cta-color, var(--color-primary)))';
+
 export interface LikertScaleProps {
   min: number;
   max: number;
@@ -55,11 +62,18 @@ export function LikertScale({
               onClick={() => onChange(n)}
               className={cn(
                 'h-9 min-w-9 rounded-md border px-2 text-sm font-medium tabular-nums transition-colors',
-                selected
-                  ? 'border-primary bg-primary text-primary-foreground'
-                  : 'border-input bg-background hover:bg-muted',
+                selected ? '' : 'border-input bg-background hover:bg-muted',
                 disabled && 'cursor-not-allowed opacity-60'
               )}
+              style={
+                selected
+                  ? {
+                      borderColor: BRAND_CTA,
+                      background: BRAND_CTA_FILL,
+                      color: 'var(--color-primary-foreground, #fff)',
+                    }
+                  : undefined
+              }
             >
               {n}
             </button>

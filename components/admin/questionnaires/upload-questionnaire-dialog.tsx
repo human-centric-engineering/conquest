@@ -115,6 +115,7 @@ export function UploadQuestionnaireDialog({
   const sensitivityId = useId();
   const notesId = useId();
   const tablesId = useId();
+  const requiredModeName = useId();
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [internalOpen, setInternalOpen] = useState(false);
@@ -133,6 +134,7 @@ export function UploadQuestionnaireDialog({
   const [locale, setLocale] = useState('');
   const [sensitivity, setSensitivity] = useState<string>(INFER);
   const [notes, setNotes] = useState('');
+  const [requiredMode, setRequiredMode] = useState<'all' | 'source'>('all');
   const [extractTables, setExtractTables] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -148,6 +150,7 @@ export function UploadQuestionnaireDialog({
     setLocale('');
     setSensitivity(INFER);
     setNotes('');
+    setRequiredMode('all');
     setExtractTables(false);
     setError(null);
     setBusy(false);
@@ -185,6 +188,7 @@ export function UploadQuestionnaireDialog({
       setIfPresent('audience.locale', locale);
       if (sensitivity !== INFER) body.set('audience.sensitivity', sensitivity);
       setIfPresent('audience.notes', notes);
+      body.set('requiredMode', requiredMode);
       if (extractTables) body.set('extractTables', 'true');
 
       // Multipart — do NOT set Content-Type; the browser adds the boundary.
@@ -316,6 +320,50 @@ export function UploadQuestionnaireDialog({
               placeholder="Leave blank to use the inferred goal"
             />
           </div>
+
+          <fieldset className="space-y-2 border-t pt-4">
+            <legend className="flex items-center gap-1 text-sm font-medium">
+              Required fields{' '}
+              <FieldHelp title="Required fields">
+                How the imported questions are marked required.{' '}
+                <strong>Make all fields required</strong> marks every extracted question mandatory.{' '}
+                <strong>Use the document’s required markers</strong> keeps only the questions the
+                source explicitly flags (an asterisk, “(required)”, “mandatory”) required; the rest
+                stay optional. You can change any question afterwards in the editor.
+              </FieldHelp>
+            </legend>
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="radio"
+                name={requiredModeName}
+                value="all"
+                checked={requiredMode === 'all'}
+                onChange={() => setRequiredMode('all')}
+                disabled={busy}
+                className="mt-0.5"
+              />
+              <span>
+                Make all fields required <span className="text-muted-foreground">(default)</span>
+              </span>
+            </label>
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="radio"
+                name={requiredModeName}
+                value="source"
+                checked={requiredMode === 'source'}
+                onChange={() => setRequiredMode('source')}
+                disabled={busy}
+                className="mt-0.5"
+              />
+              <span>
+                Use the document’s required markers
+                <span className="text-muted-foreground block text-xs">
+                  Only fields the document marks as required stay required; others become optional.
+                </span>
+              </span>
+            </label>
+          </fieldset>
 
           <div className="space-y-3 border-t pt-4">
             <p className="text-muted-foreground text-sm font-medium">Audience (optional)</p>

@@ -41,7 +41,7 @@ const sessionsMock = vi.hoisted(() => ({
   recordCostCapReached: vi.fn(() => Promise.resolve()),
   pauseSession: vi.fn(() => Promise.resolve('paused')),
   hasCostCapReachedEvent: vi.fn(() => Promise.resolve(false)),
-  abandonSession: vi.fn(() => Promise.resolve('abandoned')),
+  abortSession: vi.fn(() => Promise.resolve('aborted')),
   persistAbuseStrikes: vi.fn(() => Promise.resolve()),
   persistSensitivity: vi.fn(() => Promise.resolve()),
   recordSensitivityFlagged: vi.fn(() => Promise.resolve()),
@@ -157,6 +157,9 @@ function stubInvokers() {
     // Present for CapabilityInvokers interface completeness; the seriousness gate is off
     // in default-context tests (abuseThreshold: 0) so this stub is not called.
     assessSeriousness: vi.fn(async () => ({ verdict: { serious: true, reason: '' }, costUsd: 0 })),
+    // Dedicated sensitivity detector — runs every turn when the feature is on; defaults to
+    // "nothing detected" so default-context tests are unaffected.
+    detectSensitivity: vi.fn(async () => ({ assessment: null, costUsd: 0 })),
   };
 }
 
@@ -763,6 +766,7 @@ describe('POST /messages — seriousness / abuse gate', () => {
         verdict: { serious: false, reason: 'That tenure is not possible.' },
         costUsd: 0,
       })),
+      detectSensitivity: vi.fn(async () => ({ assessment: null, costUsd: 0 })),
     };
   }
 
@@ -781,19 +785,19 @@ describe('POST /messages — seriousness / abuse gate', () => {
     await drainSse(await POST(req({ message: '543 years' }), ctx));
 
     expect(sessionsMock.persistAbuseStrikes).toHaveBeenCalledWith('sess-1', 1);
-    expect(sessionsMock.abandonSession).not.toHaveBeenCalled();
+    expect(sessionsMock.abortSession).not.toHaveBeenCalled();
     // The disregarded answer is never handed to persistence as an upsert.
     expect(runMock.persistTurn).toHaveBeenCalledWith(expect.objectContaining({ upserts: [] }));
   });
 
-  it('abandons the session on the threshold strike, recording the analytics reason', async () => {
+  it('aborts the session on the threshold strike, recording the analytics reason', async () => {
     invokersMock.buildTurnInvokers.mockResolvedValue(abusiveInvokers());
     ctxMock.buildTurnContext.mockResolvedValue(gateContext(3)); // next strike is the 4th
 
     await drainSse(await POST(req({ message: 'garbage' }), ctx));
 
     expect(sessionsMock.persistAbuseStrikes).toHaveBeenCalledWith('sess-1', 4);
-    expect(sessionsMock.abandonSession).toHaveBeenCalledWith(
+    expect(sessionsMock.abortSession).toHaveBeenCalledWith(
       'sess-1',
       expect.objectContaining({ reason: ABUSE_ABANDON_REASON })
     );

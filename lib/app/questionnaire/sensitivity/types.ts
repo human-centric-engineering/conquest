@@ -6,9 +6,11 @@
  * seriousness gate and contradiction detection, the orchestrator never persists here: it returns a
  * {@link SensitivityOutcome} and the route writes the session memory + event.
  *
- * It is **best-effort awareness, not a hard safeguarding guarantee** — detection rides on the
- * answer-extractor's structured output (the `suspectedNonGenuine` precedent showed those side
- * signals can be missed). A miss simply means that turn isn't softened.
+ * Detection is **defence-in-depth**: three independent signals are merged each turn — the
+ * answer-extractor's structured field, a dedicated single-purpose LLM detector, and a deterministic
+ * keyword net (`keyword-net.ts`). The extractor field alone proved unreliable (the
+ * `suspectedNonGenuine` precedent — side signals get dropped on busy turns), so the dedicated
+ * detector and the keyword floor back it up: a miss by one source is caught by another.
  */
 
 import type { SensitivitySeverity } from '@/lib/app/questionnaire/types';
@@ -26,6 +28,18 @@ export interface SensitivityAssessment {
   category: string;
   /** A careful, non-graphic one-line restatement of what was disclosed. */
   summary: string;
+}
+
+/** Everything the dedicated sensitivity detector reads to rule on one message — all in-memory. */
+export interface SensitivityDetectInput {
+  /** The active question's prompt the message is responding to (or data-slot name/description). */
+  questionPrompt: string;
+  /** The respondent's raw message this turn. */
+  userMessage: string;
+  /** Recent transcript (oldest → newest) for reading an oblique disclosure. */
+  recentMessages?: string[];
+  /** Stable session identity — threaded into cost-log metadata. */
+  sessionId: string;
 }
 
 /**

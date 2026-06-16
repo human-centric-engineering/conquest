@@ -38,6 +38,12 @@ export interface QuestionFieldProps {
 /** The sentinel choice value for an "other" free-text option (single/multi choice). */
 const OTHER = '__other__';
 
+// A ticked multi-choice option carries the brand CTA colour (matching the radio/likert
+// controls), falling back to the platform primary token when no brand is defined.
+const BRAND_CTA = 'var(--app-cta-color, var(--color-primary))';
+const BRAND_CTA_TINT =
+  'color-mix(in srgb, var(--app-cta-color, var(--color-primary)) 12%, transparent)';
+
 function asString(value: unknown): string {
   return typeof value === 'string' ? value : '';
 }
@@ -227,16 +233,18 @@ function MultiChoiceField({ slot, value, onChange, onBlur, disabled }: QuestionF
             key={opt.value}
             className={cn(
               'flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors',
-              checked
-                ? 'border-primary bg-primary/10'
-                : 'border-input bg-background hover:bg-muted',
+              checked ? '' : 'border-input bg-background hover:bg-muted',
               disabled && 'cursor-not-allowed opacity-60'
             )}
+            style={
+              checked ? { borderColor: BRAND_CTA, backgroundColor: BRAND_CTA_TINT } : undefined
+            }
           >
             <Checkbox
               checked={checked}
               onCheckedChange={(c) => toggle(opt.value, c)}
               disabled={disabled}
+              style={{ accentColor: BRAND_CTA }}
             />
             <span>{opt.label}</span>
           </label>

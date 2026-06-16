@@ -38,7 +38,9 @@ import {
   hasAllowedExtension,
   parseAdminMetadata,
   parseExtractTablesFlag,
+  parseRequiredMode,
   type AdminMetadata,
+  type RequiredMode,
 } from '@/app/api/v1/app/questionnaires/_lib/upload-input';
 import {
   assertPersistable,
@@ -66,6 +68,8 @@ export interface GuardedUpload {
   adminMeta: AdminMetadata;
   /** PDF table-extraction flag, consumed by {@link extractFromDocument}. */
   extractTables: boolean;
+  /** Requiredness choice (`'all'` default / `'source'`) — consumed by the ingest route only. */
+  requiredMode: RequiredMode;
 }
 
 /** The extractor output plus the parsed document it came from (source-doc provenance). */
@@ -170,11 +174,13 @@ export async function parseAndGuardUpload(
   // Admin-supplied goal/audience (throws ValidationError → 400 on bad audience).
   const adminMeta = parseAdminMetadata(formData);
   const extractTables = parseExtractTablesFlag(formData);
+  // Requiredness choice (throws ValidationError → 400 on an unrecognised value).
+  const requiredMode = parseRequiredMode(formData);
 
   const buffer = Buffer.from(await file.arrayBuffer());
   const fileHash = createHash('sha256').update(buffer).digest('hex');
 
-  return { ok: true, value: { file, buffer, fileHash, adminMeta, extractTables } };
+  return { ok: true, value: { file, buffer, fileHash, adminMeta, extractTables, requiredMode } };
 }
 
 /**

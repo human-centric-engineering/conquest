@@ -11,10 +11,20 @@ import {
   severityRank,
   runningMaxLevel,
   shouldSignpost,
+  mergeSensitivitySignals,
   composeSupportMessage,
   effectiveSupportMessage,
   DEFAULT_SUPPORT_MESSAGE,
 } from '@/lib/app/questionnaire/sensitivity';
+import type { SensitivityAssessment } from '@/lib/app/questionnaire/sensitivity/types';
+
+const sig = (over: Partial<SensitivityAssessment> = {}): SensitivityAssessment => ({
+  detected: true,
+  severity: 'high',
+  category: 'workplace abuse',
+  summary: 'Reports being mistreated.',
+  ...over,
+});
 
 describe('severityRank', () => {
   it('orders low < medium < high', () => {
@@ -52,6 +62,33 @@ describe('shouldSignpost', () => {
   it('does not fire for low/medium disclosures', () => {
     expect(shouldSignpost(null, 'low')).toBe(false);
     expect(shouldSignpost('low', 'medium')).toBe(false);
+  });
+});
+
+describe('mergeSensitivitySignals', () => {
+  it('returns undefined when no signal fired', () => {
+    expect(mergeSensitivitySignals(undefined, null, undefined)).toBeUndefined();
+  });
+
+  it('returns the only signal that fired (the keyword net catching an extractor miss)', () => {
+    const net = sig({ category: 'safeguarding concern' });
+    expect(mergeSensitivitySignals(undefined, null, net)).toBe(net);
+  });
+
+  it('picks the strongest severity across signals', () => {
+    const low = sig({ severity: 'low', category: 'extractor' });
+    const high = sig({ severity: 'high', category: 'detector' });
+    expect(mergeSensitivitySignals(low, high)?.severity).toBe('high');
+    expect(mergeSensitivitySignals(low, high)?.category).toBe('detector');
+  });
+
+  it('on a severity tie keeps the earlier argument (LLM signals carry the better summary)', () => {
+    const extractor = sig({ category: 'harassment', summary: 'good summary' });
+    const net = sig({ category: 'safeguarding concern', summary: 'generic' });
+    // Extractor first, keyword net last → extractor wins the tie.
+    const merged = mergeSensitivitySignals(extractor, undefined, net);
+    expect(merged?.category).toBe('harassment');
+    expect(merged?.summary).toBe('good summary');
   });
 });
 

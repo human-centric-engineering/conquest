@@ -110,7 +110,17 @@ export const updateQuestionSchema = z
     message: 'Provide at least one field to update',
   });
 
+/**
+ * PATCH the whole version's question collection — bulk-set every question's
+ * `required` flag in one call (the Structure editor's "All questions required"
+ * tri-state checkbox). No per-question targeting: it's all-or-nothing.
+ */
+export const bulkSetRequiredSchema = z.object({
+  required: z.boolean(),
+});
+
 export type UpdateVersionMetaInput = z.infer<typeof updateVersionMetaSchema>;
+export type BulkSetRequiredInput = z.infer<typeof bulkSetRequiredSchema>;
 export type UpdateVersionStatusInput = z.infer<typeof updateVersionStatusSchema>;
 export type CreateSectionInput = z.infer<typeof createSectionSchema>;
 export type UpdateSectionInput = z.infer<typeof updateSectionSchema>;

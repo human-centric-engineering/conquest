@@ -17,6 +17,7 @@ import type { Prisma } from '@prisma/client';
 
 import { prisma } from '@/lib/db/client';
 import {
+  ANSWER_FIT_MODES,
   ANSWER_SLOT_PANEL_SCOPES,
   CONTRADICTION_MODES,
   DEFAULT_QUESTIONNAIRE_CONFIG,
@@ -26,6 +27,7 @@ import {
   REASONING_PLACEMENTS,
   SELECTION_STRATEGIES,
   type AccessMode,
+  type AnswerFitMode,
   type AnswerSlotPanelScope,
   type AudienceProvenance,
   type AppQuestionnaireStatus,
@@ -93,6 +95,7 @@ export const CONFIG_SELECT = {
   contradictionMode: true,
   contradictionWindowN: true,
   contradictionEveryNTurns: true,
+  answerFitMode: true,
   anonymousMode: true,
   accessMode: true,
   inviteeFields: true,
@@ -121,6 +124,7 @@ type ConfigRow = {
   contradictionMode: string;
   contradictionWindowN: number;
   contradictionEveryNTurns: number;
+  answerFitMode: string;
   anonymousMode: boolean;
   accessMode: string;
   inviteeFields: Prisma.JsonValue;
@@ -150,6 +154,13 @@ function asContradictionMode(value: string): ContradictionMode {
   return (CONTRADICTION_MODES as readonly string[]).includes(value)
     ? (value as ContradictionMode)
     : DEFAULT_QUESTIONNAIRE_CONFIG.contradictionMode;
+}
+
+/** Narrow a stored `answerFitMode` to the enum (default when unknown). */
+function asAnswerFitMode(value: string): AnswerFitMode {
+  return (ANSWER_FIT_MODES as readonly string[]).includes(value)
+    ? (value as AnswerFitMode)
+    : DEFAULT_QUESTIONNAIRE_CONFIG.answerFitMode;
 }
 
 /** Cast a stored `profileFields` Json column back to our own array (we wrote it). */
@@ -203,6 +214,7 @@ export function toConfigView(row: ConfigRow | null): ConfigView {
     voiceEnabled: row.voiceEnabled,
     attachmentsEnabled: row.attachmentsEnabled,
     contradictionMode: asContradictionMode(row.contradictionMode),
+    answerFitMode: asAnswerFitMode(row.answerFitMode),
     contradictionWindowN: row.contradictionWindowN,
     contradictionEveryNTurns: row.contradictionEveryNTurns,
     anonymousMode: row.anonymousMode,

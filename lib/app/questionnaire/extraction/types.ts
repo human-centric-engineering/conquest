@@ -109,6 +109,14 @@ export interface ExtractionContext {
    * from the platform flag AND the per-questionnaire config toggle.
    */
   sensitivityAware?: boolean;
+  /**
+   * Answer-fit resolver pass: when true, the prompt is reframed as a focused SECOND call over a
+   * small set of choice/likert questions the respondent already addressed but the first pass
+   * couldn't map. It instructs the model to commit to the single best-fitting option/scale point
+   * (or omit only when there's genuinely no fit), rather than re-running open extraction. Set by
+   * the extractor capability for the fit pass; never on the primary call.
+   */
+  forceFit?: boolean;
 }
 
 /** One base64-encoded attachment on a respondent turn (mirrors `chatAttachmentSchema`). */

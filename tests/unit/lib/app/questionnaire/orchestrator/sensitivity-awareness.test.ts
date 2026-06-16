@@ -147,6 +147,138 @@ describe('runTurn — sensitivity awareness', () => {
   });
 });
 
+describe('runTurn — dedicated sensitivity detector + keyword net (defence-in-depth)', () => {
+  it('DETECTS via the dedicated detector even when the extractor MISSED the disclosure (the bug)', async () => {
+    // The reported failure: the extractor's optional `sensitivity` field was dropped, so a real
+    // disclosure went unflagged and the seriousness gate ran instead. The dedicated detector must
+    // catch it: a sensitivity outcome IS produced and the gate is skipped.
+    const { invokers, calls } = stubInvokers({
+      extract: { intents: [] }, // extractor emits NO sensitivity field
+      sensitivity: { assessment: HIGH }, // the dedicated detector catches it
+      serious: { verdict: { serious: false, reason: 'hostile' } },
+    });
+    const result = await runTurn(
+      state({
+        userMessage: "i'm being abused by my manager",
+        questions: Q,
+        config: { abuseThreshold: 4, supportMessage: 'Support is available.' },
+      }),
+      invokers
+    );
+    expect(result.sensitivity?.detected).toBe(true);
+    expect(result.sensitivity?.signpost).toBe(true);
+    // Gate skipped — the detector signal set extractedSensitivity, so the judge never ran.
+    expect(calls.serious).toHaveLength(0);
+    expect(result.abuse).toBeUndefined();
+  });
+
+  it('DETECTS via the deterministic keyword net when BOTH the extractor and detector miss', async () => {
+    // Both LLM signals empty; the keyword floor alone catches the first-person harm disclosure.
+    const { invokers, calls } = stubInvokers({
+      extract: { intents: [] },
+      sensitivity: { assessment: null },
+      serious: { verdict: { serious: false, reason: 'hostile' } },
+    });
+    const result = await runTurn(
+      state({
+        userMessage: 'I am being harassed at work',
+        questions: Q,
+        config: { abuseThreshold: 4 },
+      }),
+      invokers
+    );
+    expect(result.sensitivity?.detected).toBe(true);
+    expect(result.sensitivity?.severity).toBe('high');
+    expect(calls.serious).toHaveLength(0);
+  });
+
+  it('records an app_detect_sensitivity tool call when the feature is on', async () => {
+    const { invokers } = stubInvokers({ sensitivity: { assessment: null } });
+    const result = await runTurn(state({ userMessage: 'work is fine', questions: Q }), invokers);
+    expect(result.toolCalls.some((t) => t.slug === 'app_detect_sensitivity')).toBe(true);
+  });
+
+  it('does NOT run the detector (no call, no tool record) when the feature is off', async () => {
+    const { invokers, calls } = stubInvokers({ sensitivity: { assessment: HIGH } });
+    const result = await runTurn(
+      state({ userMessage: 'x', questions: Q, flags: { sensitivityAwareness: false } }),
+      invokers
+    );
+    expect(calls.sensitivity).toHaveLength(0);
+    expect(result.toolCalls.some((t) => t.slug === 'app_detect_sensitivity')).toBe(false);
+    expect(result.sensitivity).toBeUndefined();
+  });
+
+  it('strikes pure hostility ("go fuck yourself") DETERMINISTICALLY — even when the LLM judge would keep it', async () => {
+    // The recurring bug: with a disclosure in context the judge intermittently returns serious:true
+    // for plain abuse, so it went unstruck. The deterministic abuse floor strikes it WITHOUT calling
+    // the judge at all — here the judge is even stubbed to keep it, proving the floor doesn't depend
+    // on the judge.
+    const { invokers, calls } = stubInvokers({
+      extract: { intents: [] },
+      sensitivity: { assessment: null },
+      serious: { verdict: { serious: true, reason: '' } }, // judge would KEEP it
+    });
+    const result = await runTurn(
+      state({
+        userMessage: 'go fuck yourself',
+        questions: Q,
+        config: { abuseThreshold: 4 },
+      }),
+      invokers
+    );
+    // No disclosure detected; the deterministic floor struck it without consulting the judge.
+    expect(result.sensitivity).toBeUndefined();
+    expect(calls.serious).toHaveLength(0);
+    expect(result.abuse?.flagged).toBe(true);
+    expect(result.abuse?.newStrikeCount).toBe(1);
+  });
+
+  it('strikes plain abuse even when an over-eager LLM detector flagged it sensitive', async () => {
+    // The other failure mode: the dedicated detector reads "oh just fuck off" (after a disclosure) as
+    // distress and flags it, which would skip the gate. The deterministic abuse floor overrides that
+    // LLM false-positive (suppressed only by the deterministic HARM floor, which is silent here).
+    const { invokers } = stubInvokers({
+      extract: { intents: [] },
+      sensitivity: {
+        assessment: { detected: true, severity: 'high', category: 'x', summary: 'y' },
+      },
+    });
+    const result = await runTurn(
+      state({
+        userMessage: 'oh just fuck off',
+        questions: Q,
+        sensitivityLevel: 'high', // a prior disclosure already raised the level
+        config: { abuseThreshold: 4, supportMessage: 'Support is available.' },
+      }),
+      invokers
+    );
+    expect(result.abuse?.flagged).toBe(true);
+    // Struck → no sensitivity outcome / signpost this turn despite the detector's flag.
+    expect(result.sensitivity).toBeUndefined();
+  });
+
+  it('does NOT strike abuse paired with a genuine harm disclosure (harm floor suppresses the abuse floor)', async () => {
+    // "fuck off, my manager abuses me" — the deterministic HARM floor fires (first-person + "abuses"),
+    // so the abuse floor is suppressed and the disclosure is protected.
+    const { invokers, calls } = stubInvokers({
+      extract: { intents: [] },
+      sensitivity: { assessment: null },
+    });
+    const result = await runTurn(
+      state({
+        userMessage: 'fuck off, my manager abuses me',
+        questions: Q,
+        config: { abuseThreshold: 4, supportMessage: 'Support is available.' },
+      }),
+      invokers
+    );
+    expect(result.abuse).toBeUndefined();
+    expect(calls.serious).toHaveLength(0); // protected: neither struck nor judged
+    expect(result.sensitivity?.detected).toBe(true);
+  });
+});
+
 describe('runDataSlotTurn — sensitivity awareness', () => {
   const withSlots = (over: Parameters<typeof state>[0]) =>
     state({

@@ -1,0 +1,72 @@
+/*
+ * ConQuest wordmark — the marketing brand treatment (Fraunces serif, two-tone
+ * marigold) reused on the admin Questionnaires surface. Colours and tracking
+ * mirror the Pricing / About-ConQuest pages so the app reads as one product.
+ *
+ * Light/dark variants follow the platform theme (`.dark` on <html>): ink/white
+ * "Con", marigold "Quest". The serif comes from `--font-display-cq` (loaded in
+ * the admin layout) and degrades to Georgia if absent.
+ */
+
+.lockup {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.brand {
+  font-family: var(--font-display-cq), Georgia, serif;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.con {
+  color: #16213d; /* ink on light */
+}
+
+.q {
+  color: #ffb300; /* marigold (strong) on light */
+}
+
+:global(.dark) .con {
+  color: #ffffff;
+}
+
+:global(.dark) .q {
+  color: #ffc73a; /* lift the marigold for contrast on dark */
+}
+
+.tagline {
+  font-family: var(--font-sans-cq), ui-sans-serif, system-ui, sans-serif;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  line-height: 1.2;
+  color: #b4730b; /* darkened marigold — legible at small sizes on cream/light */
+  white-space: nowrap;
+}
+
+:global(.dark) .tagline {
+  color: #ffc73a;
+}
+
+/* Sidebar nav slot — compact, replaces the uppercase section label. */
+.nav .brand {
+  font-size: 1.4rem;
+}
+.nav .tagline {
+  font-size: 0.5rem;
+  letter-spacing: 0.07em;
+}
+
+/* Page / header signature — a touch larger; lives in the admin header bar
+   beside the theme toggle (portaled there by the questionnaires layout). */
+.page .brand {
+  font-size: 1.55rem;
+}
+.page .tagline {
+  font-size: 0.5rem;
+  letter-spacing: 0.08em;
+}

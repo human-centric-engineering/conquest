@@ -46,9 +46,18 @@ By default the route streams the question's verbatim `prompt`. With the
 `APP_QUESTIONNAIRES_QUESTION_PHRASING_ENABLED` sub-flag on, a `question` turn instead runs an
 **interviewer pass** (`_lib/question-stream.ts` → `streamQuestionMessage`) that renders the
 targeted question as warm, natural prose — briefly acknowledging the prior answer, calibrating
-tone to the version's `goal`/`audience` (role, expertise, sensitivity, locale), offering a
-choice/Likert question's options naturally, and **re-asking conversationally** when the prior
-answer wasn't captured (`isReask` = this turn re-selected the question the previous turn asked).
+tone to the version's `goal`/`audience` (role, expertise, sensitivity, locale), and **re-asking
+conversationally** when the prior answer wasn't captured (`isReask` = this turn re-selected the
+question the previous turn asked).
+
+**Infer scales/choices; only spell them out as a last resort.** A choice or Likert question is
+asked **openly** on the first ask — the interviewer asks about the underlying feeling/choice in
+plain language and the extractor (+ the answer-fit resolver, see
+[`answer-extraction.md`](./answer-extraction.md)) maps the natural reply to the option slug or
+scale point. The phraser does **not** read out the option list or a numeric scale up front. Only on
+a struggling **re-ask** (`isReask`) does the user message authorise offering the choices explicitly
+(`extractOptionLabels`) or the simple `min–max` scale (`extractLikertScale`) as a clarifying aid —
+the "last resort" the respondent never needs when their words already map.
 Streamed token-by-token off `provider.chatStream` via the seeded `app-questionnaire-interviewer`
 agent, exactly like the offer composer. This restores the originally-planned interviewer voice
 (`Conversational Questionnaire Phases.md` §Phase 6) that F6.1 dropped when it chose the
