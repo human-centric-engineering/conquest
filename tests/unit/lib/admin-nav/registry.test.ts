@@ -69,6 +69,20 @@ describe('registerNavSection', () => {
     expect(result[0]?.items?.[0]?.label).toBe('Reports');
   });
 
+  it('stores and returns an optional titleNode alongside the title', () => {
+    // Arrange — a section that supplies a custom header node (e.g. a brand
+    // wordmark). The node is opaque to the registry; we use a sentinel string.
+    const titleNode = 'CUSTOM_HEADER_NODE';
+    registerNavSection({ title: 'Branded', titleNode, items: [] });
+
+    // Act
+    const result = getRegisteredNavSections();
+
+    // Assert — both the key (title) and the custom node survive the round-trip.
+    expect(result[0]?.title).toBe('Branded');
+    expect(result[0]?.titleNode).toBe(titleNode);
+  });
+
   it('preserves first-registration order across multiple registrations', () => {
     // Arrange — register three distinct sections.
     registerNavSection(makeSection('Alpha'));

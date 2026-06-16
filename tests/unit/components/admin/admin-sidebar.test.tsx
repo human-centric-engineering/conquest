@@ -300,6 +300,36 @@ describe('AdminSidebar – nav registry integration (Seam 4)', () => {
     expect(link).toHaveAttribute('href', '/admin/my-app/dashboard');
   });
 
+  it('renders a section titleNode in place of the default uppercase title label', () => {
+    // Arrange — register a section whose header is a custom node (a fork's
+    // brand wordmark). The plain `title` must NOT appear as a heading; the
+    // custom node must render instead.
+    registerNavSection({
+      title: 'PlainTitleShouldBeHidden',
+      titleNode: <span data-testid="brand-node">Branded Header</span>,
+      items: [
+        {
+          href: '/admin/branded/page',
+          label: 'Branded Page',
+          icon: StubIcon,
+          description: 'A branded app page',
+        },
+      ],
+    });
+
+    // Act
+    render(<AdminSidebar />);
+
+    // Assert — the custom node renders; the raw title string does not.
+    expect(screen.getByTestId('brand-node')).toBeInTheDocument();
+    expect(screen.queryByText('PlainTitleShouldBeHidden')).not.toBeInTheDocument();
+    // Items still render under the custom header.
+    expect(screen.getByRole('link', { name: /branded page/i })).toHaveAttribute(
+      'href',
+      '/admin/branded/page'
+    );
+  });
+
   it('app section appears in the DOM AFTER the core "System" section', () => {
     // Arrange — register an app section.
     registerNavSection({

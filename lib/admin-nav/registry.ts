@@ -20,7 +20,7 @@
  * @see components/admin/admin-sidebar.tsx — the consumer that renders these
  */
 
-import type { ComponentType } from 'react';
+import type { ComponentType, ReactNode } from 'react';
 
 /** A single navigable link in the admin sidebar. */
 export interface NavItem {
@@ -48,6 +48,13 @@ export interface NavSubgroup {
  */
 export interface NavSection {
   title: string;
+  /**
+   * Optional custom-rendered header for this section. When set, the sidebar
+   * renders this node in place of the default uppercase `title` label (e.g. a
+   * fork's brand wordmark). `title` is still required — it remains the React
+   * key and the collapsed/`aria` fallback.
+   */
+  titleNode?: ReactNode;
   items?: NavItem[];
   subgroups?: NavSubgroup[];
 }

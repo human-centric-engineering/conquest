@@ -13,8 +13,10 @@
  *
  * Full guide + example: CUSTOMIZATION.md §4 · lib/admin-nav/registry.ts
  */
+import { createElement } from 'react';
 import { Building2, ClipboardList, MessageSquareText } from 'lucide-react';
 
+import { QuestionnairesNavBrand } from '@/components/app/questionnaire/questionnaires-nav-brand';
 import { registerNavSection } from '@/lib/admin-nav/registry';
 
 export function initAppNav(): void {
@@ -23,6 +25,9 @@ export function initAppNav(): void {
   // sidebar, but every page/route under it 404s when the flag is off.
   registerNavSection({
     title: 'Questionnaires',
+    // Replace the plain uppercase label with the ConQuest brand lockup so the
+    // app surface carries the product identity (matches the marketing pages).
+    titleNode: createElement(QuestionnairesNavBrand),
     items: [
       {
         href: '/admin/questionnaires',

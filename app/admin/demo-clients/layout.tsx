@@ -1,3 +1,5 @@
+import { ConquestHeaderMark } from '@/components/app/questionnaire/conquest-header-mark';
+
 /**
  * Scope wrapper for the Demo clients admin subtree.
  *
@@ -6,7 +8,15 @@
  * pair, distinct from orchestration. Typography matches the rest of `/admin`
  * (the platform's default sans). Presentational only; pages keep their own flag
  * guards.
+ *
+ * Stamps the same ConQuest header wordmark as the Questionnaires subtree (via
+ * `ConquestHeaderMark`) so the brand persists across the whole nav section.
  */
 export default function DemoClientsAdminLayout({ children }: { children: React.ReactNode }) {
-  return <div className="cq-surface">{children}</div>;
+  return (
+    <div className="cq-surface">
+      <ConquestHeaderMark />
+      {children}
+    </div>
+  );
 }

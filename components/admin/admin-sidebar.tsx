@@ -532,11 +532,12 @@ export function AdminSidebar({ className }: AdminSidebarProps) {
         <nav className="flex-1 space-y-6 overflow-y-auto p-4">
           {sections.map((section) => (
             <div key={section.title}>
-              {!collapsed && (
-                <h3 className="text-muted-foreground mb-2 px-2 text-xs font-semibold tracking-wider uppercase">
-                  {section.title}
-                </h3>
-              )}
+              {!collapsed &&
+                (section.titleNode ?? (
+                  <h3 className="text-muted-foreground mb-2 px-2 text-xs font-semibold tracking-wider uppercase">
+                    {section.title}
+                  </h3>
+                ))}
               {section.items && (
                 <NavItemList items={section.items} pathname={pathname} collapsed={collapsed} />
               )}
