@@ -223,6 +223,25 @@ describe('buildAnswerExtractionPrompt — data slots', () => {
     expect(system).toMatch(/≤ 0\.4/);
   });
 
+  it('demands a substantive, evidence-bearing rationale (what was asked + what they said)', () => {
+    const messages = buildAnswerExtractionPrompt({
+      ...ctx({ candidateSlots: [slot({ key: 'q1' })], activeQuestionKey: null }),
+      dataSlotCandidates: [
+        { key: 'blockers', name: 'Work Blockers', description: 'd', theme: 'Wellbeing' },
+      ],
+    });
+    const system = systemContent(messages);
+    // The rationale must carry the actual evidence, framed "When asked about <topic>, <subject>…".
+    expect(system).toMatch(/When asked about/i);
+    expect(system).toMatch(/EVIDENCE/i);
+    // The old meta-statement pattern is explicitly forbidden, not held up as correct.
+    expect(system).toMatch(/FORBIDDEN/i);
+    expect(system).toMatch(/informs this topic.*WRONG/i);
+    // Subject wording must be gender-neutral and varied, not always "They".
+    expect(system).toMatch(/gender-neutral/i);
+    expect(system).toMatch(/the respondent/i);
+  });
+
   it("renders a slot's current fill so the model can update/correct it", () => {
     const messages = buildAnswerExtractionPrompt({
       ...ctx({ candidateSlots: [slot({ key: 'q1' })], activeQuestionKey: null }),
@@ -253,6 +272,40 @@ describe('buildAnswerExtractionPrompt — data slots', () => {
     const system = systemContent(messages);
     expect(system).toMatch(/RE-SCAN EVERY slot/i);
     expect(system).toMatch(/SUPERSET/i);
+  });
+
+  it("renders a slot's mapped questions and demands the model also answer them", () => {
+    const messages = buildAnswerExtractionPrompt({
+      ...ctx({
+        candidateSlots: [slot({ key: 'satisfaction' }), slot({ key: 'morale' })],
+        activeQuestionKey: 'satisfaction',
+      }),
+      dataSlotCandidates: [
+        {
+          key: 'role_satisfaction',
+          name: 'Role Satisfaction',
+          description: 'How they feel about their role',
+          theme: 'Wellbeing',
+          mappedQuestionKeys: ['satisfaction', 'morale'],
+        },
+      ],
+    });
+    // The slot line names the questions it captures.
+    expect(userContent(messages)).toContain('answers questions: satisfaction, morale');
+    const system = systemContent(messages);
+    // The rules tell the model to ALSO answer the mapped questions, with the appropriateness gate.
+    expect(system).toMatch(/ANSWER THE MAPPED QUESTIONS/i);
+    expect(system).toMatch(/APPROPRIATENESS GATE/i);
+    // Inferred/synthesised, never "direct" — they did not state the typed value.
+    expect(system).toMatch(/NEVER "direct"/i);
+  });
+
+  it('omits the mapped-questions line when a slot maps to nothing', () => {
+    const messages = buildAnswerExtractionPrompt({
+      ...ctx({ candidateSlots: [slot({ key: 'q1' })], activeQuestionKey: null }),
+      dataSlotCandidates: [{ key: 'demographics', name: 'Demo', description: 'd', theme: 'About' }],
+    });
+    expect(userContent(messages)).not.toContain('answers questions:');
   });
 
   it('renders a park status line and demands a best-effort inference for a parked slot', () => {

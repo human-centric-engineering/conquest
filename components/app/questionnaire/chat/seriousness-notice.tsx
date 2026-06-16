@@ -12,13 +12,16 @@
 import { ShieldAlert } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
+import { NoticeWhy } from '@/components/app/questionnaire/chat/notice-why';
 
 interface SeriousnessNoticeProps {
   message: string;
+  /** The judge's reason — surfaced behind a "Why?" disclosure. */
+  detail?: string;
   className?: string;
 }
 
-export function SeriousnessNotice({ message, className }: SeriousnessNoticeProps) {
+export function SeriousnessNotice({ message, detail, className }: SeriousnessNoticeProps) {
   return (
     <div
       role="status"
@@ -34,6 +37,7 @@ export function SeriousnessNotice({ message, className }: SeriousnessNoticeProps
       <div className="min-w-0">
         <p className="text-foreground text-xs font-medium">Let&apos;s keep it genuine</p>
         <p className="text-muted-foreground mt-0.5">{message}</p>
+        <NoticeWhy detail={detail} />
       </div>
     </div>
   );

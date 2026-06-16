@@ -215,6 +215,17 @@ export const ANSWER_SLOT_PANEL_SCOPES = ['full_progress', 'answered_only'] as co
 export type AnswerSlotPanelScope = (typeof ANSWER_SLOT_PANEL_SCOPES)[number];
 
 /**
+ * Where the live "watch it think" reasoning trace renders on the respondent surface (demo feature).
+ * `overlay` shows an animated thinking feed in place of the typing dots while the turn runs, then
+ * collapses to a compact chip on the settled turn; `inline` renders a quiet collapsible disclosure
+ * beneath each assistant turn. An admin chooses per version on the Settings tab; both are gated by
+ * the platform flag `APP_QUESTIONNAIRES_REASONING_STREAM_ENABLED`. See
+ * `lib/app/questionnaire/reasoning` and [[feature-flags-are-db-rows]].
+ */
+export const REASONING_PLACEMENTS = ['overlay', 'inline'] as const;
+export type ReasoningPlacement = (typeof REASONING_PLACEMENTS)[number];
+
+/**
  * How a respondent completes a session (P-presentation). `chat` is the streaming
  * conversation (the original surface, incl. the data-slots experience); `form`
  * renders the questionnaire as a raw, sectioned form with the right input per
@@ -334,6 +345,73 @@ export type ProfileFieldConfig = {
 };
 
 /**
+ * Interviewer tone & persona (F-tone): per-version control over *how* the live
+ * conversational interviewer responds — fed into its system prompt at turn time by
+ * `buildToneInstructions` (`lib/app/questionnaire/chat/tone.ts`). Each dimension is an
+ * independent enable-toggle + a 1–5 slider; everything is off by default so existing
+ * questionnaires keep today's voice. Gated additionally by the platform flag
+ * `APP_QUESTIONNAIRES_TONE_ENABLED`. Stored as a single `tone` Json column.
+ *
+ * The nine dimensions split into two kinds (see {@link TONE_DIMENSION_KEYS}):
+ *   - **bipolar** (`empathy`, `formality`, `verbosity`, `readingComplexity`, `humour`):
+ *     `1` and `5` are opposite poles, `3` is neutral.
+ *   - **unipolar intensity** (`mirroring`, `mimicry`, `warmth`, `curiosity`):
+ *     `1` = minimal, `5` = strong.
+ */
+export type ToneDimension = {
+  enabled: boolean;
+  /** 1–5 slider position (see the dimension's kind for what the poles mean). */
+  level: number;
+};
+
+/** Free-text persona overlay — casts the agent ("You are an experienced career coach."). */
+export type TonePersona = {
+  enabled: boolean;
+  text: string;
+};
+
+/** Ordered list of the nine tone-dimension keys (single source for editor + prompt). */
+export const TONE_DIMENSION_KEYS = [
+  'empathy',
+  'mirroring',
+  'formality',
+  'mimicry',
+  'verbosity',
+  'warmth',
+  'curiosity',
+  'readingComplexity',
+  'humour',
+] as const;
+export type ToneDimensionKey = (typeof TONE_DIMENSION_KEYS)[number];
+
+/** The resolved tone block: one {@link ToneDimension} per key plus the free-text persona. */
+export type ToneSettings = Record<ToneDimensionKey, ToneDimension> & {
+  persona: TonePersona;
+};
+
+/** Lowest / highest valid slider position. */
+export const TONE_LEVEL_MIN = 1;
+export const TONE_LEVEL_MAX = 5;
+/** Neutral midpoint a bipolar dimension defaults to. */
+export const TONE_LEVEL_NEUTRAL = 3;
+/** Max length of the free-text persona (matches the Zod bound). */
+export const TONE_PERSONA_MAX_LENGTH = 400;
+
+/** Every dimension disabled at the neutral midpoint, persona off — today's behaviour. */
+export const DEFAULT_TONE_SETTINGS: ToneSettings = {
+  empathy: { enabled: false, level: TONE_LEVEL_NEUTRAL },
+  mirroring: { enabled: false, level: TONE_LEVEL_NEUTRAL },
+  formality: { enabled: false, level: TONE_LEVEL_NEUTRAL },
+  mimicry: { enabled: false, level: TONE_LEVEL_NEUTRAL },
+  verbosity: { enabled: false, level: TONE_LEVEL_NEUTRAL },
+  warmth: { enabled: false, level: TONE_LEVEL_NEUTRAL },
+  curiosity: { enabled: false, level: TONE_LEVEL_NEUTRAL },
+  readingComplexity: { enabled: false, level: TONE_LEVEL_NEUTRAL },
+  humour: { enabled: false, level: TONE_LEVEL_NEUTRAL },
+  persona: { enabled: false, text: '' },
+};
+
+/**
  * The full resolved shape of a version's configuration — one field per
  * `AppQuestionnaireConfig` column. The read view returns this (defaults when no
  * row exists); the editor and PATCH body are partials of it.
@@ -405,6 +483,26 @@ export type QuestionnaireConfigShape = {
    * (toggle between them). See {@link PRESENTATION_MODES}.
    */
   presentationMode: PresentationMode;
+  /**
+   * Live "watch it think" reasoning trace (demo feature): show the agent's per-turn reasoning —
+   * answers captured (with provenance + confidence), contradictions spotted, why the next question
+   * was chosen — as a live feed beside the chat. On by default; only takes effect when the platform
+   * flag `APP_QUESTIONNAIRES_REASONING_STREAM_ENABLED` is on. See `lib/app/questionnaire/reasoning`.
+   */
+  reasoningStreamEnabled: boolean;
+  /** Where the reasoning trace renders ({@link REASONING_PLACEMENTS}); default `overlay`. */
+  reasoningStreamPlacement: ReasoningPlacement;
+  /**
+   * Persist each turn's reasoning trace on the turn record so it replays on resume / scroll-back
+   * (and is available to admin later). `false` = live-only (resumed turns show no trace).
+   */
+  reasoningStreamPersist: boolean;
+  /**
+   * Interviewer tone & persona — how the conversational interviewer responds to answers. See
+   * {@link ToneSettings}. Off by default per dimension; only takes effect when the platform flag
+   * `APP_QUESTIONNAIRES_TONE_ENABLED` is on. Threaded to the phraser via `buildToneInstructions`.
+   */
+  tone: ToneSettings;
 };
 
 /**
@@ -455,4 +553,8 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   profileFields: [],
   answerSlotPanelScope: 'full_progress',
   presentationMode: 'chat',
+  reasoningStreamEnabled: true,
+  reasoningStreamPlacement: 'overlay',
+  reasoningStreamPersist: true,
+  tone: DEFAULT_TONE_SETTINGS,
 };

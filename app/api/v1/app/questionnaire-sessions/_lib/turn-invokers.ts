@@ -102,6 +102,8 @@ export async function buildTurnInvokers(opts: {
     name: string;
     description: string;
     theme: string;
+    /** Question keys this slot captures — the extractor answers these when it fills the slot. */
+    mappedQuestionKeys?: string[];
     current?: { value: unknown; paraphrase: string | null; confidence: number | null };
   }>;
   /**
@@ -311,9 +313,32 @@ export async function buildTurnInvokers(opts: {
       // resolves to the system default. Fail-soft: any failure returns a null verdict + a
       // diagnostic, so the gate never crashes a turn.
       const started = Date.now();
+      // The judge must rule on the answer IN CONTEXT of what was asked. In question mode that's the
+      // active question's prompt; in DATA-SLOT mode there is no active question (the turn targeted a
+      // data slot), so fall back to the active data slot's name + description. Judging blind — with
+      // "(no specific question)" — is what made a terse-but-genuine answer like "5 year, engineering"
+      // read as non-genuine: a fragment with no prompt to anchor it looks like a non-answer.
+      const activeDataSlot =
+        state.activeDataSlotKey && state.dataSlots
+          ? state.dataSlots.find((s) => s.key === state.activeDataSlotKey)
+          : undefined;
       const questionPrompt = activeQuestionKey
         ? (slots.find((s) => s.key === activeQuestionKey)?.prompt ?? '')
-        : '';
+        : activeDataSlot
+          ? `${activeDataSlot.name} — ${activeDataSlot.description}`
+          : '';
+
+      // Safety net: with no question/data-slot context, the judge has no basis to call an answer
+      // non-genuine — disregarding here is how false positives slip through. Keep the answer (and
+      // skip the paid LLM call) rather than judge blind. Mid-conversation there is always an active
+      // target, so this only short-circuits genuinely contextless turns.
+      if (questionPrompt.trim().length === 0) {
+        return {
+          verdict: { serious: true, reason: '' },
+          costUsd: 0,
+          latencyMs: Date.now() - started,
+        };
+      }
 
       let providerSlug: string;
       let model: string;

@@ -19,6 +19,8 @@ import {
   APP_QUESTIONNAIRES_FRICTIONLESS_INVITES_FLAG,
   APP_QUESTIONNAIRES_INVITE_IMPORT_FLAG,
   APP_QUESTIONNAIRES_GENERATIVE_AUTHORING_FLAG,
+  APP_QUESTIONNAIRES_REASONING_STREAM_FLAG,
+  APP_QUESTIONNAIRES_TONE_FLAG,
   APP_QUESTIONNAIRES_FLAG,
 } from '@/lib/app/questionnaire/constants';
 import { isFeatureEnabled } from '@/lib/feature-flags';
@@ -43,6 +45,7 @@ export {
   APP_QUESTIONNAIRES_SERIOUSNESS_GATE_FLAG,
   APP_QUESTIONNAIRES_SENSITIVITY_AWARENESS_FLAG,
   APP_QUESTIONNAIRES_GENERATIVE_AUTHORING_FLAG,
+  APP_QUESTIONNAIRES_REASONING_STREAM_FLAG,
 };
 
 /**
@@ -509,4 +512,43 @@ export async function isSensitivityAwarenessEnabled(): Promise<boolean> {
     isFeatureEnabled(APP_QUESTIONNAIRES_SENSITIVITY_AWARENESS_FLAG),
   ]);
   return app && live && aware;
+}
+
+/**
+ * Whether the live **reasoning stream** ("watch it think") may run for the live turn loop.
+ * Requires the master app flag, the **live-sessions** flag, AND the reasoning-stream sub-flag.
+ * Like cost-cap / seriousness it gates a behaviour *inside* the already-gated `/messages` route
+ * (not a route of its own), and the per-version `config.reasoningStreamEnabled` toggle is the
+ * second gate (the route ANDs them). When `false`, turns emit no `reasoning` frames even if a
+ * version opts in. Depends on live-sessions because the trace only matters inside the respondent
+ * turn loop. Carries no extra LLM spend (it's derived from work the turn already did).
+ *
+ * Server-only (resolves the flags from the database).
+ */
+export async function isReasoningStreamEnabled(): Promise<boolean> {
+  const [app, live, reasoning] = await Promise.all([
+    isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_REASONING_STREAM_FLAG),
+  ]);
+  return app && live && reasoning;
+}
+
+/**
+ * Whether **interviewer tone & persona** (F-tone) may shape the live turn loop. Requires the
+ * master app flag, the **live-sessions** flag, AND the tone sub-flag. Like the reasoning stream it
+ * gates a behaviour *inside* the already-gated `/messages` route; the per-version per-dimension
+ * toggles are the second gate (the route ANDs them). When `false`, the phraser keeps today's
+ * default voice even if a version has tone dimensions enabled. Depends on live-sessions because
+ * tone only matters inside the respondent turn loop.
+ *
+ * Server-only (resolves the flags from the database).
+ */
+export async function isToneEnabled(): Promise<boolean> {
+  const [app, live, tone] = await Promise.all([
+    isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_TONE_FLAG),
+  ]);
+  return app && live && tone;
 }

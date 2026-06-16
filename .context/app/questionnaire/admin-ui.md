@@ -74,13 +74,13 @@ must render the version selector and highlight the active version against `[vid]
 ```
 /admin/questionnaires/[id]                  → redirector → newest version's Overview (honours ?v=)
 /admin/questionnaires/[id]/v/[vid]          → Overview tab (default landing)
-            …/v/[vid]/structure             → Structure only (sections/questions/tags; editor/graph, ?edit=1 toggle)
+            …/v/[vid]/structure             → Structure (goal/audience + sections/questions/tags; editor/graph, ?edit=1 toggle)
             …/v/[vid]/data-slots            → (flag: data-slots)
             …/v/[vid]/invitations           → questionnaire-scoped; vid ignored, targets newest launched
             …/v/[vid]/analytics
             …/v/[vid]/evaluations[/[runId]] → (flag: design-evaluation)
             …/v/[vid]/extraction-changes
-            …/v/[vid]/settings              → version settings: goal/audience + run-time Configuration (F3.1, version-scoped, fork-on-launch) + demo-client attribution + clone (DEMO-ONLY)
+            …/v/[vid]/settings              → version settings: run-time Configuration (F3.1, version-scoped, fork-on-launch) + demo-client attribution + clone (DEMO-ONLY)
 ```
 
 - **`[id]/v/[vid]/layout.tsx`** owns the breadcrumb, sticky header (title + status +
@@ -186,3 +186,39 @@ semantics, the draft-only `409`, and the version-scoped dedup — is in
 Creating a _new_ questionnaire is still the F1.1 ingestion endpoint (no UI). With
 re-ingest shipped, an admin can ingest, review, edit, tag, version, and re-ingest
 a questionnaire end-to-end through the UI — **P2 is complete**.
+
+## Prompt library — read the real prompts
+
+`/admin/questionnaires/prompts` is a **read-only** transparency surface: every
+questionnaire AI agent paired with the exact prompt(s) it sends to the model.
+
+It exists because the questionnaire agents are dispatched **programmatically** — the
+load-bearing system prompt is assembled in a TypeScript builder (e.g.
+`buildAnswerExtractionPrompt`), **not** read from the agent's editable
+`AiAgent.systemInstructions` field. That field is descriptive only; editing it in the
+platform agent form changes nothing at run time. The prompts were therefore invisible
+to an operator. This page closes that gap by invoking each real builder with a fixed,
+representative **sample context** and rendering the messages verbatim.
+
+- **Catalog** — `app/api/v1/app/questionnaires/_lib/prompt-catalog.ts`. Pure,
+  server-only. `buildPromptCatalog()` returns one entry per agent (authoring · live ·
+  evaluation stages), each with one or more **specimens** — a named builder invocation
+  (e.g. the answer extractor's _question_, _data-slot_, _sensitivity_, and _seriousness_
+  variants). Each specimen is built behind a try/catch, so one bad sample renders an
+  inline error instead of 500ing the page. The seven evaluation judges are generated
+  from `EVALUATION_DIMENSION_SPECS` (same source the panel uses), so they can't drift.
+- **API** — `GET /api/v1/app/questionnaires/prompts` (`API.APP.QUESTIONNAIRES.prompts`).
+  `withQuestionnairesEnabled(withAdminAuth(...))`. Merges the catalog with each agent's
+  seeded `AiAgent` row (provider/model binding, budget, the inert stored instructions)
+  and returns `{ agents }`. `resolvesAtRuntime` is true when provider+model are empty
+  (the agent-resolver picks at run time); `seeded: false` when no row exists.
+- **UI** — `components/admin/questionnaires/prompt-library.tsx`. Stage-grouped
+  master/detail: a rail of agents, a detail pane with the binding strip, a note that the
+  stored instructions are not the prompt, and the prompt rendered as a system/user
+  **transcript** in monospace with per-message + copy-all actions.
+
+When a builder's input contract changes and a sample no longer satisfies it, the
+specimen renders an error and `tests/unit/app/api/v1/app/questionnaires/_lib/prompt-catalog.test.ts`
+fails — surfacing the drift before an admin sees a broken prompt. To add an agent or a
+variant, add a `specimen(...)` (or a catalog entry) in `prompt-catalog.ts`; the API,
+page, and UI pick it up with no other change.

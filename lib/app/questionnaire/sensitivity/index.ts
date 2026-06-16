@@ -16,4 +16,6 @@ export {
   runningMaxLevel,
   shouldSignpost,
   composeSupportMessage,
+  effectiveSupportMessage,
+  DEFAULT_SUPPORT_MESSAGE,
 } from '@/lib/app/questionnaire/sensitivity/logic';

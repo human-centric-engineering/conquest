@@ -52,6 +52,21 @@ vi.mock('@dnd-kit/core', () => ({
 }));
 
 // Stub heavy children to markers — VersionEditor's own logic is what's under test.
+vi.mock('@/components/admin/questionnaires/goal-audience-editor', () => ({
+  GoalAudienceEditor: ({
+    versionId,
+    designEvalEnabled,
+  }: {
+    versionId: string;
+    designEvalEnabled?: boolean;
+  }) => (
+    <div
+      data-testid="goal-audience-editor"
+      data-vid={versionId}
+      data-designeval={String(designEvalEnabled)}
+    />
+  ),
+}));
 vi.mock('@/components/admin/questionnaires/section-editor', () => ({
   SectionEditor: ({ section }: { section: { title: string } }) => (
     <div data-testid="section-editor">{section.title}</div>
@@ -110,6 +125,13 @@ describe('VersionEditor', () => {
   it('renders a SectionEditor per section', () => {
     render(<VersionEditor questionnaireId="qn-1" version={graph()} />);
     expect(screen.getByTestId('section-editor')).toHaveTextContent('Background');
+  });
+
+  it('renders the goal/audience editor for the version, threading the design-eval flag', () => {
+    render(<VersionEditor questionnaireId="qn-1" version={graph()} designEvalEnabled />);
+    const editor = screen.getByTestId('goal-audience-editor');
+    expect(editor).toHaveAttribute('data-vid', 'ver-1');
+    expect(editor).toHaveAttribute('data-designeval', 'true');
   });
 
   it('shows the empty state when there are no sections', () => {

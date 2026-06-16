@@ -23,6 +23,7 @@ import type {
   QuestionnaireVersionSummary,
   VersionGraphView,
 } from '@/lib/app/questionnaire/views';
+import { DEFAULT_TONE_SETTINGS } from '@/lib/app/questionnaire/types';
 import type { AttributedDemoClient, DemoClientView } from '@/lib/app/questionnaire/demo-clients';
 import type { QuestionnaireWorkspaceFlags } from '@/lib/app/questionnaire/workspace-data';
 
@@ -188,6 +189,10 @@ function makeGraph(over: Partial<VersionGraphView> = {}): VersionGraphView {
       profileFields: [],
       answerSlotPanelScope: 'full_progress',
       presentationMode: 'chat',
+      reasoningStreamEnabled: true,
+      reasoningStreamPlacement: 'overlay',
+      reasoningStreamPersist: true,
+      tone: DEFAULT_TONE_SETTINGS,
     },
     ...over,
   };
@@ -415,7 +420,7 @@ describe('SettingsTab', () => {
     });
   });
 
-  describe('version settings (goal/audience + run-time config, moved from Structure)', () => {
+  describe('version settings (run-time config; goal/audience now live on Structure)', () => {
     it('renders the version-settings panel with the graph + adaptive flag', async () => {
       workspaceDataMock.getVersionGraphCached.mockResolvedValue(
         makeGraph({ id: 'ver-9', goal: 'Understand churn' })

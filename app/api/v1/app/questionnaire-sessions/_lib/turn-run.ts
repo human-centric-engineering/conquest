@@ -14,6 +14,7 @@ import type { RefinementDecision } from '@/lib/app/questionnaire/refinement/type
 import { applyRefinement } from '@/lib/app/questionnaire/refinement';
 import type { ToolCallRecord } from '@/lib/app/questionnaire/orchestrator';
 import type { SessionWarning } from '@/lib/app/questionnaire/chat/types';
+import type { ReasoningStep } from '@/lib/app/questionnaire/reasoning';
 import {
   loadAnswerSlot,
   loadRespondentEditedSlotIds,
@@ -40,6 +41,8 @@ export async function persistTurn(opts: {
   toolCalls: ToolCallRecord[];
   /** Side-band notices this turn surfaced — persisted on the turn for inline replay on resume. */
   warnings?: SessionWarning[];
+  /** Live "watch it think" reasoning trace — persisted (when the version opted in) for replay on resume. */
+  reasoning?: ReasoningStep[];
   costUsd: number;
   upserts: AnswerSlotIntent[];
   refinements: RefinementDecision[];
@@ -121,6 +124,7 @@ export async function persistTurn(opts: {
     agentResponse: opts.agentResponse,
     targetedQuestionId: opts.targetedQuestionId,
     ...(opts.warnings && opts.warnings.length > 0 ? { warnings: opts.warnings } : {}),
+    ...(opts.reasoning && opts.reasoning.length > 0 ? { reasoning: opts.reasoning } : {}),
     ...(opts.targetedDataSlotId !== undefined
       ? { targetedDataSlotId: opts.targetedDataSlotId }
       : {}),

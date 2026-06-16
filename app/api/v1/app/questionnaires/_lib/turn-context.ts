@@ -121,7 +121,9 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
           goal: true,
           audience: true,
           config: { select: CONFIG_SELECT },
-          // Data Slots feature: the version's data slots (the abstraction-layer targets).
+          // Data Slots feature: the version's data slots (the abstraction-layer targets). The
+          // `questions` mapping (AppDataSlotQuestion) rides along so the extractor can ALSO answer
+          // the question(s) a filled slot captures — the schema-documented forward propagation.
           dataSlots: {
             orderBy: { ordinal: 'asc' },
             select: {
@@ -132,6 +134,7 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
               theme: true,
               ordinal: true,
               weight: true,
+              questions: { select: { questionSlot: { select: { key: true } } } },
             },
           },
           sections: {
@@ -176,6 +179,7 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
           confidence: true,
           value: true,
           paraphrase: true,
+          provenanceLabel: true,
           provisional: true,
         },
       },
@@ -263,6 +267,8 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
       theme: ds.theme,
       ordinal: ds.ordinal,
       weight: ds.weight,
+      // The question keys this slot captures — drives the extractor's forward propagation.
+      mappedQuestionKeys: ds.questions.map((q) => q.questionSlot.key),
     }))
     .sort((a, b) => {
       const ta = themeOrder.get(a.theme) ?? 0;
@@ -274,6 +280,9 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
     confidence: f.confidence,
     value: f.value,
     paraphrase: f.paraphrase,
+    // Threaded so a `direct` (stated) fill stays covered across turns — never re-asked or parked on a
+    // later turn just because its confidence number sits below the fill threshold (see `isCovered`).
+    provenance: narrowToEnum(f.provenanceLabel, ANSWER_PROVENANCES, 'direct'),
     provisional: f.provisional,
   }));
   const byDataSlotId = new Map(dataSlots.map((s) => [s.id, s]));

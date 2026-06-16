@@ -242,3 +242,57 @@ describe('updateConfigSchema — abuseThreshold (seriousness gate)', () => {
     expect(updateConfigSchema.safeParse({ abuseThreshold: 2.5 }).success).toBe(false);
   });
 });
+
+describe('updateConfigSchema — tone (F-tone)', () => {
+  /** A complete tone block (all nine dimensions + persona) — the editor always sends the whole thing. */
+  const fullTone = {
+    empathy: { enabled: true, level: 4 },
+    mirroring: { enabled: false, level: 3 },
+    formality: { enabled: true, level: 5 },
+    mimicry: { enabled: false, level: 3 },
+    verbosity: { enabled: true, level: 2 },
+    warmth: { enabled: false, level: 3 },
+    curiosity: { enabled: true, level: 5 },
+    readingComplexity: { enabled: false, level: 3 },
+    humour: { enabled: false, level: 3 },
+    persona: { enabled: true, text: 'You are a supportive coach.' },
+  };
+
+  it('accepts a well-formed full tone block', () => {
+    expect(updateConfigSchema.safeParse({ tone: fullTone }).success).toBe(true);
+  });
+
+  it('rejects a level outside 1–5 or a non-integer level', () => {
+    expect(
+      updateConfigSchema.safeParse({ tone: { ...fullTone, empathy: { enabled: true, level: 6 } } })
+        .success
+    ).toBe(false);
+    expect(
+      updateConfigSchema.safeParse({ tone: { ...fullTone, empathy: { enabled: true, level: 0 } } })
+        .success
+    ).toBe(false);
+    expect(
+      updateConfigSchema.safeParse({
+        tone: { ...fullTone, empathy: { enabled: true, level: 2.5 } },
+      }).success
+    ).toBe(false);
+  });
+
+  it('rejects a partial tone block (a missing dimension) — the block is sent whole', () => {
+    const { humour: _omit, ...partial } = fullTone;
+    void _omit;
+    expect(updateConfigSchema.safeParse({ tone: partial }).success).toBe(false);
+  });
+
+  it('rejects unknown keys and an over-long persona', () => {
+    expect(
+      updateConfigSchema.safeParse({ tone: { ...fullTone, bogus: { enabled: true, level: 3 } } })
+        .success
+    ).toBe(false);
+    expect(
+      updateConfigSchema.safeParse({
+        tone: { ...fullTone, persona: { enabled: true, text: 'x'.repeat(401) } },
+      }).success
+    ).toBe(false);
+  });
+});

@@ -104,6 +104,15 @@ export interface DataSlotTarget {
   theme: string;
   ordinal: number;
   weight: number;
+  /**
+   * Keys of the question slots this data slot "meaningfully captures" (the `AppDataSlotQuestion`
+   * M:N mapping). Filling the slot in conversation lets the extractor ALSO answer these mapped
+   * questions (the forward propagation the schema documents) — threaded into the extractor so a
+   * captured position flows onto the underlying form questions, not just the panel. The turn-context
+   * loader always sets it (possibly `[]`); optional so pure targeting tests can omit it — targeting
+   * itself never reads the mapping (mirrors {@link DataSlotAnsweredView}'s optional value fields).
+   */
+  mappedQuestionKeys?: string[];
 }
 
 /** One data slot already filled this session (targeting view — filled at confidence ≥ θ). */
@@ -119,6 +128,13 @@ export interface DataSlotAnsweredView {
    */
   value?: unknown;
   paraphrase?: string | null;
+  /**
+   * The fill's provenance, when loaded. A `direct` fill — a position the respondent plainly
+   * STATED — counts as "covered" regardless of the confidence NUMBER (a stated answer is answered),
+   * so a clear answer the extractor under-scored is never treated as missing, re-asked, or parked.
+   * Absent in pure targeting tests, which exercise the confidence-only path.
+   */
+  provenance?: AnswerProvenance;
   /**
    * Move-on (Data Slots feature): true when this fill is a best-effort inference recorded after the
    * re-ask cap. A provisional slot counts as "covered" for targeting (so it isn't re-asked) but at
@@ -347,6 +363,16 @@ export interface TurnResult {
   response: TurnResponse;
   /** `AppQuestionSlot.id` asked for, or `null` for an offer/completion/none turn. */
   targetedQuestionId: string | null;
+  /**
+   * Why the next question/data-slot was chosen this turn — the selector's `rationale`, lifted onto
+   * the result so the route can surface it in the "watch it think" reasoning trace (the rationale is
+   * otherwise consumed and dropped). Absent on an offer/complete/none turn (nothing was selected).
+   * Respondent-safe by construction (a flow rationale, not internal scoring) — see
+   * `lib/app/questionnaire/reasoning`.
+   */
+  selectionRationale?: string;
+  /** The strategy that made the selection (lets the reasoning trace phrase the "why" per strategy). */
+  selectionStrategy?: import('@/lib/app/questionnaire/types').SelectionStrategy;
   /** The answer writes this turn produced — the route persists them at the slot seam. */
   sideEffects: {
     answerUpserts: AnswerSlotIntent[];

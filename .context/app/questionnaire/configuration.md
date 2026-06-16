@@ -43,6 +43,7 @@ single JSON column for the profile fields:
 | Session-start profile fields          | `profileFields`            | Json (array)           | `[]`                |
 | Answer panel scope                    | `answerSlotPanelScope`     | String (enum)          | `'full_progress'`   |
 | Presentation mode                     | `presentationMode`         | String (enum)          | `'chat'`            |
+| Interviewer tone & persona            | `tone`                     | Json (object)          | all dimensions off  |
 
 The enums are `const` tuples in `lib/app/questionnaire/types.ts` (single source of
 truth — the Zod schema, the read-view narrowing, and the editor's `<Select>`
@@ -77,6 +78,13 @@ respondent server pages (authenticated `[sessionId]` + public `/q/[versionId]`),
 which dispatch the surface and seed the full form view for `form`/`both`. Defaults
 to `chat` so existing launched versions are unchanged. See
 `.context/app/questionnaire/presentation-mode.md`.
+
+`tone` (F-tone) is the interviewer's voice — a single JSON object (`ToneSettings`) of nine
+enable-toggle + 1–5 sliders (empathy, mirroring, formality, mimicry, verbosity, warmth, curiosity,
+reading complexity, humour) plus a free-text `persona`. Each dimension is off by default, so the
+default block changes nothing. The live phraser renders the **enabled** dimensions into its system
+prompt; gated additionally by the platform flag `APP_QUESTIONNAIRES_TONE_ENABLED`. See
+[`interviewer-tone.md`](./interviewer-tone.md).
 
 ### Profile fields (JSON, not a relational model)
 

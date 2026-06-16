@@ -102,6 +102,8 @@ export interface DataSlotPanelSlot {
   provenance: AnswerProvenance | null;
   /** 0–1; null when not yet filled. */
   confidence: number | null;
+  /** The agent's justification for the captured position — surfaced behind a "Why?" disclosure. Null when not yet filled or none given. */
+  rationale: string | null;
   /** True once the slot is covered — a confident fill (≥ threshold) OR a parked provisional one. */
   filled: boolean;
   /**

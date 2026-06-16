@@ -116,6 +116,9 @@ const dataSlotCandidateSchema = z.object({
   name: z.string().min(1),
   description: z.string(),
   theme: z.string(),
+  // Forward propagation: the question keys this slot captures (AppDataSlotQuestion). When filling
+  // the slot, the extractor must ALSO answer these mapped questions (each is in `candidateSlots`).
+  mappedQuestionKeys: z.array(z.string().min(1)).max(MAX_CANDIDATE_SLOTS).optional(),
   // What's already recorded for this slot this session (when any) so the extractor can update or
   // correct it rather than re-deriving from scratch. `value` is free-form (Json-shaped).
   current: z
@@ -267,6 +270,9 @@ function toExtractionContext(args: ExtractAnswerSlotsArgs): ExtractionContext {
             name: c.name,
             description: c.description,
             theme: c.theme,
+            ...(c.mappedQuestionKeys && c.mappedQuestionKeys.length > 0
+              ? { mappedQuestionKeys: c.mappedQuestionKeys }
+              : {}),
             ...(c.current
               ? {
                   current: {
@@ -526,6 +532,26 @@ export class AppExtractAnswerSlotsCapability extends BaseCapability<
       completion.value.dataSlotFills,
       args.dataSlotCandidates ?? []
     );
+
+    // Data Slots feature: when the turn carried data-slot candidates, record how the model's fills
+    // fared — how many it returned vs how many survived `normalizeDataSlotFills`. An empty/under-
+    // filled result is why the "What we're learning" panel can stay "Not covered yet" despite a rich
+    // answer; logging the model-returned vs kept counts (and any dropped/unknown keys — these are
+    // config slugs, not PII) makes "the extractor didn't emit fills" vs "the keys didn't match"
+    // diagnosable from the dev log without re-running blind.
+    if ((args.dataSlotCandidates?.length ?? 0) > 0) {
+      const returned = completion.value.dataSlotFills ?? [];
+      const candidateKeys = new Set((args.dataSlotCandidates ?? []).map((c) => c.key));
+      const droppedKeys = returned.map((f) => f.dataSlotKey).filter((k) => !candidateKeys.has(k));
+      logger.info('extract_answer_slots: data-slot fills', {
+        agentId: context.agentId,
+        sessionId: extractionContext.sessionId,
+        candidateCount: args.dataSlotCandidates?.length ?? 0,
+        modelReturnedCount: returned.length,
+        keptCount: dataSlotFills.length,
+        ...(droppedKeys.length > 0 ? { droppedUnknownKeys: droppedKeys } : {}),
+      });
+    }
 
     return this.success({
       intents,

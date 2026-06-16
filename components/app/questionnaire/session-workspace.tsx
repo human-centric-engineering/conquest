@@ -39,7 +39,7 @@ import type {
   QuestionnaireTurn,
 } from '@/lib/app/questionnaire/chat/types';
 import type { AnswerPanelView, PanelSlotView } from '@/lib/app/questionnaire/panel/types';
-import type { PresentationMode } from '@/lib/app/questionnaire/types';
+import type { PresentationMode, ReasoningPlacement } from '@/lib/app/questionnaire/types';
 import type { SessionStatusView } from '@/lib/app/questionnaire/session/status-view';
 
 export interface SessionWorkspaceProps {
@@ -71,6 +71,13 @@ export interface SessionWorkspaceProps {
   presentationMode?: PresentationMode;
   /** SSR-resolved full form view (forForm) for `form`/`both` modes; omit for anonymous. */
   initialFormView?: AnswerPanelView;
+  /**
+   * Live "watch it think" reasoning placement (demo feature) — `overlay` | `inline`, or
+   * `undefined`/null when the feature is off (platform flag or version toggle off). The page
+   * resolves the gate server-side and passes the effective placement; the chat renders nothing
+   * when it's absent.
+   */
+  reasoningPlacement?: ReasoningPlacement | null;
 }
 
 export function SessionWorkspace({
@@ -85,6 +92,7 @@ export function SessionWorkspace({
   autoStart = false,
   presentationMode = 'chat',
   initialFormView,
+  reasoningPlacement,
 }: SessionWorkspaceProps) {
   const showChat = presentationMode === 'chat' || presentationMode === 'both';
   const showForm = presentationMode === 'form' || presentationMode === 'both';
@@ -206,6 +214,7 @@ export function SessionWorkspace({
           stream={stream}
           voiceInputEnabled={voiceInputEnabled}
           attachmentInputEnabled={attachmentInputEnabled}
+          reasoningPlacement={reasoningPlacement}
           // Fresh sessions (autoStart) type the seeded greeting in, like a streamed reply;
           // resumes render their history instantly.
           animateOpening={autoStart}

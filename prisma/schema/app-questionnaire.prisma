@@ -205,6 +205,21 @@ model AppQuestionnaireConfig {
   // Session-start profile fields (ProfileFieldConfig[] — types.ts).
   profileFields Json @default("[]")
 
+  // Live "watch it think" reasoning trace (demo feature): show the agent's per-turn reasoning
+  // (answers captured with provenance/confidence, contradictions spotted, why the next question was
+  // chosen) beside the chat. On by default; only takes effect when the platform flag
+  // APP_QUESTIONNAIRES_REASONING_STREAM_ENABLED is on. placement = overlay | inline (REASONING_PLACEMENTS);
+  // persist = save the trace on each turn so it replays on resume / scroll-back. (lib/.../reasoning)
+  reasoningStreamEnabled   Boolean @default(true)
+  reasoningStreamPlacement String  @default("overlay")
+  reasoningStreamPersist   Boolean @default(true)
+
+  // Interviewer tone & persona (F-tone): ToneSettings — nine enable-toggle + 1–5 sliders plus a
+  // free-text persona, controlling HOW the conversational interviewer responds. Off per dimension
+  // by default; only takes effect when the platform flag APP_QUESTIONNAIRES_TONE_ENABLED is on.
+  // Fed into the phraser system prompt by buildToneInstructions (lib/.../chat/tone.ts). (types.ts)
+  tone Json @default("{}")
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -735,6 +750,7 @@ model AppQuestionnaireTurn {
   sideEffectAnswerIds   Json     @default("[]") // AppAnswerSlot.id[] this turn created/updated
   sideEffectDataSlotIds Json     @default("[]") // AppDataSlotFill.id[] this turn created/updated (data-slot mode)
   warnings              Json     @default("[]") // [{ code, message }] side-band notices shown beneath this turn (seriousness/support/contradiction) — replayed inline on resume
+  reasoning             Json     @default("[]") // ReasoningStep[] — live "watch it think" trace, persisted (when config.reasoningStreamPersist) so it replays on resume/scroll-back. Respondent-safe (no abuse/sensitivity). (lib/.../reasoning)
   costUsd               Float? // summed per-turn LLM spend; null until set
   createdAt             DateTime @default(now())
 

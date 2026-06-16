@@ -53,13 +53,26 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/sessions', () => sessionsMock);
 const tokenMock = vi.hoisted(() => ({ verifySessionToken: vi.fn() }));
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/session-access-token', () => tokenMock);
 
+// Reasoning trace builder — mocked so tests can control whether a non-empty trace is built
+// without running the real pure builder (which inspects TurnResult internals).
+const reasoningMock = vi.hoisted(() => ({ buildReasoningTrace: vi.fn() }));
+vi.mock('@/lib/app/questionnaire/reasoning', () => ({
+  buildReasoningTrace: reasoningMock.buildReasoningTrace,
+}));
+
 import { POST } from '@/app/api/v1/app/questionnaire-sessions/[id]/messages/route';
-import { ABUSE_ABANDON_REASON, DEFAULT_QUESTIONNAIRE_CONFIG } from '@/lib/app/questionnaire/types';
+import {
+  ABUSE_ABANDON_REASON,
+  DEFAULT_QUESTIONNAIRE_CONFIG,
+  DEFAULT_TONE_SETTINGS,
+} from '@/lib/app/questionnaire/types';
 import { isFeatureEnabled } from '@/lib/feature-flags';
 import {
   APP_QUESTIONNAIRES_COST_CAP_FLAG,
   APP_QUESTIONNAIRES_DATA_SLOTS_FLAG,
   APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG,
+  APP_QUESTIONNAIRES_REASONING_STREAM_FLAG,
+  APP_QUESTIONNAIRES_TONE_FLAG,
 } from '@/lib/app/questionnaire/constants';
 import { auth } from '@/lib/auth/config';
 import { mockAuthenticatedUser, mockUnauthenticatedUser } from '@/tests/helpers/auth';
@@ -198,6 +211,8 @@ beforeEach(() => {
   sessionsMock.recordCostCapReached.mockResolvedValue(undefined);
   sessionsMock.pauseSession.mockResolvedValue('paused');
   sessionsMock.hasCostCapReachedEvent.mockResolvedValue(false);
+  // Reasoning trace: default to empty so the standard turn tests are unaffected.
+  reasoningMock.buildReasoningTrace.mockReturnValue([]);
 });
 
 /** A loaded context carrying a USD budget; `answered` optionally pre-answers the only question. */
@@ -347,6 +362,62 @@ describe('streaming a question turn', () => {
       .join('');
     expect(text).toBe('What is your role?');
   });
+
+  it('does not forward tone to the phraser when every dimension is off (the default)', async () => {
+    // The default fixture config has tone all-off → the route omits `tone` from the phraser input
+    // so the interviewer keeps its default voice.
+    await drainSse(await POST(req({ message: 'I do marketing' }), ctx));
+
+    const arg = questionMock.streamQuestionMessage.mock.calls[0][0] as {
+      input: { tone?: unknown };
+    };
+    expect(arg.input.tone).toBeUndefined();
+  });
+
+  it('forwards the tone block to the phraser when the flag is on and a dimension is enabled', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(
+      loadedContext({
+        base: {
+          ...loadedContext().base,
+          config: {
+            ...DEFAULT_QUESTIONNAIRE_CONFIG,
+            tone: { ...DEFAULT_TONE_SETTINGS, empathy: { enabled: true, level: 5 } },
+          },
+        },
+      })
+    );
+
+    await drainSse(await POST(req({ message: 'I do marketing' }), ctx));
+
+    const arg = questionMock.streamQuestionMessage.mock.calls[0][0] as {
+      input: { tone?: { empathy: { enabled: boolean; level: number } } };
+    };
+    expect(arg.input.tone?.empathy).toEqual({ enabled: true, level: 5 });
+  });
+
+  it('does not forward tone when a dimension is enabled but the platform tone flag is off', async () => {
+    vi.mocked(isFeatureEnabled).mockImplementation((name: string) =>
+      Promise.resolve(name !== APP_QUESTIONNAIRES_TONE_FLAG)
+    );
+    ctxMock.buildTurnContext.mockResolvedValue(
+      loadedContext({
+        base: {
+          ...loadedContext().base,
+          config: {
+            ...DEFAULT_QUESTIONNAIRE_CONFIG,
+            tone: { ...DEFAULT_TONE_SETTINGS, empathy: { enabled: true, level: 5 } },
+          },
+        },
+      })
+    );
+
+    await drainSse(await POST(req({ message: 'I do marketing' }), ctx));
+
+    const arg = questionMock.streamQuestionMessage.mock.calls[0][0] as {
+      input: { tone?: unknown };
+    };
+    expect(arg.input.tone).toBeUndefined();
+  });
 });
 
 describe('streaming an offer turn', () => {
@@ -436,6 +507,64 @@ describe('data-slot mode', () => {
     expect(runMock.persistTurn).toHaveBeenCalledWith(
       expect.objectContaining({ dataSlotFills: expect.any(Array) })
     );
+  });
+
+  it('builds the dataSlotFillByDataSlotId map from pre-existing fills (passes current to extractor)', async () => {
+    // Arrange: a context with a data slot that already has a prior fill — exercises the
+    // `(loaded.base.dataSlotAnswered ?? []).map(...)` path and the `current` field in
+    // the invoker's candidate build.
+    vi.mocked(isFeatureEnabled).mockImplementation((name: string) =>
+      Promise.resolve(name === APP_QUESTIONNAIRES_DATA_SLOTS_FLAG || true)
+    );
+    const baseCtx = loadedContext();
+    ctxMock.buildTurnContext.mockResolvedValue(
+      loadedContext({
+        base: {
+          ...baseCtx.base,
+          dataSlots: [
+            {
+              id: 'ds-1',
+              key: 'department',
+              name: 'Department',
+              description: 'Which department?',
+              theme: 'role',
+              ordinal: 0,
+              weight: 1,
+            },
+          ],
+          // A prior fill for ds-1 — exercises the map() body (line 257) and the `current` spread.
+          dataSlotAnswered: [
+            {
+              dataSlotId: 'ds-1',
+              value: 'Engineering',
+              paraphrase: 'Works in Engineering',
+              confidence: 0.85,
+            },
+          ],
+          dataSlotAttempts: { 'ds-1': 1 },
+        },
+      })
+    );
+    questionMock.streamQuestionMessage.mockImplementation(async function* (opts: {
+      input: { prompt: string };
+    }) {
+      yield { type: 'content', delta: opts.input.prompt };
+      return { message: opts.input.prompt, costUsd: 0 };
+    });
+
+    const res = await POST(req({ message: 'I am in Engineering' }), ctx);
+    expect(res.status).toBe(200);
+    const frames = await drainSse(res);
+    expect(frames.map((f) => f.event)).toContain('done');
+
+    // The extractor candidate should carry the prior fill as 'current' — the route must
+    // pass `dataSlotCandidates` with the fill data to buildTurnInvokers so the extractor
+    // can update/correct it across turns rather than re-deriving from scratch.
+    const invokerArgs = invokersMock.buildTurnInvokers.mock.calls[0][0] as {
+      dataSlotCandidates: Array<{ key: string; current?: { value: unknown } }>;
+    };
+    const candidate = invokerArgs.dataSlotCandidates?.find((c) => c.key === 'department');
+    expect(candidate?.current?.value).toBe('Engineering');
   });
 });
 
@@ -768,5 +897,245 @@ describe('sensitivity awareness / safeguarding', () => {
     await drainSse(await POST(req({ message: 'I was abused by the CEO' }), ctx));
     expect(sessionsMock.persistSensitivity).not.toHaveBeenCalled();
     expect(sessionsMock.recordSensitivityFlagged).not.toHaveBeenCalled();
+  });
+});
+
+describe('reasoning stream (F9.9)', () => {
+  /** A context with reasoning stream on (both platform flag and per-version toggle). */
+  function reasoningContext(persist = false) {
+    const base = loadedContext();
+    return loadedContext({
+      base: {
+        ...base.base,
+        config: {
+          ...base.base.config,
+          reasoningStreamEnabled: true,
+          reasoningStreamPersist: persist,
+        },
+      },
+    });
+  }
+
+  it('emits a reasoning frame before the content when the trace is non-empty', async () => {
+    // Arrange: platform flag on AND per-version toggle on.
+    vi.mocked(isFeatureEnabled).mockImplementation((name: string) =>
+      Promise.resolve(name === APP_QUESTIONNAIRES_REASONING_STREAM_FLAG || true)
+    );
+    ctxMock.buildTurnContext.mockResolvedValue(reasoningContext());
+    // The builder returns a non-empty trace so the route emits the reasoning frame.
+    const steps = [{ kind: 'answer_captured', label: 'Captured your answer', tone: 'positive' }];
+    reasoningMock.buildReasoningTrace.mockReturnValue(steps);
+
+    const frames = await drainSse(await POST(req({ message: 'I do sales' }), ctx));
+
+    // A 'reasoning' frame should appear between 'start' and 'content'.
+    const eventNames = frames.map((f) => f.event);
+    expect(eventNames).toContain('reasoning');
+    const reasoningFrame = frames.find((f) => f.event === 'reasoning');
+    expect((reasoningFrame!.data as { steps: unknown[] }).steps).toHaveLength(1);
+
+    // The reasoning frame must precede any content frame (emitted before the reply).
+    const reasoningIdx = eventNames.indexOf('reasoning');
+    const firstContentIdx = eventNames.indexOf('content');
+    expect(reasoningIdx).toBeLessThan(firstContentIdx);
+  });
+
+  it('does not emit a reasoning frame when the trace is empty', async () => {
+    vi.mocked(isFeatureEnabled).mockImplementation((name: string) =>
+      Promise.resolve(name === APP_QUESTIONNAIRES_REASONING_STREAM_FLAG || true)
+    );
+    ctxMock.buildTurnContext.mockResolvedValue(reasoningContext());
+    // Builder returns empty → no frame emitted.
+    reasoningMock.buildReasoningTrace.mockReturnValue([]);
+
+    const frames = await drainSse(await POST(req({ message: 'hi' }), ctx));
+    expect(frames.map((f) => f.event)).not.toContain('reasoning');
+  });
+
+  it('persists the trace when the version opts into persistence', async () => {
+    vi.mocked(isFeatureEnabled).mockImplementation((name: string) =>
+      Promise.resolve(name === APP_QUESTIONNAIRES_REASONING_STREAM_FLAG || true)
+    );
+    ctxMock.buildTurnContext.mockResolvedValue(reasoningContext(true)); // persist = true
+    const steps = [
+      { kind: 'next_question', label: 'Moving to the next question', tone: 'neutral' },
+    ];
+    reasoningMock.buildReasoningTrace.mockReturnValue(steps);
+
+    await drainSse(await POST(req({ message: 'hi' }), ctx));
+
+    // When persist is true, the reasoning trace is passed to persistTurn.
+    expect(runMock.persistTurn).toHaveBeenCalledWith(expect.objectContaining({ reasoning: steps }));
+  });
+
+  it('does not persist the trace when the version does not opt into persistence', async () => {
+    vi.mocked(isFeatureEnabled).mockImplementation((name: string) =>
+      Promise.resolve(name === APP_QUESTIONNAIRES_REASONING_STREAM_FLAG || true)
+    );
+    ctxMock.buildTurnContext.mockResolvedValue(reasoningContext(false)); // persist = false
+    const steps = [{ kind: 'answer_captured', label: 'Got it', tone: 'positive' }];
+    reasoningMock.buildReasoningTrace.mockReturnValue(steps);
+
+    await drainSse(await POST(req({ message: 'hi' }), ctx));
+
+    // The frame streamed but the trace must NOT be saved (live-only when persist is off).
+    const persistArg = runMock.persistTurn.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(persistArg.reasoning).toBeUndefined();
+  });
+
+  it('does not emit a reasoning frame when the platform flag is off', async () => {
+    // The platform flag overrides the per-version toggle — when off, nothing streams.
+    vi.mocked(isFeatureEnabled).mockImplementation((name: string) =>
+      Promise.resolve(name !== APP_QUESTIONNAIRES_REASONING_STREAM_FLAG)
+    );
+    ctxMock.buildTurnContext.mockResolvedValue(reasoningContext());
+    reasoningMock.buildReasoningTrace.mockReturnValue([
+      { kind: 'answer_captured', label: 'Got it', tone: 'positive' },
+    ]);
+
+    const frames = await drainSse(await POST(req({ message: 'hi' }), ctx));
+    expect(frames.map((f) => f.event)).not.toContain('reasoning');
+    // The builder is never called when the flag is off.
+    expect(reasoningMock.buildReasoningTrace).not.toHaveBeenCalled();
+  });
+});
+
+describe('contradiction detail enrichment', () => {
+  /**
+   * Invokers that trigger a contradiction warning with both a suggestedProbe (the public
+   * message) and a separate explanation. The route must enrich the warning frame with the
+   * explanation as `detail` when it differs from the message.
+   */
+  function contradictionInvokers() {
+    return {
+      extractAnswers: vi.fn(async () => ({
+        intents: [
+          {
+            slotKey: 'q1',
+            questionType: 'free_text',
+            value: 'senior manager',
+            confidence: 0.9,
+            provenance: 'direct',
+            rationale: 'stated',
+            isActiveQuestion: true,
+          },
+        ],
+        costUsd: 0,
+      })),
+      detectContradictions: vi.fn(async () => ({
+        findings: [
+          {
+            slotKeys: ['q1'],
+            explanation: 'Earlier said junior; now says senior',
+            severity: 'medium' as const,
+            confidence: 0.8,
+            // suggestedProbe is different from explanation — the route shows suggestedProbe
+            // as the message but attaches explanation as a detail for "Why?" disclosure.
+            suggestedProbe: 'Can you clarify your seniority level?',
+          },
+        ],
+        costUsd: 0,
+      })),
+      refineAnswer: vi.fn(async () => ({ decisions: [], costUsd: 0 })),
+      selectNext: vi.fn(async () => ({
+        decision: { kind: 'ask', questionId: 'q1', rationale: 'first', costUsd: 0 },
+      })),
+      assessSeriousness: vi.fn(async () => ({
+        verdict: { serious: true, reason: '' },
+        costUsd: 0,
+      })),
+    };
+  }
+
+  it('enriches a contradiction warning frame with the explanation as detail when suggestedProbe differs', async () => {
+    // Need ≥ MIN_CONTRADICTION_ANSWERS (2) existing answers and contradictionMode ≠ 'off'.
+    const baseCtx = loadedContext();
+    ctxMock.buildTurnContext.mockResolvedValue(
+      loadedContext({
+        activeQuestionKey: 'q1',
+        base: {
+          ...baseCtx.base,
+          // Two distinct slot answers so the orchestrator's MIN_CONTRADICTION_ANSWERS gate passes.
+          existingAnswers: [
+            { slotKey: 'q1', value: 'junior', provenance: 'direct' as const, confidence: 0.7 },
+            { slotKey: 'role', value: 'engineer', provenance: 'direct' as const, confidence: 0.8 },
+          ],
+          config: {
+            ...baseCtx.base.config,
+            // contradictionMode must be non-'off' for detection to run.
+            contradictionMode: 'flag',
+            contradictionEveryNTurns: 1,
+          },
+        },
+      })
+    );
+    invokersMock.buildTurnInvokers.mockResolvedValue(contradictionInvokers());
+
+    const frames = await drainSse(await POST(req({ message: 'senior manager' }), ctx));
+
+    // The contradiction warning frame must carry the explanation as 'detail'.
+    const contradictionFrame = frames.find(
+      (f) => f.event === 'warning' && (f.data as { code?: string }).code === 'contradiction'
+    );
+    expect(contradictionFrame).toBeDefined();
+    const data = contradictionFrame!.data as { code: string; message: string; detail?: string };
+    expect(data.message).toBe('Can you clarify your seniority level?');
+    expect(data.detail).toBe('Earlier said junior; now says senior');
+  });
+});
+
+describe('abuse gate write failure (fail-soft)', () => {
+  function abusiveInvokers() {
+    return {
+      extractAnswers: vi.fn(async () => ({
+        intents: [
+          {
+            slotKey: 'q1',
+            questionType: 'free_text',
+            value: '543 years',
+            confidence: 0.9,
+            provenance: 'direct',
+            rationale: 'stated',
+            isActiveQuestion: true,
+          },
+        ],
+        suspectedNonGenuine: true,
+        costUsd: 0,
+      })),
+      detectContradictions: vi.fn(async () => ({ findings: [], costUsd: 0 })),
+      refineAnswer: vi.fn(async () => ({ decisions: [], costUsd: 0 })),
+      selectNext: vi.fn(async () => ({
+        decision: { kind: 'ask', questionId: 'q1', rationale: 'x', costUsd: 0 },
+      })),
+      assessSeriousness: vi.fn(async () => ({
+        verdict: { serious: false, reason: 'Impossible tenure.' },
+        costUsd: 0,
+      })),
+    };
+  }
+
+  function gateContext(abuseStrikes: number) {
+    const base = loadedContext();
+    return loadedContext({
+      activeQuestionKey: 'q1',
+      base: { ...base.base, abuseStrikes, config: { ...base.base.config, abuseThreshold: 4 } },
+    });
+  }
+
+  it('still emits done when persistAbuseStrikes rejects (reply already streamed — fail-soft)', async () => {
+    // Arrange: the abuse gate fires (strike below threshold) but the DB write fails.
+    invokersMock.buildTurnInvokers.mockResolvedValue(abusiveInvokers());
+    ctxMock.buildTurnContext.mockResolvedValue(gateContext(0));
+    sessionsMock.persistAbuseStrikes.mockRejectedValue(new Error('strike write boom'));
+
+    // Act
+    const res = await POST(req({ message: 'garbage' }), ctx);
+    expect(res.status).toBe(200);
+    const frames = await drainSse(res);
+
+    // Assert: the bookkeeping failure is swallowed — done is still emitted.
+    const eventNames = frames.map((f) => f.event);
+    expect(eventNames).toContain('content');
+    expect(eventNames[eventNames.length - 1]).toBe('done');
   });
 });

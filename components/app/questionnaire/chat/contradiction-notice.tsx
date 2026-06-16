@@ -20,14 +20,17 @@
 import { Sparkles } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
+import { NoticeWhy } from '@/components/app/questionnaire/chat/notice-why';
 
 export interface ContradictionNoticeProps {
   /** The agent's probe / explanation of the possible inconsistency. */
   message: string;
+  /** The contradiction's explanation when the message shown is the probe — behind a "Why?" disclosure. */
+  detail?: string;
   className?: string;
 }
 
-export function ContradictionNotice({ message, className }: ContradictionNoticeProps) {
+export function ContradictionNotice({ message, detail, className }: ContradictionNoticeProps) {
   return (
     <div
       role="status"
@@ -50,6 +53,7 @@ export function ContradictionNotice({ message, className }: ContradictionNoticeP
       <div className="min-w-0">
         <p className="text-foreground text-xs font-medium">I noticed something</p>
         <p className="text-muted-foreground mt-0.5">{message}</p>
+        <NoticeWhy detail={detail} />
       </div>
     </div>
   );

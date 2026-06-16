@@ -308,6 +308,8 @@ describe('questionnaire datamodel (Prisma.dmmf)', () => {
     expect(getField(model, 'presentationMode').type).toBe('String');
     // Profile fields are stored as JSON (ProfileFieldConfig[]) — not a relation.
     expect(getField(model, 'profileFields').type).toBe('Json');
+    // F-tone — interviewer tone & persona stored as a single JSON block (ToneSettings).
+    expect(getField(model, 'tone').type).toBe('Json');
 
     const version = getField(model, 'version');
     expect(version.kind).toBe('object');
@@ -1046,6 +1048,30 @@ describe('app_questionnaire_turn_warnings migration SQL', () => {
   it('adds the warnings JSON column defaulting to an empty array', () => {
     expect(sql).toMatch(
       /ALTER TABLE "app_questionnaire_turn" ADD COLUMN\s+"warnings" JSONB NOT NULL DEFAULT '\[\]'/
+    );
+  });
+
+  it('is additive only — no table create/drop and no platform DDL', () => {
+    // Same schema-fold footgun as the sibling app migrations: `migrate dev` re-emitted the
+    // four pgvector DROP INDEX + the GENERATED searchVector ALTER. Stripped by hand; this
+    // guard fails if a regeneration leaks them back in.
+    expect(executableSql).not.toContain('CREATE TABLE');
+    expect(executableSql).not.toContain('DROP INDEX');
+    expect(executableSql).not.toContain('ai_knowledge');
+    expect(executableSql).not.toContain('ai_message');
+    expect(executableSql).not.toContain('searchVector');
+    // Exactly one executable statement — our single ALTER TABLE.
+    expect(executableSql.match(/ALTER TABLE/g) ?? []).toHaveLength(1);
+  });
+});
+
+describe('app_questionnaire_tone migration SQL (F-tone)', () => {
+  const sql = readMigrationSql('_app_questionnaire_tone');
+  const executableSql = executableLines(sql);
+
+  it('adds the tone JSON column defaulting to an empty object', () => {
+    expect(sql).toMatch(
+      /ALTER TABLE "app_questionnaire_config" ADD COLUMN\s+"tone" JSONB NOT NULL DEFAULT '\{\}'/
     );
   });
 

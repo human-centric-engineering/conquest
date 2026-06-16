@@ -39,12 +39,16 @@ import {
   isCostCapEnforcementEnabled,
   isDataSlotsEnabled,
   isQuestionPhrasingEnabled,
+  isReasoningStreamEnabled,
   isSeriousnessGateEnabled,
   isSensitivityAwarenessEnabled,
+  isToneEnabled,
   withLiveSessionsEnabled,
 } from '@/lib/app/questionnaire/feature-flag';
+import { buildReasoningTrace, type ReasoningStep } from '@/lib/app/questionnaire/reasoning';
+import type { SessionWarning } from '@/lib/app/questionnaire/chat/types';
 import { classifyCostCap } from '@/lib/app/questionnaire/session';
-import { ABUSE_ABANDON_REASON } from '@/lib/app/questionnaire/types';
+import { ABUSE_ABANDON_REASON, TONE_DIMENSION_KEYS } from '@/lib/app/questionnaire/types';
 import {
   runTurn,
   runDataSlotTurn,
@@ -189,6 +193,8 @@ async function handleMessage(
       dataSlotsFlag,
       seriousnessGate,
       sensitivityAwarenessFlag,
+      reasoningStreamFlag,
+      toneFlag,
     ] = await Promise.all([
       isAnswerExtractionEnabled(),
       isContradictionDetectionEnabled(),
@@ -200,6 +206,8 @@ async function handleMessage(
       isDataSlotsEnabled(),
       isSeriousnessGateEnabled(),
       isSensitivityAwarenessEnabled(),
+      isReasoningStreamEnabled(),
+      isToneEnabled(),
     ]);
 
     // Sensitivity awareness runs only when the platform flag AND the per-questionnaire config
@@ -210,6 +218,21 @@ async function handleMessage(
     // data slots (the conversation targets data slots; questions fill in the background).
     const dataSlots = loaded.base.dataSlots ?? [];
     const dataSlotMode = dataSlotsFlag && dataSlots.length > 0;
+
+    // Live "watch it think" reasoning stream (demo feature): the platform flag AND the per-version
+    // config toggle. `persist` additionally requires the version opt-in — when off the trace streams
+    // live but isn't saved, so resumed turns show nothing. Both inert when the flag is off.
+    const reasoningStreamOn = reasoningStreamFlag && loaded.base.config.reasoningStreamEnabled;
+    const reasoningPersist = reasoningStreamOn && loaded.base.config.reasoningStreamPersist;
+
+    // Interviewer tone & persona (F-tone): the platform flag AND at least one configured dimension
+    // (or the persona) being on. When neither holds the phraser keeps its default voice, so we omit
+    // `tone` from its input entirely. Resolved once and threaded into both phrasing call sites below.
+    const toneConfig = loaded.base.config.tone;
+    const toneActive =
+      toneFlag &&
+      (toneConfig.persona.enabled || TONE_DIMENSION_KEYS.some((key) => toneConfig[key].enabled));
+    const tonePhraserInput = toneActive ? { tone: toneConfig } : {};
 
     // Attachments only flow when the platform sub-flag is on (dark-launch) AND this questionnaire
     // opted in via config: with either off, a client that sends attachments anyway gets a
@@ -272,6 +295,11 @@ async function handleMessage(
                 name: s.name,
                 description: s.description,
                 theme: s.theme,
+                // Forward propagation: the question(s) this slot captures, so filling it in chat
+                // ALSO answers the underlying form questions (the schema-documented contract).
+                ...(s.mappedQuestionKeys && s.mappedQuestionKeys.length > 0
+                  ? { mappedQuestionKeys: s.mappedQuestionKeys }
+                  : {}),
                 ...(fill
                   ? {
                       current: {
@@ -301,7 +329,11 @@ async function handleMessage(
 
     log.info('Live turn started', { sessionId, versionId: loaded.session.versionId, userId });
 
-    async function* drive(): AsyncGenerator<ChatEvent> {
+    async function* drive(): AsyncGenerator<
+      | ChatEvent
+      | { type: 'reasoning'; steps: ReasoningStep[] }
+      | { type: 'warning'; code: string; message: string; detail?: string }
+    > {
       yield { type: 'start', conversationId: sessionId, messageId: sessionId };
 
       // Data Slots feature: data-slot mode runs the parallel orchestrator (targets data slots,
@@ -310,14 +342,50 @@ async function handleMessage(
         ? await runDataSlotTurn(state, invokers)
         : await runTurn(state, invokers);
 
-      // Side-band frames the core determined (contradiction warnings, fail-soft notices).
-      for (const ev of result.events) yield ev;
+      // Side-band frames the core determined (contradiction / seriousness / support / fail-soft
+      // notices). Enrich each warning with its underlying rationale — the seriousness judge's reason,
+      // or a contradiction's explanation when the message shown is the probe — so the surface can
+      // offer a "Why?" disclosure. The rationale is computed by the core but otherwise dropped here.
+      // Streamed now AND captured into `turnWarnings` for inline replay on resume.
+      const contradictionReasons = result.contradictions.map((f) => f.explanation);
+      let contradictionIdx = 0;
+      const turnWarnings: SessionWarning[] = [];
+      for (const ev of result.events) {
+        if (ev.type !== 'warning') {
+          yield ev;
+          continue;
+        }
+        let detail: string | undefined;
+        if (ev.code === 'seriousness') {
+          detail = result.abuse?.reason;
+        } else if (ev.code === 'contradiction') {
+          const explanation = contradictionReasons[contradictionIdx++];
+          // Skip when the explanation is already the message (flag mode shows it as the message).
+          if (explanation && explanation !== ev.message) detail = explanation;
+        }
+        const warning: SessionWarning = {
+          code: ev.code,
+          message: ev.message,
+          ...(detail ? { detail } : {}),
+        };
+        turnWarnings.push(warning);
+        yield { type: 'warning', ...warning };
+      }
 
-      // Capture the same warning frames to persist on the turn, so the respondent surface can
-      // replay them inline beneath this turn on resume rather than losing them on the next input.
-      const turnWarnings = result.events
-        .filter((ev): ev is Extract<ChatEvent, { type: 'warning' }> => ev.type === 'warning')
-        .map((ev) => ({ code: ev.code, message: ev.message }));
+      // Live "watch it think" reasoning trace (demo feature): a respondent-safe account of the work
+      // the turn just did (answers captured, contradictions spotted, why the next question follows),
+      // derived from the result — no extra LLM cost. Emitted as one frame BEFORE the reply streams;
+      // the client reveals the steps staggered. Persisted below (when the version opts in) so it
+      // replays on resume. Empty on an abuse-abandoned turn (the builder returns nothing).
+      let reasoning: ReasoningStep[] = [];
+      if (reasoningStreamOn) {
+        reasoning = buildReasoningTrace(result, {
+          questions: state.questions,
+          ...(dataSlotMode ? { dataSlots } : {}),
+          isOpening: state.selectionRound === 0,
+        });
+        if (reasoning.length > 0) yield { type: 'reasoning', steps: reasoning };
+      }
 
       // Sensitivity awareness: the gentle-tone memory threaded into the phraser this turn. Fold the
       // JUST-detected disclosure in (the route persists it only after the run) so the disclosure
@@ -381,6 +449,7 @@ async function handleMessage(
             ...(r.isReask && currentUnderstanding ? { currentUnderstanding } : {}),
             ...(isFinalAttempt ? { isFinalAttempt: true } : {}),
             ...sensitivityPhraserInput,
+            ...tonePhraserInput,
           },
           userId,
           sessionId,
@@ -413,6 +482,7 @@ async function handleMessage(
             isOpening: state.selectionRound === 0,
             questionsAsked: state.selectionRound,
             ...sensitivityPhraserInput,
+            ...tonePhraserInput,
           },
           userId,
           sessionId,
@@ -435,6 +505,9 @@ async function handleMessage(
           targetedQuestionId: persistedTargetedId,
           toolCalls: result.toolCalls,
           ...(turnWarnings.length > 0 ? { warnings: turnWarnings } : {}),
+          // Persist the reasoning trace only when the version opted into persistence — otherwise it
+          // was live-only this turn (streamed above, not saved), so resumed turns show none.
+          ...(reasoningPersist && reasoning.length > 0 ? { reasoning } : {}),
           costUsd,
           upserts: result.sideEffects.answerUpserts,
           refinements: result.sideEffects.answerRefinements,

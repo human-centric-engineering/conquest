@@ -31,6 +31,7 @@ import {
   runningMaxLevel,
   shouldSignpost,
   composeSupportMessage,
+  effectiveSupportMessage,
 } from '@/lib/app/questionnaire/sensitivity';
 import type { SensitivityAssessment } from '@/lib/app/questionnaire/sensitivity/types';
 import { coverageRatio, unansweredQuestions } from '@/lib/app/questionnaire/selection/context';
@@ -96,15 +97,28 @@ function applyFills(
     byId.set(id, {
       dataSlotId: id,
       confidence: fill.confidence,
+      // Carry provenance so coverage can honour a STATED answer regardless of the confidence
+      // number — see `isCovered`. A direct fill is never parked, so it carries no provisional flag.
+      provenance: fill.provenance,
       provisional: fill.provisional ?? false,
     });
   }
   return [...byId.values()];
 }
 
-/** True once a slot is "covered" for targeting — a confident fill OR a parked provisional one. */
+/**
+ * True once a slot is "covered" for targeting — so it is neither re-asked nor parked. Covered when:
+ * the respondent plainly STATED a position (`direct`), OR the fill cleared the confidence threshold,
+ * OR it was already parked (provisional). The `direct` clause is deliberate: a clearly-stated answer
+ * is answered even when the extractor under-scores its confidence, so a noisy number can never make a
+ * real answer read as missing (the bug that re-asked "extremely unlikely" and parked it provisional).
+ */
 function isCovered(a: DataSlotAnsweredView): boolean {
-  return (a.confidence ?? 0) >= DATA_SLOT_FILLED_THRESHOLD || a.provisional === true;
+  return (
+    a.provenance === 'direct' ||
+    (a.confidence ?? 0) >= DATA_SLOT_FILLED_THRESHOLD ||
+    a.provisional === true
+  );
 }
 
 /** The unfilled data slots, theme-ordered (the loader already orders by theme then ordinal). */
@@ -153,7 +167,13 @@ function buildOfferInput(
 ): OfferComposeInput {
   const filled = new Set(
     answered
-      .filter((a) => (a.confidence ?? 0) >= DATA_SLOT_FILLED_THRESHOLD)
+      // A genuinely-captured topic for the wrap-up summary: a stated (`direct`) fill or one that
+      // cleared the threshold, but never a provisional park (a best-effort guess, not a real answer).
+      .filter(
+        (a) =>
+          !a.provisional &&
+          (a.provenance === 'direct' || (a.confidence ?? 0) >= DATA_SLOT_FILLED_THRESHOLD)
+      )
       .map((a) => a.dataSlotId)
   );
   return {
@@ -220,7 +240,16 @@ export async function runDataSlotTurn(
   //     configured threshold.
   let abuse: TurnResult['abuse'];
   let disregarded = false;
-  if (hasMessage && state.flags.seriousnessGate && state.config.abuseThreshold > 0) {
+  // SAFEGUARDING OUTRANKS THE SINCERITY GATE (parity with question mode): a turn the extractor
+  // flagged as a genuine sensitive disclosure is a real answer — never judged for sincerity, struck,
+  // or set aside. Skip the gate entirely when `extractedSensitivity` is set; the sensitivity step
+  // below handles the disclosure.
+  if (
+    hasMessage &&
+    !extractedSensitivity &&
+    state.flags.seriousnessGate &&
+    state.config.abuseThreshold > 0
+  ) {
     const judged = await invokers.assessSeriousness(state);
     costUsd += judged.costUsd;
     toolCalls.push(
@@ -359,6 +388,10 @@ export async function runDataSlotTurn(
   // 3. Respond.
   let response: TurnResponse;
   let targetedQuestionId: string | null = null;
+  // Captured for the "watch it think" reasoning trace — a friendly, respondent-safe account of why
+  // the conversation moves where it does this turn. Data-slot targeting is deterministic (topic-local
+  // / bridge / sweep), so we phrase the rationale here rather than carry a selector's string.
+  let selectionRationale: string | undefined;
 
   const unfilled = unfilledDataSlots(dataSlots, effectiveDataAnswered);
 
@@ -389,6 +422,7 @@ export async function runDataSlotTurn(
     toolCalls.push(toolCall(DATA_SLOT_SELECTION_TOOL_SLUG, true));
     response = { kind: 'question', questionId: next.id, text: next.prompt ?? '' };
     targetedQuestionId = next.id;
+    selectionRationale = 'Bringing in a required detail we still need to capture.';
   } else if (unfilled.length > 0) {
     // Target the next data slot, topic-local (linger in the current theme) — but when we just
     // parked a slot, bridge to a DIFFERENT theme so the move-on reads as forward progress.
@@ -396,6 +430,8 @@ export async function runDataSlotTurn(
     const activeTheme = state.activeDataSlotKey
       ? dataSlots.find((s) => s.key === state.activeDataSlotKey)?.theme
       : undefined;
+    const isReask = next.key === state.activeDataSlotKey;
+    const isTransition = activeTheme !== undefined && activeTheme !== next.theme;
     toolCalls.push(toolCall(DATA_SLOT_SELECTION_TOOL_SLUG, true));
     response = {
       kind: 'data_slot',
@@ -404,29 +440,41 @@ export async function runDataSlotTurn(
       name: next.name,
       description: next.description,
       theme: next.theme,
-      isReask: next.key === state.activeDataSlotKey,
-      isTransition: activeTheme !== undefined && activeTheme !== next.theme,
+      isReask,
+      isTransition,
     };
+    selectionRationale = isReask
+      ? 'Circling back to understand this a little better.'
+      : isTransition
+        ? `Moving on to a new area: ${next.theme}.`
+        : 'Staying with this topic to go a little deeper.';
   } else {
     // Every data slot is filled, but a background question is still open → ask it directly.
     const next = remainingQuestions[0];
     toolCalls.push(toolCall(DATA_SLOT_SELECTION_TOOL_SLUG, true));
     response = { kind: 'question', questionId: next.id, text: next.prompt ?? '' };
     targetedQuestionId = next.id;
+    selectionRationale = 'Filling in the last few questions we still need.';
   }
 
   // Signpost support LAST so it wins the chat's single notice slot (the hook keeps one warning).
-  if (sensitivity?.signpost && state.config.supportMessage.trim().length > 0) {
+  // Fires on a first serious disclosure; copy is the admin's message, or a reviewed default when
+  // blank (so enabling sensitivity always signposts — no silent empty-message footgun).
+  if (sensitivity?.signpost) {
     events.push({
       type: 'warning',
       code: 'support',
-      message: composeSupportMessage(state.config.supportMessage, state.config.supportResourceUrl),
+      message: composeSupportMessage(
+        effectiveSupportMessage(state.config.supportMessage),
+        state.config.supportResourceUrl
+      ),
     });
   }
 
   return {
     response,
     targetedQuestionId,
+    ...(selectionRationale !== undefined ? { selectionRationale } : {}),
     sideEffects: { answerUpserts, answerRefinements: [], dataSlotFills },
     events,
     toolCalls,

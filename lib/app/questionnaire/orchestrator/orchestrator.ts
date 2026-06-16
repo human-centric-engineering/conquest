@@ -31,6 +31,7 @@ import {
   runningMaxLevel,
   shouldSignpost,
   composeSupportMessage,
+  effectiveSupportMessage,
 } from '@/lib/app/questionnaire/sensitivity';
 import type { SensitivityAssessment } from '@/lib/app/questionnaire/sensitivity/types';
 import { unansweredQuestions } from '@/lib/app/questionnaire/selection/context';
@@ -187,7 +188,19 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
   //     → abandon at the configured threshold. A genuine answer (incl. colloquial/lazy) passes.
   let abuse: TurnResult['abuse'];
   let disregarded = false;
-  if (hasMessage && state.flags.seriousnessGate && state.config.abuseThreshold > 0) {
+  // SAFEGUARDING OUTRANKS THE SINCERITY GATE. When the extractor flagged a genuine sensitive
+  // disclosure this turn (`extractedSensitivity` is set — sensitivity awareness on AND a disclosure
+  // detected), the message is by definition a real answer: NEVER judge it for sincerity, strike it,
+  // or set it aside. A respondent disclosing abuse/harm must never be told their answer "doesn't seem
+  // genuine" — so we skip the gate entirely (no judge call, no disregard, no warning) and let the
+  // sensitivity step below handle the disclosure. This is the structural guarantee; the judge prompt
+  // is hardened too (defense-in-depth) for when sensitivity awareness is off.
+  if (
+    hasMessage &&
+    !extractedSensitivity &&
+    state.flags.seriousnessGate &&
+    state.config.abuseThreshold > 0
+  ) {
     const judged = await invokers.assessSeriousness(state);
     costUsd += judged.costUsd;
     toolCalls.push(
@@ -326,6 +339,10 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
   // 6. Respond.
   let response: TurnResponse;
   let targetedQuestionId: string | null;
+  // Captured for the "watch it think" reasoning trace — the selector's flow rationale, otherwise
+  // dropped after the response is built. Only set on a `question` turn (an offer/complete/none turn
+  // selected nothing). See `lib/app/questionnaire/reasoning`.
+  let selectionRationale: string | undefined;
 
   if (assessment.kind === 'offer' || offerEarly) {
     if (effective.flags.completion) {
@@ -366,6 +383,7 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
         text: promptFor(effective.questions, decision.questionId),
       };
       targetedQuestionId = decision.questionId;
+      selectionRationale = decision.rationale;
     } else if (decision.kind === 'complete') {
       response = { kind: 'complete', text: COMPLETE_MESSAGE };
       targetedQuestionId = null;
@@ -376,18 +394,25 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
   }
 
   // Signpost support LAST so it wins the chat's single notice slot (the hook keeps one warning).
-  // Only when a serious disclosure was first reached this turn AND the admin authored copy.
-  if (sensitivity?.signpost && state.config.supportMessage.trim().length > 0) {
+  // Fires whenever a serious disclosure is first reached this turn; the copy is the admin's authored
+  // message, or a reviewed default when they left it blank (so enabling sensitivity always signposts
+  // — no silent empty-message footgun).
+  if (sensitivity?.signpost) {
     events.push({
       type: 'warning',
       code: 'support',
-      message: composeSupportMessage(state.config.supportMessage, state.config.supportResourceUrl),
+      message: composeSupportMessage(
+        effectiveSupportMessage(state.config.supportMessage),
+        state.config.supportResourceUrl
+      ),
     });
   }
 
   return {
     response,
     targetedQuestionId,
+    ...(selectionRationale !== undefined ? { selectionRationale } : {}),
+    selectionStrategy: state.config.selectionStrategy,
     sideEffects: { answerUpserts, answerRefinements },
     events,
     toolCalls,

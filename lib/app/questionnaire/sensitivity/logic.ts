@@ -11,6 +11,22 @@
 
 import type { SensitivitySeverity } from '@/lib/app/questionnaire/types';
 
+/**
+ * The fallback support-signpost copy, used when sensitivity awareness is on but the admin hasn't
+ * authored a `supportMessage`. A fixed, reviewed string (NOT LLM-generated), so the safeguarding
+ * wording is always safe + exact while removing the footgun where toggling sensitivity on with no
+ * authored copy silently produced no signpost. An admin can still override it with their own copy.
+ */
+export const DEFAULT_SUPPORT_MESSAGE =
+  'Thank you for sharing that — it sounds difficult, and you don’t have to deal with it alone. ' +
+  'Confidential support is available whenever you need it, and you can take a break or stop at any time.';
+
+/** The effective signpost copy: the admin's authored message, or {@link DEFAULT_SUPPORT_MESSAGE}. */
+export function effectiveSupportMessage(authored: string): string {
+  const trimmed = authored.trim();
+  return trimmed.length > 0 ? trimmed : DEFAULT_SUPPORT_MESSAGE;
+}
+
 /** Numeric order for the severities (low < medium < high), for running-max comparison. */
 export function severityRank(severity: SensitivitySeverity): number {
   switch (severity) {

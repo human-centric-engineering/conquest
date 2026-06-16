@@ -133,6 +133,15 @@ export interface DataSlotCandidateView {
   /** Group label (for the model's sense of the area). */
   theme: string;
   /**
+   * Keys of the candidate questions this slot "meaningfully captures" (the `AppDataSlotQuestion`
+   * mapping). When present, the extractor that fills this slot must ALSO answer these mapped
+   * questions — translating the captured position onto each question's type/scale/options — so a
+   * conversational answer flows onto the underlying form, not just the panel. Each key is also in
+   * the candidate-question list (where its type/options live); absent/empty when the slot maps to
+   * no question.
+   */
+  mappedQuestionKeys?: string[];
+  /**
    * What's already recorded for this slot this session, when any — so the extractor can UPDATE or
    * CORRECT it (merge still-true details with a correction) rather than re-deriving from scratch
    * and dropping prior detail. Absent until the slot has a fill.

@@ -77,3 +77,23 @@ export function launchReadinessChecks(input: LaunchReadinessInput): LaunchReadin
 export function isLaunchReady(input: LaunchReadinessInput): boolean {
   return launchReadinessChecks(input).every((c) => c.ok);
 }
+
+/**
+ * Whether "Preview as respondent" can be offered for a version — the single rule the overview page
+ * and the workspace header button share (so the header CTA and the overview section can't disagree).
+ * Available for a launched version, or a draft that passes the launch-readiness bar, and only when
+ * the live-sessions surface is on and the version graph resolved. The server `createPreviewSession`
+ * enforces the same rule; archived versions are never previewable.
+ */
+export function isPreviewAvailable(input: {
+  status: string;
+  liveSessions: boolean;
+  graphPresent: boolean;
+  /** Required only for the draft case (a launched version is always previewable when live-sessions is on). */
+  readiness?: LaunchReadinessInput;
+}): boolean {
+  if (!input.liveSessions || !input.graphPresent) return false;
+  if (input.status === 'launched') return true;
+  if (input.status === 'draft') return input.readiness ? isLaunchReady(input.readiness) : false;
+  return false;
+}

@@ -11,8 +11,8 @@
  * drag reorder, which updates locally for responsiveness then refetches).
  *
  * Hydrated from the same `VersionGraphView` the detail page already fetched (no
- * second fetch). Structure only — goal/audience and run-time config live on the
- * Settings tab (they're version settings, not structure).
+ * second fetch). Goal/audience are edited inline here (top of the surface, where
+ * the read-only view shows them); run-time config still lives on the Settings tab.
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -39,6 +39,7 @@ import { API } from '@/lib/api/endpoints';
 import type { AppQuestionnaireStatus } from '@/lib/app/questionnaire/types';
 import type { VersionGraphView } from '@/lib/app/questionnaire/views';
 
+import { GoalAudienceEditor } from '@/components/admin/questionnaires/goal-audience-editor';
 import { SectionEditor } from '@/components/admin/questionnaires/section-editor';
 import { TagVocabularyEditor } from '@/components/admin/questionnaires/tag-vocabulary-editor';
 import { SaveStatus, type SaveState } from '@/components/admin/questionnaires/save-status';
@@ -71,6 +72,7 @@ export function VersionEditor({
   version,
   seed = null,
   hasDataSlots = false,
+  designEvalEnabled = false,
 }: {
   questionnaireId: string;
   version: VersionGraphView;
@@ -78,6 +80,8 @@ export function VersionEditor({
   seed?: EvaluationSeed | null;
   /** Whether the version already has data slots (drives the seed composer's "slot it" checkbox). */
   hasDataSlots?: boolean;
+  /** When on, the goal/audience editor explains how the structure review scores against these fields. */
+  designEvalEnabled?: boolean;
 }) {
   const router = useRouter();
   const versionId = version.id;
@@ -245,8 +249,17 @@ export function VersionEditor({
         />
       )}
 
-      {/* Goal/audience and run-time config live on the Settings tab (version settings, not
-          structure). This editor is structure-only: tags + sections → questions. */}
+      {/* Goal & audience — edited inline at the top, mirroring where the read-only view shows
+          them. Run-time config still lives on the Settings tab. */}
+      <GoalAudienceEditor
+        questionnaireId={questionnaireId}
+        versionId={versionId}
+        goal={version.goal}
+        audience={version.audience}
+        run={run}
+        busy={busy}
+        designEvalEnabled={designEvalEnabled}
+      />
 
       {/* Tag vocabulary */}
       <TagVocabularyEditor
