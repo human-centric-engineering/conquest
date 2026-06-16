@@ -26,7 +26,11 @@ import {
 } from '@/lib/app/questionnaire/constants';
 import { assessCompletion } from '@/lib/app/questionnaire/completion/completion-logic';
 import { shouldRunDetection } from '@/lib/app/questionnaire/contradiction';
-import { evaluateAbuseStrike, ABUSE_ABANDON_MESSAGE } from '@/lib/app/questionnaire/seriousness';
+import {
+  evaluateAbuseStrike,
+  keywordAbuseFloor,
+  ABUSE_ABANDON_MESSAGE,
+} from '@/lib/app/questionnaire/seriousness';
 import {
   runningMaxLevel,
   shouldSignpost,
@@ -210,35 +214,44 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
     );
   }
 
-  // 1.5 Seriousness / abuse gate. The judge runs on EVERY answered turn while the gate is on and
-  //     the questionnaire tolerates a finite number of strikes — a dedicated, cheap LLM call, so we
-  //     don't depend on the extractor's (unreliable) suspicion flag to trigger it. A non-serious
-  //     verdict DISREGARDS the answer (never merged/persisted), strikes the session, and escalates
-  //     → abandon at the configured threshold. A genuine answer (incl. colloquial/lazy) passes.
+  // 1.5 Seriousness / abuse gate. Two layers decide whether this turn's answer is non-genuine:
+  //   (a) a DETERMINISTIC abuse floor (`keywordAbuseFloor`) — a short message dominated by directed
+  //       hostility ("oh just fuck off", "screw you") is struck WITHOUT consulting the judge, so
+  //       clear abuse is handled reliably even with a prior disclosure in context (the judge is
+  //       probabilistic and intermittently keeps such turns as "distress"). It fires even when an
+  //       LLM flagged the turn sensitive — an over-eager detector must not shield plain abuse — and
+  //       is suppressed ONLY by the deterministic HARM floor, so abuse paired with a real disclosure
+  //       stays protected.
+  //   (b) the LLM judge — for nuanced abuse / preposterous / nonsensical answers, run only when the
+  //       turn wasn't deterministically abusive AND wasn't flagged a genuine disclosure
+  //       (`!extractedSensitivity`). SAFEGUARDING OUTRANKS THE SINCERITY GATE: a disclosure is a real
+  //       answer and must never be judged for sincerity or struck.
+  // A non-serious outcome (either layer) DISREGARDS the answer (never merged/persisted), strikes the
+  // session, and escalates → abandon at the configured threshold.
   let abuse: TurnResult['abuse'];
   let disregarded = false;
-  // SAFEGUARDING OUTRANKS THE SINCERITY GATE. When the extractor flagged a genuine sensitive
-  // disclosure this turn (`extractedSensitivity` is set — sensitivity awareness on AND a disclosure
-  // detected), the message is by definition a real answer: NEVER judge it for sincerity, strike it,
-  // or set it aside. A respondent disclosing abuse/harm must never be told their answer "doesn't seem
-  // genuine" — so we skip the gate entirely (no judge call, no disregard, no warning) and let the
-  // sensitivity step below handle the disclosure. This is the structural guarantee; the judge prompt
-  // is hardened too (defense-in-depth) for when sensitivity awareness is off.
-  if (
-    hasMessage &&
-    !extractedSensitivity &&
-    state.flags.seriousnessGate &&
-    state.config.abuseThreshold > 0
-  ) {
-    const judged = await invokers.assessSeriousness(state);
-    costUsd += judged.costUsd;
-    toolCalls.push(
-      toolCall(ASSESS_SERIOUSNESS_TOOL_SLUG, judged.diagnostic === undefined, {
-        ...(judged.diagnostic !== undefined ? { code: judged.diagnostic } : {}),
-        ...(judged.latencyMs !== undefined ? { latencyMs: judged.latencyMs } : {}),
-      })
-    );
-    if (judged.verdict && !judged.verdict.serious) {
+  if (hasMessage && state.flags.seriousnessGate && state.config.abuseThreshold > 0) {
+    const ruleAbuse = keywordAbuseFloor(state.userMessage);
+    const harmFloor = keywordSensitivityFloor(state.userMessage);
+
+    let nonSeriousReason: string | null = null;
+    if (ruleAbuse && !harmFloor) {
+      // Deterministic strike — no LLM call; overrides any LLM sensitivity false-positive.
+      nonSeriousReason = ruleAbuse.reason;
+      toolCalls.push(toolCall(ASSESS_SERIOUSNESS_TOOL_SLUG, true));
+    } else if (!extractedSensitivity) {
+      const judged = await invokers.assessSeriousness(state);
+      costUsd += judged.costUsd;
+      toolCalls.push(
+        toolCall(ASSESS_SERIOUSNESS_TOOL_SLUG, judged.diagnostic === undefined, {
+          ...(judged.diagnostic !== undefined ? { code: judged.diagnostic } : {}),
+          ...(judged.latencyMs !== undefined ? { latencyMs: judged.latencyMs } : {}),
+        })
+      );
+      if (judged.verdict && !judged.verdict.serious) nonSeriousReason = judged.verdict.reason;
+    }
+
+    if (nonSeriousReason !== null) {
       // Disregard — a non-genuine answer is never merged or persisted.
       disregarded = true;
       answerUpserts.length = 0;
@@ -247,7 +260,7 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
         flagged: true,
         newStrikeCount: strike.newStrikeCount,
         abandon: strike.abandon,
-        reason: judged.verdict.reason,
+        reason: nonSeriousReason,
       };
       if (strike.abandon) {
         // Terminal: stream a polite final message; the route abandons the session + emits the

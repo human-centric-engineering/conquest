@@ -27,7 +27,11 @@ import {
   ASSESS_SERIOUSNESS_TOOL_SLUG,
   DETECT_SENSITIVITY_TOOL_SLUG,
 } from '@/lib/app/questionnaire/orchestrator/orchestrator';
-import { evaluateAbuseStrike, ABUSE_ABANDON_MESSAGE } from '@/lib/app/questionnaire/seriousness';
+import {
+  evaluateAbuseStrike,
+  keywordAbuseFloor,
+  ABUSE_ABANDON_MESSAGE,
+} from '@/lib/app/questionnaire/seriousness';
 import {
   runningMaxLevel,
   shouldSignpost,
@@ -258,30 +262,37 @@ export async function runDataSlotTurn(
     );
   }
 
-  // 1.5 Seriousness / abuse gate (parity with question mode). The judge runs on every answered
-  //     turn while the gate is on; a non-serious verdict DISREGARDS both this turn's question
-  //     answers AND its data-slot fills (never persisted), strikes the session, and abandons at the
-  //     configured threshold.
+  // 1.5 Seriousness / abuse gate (parity with question mode). Two layers: (a) a DETERMINISTIC abuse
+  //     floor (`keywordAbuseFloor`) strikes a short, clearly-abusive dismissal without the judge —
+  //     reliable even with a prior disclosure in context, and suppressed only by the deterministic
+  //     HARM floor so a real disclosure with venting stays protected; (b) the LLM judge for nuanced
+  //     cases, run only when the turn wasn't deterministically abusive AND wasn't flagged a genuine
+  //     disclosure (`!extractedSensitivity`) — safeguarding outranks the sincerity gate. A non-serious
+  //     outcome DISREGARDS both this turn's question answers AND its data-slot fills (never
+  //     persisted), strikes the session, and abandons at the configured threshold.
   let abuse: TurnResult['abuse'];
   let disregarded = false;
-  // SAFEGUARDING OUTRANKS THE SINCERITY GATE (parity with question mode): a turn the extractor
-  // flagged as a genuine sensitive disclosure is a real answer — never judged for sincerity, struck,
-  // or set aside. Skip the gate entirely when `extractedSensitivity` is set; the sensitivity step
-  // below handles the disclosure.
-  if (
-    hasMessage &&
-    !extractedSensitivity &&
-    state.flags.seriousnessGate &&
-    state.config.abuseThreshold > 0
-  ) {
-    const judged = await invokers.assessSeriousness(state);
-    costUsd += judged.costUsd;
-    toolCalls.push(
-      toolCall(ASSESS_SERIOUSNESS_TOOL_SLUG, judged.diagnostic === undefined, {
-        ...(judged.latencyMs !== undefined ? { latencyMs: judged.latencyMs } : {}),
-      })
-    );
-    if (judged.verdict && !judged.verdict.serious) {
+  if (hasMessage && state.flags.seriousnessGate && state.config.abuseThreshold > 0) {
+    const ruleAbuse = keywordAbuseFloor(state.userMessage);
+    const harmFloor = keywordSensitivityFloor(state.userMessage);
+
+    let nonSeriousReason: string | null = null;
+    if (ruleAbuse && !harmFloor) {
+      // Deterministic strike — no LLM call; overrides any LLM sensitivity false-positive.
+      nonSeriousReason = ruleAbuse.reason;
+      toolCalls.push(toolCall(ASSESS_SERIOUSNESS_TOOL_SLUG, true));
+    } else if (!extractedSensitivity) {
+      const judged = await invokers.assessSeriousness(state);
+      costUsd += judged.costUsd;
+      toolCalls.push(
+        toolCall(ASSESS_SERIOUSNESS_TOOL_SLUG, judged.diagnostic === undefined, {
+          ...(judged.latencyMs !== undefined ? { latencyMs: judged.latencyMs } : {}),
+        })
+      );
+      if (judged.verdict && !judged.verdict.serious) nonSeriousReason = judged.verdict.reason;
+    }
+
+    if (nonSeriousReason !== null) {
       // Disregard — neither the question answers nor the data-slot fills are kept.
       disregarded = true;
       answerUpserts.length = 0;
@@ -291,7 +302,7 @@ export async function runDataSlotTurn(
         flagged: true,
         newStrikeCount: strike.newStrikeCount,
         abandon: strike.abandon,
-        reason: judged.verdict.reason,
+        reason: nonSeriousReason,
       };
       if (strike.abandon) {
         // Terminal: the route abandons the session + locks the surface. The assessment reflects

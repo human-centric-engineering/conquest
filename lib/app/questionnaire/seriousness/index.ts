@@ -22,6 +22,12 @@ export {
 export { buildSeriousnessJudgePrompt } from '@/lib/app/questionnaire/seriousness/judge-prompt';
 
 export {
+  keywordAbuseFloor,
+  ABUSE_NET_REASON,
+  MAX_ABUSE_WORDS,
+} from '@/lib/app/questionnaire/seriousness/abuse-net';
+
+export {
   seriousnessGateActive,
   evaluateAbuseStrike,
   ABUSE_ABANDON_MESSAGE,

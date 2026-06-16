@@ -209,13 +209,15 @@ describe('runTurn — dedicated sensitivity detector + keyword net (defence-in-d
     expect(result.sensitivity).toBeUndefined();
   });
 
-  it('lets pure hostility ("go fuck yourself") fall through to the seriousness gate (no false disclosure)', async () => {
-    // Neither the detector nor the keyword net should flag bare profanity, so the gate runs and
-    // strikes it — the behaviour the user asked for.
+  it('strikes pure hostility ("go fuck yourself") DETERMINISTICALLY — even when the LLM judge would keep it', async () => {
+    // The recurring bug: with a disclosure in context the judge intermittently returns serious:true
+    // for plain abuse, so it went unstruck. The deterministic abuse floor strikes it WITHOUT calling
+    // the judge at all — here the judge is even stubbed to keep it, proving the floor doesn't depend
+    // on the judge.
     const { invokers, calls } = stubInvokers({
       extract: { intents: [] },
       sensitivity: { assessment: null },
-      serious: { verdict: { serious: false, reason: 'Abusive.' } },
+      serious: { verdict: { serious: true, reason: '' } }, // judge would KEEP it
     });
     const result = await runTurn(
       state({
@@ -225,10 +227,55 @@ describe('runTurn — dedicated sensitivity detector + keyword net (defence-in-d
       }),
       invokers
     );
-    // No disclosure detected → the gate ran and struck.
+    // No disclosure detected; the deterministic floor struck it without consulting the judge.
     expect(result.sensitivity).toBeUndefined();
-    expect(calls.serious).toHaveLength(1);
+    expect(calls.serious).toHaveLength(0);
     expect(result.abuse?.flagged).toBe(true);
+    expect(result.abuse?.newStrikeCount).toBe(1);
+  });
+
+  it('strikes plain abuse even when an over-eager LLM detector flagged it sensitive', async () => {
+    // The other failure mode: the dedicated detector reads "oh just fuck off" (after a disclosure) as
+    // distress and flags it, which would skip the gate. The deterministic abuse floor overrides that
+    // LLM false-positive (suppressed only by the deterministic HARM floor, which is silent here).
+    const { invokers } = stubInvokers({
+      extract: { intents: [] },
+      sensitivity: {
+        assessment: { detected: true, severity: 'high', category: 'x', summary: 'y' },
+      },
+    });
+    const result = await runTurn(
+      state({
+        userMessage: 'oh just fuck off',
+        questions: Q,
+        sensitivityLevel: 'high', // a prior disclosure already raised the level
+        config: { abuseThreshold: 4, supportMessage: 'Support is available.' },
+      }),
+      invokers
+    );
+    expect(result.abuse?.flagged).toBe(true);
+    // Struck → no sensitivity outcome / signpost this turn despite the detector's flag.
+    expect(result.sensitivity).toBeUndefined();
+  });
+
+  it('does NOT strike abuse paired with a genuine harm disclosure (harm floor suppresses the abuse floor)', async () => {
+    // "fuck off, my manager abuses me" — the deterministic HARM floor fires (first-person + "abuses"),
+    // so the abuse floor is suppressed and the disclosure is protected.
+    const { invokers, calls } = stubInvokers({
+      extract: { intents: [] },
+      sensitivity: { assessment: null },
+    });
+    const result = await runTurn(
+      state({
+        userMessage: 'fuck off, my manager abuses me',
+        questions: Q,
+        config: { abuseThreshold: 4, supportMessage: 'Support is available.' },
+      }),
+      invokers
+    );
+    expect(result.abuse).toBeUndefined();
+    expect(calls.serious).toHaveLength(0); // protected: neither struck nor judged
+    expect(result.sensitivity?.detected).toBe(true);
   });
 });
 

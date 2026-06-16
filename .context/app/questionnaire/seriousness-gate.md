@@ -8,13 +8,30 @@ questionnaire's `abuseThreshold` **abandon** the session. Colloquial / lazy / br
 end-to-end: a per-turn judge whose result becomes a `warning` SSE frame, gated by a platform
 flag + a per-questionnaire config knob, rendered as a side-band notice.
 
-## The judge
+## Two layers: a deterministic floor + the LLM judge
 
-The **judge** (`invokers.assessSeriousness`, a direct structured LLM call in
-`app/api/v1/app/questionnaire-sessions/_lib/turn-invokers.ts` reusing the answer-extractor's
-provider/model binding) runs on **every answered turn** while the gate is on AND
-`abuseThreshold > 0`, returning a `{ serious, reason }` verdict (`lib/app/questionnaire/seriousness/`).
-It's a cheap (~$0.0001) gpt-4o-mini-tier call. Fail-soft: a null verdict skips the gate.
+The gate decides "non-genuine?" in two layers, in order:
+
+1. **Deterministic abuse floor** (`keywordAbuseFloor`, `lib/app/questionnaire/seriousness/abuse-net.ts`)
+   — a SHORT message dominated by directed hostility ("oh just fuck off", "screw you", "go fuck
+   yourself", "piss off") is struck **without any LLM call**. This exists because the judge is
+   probabilistic: with a prior disclosure in its recent-conversation context it intermittently reads
+   plain dismissals as the _distress_ of an upset respondent and returns `serious: true`, so clear
+   abuse went unstruck across turns. The floor makes the obvious cases reliable. It is deliberately
+   tight — only directed-dismissal phrases (never bare insults that can sit inside a genuine
+   complaint like "my boss is an asshole"), and only on short messages (a hostile phrase inside a
+   longer sentence — "my manager told me to fuck off" — is a _report_, left to the judge). It fires
+   **even when an LLM flagged the turn sensitive** (an over-eager detector must not shield plain
+   abuse) and is suppressed **only by the deterministic HARM floor** (`keywordSensitivityFloor`), so
+   abuse paired with a real disclosure stays protected. A floor strike records an
+   `app_assess_seriousness` tool call with no `latencyMs` (no LLM call).
+
+2. **The judge** (`invokers.assessSeriousness`, a direct structured LLM call in
+   `app/api/v1/app/questionnaire-sessions/_lib/turn-invokers.ts` reusing the answer-extractor's
+   provider/model binding) runs for the nuanced cases — when the turn was **not** deterministically
+   abusive **and** not flagged a genuine disclosure (`!extractedSensitivity`). It returns a
+   `{ serious, reason }` verdict (`lib/app/questionnaire/seriousness/`); a cheap (~$0.0001)
+   gpt-4o-mini-tier call. Fail-soft: a null verdict skips the gate.
 
 > **History / why not "only on suspicion".** The first design was two-stage to save cost: the
 > answer-extractor also emitted a `suspectedNonGenuine` hint and the judge ran only when it was
@@ -95,7 +112,8 @@ question answers and the data-slot fills for that turn.
 
 ## Files
 
-Pure core: `lib/app/questionnaire/seriousness/**`, `orchestrator/{orchestrator,types}.ts`,
+Pure core: `lib/app/questionnaire/seriousness/**` (incl. `abuse-net.ts` — the deterministic floor),
+`orchestrator/{orchestrator,data-slot-orchestrator,types}.ts`,
 `types.ts` (`abuseThreshold`, `ABUSE_ABANDON_REASON`). Capability/suspicion:
 `capabilities/extract-answer-slots.ts`, `extraction/extraction-{schema,prompt}.ts`. Route seam:
 `turn-invokers.ts`, `turn-context.ts`, `messages/route.ts`, `feature-flag.ts`,

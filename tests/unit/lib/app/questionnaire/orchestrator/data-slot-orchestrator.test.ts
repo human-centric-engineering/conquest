@@ -374,7 +374,7 @@ describe('runDataSlotTurn — seriousness / abuse gate', () => {
 
     const result = await runDataSlotTurn(
       dsState({
-        userMessage: 'piss off',
+        userMessage: '543 years', // preposterous, not keyword-abuse → exercises the LLM judge path
         questions: [q({ id: 'a' })],
         dataSlots: [ds({ id: 'd1', key: 'd1', theme: 'A' })],
       }),

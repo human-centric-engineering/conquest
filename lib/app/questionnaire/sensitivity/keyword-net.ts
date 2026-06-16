@@ -35,7 +35,7 @@ const FIRST_PERSON =
 
 /** Harm terms that, paired with a first-person marker, indicate a genuine disclosure. */
 const HARM_TERM =
-  /\b(?:abus(?:e|ed|ive|ing)|harass(?:ed|ing|ment)?|bull(?:y|ied|ying)|assault(?:ed|ing)?|threat(?:en|ened|ening|s)?|intimidat(?:e|ed|ing)|discriminat(?:e|ed|ion|ing)|victimi[sz](?:e|ed)|grop(?:e|ed|ing)|stalk(?:ed|ing)?|unsafe|not\s+safe|in\s+danger)\b/;
+  /\b(?:abus(?:e|es|ed|ive|ing)|harass(?:es|ed|ing|ment)?|bull(?:y|ies|ied|ying)|assault(?:s|ed|ing)?|threat(?:en|ens|ened|ening|s)?|intimidat(?:e|es|ed|ing)|discriminat(?:e|es|ed|ion|ing)|victimi[sz](?:e|es|ed)|grop(?:e|es|ed|ing)|stalk(?:s|ed|ing)?|unsafe|not\s+safe|in\s+danger)\b/;
 
 /**
  * Returns a `high`-severity {@link SensitivityAssessment} when the message plainly discloses harm,
