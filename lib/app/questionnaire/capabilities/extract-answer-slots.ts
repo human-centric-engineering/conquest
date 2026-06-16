@@ -54,7 +54,7 @@ import {
   EXTRACT_ANSWER_SLOTS_CAPABILITY_SLUG,
   EXTRACT_ANSWER_SLOTS_FUNCTION_DEFINITION,
 } from '@/lib/app/questionnaire/constants';
-import { QUESTION_TYPES } from '@/lib/app/questionnaire/types';
+import { ANSWER_FIT_MODES, QUESTION_TYPES } from '@/lib/app/questionnaire/types';
 import {
   validateAnswerExtraction,
   type AnswerExtraction,
@@ -166,6 +166,13 @@ const argsSchema = z
      * the per-questionnaire toggle; off (default) adds no prompt text or behaviour.
      */
     sensitivityAware: z.boolean().optional(),
+    /**
+     * Semantic answer-fit resolver mode (per-questionnaire config). `off`/absent → single pass.
+     * `fallback` → after the primary pass, run ONE focused follow-up over choice/likert questions
+     * the respondent addressed but the value didn't map. `always` → also resolve still-unanswered
+     * choice/likert questions. The follow-up reuses this same agent/model.
+     */
+    answerFitMode: z.enum(ANSWER_FIT_MODES).optional(),
   })
   // There must be something to extract into: question slots (question mode) and/or data slots
   // (data-slot mode). An empty call on both would be a no-op dispatch — reject it as malformed.
@@ -398,6 +405,84 @@ export class AppExtractAnswerSlotsCapability extends BaseCapability<
     return { args: safeArgs, resultPreview: preview };
   }
 
+  /**
+   * Answer-fit resolver pass (Phase 3): a focused SECOND structured call over a small set of
+   * choice/likert questions the respondent already addressed but the first pass couldn't map.
+   * Reuses the already-resolved provider/model and the same prompt builder with `forceFit` framing.
+   * A failure here NEVER fails the turn — the primary intents already stand — so it logs and yields
+   * no intents. Drops `dataSlotCandidates` so the pass focuses purely on the question fit.
+   */
+  private async resolveAnswerFit(opts: {
+    provider: Awaited<ReturnType<typeof getProvider>>;
+    model: string;
+    providerSlug: string;
+    context: CapabilityContext;
+    extractionContext: ExtractionContext;
+    fitCandidates: ExtractionSlotView[];
+  }): Promise<{ intents: AnswerSlotIntent[]; costUsd: number }> {
+    const { dataSlotCandidates: _omitDataSlots, ...rest } = opts.extractionContext;
+    const fitContext: ExtractionContext = {
+      ...rest,
+      candidateSlots: opts.fitCandidates,
+      forceFit: true,
+    };
+    const messages = buildAnswerExtractionPrompt(fitContext);
+
+    let lastIssuePaths: string[] = [];
+    let completion: StructuredCompletionResult<AnswerExtraction>;
+    try {
+      completion = await runStructuredCompletion<AnswerExtraction>({
+        provider: opts.provider,
+        model: opts.model,
+        messages,
+        maxTokens: ANSWER_EXTRACTION_MAX_TOKENS,
+        timeoutMs: ANSWER_EXTRACTION_TIMEOUT_MS,
+        parse: (raw) =>
+          tryParseJson(raw, (parsed) => {
+            const validation = validateAnswerExtraction(parsed);
+            if (validation.ok) return validation.value;
+            lastIssuePaths = validation.issues.map((issue) =>
+              issue.path.length > 0 ? issue.path.join('.') : '(root)'
+            );
+            return null;
+          }),
+        retryUserMessage: buildAnswerExtractionRetryMessage([]),
+        onFinalFailure: () =>
+          new Error('Answer-fit resolution response was not valid against the schema after retry'),
+      });
+    } catch (err) {
+      // Non-fatal: the primary pass already produced this turn's answers.
+      logger.warn('extract_answer_slots: answer-fit pass failed (primary intents stand)', {
+        agentId: opts.context.agentId,
+        issuePaths: lastIssuePaths,
+        error: errorMessage(err),
+      });
+      return { intents: [], costUsd: 0 };
+    }
+
+    void logCost({
+      ...(opts.context.agentId ? { agentId: opts.context.agentId } : {}),
+      operation: CostOperation.CHAT,
+      model: opts.model,
+      provider: opts.providerSlug,
+      inputTokens: completion.tokenUsage.input,
+      outputTokens: completion.tokenUsage.output,
+      metadata: {
+        capability: SLUG,
+        appQuestionnaireSessionId: fitContext.sessionId,
+        pass: 'answer_fit',
+      },
+    }).catch((err) => {
+      logger.error('extract_answer_slots: answer-fit logCost rejected', {
+        agentId: opts.context.agentId,
+        error: errorMessage(err),
+      });
+    });
+
+    const { intents } = normalizeAnswerIntents(completion.value.answers, fitContext);
+    return { intents, costUsd: completion.costUsd };
+  }
+
   async execute(
     args: ExtractAnswerSlotsArgs,
     context: CapabilityContext
@@ -528,6 +613,47 @@ export class AppExtractAnswerSlotsCapability extends BaseCapability<
       });
     }
 
+    // 5b. Answer-fit resolver pass (Phase 3). When configured, run ONE focused follow-up that
+    //     commits a clearly-given free-form answer to a choice/likert option/scale point the first
+    //     pass couldn't map. `fallback` only targets questions the respondent addressed but were
+    //     dropped as type-invalid; `always` also targets still-unanswered choice/likert questions.
+    let fitIntents: AnswerSlotIntent[] = [];
+    let fitCostUsd = 0;
+    const fitMode = args.answerFitMode ?? 'off';
+    if (fitMode !== 'off') {
+      const answeredKeys = new Set(intents.map((i) => i.slotKey));
+      const droppedUnmappedKeys = new Set(
+        dropped.filter((d) => d.reason.startsWith('value invalid for type')).map((d) => d.slotKey)
+      );
+      const fitCandidates = extractionContext.candidateSlots.filter(
+        (s) =>
+          (s.type === 'single_choice' || s.type === 'multi_choice' || s.type === 'likert') &&
+          !answeredKeys.has(s.key) &&
+          (fitMode === 'always' || droppedUnmappedKeys.has(s.key))
+      );
+      if (fitCandidates.length > 0) {
+        const fit = await this.resolveAnswerFit({
+          provider,
+          model,
+          providerSlug,
+          context,
+          extractionContext,
+          fitCandidates,
+        });
+        // Only adopt a resolved value for a slot the primary pass didn't already answer.
+        fitIntents = fit.intents.filter((i) => !answeredKeys.has(i.slotKey));
+        fitCostUsd = fit.costUsd;
+        if (fitIntents.length > 0) {
+          logger.info('extract_answer_slots: answer-fit resolver recovered answers', {
+            agentId: context.agentId,
+            mode: fitMode,
+            candidates: fitCandidates.length,
+            resolved: fitIntents.length,
+          });
+        }
+      }
+    }
+
     const dataSlotFills = normalizeDataSlotFills(
       completion.value.dataSlotFills,
       args.dataSlotCandidates ?? []
@@ -554,10 +680,10 @@ export class AppExtractAnswerSlotsCapability extends BaseCapability<
     }
 
     return this.success({
-      intents,
+      intents: [...intents, ...fitIntents],
       dataSlotFills,
       droppedCount: dropped.length,
-      costUsd: completion.costUsd,
+      costUsd: completion.costUsd + fitCostUsd,
       // Stage 1 of the seriousness gate — pass the model's suspicion flag through (when set).
       ...(completion.value.suspectedNonGenuine !== undefined
         ? { suspectedNonGenuine: completion.value.suspectedNonGenuine }

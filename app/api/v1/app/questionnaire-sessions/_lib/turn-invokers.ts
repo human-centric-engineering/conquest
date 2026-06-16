@@ -42,6 +42,7 @@ import {
   type SelectionContext,
   type StrategyDeps,
 } from '@/lib/app/questionnaire/selection';
+import type { AnswerFitMode } from '@/lib/app/questionnaire/types';
 import type {
   CapabilityInvokers,
   DetectOutcome,
@@ -112,6 +113,11 @@ export async function buildTurnInvokers(opts: {
    * toggle; off (default) keeps the prompt and behaviour unchanged.
    */
   sensitivityAware?: boolean;
+  /**
+   * Semantic answer-fit resolver mode (per-questionnaire config). Threaded to the extractor so it
+   * can run the focused follow-up pass. `off`/absent → single pass (no behaviour change).
+   */
+  answerFitMode?: AnswerFitMode;
 }): Promise<CapabilityInvokers> {
   const {
     userId,
@@ -120,6 +126,7 @@ export async function buildTurnInvokers(opts: {
     adaptiveEnabled,
     dataSlotCandidates,
     sensitivityAware,
+    answerFitMode,
   } = opts;
 
   // Flush the built-in + app capability handlers into the dispatcher before any
@@ -169,6 +176,8 @@ export async function buildTurnInvokers(opts: {
           ...(dataSlotCandidates && dataSlotCandidates.length > 0 ? { dataSlotCandidates } : {}),
           // Sensitivity awareness: ask the extractor to also flag a sensitive disclosure.
           ...(sensitivityAware ? { sensitivityAware: true } : {}),
+          // Answer-fit resolver: let the extractor run the focused follow-up pass when enabled.
+          ...(answerFitMode && answerFitMode !== 'off' ? { answerFitMode } : {}),
           sessionId: state.sessionId,
         },
         {

@@ -44,6 +44,19 @@ describe('buildAnswerExtractionPrompt', () => {
     expect(system).toMatch(/catch-all option/i);
   });
 
+  it('appends the focused commit-to-a-fit framing only when forceFit is set', () => {
+    const base = ctx({ candidateSlots: [slot({ key: 'department', type: 'single_choice' })] });
+    const without = buildAnswerExtractionPrompt(base);
+    const withFit = buildAnswerExtractionPrompt({ ...base, forceFit: true });
+    const sysOf = (m: ReturnType<typeof buildAnswerExtractionPrompt>) =>
+      typeof m[0]?.content === 'string' ? m[0].content : '';
+    expect(sysOf(without)).not.toMatch(/FOCUSED RESOLUTION/i);
+    const sys = sysOf(withFit);
+    expect(sys).toMatch(/FOCUSED RESOLUTION/i);
+    // Commit to the closest genuine fit rather than omit.
+    expect(sys).toMatch(/Prefer committing to the closest genuine fit/i);
+  });
+
   it('omits the sensitivity block by default (zero added prompt when the feature is off)', () => {
     const messages = buildAnswerExtractionPrompt(ctx({ candidateSlots: [slot({ key: 'q1' })] }));
     const system = typeof messages[0]?.content === 'string' ? messages[0].content : '';

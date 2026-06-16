@@ -123,6 +123,32 @@ parse → retry-once → cost-sum) → fire-and-forget `logCost` → `normalizeA
   document extractor and the selection agent — different job, far higher volume,
   its own monthly budget ceiling. Capability + binding in seed 007.
 
+### Answer-fit resolver (second pass)
+
+A choice/likert answer the respondent clearly gave but phrased loosely can fail the
+strict value validation and get **dropped** ("Marketing" for a department with no
+matching option; "10 years" echoed instead of the `3+ years` bucket). The
+**`answerFitMode`** config (`off | fallback | always`, default `fallback`) controls a
+focused SECOND structured call that recovers these:
+
+- **`fallback`** — after the primary pass, if any choice/likert candidate the
+  respondent addressed was dropped as `value invalid for type`, run one more call over
+  **just those slots** with `forceFit` framing (commit to the closest genuine
+  option/scale point, or omit). No second call when nothing was dropped — zero extra
+  cost on the common path.
+- **`always`** — additionally targets every still-unanswered choice/likert candidate
+  each turn (proactive, one extra call per answered turn).
+- **`off`** — single pass, unchanged behaviour.
+
+The second pass lives **inside the capability** (`resolveAnswerFit`), reusing the same
+agent/model and prompt builder (`forceFit`) and the same `normalizeAnswerIntents`
+validation — so a resolved value is still type-checked. Resolved intents merge into the
+result for slots the primary pass left unanswered; a failure of the fit pass is
+**non-fatal** (the primary intents stand). The mode is threaded route → `buildTurnInvokers`
+→ the `extractAnswers` dispatch. It maps **surface form to a form option**; it never
+changes the data-slot fill, which keeps the respondent's natural words (see
+[`data-slots.md`](./data-slots.md)).
+
 ## The preview route
 
 `POST /api/v1/app/questionnaires/:id/versions/:vid/extract-answer` —

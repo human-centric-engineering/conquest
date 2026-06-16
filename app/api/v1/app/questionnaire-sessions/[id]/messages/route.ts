@@ -276,6 +276,8 @@ async function handleMessage(
       adaptiveEnabled: adaptive,
       // Sensitivity awareness: ask the extractor to also flag a sensitive disclosure (kickoff off).
       sensitivityAware: body.kickoff ? false : sensitivityAware,
+      // Answer-fit resolver: per-questionnaire mode for the focused free-form → choice/likert pass.
+      answerFitMode: loaded.base.config.answerFitMode,
       // Data Slots feature: feed the data slots so the SAME extraction call fills them too. Each
       // carries its `current` fill (when any) so a correction merges/updates rather than re-derives.
       ...(dataSlotMode

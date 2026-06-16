@@ -226,6 +226,27 @@ OMIT the "sensitivity" field only for a neutral, negative, or merely critical OP
 no personal harm (e.g. "management doesn't listen", "the tools are clunky"). When a genuine \
 disclosure of harm IS present, always include it.`;
 
+/**
+ * REPLACES the default framing on the answer-fit RESOLVER pass (`ctx.forceFit`). The candidate list
+ * is a small set of choice/likert questions the respondent already addressed in conversation, but
+ * whose meaning the first pass couldn't pin to an option/scale point. This pass exists to COMMIT to
+ * a fit, so the bar for emitting an answer is lower than the cautious primary pass — but never
+ * invent one the conversation doesn't support.
+ */
+const FORCE_FIT_RULES = `
+
+This is a FOCUSED RESOLUTION pass. Each candidate question below is one the respondent ALREADY \
+addressed in the conversation, but their wording didn't line up with an option or scale point. Your \
+job is to commit to the SINGLE best-fitting value for each, reading the whole conversation:
+- Map the respondent's MEANING, not their exact words — "Marketing" → the "Other" option when the \
+listed choices don't include it; "10 years" → the option whose range contains it ("3+ years"); \
+"I love this place" → the top of the likert scale; "it's a nightmare" → the bottom.
+- Return the choice's "value" (slug), or the integer scale point — NEVER the label or raw words.
+- Prefer committing to the closest genuine fit over omitting. Omit a question ONLY when the \
+conversation truly says nothing that bears on it. A low-but-honest "confidence" is fine.
+- Use provenance "inferred" (or "synthesised" if it draws on several turns); a "direct" value still \
+needs a "sourceQuote".`;
+
 /** Render one data-slot candidate as a compact, model-readable line. */
 function describeDataSlot(slot: DataSlotCandidateView): string {
   const lines = [
@@ -311,7 +332,9 @@ export function buildAnswerExtractionPrompt(ctx: ExtractionContext): LlmMessage[
   const systemContent =
     (hasDataSlots ? SYSTEM_RULES + DATA_SLOT_RULES : SYSTEM_RULES) +
     // Sensitivity block only when the feature is on — zero added prompt/tokens otherwise.
-    (ctx.sensitivityAware ? SENSITIVITY_RULES : '');
+    (ctx.sensitivityAware ? SENSITIVITY_RULES : '') +
+    // Answer-fit resolver pass: append the commit-to-a-fit framing (only on the focused 2nd call).
+    (ctx.forceFit ? FORCE_FIT_RULES : '');
   const dataSlotSection = hasDataSlots
     ? `\n\nData slots (capture these — a primary deliverable, fill every one the message informs):\n${ctx.dataSlotCandidates!.map(describeDataSlot).join('\n')}`
     : '';

@@ -19,6 +19,7 @@ import { z } from 'zod';
 
 import {
   ACCESS_MODES,
+  ANSWER_FIT_MODES,
   ANSWER_SLOT_PANEL_SCOPES,
   CONTRADICTION_MODES,
   INVITEE_FIELD_KEYS,
@@ -129,6 +130,7 @@ export const updateConfigSchema = z
     // attachment-input flag; off by default.
     attachmentsEnabled: z.boolean().optional(),
     contradictionMode: z.enum(CONTRADICTION_MODES).optional(),
+    answerFitMode: z.enum(ANSWER_FIT_MODES).optional(),
     contradictionWindowN: z.number().int().nonnegative().optional(),
     contradictionEveryNTurns: z.number().int().min(1).optional(),
     anonymousMode: z.boolean().optional(),
