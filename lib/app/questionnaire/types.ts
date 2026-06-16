@@ -335,7 +335,15 @@ export type ImportMethod = (typeof IMPORT_METHODS)[number];
  * derive from it). The schema keeps `@default("active")` — a new session starts
  * in progress.
  */
-export const SESSION_STATUSES = ['active', 'paused', 'completed', 'abandoned'] as const;
+export const SESSION_STATUSES = [
+  'active',
+  'paused',
+  'completed',
+  'abandoned',
+  // Terminal, set ONLY by the seriousness/abuse gate when the strike threshold is hit. Distinct
+  // from `abandoned` (admin/manual) so it reads as "Aborted" and analytics can tell the two apart.
+  'aborted',
+] as const;
 export type SessionStatus = (typeof SESSION_STATUSES)[number];
 
 /**

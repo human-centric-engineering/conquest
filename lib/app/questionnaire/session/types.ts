@@ -32,6 +32,8 @@ export const SESSION_EVENT_TYPES = [
   'resumed',
   'completed',
   'abandoned',
+  // Seriousness/abuse gate terminal — mirrors the `aborted` status transition.
+  'aborted',
   'cost_cap_reached',
   // Sensitivity awareness / safeguarding: a non-transition event recorded when a sensitive
   // disclosure is flagged (metadata: { severity, category } — never the summary).

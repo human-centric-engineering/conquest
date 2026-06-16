@@ -10,7 +10,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { ASSESS_SERIOUSNESS_TOOL_SLUG, runTurn } from '@/lib/app/questionnaire/orchestrator';
-import { ABUSE_ABANDON_MESSAGE } from '@/lib/app/questionnaire/seriousness';
+import { abuseAbortMessage } from '@/lib/app/questionnaire/seriousness';
 import {
   intent,
   state,
@@ -78,7 +78,7 @@ describe('runTurn — seriousness / abuse gate', () => {
       reason: 'nope',
     });
     expect(result.sideEffects.answerUpserts).toHaveLength(0);
-    expect(result.response).toEqual({ kind: 'complete', text: ABUSE_ABANDON_MESSAGE });
+    expect(result.response).toEqual({ kind: 'complete', text: abuseAbortMessage(4) });
   });
 
   it('keeps a serious answer (judge ran, no strike, answer persisted)', async () => {

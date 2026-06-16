@@ -3,7 +3,7 @@
 Per answered turn, the gate judges whether a respondent's answer is a **genuine attempt**.
 Non-genuine answers (preposterous, abusive, off-topic — e.g. "**543 years**" of tenure) are
 **disregarded** (never persisted), **strike** the session, escalate a polite warning, and at the
-questionnaire's `abuseThreshold` **abandon** the session. Colloquial / lazy / brief answers
+questionnaire's `abuseThreshold` **abort** the session (terminal status `aborted`). Colloquial / lazy / brief answers
 ("very unlikely", "prefer not to say") are tolerated. Mirrors contradiction detection (F4.3)
 end-to-end: a per-turn judge whose result becomes a `warning` SSE frame, gated by a platform
 flag + a per-questionnaire config knob, rendered as a side-band notice.
@@ -65,11 +65,15 @@ the session — tone-softening and the strike decision are independent.
 - **Strike** — `evaluateAbuseStrike(state.abuseStrikes, threshold)` (`seriousness/seriousness-logic.ts`).
 - **Below threshold** — emit a `warning` (`code: 'seriousness'`) with escalating copy (gentle →
   firm); because the answer wasn't merged, selection **re-asks the same still-unanswered question**.
-  Rendered by `SeriousnessNotice` inline beneath the re-asked turn. The route persists the frame on
-  the turn (`AppQuestionnaireTurn.warnings`), so the notice survives the next input and replays on
-  resume rather than vanishing (see `per-turn-orchestrator.md` § resume replay).
-- **At/over threshold** — `result.abuse.abandon = true` + a deterministic polite final message;
-  the pure core skips detect/refine/select.
+  The **penultimate** warning (the last one before abort, `remaining === 1`) ends with a **bold**
+  last-chance sentence — `warningCopy` wraps it in `**…**` and `SeriousnessNotice` renders the
+  markers as `<strong>` (a tiny system-text-only inline renderer; the notice is otherwise plain).
+  Rendered inline beneath the re-asked turn. The route persists the frame on the turn
+  (`AppQuestionnaireTurn.warnings`), so the notice survives the next input and replays on resume
+  (see `per-turn-orchestrator.md` § resume replay).
+- **At/over threshold** — `result.abuse.abandon = true` + the deterministic `abuseAbortMessage(count)`
+  final message ("There have now been {count} occasions … record this session as aborted.",
+  singular-aware); the pure core skips detect/refine/select.
 
 `runTurn` stays pure: it reads `state.abuseStrikes`, returns
 `result.abuse = { flagged, newStrikeCount, abandon, reason }`; the **route does the I/O**.
@@ -77,9 +81,11 @@ the session — tone-softening and the strike decision are independent.
 ## Route (`…/questionnaire-sessions/[id]/messages/route.ts`)
 
 After the reply streams + `persistTurn`: when `result.abuse?.flagged`, `persistAbuseStrikes()`;
-when `abandon`, `abandonSession(sessionId, { reason: 'abuse_threshold_exceeded', metadata })`
-(status → `abandoned`). The lifecycle status poll then locks the composer (`abandoned` →
-`not_active`) and every later turn 409s. `seriousnessGate` is forced off on a kickoff turn.
+when `abandon`, `abortSession(sessionId, { reason: 'abuse_threshold_exceeded', metadata })` (status
+→ **`aborted`**). `aborted` is a distinct terminal status set ONLY by the abuse gate — separate from
+the admin/manual `abandoned` — so the outcome reads as "Aborted" and analytics can tell them apart.
+The lifecycle status poll then locks the composer (any non-active terminal status → `not_active`)
+and every later turn 409s. `seriousnessGate` is forced off on a kickoff turn.
 
 ## Config & gating
 
@@ -87,16 +93,20 @@ when `abandon`, `abandonSession(sessionId, { reason: 'abuse_threshold_exceeded',
   (`isSeriousnessGateEnabled()`; requires master + live-sessions flags). Seeded by
   `prisma/seeds/app-questionnaire/029-seriousness-gate-flag.ts`.
 - **Per-questionnaire** `AppQuestionnaireConfig.abuseThreshold` (Int, default **4**; **0 = off**) —
-  non-genuine answers tolerated before abandon. Edited in the config editor ("Abuse threshold").
-  Escalation at the default: strikes 1–3 warn (firming up), the 4th abandons.
+  non-genuine answers tolerated before abort. Edited in the config editor ("Abuse threshold").
+  Escalation at the default: strikes 1–2 warn gently, strike 3 is the firm bold last-chance warning,
+  the 4th aborts.
 - **Per-session** `AppQuestionnaireSession.abuseStrikes` (Int, default 0) — the strike counter.
 
 ## Analytics
 
-Abandonment writes an `app_questionnaire_session_event` with `eventType: 'abandoned'`,
-`reason: 'abuse_threshold_exceeded'`, and `metadata: { strikes, threshold, judgeReason }`. Filter
-session-outcome analytics on that `reason` to count abuse-driven abandonments
-(`ABUSE_ABANDON_REASON` in `lib/app/questionnaire/types.ts` is the single source of truth).
+Abort writes an `app_questionnaire_session_event` with `eventType: 'aborted'`,
+`reason: 'abuse_threshold_exceeded'`, and `metadata: { strikes, threshold, judgeReason }`. The
+session's terminal status is `aborted` (distinct from admin `abandoned`). The completion funnel
+(`analytics/funnel.ts`) counts only `completed` as completed, so an `aborted` session is a
+started-but-not-completed run — it lowers the completion rate exactly like any non-completion, and is
+distinguishable from admin abandonment by status (`ABUSE_ABANDON_REASON` in
+`lib/app/questionnaire/types.ts` remains the reason constant).
 
 Both orchestrators run the gate: question mode (`runTurn`) and **data-slot mode**
 (`runDataSlotTurn`). In data-slot mode a non-serious verdict disregards both the background

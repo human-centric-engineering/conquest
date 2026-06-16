@@ -30,5 +30,6 @@ export {
 export {
   seriousnessGateActive,
   evaluateAbuseStrike,
+  abuseAbortMessage,
   ABUSE_ABANDON_MESSAGE,
 } from '@/lib/app/questionnaire/seriousness/seriousness-logic';

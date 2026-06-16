@@ -68,6 +68,16 @@ describe('SeriousnessNotice', () => {
       expect(screen.getByText('Second escalated message.')).toBeInTheDocument();
       expect(screen.queryByText('First message.')).toBeNull();
     });
+
+    it('renders **bold** segments as <strong> (the penultimate-strike last-chance warning)', () => {
+      // Arrange: the final warning wraps its consequence sentence in ** ** markers.
+      render(<SeriousnessNotice message="Set aside for now. **One more will end the session.**" />);
+
+      // Assert: the emphasised run is a <strong>, and the markers themselves are not shown.
+      const strong = screen.getByText('One more will end the session.');
+      expect(strong.tagName).toBe('STRONG');
+      expect(screen.queryByText(/\*\*/)).toBeNull();
+    });
   });
 
   describe('ShieldAlert icon', () => {

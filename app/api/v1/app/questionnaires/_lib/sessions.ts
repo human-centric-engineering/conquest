@@ -120,12 +120,21 @@ export function resumeSession(sessionId: string, opts?: TransitionOptions): Prom
   return transitionSession(sessionId, 'active', opts);
 }
 
-/** Abandon a session (`active|paused → abandoned`). Terminal. */
+/** Abandon a session (`active|paused → abandoned`). Terminal. Admin/manual abandonment. */
 export function abandonSession(
   sessionId: string,
   opts?: TransitionOptions
 ): Promise<SessionStatus> {
   return transitionSession(sessionId, 'abandoned', opts);
+}
+
+/**
+ * Abort a session (`active|paused → aborted`). Terminal. Set ONLY by the seriousness/abuse gate
+ * when the strike threshold is hit — distinct from {@link abandonSession} so the outcome reads as
+ * "Aborted" and analytics can separate abuse terminations from admin/manual abandonment.
+ */
+export function abortSession(sessionId: string, opts?: TransitionOptions): Promise<SessionStatus> {
+  return transitionSession(sessionId, 'aborted', opts);
 }
 
 /**

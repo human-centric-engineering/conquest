@@ -9,6 +9,7 @@
  * notice. A fork that strips the gate drops this component.
  */
 
+import { Fragment } from 'react';
 import { ShieldAlert } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
@@ -19,6 +20,24 @@ interface SeriousnessNoticeProps {
   /** The judge's reason — surfaced behind a "Why?" disclosure. */
   detail?: string;
   className?: string;
+}
+
+/**
+ * Render a system-authored notice string with minimal `**bold**` support — the only markup the
+ * gate's copy uses (e.g. the bold last-chance warning on the penultimate strike). Splitting on `**`
+ * yields alternating plain / bold segments; odd indices are the emphasised runs. Safe because the
+ * text is authored in `seriousness-logic.ts`, never respondent input.
+ */
+function renderWithBold(text: string) {
+  return text.split('**').map((segment, i) =>
+    i % 2 === 1 ? (
+      <strong key={i} className="text-foreground font-semibold">
+        {segment}
+      </strong>
+    ) : (
+      <Fragment key={i}>{segment}</Fragment>
+    )
+  );
 }
 
 export function SeriousnessNotice({ message, detail, className }: SeriousnessNoticeProps) {
@@ -36,7 +55,7 @@ export function SeriousnessNotice({ message, detail, className }: SeriousnessNot
       />
       <div className="min-w-0">
         <p className="text-foreground text-xs font-medium">Let&apos;s keep it genuine</p>
-        <p className="text-muted-foreground mt-0.5">{message}</p>
+        <p className="text-muted-foreground mt-0.5">{renderWithBold(message)}</p>
         <NoticeWhy detail={detail} />
       </div>
     </div>

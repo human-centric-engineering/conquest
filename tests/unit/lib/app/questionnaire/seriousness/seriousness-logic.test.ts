@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest';
 import {
   seriousnessGateActive,
   evaluateAbuseStrike,
-  ABUSE_ABANDON_MESSAGE,
+  abuseAbortMessage,
 } from '@/lib/app/questionnaire/seriousness';
 
 describe('seriousnessGateActive', () => {
@@ -35,22 +35,29 @@ describe('evaluateAbuseStrike', () => {
     const gentle = evaluateAbuseStrike(0, 4).noticeMessage; // strike 1, 3 remaining
     const firm = evaluateAbuseStrike(2, 4).noticeMessage; // strike 3, 1 remaining
     expect(firm).not.toBe(gentle);
-    // The final warning names the consequence; the gentle one doesn't.
-    expect(firm.toLowerCase()).toContain('end');
+    // The final warning names the consequence (termination) in a bold (**…**) sentence.
+    expect(firm.toLowerCase()).toContain('termination');
+    expect(firm).toContain('**');
   });
 
-  it('abandons on the threshold strike, carrying the final message', () => {
+  it('aborts on the threshold strike, carrying the counted final message', () => {
     const out = evaluateAbuseStrike(3, 4); // 4th strike == threshold
     expect(out.newStrikeCount).toBe(4);
     expect(out.abandon).toBe(true);
     expect(out.noticeMessage).toBe('');
-    expect(out.abandonMessage).toBe(ABUSE_ABANDON_MESSAGE);
+    // The abort message names the count and records the session as aborted.
+    expect(out.abandonMessage).toBe(abuseAbortMessage(4));
+    expect(out.abandonMessage).toContain('4 occasions');
+    expect(out.abandonMessage).toContain('aborted');
   });
 
-  it('abandons immediately when the threshold is 1', () => {
+  it('aborts immediately when the threshold is 1, with a singular-aware message', () => {
     const out = evaluateAbuseStrike(0, 1);
     expect(out.newStrikeCount).toBe(1);
     expect(out.abandon).toBe(true);
+    expect(out.abandonMessage).toBe(abuseAbortMessage(1));
+    expect(out.abandonMessage).toContain('1 occasion ');
+    expect(out.abandonMessage).not.toContain('occasions');
   });
 
   it('matches the worked example (threshold 4): warn, warn, firm-warn, abandon', () => {
