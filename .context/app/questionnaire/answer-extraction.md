@@ -92,6 +92,18 @@ userMessage, recentMessages?, sessionId }`, all in memory. `ExtractionSlotView`
   opt to `buildTurnInvokers` — the contradiction detector + refiner keep the **full** `slots`,
   so only the extractor's prompt shrinks. Off by default (dark-launch); when off the extractor
   gets the full set (today's behaviour). See the runtime roadmap in [selection-strategies.md].
+- **Near-identical (twin) questions.** A questionnaire may include several questions that
+  ask essentially the same thing in different words (poor authoring, but inevitable). The
+  extractor prompt instructs the model to treat each candidate **independently** and emit a
+  separate entry for **every** near-identical question one answer determines — not just one,
+  skipping its twins as redundant — while mapping each to its **own wording, type, and
+  polarity** ("No" to "Do we maintain a robust pipeline?" is "Yes" to "Is our pipeline a
+  concern?"). The LLM stays the judge precisely so polarity is respected; we deliberately do
+  **not** deterministically copy a value across embedding-similar questions, because similarity
+  can't tell an identical question from an inverse-polarity one — a blind copy would fabricate
+  wrong answers. Both twins must also be **candidates** for this to fire: when the extraction
+  pre-filter is on, the current-answer query (above) keeps mutually-similar twins ranked together;
+  with it off, the full set is present anyway.
 - **Value validation** reuses the F2.1 authoring schemas (`typeConfigSchemaFor`)
   so a `single_choice` value must be one of _that slot's_ choices, a `likert`
   within its scale, etc. Lenient where the LLM is loose (a numeric `"34"`, a

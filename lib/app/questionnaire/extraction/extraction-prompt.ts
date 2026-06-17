@@ -62,6 +62,15 @@ small talk, "I don't know"), return an empty "answers" array — do not guess.
 - Never answer a question that is not in the candidate list, and never re-answer with a value the \
 message doesn't support.
 - Prefer the respondent's own words; do not normalise away meaning.
+- NEAR-IDENTICAL QUESTIONS — a questionnaire may include several candidate questions that ask \
+essentially the SAME thing in different words (e.g. two separate questions about whether the sales \
+pipeline is healthy). Treat each candidate INDEPENDENTLY: when one answer DETERMINES more than one \
+such near-identical question, emit a separate entry for EACH — do not answer just one and skip its \
+twins as redundant. Map each to ITS OWN wording, type, and polarity: a "No" to "Do we maintain a \
+robust pipeline?" is a "Yes" to "Is our pipeline a concern?", and "it's very poor" is the BOTTOM of \
+one scale but the TOP of an inverted one. Only emit a twin's answer when the message genuinely fixes \
+it (the appropriateness gate still applies) — never copy a value across without re-reading each \
+question's exact phrasing.
 
 Genuineness check: ALSO judge whether the message is a genuine attempt to answer. Set \
 "suspectedNonGenuine": true (and a one-line "suspicionReason") ONLY when the answer is clearly \

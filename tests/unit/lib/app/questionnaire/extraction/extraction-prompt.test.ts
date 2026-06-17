@@ -50,6 +50,16 @@ describe('buildAnswerExtractionPrompt', () => {
     expect(system).not.toContain('refined');
   });
 
+  it('instructs the model to fill near-identical twin questions independently, respecting polarity', () => {
+    const messages = buildAnswerExtractionPrompt(ctx({ candidateSlots: [slot({ key: 'q1' })] }));
+    const system = typeof messages[0]?.content === 'string' ? messages[0].content : '';
+    expect(system).toMatch(/NEAR-IDENTICAL QUESTIONS/);
+    expect(system).toMatch(/emit a separate entry for EACH/i);
+    // Polarity is explicit — a twin can take the OPPOSITE value, never a blind copy.
+    expect(system).toMatch(/polarity/i);
+    expect(system).toMatch(/never copy a value across/i);
+  });
+
   it('instructs the model to map meaning onto options/scale (buckets, likert sentiment, catch-all)', () => {
     const messages = buildAnswerExtractionPrompt(ctx({ candidateSlots: [slot({ key: 'q1' })] }));
     const system = typeof messages[0]?.content === 'string' ? messages[0].content : '';
