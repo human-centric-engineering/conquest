@@ -55,7 +55,14 @@ function ctx(over: Partial<DataSlotSelectionContext> = {}): DataSlotSelectionCon
 
 beforeEach(() => {
   vi.clearAllMocks();
-  (embedText as unknown as Mock).mockResolvedValue({ embedding: [0.1, 0.2] });
+  (embedText as unknown as Mock).mockResolvedValue({
+    embedding: [0.1, 0.2],
+    model: 'text-embedding-3-small',
+    provider: 'openai',
+    dimensions: 1536,
+    inputTokens: 9,
+    costUsd: 0.0000009,
+  });
   (rankDataSlotsByVector as unknown as Mock).mockResolvedValue(['d3', 'd2', 'd4']);
   (drainStreamChat as unknown as Mock).mockResolvedValue({
     assistantText: '{"choice": 1, "rationale": "follows naturally"}',
@@ -124,6 +131,30 @@ describe('selectNextDataSlot — happy path', () => {
   it('embeds the LAST recent message as the similarity query', async () => {
     await selectNextDataSlot(ctx({ recentMessages: ['older', 'the latest thing they said'] }));
     expect(embedText).toHaveBeenCalledWith('the latest thing they said', 'query');
+  });
+});
+
+describe('selectNextDataSlot — inspector capture', () => {
+  it('records one embedding trace on the ranked path', async () => {
+    const recordInspectorCall = vi.fn();
+    await selectNextDataSlot(ctx({ recordInspectorCall }));
+
+    expect(recordInspectorCall).toHaveBeenCalledTimes(1);
+    const trace = recordInspectorCall.mock.calls[0][0];
+    expect(trace.kind).toBe('embedding');
+    expect(trace.label).toBe('Adaptive data-slot ranking');
+    expect(trace.dimensions).toBe(1536);
+    expect(trace.tokensIn).toBe(9);
+    expect(trace.tokensOut).toBeUndefined();
+  });
+
+  it('records no trace on the fail-soft paths (no message, un-embedded version)', async () => {
+    const recordInspectorCall = vi.fn();
+    await selectNextDataSlot(ctx({ recordInspectorCall, recentMessages: [] }));
+    (rankDataSlotsByVector as unknown as Mock).mockResolvedValue([]);
+    await selectNextDataSlot(ctx({ recordInspectorCall }));
+
+    expect(recordInspectorCall).not.toHaveBeenCalled();
   });
 });
 

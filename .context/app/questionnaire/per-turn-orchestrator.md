@@ -238,7 +238,10 @@ streamed phrasers (`streamQuestionMessage`/`streamOfferMessage`); each app-owned
 hook accumulates them and `TurnInspectorDrawer` renders the right-edge console. **Live-only** —
 never persisted, and capture is a no-op (zero overhead) for any non-preview session.
 
-The drawer can export its contents to the clipboard at three granularities, all backed by the pure
+The drawer **starts closed** — it's opt-in via the right-edge tab (whose badge shows the captured
+call count), so it never covers the preview chat unless the admin opens it. When open it leads with a
+**summary header** (turns, calls, total cost, total latency, tokens in/out) rolled up across the
+session. It can export its contents to the clipboard at three granularities, all backed by the pure
 `formatInspector{Call,Turn,Turns}` serializers in `lib/app/questionnaire/inspector/serialize.ts`
 (readable plaintext — metrics, then raw prompt roles + response): **Copy all** in the header (every
 turn under a session banner), a per-turn copy button on each turn header, and a per-call copy button
@@ -249,6 +252,16 @@ request shown as the dispatched structured args), the seriousness + sensitivity 
 messages + tokens), and the interviewer + completion-offer phrasers. The deterministic selection
 strategies make no LLM call, so they produce no trace; the adaptive selector's LLM call isn't
 captured yet.
+
+**Embedding calls** are captured too (`kind: 'embedding'` traces, built by `buildEmbeddingTrace` in
+`lib/app/questionnaire/inspector/embedding-trace.ts`): the extraction candidate pre-filter, adaptive
+data-slot ranking, and adaptive question ranking each record one trace per turn carrying the embedder
+model/provider, input tokens, cost, vector dimensions, the embedded message, and a one-line ranking
+summary. They render distinctly (a "VEC" chip, a "Dimensions" metric, the output shown as the
+**Ranking** rather than a completion). Recording is on the embed's success path only — a fail-soft
+embed (no message, below threshold, un-embedded version, embed error) degrades the turn and produces
+no trace. The one-time bulk `ensureVersion{Questions,DataSlots}Embedded` backfill is **not** captured
+(it's not a per-turn call and `embedBatch` doesn't surface per-call cost).
 
 ## See also
 

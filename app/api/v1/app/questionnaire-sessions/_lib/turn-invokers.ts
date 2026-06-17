@@ -429,7 +429,10 @@ export async function buildTurnInvokers(opts: {
       // degrades to `weighted` via the strategy's own fallback (no deps passed).
       let deps: StrategyDeps | undefined;
       if (state.config.selectionStrategy === 'adaptive' && adaptiveEnabled) {
-        deps = buildAdaptiveDeps({ userId });
+        deps = buildAdaptiveDeps({
+          userId,
+          ...(recordInspectorCall ? { recordInspectorCall } : {}),
+        });
       }
       const started = Date.now();
       const decision = await getStrategy(state.config.selectionStrategy).select(ctx, deps);
@@ -448,6 +451,7 @@ export async function buildTurnInvokers(opts: {
         ...(goal ? { goal } : {}),
         sessionId: state.sessionId,
         userId,
+        ...(recordInspectorCall ? { recordInspectorCall } : {}),
       });
     },
 

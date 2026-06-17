@@ -84,6 +84,42 @@ describe('TurnInspectorDrawer', () => {
     expect(screen.getByText('900 / 40')).toBeInTheDocument();
   });
 
+  it('renders an embedding call distinctly (VEC chip, Dimensions metric, Ranking block)', async () => {
+    const user = userEvent.setup();
+    render(
+      <TurnInspectorDrawer
+        turns={[
+          {
+            turnIndex: 0,
+            calls: [
+              {
+                kind: 'embedding',
+                label: 'Extraction candidate ranking',
+                model: 'text-embedding-3-small',
+                provider: 'openai',
+                latencyMs: 41,
+                costUsd: 0.0000012,
+                tokensIn: 12,
+                dimensions: 1536,
+                prompt: [{ role: 'input', content: 'Embedded (query): "I rent a flat"' }],
+                response: 'Ranked 62 questions → kept 25.',
+              },
+            ],
+          },
+        ]}
+      />
+    );
+    await user.click(screen.getByRole('button', { name: /open the admin turn inspector/i }));
+    expect(screen.getByText('VEC')).toBeInTheDocument();
+
+    await user.click(screen.getByText('Extraction candidate ranking'));
+    expect(screen.getByText('Dimensions')).toBeInTheDocument();
+    expect(screen.getByText('1,536')).toBeInTheDocument();
+    // The embedding's output block is labelled "Ranking", not "Response".
+    expect(screen.getByText('Ranking')).toBeInTheDocument();
+    expect(screen.queryByText('Response')).not.toBeInTheDocument();
+  });
+
   it('expands a call to reveal its model, cost, and raw prompt + response', async () => {
     const user = userEvent.setup();
     await renderOpen(user);

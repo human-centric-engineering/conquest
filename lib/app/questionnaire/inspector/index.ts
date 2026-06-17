@@ -14,3 +14,7 @@ export {
   formatInspectorTurn,
   formatInspectorTurns,
 } from '@/lib/app/questionnaire/inspector/serialize';
+export {
+  buildEmbeddingTrace,
+  type EmbeddingTraceInput,
+} from '@/lib/app/questionnaire/inspector/embedding-trace';

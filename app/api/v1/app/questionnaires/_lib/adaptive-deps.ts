@@ -22,6 +22,7 @@ import { tryParseJson } from '@/lib/orchestration/evaluations/parse-structured';
 import { QUESTIONNAIRE_SELECTOR_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
 import type { LlmPickInput, LlmPickResult, StrategyDeps } from '@/lib/app/questionnaire/selection';
 import { rankSlotsByVector } from '@/app/api/v1/app/questionnaires/_lib/slot-embeddings';
+import { buildEmbeddingTrace, type RecordAgentCall } from '@/lib/app/questionnaire/inspector';
 
 /** The selector agent's pinned output envelope. */
 interface SelectorOutput {
@@ -135,11 +136,34 @@ async function runSelectorAgent(input: LlmPickInput, userId: string): Promise<Ll
 /**
  * Build the real {@link StrategyDeps} for adaptive selection. `userId` is the
  * admin/respondent on whose behalf the selection agent runs (carries the budget
- * attribution).
+ * attribution). `recordInspectorCall` (admin preview only) captures the query
+ * embedding as an inspector trace — the embedder wrapper is the only place the
+ * provenance (model/cost/tokens) is visible before it's discarded down to the
+ * vector the pure strategy consumes.
  */
-export function buildAdaptiveDeps(opts: { userId: string }): StrategyDeps {
+export function buildAdaptiveDeps(opts: {
+  userId: string;
+  recordInspectorCall?: RecordAgentCall;
+}): StrategyDeps {
   return {
-    embedText: async (text) => (await embedText(text, 'query')).embedding,
+    embedText: async (text) => {
+      const startedAt = Date.now();
+      const result = await embedText(text, 'query');
+      opts.recordInspectorCall?.(
+        buildEmbeddingTrace({
+          label: 'Adaptive question ranking',
+          embedded: text,
+          rankingSummary: 'Embedded the respondent message to rank question slots by similarity.',
+          model: result.model,
+          provider: result.provider,
+          dimensions: result.dimensions,
+          inputTokens: result.inputTokens,
+          costUsd: result.costUsd,
+          latencyMs: Date.now() - startedAt,
+        })
+      );
+      return result.embedding;
+    },
     rankByVector: (embedding, candidateIds, k) => rankSlotsByVector(embedding, candidateIds, k),
     llmPick: (input) => runSelectorAgent(input, opts.userId),
   };

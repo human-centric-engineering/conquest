@@ -419,6 +419,7 @@ async function handleMessage(
         activeTheme,
         recentMessages: loaded.base.recentMessages,
         sessionId,
+        ...(recordInspectorCall ? { recordInspectorCall } : {}),
       });
       if (narrowed.applied) {
         const keptQuestionKeys = new Set(narrowed.questionSlots.map((s) => s.key));

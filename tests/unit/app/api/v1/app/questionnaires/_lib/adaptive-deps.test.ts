@@ -140,6 +140,33 @@ describe('buildAdaptiveDeps — embedText + rankByVector delegation', () => {
     expect(await deps.rankByVector([0.1], ['q1-id', 'q2-id'], 5)).toEqual(['q2-id']);
     expect(rankSlotsByVector).toHaveBeenCalledWith([0.1], ['q1-id', 'q2-id'], 5);
   });
+
+  it('records an embedding inspector trace (when a sink is supplied) without changing the return', async () => {
+    (embedText as unknown as Mock).mockResolvedValue({
+      embedding: [0.1, 0.2, 0.3],
+      model: 'text-embedding-3-small',
+      provider: 'openai',
+      dimensions: 1536,
+      inputTokens: 7,
+      costUsd: 0.0000007,
+    });
+    const recordInspectorCall = vi.fn();
+    const deps = buildAdaptiveDeps({ userId: 'admin-1', recordInspectorCall });
+
+    expect(await deps.embedText('hello')).toEqual([0.1, 0.2, 0.3]);
+    expect(recordInspectorCall).toHaveBeenCalledTimes(1);
+    const trace = recordInspectorCall.mock.calls[0][0];
+    expect(trace.kind).toBe('embedding');
+    expect(trace.label).toBe('Adaptive question ranking');
+    expect(trace.dimensions).toBe(1536);
+    expect(trace.tokensIn).toBe(7);
+  });
+
+  it('omits the trace when no sink is supplied', async () => {
+    (embedText as unknown as Mock).mockResolvedValue({ embedding: [0.1], dimensions: 1536 });
+    const deps = buildAdaptiveDeps({ userId: 'admin-1' });
+    await expect(deps.embedText('hi')).resolves.toEqual([0.1]);
+  });
 });
 
 describe('buildAdaptiveDeps — llmPick', () => {

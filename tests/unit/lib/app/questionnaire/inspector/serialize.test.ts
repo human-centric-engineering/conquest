@@ -70,6 +70,26 @@ describe('formatInspectorCall', () => {
     // Seconds formatting for >= 1000ms.
     expect(out).toContain('Latency:    1.5s');
   });
+
+  it('renders an embedding call with a Dimensions line and a "Ranking" (not "Response") block', () => {
+    const embedding: AgentCallTrace = {
+      kind: 'embedding',
+      label: 'Extraction candidate ranking',
+      model: 'text-embedding-3-small',
+      provider: 'openai',
+      latencyMs: 41,
+      costUsd: 0.0000012,
+      tokensIn: 12,
+      dimensions: 1536,
+      prompt: [{ role: 'input', content: 'Embedded (query): "I rent a flat"' }],
+      response: 'Ranked 62 questions → kept 25.',
+    };
+    const out = formatInspectorCall(embedding);
+    expect(out).toContain('Dimensions: 1,536');
+    expect(out).toContain('Ranking:');
+    expect(out).not.toContain('Response:');
+    expect(out).not.toContain('Tokens out:');
+  });
 });
 
 describe('formatInspectorTurn', () => {

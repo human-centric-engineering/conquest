@@ -21,6 +21,7 @@ import { QUESTIONNAIRE_SELECTOR_AGENT_SLUG } from '@/lib/app/questionnaire/const
 import { parseSelectorOutput } from '@/app/api/v1/app/questionnaires/_lib/adaptive-deps';
 import { rankDataSlotsByVector } from '@/app/api/v1/app/questionnaires/_lib/data-slot-embeddings';
 import { logger } from '@/lib/logging';
+import { buildEmbeddingTrace, type RecordAgentCall } from '@/lib/app/questionnaire/inspector';
 import type {
   DataSlotSelectOutcome,
   DataSlotTarget,
@@ -47,6 +48,8 @@ export interface DataSlotSelectionContext {
   sessionId: string;
   /** The admin/respondent the selector runs on behalf of (budget attribution). */
   userId: string;
+  /** Inspector sink (admin preview only); when present, a successful embed records one trace. */
+  recordInspectorCall?: RecordAgentCall;
 }
 
 /** Dedupe slots by id, preserving first-seen order. */
@@ -113,14 +116,30 @@ export async function selectNextDataSlot(
   if (!lastMessage || ctx.unfilled.length < 2) return null;
 
   try {
-    const embedding = (await embedText(lastMessage, 'query')).embedding;
+    const startedAt = Date.now();
+    const embedResult = await embedText(lastMessage, 'query');
+    const embedLatencyMs = Date.now() - startedAt;
     const rankedIds = await rankDataSlotsByVector(
-      embedding,
+      embedResult.embedding,
       ctx.unfilled.map((s) => s.id),
       DATA_SLOT_CANDIDATE_K
     );
     // No embeddings to rank against (version never embedded) → defer to deterministic.
     if (rankedIds.length === 0) return null;
+
+    ctx.recordInspectorCall?.(
+      buildEmbeddingTrace({
+        label: 'Adaptive data-slot ranking',
+        embedded: lastMessage,
+        rankingSummary: `Ranked ${ctx.unfilled.length} unfilled data slots → top ${rankedIds.length} candidates for the selector.`,
+        model: embedResult.model,
+        provider: embedResult.provider,
+        dimensions: embedResult.dimensions,
+        inputTokens: embedResult.inputTokens,
+        costUsd: embedResult.costUsd,
+        latencyMs: embedLatencyMs,
+      })
+    );
 
     const byId = new Map(ctx.unfilled.map((s) => [s.id, s]));
     const ranked = rankedIds

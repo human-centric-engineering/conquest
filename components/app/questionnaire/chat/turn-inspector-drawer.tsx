@@ -324,6 +324,7 @@ function TurnBlock({ turn, defaultOpen }: { turn: TurnInspectorData; defaultOpen
 
 function CallRow({ index, call }: { index: number; call: AgentCallTrace }) {
   const [open, setOpen] = useState(false);
+  const isEmbedding = call.kind === 'embedding';
   return (
     <li className="rounded">
       <button
@@ -334,7 +335,14 @@ function CallRow({ index, call }: { index: number; call: AgentCallTrace }) {
         <span className="font-mono text-[0.6rem] text-zinc-600">
           {String(index + 1).padStart(2, '0')}
         </span>
-        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--cq-accent)]" aria-hidden />
+        {isEmbedding ? (
+          // Embedding calls are a different shape (no completion) — flag them with a "VEC" chip.
+          <span className="shrink-0 rounded-sm bg-sky-500/20 px-1 font-mono text-[0.55rem] font-bold tracking-wide text-sky-300">
+            VEC
+          </span>
+        ) : (
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--cq-accent)]" aria-hidden />
+        )}
         <span className="truncate text-xs font-medium text-zinc-200">{call.label}</span>
         <span className="ml-auto flex shrink-0 items-center gap-2.5 font-mono text-[0.62rem] text-zinc-500">
           <span className="hidden sm:inline">{fmtLatency(call.latencyMs)}</span>
@@ -369,6 +377,9 @@ function CallRow({ index, call }: { index: number; call: AgentCallTrace }) {
             {call.tokensOut !== undefined && (
               <Metric label="Tokens out" value={call.tokensOut.toLocaleString()} />
             )}
+            {call.dimensions !== undefined && (
+              <Metric label="Dimensions" value={call.dimensions.toLocaleString()} />
+            )}
           </dl>
 
           {/* Prompt */}
@@ -390,10 +401,10 @@ function CallRow({ index, call }: { index: number; call: AgentCallTrace }) {
             </div>
           </div>
 
-          {/* Response */}
+          {/* Response (an embedding's "output" is the ranking it drove, not a completion). */}
           <div>
             <p className="mb-1 font-mono text-[0.6rem] font-semibold tracking-[0.15em] text-[color:var(--cq-accent)] uppercase">
-              Response
+              {isEmbedding ? 'Ranking' : 'Response'}
             </p>
             <pre className="max-h-56 overflow-auto rounded border border-[var(--cq-accent-ring)] bg-[var(--cq-accent-muted)] px-2.5 py-2 font-mono text-[0.68rem] leading-relaxed whitespace-pre-wrap text-zinc-200">
               {call.response || '—'}

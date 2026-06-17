@@ -43,13 +43,16 @@ export function formatInspectorCall(call: AgentCallTrace, index?: number): strin
   lines.push(`  Est. cost:  ${fmtCost(call.costUsd)}`);
   if (call.tokensIn !== undefined) lines.push(`  Tokens in:  ${call.tokensIn.toLocaleString()}`);
   if (call.tokensOut !== undefined) lines.push(`  Tokens out: ${call.tokensOut.toLocaleString()}`);
+  if (call.dimensions !== undefined)
+    lines.push(`  Dimensions: ${call.dimensions.toLocaleString()}`);
 
   lines.push('', '  Prompt:');
   for (const m of call.prompt) {
     lines.push(`  [${m.role}]`, m.content);
   }
 
-  lines.push('', '  Response:', call.response || '—');
+  // An embedding's "output" is the ranking it drove, not a completion.
+  lines.push('', call.kind === 'embedding' ? '  Ranking:' : '  Response:', call.response || '—');
 
   return lines.join('\n');
 }

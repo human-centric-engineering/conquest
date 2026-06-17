@@ -19,6 +19,13 @@ export interface InspectorMessage {
 
 /** One agent/LLM call made during a turn. */
 export interface AgentCallTrace {
+  /**
+   * What kind of call this is. Absent ⇒ `'llm'` (back-compat — every existing call site is an LLM
+   * call). `'embedding'` marks a vector-embedding call (e.g. ranking slots by similarity): it has
+   * input tokens + a width but no completion tokens and no free-text response, so the UI/serializer
+   * render it distinctly (a "VEC" tag, a "Dimensions" metric, the response shown as the ranking).
+   */
+  kind?: 'llm' | 'embedding';
   /** Human label, e.g. "Answer extraction", "Seriousness judge", "Interviewer phrasing". */
   label: string;
   /** Resolved model id (e.g. `gpt-4o-mini`), or `''` when not resolvable. */
@@ -33,6 +40,8 @@ export interface AgentCallTrace {
   tokensIn?: number;
   /** Output (completion) tokens, when the call path exposes them. */
   tokensOut?: number;
+  /** Embedding width (the vector dimension), for `kind: 'embedding'` calls. */
+  dimensions?: number;
   /** The request sent — chat messages, or a single `input` entry holding the dispatched args. */
   prompt: InspectorMessage[];
   /** The response received — the assistant text, or the structured result serialized. */

@@ -87,7 +87,14 @@ function input(over: Partial<ExtractionCandidateInput> = {}): ExtractionCandidat
 
 beforeEach(() => {
   vi.clearAllMocks();
-  (embedText as unknown as Mock).mockResolvedValue({ embedding: [0.1, 0.2] });
+  (embedText as unknown as Mock).mockResolvedValue({
+    embedding: [0.1, 0.2],
+    model: 'text-embedding-3-small',
+    provider: 'openai',
+    dimensions: 1536,
+    inputTokens: 12,
+    costUsd: 0.0000012,
+  });
   // Default: similarity ranks a couple of slots that are NOT otherwise forced.
   (rankSlotsByVector as unknown as Mock).mockResolvedValue(['q5', 'q6']);
   (rankDataSlotsByVector as unknown as Mock).mockResolvedValue(['d9', 'd10']);
@@ -203,5 +210,39 @@ describe('narrowExtractionCandidates — no-op + fail-soft', () => {
     expect(r.applied).toBe(true);
     expect(r.questionSlots.map((s) => s.key)).toEqual(expect.arrayContaining(['q0', 'q5', 'q6']));
     expect(r.dataSlotsOut).toBe(0);
+  });
+});
+
+describe('narrowExtractionCandidates — inspector capture', () => {
+  it('records exactly one embedding trace (carrying the embed provenance) on the narrowed path', async () => {
+    const recordInspectorCall = vi.fn();
+    await narrowExtractionCandidates(input({ recordInspectorCall }));
+
+    expect(recordInspectorCall).toHaveBeenCalledTimes(1);
+    const trace = recordInspectorCall.mock.calls[0][0];
+    expect(trace.kind).toBe('embedding');
+    expect(trace.label).toBe('Extraction candidate ranking');
+    expect(trace.model).toBe('text-embedding-3-small');
+    expect(trace.provider).toBe('openai');
+    expect(trace.dimensions).toBe(1536);
+    expect(trace.tokensIn).toBe(12);
+    expect(trace.tokensOut).toBeUndefined();
+    // The respondent's last message is echoed; the ranking summary reports kept counts.
+    expect(trace.prompt[0].content).toContain('the respondent just said something');
+    expect(trace.response).toMatch(/Ranked \d+ questions → kept/);
+  });
+
+  it('records no trace on the fail-soft paths (no message, below threshold, embed throws)', async () => {
+    const recordInspectorCall = vi.fn();
+    await narrowExtractionCandidates(input({ recordInspectorCall, recentMessages: [] }));
+    await narrowExtractionCandidates({
+      ...input({ recordInspectorCall }),
+      questionSlots: QUESTIONS.slice(0, 10),
+      dataSlots: DATA.slice(0, 5),
+    });
+    (embedText as unknown as Mock).mockRejectedValueOnce(new Error('embedder down'));
+    await narrowExtractionCandidates(input({ recordInspectorCall }));
+
+    expect(recordInspectorCall).not.toHaveBeenCalled();
   });
 });

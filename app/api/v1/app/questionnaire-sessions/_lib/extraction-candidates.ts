@@ -23,6 +23,7 @@ import { logger } from '@/lib/logging';
 import { rankSlotsByVector } from '@/app/api/v1/app/questionnaires/_lib/slot-embeddings';
 import { rankDataSlotsByVector } from '@/app/api/v1/app/questionnaires/_lib/data-slot-embeddings';
 import type { CapabilitySlotView } from '@/app/api/v1/app/questionnaires/_lib/turn-context';
+import { buildEmbeddingTrace, type RecordAgentCall } from '@/lib/app/questionnaire/inspector';
 
 /** Tuning knobs. All overridable per-call so tests can pin small values and ops can tune. */
 export const EXTRACTION_PREFILTER_DEFAULTS = {
@@ -63,6 +64,8 @@ export interface ExtractionCandidateInput {
   questionK?: number;
   dataSlotK?: number;
   sizeThreshold?: number;
+  /** Inspector sink (admin preview only); when present, a successful embed records one trace. */
+  recordInspectorCall?: RecordAgentCall;
 }
 
 export type ExtractionPrefilterReason =
@@ -124,7 +127,10 @@ export async function narrowExtractionCandidates(
   if (!lastMessage) return full('no_message');
 
   try {
-    const embedding = (await embedText(lastMessage, 'query')).embedding;
+    const startedAt = Date.now();
+    const embedResult = await embedText(lastMessage, 'query');
+    const embedLatencyMs = Date.now() - startedAt;
+    const embedding = embedResult.embedding;
 
     // ---- Data slots ----
     // Rails 1-3: always keep the active slot, every filled slot (any theme), and same-theme unfilled.
@@ -174,6 +180,23 @@ export async function narrowExtractionCandidates(
     );
     const keptQuestionSlots = input.questionSlots.filter(
       (s) => forcedQuestionKeys.has(s.key) || rankedQuestionKeys.has(s.key)
+    );
+
+    input.recordInspectorCall?.(
+      buildEmbeddingTrace({
+        label: 'Extraction candidate ranking',
+        embedded: lastMessage,
+        rankingSummary:
+          `Ranked ${input.questionSlots.length} questions → kept ${keptQuestionSlots.length}, ` +
+          `${input.dataSlots.length} data slots → kept ${keptDataSlots.length} ` +
+          `(top-K + safety rails).`,
+        model: embedResult.model,
+        provider: embedResult.provider,
+        dimensions: embedResult.dimensions,
+        inputTokens: embedResult.inputTokens,
+        costUsd: embedResult.costUsd,
+        latencyMs: embedLatencyMs,
+      })
     );
 
     return {
