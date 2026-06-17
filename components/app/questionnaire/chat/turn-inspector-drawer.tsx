@@ -63,18 +63,78 @@ function fmtLatency(ms: number): string {
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`;
 }
 
-export function TurnInspectorDrawer({ turns }: TurnInspectorDrawerProps) {
-  const [open, setOpen] = useState(false);
-  const totalCalls = useMemo(() => turns.reduce((n, t) => n + t.calls.length, 0), [turns]);
+interface TurnTotals {
+  turns: number;
+  calls: number;
+  costUsd: number;
+  latencyMs: number;
+  tokensIn: number;
+  tokensOut: number;
+}
 
-  // Pop open the first time data arrives so the admin notices it (once, not on every turn).
-  const [autoOpened, setAutoOpened] = useState(false);
-  useEffect(() => {
-    if (!autoOpened && turns.length > 0) {
-      setOpen(true);
-      setAutoOpened(true);
+/** Session-wide rollup for the summary header. Token sums skip calls that don't expose counts. */
+function summariseTurns(turns: TurnInspectorData[]): TurnTotals {
+  const totals: TurnTotals = {
+    turns: turns.length,
+    calls: 0,
+    costUsd: 0,
+    latencyMs: 0,
+    tokensIn: 0,
+    tokensOut: 0,
+  };
+  for (const turn of turns) {
+    totals.calls += turn.calls.length;
+    totals.costUsd += totalInspectorCostUsd(turn.calls);
+    totals.latencyMs += totalInspectorLatencyMs(turn.calls);
+    for (const call of turn.calls) {
+      if (typeof call.tokensIn === 'number') totals.tokensIn += call.tokensIn;
+      if (typeof call.tokensOut === 'number') totals.tokensOut += call.tokensOut;
     }
-  }, [turns.length, autoOpened]);
+  }
+  return totals;
+}
+
+/** A compact at-a-glance rollup pinned to the top of the drawer body. */
+function SummaryHeader({ totals }: { totals: TurnTotals }) {
+  const tokens =
+    totals.tokensIn || totals.tokensOut
+      ? `${totals.tokensIn.toLocaleString()} / ${totals.tokensOut.toLocaleString()}`
+      : '—';
+  return (
+    <dl className="mb-3 grid grid-cols-3 gap-2 rounded-md border border-zinc-800 bg-zinc-900/40 p-2.5">
+      <SummaryStat label="Turns" value={String(totals.turns)} />
+      <SummaryStat label="Calls" value={String(totals.calls)} />
+      <SummaryStat label="Total cost" value={fmtCost(totals.costUsd)} accent />
+      <SummaryStat label="Latency" value={fmtLatency(totals.latencyMs)} />
+      <SummaryStat label="Tokens in/out" value={tokens} />
+    </dl>
+  );
+}
+
+function SummaryStat({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+  return (
+    <div className="min-w-0">
+      <dt className="font-mono text-[0.58rem] tracking-[0.12em] text-zinc-500 uppercase">
+        {label}
+      </dt>
+      <dd
+        className={cn(
+          'truncate font-mono text-sm font-semibold',
+          accent ? 'text-[color:var(--cq-accent)]' : 'text-zinc-100'
+        )}
+      >
+        {value}
+      </dd>
+    </div>
+  );
+}
+
+export function TurnInspectorDrawer({ turns }: TurnInspectorDrawerProps) {
+  // Start closed: the drawer is opt-in via the edge tab (whose badge signals when data has arrived),
+  // so it never covers the preview chat unless the admin asks for it.
+  const [open, setOpen] = useState(false);
+  const totals = useMemo(() => summariseTurns(turns), [turns]);
+  const totalCalls = totals.calls;
 
   // Esc closes the open drawer — expected of any overlay console.
   useEffect(() => {
@@ -182,20 +242,23 @@ export function TurnInspectorDrawer({ turns }: TurnInspectorDrawerProps) {
                 Waiting for the first turn…
               </p>
             ) : (
-              <ol className="space-y-3">
-                {turns.map((turn, i) => (
-                  <TurnBlock
-                    key={`${turn.turnIndex}-${i}`}
-                    turn={turn}
-                    defaultOpen={i === turns.length - 1}
-                  />
-                ))}
-              </ol>
+              <>
+                <SummaryHeader totals={totals} />
+                <ol className="space-y-3">
+                  {turns.map((turn, i) => (
+                    <TurnBlock
+                      key={`${turn.turnIndex}-${i}`}
+                      turn={turn}
+                      defaultOpen={i === turns.length - 1}
+                    />
+                  ))}
+                </ol>
+              </>
             )}
           </div>
 
           <div className="shrink-0 border-t border-zinc-800 px-4 py-2 font-mono text-[0.65rem] text-zinc-500">
-            {turns.length} turn{turns.length === 1 ? '' : 's'} · {totalCalls} agent call
+            {totals.turns} turn{totals.turns === 1 ? '' : 's'} · {totalCalls} agent call
             {totalCalls === 1 ? '' : 's'} captured this session
           </div>
         </aside>

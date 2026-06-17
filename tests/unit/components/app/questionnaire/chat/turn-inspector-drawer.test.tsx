@@ -44,18 +44,49 @@ const turns: TurnInspectorData[] = [
   },
 ];
 
+/** Render the drawer and open it from the collapsed edge tab (it now starts closed). */
+async function renderOpen(user: ReturnType<typeof userEvent.setup>) {
+  render(<TurnInspectorDrawer turns={turns} />);
+  await user.click(screen.getByRole('button', { name: /open the admin turn inspector/i }));
+}
+
 describe('TurnInspectorDrawer', () => {
-  it('auto-opens, is labelled admin-only, and lists the turn with its call count', () => {
+  it('starts closed: shows the edge tab (with call-count badge), not the open drawer', () => {
     render(<TurnInspectorDrawer turns={turns} />);
+    // The collapsed tab is the reachable affordance; the close button (inside the open drawer) is not.
+    expect(
+      screen.getByRole('button', { name: /open the admin turn inspector/i })
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /close the turn inspector/i })
+    ).not.toBeInTheDocument();
+    // Badge on the edge tab reflects the captured call count even while closed.
+    const tab = screen.getByRole('button', { name: /open the admin turn inspector/i });
+    expect(within(tab).getByText('2')).toBeInTheDocument();
+  });
+
+  it('opens from the edge tab: labelled admin-only and lists the turn with its call count', async () => {
+    const user = userEvent.setup();
+    await renderOpen(user);
     expect(screen.getByText(/not shown to respondents/i)).toBeInTheDocument();
     expect(screen.getAllByText(/admin only/i).length).toBeGreaterThan(0);
     expect(screen.getByText('Turn 1')).toBeInTheDocument();
     expect(screen.getByText('2 calls')).toBeInTheDocument();
   });
 
+  it('shows a session summary header (turns, calls, total cost, tokens)', async () => {
+    const user = userEvent.setup();
+    await renderOpen(user);
+    // Summary stat labels are present…
+    expect(screen.getByText('Total cost')).toBeInTheDocument();
+    expect(screen.getByText('Tokens in/out')).toBeInTheDocument();
+    // …and the token rollup sums both calls (900+0 in / 40+0 out).
+    expect(screen.getByText('900 / 40')).toBeInTheDocument();
+  });
+
   it('expands a call to reveal its model, cost, and raw prompt + response', async () => {
     const user = userEvent.setup();
-    render(<TurnInspectorDrawer turns={turns} />);
+    await renderOpen(user);
 
     // The latest turn is expanded by default, so the call rows are visible; expand the first call.
     await user.click(screen.getByText('Answer extraction'));
@@ -81,7 +112,7 @@ describe('TurnInspectorDrawer', () => {
     it('copies every turn (with the session header) via the header "Copy all" button', async () => {
       const user = userEvent.setup();
       const writeText = mockClipboard();
-      render(<TurnInspectorDrawer turns={turns} />);
+      await renderOpen(user);
 
       await user.click(screen.getByRole('button', { name: /copy all turns to clipboard/i }));
 
@@ -95,7 +126,7 @@ describe('TurnInspectorDrawer', () => {
     it('copies a single turn via its per-turn copy button', async () => {
       const user = userEvent.setup();
       const writeText = mockClipboard();
-      render(<TurnInspectorDrawer turns={turns} />);
+      await renderOpen(user);
 
       await user.click(screen.getByRole('button', { name: /copy turn 1 to clipboard/i }));
 
@@ -108,7 +139,7 @@ describe('TurnInspectorDrawer', () => {
     it('copies a single call via the copy button in its expanded body', async () => {
       const user = userEvent.setup();
       const writeText = mockClipboard();
-      render(<TurnInspectorDrawer turns={turns} />);
+      await renderOpen(user);
 
       // Expand the first call so its copy affordance is visible.
       await user.click(screen.getByText('Answer extraction'));
@@ -124,7 +155,7 @@ describe('TurnInspectorDrawer', () => {
     it('flips the button to a "Copied" state after a successful copy', async () => {
       const user = userEvent.setup();
       mockClipboard();
-      render(<TurnInspectorDrawer turns={turns} />);
+      await renderOpen(user);
 
       const copyAll = screen.getByRole('button', { name: /copy all turns to clipboard/i });
       expect(within(copyAll).queryByText(/copied/i)).not.toBeInTheDocument();
@@ -133,17 +164,19 @@ describe('TurnInspectorDrawer', () => {
     });
   });
 
-  it('collapses to a tab that can reopen the drawer', async () => {
+  it('toggles between the open drawer and the collapsed tab', async () => {
     const user = userEvent.setup();
-    render(<TurnInspectorDrawer turns={turns} />);
-    await user.click(screen.getByRole('button', { name: /close the turn inspector/i }));
-    const reopen = screen.getByRole('button', { name: /open the admin turn inspector/i });
-    expect(reopen).toBeInTheDocument();
-    await user.click(reopen);
-    // Drawer is open again — its close affordance is back, the collapsed tab is gone.
+    await renderOpen(user);
+    // Open: the close affordance is present, the tab is gone.
     expect(screen.getByRole('button', { name: /close the turn inspector/i })).toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: /open the admin turn inspector/i })
     ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /close the turn inspector/i }));
+    // Collapsed again: the tab is back.
+    expect(
+      screen.getByRole('button', { name: /open the admin turn inspector/i })
+    ).toBeInTheDocument();
   });
 });
