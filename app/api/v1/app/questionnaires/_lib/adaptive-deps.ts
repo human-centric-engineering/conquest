@@ -23,6 +23,14 @@ import { QUESTIONNAIRE_SELECTOR_AGENT_SLUG } from '@/lib/app/questionnaire/const
 import type { LlmPickInput, LlmPickResult, StrategyDeps } from '@/lib/app/questionnaire/selection';
 import { rankSlotsByVector } from '@/app/api/v1/app/questionnaires/_lib/slot-embeddings';
 import { buildEmbeddingTrace, type RecordAgentCall } from '@/lib/app/questionnaire/inspector';
+import {
+  bulletList,
+  joinSections,
+  jsonOutputContract,
+  numberedList,
+  section,
+  titledBlock,
+} from '@/lib/app/questionnaire/prompt/format';
 
 /** The selector agent's pinned output envelope. */
 interface SelectorOutput {
@@ -31,46 +39,47 @@ interface SelectorOutput {
   rationale: string;
 }
 
-/** Render the numbered candidate list + transcript + framing the selector agent judges. */
+/**
+ * Render the numbered candidate list + transcript + framing the selector agent judges, as XML-tagged
+ * sections (see `prompt/format.ts`). The system prompt lives in the seeded selector agent; this is
+ * the per-turn user message. The output contract shape is kept verbatim — `parseSelectorOutput`
+ * reads `{ choice, rationale }`.
+ */
 export function buildSelectorPrompt(input: LlmPickInput): string {
   const transcript =
-    input.recentMessages.length > 0
-      ? input.recentMessages.map((m) => `- ${m}`).join('\n')
-      : '(no prior messages)';
+    input.recentMessages.length > 0 ? bulletList(input.recentMessages) : '(no prior messages)';
 
   // Each candidate: its prompt, then any guidelines / rationale on indented sub-lines
   // so the model judges on intent, not just wording. Absent fields are simply omitted.
-  const candidates = input.candidates
-    .map((c, i) => {
-      const lines = [`${i + 1}. ${c.prompt ?? c.key}`];
+  const candidates = numberedList(
+    input.candidates.map((c) => {
+      const lines = [c.prompt ?? c.key];
       if (c.guidelines) lines.push(`   - Looking for: ${c.guidelines}`);
       if (c.rationale) lines.push(`   - Why it matters: ${c.rationale}`);
       return lines.join('\n');
     })
-    .join('\n');
-
-  const sections: string[] = [];
-  if (input.goal) {
-    sections.push(`Questionnaire goal: ${input.goal}`, '');
-  }
-  sections.push('Recent conversation (oldest first):', transcript, '');
-  if (input.answeredQuestions && input.answeredQuestions.length > 0) {
-    sections.push(
-      'Already answered (do not re-tread these):',
-      input.answeredQuestions.map((q) => `- ${q}`).join('\n'),
-      ''
-    );
-  }
-  sections.push(
-    'Candidate questions to ask next:',
-    candidates,
-    '',
-    'Pick the candidate that follows most naturally from the conversation and best advances ' +
-      'the goal — favour continuity over list order, and choose 0 if none fit. Reply with ONLY ' +
-      'JSON: {"choice": <1-based number, or 0 if none fits>, "rationale": "<one short sentence>"}.'
   );
 
-  return sections.join('\n');
+  const answered =
+    input.answeredQuestions && input.answeredQuestions.length > 0
+      ? titledBlock('Already answered (do not re-tread these)', bulletList(input.answeredQuestions))
+      : '';
+
+  return joinSections(
+    input.goal ? section('goal', `Questionnaire goal: ${input.goal}`) : '',
+    section('conversation', titledBlock('Recent conversation (oldest first)', transcript)),
+    answered ? section('already_answered', answered) : '',
+    section('candidates', titledBlock('Candidate questions to ask next', candidates)),
+    section(
+      'task',
+      'Pick the candidate that follows most naturally from the conversation and best advances ' +
+        'the goal — favour continuity over list order, and choose 0 if none fit.\n' +
+        jsonOutputContract(
+          '{"choice": <1-based number, or 0 if none fits>, "rationale": "<one short sentence>"}',
+          { preface: 'Reply with ONLY this JSON' }
+        )
+    )
+  );
 }
 
 /** Validate the selector agent's JSON reply into a {@link SelectorOutput}. */

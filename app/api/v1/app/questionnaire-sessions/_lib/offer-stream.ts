@@ -24,6 +24,12 @@ import { calculateCost, logCost } from '@/lib/orchestration/llm/cost-tracker';
 import { getTextContent, type LlmMessage } from '@/lib/orchestration/llm/types';
 import { QUESTIONNAIRE_COMPLETION_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
 import type { RecordAgentCall } from '@/lib/app/questionnaire/inspector';
+import {
+  bulletList,
+  joinSections,
+  section,
+  titledBlock,
+} from '@/lib/app/questionnaire/prompt/format';
 import type { OfferComposeInput } from '@/lib/app/questionnaire/orchestrator';
 
 /** Deterministic fallback offer when phrasing is unavailable or fails (fail-soft). */
@@ -36,27 +42,39 @@ const OFFER_TIMEOUT_MS = 30_000;
 
 /** Build the plain-prose offer prompt — explicitly NOT JSON, so the tokens stream as prose. */
 export function buildStreamingOfferPrompt(input: OfferComposeInput): LlmMessage[] {
-  const covered = input.coveredSlots.map((s) => `- ${s.prompt}`).join('\n') || '- (nothing yet)';
-  const remaining = input.remainingSlots.map((s) => `- ${s.prompt}`).join('\n');
+  const covered =
+    input.coveredSlots.length > 0
+      ? bulletList(input.coveredSlots.map((s) => s.prompt))
+      : '- (nothing yet)';
+  const remaining = bulletList(input.remainingSlots.map((s) => s.prompt));
   const pct = Math.round(input.coverage * 100);
 
-  const system =
-    'You are a warm, concise questionnaire assistant. The respondent has answered enough ' +
-    'to submit. Write a short, friendly message (2–3 sentences) that briefly acknowledges ' +
-    'what they covered and invites them to submit now — or keep going if they prefer. ' +
-    'Reply with plain conversational prose only: no JSON, no lists, no headings, no preamble.' +
-    // F6.3 soft cost cap: nudge toward wrapping up without alarming the respondent about cost.
-    (input.costWrapUp
-      ? ' This session is approaching its limit, so gently encourage them to wrap up and ' +
-        'submit now rather than continue, and keep the message especially brief.'
-      : '');
+  const system = joinSections(
+    section(
+      'role',
+      'You are a warm, concise questionnaire assistant. The respondent has answered enough ' +
+        'to submit. Write a short, friendly message (2–3 sentences) that briefly acknowledges ' +
+        'what they covered and invites them to submit now — or keep going if they prefer.' +
+        // F6.3 soft cost cap: nudge toward wrapping up without alarming the respondent about cost.
+        (input.costWrapUp
+          ? ' This session is approaching its limit, so gently encourage them to wrap up and ' +
+            'submit now rather than continue, and keep the message especially brief.'
+          : '')
+    ),
+    section(
+      'output_format',
+      'Reply with plain conversational prose only: no JSON, no lists, no headings, no XML tags, ' +
+        'no preamble.'
+    )
+  );
 
-  const user =
+  const user = joinSections(
     `Coverage: ${pct}% across ${input.answeredCount} answered question(s).` +
-    (input.capReached ? ' (The session question limit was reached.)' : '') +
-    `\n\nCovered:\n${covered}` +
-    (remaining ? `\n\nStill optional:\n${remaining}` : '') +
-    '\n\nWrite the wrap-up message now.';
+      (input.capReached ? ' (The session question limit was reached.)' : ''),
+    titledBlock('Covered', covered),
+    remaining ? titledBlock('Still optional', remaining) : '',
+    'Write the wrap-up message now.'
+  );
 
   return [
     { role: 'system', content: system },

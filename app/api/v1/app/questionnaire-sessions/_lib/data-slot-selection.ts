@@ -22,6 +22,14 @@ import { parseSelectorOutput } from '@/app/api/v1/app/questionnaires/_lib/adapti
 import { rankDataSlotsByVector } from '@/app/api/v1/app/questionnaires/_lib/data-slot-embeddings';
 import { logger } from '@/lib/logging';
 import { buildEmbeddingTrace, type RecordAgentCall } from '@/lib/app/questionnaire/inspector';
+import {
+  bulletList,
+  joinSections,
+  jsonOutputContract,
+  numberedList,
+  section,
+  titledBlock,
+} from '@/lib/app/questionnaire/prompt/format';
 import type {
   DataSlotSelectOutcome,
   DataSlotTarget,
@@ -65,43 +73,43 @@ function dedupeById(slots: DataSlotTarget[]): DataSlotTarget[] {
   return out;
 }
 
-/** Render the numbered candidate list + transcript + theme-local framing the selector judges. */
+/**
+ * Render the numbered candidate list + transcript + theme-local framing the selector judges, as
+ * XML-tagged sections (see `prompt/format.ts`). The output contract shape is kept verbatim —
+ * `parseSelectorOutput` reads `{ choice, rationale }`.
+ */
 export function buildDataSlotSelectorPrompt(
   ctx: DataSlotSelectionContext,
   candidates: DataSlotTarget[]
 ): string {
   const transcript =
-    ctx.recentMessages.length > 0
-      ? ctx.recentMessages.map((m) => `- ${m}`).join('\n')
-      : '(no prior messages)';
+    ctx.recentMessages.length > 0 ? bulletList(ctx.recentMessages) : '(no prior messages)';
 
-  const list = candidates
-    .map(
-      (c, i) => `${i + 1}. ${c.name} (theme: ${c.theme})\n   - What it captures: ${c.description}`
-    )
-    .join('\n');
-
-  const sections: string[] = [];
-  if (ctx.goal) sections.push(`Questionnaire goal: ${ctx.goal}`, '');
-  sections.push('Recent conversation (oldest first):', transcript, '');
-  if (ctx.activeTheme) {
-    sections.push(
-      `You are currently exploring the area: "${ctx.activeTheme}". Gently prefer to finish this ` +
-        'area before moving on — but choose a different one when it clearly flows more naturally ' +
-        'from what they just said.',
-      ''
-    );
-  }
-  sections.push(
-    'Candidate topics to explore next:',
-    list,
-    '',
-    'Pick the topic that follows most naturally from the conversation and best advances the goal — ' +
-      'favour continuity over list order, and choose 0 if none fit. Reply with ONLY JSON: ' +
-      '{"choice": <1-based number, or 0 if none fits>, "rationale": "<one short sentence>"}.'
+  const list = numberedList(
+    candidates.map((c) => `${c.name} (theme: ${c.theme})\n   - What it captures: ${c.description}`)
   );
 
-  return sections.join('\n');
+  const lingerNote = ctx.activeTheme
+    ? `You are currently exploring the area: "${ctx.activeTheme}". Gently prefer to finish this ` +
+      'area before moving on — but choose a different one when it clearly flows more naturally ' +
+      'from what they just said.'
+    : '';
+
+  return joinSections(
+    ctx.goal ? section('goal', `Questionnaire goal: ${ctx.goal}`) : '',
+    section('conversation', titledBlock('Recent conversation (oldest first)', transcript)),
+    lingerNote ? section('active_area', lingerNote) : '',
+    section('candidates', titledBlock('Candidate topics to explore next', list)),
+    section(
+      'task',
+      'Pick the topic that follows most naturally from the conversation and best advances the goal — ' +
+        'favour continuity over list order, and choose 0 if none fit.\n' +
+        jsonOutputContract(
+          '{"choice": <1-based number, or 0 if none fits>, "rationale": "<one short sentence>"}',
+          { preface: 'Reply with ONLY this JSON' }
+        )
+    )
+  );
 }
 
 /**
