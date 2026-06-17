@@ -23,10 +23,24 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronDown, ChevronRight, Clock, Coins, Cpu, Lock, ScanSearch, X } from 'lucide-react';
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Clock,
+  Coins,
+  Copy,
+  Cpu,
+  Lock,
+  ScanSearch,
+  X,
+} from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import {
+  formatInspectorCall,
+  formatInspectorTurn,
+  formatInspectorTurns,
   totalInspectorCostUsd,
   totalInspectorLatencyMs,
   type AgentCallTrace,
@@ -49,18 +63,78 @@ function fmtLatency(ms: number): string {
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`;
 }
 
-export function TurnInspectorDrawer({ turns }: TurnInspectorDrawerProps) {
-  const [open, setOpen] = useState(false);
-  const totalCalls = useMemo(() => turns.reduce((n, t) => n + t.calls.length, 0), [turns]);
+interface TurnTotals {
+  turns: number;
+  calls: number;
+  costUsd: number;
+  latencyMs: number;
+  tokensIn: number;
+  tokensOut: number;
+}
 
-  // Pop open the first time data arrives so the admin notices it (once, not on every turn).
-  const [autoOpened, setAutoOpened] = useState(false);
-  useEffect(() => {
-    if (!autoOpened && turns.length > 0) {
-      setOpen(true);
-      setAutoOpened(true);
+/** Session-wide rollup for the summary header. Token sums skip calls that don't expose counts. */
+function summariseTurns(turns: TurnInspectorData[]): TurnTotals {
+  const totals: TurnTotals = {
+    turns: turns.length,
+    calls: 0,
+    costUsd: 0,
+    latencyMs: 0,
+    tokensIn: 0,
+    tokensOut: 0,
+  };
+  for (const turn of turns) {
+    totals.calls += turn.calls.length;
+    totals.costUsd += totalInspectorCostUsd(turn.calls);
+    totals.latencyMs += totalInspectorLatencyMs(turn.calls);
+    for (const call of turn.calls) {
+      if (typeof call.tokensIn === 'number') totals.tokensIn += call.tokensIn;
+      if (typeof call.tokensOut === 'number') totals.tokensOut += call.tokensOut;
     }
-  }, [turns.length, autoOpened]);
+  }
+  return totals;
+}
+
+/** A compact at-a-glance rollup pinned to the top of the drawer body. */
+function SummaryHeader({ totals }: { totals: TurnTotals }) {
+  const tokens =
+    totals.tokensIn || totals.tokensOut
+      ? `${totals.tokensIn.toLocaleString()} / ${totals.tokensOut.toLocaleString()}`
+      : '—';
+  return (
+    <dl className="mb-3 grid grid-cols-3 gap-2 rounded-md border border-zinc-800 bg-zinc-900/40 p-2.5">
+      <SummaryStat label="Turns" value={String(totals.turns)} />
+      <SummaryStat label="Calls" value={String(totals.calls)} />
+      <SummaryStat label="Total cost" value={fmtCost(totals.costUsd)} accent />
+      <SummaryStat label="Latency" value={fmtLatency(totals.latencyMs)} />
+      <SummaryStat label="Tokens in/out" value={tokens} />
+    </dl>
+  );
+}
+
+function SummaryStat({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+  return (
+    <div className="min-w-0">
+      <dt className="font-mono text-[0.58rem] tracking-[0.12em] text-zinc-500 uppercase">
+        {label}
+      </dt>
+      <dd
+        className={cn(
+          'truncate font-mono text-sm font-semibold',
+          accent ? 'text-[color:var(--cq-accent)]' : 'text-zinc-100'
+        )}
+      >
+        {value}
+      </dd>
+    </div>
+  );
+}
+
+export function TurnInspectorDrawer({ turns }: TurnInspectorDrawerProps) {
+  // Start closed: the drawer is opt-in via the edge tab (whose badge signals when data has arrived),
+  // so it never covers the preview chat unless the admin asks for it.
+  const [open, setOpen] = useState(false);
+  const totals = useMemo(() => summariseTurns(turns), [turns]);
+  const totalCalls = totals.calls;
 
   // Esc closes the open drawer — expected of any overlay console.
   useEffect(() => {
@@ -132,14 +206,23 @@ export function TurnInspectorDrawer({ turns }: TurnInspectorDrawerProps) {
                   Turn Inspector
                 </h2>
               </div>
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                className="rounded p-1 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
-                aria-label="Close the turn inspector"
-              >
-                <X className="h-4 w-4" aria-hidden />
-              </button>
+              <div className="flex items-center gap-1">
+                {turns.length > 0 && (
+                  <CopyButton
+                    getText={() => formatInspectorTurns(turns)}
+                    label="Copy all turns to clipboard"
+                    idleText="Copy all"
+                  />
+                )}
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  className="rounded p-1 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+                  aria-label="Close the turn inspector"
+                >
+                  <X className="h-4 w-4" aria-hidden />
+                </button>
+              </div>
             </div>
             <div className="mt-2 flex items-center gap-1.5 rounded border border-[var(--cq-accent-ring)] bg-[var(--cq-accent-muted)] px-2 py-1">
               <Lock className="h-3 w-3 shrink-0 text-[var(--cq-accent)]" aria-hidden />
@@ -159,20 +242,23 @@ export function TurnInspectorDrawer({ turns }: TurnInspectorDrawerProps) {
                 Waiting for the first turn…
               </p>
             ) : (
-              <ol className="space-y-3">
-                {turns.map((turn, i) => (
-                  <TurnBlock
-                    key={`${turn.turnIndex}-${i}`}
-                    turn={turn}
-                    defaultOpen={i === turns.length - 1}
-                  />
-                ))}
-              </ol>
+              <>
+                <SummaryHeader totals={totals} />
+                <ol className="space-y-3">
+                  {turns.map((turn, i) => (
+                    <TurnBlock
+                      key={`${turn.turnIndex}-${i}`}
+                      turn={turn}
+                      defaultOpen={i === turns.length - 1}
+                    />
+                  ))}
+                </ol>
+              </>
             )}
           </div>
 
           <div className="shrink-0 border-t border-zinc-800 px-4 py-2 font-mono text-[0.65rem] text-zinc-500">
-            {turns.length} turn{turns.length === 1 ? '' : 's'} · {totalCalls} agent call
+            {totals.turns} turn{totals.turns === 1 ? '' : 's'} · {totalCalls} agent call
             {totalCalls === 1 ? '' : 's'} captured this session
           </div>
         </aside>
@@ -189,33 +275,41 @@ function TurnBlock({ turn, defaultOpen }: { turn: TurnInspectorData; defaultOpen
 
   return (
     <li className="overflow-hidden rounded-md border border-zinc-800 bg-zinc-900/40">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-zinc-900"
-      >
-        {open ? (
-          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-500" aria-hidden />
-        ) : (
-          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-500" aria-hidden />
-        )}
-        <span className="font-mono text-xs font-semibold tracking-wide text-zinc-100">
-          Turn {turn.turnIndex + 1}
-        </span>
-        <span className="ml-auto flex items-center gap-3 font-mono text-[0.65rem] text-zinc-400">
-          <span>
-            {turn.calls.length} call{turn.calls.length === 1 ? '' : 's'}
+      <div className="flex w-full items-center">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-zinc-900"
+        >
+          {open ? (
+            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-500" aria-hidden />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-500" aria-hidden />
+          )}
+          <span className="font-mono text-xs font-semibold tracking-wide text-zinc-100">
+            Turn {turn.turnIndex + 1}
           </span>
-          <span className="inline-flex items-center gap-1">
-            <Clock className="h-3 w-3" aria-hidden />
-            {fmtLatency(latency)}
+          <span className="ml-auto flex items-center gap-3 font-mono text-[0.65rem] text-zinc-400">
+            <span>
+              {turn.calls.length} call{turn.calls.length === 1 ? '' : 's'}
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <Clock className="h-3 w-3" aria-hidden />
+              {fmtLatency(latency)}
+            </span>
+            <span className="inline-flex items-center gap-1 text-[color:var(--cq-accent)]">
+              <Coins className="h-3 w-3" aria-hidden />
+              {fmtCost(cost)}
+            </span>
           </span>
-          <span className="inline-flex items-center gap-1 text-[color:var(--cq-accent)]">
-            <Coins className="h-3 w-3" aria-hidden />
-            {fmtCost(cost)}
-          </span>
-        </span>
-      </button>
+        </button>
+        <CopyButton
+          getText={() => formatInspectorTurn(turn)}
+          label={`Copy turn ${turn.turnIndex + 1} to clipboard`}
+          idleText=""
+          className="mr-1.5"
+        />
+      </div>
 
       {open && (
         <ol className="space-y-px border-t border-zinc-800 bg-zinc-950/60 p-2">
@@ -230,6 +324,7 @@ function TurnBlock({ turn, defaultOpen }: { turn: TurnInspectorData; defaultOpen
 
 function CallRow({ index, call }: { index: number; call: AgentCallTrace }) {
   const [open, setOpen] = useState(false);
+  const isEmbedding = call.kind === 'embedding';
   return (
     <li className="rounded">
       <button
@@ -240,7 +335,14 @@ function CallRow({ index, call }: { index: number; call: AgentCallTrace }) {
         <span className="font-mono text-[0.6rem] text-zinc-600">
           {String(index + 1).padStart(2, '0')}
         </span>
-        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--cq-accent)]" aria-hidden />
+        {isEmbedding ? (
+          // Embedding calls are a different shape (no completion) — flag them with a "VEC" chip.
+          <span className="shrink-0 rounded-sm bg-sky-500/20 px-1 font-mono text-[0.55rem] font-bold tracking-wide text-sky-300">
+            VEC
+          </span>
+        ) : (
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--cq-accent)]" aria-hidden />
+        )}
         <span className="truncate text-xs font-medium text-zinc-200">{call.label}</span>
         <span className="ml-auto flex shrink-0 items-center gap-2.5 font-mono text-[0.62rem] text-zinc-500">
           <span className="hidden sm:inline">{fmtLatency(call.latencyMs)}</span>
@@ -255,6 +357,14 @@ function CallRow({ index, call }: { index: number; call: AgentCallTrace }) {
 
       {open && (
         <div className="space-y-2.5 px-2 pt-1 pb-3">
+          <div className="flex justify-end">
+            <CopyButton
+              getText={() => formatInspectorCall(call)}
+              label={`Copy the "${call.label}" call to clipboard`}
+              idleText="Copy call"
+            />
+          </div>
+
           {/* Metrics */}
           <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 rounded border border-zinc-800 bg-zinc-900/50 p-2.5 font-mono text-[0.65rem]">
             <Metric icon={Cpu} label="Model" value={call.model || '—'} />
@@ -266,6 +376,9 @@ function CallRow({ index, call }: { index: number; call: AgentCallTrace }) {
             )}
             {call.tokensOut !== undefined && (
               <Metric label="Tokens out" value={call.tokensOut.toLocaleString()} />
+            )}
+            {call.dimensions !== undefined && (
+              <Metric label="Dimensions" value={call.dimensions.toLocaleString()} />
             )}
           </dl>
 
@@ -288,10 +401,10 @@ function CallRow({ index, call }: { index: number; call: AgentCallTrace }) {
             </div>
           </div>
 
-          {/* Response */}
+          {/* Response (an embedding's "output" is the ranking it drove, not a completion). */}
           <div>
             <p className="mb-1 font-mono text-[0.6rem] font-semibold tracking-[0.15em] text-[color:var(--cq-accent)] uppercase">
-              Response
+              {isEmbedding ? 'Ranking' : 'Response'}
             </p>
             <pre className="max-h-56 overflow-auto rounded border border-[var(--cq-accent-ring)] bg-[var(--cq-accent-muted)] px-2.5 py-2 font-mono text-[0.68rem] leading-relaxed whitespace-pre-wrap text-zinc-200">
               {call.response || '—'}
@@ -300,6 +413,57 @@ function CallRow({ index, call }: { index: number; call: AgentCallTrace }) {
         </div>
       )}
     </li>
+  );
+}
+
+/**
+ * A console-styled "copy to clipboard" button. `getText` is resolved lazily on click (so a turn's
+ * text is serialized only when actually copied), and the icon/label flips to a tick for ~2s. Copy
+ * failures (insecure context, permission denied) are swallowed — nothing here is destructive, and a
+ * silent no-op beats throwing inside an overlay.
+ */
+function CopyButton({
+  getText,
+  label,
+  idleText = 'Copy',
+  className,
+}: {
+  getText: () => string;
+  /** Accessible label (the visible text is just "Copy"/"Copied"). */
+  label: string;
+  /** Visible idle text. */
+  idleText?: string;
+  className?: string;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(getText());
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard unavailable — no-op.
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => void copy()}
+      className={cn(
+        'inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 font-mono text-[0.6rem] font-semibold tracking-wide text-zinc-400 uppercase transition-colors hover:bg-zinc-800 hover:text-zinc-100',
+        className
+      )}
+      aria-label={label}
+    >
+      {copied ? (
+        <Check className="h-3 w-3 text-emerald-400" aria-hidden />
+      ) : (
+        <Copy className="h-3 w-3" aria-hidden />
+      )}
+      {copied ? 'Copied' : idleText}
+    </button>
   );
 }
 

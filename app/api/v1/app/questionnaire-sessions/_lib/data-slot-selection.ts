@@ -21,6 +21,15 @@ import { QUESTIONNAIRE_SELECTOR_AGENT_SLUG } from '@/lib/app/questionnaire/const
 import { parseSelectorOutput } from '@/app/api/v1/app/questionnaires/_lib/adaptive-deps';
 import { rankDataSlotsByVector } from '@/app/api/v1/app/questionnaires/_lib/data-slot-embeddings';
 import { logger } from '@/lib/logging';
+import { buildEmbeddingTrace, type RecordAgentCall } from '@/lib/app/questionnaire/inspector';
+import {
+  bulletList,
+  joinSections,
+  jsonOutputContract,
+  numberedList,
+  section,
+  titledBlock,
+} from '@/lib/app/questionnaire/prompt/format';
 import type {
   DataSlotSelectOutcome,
   DataSlotTarget,
@@ -47,6 +56,16 @@ export interface DataSlotSelectionContext {
   sessionId: string;
   /** The admin/respondent the selector runs on behalf of (budget attribution). */
   userId: string;
+  /**
+   * Anonymous (no-login) session. The selector AGENT runs through `streamChat`, which persists an
+   * `AiConversation` keyed to a real `user` — but an anonymous turn's `userId` is the synthetic
+   * `anon:<sessionId>` with no `user` row, so the insert violates the FK and the stream 500s every
+   * turn. With no ephemeral-chat seam in the platform handler, skip the LLM pick for anonymous
+   * sessions and defer to the deterministic topic-local pick. See `turn-access.ts`.
+   */
+  anonymous?: boolean;
+  /** Inspector sink (admin preview only); when present, a successful embed records one trace. */
+  recordInspectorCall?: RecordAgentCall;
 }
 
 /** Dedupe slots by id, preserving first-seen order. */
@@ -62,43 +81,43 @@ function dedupeById(slots: DataSlotTarget[]): DataSlotTarget[] {
   return out;
 }
 
-/** Render the numbered candidate list + transcript + theme-local framing the selector judges. */
+/**
+ * Render the numbered candidate list + transcript + theme-local framing the selector judges, as
+ * XML-tagged sections (see `prompt/format.ts`). The output contract shape is kept verbatim —
+ * `parseSelectorOutput` reads `{ choice, rationale }`.
+ */
 export function buildDataSlotSelectorPrompt(
   ctx: DataSlotSelectionContext,
   candidates: DataSlotTarget[]
 ): string {
   const transcript =
-    ctx.recentMessages.length > 0
-      ? ctx.recentMessages.map((m) => `- ${m}`).join('\n')
-      : '(no prior messages)';
+    ctx.recentMessages.length > 0 ? bulletList(ctx.recentMessages) : '(no prior messages)';
 
-  const list = candidates
-    .map(
-      (c, i) => `${i + 1}. ${c.name} (theme: ${c.theme})\n   - What it captures: ${c.description}`
-    )
-    .join('\n');
-
-  const sections: string[] = [];
-  if (ctx.goal) sections.push(`Questionnaire goal: ${ctx.goal}`, '');
-  sections.push('Recent conversation (oldest first):', transcript, '');
-  if (ctx.activeTheme) {
-    sections.push(
-      `You are currently exploring the area: "${ctx.activeTheme}". Gently prefer to finish this ` +
-        'area before moving on — but choose a different one when it clearly flows more naturally ' +
-        'from what they just said.',
-      ''
-    );
-  }
-  sections.push(
-    'Candidate topics to explore next:',
-    list,
-    '',
-    'Pick the topic that follows most naturally from the conversation and best advances the goal — ' +
-      'favour continuity over list order, and choose 0 if none fit. Reply with ONLY JSON: ' +
-      '{"choice": <1-based number, or 0 if none fits>, "rationale": "<one short sentence>"}.'
+  const list = numberedList(
+    candidates.map((c) => `${c.name} (theme: ${c.theme})\n   - What it captures: ${c.description}`)
   );
 
-  return sections.join('\n');
+  const lingerNote = ctx.activeTheme
+    ? `You are currently exploring the area: "${ctx.activeTheme}". Gently prefer to finish this ` +
+      'area before moving on — but choose a different one when it clearly flows more naturally ' +
+      'from what they just said.'
+    : '';
+
+  return joinSections(
+    ctx.goal ? section('goal', `Questionnaire goal: ${ctx.goal}`) : '',
+    section('conversation', titledBlock('Recent conversation (oldest first)', transcript)),
+    lingerNote ? section('active_area', lingerNote) : '',
+    section('candidates', titledBlock('Candidate topics to explore next', list)),
+    section(
+      'task',
+      'Pick the topic that follows most naturally from the conversation and best advances the goal — ' +
+        'favour continuity over list order, and choose 0 if none fit.\n' +
+        jsonOutputContract(
+          '{"choice": <1-based number, or 0 if none fits>, "rationale": "<one short sentence>"}',
+          { preface: 'Reply with ONLY this JSON' }
+        )
+    )
+  );
 }
 
 /**
@@ -111,16 +130,35 @@ export async function selectNextDataSlot(
   const lastMessage = ctx.recentMessages[ctx.recentMessages.length - 1]?.trim();
   // No conversation yet, or only one option — nothing to rank/choose, let the deterministic pick run.
   if (!lastMessage || ctx.unfilled.length < 2) return null;
+  // Anonymous session: the selector agent's `streamChat` would FK-violate on the synthetic
+  // `anon:<sessionId>` user (no ephemeral-chat seam) — defer to the deterministic topic-local pick.
+  if (ctx.anonymous) return null;
 
   try {
-    const embedding = (await embedText(lastMessage, 'query')).embedding;
+    const startedAt = Date.now();
+    const embedResult = await embedText(lastMessage, 'query');
+    const embedLatencyMs = Date.now() - startedAt;
     const rankedIds = await rankDataSlotsByVector(
-      embedding,
+      embedResult.embedding,
       ctx.unfilled.map((s) => s.id),
       DATA_SLOT_CANDIDATE_K
     );
     // No embeddings to rank against (version never embedded) → defer to deterministic.
     if (rankedIds.length === 0) return null;
+
+    ctx.recordInspectorCall?.(
+      buildEmbeddingTrace({
+        label: 'Adaptive data-slot ranking',
+        embedded: lastMessage,
+        rankingSummary: `Ranked ${ctx.unfilled.length} unfilled data slots → top ${rankedIds.length} candidates for the selector.`,
+        model: embedResult.model,
+        provider: embedResult.provider,
+        dimensions: embedResult.dimensions,
+        inputTokens: embedResult.inputTokens,
+        costUsd: embedResult.costUsd,
+        latencyMs: embedLatencyMs,
+      })
+    );
 
     const byId = new Map(ctx.unfilled.map((s) => [s.id, s]));
     const ranked = rankedIds
@@ -143,15 +181,29 @@ export async function selectNextDataSlot(
     const candidates = pool.slice(0, DATA_SLOT_CANDIDATE_K);
     if (candidates.length < 2) return null;
 
+    const selectorMessage = buildDataSlotSelectorPrompt(ctx, candidates);
     const result = await drainStreamChat({
       agentSlug: QUESTIONNAIRE_SELECTOR_AGENT_SLUG,
       userId: ctx.userId,
-      message: buildDataSlotSelectorPrompt(ctx, candidates),
+      message: selectorMessage,
       entityContext: {
         source: 'app_questionnaire_data_slot_selection',
         appQuestionnaireSessionId: ctx.sessionId,
       },
       costLogMetadata: { appQuestionnaireSessionId: ctx.sessionId },
+    });
+    // Surface the LLM pick in the inspector (admin preview only) — the embedding ranking was already
+    // traced; this is the agent that actually chooses among the ranked candidates.
+    ctx.recordInspectorCall?.({
+      label: 'Data-slot selector',
+      model: '',
+      provider: '',
+      latencyMs: result.latencyMs,
+      costUsd: result.costUsd,
+      tokensIn: result.tokenUsage.input,
+      tokensOut: result.tokenUsage.output,
+      prompt: [{ role: 'user', content: selectorMessage }],
+      response: result.errorCode ? `(selector error: ${result.errorCode})` : result.assistantText,
     });
     if (result.errorCode) return null;
 

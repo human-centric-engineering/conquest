@@ -9,3 +9,12 @@ export {
   totalInspectorCostUsd,
   totalInspectorLatencyMs,
 } from '@/lib/app/questionnaire/inspector/types';
+export {
+  formatInspectorCall,
+  formatInspectorTurn,
+  formatInspectorTurns,
+} from '@/lib/app/questionnaire/inspector/serialize';
+export {
+  buildEmbeddingTrace,
+  type EmbeddingTraceInput,
+} from '@/lib/app/questionnaire/inspector/embedding-trace';

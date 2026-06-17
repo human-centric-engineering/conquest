@@ -438,4 +438,26 @@ describe('buildStreamingQuestionPrompt', () => {
     );
     expect(system).toMatch(/very short and tight/i);
   });
+
+  it('frames the system prompt with XML sections and surfaces a visible <tone> block when a dimension is on', () => {
+    const tone = freshTone();
+    tone.warmth = { enabled: true, level: 4 };
+    const system = text(buildStreamingQuestionPrompt({ ...INPUT, tone })[0].content);
+    // The prompt is now structured into XML-tagged sections (readability + LLM framing).
+    expect(system).toContain('<role>');
+    expect(system).toContain('<rules>');
+    expect(system).toContain('<output_format>');
+    // The admin-configured voice is injected inside an explicit <tone> section, so it's obvious
+    // in the inspector that tone is actually being applied.
+    expect(system).toMatch(/<tone>[\s\S]*encouraging[\s\S]*<\/tone>/i);
+  });
+
+  it('keeps a <tone> section with the default voice but no admin clauses when no tone is configured', () => {
+    const system = text(buildStreamingQuestionPrompt(INPUT)[0].content);
+    // The tone section holds the always-on voice baseline ("match their tone")…
+    expect(system).toMatch(/<tone>[\s\S]*match the respondent[\s\S]*<\/tone>/i);
+    // …but none of the admin-configured dimension/persona clauses.
+    expect(system).not.toMatch(/adopt this persona/i);
+    expect(system).not.toContain('encouraging');
+  });
 });

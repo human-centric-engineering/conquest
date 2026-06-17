@@ -22,6 +22,15 @@ import { tryParseJson } from '@/lib/orchestration/evaluations/parse-structured';
 import { QUESTIONNAIRE_SELECTOR_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
 import type { LlmPickInput, LlmPickResult, StrategyDeps } from '@/lib/app/questionnaire/selection';
 import { rankSlotsByVector } from '@/app/api/v1/app/questionnaires/_lib/slot-embeddings';
+import { buildEmbeddingTrace, type RecordAgentCall } from '@/lib/app/questionnaire/inspector';
+import {
+  bulletList,
+  joinSections,
+  jsonOutputContract,
+  numberedList,
+  section,
+  titledBlock,
+} from '@/lib/app/questionnaire/prompt/format';
 
 /** The selector agent's pinned output envelope. */
 interface SelectorOutput {
@@ -30,46 +39,47 @@ interface SelectorOutput {
   rationale: string;
 }
 
-/** Render the numbered candidate list + transcript + framing the selector agent judges. */
+/**
+ * Render the numbered candidate list + transcript + framing the selector agent judges, as XML-tagged
+ * sections (see `prompt/format.ts`). The system prompt lives in the seeded selector agent; this is
+ * the per-turn user message. The output contract shape is kept verbatim — `parseSelectorOutput`
+ * reads `{ choice, rationale }`.
+ */
 export function buildSelectorPrompt(input: LlmPickInput): string {
   const transcript =
-    input.recentMessages.length > 0
-      ? input.recentMessages.map((m) => `- ${m}`).join('\n')
-      : '(no prior messages)';
+    input.recentMessages.length > 0 ? bulletList(input.recentMessages) : '(no prior messages)';
 
   // Each candidate: its prompt, then any guidelines / rationale on indented sub-lines
   // so the model judges on intent, not just wording. Absent fields are simply omitted.
-  const candidates = input.candidates
-    .map((c, i) => {
-      const lines = [`${i + 1}. ${c.prompt ?? c.key}`];
+  const candidates = numberedList(
+    input.candidates.map((c) => {
+      const lines = [c.prompt ?? c.key];
       if (c.guidelines) lines.push(`   - Looking for: ${c.guidelines}`);
       if (c.rationale) lines.push(`   - Why it matters: ${c.rationale}`);
       return lines.join('\n');
     })
-    .join('\n');
-
-  const sections: string[] = [];
-  if (input.goal) {
-    sections.push(`Questionnaire goal: ${input.goal}`, '');
-  }
-  sections.push('Recent conversation (oldest first):', transcript, '');
-  if (input.answeredQuestions && input.answeredQuestions.length > 0) {
-    sections.push(
-      'Already answered (do not re-tread these):',
-      input.answeredQuestions.map((q) => `- ${q}`).join('\n'),
-      ''
-    );
-  }
-  sections.push(
-    'Candidate questions to ask next:',
-    candidates,
-    '',
-    'Pick the candidate that follows most naturally from the conversation and best advances ' +
-      'the goal — favour continuity over list order, and choose 0 if none fit. Reply with ONLY ' +
-      'JSON: {"choice": <1-based number, or 0 if none fits>, "rationale": "<one short sentence>"}.'
   );
 
-  return sections.join('\n');
+  const answered =
+    input.answeredQuestions && input.answeredQuestions.length > 0
+      ? titledBlock('Already answered (do not re-tread these)', bulletList(input.answeredQuestions))
+      : '';
+
+  return joinSections(
+    input.goal ? section('goal', `Questionnaire goal: ${input.goal}`) : '',
+    section('conversation', titledBlock('Recent conversation (oldest first)', transcript)),
+    answered ? section('already_answered', answered) : '',
+    section('candidates', titledBlock('Candidate questions to ask next', candidates)),
+    section(
+      'task',
+      'Pick the candidate that follows most naturally from the conversation and best advances ' +
+        'the goal — favour continuity over list order, and choose 0 if none fit.\n' +
+        jsonOutputContract(
+          '{"choice": <1-based number, or 0 if none fits>, "rationale": "<one short sentence>"}',
+          { preface: 'Reply with ONLY this JSON' }
+        )
+    )
+  );
 }
 
 /** Validate the selector agent's JSON reply into a {@link SelectorOutput}. */
@@ -88,16 +98,34 @@ export function parseSelectorOutput(raw: string): SelectorOutput | null {
  * candidates. Never throws — a stream error or unparseable reply returns a null
  * pick so the strategy falls back to `weighted`.
  */
-async function runSelectorAgent(input: LlmPickInput, userId: string): Promise<LlmPickResult> {
+async function runSelectorAgent(
+  input: LlmPickInput,
+  userId: string,
+  recordInspectorCall?: RecordAgentCall
+): Promise<LlmPickResult> {
+  const selectorMessage = buildSelectorPrompt(input);
   const result = await drainStreamChat({
     agentSlug: QUESTIONNAIRE_SELECTOR_AGENT_SLUG,
     userId,
-    message: buildSelectorPrompt(input),
+    message: selectorMessage,
     entityContext: {
       source: 'app_questionnaire_selection',
       appQuestionnaireSessionId: input.sessionId,
     },
     costLogMetadata: { appQuestionnaireSessionId: input.sessionId },
+  });
+  // Surface the LLM pick in the inspector (admin preview only) — the embedding ranking was already
+  // traced; this is the agent that actually chooses among the ranked candidates.
+  recordInspectorCall?.({
+    label: 'Question selector',
+    model: '',
+    provider: '',
+    latencyMs: result.latencyMs,
+    costUsd: result.costUsd,
+    tokensIn: result.tokenUsage.input,
+    tokensOut: result.tokenUsage.output,
+    prompt: [{ role: 'user', content: selectorMessage }],
+    response: result.errorCode ? `(selector error: ${result.errorCode})` : result.assistantText,
   });
 
   if (result.errorCode) {
@@ -135,12 +163,51 @@ async function runSelectorAgent(input: LlmPickInput, userId: string): Promise<Ll
 /**
  * Build the real {@link StrategyDeps} for adaptive selection. `userId` is the
  * admin/respondent on whose behalf the selection agent runs (carries the budget
- * attribution).
+ * attribution). `recordInspectorCall` (admin preview only) captures the query
+ * embedding as an inspector trace — the embedder wrapper is the only place the
+ * provenance (model/cost/tokens) is visible before it's discarded down to the
+ * vector the pure strategy consumes.
  */
-export function buildAdaptiveDeps(opts: { userId: string }): StrategyDeps {
+export function buildAdaptiveDeps(opts: {
+  userId: string;
+  /**
+   * Anonymous (no-login) session: the selection AGENT runs through `streamChat`, which persists an
+   * `AiConversation` keyed to a REAL user — but an anonymous turn's `userId` is the synthetic
+   * `anon:<sessionId>`, which has no `user` row, so the insert violates the FK and the whole stream
+   * 500s (`internal_error`) every turn. There's no ephemeral-chat seam in the platform handler, so we
+   * skip the LLM pick for anonymous sessions and let the strategy fall back to its deterministic
+   * `weighted` ordering. Embedding ranking still runs (a direct embedder call, no conversation row).
+   */
+  anonymous?: boolean;
+  recordInspectorCall?: RecordAgentCall;
+}): StrategyDeps {
   return {
-    embedText: async (text) => (await embedText(text, 'query')).embedding,
+    embedText: async (text) => {
+      const startedAt = Date.now();
+      const result = await embedText(text, 'query');
+      opts.recordInspectorCall?.(
+        buildEmbeddingTrace({
+          label: 'Adaptive question ranking',
+          embedded: text,
+          rankingSummary: 'Embedded the respondent message to rank question slots by similarity.',
+          model: result.model,
+          provider: result.provider,
+          dimensions: result.dimensions,
+          inputTokens: result.inputTokens,
+          costUsd: result.costUsd,
+          latencyMs: Date.now() - startedAt,
+        })
+      );
+      return result.embedding;
+    },
     rankByVector: (embedding, candidateIds, k) => rankSlotsByVector(embedding, candidateIds, k),
-    llmPick: (input) => runSelectorAgent(input, opts.userId),
+    llmPick: (input) =>
+      opts.anonymous
+        ? Promise.resolve({
+            questionId: null,
+            rationale: 'LLM selection skipped for anonymous session',
+            costUsd: 0,
+          })
+        : runSelectorAgent(input, opts.userId, opts.recordInspectorCall),
   };
 }

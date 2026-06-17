@@ -6,11 +6,15 @@
  * offer prose is streamed separately (`offer-stream.ts`).
  */
 
+import { Prisma } from '@prisma/client';
+
 import type {
   AnswerSlotIntent,
   DataSlotFillIntent,
 } from '@/lib/app/questionnaire/extraction/types';
 import type { RefinementDecision } from '@/lib/app/questionnaire/refinement/types';
+import type { PendingContradiction } from '@/lib/app/questionnaire/contradiction/types';
+import { prisma } from '@/lib/db/client';
 import { applyRefinement } from '@/lib/app/questionnaire/refinement';
 import type { ToolCallRecord } from '@/lib/app/questionnaire/orchestrator';
 import type { SessionWarning } from '@/lib/app/questionnaire/chat/types';
@@ -50,6 +54,12 @@ export async function persistTurn(opts: {
   /** Data Slots feature: the data-slot fills to upsert + their key→id map (data-slot mode). */
   dataSlotFills?: DataSlotFillIntent[];
   dataSlotKeyToId?: Map<string, string>;
+  /**
+   * Probe-confirm contradiction flow: how to update `AppQuestionnaireSession.pendingContradiction`.
+   * An object parks a raised probe; `null` clears a resolved one; `undefined` (the default) leaves it
+   * untouched. Written before the turn is recorded so a mid-turn crash can't strand a stale probe.
+   */
+  pendingContradiction?: PendingContradiction | null;
 }): Promise<string> {
   const sideEffectAnswerIds: string[] = [];
   const sideEffectDataSlotIds: string[] = [];
@@ -116,6 +126,20 @@ export async function persistTurn(opts: {
       });
       sideEffectDataSlotIds.push(id);
     }
+  }
+
+  // Probe-confirm flow: park a raised probe or clear a resolved one on the session. `undefined` =
+  // leave untouched (the common case); `null` writes SQL NULL (DbNull) to clear.
+  if (opts.pendingContradiction !== undefined) {
+    await prisma.appQuestionnaireSession.update({
+      where: { id: opts.sessionId },
+      data: {
+        pendingContradiction:
+          opts.pendingContradiction === null
+            ? Prisma.DbNull
+            : (opts.pendingContradiction as unknown as Prisma.InputJsonValue),
+      },
+    });
   }
 
   return recordTurn({

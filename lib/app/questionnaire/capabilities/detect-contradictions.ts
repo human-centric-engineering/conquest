@@ -122,12 +122,22 @@ const answerSchema = z.object({
 const argsSchema = z.object({
   /** The version slot definitions to reason over. */
   slots: z.array(slotSchema).min(1).max(MAX_CONTRADICTION_SLOTS),
-  /** The captured answers to compare — need at least two to have a contradiction. */
-  answers: z.array(answerSchema).min(2).max(MAX_CONTRADICTION_ANSWERS),
+  /**
+   * The captured answers to compare. At least ONE: two answers can contradict each other, OR a
+   * single answer can contradict the respondent's `currentStatement` (the same-slot reversal case).
+   * The ≥2-distinct-slots rule (when there's no `currentStatement`) is the normaliser's, not Zod's.
+   */
+  answers: z.array(answerSchema).min(1).max(MAX_CONTRADICTION_ANSWERS),
   /** Behaviour on a hit: off | flag | probe. */
   mode: z.enum(CONTRADICTION_MODES),
   /** How many prior answers to compare against; 0 = all. */
   windowN: z.number().int().min(0).default(0),
+  /**
+   * The respondent's latest message, when the caller wants the detector to ALSO weigh
+   * it against the captured answers (same-slot reversal detection). PII — redacted from
+   * the durable provenance row. Absent → the classic answer-vs-answer pass.
+   */
+  currentStatement: z.string().optional(),
   /** Stable session identity, threaded into cost-log metadata. */
   sessionId: z.string().optional(),
 });
@@ -204,6 +214,7 @@ function toContradictionContext(args: DetectContradictionsArgs): ContradictionCo
     answers,
     mode: args.mode,
     windowN: args.windowN,
+    ...(args.currentStatement !== undefined ? { currentStatement: args.currentStatement } : {}),
     // The route always supplies a real session id (`preview-<versionId>`); this
     // constant only labels direct/CLI dispatches in cost-log metadata.
     sessionId: args.sessionId ?? 'dispatch-detect',
@@ -239,6 +250,10 @@ export class AppDetectContradictionsCapability extends BaseCapability<
       mode: args.mode,
       windowN: args.windowN,
       answers: redactedString('answers'),
+      // The latest message is PII (free-text the respondent typed) — never persist it.
+      ...(args.currentStatement !== undefined
+        ? { currentStatement: redactedString('currentStatement') }
+        : {}),
       ...(args.sessionId !== undefined ? { sessionId: args.sessionId } : {}),
     };
 

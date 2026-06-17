@@ -271,6 +271,11 @@ export const DETECT_CONTRADICTIONS_FUNCTION_DEFINITION: CapabilityFunctionDefini
         type: 'number',
         description: 'How many prior answers to compare against; 0 = compare all.',
       },
+      currentStatement: {
+        type: 'string',
+        description:
+          "The respondent's latest message, when the detector should also weigh it against the captured answers (catches a same-slot reversal). When present, a finding may reference a single conflicting slot.",
+      },
       sessionId: {
         type: 'string',
         description: 'Stable session identity, threaded into cost-log metadata.',
@@ -559,21 +564,6 @@ export const APP_QUESTIONNAIRES_DATA_SLOTS_FLAG = 'APP_QUESTIONNAIRES_DATA_SLOTS
  */
 export const APP_QUESTIONNAIRES_ADAPTIVE_DATA_SLOTS_FLAG =
   'APP_QUESTIONNAIRES_ADAPTIVE_DATA_SLOTS_ENABLED';
-
-/**
- * Sub-flag gating the **extraction candidate pre-filter** — at scale (50+ data slots / 70+
- * questions) the combined extractor is handed the FULL candidate list every turn. When on, the
- * live `/messages` route embeds the respondent's last message and narrows the candidates to the
- * ones that matter (active slot, slots already filled, same-theme, mapped questions) plus the
- * top-K most similar, cutting per-turn prompt cost. Behaviour-preserving by design (the safety
- * rails keep every slot the answer could inform) and fail-soft (any embed failure → full set).
- * Requires the master app flag AND the live-sessions flag (it only runs in the respondent turn
- * loop); independent of the data-slots flag (it also helps question-only large questionnaires).
- * Disabled by default (dark-launch). Seeded by
- * `prisma/seeds/app-questionnaire/042-extraction-prefilter-flag.ts`.
- */
-export const APP_QUESTIONNAIRES_EXTRACTION_PREFILTER_FLAG =
-  'APP_QUESTIONNAIRES_EXTRACTION_PREFILTER_ENABLED';
 
 /**
  * Sub-flag gating the **seriousness / abuse gate** — per answered turn, a respondent answer the

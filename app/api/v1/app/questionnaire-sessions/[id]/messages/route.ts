@@ -32,7 +32,6 @@ import { createRateLimitResponse } from '@/lib/security/rate-limit';
 import {
   isAdaptiveSelectionEnabled,
   isAdaptiveDataSlotSelectionEnabled,
-  isExtractionPrefilterEnabled,
   isAnswerExtractionEnabled,
   isAnswerRefinementEnabled,
   isCompletionEnabled,
@@ -203,7 +202,6 @@ async function handleMessage(
       reasoningStreamFlag,
       toneFlag,
       dataSlotAdaptive,
-      extractionPrefilter,
     ] = await Promise.all([
       isAnswerExtractionEnabled(),
       isContradictionDetectionEnabled(),
@@ -218,7 +216,6 @@ async function handleMessage(
       isReasoningStreamEnabled(),
       isToneEnabled(),
       isAdaptiveDataSlotSelectionEnabled(),
-      isExtractionPrefilterEnabled(),
     ]);
 
     // Adaptive selection ranks unanswered questions by vector similarity, which needs each slot's
@@ -278,7 +275,8 @@ async function handleMessage(
     // when extraction actually runs (a kickoff forces it off). The pre-filter needs BOTH question and
     // data-slot embeddings regardless of selection strategy — ensure them here (cheap no-op once
     // embedded; fail-soft, since the pre-filter degrades to the full set without embeddings).
-    const prefilterActive = extractionPrefilter && extraction && !body.kickoff;
+    // Per-questionnaire Settings toggle (not a platform flag) — recommended for large surveys.
+    const prefilterActive = loaded.base.config.extractionPrefilter && extraction && !body.kickoff;
     const activeDataSlotKey = loaded.base.activeDataSlotKey ?? null;
     const activeTheme = activeDataSlotKey
       ? (dataSlots.find((s) => s.key === activeDataSlotKey)?.theme ?? null)
@@ -417,8 +415,16 @@ async function handleMessage(
         activeQuestionKey: loaded.activeQuestionKey,
         activeDataSlotKey,
         activeTheme,
-        recentMessages: loaded.base.recentMessages,
+        // The pre-filter ranks candidates by similarity to the respondent's CURRENT answer, but
+        // `loaded.base.recentMessages` (persisted) ends with the interviewer's previous question.
+        // Append the current message so the ranking query is what they just said — otherwise
+        // answer-relevant questions (e.g. a "pipeline" question for "our pipeline is very poor")
+        // get ranked out and the extractor never sees them.
+        recentMessages: userMessage.trim().length
+          ? [...loaded.base.recentMessages, userMessage]
+          : loaded.base.recentMessages,
         sessionId,
+        ...(recordInspectorCall ? { recordInspectorCall } : {}),
       });
       if (narrowed.applied) {
         const keptQuestionKeys = new Set(narrowed.questionSlots.map((s) => s.key));
@@ -459,6 +465,9 @@ async function handleMessage(
       // Data Slots feature: feed the data slots so the SAME extraction call fills them too (narrowed
       // by the pre-filter when active).
       ...(dataSlotMode ? { dataSlotCandidates: extractionDataCandidates } : {}),
+      // Anonymous (no-login) session: the adaptive selectors skip the LLM pick (its `streamChat`
+      // would FK-violate on the synthetic `anon:<sessionId>` user) and fall back to deterministic.
+      ...(access.anonymous ? { anonymous: true } : {}),
     });
 
     const keyToSlotId = new Map(loaded.slots.map((s) => [s.key, s.id]));
@@ -683,6 +692,10 @@ async function handleMessage(
           costUsd,
           upserts: result.sideEffects.answerUpserts,
           refinements: result.sideEffects.answerRefinements,
+          // Probe-confirm flow: park a raised probe / clear a resolved one (undefined = leave as-is).
+          ...(result.sideEffects.pendingContradiction !== undefined
+            ? { pendingContradiction: result.sideEffects.pendingContradiction }
+            : {}),
           keyToSlotId,
           // Data Slots feature: persist the respondent-facing fills captured this turn + which
           // data slot this turn targeted (the re-ask/park counter source).

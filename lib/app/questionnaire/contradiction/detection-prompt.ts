@@ -23,19 +23,35 @@ import {
 } from '@/lib/app/questionnaire/contradiction/types';
 
 /** Build the system rules. Under `probe` the model is asked for a follow-up
- *  question; under `flag`/`off` it is not (those modes surface passively). */
-function systemRules(mode: ContradictionContext['mode']): string {
+ *  question; under `flag`/`off` it is not (those modes surface passively).
+ *  When `withCurrentStatement` is set, the model is also told to weigh the
+ *  respondent's latest message against the captured answers (reversal detection). */
+function systemRules(mode: ContradictionContext['mode'], withCurrentStatement: boolean): string {
   const probeLine =
     mode === 'probe'
       ? `\n- "suggestedProbe": ONE neutral follow-up question that lets the respondent reconcile the \
 conflicting answers. Ask, don't accuse; don't presume which answer is correct.`
       : '';
 
+  const slotKeysLine = withCurrentStatement
+    ? `- "slotKeys": the keys of the conflicting questions. Use ONLY keys from the list. When the \
+conflict is between the LATEST MESSAGE and a single recorded answer, list that ONE key; when it is \
+between two recorded answers, list two or more.`
+    : `- "slotKeys": the keys of the conflicting questions (two or more). Use ONLY keys from the list.`;
+
+  const latestMessageRule = withCurrentStatement
+    ? `\n- ALSO compare the respondent's LATEST MESSAGE (given below) against each recorded answer. \
+When the latest message reverses or is incompatible with a recorded answer — e.g. they now express \
+the opposite sentiment to one recorded earlier — report it against that answer's key, even though \
+only one recorded answer is involved.`
+    : '';
+
   return `You review a respondent's answers in a conversational questionnaire and report only \
-GENUINE logical contradictions between them — two or more answers that cannot both be true.
+GENUINE logical contradictions — answers (or an answer and the respondent's latest message) that \
+cannot both be true.
 
 Compare the answers below against each other. For each real contradiction, output one entry with:
-- "slotKeys": the keys of the conflicting questions (two or more). Use ONLY keys from the list.
+${slotKeysLine}
 - "explanation": a short, specific account of why those answers conflict.
 - "severity": one of ${CONTRADICTION_SEVERITIES.join(', ')} — how badly the answers are at odds.
 - "confidence": 0–1, how sure you are this is a real contradiction.${probeLine}
@@ -45,7 +61,7 @@ Rules:
 emphasis, or wording are NOT contradictions. When in doubt, do not report it.
 - Never invent a conflict to have something to say. If the answers are consistent, return an empty \
 "contradictions" array.
-- Only reference questions in the provided list, and only ones that have an answer.
+- Only reference questions in the provided list, and only ones that have an answer.${latestMessageRule}
 
 Output: respond with ONLY a single JSON object: { "contradictions": [ ... ] }. Do not wrap the \
 JSON in prose or code fences.`;
@@ -123,12 +139,19 @@ export function buildContradictionDetectionPrompt(ctx: ContradictionContext): Ll
     if (slot) answeredLines.push(describeAnsweredSlot(answer, slot));
   }
 
+  const latestMessage = typeof ctx.currentStatement === 'string' ? ctx.currentStatement.trim() : '';
+  const hasLatest = latestMessage.length > 0;
+
   const userContent =
     `Answered questions to check for contradictions:\n${answeredLines.join('\n')}\n\n` +
-    `Report only genuine logical contradictions between these answers.`;
+    (hasLatest
+      ? `The respondent's LATEST MESSAGE:\n"${latestMessage}"\n\n` +
+        `Report genuine logical contradictions between these answers, AND any answer the latest ` +
+        `message reverses or is incompatible with.`
+      : `Report only genuine logical contradictions between these answers.`);
 
   return [
-    { role: 'system', content: systemRules(ctx.mode) },
+    { role: 'system', content: systemRules(ctx.mode, hasLatest) },
     { role: 'user', content: userContent },
   ];
 }

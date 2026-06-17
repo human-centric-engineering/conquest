@@ -72,18 +72,49 @@ userMessage, recentMessages?, sessionId }`, all in memory. `ExtractionSlotView`
 - **Extraction candidate pre-filter (50+-slot scale).** By default the extractor is
   handed the FULL candidate set every turn (all question slots + all data slots),
   which at 50+ data slots / 70+ questions is thousands of candidate tokens per turn.
-  When `APP_QUESTIONNAIRES_EXTRACTION_PREFILTER_ENABLED` is on, the live `/messages`
-  route embeds the respondent's last message and narrows what **the extractor** sees
+  It's a **per-questionnaire Settings toggle** (`config.extractionPrefilter`, in the Settings tab —
+  not a platform feature flag; consistent with `answerFitMode` / `contradictionMode`), **off by
+  default** and **recommended for large (50+ slot / 70+ question) surveys** where the full candidate
+  list is expensive; for smaller ones leave it off, since sending everything is cheap and maximises
+  capture accuracy. When on, the live `/messages` route embeds the respondent's last message and
+  narrows what **the extractor** sees
   via `narrowExtractionCandidates` (`questionnaire-sessions/_lib/extraction-candidates.ts`,
-  reusing `rankSlotsByVector` / `rankDataSlotsByVector`). It is **behaviour-preserving**:
+  reusing `rankSlotsByVector` / `rankDataSlotsByVector`). **The ranking query is the
+  respondent's CURRENT answer, not the prior interviewer question:** `state.recentMessages`
+  is built from persisted turns, so its last entry is the interviewer's previous question —
+  the route appends `userMessage` so the similarity query is what they just SAID. Without
+  this, an answer that volunteers a cross-topic point (e.g. "our pipeline is very poor" while
+  the active topic is offerings) ranks by the _asked_ topic and the relevant question drops
+  out of top-K, so the extractor never sees it. The two adaptive selectors get the same
+  current-answer-appended transcript (`conversationWithCurrentAnswer` in `turn-invokers.ts`).
+  It is **behaviour-preserving**:
   hard safety rails always retain the active slot, **every data slot that already has a
   fill** (the cross-turn re-scan/enrichment guarantee), same-theme unfilled slots, and a
-  kept slot's mapped questions — then add the top-K most similar. It is **fail-soft**
-  (no message / embed error / un-embedded version → full set) and a **no-op below a size
-  threshold**. Crucially the narrowed set is threaded as a **separate** `extractionCandidateSlots`
-  opt to `buildTurnInvokers` — the contradiction detector + refiner keep the **full** `slots`,
-  so only the extractor's prompt shrinks. Off by default (dark-launch); when off the extractor
-  gets the full set (today's behaviour). See the runtime roadmap in [selection-strategies.md].
+  kept slot's mapped questions — then add the top-K most similar. **Ranking is hybrid:** the
+  dense vector top-K is **UNION**ed with a lexical (BM25-style, Postgres `ts_rank_cd` /
+  `plainto_tsquery`) top-K (`rankSlotsByText` / `rankDataSlotsByText`), so an exact term the
+  respondent used surfaces its slot even when a multi-topic message dilutes the dense vector below
+  the cut. A **twin-inclusion rail** (`findDuplicateSlotIds`, embedding self-similarity ≥ 0.93) then
+  pulls in near-duplicate copies of any kept question, so a clear answer lands on **every** reworded
+  copy. `questionK`/`dataSlotK` default to 40/18 (the pre-filter is now opt-in for large surveys, so
+  a more generous K is safe). It is **fail-soft** (no message / embed error / un-embedded version →
+  full set — the un-embedded bail keys on the _dense_ result, since lexical alone is too sparse to
+  narrow on) and a **no-op below a size threshold**. Crucially the narrowed set is threaded as a
+  **separate** `extractionCandidateSlots` opt to `buildTurnInvokers` — the contradiction detector +
+  refiner keep the **full** `slots`, so only the extractor's prompt shrinks. When off (the default),
+  the extractor gets the full set. See the runtime roadmap in [selection-strategies.md].
+- **Near-identical (twin) questions.** A questionnaire may include several questions that
+  ask essentially the same thing in different words (poor authoring, but inevitable). The
+  extractor prompt instructs the model to treat each candidate **independently** and emit a
+  separate entry for **every** near-identical question one answer determines — not just one,
+  skipping its twins as redundant — while mapping each to its **own wording, type, and
+  polarity** ("No" to "Do we maintain a robust pipeline?" is "Yes" to "Is our pipeline a
+  concern?"). The LLM stays the judge precisely so polarity is respected; we deliberately do
+  **not** deterministically copy a value across embedding-similar questions, because similarity
+  can't tell an identical question from an inverse-polarity one — a blind copy would fabricate
+  wrong answers. Both twins must also be **candidates** for this to fire: when the extraction
+  pre-filter is on, the current-answer query (above) keeps mutually-similar twins ranked together;
+  with it off, the full set is present anyway.
 - **Value validation** reuses the F2.1 authoring schemas (`typeConfigSchemaFor`)
   so a `single_choice` value must be one of _that slot's_ choices, a `likert`
   within its scale, etc. Lenient where the LLM is loose (a numeric `"34"`, a

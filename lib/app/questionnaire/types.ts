@@ -453,6 +453,12 @@ export type QuestionnaireConfigShape = {
   contradictionEveryNTurns: number;
   /** Semantic answer-fit resolver mode — see {@link ANSWER_FIT_MODES}. Default `fallback`. */
   answerFitMode: AnswerFitMode;
+  /**
+   * Extraction candidate pre-filter — narrow the extractor's candidate set by embedding similarity
+   * each turn (one embedding call/turn). Recommended for large (50+ slot / 70+ question) surveys.
+   * Default `false`.
+   */
+  extractionPrefilter: boolean;
   anonymousMode: boolean;
   /**
    * Who may start a session (the access axis — orthogonal to {@link anonymousMode}). See
@@ -570,6 +576,7 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   contradictionWindowN: 0,
   contradictionEveryNTurns: 1,
   answerFitMode: 'fallback',
+  extractionPrefilter: false,
   anonymousMode: false,
   accessMode: 'invitation_only',
   inviteeFields: DEFAULT_INVITEE_FIELDS,

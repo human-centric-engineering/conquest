@@ -94,6 +94,18 @@ export interface ContradictionContext {
   /** How many prior answers to compare against; `0` = compare all. Mirrors the
    *  config's `contradictionWindowN`. */
   windowN: number;
+  /**
+   * The respondent's most recent message, when the caller wants the detector to ALSO
+   * weigh it against the captured answers. This is what catches a *same-slot reversal*
+   * ("I hate the job" earlier → "I love my job" now): the new statement may not have
+   * overwritten the stored answer yet (extraction can miss a re-answer to an already-
+   * filled slot), so comparing stored answers against each other alone wouldn't see it.
+   * When present, a finding may reference a SINGLE slot — the stored answer the latest
+   * message contradicts — since the message itself is the implicit second party (the
+   * normaliser relaxes its ≥2-distinct-slots rule accordingly). Absent → the classic
+   * answer-vs-answer pass, unchanged.
+   */
+  currentStatement?: string;
   /** Stable session identity — threaded into cost-log metadata. */
   sessionId: string;
 }
@@ -130,6 +142,26 @@ export interface ContradictionFinding {
   /** A single neutral follow-up question that lets the respondent reconcile the
    *  answers — present **only** under `probe` mode; absent for `flag`. */
   suggestedProbe?: string;
+}
+
+/**
+ * A `probe`-mode contradiction parked across turns (the confirm-before-overwrite flow). When the
+ * detector flags a conflict under `probe` mode, nothing is overwritten: the interviewer asks a
+ * reconciliation question and this is persisted on the session. The NEXT turn resolves it — the
+ * refiner applies the change if the respondent confirms, or keeps the original — and clears it.
+ * Persisted as `AppQuestionnaireSession.pendingContradiction` (JSON).
+ */
+export interface PendingContradiction {
+  /** The conflicting question slot key(s) the probe is reconciling. */
+  slotKeys: string[];
+  /** Why the answers conflict — surfaced informationally (the blue notice), not as the question. */
+  explanation: string;
+  /** The reconciliation question the interviewer asked (probe-mode finding's probe). */
+  suggestedProbe?: string;
+  /** The respondent message that triggered the contradiction (the "new" side of the conflict). */
+  statement: string;
+  /** The zero-based selection round the probe was raised on (for ordering / audit). */
+  raisedAtTurnIndex: number;
 }
 
 /** A raw detected contradiction dropped by the normaliser, with why — for logging. */

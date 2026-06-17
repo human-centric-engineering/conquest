@@ -101,9 +101,9 @@ import { isFeatureEnabled } from '@/lib/feature-flags';
 import {
   APP_QUESTIONNAIRES_COST_CAP_FLAG,
   APP_QUESTIONNAIRES_DATA_SLOTS_FLAG,
-  APP_QUESTIONNAIRES_EXTRACTION_PREFILTER_FLAG,
   APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG,
   APP_QUESTIONNAIRES_REASONING_STREAM_FLAG,
+  APP_QUESTIONNAIRES_SENSITIVITY_AWARENESS_FLAG,
   APP_QUESTIONNAIRES_TONE_FLAG,
 } from '@/lib/app/questionnaire/constants';
 import { auth } from '@/lib/auth/config';
@@ -646,6 +646,8 @@ describe('extraction pre-filter', () => {
       ],
       base: {
         ...base.base,
+        // The pre-filter is now a per-questionnaire Settings toggle (config), not a platform flag.
+        config: { ...base.base.config, extractionPrefilter: true },
         recentMessages: ['I just joined the marketing team'],
         dataSlots: [
           {
@@ -695,9 +697,15 @@ describe('extraction pre-filter', () => {
       dataSlotsOut: 1,
     });
 
-    const res = await POST(req({ message: 'I just joined the marketing team' }), ctx);
+    const res = await POST(req({ message: 'actually our pipeline is very poor' }), ctx);
     expect(res.status).toBe(200);
     await drainSse(res);
+
+    // The pre-filter must rank against the respondent's CURRENT answer — so the message they just
+    // sent is appended as the last (query) entry, not the prior interviewer turn.
+    const narrowCall = prefilterMock.narrowExtractionCandidates.mock.calls[0] as unknown[];
+    const narrowArgs = narrowCall[0] as { recentMessages: string[] };
+    expect(narrowArgs.recentMessages.at(-1)).toBe('actually our pipeline is very poor');
 
     const args = invokerArgs();
     // Full slots still flow to the detector/refiner (their coverage is unchanged).
@@ -707,11 +715,10 @@ describe('extraction pre-filter', () => {
     expect(args.dataSlotCandidates?.map((s) => s.key)).toEqual(['department']);
   });
 
-  it('sends the full candidate set when the flag is off (no extractionCandidateSlots; narrow not called)', async () => {
-    vi.mocked(isFeatureEnabled).mockImplementation((name: string) =>
-      Promise.resolve(name !== APP_QUESTIONNAIRES_EXTRACTION_PREFILTER_FLAG)
-    );
-    ctxMock.buildTurnContext.mockResolvedValue(multiSlotContext());
+  it('sends the full candidate set when the Settings toggle is off (no extractionCandidateSlots; narrow not called)', async () => {
+    const offContext = multiSlotContext();
+    offContext.base.config.extractionPrefilter = false;
+    ctxMock.buildTurnContext.mockResolvedValue(offContext);
 
     const res = await POST(req({ message: 'hi' }), ctx);
     expect(res.status).toBe(200);
@@ -1206,8 +1213,8 @@ describe('contradiction detail enrichment', () => {
             explanation: 'Earlier said junior; now says senior',
             severity: 'medium' as const,
             confidence: 0.8,
-            // suggestedProbe is different from explanation — the route shows suggestedProbe
-            // as the message but attaches explanation as a detail for "Why?" disclosure.
+            // A probe is present, but the blue notice is INFORMATIONAL — it shows the explanation,
+            // never the question (under `probe` mode the question is asked as the interviewer turn).
             suggestedProbe: 'Can you clarify your seniority level?',
           },
         ],
@@ -1224,7 +1231,7 @@ describe('contradiction detail enrichment', () => {
     };
   }
 
-  it('enriches a contradiction warning frame with the explanation as detail when suggestedProbe differs', async () => {
+  it('shows the explanation (not the probe) as the contradiction notice message under flag mode', async () => {
     // Need ≥ MIN_CONTRADICTION_ANSWERS (2) existing answers and contradictionMode ≠ 'off'.
     const baseCtx = loadedContext();
     ctxMock.buildTurnContext.mockResolvedValue(
@@ -1250,14 +1257,16 @@ describe('contradiction detail enrichment', () => {
 
     const frames = await drainSse(await POST(req({ message: 'senior manager' }), ctx));
 
-    // The contradiction warning frame must carry the explanation as 'detail'.
+    // The contradiction notice is informational: its message IS the explanation (no separate
+    // "Why?" detail, since the message already carries it). The probe question is never shown here.
     const contradictionFrame = frames.find(
       (f) => f.event === 'warning' && (f.data as { code?: string }).code === 'contradiction'
     );
     expect(contradictionFrame).toBeDefined();
     const data = contradictionFrame!.data as { code: string; message: string; detail?: string };
-    expect(data.message).toBe('Can you clarify your seniority level?');
-    expect(data.detail).toBe('Earlier said junior; now says senior');
+    expect(data.message).toBe('Earlier said junior; now says senior');
+    expect(data.message).not.toBe('Can you clarify your seniority level?');
+    expect(data.detail).toBeUndefined();
   });
 });
 
@@ -1314,5 +1323,950 @@ describe('abuse gate write failure (fail-soft)', () => {
     const eventNames = frames.map((f) => f.event);
     expect(eventNames).toContain('content');
     expect(eventNames[eventNames.length - 1]).toBe('done');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// kickoff turn: flags forced off (lines 140, 346, 351, 353, 355, 372, 373)
+// ---------------------------------------------------------------------------
+describe('kickoff turn flag overrides', () => {
+  it('forces extraction, seriousnessGate, and sensitivityAwareness flags off on a kickoff turn', async () => {
+    // Arrange: a context where sensitivity awareness and seriousness gate are config-enabled.
+    // A kickoff carries no respondent answer — all three flags must be forced off.
+    const baseCtx = loadedContext();
+    ctxMock.buildTurnContext.mockResolvedValue(
+      loadedContext({
+        base: {
+          ...baseCtx.base,
+          config: {
+            ...baseCtx.base.config,
+            sensitivityAwareness: true,
+            abuseThreshold: 1,
+          },
+        },
+      })
+    );
+
+    // A seriousness invoker that would mutate state if called erroneously.
+    const sensitivityStub = vi.fn(async () => ({ assessment: null, costUsd: 0 }));
+    invokersMock.buildTurnInvokers.mockResolvedValue({
+      ...stubInvokers(),
+      detectSensitivity: sensitivityStub,
+    });
+
+    // Act: kickoff (no message).
+    const res = await POST(req({ kickoff: true }), ctx);
+    expect(res.status).toBe(200);
+    await drainSse(res);
+
+    // Assert: the invoker was built with sensitivityAware: false for kickoff turns
+    // (no message to disclose — forcing it off prevents a spurious sensitivity flag).
+    const invokerArgs = invokersMock.buildTurnInvokers.mock.calls[0]?.[0] as {
+      sensitivityAware: boolean;
+    };
+    expect(invokerArgs.sensitivityAware).toBe(false);
+
+    // The userMessage persisted must be empty (kickoff carries no respondent text).
+    expect(runMock.persistTurn).toHaveBeenCalledWith(expect.objectContaining({ userMessage: '' }));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// goal forwarded to invoker builder (line 458)
+// ---------------------------------------------------------------------------
+describe('version goal forwarded to invoker builder', () => {
+  it('passes the version goal to buildTurnInvokers when set', async () => {
+    // Arrange: meta.goal set — the adaptive selector uses it to pick the best next question.
+    ctxMock.buildTurnContext.mockResolvedValue(
+      loadedContext({ meta: { goal: 'Understand team dynamics' } })
+    );
+
+    await drainSse(await POST(req({ message: 'hi' }), ctx));
+
+    const args = invokersMock.buildTurnInvokers.mock.calls[0]?.[0] as {
+      goal?: string;
+    };
+    expect(args.goal).toBe('Understand team dynamics');
+  });
+
+  it('omits goal from buildTurnInvokers when not set', async () => {
+    // Default loadedContext has meta: {} (no goal).
+    await drainSse(await POST(req({ message: 'hi' }), ctx));
+
+    const args = invokersMock.buildTurnInvokers.mock.calls[0]?.[0] as {
+      goal?: string;
+    };
+    expect(args.goal).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// anonymous flag forwarded to invoker builder (line 460, 470)
+// ---------------------------------------------------------------------------
+describe('anonymous flag forwarded to invoker builder', () => {
+  it('passes anonymous:true to buildTurnInvokers for an anonymous session', async () => {
+    // Arrange: no cookie session, valid session token.
+    setAuth(null);
+    tokenMock.verifySessionToken.mockReturnValue({ ok: true, sessionId: 'sess-1' });
+    ctxMock.buildTurnContext.mockResolvedValue(
+      loadedContext({
+        session: { id: 'sess-1', status: 'active', versionId: 'v1', respondentUserId: null },
+      })
+    );
+
+    await drainSse(await POST(req({ message: 'hello' }, { 'x-session-token': 'tok.sig' }), ctx));
+
+    const args = invokersMock.buildTurnInvokers.mock.calls[0]?.[0] as {
+      anonymous?: boolean;
+    };
+    expect(args.anonymous).toBe(true);
+  });
+
+  it('omits anonymous from buildTurnInvokers for an authenticated session', async () => {
+    // Default beforeEach: authenticated user — anonymous must be absent.
+    await drainSse(await POST(req({ message: 'hello' }), ctx));
+
+    const args = invokersMock.buildTurnInvokers.mock.calls[0]?.[0] as {
+      anonymous?: boolean;
+    };
+    expect(args.anonymous).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// inspector frame (lines 313, 315, 460, 584, 626, 669, 787)
+// ---------------------------------------------------------------------------
+describe('preview turn inspector', () => {
+  /** A context with isPreview=true and previewInspectorEnabled=true. */
+  function inspectorContext() {
+    const base = loadedContext();
+    return loadedContext({
+      session: {
+        id: 'sess-1',
+        status: 'active',
+        versionId: 'v1',
+        respondentUserId: USER,
+        isPreview: true,
+      },
+      base: {
+        ...base.base,
+        config: { ...base.base.config, previewInspectorEnabled: true },
+      },
+    });
+  }
+
+  it('emits an inspector frame after the reply when inspectorCalls are populated', async () => {
+    // Arrange: preview session + inspector on. Build invokers that push a call into
+    // the recorder when the extractor fires — so inspectorCalls.length > 0.
+    ctxMock.buildTurnContext.mockResolvedValue(inspectorContext());
+
+    // Override buildTurnInvokers to capture the recordInspectorCall seam and call it.
+    invokersMock.buildTurnInvokers.mockImplementation(
+      async (opts: {
+        recordInspectorCall?: (trace: {
+          label: string;
+          model: string;
+          provider: string;
+          latencyMs: number;
+          costUsd: number;
+          prompt: Array<{ role: string; content: string }>;
+          response: string;
+        }) => void;
+      }) => {
+        const inv = stubInvokers();
+        // Simulate the extractor recording a trace via the inspector seam.
+        inv.extractAnswers = vi.fn(async () => {
+          opts.recordInspectorCall?.({
+            label: 'Answer extraction',
+            model: 'gpt-4o-mini',
+            provider: 'openai',
+            latencyMs: 42,
+            costUsd: 0.0001,
+            prompt: [{ role: 'user', content: 'test' }],
+            response: '[]',
+          });
+          return { intents: [], costUsd: 0.0001 };
+        });
+        return inv;
+      }
+    );
+
+    // Act
+    const frames = await drainSse(await POST(req({ message: 'hi' }), ctx));
+
+    // Assert: an 'inspector' frame is present after the 'content' frames.
+    const eventNames = frames.map((f) => f.event);
+    expect(eventNames).toContain('inspector');
+
+    const inspectorFrame = frames.find((f) => f.event === 'inspector');
+    const data = inspectorFrame!.data as {
+      turnIndex: number;
+      calls: Array<{ label: string }>;
+    };
+    expect(data.calls).toHaveLength(1);
+    expect(data.calls[0].label).toBe('Answer extraction');
+    expect(data.turnIndex).toBe(0); // selectionRound === 0 in base context
+
+    // Inspector frame must come after the last content frame.
+    const lastContentIdx = eventNames.lastIndexOf('content');
+    const inspectorIdx = eventNames.indexOf('inspector');
+    expect(inspectorIdx).toBeGreaterThan(lastContentIdx);
+  });
+
+  it('does not emit an inspector frame when no calls were recorded (empty inspectorCalls)', async () => {
+    // Arrange: inspector on, but invokers never call recordInspectorCall.
+    ctxMock.buildTurnContext.mockResolvedValue(inspectorContext());
+    // stubInvokers() does NOT call recordInspectorCall — inspectorCalls stays empty.
+
+    const frames = await drainSse(await POST(req({ message: 'hi' }), ctx));
+
+    expect(frames.map((f) => f.event)).not.toContain('inspector');
+  });
+
+  it('does not emit an inspector frame for a non-preview session (isPreview falsy)', async () => {
+    // Default context: session has no isPreview → inspector off, frame never emitted.
+    // Even if we push a fake call trace, the `inspectorOn` gate blocks the frame.
+    const frames = await drainSse(await POST(req({ message: 'hi' }), ctx));
+    expect(frames.map((f) => f.event)).not.toContain('inspector');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// warning detail enrichment — seriousness (line 519-520) and contradiction
+// explanation equals message branch (line 521-524)
+// ---------------------------------------------------------------------------
+describe('warning detail enrichment', () => {
+  function seriousnessInvokers(reason: string) {
+    return {
+      extractAnswers: vi.fn(async () => ({
+        intents: [
+          {
+            slotKey: 'q1',
+            questionType: 'free_text',
+            value: 'junk',
+            confidence: 0.9,
+            provenance: 'direct',
+            rationale: 'stated',
+            isActiveQuestion: true,
+          },
+        ],
+        suspectedNonGenuine: true,
+        costUsd: 0,
+      })),
+      detectContradictions: vi.fn(async () => ({ findings: [], costUsd: 0 })),
+      refineAnswer: vi.fn(async () => ({ decisions: [], costUsd: 0 })),
+      selectNext: vi.fn(async () => ({
+        decision: { kind: 'ask', questionId: 'q1', rationale: 'x', costUsd: 0 },
+      })),
+      assessSeriousness: vi.fn(async () => ({
+        verdict: { serious: false, reason },
+        costUsd: 0,
+      })),
+      detectSensitivity: vi.fn(async () => ({ assessment: null, costUsd: 0 })),
+    };
+  }
+
+  it('enriches a seriousness warning with the judge reason as detail', async () => {
+    // Arrange: a non-serious response with a reason — the route enriches the warning frame.
+    const baseCtx = loadedContext();
+    ctxMock.buildTurnContext.mockResolvedValue(
+      loadedContext({
+        activeQuestionKey: 'q1',
+        base: {
+          ...baseCtx.base,
+          abuseStrikes: 0,
+          config: { ...baseCtx.base.config, abuseThreshold: 4 },
+        },
+      })
+    );
+    invokersMock.buildTurnInvokers.mockResolvedValue(
+      seriousnessInvokers('That answer is not plausible.')
+    );
+
+    // Act
+    const frames = await drainSse(await POST(req({ message: 'junk' }), ctx));
+
+    // Assert: the seriousness warning frame carries the judge's reason as `detail`.
+    const seriousnessFrame = frames.find(
+      (f) => f.event === 'warning' && (f.data as { code?: string }).code === 'seriousness'
+    );
+    expect(seriousnessFrame).toBeDefined();
+    const data = seriousnessFrame!.data as { code: string; message: string; detail?: string };
+    expect(data.detail).toBe('That answer is not plausible.');
+  });
+
+  it('omits detail on a contradiction warning when explanation equals the message (flag mode)', async () => {
+    // In flag mode the explanation IS the warning message — no separate "Why?" detail needed.
+    const baseCtx = loadedContext();
+    ctxMock.buildTurnContext.mockResolvedValue(
+      loadedContext({
+        activeQuestionKey: 'q1',
+        base: {
+          ...baseCtx.base,
+          existingAnswers: [
+            { slotKey: 'q1', value: 'junior', provenance: 'direct' as const, confidence: 0.7 },
+            { slotKey: 'role', value: 'engineer', provenance: 'direct' as const, confidence: 0.8 },
+          ],
+          config: {
+            ...baseCtx.base.config,
+            contradictionMode: 'flag',
+            contradictionEveryNTurns: 1,
+          },
+        },
+      })
+    );
+
+    // Invoker whose contradiction explanation IS the warning message (flag mode pattern).
+    invokersMock.buildTurnInvokers.mockResolvedValue({
+      extractAnswers: vi.fn(async () => ({
+        intents: [
+          {
+            slotKey: 'q1',
+            questionType: 'free_text',
+            value: 'senior',
+            confidence: 0.9,
+            provenance: 'direct',
+            rationale: 'stated',
+            isActiveQuestion: true,
+          },
+        ],
+        costUsd: 0,
+      })),
+      detectContradictions: vi.fn(async () => ({
+        findings: [
+          {
+            slotKeys: ['q1'],
+            // explanation and message are THE SAME — the route must skip the detail field.
+            explanation: 'Earlier said junior; now says senior',
+            severity: 'medium' as const,
+            confidence: 0.8,
+          },
+        ],
+        costUsd: 0,
+      })),
+      refineAnswer: vi.fn(async () => ({ decisions: [], costUsd: 0 })),
+      selectNext: vi.fn(async () => ({
+        decision: { kind: 'ask', questionId: 'q1', rationale: 'x', costUsd: 0 },
+      })),
+      assessSeriousness: vi.fn(async () => ({
+        verdict: { serious: true, reason: '' },
+        costUsd: 0,
+      })),
+      detectSensitivity: vi.fn(async () => ({ assessment: null, costUsd: 0 })),
+    });
+
+    const frames = await drainSse(await POST(req({ message: 'senior manager' }), ctx));
+
+    const contradictionFrame = frames.find(
+      (f) => f.event === 'warning' && (f.data as { code?: string }).code === 'contradiction'
+    );
+    expect(contradictionFrame).toBeDefined();
+    const data = contradictionFrame!.data as { code: string; message: string; detail?: string };
+    // message === explanation → detail must be absent (the route skips the duplicate).
+    expect(data.message).toBe('Earlier said junior; now says senior');
+    expect(data.detail).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// data_slot response branch — isReask / isFinalAttempt / goal / audience (lines 597, 610, 611, 618-620)
+// ---------------------------------------------------------------------------
+describe('data_slot response — phrasing inputs', () => {
+  /** A context where data-slot mode is active and a re-ask scenario can be set up. */
+  function reaskDataSlotContext(
+    attempts: number,
+    maxAttempts: number,
+    currentFill?: { value: string; paraphrase: string; confidence: number }
+  ) {
+    const base = loadedContext();
+    return loadedContext({
+      meta: { goal: 'Assess team performance', audience: 'managers' },
+      base: {
+        ...base.base,
+        config: { ...base.base.config, maxDataSlotAttempts: maxAttempts },
+        dataSlots: [
+          {
+            id: 'ds-1',
+            key: 'department',
+            name: 'Department',
+            description: 'Which department?',
+            theme: 'role',
+            ordinal: 0,
+            weight: 1,
+          },
+        ],
+        dataSlotAnswered: currentFill
+          ? [
+              {
+                dataSlotId: 'ds-1',
+                value: currentFill.value,
+                paraphrase: currentFill.paraphrase,
+                confidence: currentFill.confidence,
+              },
+            ]
+          : [],
+        dataSlotAttempts: { 'ds-1': attempts },
+      },
+    });
+  }
+
+  it('threads goal and audience into data_slot phraser input when set in meta', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(reaskDataSlotContext(0, 3));
+    // Standard stubInvokers: extraction returns empty, selectNext asks q1 (question path),
+    // but the data-slot orchestrator takes over because dataSlots is non-empty.
+
+    await drainSse(await POST(req({ message: 'tell me more' }), ctx));
+
+    const input = (questionMock.streamQuestionMessage as Mock).mock.calls[0]?.[0]?.input as {
+      goal?: string;
+      audience?: string;
+    };
+    expect(input.goal).toBe('Assess team performance');
+    expect(input.audience).toBe('managers');
+  });
+
+  it('passes isReask=true and currentUnderstanding when the slot is the active slot with a prior weak fill', async () => {
+    // isReask is set by the real orchestrator when next.key === state.activeDataSlotKey.
+    // Set activeDataSlotKey to match the only slot ('department') — the fill has low confidence
+    // so it stays "unfilled" and the orchestrator will re-select it → isReask=true.
+    const base = loadedContext();
+    ctxMock.buildTurnContext.mockResolvedValue(
+      loadedContext({
+        meta: { goal: 'Assess team performance', audience: 'managers' },
+        base: {
+          ...base.base,
+          config: { ...base.base.config, maxDataSlotAttempts: 3 },
+          // activeDataSlotKey matches the slot → the orchestrator marks it as a re-ask.
+          activeDataSlotKey: 'department',
+          dataSlots: [
+            {
+              id: 'ds-1',
+              key: 'department',
+              name: 'Department',
+              description: 'Which department?',
+              theme: 'role',
+              ordinal: 0,
+              weight: 1,
+            },
+          ],
+          dataSlotAnswered: [
+            {
+              dataSlotId: 'ds-1',
+              value: 'Engineering',
+              paraphrase: 'Works in Engineering',
+              // Low confidence → slot stays unfilled → re-ask path.
+              confidence: 0.4,
+            },
+          ],
+          dataSlotAttempts: { 'ds-1': 1 },
+        },
+      })
+    );
+
+    await drainSse(await POST(req({ message: 'engineering' }), ctx));
+
+    const input = (questionMock.streamQuestionMessage as Mock).mock.calls[0]?.[0]?.input as {
+      isReask: boolean;
+      currentUnderstanding?: string;
+      isFinalAttempt?: boolean;
+    };
+    // The real orchestrator computed isReask=true because next.key===activeDataSlotKey.
+    expect(input.isReask).toBe(true);
+    // The route threads the prior fill's paraphrase as currentUnderstanding for the phraser.
+    expect(input.currentUnderstanding).toBe('Works in Engineering');
+    // attempts (1) + 1 = 2, maxAttempts = 3 → NOT the final attempt.
+    expect(input.isFinalAttempt).toBeUndefined();
+  });
+
+  it('sets isFinalAttempt when the re-ask is the last allowed attempt', async () => {
+    // attempts=2, maxAttempts=3 → attemptsForTarget(2) + 1 = 3 >= maxDataSlotAttempts(3) → isFinalAttempt.
+    const base = loadedContext();
+    ctxMock.buildTurnContext.mockResolvedValue(
+      loadedContext({
+        meta: { goal: 'Assess team performance', audience: 'managers' },
+        base: {
+          ...base.base,
+          config: { ...base.base.config, maxDataSlotAttempts: 3 },
+          activeDataSlotKey: 'department',
+          dataSlots: [
+            {
+              id: 'ds-1',
+              key: 'department',
+              name: 'Department',
+              description: 'Which department?',
+              theme: 'role',
+              ordinal: 0,
+              weight: 1,
+            },
+          ],
+          dataSlotAnswered: [
+            {
+              dataSlotId: 'ds-1',
+              value: 'Engineering',
+              paraphrase: 'Still unclear',
+              confidence: 0.3,
+            },
+          ],
+          dataSlotAttempts: { 'ds-1': 2 },
+        },
+      })
+    );
+
+    await drainSse(await POST(req({ message: 'engineering again' }), ctx));
+
+    const input = (questionMock.streamQuestionMessage as Mock).mock.calls[0]?.[0]?.input as {
+      isFinalAttempt?: boolean;
+    };
+    expect(input.isFinalAttempt).toBe(true);
+  });
+
+  it('omits isFinalAttempt on the first ask (not a re-ask)', async () => {
+    // activeDataSlotKey is null → isReask=false → isFinalAttempt check is skipped.
+    ctxMock.buildTurnContext.mockResolvedValue(reaskDataSlotContext(0, 3));
+
+    await drainSse(await POST(req({ message: 'hi' }), ctx));
+
+    const input = (questionMock.streamQuestionMessage as Mock).mock.calls[0]?.[0]?.input as {
+      isFinalAttempt?: boolean;
+    };
+    expect(input.isFinalAttempt).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// question response — chunked fallback (line 673-676: phrasing OFF + not data-slot mode)
+// ---------------------------------------------------------------------------
+describe('question response — deterministic chunked fallback', () => {
+  it('yields chunked content frames for the verbatim prompt when phrasing flag is off and not data-slot mode', async () => {
+    // phrasing flag off → phraser not called → chunkText(response.text) is the stream.
+    vi.mocked(isFeatureEnabled).mockImplementation((name: string) =>
+      Promise.resolve(name !== APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG)
+    );
+
+    // Use a prompt longer than 48 chars to exercise the multi-chunk path.
+    const longPrompt = 'A'.repeat(100);
+    // The selector returns a question whose text is the long prompt; the route reads it from result.response.text.
+    invokersMock.buildTurnInvokers.mockResolvedValue({
+      ...stubInvokers(),
+      selectNext: vi.fn(async () => ({
+        decision: { kind: 'ask', questionId: 'q1', rationale: 'first', costUsd: 0 },
+      })),
+    });
+    // Override the context question text so result.response.text is the long prompt.
+    const base = loadedContext();
+    ctxMock.buildTurnContext.mockResolvedValue(
+      loadedContext({
+        base: {
+          ...base.base,
+          questions: [
+            {
+              ...base.base.questions[0],
+              prompt: longPrompt,
+            },
+          ],
+        },
+        slots: [
+          {
+            id: 'q1',
+            key: 'q1',
+            sectionId: 's1',
+            prompt: longPrompt,
+            type: 'free_text',
+            required: false,
+          },
+        ],
+      })
+    );
+
+    const frames = await drainSse(await POST(req({ message: 'hi' }), ctx));
+
+    // Phrasing off → streamQuestionMessage not called.
+    expect(questionMock.streamQuestionMessage).not.toHaveBeenCalled();
+
+    // Multiple content frames (chunked at 48 chars each).
+    const contentFrames = frames.filter((f) => f.event === 'content');
+    expect(contentFrames.length).toBeGreaterThan(1);
+
+    // Concatenated content equals the original prompt.
+    const assembled = contentFrames.map((f) => (f.data as { delta: string }).delta).join('');
+    expect(assembled).toBe(longPrompt);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// data-slot candidate with parkPending flag (lines 381, 388, 393)
+// ---------------------------------------------------------------------------
+describe('data-slot candidate parkPending', () => {
+  it('includes parkPending:true and attempts when slot hits the re-ask cap with low confidence', async () => {
+    // Arrange: a slot with attempts >= maxDataSlotAttempts and confidence below threshold.
+    const base = loadedContext();
+    const MAX_ATTEMPTS = 3;
+    ctxMock.buildTurnContext.mockResolvedValue(
+      loadedContext({
+        base: {
+          ...base.base,
+          config: { ...base.base.config, maxDataSlotAttempts: MAX_ATTEMPTS },
+          dataSlots: [
+            {
+              id: 'ds-1',
+              key: 'department',
+              name: 'Department',
+              description: 'Which department?',
+              theme: 'role',
+              ordinal: 0,
+              weight: 1,
+            },
+          ],
+          dataSlotAnswered: [
+            {
+              dataSlotId: 'ds-1',
+              value: 'maybe marketing',
+              paraphrase: 'unclear',
+              // Low confidence → below DATA_SLOT_FILLED_THRESHOLD → parkPending
+              confidence: 0.2,
+            },
+          ],
+          // attempts === maxDataSlotAttempts → parkPending
+          dataSlotAttempts: { 'ds-1': MAX_ATTEMPTS },
+        },
+      })
+    );
+
+    await drainSse(await POST(req({ message: 'I work in marketing maybe' }), ctx));
+
+    // Assert: the invoker builder received a candidate with parkPending: true.
+    const invokerArgs = invokersMock.buildTurnInvokers.mock.calls[0]?.[0] as {
+      dataSlotCandidates?: Array<{ key: string; parkPending?: boolean; attempts?: number }>;
+    };
+    const candidate = invokerArgs.dataSlotCandidates?.find((c) => c.key === 'department');
+    expect(candidate?.parkPending).toBe(true);
+    expect(candidate?.attempts).toBe(MAX_ATTEMPTS);
+  });
+
+  it('includes mappedQuestionKeys when the slot has them', async () => {
+    const base = loadedContext();
+    ctxMock.buildTurnContext.mockResolvedValue(
+      loadedContext({
+        base: {
+          ...base.base,
+          dataSlots: [
+            {
+              id: 'ds-1',
+              key: 'department',
+              name: 'Department',
+              description: 'Which department?',
+              theme: 'role',
+              ordinal: 0,
+              weight: 1,
+              mappedQuestionKeys: ['q1', 'q2'],
+            },
+          ],
+          dataSlotAnswered: [],
+          dataSlotAttempts: {},
+        },
+      })
+    );
+
+    await drainSse(await POST(req({ message: 'hi' }), ctx));
+
+    const invokerArgs = invokersMock.buildTurnInvokers.mock.calls[0]?.[0] as {
+      dataSlotCandidates?: Array<{ key: string; mappedQuestionKeys?: string[] }>;
+    };
+    const candidate = invokerArgs.dataSlotCandidates?.find((c) => c.key === 'department');
+    expect(candidate?.mappedQuestionKeys).toEqual(['q1', 'q2']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// adaptive slot embedding — fail-soft and lazy-ensure on data-slot adaptive (lines 228, 237, 267, 281-296)
+// ---------------------------------------------------------------------------
+describe('adaptive embedding lazy-ensure', () => {
+  it('calls ensureVersionSlotsEmbedded when adaptive mode is on and strategy is adaptive', async () => {
+    const base = loadedContext();
+    ctxMock.buildTurnContext.mockResolvedValue(
+      loadedContext({
+        base: {
+          ...base.base,
+          config: { ...base.base.config, selectionStrategy: 'adaptive' },
+        },
+      })
+    );
+
+    await drainSse(await POST(req({ message: 'hi' }), ctx));
+
+    // When adaptive flag is on AND selectionStrategy is 'adaptive', embeddings are ensured.
+    expect(slotEmbedMock.ensureVersionSlotsEmbedded).toHaveBeenCalledWith('v1');
+  });
+
+  it('does not call ensureVersionSlotsEmbedded when strategy is not adaptive', async () => {
+    // Default context has selectionStrategy: 'weighted' (from DEFAULT_QUESTIONNAIRE_CONFIG).
+    await drainSse(await POST(req({ message: 'hi' }), ctx));
+
+    // ensureVersionSlotsEmbedded is only called by adaptive or prefilter paths.
+    // With no adaptive strategy and no prefilter, it should not be called by the adaptive branch.
+    // (It may be called by other paths if prefilter is on, but default context has prefilter off.)
+    expect(slotEmbedMock.ensureVersionSlotsEmbedded).not.toHaveBeenCalled();
+  });
+
+  it('completes the turn fail-soft when adaptive slot embedding throws', async () => {
+    const base = loadedContext();
+    ctxMock.buildTurnContext.mockResolvedValue(
+      loadedContext({
+        base: {
+          ...base.base,
+          config: { ...base.base.config, selectionStrategy: 'adaptive' },
+        },
+      })
+    );
+    slotEmbedMock.ensureVersionSlotsEmbedded.mockRejectedValue(new Error('pgvector timeout'));
+
+    const res = await POST(req({ message: 'hi' }), ctx);
+    expect(res.status).toBe(200);
+    const frames = await drainSse(res);
+    expect(frames[frames.length - 1].event).toBe('done');
+  });
+
+  it('calls ensureVersionDataSlotsEmbedded when data-slot adaptive mode is active', async () => {
+    // Arrange: data-slot mode + adaptive data-slot sub-flag both on.
+    const base = loadedContext();
+    ctxMock.buildTurnContext.mockResolvedValue(
+      loadedContext({
+        base: {
+          ...base.base,
+          dataSlots: [
+            {
+              id: 'ds-1',
+              key: 'department',
+              name: 'Department',
+              description: 'Which department?',
+              theme: 'role',
+              ordinal: 0,
+              weight: 1,
+            },
+          ],
+          dataSlotAnswered: [],
+          dataSlotAttempts: {},
+        },
+      })
+    );
+
+    await drainSse(await POST(req({ message: 'hi' }), ctx));
+
+    // Data-slot adaptive path ensures data-slot embeddings.
+    expect(dataSlotEmbedMock.ensureVersionDataSlotsEmbedded).toHaveBeenCalledWith('v1');
+  });
+
+  it('completes the turn fail-soft when data-slot adaptive embedding throws', async () => {
+    const base = loadedContext();
+    ctxMock.buildTurnContext.mockResolvedValue(
+      loadedContext({
+        base: {
+          ...base.base,
+          dataSlots: [
+            {
+              id: 'ds-1',
+              key: 'department',
+              name: 'Department',
+              description: 'Which department?',
+              theme: 'role',
+              ordinal: 0,
+              weight: 1,
+            },
+          ],
+          dataSlotAnswered: [],
+          dataSlotAttempts: {},
+        },
+      })
+    );
+    dataSlotEmbedMock.ensureVersionDataSlotsEmbedded.mockRejectedValue(
+      new Error('embedder unavailable')
+    );
+
+    const res = await POST(req({ message: 'hi' }), ctx);
+    expect(res.status).toBe(200);
+    const frames = await drainSse(res);
+    expect(frames[frames.length - 1].event).toBe('done');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// sensitivity awareness: platform flag off suppresses detection (lines 779)
+// ---------------------------------------------------------------------------
+describe('sensitivity awareness platform flag gate', () => {
+  it('does not persist or record sensitivity when the platform flag is off even if config is on', async () => {
+    // Arrange: turn off the sensitivity platform flag only.
+    vi.mocked(isFeatureEnabled).mockImplementation((name: string) =>
+      Promise.resolve(name !== APP_QUESTIONNAIRES_SENSITIVITY_AWARENESS_FLAG)
+    );
+
+    const base = loadedContext();
+    ctxMock.buildTurnContext.mockResolvedValue(
+      loadedContext({
+        activeQuestionKey: 'q1',
+        base: {
+          ...base.base,
+          config: { ...base.base.config, sensitivityAwareness: true },
+        },
+      })
+    );
+
+    // Invokers whose extractor reports a sensitivity disclosure.
+    invokersMock.buildTurnInvokers.mockResolvedValue({
+      ...stubInvokers(),
+      extractAnswers: vi.fn(async () => ({
+        intents: [],
+        costUsd: 0,
+        sensitivity: {
+          detected: true,
+          severity: 'high',
+          category: 'harassment',
+          summary: 'Flagged disclosure',
+        },
+      })),
+    });
+
+    await drainSse(await POST(req({ message: 'I was mistreated' }), ctx));
+
+    // Platform flag off → sensitivityAware = false → no persistence, no event.
+    expect(sessionsMock.persistSensitivity).not.toHaveBeenCalled();
+    expect(sessionsMock.recordSensitivityFlagged).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// abuse gate: abortSession called on threshold, persistAbuseStrikes + abortSession
+// fail-soft swallows the error (lines 723-747)
+// ---------------------------------------------------------------------------
+describe('abuse gate: abort on threshold strike', () => {
+  // Per gotcha #22: `abuse gate write failure` test sets persistAbuseStrikes to reject; the
+  // outer vi.clearAllMocks() only clears call history, not mockRejectedValue implementations.
+  // Reset here so abortSession can be reached (it's only called after persistAbuseStrikes succeeds).
+  beforeEach(() => {
+    sessionsMock.persistAbuseStrikes.mockReset().mockResolvedValue(undefined);
+    sessionsMock.abortSession.mockReset().mockResolvedValue('aborted');
+  });
+
+  function thresholdAbusiveInvokers() {
+    return {
+      extractAnswers: vi.fn(async () => ({
+        intents: [
+          {
+            slotKey: 'q1',
+            questionType: 'free_text',
+            value: 'nonsense',
+            confidence: 0.9,
+            provenance: 'direct',
+            rationale: 'stated',
+            isActiveQuestion: true,
+          },
+        ],
+        suspectedNonGenuine: true,
+        costUsd: 0,
+      })),
+      detectContradictions: vi.fn(async () => ({ findings: [], costUsd: 0 })),
+      refineAnswer: vi.fn(async () => ({ decisions: [], costUsd: 0 })),
+      selectNext: vi.fn(async () => ({
+        decision: { kind: 'ask', questionId: 'q1', rationale: 'x', costUsd: 0 },
+      })),
+      assessSeriousness: vi.fn(async () => ({
+        verdict: { serious: false, reason: 'Implausible answer' },
+        costUsd: 0,
+      })),
+      detectSensitivity: vi.fn(async () => ({ assessment: null, costUsd: 0 })),
+    };
+  }
+
+  function thresholdGateContext(abuseStrikes: number) {
+    const base = loadedContext();
+    return loadedContext({
+      activeQuestionKey: 'q1',
+      base: { ...base.base, abuseStrikes, config: { ...base.base.config, abuseThreshold: 4 } },
+    });
+  }
+
+  it('calls abortSession with ABUSE_ABANDON_REASON and metadata when threshold is reached', async () => {
+    invokersMock.buildTurnInvokers.mockResolvedValue(thresholdAbusiveInvokers());
+    ctxMock.buildTurnContext.mockResolvedValue(thresholdGateContext(3)); // next strike is the 4th (threshold)
+
+    await drainSse(await POST(req({ message: 'garbage' }), ctx));
+
+    expect(sessionsMock.abortSession).toHaveBeenCalledWith(
+      'sess-1',
+      expect.objectContaining({
+        reason: ABUSE_ABANDON_REASON,
+        metadata: expect.objectContaining({
+          strikes: 4,
+          threshold: 4,
+          judgeReason: 'Implausible answer',
+        }),
+      })
+    );
+    // persistAbuseStrikes runs before abortSession (call order).
+    expect(sessionsMock.persistAbuseStrikes.mock.invocationCallOrder[0]).toBeLessThan(
+      sessionsMock.abortSession.mock.invocationCallOrder[0]
+    );
+  });
+
+  it('still emits done when abortSession rejects (fail-soft)', async () => {
+    invokersMock.buildTurnInvokers.mockResolvedValue(thresholdAbusiveInvokers());
+    ctxMock.buildTurnContext.mockResolvedValue(thresholdGateContext(3));
+    sessionsMock.abortSession.mockRejectedValue(new Error('abort write boom'));
+
+    const res = await POST(req({ message: 'garbage' }), ctx);
+    expect(res.status).toBe(200);
+    const frames = await drainSse(res);
+    expect(frames[frames.length - 1].event).toBe('done');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// reasoning stream: emits dataSlots to builder in data-slot mode (line 544)
+// and non-empty trace branch (line 547)
+// ---------------------------------------------------------------------------
+describe('reasoning stream in data-slot mode', () => {
+  it('passes dataSlots to buildReasoningTrace when in data-slot mode', async () => {
+    vi.mocked(isFeatureEnabled).mockImplementation((name: string) =>
+      Promise.resolve(name === APP_QUESTIONNAIRES_REASONING_STREAM_FLAG || true)
+    );
+
+    const base = loadedContext();
+    ctxMock.buildTurnContext.mockResolvedValue(
+      loadedContext({
+        base: {
+          ...base.base,
+          config: {
+            ...base.base.config,
+            reasoningStreamEnabled: true,
+            reasoningStreamPersist: false,
+          },
+          dataSlots: [
+            {
+              id: 'ds-1',
+              key: 'department',
+              name: 'Department',
+              description: 'Which department?',
+              theme: 'role',
+              ordinal: 0,
+              weight: 1,
+            },
+          ],
+          dataSlotAnswered: [],
+          dataSlotAttempts: {},
+        },
+      })
+    );
+    const steps = [{ kind: 'answer_captured', label: 'Captured department', tone: 'positive' }];
+    reasoningMock.buildReasoningTrace.mockReturnValue(steps);
+
+    const frames = await drainSse(await POST(req({ message: 'hi' }), ctx));
+
+    // In data-slot mode the builder receives dataSlots so it can name them in the trace.
+    const builderCall = reasoningMock.buildReasoningTrace.mock.calls[0];
+    const opts = builderCall?.[1] as { dataSlots?: Array<{ key: string }> };
+    expect(opts.dataSlots).toBeDefined();
+    expect(opts.dataSlots![0].key).toBe('department');
+
+    // The reasoning frame is emitted.
+    expect(frames.map((f) => f.event)).toContain('reasoning');
   });
 });

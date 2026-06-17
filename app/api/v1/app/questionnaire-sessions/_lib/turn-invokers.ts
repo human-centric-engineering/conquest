@@ -108,6 +108,26 @@ async function loadBinding(slug: string): Promise<AgentBinding | null> {
   return agent;
 }
 
+/**
+ * The transcript the per-turn similarity ranking / selection should rank against: the persisted
+ * recent messages PLUS the answer the respondent just sent THIS turn.
+ *
+ * `state.recentMessages` is built from *persisted* turns, so its last entry is the interviewer's
+ * previous QUESTION, not the respondent's current ANSWER (which lives in `state.userMessage`). The
+ * adaptive selectors embed the last entry as their similarity query — so without this they rank by
+ * what was ASKED, not what the respondent just SAID, which drops answer-relevant candidates for any
+ * volunteered or cross-topic content. Appending the current answer makes "what they just said" the
+ * query and the latest line in the selector's transcript. Empty (kickoff) → unchanged.
+ */
+function conversationWithCurrentAnswer(state: {
+  userMessage: string;
+  recentMessages: string[];
+}): string[] {
+  return state.userMessage.trim().length > 0
+    ? [...state.recentMessages, state.userMessage]
+    : state.recentMessages;
+}
+
 /** Build the live invokers, loading the capability agent bindings once up front. */
 export async function buildTurnInvokers(opts: {
   userId: string;
@@ -159,6 +179,14 @@ export async function buildTurnInvokers(opts: {
    * can run the focused follow-up pass. `off`/absent → single pass (no behaviour change).
    */
   answerFitMode?: AnswerFitMode;
+  /**
+   * Anonymous (no-login) session. The adaptive SELECTORS drive the selection agent through
+   * `streamChat`, which persists an `AiConversation` keyed to a real `user` — but an anonymous turn's
+   * `userId` is the synthetic `anon:<sessionId>` (no `user` row), so the insert FK-violates and the
+   * stream 500s every turn. With no ephemeral-chat seam in the platform handler, the selectors skip
+   * the LLM pick for anonymous sessions and fall back to deterministic selection.
+   */
+  anonymous?: boolean;
 }): Promise<CapabilityInvokers> {
   const {
     userId,
@@ -171,6 +199,7 @@ export async function buildTurnInvokers(opts: {
     dataSlotCandidates,
     sensitivityAware,
     answerFitMode,
+    anonymous,
     recordInspectorCall,
   } = opts;
 
@@ -286,6 +315,22 @@ export async function buildTurnInvokers(opts: {
             2
           ),
         });
+        // The answer-fit resolver is a SEPARATE LLM call inside the capability — surface it as its
+        // own trace (the capability hands its details back on `data.answerFitCall` when it ran).
+        if (data.answerFitCall) {
+          const fc = data.answerFitCall;
+          recordInspectorCall({
+            label: 'Answer-fit resolver',
+            model: fc.model,
+            provider: fc.provider,
+            latencyMs: 0,
+            costUsd: fc.costUsd,
+            tokensIn: fc.tokensIn,
+            tokensOut: fc.tokensOut,
+            prompt: fc.prompt,
+            response: fc.response,
+          });
+        }
       }
       return {
         intents: data.intents,
@@ -311,6 +356,10 @@ export async function buildTurnInvokers(opts: {
         })),
         mode: state.config.contradictionMode,
         windowN: state.config.contradictionWindowN,
+        // Feed the respondent's latest message so the detector can catch a same-slot reversal
+        // (e.g. an earlier "I hate the job" answer vs a current "I love my job") even when this
+        // turn's extraction didn't overwrite the stored answer. Omitted on a kickoff (empty).
+        ...(state.userMessage.trim().length > 0 ? { currentStatement: state.userMessage } : {}),
         sessionId: state.sessionId,
       };
       const dispatch = await capabilityDispatcher.dispatch(
@@ -416,20 +465,26 @@ export async function buildTurnInvokers(opts: {
     },
 
     async selectNext(state): Promise<SelectOutcome> {
+      // Rank the next question by what the respondent JUST said, not the prior interviewer question.
+      const conversation = conversationWithCurrentAnswer(state);
       const ctx: SelectionContext = {
         questions: state.questions,
         answered: state.answered,
         config: state.config,
         round: state.selectionRound,
         sessionId: state.sessionId,
-        ...(state.recentMessages.length > 0 ? { recentMessages: state.recentMessages } : {}),
+        ...(conversation.length > 0 ? { recentMessages: conversation } : {}),
         ...(goal ? { goal } : {}),
       };
       // Adaptive's embedding + LLM path runs only when its sub-flag is on; otherwise it
       // degrades to `weighted` via the strategy's own fallback (no deps passed).
       let deps: StrategyDeps | undefined;
       if (state.config.selectionStrategy === 'adaptive' && adaptiveEnabled) {
-        deps = buildAdaptiveDeps({ userId });
+        deps = buildAdaptiveDeps({
+          userId,
+          ...(anonymous ? { anonymous } : {}),
+          ...(recordInspectorCall ? { recordInspectorCall } : {}),
+        });
       }
       const started = Date.now();
       const decision = await getStrategy(state.config.selectionStrategy).select(ctx, deps);
@@ -442,12 +497,15 @@ export async function buildTurnInvokers(opts: {
       if (!dataSlotAdaptiveEnabled) return null;
       return selectNextDataSlot({
         unfilled,
-        recentMessages: state.recentMessages,
+        // Rank the next data slot by what the respondent JUST said (see conversationWithCurrentAnswer).
+        recentMessages: conversationWithCurrentAnswer(state),
         activeTheme: context.activeTheme,
         parkedTheme: context.parkedTheme,
         ...(goal ? { goal } : {}),
         sessionId: state.sessionId,
         userId,
+        ...(anonymous ? { anonymous } : {}),
+        ...(recordInspectorCall ? { recordInspectorCall } : {}),
       });
     },
 

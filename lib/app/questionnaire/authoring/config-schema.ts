@@ -131,6 +131,10 @@ export const updateConfigSchema = z
     attachmentsEnabled: z.boolean().optional(),
     contradictionMode: z.enum(CONTRADICTION_MODES).optional(),
     answerFitMode: z.enum(ANSWER_FIT_MODES).optional(),
+    // Extraction candidate pre-filter: narrow the combined extractor's candidate set by embedding
+    // similarity to the respondent's message each turn (spends one embedding call per turn).
+    // Recommended for large (50+ slot / 70+ question) surveys; off by default.
+    extractionPrefilter: z.boolean().optional(),
     contradictionWindowN: z.number().int().nonnegative().optional(),
     contradictionEveryNTurns: z.number().int().min(1).optional(),
     anonymousMode: z.boolean().optional(),

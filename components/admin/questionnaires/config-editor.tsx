@@ -403,6 +403,7 @@ export function ConfigEditor({
     String(config.contradictionEveryNTurns)
   );
   const [answerFitMode, setAnswerFitMode] = useState<AnswerFitMode>(config.answerFitMode);
+  const [extractionPrefilter, setExtractionPrefilter] = useState(config.extractionPrefilter);
   const [anonymousMode, setAnonymousMode] = useState(config.anonymousMode);
   const [accessMode, setAccessMode] = useState<AccessMode>(config.accessMode);
   const [inviteeFields, setInviteeFields] = useState<InviteeFieldConfig[]>(config.inviteeFields);
@@ -453,6 +454,7 @@ export function ConfigEditor({
     setContradictionWindowN(String(config.contradictionWindowN));
     setContradictionEveryNTurns(String(config.contradictionEveryNTurns));
     setAnswerFitMode(config.answerFitMode);
+    setExtractionPrefilter(config.extractionPrefilter);
     setAnonymousMode(config.anonymousMode);
     setAccessMode(config.accessMode);
     setInviteeFields(config.inviteeFields);
@@ -525,6 +527,7 @@ export function ConfigEditor({
           true
         ),
         answerFitMode,
+        extractionPrefilter,
         anonymousMode,
         // Access mode (who may start) + invitee fields — email is forced shown+required server-side.
         accessMode,
@@ -1216,6 +1219,26 @@ export function ConfigEditor({
                 ))}
               </SelectContent>
             </Select>
+          </div>
+          <div className="flex items-center gap-2 sm:col-span-2">
+            <Switch
+              checked={extractionPrefilter}
+              onCheckedChange={setExtractionPrefilter}
+              disabled={busy}
+            />
+            <Label className="text-sm font-medium">
+              Extraction pre-filter{' '}
+              <FieldHelp title="Extraction pre-filter">
+                Each turn, narrows the candidate slots the answer extractor reads to the active
+                slot, already-filled slots, same-theme slots, mapped questions, and the most similar
+                to what the respondent just said — cutting per-turn prompt cost on big
+                questionnaires. Spends one embedding call per turn and is fail-soft (any embedding
+                error falls back to the full candidate set).{' '}
+                <strong>Recommended for large surveys</strong> (roughly 50+ data slots / 70+
+                questions); leave off for smaller ones, where sending the full set is cheap and
+                maximises capture accuracy. Off by default.
+              </FieldHelp>
+            </Label>
           </div>
         </div>
       </SettingsGroup>

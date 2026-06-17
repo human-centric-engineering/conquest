@@ -20,18 +20,32 @@
 
 import { embedText } from '@/lib/orchestration/knowledge/embedder';
 import { logger } from '@/lib/logging';
-import { rankSlotsByVector } from '@/app/api/v1/app/questionnaires/_lib/slot-embeddings';
-import { rankDataSlotsByVector } from '@/app/api/v1/app/questionnaires/_lib/data-slot-embeddings';
+import {
+  rankSlotsByVector,
+  rankSlotsByText,
+  findDuplicateSlotIds,
+} from '@/app/api/v1/app/questionnaires/_lib/slot-embeddings';
+import {
+  rankDataSlotsByVector,
+  rankDataSlotsByText,
+} from '@/app/api/v1/app/questionnaires/_lib/data-slot-embeddings';
 import type { CapabilitySlotView } from '@/app/api/v1/app/questionnaires/_lib/turn-context';
+import { buildEmbeddingTrace, type RecordAgentCall } from '@/lib/app/questionnaire/inspector';
 
 /** Tuning knobs. All overridable per-call so tests can pin small values and ops can tune. */
 export const EXTRACTION_PREFILTER_DEFAULTS = {
   /** Top-K most similar question slots to keep (beyond the forced safety-rail set). */
-  questionK: 25,
+  questionK: 40,
   /** Top-K most similar data slots to keep (generous vs. the selector's 8 — extraction fills many per turn). */
-  dataSlotK: 12,
+  dataSlotK: 18,
   /** Below this combined candidate count the pre-filter is a no-op (send everything). */
   sizeThreshold: 30,
+  /**
+   * Cosine DISTANCE under which a candidate question counts as a near-duplicate of a kept one
+   * (similarity ≥ 0.93) — the twin-inclusion rail pulls those siblings in so a clear answer lands on
+   * every copy of a repeated question, not just the one the ranking surfaced.
+   */
+  duplicateMaxDistance: 0.07,
 } as const;
 
 /** A data-slot candidate, as the route assembles it (identity, theme, mapping, current-fill marker). */
@@ -63,6 +77,8 @@ export interface ExtractionCandidateInput {
   questionK?: number;
   dataSlotK?: number;
   sizeThreshold?: number;
+  /** Inspector sink (admin preview only); when present, a successful embed records one trace. */
+  recordInspectorCall?: RecordAgentCall;
 }
 
 export type ExtractionPrefilterReason =
@@ -101,6 +117,7 @@ export async function narrowExtractionCandidates(
 ): Promise<ExtractionCandidateResult> {
   const questionK = input.questionK ?? EXTRACTION_PREFILTER_DEFAULTS.questionK;
   const dataSlotK = input.dataSlotK ?? EXTRACTION_PREFILTER_DEFAULTS.dataSlotK;
+  const duplicateMaxDistance = EXTRACTION_PREFILTER_DEFAULTS.duplicateMaxDistance;
   const sizeThreshold = input.sizeThreshold ?? EXTRACTION_PREFILTER_DEFAULTS.sizeThreshold;
 
   const full = (reason: ExtractionPrefilterReason): ExtractionCandidateResult => ({
@@ -124,7 +141,10 @@ export async function narrowExtractionCandidates(
   if (!lastMessage) return full('no_message');
 
   try {
-    const embedding = (await embedText(lastMessage, 'query')).embedding;
+    const startedAt = Date.now();
+    const embedResult = await embedText(lastMessage, 'query');
+    const embedLatencyMs = Date.now() - startedAt;
+    const embedding = embedResult.embedding;
 
     // ---- Data slots ----
     // Rails 1-3: always keep the active slot, every filled slot (any theme), and same-theme unfilled.
@@ -135,15 +155,20 @@ export async function narrowExtractionCandidates(
       if (input.activeTheme && ds.theme === input.activeTheme) forcedDataKeys.add(ds.key); // rail 3
     }
 
-    const rankedDataIds = await rankDataSlotsByVector(
-      embedding,
-      input.dataSlots.map((s) => s.id),
-      dataSlotK
-    );
-    // Un-embedded version (no rows) → fail-soft to the full set so we never drop a slot.
+    // Hybrid retrieval: UNION the dense (vector) top-K with the lexical (BM25) top-K, so an exact
+    // term the respondent used surfaces its slot even when a multi-topic message dilutes the dense
+    // vector. The un-embedded fail-soft bails on the DENSE result (the embedding being absent), not
+    // the union — lexical alone is too sparse to safely narrow on.
+    const dataIds = input.dataSlots.map((s) => s.id);
+    const [denseDataIds, lexicalDataIds] = await Promise.all([
+      rankDataSlotsByVector(embedding, dataIds, dataSlotK),
+      rankDataSlotsByText(lastMessage, dataIds, dataSlotK),
+    ]);
+    // Un-embedded version (no dense rows) → fail-soft to the full set so we never drop a slot.
     // (When there are genuinely no data slots, there's nothing to drop and the question side still
     // narrows — so only bail when data slots EXIST but none are embedded.)
-    if (input.dataSlots.length > 0 && rankedDataIds.length === 0) return full('no_embeddings');
+    if (input.dataSlots.length > 0 && denseDataIds.length === 0) return full('no_embeddings');
+    const rankedDataIds = [...new Set([...denseDataIds, ...lexicalDataIds])];
 
     const dataById = new Map(input.dataSlots.map((s) => [s.id, s]));
     const rankedDataKeys = new Set(
@@ -161,19 +186,58 @@ export async function narrowExtractionCandidates(
       for (const qk of ds.mappedQuestionKeys ?? []) forcedQuestionKeys.add(qk);
     }
 
-    const rankedQuestionIds = await rankSlotsByVector(
-      embedding,
-      input.questionSlots.map((s) => s.id),
-      questionK
-    );
+    // Hybrid retrieval for questions too: dense top-K ∪ lexical top-K.
+    const questionIds = input.questionSlots.map((s) => s.id);
+    const [denseQuestionIds, lexicalQuestionIds] = await Promise.all([
+      rankSlotsByVector(embedding, questionIds, questionK),
+      rankSlotsByText(lastMessage, questionIds, questionK),
+    ]);
+    const rankedQuestionIds = [...new Set([...denseQuestionIds, ...lexicalQuestionIds])];
     const questionById = new Map(input.questionSlots.map((s) => [s.id, s]));
     const rankedQuestionKeys = new Set(
       rankedQuestionIds
         .map((id) => questionById.get(id)?.key)
         .filter((k): k is string => k !== undefined)
     );
-    const keptQuestionSlots = input.questionSlots.filter(
-      (s) => forcedQuestionKeys.has(s.key) || rankedQuestionKeys.has(s.key)
+    const keptQuestionKeys = new Set<string>();
+    for (const s of input.questionSlots) {
+      if (forcedQuestionKeys.has(s.key) || rankedQuestionKeys.has(s.key))
+        keptQuestionKeys.add(s.key);
+    }
+
+    // Twin-inclusion rail: pull in near-duplicate copies of any KEPT question (the same question
+    // reworded in another section) so a clear answer lands on EVERY copy, not just the one the
+    // ranking surfaced. Embedding self-similarity, capped — a no-op when the version has no twins.
+    const keptQuestionIds = input.questionSlots
+      .filter((s) => keptQuestionKeys.has(s.key))
+      .map((s) => s.id);
+    const duplicateIds = await findDuplicateSlotIds(
+      keptQuestionIds,
+      questionIds,
+      duplicateMaxDistance
+    );
+    for (const id of duplicateIds) {
+      const key = questionById.get(id)?.key;
+      if (key) keptQuestionKeys.add(key);
+    }
+
+    const keptQuestionSlots = input.questionSlots.filter((s) => keptQuestionKeys.has(s.key));
+
+    input.recordInspectorCall?.(
+      buildEmbeddingTrace({
+        label: 'Extraction candidate ranking',
+        embedded: lastMessage,
+        rankingSummary:
+          `Ranked ${input.questionSlots.length} questions → kept ${keptQuestionSlots.length}, ` +
+          `${input.dataSlots.length} data slots → kept ${keptDataSlots.length} ` +
+          `(top-K + safety rails).`,
+        model: embedResult.model,
+        provider: embedResult.provider,
+        dimensions: embedResult.dimensions,
+        inputTokens: embedResult.inputTokens,
+        costUsd: embedResult.costUsd,
+        latencyMs: embedLatencyMs,
+      })
     );
 
     return {

@@ -14,6 +14,7 @@
  */
 
 import type { LlmMessage } from '@/lib/orchestration/llm/types';
+import { joinSections, section, titledBlock } from '@/lib/app/questionnaire/prompt/format';
 import {
   REFINEMENT_ACTIONS,
   REFINEMENT_SOURCES,
@@ -129,31 +130,34 @@ export function buildRefinementPrompt(ctx: RefinementContext): LlmMessage[] {
     if (slot) answerLines.push(describeExistingAnswer(answer, slot));
   }
 
-  const contextParts: string[] = [`Existing answers:\n${answerLines.join('\n')}`];
+  const contradiction = ctx.triggeringContradiction
+    ? (() => {
+        const { explanation, suggestedProbe } = ctx.triggeringContradiction;
+        const probeLine = suggestedProbe
+          ? `\nSuggested follow-up that was asked: ${suggestedProbe}`
+          : '';
+        return `A contradiction was flagged between these answers:\n${explanation}${probeLine}`;
+      })()
+    : '';
 
-  if (ctx.triggeringContradiction) {
-    const { explanation, suggestedProbe } = ctx.triggeringContradiction;
-    const probeLine = suggestedProbe
-      ? `\nSuggested follow-up that was asked: ${suggestedProbe}`
-      : '';
-    contextParts.push(
-      `A contradiction was flagged between these answers:\n${explanation}${probeLine}`
-    );
-  }
-
-  if (ctx.recentMessages && ctx.recentMessages.length > 0) {
-    contextParts.push(`Recent conversation:\n${ctx.recentMessages.join('\n')}`);
-  }
-
-  if (ctx.userMessage) {
-    contextParts.push(`The respondent's new message:\n${ctx.userMessage}`);
-  }
-
-  contextParts.push(`Decide which existing answers (if any) the new context warrants updating.`);
+  // The new context, framed as named XML sections so the existing answers, the triggering
+  // contradiction, and the respondent's new message are clearly separable (in the prompt and the
+  // inspector). Section text is unchanged; absent parts collapse to nothing.
+  const userContent = joinSections(
+    section('existing_answers', titledBlock('Existing answers', answerLines.join('\n'))),
+    contradiction ? section('contradiction', contradiction) : '',
+    ctx.recentMessages && ctx.recentMessages.length > 0
+      ? section('transcript', titledBlock('Recent conversation', ctx.recentMessages.join('\n')))
+      : '',
+    ctx.userMessage
+      ? section('new_message', titledBlock("The respondent's new message", ctx.userMessage))
+      : '',
+    section('task', 'Decide which existing answers (if any) the new context warrants updating.')
+  );
 
   return [
-    { role: 'system', content: systemRules() },
-    { role: 'user', content: contextParts.join('\n\n') },
+    { role: 'system', content: section('refinement_rules', systemRules()) },
+    { role: 'user', content: userContent },
   ];
 }
 

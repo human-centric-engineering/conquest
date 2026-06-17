@@ -205,9 +205,13 @@ route then drives `runDataSlotTurn` (`orchestrator/data-slot-orchestrator.ts`) i
    never parks or records a provisional fill.
 4. **Late-stage sweep** — once every data slot is covered, ask any still-unanswered **questions**
    directly.
-5. **Completion** — offer to submit only when **all questions** are answered. The respondent
-   progress bar + panel header track question completion (`answeredCount / total`), via a
-   data-slot-mode override in `loadSessionStatus`.
+5. **Completion** — offer to submit only when **all questions** are answered (a data-slot-mode
+   submit-gate override in `loadSessionStatus`, independent of the configurable weighted
+   threshold). Progress, by contrast, is one figure everywhere: the respondent top progress bar,
+   the panel's "What we're learning" header, and the chat reasoning trace's "X% covered so far"
+   all show the **weighted question coverage** (`coverageRatio` / `weightedCoverage`) — guided by
+   question completeness, never moved by how many data slots are filled, so the three can't
+   disagree.
 
 Persistence: `persistTurn` upserts the data-slot fills (`upsertDataSlotFill`, carrying
 `provisional`) alongside the question answers; `recordTurn` back-stamps
@@ -215,9 +219,18 @@ Persistence: `persistTurn` upserts the data-slot fills (`upsertDataSlotFill`, ca
 counter). The generic `targetedQuestionId` column ALSO carries the targeted data-slot id on a
 data-slot turn (the loader resolves it to the active data slot for re-ask/transition next turn).
 
-> Contradiction/refinement (F4.3/F4.4) are not run in data-slot mode v1 — the combined extractor
-> improves fills/answers each turn. Active re-targeting of parked slots (vs the passive cross-turn
-> enrichment above) is future work.
+**Contradiction detection + refinement (F4.3/F4.4) run in data-slot mode** (parity with question
+mode) via the shared `runContradictionPhase`: gated by the questionnaire's `contradictionMode` +
+`contradictionEveryNTurns` cadence and the platform flag, with a ≥1-stored-answer floor (a single
+answer can contradict the latest message; ≥2 only when there's no message). They compare the **background question answers** — and, crucially, the respondent's
+**latest message** (`currentStatement`) — so a _same-slot reversal_ across turns ("I hate the job"
+→ "I love my job") is caught even when extraction didn't overwrite the stored answer. Under `flag`
+mode it surfaces an informational notice and refines immediately; under `probe` mode it runs the
+[confirm-before-overwrite flow](./contradiction-detection.md#probe-confirm-flow-probe-mode) — the
+interviewer asks a reconciliation question and **suppresses this turn's data-slot fills + answers**
+until the respondent confirms next turn (the parked finding lives on
+`AppQuestionnaireSession.pendingContradiction`). Active re-targeting of parked slots (vs the passive
+cross-turn enrichment above) is future work.
 
 ## Adaptive data-slot selection (50+-slot scale)
 
@@ -241,6 +254,15 @@ question slots) and asks the seeded **selector agent** which to pursue next.
   `_lib/data-slot-selection.ts` (`selectNextDataSlot`). **Fail-soft everywhere**: no last message,
   <2 candidates, un-embedded slots, a selector error, or an off-pool pick all return `null` and the
   orchestrator falls back to `pickNextDataSlot`. The selector's spend is folded into the turn cost.
+- **Anonymous sessions skip the LLM pick.** The selector agent runs through `streamChat`, which
+  persists an `AiConversation` keyed to a real `user`. An anonymous (no-login) turn's `userId` is the
+  synthetic `anon:<sessionId>` with no `user` row, so that insert FK-violates and the stream 500s
+  (`internal_error`) every turn — silently degrading adaptive selection while spamming error logs.
+  With no ephemeral-chat seam in the platform handler, `selectNextDataSlot` (and the question-mode
+  `buildAdaptiveDeps`) take an `anonymous` flag — threaded from `resolveTurnAccess` → the `/messages`
+  route → `buildTurnInvokers` — and short-circuit to the deterministic pick for anonymous sessions.
+  Restoring adaptive selection for anonymous respondents needs an ephemeral (non-persisting) chat
+  mode in the platform `streamChat`, tracked as platform follow-up.
 - **Gating.** Sub-flag `APP_QUESTIONNAIRES_ADAPTIVE_DATA_SLOTS_ENABLED`
   (`isAdaptiveDataSlotSelectionEnabled` = master AND data-slots AND live-sessions AND this sub-flag),
   off by default. The `/messages` route wires the invoker only in data-slot mode with the flag on,
@@ -257,9 +279,11 @@ question slots) and asks the seeded **selector agent** which to pursue next.
 `GET …/:id/answers` returns themed `dataSlotGroups` (name + paraphrase + **provenance** + confidence
 
 - filled + `provisional`) in data-slot mode; `AnswerSlotPanel` renders them grouped by theme. A
-  parked slot shows its inferred summary with a subtle **"provisional · may revisit"** marker and
-  counts toward the blended progress. The question rows are suppressed — the respondent only ever sees
-  the abstraction layer.
+  parked slot shows its inferred summary with a subtle **"provisional · may revisit"** marker. The
+  panel's "% complete" header tracks the **weighted question coverage** (not data-slot fills — those
+  are the abstraction layer, not the deliverable), so it matches the reasoning trace and the top
+  progress bar exactly. The question rows are suppressed — the respondent only ever sees the
+  abstraction layer.
 
 **Inferred vs stated (honesty in the panel).** A fill carries the extractor's `provenance` — `direct`
 (stated), `inferred` (single-step reasoning), or `synthesised` (across turns). The panel flags

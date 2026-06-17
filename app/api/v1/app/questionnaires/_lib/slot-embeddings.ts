@@ -191,3 +191,62 @@ export async function rankSlotsByVector(
   );
   return rows.map((r) => r.id);
 }
+
+/**
+ * Lexical (BM25-style) ranking of `candidateIds` against `queryText` via Postgres full-text search
+ * (`ts_rank_cd` over `websearch_to_tsquery`), returning at most `k` ids best-first. The lexical
+ * complement to {@link rankSlotsByVector}: the extraction pre-filter UNIONs the two so an exact term
+ * the respondent used ("pipeline") surfaces its question even when a multi-topic message's dense
+ * vector dilutes it below the dense top-K. No `tsvector` column — `to_tsvector` is computed inline
+ * (the candidate set is one version's slots, so the seq-scan is trivial). Empty/stopword-only query
+ * → `[]`.
+ */
+export async function rankSlotsByText(
+  queryText: string,
+  candidateIds: string[],
+  k: number
+): Promise<string[]> {
+  const q = queryText.trim();
+  if (!q || candidateIds.length === 0 || k <= 0) return [];
+  const idPlaceholders = candidateIds.map((_, i) => `$${i + 3}`).join(', ');
+  const tsv = `to_tsvector('english', coalesce("prompt", '') || ' ' || coalesce("guidelines", ''))`;
+  const rows = await prisma.$queryRawUnsafe<Array<{ id: string }>>(
+    `SELECT "id" FROM "app_question_slot"
+     WHERE "id" IN (${idPlaceholders}) AND ${tsv} @@ plainto_tsquery('english', $1)
+     ORDER BY ts_rank_cd(${tsv}, plainto_tsquery('english', $1), 32) DESC
+     LIMIT $2`,
+    q,
+    k,
+    ...candidateIds
+  );
+  return rows.map((r) => r.id);
+}
+
+/**
+ * Among `candidateIds`, find the question slots that are NEAR-DUPLICATES of any `keptId` — cosine
+ * distance ≤ `maxDistance` (i.e. similarity ≥ `1 - maxDistance`). Backs the extraction pre-filter's
+ * twin-inclusion rail: when a question is kept, its semantically-identical siblings (the same
+ * question reworded in another section) are pulled in too, so a clear answer lands on EVERY copy,
+ * not just the one the ranking happened to surface. Only embedded slots participate; `[]` on empty
+ * input.
+ */
+export async function findDuplicateSlotIds(
+  keptIds: string[],
+  candidateIds: string[],
+  maxDistance: number
+): Promise<string[]> {
+  if (keptIds.length === 0 || candidateIds.length === 0) return [];
+  const keptPh = keptIds.map((_, i) => `$${i + 2}`).join(', ');
+  const candPh = candidateIds.map((_, i) => `$${i + 2 + keptIds.length}`).join(', ');
+  const rows = await prisma.$queryRawUnsafe<Array<{ id: string }>>(
+    `SELECT DISTINCT b."id" FROM "app_question_slot" a
+     JOIN "app_question_slot" b ON a."id" <> b."id"
+     WHERE a."id" IN (${keptPh}) AND b."id" IN (${candPh})
+       AND a."embedding" IS NOT NULL AND b."embedding" IS NOT NULL
+       AND (a."embedding" <=> b."embedding") <= $1`,
+    maxDistance,
+    ...keptIds,
+    ...candidateIds
+  );
+  return rows.map((r) => r.id);
+}

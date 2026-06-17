@@ -447,4 +447,156 @@ describe('buildTurnContext', () => {
       provisional: true,
     });
   });
+
+  // -------------------------------------------------------------------------
+  // parsePendingContradiction — defensive JSON parsing (lines 46–62)
+  // -------------------------------------------------------------------------
+  // The function is called via buildTurnContext; it exercises all its branches
+  // through the pendingContradiction field on the session row.
+
+  it('parses a fully-valid pendingContradiction and threads it into base', async () => {
+    // Arrange: a well-formed contradiction object with all required fields.
+    const raw = {
+      slotKeys: ['role', 'tenure'],
+      explanation: 'Earlier answer contradicts the latest.',
+      statement: 'Earlier you said engineer; now you say manager.',
+      raisedAtTurnIndex: 3,
+      suggestedProbe: 'Can you clarify your current title?',
+    };
+    (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionGraph({ pendingContradiction: raw })
+    );
+
+    // Act
+    const loaded = await buildTurnContext('sess-1');
+
+    // Assert: the loader must parse the raw JSON into a PendingContradiction and thread
+    // it into base.pendingContradiction — not pass the raw object through.
+    expect(loaded!.base.pendingContradiction).toEqual({
+      slotKeys: ['role', 'tenure'],
+      explanation: 'Earlier answer contradicts the latest.',
+      statement: 'Earlier you said engineer; now you say manager.',
+      raisedAtTurnIndex: 3,
+      suggestedProbe: 'Can you clarify your current title?',
+    });
+  });
+
+  it('omits suggestedProbe when the raw field is not a string', async () => {
+    // Arrange: valid required fields but suggestedProbe is a number (wrong type).
+    const raw = {
+      slotKeys: ['role'],
+      explanation: 'Conflict detected.',
+      statement: 'You said both A and B.',
+      raisedAtTurnIndex: 1,
+      suggestedProbe: 42, // not a string — must be omitted
+    };
+    (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionGraph({ pendingContradiction: raw })
+    );
+
+    const loaded = await buildTurnContext('sess-1');
+
+    // The parsed result must carry all required fields but NOT suggestedProbe.
+    expect(loaded!.base.pendingContradiction).not.toBeNull();
+    expect(loaded!.base.pendingContradiction).not.toHaveProperty('suggestedProbe');
+    expect(loaded!.base.pendingContradiction?.slotKeys).toEqual(['role']);
+  });
+
+  it('returns null for pendingContradiction when the raw value is not a record (null)', async () => {
+    // Arrange: session row has pendingContradiction=null (DB default — no contradiction pending).
+    (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionGraph({ pendingContradiction: null })
+    );
+
+    const loaded = await buildTurnContext('sess-1');
+
+    // null is not a record → parsePendingContradiction returns null.
+    expect(loaded!.base.pendingContradiction).toBeNull();
+  });
+
+  it('returns null for pendingContradiction when slotKeys is not an array', async () => {
+    // Arrange: an object whose slotKeys is a string, not an array.
+    const raw = {
+      slotKeys: 'role', // string, not array
+      explanation: 'Conflict.',
+      statement: 'You said both A and B.',
+      raisedAtTurnIndex: 1,
+    };
+    (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionGraph({ pendingContradiction: raw })
+    );
+
+    const loaded = await buildTurnContext('sess-1');
+
+    expect(loaded!.base.pendingContradiction).toBeNull();
+  });
+
+  it('returns null for pendingContradiction when slotKeys contains non-string elements', async () => {
+    // Arrange: slotKeys array exists but contains a number — every element must be a string.
+    const raw = {
+      slotKeys: ['role', 42], // 42 is not a string
+      explanation: 'Conflict.',
+      statement: 'You said both A and B.',
+      raisedAtTurnIndex: 1,
+    };
+    (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionGraph({ pendingContradiction: raw })
+    );
+
+    const loaded = await buildTurnContext('sess-1');
+
+    expect(loaded!.base.pendingContradiction).toBeNull();
+  });
+
+  it('returns null for pendingContradiction when slotKeys is an empty array', async () => {
+    // Arrange: slotKeys is [] — an empty array is treated as "no contradiction" (nothing to
+    // probe), so the parser degrades gracefully rather than passing an unusable object through.
+    const raw = {
+      slotKeys: [],
+      explanation: 'Conflict.',
+      statement: 'You said both A and B.',
+      raisedAtTurnIndex: 1,
+    };
+    (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionGraph({ pendingContradiction: raw })
+    );
+
+    const loaded = await buildTurnContext('sess-1');
+
+    expect(loaded!.base.pendingContradiction).toBeNull();
+  });
+
+  it('returns null for pendingContradiction when explanation is missing', async () => {
+    // Arrange: explanation is absent — the parser requires both explanation and statement.
+    const raw = {
+      slotKeys: ['role'],
+      // explanation intentionally omitted
+      statement: 'You said both A and B.',
+      raisedAtTurnIndex: 1,
+    };
+    (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionGraph({ pendingContradiction: raw })
+    );
+
+    const loaded = await buildTurnContext('sess-1');
+
+    expect(loaded!.base.pendingContradiction).toBeNull();
+  });
+
+  it('returns null for pendingContradiction when raisedAtTurnIndex is not a number', async () => {
+    // Arrange: all required string fields present but raisedAtTurnIndex is a string.
+    const raw = {
+      slotKeys: ['role'],
+      explanation: 'Conflict.',
+      statement: 'You said both A and B.',
+      raisedAtTurnIndex: '1', // string, not number
+    };
+    (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionGraph({ pendingContradiction: raw })
+    );
+
+    const loaded = await buildTurnContext('sess-1');
+
+    expect(loaded!.base.pendingContradiction).toBeNull();
+  });
 });

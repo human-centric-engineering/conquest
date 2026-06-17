@@ -59,6 +59,20 @@ content or a fresh disclosure ("I'm still being bullied and I'm furious") stays 
 the persisted `sensitivityLevel` still keeps the **phraser** in a warm/careful tone for the rest of
 the session — tone-softening and the strike decision are independent.
 
+### A contradiction is not a sincerity failure
+
+The judge rules on whether **this** answer is genuine on its own — **never** on whether it is
+consistent with earlier answers. A later answer that contradicts or reverses an earlier one ("I
+hate my job" on one turn, "I love my job" on the next) is genuine and must be **kept**; reconciling
+the conflict is the [contradiction detector's](./contradiction-detection.md) job (it surfaces a
+`contradiction` warning and, under `probe` mode, a reconciliation question). This is an explicit
+rule in the judge prompt because the recent conversation it receives (for reading oblique messages)
+otherwise tempts the model to mark a reversal as a "joke/troll" and disregard it — which both drops
+a real answer **and** pre-empts the contradiction probe (the disregard sets `disregarded`, and the
+per-turn detect step is guarded by `!disregarded`). The `PREPOSTEROUS / IMPOSSIBLE` category is
+scoped to an answer that is impossible **on its own**, not one that is merely inconsistent with a
+prior turn.
+
 ## On a NOT-serious verdict (pure orchestrator, `orchestrator.ts`)
 
 - **Disregard** — clear the turn's `answerUpserts`; the answer is never merged or persisted.

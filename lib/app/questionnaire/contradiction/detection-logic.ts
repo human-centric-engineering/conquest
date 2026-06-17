@@ -82,9 +82,16 @@ export function normalizeContradictionFindings(
       continue;
     }
 
-    // A contradiction needs at least two distinct slots to be a contradiction.
-    if (keys.length < 2) {
-      dropped.push({ slotKeys: keys, reason: 'fewer than two distinct slots' });
+    // A contradiction normally needs at least two distinct slots. But when the caller
+    // supplied the respondent's latest message (`currentStatement`), that message is the
+    // implicit second party — so a single stored slot the message reverses IS a real
+    // contradiction (the same-slot reversal case). Require ≥1 distinct slot then, ≥2 otherwise.
+    const minSlots = ctx.currentStatement ? 1 : 2;
+    if (keys.length < minSlots) {
+      dropped.push({
+        slotKeys: keys,
+        reason: minSlots === 1 ? 'no slot referenced' : 'fewer than two distinct slots',
+      });
       continue;
     }
 

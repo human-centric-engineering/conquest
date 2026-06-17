@@ -26,6 +26,7 @@ vi.mock('@/lib/app/questionnaire/feature-flag', () => ({
   isQuestionnairesEnabled: vi.fn(),
   isDataSlotsEnabled: vi.fn(),
   isGenerativeAuthoringEnabled: vi.fn(),
+  isAdaptiveDataSlotSelectionEnabled: vi.fn(),
 }));
 
 vi.mock('@/lib/api/server-fetch', () => ({
@@ -66,6 +67,7 @@ import {
   isQuestionnairesEnabled,
   isDataSlotsEnabled,
   isGenerativeAuthoringEnabled,
+  isAdaptiveDataSlotSelectionEnabled,
 } from '@/lib/app/questionnaire/feature-flag';
 import { serverFetch, parseApiResponse } from '@/lib/api/server-fetch';
 import type { QuestionnaireListItem } from '@/lib/app/questionnaire/views';
@@ -108,6 +110,7 @@ describe('QuestionnairesListPage stat tiles', () => {
     vi.mocked(isQuestionnairesEnabled).mockResolvedValue(true);
     vi.mocked(isDataSlotsEnabled).mockResolvedValue(false);
     vi.mocked(isGenerativeAuthoringEnabled).mockResolvedValue(false);
+    vi.mocked(isAdaptiveDataSlotSelectionEnabled).mockResolvedValue(false);
 
     // serverFetch tags the response with its URL so parseApiResponse can branch.
     vi.mocked(serverFetch).mockImplementation(
@@ -428,5 +431,28 @@ describe('QuestionnairesListPage stat tiles', () => {
     expect(tileValue('Drafts')).toBe('2');
     expect(tileValue('Launched')).toBe('0');
     expect(tileValue('Archived')).toBe('0');
+  });
+
+  it('hides the data-slot embedding explainer when data slots are disabled', async () => {
+    // Default beforeEach disables data slots — the dashboard must not advertise the dark feature.
+    render(await QuestionnairesListPage());
+
+    expect(screen.queryByText('About data-slot embedding')).not.toBeInTheDocument();
+  });
+
+  it('shows the data-slot embedding explainer (with live flag status) when data slots are enabled', async () => {
+    vi.mocked(isDataSlotsEnabled).mockResolvedValue(true);
+    vi.mocked(isAdaptiveDataSlotSelectionEnabled).mockResolvedValue(true);
+
+    render(await QuestionnairesListPage());
+
+    // The explainer renders and its consumer use-cases are listed.
+    expect(screen.getByText('About data-slot embedding')).toBeInTheDocument();
+    expect(screen.getByText('Adaptive question selection')).toBeInTheDocument();
+    expect(screen.getByText('Extraction pre-filter (large surveys)')).toBeInTheDocument();
+    // Adaptive selection (a platform flag) shows a live On pill; the pre-filter is now a
+    // per-questionnaire Settings toggle, so it has no global pill.
+    const pills = screen.getAllByText(/^(On|Off)$/).map((el) => el.textContent);
+    expect(pills).toEqual(['On']);
   });
 });

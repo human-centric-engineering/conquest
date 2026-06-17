@@ -16,10 +16,17 @@ export {
   type DetectionPhase,
   type DetectionDecision,
   type ContradictionFinding,
+  type PendingContradiction,
   type DroppedFinding,
   type ContradictionDetectionResult,
   type FindingsSummary,
 } from '@/lib/app/questionnaire/contradiction/types';
+
+export {
+  buildContradictionProbe,
+  DEFAULT_RECONCILIATION_QUESTION,
+  type ContradictionProbeLabels,
+} from '@/lib/app/questionnaire/contradiction/probe-flow';
 
 export {
   contradictionDetectionSchema,

@@ -62,6 +62,44 @@ describe('normalizeContradictionFindings', () => {
     expect(dropped[0]?.reason).toMatch(/fewer than two distinct slots/);
   });
 
+  it('keeps a single-slot finding when a current statement is supplied (reversal)', () => {
+    // The latest message is the implicit second party — one stored slot it reverses is enough.
+    const context = ctx({
+      answers: [answered({ slotKey: 'a' }), answered({ slotKey: 'b' })],
+      currentStatement: 'actually the opposite is true',
+    });
+    const { findings, dropped } = normalizeContradictionFindings(
+      [contradiction({ slotKeys: ['a'] })],
+      context
+    );
+    expect(dropped).toHaveLength(0);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.slotKeys).toEqual(['a']);
+  });
+
+  it('still drops a zero-slot finding even with a current statement', () => {
+    const context = ctx({
+      answers: [answered({ slotKey: 'a' })],
+      currentStatement: 'the opposite is true',
+    });
+    const { findings, dropped } = normalizeContradictionFindings(
+      [contradiction({ slotKeys: [] })],
+      context
+    );
+    expect(findings).toHaveLength(0);
+    expect(dropped[0]?.reason).toMatch(/no slot referenced/);
+  });
+
+  it('without a current statement, a single-slot finding is still dropped (≥2 rule holds)', () => {
+    const context = ctx({ answers: [answered({ slotKey: 'a' }), answered({ slotKey: 'b' })] });
+    const { findings, dropped } = normalizeContradictionFindings(
+      [contradiction({ slotKeys: ['a'] })],
+      context
+    );
+    expect(findings).toHaveLength(0);
+    expect(dropped[0]?.reason).toMatch(/fewer than two distinct slots/);
+  });
+
   it('de-duplicates symmetric pairs, keeping the higher-confidence finding', () => {
     const context = ctx({
       answers: [answered({ slotKey: 'a' }), answered({ slotKey: 'b' })],

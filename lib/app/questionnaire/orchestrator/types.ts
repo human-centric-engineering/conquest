@@ -34,7 +34,10 @@ import type {
   AnswerSlotIntent,
   DataSlotFillIntent,
 } from '@/lib/app/questionnaire/extraction/types';
-import type { ContradictionFinding } from '@/lib/app/questionnaire/contradiction/types';
+import type {
+  ContradictionFinding,
+  PendingContradiction,
+} from '@/lib/app/questionnaire/contradiction/types';
 import type { RefinementDecision } from '@/lib/app/questionnaire/refinement/types';
 import type { CompletionAssessment } from '@/lib/app/questionnaire/completion/types';
 import type { SeriousnessVerdict } from '@/lib/app/questionnaire/seriousness/types';
@@ -189,6 +192,14 @@ export interface TurnState {
   sensitivityNotes?: string[];
   /** Which sub-features are enabled this turn. */
   flags: TurnFlags;
+  /**
+   * Probe-confirm contradiction flow: a `probe`-mode contradiction raised on a PRIOR turn that is
+   * awaiting the respondent's confirmation, loaded from `AppQuestionnaireSession.pendingContradiction`.
+   * When present, THIS turn is the resolution turn — the orchestrator runs the refiner against it
+   * (apply on confirm / keep otherwise) and clears it, instead of detecting afresh. Absent/null = no
+   * contradiction awaiting confirmation.
+   */
+  pendingContradiction?: PendingContradiction | null;
   /**
    * Data Slots feature: present in data-slot mode. `dataSlots` is the version's data slots
    * (theme-ordered for topic-local targeting); `dataSlotAnswered` is the filled set; the
@@ -393,7 +404,20 @@ export type TurnResponse =
     }
   | { kind: 'offer'; input: OfferComposeInput }
   | { kind: 'complete'; text: string }
-  | { kind: 'none'; text: string };
+  | { kind: 'none'; text: string }
+  | {
+      /**
+       * Probe-confirm contradiction flow: ask the respondent a reconciliation question for a
+       * `probe`-mode contradiction BEFORE any answer/data-slot is overwritten. `text` is the
+       * deterministic interviewer message (reconciliation question + a plain statement that
+       * confirming will update the earlier answer and the linked data record) — the route streams
+       * it verbatim, NOT through the question phraser, so the consequence wording is exact.
+       * `slotKeys` are the conflicting question slots (recorded on the turn).
+       */
+      kind: 'contradiction_probe';
+      text: string;
+      slotKeys: string[];
+    };
 
 /**
  * The result of one turn — what the route persists (side effects + turn record) and
@@ -420,6 +444,12 @@ export interface TurnResult {
     answerRefinements: RefinementDecision[];
     /** Data Slots feature: the data-slot fills to upsert (present only in data-slot mode). */
     dataSlotFills?: DataSlotFillIntent[];
+    /**
+     * Probe-confirm contradiction flow: how to update `AppQuestionnaireSession.pendingContradiction`.
+     * An object = a probe was raised this turn, park it. `null` = a pending contradiction was resolved
+     * this turn, clear it. `undefined` (the default) = leave it untouched.
+     */
+    pendingContradiction?: PendingContradiction | null;
   };
   /** Side-band frames to stream (warnings/status) — NOT the main content. */
   events: ChatEvent[];

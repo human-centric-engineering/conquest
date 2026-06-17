@@ -21,6 +21,8 @@ vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
 import {
   embedVersionSlots,
   ensureVersionSlotsEmbedded,
+  findDuplicateSlotIds,
+  rankSlotsByText,
   rankSlotsByVector,
   slotEmbeddingCoverage,
 } from '@/app/api/v1/app/questionnaires/_lib/slot-embeddings';
@@ -181,5 +183,136 @@ describe('rankSlotsByVector', () => {
     );
     // ids are expanded into IN-placeholders, not bound as an array.
     expect((prismaMock.$queryRawUnsafe as Mock).mock.calls[0][0]).toContain('IN ($3, $4, $5)');
+  });
+});
+
+describe('slotEmbeddingCoverage — null-row guard', () => {
+  it('returns all-zero when the COUNT query returns no rows (empty version)', async () => {
+    // Exercises the `rows[0]?.total ?? 0` and `rows[0]?.embedded ?? 0` null-coalescing branches.
+    prismaMock.$queryRawUnsafe.mockResolvedValue([]);
+    expect(await slotEmbeddingCoverage('v-empty')).toEqual({ total: 0, embedded: 0, missing: 0 });
+  });
+});
+
+describe('ensureVersionSlotsEmbedded — null-row guard', () => {
+  it('treats a missing-count query with no rows as zero missing (short-circuits)', async () => {
+    // Exercises the `rows[0]?.missing ?? 0` null-coalescing branch.
+    prismaMock.$queryRawUnsafe.mockResolvedValueOnce([]);
+    const result = await ensureVersionSlotsEmbedded('v-empty');
+    expect(result).toEqual({ embedded: 0, skipped: 0, total: 0 });
+    expect(prismaMock.appQuestionSlot.findMany).not.toHaveBeenCalled();
+    expect(embedBatch).not.toHaveBeenCalled();
+  });
+});
+
+describe('embedVersionSlots — null embedding guard', () => {
+  it('treats a zero-element embeddings array as dim=0 and throws a dimension error', async () => {
+    // When embeddings[0] is undefined the `?? 0` branch fires and dim becomes 0,
+    // which never equals QUESTIONNAIRE_EMBEDDING_DIMENSION (1536), so the function
+    // must throw — verifying the fail-fast guard works for the degenerate case.
+    prismaMock.$queryRawUnsafe.mockResolvedValue([{ id: 'b' }]);
+    (embedBatch as unknown as Mock).mockResolvedValue({ embeddings: [] });
+    await expect(embedVersionSlots('v1')).rejects.toThrow(/does not match slot count/);
+    expect(prismaMock.$executeRawUnsafe).not.toHaveBeenCalled();
+  });
+});
+
+describe('rankSlotsByText', () => {
+  it('returns [] for an empty query string without querying', async () => {
+    // Exercises the `!q` early-return branch (line 210).
+    expect(await rankSlotsByText('', ['a', 'b'], 5)).toEqual([]);
+    expect(prismaMock.$queryRawUnsafe).not.toHaveBeenCalled();
+  });
+
+  it('returns [] for a whitespace-only query without querying', async () => {
+    // trim() collapses to '' — same `!q` branch.
+    expect(await rankSlotsByText('   ', ['a', 'b'], 5)).toEqual([]);
+    expect(prismaMock.$queryRawUnsafe).not.toHaveBeenCalled();
+  });
+
+  it('returns [] for an empty candidate list without querying', async () => {
+    expect(await rankSlotsByText('pipeline', [], 5)).toEqual([]);
+    expect(prismaMock.$queryRawUnsafe).not.toHaveBeenCalled();
+  });
+
+  it('returns [] for a non-positive k without querying', async () => {
+    expect(await rankSlotsByText('pipeline', ['a'], 0)).toEqual([]);
+    expect(prismaMock.$queryRawUnsafe).not.toHaveBeenCalled();
+  });
+
+  it('returns BM25-ranked ids the full-text query yields, in order', async () => {
+    // Arrange: DB returns two matches best-first.
+    prismaMock.$queryRawUnsafe.mockResolvedValue([{ id: 'b' }, { id: 'a' }]);
+
+    // Act
+    const ranked = await rankSlotsByText('pipeline', ['a', 'b', 'c'], 2);
+
+    // Assert: the ranked order comes from the DB, not just the input order.
+    expect(ranked).toEqual(['b', 'a']);
+    // The query uses plainto_tsquery and ts_rank_cd — verify the SQL shape.
+    expect(prismaMock.$queryRawUnsafe).toHaveBeenCalledWith(
+      expect.stringContaining('plainto_tsquery'),
+      'pipeline',
+      2,
+      'a',
+      'b',
+      'c'
+    );
+    expect((prismaMock.$queryRawUnsafe as Mock).mock.calls[0][0]).toContain('ts_rank_cd');
+    // Candidate ids expand into IN-placeholders, not bound as an array.
+    expect((prismaMock.$queryRawUnsafe as Mock).mock.calls[0][0]).toContain('IN ($3, $4, $5)');
+  });
+
+  it('trims leading/trailing whitespace from the query before passing to SQL', async () => {
+    prismaMock.$queryRawUnsafe.mockResolvedValue([{ id: 'a' }]);
+    await rankSlotsByText('  pipeline  ', ['a'], 3);
+    // $1 bound to the trimmed value, not the padded one.
+    expect(prismaMock.$queryRawUnsafe).toHaveBeenCalledWith(expect.any(String), 'pipeline', 3, 'a');
+  });
+});
+
+describe('findDuplicateSlotIds', () => {
+  it('returns [] for an empty keptIds list without querying', async () => {
+    // Exercises the `keptIds.length === 0` guard (line 238).
+    expect(await findDuplicateSlotIds([], ['a', 'b'], 0.1)).toEqual([]);
+    expect(prismaMock.$queryRawUnsafe).not.toHaveBeenCalled();
+  });
+
+  it('returns [] for an empty candidateIds list without querying', async () => {
+    // Exercises the `candidateIds.length === 0` guard (line 238).
+    expect(await findDuplicateSlotIds(['kept-1'], [], 0.1)).toEqual([]);
+    expect(prismaMock.$queryRawUnsafe).not.toHaveBeenCalled();
+  });
+
+  it('returns the near-duplicate candidate ids the self-join query yields', async () => {
+    // Arrange: two of the candidates are near-duplicates of the kept slot.
+    prismaMock.$queryRawUnsafe.mockResolvedValue([{ id: 'dup-1' }, { id: 'dup-2' }]);
+
+    // Act
+    const dupes = await findDuplicateSlotIds(['kept-1'], ['dup-1', 'dup-2', 'other'], 0.15);
+
+    // Assert: the function maps row ids and returns them.
+    expect(dupes).toEqual(['dup-1', 'dup-2']);
+    // Verify the SQL self-join shape: maxDistance ($1), kept ids, candidate ids.
+    expect(prismaMock.$queryRawUnsafe).toHaveBeenCalledWith(
+      expect.stringContaining('app_question_slot" a'),
+      0.15,
+      'kept-1',
+      'dup-1',
+      'dup-2',
+      'other'
+    );
+    expect((prismaMock.$queryRawUnsafe as Mock).mock.calls[0][0]).toContain('<=>');
+    expect((prismaMock.$queryRawUnsafe as Mock).mock.calls[0][0]).toContain('DISTINCT');
+  });
+
+  it('builds separate placeholder ranges for keptIds and candidateIds', async () => {
+    // kept: $2; candidates: $3, $4 — offsets must not overlap.
+    prismaMock.$queryRawUnsafe.mockResolvedValue([]);
+    await findDuplicateSlotIds(['k1'], ['c1', 'c2'], 0.1);
+    const sql = (prismaMock.$queryRawUnsafe as Mock).mock.calls[0][0] as string;
+    // kept IN ($2), candidates IN ($3, $4)
+    expect(sql).toContain('IN ($2)');
+    expect(sql).toContain('IN ($3, $4)');
   });
 });

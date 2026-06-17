@@ -170,6 +170,7 @@ model AppQuestionnaireConfig {
   contradictionWindowN     Int     @default(0) // N prior answers to check against; 0 when mode=off
   contradictionEveryNTurns Int     @default(1) // run detection every N respondent turns; 1 = every turn
   answerFitMode            String  @default("fallback") // off | fallback | always (ANSWER_FIT_MODES) — semantic free-form → choice/likert resolver pass
+  extractionPrefilter      Boolean @default(false) // narrow the extractor's candidate set by embedding similarity each turn; recommended for large (50+ slot / 70+ question) surveys
   anonymousMode            Boolean @default(false) // don't collect identifying profile fields (IDENTITY axis)
   accessMode               String  @default("invitation_only") // invitation_only | public | both (ACCESS_MODES) — who may START (access axis, orthogonal to anonymousMode)
   inviteeFields            Json    @default("[{\"key\":\"firstName\",\"shown\":true,\"required\":false},{\"key\":\"surname\",\"shown\":true,\"required\":false},{\"key\":\"email\",\"shown\":true,\"required\":true},{\"key\":\"jobTitle\",\"shown\":false,\"required\":false},{\"key\":\"team\",\"shown\":false,\"required\":false},{\"key\":\"organisation\",\"shown\":false,\"required\":false}]") // InviteeFieldConfig[] — per-invitee detail fields the admin captures (email forced on)
@@ -489,6 +490,12 @@ model AppQuestionnaireSession {
   // only; never surfaced raw to analytics or event metadata.
   sensitivityLevel String?
   sensitivityNotes Json     @default("[]")
+  // Probe-confirm contradiction flow: when a `probe`-mode contradiction is detected, the conflicting
+  // answer/data-slot is NOT overwritten — instead the interviewer asks a reconciliation question and
+  // the finding is parked here (PendingContradiction shape: slotKeys, explanation, suggestedProbe?,
+  // statement, raisedAtTurnIndex). The next turn resolves it (refiner applies the change on confirm,
+  // or keeps the original) and clears this back to null. Null = no contradiction awaiting confirmation.
+  pendingContradiction Json?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 

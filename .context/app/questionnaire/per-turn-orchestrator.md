@@ -27,11 +27,18 @@ Pipeline (a step is **skipped, not failed**, when its flag/config is off):
 1. **Extract** (F4.2) — only with a non-empty message → `AnswerSlotIntent[]`.
 2. **Merge** — `applyIntents` folds the extracted answer into an _effective_ state so
    completion + selection see it this turn.
-3. **Detect contradictions** (F4.3) — only when `config.contradictionMode !== 'off'`.
-4. **Refine** (F4.4) — contradiction-driven (the PR2 trigger).
-5. **Assess completion** (F4.5, pure `assessCompletion`) — free, always runs.
-6. **Respond** — an `offer` (assessment offered + completion flag on), else the next
-   question (F4.1 selection), else a terminal `complete`/`none`.
+3. **Contradiction phase** (F4.3 detect + F4.4 refine + the probe-confirm flow), shared with
+   data-slot mode in `orchestrator/contradiction-phase.ts`. Resolves a `PendingContradiction` parked
+   on a prior turn (run the refiner, clear it), OR detects afresh (gated by mode/cadence + a floor of
+   ≥1 stored answer when there's a latest message, else ≥2; detection runs over the PRE-merge answers;
+   the invoker feeds the detector the respondent's **latest message** so a _same-slot reversal_ is
+   caught even when extraction didn't overwrite the prior answer). On a hit: `flag` mode refines
+   immediately; `probe` mode **defers** — it asks a reconciliation question (a `contradiction_probe`
+   response), suppresses this turn's writes, and parks the finding. See
+   [`contradiction-detection.md`](./contradiction-detection.md#probe-confirm-flow-probe-mode).
+4. **Assess completion** (F4.5, pure `assessCompletion`) — free, always runs.
+5. **Respond** — a `contradiction_probe` (probe-confirm flow) else an `offer` (assessment offered +
+   completion flag on), else the next question (F4.1 selection), else a terminal `complete`/`none`.
 
 The core returns `{ response, targetedQuestionId, sideEffects, events, toolCalls, costUsd,
 contradictions, assessment }`. It does **not** stream — for an offer turn it returns the
@@ -49,6 +56,29 @@ targeted question as warm, natural prose — briefly acknowledging the prior ans
 tone to the version's `goal`/`audience` (role, expertise, sensitivity, locale), and **re-asking
 conversationally** when the prior answer wasn't captured (`isReask` = this turn re-selected the
 question the previous turn asked).
+
+**Prompt structure (XML sections).** The interviewer prompt — and the other capability prompts
+(the two adaptive selectors, the answer extractor, refiner, and completion-offer composer) — are
+assembled with the shared formatter `lib/app/questionnaire/prompt/format.ts`
+(`section`/`joinSections`/`bulletList`/`numberedList`/`titledBlock`/`jsonOutputContract`). It frames
+each prompt as XML-tagged sections (`<role>`, `<rules>`, `<this_turn>`, `<context>`, `<tone>`,
+`<output_format>`, `<message_shape>`, …) — chosen over Markdown headers because the interviewer may emit Markdown in its
+reply, so tags can't collide with output. Empty input collapses to `''`, so optional sections (tone,
+prior answers) stay free. The instructional text is unchanged; the structure just makes section
+boundaries legible to the model, the admin Prompt Library, and the Turn Inspector. Notably, the
+admin-configured **tone & persona** clauses (`buildToneInstructions`) render inside an explicit
+`<tone>` section, so it's obvious in the inspector when a version's voice is actually applied.
+
+**Message shape (readable, single-ask, adaptive).** A `<message_shape>` section governs the prose
+structure so replies don't arrive as one dense block. It asks for up to three short blank-line-separated
+paragraphs — a brief opener, the question on its own, and an optional closing line — with no printed
+labels or headings. Three behaviours fall out of it: (1) the **opener stays light by default** (a nod,
+a thanks, or a topic-change note; skipped on the opening question) and only reflects the whole answer
+back when a **Mirroring** tone clause says to — so full mirroring is opt-in via the `mirroring` slider,
+not a default; (2) the **question is a single clean ask** ending in one question mark — no stacked
+second/third question; (3) the **closing line is optional and value-gated** — used only to explain an
+unobvious "why" or to coax a concrete example when recent answers have been thin, and omitted entirely
+when the respondent is already answering openly and at length, so it never reads as repetitive coaxing.
 
 **Continuity from prior answers.** The phraser also receives a short `priorAnswers` digest —
 "what they've already shared this session" — built by `_lib/prior-answers.ts`
@@ -238,11 +268,32 @@ streamed phrasers (`streamQuestionMessage`/`streamOfferMessage`); each app-owned
 hook accumulates them and `TurnInspectorDrawer` renders the right-edge console. **Live-only** —
 never persisted, and capture is a no-op (zero overhead) for any non-preview session.
 
+The drawer **starts closed** — it's opt-in via the right-edge tab (whose badge shows the captured
+call count), so it never covers the preview chat unless the admin opens it. When open it leads with a
+**summary header** (turns, calls, total cost, total latency, tokens in/out) rolled up across the
+session. It can export its contents to the clipboard at three granularities, all backed by the pure
+`formatInspector{Call,Turn,Turns}` serializers in `lib/app/questionnaire/inspector/serialize.ts`
+(readable plaintext — metrics, then raw prompt roles + response): **Copy all** in the header (every
+turn under a session banner), a per-turn copy button on each turn header, and a per-call copy button
+inside each expanded call. Clipboard failures (insecure context / denied) are a silent no-op.
+
 Coverage: the answer extractor, contradiction detector, answer refiner (capability dispatches —
 request shown as the dispatched structured args), the seriousness + sensitivity judges (full LLM
-messages + tokens), and the interviewer + completion-offer phrasers. The deterministic selection
-strategies make no LLM call, so they produce no trace; the adaptive selector's LLM call isn't
-captured yet.
+messages + tokens), the interviewer + completion-offer phrasers, the **answer-fit resolver** second
+pass (when it runs — surfaced on the capability's `answerFitCall` and recorded as its own trace by
+the extractor invoker), and **both adaptive selectors' LLM pick** ("Question selector" /
+"Data-slot selector", captured in `runSelectorAgent` / `selectNextDataSlot`). The deterministic
+selection strategies make no LLM call, so they produce no trace.
+
+**Embedding calls** are captured too (`kind: 'embedding'` traces, built by `buildEmbeddingTrace` in
+`lib/app/questionnaire/inspector/embedding-trace.ts`): the extraction candidate pre-filter, adaptive
+data-slot ranking, and adaptive question ranking each record one trace per turn carrying the embedder
+model/provider, input tokens, cost, vector dimensions, the embedded message, and a one-line ranking
+summary. They render distinctly (a "VEC" chip, a "Dimensions" metric, the output shown as the
+**Ranking** rather than a completion). Recording is on the embed's success path only — a fail-soft
+embed (no message, below threshold, un-embedded version, embed error) degrades the turn and produces
+no trace. The one-time bulk `ensureVersion{Questions,DataSlots}Embedded` backfill is **not** captured
+(it's not a per-turn call and `embedBatch` doesn't surface per-call cost).
 
 ## See also
 

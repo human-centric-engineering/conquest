@@ -187,3 +187,30 @@ export async function rankDataSlotsByVector(
   );
   return rows.map((r) => r.id);
 }
+
+/**
+ * Lexical (BM25-style) ranking of `candidateIds` against `queryText` via Postgres full-text search
+ * over each slot's name + description. The data-slot analogue of `rankSlotsByText` — the extraction
+ * pre-filter UNIONs this with the dense ranking so an exact term the respondent used surfaces its
+ * slot even when a multi-topic message dilutes it below the dense top-K. Empty/stopword-only → `[]`.
+ */
+export async function rankDataSlotsByText(
+  queryText: string,
+  candidateIds: string[],
+  k: number
+): Promise<string[]> {
+  const q = queryText.trim();
+  if (!q || candidateIds.length === 0 || k <= 0) return [];
+  const idPlaceholders = candidateIds.map((_, i) => `$${i + 3}`).join(', ');
+  const tsv = `to_tsvector('english', coalesce("name", '') || ' ' || coalesce("description", ''))`;
+  const rows = await prisma.$queryRawUnsafe<Array<{ id: string }>>(
+    `SELECT "id" FROM "app_data_slot"
+     WHERE "id" IN (${idPlaceholders}) AND ${tsv} @@ plainto_tsquery('english', $1)
+     ORDER BY ts_rank_cd(${tsv}, plainto_tsquery('english', $1), 32) DESC
+     LIMIT $2`,
+    q,
+    k,
+    ...candidateIds
+  );
+  return rows.map((r) => r.id);
+}

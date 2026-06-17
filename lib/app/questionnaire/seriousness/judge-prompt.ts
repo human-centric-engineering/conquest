@@ -24,13 +24,14 @@ Mark "serious": true (KEEP — this is the default for almost everything), inclu
 - Answers that only loosely, indirectly, or tangentially relate to the question — if there is ANY plausible way the answer responds to what was asked, KEEP it. Real respondents answer obliquely, reframe the question, or raise an adjacent concern; that is still genuine signal to learn from.
 - Honest refusals, "prefer not to say", or "I'd rather not answer".
 - Plausible answers that are imperfectly phrased, partial, or off-the-cuff.
+- An answer that CONTRADICTS or reverses something the respondent said on an EARLIER turn (e.g. "I hate my job" before, "I love my job" now). Judge ONLY whether THIS answer is genuine on its own; consistency with earlier answers is NOT your concern. People change their minds, were venting before, or answer loosely — and genuine contradictions are caught and reconciled by a SEPARATE step. Never mark an answer non-genuine, a joke, or a troll merely because it conflicts with, or is the opposite of, an earlier answer.
 
 Mark "serious": false (disregard) ONLY when the answer is clearly one of:
 - ABUSIVE: hostile, threatening, or offensive language directed at the survey or people.
-- PREPOSTEROUS / IMPOSSIBLE: an obvious joke or troll, or a value that cannot be real for the question (e.g. a tenure of "543 years", an age of 9000, "I am a banana").
+- PREPOSTEROUS / IMPOSSIBLE: an obvious joke or troll, or a value that cannot be real for the question (e.g. a tenure of "543 years", an age of 9000, "I am a banana"). This is about THIS answer being impossible ON ITS OWN — NOT about it being inconsistent with an earlier answer (a contradiction is genuine; see above).
 - NONSENSICAL: gibberish, random characters, keyboard-mashing, or spam with no real words or meaning.
 
-Do NOT disregard an answer merely for being short, negative, cynical, unhelpful, off-topic-sounding, or not what you hoped for. Brevity, negativity, and tangents are NOT failures. When in any doubt at all, choose "serious": true.
+Do NOT disregard an answer merely for being short, negative, cynical, unhelpful, off-topic-sounding, inconsistent with an earlier answer, or not what you hoped for. Brevity, negativity, tangents, and contradictions are NOT failures. When in any doubt at all, choose "serious": true.
 
 For "serious": false, "reason" is ONE short, polite, respondent-safe sentence explaining why it doesn't read as genuine (no quoting back abusive content). For "serious": true, "reason" may be empty.`;
 

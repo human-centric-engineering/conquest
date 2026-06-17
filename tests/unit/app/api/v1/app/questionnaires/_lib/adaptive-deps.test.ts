@@ -140,6 +140,33 @@ describe('buildAdaptiveDeps — embedText + rankByVector delegation', () => {
     expect(await deps.rankByVector([0.1], ['q1-id', 'q2-id'], 5)).toEqual(['q2-id']);
     expect(rankSlotsByVector).toHaveBeenCalledWith([0.1], ['q1-id', 'q2-id'], 5);
   });
+
+  it('records an embedding inspector trace (when a sink is supplied) without changing the return', async () => {
+    (embedText as unknown as Mock).mockResolvedValue({
+      embedding: [0.1, 0.2, 0.3],
+      model: 'text-embedding-3-small',
+      provider: 'openai',
+      dimensions: 1536,
+      inputTokens: 7,
+      costUsd: 0.0000007,
+    });
+    const recordInspectorCall = vi.fn();
+    const deps = buildAdaptiveDeps({ userId: 'admin-1', recordInspectorCall });
+
+    expect(await deps.embedText('hello')).toEqual([0.1, 0.2, 0.3]);
+    expect(recordInspectorCall).toHaveBeenCalledTimes(1);
+    const trace = recordInspectorCall.mock.calls[0][0];
+    expect(trace.kind).toBe('embedding');
+    expect(trace.label).toBe('Adaptive question ranking');
+    expect(trace.dimensions).toBe(1536);
+    expect(trace.tokensIn).toBe(7);
+  });
+
+  it('omits the trace when no sink is supplied', async () => {
+    (embedText as unknown as Mock).mockResolvedValue({ embedding: [0.1], dimensions: 1536 });
+    const deps = buildAdaptiveDeps({ userId: 'admin-1' });
+    await expect(deps.embedText('hi')).resolves.toEqual([0.1]);
+  });
 });
 
 describe('buildAdaptiveDeps — llmPick', () => {
@@ -156,6 +183,23 @@ describe('buildAdaptiveDeps — llmPick', () => {
     expect(drainStreamChat).toHaveBeenCalledWith(
       expect.objectContaining({ costLogMetadata: { appQuestionnaireSessionId: 'sess-1' } })
     );
+  });
+
+  it('records the selector LLM pick in the inspector when a sink is supplied', async () => {
+    (drainStreamChat as unknown as Mock).mockResolvedValue(
+      drainResult({ assistantText: '{"choice": 2, "rationale": "flows"}', costUsd: 0.004 })
+    );
+    const recordInspectorCall = vi.fn();
+    const d = buildAdaptiveDeps({ userId: 'admin-1', recordInspectorCall });
+    await d.llmPick(input);
+
+    expect(recordInspectorCall).toHaveBeenCalledTimes(1);
+    const trace = recordInspectorCall.mock.calls[0][0];
+    expect(trace.label).toBe('Question selector');
+    expect(trace.kind).toBeUndefined(); // an LLM call, not an embedding
+    expect(trace.costUsd).toBe(0.004);
+    expect(trace.prompt[0].content).toContain('Candidate questions to ask next');
+    expect(trace.response).toContain('"choice": 2');
   });
 
   it('returns a null pick when the selector chooses 0 (none)', async () => {
@@ -190,5 +234,15 @@ describe('buildAdaptiveDeps — llmPick', () => {
     const pick = await deps().llmPick(input);
     expect(pick.questionId).toBeNull();
     expect(pick.rationale).toMatch(/unparseable/);
+  });
+
+  it('skips the selector agent entirely for an anonymous session (no streamChat call)', async () => {
+    // The selector's streamChat would FK-violate on the synthetic anon user, so anon sessions
+    // must never reach it — the deps return a null pick and the strategy falls back to weighted.
+    const d = buildAdaptiveDeps({ userId: 'anon:sess-1', anonymous: true });
+    const pick = await d.llmPick(input);
+    expect(pick.questionId).toBeNull();
+    expect(pick.rationale).toMatch(/anonymous/);
+    expect(drainStreamChat).not.toHaveBeenCalled();
   });
 });

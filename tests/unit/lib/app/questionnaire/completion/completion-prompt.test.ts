@@ -37,6 +37,13 @@ describe('buildCompletionOfferPrompt', () => {
     expect(system.toLowerCase()).toContain('already determined');
   });
 
+  it('frames the rules and recap in named XML sections', () => {
+    const [system, user] = buildCompletionOfferPrompt(baseInput);
+    expect(text(system)).toContain('<completion_rules>');
+    expect(text(user)).toContain('<status>');
+    expect(text(user)).toContain('<covered>');
+  });
+
   it('includes coverage stats and the covered questions in the user message', () => {
     const user = text(buildCompletionOfferPrompt(baseInput)[1]);
     expect(user).toContain('100%');

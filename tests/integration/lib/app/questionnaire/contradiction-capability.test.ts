@@ -255,6 +255,39 @@ describe('AppDetectContradictionsCapability — dispatch', () => {
     expect(data.droppedCount).toBe(1);
   });
 
+  it('keeps a single-slot finding when currentStatement is supplied (same-slot reversal)', async () => {
+    // A finding against ONE answered slot would normally drop (≥2 rule), but with the latest
+    // message present the message is the implicit second party — the finding survives end-to-end.
+    const payload = JSON.stringify({
+      contradictions: [
+        {
+          slotKeys: ['has_children'],
+          explanation: 'Now says the opposite of the recorded answer.',
+          severity: 'high',
+          confidence: 0.9,
+        },
+      ],
+    });
+    const provider = makeProvider([{ content: payload }]);
+    (getProvider as Mock).mockResolvedValue(provider);
+
+    const result = await capabilityDispatcher.dispatch(
+      SLUG,
+      baseArgs({ mode: 'flag', currentStatement: 'actually I do have children' }),
+      baseContext()
+    );
+
+    expect(result.success).toBe(true);
+    const data = result.data as { findings: Array<{ slotKeys: string[] }>; droppedCount: number };
+    expect(data.findings).toHaveLength(1);
+    expect(data.findings[0]?.slotKeys).toEqual(['has_children']);
+    expect(data.droppedCount).toBe(0);
+    // The latest message reached the prompt (assert against the whole first chat call).
+    expect(JSON.stringify((provider.chat as Mock).mock.calls[0])).toContain(
+      'actually I do have children'
+    );
+  });
+
   it('returns an empty findings list when the answers are consistent', async () => {
     (getProvider as Mock).mockResolvedValue(
       makeProvider([{ content: JSON.stringify({ contradictions: [] }) }])
@@ -306,12 +339,30 @@ describe('AppDetectContradictionsCapability — dispatch', () => {
     expect(provider.chat).toHaveBeenCalledTimes(2);
   });
 
-  it('rejects invalid args (fewer than two answers) at the dispatcher boundary', async () => {
+  it('accepts a single answer (it can contradict the currentStatement)', async () => {
+    // The floor is ≥1, not ≥2: one stored answer can conflict with the respondent's latest message.
+    (getProvider as Mock).mockResolvedValue(
+      makeProvider([{ content: JSON.stringify({ contradictions: [] }) }])
+    );
+
+    const result = await capabilityDispatcher.dispatch(
+      SLUG,
+      baseArgs({
+        answers: [{ slotKey: 'has_children', value: false }],
+        currentStatement: 'actually I have two kids',
+      }),
+      baseContext()
+    );
+
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects invalid args (zero answers) at the dispatcher boundary', async () => {
     (getProvider as Mock).mockResolvedValue(makeProvider([{ content: VALID_JSON }]));
 
     const result = await capabilityDispatcher.dispatch(
       SLUG,
-      baseArgs({ answers: [{ slotKey: 'has_children', value: false }] }),
+      baseArgs({ answers: [] }),
       baseContext()
     );
 
@@ -508,6 +559,22 @@ describe('AppDetectContradictionsCapability — redactProvenance', () => {
     expect(preview.data.probeCount).toBe(1);
     expect(preview.data.droppedCount).toBe(1);
     expect(preview.data.severityCounts.high).toBe(1);
+  });
+
+  it('redacts the currentStatement (PII) from the persisted args', () => {
+    const args = baseArgs({
+      currentStatement: 'I actually love my job',
+    }) as Parameters<typeof capability.redactProvenance>[0];
+
+    const redaction = capability.redactProvenance(args, {
+      success: true,
+      data: { findings: [], droppedCount: 0, costUsd: 0 },
+    });
+
+    const safeArgs = redaction.args as Record<string, unknown>;
+    expect(safeArgs).toHaveProperty('currentStatement');
+    expect(String(safeArgs.currentStatement)).toContain('redacted');
+    expect(String(safeArgs.currentStatement)).not.toContain('love my job');
   });
 
   it('passes an error envelope through the preview untouched', () => {

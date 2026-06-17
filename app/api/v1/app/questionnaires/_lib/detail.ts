@@ -96,6 +96,7 @@ export const CONFIG_SELECT = {
   contradictionWindowN: true,
   contradictionEveryNTurns: true,
   answerFitMode: true,
+  extractionPrefilter: true,
   anonymousMode: true,
   accessMode: true,
   inviteeFields: true,
@@ -126,6 +127,7 @@ type ConfigRow = {
   contradictionWindowN: number;
   contradictionEveryNTurns: number;
   answerFitMode: string;
+  extractionPrefilter: boolean;
   anonymousMode: boolean;
   accessMode: string;
   inviteeFields: Prisma.JsonValue;
@@ -217,6 +219,7 @@ export function toConfigView(row: ConfigRow | null): ConfigView {
     attachmentsEnabled: row.attachmentsEnabled,
     contradictionMode: asContradictionMode(row.contradictionMode),
     answerFitMode: asAnswerFitMode(row.answerFitMode),
+    extractionPrefilter: row.extractionPrefilter,
     contradictionWindowN: row.contradictionWindowN,
     contradictionEveryNTurns: row.contradictionEveryNTurns,
     anonymousMode: row.anonymousMode,
