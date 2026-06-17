@@ -516,9 +516,15 @@ export const API = {
       messages: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/messages`,
       /** Voice transcription (POST multipart `{ audio, language? }`). */
       transcribe: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/transcribe`,
-      /** Turn evaluation — score one inspector turn (POST `{ turn }` → `{ verdict, costUsd, model }`); admin + preview only. */
+      /** Turn evaluation — score one inspector turn (POST `{ turn }` → `{ verdict, costUsd, model, evaluationId }`); admin + preview only, persists the verdict. */
       evaluateTurn: (id: string): string =>
         `/api/v1/app/questionnaire-sessions/${id}/evaluate-turn`,
+      /** Human review of a persisted turn evaluation — comment + flag transition (PATCH); admin only. */
+      evaluationReview: (id: string, evalId: string): string =>
+        `/api/v1/app/questionnaire-sessions/${id}/evaluations/${evalId}`,
+      /** Action a flagged evaluation into an eval dataset (POST `{ datasetId }`); admin only. */
+      evaluationActionLearning: (id: string, evalId: string): string =>
+        `/api/v1/app/questionnaire-sessions/${id}/evaluations/${evalId}/action-learning`,
       /** Replayed transcript — prior turns + their persisted side-band notices (GET — F7.1 resume). */
       transcript: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/transcript`,
       /** Answer-slot panel state — live read for the respondent panel (GET) (F7.2). */
@@ -531,6 +537,13 @@ export const API = {
       submit: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/submit`,
       /** Download the session's results as a branded PDF (GET — F7.4). */
       exportPdf: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/export.pdf`,
+    },
+    /** Persisted turn-evaluation search surface (admin) — cross-session list + detail. */
+    TURN_EVALUATIONS: {
+      /** Paginated, filterable list of persisted turn evaluations (GET). */
+      ROOT: '/api/v1/app/turn-evaluations',
+      /** One evaluation's full verdict + snapshot + review state (GET). */
+      byId: (evalId: string): string => `/api/v1/app/turn-evaluations/${evalId}`,
     },
     /** Public (token-gated) respondent invitation endpoints (F3.2 PR2). */
     INVITATIONS: {

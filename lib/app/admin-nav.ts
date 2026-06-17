@@ -14,7 +14,7 @@
  * Full guide + example: CUSTOMIZATION.md §4 · lib/admin-nav/registry.ts
  */
 import { createElement } from 'react';
-import { Building2, ClipboardList, MessageSquareText } from 'lucide-react';
+import { Building2, ClipboardList, Gauge, MessageSquareText } from 'lucide-react';
 
 import { QuestionnairesNavBrand } from '@/components/app/questionnaire/questionnaires-nav-brand';
 import { registerNavSection } from '@/lib/admin-nav/registry';
@@ -43,6 +43,12 @@ export function initAppNav(): void {
         label: 'Prompt library',
         icon: MessageSquareText,
         description: 'Read the exact prompts each questionnaire agent sends',
+      },
+      {
+        href: '/admin/questionnaires/turn-evaluations',
+        label: 'Turn evaluations',
+        icon: Gauge,
+        description: 'Search, review, and flag persisted interview-turn evaluations',
       },
       // DEMO-ONLY (F2.5.1): demo-client attribution + branding for the sales demo.
       // A real client engagement strips demo tenancy — see forking.md.

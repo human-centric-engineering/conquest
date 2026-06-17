@@ -248,3 +248,58 @@ export interface EvaluationRunDetail extends EvaluationRunListItem {
   /** All findings across dimensions, ordered by (dimension, ordinal). */
   findings: EvaluationFindingView[];
 }
+
+/**
+ * One row in the persisted turn-evaluation search surface — the denormalised facets the table
+ * filters/sorts on, enriched with the (cross-`versionId`) questionnaire title + version number
+ * in a fixed query budget. `commentPreview` is a trimmed slice so the list can show a comment
+ * exists without shipping the whole note. Dates are ISO strings (they cross the HTTP boundary).
+ */
+export interface TurnEvaluationListItem {
+  id: string;
+  sessionId: string;
+  turnId: string | null;
+  turnOrdinal: number;
+  overallScore: number;
+  /** TurnEffectiveness band: Excellent | Good | Mixed | Weak | Poor. */
+  effectiveness: string;
+  evaluatorModel: string;
+  evaluatorProvider: string;
+  rubricVersion: string;
+  questionnaireVersionId: string;
+  /** Enriched from the version → questionnaire; `null` when the version no longer resolves. */
+  questionnaireTitle: string | null;
+  questionnaireId: string | null;
+  versionNumber: number | null;
+  /** Learning workflow: none | flagged | reviewed | actioned | dismissed. */
+  flagStatus: string;
+  /** Trimmed comment slice (or `null`); the full text is on the detail view. */
+  commentPreview: string | null;
+  /** The dataset case this row was actioned into, when `flagStatus === 'actioned'`. */
+  datasetCaseId: string | null;
+  costUsd: number | null;
+  createdAt: string;
+}
+
+/**
+ * Full persisted turn-evaluation detail — the list row plus the verdict, the snapshotted input
+ * that was judged, the full comment, and the complete review/provenance state. `verdict` and
+ * `evaluatedInput` are passed through as opaque JSON (the client renders the verdict with the
+ * shared turn-evaluation components; the schema validates them at write time).
+ */
+export interface TurnEvaluationDetail extends TurnEvaluationListItem {
+  appVersion: string;
+  evaluatorAgentId: string | null;
+  evaluatedByUserId: string | null;
+  /** The full `TurnEvaluation` verdict object. */
+  verdict: unknown;
+  /** The `{ turn, context }` dump that was judged. */
+  evaluatedInput: unknown;
+  comment: string | null;
+  commentByUserId: string | null;
+  commentAt: string | null;
+  flagReviewerId: string | null;
+  flagUpdatedAt: string | null;
+  datasetId: string | null;
+  updatedAt: string;
+}
