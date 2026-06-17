@@ -23,10 +23,24 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronDown, ChevronRight, Clock, Coins, Cpu, Lock, ScanSearch, X } from 'lucide-react';
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Clock,
+  Coins,
+  Copy,
+  Cpu,
+  Lock,
+  ScanSearch,
+  X,
+} from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import {
+  formatInspectorCall,
+  formatInspectorTurn,
+  formatInspectorTurns,
   totalInspectorCostUsd,
   totalInspectorLatencyMs,
   type AgentCallTrace,
@@ -132,14 +146,23 @@ export function TurnInspectorDrawer({ turns }: TurnInspectorDrawerProps) {
                   Turn Inspector
                 </h2>
               </div>
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                className="rounded p-1 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
-                aria-label="Close the turn inspector"
-              >
-                <X className="h-4 w-4" aria-hidden />
-              </button>
+              <div className="flex items-center gap-1">
+                {turns.length > 0 && (
+                  <CopyButton
+                    getText={() => formatInspectorTurns(turns)}
+                    label="Copy all turns to clipboard"
+                    idleText="Copy all"
+                  />
+                )}
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  className="rounded p-1 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+                  aria-label="Close the turn inspector"
+                >
+                  <X className="h-4 w-4" aria-hidden />
+                </button>
+              </div>
             </div>
             <div className="mt-2 flex items-center gap-1.5 rounded border border-[var(--cq-accent-ring)] bg-[var(--cq-accent-muted)] px-2 py-1">
               <Lock className="h-3 w-3 shrink-0 text-[var(--cq-accent)]" aria-hidden />
@@ -189,33 +212,41 @@ function TurnBlock({ turn, defaultOpen }: { turn: TurnInspectorData; defaultOpen
 
   return (
     <li className="overflow-hidden rounded-md border border-zinc-800 bg-zinc-900/40">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-zinc-900"
-      >
-        {open ? (
-          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-500" aria-hidden />
-        ) : (
-          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-500" aria-hidden />
-        )}
-        <span className="font-mono text-xs font-semibold tracking-wide text-zinc-100">
-          Turn {turn.turnIndex + 1}
-        </span>
-        <span className="ml-auto flex items-center gap-3 font-mono text-[0.65rem] text-zinc-400">
-          <span>
-            {turn.calls.length} call{turn.calls.length === 1 ? '' : 's'}
+      <div className="flex w-full items-center">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-zinc-900"
+        >
+          {open ? (
+            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-500" aria-hidden />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-500" aria-hidden />
+          )}
+          <span className="font-mono text-xs font-semibold tracking-wide text-zinc-100">
+            Turn {turn.turnIndex + 1}
           </span>
-          <span className="inline-flex items-center gap-1">
-            <Clock className="h-3 w-3" aria-hidden />
-            {fmtLatency(latency)}
+          <span className="ml-auto flex items-center gap-3 font-mono text-[0.65rem] text-zinc-400">
+            <span>
+              {turn.calls.length} call{turn.calls.length === 1 ? '' : 's'}
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <Clock className="h-3 w-3" aria-hidden />
+              {fmtLatency(latency)}
+            </span>
+            <span className="inline-flex items-center gap-1 text-[color:var(--cq-accent)]">
+              <Coins className="h-3 w-3" aria-hidden />
+              {fmtCost(cost)}
+            </span>
           </span>
-          <span className="inline-flex items-center gap-1 text-[color:var(--cq-accent)]">
-            <Coins className="h-3 w-3" aria-hidden />
-            {fmtCost(cost)}
-          </span>
-        </span>
-      </button>
+        </button>
+        <CopyButton
+          getText={() => formatInspectorTurn(turn)}
+          label={`Copy turn ${turn.turnIndex + 1} to clipboard`}
+          idleText=""
+          className="mr-1.5"
+        />
+      </div>
 
       {open && (
         <ol className="space-y-px border-t border-zinc-800 bg-zinc-950/60 p-2">
@@ -255,6 +286,14 @@ function CallRow({ index, call }: { index: number; call: AgentCallTrace }) {
 
       {open && (
         <div className="space-y-2.5 px-2 pt-1 pb-3">
+          <div className="flex justify-end">
+            <CopyButton
+              getText={() => formatInspectorCall(call)}
+              label={`Copy the "${call.label}" call to clipboard`}
+              idleText="Copy call"
+            />
+          </div>
+
           {/* Metrics */}
           <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 rounded border border-zinc-800 bg-zinc-900/50 p-2.5 font-mono text-[0.65rem]">
             <Metric icon={Cpu} label="Model" value={call.model || '—'} />
@@ -300,6 +339,57 @@ function CallRow({ index, call }: { index: number; call: AgentCallTrace }) {
         </div>
       )}
     </li>
+  );
+}
+
+/**
+ * A console-styled "copy to clipboard" button. `getText` is resolved lazily on click (so a turn's
+ * text is serialized only when actually copied), and the icon/label flips to a tick for ~2s. Copy
+ * failures (insecure context, permission denied) are swallowed — nothing here is destructive, and a
+ * silent no-op beats throwing inside an overlay.
+ */
+function CopyButton({
+  getText,
+  label,
+  idleText = 'Copy',
+  className,
+}: {
+  getText: () => string;
+  /** Accessible label (the visible text is just "Copy"/"Copied"). */
+  label: string;
+  /** Visible idle text. */
+  idleText?: string;
+  className?: string;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(getText());
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard unavailable — no-op.
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => void copy()}
+      className={cn(
+        'inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 font-mono text-[0.6rem] font-semibold tracking-wide text-zinc-400 uppercase transition-colors hover:bg-zinc-800 hover:text-zinc-100',
+        className
+      )}
+      aria-label={label}
+    >
+      {copied ? (
+        <Check className="h-3 w-3 text-emerald-400" aria-hidden />
+      ) : (
+        <Copy className="h-3 w-3" aria-hidden />
+      )}
+      {copied ? 'Copied' : idleText}
+    </button>
   );
 }
 

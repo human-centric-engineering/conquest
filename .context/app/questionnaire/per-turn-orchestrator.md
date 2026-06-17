@@ -238,6 +238,12 @@ streamed phrasers (`streamQuestionMessage`/`streamOfferMessage`); each app-owned
 hook accumulates them and `TurnInspectorDrawer` renders the right-edge console. **Live-only** —
 never persisted, and capture is a no-op (zero overhead) for any non-preview session.
 
+The drawer can export its contents to the clipboard at three granularities, all backed by the pure
+`formatInspector{Call,Turn,Turns}` serializers in `lib/app/questionnaire/inspector/serialize.ts`
+(readable plaintext — metrics, then raw prompt roles + response): **Copy all** in the header (every
+turn under a session banner), a per-turn copy button on each turn header, and a per-call copy button
+inside each expanded call. Clipboard failures (insecure context / denied) are a silent no-op.
+
 Coverage: the answer extractor, contradiction detector, answer refiner (capability dispatches —
 request shown as the dispatched structured args), the seriousness + sensitivity judges (full LLM
 messages + tokens), and the interviewer + completion-offer phrasers. The deterministic selection
