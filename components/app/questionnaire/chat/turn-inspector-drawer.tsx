@@ -54,6 +54,7 @@ import {
 // `evaluate-turn` service (→ provider-manager → pg → node `dns`), which would pull Node-only code
 // into this client bundle. `schema` is zod-only and client-safe.
 import type { TurnEvaluation } from '@/lib/app/questionnaire/turn-evaluation/schema';
+import type { QuestionnaireTurn } from '@/lib/app/questionnaire/chat/types';
 import { TurnEvaluationVerdict } from '@/components/app/questionnaire/turn-evaluation/turn-evaluation-verdict';
 import { TurnEvaluationReview } from '@/components/app/questionnaire/turn-evaluation/turn-evaluation-review';
 
@@ -61,6 +62,14 @@ export interface TurnInspectorDrawerProps {
   turns: TurnInspectorData[];
   /** The preview session id — the evaluate-turn route is keyed on it (admin + preview only). */
   sessionId: string;
+  /**
+   * The live conversation turns (user/assistant messages), oldest first. Threaded so an
+   * evaluation can carry the respondent message that opened a turn and the interviewer reply that
+   * closed it — the context the learning-dataset action needs (without it, actioning 422s with
+   * `no_content`). Optional: absent for older mounts, in which case the evaluation is run without
+   * conversation context (the verdict still persists; only the learning case can't be built).
+   */
+  messages?: QuestionnaireTurn[];
 }
 
 /** $0.00 → "$0", small values to 4 sig decimals, larger to cents. */
@@ -141,7 +150,7 @@ function SummaryStat({ label, value, accent }: { label: string; value: string; a
   );
 }
 
-export function TurnInspectorDrawer({ turns, sessionId }: TurnInspectorDrawerProps) {
+export function TurnInspectorDrawer({ turns, sessionId, messages }: TurnInspectorDrawerProps) {
   // Start closed: the drawer is opt-in via the edge tab (whose badge signals when data has arrived),
   // so it never covers the preview chat unless the admin asks for it.
   const [open, setOpen] = useState(false);
@@ -262,6 +271,7 @@ export function TurnInspectorDrawer({ turns, sessionId }: TurnInspectorDrawerPro
                       key={`${turn.turnIndex}-${i}`}
                       turn={turn}
                       sessionId={sessionId}
+                      messages={messages}
                       defaultOpen={i === turns.length - 1}
                     />
                   ))}
@@ -284,10 +294,12 @@ export function TurnInspectorDrawer({ turns, sessionId }: TurnInspectorDrawerPro
 function TurnBlock({
   turn,
   sessionId,
+  messages,
   defaultOpen,
 }: {
   turn: TurnInspectorData;
   sessionId: string;
+  messages?: QuestionnaireTurn[];
   defaultOpen: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -339,7 +351,7 @@ function TurnBlock({
               <CallRow key={i} index={i} call={call} />
             ))}
           </ol>
-          <TurnEvaluationSection turn={turn} sessionId={sessionId} />
+          <TurnEvaluationSection turn={turn} sessionId={sessionId} messages={messages} />
         </>
       )}
     </li>
@@ -360,20 +372,75 @@ type EvalState =
       evaluationId: string | null;
     };
 
+/** How many prior conversation lines to send as recent context (keeps the payload lean). */
+const RECENT_CONTEXT_LINES = 12;
+
 /**
- * Trigger + render the interview-quality evaluation for one turn. Posts the turn dump to the
- * admin-only evaluate-turn route (the server reloads the questionnaire objectives AND persists the
- * verdict), then renders the scored verdict with Copy/Download/Re-run via the shared
- * {@link TurnEvaluationVerdict}. When the verdict persisted (an `evaluationId` came back) the
- * reviewer can also comment on it and flag it for learning, inline, via {@link TurnEvaluationReview}
- * — the same controls the admin search surface uses.
+ * Derive the conversation context for one inspector turn from the live message list. The inspector
+ * `turnIndex` is the 0-based respondent-answer→agent-reply round, so it maps to the
+ * `(turnIndex)`-th **user** message and the first **assistant** message after it — derived by
+ * walking the array (not by `index*2` math) so a leading agent greeting or any off-by-one can't
+ * misalign it. Returns `{}` when the messages aren't available or the turn isn't found.
+ */
+function deriveTurnContext(
+  messages: QuestionnaireTurn[] | undefined,
+  turnIndex: number
+): { respondentMessage?: string; interviewerMessage?: string; recentMessages?: string[] } {
+  if (!messages || messages.length === 0) return {};
+
+  // Find the index of the (turnIndex)-th user message.
+  let seenUser = -1;
+  let userIdx = -1;
+  for (let i = 0; i < messages.length; i++) {
+    if (messages[i].role === 'user') {
+      seenUser += 1;
+      if (seenUser === turnIndex) {
+        userIdx = i;
+        break;
+      }
+    }
+  }
+  if (userIdx === -1) return {};
+
+  const respondentMessage = messages[userIdx].content;
+  let interviewerMessage: string | undefined;
+  for (let j = userIdx + 1; j < messages.length; j++) {
+    if (messages[j].role === 'assistant') {
+      interviewerMessage = messages[j].content;
+      break;
+    }
+  }
+
+  const recentMessages = messages
+    .slice(0, userIdx)
+    .slice(-RECENT_CONTEXT_LINES)
+    .map((m) => `${m.role === 'user' ? 'Respondent' : 'Interviewer'}: ${m.content}`);
+
+  return {
+    ...(respondentMessage ? { respondentMessage } : {}),
+    ...(interviewerMessage ? { interviewerMessage } : {}),
+    ...(recentMessages.length > 0 ? { recentMessages } : {}),
+  };
+}
+
+/**
+ * Trigger + render the interview-quality evaluation for one turn. Posts the turn dump — plus the
+ * conversation context for that turn (the respondent message that opened it, the interviewer reply
+ * that closed it, and recent history) — to the admin-only evaluate-turn route (which reloads the
+ * questionnaire objectives AND persists the verdict), then renders the scored verdict with
+ * Copy/Download/Re-run via the shared {@link TurnEvaluationVerdict}. When the verdict persisted (an
+ * `evaluationId` came back) the reviewer can also comment on it and flag it for learning, inline,
+ * via {@link TurnEvaluationReview}. The conversation context is what lets a flagged verdict be
+ * actioned into a learning dataset — without it the action 422s with `no_content`.
  */
 function TurnEvaluationSection({
   turn,
   sessionId,
+  messages,
 }: {
   turn: TurnInspectorData;
   sessionId: string;
+  messages?: QuestionnaireTurn[];
 }) {
   const [state, setState] = useState<EvalState>({ status: 'idle' });
 
@@ -385,7 +452,9 @@ function TurnEvaluationSection({
         costUsd: number;
         model: string;
         evaluationId: string | null;
-      }>(API.APP.QUESTIONNAIRE_SESSIONS.evaluateTurn(sessionId), { body: { turn } });
+      }>(API.APP.QUESTIONNAIRE_SESSIONS.evaluateTurn(sessionId), {
+        body: { turn, ...deriveTurnContext(messages, turn.turnIndex) },
+      });
       setState({
         status: 'done',
         verdict: data.verdict,

@@ -133,10 +133,12 @@ Actioning a flagged verdict appends it to an eval dataset as a learning case, vi
 rubricVersion, questionnaireVersionId, flaggedByUserId, reviewerComment? }`.
 - **No platform edit:** provenance rides in case **metadata** (the dataset `source` enum is
   platform-owned); the row records the resulting `datasetId` + `datasetCaseId`.
-- **Limitation:** the learning case needs a respondent message in the snapshot's `context`. The
-  inspector drawer currently POSTs only the turn dump (no conversation context), so verdicts run from
-  the live drawer may action as `no_content` (a clean 422) until context plumbing is added; verdicts
-  whose snapshot carries context action normally.
+- **Context source:** the case needs a respondent message in the snapshot's `context`. The inspector
+  drawer derives it from the live conversation — for a given turn it walks the message list to the
+  matching respondent message + the interviewer reply that followed (a robust walk, so a leading
+  agent greeting can't misalign it) and POSTs them alongside the dump, so the snapshot carries the
+  context the action needs. A verdict with no respondent message still actions cleanly as a `422
+no_content`.
 
 ## Search surface (admin)
 

@@ -328,6 +328,53 @@ describe('TurnInspectorDrawer', () => {
       expect(screen.getAllByText('7/10')).toHaveLength(2);
     });
 
+    it('sends the turn conversation context (respondent + interviewer + recent), walking past a leading greeting', async () => {
+      const user = userEvent.setup();
+      mockPost.mockResolvedValue({
+        verdict: sampleVerdict,
+        costUsd: 0.004,
+        model: 'claude-x',
+        evaluationId: 'eval-1',
+      });
+      // A leading assistant greeting precedes the first user message — so index*2 math would
+      // mis-map; the robust walk must still pick the first USER message as the respondent.
+      const messages = [
+        { role: 'assistant' as const, content: 'Welcome! Tell me about your home.' },
+        { role: 'user' as const, content: 'I rent a flat' },
+        { role: 'assistant' as const, content: 'And whereabouts is that?' },
+      ];
+      render(<TurnInspectorDrawer turns={turns} sessionId="sess_test" messages={messages} />);
+      await user.click(screen.getByRole('button', { name: /open the admin turn inspector/i }));
+      await user.click(screen.getByRole('button', { name: /evaluate turn/i }));
+
+      const [, opts] = mockPost.mock.calls[0];
+      const body = (
+        opts as {
+          body: {
+            respondentMessage?: string;
+            interviewerMessage?: string;
+            recentMessages?: string[];
+          };
+        }
+      ).body;
+      expect(body.respondentMessage).toBe('I rent a flat');
+      expect(body.interviewerMessage).toBe('And whereabouts is that?');
+      expect(body.recentMessages).toEqual(['Interviewer: Welcome! Tell me about your home.']);
+    });
+
+    it('omits conversation context when no messages are supplied', async () => {
+      const user = userEvent.setup();
+      mockPost.mockResolvedValue({ verdict: sampleVerdict, costUsd: 0.004, model: 'claude-x' });
+      await renderOpen(user); // renders without the messages prop
+      await user.click(screen.getByRole('button', { name: /evaluate turn/i }));
+
+      const [, opts] = mockPost.mock.calls[0];
+      const body = (opts as { body: Record<string, unknown> }).body;
+      expect(body).not.toHaveProperty('respondentMessage');
+      expect(body).not.toHaveProperty('interviewerMessage');
+      expect(body).not.toHaveProperty('recentMessages');
+    });
+
     it('surfaces an error when the evaluation fails, without crashing the drawer', async () => {
       const user = userEvent.setup();
       mockPost.mockRejectedValue(new Error('Turn evaluation failed'));
