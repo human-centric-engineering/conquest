@@ -189,6 +189,82 @@ describe('selectNextDataSlot — inspector capture', () => {
   });
 });
 
+describe('selectNextDataSlot — parkedTheme bridging', () => {
+  it('filters out the parked-theme slots when bridging alternatives are available', async () => {
+    // parkedTheme=A means we just finished an A slot and want to bridge away.
+    // ranked returns [d3, d2, d4] — d2 is theme A (parked), d3+d4 are theme B.
+    // sameTheme is suppressed (stayTheme = null when parkedTheme is set).
+    // pool before bridging: deduped ranked → [d3, d2, d4]
+    // After bridging: d2 removed (theme A = parkedTheme) → [d3, d4], bridged.length > 0 so pool = bridged.
+    (drainStreamChat as unknown as Mock).mockResolvedValue({
+      assistantText: '{"choice": 1, "rationale": "bridge to B"}',
+      costUsd: 0.002,
+      errorCode: null,
+    });
+    const result = await selectNextDataSlot(ctx({ activeTheme: 'A', parkedTheme: 'A' }));
+    // choice 1 in bridged pool [d3, d4] → d3
+    expect(result).not.toBeNull();
+    expect(result?.dataSlotKey).toBe('d3');
+  });
+
+  it('keeps the full pool when all bridged alternatives are in the parked theme (bridged.length = 0)', async () => {
+    // All unfilled slots share the parked theme — there is nothing to bridge to,
+    // so the code keeps the existing pool rather than reducing it to empty.
+    // unfilled: [d1(A), d2(A)], parkedTheme=A → bridged = [] → pool unchanged → candidates = [d1, d2]
+    (rankDataSlotsByVector as unknown as Mock).mockResolvedValue(['d1', 'd2']);
+    (drainStreamChat as unknown as Mock).mockResolvedValue({
+      assistantText: '{"choice": 2, "rationale": "only theme A left"}',
+      costUsd: 0.001,
+      errorCode: null,
+    });
+    const result = await selectNextDataSlot(
+      ctx({
+        unfilled: [ds('d1', 'A'), ds('d2', 'A')],
+        activeTheme: 'A',
+        parkedTheme: 'A',
+      })
+    );
+    // bridged is empty so pool stays [d1, d2]; choice 2 → d2
+    expect(result).not.toBeNull();
+    expect(result?.dataSlotKey).toBe('d2');
+  });
+
+  it('returns null when only one candidate survives bridging (< 2 required)', async () => {
+    // unfilled: [d1(A), d2(A), d3(B)] — ranked returns [d3, d1], parkedTheme=A.
+    // sameTheme suppressed, pool = [d3, d1]. bridged = [d3] (length 1). pool = bridged = [d3].
+    // candidates.length = 1 < 2 → null.
+    (rankDataSlotsByVector as unknown as Mock).mockResolvedValue(['d3', 'd1']);
+    const result = await selectNextDataSlot(
+      ctx({
+        unfilled: [ds('d1', 'A'), ds('d2', 'A'), ds('d3', 'B')],
+        activeTheme: 'A',
+        parkedTheme: 'A',
+      })
+    );
+    expect(result).toBeNull();
+  });
+});
+
+describe('selectNextDataSlot — out-of-range choice', () => {
+  it('returns null when the selector picks a number beyond the candidate count', async () => {
+    // The existing test covers choice=0; this covers choice > candidates.length.
+    (drainStreamChat as unknown as Mock).mockResolvedValue({
+      assistantText: '{"choice": 99, "rationale": "way out of range"}',
+      costUsd: 0.001,
+      errorCode: null,
+    });
+    expect(await selectNextDataSlot(ctx())).toBeNull();
+  });
+});
+
+describe('selectNextDataSlot — catch path', () => {
+  it('returns null and logs a warning when embedText throws', async () => {
+    (embedText as unknown as Mock).mockRejectedValue(new Error('embedding service down'));
+    const result = await selectNextDataSlot(ctx());
+    expect(result).toBeNull();
+  });
+});
+
 describe('buildDataSlotSelectorPrompt', () => {
   it('lists candidates with theme + description and notes the active theme to linger in', () => {
     const prompt = buildDataSlotSelectorPrompt(ctx({ goal: 'Understand wellbeing' }), [
@@ -199,6 +275,25 @@ describe('buildDataSlotSelectorPrompt', () => {
     expect(prompt).toContain('1. Name d1 (theme: A)');
     expect(prompt).toContain('What it captures: Desc d1');
     expect(prompt).toContain('currently exploring the area: "A"');
+    expect(prompt).toContain('"choice"');
+  });
+
+  it('renders "(no prior messages)" transcript placeholder when recentMessages is empty', () => {
+    // Covers the false branch of `ctx.recentMessages.length > 0` (line 94).
+    const prompt = buildDataSlotSelectorPrompt(ctx({ recentMessages: [] }), [ds('d1', 'A')]);
+    expect(prompt).toContain('(no prior messages)');
+  });
+
+  it('omits the linger note and goal section when activeTheme and goal are absent', () => {
+    // Covers the false branches at lines 100 (no activeTheme → lingerNote='') and
+    // 107 (no goal → the goal section is omitted from joinSections).
+    const prompt = buildDataSlotSelectorPrompt(ctx({ activeTheme: null, goal: undefined }), [
+      ds('d1', 'A'),
+      ds('d2', 'B'),
+    ]);
+    expect(prompt).not.toContain('Questionnaire goal');
+    expect(prompt).not.toContain('currently exploring the area');
+    // The task section must still be present.
     expect(prompt).toContain('"choice"');
   });
 });

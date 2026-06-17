@@ -731,6 +731,158 @@ describe('assessSeriousness', () => {
   });
 });
 
+describe('detectContradictions — inspector trace', () => {
+  const resolvedBinding = { providerSlug: 'openai', model: 'gpt-4o', fallbacks: [] };
+
+  beforeEach(() => {
+    resolverMock.resolveAgentProviderAndModel.mockResolvedValue(resolvedBinding);
+  });
+
+  it('records a contradiction-detection trace when recordInspectorCall is wired in', async () => {
+    // Lines 385-395: the `if (recordInspectorCall)` branch in detectContradictions.
+    // Arrange: a successful dispatch that returns findings.
+    (dispatcherMock.dispatch as Mock).mockResolvedValue({
+      success: true,
+      data: {
+        findings: [
+          { slotKeys: ['role'], explanation: 'conflict', severity: 'low', confidence: 0.6 },
+        ],
+        droppedCount: 0,
+        costUsd: 0.005,
+      },
+    });
+    const recordInspectorCall = vi.fn();
+    const inv = await invokers({ recordInspectorCall });
+
+    await inv.detectContradictions(state());
+
+    // The invoker must call recordInspectorCall with the detection trace — asserting it was
+    // called with the constructed shape (label, costUsd read from data.costUsd) proves the
+    // `if (recordInspectorCall)` branch ran and the trace was built from dispatch data, not mocks.
+    expect(recordInspectorCall).toHaveBeenCalledTimes(1);
+    const trace = recordInspectorCall.mock.calls[0][0];
+    expect(trace.label).toBe('Contradiction detection');
+    // costUsd comes from data.costUsd — verify the field is read, not a passthrough from dispatch
+    expect(trace.costUsd).toBe(0.005);
+    // response must be the serialised findings, not the raw dispatch object
+    expect(trace.response).toContain('"conflict"');
+    expect(trace.prompt).toEqual([{ role: 'input', content: expect.stringContaining('mode') }]);
+  });
+});
+
+describe('refineAnswer — inspector trace', () => {
+  const resolvedBinding = { providerSlug: 'openai', model: 'gpt-4o', fallbacks: [] };
+
+  beforeEach(() => {
+    resolverMock.resolveAgentProviderAndModel.mockResolvedValue(resolvedBinding);
+  });
+
+  it('records a refinement trace when recordInspectorCall is wired in', async () => {
+    // Lines 452-463: the `if (recordInspectorCall)` branch in refineAnswer.
+    (dispatcherMock.dispatch as Mock).mockResolvedValue({
+      success: true,
+      data: {
+        decisions: [{ slotKey: 'role', action: 'accept' }],
+        droppedCount: 0,
+        costUsd: 0.007,
+      },
+    });
+    const recordInspectorCall = vi.fn();
+    const inv = await invokers({ recordInspectorCall });
+
+    await inv.refineAnswer(state(), {
+      contradiction: { slotKeys: ['role'], explanation: 'x', severity: 'low', confidence: 0.3 },
+    });
+
+    expect(recordInspectorCall).toHaveBeenCalledTimes(1);
+    const trace = recordInspectorCall.mock.calls[0][0];
+    expect(trace.label).toBe('Answer refinement');
+    // costUsd is read from data.costUsd — different from any other number in the flow
+    expect(trace.costUsd).toBe(0.007);
+    // response contains the serialised decisions array — verifies the code builds it, not echoes mock
+    expect(trace.response).toContain('"accept"');
+  });
+});
+
+describe('selectDataSlot — disabled path', () => {
+  it('returns null immediately when dataSlotAdaptiveEnabled is false (no selectNextDataSlot call)', async () => {
+    // Line 497: the `if (!dataSlotAdaptiveEnabled) return null` early-out.
+    dataSlotSelectionMock.selectNextDataSlot.mockResolvedValue({
+      dataSlotKey: 'x',
+      rationale: 'r',
+      costUsd: 0,
+    });
+    const inv = await invokers({ dataSlotAdaptiveEnabled: false });
+
+    const result = await inv.selectDataSlot!(
+      state(),
+      [{ id: 'd1', key: 'k', name: 'n', description: 'd', theme: 't', ordinal: 0, weight: 1 }],
+      { activeTheme: null, parkedTheme: null }
+    );
+
+    expect(result).toBeNull();
+    // The inner selectNextDataSlot must NOT have been called — the return null fired first.
+    expect(dataSlotSelectionMock.selectNextDataSlot).not.toHaveBeenCalled();
+  });
+});
+
+describe('assessSeriousness — inspector trace', () => {
+  const resolvedBinding = { providerSlug: 'openai', model: 'gpt-4o', fallbacks: [] };
+  const providerStub = { chat: vi.fn() };
+
+  beforeEach(() => {
+    resolverMock.resolveAgentProviderAndModel.mockResolvedValue(resolvedBinding);
+    providerManagerMock.getProvider.mockResolvedValue(providerStub);
+  });
+
+  it('records a seriousness-judge trace when recordInspectorCall is wired in', async () => {
+    // Lines 637-648: the `if (recordInspectorCall)` block inside assessSeriousness.
+    // The trace must carry the verdict text in `response` (serialised JSON) and the
+    // LLM messages in `prompt` — verifying the invoker builds the trace from the completion,
+    // not from the mock return value.
+    structuredMock.runStructuredCompletion.mockResolvedValue({
+      value: { serious: false, reason: 'Typed gibberish' },
+      tokenUsage: { input: 80, output: 25 },
+      costUsd: 0.006,
+    });
+    const recordInspectorCall = vi.fn();
+    const inv = await invokers({ recordInspectorCall });
+
+    await inv.assessSeriousness(state());
+
+    expect(recordInspectorCall).toHaveBeenCalledTimes(1);
+    const trace = recordInspectorCall.mock.calls[0][0];
+    expect(trace.label).toBe('Seriousness judge');
+    expect(trace.model).toBe('gpt-4o');
+    expect(trace.provider).toBe('openai');
+    expect(trace.costUsd).toBe(0.006);
+    expect(trace.tokensIn).toBe(80);
+    expect(trace.tokensOut).toBe(25);
+    // response is JSON.stringify({ serious: false, reason: ... }) — verifies the code serialises
+    // the verdict it constructed, not the raw mock
+    expect(trace.response).toContain('"serious"');
+    expect(trace.response).toContain('false');
+    // prompt carries the LLM messages (system + user) mapped through getTextContent
+    expect(Array.isArray(trace.prompt)).toBe(true);
+    expect(trace.prompt.length).toBe(2);
+  });
+
+  it('wires anonymous + recordInspectorCall into the adaptive deps for selectNext', async () => {
+    // Line 485-487: the `...(anonymous ? { anonymous } : {})` and
+    // `...(recordInspectorCall ? { recordInspectorCall } : {})` spreads in selectNext.
+    const recordInspectorCall = vi.fn();
+    const inv = await invokers({
+      adaptiveEnabled: true,
+      anonymous: true,
+      recordInspectorCall,
+    });
+    await inv.selectNext(state({ config: { ...state().config, selectionStrategy: 'adaptive' } }));
+    expect(adaptiveMock.buildAdaptiveDeps).toHaveBeenCalledWith(
+      expect.objectContaining({ anonymous: true, recordInspectorCall })
+    );
+  });
+});
+
 describe('detectSensitivity', () => {
   const resolvedBinding = { providerSlug: 'openai', model: 'gpt-4o', fallbacks: [] };
   const providerStub = { chat: vi.fn() };
@@ -825,6 +977,148 @@ describe('detectSensitivity', () => {
     expect(out.assessment).toBeNull();
     expect(out.costUsd).toBe(0);
     expect(out.diagnostic).toBe('sensitivity_detect_failed');
+  });
+
+  it('data-slot mode: uses the active data-slot name + description as the question prompt', async () => {
+    // Line 679-685: the activeDataSlot branch inside detectSensitivity. When there is no active
+    // question (data-slot mode), the code looks up the data-slot by activeDataSlotKey — the
+    // resulting questionPrompt feeds the sensitivity detector so oblique disclosures are read in
+    // context. Verifying the prompt reaches runStructuredCompletion proves the branch ran.
+    structuredMock.runStructuredCompletion.mockResolvedValue({
+      value: { detected: false },
+      tokenUsage: { input: 25, output: 5 },
+      costUsd: 0.001,
+    });
+    const inv = await invokers({ activeQuestionKey: null });
+
+    await inv.detectSensitivity(
+      state({
+        userMessage: 'I feel very stressed',
+        activeDataSlotKey: 'wellbeing',
+        dataSlots: [
+          {
+            id: 'ds1',
+            key: 'wellbeing',
+            name: 'Employee Wellbeing',
+            description: 'Overall health and stress levels',
+            theme: 'Health',
+            ordinal: 0,
+            weight: 1,
+          },
+        ],
+      })
+    );
+
+    expect(structuredMock.runStructuredCompletion).toHaveBeenCalledTimes(1);
+    const messages = structuredMock.runStructuredCompletion.mock.calls[0][0].messages;
+    const userMsg = messages.find((m: { role: string }) => m.role === 'user')?.content ?? '';
+    // The data-slot context must appear in the prompt, not a blank questionPrompt.
+    expect(userMsg).toContain('Employee Wellbeing');
+  });
+
+  it('parse callback: invokes tryParseJson with the raw string and the sensitivity validator', async () => {
+    // Lines 745-748: the `parse` option in detectSensitivity calls tryParseJson then
+    // validateSensitivityDetectVerdict. Exercises this path the same way as the seriousness test.
+    let capturedParseRaw: string | undefined;
+    structuredMock.tryParseJson.mockImplementation((raw: string, fn: (p: unknown) => unknown) => {
+      capturedParseRaw = raw;
+      return fn({ detected: false, severity: 'none', category: 'none', summary: '' });
+    });
+    structuredMock.runStructuredCompletion.mockImplementation(
+      async (opts: { parse: (raw: string) => unknown }) => {
+        opts.parse('{"detected":false}');
+        return {
+          value: { detected: false },
+          tokenUsage: { input: 5, output: 5 },
+          costUsd: 0,
+        };
+      }
+    );
+
+    const inv = await invokers();
+    await inv.detectSensitivity(state());
+
+    expect(capturedParseRaw).toBe('{"detected":false}');
+  });
+
+  it('onFinalFailure callback: returns an Error describing the sensitivity schema mismatch', async () => {
+    // Line 752-753: the `onFinalFailure` factory in detectSensitivity.
+    let capturedOnFinalFailure: (() => Error) | undefined;
+    structuredMock.runStructuredCompletion.mockImplementation(
+      async (opts: { onFinalFailure: () => Error }) => {
+        capturedOnFinalFailure = opts.onFinalFailure;
+        return {
+          value: { detected: false },
+          tokenUsage: { input: 5, output: 5 },
+          costUsd: 0,
+        };
+      }
+    );
+
+    const inv = await invokers();
+    await inv.detectSensitivity(state());
+
+    expect(capturedOnFinalFailure).toBeDefined();
+    const err = capturedOnFinalFailure!();
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toContain('Sensitivity verdict was not valid');
+  });
+
+  it('logCost rejection is swallowed and error is logged', async () => {
+    // Line 768: the .catch() handler on the fire-and-forget logCost call inside detectSensitivity.
+    structuredMock.runStructuredCompletion.mockResolvedValue({
+      value: { detected: false },
+      tokenUsage: { input: 10, output: 5 },
+      costUsd: 0.001,
+    });
+    logCostMock.logCost.mockRejectedValue(new Error('logCost boom'));
+
+    const inv = await invokers();
+    const out = await inv.detectSensitivity(state());
+
+    // The invoker must not propagate the logCost failure.
+    expect(out.assessment).toBeNull();
+    expect(out.diagnostic).toBeUndefined();
+
+    // Allow the microtask to flush so the .catch() fires.
+    await Promise.resolve();
+    expect(loggerMock.error).toHaveBeenCalledWith(
+      'detect_sensitivity: logCost rejected',
+      expect.objectContaining({ sessionId: 'sess-1' })
+    );
+  });
+
+  it('records a sensitivity-detection inspector trace when recordInspectorCall is wired in', async () => {
+    // Lines 776-787: the `if (recordInspectorCall)` block inside detectSensitivity.
+    structuredMock.runStructuredCompletion.mockResolvedValue({
+      value: {
+        detected: true,
+        severity: 'high',
+        category: 'self-harm',
+        summary: 'Expressed distress.',
+      },
+      tokenUsage: { input: 60, output: 20 },
+      costUsd: 0.004,
+    });
+    const recordInspectorCall = vi.fn();
+    const inv = await invokers({ recordInspectorCall });
+
+    await inv.detectSensitivity(state({ userMessage: 'I feel like giving up' }));
+
+    expect(recordInspectorCall).toHaveBeenCalledTimes(1);
+    const trace = recordInspectorCall.mock.calls[0][0];
+    expect(trace.label).toBe('Sensitivity detection');
+    expect(trace.model).toBe('gpt-4o');
+    expect(trace.provider).toBe('openai');
+    expect(trace.costUsd).toBe(0.004);
+    expect(trace.tokensIn).toBe(60);
+    expect(trace.tokensOut).toBe(20);
+    // response is the serialised normalizeSensitivityVerdict output — proves the code used the
+    // normalised assessment, not the raw mock
+    expect(trace.response).toContain('"detected"');
+    // prompt carries the LLM messages mapped through getTextContent
+    expect(Array.isArray(trace.prompt)).toBe(true);
+    expect(trace.prompt.length).toBe(2);
   });
 });
 
