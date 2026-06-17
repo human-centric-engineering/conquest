@@ -53,17 +53,19 @@ export async function loadSessionStatus(sessionId: string): Promise<LoadedSessio
     sessionId: loaded.base.sessionId,
   });
 
-  // Data Slots feature: in data-slot mode the deliverable is "every question answered", and the
-  // progress bar tracks that (not the configurable weighted threshold). Override coverage to the
-  // raw question-completion fraction and offer only when all questions are answered — matching
-  // `runDataSlotTurn`'s gate so the Submit affordance and the turn loop can't disagree.
+  // Data Slots feature: only the SUBMIT gate is mode-specific — data-slot mode offers to submit
+  // strictly when every question is answered (matching `runDataSlotTurn`, not the configurable
+  // weighted threshold), so the Submit affordance and the turn loop can't disagree. The progress
+  // bar's `coverage`, by contrast, KEEPS the weighted question coverage from `assessCompletion`,
+  // so the top bar, the reasoning trace's "X% covered so far", and the panel's "What we're
+  // learning" header all report one question-completeness figure. Coverage and kind are consumed
+  // independently downstream (bar vs `canSubmitSession`), so overriding only the gate is safe.
   const dataSlots = loaded.base.dataSlots ?? [];
   if (dataSlots.length > 0 && (await isDataSlotsEnabled())) {
     const total = loaded.base.questions.length;
     const allAnswered = total > 0 && assessment.answeredCount >= total;
     assessment = {
       ...assessment,
-      coverage: total === 0 ? 1 : assessment.answeredCount / total,
       kind: allAnswered ? 'offer' : 'not_ready',
       requiredUnansweredKeys: allAnswered ? [] : assessment.requiredUnansweredKeys,
     };

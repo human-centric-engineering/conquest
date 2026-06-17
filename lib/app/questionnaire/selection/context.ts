@@ -79,22 +79,36 @@ export function answeredCount(ctx: Pick<CoverageContext, 'answered'>): number {
  * never-asked questionnaire as 100% done.
  */
 export function coverageRatio(ctx: Pick<CoverageContext, 'questions' | 'answered'>): number {
+  return weightedCoverage(ctx.questions, answeredQuestionIds(ctx));
+}
+
+/**
+ * The structural core of {@link coverageRatio}: weighted coverage in [0, 1] from the minimal
+ * `{ id, weight }` question shape and the set of answered ids. Exported so a non-selection caller
+ * (the respondent answer panel) can report the SAME question-completeness figure the reasoning
+ * trace shows — without assembling a full {@link SelectionContext}. Same fallbacks as
+ * {@link coverageRatio}: an empty version is fully covered (1); when questions exist but no weight
+ * is usable, it falls back to the distinct-answered count ratio.
+ */
+export function weightedCoverage(
+  questions: ReadonlyArray<{ id: string; weight: number }>,
+  answeredIds: ReadonlySet<string>
+): number {
   let total = 0;
   const weightById = new Map<string, number>();
-  for (const q of ctx.questions) {
+  for (const q of questions) {
     const w = Number.isFinite(q.weight) && q.weight > 0 ? q.weight : 0;
     weightById.set(q.id, w);
     total += w;
   }
 
-  const answered = answeredQuestionIds(ctx);
   if (total <= 0) {
     // No usable weights: empty version → fully covered; else count-based.
-    return ctx.questions.length === 0 ? 1 : Math.min(1, answered.size / ctx.questions.length);
+    return questions.length === 0 ? 1 : Math.min(1, answeredIds.size / questions.length);
   }
 
   let covered = 0;
-  for (const id of answered) {
+  for (const id of answeredIds) {
     covered += weightById.get(id) ?? 0;
   }
   return Math.min(1, covered / total);

@@ -306,9 +306,52 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
         // Markdown bold IS rendered in the chat UI. Used sparingly it helps the respondent see the
         // single thing being asked at a glance; overused it reads as shouty, so cap it hard.
         'You may use Markdown **bold** sparingly — at most one short phrase per message — to gently ' +
-        'emphasise the specific area of focus you are asking about (e.g. **recommend the ' +
-        'workplace**). Never bold a whole sentence, never bold more than one phrase, and skip it ' +
-        'entirely when no single phrase is the clear focus.'
+        'emphasise the subject the question is about. Phrase that subject naturally, in plain ' +
+        'conversational words woven into the sentence, and bold it — describe the topic’s ' +
+        'real-world state, not the respondent’s feelings about it. Prefer a natural clause ' +
+        'like "Thinking about **how well your customer teams are integrated**…" or "I’d love ' +
+        'to understand **how clearly the growth strategy is communicated**…" over a lifted label ' +
+        'like "Focusing on **integrated customer teams**" or jargon pulled straight from the ' +
+        'questionnaire. Never emphasise how aware, confident, or informed the respondent personally ' +
+        'feels (not **how aware you feel**), and never bold the verb or the ask itself. Never bold ' +
+        'a whole sentence, never bold more than one phrase, and skip it entirely when no single ' +
+        'phrase is the clear subject.'
+    ),
+    section(
+      'message_shape',
+      joinSections(
+        // Short paragraphs read far better than one dense block in the chat UI. The reply is
+        // rendered as Markdown, so paragraphs MUST be separated by a true blank line (\n\n); a
+        // single line break collapses back into one block. These parts are a shape to follow, NOT
+        // labels to print — let the blank lines do the work, no headings.
+        'Format your reply as separate short paragraphs with a real BLANK LINE between them — a ' +
+          'double line break (\\n\\n), never a single newline, and never one dense block. The ' +
+          'shape is up to three blank-line-separated paragraphs: a brief opener, then the question ' +
+          'on its own, then — only when it earns its place — a short closing line, with no printed ' +
+          'labels or headings. Lay it out literally like this (note the blank lines):\n\n' +
+          'Good to hear — thanks for sharing that.\n\n' +
+          'Thinking about **how well your teams share information**, what does that look like day ' +
+          'to day?\n\n' +
+          'A quick example would really help bring it to life.',
+        // Opener / reflection: light by default. The Mirroring tone dimension, when enabled, owns
+        // how much to reflect — so only reflect the whole answer back when a mirroring clause says
+        // to; otherwise a light touch keeps the pace up and avoids sounding repetitive.
+        'Opener: keep it light by default — a brief nod, a quick thanks, or simply noting that you ' +
+          'are moving to a new area is plenty, and on the opening question skip it entirely. You do ' +
+          'NOT need to restate or reflect their whole answer back; reflect it back more fully only ' +
+          'if a mirroring instruction above tells you to.',
+        // The recurring "two-in-one" failure: stop after the single ask.
+        'Question: ask ONE clear question and stop — do not stack a second or third question after ' +
+          'it, and do not tack on "…and what about X?". Two tightly-linked parts are occasionally ' +
+          'fine, but default hard to a single, clean ask ending in one question mark.',
+        // Closing rationale: optional, value-gated, and verbosity-adaptive — drop it when the
+        // respondent is already answering richly so every turn doesn't end the same coaxing way.
+        'Closing line: optional, and often best left off. Add it ONLY when it earns its place — to ' +
+          'say briefly why you are asking when that is not obvious, or to gently invite a concrete ' +
+          'example or story when their recent answers have been thin, short, or guarded. If they ' +
+          'are already answering openly, at length, and with examples, OMIT it entirely — do not ' +
+          'end every question with the same encouragement, which quickly reads as repetitive.'
+      )
     )
   );
 

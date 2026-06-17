@@ -205,9 +205,13 @@ route then drives `runDataSlotTurn` (`orchestrator/data-slot-orchestrator.ts`) i
    never parks or records a provisional fill.
 4. **Late-stage sweep** — once every data slot is covered, ask any still-unanswered **questions**
    directly.
-5. **Completion** — offer to submit only when **all questions** are answered. The respondent
-   progress bar + panel header track question completion (`answeredCount / total`), via a
-   data-slot-mode override in `loadSessionStatus`.
+5. **Completion** — offer to submit only when **all questions** are answered (a data-slot-mode
+   submit-gate override in `loadSessionStatus`, independent of the configurable weighted
+   threshold). Progress, by contrast, is one figure everywhere: the respondent top progress bar,
+   the panel's "What we're learning" header, and the chat reasoning trace's "X% covered so far"
+   all show the **weighted question coverage** (`coverageRatio` / `weightedCoverage`) — guided by
+   question completeness, never moved by how many data slots are filled, so the three can't
+   disagree.
 
 Persistence: `persistTurn` upserts the data-slot fills (`upsertDataSlotFill`, carrying
 `provisional`) alongside the question answers; `recordTurn` back-stamps
@@ -257,9 +261,11 @@ question slots) and asks the seeded **selector agent** which to pursue next.
 `GET …/:id/answers` returns themed `dataSlotGroups` (name + paraphrase + **provenance** + confidence
 
 - filled + `provisional`) in data-slot mode; `AnswerSlotPanel` renders them grouped by theme. A
-  parked slot shows its inferred summary with a subtle **"provisional · may revisit"** marker and
-  counts toward the blended progress. The question rows are suppressed — the respondent only ever sees
-  the abstraction layer.
+  parked slot shows its inferred summary with a subtle **"provisional · may revisit"** marker. The
+  panel's "% complete" header tracks the **weighted question coverage** (not data-slot fills — those
+  are the abstraction layer, not the deliverable), so it matches the reasoning trace and the top
+  progress bar exactly. The question rows are suppressed — the respondent only ever sees the
+  abstraction layer.
 
 **Inferred vs stated (honesty in the panel).** A fill carries the extractor's `provenance` — `direct`
 (stated), `inferred` (single-step reasoning), or `synthesised` (across turns). The panel flags

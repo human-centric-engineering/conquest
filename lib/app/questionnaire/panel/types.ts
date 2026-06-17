@@ -147,10 +147,12 @@ export interface AnswerPanelView {
    */
   dataSlotGroups?: DataSlotPanelGroup[];
   /**
-   * Data Slots feature: a single 0–100 progress figure blending background question coverage with
-   * data-slot coverage (see `blendedProgressPercent`). Present only in data-slot mode — the header
-   * shows "{progressPercent}% complete" instead of the raw question count, which the respondent
-   * never sees. Absent in question mode (the header uses `answeredCount` / `totalCount`).
+   * Data Slots feature: a single 0–100 progress figure — the WEIGHTED question coverage
+   * (`weightedCoverage` in selection/context.ts), the same completeness figure the reasoning
+   * trace's "X% covered so far" shows. Progress is guided by the questions (the deliverable), not
+   * by how many data slots are filled. Present only in data-slot mode — the header shows
+   * "{progressPercent}% complete" instead of the raw question count, which the respondent never
+   * sees. Absent in question mode (the header uses `answeredCount` / `totalCount`).
    */
   progressPercent?: number;
 }

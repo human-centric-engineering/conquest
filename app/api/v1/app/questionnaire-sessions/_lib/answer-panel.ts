@@ -26,10 +26,10 @@ import {
 } from '@/lib/app/questionnaire/types';
 import {
   buildAnswerPanelView,
-  blendedProgressPercent,
   type PanelAnswerInput,
   type PanelSectionInput,
 } from '@/lib/app/questionnaire/panel/answer-panel';
+import { weightedCoverage } from '@/lib/app/questionnaire/selection/context';
 import type {
   AnswerPanelView,
   DataSlotFillHistoryEntry,
@@ -100,7 +100,14 @@ export async function loadAnswerPanelState(
               title: true,
               questions: {
                 orderBy: { ordinal: 'asc' },
-                select: { key: true, prompt: true, type: true, typeConfig: true, required: true },
+                select: {
+                  key: true,
+                  prompt: true,
+                  type: true,
+                  typeConfig: true,
+                  required: true,
+                  weight: true,
+                },
               },
             },
           },
@@ -195,14 +202,12 @@ export async function loadAnswerPanelState(
     );
     const groups: DataSlotPanelGroup[] = [];
     const byTheme = new Map<string, DataSlotPanelGroup>();
-    let filledDataSlots = 0;
     for (const ds of row.version.dataSlots) {
       const fill = fillByDataSlotId.get(ds.id);
       // A slot is covered at a confident fill OR when parked with a provisional best-effort one
       // (the respondent sees forward progress; the marker flags it as tentative).
       const provisional = fill?.provisional ?? false;
       const filled = (fill?.confidence ?? 0) >= DATA_SLOT_FILLED_THRESHOLD || provisional;
-      if (filled) filledDataSlots += 1;
       let group = byTheme.get(ds.theme);
       if (!group) {
         group = { theme: ds.theme, slots: [] };
@@ -227,17 +232,17 @@ export async function loadAnswerPanelState(
       });
     }
     view.dataSlotGroups = groups;
-    // Balanced progress: blend the background question coverage (answeredCount/totalCount, already
-    // computed by the pure builder) with the data-slot coverage into one percentage. Data-slot mode
-    // shows this — never the raw question count, which would leak the structure the respondent
-    // never sees.
-    view.progressPercent = blendedProgressPercent({
-      answeredQuestions: view.answeredCount,
-      totalQuestions: view.totalCount,
-      filledDataSlots,
-      totalDataSlots: row.version.dataSlots.length,
-    });
-    // Question rows are suppressed in data-slot mode; the header/progress use the blended percent.
+    // Progress tracks the WEIGHTED question coverage — the same completeness figure the reasoning
+    // trace's "X% covered so far" shows (`coverageRatio`) — so the two never disagree. Data slots
+    // are the respondent-facing abstraction layer, not the deliverable, so they no longer move the
+    // bar; progress is guided by how much of the questionnaire's questions have been answered. We
+    // still never leak the raw "N of M" question count in data-slot mode — only this percentage.
+    const coverageQuestions = row.version.sections.flatMap((s) =>
+      s.questions.map((q) => ({ id: q.key, weight: q.weight }))
+    );
+    const answeredKeys = new Set(row.answers.map((a) => a.questionSlot.key));
+    view.progressPercent = Math.round(weightedCoverage(coverageQuestions, answeredKeys) * 100);
+    // Question rows are suppressed in data-slot mode; the header/progress use the coverage percent.
     view.sections = [];
   }
 

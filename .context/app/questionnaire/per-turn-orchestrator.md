@@ -55,12 +55,23 @@ question the previous turn asked).
 assembled with the shared formatter `lib/app/questionnaire/prompt/format.ts`
 (`section`/`joinSections`/`bulletList`/`numberedList`/`titledBlock`/`jsonOutputContract`). It frames
 each prompt as XML-tagged sections (`<role>`, `<rules>`, `<this_turn>`, `<context>`, `<tone>`,
-`<output_format>`, …) — chosen over Markdown headers because the interviewer may emit Markdown in its
+`<output_format>`, `<message_shape>`, …) — chosen over Markdown headers because the interviewer may emit Markdown in its
 reply, so tags can't collide with output. Empty input collapses to `''`, so optional sections (tone,
 prior answers) stay free. The instructional text is unchanged; the structure just makes section
 boundaries legible to the model, the admin Prompt Library, and the Turn Inspector. Notably, the
 admin-configured **tone & persona** clauses (`buildToneInstructions`) render inside an explicit
 `<tone>` section, so it's obvious in the inspector when a version's voice is actually applied.
+
+**Message shape (readable, single-ask, adaptive).** A `<message_shape>` section governs the prose
+structure so replies don't arrive as one dense block. It asks for up to three short blank-line-separated
+paragraphs — a brief opener, the question on its own, and an optional closing line — with no printed
+labels or headings. Three behaviours fall out of it: (1) the **opener stays light by default** (a nod,
+a thanks, or a topic-change note; skipped on the opening question) and only reflects the whole answer
+back when a **Mirroring** tone clause says to — so full mirroring is opt-in via the `mirroring` slider,
+not a default; (2) the **question is a single clean ask** ending in one question mark — no stacked
+second/third question; (3) the **closing line is optional and value-gated** — used only to explain an
+unobvious "why" or to coax a concrete example when recent answers have been thin, and omitted entirely
+when the respondent is already answering openly and at length, so it never reads as repetitive coaxing.
 
 **Continuity from prior answers.** The phraser also receives a short `priorAnswers` digest —
 "what they've already shared this session" — built by `_lib/prior-answers.ts`

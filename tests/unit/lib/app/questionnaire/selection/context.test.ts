@@ -6,6 +6,7 @@ import {
   requiredFirstPool,
   terminalDecision,
   unansweredQuestions,
+  weightedCoverage,
 } from '@/lib/app/questionnaire/selection/context';
 import { ctx, q } from '@/tests/unit/lib/app/questionnaire/selection/_fixtures';
 
@@ -90,6 +91,48 @@ describe('coverageRatio', () => {
       ],
     });
     expect(coverageRatio(c)).toBeCloseTo(0.5);
+  });
+});
+
+describe('weightedCoverage', () => {
+  // The structural core the respondent panel reuses so its "% complete" equals the reasoning
+  // trace's weighted "% covered so far". Mirrors coverageRatio's math from the minimal id+weight
+  // shape + an answered-id set.
+  it('matches coverageRatio: weighted, not a plain count', () => {
+    expect(
+      weightedCoverage(
+        [
+          { id: 'a', weight: 3 },
+          { id: 'b', weight: 1 },
+        ],
+        new Set(['a'])
+      )
+    ).toBeCloseTo(0.75);
+  });
+
+  it('returns 1 for no questions, and falls back to a count ratio when all weights are zero', () => {
+    expect(weightedCoverage([], new Set())).toBe(1);
+    expect(
+      weightedCoverage(
+        [
+          { id: 'a', weight: 0 },
+          { id: 'b', weight: 0 },
+        ],
+        new Set(['a'])
+      )
+    ).toBeCloseTo(0.5);
+  });
+
+  it('ignores an answered id that is not a known question', () => {
+    expect(
+      weightedCoverage(
+        [
+          { id: 'a', weight: 1 },
+          { id: 'b', weight: 1 },
+        ],
+        new Set(['a', 'ghost'])
+      )
+    ).toBeCloseTo(0.5);
   });
 });
 
