@@ -8,6 +8,7 @@ import {
   APP_QUESTIONNAIRES_COMPLETION_FLAG,
   APP_QUESTIONNAIRES_CONTRADICTION_DETECTION_FLAG,
   APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG,
+  APP_QUESTIONNAIRES_TURN_EVALUATION_FLAG,
   APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG,
   APP_QUESTIONNAIRES_VOICE_INPUT_FLAG,
   APP_QUESTIONNAIRES_COST_CAP_FLAG,
@@ -37,6 +38,7 @@ export {
   APP_QUESTIONNAIRES_ANSWER_REFINEMENT_FLAG,
   APP_QUESTIONNAIRES_COMPLETION_FLAG,
   APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG,
+  APP_QUESTIONNAIRES_TURN_EVALUATION_FLAG,
   APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG,
   APP_QUESTIONNAIRES_VOICE_INPUT_FLAG,
   APP_QUESTIONNAIRES_COST_CAP_FLAG,
@@ -171,6 +173,62 @@ export async function isDesignEvaluationEnabled(): Promise<boolean> {
     isFeatureEnabled(APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG),
   ]);
   return app && evaluation;
+}
+
+/**
+ * Whether the **turn evaluation** agent may run — the admin-only interview-quality
+ * evaluator the Preview Turn Inspector runs over one completed turn. Requires BOTH the
+ * master app flag and the turn-evaluation sub-flag — each run spends a reasoning-model
+ * call, so it's opt-in on top of an already-enabled app (the same shape as
+ * {@link isDesignEvaluationEnabled}). The evaluate-turn route consults this and returns
+ * 404 when it's `false`, so a disabled sub-feature looks like a missing route rather than
+ * a 401 — the whole route is paid LLM work, so there is no free deterministic result to
+ * fall back to. The route additionally requires the session to be a preview (the same
+ * gate the inspector itself enforces).
+ *
+ * Server-only (resolves both flags from the database).
+ */
+export async function isTurnEvaluationEnabled(): Promise<boolean> {
+  const [app, evaluation] = await Promise.all([
+    isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_TURN_EVALUATION_FLAG),
+  ]);
+  return app && evaluation;
+}
+
+/**
+ * Flag gate for the evaluate-turn route — 404 when either the master flag or the
+ * turn-evaluation sub-flag is off, `null` when both are on. The
+ * {@link ensureQuestionnairesEnabled} analogue for the turn-evaluator; call it first,
+ * before any auth or handler work.
+ *
+ * Server-only (resolves both flags from the database).
+ */
+export async function ensureTurnEvaluationEnabled(): Promise<Response | null> {
+  if (await isTurnEvaluationEnabled()) {
+    return null;
+  }
+  return errorResponse('Not found', { code: 'NOT_FOUND', status: 404 });
+}
+
+/**
+ * Wrap the evaluate-turn route handler so the turn-evaluation gate runs **before** anything
+ * else (auth, handler work) — the order a disabled sub-feature needs to look like a missing
+ * route rather than a 401. The {@link withQuestionnairesEnabled} analogue for the
+ * turn-evaluator surface.
+ *
+ * ```ts
+ * export const POST = withTurnEvaluationEnabled(handleEvaluateTurn);
+ * ```
+ */
+export function withTurnEvaluationEnabled<C>(
+  handler: (request: NextRequest, context: C) => Promise<Response>
+): (request: NextRequest, context: C) => Promise<Response> {
+  return async (request, context) => {
+    const blocked = await ensureTurnEvaluationEnabled();
+    if (blocked) return blocked;
+    return handler(request, context);
+  };
 }
 
 /**

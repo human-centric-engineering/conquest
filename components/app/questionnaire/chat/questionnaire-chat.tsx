@@ -416,7 +416,9 @@ export function QuestionnaireChat({
       {/* Preview Turn Inspector (admin only): a fixed right-edge console, mounted only once the
           server has emitted inspector frames — which it does solely for a preview session with the
           toggle on, so it never appears for a real respondent. */}
-      {inspectorTurns.length > 0 && <TurnInspectorDrawer turns={inspectorTurns} />}
+      {inspectorTurns.length > 0 && (
+        <TurnInspectorDrawer turns={inspectorTurns} sessionId={sessionId} />
+      )}
       {/* Transcript */}
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6">
         <div className="mx-auto flex max-w-2xl flex-col gap-6">
