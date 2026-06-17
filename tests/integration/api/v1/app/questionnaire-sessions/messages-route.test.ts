@@ -101,7 +101,6 @@ import { isFeatureEnabled } from '@/lib/feature-flags';
 import {
   APP_QUESTIONNAIRES_COST_CAP_FLAG,
   APP_QUESTIONNAIRES_DATA_SLOTS_FLAG,
-  APP_QUESTIONNAIRES_EXTRACTION_PREFILTER_FLAG,
   APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG,
   APP_QUESTIONNAIRES_REASONING_STREAM_FLAG,
   APP_QUESTIONNAIRES_TONE_FLAG,
@@ -646,6 +645,8 @@ describe('extraction pre-filter', () => {
       ],
       base: {
         ...base.base,
+        // The pre-filter is now a per-questionnaire Settings toggle (config), not a platform flag.
+        config: { ...base.base.config, extractionPrefilter: true },
         recentMessages: ['I just joined the marketing team'],
         dataSlots: [
           {
@@ -713,11 +714,10 @@ describe('extraction pre-filter', () => {
     expect(args.dataSlotCandidates?.map((s) => s.key)).toEqual(['department']);
   });
 
-  it('sends the full candidate set when the flag is off (no extractionCandidateSlots; narrow not called)', async () => {
-    vi.mocked(isFeatureEnabled).mockImplementation((name: string) =>
-      Promise.resolve(name !== APP_QUESTIONNAIRES_EXTRACTION_PREFILTER_FLAG)
-    );
-    ctxMock.buildTurnContext.mockResolvedValue(multiSlotContext());
+  it('sends the full candidate set when the Settings toggle is off (no extractionCandidateSlots; narrow not called)', async () => {
+    const offContext = multiSlotContext();
+    offContext.base.config.extractionPrefilter = false;
+    ctxMock.buildTurnContext.mockResolvedValue(offContext);
 
     const res = await POST(req({ message: 'hi' }), ctx);
     expect(res.status).toBe(200);

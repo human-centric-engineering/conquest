@@ -102,6 +102,7 @@ function state(over: Partial<TurnState> = {}): TurnState {
       contradictionWindowN: 3,
       contradictionEveryNTurns: 1,
       answerFitMode: 'fallback',
+      extractionPrefilter: false,
       anonymousMode: false,
       accessMode: 'invitation_only',
       inviteeFields: [],

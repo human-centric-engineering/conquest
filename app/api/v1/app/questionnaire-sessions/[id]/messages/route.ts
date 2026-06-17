@@ -32,7 +32,6 @@ import { createRateLimitResponse } from '@/lib/security/rate-limit';
 import {
   isAdaptiveSelectionEnabled,
   isAdaptiveDataSlotSelectionEnabled,
-  isExtractionPrefilterEnabled,
   isAnswerExtractionEnabled,
   isAnswerRefinementEnabled,
   isCompletionEnabled,
@@ -203,7 +202,6 @@ async function handleMessage(
       reasoningStreamFlag,
       toneFlag,
       dataSlotAdaptive,
-      extractionPrefilter,
     ] = await Promise.all([
       isAnswerExtractionEnabled(),
       isContradictionDetectionEnabled(),
@@ -218,7 +216,6 @@ async function handleMessage(
       isReasoningStreamEnabled(),
       isToneEnabled(),
       isAdaptiveDataSlotSelectionEnabled(),
-      isExtractionPrefilterEnabled(),
     ]);
 
     // Adaptive selection ranks unanswered questions by vector similarity, which needs each slot's
@@ -278,7 +275,8 @@ async function handleMessage(
     // when extraction actually runs (a kickoff forces it off). The pre-filter needs BOTH question and
     // data-slot embeddings regardless of selection strategy — ensure them here (cheap no-op once
     // embedded; fail-soft, since the pre-filter degrades to the full set without embeddings).
-    const prefilterActive = extractionPrefilter && extraction && !body.kickoff;
+    // Per-questionnaire Settings toggle (not a platform flag) — recommended for large surveys.
+    const prefilterActive = loaded.base.config.extractionPrefilter && extraction && !body.kickoff;
     const activeDataSlotKey = loaded.base.activeDataSlotKey ?? null;
     const activeTheme = activeDataSlotKey
       ? (dataSlots.find((s) => s.key === activeDataSlotKey)?.theme ?? null)

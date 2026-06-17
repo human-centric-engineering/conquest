@@ -272,6 +272,13 @@ describe('ConfigEditor', () => {
     expect(bodyOf(specs).anonymousMode).toBe(true);
   });
 
+  it('PATCHes extractionPrefilter toggled on on save', () => {
+    const { specs } = setup({ extractionPrefilter: false });
+    fireEvent.click(switchNear(/^Extraction pre-filter/));
+    clickSave();
+    expect(bodyOf(specs).extractionPrefilter).toBe(true);
+  });
+
   // ── Presentation mode ────────────────────────────────────────────────────────
 
   it('reflects presentationMode in its select', () => {

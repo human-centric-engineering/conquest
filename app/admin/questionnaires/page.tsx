@@ -13,7 +13,6 @@ import { logger } from '@/lib/logging';
 import {
   isAdaptiveDataSlotSelectionEnabled,
   isDataSlotsEnabled,
-  isExtractionPrefilterEnabled,
   isGenerativeAuthoringEnabled,
   isQuestionnairesEnabled,
 } from '@/lib/app/questionnaire/feature-flag';
@@ -121,7 +120,6 @@ export default async function QuestionnairesListPage() {
     dataSlotsEnabled,
     generativeAuthoringEnabled,
     adaptiveDataSlotsEnabled,
-    extractionPrefilterEnabled,
   ] = await Promise.all([
     getQuestionnaires(),
     getQuestionnaireStats(),
@@ -129,7 +127,6 @@ export default async function QuestionnairesListPage() {
     isDataSlotsEnabled(),
     isGenerativeAuthoringEnabled(),
     isAdaptiveDataSlotSelectionEnabled(),
-    isExtractionPrefilterEnabled(),
   ]);
 
   const statTiles: CqStat[] = [
@@ -174,10 +171,7 @@ export default async function QuestionnairesListPage() {
       <CqStatTiles stats={statTiles} />
 
       {dataSlotsEnabled && (
-        <DataSlotEmbeddingInfo
-          adaptiveDataSlotsEnabled={adaptiveDataSlotsEnabled}
-          extractionPrefilterEnabled={extractionPrefilterEnabled}
-        />
+        <DataSlotEmbeddingInfo adaptiveDataSlotsEnabled={adaptiveDataSlotsEnabled} />
       )}
 
       <QuestionnairesTable

@@ -72,8 +72,12 @@ userMessage, recentMessages?, sessionId }`, all in memory. `ExtractionSlotView`
 - **Extraction candidate pre-filter (50+-slot scale).** By default the extractor is
   handed the FULL candidate set every turn (all question slots + all data slots),
   which at 50+ data slots / 70+ questions is thousands of candidate tokens per turn.
-  When `APP_QUESTIONNAIRES_EXTRACTION_PREFILTER_ENABLED` is on, the live `/messages`
-  route embeds the respondent's last message and narrows what **the extractor** sees
+  It's a **per-questionnaire Settings toggle** (`config.extractionPrefilter`, in the Settings tab —
+  not a platform feature flag; consistent with `answerFitMode` / `contradictionMode`), **off by
+  default** and **recommended for large (50+ slot / 70+ question) surveys** where the full candidate
+  list is expensive; for smaller ones leave it off, since sending everything is cheap and maximises
+  capture accuracy. When on, the live `/messages` route embeds the respondent's last message and
+  narrows what **the extractor** sees
   via `narrowExtractionCandidates` (`questionnaire-sessions/_lib/extraction-candidates.ts`,
   reusing `rankSlotsByVector` / `rankDataSlotsByVector`). **The ranking query is the
   respondent's CURRENT answer, not the prior interviewer question:** `state.recentMessages`
@@ -90,8 +94,8 @@ userMessage, recentMessages?, sessionId }`, all in memory. `ExtractionSlotView`
   (no message / embed error / un-embedded version → full set) and a **no-op below a size
   threshold**. Crucially the narrowed set is threaded as a **separate** `extractionCandidateSlots`
   opt to `buildTurnInvokers` — the contradiction detector + refiner keep the **full** `slots`,
-  so only the extractor's prompt shrinks. Off by default (dark-launch); when off the extractor
-  gets the full set (today's behaviour). See the runtime roadmap in [selection-strategies.md].
+  so only the extractor's prompt shrinks. When off (the default), the extractor gets the full set.
+  See the runtime roadmap in [selection-strategies.md].
 - **Near-identical (twin) questions.** A questionnaire may include several questions that
   ask essentially the same thing in different words (poor authoring, but inevitable). The
   extractor prompt instructs the model to treat each candidate **independently** and emit a

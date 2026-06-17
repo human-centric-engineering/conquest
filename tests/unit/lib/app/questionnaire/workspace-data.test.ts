@@ -103,6 +103,7 @@ function makeGraph(over: Partial<VersionGraphView> = {}): VersionGraphView {
       contradictionWindowN: 0,
       contradictionEveryNTurns: 1,
       answerFitMode: 'fallback',
+      extractionPrefilter: false,
       anonymousMode: false,
       accessMode: 'invitation_only',
       inviteeFields: [],

@@ -27,7 +27,6 @@ vi.mock('@/lib/app/questionnaire/feature-flag', () => ({
   isDataSlotsEnabled: vi.fn(),
   isGenerativeAuthoringEnabled: vi.fn(),
   isAdaptiveDataSlotSelectionEnabled: vi.fn(),
-  isExtractionPrefilterEnabled: vi.fn(),
 }));
 
 vi.mock('@/lib/api/server-fetch', () => ({
@@ -69,7 +68,6 @@ import {
   isDataSlotsEnabled,
   isGenerativeAuthoringEnabled,
   isAdaptiveDataSlotSelectionEnabled,
-  isExtractionPrefilterEnabled,
 } from '@/lib/app/questionnaire/feature-flag';
 import { serverFetch, parseApiResponse } from '@/lib/api/server-fetch';
 import type { QuestionnaireListItem } from '@/lib/app/questionnaire/views';
@@ -113,7 +111,6 @@ describe('QuestionnairesListPage stat tiles', () => {
     vi.mocked(isDataSlotsEnabled).mockResolvedValue(false);
     vi.mocked(isGenerativeAuthoringEnabled).mockResolvedValue(false);
     vi.mocked(isAdaptiveDataSlotSelectionEnabled).mockResolvedValue(false);
-    vi.mocked(isExtractionPrefilterEnabled).mockResolvedValue(false);
 
     // serverFetch tags the response with its URL so parseApiResponse can branch.
     vi.mocked(serverFetch).mockImplementation(
@@ -446,17 +443,16 @@ describe('QuestionnairesListPage stat tiles', () => {
   it('shows the data-slot embedding explainer (with live flag status) when data slots are enabled', async () => {
     vi.mocked(isDataSlotsEnabled).mockResolvedValue(true);
     vi.mocked(isAdaptiveDataSlotSelectionEnabled).mockResolvedValue(true);
-    vi.mocked(isExtractionPrefilterEnabled).mockResolvedValue(false);
 
     render(await QuestionnairesListPage());
 
     // The explainer renders and its consumer use-cases are listed.
     expect(screen.getByText('About data-slot embedding')).toBeInTheDocument();
     expect(screen.getByText('Adaptive question selection')).toBeInTheDocument();
-    expect(screen.getByText('Answer-slot completion (extraction pre-filter)')).toBeInTheDocument();
-    // The status pills reflect the resolved flags — adaptive on, pre-filter off.
+    expect(screen.getByText('Extraction pre-filter (large surveys)')).toBeInTheDocument();
+    // Adaptive selection (a platform flag) shows a live On pill; the pre-filter is now a
+    // per-questionnaire Settings toggle, so it has no global pill.
     const pills = screen.getAllByText(/^(On|Off)$/).map((el) => el.textContent);
-    expect(pills).toContain('On');
-    expect(pills).toContain('Off');
+    expect(pills).toEqual(['On']);
   });
 });

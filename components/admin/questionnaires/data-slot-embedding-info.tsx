@@ -18,8 +18,6 @@ import { cn } from '@/lib/utils';
 export interface DataSlotEmbeddingInfoProps {
   /** Whether adaptive data-slot selection is live (master + data-slots + live + sub-flag). */
   adaptiveDataSlotsEnabled: boolean;
-  /** Whether the extraction candidate pre-filter is live (master + live + sub-flag). */
-  extractionPrefilterEnabled: boolean;
 }
 
 function StatusPill({ on }: { on: boolean }) {
@@ -60,10 +58,7 @@ function UseRow({
   );
 }
 
-export function DataSlotEmbeddingInfo({
-  adaptiveDataSlotsEnabled,
-  extractionPrefilterEnabled,
-}: DataSlotEmbeddingInfoProps) {
+export function DataSlotEmbeddingInfo({ adaptiveDataSlotsEnabled }: DataSlotEmbeddingInfoProps) {
   return (
     <details className="group bg-card rounded-xl border">
       <summary className="flex cursor-pointer list-none items-center gap-2 p-4 text-sm font-medium select-none">
@@ -104,13 +99,12 @@ export function DataSlotEmbeddingInfo({
             rather than a list, while still letting it linger on a theme.
           </UseRow>
 
-          <UseRow
-            icon={Filter}
-            title="Answer-slot completion (extraction pre-filter)"
-            status={extractionPrefilterEnabled}
-          >
+          <UseRow icon={Filter} title="Extraction pre-filter (large surveys)">
             Narrows the candidate slots the answer extractor reads each turn to the most relevant
             ones, cutting token cost while still re-scanning already-filled slots for enrichment.
+            Enabled per questionnaire on the{' '}
+            <span className="text-foreground font-medium">Settings tab</span> — recommended for
+            large (50+ slot / 70+ question) surveys.
           </UseRow>
         </div>
 
