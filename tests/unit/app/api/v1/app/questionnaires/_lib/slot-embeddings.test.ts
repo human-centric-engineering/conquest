@@ -20,7 +20,9 @@ vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
 
 import {
   embedVersionSlots,
+  ensureVersionSlotsEmbedded,
   rankSlotsByVector,
+  slotEmbeddingCoverage,
 } from '@/app/api/v1/app/questionnaires/_lib/slot-embeddings';
 import { embedBatch } from '@/lib/orchestration/knowledge/embedder';
 import { QUESTIONNAIRE_EMBEDDING_DIMENSION } from '@/lib/app/questionnaire/constants';
@@ -103,6 +105,53 @@ describe('embedVersionSlots', () => {
     prismaMock.$queryRawUnsafe.mockResolvedValue([{ id: 'b' }, { id: 'c' }]);
     (embedBatch as unknown as Mock).mockResolvedValue({ embeddings: [[0.1]] });
     await expect(embedVersionSlots('v1')).rejects.toThrow(/does not match/);
+  });
+});
+
+describe('slotEmbeddingCoverage', () => {
+  it('reports total / embedded / missing from the COUNT query', async () => {
+    prismaMock.$queryRawUnsafe.mockResolvedValue([{ total: 5n, embedded: 2n }]);
+    expect(await slotEmbeddingCoverage('v1')).toEqual({ total: 5, embedded: 2, missing: 3 });
+  });
+
+  it('treats a fully-embedded version as zero missing', async () => {
+    prismaMock.$queryRawUnsafe.mockResolvedValue([{ total: 7n, embedded: 7n }]);
+    expect(await slotEmbeddingCoverage('v1')).toEqual({ total: 7, embedded: 7, missing: 0 });
+  });
+
+  it('returns all-zero for a version with no slots', async () => {
+    prismaMock.$queryRawUnsafe.mockResolvedValue([{ total: 0n, embedded: 0n }]);
+    expect(await slotEmbeddingCoverage('v1')).toEqual({ total: 0, embedded: 0, missing: 0 });
+  });
+});
+
+describe('ensureVersionSlotsEmbedded', () => {
+  it('no-ops via the cheap COUNT when the version is fully embedded', async () => {
+    // COUNT(… IS NULL) → 0 missing: the lazy path must short-circuit here.
+    prismaMock.$queryRawUnsafe.mockResolvedValueOnce([{ missing: 0n }]);
+
+    const result = await ensureVersionSlotsEmbedded('v1');
+
+    expect(result).toEqual({ embedded: 0, skipped: 0, total: 0 });
+    // No slot load, no embedding work — only the one COUNT query ran.
+    expect(prismaMock.appQuestionSlot.findMany).not.toHaveBeenCalled();
+    expect(embedBatch).not.toHaveBeenCalled();
+    expect(prismaMock.$queryRawUnsafe).toHaveBeenCalledTimes(1);
+  });
+
+  it('embeds only the missing slots when some are unembedded', async () => {
+    // 1st $queryRawUnsafe = the COUNT (2 missing); 2nd = the missing-id list
+    // inside the delegated embedVersionSlots(onlyMissing) call.
+    prismaMock.$queryRawUnsafe
+      .mockResolvedValueOnce([{ missing: 2n }])
+      .mockResolvedValueOnce([{ id: 'b' }, { id: 'c' }]);
+    (embedBatch as unknown as Mock).mockResolvedValue({ embeddings: [vec(0.1), vec(0.3)] });
+
+    const result = await ensureVersionSlotsEmbedded('v1');
+
+    expect(result).toEqual({ embedded: 2, skipped: 1, total: 3 });
+    expect(embedBatch).toHaveBeenCalledWith(['P-b\n\nG-b', 'P-c'], undefined, 'document');
+    expect(prismaMock.$executeRawUnsafe).toHaveBeenCalledTimes(2);
   });
 });
 

@@ -27,6 +27,7 @@ import {
   Mail,
   MessageSquareText,
   Plus,
+  ScanSearch,
   ShieldCheck,
   SlidersHorizontal,
   X,
@@ -51,6 +52,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { FieldHelp } from '@/components/ui/field-help';
 import { cn } from '@/lib/utils';
 import { CostEstimateCard } from '@/components/admin/questionnaires/cost-estimate-card';
+import { AdaptiveEmbeddingStep } from '@/components/admin/questionnaires/adaptive-embedding-step';
 import { API } from '@/lib/api/endpoints';
 import {
   ACCESS_MODES,
@@ -426,6 +428,9 @@ export function ConfigEditor({
   const [reasoningStreamPersist, setReasoningStreamPersist] = useState(
     config.reasoningStreamPersist
   );
+  const [previewInspectorEnabled, setPreviewInspectorEnabled] = useState(
+    config.previewInspectorEnabled
+  );
   const [profileFields, setProfileFields] = useState<ProfileFieldRow[]>(
     config.profileFields.map(toRow)
   );
@@ -461,6 +466,7 @@ export function ConfigEditor({
     setReasoningStreamEnabled(config.reasoningStreamEnabled);
     setReasoningStreamPlacement(config.reasoningStreamPlacement);
     setReasoningStreamPersist(config.reasoningStreamPersist);
+    setPreviewInspectorEnabled(config.previewInspectorEnabled);
     setProfileFields(config.profileFields.map(toRow));
     setTone(config.tone);
   }, [config]);
@@ -546,6 +552,8 @@ export function ConfigEditor({
         reasoningStreamEnabled,
         reasoningStreamPlacement,
         reasoningStreamPersist,
+        // Preview Turn Inspector (admin-only). Surfaces only inside an admin preview session.
+        previewInspectorEnabled,
         // Interviewer tone & persona (F-tone). Sent whole; trim the persona text. Requires the
         // platform tone flag to take effect.
         tone: { ...tone, persona: { ...tone.persona, text: tone.persona.text.trim() } },
@@ -605,6 +613,16 @@ export function ConfigEditor({
               ))}
             </SelectContent>
           </Select>
+          {/* Adaptive ranks questions by embedding similarity, so it needs the slots embedded
+              first. Surface the explicit generate step + coverage as soon as the admin picks
+              adaptive (driven by the live selection, not just the saved value). */}
+          {selectionStrategy === 'adaptive' && (
+            <AdaptiveEmbeddingStep
+              questionnaireId={questionnaireId}
+              versionId={versionId}
+              busy={busy}
+            />
+          )}
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-1.5">
@@ -844,6 +862,35 @@ export function ConfigEditor({
             </div>
           </div>
         )}
+      </SettingsGroup>
+
+      {/* ── 2b-ii. Preview tools (admin only) — debugging surfaces that appear ONLY when an admin is
+             previewing as a respondent, never to a real respondent. Server-enforced via the preview
+             session marker, so this toggle can't leak telemetry to live sessions. ── */}
+      <SettingsGroup
+        icon={ScanSearch}
+        accent="bg-[var(--cq-accent-muted)] text-[color:var(--cq-accent)]"
+        title="Preview tools — admin only"
+        description="Debugging surfaces shown only when you preview as a respondent. Never visible to real respondents."
+      >
+        <div className="flex items-center gap-2">
+          <Switch
+            checked={previewInspectorEnabled}
+            onCheckedChange={setPreviewInspectorEnabled}
+            disabled={busy}
+          />
+          <Label className="text-sm font-medium">
+            Turn inspector{' '}
+            <FieldHelp title="Preview turn inspector (admin only)">
+              When on, the &ldquo;Preview as respondent&rdquo; screen gains a collapsible{' '}
+              <strong>Inspector</strong> drawer. For each turn it shows the sequence of agent calls
+              the conversation made, and for each call the model used, response time, estimated
+              cost, token counts, and the raw prompt and response. It appears <strong>only</strong>{' '}
+              in a preview session — a real respondent never sees it and the data is never sent to
+              them. Useful for understanding and debugging how the conversation is being driven.
+            </FieldHelp>
+          </Label>
+        </div>
       </SettingsGroup>
 
       {/* ── 2c. Interviewer tone & persona — how the conversational interviewer responds. Each

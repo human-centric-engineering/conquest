@@ -550,6 +550,32 @@ export const QUESTIONNAIRE_INTERVIEWER_AGENT_SLUG = 'app-questionnaire-interview
 export const APP_QUESTIONNAIRES_DATA_SLOTS_FLAG = 'APP_QUESTIONNAIRES_DATA_SLOTS_ENABLED';
 
 /**
+ * Sub-flag gating **adaptive data-slot selection** — the embedding-ranked LLM selector that picks
+ * the next data slot to pursue in data-slot mode, instead of the deterministic topic-local order.
+ * A paid (embedding + LLM) sub-feature aimed at large questionnaires (50+ data slots): it depends
+ * on the data-slots feature AND live-sessions, and is an independent opt-in on top. When off, the
+ * data-slot turn loop keeps today's deterministic `pickNextDataSlot`. Disabled by default
+ * (dark-launch). Seeded by `prisma/seeds/app-questionnaire/041-adaptive-data-slots-flag.ts`.
+ */
+export const APP_QUESTIONNAIRES_ADAPTIVE_DATA_SLOTS_FLAG =
+  'APP_QUESTIONNAIRES_ADAPTIVE_DATA_SLOTS_ENABLED';
+
+/**
+ * Sub-flag gating the **extraction candidate pre-filter** — at scale (50+ data slots / 70+
+ * questions) the combined extractor is handed the FULL candidate list every turn. When on, the
+ * live `/messages` route embeds the respondent's last message and narrows the candidates to the
+ * ones that matter (active slot, slots already filled, same-theme, mapped questions) plus the
+ * top-K most similar, cutting per-turn prompt cost. Behaviour-preserving by design (the safety
+ * rails keep every slot the answer could inform) and fail-soft (any embed failure → full set).
+ * Requires the master app flag AND the live-sessions flag (it only runs in the respondent turn
+ * loop); independent of the data-slots flag (it also helps question-only large questionnaires).
+ * Disabled by default (dark-launch). Seeded by
+ * `prisma/seeds/app-questionnaire/042-extraction-prefilter-flag.ts`.
+ */
+export const APP_QUESTIONNAIRES_EXTRACTION_PREFILTER_FLAG =
+  'APP_QUESTIONNAIRES_EXTRACTION_PREFILTER_ENABLED';
+
+/**
  * Sub-flag gating the **seriousness / abuse gate** — per answered turn, a respondent answer the
  * extractor flags as non-genuine is judged; a non-serious verdict is disregarded, strikes the
  * session, and (at `config.abuseThreshold`) abandons it. Disabled by default (dark-launch);

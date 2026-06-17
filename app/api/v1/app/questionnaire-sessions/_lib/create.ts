@@ -262,9 +262,11 @@ export async function createPreviewSession(versionId: string): Promise<CreateSes
     return { ok: false, status: 404, code: 'NOT_FOUND', message: 'Questionnaire not found' };
   }
   // A launched version is always previewable; a draft is previewable once it passes the same
-  // readiness gate as launch (so an admin can rehearse it before going live).
+  // readiness gate as launch (so an admin can rehearse it before going live). Exception: the
+  // adaptive "Questions embedded" check is launch-only — preview rehearsal is allowed before
+  // embedding because the live turn loop embeds slots lazily as a backstop.
   if (version.status !== 'launched') {
-    const { ready } = await loadLaunchReadiness(versionId);
+    const { ready } = await loadLaunchReadiness(versionId, { includeEmbeddings: false });
     if (!ready) {
       return {
         ok: false,

@@ -1,10 +1,11 @@
 /**
- * DEMO-ONLY (F2.5.1) integration test: questionnaire demo-client attribution.
- *
- * PATCH /api/v1/app/questionnaires/:id — set/clear `demoClientId`. Covers the gate
- * order, auth, the unknown-questionnaire 404, the unknown-demo-client 404 on
- * attach, the detach (null) path, and audit emission. The questionnaire read GET
- * lives in read-routes.test.ts; this only exercises the new PATCH handler.
+ * Integration test for `PATCH /api/v1/app/questionnaires/:id` — the two
+ * questionnaire-level mutations the route discriminates by body:
+ *   • rename (`{ title }`)              — see the rename describe block.
+ *   • demo-client attribution (F2.5.1)  — set/clear `demoClientId`.
+ * Covers the gate order, auth, the unknown-questionnaire 404, the unknown-demo-client
+ * 404 on attach, the detach (null) path, the rename no-op, and audit emission. The
+ * questionnaire read GET lives in read-routes.test.ts; this only exercises PATCH.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -155,5 +156,67 @@ describe('PATCH /api/v1/app/questionnaires/:id (attribution)', () => {
     expect(prismaMock.appQuestionnaire.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: { demoClientId: null } })
     );
+  });
+});
+
+describe('PATCH /api/v1/app/questionnaires/:id (rename)', () => {
+  it('404s when the questionnaire is unknown', async () => {
+    prismaMock.appQuestionnaire.findUnique.mockResolvedValue(null);
+    const res = await attributePATCH(jsonReq({ title: 'New name' }), ctx('missing'));
+    expect(res.status).toBe(404);
+    expect(prismaMock.appQuestionnaire.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects an empty title without writing or auditing', async () => {
+    prismaMock.appQuestionnaire.findUnique.mockResolvedValue({
+      id: 'qn-1',
+      title: 'Onboarding',
+      demoClientId: null,
+    });
+    const res = await attributePATCH(jsonReq({ title: '   ' }), ctx('qn-1'));
+    expect(res.status).toBe(400);
+    expect(prismaMock.appQuestionnaire.update).not.toHaveBeenCalled();
+    expect(logAdminAction).not.toHaveBeenCalled();
+  });
+
+  it('renames the questionnaire, trims, and audits the change', async () => {
+    prismaMock.appQuestionnaire.findUnique.mockResolvedValue({
+      id: 'qn-1',
+      title: 'Chris Thomas Questionnaire.xlsx',
+      demoClientId: null,
+    });
+    prismaMock.appQuestionnaire.update.mockResolvedValue({ id: 'qn-1' });
+
+    const res = await attributePATCH(jsonReq({ title: '  Merlin5 Questionnaire  ' }), ctx('qn-1'));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data).toEqual({ id: 'qn-1', title: 'Merlin5 Questionnaire' });
+    expect(prismaMock.appQuestionnaire.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'qn-1' }, data: { title: 'Merlin5 Questionnaire' } })
+    );
+    expect(logAdminAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'questionnaire.rename',
+        entityId: 'qn-1',
+        entityName: 'Merlin5 Questionnaire',
+      })
+    );
+    // Demo-client path is untouched by a rename.
+    expect(prismaMock.appDemoClient.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('treats an unchanged title as a no-op: no write, no audit, still 200', async () => {
+    prismaMock.appQuestionnaire.findUnique.mockResolvedValue({
+      id: 'qn-1',
+      title: 'Onboarding',
+      demoClientId: null,
+    });
+
+    const res = await attributePATCH(jsonReq({ title: 'Onboarding' }), ctx('qn-1'));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data).toEqual({ id: 'qn-1', title: 'Onboarding' });
+    expect(prismaMock.appQuestionnaire.update).not.toHaveBeenCalled();
+    expect(logAdminAction).not.toHaveBeenCalled();
   });
 });

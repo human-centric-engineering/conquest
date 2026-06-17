@@ -23,7 +23,8 @@ import type { ChatEvent } from '@/types/orchestration';
 import { resolveAgentProviderAndModel } from '@/lib/orchestration/llm/agent-resolver';
 import { getProvider } from '@/lib/orchestration/llm/provider-manager';
 import { calculateCost, logCost } from '@/lib/orchestration/llm/cost-tracker';
-import type { LlmMessage } from '@/lib/orchestration/llm/types';
+import { getTextContent, type LlmMessage } from '@/lib/orchestration/llm/types';
+import type { RecordAgentCall } from '@/lib/app/questionnaire/inspector';
 import {
   QUESTION_TYPE_LABELS,
   type QuestionType,
@@ -61,6 +62,14 @@ export interface QuestionComposeInput {
   audience?: QuestionAudience;
   /** Recent transcript (oldest → newest) for continuity. */
   recentMessages: string[];
+  /**
+   * A short digest of what the respondent has already shared this session — each entry a
+   * `"<label>: <summary>"` line (e.g. a data slot's name + its paraphrase). Background for
+   * continuity: the interviewer may refer back to one point naturally when it genuinely helps
+   * the next question flow, but must NOT recap the list or re-ask anything in it. Absent/empty
+   * → the block is omitted (no behaviour change). Built by `_lib/prior-answers.ts`.
+   */
+  priorAnswers?: string[];
   /** The respondent's message this turn (to acknowledge); empty on the opening turn. */
   lastUserMessage: string;
   /** True when this same question was just asked and the prior answer wasn't captured. */
@@ -187,8 +196,9 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
       'simple, easy-to-answer sentence. The opening questions must feel effortless. '
     : verbosityControlled
       ? ''
-      : 'Keep it concise — one or two sentences. Rapport has built, so you may be a little warmer ' +
-        'or add light context, but never long-winded or convoluted. ';
+      : 'Keep your OWN question concise — one or two sentences — even as you invite a longer answer ' +
+        'from them; a short, open question gives them the most room to expand. Rapport has built, ' +
+        'so you may be a little warmer or add light context, but never long-winded or convoluted. ';
 
   // Sensitivity awareness / safeguarding: once a sensitive disclosure has been remembered this
   // session, every later question is asked more gently. The latest summary reminds the interviewer
@@ -204,7 +214,11 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
     : '';
 
   const system =
-    'You are a warm, conversational interviewer guiding someone through a questionnaire. ' +
+    'You are a warm, emotionally attuned interviewer guiding someone through a questionnaire. ' +
+    'You are deeply skilled in human psychology and the craft of getting people to open up — you ' +
+    'understand that people share most freely when they feel genuinely heard, unhurried, and ' +
+    'trusted to follow their own train of thought. Your aim is to draw out rich, reflective, ' +
+    'story-led answers, not to tick boxes. ' +
     'Ask the ONE question provided, naturally — never as a numbered form field, never restate ' +
     'the whole survey, never invent new questions, and never answer on their behalf. ' +
     // The single most important rule for readable questions: one ask, stated plainly.
@@ -212,6 +226,14 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
     'pre-list everything you hope to learn (e.g. do not tack on "…and tell me what was good, any ' +
     'challenges, and what changed"). State the core question simply and let them answer; you can ' +
     'always draw out more on the next turn. ' +
+    // Open phrasing: one ask, but framed to invite an expansive, reflective answer.
+    'Phrase every question as an OPEN invitation rather than a closed prompt — favour "Tell me ' +
+    'about…", "What was that like for you?", "Walk me through…", "How did you come to…" over ' +
+    'anything answerable in a single word. Where it fits naturally, gently invite them to ' +
+    'illustrate with a recent example or moment, and make it feel completely fine to take their ' +
+    'time, think aloud, and follow a tangent if one comes to mind — reassure them, in spirit, ' +
+    'that whatever they share is welcome and helpful. Ask the one thing, then leave them real ' +
+    'room to be expansive. ' +
     // Phase 5 — infer scales/choices from natural language; only spell them out as a last resort.
     'When the question is a rating SCALE, ask about the underlying feeling or judgement in plain, ' +
     'everyday language and read their level from HOW they answer — unless told below that a ' +
@@ -277,12 +299,22 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
         ? `\n\nThe last reply wasn't clear enough to map, so this time you MAY offer the simple ${likertScale.min}–${likertScale.max} scale (where ${likertScale.max} is the most positive) to make it easy.`
         : '';
 
+  // What they've already shared this session (continuity). Explicitly background-only: the
+  // interviewer may glance back at one point when it helps, but must not recap or re-ask it.
+  const priorContext =
+    input.priorAnswers && input.priorAnswers.length > 0
+      ? `\n\nWhat they have already shared this session (background only — do NOT recap this list and do NOT re-ask anything in it; you MAY refer back to ONE point naturally if it genuinely helps this question land):\n${input.priorAnswers
+          .map((p) => `- ${p}`)
+          .join('\n')}`
+      : '';
+
   const user =
     `The question to ask (type: ${QUESTION_TYPE_LABELS[input.type]}):\n"${input.prompt}"` +
     clarifyGuidance +
     (input.guidelines
       ? `\n\nAnswer guidance (for you, do not read aloud): ${input.guidelines}`
       : '') +
+    priorContext +
     (transcript ? `\n\nRecent conversation:\n${transcript}` : '') +
     (input.lastUserMessage.trim().length > 0
       ? `\n\nThe respondent just said: "${input.lastUserMessage.trim()}"`
@@ -304,7 +336,10 @@ export async function* streamQuestionMessage(opts: {
   input: QuestionComposeInput;
   userId: string;
   sessionId: string;
+  /** Preview Turn Inspector (admin-only): records this phrasing call's trace when supplied. */
+  recordInspectorCall?: RecordAgentCall;
 }): AsyncGenerator<ChatEvent, StreamedQuestion, undefined> {
+  const startedAt = Date.now();
   const fallback = opts.input.prompt;
 
   const agent = await prisma.aiAgent.findUnique({
@@ -384,6 +419,19 @@ export async function* streamQuestionMessage(opts: {
         sessionId: opts.sessionId,
         error: err instanceof Error ? err.message : String(err),
       });
+    });
+  }
+
+  if (opts.recordInspectorCall) {
+    opts.recordInspectorCall({
+      label: 'Interviewer phrasing',
+      model,
+      provider: providerSlug,
+      latencyMs: Date.now() - startedAt,
+      costUsd,
+      ...(usage ? { tokensIn: usage.inputTokens, tokensOut: usage.outputTokens } : {}),
+      prompt: messages.map((m) => ({ role: m.role, content: getTextContent(m.content) })),
+      response: message,
     });
   }
 

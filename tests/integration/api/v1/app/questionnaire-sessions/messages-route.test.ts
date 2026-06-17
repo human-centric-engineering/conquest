@@ -60,6 +60,37 @@ vi.mock('@/lib/app/questionnaire/reasoning', () => ({
   buildReasoningTrace: reasoningMock.buildReasoningTrace,
 }));
 
+// Embedding lazy-ensure seams — mocked so the route never touches pgvector / the embedder here.
+const slotEmbedMock = vi.hoisted(() => ({
+  ensureVersionSlotsEmbedded: vi.fn(() => Promise.resolve({ embedded: 0, skipped: 0, total: 0 })),
+}));
+vi.mock('@/app/api/v1/app/questionnaires/_lib/slot-embeddings', () => slotEmbedMock);
+const dataSlotEmbedMock = vi.hoisted(() => ({
+  ensureVersionDataSlotsEmbedded: vi.fn(() =>
+    Promise.resolve({ embedded: 0, skipped: 0, total: 0 })
+  ),
+}));
+vi.mock('@/app/api/v1/app/questionnaires/_lib/data-slot-embeddings', () => dataSlotEmbedMock);
+
+// Extraction pre-filter — mocked so the wiring (which lists the extractor sees) is asserted without
+// running the real ranker. Default: a full-set passthrough (`applied:false`), so the flag being on
+// changes nothing unless a test overrides it.
+const prefilterMock = vi.hoisted(() => ({
+  narrowExtractionCandidates: vi.fn(() =>
+    Promise.resolve({
+      questionSlots: [] as Array<{ key: string }>,
+      dataSlots: [] as Array<{ key: string }>,
+      applied: false,
+      reason: 'below_threshold',
+      questionsIn: 0,
+      questionsOut: 0,
+      dataSlotsIn: 0,
+      dataSlotsOut: 0,
+    })
+  ),
+}));
+vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/extraction-candidates', () => prefilterMock);
+
 import { POST } from '@/app/api/v1/app/questionnaire-sessions/[id]/messages/route';
 import {
   ABUSE_ABANDON_REASON,
@@ -70,6 +101,7 @@ import { isFeatureEnabled } from '@/lib/feature-flags';
 import {
   APP_QUESTIONNAIRES_COST_CAP_FLAG,
   APP_QUESTIONNAIRES_DATA_SLOTS_FLAG,
+  APP_QUESTIONNAIRES_EXTRACTION_PREFILTER_FLAG,
   APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG,
   APP_QUESTIONNAIRES_REASONING_STREAM_FLAG,
   APP_QUESTIONNAIRES_TONE_FLAG,
@@ -197,6 +229,24 @@ beforeEach(() => {
   rateMock.turnLimiter.check.mockReturnValue({ success: true });
   ctxMock.buildTurnContext.mockResolvedValue(loadedContext());
   invokersMock.buildTurnInvokers.mockResolvedValue(stubInvokers());
+  // Pre-filter defaults: lazy-ensure no-ops; narrowing is a full-set passthrough (off-effect) unless
+  // a test overrides it.
+  slotEmbedMock.ensureVersionSlotsEmbedded.mockResolvedValue({ embedded: 0, skipped: 0, total: 0 });
+  dataSlotEmbedMock.ensureVersionDataSlotsEmbedded.mockResolvedValue({
+    embedded: 0,
+    skipped: 0,
+    total: 0,
+  });
+  prefilterMock.narrowExtractionCandidates.mockResolvedValue({
+    questionSlots: [],
+    dataSlots: [],
+    applied: false,
+    reason: 'below_threshold',
+    questionsIn: 0,
+    questionsOut: 0,
+    dataSlotsIn: 0,
+    dataSlotsOut: 0,
+  });
   runMock.persistTurn.mockResolvedValue('turn-1');
   offerMock.streamOfferMessage.mockImplementation(async function* () {
     yield { type: 'content', delta: 'Ready to submit?' };
@@ -568,6 +618,129 @@ describe('data-slot mode', () => {
     };
     const candidate = invokerArgs.dataSlotCandidates?.find((c) => c.key === 'department');
     expect(candidate?.current?.value).toBe('Engineering');
+  });
+});
+
+describe('extraction pre-filter', () => {
+  /** A context with two question slots + two data slots — enough to assert narrowing. */
+  function multiSlotContext() {
+    const base = loadedContext();
+    return loadedContext({
+      slots: [
+        {
+          id: 'q1',
+          key: 'q1',
+          sectionId: 's1',
+          prompt: 'Role?',
+          type: 'free_text',
+          required: false,
+        },
+        {
+          id: 'q2',
+          key: 'q2',
+          sectionId: 's1',
+          prompt: 'Tenure?',
+          type: 'free_text',
+          required: false,
+        },
+      ],
+      base: {
+        ...base.base,
+        recentMessages: ['I just joined the marketing team'],
+        dataSlots: [
+          {
+            id: 'ds-1',
+            key: 'department',
+            name: 'Department',
+            description: 'Which dept?',
+            theme: 'role',
+            ordinal: 0,
+            weight: 1,
+          },
+          {
+            id: 'ds-2',
+            key: 'tenure',
+            name: 'Tenure',
+            description: 'How long?',
+            theme: 'role',
+            ordinal: 1,
+            weight: 1,
+          },
+        ],
+        dataSlotAnswered: [],
+        dataSlotAttempts: {},
+      },
+    });
+  }
+
+  /** The args the route passed to the (mocked) invoker builder. */
+  function invokerArgs() {
+    return invokersMock.buildTurnInvokers.mock.calls[0][0] as {
+      slots: Array<{ key: string }>;
+      extractionCandidateSlots?: Array<{ key: string }>;
+      dataSlotCandidates?: Array<{ key: string }>;
+    };
+  }
+
+  it('narrows the extractor candidates when applied, while detector/refiner keep the full slots', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(multiSlotContext());
+    prefilterMock.narrowExtractionCandidates.mockResolvedValue({
+      questionSlots: [{ key: 'q1' }], // keep q1, drop q2
+      dataSlots: [{ key: 'department' }], // keep ds-1, drop ds-2
+      applied: true,
+      reason: 'narrowed',
+      questionsIn: 2,
+      questionsOut: 1,
+      dataSlotsIn: 2,
+      dataSlotsOut: 1,
+    });
+
+    const res = await POST(req({ message: 'I just joined the marketing team' }), ctx);
+    expect(res.status).toBe(200);
+    await drainSse(res);
+
+    const args = invokerArgs();
+    // Full slots still flow to the detector/refiner (their coverage is unchanged).
+    expect(args.slots.map((s) => s.key).sort()).toEqual(['q1', 'q2']);
+    // The extractor sees ONLY the narrowed question slots + data-slot candidates.
+    expect(args.extractionCandidateSlots?.map((s) => s.key)).toEqual(['q1']);
+    expect(args.dataSlotCandidates?.map((s) => s.key)).toEqual(['department']);
+  });
+
+  it('sends the full candidate set when the flag is off (no extractionCandidateSlots; narrow not called)', async () => {
+    vi.mocked(isFeatureEnabled).mockImplementation((name: string) =>
+      Promise.resolve(name !== APP_QUESTIONNAIRES_EXTRACTION_PREFILTER_FLAG)
+    );
+    ctxMock.buildTurnContext.mockResolvedValue(multiSlotContext());
+
+    const res = await POST(req({ message: 'hi' }), ctx);
+    expect(res.status).toBe(200);
+    await drainSse(res);
+
+    expect(prefilterMock.narrowExtractionCandidates).not.toHaveBeenCalled();
+    const args = invokerArgs();
+    expect(args.extractionCandidateSlots).toBeUndefined();
+    expect(args.dataSlotCandidates?.map((s) => s.key).sort()).toEqual(['department', 'tenure']);
+  });
+
+  it('keeps the full set on a passthrough result (no-op / below threshold)', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(multiSlotContext());
+    // default mock → applied:false passthrough
+    const res = await POST(req({ message: 'hi' }), ctx);
+    expect(res.status).toBe(200);
+    await drainSse(res);
+
+    const args = invokerArgs();
+    expect(args.extractionCandidateSlots?.map((s) => s.key).sort()).toEqual(['q1', 'q2']);
+    expect(args.dataSlotCandidates?.map((s) => s.key).sort()).toEqual(['department', 'tenure']);
+  });
+
+  it('completes the turn fail-soft when the lazy embed throws', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(multiSlotContext());
+    slotEmbedMock.ensureVersionSlotsEmbedded.mockRejectedValue(new Error('embedder down'));
+    const res = await POST(req({ message: 'hi' }), ctx);
+    expect(res.status).toBe(200);
+    await drainSse(res);
   });
 });
 

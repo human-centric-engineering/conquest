@@ -117,6 +117,7 @@ function makeGraph(over: Partial<VersionGraphView> = {}): VersionGraphView {
       reasoningStreamEnabled: true,
       reasoningStreamPlacement: 'overlay',
       reasoningStreamPersist: true,
+      previewInspectorEnabled: false,
       tone: DEFAULT_TONE_SETTINGS,
     },
     ...over,
@@ -647,11 +648,12 @@ describe('getEvaluationAddQuestionSeed', () => {
 describe('resolveQuestionnaireWorkspaceFlags', () => {
   /**
    * Flag resolution order mirrors the Promise.all in the source:
-   *   [master, dataSlots, designEval, liveSessions, adaptive]
+   *   [master, dataSlots, designEval, liveSessions, adaptive, adaptiveDataSlots]
    *
    * Sub-flags are ANDed with master locally (after the parallel lookups),
    * so even when a sub-flag's own DB row is `true`, it resolves to `false`
-   * when the master is `false`.
+   * when the master is `false`. `adaptiveDataSlots` is additionally ANDed with
+   * dataSlots + liveSessions (it only runs in live data-slot mode).
    */
 
   describe('all flags on', () => {
@@ -669,19 +671,20 @@ describe('resolveQuestionnaireWorkspaceFlags', () => {
         designEval: true,
         liveSessions: true,
         adaptive: true,
+        adaptiveDataSlots: true,
       });
     });
 
-    it('resolves all 5 flags in a single Promise.all (5 isFeatureEnabled calls)', async () => {
+    it('resolves all 6 flags in a single Promise.all (6 isFeatureEnabled calls)', async () => {
       // Arrange
       mockIsFeatureEnabled.mockResolvedValue(true);
 
       // Act
       await resolveQuestionnaireWorkspaceFlags();
 
-      // Assert: exactly 5 calls — one per flag constant; prevents regression
+      // Assert: exactly 6 calls — one per flag constant; prevents regression
       // where sub-flag helpers re-resolved the master flag independently
-      expect(mockIsFeatureEnabled).toHaveBeenCalledTimes(5);
+      expect(mockIsFeatureEnabled).toHaveBeenCalledTimes(6);
     });
   });
 
@@ -745,7 +748,14 @@ describe('resolveQuestionnaireWorkspaceFlags', () => {
 
       // Assert: the returned object has the exact keys the interface defines
       expect(Object.keys(flags).sort()).toEqual(
-        ['adaptive', 'dataSlots', 'designEval', 'liveSessions', 'master'].sort()
+        [
+          'adaptive',
+          'adaptiveDataSlots',
+          'dataSlots',
+          'designEval',
+          'liveSessions',
+          'master',
+        ].sort()
       );
     });
   });

@@ -20,6 +20,7 @@ import {
   AUDIENCE_SENSITIVITY_LEVELS,
   type AudienceShape,
 } from '@/lib/app/questionnaire/types';
+import { MAX_QUESTIONNAIRE_TITLE_LENGTH } from '@/lib/app/questionnaire/title';
 
 /**
  * Extension allowlist — the source of truth for accepted formats (the caller's
@@ -38,8 +39,13 @@ export function hasAllowedExtension(name: string): boolean {
   return ALLOWED_EXTENSIONS.some((ext) => lower.endsWith(ext));
 }
 
-/** Upper bound on an admin-supplied questionnaire name (matches the title-search cap). */
-export const MAX_TITLE_LENGTH = 200;
+/**
+ * Upper bound on an admin-supplied questionnaire name. Alias of the shared
+ * {@link MAX_QUESTIONNAIRE_TITLE_LENGTH} (single source of truth, also used by the
+ * rename endpoint/form) — re-exported here so the existing ingest callers and tests
+ * keep their import path.
+ */
+export const MAX_TITLE_LENGTH = MAX_QUESTIONNAIRE_TITLE_LENGTH;
 
 /** Parsed, validated admin-supplied metadata. Absent fields are omitted. */
 export interface AdminMetadata {

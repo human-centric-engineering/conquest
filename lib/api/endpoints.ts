@@ -359,7 +359,7 @@ export const API = {
       /** Conversational refine of a draft version's structure (POST JSON). */
       composeRefine: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/compose/refine`,
-      /** Questionnaire detail (questionnaire + version summaries). */
+      /** Questionnaire detail (GET); rename or demo-client attribution (PATCH). */
       byId: (id: string): string => `/api/v1/app/questionnaires/${id}`,
       /** One version's full section/question graph (GET); version-meta edit (PATCH). */
       versionGraph: (id: string, versionId: string): string =>
@@ -381,9 +381,18 @@ export const API = {
       /** Next-question preview against a supplied answer state (POST — F4.1). */
       versionNextQuestion: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/next-question`,
-      /** Generate/backfill slot embeddings for adaptive selection (POST `{ force? }` — F4.1). */
+      /**
+       * Slot embeddings for adaptive selection (F4.1). GET returns coverage
+       * `{ total, embedded, missing }`; POST `{ force? }` generates/backfills them.
+       */
       versionEmbedQuestions: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/embed-questions`,
+      /**
+       * Data-slot embeddings for adaptive data-slot selection. GET returns coverage
+       * `{ total, embedded, missing }`; POST `{ force? }` generates/backfills them.
+       */
+      versionEmbedDataSlots: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/embed-data-slots`,
       /** Section collection (POST create). */
       versionSections: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/sections`,

@@ -16,6 +16,7 @@ import {
   REASONING_TONES,
   type ReasoningStep,
 } from '@/lib/app/questionnaire/reasoning';
+import type { AgentCallTrace, InspectorMessage } from '@/lib/app/questionnaire/inspector';
 
 /** The `ChatEvent` variants the respondent `/messages` stream can produce. */
 export type SessionStreamEvent =
@@ -23,6 +24,9 @@ export type SessionStreamEvent =
   | { type: 'content'; delta: string }
   | { type: 'warning'; code: string; message: string; detail?: string }
   | { type: 'reasoning'; steps: ReasoningStep[] }
+  // Preview Turn Inspector (admin-only): the agent-call trace for this turn. The server only emits
+  // it for a preview session with the inspector toggle on — never to a real respondent.
+  | { type: 'inspector'; turnIndex: number; calls: AgentCallTrace[] }
   | { type: 'done'; costUsd: number }
   | { type: 'error'; code: string; message: string };
 
@@ -60,6 +64,35 @@ function asReasoningStep(value: unknown): ReasoningStep | null {
   };
 }
 
+/** Narrow one prompt message from an `inspector` frame; drops malformed entries. */
+function asInspectorMessage(value: unknown): InspectorMessage | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const v = value as Record<string, unknown>;
+  if (typeof v.role !== 'string' || typeof v.content !== 'string') return null;
+  return { role: v.role, content: v.content };
+}
+
+/** Narrow one untyped item from the `inspector` frame to an {@link AgentCallTrace}, or drop it. */
+function asAgentCallTrace(value: unknown): AgentCallTrace | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const v = value as Record<string, unknown>;
+  if (typeof v.label !== 'string') return null;
+  const prompt = Array.isArray(v.prompt)
+    ? v.prompt.map(asInspectorMessage).filter((m): m is InspectorMessage => m !== null)
+    : [];
+  return {
+    label: v.label,
+    model: typeof v.model === 'string' ? v.model : '',
+    provider: typeof v.provider === 'string' ? v.provider : '',
+    latencyMs: typeof v.latencyMs === 'number' ? v.latencyMs : 0,
+    costUsd: typeof v.costUsd === 'number' ? v.costUsd : 0,
+    ...(typeof v.tokensIn === 'number' ? { tokensIn: v.tokensIn } : {}),
+    ...(typeof v.tokensOut === 'number' ? { tokensOut: v.tokensOut } : {}),
+    prompt,
+    response: typeof v.response === 'string' ? v.response : '',
+  };
+}
+
 /**
  * Parse one SSE block into a narrowed session event, or `null` for keepalive
  * comments, unrecognised event types, and malformed payloads.
@@ -93,6 +126,13 @@ export function parseSessionEvent(block: string): SessionStreamEvent | null {
       const steps = data.steps.map(asReasoningStep).filter((s): s is ReasoningStep => s !== null);
       if (steps.length === 0) return null;
       return { type: 'reasoning', steps };
+    }
+    case 'inspector': {
+      if (!Array.isArray(data.calls)) return null;
+      const calls = data.calls.map(asAgentCallTrace).filter((c): c is AgentCallTrace => c !== null);
+      if (calls.length === 0) return null;
+      const turnIndex = typeof data.turnIndex === 'number' ? data.turnIndex : 0;
+      return { type: 'inspector', turnIndex, calls };
     }
     case 'done': {
       const costUsd = typeof data.costUsd === 'number' ? data.costUsd : 0;

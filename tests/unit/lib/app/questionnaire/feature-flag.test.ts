@@ -15,6 +15,8 @@ import {
   APP_QUESTIONNAIRES_ATTACHMENT_INPUT_FLAG,
   APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG,
   APP_QUESTIONNAIRES_DATA_SLOTS_FLAG,
+  APP_QUESTIONNAIRES_ADAPTIVE_DATA_SLOTS_FLAG,
+  APP_QUESTIONNAIRES_EXTRACTION_PREFILTER_FLAG,
   ensureQuestionnairesEnabled,
   ensureLiveSessionsEnabled,
   ensureVoiceInputEnabled,
@@ -34,6 +36,8 @@ import {
   isCostCapEnforcementEnabled,
   isQuestionPhrasingEnabled,
   isDataSlotsEnabled,
+  isAdaptiveDataSlotSelectionEnabled,
+  isExtractionPrefilterEnabled,
 } from '@/lib/app/questionnaire/feature-flag';
 import { isFeatureEnabled } from '@/lib/feature-flags';
 
@@ -54,7 +58,7 @@ function setFlags(enabled: Record<string, boolean>): void {
   );
 }
 
-/** All twelve flag names, used to build "everything on" baselines. */
+/** All questionnaire flag names, used to build "everything on" baselines. */
 const ALL_FLAGS = [
   APP_QUESTIONNAIRES_FLAG,
   APP_QUESTIONNAIRES_ADAPTIVE_FLAG,
@@ -69,6 +73,8 @@ const ALL_FLAGS = [
   APP_QUESTIONNAIRES_ATTACHMENT_INPUT_FLAG,
   APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG,
   APP_QUESTIONNAIRES_DATA_SLOTS_FLAG,
+  APP_QUESTIONNAIRES_ADAPTIVE_DATA_SLOTS_FLAG,
+  APP_QUESTIONNAIRES_EXTRACTION_PREFILTER_FLAG,
 ] as const;
 
 /** A map with every flag on (the baseline each truth-table test perturbs from). */
@@ -214,6 +220,29 @@ const SUB_FLAG_RESOLVERS: ReadonlyArray<{
     fn: isDataSlotsEnabled,
     requires: [APP_QUESTIONNAIRES_FLAG, APP_QUESTIONNAIRES_DATA_SLOTS_FLAG],
   },
+  {
+    // Depends on data-slots AND live-sessions (only runs in live data-slot mode), plus its own
+    // paid sub-flag — the AND of four flags.
+    name: 'isAdaptiveDataSlotSelectionEnabled',
+    fn: isAdaptiveDataSlotSelectionEnabled,
+    requires: [
+      APP_QUESTIONNAIRES_FLAG,
+      APP_QUESTIONNAIRES_DATA_SLOTS_FLAG,
+      APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG,
+      APP_QUESTIONNAIRES_ADAPTIVE_DATA_SLOTS_FLAG,
+    ],
+  },
+  {
+    // Live-dependent (only runs in the respondent turn loop), but NOT data-slots-dependent — it
+    // also helps question-only large questionnaires.
+    name: 'isExtractionPrefilterEnabled',
+    fn: isExtractionPrefilterEnabled,
+    requires: [
+      APP_QUESTIONNAIRES_FLAG,
+      APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG,
+      APP_QUESTIONNAIRES_EXTRACTION_PREFILTER_FLAG,
+    ],
+  },
 ];
 
 describe('sub-flag resolvers — truth tables', () => {
@@ -265,6 +294,14 @@ describe('sub-flag independence — one flag off suppresses only its own surface
     { flag: APP_QUESTIONNAIRES_COST_CAP_FLAG, resolver: isCostCapEnforcementEnabled },
     { flag: APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG, resolver: isQuestionPhrasingEnabled },
     { flag: APP_QUESTIONNAIRES_DATA_SLOTS_FLAG, resolver: isDataSlotsEnabled },
+    {
+      flag: APP_QUESTIONNAIRES_ADAPTIVE_DATA_SLOTS_FLAG,
+      resolver: isAdaptiveDataSlotSelectionEnabled,
+    },
+    {
+      flag: APP_QUESTIONNAIRES_EXTRACTION_PREFILTER_FLAG,
+      resolver: isExtractionPrefilterEnabled,
+    },
   ];
 
   for (const { flag, resolver } of INDEPENDENT_PAIRS) {

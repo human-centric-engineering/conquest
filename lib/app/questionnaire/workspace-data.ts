@@ -22,6 +22,7 @@ import { isFeatureEnabled } from '@/lib/feature-flags';
 import { logger } from '@/lib/logging';
 import {
   APP_QUESTIONNAIRES_ADAPTIVE_FLAG,
+  APP_QUESTIONNAIRES_ADAPTIVE_DATA_SLOTS_FLAG,
   APP_QUESTIONNAIRES_DATA_SLOTS_FLAG,
   APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG,
   APP_QUESTIONNAIRES_FLAG,
@@ -93,6 +94,58 @@ export const getVersionDataSlotCountCached = cache(
 );
 
 /**
+ * Question-slot embedding coverage for the selected version — `{ total, embedded, missing }`.
+ * Drives the adaptive launch-gate check (the Overview "Questions embedded" row) and is only worth
+ * fetching when the version actually uses the `adaptive` strategy. `cache()`-wrapped; degrades to a
+ * fully-embedded-looking `{ total: 0, embedded: 0, missing: 0 }` on failure so a transient error
+ * never wrongly blocks launch (the server re-checks on PATCH, which is the real gate).
+ */
+export const getVersionEmbeddingCoverageCached = cache(
+  async (
+    id: string,
+    versionId: string
+  ): Promise<{ total: number; embedded: number; missing: number }> => {
+    try {
+      const res = await serverFetch(API.APP.QUESTIONNAIRES.versionEmbedQuestions(id, versionId));
+      if (!res.ok) return { total: 0, embedded: 0, missing: 0 };
+      const body = await parseApiResponse<{ total: number; embedded: number; missing: number }>(
+        res
+      );
+      return body.success ? body.data : { total: 0, embedded: 0, missing: 0 };
+    } catch (err) {
+      logger.error('workspace: embedding coverage fetch failed', err);
+      return { total: 0, embedded: 0, missing: 0 };
+    }
+  }
+);
+
+/**
+ * Data-slot embedding coverage for the selected version — `{ total, embedded, missing }`. Drives the
+ * adaptive data-slot launch-gate check (the Overview "Data slots embedded" row); only worth fetching
+ * when adaptive data-slot selection is on and the version has data slots. `cache()`-wrapped; degrades
+ * to a fully-embedded-looking zero on failure so a transient error never wrongly blocks launch (the
+ * server re-checks on PATCH, which is the real gate).
+ */
+export const getVersionDataSlotEmbeddingCoverageCached = cache(
+  async (
+    id: string,
+    versionId: string
+  ): Promise<{ total: number; embedded: number; missing: number }> => {
+    try {
+      const res = await serverFetch(API.APP.QUESTIONNAIRES.versionEmbedDataSlots(id, versionId));
+      if (!res.ok) return { total: 0, embedded: 0, missing: 0 };
+      const body = await parseApiResponse<{ total: number; embedded: number; missing: number }>(
+        res
+      );
+      return body.success ? body.data : { total: 0, embedded: 0, missing: 0 };
+    } catch (err) {
+      logger.error('workspace: data-slot embedding coverage fetch failed', err);
+      return { total: 0, embedded: 0, missing: 0 };
+    }
+  }
+);
+
+/**
  * Resolve the editor seed for an `add_question` finding deep-link (F5.3 "Open in editor").
  *
  * The structure page receives `?seedFinding=<runId>:<findingId>` from the review queue. This loads
@@ -157,6 +210,8 @@ export interface QuestionnaireWorkspaceFlags {
   liveSessions: boolean;
   /** Adaptive selection strategy offered in the config editor. */
   adaptive: boolean;
+  /** Adaptive data-slot selection (embedding-ranked next-slot pick) — gates the data-slot embed step + launch check. */
+  adaptiveDataSlots: boolean;
 }
 
 /**
@@ -169,19 +224,24 @@ export interface QuestionnaireWorkspaceFlags {
  */
 export const resolveQuestionnaireWorkspaceFlags = cache(
   async (): Promise<QuestionnaireWorkspaceFlags> => {
-    const [master, dataSlots, designEval, liveSessions, adaptive] = await Promise.all([
-      isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
-      isFeatureEnabled(APP_QUESTIONNAIRES_DATA_SLOTS_FLAG),
-      isFeatureEnabled(APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG),
-      isFeatureEnabled(APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG),
-      isFeatureEnabled(APP_QUESTIONNAIRES_ADAPTIVE_FLAG),
-    ]);
+    const [master, dataSlots, designEval, liveSessions, adaptive, adaptiveDataSlots] =
+      await Promise.all([
+        isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
+        isFeatureEnabled(APP_QUESTIONNAIRES_DATA_SLOTS_FLAG),
+        isFeatureEnabled(APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG),
+        isFeatureEnabled(APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG),
+        isFeatureEnabled(APP_QUESTIONNAIRES_ADAPTIVE_FLAG),
+        isFeatureEnabled(APP_QUESTIONNAIRES_ADAPTIVE_DATA_SLOTS_FLAG),
+      ]);
     return {
       master,
       dataSlots: master && dataSlots,
       designEval: master && designEval,
       liveSessions: master && liveSessions,
       adaptive: master && adaptive,
+      // Adaptive data-slot selection also depends on the data-slots + live-sessions flags (it only
+      // runs in live data-slot mode); AND them here so the workspace flag matches the runtime gate.
+      adaptiveDataSlots: master && dataSlots && liveSessions && adaptiveDataSlots,
     };
   }
 );

@@ -54,6 +54,7 @@ function ctx(
       status: over.status ?? 'active',
       versionId: 'ver-1',
       respondentUserId: over.respondentUserId === undefined ? 'user-1' : over.respondentUserId,
+      isPreview: false,
     },
     base: {
       sessionId: 'sess-1',

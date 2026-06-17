@@ -69,6 +69,21 @@ userMessage, recentMessages?, sessionId }`, all in memory. `ExtractionSlotView`
 - **Candidacy** — `candidateSlots` is the version's **unanswered slots plus the
   active slot** (re-answering an answered slot is F4.4's `refined` job). The route
   builds it; a hard `.max()` cap bounds prompt size and cost.
+- **Extraction candidate pre-filter (50+-slot scale).** By default the extractor is
+  handed the FULL candidate set every turn (all question slots + all data slots),
+  which at 50+ data slots / 70+ questions is thousands of candidate tokens per turn.
+  When `APP_QUESTIONNAIRES_EXTRACTION_PREFILTER_ENABLED` is on, the live `/messages`
+  route embeds the respondent's last message and narrows what **the extractor** sees
+  via `narrowExtractionCandidates` (`questionnaire-sessions/_lib/extraction-candidates.ts`,
+  reusing `rankSlotsByVector` / `rankDataSlotsByVector`). It is **behaviour-preserving**:
+  hard safety rails always retain the active slot, **every data slot that already has a
+  fill** (the cross-turn re-scan/enrichment guarantee), same-theme unfilled slots, and a
+  kept slot's mapped questions — then add the top-K most similar. It is **fail-soft**
+  (no message / embed error / un-embedded version → full set) and a **no-op below a size
+  threshold**. Crucially the narrowed set is threaded as a **separate** `extractionCandidateSlots`
+  opt to `buildTurnInvokers` — the contradiction detector + refiner keep the **full** `slots`,
+  so only the extractor's prompt shrinks. Off by default (dark-launch); when off the extractor
+  gets the full set (today's behaviour). See the runtime roadmap in [selection-strategies.md].
 - **Value validation** reuses the F2.1 authoring schemas (`typeConfigSchemaFor`)
   so a `single_choice` value must be one of _that slot's_ choices, a `likert`
   within its scale, etc. Lenient where the LLM is loose (a numeric `"34"`, a

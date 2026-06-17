@@ -170,8 +170,9 @@ function PageHeader({ agentCount, promptCount }: { agentCount: number; promptCou
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Prompt library</h1>
           <p className="text-muted-foreground mt-1 max-w-2xl text-sm">
-            The exact prompts each questionnaire agent sends to the model — rendered from
-            representative sample inputs, exactly as assembled at run time. This library is{' '}
+            The exact prompts each questionnaire agent sends to the model — rendered with{' '}
+            <code className="bg-muted rounded px-1 py-0.5 text-[0.85em]">{'{{ … }}'}</code>{' '}
+            placeholder inputs that, at run time, carry your questionnaire’s data. This library is{' '}
             <span className="text-foreground font-medium">read-only</span>; edit prompt behaviour in
             the source module noted on each agent.
           </p>
@@ -198,13 +199,21 @@ function HonestyBanner() {
       <div className="flex gap-3">
         <Info className="mt-0.5 h-4 w-4 shrink-0 text-[var(--cq-accent)]" aria-hidden />
         <div className="space-y-1 text-sm">
-          <p className="text-foreground font-medium">These are the real prompts.</p>
+          <p className="text-foreground font-medium">
+            These are the real prompts — with sample data.
+          </p>
           <p className="text-muted-foreground">
-            Each questionnaire agent is dispatched programmatically — its load-bearing prompt is
-            assembled in code and shown here verbatim. The editable{' '}
-            <span className="text-foreground font-medium">Instructions</span> field on an agent is{' '}
-            <span className="text-foreground font-medium">descriptive only</span>; it is not sent to
-            the model. Edit prompt behaviour in the source module noted on each agent.
+            Most questionnaire agents are dispatched programmatically — the prompt is assembled in
+            code and shown here verbatim, so the editable{' '}
+            <span className="text-foreground font-medium">Instructions</span> field is{' '}
+            <span className="text-foreground font-medium">descriptive only</span> and isn’t sent to
+            the model; edit prompt behaviour in the source module noted on each agent. The one
+            exception is the <span className="text-foreground font-medium">Question Selector</span>,
+            whose Instructions <span className="text-foreground font-medium">are</span> its system
+            prompt. Values shown as{' '}
+            <code className="bg-muted rounded px-1 py-0.5 text-[0.8em]">{'{{ … }}'}</code> are
+            placeholders — at run time they’re filled with your questionnaire’s goal, questions, and
+            the live transcript.
           </p>
         </div>
       </div>
@@ -402,11 +411,20 @@ function InstructionsNote({ agent }: { agent: PromptAgentApiView }) {
       <div className="flex items-start gap-2">
         <Info className="text-muted-foreground mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
         <div className="min-w-0 flex-1 text-xs">
-          <p className="text-muted-foreground">
-            The agent’s editable <span className="text-foreground font-medium">Instructions</span>{' '}
-            field is descriptive only — <span className="text-foreground font-medium">not</span>{' '}
-            part of the prompt below.
-          </p>
+          {agent.instructionsAreLoadBearing ? (
+            <p className="text-muted-foreground">
+              This agent runs through the chat handler, so its editable{' '}
+              <span className="text-foreground font-medium">Instructions</span> field{' '}
+              <span className="text-foreground font-medium">is</span> its system prompt — sent to
+              the model above the message below. Editing it changes the agent’s behaviour.
+            </p>
+          ) : (
+            <p className="text-muted-foreground">
+              The agent’s editable <span className="text-foreground font-medium">Instructions</span>{' '}
+              field is descriptive only — <span className="text-foreground font-medium">not</span>{' '}
+              part of the prompt below.
+            </p>
+          )}
           {stored ? (
             <button
               type="button"
@@ -462,6 +480,14 @@ function SpecimenView({ specimen }: { specimen: PromptSpecimen }) {
         <CopyButton text={fullText} label="all" />
       </div>
 
+      <p className="text-muted-foreground border-border/60 border-l-2 pl-3 text-xs leading-relaxed">
+        A prompt is a sequence of <span className="text-foreground/80 font-medium">messages</span>,
+        each tagged with a role. The model reads them top to bottom: the{' '}
+        <span className="text-foreground/80 font-medium">System</span> message sets the rules, then
+        the <span className="text-foreground/80 font-medium">User</span> message supplies this
+        turn’s data to act on.
+      </p>
+
       <div className="space-y-2.5">
         {specimen.messages.map((message, i) => (
           <MessageBlock key={i} index={i} message={message} error={specimen.error} />
@@ -482,6 +508,7 @@ function MessageBlock({
 }) {
   const role = message.role.toLowerCase();
   const tone = roleTone(role);
+  const meta = roleMeta(role);
   return (
     <div className="border-border/70 bg-card overflow-hidden rounded-lg border">
       <div className="border-border/60 bg-muted/30 flex items-center justify-between gap-2 border-b px-3 py-1.5">
@@ -505,6 +532,11 @@ function MessageBlock({
           <CopyButton text={message.content} label="msg" />
         </div>
       </div>
+      {meta.blurb ? (
+        <p className="border-border/40 text-muted-foreground border-b px-3 py-1.5 text-[0.72rem] leading-snug">
+          <span className="text-foreground/80 font-medium">{meta.term}</span> — {meta.blurb}
+        </p>
+      ) : null}
       <pre
         className={cn(
           'max-h-[28rem] overflow-auto px-4 py-3 font-mono text-[0.8rem] leading-relaxed whitespace-pre-wrap',
@@ -527,6 +559,32 @@ function roleTone(role: string): string {
       return 'bg-blue-500/15 text-blue-600 dark:text-blue-300';
     default:
       return 'bg-muted text-muted-foreground';
+  }
+}
+
+/**
+ * Plain-English description of how each chat role is *used* in the LLM call, shown
+ * inline beneath the badge. A prompt is a list of messages, each tagged with a role;
+ * both are sent to the model together on every call (it keeps no state between calls).
+ */
+function roleMeta(role: string): { term: string; blurb: string } {
+  switch (role) {
+    case 'system':
+      return {
+        term: 'System message',
+        blurb:
+          'Sent to the model first on every call — the instructions it must follow (the agent’s role, rules, and how to shape its answer). The model keeps no memory between calls, so this is re-sent each turn.',
+      };
+    case 'user':
+      return {
+        term: 'User message',
+        blurb:
+          'Sent alongside the system instructions — the data for this call that the model acts on (the goal, questions, a window of recent transcript, captured answers). Rebuilt each turn from your questionnaire.',
+      };
+    case 'assistant':
+      return { term: 'Assistant message', blurb: 'The model’s reply, sent back in the response.' };
+    default:
+      return { term: role, blurb: '' };
   }
 }
 

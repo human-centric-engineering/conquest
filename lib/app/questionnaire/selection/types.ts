@@ -60,6 +60,17 @@ export interface QuestionView {
    * off ordinal/weight/required alone, so a caller may omit it for them.
    */
   prompt?: string;
+  /**
+   * Admin/extractor guidance on what a good answer looks like. Optional and read
+   * only by `adaptive` — handed to the selector LLM so it judges flow on intent,
+   * not just the prompt wording. `null`/absent when the slot has none.
+   */
+  guidelines?: string | null;
+  /**
+   * Why this question exists (the extractor's editorial note). Optional and read
+   * only by `adaptive`, for the same reason as {@link guidelines}.
+   */
+  rationale?: string | null;
 }
 
 /**
@@ -98,6 +109,12 @@ export interface SelectionContext {
    * `adaptive` fall back to `weighted`.
    */
   recentMessages?: string[];
+  /**
+   * The questionnaire's goal (version-level). Optional and read only by `adaptive` —
+   * given to the selector LLM as framing so it picks the question that best advances
+   * the goal, not just the one nearest the last message. `null`/absent when unset.
+   */
+  goal?: string | null;
 }
 
 /**
@@ -144,8 +161,25 @@ export interface StrategyDeps {
 export interface LlmPickInput {
   /** Recent user messages, oldest → newest. */
   recentMessages: string[];
-  /** Candidate questions to choose among (already similarity-ranked). */
-  candidates: Array<{ id: string; key: string; prompt?: string }>;
+  /**
+   * Candidate questions to choose among (already similarity-ranked). Each carries
+   * optional `guidelines`/`rationale` so the selector judges intent, not just the
+   * prompt wording.
+   */
+  candidates: Array<{
+    id: string;
+    key: string;
+    prompt?: string;
+    guidelines?: string | null;
+    rationale?: string | null;
+  }>;
+  /** The questionnaire's goal (version-level), for framing. Absent when unset. */
+  goal?: string | null;
+  /**
+   * Prompts of questions already answered this session, oldest → newest — so the
+   * selector knows what's been covered and avoids re-treading it.
+   */
+  answeredQuestions?: string[];
   /** Session id, threaded into cost-log metadata. */
   sessionId: string;
 }

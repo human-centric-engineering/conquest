@@ -93,28 +93,11 @@ const handleIngest = withAdminAuth(async (request: NextRequest, session) => {
     demoClientId = client.id;
   }
 
-  // SHA-256 dedup — best-effort: the exact same bytes were already ingested, so
-  // surface the existing ids instead of creating a near-identical questionnaire.
-  // Deliberately NOT backed by a DB unique constraint: F2.4 re-ingest legitimately
-  // attaches the same hash to a new version, so a global unique on fileHash would
-  // be wrong. The check is therefore a friendly pre-empt, not a race-proof
-  // guarantee — two interleaved identical uploads could both pass, at worst
-  // yielding a duplicate the admin can delete. (F2.4 re-ingest scopes its own
-  // dedup to the target version instead — see the reingest route.)
-  const duplicate = await prisma.appQuestionnaireSourceDocument.findFirst({
-    where: { fileHash },
-    select: { versionId: true, version: { select: { questionnaireId: true } } },
-  });
-  if (duplicate) {
-    return errorResponse('This document has already been ingested', {
-      code: 'DUPLICATE_DOCUMENT',
-      status: 409,
-      details: {
-        questionnaireId: duplicate.version.questionnaireId,
-        versionId: duplicate.versionId,
-      },
-    });
-  }
+  // DEMO-ONLY: the global SHA-256 dedup pre-empt was removed so re-uploading the
+  // exact same document creates a fresh questionnaire/version instead of a 409.
+  // The fileHash is still computed and persisted on the source document (used by
+  // F2.4 re-ingest, which scopes its own dedup to the target version). Re-add the
+  // global pre-empt here if duplicate-upload UX matters again outside the demo.
 
   // Parse → scanned/empty detection → extractor dispatch → coherence pre-check.
   const extracted = await extractFromDocument(guard.value, { adminId, log });

@@ -96,6 +96,34 @@ describe('buildSelectorPrompt', () => {
     expect(prompt).toContain('1. only-key');
     expect(prompt).toContain('(no prior messages)');
   });
+
+  it('renders the goal, already-answered set, and per-candidate guidelines/rationale', () => {
+    const prompt = buildSelectorPrompt({
+      goal: 'Understand onboarding friction',
+      recentMessages: ['docs were confusing'],
+      answeredQuestions: ['How did you hear about us?'],
+      candidates: [
+        { id: 'q1', key: 'blockers', prompt: 'What blocked you?', guidelines: 'A specific step' },
+        { id: 'q2', key: 'ease', prompt: 'How easy was it?', rationale: 'Sentiment baseline' },
+      ],
+      sessionId: 's1',
+    });
+    expect(prompt).toContain('Questionnaire goal: Understand onboarding friction');
+    expect(prompt).toContain('Already answered (do not re-tread these):');
+    expect(prompt).toContain('- How did you hear about us?');
+    expect(prompt).toContain('Looking for: A specific step');
+    expect(prompt).toContain('Why it matters: Sentiment baseline');
+  });
+
+  it('omits the goal and answered sections when they are absent', () => {
+    const prompt = buildSelectorPrompt({
+      recentMessages: ['hi'],
+      candidates,
+      sessionId: 's1',
+    });
+    expect(prompt).not.toContain('Questionnaire goal:');
+    expect(prompt).not.toContain('Already answered');
+  });
 });
 
 describe('buildAdaptiveDeps — embedText + rankByVector delegation', () => {

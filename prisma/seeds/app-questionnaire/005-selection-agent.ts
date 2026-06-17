@@ -3,17 +3,32 @@ import { serviceAccountWhere } from '@/lib/auth/account';
 import { QUESTIONNAIRE_SELECTOR_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
 
 /**
- * System prompt for the adaptive-selection agent. The load-bearing per-call
- * instructions (the numbered candidate list + the strict output contract) are
- * assembled at run time by `_lib/adaptive-deps.ts`; these instructions set the
- * persona and pin the JSON shape so the agent is self-describing in the admin UI.
+ * System prompt for the adaptive-selection agent. This is **load-bearing**: the
+ * selector runs through `streamChat`, so these instructions ARE the system prompt
+ * sent to the model. The per-turn user message (goal, transcript, already-answered
+ * set, and the numbered candidates with their guidelines/rationale) is assembled at
+ * run time by `_lib/adaptive-deps.ts` (`buildSelectorPrompt`). Editing this field in
+ * the admin UI changes how the questionnaire selects its next question.
  */
-const SELECTOR_INSTRUCTIONS = `You choose which question a conversational questionnaire should ask next. \
-Given the respondent's recent messages and a short numbered list of candidate questions, \
-pick the ONE that follows most naturally from what they just said — the question that keeps \
-the conversation coherent rather than jumping topics. Prefer continuity and relevance over \
-list order. Reply with ONLY a JSON object: {"choice": <1-based number of the chosen \
-candidate, or 0 if none fits>, "rationale": "<one short sentence>"}. No prose outside the JSON.`;
+export const SELECTOR_INSTRUCTIONS = `You are the question-selection brain of a conversational questionnaire. \
+Each turn you receive the questionnaire's GOAL, the recent transcript, the questions ALREADY ANSWERED, \
+and a short numbered list of CANDIDATE questions (each with optional "Looking for" guidelines and a \
+"Why it matters" rationale). The candidates have already been filtered to eligible, unanswered questions \
+and pre-ranked by relevance — your job is to choose the single best one to ask next.
+
+Choose the candidate that:
+- follows most naturally from what the respondent just said, keeping the conversation coherent rather \
+than jumping topics;
+- best advances the questionnaire's stated goal;
+- builds on the thread they have opened (pick up the detail they just volunteered before changing subject);
+- does NOT re-tread ground already covered by the answered questions.
+
+Use each candidate's guidelines and rationale to judge intent, not just the surface wording. Prefer \
+continuity and goal-fit over the order the candidates are listed in. Choose 0 ONLY when none of the \
+candidates genuinely fit what the respondent is talking about — this should be rare.
+
+Reply with ONLY a JSON object: {"choice": <1-based number of the chosen candidate, or 0 if none fits>, \
+"rationale": "<one short sentence on why>"}. No prose outside the JSON.`;
 
 /**
  * Seed the questionnaire adaptive-selection agent (F4.1).

@@ -80,7 +80,7 @@ must render the version selector and highlight the active version against `[vid]
             …/v/[vid]/analytics
             …/v/[vid]/evaluations[/[runId]] → (flag: design-evaluation)
             …/v/[vid]/extraction-changes
-            …/v/[vid]/settings              → version settings: run-time Configuration (F3.1, version-scoped, fork-on-launch) + demo-client attribution + clone (DEMO-ONLY)
+            …/v/[vid]/settings              → questionnaire Name (rename) + run-time Configuration (F3.1, version-scoped, fork-on-launch) + demo-client attribution + clone (DEMO-ONLY)
 ```
 
 - **`[id]/v/[vid]/layout.tsx`** owns the breadcrumb, sticky header (title + status +
@@ -206,13 +206,21 @@ a questionnaire end-to-end through the UI — **P2 is complete**.
 `/admin/questionnaires/prompts` is a **read-only** transparency surface: every
 questionnaire AI agent paired with the exact prompt(s) it sends to the model.
 
-It exists because the questionnaire agents are dispatched **programmatically** — the
+It exists because **most** questionnaire agents are dispatched **programmatically** — the
 load-bearing system prompt is assembled in a TypeScript builder (e.g.
 `buildAnswerExtractionPrompt`), **not** read from the agent's editable
-`AiAgent.systemInstructions` field. That field is descriptive only; editing it in the
-platform agent form changes nothing at run time. The prompts were therefore invisible
-to an operator. This page closes that gap by invoking each real builder with a fixed,
-representative **sample context** and rendering the messages verbatim.
+`AiAgent.systemInstructions` field. For those agents that field is descriptive only;
+editing it in the platform agent form changes nothing at run time. The prompts were
+therefore invisible to an operator. This page closes that gap by invoking each real
+builder with **placeholder inputs** (`{{ questionnaire goal }}`, `{{ question 1 }}`, …)
+and rendering the messages verbatim — the tokens make clear it's the prompt _shape_,
+filled at run time with the real questionnaire + transcript, not example data.
+
+**Exception — the Question Selector.** It runs through `streamChat`, so its
+`systemInstructions` **are** its system prompt (load-bearing — editing it changes
+selection). Its catalog entry sets `instructionsAreLoadBearing: true`, and the UI flips
+the per-agent note accordingly. Only its per-turn **user** message is code-built (by
+`buildSelectorPrompt`).
 
 - **Catalog** — `app/api/v1/app/questionnaires/_lib/prompt-catalog.ts`. Pure,
   server-only. `buildPromptCatalog()` returns one entry per agent (authoring · live ·
@@ -227,9 +235,10 @@ representative **sample context** and rendering the messages verbatim.
   and returns `{ agents }`. `resolvesAtRuntime` is true when provider+model are empty
   (the agent-resolver picks at run time); `seeded: false` when no row exists.
 - **UI** — `components/admin/questionnaires/prompt-library.tsx`. Stage-grouped
-  master/detail: a rail of agents, a detail pane with the binding strip, a note that the
-  stored instructions are not the prompt, and the prompt rendered as a system/user
-  **transcript** in monospace with per-message + copy-all actions.
+  master/detail: a rail of agents, a detail pane with the binding strip, a per-agent note
+  that reflects `instructionsAreLoadBearing` (stored instructions are _not_ the prompt for
+  the code-built agents; _are_ the system prompt for the selector), and the prompt rendered
+  as a system/user **transcript** in monospace with per-message + copy-all actions.
 
 When a builder's input contract changes and a sample no longer satisfies it, the
 specimen renders an error and `tests/unit/app/api/v1/app/questionnaires/_lib/prompt-catalog.test.ts`

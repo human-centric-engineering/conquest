@@ -73,6 +73,16 @@ vi.mock('@/lib/logging', () => loggerMock);
 
 // ─── Stub heavy children to identifiable markers ──────────────────────────────
 
+vi.mock('@/components/admin/questionnaires/rename-questionnaire', () => ({
+  RenameQuestionnaire: (props: { questionnaireId: string; currentTitle: string }) => (
+    <div
+      data-testid="rename-questionnaire"
+      data-qid={props.questionnaireId}
+      data-title={props.currentTitle}
+    />
+  ),
+}));
+
 vi.mock('@/components/admin/demo-clients/demo-client-assign', () => ({
   DemoClientAssign: (props: {
     questionnaireId: string;
@@ -193,6 +203,7 @@ function makeGraph(over: Partial<VersionGraphView> = {}): VersionGraphView {
       reasoningStreamEnabled: true,
       reasoningStreamPlacement: 'overlay',
       reasoningStreamPersist: true,
+      previewInspectorEnabled: false,
       tone: DEFAULT_TONE_SETTINGS,
     },
     ...over,
@@ -202,6 +213,7 @@ function makeGraph(over: Partial<VersionGraphView> = {}): VersionGraphView {
 function makeFlags(over: Partial<QuestionnaireWorkspaceFlags> = {}): QuestionnaireWorkspaceFlags {
   return {
     adaptive: false,
+    adaptiveDataSlots: false,
     dataSlots: false,
     designEval: false,
     ...over,

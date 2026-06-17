@@ -215,6 +215,12 @@ model AppQuestionnaireConfig {
   reasoningStreamPlacement String  @default("overlay")
   reasoningStreamPersist   Boolean @default(true)
 
+  // Preview Turn Inspector (admin-only): when on, an admin previewing as a respondent can open a
+  // per-turn console of the agent calls, raw prompts/responses, model, latency, and estimated cost.
+  // Off by default. Server-gated to preview sessions (AppQuestionnaireSession.isPreview), so it is
+  // never surfaced to a real respondent. (lib/app/questionnaire/inspector)
+  previewInspectorEnabled Boolean @default(false)
+
   // Interviewer tone & persona (F-tone): ToneSettings — nine enable-toggle + 1–5 sliders plus a
   // free-text persona, controlling HOW the conversational interviewer responds. Off per dimension
   // by default; only takes effect when the platform flag APP_QUESTIONNAIRES_TONE_ENABLED is on.
@@ -599,6 +605,18 @@ model AppAnswerSlot {
 /// targeting (mirrors AppQuestionSlot.weight). `generationConfidence` is the generator's
 /// 0–1 confidence. A slot relates to one or more questions via AppDataSlotQuestion (M:N) —
 /// filling the slot well captures those questions.
+///
+/// ⚠️ PRISMA-SCHEMA DRIFT WARNING ⚠️
+/// `embedding` is a pgvector column (adaptive data-slot selection) — the data-slot analogue of
+/// AppQuestionSlot.embedding. Two Postgres objects on it are managed via raw SQL in migrations
+/// because Prisma cannot model them natively:
+///   1. The `vector(1536)` column type — `Unsupported(...)` so it's absent from typed selects
+///      (read/written via $queryRawUnsafe / $executeRawUnsafe in `_lib/data-slot-embeddings.ts`).
+///   2. The HNSW ANN index `idx_app_data_slot_embedding` (vector_cosine_ops, m=16,
+///      ef_construction=64) — added by raw SQL in the migration.
+/// `npx prisma migrate dev` may try to DROP the index on a schema-diff run; always inspect
+/// generated SQL and remove any line touching `idx_app_data_slot_embedding` before applying (the
+/// same discipline the AppQuestionSlot / AiKnowledgeChunk `embedding` columns document).
 model AppDataSlot {
   id                   String   @id @default(cuid())
   versionId            String
@@ -609,6 +627,10 @@ model AppDataSlot {
   ordinal              Int      @default(0)
   weight               Float    @default(1.0)
   generationConfidence Float? // 0–1, set by the generator
+  // Adaptive data-slot selection: cosine-similarity vector over `name` (+`description`). Width
+  // matches the platform embedding model (AiKnowledgeChunk.embedding). Raw-SQL read/write only —
+  // see the drift warning above.
+  embedding            Unsupported("vector(1536)")?
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 

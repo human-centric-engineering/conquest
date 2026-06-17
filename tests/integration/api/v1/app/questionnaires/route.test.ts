@@ -526,7 +526,9 @@ describe('POST /api/v1/app/questionnaires — parse and extraction failures', ()
 // ─── Dedup / config / rate-limit ────────────────────────────────────────────────
 
 describe('POST /api/v1/app/questionnaires — dedup, config, rate-limit', () => {
-  it('returns 409 DUPLICATE_DOCUMENT with the existing ids when the same bytes were ingested', async () => {
+  it('ingests re-uploaded identical bytes instead of returning a duplicate error (DEMO: global dedup removed)', async () => {
+    // Even if a source document with the same fileHash already exists, the
+    // upload now proceeds and creates a fresh questionnaire/version.
     (prisma.appQuestionnaireSourceDocument.findFirst as Mock).mockResolvedValue({
       versionId: 'ver-existing',
       version: { questionnaireId: 'qn-existing' },
@@ -534,14 +536,11 @@ describe('POST /api/v1/app/questionnaires — dedup, config, rate-limit', () => 
 
     const res = await POST(makeRequest('dup.md'));
 
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(201);
     const body = await res.json();
-    expect(body.error.code).toBe('DUPLICATE_DOCUMENT');
-    expect(body.error.details).toEqual({
-      questionnaireId: 'qn-existing',
-      versionId: 'ver-existing',
-    });
-    expect(capabilityDispatcher.dispatch).not.toHaveBeenCalled();
+    expect(body.error?.code).not.toBe('DUPLICATE_DOCUMENT');
+    expect(capabilityDispatcher.dispatch).toHaveBeenCalled();
+    expect(persistIngestion).toHaveBeenCalledTimes(1);
   });
 
   it('returns 503 EXTRACTOR_NOT_CONFIGURED when the extractor agent is not seeded', async () => {

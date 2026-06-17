@@ -223,6 +223,28 @@ describe('buildStreamingQuestionPrompt', () => {
     expect(user).toContain('it was a nightmare');
   });
 
+  it('renders the prior-answers block (background only) when priorAnswers is supplied', () => {
+    const user = text(
+      buildStreamingQuestionPrompt({
+        ...INPUT,
+        priorAnswers: ['Housing: rents a flat in Leeds', 'Budget: around £1200/month'],
+      })[1].content
+    );
+    expect(user).toMatch(/already shared this session/i);
+    expect(user).toContain('Housing: rents a flat in Leeds');
+    expect(user).toContain('Budget: around £1200/month');
+    // The guidance must mark it background-only so the interviewer doesn't recap or re-ask it.
+    expect(user).toMatch(/do NOT recap/i);
+    expect(user).toMatch(/do NOT re-ask/i);
+  });
+
+  it('omits the prior-answers block entirely when there are none', () => {
+    const withNone = text(buildStreamingQuestionPrompt(INPUT)[1].content);
+    expect(withNone).not.toMatch(/already shared this session/i);
+    const withEmpty = text(buildStreamingQuestionPrompt({ ...INPUT, priorAnswers: [] })[1].content);
+    expect(withEmpty).not.toMatch(/already shared this session/i);
+  });
+
   it('switches to opening framing (no acknowledgement) when isOpening', () => {
     const system = text(buildStreamingQuestionPrompt({ ...INPUT, isOpening: true })[0].content);
     expect(system).toMatch(/first question/i);

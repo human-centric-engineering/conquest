@@ -18,7 +18,7 @@ import { registerBuiltInCapabilities } from '@/lib/orchestration/capabilities';
 import { resolveAgentProviderAndModel } from '@/lib/orchestration/llm/agent-resolver';
 import { getProvider } from '@/lib/orchestration/llm/provider-manager';
 import { logCost } from '@/lib/orchestration/llm/cost-tracker';
-import type { LlmMessage } from '@/lib/orchestration/llm/types';
+import { getTextContent, type LlmMessage } from '@/lib/orchestration/llm/types';
 import {
   runStructuredCompletion,
   tryParseJson,
@@ -54,6 +54,7 @@ import {
 import type { AnswerFitMode } from '@/lib/app/questionnaire/types';
 import type {
   CapabilityInvokers,
+  DataSlotSelectOutcome,
   DetectOutcome,
   ExtractOutcome,
   RefineOutcome,
@@ -67,7 +68,14 @@ import type {
   RefineAnswerData,
 } from '@/lib/app/questionnaire/capabilities';
 import { buildAdaptiveDeps } from '@/app/api/v1/app/questionnaires/_lib/adaptive-deps';
+import { selectNextDataSlot } from '@/app/api/v1/app/questionnaire-sessions/_lib/data-slot-selection';
 import type { CapabilitySlotView } from '@/app/api/v1/app/questionnaires/_lib/turn-context';
+import type { AgentCallTrace, RecordAgentCall } from '@/lib/app/questionnaire/inspector';
+
+/** Render a dispatched capability's structured args as a single readable `input` "message". */
+function argsAsPrompt(args: unknown): AgentCallTrace['prompt'] {
+  return [{ role: 'input', content: JSON.stringify(args, null, 2) }];
+}
 
 /** A resolved agent binding (provider/model) for a capability's `entityContext`. */
 interface AgentBinding {
@@ -104,8 +112,31 @@ async function loadBinding(slug: string): Promise<AgentBinding | null> {
 export async function buildTurnInvokers(opts: {
   userId: string;
   slots: CapabilitySlotView[];
+  /**
+   * Extraction candidate pre-filter: when provided, the EXTRACTOR sees this narrowed question-slot
+   * set instead of the full `slots` — cutting per-turn prompt cost at scale. Everything else
+   * (contradiction detector, refiner, active-prompt lookups) still uses the full `slots`, so their
+   * coverage is unchanged. Absent → the extractor uses the full `slots` (today's behaviour). The
+   * route assembles it via `narrowExtractionCandidates`.
+   */
+  extractionCandidateSlots?: CapabilitySlotView[];
   activeQuestionKey: string | null;
   adaptiveEnabled: boolean;
+  /**
+   * Data Slots feature: when true, wire the adaptive data-slot `selectDataSlot` invoker (embedding
+   * pre-filter + LLM selector). The route sets it from `isAdaptiveDataSlotSelectionEnabled()` AND
+   * data-slot mode being active. When false/absent, the invoker is omitted and the data-slot
+   * orchestrator keeps its deterministic topic-local pick.
+   */
+  dataSlotAdaptiveEnabled?: boolean;
+  /** Version goal — framing handed to the adaptive selector (read only by `adaptive`). */
+  goal?: string;
+  /**
+   * Preview Turn Inspector (admin-only): when provided, each agent/LLM call pushes a trace here.
+   * The route only supplies it for a preview session with the inspector toggle on, so capture is
+   * off (zero overhead) for real respondents. See `lib/app/questionnaire/inspector`.
+   */
+  recordInspectorCall?: RecordAgentCall;
   /** Data Slots feature: the data slots to also fill (omit for question-only mode). Each carries
    *  its `current` fill when one exists, so the extractor can update/correct it across turns. */
   dataSlotCandidates?: Array<{
@@ -132,12 +163,37 @@ export async function buildTurnInvokers(opts: {
   const {
     userId,
     slots,
+    extractionCandidateSlots,
     activeQuestionKey,
     adaptiveEnabled,
+    dataSlotAdaptiveEnabled,
+    goal,
     dataSlotCandidates,
     sensitivityAware,
     answerFitMode,
+    recordInspectorCall,
   } = opts;
+
+  // Inspector (admin preview only): resolve a binding's display model/provider for a trace, fail-soft.
+  async function resolveDisplay(
+    binding: AgentBinding | null
+  ): Promise<{ model: string; provider: string }> {
+    try {
+      const r = await resolveAgentProviderAndModel(
+        binding
+          ? {
+              provider: binding.provider,
+              model: binding.model,
+              fallbackProviders: binding.fallbackProviders,
+            }
+          : { provider: '', model: '', fallbackProviders: [] },
+        'chat'
+      );
+      return { model: r.model, provider: r.providerSlug };
+    } catch {
+      return { model: binding?.model ?? '', provider: binding?.provider ?? '' };
+    }
+  }
 
   // Flush the built-in + app capability handlers into the dispatcher before any
   // invoker dispatches. The turn loop calls `capabilityDispatcher.dispatch()` directly
@@ -153,7 +209,10 @@ export async function buildTurnInvokers(opts: {
     loadBinding(QUESTIONNAIRE_ANSWER_REFINER_AGENT_SLUG),
   ]);
 
+  // Full candidate set — used by the contradiction detector + refiner (their coverage must not shrink).
   const candidateSlots = slots.map(toCapabilitySlot);
+  // The EXTRACTOR sees the narrowed set when the route supplied one (the pre-filter), else the full set.
+  const extractionCandidates = (extractionCandidateSlots ?? slots).map(toCapabilitySlot);
 
   return {
     async extractAnswers(state): Promise<ExtractOutcome> {
@@ -167,29 +226,30 @@ export async function buildTurnInvokers(opts: {
       if (!extractor) return { intents: [], costUsd: 0, diagnostic: 'extractor_unconfigured' };
 
       const started = Date.now();
+      const extractArgs = {
+        userMessage: state.userMessage,
+        // Omit in data-slot mode — the capability treats an absent key as "open prompt".
+        ...(activeQuestionKey ? { activeQuestionKey } : {}),
+        candidateSlots: extractionCandidates,
+        answered: state.existingAnswers.map((a) => ({
+          slotKey: a.slotKey,
+          confidence: a.confidence ?? null,
+        })),
+        ...(state.recentMessages.length > 0 ? { recentMessages: state.recentMessages } : {}),
+        ...(state.attachments && state.attachments.length > 0
+          ? { attachments: state.attachments }
+          : {}),
+        // Data Slots feature: when present, the same call also returns data-slot fills.
+        ...(dataSlotCandidates && dataSlotCandidates.length > 0 ? { dataSlotCandidates } : {}),
+        // Sensitivity awareness: ask the extractor to also flag a sensitive disclosure.
+        ...(sensitivityAware ? { sensitivityAware: true } : {}),
+        // Answer-fit resolver: let the extractor run the focused follow-up pass when enabled.
+        ...(answerFitMode && answerFitMode !== 'off' ? { answerFitMode } : {}),
+        sessionId: state.sessionId,
+      };
       const dispatch = await capabilityDispatcher.dispatch(
         EXTRACT_ANSWER_SLOTS_CAPABILITY_SLUG,
-        {
-          userMessage: state.userMessage,
-          // Omit in data-slot mode — the capability treats an absent key as "open prompt".
-          ...(activeQuestionKey ? { activeQuestionKey } : {}),
-          candidateSlots,
-          answered: state.existingAnswers.map((a) => ({
-            slotKey: a.slotKey,
-            confidence: a.confidence ?? null,
-          })),
-          ...(state.recentMessages.length > 0 ? { recentMessages: state.recentMessages } : {}),
-          ...(state.attachments && state.attachments.length > 0
-            ? { attachments: state.attachments }
-            : {}),
-          // Data Slots feature: when present, the same call also returns data-slot fills.
-          ...(dataSlotCandidates && dataSlotCandidates.length > 0 ? { dataSlotCandidates } : {}),
-          // Sensitivity awareness: ask the extractor to also flag a sensitive disclosure.
-          ...(sensitivityAware ? { sensitivityAware: true } : {}),
-          // Answer-fit resolver: let the extractor run the focused follow-up pass when enabled.
-          ...(answerFitMode && answerFitMode !== 'off' ? { answerFitMode } : {}),
-          sessionId: state.sessionId,
-        },
+        extractArgs,
         {
           userId,
           agentId: extractor.id,
@@ -207,6 +267,26 @@ export async function buildTurnInvokers(opts: {
         };
       }
       const data = dispatch.data as ExtractAnswerSlotsData;
+      if (recordInspectorCall) {
+        const { model, provider } = await resolveDisplay(extractor);
+        recordInspectorCall({
+          label: 'Answer extraction',
+          model,
+          provider,
+          latencyMs,
+          costUsd: data.costUsd ?? 0,
+          prompt: argsAsPrompt(extractArgs),
+          response: JSON.stringify(
+            {
+              intents: data.intents,
+              dataSlotFills: data.dataSlotFills ?? [],
+              sensitivity: data.sensitivity,
+            },
+            null,
+            2
+          ),
+        });
+      }
       return {
         intents: data.intents,
         dataSlotFills: data.dataSlotFills ?? [],
@@ -221,20 +301,21 @@ export async function buildTurnInvokers(opts: {
       if (!detector) return { findings: [], costUsd: 0, diagnostic: 'detector_unconfigured' };
 
       const started = Date.now();
+      const detectArgs = {
+        slots: candidateSlots,
+        answers: state.existingAnswers.map((a) => ({
+          slotKey: a.slotKey,
+          value: a.value,
+          ...(a.confidence !== undefined ? { confidence: a.confidence } : {}),
+          provenance: a.provenance,
+        })),
+        mode: state.config.contradictionMode,
+        windowN: state.config.contradictionWindowN,
+        sessionId: state.sessionId,
+      };
       const dispatch = await capabilityDispatcher.dispatch(
         DETECT_CONTRADICTIONS_CAPABILITY_SLUG,
-        {
-          slots: candidateSlots,
-          answers: state.existingAnswers.map((a) => ({
-            slotKey: a.slotKey,
-            value: a.value,
-            ...(a.confidence !== undefined ? { confidence: a.confidence } : {}),
-            provenance: a.provenance,
-          })),
-          mode: state.config.contradictionMode,
-          windowN: state.config.contradictionWindowN,
-          sessionId: state.sessionId,
-        },
+        detectArgs,
         {
           userId,
           agentId: detector.id,
@@ -252,6 +333,18 @@ export async function buildTurnInvokers(opts: {
         };
       }
       const data = dispatch.data as DetectContradictionsData;
+      if (recordInspectorCall) {
+        const { model, provider } = await resolveDisplay(detector);
+        recordInspectorCall({
+          label: 'Contradiction detection',
+          model,
+          provider,
+          latencyMs,
+          costUsd: data.costUsd ?? 0,
+          prompt: argsAsPrompt(detectArgs),
+          response: JSON.stringify({ findings: data.findings }, null, 2),
+        });
+      }
       return {
         findings: data.findings,
         costUsd: data.costUsd ?? 0,
@@ -263,33 +356,38 @@ export async function buildTurnInvokers(opts: {
       if (!refiner) return { decisions: [], costUsd: 0, diagnostic: 'refiner_unconfigured' };
 
       const started = Date.now();
+      const refineArgs = {
+        slots: candidateSlots,
+        existingAnswers: state.existingAnswers.map((a) => ({
+          slotKey: a.slotKey,
+          value: a.value,
+          provenance: a.provenance,
+          ...(a.rationale !== undefined ? { rationale: a.rationale } : {}),
+          ...(a.confidence !== undefined ? { confidence: a.confidence } : {}),
+        })),
+        ...(state.userMessage.trim().length > 0 ? { userMessage: state.userMessage } : {}),
+        ...(trigger.contradiction
+          ? {
+              triggeringContradiction: {
+                slotKeys: trigger.contradiction.slotKeys,
+                explanation: trigger.contradiction.explanation,
+                ...(trigger.contradiction.suggestedProbe !== undefined
+                  ? { suggestedProbe: trigger.contradiction.suggestedProbe }
+                  : {}),
+              },
+            }
+          : {}),
+        ...(state.recentMessages.length > 0 ? { recentMessages: state.recentMessages } : {}),
+        sessionId: state.sessionId,
+      };
       const dispatch = await capabilityDispatcher.dispatch(
         REFINE_ANSWER_CAPABILITY_SLUG,
+        refineArgs,
         {
-          slots: candidateSlots,
-          existingAnswers: state.existingAnswers.map((a) => ({
-            slotKey: a.slotKey,
-            value: a.value,
-            provenance: a.provenance,
-            ...(a.rationale !== undefined ? { rationale: a.rationale } : {}),
-            ...(a.confidence !== undefined ? { confidence: a.confidence } : {}),
-          })),
-          ...(state.userMessage.trim().length > 0 ? { userMessage: state.userMessage } : {}),
-          ...(trigger.contradiction
-            ? {
-                triggeringContradiction: {
-                  slotKeys: trigger.contradiction.slotKeys,
-                  explanation: trigger.contradiction.explanation,
-                  ...(trigger.contradiction.suggestedProbe !== undefined
-                    ? { suggestedProbe: trigger.contradiction.suggestedProbe }
-                    : {}),
-                },
-              }
-            : {}),
-          ...(state.recentMessages.length > 0 ? { recentMessages: state.recentMessages } : {}),
-          sessionId: state.sessionId,
-        },
-        { userId, agentId: refiner.id, entityContext: { answerRefinerAgent: bindingCtx(refiner) } }
+          userId,
+          agentId: refiner.id,
+          entityContext: { answerRefinerAgent: bindingCtx(refiner) },
+        }
       );
       const latencyMs = Date.now() - started;
 
@@ -302,6 +400,18 @@ export async function buildTurnInvokers(opts: {
         };
       }
       const data = dispatch.data as RefineAnswerData;
+      if (recordInspectorCall) {
+        const { model, provider } = await resolveDisplay(refiner);
+        recordInspectorCall({
+          label: 'Answer refinement',
+          model,
+          provider,
+          latencyMs,
+          costUsd: data.costUsd ?? 0,
+          prompt: argsAsPrompt(refineArgs),
+          response: JSON.stringify({ decisions: data.decisions }, null, 2),
+        });
+      }
       return { decisions: data.decisions, costUsd: data.costUsd ?? 0, latencyMs };
     },
 
@@ -313,6 +423,7 @@ export async function buildTurnInvokers(opts: {
         round: state.selectionRound,
         sessionId: state.sessionId,
         ...(state.recentMessages.length > 0 ? { recentMessages: state.recentMessages } : {}),
+        ...(goal ? { goal } : {}),
       };
       // Adaptive's embedding + LLM path runs only when its sub-flag is on; otherwise it
       // degrades to `weighted` via the strategy's own fallback (no deps passed).
@@ -323,6 +434,21 @@ export async function buildTurnInvokers(opts: {
       const started = Date.now();
       const decision = await getStrategy(state.config.selectionStrategy).select(ctx, deps);
       return { decision, latencyMs: Date.now() - started };
+    },
+
+    // Adaptive data-slot selection — only does work when its sub-flag is on (else returns null and
+    // the data-slot orchestrator keeps its deterministic topic-local pick). Fail-soft inside.
+    async selectDataSlot(state, unfilled, context): Promise<DataSlotSelectOutcome | null> {
+      if (!dataSlotAdaptiveEnabled) return null;
+      return selectNextDataSlot({
+        unfilled,
+        recentMessages: state.recentMessages,
+        activeTheme: context.activeTheme,
+        parkedTheme: context.parkedTheme,
+        ...(goal ? { goal } : {}),
+        sessionId: state.sessionId,
+        userId,
+      });
     },
 
     async assessSeriousness(state): Promise<SeriousnessOutcome> {
@@ -445,11 +571,25 @@ export async function buildTurnInvokers(opts: {
           });
         });
 
-        return {
-          verdict: { serious: completion.value.serious, reason: completion.value.reason ?? '' },
-          costUsd: completion.costUsd,
-          latencyMs: Date.now() - started,
+        const verdict = {
+          serious: completion.value.serious,
+          reason: completion.value.reason ?? '',
         };
+        const latencyMs = Date.now() - started;
+        if (recordInspectorCall) {
+          recordInspectorCall({
+            label: 'Seriousness judge',
+            model,
+            provider: providerSlug,
+            latencyMs,
+            costUsd: completion.costUsd,
+            tokensIn: completion.tokenUsage.input,
+            tokensOut: completion.tokenUsage.output,
+            prompt: messages.map((m) => ({ role: m.role, content: getTextContent(m.content) })),
+            response: JSON.stringify(verdict, null, 2),
+          });
+        }
+        return { verdict, costUsd: completion.costUsd, latencyMs };
       } catch (err) {
         logger.error('assess_seriousness: structured completion failed', {
           sessionId: state.sessionId,
@@ -573,11 +713,22 @@ export async function buildTurnInvokers(opts: {
           });
         });
 
-        return {
-          assessment: normalizeSensitivityVerdict(completion.value),
-          costUsd: completion.costUsd,
-          latencyMs: Date.now() - started,
-        };
+        const assessment = normalizeSensitivityVerdict(completion.value);
+        const latencyMs = Date.now() - started;
+        if (recordInspectorCall) {
+          recordInspectorCall({
+            label: 'Sensitivity detection',
+            model,
+            provider: providerSlug,
+            latencyMs,
+            costUsd: completion.costUsd,
+            tokensIn: completion.tokenUsage.input,
+            tokensOut: completion.tokenUsage.output,
+            prompt: messages.map((m) => ({ role: m.role, content: getTextContent(m.content) })),
+            response: JSON.stringify(assessment, null, 2),
+          });
+        }
+        return { assessment, costUsd: completion.costUsd, latencyMs };
       } catch (err) {
         logger.error('detect_sensitivity: structured completion failed', {
           sessionId: state.sessionId,

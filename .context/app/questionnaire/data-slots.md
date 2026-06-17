@@ -172,11 +172,14 @@ route then drives `runDataSlotTurn` (`orchestrator/data-slot-orchestrator.ts`) i
    didn't. (The reverse direction — a form edit recomputing its mapped slots — lives in
    `form-answers.ts`.)
 
-2. **Targeting (topic-local)** — pick the next unfilled data slot, preferring the **current theme**
-   (linger before moving on); transition to a new theme when the area is exhausted. The targeted
-   slot feeds the **interviewer phraser** (`question-stream.ts`): deepen (same area), bridge
-   (transition), or — on a re-ask — ask a **sharper, narrower** follow-up using the slot's current
-   paraphrase (`currentUnderstanding`) rather than repeating the same open question.
+2. **Targeting (topic-local, or adaptive)** — pick the next unfilled data slot, preferring the
+   **current theme** (linger before moving on); transition to a new theme when the area is exhausted.
+   This deterministic `pickNextDataSlot` is the default. When **adaptive data-slot selection** is on
+   (see below), an embedding-ranked LLM selector chooses the next slot instead — fail-soft back to
+   the deterministic pick. The targeted slot feeds the **interviewer phraser** (`question-stream.ts`):
+   deepen (same area), bridge (transition), or — on a re-ask — ask a **sharper, narrower** follow-up
+   using the slot's current paraphrase (`currentUnderstanding`) rather than repeating the same open
+   question.
    **Coverage is provenance-aware, not confidence-only.** A slot counts as _covered_ (so it is
    neither re-asked nor parked) when the respondent plainly **stated** a position (`provenance:
 'direct'`) OR the fill cleared `DATA_SLOT_FILLED_THRESHOLD` OR it was already parked
@@ -216,6 +219,39 @@ data-slot turn (the loader resolves it to the active data slot for re-ask/transi
 > improves fills/answers each turn. Active re-targeting of parked slots (vs the passive cross-turn
 > enrichment above) is future work.
 
+## Adaptive data-slot selection (50+-slot scale)
+
+The deterministic topic-local pick is fine for a handful of slots, but at **50+ data slots** it
+can't tell which unfilled slot flows most naturally from what the respondent just said. Adaptive
+data-slot selection is the data-slot analogue of [adaptive question selection](selection-strategies.md):
+it ranks the unfilled slots by **embedding similarity** to the last message (pgvector, same model as
+question slots) and asks the seeded **selector agent** which to pursue next.
+
+- **Embeddings.** `AppDataSlot.embedding` is a `vector(1536)` pgvector column (the data-slot analogue
+  of `AppQuestionSlot.embedding`), embedded over `name` + `description`. Raw-SQL read/write in
+  `_lib/data-slot-embeddings.ts` (`embedVersionDataSlots`, `rankDataSlotsByVector`,
+  `dataSlotEmbeddingCoverage`, `ensureVersionDataSlotsEmbedded`); HNSW index added by raw SQL in the
+  migration. Same drift-warning discipline as the question-slot column.
+- **Candidate set (preserves the theme rhythm).** The pre-filter narrows the unfilled pool to the
+  top-K by similarity, but **always keeps a couple of same-theme slots** so the topic-local "linger"
+  is still available, and **biases away from a just-parked theme** when bridging. The selector agent
+  sees that set (with themes) and is told to gently prefer finishing the current area unless another
+  clearly flows better. So embeddings refine the rhythm rather than replacing it with raw jumps.
+- **The seam.** Pure orchestrator → `selectDataSlot` invoker (optional, on `CapabilityInvokers`) →
+  `_lib/data-slot-selection.ts` (`selectNextDataSlot`). **Fail-soft everywhere**: no last message,
+  <2 candidates, un-embedded slots, a selector error, or an off-pool pick all return `null` and the
+  orchestrator falls back to `pickNextDataSlot`. The selector's spend is folded into the turn cost.
+- **Gating.** Sub-flag `APP_QUESTIONNAIRES_ADAPTIVE_DATA_SLOTS_ENABLED`
+  (`isAdaptiveDataSlotSelectionEnabled` = master AND data-slots AND live-sessions AND this sub-flag),
+  off by default. The `/messages` route wires the invoker only in data-slot mode with the flag on,
+  and lazily ensures the slots are embedded the first time such a session runs (cheap no-op once
+  embedded; fail-soft).
+- **Admin surfaces.** The **Data slots tab** shows an explicit "Generate embeddings" step + coverage
+  when the feature is on (`GET/POST …/versions/:vid/embed-data-slots`). The **Review & Launch**
+  checklist adds a "Data slots embedded for adaptive selection" check — required when the feature is
+  on AND the version has data slots, **launch-only** (the preview gate opts out; the lazy backstop
+  covers rehearsal). Mirrors the question-slot embedding operability.
+
 ## Respondent panel
 
 `GET …/:id/answers` returns themed `dataSlotGroups` (name + paraphrase + **provenance** + confidence
@@ -253,6 +289,7 @@ respondent" / "they" / "this person"), never assuming a gender — this applies 
 | Generate / refine / assign / CRUD routes | `app/api/v1/app/questionnaires/[id]/versions/[vid]/data-slots/**` (`generate`, `generate/stream`, `refine`, `assign`, `draft`)                                                                                                   |
 | Admin review UI                          | `app/admin/questionnaires/[id]/data-slots/page.tsx`, `components/admin/questionnaires/data-slots-review.tsx`, `data-slot-refine-button.tsx`; assign checkbox in `evaluation-finding-review.tsx` + `evaluation-seed-composer.tsx` |
 | Engine                                   | `orchestrator/data-slot-orchestrator.ts`, `extraction/**` (combined), `_lib/turn-context.ts`, `_lib/data-slot-fills.ts`                                                                                                          |
+| Adaptive selection                       | `_lib/data-slot-embeddings.ts` (pgvector seam), `questionnaire-sessions/_lib/data-slot-selection.ts` (selector), `embed-data-slots/route.ts` (generate/coverage), `components/admin/questionnaires/data-slot-embedding-step.tsx` |
 | Respondent panel                         | `_lib/answer-panel.ts`, `components/app/questionnaire/panel/answer-slot-panel.tsx`                                                                                                                                               |
 | Calibration eval                         | `lib/app/questionnaire/extraction/eval/**` (golden set + pure scorer), `scripts/eval/extraction.ts` (`npm run eval:extraction`)                                                                                                  |
 | Seeds                                    | `prisma/seeds/app-questionnaire/028-032` (031 = refine capability row, 032 = assign capability row, both bound to the generator agent)                                                                                           |

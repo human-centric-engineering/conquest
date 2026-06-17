@@ -160,6 +160,10 @@ export const updateConfigSchema = z
     reasoningStreamEnabled: z.boolean().optional(),
     reasoningStreamPlacement: z.enum(REASONING_PLACEMENTS).optional(),
     reasoningStreamPersist: z.boolean().optional(),
+    // Preview Turn Inspector (admin-only). When on, an admin previewing as a respondent can open
+    // a per-turn console of the agent calls, raw prompts/responses, model, latency, and cost. Only
+    // ever surfaced in a preview session (server-enforced); never reaches a real respondent.
+    previewInspectorEnabled: z.boolean().optional(),
     // Interviewer tone & persona (F-tone). Sent whole when present; gated additionally by the
     // platform flag APP_QUESTIONNAIRES_TONE_ENABLED.
     tone: toneSettingsSchema.optional(),

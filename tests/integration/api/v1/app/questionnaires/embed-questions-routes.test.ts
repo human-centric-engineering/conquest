@@ -23,6 +23,7 @@ vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
 
 vi.mock('@/app/api/v1/app/questionnaires/_lib/slot-embeddings', () => ({
   embedVersionSlots: vi.fn(),
+  slotEmbeddingCoverage: vi.fn(),
 }));
 
 // The backfill sub-cap is a module-singleton sliding-window limiter. Mock it so
@@ -37,11 +38,17 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/rate-limit', () => rateLimitMock);
 
 // ─── Imports (after mocks) ────────────────────────────────────────────────────
 
-import { POST } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/embed-questions/route';
+import {
+  GET,
+  POST,
+} from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/embed-questions/route';
 
 import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
-import { embedVersionSlots } from '@/app/api/v1/app/questionnaires/_lib/slot-embeddings';
+import {
+  embedVersionSlots,
+  slotEmbeddingCoverage,
+} from '@/app/api/v1/app/questionnaires/_lib/slot-embeddings';
 import {
   mockAdminUser,
   mockAuthenticatedUser,
@@ -81,6 +88,11 @@ beforeEach(() => {
     status: 'draft',
   });
   (embedVersionSlots as unknown as Mock).mockResolvedValue({ embedded: 2, skipped: 1, total: 3 });
+  (slotEmbeddingCoverage as unknown as Mock).mockResolvedValue({
+    total: 3,
+    embedded: 2,
+    missing: 1,
+  });
 });
 
 describe('gate order + auth', () => {
@@ -149,5 +161,36 @@ describe('happy path', () => {
     const body = await res.json();
     expect(body.data).toEqual({ embedded: 3, skipped: 0, total: 3 });
     expect(embedVersionSlots).toHaveBeenCalledWith('v1', { onlyMissing: false });
+  });
+});
+
+describe('GET coverage', () => {
+  it('returns the version embedding coverage', async () => {
+    const res = await GET(req({}), ctx(PARAMS));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    expect(body.data).toEqual({ total: 3, embedded: 2, missing: 1 });
+    expect(slotEmbeddingCoverage).toHaveBeenCalledWith('v1');
+  });
+
+  it('404s when the flag is off, before auth', async () => {
+    (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
+    const res = await GET(req({}), ctx(PARAMS));
+    expect(res.status).toBe(404);
+    expect(auth.api.getSession).not.toHaveBeenCalled();
+    expect(slotEmbeddingCoverage).not.toHaveBeenCalled();
+  });
+
+  it('404s on a scope mismatch without reading coverage', async () => {
+    prismaMock.appQuestionnaireVersion.findFirst.mockResolvedValue(null);
+    const res = await GET(req({}), ctx(PARAMS));
+    expect(res.status).toBe(404);
+    expect(slotEmbeddingCoverage).not.toHaveBeenCalled();
+  });
+
+  it('403s for a non-admin', async () => {
+    setAuth(mockAuthenticatedUser('USER'));
+    expect((await GET(req({}), ctx(PARAMS))).status).toBe(403);
   });
 });

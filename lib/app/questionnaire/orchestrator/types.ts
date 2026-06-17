@@ -293,6 +293,14 @@ export interface SelectOutcome {
   latencyMs?: number;
 }
 
+/** Adaptive data-slot selection outcome — the chosen slot key + a short rationale + its spend. */
+export interface DataSlotSelectOutcome {
+  /** `DataSlotTarget.key` of the chosen next slot — guaranteed to be one of the passed `unfilled`. */
+  dataSlotKey: string;
+  rationale: string;
+  costUsd: number;
+}
+
 /** What triggered a refinement pass (passed to the refine invoker). */
 export interface RefinementTrigger {
   /** The contradiction that prompted reconciliation, if any. */
@@ -311,6 +319,19 @@ export interface CapabilityInvokers {
   detectContradictions(state: TurnState): Promise<DetectOutcome>;
   refineAnswer(state: TurnState, trigger: RefinementTrigger): Promise<RefineOutcome>;
   selectNext(state: TurnState): Promise<SelectOutcome>;
+  /**
+   * Adaptive data-slot selection (Data Slots feature, 50+-slot scale). Given the unfilled slots,
+   * rank them by similarity to the conversation and let an LLM pick the next one to pursue,
+   * preserving the theme-local rhythm via `context`. Optional + fail-soft: returns `null` when the
+   * sub-feature is off, fewer than 2 candidates remain, the slots aren't embedded, or anything
+   * errors — the core then falls back to the deterministic topic-local `pickNextDataSlot`.
+   * Implemented at the route seam (embeddings + the seeded selector agent).
+   */
+  selectDataSlot?(
+    state: TurnState,
+    unfilled: DataSlotTarget[],
+    context: { activeTheme: string | null; parkedTheme: string | null }
+  ): Promise<DataSlotSelectOutcome | null>;
   /**
    * Seriousness gate — stage 2: rule on whether this turn's answer is a genuine attempt. The
    * invoker resolves the active question + transcript from its own closure; the core just gates

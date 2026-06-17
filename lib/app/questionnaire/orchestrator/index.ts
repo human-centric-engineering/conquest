@@ -23,6 +23,7 @@ export {
 export type {
   CapabilityInvokers,
   DataSlotAnsweredView,
+  DataSlotSelectOutcome,
   DataSlotTarget,
   DetectOutcome,
   ExistingAnswerView,

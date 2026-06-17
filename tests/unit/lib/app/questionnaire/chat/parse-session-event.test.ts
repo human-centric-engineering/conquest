@@ -121,6 +121,62 @@ describe('parseSessionEvent', () => {
     expect(parseSessionEvent(block('reasoning', { notSteps: 1 }))).toBeNull();
   });
 
+  it('parses an inspector frame (admin-only), keeping optional token fields', () => {
+    const event = parseSessionEvent(
+      block('inspector', {
+        turnIndex: 2,
+        calls: [
+          {
+            label: 'Answer extraction',
+            model: 'gpt-4o-mini',
+            provider: 'openai',
+            latencyMs: 412,
+            costUsd: 0.0013,
+            tokensIn: 900,
+            tokensOut: 40,
+            prompt: [{ role: 'input', content: '{"userMessage":"..."}' }],
+            response: '{"intents":[]}',
+          },
+          // Minimal call: missing optional model/provider/tokens → defaulted, not dropped.
+          { label: 'Question selection', prompt: [], response: '' },
+        ],
+      })
+    );
+    expect(event).toEqual({
+      type: 'inspector',
+      turnIndex: 2,
+      calls: [
+        {
+          label: 'Answer extraction',
+          model: 'gpt-4o-mini',
+          provider: 'openai',
+          latencyMs: 412,
+          costUsd: 0.0013,
+          tokensIn: 900,
+          tokensOut: 40,
+          prompt: [{ role: 'input', content: '{"userMessage":"..."}' }],
+          response: '{"intents":[]}',
+        },
+        {
+          label: 'Question selection',
+          model: '',
+          provider: '',
+          latencyMs: 0,
+          costUsd: 0,
+          prompt: [],
+          response: '',
+        },
+      ],
+    });
+  });
+
+  it('drops malformed inspector calls and returns null when none survive', () => {
+    // A call with no label is dropped; with all dropped the frame is null.
+    expect(parseSessionEvent(block('inspector', { calls: [{ model: 'x' }] }))).toBeNull();
+    expect(parseSessionEvent(block('inspector', { calls: [] }))).toBeNull();
+    expect(parseSessionEvent(block('inspector', { notCalls: 1 }))).toBeNull();
+  });
+
   it('returns null for unknown event types', () => {
     expect(
       parseSessionEvent(block('capability_result', { capabilitySlug: 'x', result: 1 }))

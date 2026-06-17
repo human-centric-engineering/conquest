@@ -35,9 +35,12 @@ selection/
 └── index.ts      barrel: auto-registers each strategy, exports KNOWN_STRATEGY_SLUGS
 ```
 
-- **`SelectionContext`** — `{ questions, answered, config, round, sessionId, recentMessages? }`,
+- **`SelectionContext`** — `{ questions, answered, config, round, sessionId, recentMessages?, goal? }`,
   all in memory. `QuestionView` is the minimal slot projection (id, key, section
-  ordinal, ordinal, weight, required, type, tagIds, optional prompt).
+  ordinal, ordinal, weight, required, type, tagIds, optional prompt, and — for the
+  adaptive selector only — optional `guidelines`/`rationale`). `goal` and the
+  per-candidate `guidelines`/`rationale` are read by `adaptive` alone; the
+  deterministic strategies ignore them.
 - **`SelectionDecision`** — `ask` (with `questionId`, `rationale`, `costUsd`),
   `complete` (terminal condition met), or `none` (nothing left but thresholds
   unmet). F4.1 only _computes_ `complete`; the offer-to-submit flow is F4.5.
@@ -114,6 +117,19 @@ When the sub-flag is off, the route simply withholds deps, which lands here as t
 no-deps fallback; the config editor also hides `adaptive` from the picker (unless
 it's the already-saved value).
 
+**What the selector sees.** The agent's **system prompt is load-bearing** — unlike
+the capability-dispatched agents, the selector runs through `streamChat`, so its
+editable `systemInstructions` (seed `005-selection-agent.ts`) _are_ the system prompt
+sent to the model. Editing it in the admin UI changes selection. The per-turn **user**
+message is assembled by `buildSelectorPrompt` (`_lib/adaptive-deps.ts`) and carries:
+the questionnaire **goal** (version-level framing), the recent transcript, the
+**already-answered** questions (so it doesn't re-tread them), and the **candidate
+list** — each candidate rendered with its `guidelines` ("looking for") and `rationale`
+("why it matters") so the model judges on intent, not just prompt wording. `goal`
+threads onto `SelectionContext` (the preview builder sets it directly; the live turn
+loop passes `meta.goal` via `buildTurnInvokers`); `guidelines`/`rationale` ride on
+`QuestionView`. All of it is optional — absent fields are simply omitted from the prompt.
+
 ### Embeddings
 
 `AppQuestionSlot.embedding` is a `vector(1536)` pgvector column (width matches the
@@ -122,12 +138,18 @@ platform embedding model / `AiKnowledgeChunk`). Prisma can't type it — it's
 HNSW ANN index added by raw SQL in the F4.1 migration. Generate them with the
 backfill route below (idempotent; `force` re-embeds after prompt edits).
 
+> **Data slots have a parallel.** Data-slot mode (the `runDataSlotTurn` loop) doesn't use these
+> strategies — its targeting is deterministic topic-local. At 50+ data slots it gains an analogous
+> **adaptive data-slot selection** with its own `AppDataSlot.embedding` column + selector. See
+> [Adaptive data-slot selection](data-slots.md#adaptive-data-slot-selection-50-slot-scale).
+
 ## API
 
-| Method + path                                                | Purpose                                                                     |
-| ------------------------------------------------------------ | --------------------------------------------------------------------------- |
-| `POST .../versions/:vid/next-question`                       | Preview the next question for a hand-supplied answer state. No persistence. |
-| `POST .../versions/:vid/embed-questions` (body `{ force? }`) | Generate/backfill slot embeddings for adaptive selection.                   |
+| Method + path                                                | Purpose                                                                          |
+| ------------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| `POST .../versions/:vid/next-question`                       | Preview the next question for a hand-supplied answer state. No persistence.      |
+| `GET .../versions/:vid/embed-questions`                      | Embedding coverage `{ total, embedded, missing }` (Settings step + launch gate). |
+| `POST .../versions/:vid/embed-questions` (body `{ force? }`) | Generate/backfill slot embeddings for adaptive selection.                        |
 
 Both are admin-only and 404 behind the master flag. `next-question` runs the
 deterministic strategies with no sub-cap (section 100/min); the `adaptive` path
@@ -148,25 +170,56 @@ round?, sessionId?, strategyOverride? }` → `{ strategy, decision, question? }`
   the `weighted` scorer's low-confidence-section boost reads (see
   [answer extraction](answer-extraction.md)).
 
+### Lazy embedding on first adaptive turn
+
+Nothing in the authoring flow generates embeddings, so a version configured for
+`adaptive` would otherwise rank against an empty set and silently degrade to
+`weighted` (sequential-looking) forever. The live turn route closes that gap: when
+the adaptive sub-flag is on **and** the version's `selectionStrategy === 'adaptive'`,
+`POST .../questionnaire-sessions/:id/messages` calls `ensureVersionSlotsEmbedded`
+(`_lib/slot-embeddings.ts`) before the turn runs. A single `COUNT(… IS NULL)`
+short-circuits to a no-op once the version is fully embedded, so only the **first**
+session of a fresh version pays the embed cost; subsequent turns are free. It's
+**fail-soft** — a missing/misconfigured embedder is caught and logged, and the turn
+proceeds on the `weighted` fallback rather than breaking. So selecting "Adaptive
+(agent-chosen)" in settings now works without any manual backfill step.
+
+### Admin surfaces: the explicit step + launch gate
+
+Two admin surfaces make the embedding requirement visible rather than relying on the lazy
+backstop alone:
+
+- **Settings tab — "Generate embeddings" step.** When the selection strategy is set to
+  `adaptive`, the config editor renders `<AdaptiveEmbeddingStep>` directly under the strategy
+  picker. It reads coverage from `GET …/embed-questions` and shows the state (N of M embedded /
+  all embedded / no questions yet), with a **Generate embeddings** button (`POST …/embed-questions`)
+  — and a **Re-embed all** (`force: true`) once fully embedded, for refreshing after prompt edits.
+  After a generate it refetches coverage and `router.refresh()`es so the launch checklist updates.
+
+- **Review & Launch — "Questions embedded" check.** `launchReadinessChecks` adds an `embeddings`
+  check **only** when `embeddingsRequired` (the version is `adaptive` and the sub-flag is on). The
+  launch gate (`status` route → `loadLaunchReadiness`) blocks `draft → launched` until every slot
+  is embedded; the checklist row links to the Settings tab. This is **launch-only** — the _preview_
+  gate (`createPreviewSession` → `loadLaunchReadiness(vid, { includeEmbeddings: false })`) skips it,
+  so an admin can still rehearse a draft before embedding (the lazy backstop covers the turn loop).
+  A non-adaptive version never sees this check; a version whose adaptive sub-flag is off doesn't
+  either (it degrades to `weighted` at runtime, so embeddings are irrelevant).
+
 ### Embedding staleness (operator caveat)
 
-Embeddings are produced **only** by the explicit backfill route — there is no
-on-write hook yet. So embeddings can go stale or missing without any visible
-signal, and adaptive silently degrades to `weighted` (a `logger.warn` fires when
-a turn finds no embeddings). Re-run `embed-questions` (with `force: true` to
-re-embed) after:
-
-- **editing a question's prompt/guidelines** — the stored vector still reflects
-  the old text;
-- **adding questions** — new slots are un-embedded and excluded from ranking;
-- **forking a version** — the fork copies the config (including
-  `selectionStrategy: 'adaptive'`) but **not** the pgvector column, so a forked
-  version starts with no embeddings.
+The lazy ensure embeds only the **missing** (un-embedded) slots — it does not
+re-embed a slot whose stored vector has gone stale. So after **editing a
+question's prompt/guidelines**, the stored vector still reflects the old text;
+re-run `embed-questions` with `force: true` to refresh it. Newly **added**
+questions and **forked** versions (the fork copies the config but not the pgvector
+column) self-heal on their next adaptive session via the lazy ensure above — no
+manual step needed.
 
 ## Not in F4.1
 
 Session/turn/answer persistence (F4.6/P6), the streaming surface (P6), answer
 extraction (F4.2), the offer-to-submit flow (F4.5). On-write / on-publish
-embedding generation (today embeddings come from the explicit backfill route;
-generating them on slot edits, and an admin-facing embedding-coverage indicator,
-are later refinements).
+embedding generation (embeddings are generated lazily on the first adaptive turn —
+see "Lazy embedding" above — via the Settings-tab step, or the explicit backfill
+route; automatic re-embedding on slot _edits_ is a later refinement — for now the
+admin re-embeds with `force` after editing question wording).

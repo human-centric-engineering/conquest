@@ -54,6 +54,14 @@ export interface LaunchChecklistProps {
   dataSlotsRequired?: boolean;
   /** True when the version has ≥1 saved data slot (only checked when required). */
   dataSlotsReady?: boolean;
+  /** When the version uses the adaptive strategy, launch requires its question slots to be embedded. */
+  embeddingsRequired?: boolean;
+  /** True when every question slot is embedded (only checked when required). */
+  embeddingsReady?: boolean;
+  /** When adaptive data-slot selection is on + the version has data slots, launch requires them embedded. */
+  dataSlotEmbeddingsRequired?: boolean;
+  /** True when every data slot is embedded (only checked when required). */
+  dataSlotEmbeddingsReady?: boolean;
 }
 
 interface LaunchCheck {
@@ -98,6 +106,10 @@ export function LaunchChecklist({
   configSaved,
   dataSlotsRequired = false,
   dataSlotsReady = false,
+  embeddingsRequired = false,
+  embeddingsReady = false,
+  dataSlotEmbeddingsRequired = false,
+  dataSlotEmbeddingsReady = false,
 }: LaunchChecklistProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -105,19 +117,22 @@ export function LaunchChecklist({
   const [error, setError] = useState<string | null>(null);
 
   // Goal, audience, sections, questions and the config row are all set in the Structure editor;
-  // data slots have their own tab. Each row links to the page that satisfies it.
+  // data slots have their own tab; embeddings are generated on the Settings tab (under the
+  // selection-strategy picker). Each row links to the page that satisfies it.
   const base = workspaceVersionBase(questionnaireId, versionId);
   const structureHref = `${base}/structure?edit=1`;
 
   // The shared readiness helper is the single source of the checks; the data-slots row links to
-  // its own tab, every other row to the structure editor.
+  // its own tab, the embeddings row to Settings, every other row to the structure editor.
   const hrefByKey: Record<LaunchCheckKey, string> = {
     goal: structureHref,
     audience: structureHref,
     sections: structureHref,
     questions: structureHref,
     config: structureHref,
+    embeddings: `${base}/settings`,
     dataSlots: `${base}/data-slots`,
+    dataSlotEmbeddings: `${base}/data-slots`,
   };
   const checks: LaunchCheck[] = launchReadinessChecks({
     goal,
@@ -127,6 +142,10 @@ export function LaunchChecklist({
     configSaved,
     dataSlotsRequired,
     dataSlotsReady,
+    embeddingsRequired,
+    embeddingsReady,
+    dataSlotEmbeddingsRequired,
+    dataSlotEmbeddingsReady,
   }).map((c) => ({ ok: c.ok, label: c.label, href: hrefByKey[c.key] }));
   const ready = checks.every((c) => c.ok);
   const remaining = checks.filter((c) => !c.ok).length;

@@ -1,6 +1,12 @@
 /**
  * Generate question-slot embeddings for adaptive selection (F4.1).
  *
+ * GET /api/v1/app/questionnaires/:id/versions/:vid/embed-questions
+ *   Admin-only. Returns the version's embedding coverage
+ *   `{ total, embedded, missing }` — backs the Settings-tab "Generate embeddings"
+ *   status and the adaptive launch-gate check. Cheap (a single COUNT), so it takes
+ *   no sub-cap beyond the section 100/min.
+ *
  * POST /api/v1/app/questionnaires/:id/versions/:vid/embed-questions
  *   body: { force?: boolean }   // re-embed every slot, not just un-embedded ones
  *
@@ -29,10 +35,24 @@ import { createRateLimitResponse } from '@/lib/security/rate-limit';
 
 import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
-import { embedVersionSlots } from '@/app/api/v1/app/questionnaires/_lib/slot-embeddings';
+import {
+  embedVersionSlots,
+  slotEmbeddingCoverage,
+} from '@/app/api/v1/app/questionnaires/_lib/slot-embeddings';
 import { embedSlotsLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
 
 const bodySchema = z.object({ force: z.boolean().optional() }).default({});
+
+const handleEmbeddingCoverage = withAdminAuth<{ id: string; vid: string }>(
+  async (_request, _session, { params }) => {
+    const { id, vid } = await params;
+    const scoped = await loadScopedVersion(id, vid);
+    if (!scoped) {
+      throw new NotFoundError('Questionnaire version not found');
+    }
+    return successResponse(await slotEmbeddingCoverage(vid));
+  }
+);
 
 const handleEmbedQuestions = withAdminAuth<{ id: string; vid: string }>(
   async (request, session, { params }) => {
@@ -69,4 +89,5 @@ const handleEmbedQuestions = withAdminAuth<{ id: string; vid: string }>(
   }
 );
 
+export const GET = withQuestionnairesEnabled(handleEmbeddingCoverage);
 export const POST = withQuestionnairesEnabled(handleEmbedQuestions);

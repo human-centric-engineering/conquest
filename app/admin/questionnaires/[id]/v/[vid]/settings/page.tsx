@@ -9,6 +9,7 @@ import { notFound } from 'next/navigation';
 
 import { DemoClientAssign } from '@/components/admin/demo-clients/demo-client-assign';
 import { CloneForClientDialog } from '@/components/admin/questionnaires/clone-for-client-dialog';
+import { RenameQuestionnaire } from '@/components/admin/questionnaires/rename-questionnaire';
 import { VersionSettingsPanel } from '@/components/admin/questionnaires/version-settings-panel';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
@@ -62,6 +63,19 @@ export default async function SettingsTab({ params }: PageProps) {
 
   return (
     <div className="max-w-2xl space-y-8">
+      {/* Questionnaire-level identity: rename. The title spans every version, so it lives here
+          (questionnaire-scoped), not in a version's Structure editor. */}
+      <section className="space-y-3">
+        <div className="space-y-1">
+          <h2 className="text-lg font-semibold">Name</h2>
+          <p className="text-muted-foreground text-sm">
+            The questionnaire&rsquo;s display name, shown in the admin list, this workspace header,
+            and respondent surfaces.
+          </p>
+        </div>
+        <RenameQuestionnaire questionnaireId={id} currentTitle={detail.title} />
+      </section>
+
       {/* Version-scoped run-time config (F3.1 + F9.7). Editing a launched version forks a new
           draft (the panel surfaces the notice). Goal & audience are edited on the Structure tab. */}
       {graph && (

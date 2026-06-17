@@ -110,6 +110,59 @@ export async function embedVersionSlots(
   };
 }
 
+export interface SlotEmbeddingCoverage {
+  /** Total question slots in the version. */
+  total: number;
+  /** Slots that have an embedding. */
+  embedded: number;
+  /** Slots still missing an embedding (`total - embedded`). */
+  missing: number;
+}
+
+/**
+ * Report how many of a version's question slots are embedded. Backs the admin
+ * "Generate embeddings" status in the Settings tab and the adaptive launch-gate
+ * check. A version is launch-ready for adaptive when `total > 0 && missing === 0`.
+ */
+export async function slotEmbeddingCoverage(versionId: string): Promise<SlotEmbeddingCoverage> {
+  const rows = await prisma.$queryRawUnsafe<Array<{ total: bigint; embedded: bigint }>>(
+    `SELECT count(*)::bigint AS total, count("embedding")::bigint AS embedded
+       FROM "app_question_slot" WHERE "versionId" = $1`,
+    versionId
+  );
+  const total = Number(rows[0]?.total ?? 0);
+  const embedded = Number(rows[0]?.embedded ?? 0);
+  return { total, embedded, missing: total - embedded };
+}
+
+/**
+ * Lazily ensure a version's slots are embedded for adaptive selection.
+ *
+ * Adaptive ranks unanswered questions by vector similarity, which needs every
+ * slot to carry an `embedding`. Nothing in the authoring flow generates them, so
+ * without this an `adaptive` version silently degrades to `weighted` forever (an
+ * empty `rankSlotsByVector` result). The live turn path calls this the first time
+ * an adaptive session runs.
+ *
+ * Cheap to call on every turn: a single `COUNT(… IS NULL)` short-circuits to a
+ * no-op once the version is fully embedded, so only the first session of a fresh
+ * (or newly edited) version pays the embed cost. Still throws if the embedder is
+ * unconfigured — callers on the respondent hot path MUST wrap in try/catch so a
+ * failed embed degrades to `weighted` rather than breaking the turn.
+ */
+export async function ensureVersionSlotsEmbedded(
+  versionId: string
+): Promise<EmbedVersionSlotsResult> {
+  const rows = await prisma.$queryRawUnsafe<Array<{ missing: bigint }>>(
+    `SELECT count(*)::bigint AS missing FROM "app_question_slot" WHERE "versionId" = $1 AND "embedding" IS NULL`,
+    versionId
+  );
+  if (Number(rows[0]?.missing ?? 0) === 0) {
+    return { embedded: 0, skipped: 0, total: 0 };
+  }
+  return embedVersionSlots(versionId, { onlyMissing: true });
+}
+
 /**
  * Rank `candidateIds` by cosine similarity to `embedding`, returning at most `k`
  * slot ids best-first. Only slots that actually have an embedding participate —
