@@ -66,7 +66,21 @@ beforeEach(() => {
   vi.clearAllMocks();
   (isFeatureEnabled as unknown as Mock).mockResolvedValue(true);
   setAuth(mockAdminUser());
-  listMock.listTurnEvaluations.mockResolvedValue({ items: [{ id: 'eval-1' }], total: 1 });
+  listMock.listTurnEvaluations.mockResolvedValue({
+    items: [
+      {
+        id: 'eval-1',
+        sessionId: 'sess-1',
+        turnOrdinal: 2,
+        overallScore: 82,
+        effectiveness: 'Good',
+        flagStatus: 'flagged',
+        questionnaireTitle: 'Housing Survey',
+        createdAt: '2026-06-17T00:00:00.000Z',
+      },
+    ],
+    total: 1,
+  });
   listMock.getTurnEvaluationDetail.mockResolvedValue({ id: 'eval-1', verdict: {} });
 });
 
@@ -100,7 +114,15 @@ describe('GET /turn-evaluations (list)', () => {
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.success).toBe(true);
-    expect(json.data).toEqual([{ id: 'eval-1' }]);
+    // The route maps the read model's `items` → response `data` intact (not a single-key passthrough).
+    expect(json.data).toHaveLength(1);
+    expect(json.data[0]).toMatchObject({
+      id: 'eval-1',
+      sessionId: 'sess-1',
+      overallScore: 82,
+      effectiveness: 'Good',
+      questionnaireTitle: 'Housing Survey',
+    });
     expect(json.meta.total).toBe(1);
 
     const [query] = listMock.listTurnEvaluations.mock.calls[0];

@@ -290,8 +290,17 @@ export type ActionLearningResult =
  * resolves the new case id, then stamps `actioned` + `datasetId`/`datasetCaseId` + reviewer.
  * A dataset at its case cap surfaces as `dataset_full`.
  *
- * The caller (an admin route) is the authentication boundary; per the append seam's contract,
- * dataset existence is checked here but per-user ownership is the admin surface's concern.
+ * The append and the flag-flip are two writes, NOT one transaction. The flip is claimed
+ * conditionally (`flagStatus != 'actioned'`), so a concurrent second action is rejected as
+ * `already_actioned` rather than double-stamping the row — but it is best-effort: two genuinely
+ * simultaneous requests can each append a case before either claims the flip, and a crash between
+ * the append and the flip leaves the case written with the row still unactioned (a retry then
+ * appends a duplicate). Acceptable for an admin, single-click surface; not a strong invariant.
+ *
+ * The caller (an admin route) is the authentication boundary. The target dataset is resolved
+ * scoped to the reviewer (`userId: reviewerId`) — matching every other dataset route and the
+ * picker the review UI lists from — so a reviewer can only action a turn into a dataset they own
+ * (a foreign/unknown id reads as `dataset_not_found`, never a cross-user write).
  */
 export async function actionTurnEvaluationForLearning(
   params: ActionLearningParams
@@ -314,8 +323,8 @@ export async function actionTurnEvaluationForLearning(
   if (!evaluation) return { ok: false, reason: 'not_found' };
   if (evaluation.flagStatus === 'actioned') return { ok: false, reason: 'already_actioned' };
 
-  const dataset = await prisma.aiDataset.findUnique({
-    where: { id: params.datasetId },
+  const dataset = await prisma.aiDataset.findFirst({
+    where: { id: params.datasetId, userId: params.reviewerId },
     select: { id: true },
   });
   if (!dataset) return { ok: false, reason: 'dataset_not_found' };
@@ -354,8 +363,14 @@ export async function actionTurnEvaluationForLearning(
     select: { id: true },
   });
 
-  const row = await prisma.appQuestionnaireTurnEvaluation.update({
-    where: { id: params.id },
+  // Claim the flip conditionally: only flip a row that isn't already actioned. A concurrent
+  // second action (e.g. a double-click) flips nothing here (`count === 0`) and is reported as
+  // `already_actioned` instead of re-stamping the row with a different reviewer/dataset. This is a
+  // best-effort guard, NOT a transaction across the append above — two genuinely simultaneous
+  // requests can still each append a case before either claims the flip; what it prevents is the
+  // double flag-flip and the wrong-reviewer stamp.
+  const claimed = await prisma.appQuestionnaireTurnEvaluation.updateMany({
+    where: { id: params.id, sessionId: params.sessionId, flagStatus: { not: 'actioned' } },
     data: {
       flagStatus: 'actioned',
       flagReviewerId: params.reviewerId,
@@ -363,6 +378,11 @@ export async function actionTurnEvaluationForLearning(
       datasetId: params.datasetId,
       datasetCaseId: newCase?.id ?? null,
     },
+  });
+  if (claimed.count === 0) return { ok: false, reason: 'already_actioned' };
+
+  const row = await prisma.appQuestionnaireTurnEvaluation.findUniqueOrThrow({
+    where: { id: params.id },
     select: {
       id: true,
       flagStatus: true,

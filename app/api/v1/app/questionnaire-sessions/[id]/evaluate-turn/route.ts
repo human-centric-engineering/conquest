@@ -34,72 +34,29 @@ import { NotFoundError } from '@/lib/api/errors';
 import { withAdminAuth } from '@/lib/auth/guards';
 import { validateRequestBody } from '@/lib/api/validation';
 import { createRateLimitResponse } from '@/lib/security/rate-limit';
-import { isRecord } from '@/lib/utils';
 
 import { prisma } from '@/lib/db/client';
 import { withTurnEvaluationEnabled } from '@/lib/app/questionnaire/feature-flag';
+import { inspectorTurnSchema } from '@/lib/app/questionnaire/inspector/schema';
 import {
   evaluateTurn,
-  MAX_EVALUATED_CALLS,
   type TurnEvaluationContext,
   type TurnEvaluationInput,
 } from '@/lib/app/questionnaire/turn-evaluation';
 import { turnEvaluationLimiter } from '@/app/api/v1/app/questionnaire-sessions/_lib/rate-limit';
 import { persistTurnEvaluation } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-evaluation-store';
-
-/** One captured prompt message — mirrors `InspectorMessage`. */
-const inspectorMessageSchema = z.object({
-  role: z.string().max(50),
-  content: z.string().max(100_000),
-});
-
-/** One agent/LLM call trace — mirrors `AgentCallTrace`. */
-const agentCallTraceSchema = z.object({
-  kind: z.enum(['llm', 'embedding']).optional(),
-  label: z.string().min(1).max(200),
-  model: z.string().max(200),
-  provider: z.string().max(200),
-  latencyMs: z.number().nonnegative(),
-  costUsd: z.number().nonnegative(),
-  tokensIn: z.number().int().nonnegative().optional(),
-  tokensOut: z.number().int().nonnegative().optional(),
-  dimensions: z.number().int().nonnegative().optional(),
-  prompt: z.array(inspectorMessageSchema).max(50),
-  response: z.string().max(200_000),
-});
+import {
+  buildObjectivesContext,
+  loadTurnEvaluatorAgent,
+  TURN_EVALUATOR_SLUG,
+} from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-evaluation-context';
 
 const bodySchema = z.object({
-  turn: z.object({
-    turnIndex: z.number().int().nonnegative(),
-    calls: z.array(agentCallTraceSchema).min(1).max(MAX_EVALUATED_CALLS),
-  }),
+  turn: inspectorTurnSchema,
   respondentMessage: z.string().max(50_000).optional(),
   interviewerMessage: z.string().max(50_000).optional(),
   recentMessages: z.array(z.string().max(50_000)).max(100).optional(),
 });
-
-/** The seeded evaluator agent's slug — its provider/model binding drives the call. */
-const TURN_EVALUATOR_SLUG = 'turn-evaluator';
-
-/** Pull the free-text persona out of the config's tone JSON, when present. */
-function summariseTone(tone: unknown): string | undefined {
-  if (isRecord(tone) && typeof tone.persona === 'string' && tone.persona.trim()) {
-    return tone.persona.trim();
-  }
-  return undefined;
-}
-
-/** Compact, bounded summary of the version's audience JSON for the prompt. */
-function summariseAudience(audience: unknown): string | undefined {
-  if (audience === null || audience === undefined) return undefined;
-  try {
-    const s = typeof audience === 'string' ? audience : JSON.stringify(audience);
-    if (!s || s === '{}' || s === 'null') return undefined;
-    return s.slice(0, 2_000);
-  } catch {
-    return undefined;
-  }
-}
 
 const handleEvaluateTurn = withAdminAuth<{ id: string }>(async (request, session, { params }) => {
   const log = await getRouteLogger(request);
@@ -139,10 +96,7 @@ const handleEvaluateTurn = withAdminAuth<{ id: string }>(async (request, session
 
   // The evaluator agent's binding (empty provider/model → system default at resolve time). A
   // missing agent means the seed never ran — a config problem, surfaced as a 404.
-  const agent = await prisma.aiAgent.findFirst({
-    where: { slug: TURN_EVALUATOR_SLUG, kind: 'judge' },
-    select: { id: true, provider: true, model: true, fallbackProviders: true },
-  });
+  const agent = await loadTurnEvaluatorAgent();
   if (!agent) {
     log.error('No turn-evaluator agent found; run db:seed', { slug: TURN_EVALUATOR_SLUG });
     throw new NotFoundError('Turn evaluation is not configured');
@@ -150,14 +104,7 @@ const handleEvaluateTurn = withAdminAuth<{ id: string }>(async (request, session
 
   const version = sessionRow.version;
   const context: TurnEvaluationContext = {
-    ...(version.goal ? { goal: version.goal } : {}),
-    ...(summariseAudience(version.audience)
-      ? { audience: summariseAudience(version.audience) }
-      : {}),
-    ...(version.config?.selectionStrategy
-      ? { selectionStrategy: version.config.selectionStrategy }
-      : {}),
-    ...(summariseTone(version.config?.tone) ? { tone: summariseTone(version.config?.tone) } : {}),
+    ...buildObjectivesContext(version),
     ...(body.respondentMessage ? { respondentMessage: body.respondentMessage } : {}),
     ...(body.interviewerMessage ? { interviewerMessage: body.interviewerMessage } : {}),
     ...(body.recentMessages && body.recentMessages.length > 0

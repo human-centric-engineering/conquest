@@ -185,7 +185,7 @@ describe('POST evaluate-turn', () => {
       success: false,
       limit: 20,
       remaining: 0,
-      reset: Date.now() + 1000,
+      reset: 9_999_999_999,
     });
     const res = await POST(req({ turn: TURN }), ctx('sess-1'));
     expect(res.status).toBe(429);
@@ -220,6 +220,8 @@ describe('POST evaluate-turn', () => {
     expect(input.turn.turnIndex).toBe(0);
     expect(input.context).toMatchObject({
       goal: 'Understand housing security',
+      // audience is summarised server-side to a bounded JSON string, not passed through raw.
+      audience: '{"role":"Renter"}',
       selectionStrategy: 'adaptive',
       tone: 'warm',
     });

@@ -13,7 +13,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Loader2, X } from 'lucide-react';
 
 import { apiClient } from '@/lib/api/client';
-import { parseApiResponse } from '@/lib/api/server-fetch';
+import { parseApiResponse } from '@/lib/api/parse-response';
 import { API } from '@/lib/api/endpoints';
 import { TURN_EFFECTIVENESS } from '@/lib/app/questionnaire/turn-evaluation/schema';
 import { validateTurnEvaluation } from '@/lib/app/questionnaire/turn-evaluation/schema';

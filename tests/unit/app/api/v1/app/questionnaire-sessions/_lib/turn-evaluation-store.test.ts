@@ -11,8 +11,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const prismaMock = vi.hoisted(() => ({
   appQuestionnaireTurn: { findFirst: vi.fn() },
-  appQuestionnaireTurnEvaluation: { create: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
-  aiDataset: { findUnique: vi.fn() },
+  appQuestionnaireTurnEvaluation: {
+    create: vi.fn(),
+    findFirst: vi.fn(),
+    findUniqueOrThrow: vi.fn(),
+    update: vi.fn(),
+    updateMany: vi.fn(),
+  },
+  aiDataset: { findFirst: vi.fn() },
   aiDatasetCase: { findFirst: vi.fn() },
 }));
 vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
@@ -153,6 +159,22 @@ describe('updateTurnEvaluationReview', () => {
     expect(res).toEqual({ ok: false, reason: 'locked' });
   });
 
+  it('locks a both-fields patch on an actioned row (the supplied flag trips the guard)', async () => {
+    (prismaMock.appQuestionnaireTurnEvaluation.findFirst as Mock).mockResolvedValue({
+      id: 'eval-1',
+      flagStatus: 'actioned',
+    });
+    const res = await updateTurnEvaluationReview({
+      id: 'eval-1',
+      sessionId: 'sess-1',
+      reviewerId: 'admin-1',
+      comment: 'still useful context',
+      flagStatus: 'reviewed',
+    });
+    expect(res).toEqual({ ok: false, reason: 'locked' });
+    expect(prismaMock.appQuestionnaireTurnEvaluation.update).not.toHaveBeenCalled();
+  });
+
   it('allows a comment-only patch on an actioned row (only the flag is locked)', async () => {
     (prismaMock.appQuestionnaireTurnEvaluation.findFirst as Mock).mockResolvedValue({
       id: 'eval-1',
@@ -223,7 +245,7 @@ describe('actionTurnEvaluationForLearning', () => {
 
   beforeEach(() => {
     (prismaMock.appQuestionnaireTurnEvaluation.findFirst as Mock).mockResolvedValue(evalRow());
-    (prismaMock.aiDataset.findUnique as Mock).mockResolvedValue({ id: 'ds-1' });
+    (prismaMock.aiDataset.findFirst as Mock).mockResolvedValue({ id: 'ds-1' });
     appendMock.appendCasesToDataset.mockResolvedValue({
       datasetId: 'ds-1',
       appendedCount: 1,
@@ -231,7 +253,9 @@ describe('actionTurnEvaluationForLearning', () => {
       newContentHash: 'hash',
     });
     (prismaMock.aiDatasetCase.findFirst as Mock).mockResolvedValue({ id: 'case-9' });
-    (prismaMock.appQuestionnaireTurnEvaluation.update as Mock).mockResolvedValue({
+    // The flip is a conditional updateMany (claim) followed by a read-back of the row.
+    (prismaMock.appQuestionnaireTurnEvaluation.updateMany as Mock).mockResolvedValue({ count: 1 });
+    (prismaMock.appQuestionnaireTurnEvaluation.findUniqueOrThrow as Mock).mockResolvedValue({
       id: 'eval-1',
       flagStatus: 'actioned',
       flagReviewerId: 'admin-1',
@@ -269,18 +293,48 @@ describe('actionTurnEvaluationForLearning', () => {
       reviewerComment: 'great probe',
     });
 
+    // The target dataset is resolved scoped to the reviewer (no cross-user write).
+    expect(prismaMock.aiDataset.findFirst).toHaveBeenCalledWith({
+      where: { id: 'ds-1', userId: 'admin-1' },
+      select: { id: true },
+    });
+
     // Case id resolved from the last position (newCaseCount - 1).
     expect(prismaMock.aiDatasetCase.findFirst).toHaveBeenCalledWith({
       where: { datasetId: 'ds-1', position: 4 },
       select: { id: true },
     });
-    const [{ data }] = (prismaMock.appQuestionnaireTurnEvaluation.update as Mock).mock.calls[0];
-    expect(data).toMatchObject({
+    // The flip is claimed conditionally: only a row that isn't already actioned (scoped to the
+    // session) is flipped, so a concurrent re-action can't double-stamp it.
+    const [claimArg] = (prismaMock.appQuestionnaireTurnEvaluation.updateMany as Mock).mock.calls[0];
+    expect(claimArg.where).toEqual({
+      id: 'eval-1',
+      sessionId: 'sess-1',
+      flagStatus: { not: 'actioned' },
+    });
+    expect(claimArg.data).toMatchObject({
       flagStatus: 'actioned',
       flagReviewerId: 'admin-1',
       datasetId: 'ds-1',
       datasetCaseId: 'case-9',
     });
+  });
+
+  it('returns already_actioned when a concurrent action claimed the flip first (updateMany count 0)', async () => {
+    // The row was not actioned at the initial read, but the conditional claim flips nothing —
+    // another in-flight request actioned it between the read and the claim.
+    (prismaMock.appQuestionnaireTurnEvaluation.updateMany as Mock).mockResolvedValue({ count: 0 });
+
+    const res = await actionTurnEvaluationForLearning({
+      id: 'eval-1',
+      sessionId: 'sess-1',
+      datasetId: 'ds-1',
+      reviewerId: 'admin-1',
+    });
+
+    expect(res).toEqual({ ok: false, reason: 'already_actioned' });
+    // The row is not read back / re-stamped once the claim loses the race.
+    expect(prismaMock.appQuestionnaireTurnEvaluation.findUniqueOrThrow).not.toHaveBeenCalled();
   });
 
   it('returns not_found when the row does not belong to the session', async () => {
@@ -309,8 +363,10 @@ describe('actionTurnEvaluationForLearning', () => {
     expect(appendMock.appendCasesToDataset).not.toHaveBeenCalled();
   });
 
-  it('returns dataset_not_found when the target dataset is missing', async () => {
-    (prismaMock.aiDataset.findUnique as Mock).mockResolvedValue(null);
+  it('returns dataset_not_found when the dataset is missing or owned by another reviewer', async () => {
+    // findFirst is scoped to `userId: reviewerId`, so a dataset the reviewer does not own
+    // resolves to null here — a foreign id can never become a cross-user write.
+    (prismaMock.aiDataset.findFirst as Mock).mockResolvedValue(null);
     const res = await actionTurnEvaluationForLearning({
       id: 'eval-1',
       sessionId: 'sess-1',
@@ -318,6 +374,10 @@ describe('actionTurnEvaluationForLearning', () => {
       reviewerId: 'admin-1',
     });
     expect(res).toEqual({ ok: false, reason: 'dataset_not_found' });
+    expect(prismaMock.aiDataset.findFirst).toHaveBeenCalledWith({
+      where: { id: 'ds-x', userId: 'admin-1' },
+      select: { id: true },
+    });
     expect(appendMock.appendCasesToDataset).not.toHaveBeenCalled();
   });
 
@@ -335,8 +395,20 @@ describe('actionTurnEvaluationForLearning', () => {
     expect(appendMock.appendCasesToDataset).not.toHaveBeenCalled();
   });
 
-  it('maps an append cap failure to dataset_full and leaves the row unactioned', async () => {
+  it('maps any append failure to dataset_full and leaves the row unactioned', async () => {
     appendMock.appendCasesToDataset.mockRejectedValue(new Error('cap exceeded'));
+    const res = await actionTurnEvaluationForLearning({
+      id: 'eval-1',
+      sessionId: 'sess-1',
+      datasetId: 'ds-1',
+      reviewerId: 'admin-1',
+    });
+    expect(res).toEqual({ ok: false, reason: 'dataset_full' });
+    expect(prismaMock.appQuestionnaireTurnEvaluation.update).not.toHaveBeenCalled();
+  });
+
+  it('maps a non-cap append throw to dataset_full too (the catch is catch-all)', async () => {
+    appendMock.appendCasesToDataset.mockRejectedValue(new TypeError('unexpected boom'));
     const res = await actionTurnEvaluationForLearning({
       id: 'eval-1',
       sessionId: 'sess-1',

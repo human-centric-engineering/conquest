@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 
 import { TurnEvaluationsTable } from '@/components/admin/questionnaires/turn-evaluations-table';
+import { RefLookupPanel } from '@/components/admin/questionnaires/ref-lookup-panel';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { parsePaginationMeta } from '@/lib/validations/common';
@@ -59,6 +60,8 @@ export default async function TurnEvaluationsPage() {
           reviewer comment, and flag or action it into a learning dataset.
         </p>
       </header>
+
+      <RefLookupPanel />
 
       <TurnEvaluationsTable initialItems={items} initialMeta={meta} />
     </div>

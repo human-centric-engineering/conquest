@@ -9,10 +9,12 @@
  *   interviewer reply, with the verdict/score/comment in case metadata) and moves the flag to
  *   `actioned`, recording the dataset + case ids on the row.
  *
- *   This is the ONLY way a row reaches `actioned`: keeping the dataset append and the status
- *   flip in one operation guarantees an actioned row is always backed by a real case. Re-running
- *   on an already-actioned row is a 409. The row must belong to the `:id` session (404 on
- *   mismatch); a missing dataset is a 404; a dataset at its case cap is a 422.
+ *   This is the ONLY way a row reaches `actioned`. The dataset append and the status flip are two
+ *   writes (not a transaction); the flip is claimed conditionally so a concurrent re-action is
+ *   rejected as 409 rather than double-stamping the row — best-effort, not a hard atomic guarantee
+ *   (see `actionTurnEvaluationForLearning`). Re-running on an already-actioned row is a 409. The
+ *   row must belong to the `:id` session (404 on mismatch); a missing dataset is a 404; a dataset
+ *   at its case cap is a 422.
  */
 
 import { z } from 'zod';

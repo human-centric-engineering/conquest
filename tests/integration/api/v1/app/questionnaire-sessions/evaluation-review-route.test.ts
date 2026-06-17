@@ -110,6 +110,7 @@ describe('PATCH evaluation review', () => {
     const res = await PATCH(req({ flagStatus: 'flagged' }), ctx('sess-1', 'eval-1'));
     expect(res.status).toBe(409);
     const body = await res.json();
+    expect(body.success).toBe(false);
     expect(body.error.code).toBe('evaluation_actioned');
   });
 

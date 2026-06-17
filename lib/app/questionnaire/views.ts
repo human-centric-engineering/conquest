@@ -287,6 +287,37 @@ export interface TurnEvaluationListItem {
  * `evaluatedInput` are passed through as opaque JSON (the client renders the verdict with the
  * shared turn-evaluation components; the schema validates them at write time).
  */
+/**
+ * One turn in a ref-lookup result — enough for an admin to see what happened and re-evaluate it.
+ * Messages are trimmed previews; `hasTraces` says whether the saved inspector dump is present (so
+ * the turn can be re-evaluated), and `evaluationCount` how many verdicts already exist for it.
+ */
+export interface RefLookupTurn {
+  ordinal: number;
+  userMessagePreview: string;
+  agentResponsePreview: string;
+  callCount: number;
+  hasTraces: boolean;
+  evaluationCount: number;
+  createdAt: string;
+}
+
+/** The result of looking a chat up by its support reference — the session + its turns. */
+export interface RefLookupResult {
+  session: {
+    id: string;
+    ref: string;
+    status: string;
+    isPreview: boolean;
+    questionnaireTitle: string | null;
+    questionnaireId: string | null;
+    versionId: string;
+    versionNumber: number | null;
+    createdAt: string;
+  };
+  turns: RefLookupTurn[];
+}
+
 export interface TurnEvaluationDetail extends TurnEvaluationListItem {
   appVersion: string;
   evaluatorAgentId: string | null;

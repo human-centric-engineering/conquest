@@ -18,9 +18,24 @@ import { Prisma } from '@prisma/client';
 
 import { prisma } from '@/lib/db/client';
 import { TURN_EFFECTIVENESS } from '@/lib/app/questionnaire/turn-evaluation';
-import type { TurnEvaluationListItem, TurnEvaluationDetail } from '@/lib/app/questionnaire/views';
+import { normalizeSessionRef } from '@/lib/app/questionnaire/session-ref';
+import type {
+  TurnEvaluationListItem,
+  TurnEvaluationDetail,
+  RefLookupResult,
+  RefLookupTurn,
+} from '@/lib/app/questionnaire/views';
 
 import { TURN_EVAL_FLAG_STATUSES } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-evaluation-store';
+
+/** How much of a turn message the lookup ships as a preview. */
+const MESSAGE_PREVIEW_CHARS = 200;
+
+/** Trim a string to a bounded preview with an ellipsis. */
+function trimPreview(value: string, max: number): string {
+  const s = value.trim();
+  return s.length > max ? `${s.slice(0, max)}…` : s;
+}
 
 /** How much of a comment the list row ships as a preview. */
 const COMMENT_PREVIEW_CHARS = 140;
@@ -185,6 +200,82 @@ export async function listTurnEvaluations(
   });
 
   return { items, total };
+}
+
+/**
+ * Look a chat up by its support reference (`publicRef`). Normalises the user-entered ref (folds
+ * look-alikes, strips grouping), resolves the session, and returns it with its turns — each
+ * annotated with whether a saved inspector dump is present (so it can be re-evaluated) and how many
+ * verdicts it already has. Returns null when no session matches. Query budget: session + turns +
+ * one eval-count groupBy + one version-enrichment = 4 round-trips.
+ */
+export async function lookupSessionByRef(rawRef: string): Promise<RefLookupResult | null> {
+  const ref = normalizeSessionRef(rawRef);
+  if (!ref) return null;
+
+  const session = await prisma.appQuestionnaireSession.findUnique({
+    where: { publicRef: ref },
+    select: {
+      id: true,
+      publicRef: true,
+      status: true,
+      isPreview: true,
+      versionId: true,
+      createdAt: true,
+    },
+  });
+  if (!session || !session.publicRef) return null;
+
+  const [turns, evalGroups, versionMap] = await Promise.all([
+    prisma.appQuestionnaireTurn.findMany({
+      where: { sessionId: session.id },
+      orderBy: { ordinal: 'asc' },
+      select: {
+        ordinal: true,
+        userMessage: true,
+        agentResponse: true,
+        inspectorCalls: true,
+        createdAt: true,
+      },
+    }),
+    prisma.appQuestionnaireTurnEvaluation.groupBy({
+      by: ['turnOrdinal'],
+      where: { sessionId: session.id },
+      _count: { _all: true },
+    }),
+    enrichVersions([session.versionId]),
+  ]);
+
+  const evalCountByOrdinal = new Map(evalGroups.map((g) => [g.turnOrdinal, g._count._all]));
+  const v = versionMap.get(session.versionId) ?? null;
+
+  const turnViews: RefLookupTurn[] = turns.map((t) => {
+    const callCount = Array.isArray(t.inspectorCalls) ? t.inspectorCalls.length : 0;
+    return {
+      ordinal: t.ordinal,
+      userMessagePreview: trimPreview(t.userMessage, MESSAGE_PREVIEW_CHARS),
+      agentResponsePreview: trimPreview(t.agentResponse, MESSAGE_PREVIEW_CHARS),
+      callCount,
+      hasTraces: callCount > 0,
+      evaluationCount: evalCountByOrdinal.get(t.ordinal) ?? 0,
+      createdAt: t.createdAt.toISOString(),
+    };
+  });
+
+  return {
+    session: {
+      id: session.id,
+      ref: session.publicRef,
+      status: session.status,
+      isPreview: session.isPreview,
+      questionnaireTitle: v?.questionnaireTitle ?? null,
+      questionnaireId: v?.questionnaireId ?? null,
+      versionId: session.versionId,
+      versionNumber: v?.versionNumber ?? null,
+      createdAt: session.createdAt.toISOString(),
+    },
+    turns: turnViews,
+  };
 }
 
 /** Fetch one persisted turn evaluation in full, or null when it doesn't exist. */

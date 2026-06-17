@@ -525,6 +525,9 @@ export const API = {
       /** Action a flagged evaluation into an eval dataset (POST `{ datasetId }`); admin only. */
       evaluationActionLearning: (id: string, evalId: string): string =>
         `/api/v1/app/questionnaire-sessions/${id}/evaluations/${evalId}/action-learning`,
+      /** Re-evaluate a SAVED turn from its persisted inspector traces (POST); admin only, not preview-gated. */
+      evaluateSavedTurn: (id: string, ordinal: number): string =>
+        `/api/v1/app/questionnaire-sessions/${id}/turns/${ordinal}/evaluate-saved`,
       /** Replayed transcript — prior turns + their persisted side-band notices (GET — F7.1 resume). */
       transcript: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/transcript`,
       /** Answer-slot panel state — live read for the respondent panel (GET) (F7.2). */
@@ -544,6 +547,9 @@ export const API = {
       ROOT: '/api/v1/app/turn-evaluations',
       /** One evaluation's full verdict + snapshot + review state (GET). */
       byId: (evalId: string): string => `/api/v1/app/turn-evaluations/${evalId}`,
+      /** Look a chat up by its support reference → session + turns (GET). */
+      byRef: (ref: string): string =>
+        `/api/v1/app/turn-evaluations/by-ref/${encodeURIComponent(ref)}`,
     },
     /** Public (token-gated) respondent invitation endpoints (F3.2 PR2). */
     INVITATIONS: {

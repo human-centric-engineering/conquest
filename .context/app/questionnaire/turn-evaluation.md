@@ -12,49 +12,65 @@ A "turn" = all the LLM calls between one respondent answer and the next intervie
 
 ## Why it's shaped this way
 
-**Inspector data is live-only and never persisted.** The server streams `inspector` SSE frames
-(full `TurnInspectorData` dumps) only for an admin **preview** session with the inspector toggle on;
-the client holds them in `inspectorTurns` state and the drawer renders them. So the evaluator's
-input — "a complete Turn Inspector dump" — already exists client-side. The flow is therefore:
+**Two ways to feed the evaluator — a live dump, or saved traces.** The Turn Inspector dump
+(`TurnInspectorData` — every LLM/embedding call with its prompt, response, model, latency, tokens,
+cost) reaches the evaluator from either boundary:
+
+1. **Live (preview):** the server streams `inspector` SSE frames only for an admin **preview**
+   session with the toggle on; the drawer holds them and POSTs the dump for the turn being judged.
+2. **Saved (any session):** the per-turn dump is **persisted on every turn row**
+   (`AppQuestionnaireTurn.inspectorCalls`, captured for all sessions), so a real chat found by its
+   **support reference** (`publicRef`) can be re-evaluated against the exact calls it ran — see
+   [Re-evaluate a chat by reference](#re-evaluate-a-chat-by-reference).
 
 ```
-drawer "Evaluate" button → POST the turn dump → route → one structured LLM call → persist + verdict back to the drawer
+live:  drawer "Evaluate" → POST the dump        → route → structured LLM call → persist + verdict
+saved: admin looks up ref → pick a turn         → route → load saved dump → same call → persist + verdict
 ```
 
-No prompt reconstruction. **The verdict IS persisted** (`AppQuestionnaireTurnEvaluation`) — see
-[Persistence](#persistence-the-stored-verdict). Because the inspector dump it judges is otherwise
-live-only, the row snapshots **both** the verdict and the `evaluatedInput` (the exact call traces +
-context that were judged): a stored score is uninterpretable without the input it judged, and the
-snapshot is what later makes a flagged verdict usable as a learning case. Persistence is best-effort
-— a write failure logs and returns a `null` `evaluationId` rather than losing the verdict the admin
-is waiting on.
+Both validate the dump against the **same** Zod schema (`inspector/schema.ts`) — the live POST
+because it's untrusted client data, the saved path because the persisted JSON is structurally
+untrusted at the read seam. **The verdict IS persisted** (`AppQuestionnaireTurnEvaluation`) — see
+[Persistence](#persistence-the-stored-verdict) — snapshotting **both** the verdict and the
+`evaluatedInput` so a stored score stays interpretable and a flagged verdict is usable as a learning
+case. Persistence is best-effort — a write failure logs and returns a `null` `evaluationId` rather
+than losing the verdict.
 
-**The dump comes from the client; the objectives come from the server.** The client POSTs the call
-traces (validated with Zod — external data, never `as`). The route separately loads the version's
-**goal, audience, selection strategy, and tone/persona** by session id, so the questionnaire
-objectives can't be spoofed and are present even though the dump doesn't carry them.
+> SSE **emission** of the live `inspector` frame is still preview-gated (a real respondent never
+> receives it); only the **persistence** is universal. The drawer derives each turn's conversation
+> context (respondent message + interviewer reply + recent history) and POSTs it with the dump.
+
+**The dump's objectives come from the server.** Either route loads the version's **goal, audience,
+selection strategy, and tone/persona** by session id (`buildObjectivesContext`), so the
+questionnaire objectives can't be spoofed and are present even though the dump doesn't carry them.
 
 ## Pieces
 
-| Concern                                                                           | Location                                                                                                            |
-| --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| Output contract (hybrid Zod + JSON-schema, `validateTurnEvaluation`, retry msg)   | `lib/app/questionnaire/turn-evaluation/schema.ts`                                                                   |
-| Input types (`TurnEvaluationInput`, `TurnEvaluationContext`)                      | `lib/app/questionnaire/turn-evaluation/types.ts`                                                                    |
-| Prompt builder (system rubric + serialized dump + context)                        | `lib/app/questionnaire/turn-evaluation/prompt.ts`                                                                   |
-| Markdown serializer (shared by Copy + Download)                                   | `lib/app/questionnaire/turn-evaluation/serialize.ts`                                                                |
-| Service (`evaluateTurn` — resolve binding → `runStructuredCompletion` → cost log) | `lib/app/questionnaire/turn-evaluation/evaluate-turn.ts`                                                            |
-| Route (`POST …/questionnaire-sessions/:id/evaluate-turn`)                         | `app/api/v1/app/questionnaire-sessions/[id]/evaluate-turn/route.ts`                                                 |
-| Prisma model (`AppQuestionnaireTurnEvaluation`)                                   | `prisma/schema/app-questionnaire.prisma`                                                                            |
-| Persistence store (create / review-update / learning-action)                      | `app/api/v1/app/questionnaire-sessions/_lib/turn-evaluation-store.ts`                                               |
-| Search read model (list + detail, version enrichment)                             | `app/api/v1/app/questionnaire-sessions/_lib/turn-evaluation-list.ts`                                                |
-| Review route (`PATCH …/evaluations/:evalId` — comment + flag)                     | `app/api/v1/app/questionnaire-sessions/[id]/evaluations/[evalId]/route.ts`                                          |
-| Learning-action route (`POST …/evaluations/:evalId/action-learning`)              | `app/api/v1/app/questionnaire-sessions/[id]/evaluations/[evalId]/action-learning/route.ts`                          |
-| Search API (`GET …/turn-evaluations`, `GET …/turn-evaluations/:id`)               | `app/api/v1/app/turn-evaluations/`                                                                                  |
-| Admin search surface (table + filters + detail drawer + review)                   | `app/admin/questionnaires/turn-evaluations/page.tsx` · `components/admin/questionnaires/turn-evaluations-table.tsx` |
-| Shared verdict + review components (drawer + admin reuse)                         | `components/app/questionnaire/turn-evaluation/`                                                                     |
-| Drawer UI (Evaluate button + verdict + inline review)                             | `components/app/questionnaire/chat/turn-inspector-drawer.tsx`                                                       |
-| Evaluator agent seed (`turn-evaluator`, `kind: 'judge'`)                          | `prisma/seeds/app-questionnaire/043-turn-evaluator-agent.ts`                                                        |
-| Sub-flag seed (disabled by default)                                               | `prisma/seeds/app-questionnaire/042-turn-evaluation-flag.ts`                                                        |
+| Concern                                                                               | Location                                                                                                            |
+| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Output contract (hybrid Zod + JSON-schema, `validateTurnEvaluation`, retry msg)       | `lib/app/questionnaire/turn-evaluation/schema.ts`                                                                   |
+| Input types (`TurnEvaluationInput`, `TurnEvaluationContext`)                          | `lib/app/questionnaire/turn-evaluation/types.ts`                                                                    |
+| Prompt builder (system rubric + serialized dump + context)                            | `lib/app/questionnaire/turn-evaluation/prompt.ts`                                                                   |
+| Markdown serializer (shared by Copy + Download)                                       | `lib/app/questionnaire/turn-evaluation/serialize.ts`                                                                |
+| Service (`evaluateTurn` — resolve binding → `runStructuredCompletion` → cost log)     | `lib/app/questionnaire/turn-evaluation/evaluate-turn.ts`                                                            |
+| Inspector dump Zod schema (shared by live + saved paths)                              | `lib/app/questionnaire/inspector/schema.ts`                                                                         |
+| Shared evaluator seam (agent load + objectives projection)                            | `app/api/v1/app/questionnaire-sessions/_lib/turn-evaluation-context.ts`                                             |
+| Route — live (`POST …/questionnaire-sessions/:id/evaluate-turn`)                      | `app/api/v1/app/questionnaire-sessions/[id]/evaluate-turn/route.ts`                                                 |
+| Route — saved (`POST …/questionnaire-sessions/:id/turns/:ordinal/evaluate-saved`)     | `app/api/v1/app/questionnaire-sessions/[id]/turns/[ordinal]/evaluate-saved/route.ts`                                |
+| Saved-trace orchestration (`runSavedTurnEvaluation`)                                  | `app/api/v1/app/questionnaire-sessions/_lib/evaluate-saved-turn.ts`                                                 |
+| Ref lookup (`GET …/turn-evaluations/by-ref/:ref`) + read model (`lookupSessionByRef`) | `app/api/v1/app/turn-evaluations/by-ref/[ref]/route.ts` · `_lib/turn-evaluation-list.ts`                            |
+| Ref lookup + re-evaluate UI panel                                                     | `components/admin/questionnaires/ref-lookup-panel.tsx`                                                              |
+| Prisma model (`AppQuestionnaireTurnEvaluation`)                                       | `prisma/schema/app-questionnaire.prisma`                                                                            |
+| Persistence store (create / review-update / learning-action)                          | `app/api/v1/app/questionnaire-sessions/_lib/turn-evaluation-store.ts`                                               |
+| Search read model (list + detail, version enrichment)                                 | `app/api/v1/app/questionnaire-sessions/_lib/turn-evaluation-list.ts`                                                |
+| Review route (`PATCH …/evaluations/:evalId` — comment + flag)                         | `app/api/v1/app/questionnaire-sessions/[id]/evaluations/[evalId]/route.ts`                                          |
+| Learning-action route (`POST …/evaluations/:evalId/action-learning`)                  | `app/api/v1/app/questionnaire-sessions/[id]/evaluations/[evalId]/action-learning/route.ts`                          |
+| Search API (`GET …/turn-evaluations`, `GET …/turn-evaluations/:id`)                   | `app/api/v1/app/turn-evaluations/`                                                                                  |
+| Admin search surface (table + filters + detail drawer + review)                       | `app/admin/questionnaires/turn-evaluations/page.tsx` · `components/admin/questionnaires/turn-evaluations-table.tsx` |
+| Shared verdict + review components (drawer + admin reuse)                             | `components/app/questionnaire/turn-evaluation/`                                                                     |
+| Drawer UI (Evaluate button + verdict + inline review)                                 | `components/app/questionnaire/chat/turn-inspector-drawer.tsx`                                                       |
+| Evaluator agent seed (`turn-evaluator`, `kind: 'judge'`)                              | `prisma/seeds/app-questionnaire/043-turn-evaluator-agent.ts`                                                        |
+| Sub-flag seed (disabled by default)                                                   | `prisma/seeds/app-questionnaire/042-turn-evaluation-flag.ts`                                                        |
 
 It deliberately reuses the F5.1 design-evaluation machinery: `runStructuredCompletion`
 (call → parse → retry-once-at-temp-0 → cost-sum) from `lib/orchestration/evaluations/parse-structured.ts`,
@@ -119,8 +135,12 @@ none → flagged → reviewed → actioned | dismissed
 - **Review PATCH** (`…/evaluations/:evalId`) sets the comment and/or moves the flag among
   `none | flagged | reviewed | dismissed`, stamping reviewer + timestamp on whichever facet changed.
   `actioned` is **not** settable here, and the store refuses to re-flag an already-actioned row (409).
-- **`actioned` is reached only via the learning-action route** (below), which must append a dataset
-  case first — so an actioned row is always backed by a real learning case.
+- **`actioned` is reached only via the learning-action route** (below), which appends a dataset
+  case first, then claims the flip with a conditional `updateMany` (`flagStatus != 'actioned'`) so a
+  concurrent re-action is rejected (409) rather than double-stamping the row. The append and the
+  flip are two writes, not a transaction — best-effort, not a hard guarantee: under genuinely
+  simultaneous requests, or a crash between the two writes, a duplicate case can land. Acceptable
+  for the admin, single-click surface.
 
 ## Learning datasets (wiring)
 
@@ -151,6 +171,26 @@ renders the table with a slide-over detail that shows the verdict (shared `TurnE
 the review controls (shared `TurnEvaluationReview`) — the same controls the inspector drawer uses
 inline once a verdict has persisted.
 
+## Re-evaluate a chat by reference
+
+Every session carries a short **support reference** (`AppQuestionnaireSession.publicRef`, e.g.
+`7F3K-9M2P`) shown to the respondent (chat footer + completion screen — `lib/app/questionnaire/session-ref.ts`,
+`components/app/questionnaire/lifecycle/session-ref-chip.tsx`). When a respondent reports a bad
+experience and quotes it:
+
+1. **Look it up** — `GET /api/v1/app/turn-evaluations/by-ref/:ref` (admin) resolves the
+   forgivingly-normalised reference to the session and its turns, each annotated with `hasTraces`
+   (is a saved inspector dump present?) and how many verdicts it already has. The admin surface
+   (`/admin/questionnaires/turn-evaluations`) renders this as a lookup panel.
+2. **Re-evaluate a turn** — `POST …/questionnaire-sessions/:id/turns/:ordinal/evaluate-saved`
+   (admin, **not** preview-gated) loads that turn's saved `inspectorCalls`, validates them, rebuilds
+   the context from the saved respondent/interviewer messages + prior turns, runs the evaluator, and
+   persists the verdict — which then appears in the search surface like any other. `no_traces` (422)
+   when the turn predates the capture column or its dump is malformed.
+
+This is the payoff of persisting traces for all sessions: a real conversation, not just a preview,
+can be judged after the fact against the exact calls it made.
+
 ## Gating & limits
 
 - **Flag:** `APP_QUESTIONNAIRES_TURN_EVALUATION_ENABLED` (a `feature_flag` row, **not** an env var),
@@ -162,8 +202,11 @@ inline once a verdict has persisted.
 - **Rate limit:** `turnEvaluationLimiter` (20/min per admin) in `questionnaire-sessions/_lib/rate-limit.ts`
   — the expensive-sub-flow sub-cap on top of the section 100/min.
 - **Cost:** logged fire-and-forget via `logCost` with `{ capability: 'turn-evaluation', sessionId, turnIndex }`.
-- **Review / search / action routes** share the same flag + `withAdminAuth` (all 404 when the flag is
-  off). They are reads / cheap writes, so they inherit the section 100/min cap with no extra sub-cap.
+- **Review / search / action / ref-lookup routes** share the same flag + `withAdminAuth` (all 404
+  when the flag is off). They are reads / cheap writes, so they inherit the section 100/min cap with
+  no extra sub-cap. The **saved-turn evaluation** route is a paid reasoning call, so it takes the
+  same per-admin `turnEvaluationLimiter` (20/min) as the live evaluator — but it is **not**
+  preview-gated (re-evaluating a real chat by ref is the whole point).
 
 ## Try it
 

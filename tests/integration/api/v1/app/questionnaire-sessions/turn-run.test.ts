@@ -26,6 +26,11 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/turns', () => ({ recordTurn: seamM
 const dataSlotMock = vi.hoisted(() => ({ upsertDataSlotFill: vi.fn() }));
 vi.mock('@/app/api/v1/app/questionnaires/_lib/data-slot-fills', () => dataSlotMock);
 
+const prismaMock = vi.hoisted(() => ({
+  appQuestionnaireSession: { update: vi.fn() },
+}));
+vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
+
 import { persistTurn } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-run';
 import type { AnswerSlotIntent } from '@/lib/app/questionnaire/extraction/types';
 import type {
@@ -397,5 +402,78 @@ describe('persistTurn', () => {
     expect(seamMock.recordTurn).toHaveBeenCalledWith(
       expect.objectContaining({ sideEffectAnswerIds: [] })
     );
+  });
+
+  describe('pendingContradiction flow', () => {
+    beforeEach(() => {
+      (prismaMock.appQuestionnaireSession.update as ReturnType<typeof vi.fn>).mockResolvedValue({});
+    });
+
+    it('clears a resolved probe by writing DbNull when pendingContradiction is null', async () => {
+      await persistTurn({
+        sessionId: 'sess-1',
+        userMessage: 'confirmed',
+        agentResponse: 'Great.',
+        targetedQuestionId: null,
+        toolCalls: [],
+        costUsd: 0,
+        upserts: [],
+        refinements: [],
+        keyToSlotId: new Map(),
+        pendingContradiction: null,
+      });
+
+      // The session must be updated to clear the contradiction probe.
+      expect(prismaMock.appQuestionnaireSession.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'sess-1' } })
+      );
+      // The turn is still recorded after the session update.
+      expect(seamMock.recordTurn).toHaveBeenCalledTimes(1);
+    });
+
+    it('parks a raised probe on the session when pendingContradiction is an object', async () => {
+      const probe = {
+        slotKeys: ['role'],
+        explanation: 'Conflicting roles detected.',
+        statement: 'Actually I do sales.',
+        raisedAtTurnIndex: 3,
+      };
+
+      await persistTurn({
+        sessionId: 'sess-1',
+        userMessage: 'Actually I do sales.',
+        agentResponse: 'Could you clarify?',
+        targetedQuestionId: null,
+        toolCalls: [],
+        costUsd: 0,
+        upserts: [],
+        refinements: [],
+        keyToSlotId: new Map(),
+        pendingContradiction: probe,
+      });
+
+      expect(prismaMock.appQuestionnaireSession.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'sess-1' } })
+      );
+      expect(seamMock.recordTurn).toHaveBeenCalledTimes(1);
+    });
+
+    it('does NOT call session update when pendingContradiction is undefined (default)', async () => {
+      // The common path — undefined means "leave untouched".
+      await persistTurn({
+        sessionId: 'sess-1',
+        userMessage: 'm',
+        agentResponse: 'r',
+        targetedQuestionId: null,
+        toolCalls: [],
+        costUsd: 0,
+        upserts: [],
+        refinements: [],
+        keyToSlotId: new Map(),
+        // pendingContradiction intentionally omitted
+      });
+
+      expect(prismaMock.appQuestionnaireSession.update).not.toHaveBeenCalled();
+    });
   });
 });
