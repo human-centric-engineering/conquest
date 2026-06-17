@@ -20,6 +20,11 @@ vi.mock('@/lib/orchestration/capabilities/dispatcher', () => ({
 const adaptiveMock = vi.hoisted(() => ({ buildAdaptiveDeps: vi.fn(() => ({})) }));
 vi.mock('@/app/api/v1/app/questionnaires/_lib/adaptive-deps', () => adaptiveMock);
 
+const dataSlotSelectionMock = vi.hoisted(() => ({ selectNextDataSlot: vi.fn() }));
+vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/data-slot-selection', () => ({
+  selectNextDataSlot: dataSlotSelectionMock.selectNextDataSlot,
+}));
+
 // Mocks for assessSeriousness: provider resolution, getProvider, structured completion, and
 // logCost (fire-and-forget — a no-op here so the test doesn't hit Prisma/SDK).
 const resolverMock = vi.hoisted(() => ({ resolveAgentProviderAndModel: vi.fn() }));
@@ -865,5 +870,64 @@ describe('selectNext', () => {
     const inv = await invokers({ adaptiveEnabled: true });
     await inv.selectNext(state({ config: { ...state().config, selectionStrategy: 'adaptive' } }));
     expect(adaptiveMock.buildAdaptiveDeps).toHaveBeenCalledWith({ userId: 'user-1' });
+  });
+});
+
+describe('selectDataSlot — ranks by the current answer, not the prior question', () => {
+  it("appends the respondent's current message to the transcript handed to the data-slot selector", async () => {
+    dataSlotSelectionMock.selectNextDataSlot.mockResolvedValue(null);
+    const inv = await invokers({ dataSlotAdaptiveEnabled: true });
+
+    await inv.selectDataSlot!(
+      state({
+        // Persisted transcript ends with the interviewer's question; the answer is in userMessage.
+        recentMessages: ['Tell me about your pipeline.'],
+        userMessage: 'our pipeline is very poor and we have no sales methodology',
+      }),
+      [
+        {
+          id: 'd1',
+          key: 'pipeline',
+          name: 'Pipeline',
+          description: '',
+          theme: 'Sales',
+          ordinal: 0,
+          weight: 1,
+        },
+      ],
+      { activeTheme: 'Sales', parkedTheme: null }
+    );
+
+    expect(dataSlotSelectionMock.selectNextDataSlot).toHaveBeenCalledTimes(1);
+    const passed = dataSlotSelectionMock.selectNextDataSlot.mock.calls[0][0];
+    // The current answer is the LAST transcript entry → it seeds the similarity query.
+    expect(passed.recentMessages).toEqual([
+      'Tell me about your pipeline.',
+      'our pipeline is very poor and we have no sales methodology',
+    ]);
+  });
+
+  it('leaves the transcript unchanged on a kickoff (empty userMessage)', async () => {
+    dataSlotSelectionMock.selectNextDataSlot.mockResolvedValue(null);
+    const inv = await invokers({ dataSlotAdaptiveEnabled: true });
+
+    await inv.selectDataSlot!(
+      state({ recentMessages: ['Welcome!'], userMessage: '' }),
+      [
+        {
+          id: 'd1',
+          key: 'pipeline',
+          name: 'Pipeline',
+          description: '',
+          theme: 'Sales',
+          ordinal: 0,
+          weight: 1,
+        },
+      ],
+      { activeTheme: null, parkedTheme: null }
+    );
+
+    const passed = dataSlotSelectionMock.selectNextDataSlot.mock.calls[0][0];
+    expect(passed.recentMessages).toEqual(['Welcome!']);
   });
 });

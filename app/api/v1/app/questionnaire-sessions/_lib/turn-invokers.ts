@@ -108,6 +108,26 @@ async function loadBinding(slug: string): Promise<AgentBinding | null> {
   return agent;
 }
 
+/**
+ * The transcript the per-turn similarity ranking / selection should rank against: the persisted
+ * recent messages PLUS the answer the respondent just sent THIS turn.
+ *
+ * `state.recentMessages` is built from *persisted* turns, so its last entry is the interviewer's
+ * previous QUESTION, not the respondent's current ANSWER (which lives in `state.userMessage`). The
+ * adaptive selectors embed the last entry as their similarity query — so without this they rank by
+ * what was ASKED, not what the respondent just SAID, which drops answer-relevant candidates for any
+ * volunteered or cross-topic content. Appending the current answer makes "what they just said" the
+ * query and the latest line in the selector's transcript. Empty (kickoff) → unchanged.
+ */
+function conversationWithCurrentAnswer(state: {
+  userMessage: string;
+  recentMessages: string[];
+}): string[] {
+  return state.userMessage.trim().length > 0
+    ? [...state.recentMessages, state.userMessage]
+    : state.recentMessages;
+}
+
 /** Build the live invokers, loading the capability agent bindings once up front. */
 export async function buildTurnInvokers(opts: {
   userId: string;
@@ -416,13 +436,15 @@ export async function buildTurnInvokers(opts: {
     },
 
     async selectNext(state): Promise<SelectOutcome> {
+      // Rank the next question by what the respondent JUST said, not the prior interviewer question.
+      const conversation = conversationWithCurrentAnswer(state);
       const ctx: SelectionContext = {
         questions: state.questions,
         answered: state.answered,
         config: state.config,
         round: state.selectionRound,
         sessionId: state.sessionId,
-        ...(state.recentMessages.length > 0 ? { recentMessages: state.recentMessages } : {}),
+        ...(conversation.length > 0 ? { recentMessages: conversation } : {}),
         ...(goal ? { goal } : {}),
       };
       // Adaptive's embedding + LLM path runs only when its sub-flag is on; otherwise it
@@ -445,7 +467,8 @@ export async function buildTurnInvokers(opts: {
       if (!dataSlotAdaptiveEnabled) return null;
       return selectNextDataSlot({
         unfilled,
-        recentMessages: state.recentMessages,
+        // Rank the next data slot by what the respondent JUST said (see conversationWithCurrentAnswer).
+        recentMessages: conversationWithCurrentAnswer(state),
         activeTheme: context.activeTheme,
         parkedTheme: context.parkedTheme,
         ...(goal ? { goal } : {}),

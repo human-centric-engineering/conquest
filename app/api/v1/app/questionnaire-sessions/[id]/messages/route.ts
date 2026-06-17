@@ -417,7 +417,14 @@ async function handleMessage(
         activeQuestionKey: loaded.activeQuestionKey,
         activeDataSlotKey,
         activeTheme,
-        recentMessages: loaded.base.recentMessages,
+        // The pre-filter ranks candidates by similarity to the respondent's CURRENT answer, but
+        // `loaded.base.recentMessages` (persisted) ends with the interviewer's previous question.
+        // Append the current message so the ranking query is what they just said — otherwise
+        // answer-relevant questions (e.g. a "pipeline" question for "our pipeline is very poor")
+        // get ranked out and the extractor never sees them.
+        recentMessages: userMessage.trim().length
+          ? [...loaded.base.recentMessages, userMessage]
+          : loaded.base.recentMessages,
         sessionId,
         ...(recordInspectorCall ? { recordInspectorCall } : {}),
       });

@@ -695,9 +695,15 @@ describe('extraction pre-filter', () => {
       dataSlotsOut: 1,
     });
 
-    const res = await POST(req({ message: 'I just joined the marketing team' }), ctx);
+    const res = await POST(req({ message: 'actually our pipeline is very poor' }), ctx);
     expect(res.status).toBe(200);
     await drainSse(res);
+
+    // The pre-filter must rank against the respondent's CURRENT answer — so the message they just
+    // sent is appended as the last (query) entry, not the prior interviewer turn.
+    const narrowCall = prefilterMock.narrowExtractionCandidates.mock.calls[0] as unknown[];
+    const narrowArgs = narrowCall[0] as { recentMessages: string[] };
+    expect(narrowArgs.recentMessages.at(-1)).toBe('actually our pipeline is very poor');
 
     const args = invokerArgs();
     // Full slots still flow to the detector/refiner (their coverage is unchanged).

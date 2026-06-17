@@ -75,7 +75,15 @@ userMessage, recentMessages?, sessionId }`, all in memory. `ExtractionSlotView`
   When `APP_QUESTIONNAIRES_EXTRACTION_PREFILTER_ENABLED` is on, the live `/messages`
   route embeds the respondent's last message and narrows what **the extractor** sees
   via `narrowExtractionCandidates` (`questionnaire-sessions/_lib/extraction-candidates.ts`,
-  reusing `rankSlotsByVector` / `rankDataSlotsByVector`). It is **behaviour-preserving**:
+  reusing `rankSlotsByVector` / `rankDataSlotsByVector`). **The ranking query is the
+  respondent's CURRENT answer, not the prior interviewer question:** `state.recentMessages`
+  is built from persisted turns, so its last entry is the interviewer's previous question —
+  the route appends `userMessage` so the similarity query is what they just SAID. Without
+  this, an answer that volunteers a cross-topic point (e.g. "our pipeline is very poor" while
+  the active topic is offerings) ranks by the _asked_ topic and the relevant question drops
+  out of top-K, so the extractor never sees it. The two adaptive selectors get the same
+  current-answer-appended transcript (`conversationWithCurrentAnswer` in `turn-invokers.ts`).
+  It is **behaviour-preserving**:
   hard safety rails always retain the active slot, **every data slot that already has a
   fill** (the cross-turn re-scan/enrichment guarantee), same-theme unfilled slots, and a
   kept slot's mapped questions — then add the top-K most similar. It is **fail-soft**
