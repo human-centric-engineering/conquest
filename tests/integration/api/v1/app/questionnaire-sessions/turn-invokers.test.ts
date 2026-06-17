@@ -217,6 +217,48 @@ describe('extractAnswers', () => {
     });
   });
 
+  it('records the extraction trace, plus a separate Answer-fit resolver trace when that pass ran', async () => {
+    (dispatcherMock.dispatch as Mock).mockResolvedValue({
+      success: true,
+      data: {
+        intents: [{ slotKey: 'role', value: 'x' }],
+        droppedCount: 0,
+        costUsd: 0.01,
+        answerFitCall: {
+          model: 'gpt-4o',
+          provider: 'openai',
+          costUsd: 0.004,
+          tokensIn: 300,
+          tokensOut: 12,
+          prompt: [{ role: 'user', content: 'resolve these choice answers' }],
+          response: '{"answers":[{"slotKey":"team","value":"sales"}]}',
+        },
+      },
+    });
+    const recordInspectorCall = vi.fn();
+    const inv = await invokers({ recordInspectorCall });
+    await inv.extractAnswers(state());
+
+    const labels = recordInspectorCall.mock.calls.map((c) => c[0].label);
+    expect(labels).toEqual(['Answer extraction', 'Answer-fit resolver']);
+    const fit = recordInspectorCall.mock.calls[1][0];
+    expect(fit.costUsd).toBe(0.004);
+    expect(fit.tokensIn).toBe(300);
+    expect(fit.response).toContain('"slotKey":"team"');
+  });
+
+  it('records only the extraction trace when the answer-fit pass did not run', async () => {
+    (dispatcherMock.dispatch as Mock).mockResolvedValue({
+      success: true,
+      data: { intents: [], droppedCount: 0, costUsd: 0.01 }, // no answerFitCall
+    });
+    const recordInspectorCall = vi.fn();
+    const inv = await invokers({ recordInspectorCall });
+    await inv.extractAnswers(state());
+
+    expect(recordInspectorCall.mock.calls.map((c) => c[0].label)).toEqual(['Answer extraction']);
+  });
+
   it('short-circuits with a diagnostic when there is no active question AND no data slots', async () => {
     const inv = await invokers({ activeQuestionKey: null });
     const out = await inv.extractAnswers(state());

@@ -306,6 +306,22 @@ export async function buildTurnInvokers(opts: {
             2
           ),
         });
+        // The answer-fit resolver is a SEPARATE LLM call inside the capability — surface it as its
+        // own trace (the capability hands its details back on `data.answerFitCall` when it ran).
+        if (data.answerFitCall) {
+          const fc = data.answerFitCall;
+          recordInspectorCall({
+            label: 'Answer-fit resolver',
+            model: fc.model,
+            provider: fc.provider,
+            latencyMs: 0,
+            costUsd: fc.costUsd,
+            tokensIn: fc.tokensIn,
+            tokensOut: fc.tokensOut,
+            prompt: fc.prompt,
+            response: fc.response,
+          });
+        }
       }
       return {
         intents: data.intents,

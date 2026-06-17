@@ -218,6 +218,24 @@ export interface ExtractAnswerSlotsData {
    * enters the provenance audit row, event metadata, or analytics.
    */
   sensitivity?: SensitivityAssessment;
+  /**
+   * Inspector (admin preview only): the answer-fit resolver's LLM call, present only when that
+   * second pass actually ran this turn. The route's extractor invoker records it as a separate
+   * trace so the recovery pass is no longer a blind spot. Plain shape (no inspector-type import) —
+   * the invoker maps it onto an `AgentCallTrace`.
+   */
+  answerFitCall?: AnswerFitCallTrace;
+}
+
+/** The answer-fit resolver's LLM call, captured for the Turn Inspector. */
+export interface AnswerFitCallTrace {
+  model: string;
+  provider: string;
+  costUsd: number;
+  tokensIn: number;
+  tokensOut: number;
+  prompt: { role: string; content: string }[];
+  response: string;
 }
 
 /**
@@ -419,7 +437,7 @@ export class AppExtractAnswerSlotsCapability extends BaseCapability<
     context: CapabilityContext;
     extractionContext: ExtractionContext;
     fitCandidates: ExtractionSlotView[];
-  }): Promise<{ intents: AnswerSlotIntent[]; costUsd: number }> {
+  }): Promise<{ intents: AnswerSlotIntent[]; costUsd: number; call?: AnswerFitCallTrace }> {
     const { dataSlotCandidates: _omitDataSlots, ...rest } = opts.extractionContext;
     const fitContext: ExtractionContext = {
       ...rest,
@@ -480,7 +498,22 @@ export class AppExtractAnswerSlotsCapability extends BaseCapability<
     });
 
     const { intents } = normalizeAnswerIntents(completion.value.answers, fitContext);
-    return { intents, costUsd: completion.costUsd };
+    return {
+      intents,
+      costUsd: completion.costUsd,
+      call: {
+        model: opts.model,
+        provider: opts.providerSlug,
+        costUsd: completion.costUsd,
+        tokensIn: completion.tokenUsage.input,
+        tokensOut: completion.tokenUsage.output,
+        prompt: messages.map((m) => ({
+          role: m.role,
+          content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+        })),
+        response: JSON.stringify(completion.value, null, 2),
+      },
+    };
   }
 
   async execute(
@@ -619,6 +652,7 @@ export class AppExtractAnswerSlotsCapability extends BaseCapability<
     //     dropped as type-invalid; `always` also targets still-unanswered choice/likert questions.
     let fitIntents: AnswerSlotIntent[] = [];
     let fitCostUsd = 0;
+    let fitCall: AnswerFitCallTrace | undefined;
     const fitMode = args.answerFitMode ?? 'off';
     if (fitMode !== 'off') {
       const answeredKeys = new Set(intents.map((i) => i.slotKey));
@@ -643,6 +677,7 @@ export class AppExtractAnswerSlotsCapability extends BaseCapability<
         // Only adopt a resolved value for a slot the primary pass didn't already answer.
         fitIntents = fit.intents.filter((i) => !answeredKeys.has(i.slotKey));
         fitCostUsd = fit.costUsd;
+        fitCall = fit.call;
         if (fitIntents.length > 0) {
           logger.info('extract_answer_slots: answer-fit resolver recovered answers', {
             agentId: context.agentId,
@@ -684,6 +719,8 @@ export class AppExtractAnswerSlotsCapability extends BaseCapability<
       dataSlotFills,
       droppedCount: dropped.length,
       costUsd: completion.costUsd + fitCostUsd,
+      // Inspector (admin preview): surface the answer-fit pass as its own trace when it ran.
+      ...(fitCall ? { answerFitCall: fitCall } : {}),
       // Stage 1 of the seriousness gate — pass the model's suspicion flag through (when set).
       ...(completion.value.suspectedNonGenuine !== undefined
         ? { suspectedNonGenuine: completion.value.suspectedNonGenuine }

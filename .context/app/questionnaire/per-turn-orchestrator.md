@@ -272,9 +272,11 @@ inside each expanded call. Clipboard failures (insecure context / denied) are a 
 
 Coverage: the answer extractor, contradiction detector, answer refiner (capability dispatches —
 request shown as the dispatched structured args), the seriousness + sensitivity judges (full LLM
-messages + tokens), and the interviewer + completion-offer phrasers. The deterministic selection
-strategies make no LLM call, so they produce no trace; the adaptive selector's LLM call isn't
-captured yet.
+messages + tokens), the interviewer + completion-offer phrasers, the **answer-fit resolver** second
+pass (when it runs — surfaced on the capability's `answerFitCall` and recorded as its own trace by
+the extractor invoker), and **both adaptive selectors' LLM pick** ("Question selector" /
+"Data-slot selector", captured in `runSelectorAgent` / `selectNextDataSlot`). The deterministic
+selection strategies make no LLM call, so they produce no trace.
 
 **Embedding calls** are captured too (`kind: 'embedding'` traces, built by `buildEmbeddingTrace` in
 `lib/app/questionnaire/inspector/embedding-trace.ts`): the extraction candidate pre-filter, adaptive
