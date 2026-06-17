@@ -305,18 +305,17 @@ async function handleMessage(
     const reasoningStreamOn = reasoningStreamFlag && loaded.base.config.reasoningStreamEnabled;
     const reasoningPersist = reasoningStreamOn && loaded.base.config.reasoningStreamPersist;
 
-    // Preview Turn Inspector (admin-only): capture the per-turn agent-call traces ONLY for a preview
-    // session (server-authoritative `isPreview`, set solely by the admin-gated /preview route) with
-    // the version's `previewInspectorEnabled` toggle on. Both gates are required, so a real respondent
-    // never has capture enabled and never receives the `inspector` frame below. Live-only: never
-    // persisted. Capture is a no-op (zero overhead) when the recorder isn't passed.
+    // Turn Inspector traces. We now capture the per-turn agent-call traces for EVERY session and
+    // persist them on the turn row (recordTurn below), so a chat looked up by its `publicRef` can
+    // later be re-evaluated by the turn evaluator against the exact calls it ran. The cost is small
+    // (the traces are built from data already in hand). SSE *emission* of the live `inspector` frame
+    // to the admin drawer stays gated to a preview session with the `previewInspectorEnabled` toggle
+    // (`inspectorOn`) — a real respondent never receives the frame, only the persisted record.
     const inspectorOn = loaded.session.isPreview && loaded.base.config.previewInspectorEnabled;
     const inspectorCalls: AgentCallTrace[] = [];
-    const recordInspectorCall = inspectorOn
-      ? (trace: AgentCallTrace) => {
-          inspectorCalls.push(trace);
-        }
-      : undefined;
+    const recordInspectorCall = (trace: AgentCallTrace) => {
+      inspectorCalls.push(trace);
+    };
 
     // Interviewer tone & persona (F-tone): the platform flag AND at least one configured dimension
     // (or the persona) being on. When neither holds the phraser keeps its default voice, so we omit
@@ -424,7 +423,7 @@ async function handleMessage(
           ? [...loaded.base.recentMessages, userMessage]
           : loaded.base.recentMessages,
         sessionId,
-        ...(recordInspectorCall ? { recordInspectorCall } : {}),
+        recordInspectorCall,
       });
       if (narrowed.applied) {
         const keptQuestionKeys = new Set(narrowed.questionSlots.map((s) => s.key));
@@ -457,7 +456,7 @@ async function handleMessage(
       // Adaptive-selector framing: the version goal, so the LLM picks the question that advances it.
       ...(loaded.meta.goal ? { goal: loaded.meta.goal } : {}),
       // Preview Turn Inspector (admin-only): capture each capability/judge call's trace (undefined off).
-      ...(recordInspectorCall ? { recordInspectorCall } : {}),
+      recordInspectorCall,
       // Sensitivity awareness: ask the extractor to also flag a sensitive disclosure (kickoff off).
       sensitivityAware: body.kickoff ? false : sensitivityAware,
       // Answer-fit resolver: per-questionnaire mode for the focused free-form → choice/likert pass.
@@ -581,7 +580,7 @@ async function handleMessage(
           input: result.response.input,
           userId,
           sessionId,
-          ...(recordInspectorCall ? { recordInspectorCall } : {}),
+          recordInspectorCall,
         });
         agentResponse = offer.message;
         extraCostUsd = offer.costUsd;
@@ -623,7 +622,7 @@ async function handleMessage(
           },
           userId,
           sessionId,
-          ...(recordInspectorCall ? { recordInspectorCall } : {}),
+          recordInspectorCall,
         });
         agentResponse = phrased.message;
         extraCostUsd = phrased.costUsd;
@@ -666,7 +665,7 @@ async function handleMessage(
           },
           userId,
           sessionId,
-          ...(recordInspectorCall ? { recordInspectorCall } : {}),
+          recordInspectorCall,
         });
         agentResponse = phrased.message;
         extraCostUsd = phrased.costUsd;
@@ -689,6 +688,9 @@ async function handleMessage(
           // Persist the reasoning trace only when the version opted into persistence — otherwise it
           // was live-only this turn (streamed above, not saved), so resumed turns show none.
           ...(reasoningPersist && reasoning.length > 0 ? { reasoning } : {}),
+          // Persist the inspector dump for EVERY session (captured unconditionally above), so the
+          // turn can be re-evaluated later by `publicRef`. SSE emission stays preview-gated.
+          ...(inspectorCalls.length > 0 ? { inspectorCalls } : {}),
           costUsd,
           upserts: result.sideEffects.answerUpserts,
           refinements: result.sideEffects.answerRefinements,
@@ -782,8 +784,9 @@ async function handleMessage(
       }
 
       // Preview Turn Inspector (admin-only): emit the captured agent-call sequence for this turn,
-      // AFTER the reply streamed (so the interviewer/offer calls are included). Gated above to a
-      // preview session with the toggle on, so this frame never reaches a real respondent.
+      // AFTER the reply streamed (so the interviewer/offer calls are included). The traces are
+      // captured for every session (and persisted above), but EMISSION of this live frame is gated
+      // to a preview session with the toggle on, so it never reaches a real respondent.
       if (inspectorOn && inspectorCalls.length > 0) {
         yield { type: 'inspector', turnIndex: state.selectionRound, calls: inspectorCalls };
       }

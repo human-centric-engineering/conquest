@@ -19,6 +19,7 @@ import { applyRefinement } from '@/lib/app/questionnaire/refinement';
 import type { ToolCallRecord } from '@/lib/app/questionnaire/orchestrator';
 import type { SessionWarning } from '@/lib/app/questionnaire/chat/types';
 import type { ReasoningStep } from '@/lib/app/questionnaire/reasoning';
+import type { AgentCallTrace } from '@/lib/app/questionnaire/inspector';
 import {
   loadAnswerSlot,
   loadRespondentEditedSlotIds,
@@ -47,6 +48,9 @@ export async function persistTurn(opts: {
   warnings?: SessionWarning[];
   /** Live "watch it think" reasoning trace — persisted (when the version opted in) for replay on resume. */
   reasoning?: ReasoningStep[];
+  /** The saved Turn Inspector dump — every LLM/embedding call this turn made. Persisted for every
+   *  session so it can be re-evaluated later by `publicRef`. Empty/omitted for a turn with none. */
+  inspectorCalls?: AgentCallTrace[];
   costUsd: number;
   upserts: AnswerSlotIntent[];
   refinements: RefinementDecision[];
@@ -149,6 +153,9 @@ export async function persistTurn(opts: {
     targetedQuestionId: opts.targetedQuestionId,
     ...(opts.warnings && opts.warnings.length > 0 ? { warnings: opts.warnings } : {}),
     ...(opts.reasoning && opts.reasoning.length > 0 ? { reasoning: opts.reasoning } : {}),
+    ...(opts.inspectorCalls && opts.inspectorCalls.length > 0
+      ? { inspectorCalls: opts.inspectorCalls }
+      : {}),
     ...(opts.targetedDataSlotId !== undefined
       ? { targetedDataSlotId: opts.targetedDataSlotId }
       : {}),

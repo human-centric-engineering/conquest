@@ -788,6 +788,14 @@ model AppQuestionnaireTurn {
   sideEffectDataSlotIds Json     @default("[]") // AppDataSlotFill.id[] this turn created/updated (data-slot mode)
   warnings              Json     @default("[]") // [{ code, message }] side-band notices shown beneath this turn (seriousness/support/contradiction) — replayed inline on resume
   reasoning             Json     @default("[]") // ReasoningStep[] — live "watch it think" trace, persisted (when config.reasoningStreamPersist) so it replays on resume/scroll-back. Respondent-safe (no abuse/sensitivity). (lib/.../reasoning)
+  // The saved Turn Inspector dump: AgentCallTrace[] (inspector/types.ts) — every LLM/embedding
+  // call this turn made, with its prompt, response, model, latency, tokens, and cost. Captured for
+  // EVERY session (not just preview), so a session looked up by its `publicRef` can be re-evaluated
+  // by the turn evaluator against the exact calls it ran. SSE *emission* to the live drawer stays
+  // preview-gated; this is the persisted record. Empty [] for pre-column turns / a capture failure.
+  // PII by construction (it holds the respondent's words + the prompts) — same cascade/erasure
+  // posture as the rest of the turn row.
+  inspectorCalls        Json     @default("[]")
   costUsd               Float? // summed per-turn LLM spend; null until set
   createdAt             DateTime @default(now())
 

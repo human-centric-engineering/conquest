@@ -75,6 +75,54 @@ describe('recordTurn', () => {
     );
   });
 
+  it('persists the inspector dump when calls are present', async () => {
+    const calls = [
+      {
+        label: 'Answer extraction',
+        model: 'gpt-4o-mini',
+        provider: 'openai',
+        latencyMs: 400,
+        costUsd: 0.001,
+        prompt: [{ role: 'input', content: '{"userMessage":"hi"}' }],
+        response: '{"intents":[]}',
+      },
+    ];
+
+    await recordTurn({
+      sessionId: 'sess-1',
+      userMessage: 'hi',
+      agentResponse: 'hello',
+      targetedQuestionId: null,
+      toolCalls: [],
+      sideEffectAnswerIds: [],
+      inspectorCalls: calls,
+      costUsd: null,
+    });
+
+    const [{ data }] = txMock.appQuestionnaireTurn.create.mock.calls[0] as [
+      { data: { inspectorCalls?: unknown } },
+    ];
+    expect(data.inspectorCalls).toEqual(calls);
+  });
+
+  it('omits inspectorCalls (defaulting to []) when none are present', async () => {
+    await recordTurn({
+      sessionId: 'sess-1',
+      userMessage: 'hi',
+      agentResponse: 'hello',
+      targetedQuestionId: null,
+      toolCalls: [],
+      sideEffectAnswerIds: [],
+      inspectorCalls: [],
+      costUsd: null,
+    });
+
+    const [{ data }] = txMock.appQuestionnaireTurn.create.mock.calls[0] as [
+      { data: Record<string, unknown> },
+    ];
+    expect(data).not.toHaveProperty('inspectorCalls');
+  });
+
   it('throws NotFoundError when the session does not exist', async () => {
     txMock.appQuestionnaireSession.findUnique.mockResolvedValue(null);
 
