@@ -12,15 +12,21 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const prismaMock = vi.hoisted(() => ({
   appQuestionnaireTurn: { findFirst: vi.fn() },
   appQuestionnaireTurnEvaluation: { create: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
+  aiDataset: { findUnique: vi.fn() },
+  aiDatasetCase: { findFirst: vi.fn() },
 }));
 vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
 
 vi.mock('@/lib/app-version', () => ({ APP_VERSION: '9.9.9' }));
 vi.mock('@/lib/app/questionnaire/turn-evaluation', () => ({ TURN_RUBRIC_VERSION: '1.0.0' }));
 
+const appendMock = vi.hoisted(() => ({ appendCasesToDataset: vi.fn() }));
+vi.mock('@/lib/orchestration/evaluations/datasets/append-cases', () => appendMock);
+
 import {
   persistTurnEvaluation,
   updateTurnEvaluationReview,
+  actionTurnEvaluationForLearning,
 } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-evaluation-store';
 
 type Mock = ReturnType<typeof vi.fn>;
@@ -192,5 +198,166 @@ describe('updateTurnEvaluationReview', () => {
     expect(data.flagReviewerId).toBe('admin-2');
     expect(data.flagUpdatedAt).toBeInstanceOf(Date);
     expect(data).not.toHaveProperty('comment');
+  });
+});
+
+describe('actionTurnEvaluationForLearning', () => {
+  function evalRow(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'eval-1',
+      flagStatus: 'reviewed',
+      evaluatedInput: {
+        turn: { turnIndex: 1, calls: [] },
+        context: { respondentMessage: 'I rent a flat', interviewerMessage: 'Whereabouts?' },
+      },
+      turnOrdinal: 2,
+      overallScore: 82,
+      effectiveness: 'Good',
+      rubricVersion: '1.0.0',
+      questionnaireVersionId: 'ver-1',
+      evaluatorModel: 'claude-x',
+      comment: 'great probe',
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    (prismaMock.appQuestionnaireTurnEvaluation.findFirst as Mock).mockResolvedValue(evalRow());
+    (prismaMock.aiDataset.findUnique as Mock).mockResolvedValue({ id: 'ds-1' });
+    appendMock.appendCasesToDataset.mockResolvedValue({
+      datasetId: 'ds-1',
+      appendedCount: 1,
+      newCaseCount: 5,
+      newContentHash: 'hash',
+    });
+    (prismaMock.aiDatasetCase.findFirst as Mock).mockResolvedValue({ id: 'case-9' });
+    (prismaMock.appQuestionnaireTurnEvaluation.update as Mock).mockResolvedValue({
+      id: 'eval-1',
+      flagStatus: 'actioned',
+      flagReviewerId: 'admin-1',
+      flagUpdatedAt: new Date('2026-06-17T00:00:00Z'),
+      datasetId: 'ds-1',
+      datasetCaseId: 'case-9',
+      updatedAt: new Date('2026-06-17T00:00:00Z'),
+    });
+  });
+
+  it('appends a learning case, resolves its id, and stamps actioned + dataset ids', async () => {
+    const res = await actionTurnEvaluationForLearning({
+      id: 'eval-1',
+      sessionId: 'sess-1',
+      datasetId: 'ds-1',
+      reviewerId: 'admin-1',
+    });
+    expect(res.ok).toBe(true);
+
+    // The case framing: respondent → input, interviewer → expectedOutput, rich provenance metadata.
+    const [appendArg] = appendMock.appendCasesToDataset.mock.calls[0];
+    expect(appendArg.datasetId).toBe('ds-1');
+    const learningCase = appendArg.cases[0];
+    expect(learningCase.input).toBe('I rent a flat');
+    expect(learningCase.expectedOutput).toBe('Whereabouts?');
+    expect(learningCase.metadata).toMatchObject({
+      source: 'flagged_turn',
+      evaluationId: 'eval-1',
+      sessionId: 'sess-1',
+      overallScore: 82,
+      effectiveness: 'Good',
+      rubricVersion: '1.0.0',
+      questionnaireVersionId: 'ver-1',
+      flaggedByUserId: 'admin-1',
+      reviewerComment: 'great probe',
+    });
+
+    // Case id resolved from the last position (newCaseCount - 1).
+    expect(prismaMock.aiDatasetCase.findFirst).toHaveBeenCalledWith({
+      where: { datasetId: 'ds-1', position: 4 },
+      select: { id: true },
+    });
+    const [{ data }] = (prismaMock.appQuestionnaireTurnEvaluation.update as Mock).mock.calls[0];
+    expect(data).toMatchObject({
+      flagStatus: 'actioned',
+      flagReviewerId: 'admin-1',
+      datasetId: 'ds-1',
+      datasetCaseId: 'case-9',
+    });
+  });
+
+  it('returns not_found when the row does not belong to the session', async () => {
+    (prismaMock.appQuestionnaireTurnEvaluation.findFirst as Mock).mockResolvedValue(null);
+    const res = await actionTurnEvaluationForLearning({
+      id: 'eval-1',
+      sessionId: 'sess-1',
+      datasetId: 'ds-1',
+      reviewerId: 'admin-1',
+    });
+    expect(res).toEqual({ ok: false, reason: 'not_found' });
+    expect(appendMock.appendCasesToDataset).not.toHaveBeenCalled();
+  });
+
+  it('returns already_actioned without appending', async () => {
+    (prismaMock.appQuestionnaireTurnEvaluation.findFirst as Mock).mockResolvedValue(
+      evalRow({ flagStatus: 'actioned' })
+    );
+    const res = await actionTurnEvaluationForLearning({
+      id: 'eval-1',
+      sessionId: 'sess-1',
+      datasetId: 'ds-1',
+      reviewerId: 'admin-1',
+    });
+    expect(res).toEqual({ ok: false, reason: 'already_actioned' });
+    expect(appendMock.appendCasesToDataset).not.toHaveBeenCalled();
+  });
+
+  it('returns dataset_not_found when the target dataset is missing', async () => {
+    (prismaMock.aiDataset.findUnique as Mock).mockResolvedValue(null);
+    const res = await actionTurnEvaluationForLearning({
+      id: 'eval-1',
+      sessionId: 'sess-1',
+      datasetId: 'ds-x',
+      reviewerId: 'admin-1',
+    });
+    expect(res).toEqual({ ok: false, reason: 'dataset_not_found' });
+    expect(appendMock.appendCasesToDataset).not.toHaveBeenCalled();
+  });
+
+  it('returns no_content when the snapshot has no respondent message', async () => {
+    (prismaMock.appQuestionnaireTurnEvaluation.findFirst as Mock).mockResolvedValue(
+      evalRow({ evaluatedInput: { turn: { turnIndex: 1, calls: [] }, context: {} } })
+    );
+    const res = await actionTurnEvaluationForLearning({
+      id: 'eval-1',
+      sessionId: 'sess-1',
+      datasetId: 'ds-1',
+      reviewerId: 'admin-1',
+    });
+    expect(res).toEqual({ ok: false, reason: 'no_content' });
+    expect(appendMock.appendCasesToDataset).not.toHaveBeenCalled();
+  });
+
+  it('maps an append cap failure to dataset_full and leaves the row unactioned', async () => {
+    appendMock.appendCasesToDataset.mockRejectedValue(new Error('cap exceeded'));
+    const res = await actionTurnEvaluationForLearning({
+      id: 'eval-1',
+      sessionId: 'sess-1',
+      datasetId: 'ds-1',
+      reviewerId: 'admin-1',
+    });
+    expect(res).toEqual({ ok: false, reason: 'dataset_full' });
+    expect(prismaMock.appQuestionnaireTurnEvaluation.update).not.toHaveBeenCalled();
+  });
+
+  it('omits reviewerComment from metadata when there is no comment', async () => {
+    (prismaMock.appQuestionnaireTurnEvaluation.findFirst as Mock).mockResolvedValue(
+      evalRow({ comment: null })
+    );
+    await actionTurnEvaluationForLearning({
+      id: 'eval-1',
+      sessionId: 'sess-1',
+      datasetId: 'ds-1',
+      reviewerId: 'admin-1',
+    });
+    const [appendArg] = appendMock.appendCasesToDataset.mock.calls[0];
+    expect(appendArg.cases[0].metadata).not.toHaveProperty('reviewerComment');
   });
 });

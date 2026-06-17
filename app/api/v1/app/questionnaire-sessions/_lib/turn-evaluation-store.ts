@@ -17,8 +17,17 @@ import { Prisma } from '@prisma/client';
 
 import { prisma } from '@/lib/db/client';
 import { APP_VERSION } from '@/lib/app-version';
+import { isRecord } from '@/lib/utils';
+import {
+  appendCasesToDataset,
+  type AppendCaseInput,
+} from '@/lib/orchestration/evaluations/datasets/append-cases';
 import { TURN_RUBRIC_VERSION, type TurnEvaluation } from '@/lib/app/questionnaire/turn-evaluation';
 import type { TurnEvaluationInput } from '@/lib/app/questionnaire/turn-evaluation';
+
+/** The provenance label stamped into a learning case's metadata (the dataset `source` enum is
+ * platform-owned, so flagged-turn provenance rides in case metadata, not on `AiDataset.source`). */
+export const FLAGGED_TURN_CASE_SOURCE = 'flagged_turn';
 
 /**
  * The learning workflow a persisted verdict moves through. `none` is the resting state of a
@@ -203,4 +212,166 @@ export async function updateTurnEvaluationReview(
     },
   });
   return { ok: true, row };
+}
+
+// ─── Learning action: append a flagged evaluation to an eval dataset ──────────────────────────
+
+/** Read an optional string field off the snapshotted context, trimmed; '' when absent/blank. */
+function contextString(context: unknown, key: string): string {
+  if (!isRecord(context)) return '';
+  const v = context[key];
+  return typeof v === 'string' ? v.trim() : '';
+}
+
+/**
+ * Build the learning dataset case from a flagged evaluation's snapshot. The interviewer is the
+ * subject under study, so the case is framed as: `input` = the respondent's message that opened
+ * the turn (plus the immediately preceding interviewer line for context, when present), and
+ * `expectedOutput` = the interviewer reply that was judged (the exemplar — the verdict + comment
+ * in metadata say whether it's a positive or a negative one). Reviewers refine the case in the
+ * dataset UI afterwards. Returns null when the snapshot carries no usable respondent message.
+ */
+function buildLearningCase(
+  evaluatedInput: unknown,
+  metadata: Record<string, unknown>
+): AppendCaseInput | null {
+  const context = isRecord(evaluatedInput) ? evaluatedInput.context : undefined;
+  const respondent = contextString(context, 'respondentMessage');
+  const interviewer = contextString(context, 'interviewerMessage');
+  if (!respondent) return null;
+
+  return {
+    input: respondent,
+    ...(interviewer ? { expectedOutput: interviewer } : {}),
+    metadata,
+  };
+}
+
+/** Inputs for {@link actionTurnEvaluationForLearning}. */
+export interface ActionLearningParams {
+  id: string;
+  sessionId: string;
+  datasetId: string;
+  reviewerId: string;
+}
+
+/** The lean actioned row returned to the route. */
+export interface ActionedTurnEvaluationRow {
+  id: string;
+  flagStatus: string;
+  flagReviewerId: string | null;
+  flagUpdatedAt: Date | null;
+  datasetId: string | null;
+  datasetCaseId: string | null;
+  updatedAt: Date;
+}
+
+/** Discriminated outcome so the route maps cleanly to 404 / 409 / 422 / 200. */
+export type ActionLearningResult =
+  | { ok: true; row: ActionedTurnEvaluationRow; appendedCaseCount: number }
+  | {
+      ok: false;
+      reason:
+        | 'not_found'
+        | 'already_actioned'
+        | 'dataset_not_found'
+        | 'dataset_full'
+        | 'no_content';
+    };
+
+/**
+ * Move a flagged evaluation to `actioned` by appending it to an eval dataset as a learning case.
+ *
+ * Verifies the row belongs to `sessionId` (`not_found`), that it isn't already actioned
+ * (`already_actioned` — terminal, backed by an existing case), and that the target dataset
+ * exists (`dataset_not_found`). Builds the case from the snapshot (`no_content` when there's no
+ * respondent message to learn from), appends via the platform {@link appendCasesToDataset} seam
+ * (provenance rides in case metadata — the dataset `source` enum is platform-owned), best-effort
+ * resolves the new case id, then stamps `actioned` + `datasetId`/`datasetCaseId` + reviewer.
+ * A dataset at its case cap surfaces as `dataset_full`.
+ *
+ * The caller (an admin route) is the authentication boundary; per the append seam's contract,
+ * dataset existence is checked here but per-user ownership is the admin surface's concern.
+ */
+export async function actionTurnEvaluationForLearning(
+  params: ActionLearningParams
+): Promise<ActionLearningResult> {
+  const evaluation = await prisma.appQuestionnaireTurnEvaluation.findFirst({
+    where: { id: params.id, sessionId: params.sessionId },
+    select: {
+      id: true,
+      flagStatus: true,
+      evaluatedInput: true,
+      turnOrdinal: true,
+      overallScore: true,
+      effectiveness: true,
+      rubricVersion: true,
+      questionnaireVersionId: true,
+      evaluatorModel: true,
+      comment: true,
+    },
+  });
+  if (!evaluation) return { ok: false, reason: 'not_found' };
+  if (evaluation.flagStatus === 'actioned') return { ok: false, reason: 'already_actioned' };
+
+  const dataset = await prisma.aiDataset.findUnique({
+    where: { id: params.datasetId },
+    select: { id: true },
+  });
+  if (!dataset) return { ok: false, reason: 'dataset_not_found' };
+
+  const learningCase = buildLearningCase(evaluation.evaluatedInput, {
+    source: FLAGGED_TURN_CASE_SOURCE,
+    evaluationId: evaluation.id,
+    sessionId: params.sessionId,
+    turnOrdinal: evaluation.turnOrdinal,
+    overallScore: evaluation.overallScore,
+    effectiveness: evaluation.effectiveness,
+    rubricVersion: evaluation.rubricVersion,
+    questionnaireVersionId: evaluation.questionnaireVersionId,
+    evaluatorModel: evaluation.evaluatorModel,
+    flaggedByUserId: params.reviewerId,
+    ...(evaluation.comment ? { reviewerComment: evaluation.comment } : {}),
+  });
+  if (!learningCase) return { ok: false, reason: 'no_content' };
+
+  let appendedCaseCount: number;
+  try {
+    const appended = await appendCasesToDataset({
+      datasetId: params.datasetId,
+      cases: [learningCase],
+    });
+    appendedCaseCount = appended.newCaseCount;
+  } catch {
+    // appendCasesToDataset throws ValidationError on the per-dataset case cap (the only
+    // expected failure now that existence is pre-checked). Surface it as a clean reason.
+    return { ok: false, reason: 'dataset_full' };
+  }
+
+  // Best-effort resolve the appended case id: it sits at the last position (we append exactly one).
+  const newCase = await prisma.aiDatasetCase.findFirst({
+    where: { datasetId: params.datasetId, position: appendedCaseCount - 1 },
+    select: { id: true },
+  });
+
+  const row = await prisma.appQuestionnaireTurnEvaluation.update({
+    where: { id: params.id },
+    data: {
+      flagStatus: 'actioned',
+      flagReviewerId: params.reviewerId,
+      flagUpdatedAt: new Date(),
+      datasetId: params.datasetId,
+      datasetCaseId: newCase?.id ?? null,
+    },
+    select: {
+      id: true,
+      flagStatus: true,
+      flagReviewerId: true,
+      flagUpdatedAt: true,
+      datasetId: true,
+      datasetCaseId: true,
+      updatedAt: true,
+    },
+  });
+  return { ok: true, row, appendedCaseCount };
 }
