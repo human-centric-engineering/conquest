@@ -34,6 +34,15 @@ export const TURN_EVAL_FLAG_STATUSES = [
 ] as const;
 export type TurnEvalFlagStatus = (typeof TURN_EVAL_FLAG_STATUSES)[number];
 
+/**
+ * The flag states an admin may set through the review PATCH. `actioned` is deliberately
+ * excluded: it is owned by the dedicated learning-action endpoint, which must atomically append
+ * a dataset case before the row may claim that state — so a stray PATCH can never produce an
+ * `actioned` row with no backing case.
+ */
+export const TURN_EVAL_REVIEW_STATUSES = ['none', 'flagged', 'reviewed', 'dismissed'] as const;
+export type TurnEvalReviewStatus = (typeof TURN_EVAL_REVIEW_STATUSES)[number];
+
 /** Everything the evaluate-turn route hands the store to persist one verdict. */
 export interface PersistTurnEvaluationParams {
   sessionId: string;
@@ -112,4 +121,86 @@ export async function persistTurnEvaluation(
       createdAt: true,
     },
   });
+}
+
+/** A human-review patch: a comment, a flag transition, or both (the route enforces ≥1). */
+export interface UpdateTurnEvaluationReviewParams {
+  /** The evaluation row id. */
+  id: string;
+  /** The session the URL scopes to — the row must belong to it (defence against id-guessing). */
+  sessionId: string;
+  /** The admin making the change (stamped on whichever fields are touched). */
+  reviewerId: string;
+  /** New comment text; empty string clears the comment. Absent = leave comment untouched. */
+  comment?: string;
+  /** New flag state (review subset only). Absent = leave the flag untouched. */
+  flagStatus?: TurnEvalReviewStatus;
+}
+
+/** The lean updated row the review PATCH returns. */
+export interface TurnEvaluationReviewRow {
+  id: string;
+  comment: string | null;
+  commentByUserId: string | null;
+  commentAt: Date | null;
+  flagStatus: string;
+  flagReviewerId: string | null;
+  flagUpdatedAt: Date | null;
+  updatedAt: Date;
+}
+
+/** Discriminated outcome so the route can map cleanly to 404 / 409 / 200. */
+export type UpdateTurnEvaluationReviewResult =
+  | { ok: true; row: TurnEvaluationReviewRow }
+  | { ok: false; reason: 'not_found' | 'locked' };
+
+/**
+ * Apply a human-review patch to one evaluation. Verifies the row belongs to `sessionId` (a
+ * mismatched or missing id is `not_found`), refuses to mutate the flag of an already-`actioned`
+ * row (`locked` — it is backed by a dataset case the action endpoint owns), then stamps the
+ * toucher/timestamp on whichever facet changed. The DB write uses a `WHERE id AND sessionId`
+ * guard so the scoping can't be raced.
+ */
+export async function updateTurnEvaluationReview(
+  params: UpdateTurnEvaluationReviewParams
+): Promise<UpdateTurnEvaluationReviewResult> {
+  const existing = await prisma.appQuestionnaireTurnEvaluation.findFirst({
+    where: { id: params.id, sessionId: params.sessionId },
+    select: { id: true, flagStatus: true },
+  });
+  if (!existing) return { ok: false, reason: 'not_found' };
+
+  // An actioned row is terminal for the flag: un-actioning here would orphan its dataset case.
+  if (params.flagStatus !== undefined && existing.flagStatus === 'actioned') {
+    return { ok: false, reason: 'locked' };
+  }
+
+  const now = new Date();
+  const data: Prisma.AppQuestionnaireTurnEvaluationUpdateInput = {};
+  if (params.comment !== undefined) {
+    data.comment = params.comment.length > 0 ? params.comment : null;
+    data.commentByUserId = params.reviewerId;
+    data.commentAt = now;
+  }
+  if (params.flagStatus !== undefined) {
+    data.flagStatus = params.flagStatus;
+    data.flagReviewerId = params.reviewerId;
+    data.flagUpdatedAt = now;
+  }
+
+  const row = await prisma.appQuestionnaireTurnEvaluation.update({
+    where: { id: params.id },
+    data,
+    select: {
+      id: true,
+      comment: true,
+      commentByUserId: true,
+      commentAt: true,
+      flagStatus: true,
+      flagReviewerId: true,
+      flagUpdatedAt: true,
+      updatedAt: true,
+    },
+  });
+  return { ok: true, row };
 }

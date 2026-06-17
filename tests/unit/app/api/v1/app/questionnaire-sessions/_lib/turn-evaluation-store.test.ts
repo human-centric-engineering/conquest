@@ -11,14 +11,17 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const prismaMock = vi.hoisted(() => ({
   appQuestionnaireTurn: { findFirst: vi.fn() },
-  appQuestionnaireTurnEvaluation: { create: vi.fn() },
+  appQuestionnaireTurnEvaluation: { create: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
 }));
 vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
 
 vi.mock('@/lib/app-version', () => ({ APP_VERSION: '9.9.9' }));
 vi.mock('@/lib/app/questionnaire/turn-evaluation', () => ({ TURN_RUBRIC_VERSION: '1.0.0' }));
 
-import { persistTurnEvaluation } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-evaluation-store';
+import {
+  persistTurnEvaluation,
+  updateTurnEvaluationReview,
+} from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-evaluation-store';
 
 type Mock = ReturnType<typeof vi.fn>;
 
@@ -97,5 +100,97 @@ describe('persistTurnEvaluation', () => {
     expect(data).not.toHaveProperty('evaluatorAgentId');
     expect(data).not.toHaveProperty('costUsd');
     expect(data).not.toHaveProperty('evaluatedByUserId');
+  });
+});
+
+describe('updateTurnEvaluationReview', () => {
+  beforeEach(() => {
+    (prismaMock.appQuestionnaireTurnEvaluation.findFirst as Mock).mockResolvedValue({
+      id: 'eval-1',
+      flagStatus: 'none',
+    });
+    (prismaMock.appQuestionnaireTurnEvaluation.update as Mock).mockResolvedValue({
+      id: 'eval-1',
+      comment: 'note',
+      commentByUserId: 'admin-1',
+      commentAt: new Date('2026-06-17T00:00:00Z'),
+      flagStatus: 'flagged',
+      flagReviewerId: 'admin-1',
+      flagUpdatedAt: new Date('2026-06-17T00:00:00Z'),
+      updatedAt: new Date('2026-06-17T00:00:00Z'),
+    });
+  });
+
+  it('returns not_found when the row does not belong to the session', async () => {
+    (prismaMock.appQuestionnaireTurnEvaluation.findFirst as Mock).mockResolvedValue(null);
+    const res = await updateTurnEvaluationReview({
+      id: 'eval-1',
+      sessionId: 'sess-1',
+      reviewerId: 'admin-1',
+      flagStatus: 'flagged',
+    });
+    expect(res).toEqual({ ok: false, reason: 'not_found' });
+    expect(prismaMock.appQuestionnaireTurnEvaluation.update).not.toHaveBeenCalled();
+  });
+
+  it('refuses to re-flag an actioned row (locked)', async () => {
+    (prismaMock.appQuestionnaireTurnEvaluation.findFirst as Mock).mockResolvedValue({
+      id: 'eval-1',
+      flagStatus: 'actioned',
+    });
+    const res = await updateTurnEvaluationReview({
+      id: 'eval-1',
+      sessionId: 'sess-1',
+      reviewerId: 'admin-1',
+      flagStatus: 'flagged',
+    });
+    expect(res).toEqual({ ok: false, reason: 'locked' });
+  });
+
+  it('allows a comment-only patch on an actioned row (only the flag is locked)', async () => {
+    (prismaMock.appQuestionnaireTurnEvaluation.findFirst as Mock).mockResolvedValue({
+      id: 'eval-1',
+      flagStatus: 'actioned',
+    });
+    const res = await updateTurnEvaluationReview({
+      id: 'eval-1',
+      sessionId: 'sess-1',
+      reviewerId: 'admin-1',
+      comment: 'still useful context',
+    });
+    expect(res.ok).toBe(true);
+    const [{ data }] = (prismaMock.appQuestionnaireTurnEvaluation.update as Mock).mock.calls[0];
+    expect(data).not.toHaveProperty('flagStatus');
+    expect(data.comment).toBe('still useful context');
+  });
+
+  it('stamps reviewer + timestamp on the comment, and clears on empty string', async () => {
+    await updateTurnEvaluationReview({
+      id: 'eval-1',
+      sessionId: 'sess-1',
+      reviewerId: 'admin-1',
+      comment: '',
+    });
+    const [{ data }] = (prismaMock.appQuestionnaireTurnEvaluation.update as Mock).mock.calls[0];
+    expect(data.comment).toBeNull(); // empty string clears
+    expect(data.commentByUserId).toBe('admin-1');
+    expect(data.commentAt).toBeInstanceOf(Date);
+    expect(data).not.toHaveProperty('flagStatus'); // untouched facet not written
+  });
+
+  it('stamps reviewer + timestamp on a flag transition', async () => {
+    await updateTurnEvaluationReview({
+      id: 'eval-1',
+      sessionId: 'sess-1',
+      reviewerId: 'admin-2',
+      flagStatus: 'reviewed',
+    });
+    const [{ where, data }] = (prismaMock.appQuestionnaireTurnEvaluation.update as Mock).mock
+      .calls[0];
+    expect(where).toEqual({ id: 'eval-1' });
+    expect(data.flagStatus).toBe('reviewed');
+    expect(data.flagReviewerId).toBe('admin-2');
+    expect(data.flagUpdatedAt).toBeInstanceOf(Date);
+    expect(data).not.toHaveProperty('comment');
   });
 });
