@@ -37,6 +37,9 @@ const rateLimitMock = vi.hoisted(() => ({
 }));
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/rate-limit', () => rateLimitMock);
 
+const storeMock = vi.hoisted(() => ({ persistTurnEvaluation: vi.fn() }));
+vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/turn-evaluation-store', () => storeMock);
+
 // ─── Imports (after mocks) ──────────────────────────────────────────────────────
 
 import { POST } from '@/app/api/v1/app/questionnaire-sessions/[id]/evaluate-turn/route';
@@ -87,6 +90,7 @@ function previewSession() {
   return {
     isPreview: true,
     version: {
+      id: 'ver-1',
       goal: 'Understand housing security',
       audience: { role: 'Renter' },
       config: { selectionStrategy: 'adaptive', tone: { persona: 'warm' } },
@@ -102,6 +106,7 @@ const VERDICT_RESULT = {
   verdict: { overallScore: 82, effectiveness: 'Good' },
   costUsd: 0.004,
   model: 'claude-x',
+  provider: 'anthropic',
 };
 
 beforeEach(() => {
@@ -112,6 +117,14 @@ beforeEach(() => {
   prismaMock.appQuestionnaireSession.findUnique.mockResolvedValue(previewSession());
   prismaMock.aiAgent.findFirst.mockResolvedValue(evaluatorAgent());
   evalMock.evaluateTurn.mockResolvedValue(VERDICT_RESULT);
+  storeMock.persistTurnEvaluation.mockResolvedValue({
+    id: 'eval-1',
+    turnId: 'turn-1',
+    turnOrdinal: 1,
+    rubricVersion: '1.0.0',
+    appVersion: '0.0.0',
+    createdAt: new Date('2026-06-17T00:00:00Z'),
+  });
   rateLimitMock.turnEvaluationLimiter.check.mockReturnValue({
     success: true,
     limit: 20,
@@ -193,13 +206,14 @@ describe('POST evaluate-turn', () => {
     expect(body.error.code).toBe('evaluation_failed');
   });
 
-  it('returns the verdict on the happy path, threading server-loaded context', async () => {
+  it('returns the verdict + evaluationId on the happy path, threading server-loaded context', async () => {
     const res = await POST(req({ turn: TURN }), ctx('sess-1'));
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.success).toBe(true);
     expect(json.data.verdict.overallScore).toBe(82);
     expect(json.data.model).toBe('claude-x');
+    expect(json.data.evaluationId).toBe('eval-1');
 
     // The route loaded the questionnaire objectives server-side and passed them through.
     const [input, agent, opts] = evalMock.evaluateTurn.mock.calls[0];
@@ -211,6 +225,35 @@ describe('POST evaluate-turn', () => {
     });
     expect(agent).toMatchObject({ provider: '', model: '' });
     expect(opts).toMatchObject({ agentId: 'agent-eval', sessionId: 'sess-1' });
+  });
+
+  it('persists the verdict with the snapshot, version id, evaluator binding, and admin id', async () => {
+    await POST(req({ turn: TURN }), ctx('sess-1'));
+
+    expect(storeMock.persistTurnEvaluation).toHaveBeenCalledTimes(1);
+    const [params] = storeMock.persistTurnEvaluation.mock.calls[0];
+    expect(params).toMatchObject({
+      sessionId: 'sess-1',
+      questionnaireVersionId: 'ver-1',
+      verdict: { overallScore: 82, effectiveness: 'Good' },
+      evaluatorModel: 'claude-x',
+      evaluatorProvider: 'anthropic',
+      evaluatorAgentId: 'agent-eval',
+      costUsd: 0.004,
+      evaluatedByUserId: mockAdminUser().user.id,
+    });
+    // The exact input that was judged is snapshotted (inspector data is otherwise live-only).
+    expect(params.evaluatedInput.turn.turnIndex).toBe(0);
+  });
+
+  it('still returns the verdict with a null evaluationId when persistence fails', async () => {
+    storeMock.persistTurnEvaluation.mockRejectedValue(new Error('db down'));
+    const res = await POST(req({ turn: TURN }), ctx('sess-1'));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.success).toBe(true);
+    expect(json.data.verdict.overallScore).toBe(82);
+    expect(json.data.evaluationId).toBeNull();
   });
 
   it('threads the client-supplied conversation messages into the context', async () => {
@@ -234,7 +277,7 @@ describe('POST evaluate-turn', () => {
   it('omits absent objectives when the version has no goal/audience/config', async () => {
     prismaMock.appQuestionnaireSession.findUnique.mockResolvedValue({
       isPreview: true,
-      version: { goal: null, audience: null, config: null },
+      version: { id: 'ver-1', goal: null, audience: null, config: null },
     });
 
     const res = await POST(req({ turn: TURN }), ctx('sess-1'));

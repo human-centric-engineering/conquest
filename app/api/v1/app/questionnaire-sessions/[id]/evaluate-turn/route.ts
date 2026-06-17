@@ -9,13 +9,15 @@
  *
  *   Admin-only, preview-session-only. Runs one structured reasoning-model call that judges the
  *   turn (instruction compliance, interviewing/extraction/selection quality, information gain,
- *   missed opportunities, prompt drift, cost/efficiency) and returns the verdict. A read-only
- *   *evaluation*: it persists nothing — inspector data is itself live-only, so the verdict is
- *   ephemeral (rendered in the drawer, copied/downloaded by the admin).
+ *   missed opportunities, prompt drift, cost/efficiency), persists the verdict alongside a
+ *   snapshot of the input it judged (`AppQuestionnaireTurnEvaluation` — so it can later be
+ *   surfaced, searched, commented on, and flagged for learning), and returns it with the new
+ *   `evaluationId`. Persistence is best-effort: a write failure logs and returns a null id
+ *   rather than losing the verdict the admin is waiting on.
  *
- *   The dump is supplied by the client because inspector data is never persisted; it is validated
- *   here (external data → Zod, never `as`). The questionnaire objectives (goal, audience, strategy,
- *   tone) are loaded SERVER-SIDE from the session's version so they can't be spoofed.
+ *   The dump is supplied by the client because inspector data is never persisted elsewhere; it is
+ *   validated here (external data → Zod, never `as`). The questionnaire objectives (goal, audience,
+ *   strategy, tone) are loaded SERVER-SIDE from the session's version so they can't be spoofed.
  *
  *   Gated by the master flag AND the turn-evaluation sub-flag (the whole route is paid LLM work):
  *   404 when either is off. It additionally requires the session to be a *preview* — the same gate
@@ -43,6 +45,7 @@ import {
   type TurnEvaluationInput,
 } from '@/lib/app/questionnaire/turn-evaluation';
 import { turnEvaluationLimiter } from '@/app/api/v1/app/questionnaire-sessions/_lib/rate-limit';
+import { persistTurnEvaluation } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-evaluation-store';
 
 /** One captured prompt message — mirrors `InspectorMessage`. */
 const inspectorMessageSchema = z.object({
@@ -121,6 +124,7 @@ const handleEvaluateTurn = withAdminAuth<{ id: string }>(async (request, session
       isPreview: true,
       version: {
         select: {
+          id: true,
           goal: true,
           audience: true,
           config: { select: { selectionStrategy: true, tone: true } },
@@ -164,7 +168,7 @@ const handleEvaluateTurn = withAdminAuth<{ id: string }>(async (request, session
   const input: TurnEvaluationInput = { turn: body.turn, context };
 
   try {
-    const { verdict, costUsd, model } = await evaluateTurn(
+    const { verdict, costUsd, model, provider } = await evaluateTurn(
       input,
       {
         provider: agent.provider,
@@ -174,6 +178,31 @@ const handleEvaluateTurn = withAdminAuth<{ id: string }>(async (request, session
       { agentId: agent.id, sessionId: id }
     );
 
+    // Persist the verdict + a snapshot of the input it judged. Failure here must not lose the
+    // verdict the admin is waiting on — log it and return a null id so the drawer still renders
+    // (the comment/flag affordances simply stay disabled until a successful persist).
+    let evaluationId: string | null = null;
+    try {
+      const persisted = await persistTurnEvaluation({
+        sessionId: id,
+        questionnaireVersionId: sessionRow.version.id,
+        verdict,
+        evaluatedInput: input,
+        evaluatorModel: model,
+        evaluatorProvider: provider,
+        evaluatorAgentId: agent.id,
+        costUsd,
+        evaluatedByUserId: adminId,
+      });
+      evaluationId = persisted.id;
+    } catch (persistErr) {
+      log.error('Turn evaluation persist failed', {
+        sessionId: id,
+        turnIndex: body.turn.turnIndex,
+        error: persistErr instanceof Error ? persistErr.message : String(persistErr),
+      });
+    }
+
     log.info('Turn evaluation complete', {
       sessionId: id,
       turnIndex: body.turn.turnIndex,
@@ -181,9 +210,10 @@ const handleEvaluateTurn = withAdminAuth<{ id: string }>(async (request, session
       overallScore: verdict.overallScore,
       model,
       costUsd,
+      evaluationId,
     });
 
-    return successResponse({ verdict, costUsd, model });
+    return successResponse({ verdict, costUsd, model, evaluationId });
   } catch (err) {
     log.error('Turn evaluation failed', {
       sessionId: id,
