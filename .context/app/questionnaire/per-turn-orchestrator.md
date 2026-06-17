@@ -27,11 +27,18 @@ Pipeline (a step is **skipped, not failed**, when its flag/config is off):
 1. **Extract** (F4.2) — only with a non-empty message → `AnswerSlotIntent[]`.
 2. **Merge** — `applyIntents` folds the extracted answer into an _effective_ state so
    completion + selection see it this turn.
-3. **Detect contradictions** (F4.3) — only when `config.contradictionMode !== 'off'`.
-4. **Refine** (F4.4) — contradiction-driven (the PR2 trigger).
-5. **Assess completion** (F4.5, pure `assessCompletion`) — free, always runs.
-6. **Respond** — an `offer` (assessment offered + completion flag on), else the next
-   question (F4.1 selection), else a terminal `complete`/`none`.
+3. **Contradiction phase** (F4.3 detect + F4.4 refine + the probe-confirm flow), shared with
+   data-slot mode in `orchestrator/contradiction-phase.ts`. Resolves a `PendingContradiction` parked
+   on a prior turn (run the refiner, clear it), OR detects afresh (gated by mode/cadence + a floor of
+   ≥1 stored answer when there's a latest message, else ≥2; detection runs over the PRE-merge answers;
+   the invoker feeds the detector the respondent's **latest message** so a _same-slot reversal_ is
+   caught even when extraction didn't overwrite the prior answer). On a hit: `flag` mode refines
+   immediately; `probe` mode **defers** — it asks a reconciliation question (a `contradiction_probe`
+   response), suppresses this turn's writes, and parks the finding. See
+   [`contradiction-detection.md`](./contradiction-detection.md#probe-confirm-flow-probe-mode).
+4. **Assess completion** (F4.5, pure `assessCompletion`) — free, always runs.
+5. **Respond** — a `contradiction_probe` (probe-confirm flow) else an `offer` (assessment offered +
+   completion flag on), else the next question (F4.1 selection), else a terminal `complete`/`none`.
 
 The core returns `{ response, targetedQuestionId, sideEffects, events, toolCalls, costUsd,
 contradictions, assessment }`. It does **not** stream — for an offer turn it returns the

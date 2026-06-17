@@ -170,6 +170,15 @@ async function runSelectorAgent(
  */
 export function buildAdaptiveDeps(opts: {
   userId: string;
+  /**
+   * Anonymous (no-login) session: the selection AGENT runs through `streamChat`, which persists an
+   * `AiConversation` keyed to a REAL user — but an anonymous turn's `userId` is the synthetic
+   * `anon:<sessionId>`, which has no `user` row, so the insert violates the FK and the whole stream
+   * 500s (`internal_error`) every turn. There's no ephemeral-chat seam in the platform handler, so we
+   * skip the LLM pick for anonymous sessions and let the strategy fall back to its deterministic
+   * `weighted` ordering. Embedding ranking still runs (a direct embedder call, no conversation row).
+   */
+  anonymous?: boolean;
   recordInspectorCall?: RecordAgentCall;
 }): StrategyDeps {
   return {
@@ -192,6 +201,13 @@ export function buildAdaptiveDeps(opts: {
       return result.embedding;
     },
     rankByVector: (embedding, candidateIds, k) => rankSlotsByVector(embedding, candidateIds, k),
-    llmPick: (input) => runSelectorAgent(input, opts.userId, opts.recordInspectorCall),
+    llmPick: (input) =>
+      opts.anonymous
+        ? Promise.resolve({
+            questionId: null,
+            rationale: 'LLM selection skipped for anonymous session',
+            costUsd: 0,
+          })
+        : runSelectorAgent(input, opts.userId, opts.recordInspectorCall),
   };
 }

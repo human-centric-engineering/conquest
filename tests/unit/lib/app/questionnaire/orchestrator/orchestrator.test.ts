@@ -33,7 +33,7 @@ import {
 
 const slugs = (calls: { slug: string }[]): string[] => calls.map((c) => c.slug);
 
-/** Two captured answers — the floor the detector capability needs (`answers.min(2)`). */
+/** Two captured answers — comfortably above the detector floor (≥1 with a message, else ≥2). */
 const TWO_ANSWERS = [
   { slotKey: 'a', value: 1, provenance: 'direct' as const },
   { slotKey: 'b', value: 2, provenance: 'direct' as const },
@@ -160,11 +160,13 @@ describe('runTurn — contradiction detection', () => {
     );
     expect(calls.detect).toHaveLength(1);
     expect(result.contradictions).toHaveLength(1);
+    // The blue notice is purely INFORMATIONAL — it shows the explanation, never the probe question
+    // (under `probe` mode the question is asked separately; flag mode never asks).
     expect(result.events).toContainEqual(
       expect.objectContaining({
         type: 'warning',
         code: 'contradiction',
-        message: 'which is right?',
+        message: 'conflict!',
       })
     );
     expect(slugs(result.toolCalls)).toContain(DETECT_CONTRADICTIONS_CAPABILITY_SLUG);
@@ -214,8 +216,13 @@ describe('runTurn — contradiction detection', () => {
     expect(ran.calls.detect).toHaveLength(1);
   });
 
-  it('skips detection below the two-answer floor (the detector capability needs ≥2)', async () => {
-    const { invokers, calls } = stubInvokers({ detect: { findings: [finding()] } });
+  it('detects with a SINGLE stored answer + a message (it can contradict the latest message)', async () => {
+    // The reversal floor: one stored answer is enough when there's a latest message to weigh it
+    // against (the detector receives it as `currentStatement`). This is the fix for the case where
+    // only `satisfaction` was answered before the contradicting "I love my job" turn.
+    const { invokers, calls } = stubInvokers({
+      detect: { findings: [finding({ slotKeys: ['a'] })] },
+    });
     const result = await runTurn(
       state({
         userMessage: 'x',
@@ -225,15 +232,52 @@ describe('runTurn — contradiction detection', () => {
       }),
       invokers
     );
-    // Only one answer → detection would fail the capability's args validation, so skip it.
+    expect(calls.detect).toHaveLength(1);
+    expect(result.contradictions).toHaveLength(1);
+    expect(slugs(result.toolCalls)).toContain(DETECT_CONTRADICTIONS_CAPABILITY_SLUG);
+  });
+
+  it('skips detection with NO stored answers (nothing to contradict yet)', async () => {
+    const { invokers, calls } = stubInvokers({ detect: { findings: [finding()] } });
+    await runTurn(
+      state({
+        userMessage: 'x',
+        questions: [q({ id: 'a' })],
+        config: { contradictionMode: 'flag' },
+        existingAnswers: [],
+      }),
+      invokers
+    );
     expect(calls.detect).toHaveLength(0);
-    expect(result.contradictions).toHaveLength(0);
-    expect(slugs(result.toolCalls)).not.toContain(DETECT_CONTRADICTIONS_CAPABILITY_SLUG);
+  });
+
+  it('detects against the PRE-merge answers — a value overwritten this turn stays visible', async () => {
+    // This turn's extraction overwrites `a` (1 → 9); detection must still see the OLD value (1),
+    // so it runs against the pre-merge answers, not the merged effective state.
+    const { invokers, calls } = stubInvokers({
+      extract: { intents: [intent({ slotKey: 'a', value: 9 })] },
+      detect: { findings: [finding({ slotKeys: ['a'] })] },
+    });
+    await runTurn(
+      state({
+        userMessage: 'actually the opposite',
+        questions: [q({ id: 'a', key: 'a' })],
+        config: { contradictionMode: 'flag' },
+        existingAnswers: [{ slotKey: 'a', value: 1, provenance: 'direct' }],
+      }),
+      invokers
+    );
+    expect(calls.detect).toHaveLength(1);
+    // The detector saw the pre-merge value (1), not this turn's overwrite (9).
+    const detectedAnswers = calls.detect[0]?.existingAnswers.find((a) => a.slotKey === 'a');
+    expect(detectedAnswers?.value).toBe(1);
   });
 });
 
 describe('runTurn — refinement', () => {
-  it('refines when a contradiction was flagged and refinement is on', async () => {
+  it('refines immediately under flag mode when a contradiction is found and refinement is on', async () => {
+    // Flag mode keeps the historical behaviour: surface the explanation AND refine the same turn.
+    // (Probe mode now DEFERS — see the probe-confirm flow tests below.)
     const { invokers, calls } = stubInvokers({
       detect: { findings: [finding()] },
       refine: { decisions: [decision({ slotKey: 'a' })], costUsd: 0.001 },
@@ -242,7 +286,7 @@ describe('runTurn — refinement', () => {
       state({
         userMessage: 'x',
         questions: [q({ id: 'a' })],
-        config: { contradictionMode: 'probe' },
+        config: { contradictionMode: 'flag' },
         existingAnswers: TWO_ANSWERS,
       }),
       invokers
@@ -281,6 +325,98 @@ describe('runTurn — refinement', () => {
       invokers
     );
     expect(calls.refine).toHaveLength(0);
+  });
+});
+
+describe('runTurn — probe-confirm contradiction flow (probe mode)', () => {
+  it('DEFERS on a fresh contradiction: asks the reconciliation question, suppresses writes, parks it', async () => {
+    const { invokers, calls } = stubInvokers({
+      detect: {
+        findings: [
+          finding({
+            slotKeys: ['a'],
+            explanation: 'Said A then not-A.',
+            suggestedProbe: 'Which of those is right?',
+          }),
+        ],
+      },
+      // This turn's extraction captured a value — it must be suppressed until the respondent confirms.
+      extract: { intents: [intent({ slotKey: 'a', value: 9 })] },
+    });
+    const result = await runTurn(
+      state({
+        userMessage: 'actually the opposite',
+        questions: [q({ id: 'a', key: 'a', prompt: 'Question A' })],
+        config: { contradictionMode: 'probe', contradictionWindowN: 1 },
+        existingAnswers: TWO_ANSWERS,
+      }),
+      invokers
+    );
+    expect(result.response.kind).toBe('contradiction_probe');
+    if (result.response.kind === 'contradiction_probe') {
+      expect(result.response.text).toContain('Which of those is right?');
+      expect(result.response.text.toLowerCase()).toContain('update your earlier answer');
+    }
+    // Informational notice = explanation, not the question.
+    expect(result.events).toContainEqual(
+      expect.objectContaining({
+        type: 'warning',
+        code: 'contradiction',
+        message: 'Said A then not-A.',
+      })
+    );
+    // No write, no refine, no selection this turn; the finding is parked.
+    expect(result.sideEffects.answerUpserts).toHaveLength(0);
+    expect(calls.refine).toHaveLength(0);
+    expect(calls.select).toHaveLength(0);
+    expect(result.sideEffects.pendingContradiction).toMatchObject({ slotKeys: ['a'] });
+  });
+
+  it('RESOLVES a parked pending contradiction with the refiner and clears it (no fresh detection)', async () => {
+    const { invokers, calls } = stubInvokers({
+      refine: { decisions: [decision({ slotKey: 'a' })] },
+      detect: { findings: [finding({ slotKeys: ['a'] })] }, // must NOT be called on a resolution turn
+    });
+    const result = await runTurn(
+      {
+        ...state({
+          userMessage: 'yes, confirm the new one',
+          questions: [q({ id: 'a', key: 'a' })],
+          config: { contradictionMode: 'probe', contradictionWindowN: 1 },
+          existingAnswers: TWO_ANSWERS,
+        }),
+        pendingContradiction: {
+          slotKeys: ['a'],
+          explanation: 'A vs not-A',
+          statement: 'actually the opposite',
+          raisedAtTurnIndex: 0,
+        },
+      },
+      invokers
+    );
+    expect(calls.refine).toHaveLength(1);
+    expect(calls.detect).toHaveLength(0);
+    expect(result.sideEffects.answerRefinements).toHaveLength(1);
+    expect(result.sideEffects.pendingContradiction).toBeNull();
+    // Proceeds to normal selection (not another probe).
+    expect(result.response.kind).not.toBe('contradiction_probe');
+    expect(calls.select).toHaveLength(1);
+  });
+
+  it('leaves the session pending state untouched when there is nothing to do', async () => {
+    // No pending, no contradiction → the side effect is omitted (undefined), so the route leaves the
+    // column as-is rather than clearing a (non-existent) pending state.
+    const { invokers } = stubInvokers({ detect: { findings: [] } });
+    const result = await runTurn(
+      state({
+        userMessage: 'x',
+        questions: [q({ id: 'a' })],
+        config: { contradictionMode: 'probe', contradictionWindowN: 1 },
+        existingAnswers: TWO_ANSWERS,
+      }),
+      invokers
+    );
+    expect(result.sideEffects.pendingContradiction).toBeUndefined();
   });
 });
 

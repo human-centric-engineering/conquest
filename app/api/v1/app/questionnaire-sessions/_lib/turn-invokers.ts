@@ -179,6 +179,14 @@ export async function buildTurnInvokers(opts: {
    * can run the focused follow-up pass. `off`/absent → single pass (no behaviour change).
    */
   answerFitMode?: AnswerFitMode;
+  /**
+   * Anonymous (no-login) session. The adaptive SELECTORS drive the selection agent through
+   * `streamChat`, which persists an `AiConversation` keyed to a real `user` — but an anonymous turn's
+   * `userId` is the synthetic `anon:<sessionId>` (no `user` row), so the insert FK-violates and the
+   * stream 500s every turn. With no ephemeral-chat seam in the platform handler, the selectors skip
+   * the LLM pick for anonymous sessions and fall back to deterministic selection.
+   */
+  anonymous?: boolean;
 }): Promise<CapabilityInvokers> {
   const {
     userId,
@@ -191,6 +199,7 @@ export async function buildTurnInvokers(opts: {
     dataSlotCandidates,
     sensitivityAware,
     answerFitMode,
+    anonymous,
     recordInspectorCall,
   } = opts;
 
@@ -347,6 +356,10 @@ export async function buildTurnInvokers(opts: {
         })),
         mode: state.config.contradictionMode,
         windowN: state.config.contradictionWindowN,
+        // Feed the respondent's latest message so the detector can catch a same-slot reversal
+        // (e.g. an earlier "I hate the job" answer vs a current "I love my job") even when this
+        // turn's extraction didn't overwrite the stored answer. Omitted on a kickoff (empty).
+        ...(state.userMessage.trim().length > 0 ? { currentStatement: state.userMessage } : {}),
         sessionId: state.sessionId,
       };
       const dispatch = await capabilityDispatcher.dispatch(
@@ -469,6 +482,7 @@ export async function buildTurnInvokers(opts: {
       if (state.config.selectionStrategy === 'adaptive' && adaptiveEnabled) {
         deps = buildAdaptiveDeps({
           userId,
+          ...(anonymous ? { anonymous } : {}),
           ...(recordInspectorCall ? { recordInspectorCall } : {}),
         });
       }
@@ -490,6 +504,7 @@ export async function buildTurnInvokers(opts: {
         ...(goal ? { goal } : {}),
         sessionId: state.sessionId,
         userId,
+        ...(anonymous ? { anonymous } : {}),
         ...(recordInspectorCall ? { recordInspectorCall } : {}),
       });
     },

@@ -235,4 +235,14 @@ describe('buildAdaptiveDeps — llmPick', () => {
     expect(pick.questionId).toBeNull();
     expect(pick.rationale).toMatch(/unparseable/);
   });
+
+  it('skips the selector agent entirely for an anonymous session (no streamChat call)', async () => {
+    // The selector's streamChat would FK-violate on the synthetic anon user, so anon sessions
+    // must never reach it — the deps return a null pick and the strategy falls back to weighted.
+    const d = buildAdaptiveDeps({ userId: 'anon:sess-1', anonymous: true });
+    const pick = await d.llmPick(input);
+    expect(pick.questionId).toBeNull();
+    expect(pick.rationale).toMatch(/anonymous/);
+    expect(drainStreamChat).not.toHaveBeenCalled();
+  });
 });

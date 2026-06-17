@@ -17,8 +17,12 @@
  *      - else (every slot filled but a question is still open) → **sweep**: ask the next
  *        unanswered question directly.
  *
- * Contradiction/refinement (F4.3/F4.4) are intentionally not run in data-slot mode v1 — the
- * combined extractor already improves fills/answers each turn; reconciliation is future work.
+ * Contradiction detection (F4.3) + refinement (F4.4) run here too, in parity with {@link runTurn}
+ * (steps 2.6/2.7): gated by the questionnaire's `contradictionMode` + cadence and the platform flag,
+ * they compare the background question answers — and the respondent's latest message — so a same-slot
+ * reversal across turns surfaces a `contradiction` warning (and, under `probe` mode, a reconciliation
+ * question). The conflicting question answer is refined; the data-slot fill reconciles as the
+ * respondent answers the probe.
  */
 
 import { EXTRACT_ANSWER_SLOTS_CAPABILITY_SLUG } from '@/lib/app/questionnaire/constants';
@@ -27,6 +31,10 @@ import {
   ASSESS_SERIOUSNESS_TOOL_SLUG,
   DETECT_SENSITIVITY_TOOL_SLUG,
 } from '@/lib/app/questionnaire/orchestrator/orchestrator';
+import {
+  runContradictionPhase,
+  questionProbeLabels,
+} from '@/lib/app/questionnaire/orchestrator/contradiction-phase';
 import {
   evaluateAbuseStrike,
   keywordAbuseFloor,
@@ -199,9 +207,14 @@ function buildOfferInput(
 function toolCall(
   slug: string,
   success: boolean,
-  opts: { latencyMs?: number } = {}
+  opts: { code?: string; latencyMs?: number } = {}
 ): ToolCallRecord {
-  return { slug, success, ...(opts.latencyMs !== undefined ? { latencyMs: opts.latencyMs } : {}) };
+  return {
+    slug,
+    success,
+    ...(opts.code !== undefined ? { code: opts.code } : {}),
+    ...(opts.latencyMs !== undefined ? { latencyMs: opts.latencyMs } : {}),
+  };
 }
 
 /** Run one data-slot-mode turn. Mirrors {@link runTurn}'s shape; targets data slots. */
@@ -214,6 +227,8 @@ export async function runDataSlotTurn(
   const toolCalls: ToolCallRecord[] = [];
   const answerUpserts: AnswerSlotIntent[] = [];
   let dataSlotFills: DataSlotFillIntent[] = [];
+  let contradictions: TurnResult['contradictions'] = [];
+  let answerRefinements: TurnResult['sideEffects']['answerRefinements'] = [];
   let costUsd = 0;
 
   const hasMessage = state.userMessage.trim().length > 0;
@@ -399,6 +414,33 @@ export async function runDataSlotTurn(
     }
   }
 
+  // 2.6 Contradiction phase (F4.3 detect + F4.4 refine + the probe-confirm flow), shared verbatim
+  //     with question mode (`runTurn`). It compares the BACKGROUND question answers — and the
+  //     respondent's latest message — so a same-slot reversal ("I hate the job" → "I love my job")
+  //     is caught even when extraction didn't overwrite the stored answer. Under `probe` mode a fresh
+  //     contradiction DEFERS: ask a reconciliation question, suppress this turn's writes (including
+  //     the data-slot fills), and park the finding; the next turn resolves it. Under `flag` mode it
+  //     surfaces the explanation and refines immediately.
+  const contradiction = await runContradictionPhase(effective, invokers, {
+    hasMessage,
+    disregarded,
+    dataMode: true,
+    labels: questionProbeLabels(effective.questions),
+    // Detect against the PRE-merge answers so a value this turn's extraction overwrote stays visible.
+    priorAnswers: state.existingAnswers,
+  });
+  costUsd += contradiction.costUsd;
+  toolCalls.push(...contradiction.toolCalls);
+  events.push(...contradiction.events);
+  contradictions = contradiction.contradictions;
+  answerRefinements = contradiction.answerRefinements;
+  // Probe raised → record nothing this turn (neither question answers nor data-slot fills) until the
+  // respondent confirms on the next turn.
+  if (contradiction.suppressWrites) {
+    answerUpserts.length = 0;
+    dataSlotFills = [];
+  }
+
   // Background deliverable: completion is gated on ALL questions being answered.
   const answeredIds = new Set(effective.answered.map((a) => a.questionId));
   const remainingQuestions = unansweredQuestions({
@@ -442,7 +484,17 @@ export async function runDataSlotTurn(
   const questionCoverage = coverageRatio(effective);
   const questionsLagging = dataCoverage - questionCoverage > BALANCED_QUESTION_LAG;
 
-  if (allQuestionsAnswered) {
+  if (contradiction.probe) {
+    // Probe-confirm flow: ask the reconciliation question instead of targeting a slot/question.
+    // Nothing was recorded this turn; the pending finding is persisted (below).
+    response = {
+      kind: 'contradiction_probe',
+      text: contradiction.probe.text,
+      slotKeys: contradiction.probe.slotKeys,
+    };
+    targetedQuestionId = null;
+    selectionRationale = 'Checking an apparent change of heart before updating earlier answers.';
+  } else if (allQuestionsAnswered) {
     if (effective.flags.completion) {
       response = {
         kind: 'offer',
@@ -527,11 +579,18 @@ export async function runDataSlotTurn(
     response,
     targetedQuestionId,
     ...(selectionRationale !== undefined ? { selectionRationale } : {}),
-    sideEffects: { answerUpserts, answerRefinements: [], dataSlotFills },
+    sideEffects: {
+      answerUpserts,
+      answerRefinements,
+      dataSlotFills,
+      ...(contradiction.pendingContradiction !== undefined
+        ? { pendingContradiction: contradiction.pendingContradiction }
+        : {}),
+    },
     events,
     toolCalls,
     costUsd,
-    contradictions: [],
+    contradictions,
     assessment,
     ...(abuse !== undefined ? { abuse } : {}),
     ...(sensitivity !== undefined ? { sensitivity } : {}),

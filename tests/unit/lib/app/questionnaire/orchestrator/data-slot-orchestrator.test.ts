@@ -23,6 +23,8 @@ import {
   state,
   stubInvokers,
   intent,
+  finding,
+  decision,
   q,
 } from '@/tests/unit/lib/app/questionnaire/orchestrator/_fixtures';
 
@@ -47,6 +49,8 @@ function dsState(input: {
   dataSlotAnswered?: DataSlotAnsweredView[];
   activeDataSlotKey?: string | null;
   dataSlotAttempts?: Record<string, number>;
+  existingAnswers?: TurnState['existingAnswers'];
+  selectionRound?: number;
   config?: Partial<TurnState['config']>;
   flags?: Partial<TurnState['flags']>;
 }): TurnState {
@@ -55,6 +59,8 @@ function dsState(input: {
       userMessage: input.userMessage ?? 'hi',
       questions: input.questions,
       answered: input.answered ?? [],
+      ...(input.existingAnswers ? { existingAnswers: input.existingAnswers } : {}),
+      ...(input.selectionRound !== undefined ? { selectionRound: input.selectionRound } : {}),
       ...(input.config ? { config: input.config } : {}),
       ...(input.flags ? { flags: input.flags } : {}),
     }),
@@ -719,5 +725,221 @@ describe('runDataSlotTurn — a stated (direct) answer is covered regardless of 
     );
     expect(result.response.kind).toBe('data_slot');
     if (result.response.kind === 'data_slot') expect(result.response.dataSlotId).toBe('d2');
+  });
+});
+
+describe('runDataSlotTurn — contradiction detection + refinement (parity with question mode)', () => {
+  /** Two background question answers so the ≥2-answers floor is met. */
+  const twoAnswers = [
+    { slotKey: 'satisfaction', value: 1, provenance: 'inferred' as const, confidence: 0.8 },
+    { slotKey: 'recommend', value: 0, provenance: 'inferred' as const, confidence: 0.8 },
+  ];
+
+  it('runs the detector under flag mode and surfaces a contradiction warning', async () => {
+    const { invokers, calls } = stubInvokers({
+      detect: {
+        findings: [finding({ slotKeys: ['satisfaction'], explanation: 'now loves the job' })],
+      },
+    });
+    const result = await runDataSlotTurn(
+      dsState({
+        userMessage: 'no obstacles, i love my job',
+        questions: [q({ id: 'q1', key: 'satisfaction' })],
+        dataSlots: [
+          ds({ id: 'd1', key: 'd1', theme: 'A' }),
+          ds({ id: 'd2', key: 'd2', theme: 'B' }),
+        ],
+        existingAnswers: twoAnswers,
+        config: { contradictionMode: 'flag', contradictionWindowN: 1 },
+      }),
+      invokers
+    );
+    expect(calls.detect).toHaveLength(1);
+    expect(result.contradictions).toHaveLength(1);
+    expect(result.events).toContainEqual(
+      expect.objectContaining({
+        type: 'warning',
+        code: 'contradiction',
+        message: 'now loves the job',
+      })
+    );
+  });
+
+  it('probe mode DEFERS: asks a reconciliation question, suppresses writes, parks the finding, no refine', async () => {
+    const { invokers, calls } = stubInvokers({
+      detect: {
+        findings: [
+          finding({
+            slotKeys: ['satisfaction'],
+            explanation: 'Said they hate the job, now love it.',
+            suggestedProbe: 'Earlier this felt different — what changed?',
+          }),
+        ],
+      },
+      // extraction captured a fill this turn — it must be suppressed (nothing recorded until confirm).
+      extract: {
+        intents: [intent({ slotKey: 'satisfaction', value: 5 })],
+        dataSlotFills: [fill('d1')],
+      },
+    });
+    const result = await runDataSlotTurn(
+      dsState({
+        userMessage: 'no obstacles, i love my job',
+        questions: [q({ id: 'q1', key: 'satisfaction' })],
+        dataSlots: [ds({ id: 'd1', key: 'd1', theme: 'A' })],
+        existingAnswers: twoAnswers,
+        config: { contradictionMode: 'probe', contradictionWindowN: 1 },
+      }),
+      invokers
+    );
+    // The reconciliation question is ASKED (not buried in the box), with the consequence stated.
+    expect(result.response.kind).toBe('contradiction_probe');
+    if (result.response.kind === 'contradiction_probe') {
+      expect(result.response.text).toContain('Earlier this felt different — what changed?');
+      expect(result.response.text.toLowerCase()).toContain('update your earlier answer');
+      expect(result.response.slotKeys).toEqual(['satisfaction']);
+    }
+    // The blue notice is informational — the EXPLANATION, never the question.
+    expect(result.events).toContainEqual(
+      expect.objectContaining({
+        type: 'warning',
+        code: 'contradiction',
+        message: 'Said they hate the job, now love it.',
+      })
+    );
+    // Nothing is recorded this turn, and no refinement runs (it defers to the confirmation turn).
+    expect(result.sideEffects.answerUpserts).toHaveLength(0);
+    expect(result.sideEffects.dataSlotFills).toHaveLength(0);
+    expect(calls.refine).toHaveLength(0);
+    expect(result.sideEffects.answerRefinements).toHaveLength(0);
+    // The finding is parked for the next turn to resolve.
+    expect(result.sideEffects.pendingContradiction).toMatchObject({
+      slotKeys: ['satisfaction'],
+      statement: 'no obstacles, i love my job',
+    });
+  });
+
+  it('resolution turn: a parked pending contradiction runs the refiner and clears the pending state', async () => {
+    const { invokers, calls } = stubInvokers({
+      refine: { decisions: [decision({ slotKey: 'satisfaction', newValue: 5 })] },
+      // A fresh detect stub that would fire if (wrongly) re-detected — it must NOT be called.
+      detect: { findings: [finding({ slotKeys: ['satisfaction'] })] },
+    });
+    const result = await runDataSlotTurn(
+      {
+        ...dsState({
+          userMessage: 'yes, I love it now',
+          questions: [q({ id: 'q1', key: 'satisfaction' })],
+          dataSlots: [ds({ id: 'd1', key: 'd1', theme: 'A' })],
+          existingAnswers: twoAnswers,
+          config: { contradictionMode: 'probe', contradictionWindowN: 1 },
+        }),
+        pendingContradiction: {
+          slotKeys: ['satisfaction'],
+          explanation: 'hate vs love',
+          statement: 'i love my job',
+          raisedAtTurnIndex: 1,
+        },
+      },
+      invokers
+    );
+    // Resolution runs the refiner (not fresh detection) and applies the change.
+    expect(calls.refine).toHaveLength(1);
+    expect(calls.detect).toHaveLength(0);
+    expect(result.sideEffects.answerRefinements).toHaveLength(1);
+    // Pending is cleared (null = clear).
+    expect(result.sideEffects.pendingContradiction).toBeNull();
+    // The turn proceeds normally to the next target (not a probe).
+    expect(result.response.kind).not.toBe('contradiction_probe');
+  });
+
+  it('refines the conflicting answer when a finding is returned and refinement is on', async () => {
+    const { invokers, calls } = stubInvokers({
+      detect: { findings: [finding({ slotKeys: ['satisfaction'] })] },
+      refine: { decisions: [decision({ slotKey: 'satisfaction', newValue: 5 })] },
+    });
+    const result = await runDataSlotTurn(
+      dsState({
+        userMessage: 'i love my job',
+        questions: [q({ id: 'q1', key: 'satisfaction' })],
+        dataSlots: [ds({ id: 'd1', key: 'd1', theme: 'A' })],
+        existingAnswers: twoAnswers,
+        config: { contradictionMode: 'flag', contradictionWindowN: 1 },
+      }),
+      invokers
+    );
+    expect(calls.refine).toHaveLength(1);
+    expect(result.sideEffects.answerRefinements).toHaveLength(1);
+    expect(result.sideEffects.answerRefinements[0]?.slotKey).toBe('satisfaction');
+  });
+
+  it('does not run the detector when contradictionMode is off (the default)', async () => {
+    const { invokers, calls } = stubInvokers({
+      detect: { findings: [finding({ slotKeys: ['satisfaction'] })] },
+    });
+    const result = await runDataSlotTurn(
+      dsState({
+        userMessage: 'i love my job',
+        questions: [q({ id: 'q1', key: 'satisfaction' })],
+        dataSlots: [ds({ id: 'd1', key: 'd1', theme: 'A' })],
+        existingAnswers: twoAnswers,
+        // config omitted → DEFAULT contradictionMode is 'off'
+      }),
+      invokers
+    );
+    expect(calls.detect).toHaveLength(0);
+    expect(result.contradictions).toHaveLength(0);
+  });
+
+  it('detects with a single stored answer + a message (reversal against the latest message)', async () => {
+    const { invokers, calls } = stubInvokers({
+      detect: { findings: [finding({ slotKeys: ['satisfaction'] })] },
+    });
+    await runDataSlotTurn(
+      dsState({
+        userMessage: 'i love my job',
+        questions: [q({ id: 'q1', key: 'satisfaction' })],
+        dataSlots: [ds({ id: 'd1', key: 'd1', theme: 'A' })],
+        existingAnswers: [twoAnswers[0]], // a single prior answer — enough, given the latest message
+        config: { contradictionMode: 'flag', contradictionWindowN: 1 },
+      }),
+      invokers
+    );
+    expect(calls.detect).toHaveLength(1);
+  });
+
+  it('skips detection with no stored answers (nothing to contradict yet)', async () => {
+    const { invokers, calls } = stubInvokers({
+      detect: { findings: [finding({ slotKeys: ['satisfaction'] })] },
+    });
+    await runDataSlotTurn(
+      dsState({
+        userMessage: 'i love my job',
+        questions: [q({ id: 'q1', key: 'satisfaction' })],
+        dataSlots: [ds({ id: 'd1', key: 'd1', theme: 'A' })],
+        existingAnswers: [],
+        config: { contradictionMode: 'flag', contradictionWindowN: 1 },
+      }),
+      invokers
+    );
+    expect(calls.detect).toHaveLength(0);
+  });
+
+  it('does not run the detector on the contradiction off-cadence turn', async () => {
+    const { invokers, calls } = stubInvokers({
+      detect: { findings: [finding({ slotKeys: ['satisfaction'] })] },
+    });
+    await runDataSlotTurn(
+      dsState({
+        userMessage: 'i love my job',
+        questions: [q({ id: 'q1', key: 'satisfaction' })],
+        dataSlots: [ds({ id: 'd1', key: 'd1', theme: 'A' })],
+        existingAnswers: twoAnswers,
+        selectionRound: 1, // every_n_turns=2 → run on 0,2,4… not turn 1
+        config: { contradictionMode: 'flag', contradictionWindowN: 1, contradictionEveryNTurns: 2 },
+      }),
+      invokers
+    );
+    expect(calls.detect).toHaveLength(0);
   });
 });

@@ -242,6 +242,11 @@ test guards it. Full behaviour in [`configuration.md`](./configuration.md).
   most one preview session per version — Prisma can't model partial uniques, so it's
   invisible in the schema and guarded by a drift probe (`lib/app/db-drift.ts`). Author
   future migrations on this table with `--create-only` and strip any phantom DROP of it.
+  Later additive columns: `abuseStrikes` (seriousness gate), `sensitivityLevel?` +
+  `sensitivityNotes` (safeguarding memory), and `pendingContradiction Json?` (migration
+  `20260617130000_app_session_pending_contradiction`) — the `probe`-mode contradiction parked
+  across two turns for the confirm-before-overwrite flow (null = none pending; see
+  [contradiction-detection.md](./contradiction-detection.md#probe-confirm-flow-probe-mode)).
 - **`AppAnswerSlot`** (F4.4, same migration) — one captured answer per `(sessionId,
 questionSlotId)` (the upsert unique), with `value Json`, `provenanceLabel`,
   `confidence?`, `refinementHistory Json` (default `[]`), and `lastUpdatedTurnId String?`

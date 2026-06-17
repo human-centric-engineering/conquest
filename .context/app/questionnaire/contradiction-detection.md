@@ -18,9 +18,12 @@ will drive.
 - **Behaviour — what to do on a hit** (`AppQuestionnaireConfig.contradictionMode`,
   `CONTRADICTION_MODES` in `lib/app/questionnaire/types.ts`):
   - **`off`** — no detection.
-  - **`flag`** — surface the conflict passively (for admin review / a quiet note).
-  - **`probe`** — the agent follows up in-conversation to reconcile it. Findings
-    carry a `suggestedProbe`; `flag` findings do not.
+  - **`flag`** — surface the conflict passively (a quiet informational notice) **and** refine the
+    conflicting answer immediately, same turn.
+  - **`probe`** — **confirm before overwrite**: nothing is changed on the detection turn. The
+    interviewer asks a reconciliation question (stating that confirming will update the earlier
+    answer + the linked data), the finding is parked on the session, and the change is applied only
+    once the respondent confirms on the next turn. See [Probe-confirm flow](#probe-confirm-flow-probe-mode).
 - **Cadence — when to run** (pure `shouldRunDetection`, **no config column**): the
   development-plan prose once listed `every_turn / every_n_turns / sweep_only`, but
   the committed schema has no cadence enum — it has `contradictionWindowN` (a
@@ -77,10 +80,11 @@ contradiction/
 └── detection-logic.ts  normalizeContradictionFindings(...) + shouldRunDetection(...)
 ```
 
-- **`ContradictionContext`** — `{ slots, answers, mode, windowN, sessionId }`, all in
-  memory. `AnsweredSlotView` carries the actual `value` (detection reasons over
-  values, not just "is answered") plus optional `provenance` (which side of a
-  conflict to trust) and `turnIndex` (for windowing).
+- **`ContradictionContext`** — `{ slots, answers, mode, windowN, currentStatement?,
+sessionId }`, all in memory. `AnsweredSlotView` carries the actual `value` (detection
+  reasons over values, not just "is answered") plus optional `provenance` (which side
+  of a conflict to trust) and `turnIndex` (for windowing). **`currentStatement`** is the
+  respondent's latest message — see [Same-slot reversal](#same-slot-reversal-via-the-latest-message).
 - **`normalizeContradictionFindings`** — drop findings referencing unknown or
   _unanswered_ slots; require ≥2 distinct slots; **dedupe symmetric pairs** (`[a,b]`
   ≡ `[b,a]`, keep highest confidence); clamp severity; mode-shape (`flag` strips any
@@ -92,14 +96,71 @@ contradiction/
 
 ### `normalizeContradictionFindings` outcomes
 
-| Situation                                  | Outcome                                          |
-| ------------------------------------------ | ------------------------------------------------ |
-| `slotKey` not a known slot                 | **drop** (`unknown slot key(s)`)                 |
-| `slotKey` known but unanswered             | **drop** (`unanswered slot key(s)`)              |
-| fewer than two distinct slots after dedupe | **drop** (`fewer than two distinct slots`)       |
-| same conflict reported twice (symmetric)   | **dedupe** — keep the highest-confidence finding |
-| `flag` mode finding carrying a probe       | **strip** the probe                              |
-| `probe` mode finding with a blank probe    | **keep** without a probe (conflict still stands) |
+| Situation                                  | Outcome                                                                                                                            |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `slotKey` not a known slot                 | **drop** (`unknown slot key(s)`)                                                                                                   |
+| `slotKey` known but unanswered             | **drop** (`unanswered slot key(s)`)                                                                                                |
+| fewer than two distinct slots after dedupe | **drop** (`fewer than two distinct slots`) — but ≥1 is enough when `currentStatement` is set (`no slot referenced` only when zero) |
+| same conflict reported twice (symmetric)   | **dedupe** — keep the highest-confidence finding                                                                                   |
+| `flag` mode finding carrying a probe       | **strip** the probe                                                                                                                |
+| `probe` mode finding with a blank probe    | **keep** without a probe (conflict still stands)                                                                                   |
+
+## Same-slot reversal via the latest message
+
+The classic pass compares captured **answers against each other**, so it catches a
+_cross-slot_ conflict ("no children" + "daughter at college") only once **both** values
+are stored. It misses a _same-slot reversal_ — an earlier "I hate the job" (→ `satisfaction`
+low) and a later "I love my job" — because the new statement either overwrites the stored
+value (no conflict left to see) or, as often happens, isn't re-extracted into the already-
+answered slot at all (extraction tends not to re-answer a filled slot). Either way the
+reversal lives only in the message text, invisible to an answer-vs-answer pass.
+
+`currentStatement` closes that gap. The live invoker passes the respondent's latest message
+(`state.userMessage`); the prompt tells the detector to **also** weigh it against each
+recorded answer and report any answer it reverses. Because the message is the implicit second
+party, the normaliser **relaxes its ≥2-distinct-slots rule to ≥1** when `currentStatement` is
+present — a finding may name the single conflicting slot (`satisfaction`), which then drives
+the probe and F4.4 refinement of that answer. Absent/blank → the classic answer-vs-answer pass,
+unchanged. `currentStatement` is respondent PII, so `redactProvenance()` redacts it from the
+durable provenance row alongside the answers.
+
+Two orchestration details make this actually fire (both were live bugs):
+
+- **Floor.** The live phase requires only **≥1 stored answer** when a message is present (it can
+  contradict the message); the detector capability's arg floor is `answers.min(1)` to match. The old
+  `≥2` floor silently skipped the very case this targets (e.g. only `satisfaction` answered so far).
+- **Pre-merge answers.** Detection runs over the answers **as they were before this turn's extraction
+  merged in** (`runContradictionPhase`'s `priorAnswers` = the orchestrator's `state.existingAnswers`,
+  pre-`applyIntents`). This turn's contradicting statement is often extracted straight into the
+  conflicting slot (`satisfaction` 1→5), which would erase the old value before the detector sees it;
+  comparing the pre-merge answers against the latest message keeps it visible.
+
+## Probe-confirm flow (`probe` mode)
+
+Under `probe` mode a detected contradiction is **never silently overwritten**. The shared
+`runContradictionPhase` (`orchestrator/contradiction-phase.ts`, used by BOTH `runTurn` and
+`runDataSlotTurn`) runs a small two-turn state machine:
+
+1. **Detection turn.** A fresh contradiction → the orchestrator:
+   - emits the blue notice carrying the **explanation only** (informational — never the question);
+   - asks a **reconciliation question** as the interviewer's message — a `contradiction_probe`
+     response whose text is the detector's `suggestedProbe` (or a default) **plus an explicit
+     consequence line**: confirming will update the earlier answer(s) — named from the slot/data-slot
+     labels — and the linked saved data (`buildContradictionProbe`). The route streams this text
+     **verbatim** (not through the question phraser) so the consequence wording is exact;
+   - **suppresses this turn's writes** (`suppressWrites`): no answer upsert, and in data-slot mode no
+     data-slot fill either — nothing is recorded before the respondent confirms;
+   - **parks** the finding as a `PendingContradiction` on `AppQuestionnaireSession.pendingContradiction`.
+2. **Resolution turn.** With a pending contradiction loaded, THIS turn's message is the answer to the
+   probe: the refiner runs against the parked finding (apply the change on confirm / keep otherwise),
+   the pending state is **cleared**, and **no fresh detection runs** (so the same conflict can't
+   re-probe in a loop). The turn then proceeds to normal selection.
+
+`flag` mode is unchanged: surface the explanation **and** refine immediately. `off` does nothing.
+
+The seriousness gate runs BEFORE this phase, so a contradicting answer must survive it to be probed —
+the judge prompt explicitly treats "contradicts an earlier answer" as genuine (see
+[seriousness-gate.md](./seriousness-gate.md#a-contradiction-is-not-a-sincerity-failure)).
 
 ## The capability
 
@@ -148,7 +209,12 @@ mode?, windowN?, sessionId? }`.
 
 F4.6 (session state machine) wires persistence + the live loop: it calls
 `shouldRunDetection` per turn / at the completion sweep, then this detection seam,
-and renders findings to the agent. **F4.4** (refinement, now shipped — see
+and renders findings to the agent. The live per-turn loop runs detection in **both**
+orchestrators via the shared `runContradictionPhase` — question mode (`runTurn`) and **data-slot
+mode** (`runDataSlotTurn`, comparing the background question answers). Under `flag` mode each
+surfaces an informational notice and refines immediately; under `probe` mode each runs the
+[confirm-before-overwrite flow](#probe-confirm-flow-probe-mode). See
+[`per-turn-orchestrator.md`](./per-turn-orchestrator.md) and [`data-slots.md`](./data-slots.md). **F4.4** (refinement, now shipped — see
 [`answer-refinement.md`](./answer-refinement.md)) acts on a confirmed contradiction:
 its capability takes the finding as a `triggeringContradiction` and writes a `refine`
 (transitioning provenance to `refined`); the `suggestedProbe` is F4.3's handoff to it.

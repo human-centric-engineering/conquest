@@ -271,6 +271,11 @@ export const DETECT_CONTRADICTIONS_FUNCTION_DEFINITION: CapabilityFunctionDefini
         type: 'number',
         description: 'How many prior answers to compare against; 0 = compare all.',
       },
+      currentStatement: {
+        type: 'string',
+        description:
+          "The respondent's latest message, when the detector should also weigh it against the captured answers (catches a same-slot reversal). When present, a finding may reference a single conflicting slot.",
+      },
       sessionId: {
         type: 'string',
         description: 'Stable session identity, threaded into cost-log metadata.',

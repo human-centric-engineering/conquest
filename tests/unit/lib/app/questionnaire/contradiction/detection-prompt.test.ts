@@ -74,6 +74,36 @@ describe('buildContradictionDetectionPrompt', () => {
     expect(flagSystem).not.toContain('suggestedProbe');
   });
 
+  it('includes the latest message and reversal instruction when currentStatement is set', () => {
+    const context = ctx({
+      answers: [answered({ slotKey: 'a' }), answered({ slotKey: 'b' })],
+      currentStatement: 'actually I love my job',
+    });
+    const messages = buildContradictionDetectionPrompt(context);
+    const system = text(messages[0]);
+    const user = text(messages[1]);
+    expect(user).toContain('LATEST MESSAGE');
+    expect(user).toContain('actually I love my job');
+    // The system rules tell the model it may report a single conflicting slot against the message.
+    expect(system).toContain('LATEST MESSAGE');
+    expect(system).toMatch(/single recorded answer|reverses/);
+  });
+
+  it('omits the latest-message section when currentStatement is absent or blank', () => {
+    const absent = buildContradictionDetectionPrompt(
+      ctx({ answers: [answered({ slotKey: 'a' }), answered({ slotKey: 'b' })] })
+    );
+    const blank = buildContradictionDetectionPrompt(
+      ctx({
+        answers: [answered({ slotKey: 'a' }), answered({ slotKey: 'b' })],
+        currentStatement: '   ',
+      })
+    );
+    expect(text(absent[1])).not.toContain('LATEST MESSAGE');
+    expect(text(absent[0])).not.toContain('LATEST MESSAGE');
+    expect(text(blank[1])).not.toContain('LATEST MESSAGE');
+  });
+
   it('names the severity vocabulary in the system rules', () => {
     const system = text(
       buildContradictionDetectionPrompt(ctx({ answers: [answered({ slotKey: 'a' })] }))[0]

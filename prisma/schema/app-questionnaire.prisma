@@ -490,6 +490,12 @@ model AppQuestionnaireSession {
   // only; never surfaced raw to analytics or event metadata.
   sensitivityLevel String?
   sensitivityNotes Json     @default("[]")
+  // Probe-confirm contradiction flow: when a `probe`-mode contradiction is detected, the conflicting
+  // answer/data-slot is NOT overwritten — instead the interviewer asks a reconciliation question and
+  // the finding is parked here (PendingContradiction shape: slotKeys, explanation, suggestedProbe?,
+  // statement, raisedAtTurnIndex). The next turn resolves it (refiner applies the change on confirm,
+  // or keeps the original) and clears this back to null. Null = no contradiction awaiting confirmation.
+  pendingContradiction Json?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 

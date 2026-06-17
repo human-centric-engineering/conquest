@@ -1212,8 +1212,8 @@ describe('contradiction detail enrichment', () => {
             explanation: 'Earlier said junior; now says senior',
             severity: 'medium' as const,
             confidence: 0.8,
-            // suggestedProbe is different from explanation — the route shows suggestedProbe
-            // as the message but attaches explanation as a detail for "Why?" disclosure.
+            // A probe is present, but the blue notice is INFORMATIONAL — it shows the explanation,
+            // never the question (under `probe` mode the question is asked as the interviewer turn).
             suggestedProbe: 'Can you clarify your seniority level?',
           },
         ],
@@ -1230,7 +1230,7 @@ describe('contradiction detail enrichment', () => {
     };
   }
 
-  it('enriches a contradiction warning frame with the explanation as detail when suggestedProbe differs', async () => {
+  it('shows the explanation (not the probe) as the contradiction notice message under flag mode', async () => {
     // Need ≥ MIN_CONTRADICTION_ANSWERS (2) existing answers and contradictionMode ≠ 'off'.
     const baseCtx = loadedContext();
     ctxMock.buildTurnContext.mockResolvedValue(
@@ -1256,14 +1256,16 @@ describe('contradiction detail enrichment', () => {
 
     const frames = await drainSse(await POST(req({ message: 'senior manager' }), ctx));
 
-    // The contradiction warning frame must carry the explanation as 'detail'.
+    // The contradiction notice is informational: its message IS the explanation (no separate
+    // "Why?" detail, since the message already carries it). The probe question is never shown here.
     const contradictionFrame = frames.find(
       (f) => f.event === 'warning' && (f.data as { code?: string }).code === 'contradiction'
     );
     expect(contradictionFrame).toBeDefined();
     const data = contradictionFrame!.data as { code: string; message: string; detail?: string };
-    expect(data.message).toBe('Can you clarify your seniority level?');
-    expect(data.detail).toBe('Earlier said junior; now says senior');
+    expect(data.message).toBe('Earlier said junior; now says senior');
+    expect(data.message).not.toBe('Can you clarify your seniority level?');
+    expect(data.detail).toBeUndefined();
   });
 });
 

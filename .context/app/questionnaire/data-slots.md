@@ -219,9 +219,18 @@ Persistence: `persistTurn` upserts the data-slot fills (`upsertDataSlotFill`, ca
 counter). The generic `targetedQuestionId` column ALSO carries the targeted data-slot id on a
 data-slot turn (the loader resolves it to the active data slot for re-ask/transition next turn).
 
-> Contradiction/refinement (F4.3/F4.4) are not run in data-slot mode v1 — the combined extractor
-> improves fills/answers each turn. Active re-targeting of parked slots (vs the passive cross-turn
-> enrichment above) is future work.
+**Contradiction detection + refinement (F4.3/F4.4) run in data-slot mode** (parity with question
+mode) via the shared `runContradictionPhase`: gated by the questionnaire's `contradictionMode` +
+`contradictionEveryNTurns` cadence and the platform flag, with a ≥1-stored-answer floor (a single
+answer can contradict the latest message; ≥2 only when there's no message). They compare the **background question answers** — and, crucially, the respondent's
+**latest message** (`currentStatement`) — so a _same-slot reversal_ across turns ("I hate the job"
+→ "I love my job") is caught even when extraction didn't overwrite the stored answer. Under `flag`
+mode it surfaces an informational notice and refines immediately; under `probe` mode it runs the
+[confirm-before-overwrite flow](./contradiction-detection.md#probe-confirm-flow-probe-mode) — the
+interviewer asks a reconciliation question and **suppresses this turn's data-slot fills + answers**
+until the respondent confirms next turn (the parked finding lives on
+`AppQuestionnaireSession.pendingContradiction`). Active re-targeting of parked slots (vs the passive
+cross-turn enrichment above) is future work.
 
 ## Adaptive data-slot selection (50+-slot scale)
 
@@ -245,6 +254,15 @@ question slots) and asks the seeded **selector agent** which to pursue next.
   `_lib/data-slot-selection.ts` (`selectNextDataSlot`). **Fail-soft everywhere**: no last message,
   <2 candidates, un-embedded slots, a selector error, or an off-pool pick all return `null` and the
   orchestrator falls back to `pickNextDataSlot`. The selector's spend is folded into the turn cost.
+- **Anonymous sessions skip the LLM pick.** The selector agent runs through `streamChat`, which
+  persists an `AiConversation` keyed to a real `user`. An anonymous (no-login) turn's `userId` is the
+  synthetic `anon:<sessionId>` with no `user` row, so that insert FK-violates and the stream 500s
+  (`internal_error`) every turn — silently degrading adaptive selection while spamming error logs.
+  With no ephemeral-chat seam in the platform handler, `selectNextDataSlot` (and the question-mode
+  `buildAdaptiveDeps`) take an `anonymous` flag — threaded from `resolveTurnAccess` → the `/messages`
+  route → `buildTurnInvokers` — and short-circuit to the deterministic pick for anonymous sessions.
+  Restoring adaptive selection for anonymous respondents needs an ephemeral (non-persisting) chat
+  mode in the platform `streamChat`, tracked as platform follow-up.
 - **Gating.** Sub-flag `APP_QUESTIONNAIRES_ADAPTIVE_DATA_SLOTS_ENABLED`
   (`isAdaptiveDataSlotSelectionEnabled` = master AND data-slots AND live-sessions AND this sub-flag),
   off by default. The `/messages` route wires the invoker only in data-slot mode with the flag on,

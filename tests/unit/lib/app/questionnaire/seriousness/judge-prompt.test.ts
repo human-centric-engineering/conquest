@@ -93,6 +93,16 @@ describe('buildSeriousnessJudgePrompt — system prompt', () => {
     expect(system).toMatch(/EVEN IF an earlier turn contained a genuine disclosure/i);
   });
 
+  it('system prompt tells the judge a contradiction with an earlier answer is still genuine', () => {
+    const { system } = buildSeriousnessJudgePrompt(makeInput());
+    // The regression: "I hate my job" then "I love my job" was disregarded as non-genuine by the
+    // judge, citing the contradiction — which pre-empted the contradiction detector's probe. The
+    // judge must rule on THIS answer alone and never treat a reversal as a joke/troll.
+    expect(system).toMatch(/CONTRADICTS or reverses/i);
+    expect(system).toMatch(/separate step/i);
+    expect(system).toMatch(/contradictions are NOT failures/i);
+  });
+
   it('system prompt names the three failure categories', () => {
     // Arrange / Act
     const { system } = buildSeriousnessJudgePrompt(makeInput());

@@ -230,6 +230,14 @@ export function buildReasoningTrace(
       label: "We've reached the end of the questions",
       tone: 'neutral',
     });
+  } else if (response.kind === 'contradiction_probe') {
+    steps.push({
+      kind: 'selection',
+      label: 'Checking before changing an earlier answer',
+      detail:
+        'Asking you to confirm the apparent change of heart — nothing is updated until you do.',
+      tone: 'caution',
+    });
   }
 
   return steps;

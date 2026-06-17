@@ -24,6 +24,8 @@ import {
   type SensitivitySeverity,
 } from '@/lib/app/questionnaire/types';
 import type { SensitivityNote } from '@/lib/app/questionnaire/sensitivity/types';
+import type { PendingContradiction } from '@/lib/app/questionnaire/contradiction/types';
+import { isRecord } from '@/lib/utils';
 import { toConfigView, CONFIG_SELECT } from '@/app/api/v1/app/questionnaires/_lib/detail';
 import type { AnsweredView, QuestionView } from '@/lib/app/questionnaire/selection';
 import type {
@@ -35,6 +37,29 @@ import type {
 
 /** How many prior turns of transcript to feed the capabilities (oldest → newest). */
 const RECENT_TURNS_WINDOW = 12;
+
+/**
+ * Parse the persisted `pendingContradiction` JSON into a {@link PendingContradiction}, or null when
+ * absent/malformed. Defensive: a bad row (manual edit / drift) degrades to "none pending" rather than
+ * crashing the turn.
+ */
+function parsePendingContradiction(raw: unknown): PendingContradiction | null {
+  if (!isRecord(raw)) return null;
+  const slotKeys = raw.slotKeys;
+  if (!Array.isArray(slotKeys) || !slotKeys.every((k): k is string => typeof k === 'string')) {
+    return null;
+  }
+  if (slotKeys.length === 0) return null;
+  if (typeof raw.explanation !== 'string' || typeof raw.statement !== 'string') return null;
+  if (typeof raw.raisedAtTurnIndex !== 'number') return null;
+  return {
+    slotKeys,
+    explanation: raw.explanation,
+    statement: raw.statement,
+    raisedAtTurnIndex: raw.raisedAtTurnIndex,
+    ...(typeof raw.suggestedProbe === 'string' ? { suggestedProbe: raw.suggestedProbe } : {}),
+  };
+}
 
 /** A slot projected into the richer shape the P4 capabilities read (incl. type config). */
 export interface CapabilitySlotView {
@@ -124,6 +149,9 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
       // the phraser so EVERY later question stays gentle (not just the disclosure turn).
       sensitivityLevel: true,
       sensitivityNotes: true,
+      // Probe-confirm contradiction flow: a `probe`-mode contradiction parked on a prior turn,
+      // awaiting this turn's confirmation. Null = none pending.
+      pendingContradiction: true,
       version: {
         select: {
           // Version framing for the conversational question phraser (F6 interviewer).
@@ -340,6 +368,10 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
         .filter((s): s is string => typeof s === 'string' && s.length > 0)
     : [];
 
+  // Probe-confirm flow: parse the parked contradiction defensively (it's persisted JSON). A malformed
+  // row (manual edit, schema drift) reads as "none pending" rather than crashing the turn.
+  const pendingContradiction = parsePendingContradiction(session.pendingContradiction);
+
   const audience = toTurnAudience(session.version.audience);
   const meta: TurnMeta = {
     ...(typeof session.version.goal === 'string' ? { goal: session.version.goal } : {}),
@@ -372,6 +404,8 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
       // Sensitivity awareness: the remembered disclosure level + summaries (gentle-tone memory).
       sensitivityLevel,
       sensitivityNotes,
+      // Probe-confirm flow: the parked contradiction awaiting confirmation (null when none).
+      pendingContradiction,
       // Monotonic per-turn counter (the engine contract selection-context.ts calls out):
       // the TRUE number of turns already taken (not the windowed `turns` array, whose length
       // saturates at RECENT_TURNS_WINDOW), so the `random` strategy's session+round seed keeps

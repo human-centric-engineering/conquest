@@ -113,6 +113,14 @@ describe('selectNextDataSlot — fail-soft guards', () => {
     });
     expect(await selectNextDataSlot(ctx())).toBeNull();
   });
+
+  it('returns null for an anonymous session without embedding or calling the selector', async () => {
+    // The selector's streamChat persists an AiConversation keyed to a real user; an anon session's
+    // synthetic userId has no user row, so we must never reach it — defer to the deterministic pick.
+    expect(await selectNextDataSlot(ctx({ anonymous: true }))).toBeNull();
+    expect(embedText).not.toHaveBeenCalled();
+    expect(drainStreamChat).not.toHaveBeenCalled();
+  });
 });
 
 describe('selectNextDataSlot — happy path', () => {

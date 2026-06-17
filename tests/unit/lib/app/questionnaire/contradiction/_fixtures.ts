@@ -50,6 +50,7 @@ export function ctx(input: {
   slots?: ContradictionSlotView[];
   mode?: ContradictionContext['mode'];
   windowN?: number;
+  currentStatement?: string;
   sessionId?: string;
 }): ContradictionContext {
   const slots = input.slots ?? input.answers.map((a) => slot({ key: a.slotKey }));
@@ -58,6 +59,7 @@ export function ctx(input: {
     answers: input.answers,
     mode: input.mode ?? 'flag',
     windowN: input.windowN ?? 0,
+    ...(input.currentStatement !== undefined ? { currentStatement: input.currentStatement } : {}),
     sessionId: input.sessionId ?? 'sess-1',
   };
 }

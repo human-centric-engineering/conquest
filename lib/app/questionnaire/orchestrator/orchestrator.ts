@@ -20,12 +20,14 @@
 
 import {
   COMPOSE_COMPLETION_OFFER_CAPABILITY_SLUG,
-  DETECT_CONTRADICTIONS_CAPABILITY_SLUG,
   EXTRACT_ANSWER_SLOTS_CAPABILITY_SLUG,
-  REFINE_ANSWER_CAPABILITY_SLUG,
 } from '@/lib/app/questionnaire/constants';
 import { assessCompletion } from '@/lib/app/questionnaire/completion/completion-logic';
-import { shouldRunDetection } from '@/lib/app/questionnaire/contradiction';
+import {
+  runContradictionPhase,
+  questionProbeLabels,
+  MIN_CONTRADICTION_ANSWERS as MIN_CONTRADICTION_ANSWERS_INTERNAL,
+} from '@/lib/app/questionnaire/orchestrator/contradiction-phase';
 import {
   evaluateAbuseStrike,
   keywordAbuseFloor,
@@ -64,8 +66,9 @@ export const ASSESS_SERIOUSNESS_TOOL_SLUG = 'app_assess_seriousness';
 /** Synthetic slug recorded on a turn's `toolCalls` for the dedicated sensitivity-detector step. */
 export const DETECT_SENSITIVITY_TOOL_SLUG = 'app_detect_sensitivity';
 
-/** Fewest answers a contradiction pass needs — the detector capability enforces `min(2)`. */
-export const MIN_CONTRADICTION_ANSWERS = 2;
+/** Fewest answers a contradiction pass needs — the detector capability enforces `min(2)`.
+ *  Re-exported from the shared contradiction phase so the constant has a single source. */
+export const MIN_CONTRADICTION_ANSWERS = MIN_CONTRADICTION_ANSWERS_INTERNAL;
 
 /** Deterministic fallback prose for the terminal branches (offer phrasing is the LLM's job). */
 export const COMPLETE_MESSAGE =
@@ -312,56 +315,25 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
   // 2. Merge the extracted intents so the rest of the pipeline sees the answer just given.
   const effective = applyIntents(state, answerUpserts);
 
-  // 3. Detect contradictions over the effective answers. A contradiction needs ≥2 answers
-  //    to compare, and the detector capability enforces that (`answers.min(2)`); skip the
-  //    dispatch below that floor so an early turn doesn't surface a spurious validation
-  //    warning or record a failed tool-call.
-  // `shouldRunDetection` folds in the mode (off → never) AND the `every_n_turns`
-  // cadence (run only on a turn boundary); `selectionRound` is the zero-based turn index.
-  const detection = shouldRunDetection(
-    effective.config.contradictionMode,
-    effective.config.contradictionWindowN,
-    'turn',
-    {
-      everyNTurns: effective.config.contradictionEveryNTurns,
-      turnIndex: effective.selectionRound,
-    }
-  );
-  if (
-    detection.run &&
-    effective.flags.contradiction &&
-    effective.existingAnswers.length >= MIN_CONTRADICTION_ANSWERS
-  ) {
-    const out = await invokers.detectContradictions(effective);
-    costUsd += out.costUsd;
-    toolCalls.push(
-      toolCall(DETECT_CONTRADICTIONS_CAPABILITY_SLUG, out.diagnostic === undefined, {
-        ...(out.diagnostic !== undefined ? { code: out.diagnostic } : {}),
-        ...(out.latencyMs !== undefined ? { latencyMs: out.latencyMs } : {}),
-      })
-    );
-    contradictions = out.findings;
-    for (const finding of out.findings) {
-      events.push({
-        type: 'warning',
-        code: 'contradiction',
-        message: finding.suggestedProbe ?? finding.explanation,
-      });
-    }
-  }
-
-  // 4. Refine — contradiction-driven (the PR2 trigger; clarification-only refinement is future work).
-  if (contradictions.length > 0 && effective.flags.refinement) {
-    const out = await invokers.refineAnswer(effective, { contradiction: contradictions[0] });
-    costUsd += out.costUsd;
-    toolCalls.push(
-      toolCall(REFINE_ANSWER_CAPABILITY_SLUG, out.diagnostic === undefined, {
-        ...(out.diagnostic !== undefined ? { code: out.diagnostic } : {}),
-        ...(out.latencyMs !== undefined ? { latencyMs: out.latencyMs } : {}),
-      })
-    );
-    answerRefinements = out.decisions;
-  }
+  // 3–4. Contradiction phase (F4.3 detect + F4.4 refine + the probe-confirm flow). Resolves a probe
+  //       raised on a prior turn, or detects afresh: under `probe` mode a fresh contradiction DEFERS
+  //       (ask a reconciliation question, suppress this turn's writes, park the finding); under `flag`
+  //       mode it surfaces the explanation AND refines immediately. See `contradiction-phase.ts`.
+  const contradiction = await runContradictionPhase(effective, invokers, {
+    hasMessage,
+    disregarded,
+    dataMode: false,
+    labels: questionProbeLabels(effective.questions),
+    // Detect against the PRE-merge answers so a value this turn's extraction overwrote stays visible.
+    priorAnswers: state.existingAnswers,
+  });
+  costUsd += contradiction.costUsd;
+  toolCalls.push(...contradiction.toolCalls);
+  events.push(...contradiction.events);
+  contradictions = contradiction.contradictions;
+  answerRefinements = contradiction.answerRefinements;
+  // Probe raised → nothing is recorded until the respondent confirms next turn.
+  if (contradiction.suppressWrites) answerUpserts.length = 0;
 
   // 5. Assess completion (pure, free, always).
   const assessment = assessCompletion({
@@ -386,7 +358,16 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
   // selected nothing). See `lib/app/questionnaire/reasoning`.
   let selectionRationale: string | undefined;
 
-  if (assessment.kind === 'offer' || offerEarly) {
+  if (contradiction.probe) {
+    // Probe-confirm flow: ask the reconciliation question instead of selecting the next question.
+    // Nothing is selected/overwritten this turn; the pending finding is persisted (below).
+    response = {
+      kind: 'contradiction_probe',
+      text: contradiction.probe.text,
+      slotKeys: contradiction.probe.slotKeys,
+    };
+    targetedQuestionId = null;
+  } else if (assessment.kind === 'offer' || offerEarly) {
     if (effective.flags.completion) {
       // Offer turn: the route streams the composed prose; the core hands it the input.
       toolCalls.push(toolCall(COMPOSE_COMPLETION_OFFER_CAPABILITY_SLUG, true));
@@ -455,7 +436,13 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
     targetedQuestionId,
     ...(selectionRationale !== undefined ? { selectionRationale } : {}),
     selectionStrategy: state.config.selectionStrategy,
-    sideEffects: { answerUpserts, answerRefinements },
+    sideEffects: {
+      answerUpserts,
+      answerRefinements,
+      ...(contradiction.pendingContradiction !== undefined
+        ? { pendingContradiction: contradiction.pendingContradiction }
+        : {}),
+    },
     events,
     toolCalls,
     costUsd,

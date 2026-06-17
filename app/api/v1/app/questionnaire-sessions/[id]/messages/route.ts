@@ -465,6 +465,9 @@ async function handleMessage(
       // Data Slots feature: feed the data slots so the SAME extraction call fills them too (narrowed
       // by the pre-filter when active).
       ...(dataSlotMode ? { dataSlotCandidates: extractionDataCandidates } : {}),
+      // Anonymous (no-login) session: the adaptive selectors skip the LLM pick (its `streamChat`
+      // would FK-violate on the synthetic `anon:<sessionId>` user) and fall back to deterministic.
+      ...(access.anonymous ? { anonymous: true } : {}),
     });
 
     const keyToSlotId = new Map(loaded.slots.map((s) => [s.key, s.id]));
@@ -689,6 +692,10 @@ async function handleMessage(
           costUsd,
           upserts: result.sideEffects.answerUpserts,
           refinements: result.sideEffects.answerRefinements,
+          // Probe-confirm flow: park a raised probe / clear a resolved one (undefined = leave as-is).
+          ...(result.sideEffects.pendingContradiction !== undefined
+            ? { pendingContradiction: result.sideEffects.pendingContradiction }
+            : {}),
           keyToSlotId,
           // Data Slots feature: persist the respondent-facing fills captured this turn + which
           // data slot this turn targeted (the re-ask/park counter source).

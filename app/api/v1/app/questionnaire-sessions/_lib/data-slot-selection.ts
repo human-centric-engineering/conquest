@@ -56,6 +56,14 @@ export interface DataSlotSelectionContext {
   sessionId: string;
   /** The admin/respondent the selector runs on behalf of (budget attribution). */
   userId: string;
+  /**
+   * Anonymous (no-login) session. The selector AGENT runs through `streamChat`, which persists an
+   * `AiConversation` keyed to a real `user` — but an anonymous turn's `userId` is the synthetic
+   * `anon:<sessionId>` with no `user` row, so the insert violates the FK and the stream 500s every
+   * turn. With no ephemeral-chat seam in the platform handler, skip the LLM pick for anonymous
+   * sessions and defer to the deterministic topic-local pick. See `turn-access.ts`.
+   */
+  anonymous?: boolean;
   /** Inspector sink (admin preview only); when present, a successful embed records one trace. */
   recordInspectorCall?: RecordAgentCall;
 }
@@ -122,6 +130,9 @@ export async function selectNextDataSlot(
   const lastMessage = ctx.recentMessages[ctx.recentMessages.length - 1]?.trim();
   // No conversation yet, or only one option — nothing to rank/choose, let the deterministic pick run.
   if (!lastMessage || ctx.unfilled.length < 2) return null;
+  // Anonymous session: the selector agent's `streamChat` would FK-violate on the synthetic
+  // `anon:<sessionId>` user (no ephemeral-chat seam) — defer to the deterministic topic-local pick.
+  if (ctx.anonymous) return null;
 
   try {
     const startedAt = Date.now();
