@@ -80,7 +80,13 @@ describe('createSessionFromInvitation', () => {
     expect(result).toEqual({ ok: true, session: NEW_SESSION, resumed: false });
     expect(mocks.tx.appQuestionnaireSession.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: { versionId: 'v1', respondentUserId: USER, isPreview: false, status: 'active' },
+        data: {
+          versionId: 'v1',
+          respondentUserId: USER,
+          publicRef: expect.stringMatching(/^[0-9A-HJKMNP-TV-Z]{8}$/),
+          isPreview: false,
+          status: 'active',
+        },
       })
     );
     expect(seamMock.recordSessionCreated).toHaveBeenCalledWith('sess-new', { tx: mocks.tx });
@@ -163,7 +169,13 @@ describe('createSessionForVersion (authed anonymous-direct)', () => {
     expect(result).toEqual({ ok: true, session: NEW_SESSION, resumed: false });
     expect(mocks.tx.appQuestionnaireSession.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: { versionId: 'v1', respondentUserId: USER, isPreview: false, status: 'active' },
+        data: {
+          versionId: 'v1',
+          respondentUserId: USER,
+          publicRef: expect.stringMatching(/^[0-9A-HJKMNP-TV-Z]{8}$/),
+          isPreview: false,
+          status: 'active',
+        },
       })
     );
     expect(seamMock.recordSessionCreated).toHaveBeenCalledWith('sess-new', { tx: mocks.tx });
@@ -222,7 +234,13 @@ describe('createAnonymousSession (no-login)', () => {
     expect(result).toEqual({ ok: true, session: NEW_SESSION, resumed: false });
     expect(mocks.tx.appQuestionnaireSession.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: { versionId: 'v1', respondentUserId: null, isPreview: false, status: 'active' },
+        data: {
+          versionId: 'v1',
+          respondentUserId: null,
+          publicRef: expect.stringMatching(/^[0-9A-HJKMNP-TV-Z]{8}$/),
+          isPreview: false,
+          status: 'active',
+        },
       })
     );
     expect(seamMock.recordSessionCreated).toHaveBeenCalledWith('sess-new', { tx: mocks.tx });
@@ -256,7 +274,13 @@ describe('createPreviewSession (admin preview)', () => {
     expect(result).toEqual({ ok: true, session: NEW_SESSION, resumed: false });
     expect(mocks.tx.appQuestionnaireSession.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: { versionId: 'v1', respondentUserId: null, isPreview: true, status: 'active' },
+        data: {
+          versionId: 'v1',
+          respondentUserId: null,
+          publicRef: expect.stringMatching(/^[0-9A-HJKMNP-TV-Z]{8}$/),
+          isPreview: true,
+          status: 'active',
+        },
       })
     );
     expect(seamMock.recordSessionCreated).toHaveBeenCalledWith('sess-new', {

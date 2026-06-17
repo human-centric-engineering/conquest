@@ -192,6 +192,7 @@ export function SessionWorkspace({
         sessionId={sessionId}
         accessToken={accessToken}
         answeredCount={lifecycle.view?.completion.answeredCount ?? null}
+        refRaw={lifecycle.view?.ref ?? null}
       />
     );
   }

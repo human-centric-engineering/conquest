@@ -38,11 +38,17 @@ function input(over: Partial<SessionStatusInput> = {}): SessionStatusInput {
     costTier: 'none',
     capped: false,
     anonymous: false,
+    ref: null,
     ...over,
   };
 }
 
 describe('buildSessionStatusView', () => {
+  it('passes the support reference through (null when absent)', () => {
+    expect(buildSessionStatusView(input({ ref: '7F3K9M2P' })).ref).toBe('7F3K9M2P');
+    expect(buildSessionStatusView(input({ ref: null })).ref).toBeNull();
+  });
+
   it('projects the completion slice from the assessment', () => {
     const view = buildSessionStatusView(
       input({

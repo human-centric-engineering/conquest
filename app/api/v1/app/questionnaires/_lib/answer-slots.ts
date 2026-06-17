@@ -20,6 +20,7 @@
 
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db/client';
+import { generateSessionRef } from '@/lib/app/questionnaire/session-ref';
 import {
   ANSWER_PROVENANCES,
   narrowToEnum,
@@ -77,7 +78,7 @@ export async function getOrCreatePreviewSession(versionId: string): Promise<stri
 
   try {
     const created = await prisma.appQuestionnaireSession.create({
-      data: { versionId, isPreview: true, status: 'active' },
+      data: { versionId, publicRef: generateSessionRef(), isPreview: true, status: 'active' },
       select: { id: true },
     });
     return created.id;

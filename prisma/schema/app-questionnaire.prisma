@@ -471,6 +471,12 @@ model AppDemoClient {
 model AppQuestionnaireSession {
   id                   String   @id @default(cuid())
   versionId            String
+  // Short, human-readable support reference shown to the respondent ("Ref: 7F3K-9M2P"). Stored as
+  // the raw 8-char Crockford base32 (no dash; the UI groups it), generated at creation by every
+  // create path (session-ref.ts). A respondent quotes it when reporting a bad experience so an
+  // admin can look the session up and re-evaluate its saved turns. Nullable + @unique: Postgres
+  // permits many NULLs under a unique index, so rows predating this column simply carry none.
+  publicRef            String?  @unique
   status               String   @default("active") // SESSION_STATUSES (types.ts): active | paused | completed | abandoned | aborted
   isPreview            Boolean  @default(false) // true = admin refine-answer exercise, not a respondent run
   respondentUserId     String? // respondent User.id; plain String, no FK (UG-1); set in F4.6
