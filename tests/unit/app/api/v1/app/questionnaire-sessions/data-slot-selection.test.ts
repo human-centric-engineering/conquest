@@ -156,6 +156,29 @@ describe('selectNextDataSlot — inspector capture', () => {
 
     expect(recordInspectorCall).not.toHaveBeenCalled();
   });
+
+  it('also records the selector LLM pick (cost + tokens + prompt/response)', async () => {
+    (drainStreamChat as unknown as Mock).mockResolvedValue({
+      assistantText: '{"choice": 1, "rationale": "follows naturally"}',
+      costUsd: 0.003,
+      latencyMs: 540,
+      tokenUsage: { input: 220, output: 18 },
+      errorCode: null,
+    });
+    const recordInspectorCall = vi.fn();
+    await selectNextDataSlot(ctx({ recordInspectorCall }));
+
+    // Two traces this turn: the embedding ranking, then the selector LLM pick.
+    const labels = recordInspectorCall.mock.calls.map((c) => c[0].label);
+    expect(labels).toEqual(['Adaptive data-slot ranking', 'Data-slot selector']);
+    const pick = recordInspectorCall.mock.calls[1][0];
+    expect(pick.kind).toBeUndefined(); // an LLM call, not an embedding
+    expect(pick.costUsd).toBe(0.003);
+    expect(pick.tokensIn).toBe(220);
+    expect(pick.tokensOut).toBe(18);
+    expect(pick.prompt[0].content).toContain('Candidate topics to explore next');
+    expect(pick.response).toContain('"choice": 1');
+  });
 });
 
 describe('buildDataSlotSelectorPrompt', () => {

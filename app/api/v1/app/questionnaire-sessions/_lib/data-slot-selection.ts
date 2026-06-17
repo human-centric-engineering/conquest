@@ -170,15 +170,29 @@ export async function selectNextDataSlot(
     const candidates = pool.slice(0, DATA_SLOT_CANDIDATE_K);
     if (candidates.length < 2) return null;
 
+    const selectorMessage = buildDataSlotSelectorPrompt(ctx, candidates);
     const result = await drainStreamChat({
       agentSlug: QUESTIONNAIRE_SELECTOR_AGENT_SLUG,
       userId: ctx.userId,
-      message: buildDataSlotSelectorPrompt(ctx, candidates),
+      message: selectorMessage,
       entityContext: {
         source: 'app_questionnaire_data_slot_selection',
         appQuestionnaireSessionId: ctx.sessionId,
       },
       costLogMetadata: { appQuestionnaireSessionId: ctx.sessionId },
+    });
+    // Surface the LLM pick in the inspector (admin preview only) — the embedding ranking was already
+    // traced; this is the agent that actually chooses among the ranked candidates.
+    ctx.recordInspectorCall?.({
+      label: 'Data-slot selector',
+      model: '',
+      provider: '',
+      latencyMs: result.latencyMs,
+      costUsd: result.costUsd,
+      tokensIn: result.tokenUsage.input,
+      tokensOut: result.tokenUsage.output,
+      prompt: [{ role: 'user', content: selectorMessage }],
+      response: result.errorCode ? `(selector error: ${result.errorCode})` : result.assistantText,
     });
     if (result.errorCode) return null;
 

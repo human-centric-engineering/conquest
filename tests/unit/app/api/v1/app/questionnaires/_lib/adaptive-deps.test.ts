@@ -185,6 +185,23 @@ describe('buildAdaptiveDeps — llmPick', () => {
     );
   });
 
+  it('records the selector LLM pick in the inspector when a sink is supplied', async () => {
+    (drainStreamChat as unknown as Mock).mockResolvedValue(
+      drainResult({ assistantText: '{"choice": 2, "rationale": "flows"}', costUsd: 0.004 })
+    );
+    const recordInspectorCall = vi.fn();
+    const d = buildAdaptiveDeps({ userId: 'admin-1', recordInspectorCall });
+    await d.llmPick(input);
+
+    expect(recordInspectorCall).toHaveBeenCalledTimes(1);
+    const trace = recordInspectorCall.mock.calls[0][0];
+    expect(trace.label).toBe('Question selector');
+    expect(trace.kind).toBeUndefined(); // an LLM call, not an embedding
+    expect(trace.costUsd).toBe(0.004);
+    expect(trace.prompt[0].content).toContain('Candidate questions to ask next');
+    expect(trace.response).toContain('"choice": 2');
+  });
+
   it('returns a null pick when the selector chooses 0 (none)', async () => {
     (drainStreamChat as unknown as Mock).mockResolvedValue(
       drainResult({ assistantText: '{"choice": 0, "rationale": "nothing fits"}', costUsd: 0.001 })

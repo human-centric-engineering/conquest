@@ -98,16 +98,34 @@ export function parseSelectorOutput(raw: string): SelectorOutput | null {
  * candidates. Never throws — a stream error or unparseable reply returns a null
  * pick so the strategy falls back to `weighted`.
  */
-async function runSelectorAgent(input: LlmPickInput, userId: string): Promise<LlmPickResult> {
+async function runSelectorAgent(
+  input: LlmPickInput,
+  userId: string,
+  recordInspectorCall?: RecordAgentCall
+): Promise<LlmPickResult> {
+  const selectorMessage = buildSelectorPrompt(input);
   const result = await drainStreamChat({
     agentSlug: QUESTIONNAIRE_SELECTOR_AGENT_SLUG,
     userId,
-    message: buildSelectorPrompt(input),
+    message: selectorMessage,
     entityContext: {
       source: 'app_questionnaire_selection',
       appQuestionnaireSessionId: input.sessionId,
     },
     costLogMetadata: { appQuestionnaireSessionId: input.sessionId },
+  });
+  // Surface the LLM pick in the inspector (admin preview only) — the embedding ranking was already
+  // traced; this is the agent that actually chooses among the ranked candidates.
+  recordInspectorCall?.({
+    label: 'Question selector',
+    model: '',
+    provider: '',
+    latencyMs: result.latencyMs,
+    costUsd: result.costUsd,
+    tokensIn: result.tokenUsage.input,
+    tokensOut: result.tokenUsage.output,
+    prompt: [{ role: 'user', content: selectorMessage }],
+    response: result.errorCode ? `(selector error: ${result.errorCode})` : result.assistantText,
   });
 
   if (result.errorCode) {
@@ -174,6 +192,6 @@ export function buildAdaptiveDeps(opts: {
       return result.embedding;
     },
     rankByVector: (embedding, candidateIds, k) => rankSlotsByVector(embedding, candidateIds, k),
-    llmPick: (input) => runSelectorAgent(input, opts.userId),
+    llmPick: (input) => runSelectorAgent(input, opts.userId, opts.recordInspectorCall),
   };
 }
