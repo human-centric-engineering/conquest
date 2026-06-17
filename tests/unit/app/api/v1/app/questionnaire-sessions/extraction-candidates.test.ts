@@ -12,9 +12,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('@/lib/orchestration/knowledge/embedder', () => ({ embedText: vi.fn() }));
 vi.mock('@/app/api/v1/app/questionnaires/_lib/slot-embeddings', () => ({
   rankSlotsByVector: vi.fn(),
+  rankSlotsByText: vi.fn(),
+  findDuplicateSlotIds: vi.fn(),
 }));
 vi.mock('@/app/api/v1/app/questionnaires/_lib/data-slot-embeddings', () => ({
   rankDataSlotsByVector: vi.fn(),
+  rankDataSlotsByText: vi.fn(),
 }));
 
 import {
@@ -23,8 +26,15 @@ import {
   type ExtractionCandidateInput,
 } from '@/app/api/v1/app/questionnaire-sessions/_lib/extraction-candidates';
 import { embedText } from '@/lib/orchestration/knowledge/embedder';
-import { rankSlotsByVector } from '@/app/api/v1/app/questionnaires/_lib/slot-embeddings';
-import { rankDataSlotsByVector } from '@/app/api/v1/app/questionnaires/_lib/data-slot-embeddings';
+import {
+  rankSlotsByVector,
+  rankSlotsByText,
+  findDuplicateSlotIds,
+} from '@/app/api/v1/app/questionnaires/_lib/slot-embeddings';
+import {
+  rankDataSlotsByVector,
+  rankDataSlotsByText,
+} from '@/app/api/v1/app/questionnaires/_lib/data-slot-embeddings';
 import type { CapabilitySlotView } from '@/app/api/v1/app/questionnaires/_lib/turn-context';
 
 type Mock = ReturnType<typeof vi.fn>;
@@ -98,6 +108,11 @@ beforeEach(() => {
   // Default: similarity ranks a couple of slots that are NOT otherwise forced.
   (rankSlotsByVector as unknown as Mock).mockResolvedValue(['q5', 'q6']);
   (rankDataSlotsByVector as unknown as Mock).mockResolvedValue(['d9', 'd10']);
+  // Hybrid lexical rankers + twin rail default to empty (no lexical hits, no duplicates) so the
+  // existing dense-only assertions are unaffected; per-test overrides exercise them.
+  (rankSlotsByText as unknown as Mock).mockResolvedValue([]);
+  (rankDataSlotsByText as unknown as Mock).mockResolvedValue([]);
+  (findDuplicateSlotIds as unknown as Mock).mockResolvedValue([]);
 });
 
 describe('narrowExtractionCandidates — safety rails', () => {
@@ -210,6 +225,51 @@ describe('narrowExtractionCandidates — no-op + fail-soft', () => {
     expect(r.applied).toBe(true);
     expect(r.questionSlots.map((s) => s.key)).toEqual(expect.arrayContaining(['q0', 'q5', 'q6']));
     expect(r.dataSlotsOut).toBe(0);
+  });
+});
+
+describe('narrowExtractionCandidates — hybrid retrieval (BM25) + twin rail', () => {
+  it('UNIONs the lexical (BM25) hits with the dense top-K for questions and data slots', async () => {
+    // A question/data slot the DENSE vector ranked out, but the lexical search surfaced.
+    (rankSlotsByText as unknown as Mock).mockResolvedValue(['q20']);
+    (rankDataSlotsByText as unknown as Mock).mockResolvedValue(['d3']);
+
+    const r = await narrowExtractionCandidates(input());
+    // Dense (q5/q6) ∪ lexical (q20) are all kept.
+    expect(r.questionSlots.map((s) => s.key)).toEqual(expect.arrayContaining(['q5', 'q6', 'q20']));
+    expect(r.dataSlots.map((s) => s.key)).toEqual(expect.arrayContaining(['d9', 'd10', 'd3']));
+    // The lexical ranker was queried with the respondent's last message.
+    expect(rankSlotsByText).toHaveBeenCalledWith(
+      'the respondent just said something',
+      expect.any(Array),
+      expect.any(Number)
+    );
+  });
+
+  it('pulls in near-duplicate questions of the kept set (twin-inclusion rail)', async () => {
+    // q7 is a near-duplicate of a kept question (not dense-ranked, not forced) → still kept.
+    (findDuplicateSlotIds as unknown as Mock).mockResolvedValue(['q7']);
+
+    const r = await narrowExtractionCandidates(input());
+    expect(r.questionSlots.map((s) => s.key)).toEqual(expect.arrayContaining(['q5', 'q6', 'q7']));
+    // The rail searches for duplicates of the KEPT question ids (dense q5/q6 by default).
+    expect(findDuplicateSlotIds).toHaveBeenCalledWith(
+      expect.arrayContaining(['q5', 'q6']),
+      expect.any(Array),
+      expect.any(Number)
+    );
+  });
+
+  it('still bails to the full set on an un-embedded version even when lexical has hits', async () => {
+    // Dense empty (un-embedded) but lexical finds something — the fail-soft bail keys on DENSE,
+    // because lexical alone is too sparse to safely narrow on.
+    (rankDataSlotsByVector as unknown as Mock).mockResolvedValue([]);
+    (rankDataSlotsByText as unknown as Mock).mockResolvedValue(['d9']);
+
+    const r = await narrowExtractionCandidates(input());
+    expect(r.applied).toBe(false);
+    expect(r.reason).toBe('no_embeddings');
+    expect(r.dataSlotsOut).toBe(12);
   });
 });
 

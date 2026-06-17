@@ -90,12 +90,19 @@ userMessage, recentMessages?, sessionId }`, all in memory. `ExtractionSlotView`
   It is **behaviour-preserving**:
   hard safety rails always retain the active slot, **every data slot that already has a
   fill** (the cross-turn re-scan/enrichment guarantee), same-theme unfilled slots, and a
-  kept slot's mapped questions — then add the top-K most similar. It is **fail-soft**
-  (no message / embed error / un-embedded version → full set) and a **no-op below a size
-  threshold**. Crucially the narrowed set is threaded as a **separate** `extractionCandidateSlots`
-  opt to `buildTurnInvokers` — the contradiction detector + refiner keep the **full** `slots`,
-  so only the extractor's prompt shrinks. When off (the default), the extractor gets the full set.
-  See the runtime roadmap in [selection-strategies.md].
+  kept slot's mapped questions — then add the top-K most similar. **Ranking is hybrid:** the
+  dense vector top-K is **UNION**ed with a lexical (BM25-style, Postgres `ts_rank_cd` /
+  `plainto_tsquery`) top-K (`rankSlotsByText` / `rankDataSlotsByText`), so an exact term the
+  respondent used surfaces its slot even when a multi-topic message dilutes the dense vector below
+  the cut. A **twin-inclusion rail** (`findDuplicateSlotIds`, embedding self-similarity ≥ 0.93) then
+  pulls in near-duplicate copies of any kept question, so a clear answer lands on **every** reworded
+  copy. `questionK`/`dataSlotK` default to 40/18 (the pre-filter is now opt-in for large surveys, so
+  a more generous K is safe). It is **fail-soft** (no message / embed error / un-embedded version →
+  full set — the un-embedded bail keys on the _dense_ result, since lexical alone is too sparse to
+  narrow on) and a **no-op below a size threshold**. Crucially the narrowed set is threaded as a
+  **separate** `extractionCandidateSlots` opt to `buildTurnInvokers` — the contradiction detector +
+  refiner keep the **full** `slots`, so only the extractor's prompt shrinks. When off (the default),
+  the extractor gets the full set. See the runtime roadmap in [selection-strategies.md].
 - **Near-identical (twin) questions.** A questionnaire may include several questions that
   ask essentially the same thing in different words (poor authoring, but inevitable). The
   extractor prompt instructs the model to treat each candidate **independently** and emit a
