@@ -29,6 +29,16 @@ describe('buildRefinementPrompt', () => {
     expect(system?.content).toMatch(/leave/);
   });
 
+  it('frames the rules and the new context in named XML sections', () => {
+    const [system, user] = buildRefinementPrompt(
+      ctx({ existingAnswers: [existing({ slotKey: 'a' })], userMessage: 'I misspoke' })
+    );
+    expect(system?.content).toContain('<refinement_rules>');
+    const u = typeof user?.content === 'string' ? user.content : '';
+    expect(u).toContain('<existing_answers>');
+    expect(u).toContain('<new_message>');
+  });
+
   it('renders each existing answer with its current value and provenance', () => {
     const messages = buildRefinementPrompt(
       ctx({

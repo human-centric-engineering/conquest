@@ -14,6 +14,7 @@
  */
 
 import type { LlmMessage } from '@/lib/orchestration/llm/types';
+import { joinSections, section, titledBlock } from '@/lib/app/questionnaire/prompt/format';
 
 /** One question, identified for the recap (no respondent values — PII stays out). */
 export interface CompletionPromptSlot {
@@ -72,33 +73,38 @@ function slotLines(slots: CompletionPromptSlot[]): string {
  * recent conversation for tone.
  */
 export function buildCompletionOfferPrompt(input: CompletionOfferPromptInput): LlmMessage[] {
-  const sections: string[] = [];
+  const status = input.capReached
+    ? `Status: the per-session question cap has been reached, so it's time to wrap up.`
+    : `Status: coverage is ${pct(input.coverage)} with ${input.answeredCount} question(s) answered — enough to submit.`;
 
-  sections.push(
-    input.capReached
-      ? `Status: the per-session question cap has been reached, so it's time to wrap up.`
-      : `Status: coverage is ${pct(input.coverage)} with ${input.answeredCount} question(s) answered — enough to submit.`
-  );
-
-  sections.push(
+  const covered =
     input.coveredSlots.length > 0
-      ? `Questions covered:\n${slotLines(input.coveredSlots)}`
-      : `Questions covered: (none recorded)`
+      ? titledBlock('Questions covered', slotLines(input.coveredSlots))
+      : `Questions covered: (none recorded)`;
+
+  // Named XML sections so the status, recap, optional list, and tone transcript are clearly
+  // separable. Section text is unchanged; absent parts collapse to nothing.
+  const userContent = joinSections(
+    section('status', status),
+    section('covered', covered),
+    input.remainingSlots.length > 0
+      ? section(
+          'remaining',
+          titledBlock('Optional questions still open', slotLines(input.remainingSlots))
+        )
+      : '',
+    input.recentMessages.length > 0
+      ? section(
+          'transcript',
+          titledBlock('Recent conversation (oldest → newest)', input.recentMessages.join('\n'))
+        )
+      : '',
+    section('task', 'Compose the offer to submit now.')
   );
-
-  if (input.remainingSlots.length > 0) {
-    sections.push(`Optional questions still open:\n${slotLines(input.remainingSlots)}`);
-  }
-
-  if (input.recentMessages.length > 0) {
-    sections.push(`Recent conversation (oldest → newest):\n${input.recentMessages.join('\n')}`);
-  }
-
-  sections.push(`Compose the offer to submit now.`);
 
   return [
-    { role: 'system', content: systemRules() },
-    { role: 'user', content: sections.join('\n\n') },
+    { role: 'system', content: section('completion_rules', systemRules()) },
+    { role: 'user', content: userContent },
   ];
 }
 

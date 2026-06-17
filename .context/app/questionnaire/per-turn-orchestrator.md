@@ -50,6 +50,18 @@ tone to the version's `goal`/`audience` (role, expertise, sensitivity, locale), 
 conversationally** when the prior answer wasn't captured (`isReask` = this turn re-selected the
 question the previous turn asked).
 
+**Prompt structure (XML sections).** The interviewer prompt — and the other capability prompts
+(the two adaptive selectors, the answer extractor, refiner, and completion-offer composer) — are
+assembled with the shared formatter `lib/app/questionnaire/prompt/format.ts`
+(`section`/`joinSections`/`bulletList`/`numberedList`/`titledBlock`/`jsonOutputContract`). It frames
+each prompt as XML-tagged sections (`<role>`, `<rules>`, `<this_turn>`, `<context>`, `<tone>`,
+`<output_format>`, …) — chosen over Markdown headers because the interviewer may emit Markdown in its
+reply, so tags can't collide with output. Empty input collapses to `''`, so optional sections (tone,
+prior answers) stay free. The instructional text is unchanged; the structure just makes section
+boundaries legible to the model, the admin Prompt Library, and the Turn Inspector. Notably, the
+admin-configured **tone & persona** clauses (`buildToneInstructions`) render inside an explicit
+`<tone>` section, so it's obvious in the inspector when a version's voice is actually applied.
+
 **Continuity from prior answers.** The phraser also receives a short `priorAnswers` digest —
 "what they've already shared this session" — built by `_lib/prior-answers.ts`
 (`buildPriorAnswersDigest`): the confidently-filled, non-provisional data slots rendered as

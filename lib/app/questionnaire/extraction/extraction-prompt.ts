@@ -10,6 +10,7 @@
  */
 
 import type { ContentPart, LlmMessage } from '@/lib/orchestration/llm/types';
+import { joinSections, section } from '@/lib/app/questionnaire/prompt/format';
 import { EXTRACTOR_EMITTED_PROVENANCES } from '@/lib/app/questionnaire/types';
 import type {
   DataSlotCandidateView,
@@ -331,14 +332,18 @@ export function buildAnswerExtractionPrompt(ctx: ExtractionContext): LlmMessage[
   const candidates = ctx.candidateSlots.map(describeSlot).join('\n');
 
   // Data Slots feature: when present, the system rules + a candidate section are added so the
-  // model fills data slots in the same call.
+  // model fills data slots in the same call. Each rule block is wrapped in a named XML section so
+  // its boundaries are legible (in the prompt itself and in the admin Prompt Library / Turn
+  // Inspector); `section()` trims each constant's surrounding whitespace. The rule TEXT is unchanged.
   const hasDataSlots = ctx.dataSlotCandidates !== undefined && ctx.dataSlotCandidates.length > 0;
-  const systemContent =
-    (hasDataSlots ? SYSTEM_RULES + DATA_SLOT_RULES : SYSTEM_RULES) +
+  const systemContent = joinSections(
+    section('extraction_rules', SYSTEM_RULES),
+    hasDataSlots ? section('data_slot_rules', DATA_SLOT_RULES) : '',
     // Sensitivity block only when the feature is on — zero added prompt/tokens otherwise.
-    (ctx.sensitivityAware ? SENSITIVITY_RULES : '') +
+    ctx.sensitivityAware ? section('sensitivity_rules', SENSITIVITY_RULES) : '',
     // Answer-fit resolver pass: append the commit-to-a-fit framing (only on the focused 2nd call).
-    (ctx.forceFit ? FORCE_FIT_RULES : '');
+    ctx.forceFit ? section('resolution_pass_rules', FORCE_FIT_RULES) : ''
+  );
   const dataSlotSection = hasDataSlots
     ? `\n\nData slots (capture these — a primary deliverable, fill every one the message informs):\n${ctx.dataSlotCandidates!.map(describeDataSlot).join('\n')}`
     : '';

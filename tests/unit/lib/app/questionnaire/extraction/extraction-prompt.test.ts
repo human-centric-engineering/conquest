@@ -21,6 +21,25 @@ describe('buildAnswerExtractionPrompt', () => {
     expect(messages[1]?.role).toBe('user');
   });
 
+  it('wraps the rule blocks in named XML sections (data-slot section only with data slots)', () => {
+    const withoutDataSlots = buildAnswerExtractionPrompt(
+      ctx({ candidateSlots: [slot({ key: 'q1' })] })
+    );
+    const system =
+      typeof withoutDataSlots[0]?.content === 'string' ? withoutDataSlots[0].content : '';
+    expect(system).toContain('<extraction_rules>');
+    expect(system).not.toContain('<data_slot_rules>');
+
+    const withDataSlots = buildAnswerExtractionPrompt({
+      ...ctx({ candidateSlots: [slot({ key: 'q1' })] }),
+      dataSlotCandidates: [
+        { key: 'd1', name: 'Demographics', theme: 'about', description: 'age + gender' },
+      ],
+    });
+    const sys2 = typeof withDataSlots[0]?.content === 'string' ? withDataSlots[0].content : '';
+    expect(sys2).toContain('<data_slot_rules>');
+  });
+
   it('lists every emittable provenance label in the system rules', () => {
     const messages = buildAnswerExtractionPrompt(ctx({ candidateSlots: [slot({ key: 'q1' })] }));
     const system = typeof messages[0]?.content === 'string' ? messages[0].content : '';
