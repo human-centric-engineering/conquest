@@ -18,6 +18,16 @@ import { formatInspectorTurn } from '@/lib/app/questionnaire/inspector';
 import type { TurnEvaluationInput } from '@/lib/app/questionnaire/turn-evaluation/types';
 
 /**
+ * The rubric version stamped onto every persisted evaluation. A score is meaningless without
+ * knowing which rubric produced it, so this is recorded alongside the verdict and is a search
+ * facet. **Bump this whenever {@link SYSTEM_RUBRIC} (or the output contract it targets)
+ * changes in a way that could move scores** — major for a re-scoped rubric, minor for a
+ * tightened rule. Treat it like a migration: an edit to the rubric without a bump silently
+ * mixes incomparable verdicts under one version label.
+ */
+export const TURN_RUBRIC_VERSION = '1.0.0';
+
+/**
  * The evaluator's standing instructions. Condensed from the product spec: WHO it is, WHAT to
  * evaluate, the principles, and — critically — the rules that stop it hallucinating calls
  * that never ran or grading against outputs alone instead of the prompts that produced them.
