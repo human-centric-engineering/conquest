@@ -9,6 +9,7 @@ import {
   APP_QUESTIONNAIRES_ANSWER_REFINEMENT_FLAG,
   APP_QUESTIONNAIRES_COMPLETION_FLAG,
   APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG,
+  APP_QUESTIONNAIRES_TURN_EVALUATION_FLAG,
   APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG,
   APP_QUESTIONNAIRES_VOICE_INPUT_FLAG,
   APP_QUESTIONNAIRES_COST_CAP_FLAG,
@@ -19,9 +20,11 @@ import {
   ensureQuestionnairesEnabled,
   ensureLiveSessionsEnabled,
   ensureVoiceInputEnabled,
+  ensureTurnEvaluationEnabled,
   withQuestionnairesEnabled,
   withLiveSessionsEnabled,
   withVoiceInputEnabled,
+  withTurnEvaluationEnabled,
   isQuestionnairesEnabled,
   isAdaptiveSelectionEnabled,
   isAnswerExtractionEnabled,
@@ -29,6 +32,7 @@ import {
   isAnswerRefinementEnabled,
   isCompletionEnabled,
   isDesignEvaluationEnabled,
+  isTurnEvaluationEnabled,
   isLiveSessionsEnabled,
   isVoiceInputEnabled,
   isAttachmentInputEnabled,
@@ -65,6 +69,7 @@ const ALL_FLAGS = [
   APP_QUESTIONNAIRES_ANSWER_REFINEMENT_FLAG,
   APP_QUESTIONNAIRES_COMPLETION_FLAG,
   APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG,
+  APP_QUESTIONNAIRES_TURN_EVALUATION_FLAG,
   APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG,
   APP_QUESTIONNAIRES_VOICE_INPUT_FLAG,
   APP_QUESTIONNAIRES_COST_CAP_FLAG,
@@ -101,6 +106,9 @@ describe('questionnaire feature flag — flag names are stable', () => {
     expect(APP_QUESTIONNAIRES_COMPLETION_FLAG).toBe('APP_QUESTIONNAIRES_COMPLETION_ENABLED');
     expect(APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG).toBe(
       'APP_QUESTIONNAIRES_DESIGN_EVALUATION_ENABLED'
+    );
+    expect(APP_QUESTIONNAIRES_TURN_EVALUATION_FLAG).toBe(
+      'APP_QUESTIONNAIRES_TURN_EVALUATION_ENABLED'
     );
     expect(APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG).toBe('APP_QUESTIONNAIRES_LIVE_SESSIONS_ENABLED');
     expect(APP_QUESTIONNAIRES_VOICE_INPUT_FLAG).toBe('APP_QUESTIONNAIRES_VOICE_INPUT_ENABLED');
@@ -167,6 +175,11 @@ const SUB_FLAG_RESOLVERS: ReadonlyArray<{
     name: 'isDesignEvaluationEnabled',
     fn: isDesignEvaluationEnabled,
     requires: [APP_QUESTIONNAIRES_FLAG, APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG],
+  },
+  {
+    name: 'isTurnEvaluationEnabled',
+    fn: isTurnEvaluationEnabled,
+    requires: [APP_QUESTIONNAIRES_FLAG, APP_QUESTIONNAIRES_TURN_EVALUATION_FLAG],
   },
   {
     name: 'isLiveSessionsEnabled',
@@ -275,6 +288,7 @@ describe('sub-flag independence — one flag off suppresses only its own surface
     { flag: APP_QUESTIONNAIRES_ANSWER_REFINEMENT_FLAG, resolver: isAnswerRefinementEnabled },
     { flag: APP_QUESTIONNAIRES_COMPLETION_FLAG, resolver: isCompletionEnabled },
     { flag: APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG, resolver: isDesignEvaluationEnabled },
+    { flag: APP_QUESTIONNAIRES_TURN_EVALUATION_FLAG, resolver: isTurnEvaluationEnabled },
     { flag: APP_QUESTIONNAIRES_VOICE_INPUT_FLAG, resolver: isVoiceInputEnabled },
     { flag: APP_QUESTIONNAIRES_ATTACHMENT_INPUT_FLAG, resolver: isAttachmentInputEnabled },
     { flag: APP_QUESTIONNAIRES_COST_CAP_FLAG, resolver: isCostCapEnforcementEnabled },
@@ -363,6 +377,23 @@ describe('route gates — ensure* return a 404 envelope when off, null when on',
     it('returns a 404 NOT_FOUND envelope when the master flag is off', async () => {
       setFlags({ [APP_QUESTIONNAIRES_FLAG]: false });
       await expect404(await ensureQuestionnairesEnabled());
+    });
+  });
+
+  describe('ensureTurnEvaluationEnabled', () => {
+    it('returns null when master + turn-evaluation are on', async () => {
+      setFlags({
+        [APP_QUESTIONNAIRES_FLAG]: true,
+        [APP_QUESTIONNAIRES_TURN_EVALUATION_FLAG]: true,
+      });
+      await expect(ensureTurnEvaluationEnabled()).resolves.toBeNull();
+    });
+    it('404s when the turn-evaluation sub-flag is off even though master is on', async () => {
+      setFlags({
+        [APP_QUESTIONNAIRES_FLAG]: true,
+        [APP_QUESTIONNAIRES_TURN_EVALUATION_FLAG]: false,
+      });
+      await expect404(await ensureTurnEvaluationEnabled());
     });
   });
 
@@ -458,6 +489,12 @@ describe('with* gate wrappers — run the flag gate before the handler', () => {
         APP_QUESTIONNAIRES_VOICE_INPUT_FLAG,
       ],
       blockFlag: APP_QUESTIONNAIRES_VOICE_INPUT_FLAG,
+    },
+    {
+      name: 'withTurnEvaluationEnabled',
+      wrap: withTurnEvaluationEnabled,
+      enableFlags: [APP_QUESTIONNAIRES_FLAG, APP_QUESTIONNAIRES_TURN_EVALUATION_FLAG],
+      blockFlag: APP_QUESTIONNAIRES_TURN_EVALUATION_FLAG,
     },
   ];
 

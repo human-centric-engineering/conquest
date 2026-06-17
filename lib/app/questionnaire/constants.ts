@@ -469,6 +469,19 @@ export const APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG =
   'APP_QUESTIONNAIRES_DESIGN_EVALUATION_ENABLED';
 
 /**
+ * Sub-flag gating the **turn evaluation** agent — the admin-only "interview-quality
+ * evaluator" the Preview Turn Inspector runs over a single completed turn, judging
+ * instruction compliance, interviewing/extraction/selection quality, information gain,
+ * missed opportunities, prompt drift, and cost/efficiency. Disabled by default: each run
+ * spends one reasoning-model call, so an operator opts in deliberately — the same reasoning
+ * as the design-evaluation sub-flag. Independent of {@link APP_QUESTIONNAIRES_FLAG} (the
+ * master gate); both must be on for the evaluate-turn route to run. The route, like the
+ * inspector it serves, additionally requires the session to be a preview. Seeded by
+ * `prisma/seeds/app-questionnaire/042-turn-evaluation-flag.ts`.
+ */
+export const APP_QUESTIONNAIRES_TURN_EVALUATION_FLAG = 'APP_QUESTIONNAIRES_TURN_EVALUATION_ENABLED';
+
+/**
  * Sub-flag gating the F6.1 **live respondent sessions** surface — the streaming turn
  * loop a real respondent drives (create a session, send messages, get a streamed reply).
  * Disabled by default so the live surface dark-launches independently of the admin

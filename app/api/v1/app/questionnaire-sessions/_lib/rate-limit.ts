@@ -40,3 +40,19 @@ export const turnLimiter = createRateLimiter({
   interval: TURN_RATE_LIMIT_INTERVAL_MS,
   maxRequests: TURN_RATE_LIMIT_MAX,
 });
+
+/**
+ * Turn-evaluation sub-cap. The evaluate-turn route runs one reasoning-model completion over a
+ * turn dump — paid LLM work, like the design-evaluation preview. It's an admin-only,
+ * preview-only action an admin clicks per turn, so 20/min is ample while bounding a hammered
+ * "Evaluate" button. Keyed on the admin user id, who owns the spend.
+ */
+export const TURN_EVALUATION_RATE_LIMIT_MAX = 20;
+
+/** Sliding-window length for {@link turnEvaluationLimiter}, in milliseconds. */
+export const TURN_EVALUATION_RATE_LIMIT_INTERVAL_MS = 60_000;
+
+export const turnEvaluationLimiter = createRateLimiter({
+  interval: TURN_EVALUATION_RATE_LIMIT_INTERVAL_MS,
+  maxRequests: TURN_EVALUATION_RATE_LIMIT_MAX,
+});
