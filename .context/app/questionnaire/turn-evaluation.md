@@ -40,6 +40,15 @@ than losing the verdict.
 > receives it); only the **persistence** is universal. The drawer derives each turn's conversation
 > context (respondent message + interviewer reply + recent history) and POSTs it with the dump.
 
+**Drawer hydration on resume.** The drawer's `inspectorTurns` is client state fed by live frames, so
+a reload (the preview boots client-side and resumes via `sessionStorage`) used to empty it until the
+next turn. The transcript replay route now also returns the persisted traces (`loadInspectorTurns`
+→ `inspectorTurns`), **gated to a preview session with the toggle on** — the same gate the live
+frame uses — and `useQuestionnaireSessionStream` seeds them via `initialInspectorTurns`. Each
+hydrated turn's `turnIndex` is the 1-based `ordinal` minus 1, reproducing the live `selectionRound`
+so it maps to the same transcript message the drawer derives context from. A real respondent's
+transcript read omits the field entirely.
+
 **The dump's objectives come from the server.** Either route loads the version's **goal, audience,
 selection strategy, and tone/persona** by session id (`buildObjectivesContext`), so the
 questionnaire objectives can't be spoofed and are present even though the dump doesn't carry them.

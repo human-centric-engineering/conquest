@@ -18,6 +18,8 @@ import { prisma } from '@/lib/db/client';
 import type { QuestionnaireTurn } from '@/lib/app/questionnaire/chat/types';
 import { REASONING_STEP_KINDS, REASONING_TONES } from '@/lib/app/questionnaire/reasoning';
 import { ANSWER_PROVENANCES } from '@/lib/app/questionnaire/types';
+import { inspectorTurnSchema } from '@/lib/app/questionnaire/inspector/schema';
+import type { TurnInspectorData } from '@/lib/app/questionnaire/inspector';
 
 /** Persisted per-turn notices — `{ code, message }[]`; anything malformed degrades to `[]`. */
 const warningsSchema = z
@@ -71,4 +73,39 @@ export async function loadTranscript(sessionId: string): Promise<QuestionnaireTu
     });
   }
   return turns;
+}
+
+/**
+ * Rebuild the Preview Turn Inspector's per-turn agent-call traces from their persisted rows, so a
+ * resumed admin preview re-hydrates the inspector drawer instead of leaving it empty until the next
+ * live turn — the drawer's `inspectorTurns` is otherwise fed ONLY by live SSE `inspector` frames,
+ * which a reload discards. The data has been persisted on every turn since phase B; this is the
+ * read side the drawer hydration was missing.
+ *
+ * The caller MUST gate this to a preview session with `previewInspectorEnabled` on — the traces are
+ * admin-only telemetry (the same gate the live-emit frame in the messages route enforces). Each
+ * turn's `turnIndex` reproduces the value the live frame used (`selectionRound` = the number of
+ * turns taken before this one = the 1-based `ordinal` minus 1), so a hydrated turn maps to the same
+ * transcript user message the drawer derives its evaluation context from. Turns with no captured
+ * calls — or a malformed `inspectorCalls` JSON — are skipped; like the transcript replay it backs,
+ * this never throws.
+ */
+export async function loadInspectorTurns(sessionId: string): Promise<TurnInspectorData[]> {
+  const rows = await prisma.appQuestionnaireTurn.findMany({
+    where: { sessionId },
+    orderBy: { ordinal: 'asc' },
+    select: { ordinal: true, inspectorCalls: true },
+  });
+
+  const inspectorTurns: TurnInspectorData[] = [];
+  for (const row of rows) {
+    // `inspectorTurnSchema` requires `calls.min(1)`, so a turn that captured nothing fails the
+    // parse and is skipped — exactly the live behaviour (the frame only emits when calls exist).
+    const parsed = inspectorTurnSchema.safeParse({
+      turnIndex: row.ordinal - 1,
+      calls: row.inspectorCalls,
+    });
+    if (parsed.success) inspectorTurns.push(parsed.data);
+  }
+  return inspectorTurns;
 }

@@ -48,6 +48,13 @@ export interface UseQuestionnaireSessionStreamOptions {
   accessToken?: string;
   /** Seed the transcript (e.g. a resume greeting). */
   initialTurns?: QuestionnaireTurn[];
+  /**
+   * Preview Turn Inspector (admin-only): seed the drawer's per-turn traces on resume. The drawer is
+   * otherwise fed only by live `inspector` frames, so a reload would empty it until the next turn;
+   * the transcript route replays the persisted traces here (gated to a preview session with the
+   * toggle on). Empty for a real respondent — the route never sends them.
+   */
+  initialInspectorTurns?: TurnInspectorData[];
   /** Start in a blocking status (e.g. `not_active` for an already-paused session). */
   initialStatus?: QuestionnaireChatStatus;
   /**
@@ -74,8 +81,9 @@ export interface UseQuestionnaireSessionStreamReturn {
   streamingReasoning: ReasoningStep[];
   /**
    * Preview Turn Inspector (admin-only): the per-turn agent-call traces accumulated this session,
-   * oldest first. Populated only from `inspector` frames, which the server emits solely for a
-   * preview session with the inspector toggle on — so this is always empty for a real respondent.
+   * oldest first. Seeded from the persisted traces on resume (`initialInspectorTurns`) and extended
+   * by each live `inspector` frame — both of which the server emits solely for a preview session
+   * with the inspector toggle on, so this is always empty for a real respondent.
    */
   inspectorTurns: TurnInspectorData[];
   status: QuestionnaireChatStatus;
@@ -194,7 +202,14 @@ function defaultBlockingError(status: QuestionnaireChatStatus): ChatErrorState |
 export function useQuestionnaireSessionStream(
   options: UseQuestionnaireSessionStreamOptions
 ): UseQuestionnaireSessionStreamReturn {
-  const { sessionId, accessToken, initialTurns, initialStatus, onTurnSettled } = options;
+  const {
+    sessionId,
+    accessToken,
+    initialTurns,
+    initialInspectorTurns,
+    initialStatus,
+    onTurnSettled,
+  } = options;
   const anonymous = Boolean(accessToken);
 
   // Hold the latest settle callback in a ref so `sendMessage` stays stable even when
@@ -208,8 +223,12 @@ export function useQuestionnaireSessionStream(
   // populated from the `reasoning` frame, and cleared on commit (the steps move onto the turn).
   const [streamingReasoning, setStreamingReasoning] = useState<ReasoningStep[]>([]);
   // Preview Turn Inspector (admin-only): traces accumulate across the session, appended per
-  // `inspector` frame. Never populated for a real respondent (the server gates emission).
-  const [inspectorTurns, setInspectorTurns] = useState<TurnInspectorData[]>([]);
+  // `inspector` frame. Seeded from the persisted traces on resume (so a reload re-hydrates the
+  // drawer instead of waiting for the next turn). Never populated for a real respondent — the
+  // server gates both the live emission and the resume replay to a preview session with the toggle.
+  const [inspectorTurns, setInspectorTurns] = useState<TurnInspectorData[]>(
+    initialInspectorTurns ?? []
+  );
   const [status, setStatus] = useState<QuestionnaireChatStatus>(initialStatus ?? 'idle');
   const [error, setError] = useState<ChatErrorState | null>(() =>
     initialStatus ? defaultBlockingError(initialStatus) : null

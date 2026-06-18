@@ -38,6 +38,7 @@ import type {
   QuestionnaireChatStatus,
   QuestionnaireTurn,
 } from '@/lib/app/questionnaire/chat/types';
+import type { TurnInspectorData } from '@/lib/app/questionnaire/inspector';
 import type { AnswerPanelView, PanelSlotView } from '@/lib/app/questionnaire/panel/types';
 import type { PresentationMode, ReasoningPlacement } from '@/lib/app/questionnaire/types';
 import type { SessionStatusView } from '@/lib/app/questionnaire/session/status-view';
@@ -48,6 +49,12 @@ export interface SessionWorkspaceProps {
   accessToken?: string;
   /** Seed the transcript (e.g. a resume greeting). */
   initialTurns?: QuestionnaireTurn[];
+  /**
+   * Preview Turn Inspector (admin-only): seed the drawer's per-turn traces on resume so a reload
+   * re-hydrates it. Empty/omitted for a real respondent — the transcript route only replays these
+   * for a preview session with the inspector toggle on.
+   */
+  initialInspectorTurns?: TurnInspectorData[];
   /** Start in a blocking status (e.g. an already-paused session). */
   initialStatus?: QuestionnaireChatStatus;
   /** SSR-resolved answer-panel view (authenticated path); omit for anonymous. */
@@ -84,6 +91,7 @@ export function SessionWorkspace({
   sessionId,
   accessToken,
   initialTurns,
+  initialInspectorTurns,
   initialStatus,
   initialPanel,
   initialStatusView,
@@ -117,6 +125,7 @@ export function SessionWorkspace({
     sessionId,
     accessToken,
     initialTurns,
+    initialInspectorTurns,
     initialStatus,
     onTurnSettled,
   });
