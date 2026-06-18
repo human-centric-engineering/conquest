@@ -417,7 +417,7 @@ export function QuestionnaireChat({
           server has emitted inspector frames — which it does solely for a preview session with the
           toggle on, so it never appears for a real respondent. */}
       {inspectorTurns.length > 0 && (
-        <TurnInspectorDrawer turns={inspectorTurns} sessionId={sessionId} />
+        <TurnInspectorDrawer turns={inspectorTurns} sessionId={sessionId} messages={turns} />
       )}
       {/* Transcript */}
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6">

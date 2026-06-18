@@ -435,10 +435,10 @@ model AppDemoClient {
   // *suggested* (a deep "surface" header band, a gradient CTA, a coloured backdrop the
   // logo was designed to sit on) while staying generic — any client can arrange them
   // differently. Resolved by resolveTheme(); see lib/app/questionnaire/theming.
-  surfaceColor          String?  // deep brand "chrome" colour (hex); session header band + default logo backdrop
-  ctaColorEnd           String?  // optional CTA gradient end colour (hex); set → CTA renders ctaColor→ctaColorEnd, null → solid ctaColor
-  logoBackgroundColor   String?  // colour painted behind the logo (hex); null falls back to surfaceColor when the backdrop is enabled
-  logoBackgroundEnabled Boolean  @default(false) // "apply this colour as the logo background" — the admin toggle
+  surfaceColor          String? // deep brand "chrome" colour (hex); session header band + default logo backdrop
+  ctaColorEnd           String? // optional CTA gradient end colour (hex); set → CTA renders ctaColor→ctaColorEnd, null → solid ctaColor
+  logoBackgroundColor   String? // colour painted behind the logo (hex); null falls back to surfaceColor when the backdrop is enabled
+  logoBackgroundEnabled Boolean @default(false) // "apply this colour as the logo background" — the admin toggle
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -469,41 +469,48 @@ model AppDemoClient {
 /// `respondentUserId` is a plain String, no @relation (UG-1, as on
 /// AppQuestionnaireInvitation); null until F4.6 binds real respondent sessions.
 model AppQuestionnaireSession {
-  id               String   @id @default(cuid())
-  versionId        String
-  status           String   @default("active") // SESSION_STATUSES (types.ts): active | paused | completed | abandoned | aborted
-  isPreview        Boolean  @default(false) // true = admin refine-answer exercise, not a respondent run
-  respondentUserId String? // respondent User.id; plain String, no FK (UG-1); set in F4.6
+  id                   String   @id @default(cuid())
+  versionId            String
+  // Short, human-readable support reference shown to the respondent ("Ref: 7F3K-9M2P"). Stored as
+  // the raw 8-char Crockford base32 (no dash; the UI groups it), generated at creation by every
+  // create path (session-ref.ts). A respondent quotes it when reporting a bad experience so an
+  // admin can look the session up and re-evaluate its saved turns. Nullable + @unique: Postgres
+  // permits many NULLs under a unique index, so rows predating this column simply carry none.
+  publicRef            String?  @unique
+  status               String   @default("active") // SESSION_STATUSES (types.ts): active | paused | completed | abandoned | aborted
+  isPreview            Boolean  @default(false) // true = admin refine-answer exercise, not a respondent run
+  respondentUserId     String? // respondent User.id; plain String, no FK (UG-1); set in F4.6
   // Invitations: the invitation this session was booted from (frictionless token flow), or null
   // for a walk-up/public/authenticated-direct session. Plain String, no @relation (UG-1) — and
   // deliberately so: it must NEVER become a graph edge that joins identity to answer content. Read
   // ONLY for per-invitee STATUS (started/completed); under anonymousMode, never to attribute answers
   // (the completion-tracking-only invariant — see invitations/linkage.ts).
-  invitationId     String?
+  invitationId         String?
   // Seriousness / abuse gate: cumulative count of non-genuine answers flagged this session.
   // The route increments it; at `config.abuseThreshold` the session is abandoned.
-  abuseStrikes     Int      @default(0)
+  abuseStrikes         Int      @default(0)
   // Sensitivity awareness / safeguarding: the session's running-max disclosure severity
   // (null until first detection; "low" | "medium" | "high" — SENSITIVITY_SEVERITIES) and an
   // append-only array of remembered disclosures (SensitivityNote[]). The summaries are threaded
   // into the phraser so every later question stays gentle. Carries careful, non-graphic summaries
   // only; never surfaced raw to analytics or event metadata.
-  sensitivityLevel String?
-  sensitivityNotes Json     @default("[]")
+  sensitivityLevel     String?
+  sensitivityNotes     Json     @default("[]")
   // Probe-confirm contradiction flow: when a `probe`-mode contradiction is detected, the conflicting
   // answer/data-slot is NOT overwritten — instead the interviewer asks a reconciliation question and
   // the finding is parked here (PendingContradiction shape: slotKeys, explanation, suggestedProbe?,
   // statement, raisedAtTurnIndex). The next turn resolves it (refiner applies the change on confirm,
   // or keeps the original) and clears this back to null. Null = no contradiction awaiting confirmation.
   pendingContradiction Json?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
-  version         AppQuestionnaireVersion        @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  version         AppQuestionnaireVersion          @relation(fields: [versionId], references: [id], onDelete: Cascade)
   answers         AppAnswerSlot[]
   dataSlotFills   AppDataSlotFill[]
   events          AppQuestionnaireSessionEvent[]
   turns           AppQuestionnaireTurn[]
+  turnEvaluations AppQuestionnaireTurnEvaluation[]
   profileSnapshot AppRespondentProfileSnapshot?
 
   @@index([versionId])
@@ -625,21 +632,21 @@ model AppAnswerSlot {
 /// generated SQL and remove any line touching `idx_app_data_slot_embedding` before applying (the
 /// same discipline the AppQuestionSlot / AiKnowledgeChunk `embedding` columns document).
 model AppDataSlot {
-  id                   String   @id @default(cuid())
+  id                   String                       @id @default(cuid())
   versionId            String
   key                  String // slug, unique per version (fills/links reference it, not the cuid)
   name                 String // 1–4 words (the panel label + the targeting "prompt")
   description          String // why it matters + what counts as filled (the targeting "guidelines")
   theme                String // short group label for panel grouping
-  ordinal              Int      @default(0)
-  weight               Float    @default(1.0)
+  ordinal              Int                          @default(0)
+  weight               Float                        @default(1.0)
   generationConfidence Float? // 0–1, set by the generator
   // Adaptive data-slot selection: cosine-similarity vector over `name` (+`description`). Width
   // matches the platform embedding model (AiKnowledgeChunk.embedding). Raw-SQL read/write only —
   // see the drift warning above.
   embedding            Unsupported("vector(1536)")?
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  createdAt            DateTime                     @default(now())
+  updatedAt            DateTime                     @updatedAt
 
   version   AppQuestionnaireVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
   questions AppDataSlotQuestion[]
@@ -781,6 +788,14 @@ model AppQuestionnaireTurn {
   sideEffectDataSlotIds Json     @default("[]") // AppDataSlotFill.id[] this turn created/updated (data-slot mode)
   warnings              Json     @default("[]") // [{ code, message }] side-band notices shown beneath this turn (seriousness/support/contradiction) — replayed inline on resume
   reasoning             Json     @default("[]") // ReasoningStep[] — live "watch it think" trace, persisted (when config.reasoningStreamPersist) so it replays on resume/scroll-back. Respondent-safe (no abuse/sensitivity). (lib/.../reasoning)
+  // The saved Turn Inspector dump: AgentCallTrace[] (inspector/types.ts) — every LLM/embedding
+  // call this turn made, with its prompt, response, model, latency, tokens, and cost. Captured for
+  // EVERY session (not just preview), so a session looked up by its `publicRef` can be re-evaluated
+  // by the turn evaluator against the exact calls it ran. SSE *emission* to the live drawer stays
+  // preview-gated; this is the persisted record. Empty [] for pre-column turns / a capture failure.
+  // PII by construction (it holds the respondent's words + the prompts) — same cascade/erasure
+  // posture as the rest of the turn row.
+  inspectorCalls        Json     @default("[]")
   costUsd               Float? // summed per-turn LLM spend; null until set
   createdAt             DateTime @default(now())
 
@@ -887,4 +902,83 @@ model AppQuestionnaireEvaluationFinding {
   @@index([runId, dimension])
   @@index([status])
   @@map("app_questionnaire_evaluation_finding")
+}
+
+/// One persisted interview-quality evaluation of ONE live Preview Turn Inspector turn.
+///
+/// The evaluate-turn route runs the seeded `turn-evaluator` judge over a turn's inspector dump
+/// and, instead of returning the verdict ephemerally, writes a row here so admins can later
+/// surface, search, comment on, and flag the verdict for learning. History is intentionally
+/// kept: re-runs and different evaluator models ACCUMULATE (no `@@unique` on `turnId`), so a
+/// turn can carry several verdicts.
+///
+/// Because inspector data is itself live-only (never otherwise persisted), the row snapshots
+/// BOTH the `verdict` and the `evaluatedInput` (the exact call traces + conversation context
+/// that were judged) — a stored score is uninterpretable without the input it judged, and the
+/// snapshot is what makes a flagged verdict usable as a learning case later.
+///
+/// Versioning is multi-dimensional and deliberate: `evaluatorModel`/`evaluatorProvider` (which
+/// model judged), `rubricVersion` (which rubric produced the score — see prompt.ts
+/// `TURN_RUBRIC_VERSION`), `questionnaireVersionId` (which authored structure the turn ran
+/// against), and `appVersion` (the fork build). `overallScore`/`effectiveness` are denormalised
+/// out of the `verdict` JSON so the search surface filters/sorts on real columns, not JSON.
+///
+/// House-style FK posture (UG-1): only `session` is a modelled relation (it owns the cascade —
+/// deleting a preview session removes its evaluations). `turnId`, `evaluatorAgentId`,
+/// `evaluatedByUserId`, `commentByUserId`, `flagReviewerId`, `datasetId`, and `datasetCaseId`
+/// are plain Strings (pointers, never graph edges) validated at the seam. `questionnaireVersionId`
+/// is denormalised from the session so version-scoped admin search indexes without a join. Fully
+/// Prisma-modelled — no raw-SQL object — so no drift probe is needed.
+///
+/// `flagStatus` is a small learning workflow (none → flagged → reviewed → actioned | dismissed),
+/// a plain String validated at the seam (house style). On `actioned` the row is appended to an
+/// eval dataset and the resulting `datasetCaseId`/`datasetId` are stamped here.
+model AppQuestionnaireTurnEvaluation {
+  id          String  @id @default(cuid())
+  sessionId   String
+  turnId      String? // AppQuestionnaireTurn.id this verdict judged; plain String, no FK (UG-1). Null when the live dump had no persisted turn row.
+  turnOrdinal Int // 1-based turn index (denormalised so list/search show the turn even when turnId is null)
+
+  // The verdict and the exact input it judged — both snapshotted (inspector data is live-only).
+  verdict        Json // the full TurnEvaluation (schema.ts)
+  evaluatedInput Json // { turn: { turnIndex, calls }, context } — the dump + context fed to the judge
+
+  // Denormalised search/sort facets, pulled out of `verdict`.
+  overallScore  Int // 0–100
+  effectiveness String // TURN_EFFECTIVENESS: Excellent | Good | Mixed | Weak | Poor
+
+  // Evaluator provenance + the multi-dimensional version stamp.
+  evaluatorAgentId       String? // the turn-evaluator AiAgent.id; plain String, no FK (UG-1)
+  evaluatorModel         String // resolved model id that produced the verdict
+  evaluatorProvider      String // resolved provider slug
+  rubricVersion          String // prompt.ts TURN_RUBRIC_VERSION at eval time
+  questionnaireVersionId String // denormalised from the session's version
+  appVersion             String // APP_VERSION (fork build) at eval time
+  costUsd                Float? // summed judge spend; null if unknown
+
+  // Who ran it.
+  evaluatedByUserId String? // admin who ran the evaluation; plain String, no FK (UG-1)
+
+  // Human comment (single free-text note, latest wins).
+  comment         String?   @db.Text
+  commentByUserId String? // admin who wrote the current comment; plain String, no FK (UG-1)
+  commentAt       DateTime?
+
+  // Learning workflow.
+  flagStatus     String    @default("none") // none | flagged | reviewed | actioned | dismissed
+  flagReviewerId String? // admin who last moved the flag; plain String, no FK (UG-1)
+  flagUpdatedAt  DateTime?
+  datasetId      String? // AiDataset.id the case was appended to (on `actioned`); plain String, no FK (UG-1)
+  datasetCaseId  String? // AiDatasetCase.id created on `actioned`; plain String, no FK (UG-1)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  session AppQuestionnaireSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([questionnaireVersionId, createdAt]) // version-scoped newest-first (primary search)
+  @@index([flagStatus, createdAt]) // learning queue: flagged/reviewed first
+  @@index([overallScore])
+  @@map("app_questionnaire_turn_evaluation")
 }

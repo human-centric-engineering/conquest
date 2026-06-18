@@ -51,6 +51,12 @@ export interface SessionStatusView {
   completion: StatusCompletionView;
   cost: { tier: CostCapTier } | null;
   anonymous: boolean;
+  /**
+   * The session's raw support reference (`publicRef`), or `null` for a row predating the column.
+   * The UI groups it for display (`formatSessionRef`); it's the code a respondent quotes when
+   * reporting a problem so an admin can look the session up.
+   */
+  ref: string | null;
 }
 
 /** Inputs the pure builder maps — all already computed by the route seam. */
@@ -63,6 +69,8 @@ export interface SessionStatusInput {
   capped: boolean;
   /** True for a no-login session (`respondentUserId === null`). */
   anonymous: boolean;
+  /** The session's raw support reference, or null for a row predating the column. */
+  ref: string | null;
 }
 
 /** Map the assessment + cost tier + status into the client-safe view. */
@@ -78,6 +86,7 @@ export function buildSessionStatusView(input: SessionStatusInput): SessionStatus
     },
     cost: input.capped ? { tier: input.costTier } : null,
     anonymous: input.anonymous,
+    ref: input.ref,
   };
 }
 

@@ -82,7 +82,15 @@ export async function loadSessionStatus(sessionId: string): Promise<LoadedSessio
     costTier = classifyCostCap(spentUsd, capUsd);
   }
 
-  const view = buildSessionStatusView({ status, assessment, costTier, capped, anonymous });
+  const view = buildSessionStatusView({
+    status,
+    assessment,
+    costTier,
+    capped,
+    anonymous,
+    // The support reference comes from the same turn-context load (null for pre-column rows).
+    ref: loaded.session.publicRef ?? null,
+  });
 
   return {
     session: { id: loaded.session.id, respondentUserId: loaded.session.respondentUserId },

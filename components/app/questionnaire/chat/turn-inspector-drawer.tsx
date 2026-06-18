@@ -31,7 +31,6 @@ import {
   Coins,
   Copy,
   Cpu,
-  Download,
   Gauge,
   Loader2,
   Lock,
@@ -42,7 +41,6 @@ import {
 import { cn } from '@/lib/utils';
 import { apiClient } from '@/lib/api/client';
 import { API } from '@/lib/api/endpoints';
-import { MarkdownContent } from '@/components/admin/orchestration/markdown-or-raw-view';
 import {
   formatInspectorCall,
   formatInspectorTurn,
@@ -52,16 +50,26 @@ import {
   type AgentCallTrace,
   type TurnInspectorData,
 } from '@/lib/app/questionnaire/inspector';
-// Import the PURE submodules directly, not the barrel: the barrel re-exports the server-only
+// Import the PURE submodule directly, not the barrel: the barrel re-exports the server-only
 // `evaluate-turn` service (→ provider-manager → pg → node `dns`), which would pull Node-only code
-// into this client bundle. `serialize` + `schema` are zod/string-only and client-safe.
-import { serializeTurnEvaluation } from '@/lib/app/questionnaire/turn-evaluation/serialize';
+// into this client bundle. `schema` is zod-only and client-safe.
 import type { TurnEvaluation } from '@/lib/app/questionnaire/turn-evaluation/schema';
+import type { QuestionnaireTurn } from '@/lib/app/questionnaire/chat/types';
+import { TurnEvaluationVerdict } from '@/components/app/questionnaire/turn-evaluation/turn-evaluation-verdict';
+import { TurnEvaluationReview } from '@/components/app/questionnaire/turn-evaluation/turn-evaluation-review';
 
 export interface TurnInspectorDrawerProps {
   turns: TurnInspectorData[];
   /** The preview session id — the evaluate-turn route is keyed on it (admin + preview only). */
   sessionId: string;
+  /**
+   * The live conversation turns (user/assistant messages), oldest first. Threaded so an
+   * evaluation can carry the respondent message that opened a turn and the interviewer reply that
+   * closed it — the context the learning-dataset action needs (without it, actioning 422s with
+   * `no_content`). Optional: absent for older mounts, in which case the evaluation is run without
+   * conversation context (the verdict still persists; only the learning case can't be built).
+   */
+  messages?: QuestionnaireTurn[];
 }
 
 /** $0.00 → "$0", small values to 4 sig decimals, larger to cents. */
@@ -142,7 +150,7 @@ function SummaryStat({ label, value, accent }: { label: string; value: string; a
   );
 }
 
-export function TurnInspectorDrawer({ turns, sessionId }: TurnInspectorDrawerProps) {
+export function TurnInspectorDrawer({ turns, sessionId, messages }: TurnInspectorDrawerProps) {
   // Start closed: the drawer is opt-in via the edge tab (whose badge signals when data has arrived),
   // so it never covers the preview chat unless the admin asks for it.
   const [open, setOpen] = useState(false);
@@ -263,6 +271,7 @@ export function TurnInspectorDrawer({ turns, sessionId }: TurnInspectorDrawerPro
                       key={`${turn.turnIndex}-${i}`}
                       turn={turn}
                       sessionId={sessionId}
+                      messages={messages}
                       defaultOpen={i === turns.length - 1}
                     />
                   ))}
@@ -285,10 +294,12 @@ export function TurnInspectorDrawer({ turns, sessionId }: TurnInspectorDrawerPro
 function TurnBlock({
   turn,
   sessionId,
+  messages,
   defaultOpen,
 }: {
   turn: TurnInspectorData;
   sessionId: string;
+  messages?: QuestionnaireTurn[];
   defaultOpen: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -340,7 +351,7 @@ function TurnBlock({
               <CallRow key={i} index={i} call={call} />
             ))}
           </ol>
-          <TurnEvaluationSection turn={turn} sessionId={sessionId} />
+          <TurnEvaluationSection turn={turn} sessionId={sessionId} messages={messages} />
         </>
       )}
     </li>
@@ -352,20 +363,84 @@ type EvalState =
   | { status: 'idle' }
   | { status: 'loading' }
   | { status: 'error'; message: string }
-  | { status: 'done'; verdict: TurnEvaluation; costUsd: number; model: string };
+  | {
+      status: 'done';
+      verdict: TurnEvaluation;
+      costUsd: number;
+      model: string;
+      /** The persisted row id (null when the verdict was returned but the write failed). */
+      evaluationId: string | null;
+    };
+
+/** How many prior conversation lines to send as recent context (keeps the payload lean). */
+const RECENT_CONTEXT_LINES = 12;
 
 /**
- * Trigger + render the interview-quality evaluation for one turn. Posts the turn dump to the
- * admin-only evaluate-turn route (the server reloads the questionnaire objectives), then renders
- * the scored verdict with Copy + Download. Ephemeral — the verdict lives in this component's
- * state only, mirroring the live-only nature of the inspector data it judges.
+ * Derive the conversation context for one inspector turn from the live message list. The inspector
+ * `turnIndex` is the 0-based respondent-answer→agent-reply round, so it maps to the
+ * `(turnIndex)`-th **user** message and the first **assistant** message after it — derived by
+ * walking the array (not by `index*2` math) so a leading agent greeting or any off-by-one can't
+ * misalign it. Returns `{}` when the messages aren't available or the turn isn't found.
+ */
+function deriveTurnContext(
+  messages: QuestionnaireTurn[] | undefined,
+  turnIndex: number
+): { respondentMessage?: string; interviewerMessage?: string; recentMessages?: string[] } {
+  if (!messages || messages.length === 0) return {};
+
+  // Find the index of the (turnIndex)-th user message.
+  let seenUser = -1;
+  let userIdx = -1;
+  for (let i = 0; i < messages.length; i++) {
+    if (messages[i].role === 'user') {
+      seenUser += 1;
+      if (seenUser === turnIndex) {
+        userIdx = i;
+        break;
+      }
+    }
+  }
+  if (userIdx === -1) return {};
+
+  const respondentMessage = messages[userIdx].content;
+  let interviewerMessage: string | undefined;
+  for (let j = userIdx + 1; j < messages.length; j++) {
+    if (messages[j].role === 'assistant') {
+      interviewerMessage = messages[j].content;
+      break;
+    }
+  }
+
+  const recentMessages = messages
+    .slice(0, userIdx)
+    .slice(-RECENT_CONTEXT_LINES)
+    .map((m) => `${m.role === 'user' ? 'Respondent' : 'Interviewer'}: ${m.content}`);
+
+  return {
+    ...(respondentMessage ? { respondentMessage } : {}),
+    ...(interviewerMessage ? { interviewerMessage } : {}),
+    ...(recentMessages.length > 0 ? { recentMessages } : {}),
+  };
+}
+
+/**
+ * Trigger + render the interview-quality evaluation for one turn. Posts the turn dump — plus the
+ * conversation context for that turn (the respondent message that opened it, the interviewer reply
+ * that closed it, and recent history) — to the admin-only evaluate-turn route (which reloads the
+ * questionnaire objectives AND persists the verdict), then renders the scored verdict with
+ * Copy/Download/Re-run via the shared {@link TurnEvaluationVerdict}. When the verdict persisted (an
+ * `evaluationId` came back) the reviewer can also comment on it and flag it for learning, inline,
+ * via {@link TurnEvaluationReview}. The conversation context is what lets a flagged verdict be
+ * actioned into a learning dataset — without it the action 422s with `no_content`.
  */
 function TurnEvaluationSection({
   turn,
   sessionId,
+  messages,
 }: {
   turn: TurnInspectorData;
   sessionId: string;
+  messages?: QuestionnaireTurn[];
 }) {
   const [state, setState] = useState<EvalState>({ status: 'idle' });
 
@@ -376,8 +451,17 @@ function TurnEvaluationSection({
         verdict: TurnEvaluation;
         costUsd: number;
         model: string;
-      }>(API.APP.QUESTIONNAIRE_SESSIONS.evaluateTurn(sessionId), { body: { turn } });
-      setState({ status: 'done', verdict: data.verdict, costUsd: data.costUsd, model: data.model });
+        evaluationId: string | null;
+      }>(API.APP.QUESTIONNAIRE_SESSIONS.evaluateTurn(sessionId), {
+        body: { turn, ...deriveTurnContext(messages, turn.turnIndex) },
+      });
+      setState({
+        status: 'done',
+        verdict: data.verdict,
+        costUsd: data.costUsd,
+        model: data.model,
+        evaluationId: data.evaluationId,
+      });
     } catch (err) {
       setState({
         status: 'error',
@@ -411,142 +495,32 @@ function TurnEvaluationSection({
       )}
 
       {state.status === 'done' && (
-        <TurnEvaluationPanel
-          verdict={state.verdict}
-          model={state.model}
-          turnIndex={turn.turnIndex}
-          onRerun={() => void runEvaluation()}
-        />
-      )}
-    </div>
-  );
-}
-
-/** Trigger a client-side download of `text` as a `.md` file. */
-function downloadMarkdown(filename: string, text: string): void {
-  const blob = new Blob([text], { type: 'text/markdown;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = filename;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
-}
-
-/** A labelled score/rating chip in the verdict header. */
-function VerdictChip({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
-  return (
-    <div className="min-w-0 rounded border border-zinc-800 bg-zinc-900/60 px-2 py-1">
-      <div className="font-mono text-[0.52rem] tracking-[0.12em] text-zinc-500 uppercase">
-        {label}
-      </div>
-      <div
-        className={cn(
-          'truncate font-mono text-xs font-semibold',
-          accent ? 'text-[color:var(--cq-accent)]' : 'text-zinc-100'
-        )}
-      >
-        {value}
-      </div>
-    </div>
-  );
-}
-
-/** A 1–10 interviewer sub-score cell. */
-function SubScore({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="flex items-center justify-between gap-2 rounded bg-zinc-900/50 px-1.5 py-1">
-      <span className="truncate text-zinc-400">{label}</span>
-      <span className="shrink-0 font-semibold text-zinc-100">{value}/10</span>
-    </div>
-  );
-}
-
-/** Render a completed verdict: headline chips, interviewer sub-scores, and the full markdown body. */
-function TurnEvaluationPanel({
-  verdict,
-  model,
-  turnIndex,
-  onRerun,
-}: {
-  verdict: TurnEvaluation;
-  model: string;
-  turnIndex: number;
-  onRerun: () => void;
-}) {
-  const markdown = useMemo(() => serializeTurnEvaluation(verdict, turnIndex), [verdict, turnIndex]);
-  const i = verdict.interviewer;
-
-  return (
-    <div className="mt-1 space-y-3">
-      {/* Action bar */}
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-1.5 font-mono text-[0.6rem] tracking-[0.15em] text-[color:var(--cq-accent)] uppercase">
-          <Gauge className="h-3 w-3" aria-hidden />
-          Evaluation
-        </div>
-        <div className="flex items-center gap-1">
-          <CopyButton
-            getText={() => markdown}
-            label={`Copy turn ${turnIndex + 1} evaluation to clipboard`}
-            idleText="Copy"
+        <div className="mt-1 space-y-3">
+          <TurnEvaluationVerdict
+            verdict={state.verdict}
+            model={state.model}
+            turnIndex={turn.turnIndex}
+            extraActions={
+              <button
+                type="button"
+                onClick={() => void runEvaluation()}
+                className="inline-flex shrink-0 items-center rounded px-1.5 py-1 font-mono text-[0.6rem] font-semibold tracking-wide text-zinc-400 uppercase transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+                aria-label={`Re-run the evaluation for turn ${turn.turnIndex + 1}`}
+              >
+                Re-run
+              </button>
+            }
           />
-          <button
-            type="button"
-            onClick={() => downloadMarkdown(`turn-${turnIndex + 1}-evaluation.md`, markdown)}
-            className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 font-mono text-[0.6rem] font-semibold tracking-wide text-zinc-400 uppercase transition-colors hover:bg-zinc-800 hover:text-zinc-100"
-            aria-label={`Download turn ${turnIndex + 1} evaluation as Markdown`}
-          >
-            <Download className="h-3 w-3" aria-hidden />
-            Download
-          </button>
-          <button
-            type="button"
-            onClick={onRerun}
-            className="inline-flex shrink-0 items-center rounded px-1.5 py-1 font-mono text-[0.6rem] font-semibold tracking-wide text-zinc-400 uppercase transition-colors hover:bg-zinc-800 hover:text-zinc-100"
-            aria-label={`Re-run the evaluation for turn ${turnIndex + 1}`}
-          >
-            Re-run
-          </button>
+          {state.evaluationId && (
+            <TurnEvaluationReview
+              sessionId={sessionId}
+              evaluationId={state.evaluationId}
+              initialFlagStatus="none"
+              initialComment={null}
+            />
+          )}
         </div>
-      </div>
-
-      {/* Headline chips */}
-      <div className="grid grid-cols-3 gap-1.5">
-        <VerdictChip label="Overall" value={`${verdict.overallScore}/100`} accent />
-        <VerdictChip label="Effectiveness" value={verdict.effectiveness} />
-        <VerdictChip label="Info gain" value={verdict.informationGain.rating} />
-        <VerdictChip label="Extraction" value={`${verdict.extraction.score}/100`} />
-        <VerdictChip label="Selection" value={`${verdict.questionSelection.score}/100`} />
-        <VerdictChip label="Efficiency" value={verdict.efficiency.rating} />
-        <VerdictChip label="Prompt drift" value={verdict.promptDrift.rating} />
-        <VerdictChip label="Model" value={model || '—'} />
-      </div>
-
-      {/* Interviewer sub-scores */}
-      <div>
-        <p className="mb-1 font-mono text-[0.58rem] tracking-[0.15em] text-zinc-500 uppercase">
-          Interviewer question quality
-        </p>
-        <div className="grid grid-cols-2 gap-1 font-mono text-[0.62rem]">
-          <SubScore label="Open-endedness" value={i.openEndedness} />
-          <SubScore label="Single-topic" value={i.singleTopicFocus} />
-          <SubScore label="Non-leading" value={i.nonLeading} />
-          <SubScore label="Conversational" value={i.conversational} />
-          <SubScore label="Cognitive load" value={i.cognitiveLoad} />
-          <SubScore label="Specificity" value={i.specificity} />
-          <SubScore label="Warmth" value={i.warmth} />
-          <SubScore label="Stage fit" value={i.stageAlignment} />
-        </div>
-      </div>
-
-      {/* Full markdown verdict (authoritative — identical to Copy/Download). */}
-      <MarkdownContent
-        content={markdown}
-        className="max-h-[28rem] overflow-y-auto rounded border border-zinc-800 bg-zinc-900/40 p-2.5 text-xs text-zinc-300"
-      />
+      )}
     </div>
   );
 }

@@ -56,7 +56,12 @@ describe('getOrCreatePreviewSession', () => {
     expect(id).toBe('sess-new');
     expect(prismaMock.appQuestionnaireSession.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: { versionId: 'v1', isPreview: true, status: 'active' },
+        data: {
+          versionId: 'v1',
+          publicRef: expect.stringMatching(/^[0-9A-HJKMNP-TV-Z]{8}$/),
+          isPreview: true,
+          status: 'active',
+        },
       })
     );
   });

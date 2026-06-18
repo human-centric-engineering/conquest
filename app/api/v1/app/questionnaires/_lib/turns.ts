@@ -22,6 +22,7 @@ import { NotFoundError } from '@/lib/api/errors';
 import type { ToolCallRecord } from '@/lib/app/questionnaire/orchestrator';
 import type { SessionWarning } from '@/lib/app/questionnaire/chat/types';
 import type { ReasoningStep } from '@/lib/app/questionnaire/reasoning';
+import type { AgentCallTrace } from '@/lib/app/questionnaire/inspector';
 
 export type { ToolCallRecord };
 
@@ -66,6 +67,13 @@ export interface TurnWriteInput {
    * persistence; empty/omitted otherwise (live-only or feature off). Respondent-safe by construction.
    */
   reasoning?: ReasoningStep[];
+  /**
+   * The saved Turn Inspector dump for this turn ({@link AgentCallTrace}[]) — every LLM/embedding
+   * call with its prompt/response/model/cost. Captured for EVERY session (not just preview) so a
+   * chat found by its `publicRef` can later be re-evaluated against the exact calls it ran.
+   * Empty/omitted when the turn made no traceable calls.
+   */
+  inspectorCalls?: AgentCallTrace[];
   /** Summed per-turn LLM spend in USD; `null` until cost-summing is wired. */
   costUsd: number | null;
 }
@@ -108,6 +116,9 @@ export async function recordTurn(input: TurnWriteInput): Promise<string> {
           : {}),
         ...(input.reasoning && input.reasoning.length > 0
           ? { reasoning: jsonInput(input.reasoning) }
+          : {}),
+        ...(input.inspectorCalls && input.inspectorCalls.length > 0
+          ? { inspectorCalls: jsonInput(input.inspectorCalls) }
           : {}),
         costUsd: input.costUsd,
       },

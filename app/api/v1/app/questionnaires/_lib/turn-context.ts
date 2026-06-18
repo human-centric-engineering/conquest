@@ -99,6 +99,8 @@ export interface LoadedTurnContext {
     respondentUserId: string | null;
     /** Admin preview session marker — gates the admin-only Turn Inspector. */
     isPreview: boolean;
+    /** Short support reference shown to the respondent; null for rows predating the column. */
+    publicRef?: string | null;
   };
   base: TurnContextBase;
   /** Richer slot views for the capability args (the orchestrator only needs QuestionView). */
@@ -141,6 +143,7 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
       status: true,
       versionId: true,
       respondentUserId: true,
+      publicRef: true,
       // Admin preview marker — gates the admin-only Turn Inspector telemetry in the route.
       isPreview: true,
       // Seriousness / abuse gate: the prior strike count the orchestrator folds a new strike into.
@@ -385,6 +388,7 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
       versionId: session.versionId,
       respondentUserId: session.respondentUserId,
       isPreview: session.isPreview,
+      publicRef: session.publicRef,
     },
     base: {
       sessionId: session.id,

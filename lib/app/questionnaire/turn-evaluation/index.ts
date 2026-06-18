@@ -42,7 +42,10 @@ export {
   buildTurnEvaluatorRetryMessage,
 } from '@/lib/app/questionnaire/turn-evaluation/schema';
 
-export { buildTurnEvaluatorPrompt } from '@/lib/app/questionnaire/turn-evaluation/prompt';
+export {
+  buildTurnEvaluatorPrompt,
+  TURN_RUBRIC_VERSION,
+} from '@/lib/app/questionnaire/turn-evaluation/prompt';
 
 export { serializeTurnEvaluation } from '@/lib/app/questionnaire/turn-evaluation/serialize';
 

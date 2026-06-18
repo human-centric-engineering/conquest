@@ -20,6 +20,7 @@
 
 import { prisma } from '@/lib/db/client';
 import type { Prisma } from '@prisma/client';
+import { generateSessionRef } from '@/lib/app/questionnaire/session-ref';
 import { hashInvitationToken } from '@/lib/app/questionnaire/invitations';
 import { isInvitationTransitionAllowed } from '@/lib/app/questionnaire/invitations/status';
 import { narrowToEnum } from '@/lib/app/questionnaire/types';
@@ -163,6 +164,7 @@ export async function createSessionFromInvitation(
       data: {
         versionId: invitation.versionId,
         respondentUserId,
+        publicRef: generateSessionRef(),
         isPreview: false,
         status: 'active',
       },
@@ -224,7 +226,13 @@ export async function createSessionForVersion(
 
   const session = await prisma.$transaction(async (tx) => {
     const created = await tx.appQuestionnaireSession.create({
-      data: { versionId, respondentUserId, isPreview: false, status: 'active' },
+      data: {
+        versionId,
+        respondentUserId,
+        publicRef: generateSessionRef(),
+        isPreview: false,
+        status: 'active',
+      },
       select: { id: true, status: true, versionId: true },
     });
     await recordSessionCreated(created.id, { tx });
@@ -283,7 +291,13 @@ export async function createPreviewSession(versionId: string): Promise<CreateSes
     // cascade) before minting a new one — otherwise the insert hits a P2002 on a re-preview.
     await tx.appQuestionnaireSession.deleteMany({ where: { versionId, isPreview: true } });
     const created = await tx.appQuestionnaireSession.create({
-      data: { versionId, respondentUserId: null, isPreview: true, status: 'active' },
+      data: {
+        versionId,
+        respondentUserId: null,
+        publicRef: generateSessionRef(),
+        isPreview: true,
+        status: 'active',
+      },
       select: { id: true, status: true, versionId: true },
     });
     await recordSessionCreated(created.id, { tx, reason: 'admin_preview' });
@@ -321,7 +335,13 @@ export async function createAnonymousSession(versionId: string): Promise<CreateS
 
   const session = await prisma.$transaction(async (tx) => {
     const created = await tx.appQuestionnaireSession.create({
-      data: { versionId, respondentUserId: null, isPreview: false, status: 'active' },
+      data: {
+        versionId,
+        respondentUserId: null,
+        publicRef: generateSessionRef(),
+        isPreview: false,
+        status: 'active',
+      },
       select: { id: true, status: true, versionId: true },
     });
     await recordSessionCreated(created.id, { tx });
@@ -405,6 +425,7 @@ export async function createSessionFromInviteToken(token: string): Promise<Creat
         versionId: invitation.versionId,
         respondentUserId: null,
         invitationId: invitation.id,
+        publicRef: generateSessionRef(),
         isPreview: false,
         status: 'active',
       },

@@ -19,6 +19,7 @@ import { PauseCircle, PlayCircle, ShieldCheck, Hourglass, AlertTriangle } from '
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { SessionProgressBar } from '@/components/app/questionnaire/session-progress-bar';
+import { SessionRefChip } from '@/components/app/questionnaire/lifecycle/session-ref-chip';
 import type { SessionStatusView } from '@/lib/app/questionnaire/session/status-view';
 
 export interface SessionLifecycleBarProps {
@@ -63,12 +64,14 @@ export function SessionLifecycleBar({
   // the affordance strip below it stays conditional, so a plain active session shows
   // just the progress bar.
   const showProgress = view !== null;
+  const ref = view?.ref ?? null;
   const hasStrip =
     anonymous ||
     showCostHint ||
     showResume ||
     showPause ||
     actionError !== null ||
+    ref !== null ||
     trailing != null;
   if (!showProgress && !hasStrip) return null;
 
@@ -109,6 +112,7 @@ export function SessionLifecycleBar({
           )}
 
           <span className="ml-auto inline-flex items-center gap-2">
+            {ref && <SessionRefChip refRaw={ref} />}
             {actionError && (
               <span role="alert" className="text-destructive inline-flex items-center gap-1">
                 <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />

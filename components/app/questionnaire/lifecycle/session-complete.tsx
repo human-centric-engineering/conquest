@@ -19,6 +19,7 @@ import { CheckCircle2, Download } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { SessionRefChip } from '@/components/app/questionnaire/lifecycle/session-ref-chip';
 import { API } from '@/lib/api/endpoints';
 
 export interface SessionCompleteProps {
@@ -28,6 +29,8 @@ export interface SessionCompleteProps {
   accessToken?: string;
   /** Number of answers captured, or null when unknown. */
   answeredCount: number | null;
+  /** The session's raw support reference; shown so the respondent can quote it later. */
+  refRaw?: string | null;
   className?: string;
 }
 
@@ -35,6 +38,7 @@ export function SessionComplete({
   sessionId,
   accessToken,
   answeredCount,
+  refRaw,
   className,
 }: SessionCompleteProps) {
   const [downloading, setDownloading] = useState(false);
@@ -117,6 +121,12 @@ export function SessionComplete({
           <p className="text-destructive text-xs" role="alert">
             Couldn&rsquo;t prepare your PDF. Please try again.
           </p>
+        )}
+
+        {refRaw && (
+          <div className="mt-1 border-t pt-3">
+            <SessionRefChip refRaw={refRaw} />
+          </div>
         )}
       </div>
     </div>

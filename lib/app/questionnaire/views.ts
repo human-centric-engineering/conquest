@@ -248,3 +248,89 @@ export interface EvaluationRunDetail extends EvaluationRunListItem {
   /** All findings across dimensions, ordered by (dimension, ordinal). */
   findings: EvaluationFindingView[];
 }
+
+/**
+ * One row in the persisted turn-evaluation search surface — the denormalised facets the table
+ * filters/sorts on, enriched with the (cross-`versionId`) questionnaire title + version number
+ * in a fixed query budget. `commentPreview` is a trimmed slice so the list can show a comment
+ * exists without shipping the whole note. Dates are ISO strings (they cross the HTTP boundary).
+ */
+export interface TurnEvaluationListItem {
+  id: string;
+  sessionId: string;
+  turnId: string | null;
+  turnOrdinal: number;
+  overallScore: number;
+  /** TurnEffectiveness band: Excellent | Good | Mixed | Weak | Poor. */
+  effectiveness: string;
+  evaluatorModel: string;
+  evaluatorProvider: string;
+  rubricVersion: string;
+  questionnaireVersionId: string;
+  /** Enriched from the version → questionnaire; `null` when the version no longer resolves. */
+  questionnaireTitle: string | null;
+  questionnaireId: string | null;
+  versionNumber: number | null;
+  /** Learning workflow: none | flagged | reviewed | actioned | dismissed. */
+  flagStatus: string;
+  /** Trimmed comment slice (or `null`); the full text is on the detail view. */
+  commentPreview: string | null;
+  /** The dataset case this row was actioned into, when `flagStatus === 'actioned'`. */
+  datasetCaseId: string | null;
+  costUsd: number | null;
+  createdAt: string;
+}
+
+/**
+ * Full persisted turn-evaluation detail — the list row plus the verdict, the snapshotted input
+ * that was judged, the full comment, and the complete review/provenance state. `verdict` and
+ * `evaluatedInput` are passed through as opaque JSON (the client renders the verdict with the
+ * shared turn-evaluation components; the schema validates them at write time).
+ */
+/**
+ * One turn in a ref-lookup result — enough for an admin to see what happened and re-evaluate it.
+ * Messages are trimmed previews; `hasTraces` says whether the saved inspector dump is present (so
+ * the turn can be re-evaluated), and `evaluationCount` how many verdicts already exist for it.
+ */
+export interface RefLookupTurn {
+  ordinal: number;
+  userMessagePreview: string;
+  agentResponsePreview: string;
+  callCount: number;
+  hasTraces: boolean;
+  evaluationCount: number;
+  createdAt: string;
+}
+
+/** The result of looking a chat up by its support reference — the session + its turns. */
+export interface RefLookupResult {
+  session: {
+    id: string;
+    ref: string;
+    status: string;
+    isPreview: boolean;
+    questionnaireTitle: string | null;
+    questionnaireId: string | null;
+    versionId: string;
+    versionNumber: number | null;
+    createdAt: string;
+  };
+  turns: RefLookupTurn[];
+}
+
+export interface TurnEvaluationDetail extends TurnEvaluationListItem {
+  appVersion: string;
+  evaluatorAgentId: string | null;
+  evaluatedByUserId: string | null;
+  /** The full `TurnEvaluation` verdict object. */
+  verdict: unknown;
+  /** The `{ turn, context }` dump that was judged. */
+  evaluatedInput: unknown;
+  comment: string | null;
+  commentByUserId: string | null;
+  commentAt: string | null;
+  flagReviewerId: string | null;
+  flagUpdatedAt: string | null;
+  datasetId: string | null;
+  updatedAt: string;
+}
