@@ -61,6 +61,14 @@ Rules:
 small talk, "I don't know"), return an empty "answers" array — do not guess.
 - Never answer a question that is not in the candidate list, and never re-answer with a value the \
 message doesn't support.
+- VOLUNTEERED TOPICS — when the respondent voices a clear opinion, complaint, or judgement about a \
+specific NAMED subject (e.g. "our KPIs are badly thought out", "the CRM is useless"), find the \
+candidate question(s) about THAT subject and answer them too, EVEN WHEN the subject is not what the \
+ACTIVE question asked about and even when raised mid-tangent or alongside the active answer. A \
+strongly-stated complaint pins the matching question's negative pole — "our KPIs are meaningless and \
+don't relate to strategy" makes a "performance KPIs are clear and aligned" question false / the \
+bottom of its scale. Do not drop a clear, strongly-voiced signal just because it was not the topic \
+you asked about.
 - Prefer the respondent's own words; do not normalise away meaning.
 - NEAR-IDENTICAL QUESTIONS — a questionnaire may include several candidate questions that ask \
 essentially the SAME thing in different words (e.g. two separate questions about whether the sales \
@@ -203,7 +211,9 @@ A substantive answer almost always informs at least one slot, so an EMPTY "dataS
 EXCEPTION — correct only for a true non-answer (small talk, a question back, "I don't know", or a \
 message that genuinely bears on no slot). Whenever they share anything about themselves, their work, \
 their feelings, or their situation, map it to the slot(s) it informs and emit a fill — at honest \
-confidence (low if the signal is weak), but emit it. NEVER return question answers while leaving \
+confidence (low if the signal is weak), but emit it. This INCLUDES a strong opinion or complaint \
+about a specific named subject (e.g. KPIs, tooling, leadership): fill the slot for THAT subject even \
+when it was raised on a tangent or is not the topic you asked about. NEVER return question answers while leaving \
 "dataSlotFills" empty: if a message was clear enough to answer a question, it informs a data slot too. \
 And the converse — for every fill you emit on a slot that "answers questions: …", confirm you also \
 emitted an "answers" entry for each mapped question the position determines (or deliberately omitted one \

@@ -1,15 +1,17 @@
 /**
  * Unit test: adaptive-strategy dependency wiring (F4.1 / PR3).
  *
- * Mocks the embedder, `drainStreamChat`, and the pgvector rank so the prompt
- * builder, the selector-output parser, and the `llmPick` → candidate-resolution
- * logic (incl. every fail-soft branch) are tested without real I/O.
+ * Mocks the embedder, the shared selector completion, and the pgvector rank so the prompt builder and
+ * the `llmPick` → candidate-resolution logic (incl. every fail-soft branch) are tested without real
+ * I/O. The selector now runs as a direct structured completion, so anonymous sessions reach it too.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('@/lib/orchestration/knowledge/embedder', () => ({ embedText: vi.fn() }));
-vi.mock('@/lib/orchestration/evaluations/drain-stream-chat', () => ({ drainStreamChat: vi.fn() }));
+vi.mock('@/app/api/v1/app/questionnaires/_lib/selector-completion', () => ({
+  runSelectorCompletion: vi.fn(),
+}));
 vi.mock('@/app/api/v1/app/questionnaires/_lib/slot-embeddings', () => ({
   rankSlotsByVector: vi.fn(),
 }));
@@ -17,10 +19,9 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/slot-embeddings', () => ({
 import {
   buildAdaptiveDeps,
   buildSelectorPrompt,
-  parseSelectorOutput,
 } from '@/app/api/v1/app/questionnaires/_lib/adaptive-deps';
 import { embedText } from '@/lib/orchestration/knowledge/embedder';
-import { drainStreamChat } from '@/lib/orchestration/evaluations/drain-stream-chat';
+import { runSelectorCompletion } from '@/app/api/v1/app/questionnaires/_lib/selector-completion';
 import { rankSlotsByVector } from '@/app/api/v1/app/questionnaires/_lib/slot-embeddings';
 
 type Mock = ReturnType<typeof vi.fn>;
@@ -30,49 +31,29 @@ const candidates = [
   { id: 'q2-id', key: 'q2', prompt: 'Describe your goals.' },
 ];
 
-function drainResult(over: Partial<{ assistantText: string; costUsd: number; errorCode: string }>) {
+/** Build a {@link SelectorCompletionResult}-shaped value for the mocked helper. */
+function selResult(
+  over: Partial<{
+    parsed: { choice: number; rationale: string } | null;
+    costUsd: number;
+    tokensIn: number;
+    tokensOut: number;
+    errorCode: string;
+  }> = {}
+) {
   return {
-    assistantText: '',
-    citations: [],
-    toolCalls: [],
-    tokenUsage: { input: 0, output: 0 },
-    costUsd: 0,
+    parsed: { choice: 2, rationale: 'flows' },
+    model: 'gpt-4o',
+    provider: 'openai',
+    costUsd: 0.004,
     latencyMs: 1,
+    tokensIn: 0,
+    tokensOut: 0,
     ...over,
   };
 }
 
 beforeEach(() => vi.clearAllMocks());
-
-describe('parseSelectorOutput', () => {
-  it('parses a clean JSON envelope', () => {
-    expect(parseSelectorOutput('{"choice": 2, "rationale": "flows"}')).toEqual({
-      choice: 2,
-      rationale: 'flows',
-    });
-  });
-
-  it('parses a code-fenced JSON envelope', () => {
-    expect(parseSelectorOutput('```json\n{"choice":1,"rationale":"x"}\n```')).toEqual({
-      choice: 1,
-      rationale: 'x',
-    });
-  });
-
-  it('defaults a missing rationale to empty string', () => {
-    expect(parseSelectorOutput('{"choice": 0}')).toEqual({ choice: 0, rationale: '' });
-  });
-
-  it('truncates a fractional choice to an integer', () => {
-    expect(parseSelectorOutput('{"choice": 2.9, "rationale": "y"}')?.choice).toBe(2);
-  });
-
-  it('returns null when choice is missing or non-numeric', () => {
-    expect(parseSelectorOutput('{"rationale": "x"}')).toBeNull();
-    expect(parseSelectorOutput('{"choice": "two"}')).toBeNull();
-    expect(parseSelectorOutput('not json')).toBeNull();
-  });
-});
 
 describe('buildSelectorPrompt', () => {
   it('numbers the candidates and includes the transcript + JSON instruction', () => {
@@ -174,20 +155,20 @@ describe('buildAdaptiveDeps — llmPick', () => {
   const input = { recentMessages: ['hi'], candidates, sessionId: 'sess-1' };
 
   it('resolves the chosen candidate by 1-based index and propagates cost', async () => {
-    (drainStreamChat as unknown as Mock).mockResolvedValue(
-      drainResult({ assistantText: '{"choice": 2, "rationale": "flows"}', costUsd: 0.004 })
+    (runSelectorCompletion as unknown as Mock).mockResolvedValue(
+      selResult({ parsed: { choice: 2, rationale: 'flows' }, costUsd: 0.004 })
     );
     const pick = await deps().llmPick(input);
     expect(pick).toEqual({ questionId: 'q2-id', rationale: 'flows', costUsd: 0.004 });
-    // session id threaded into cost-log metadata.
-    expect(drainStreamChat).toHaveBeenCalledWith(
-      expect.objectContaining({ costLogMetadata: { appQuestionnaireSessionId: 'sess-1' } })
+    // session id threaded into the selector completion for cost attribution.
+    expect(runSelectorCompletion).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 'sess-1' })
     );
   });
 
   it('records the selector LLM pick in the inspector when a sink is supplied', async () => {
-    (drainStreamChat as unknown as Mock).mockResolvedValue(
-      drainResult({ assistantText: '{"choice": 2, "rationale": "flows"}', costUsd: 0.004 })
+    (runSelectorCompletion as unknown as Mock).mockResolvedValue(
+      selResult({ parsed: { choice: 2, rationale: 'flows' }, costUsd: 0.004 })
     );
     const recordInspectorCall = vi.fn();
     const d = buildAdaptiveDeps({ userId: 'admin-1', recordInspectorCall });
@@ -199,12 +180,12 @@ describe('buildAdaptiveDeps — llmPick', () => {
     expect(trace.kind).toBeUndefined(); // an LLM call, not an embedding
     expect(trace.costUsd).toBe(0.004);
     expect(trace.prompt[0].content).toContain('Candidate questions to ask next');
-    expect(trace.response).toContain('"choice": 2');
+    expect(trace.response).toContain('"choice":2');
   });
 
   it('returns a null pick when the selector chooses 0 (none)', async () => {
-    (drainStreamChat as unknown as Mock).mockResolvedValue(
-      drainResult({ assistantText: '{"choice": 0, "rationale": "nothing fits"}', costUsd: 0.001 })
+    (runSelectorCompletion as unknown as Mock).mockResolvedValue(
+      selResult({ parsed: { choice: 0, rationale: 'nothing fits' }, costUsd: 0.001 })
     );
     const pick = await deps().llmPick(input);
     expect(pick.questionId).toBeNull();
@@ -212,37 +193,37 @@ describe('buildAdaptiveDeps — llmPick', () => {
   });
 
   it('returns a null pick for an out-of-range choice', async () => {
-    (drainStreamChat as unknown as Mock).mockResolvedValue(
-      drainResult({ assistantText: '{"choice": 9, "rationale": "x"}' })
+    (runSelectorCompletion as unknown as Mock).mockResolvedValue(
+      selResult({ parsed: { choice: 9, rationale: 'x' } })
     );
     expect((await deps().llmPick(input)).questionId).toBeNull();
   });
 
-  it('returns a null pick on a stream error', async () => {
-    (drainStreamChat as unknown as Mock).mockResolvedValue(
-      drainResult({ errorCode: 'budget_exceeded', costUsd: 0 })
+  it('returns a null pick on a selector completion error', async () => {
+    (runSelectorCompletion as unknown as Mock).mockResolvedValue(
+      selResult({ parsed: null, errorCode: 'completion_failed', costUsd: 0 })
     );
     const pick = await deps().llmPick(input);
     expect(pick.questionId).toBeNull();
-    expect(pick.rationale).toMatch(/budget_exceeded/);
+    expect(pick.rationale).toMatch(/completion_failed/);
   });
 
-  it('returns a null pick on unparseable output', async () => {
-    (drainStreamChat as unknown as Mock).mockResolvedValue(
-      drainResult({ assistantText: 'I think question two' })
-    );
+  it('returns a null pick on an unparseable (null) result with no error code', async () => {
+    (runSelectorCompletion as unknown as Mock).mockResolvedValue(selResult({ parsed: null }));
     const pick = await deps().llmPick(input);
     expect(pick.questionId).toBeNull();
     expect(pick.rationale).toMatch(/unparseable/);
   });
 
-  it('skips the selector agent entirely for an anonymous session (no streamChat call)', async () => {
-    // The selector's streamChat would FK-violate on the synthetic anon user, so anon sessions
-    // must never reach it — the deps return a null pick and the strategy falls back to weighted.
+  it('RUNS the selector for an anonymous session (structured completion — no user FK)', async () => {
+    // The selector is now a direct structured completion with no persisted conversation, so an
+    // anonymous session reaches it and the strategy can use an adaptive pick.
+    (runSelectorCompletion as unknown as Mock).mockResolvedValue(
+      selResult({ parsed: { choice: 2, rationale: 'flows' }, costUsd: 0.004 })
+    );
     const d = buildAdaptiveDeps({ userId: 'anon:sess-1', anonymous: true });
     const pick = await d.llmPick(input);
-    expect(pick.questionId).toBeNull();
-    expect(pick.rationale).toMatch(/anonymous/);
-    expect(drainStreamChat).not.toHaveBeenCalled();
+    expect(pick.questionId).toBe('q2-id');
+    expect(runSelectorCompletion).toHaveBeenCalled();
   });
 });

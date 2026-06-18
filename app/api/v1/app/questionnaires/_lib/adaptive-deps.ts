@@ -16,10 +16,8 @@
  */
 
 import { embedText } from '@/lib/orchestration/knowledge/embedder';
-import { drainStreamChat } from '@/lib/orchestration/evaluations/drain-stream-chat';
-import { tryParseJson } from '@/lib/orchestration/evaluations/parse-structured';
 
-import { QUESTIONNAIRE_SELECTOR_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
+import { runSelectorCompletion } from '@/app/api/v1/app/questionnaires/_lib/selector-completion';
 import type { LlmPickInput, LlmPickResult, StrategyDeps } from '@/lib/app/questionnaire/selection';
 import { rankSlotsByVector } from '@/app/api/v1/app/questionnaires/_lib/slot-embeddings';
 import { buildEmbeddingTrace, type RecordAgentCall } from '@/lib/app/questionnaire/inspector';
@@ -31,13 +29,6 @@ import {
   section,
   titledBlock,
 } from '@/lib/app/questionnaire/prompt/format';
-
-/** The selector agent's pinned output envelope. */
-interface SelectorOutput {
-  /** 1-based index into the candidate list, or 0 for "none fits". */
-  choice: number;
-  rationale: string;
-}
 
 /**
  * Render the numbered candidate list + transcript + framing the selector agent judges, as XML-tagged
@@ -82,68 +73,48 @@ export function buildSelectorPrompt(input: LlmPickInput): string {
   );
 }
 
-/** Validate the selector agent's JSON reply into a {@link SelectorOutput}. */
-export function parseSelectorOutput(raw: string): SelectorOutput | null {
-  return tryParseJson<SelectorOutput>(raw, (parsed) => {
-    if (!parsed || typeof parsed !== 'object') return null;
-    const obj = parsed as Record<string, unknown>;
-    if (typeof obj.choice !== 'number' || !Number.isFinite(obj.choice)) return null;
-    const rationale = typeof obj.rationale === 'string' ? obj.rationale : '';
-    return { choice: Math.trunc(obj.choice), rationale };
-  });
-}
-
 /**
- * Drive the seeded selection agent to pick among the (already similarity-ranked)
- * candidates. Never throws — a stream error or unparseable reply returns a null
- * pick so the strategy falls back to `weighted`.
+ * Drive the seeded selection agent to pick among the (already similarity-ranked) candidates, via a
+ * DIRECT structured completion (see {@link runSelectorCompletion}) — no persisted conversation, so it
+ * runs for authenticated, anonymous, AND admin-preview sessions alike. Never throws — a provider/
+ * completion failure or unparseable reply returns a null pick so the strategy falls back to `weighted`.
  */
 async function runSelectorAgent(
   input: LlmPickInput,
-  userId: string,
   recordInspectorCall?: RecordAgentCall
 ): Promise<LlmPickResult> {
   const selectorMessage = buildSelectorPrompt(input);
-  const result = await drainStreamChat({
-    agentSlug: QUESTIONNAIRE_SELECTOR_AGENT_SLUG,
-    userId,
-    message: selectorMessage,
-    entityContext: {
-      source: 'app_questionnaire_selection',
-      appQuestionnaireSessionId: input.sessionId,
-    },
-    costLogMetadata: { appQuestionnaireSessionId: input.sessionId },
+  const result = await runSelectorCompletion({
+    userMessage: selectorMessage,
+    sessionId: input.sessionId,
   });
   // Surface the LLM pick in the inspector (admin preview only) — the embedding ranking was already
   // traced; this is the agent that actually chooses among the ranked candidates.
   recordInspectorCall?.({
     label: 'Question selector',
-    model: '',
-    provider: '',
+    model: result.model,
+    provider: result.provider,
     latencyMs: result.latencyMs,
     costUsd: result.costUsd,
-    tokensIn: result.tokenUsage.input,
-    tokensOut: result.tokenUsage.output,
+    tokensIn: result.tokensIn,
+    tokensOut: result.tokensOut,
     prompt: [{ role: 'user', content: selectorMessage }],
-    response: result.errorCode ? `(selector error: ${result.errorCode})` : result.assistantText,
+    response: result.errorCode
+      ? `(selector error: ${result.errorCode})`
+      : JSON.stringify(result.parsed),
   });
 
-  if (result.errorCode) {
+  if (result.errorCode || !result.parsed) {
     return {
       questionId: null,
-      rationale: `selector error: ${result.errorCode}`,
+      rationale: result.errorCode
+        ? `selector error: ${result.errorCode}`
+        : 'selector returned unparseable output',
       costUsd: result.costUsd,
     };
   }
 
-  const parsed = parseSelectorOutput(result.assistantText);
-  if (!parsed) {
-    return {
-      questionId: null,
-      rationale: 'selector returned unparseable output',
-      costUsd: result.costUsd,
-    };
-  }
+  const parsed = result.parsed;
   if (parsed.choice <= 0 || parsed.choice > input.candidates.length) {
     return {
       questionId: null,
@@ -169,15 +140,12 @@ async function runSelectorAgent(
  * vector the pure strategy consumes.
  */
 export function buildAdaptiveDeps(opts: {
-  userId: string;
   /**
-   * Anonymous (no-login) session: the selection AGENT runs through `streamChat`, which persists an
-   * `AiConversation` keyed to a REAL user — but an anonymous turn's `userId` is the synthetic
-   * `anon:<sessionId>`, which has no `user` row, so the insert violates the FK and the whole stream
-   * 500s (`internal_error`) every turn. There's no ephemeral-chat seam in the platform handler, so we
-   * skip the LLM pick for anonymous sessions and let the strategy fall back to its deterministic
-   * `weighted` ordering. Embedding ranking still runs (a direct embedder call, no conversation row).
+   * Retained for caller compatibility; no longer gates selection. The selector now runs as a direct
+   * structured completion ({@link runSelectorCompletion}) with no persisted conversation, so it works
+   * for anonymous (no-login) and admin-preview sessions too — there is no user FK to violate.
    */
+  userId?: string;
   anonymous?: boolean;
   recordInspectorCall?: RecordAgentCall;
 }): StrategyDeps {
@@ -201,13 +169,6 @@ export function buildAdaptiveDeps(opts: {
       return result.embedding;
     },
     rankByVector: (embedding, candidateIds, k) => rankSlotsByVector(embedding, candidateIds, k),
-    llmPick: (input) =>
-      opts.anonymous
-        ? Promise.resolve({
-            questionId: null,
-            rationale: 'LLM selection skipped for anonymous session',
-            costUsd: 0,
-          })
-        : runSelectorAgent(input, opts.userId, opts.recordInspectorCall),
+    llmPick: (input) => runSelectorAgent(input, opts.recordInspectorCall),
   };
 }

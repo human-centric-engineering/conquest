@@ -15,10 +15,8 @@
  */
 
 import { embedText } from '@/lib/orchestration/knowledge/embedder';
-import { drainStreamChat } from '@/lib/orchestration/evaluations/drain-stream-chat';
 
-import { QUESTIONNAIRE_SELECTOR_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
-import { parseSelectorOutput } from '@/app/api/v1/app/questionnaires/_lib/adaptive-deps';
+import { runSelectorCompletion } from '@/app/api/v1/app/questionnaires/_lib/selector-completion';
 import { rankDataSlotsByVector } from '@/app/api/v1/app/questionnaires/_lib/data-slot-embeddings';
 import { logger } from '@/lib/logging';
 import { buildEmbeddingTrace, type RecordAgentCall } from '@/lib/app/questionnaire/inspector';
@@ -52,17 +50,14 @@ export interface DataSlotSelectionContext {
   parkedTheme: string | null;
   /** Version goal — frames the selector so it advances the questionnaire's intent. */
   goal?: string;
-  /** Session id — cost attribution + the selector's entity context. */
+  /** Session id — cost attribution for the selector completion. */
   sessionId: string;
-  /** The admin/respondent the selector runs on behalf of (budget attribution). */
-  userId: string;
   /**
-   * Anonymous (no-login) session. The selector AGENT runs through `streamChat`, which persists an
-   * `AiConversation` keyed to a real `user` — but an anonymous turn's `userId` is the synthetic
-   * `anon:<sessionId>` with no `user` row, so the insert violates the FK and the stream 500s every
-   * turn. With no ephemeral-chat seam in the platform handler, skip the LLM pick for anonymous
-   * sessions and defer to the deterministic topic-local pick. See `turn-access.ts`.
+   * Retained for caller compatibility; no longer used. The selector now runs as a direct structured
+   * completion ({@link runSelectorCompletion}) with no persisted conversation, so it needs no real
+   * `user` — it runs for authenticated, anonymous (no-login), AND admin-preview sessions alike.
    */
+  userId?: string;
   anonymous?: boolean;
   /** Inspector sink (admin preview only); when present, a successful embed records one trace. */
   recordInspectorCall?: RecordAgentCall;
@@ -98,9 +93,10 @@ export function buildDataSlotSelectorPrompt(
   );
 
   const lingerNote = ctx.activeTheme
-    ? `You are currently exploring the area: "${ctx.activeTheme}". Gently prefer to finish this ` +
-      'area before moving on — but choose a different one when it clearly flows more naturally ' +
-      'from what they just said.'
+    ? `You are currently exploring the area: "${ctx.activeTheme}". All else equal, prefer to finish ` +
+      'this area before moving on — BUT if the respondent has clearly steered toward, volunteered, ' +
+      'or voiced a strong opinion about a topic in another area, switch to it now. Following what ' +
+      'they just raised matters more than finishing the current area.'
     : '';
 
   return joinSections(
@@ -129,10 +125,9 @@ export async function selectNextDataSlot(
 ): Promise<DataSlotSelectOutcome | null> {
   const lastMessage = ctx.recentMessages[ctx.recentMessages.length - 1]?.trim();
   // No conversation yet, or only one option — nothing to rank/choose, let the deterministic pick run.
-  if (!lastMessage || ctx.unfilled.length < 2) return null;
-  // Anonymous session: the selector agent's `streamChat` would FK-violate on the synthetic
-  // `anon:<sessionId>` user (no ephemeral-chat seam) — defer to the deterministic topic-local pick.
-  if (ctx.anonymous) return null;
+  if (!lastMessage || ctx.unfilled.length < 2) {
+    return null;
+  }
 
   try {
     const startedAt = Date.now();
@@ -144,7 +139,9 @@ export async function selectNextDataSlot(
       DATA_SLOT_CANDIDATE_K
     );
     // No embeddings to rank against (version never embedded) → defer to deterministic.
-    if (rankedIds.length === 0) return null;
+    if (rankedIds.length === 0) {
+      return null;
+    }
 
     ctx.recordInspectorCall?.(
       buildEmbeddingTrace({
@@ -179,37 +176,40 @@ export async function selectNextDataSlot(
       if (bridged.length > 0) pool = bridged;
     }
     const candidates = pool.slice(0, DATA_SLOT_CANDIDATE_K);
-    if (candidates.length < 2) return null;
+    if (candidates.length < 2) {
+      return null;
+    }
 
     const selectorMessage = buildDataSlotSelectorPrompt(ctx, candidates);
-    const result = await drainStreamChat({
-      agentSlug: QUESTIONNAIRE_SELECTOR_AGENT_SLUG,
-      userId: ctx.userId,
-      message: selectorMessage,
-      entityContext: {
-        source: 'app_questionnaire_data_slot_selection',
-        appQuestionnaireSessionId: ctx.sessionId,
-      },
-      costLogMetadata: { appQuestionnaireSessionId: ctx.sessionId },
+    // Direct structured completion (no persisted conversation) — runs for anonymous + preview sessions.
+    const result = await runSelectorCompletion({
+      userMessage: selectorMessage,
+      sessionId: ctx.sessionId,
     });
     // Surface the LLM pick in the inspector (admin preview only) — the embedding ranking was already
     // traced; this is the agent that actually chooses among the ranked candidates.
     ctx.recordInspectorCall?.({
       label: 'Data-slot selector',
-      model: '',
-      provider: '',
+      model: result.model,
+      provider: result.provider,
       latencyMs: result.latencyMs,
       costUsd: result.costUsd,
-      tokensIn: result.tokenUsage.input,
-      tokensOut: result.tokenUsage.output,
+      tokensIn: result.tokensIn,
+      tokensOut: result.tokensOut,
       prompt: [{ role: 'user', content: selectorMessage }],
-      response: result.errorCode ? `(selector error: ${result.errorCode})` : result.assistantText,
+      response: result.errorCode
+        ? `(selector error: ${result.errorCode})`
+        : JSON.stringify(result.parsed),
     });
-    if (result.errorCode) return null;
+    if (result.errorCode || !result.parsed) {
+      return null;
+    }
 
-    const parsed = parseSelectorOutput(result.assistantText);
-    // 0 / out-of-range / unparseable → no confident pick, defer to deterministic.
-    if (!parsed || parsed.choice <= 0 || parsed.choice > candidates.length) return null;
+    const parsed = result.parsed;
+    // 0 / out-of-range → no confident pick, defer to deterministic.
+    if (parsed.choice <= 0 || parsed.choice > candidates.length) {
+      return null;
+    }
 
     const chosen = candidates[parsed.choice - 1];
     return {

@@ -16,7 +16,10 @@ surface exists — the P4 "engine without the stream" milestone.
 
 `SELECTION_STRATEGIES` in `lib/app/questionnaire/types.ts` is the single source
 of truth; the config Zod schema, the editor's picker, and the registry all derive
-from it. Default is `sequential`.
+from it. Default is `adaptive` (`DEFAULT_QUESTIONNAIRE_CONFIG` + the
+`AppQuestionnaireConfig.selectionStrategy` column default, set by migration
+`20260618143001_app_config_default_adaptive_strategy`) — new questionnaires get
+respondent-led selection out of the box, gated by the adaptive sub-flag below.
 
 ## Architecture — pure core + injected deps
 
@@ -106,9 +109,9 @@ on top of the master app flag, because it spends per turn). Flow:
 2. Embed the last user message (`embedText`, knowledge embedder, query mode).
 3. pgvector cosine top-K unanswered candidates over `AppQuestionSlot.embedding`
    (`rankSlotsByVector`, raw SQL `<=>`).
-4. The seeded **`app-questionnaire-selector`** agent picks among them via
-   `drainStreamChat`, returning `{ choice, rationale }`; cost is logged with
-   `appQuestionnaireSessionId`.
+4. The seeded **`app-questionnaire-selector`** agent picks among them via a
+   **direct structured completion** (`runSelectorCompletion`, `_lib/selector-completion.ts`),
+   returning `{ choice, rationale }`; cost is logged with `appQuestionnaireSessionId`.
 5. **Any** failure — no deps, no embeddings, LLM/budget error, off-pool or
    unparseable pick — degrades to `weighted`, never throws. A respondent never
    sees a turn break because the LLM was down.
@@ -118,7 +121,8 @@ no-deps fallback; the config editor also hides `adaptive` from the picker (unles
 it's the already-saved value).
 
 **What the selector sees.** The agent's **system prompt is load-bearing** — unlike
-the capability-dispatched agents, the selector runs through `streamChat`, so its
+the capability-dispatched agents, the selector runs as a direct structured completion
+(`runSelectorCompletion`, the same mechanism the seriousness/sensitivity judges use), so its
 editable `systemInstructions` (seed `005-selection-agent.ts`) _are_ the system prompt
 sent to the model. Editing it in the admin UI changes selection. The per-turn **user**
 message is assembled by `buildSelectorPrompt` (`_lib/adaptive-deps.ts`) and carries:
@@ -129,6 +133,14 @@ list** — each candidate rendered with its `guidelines` ("looking for") and `ra
 threads onto `SelectionContext` (the preview builder sets it directly; the live turn
 loop passes `meta.goal` via `buildTurnInvokers`); `guidelines`/`rationale` ride on
 `QuestionView`. All of it is optional — absent fields are simply omitted from the prompt.
+
+**Follow where the respondent is steering.** The selector prompt leads with this: when the respondent
+volunteers, dwells on, or voices a strong opinion about a specific topic ("our KPIs are useless", "I
+want to talk about X"), the selector picks the candidate matching **that** topic even when it sits in
+a different area from the one being explored — a clearly volunteered topic outweighs finishing the
+current area and outweighs the listed order. Only when nothing has been strongly volunteered does it
+fall back to continuity/goal-fit. (Data-slot mode has the analogous [deepen-a-tangent](data-slots.md#deepen-a-volunteered-tangent-be-led-by-the-respondent)
+re-surfacing for just-volunteered off-topic fills.)
 
 ### Embeddings
 

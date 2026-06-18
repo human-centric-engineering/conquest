@@ -472,6 +472,21 @@ export async function runDataSlotTurn(
 
   const unfilled = unfilledDataSlots(dataSlots, effectiveDataAnswered);
 
+  // Deepen a volunteered tangent (be led by the respondent): when THIS turn captured a STRONG,
+  // volunteered opinion on a NON-active topic — a `direct`, non-provisional fill on a slot other than
+  // the one we were exploring — that slot is now covered and drops out of `unfilled`, so the
+  // interviewer could never follow up on what they're plainly animated about (the "capture-and-drop"
+  // gap). Re-surface such slots to the selector so it CAN choose to go a little deeper. Bounded to
+  // "deepen once": once targeted, the slot becomes the active slot next turn and no longer qualifies
+  // as a non-active tangent — so the conversation deepens once, then moves on.
+  const deepenCandidates: DataSlotTarget[] = (hasMessage && !disregarded ? dataSlotFills : [])
+    .filter(
+      (f) =>
+        f.provenance === 'direct' && !f.provisional && f.dataSlotKey !== state.activeDataSlotKey
+    )
+    .map((f) => dataSlots.find((s) => s.key === f.dataSlotKey))
+    .filter((s): s is DataSlotTarget => s !== undefined && !unfilled.some((u) => u.id === s.id));
+
   // Balanced progress: surface unanswered REQUIRED questions directly when the background question
   // coverage falls behind the data-slot coverage — the conversation is filling slots but not
   // capturing the mandatory answers (data slots are coarser than questions, so some required
@@ -519,23 +534,29 @@ export async function runDataSlotTurn(
     const activeTheme = state.activeDataSlotKey
       ? (dataSlots.find((s) => s.key === state.activeDataSlotKey)?.theme ?? null)
       : null;
+    // Offer just-volunteered tangent slots alongside the unfilled set so the selector can deepen them.
+    const candidatePool =
+      deepenCandidates.length > 0 ? [...deepenCandidates, ...unfilled] : unfilled;
     const adaptivePick = invokers.selectDataSlot
-      ? await invokers.selectDataSlot(state, unfilled, {
+      ? await invokers.selectDataSlot(state, candidatePool, {
           activeTheme,
           parkedTheme: parkedTheme ?? null,
         })
       : null;
     let next: DataSlotTarget;
     if (adaptivePick) {
-      const chosen = unfilled.find((s) => s.key === adaptivePick.dataSlotKey);
+      const chosen = candidatePool.find((s) => s.key === adaptivePick.dataSlotKey);
       // Trust only an in-pool pick; an off-pool key falls back to the deterministic order.
       next = chosen ?? pickNextDataSlot(unfilled, state.activeDataSlotKey, dataSlots, parkedTheme);
       costUsd += adaptivePick.costUsd;
     } else {
       next = pickNextDataSlot(unfilled, state.activeDataSlotKey, dataSlots, parkedTheme);
     }
-    const isReask = next.key === state.activeDataSlotKey;
-    const isTransition = activeTheme !== null && activeTheme !== next.theme;
+    // A deepen pick is a covered slot the respondent just raised — frame it as a follow-up (re-ask),
+    // not a fresh move into a new area, so the interviewer goes deeper on what they volunteered.
+    const isDeepen = deepenCandidates.some((s) => s.id === next.id);
+    const isReask = isDeepen || next.key === state.activeDataSlotKey;
+    const isTransition = !isDeepen && activeTheme !== null && activeTheme !== next.theme;
     toolCalls.push(toolCall(DATA_SLOT_SELECTION_TOOL_SLUG, true));
     response = {
       kind: 'data_slot',
@@ -547,11 +568,13 @@ export async function runDataSlotTurn(
       isReask,
       isTransition,
     };
-    selectionRationale = isReask
-      ? 'Circling back to understand this a little better.'
-      : isTransition
-        ? `Moving on to a new area: ${next.theme}.`
-        : 'Staying with this topic to go a little deeper.';
+    selectionRationale = isDeepen
+      ? `Following up on what they raised about ${next.name} before moving on.`
+      : isReask
+        ? 'Circling back to understand this a little better.'
+        : isTransition
+          ? `Moving on to a new area: ${next.theme}.`
+          : 'Staying with this topic to go a little deeper.';
   } else {
     // Every data slot is filled, but a background question is still open → ask it directly.
     const next = remainingQuestions[0];

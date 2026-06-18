@@ -248,21 +248,23 @@ question slots) and asks the seeded **selector agent** which to pursue next.
 - **Candidate set (preserves the theme rhythm).** The pre-filter narrows the unfilled pool to the
   top-K by similarity, but **always keeps a couple of same-theme slots** so the topic-local "linger"
   is still available, and **biases away from a just-parked theme** when bridging. The selector agent
-  sees that set (with themes) and is told to gently prefer finishing the current area unless another
-  clearly flows better. So embeddings refine the rhythm rather than replacing it with raw jumps.
+  sees that set (with themes) and is told to follow where the respondent is steering — a clearly
+  volunteered topic outweighs finishing the current area — but otherwise prefer continuity over raw
+  jumps. So embeddings refine the rhythm rather than replacing it.
 - **The seam.** Pure orchestrator → `selectDataSlot` invoker (optional, on `CapabilityInvokers`) →
   `_lib/data-slot-selection.ts` (`selectNextDataSlot`). **Fail-soft everywhere**: no last message,
   <2 candidates, un-embedded slots, a selector error, or an off-pool pick all return `null` and the
   orchestrator falls back to `pickNextDataSlot`. The selector's spend is folded into the turn cost.
-- **Anonymous sessions skip the LLM pick.** The selector agent runs through `streamChat`, which
-  persists an `AiConversation` keyed to a real `user`. An anonymous (no-login) turn's `userId` is the
-  synthetic `anon:<sessionId>` with no `user` row, so that insert FK-violates and the stream 500s
-  (`internal_error`) every turn — silently degrading adaptive selection while spamming error logs.
-  With no ephemeral-chat seam in the platform handler, `selectNextDataSlot` (and the question-mode
-  `buildAdaptiveDeps`) take an `anonymous` flag — threaded from `resolveTurnAccess` → the `/messages`
-  route → `buildTurnInvokers` — and short-circuit to the deterministic pick for anonymous sessions.
-  Restoring adaptive selection for anonymous respondents needs an ephemeral (non-persisting) chat
-  mode in the platform `streamChat`, tracked as platform follow-up.
+- **Anonymous + preview sessions run the LLM pick too.** The selector agent runs as a **direct
+  structured completion** (`runSelectorCompletion`, `_lib/selector-completion.ts`) — the same
+  mechanism the seriousness/sensitivity judges use — so it persists **no** `AiConversation` and has no
+  `user` FK to violate. It therefore works identically for authenticated, anonymous (no-login,
+  synthetic `anon:<sessionId>` user), and admin-preview (null `respondentUserId`) sessions. (It used
+  to run through `drainStreamChat`, which writes a conversation keyed to a real `user` — that insert
+  FK-violated on the synthetic anonymous user, so both selectors skipped the LLM pick for anonymous
+  sessions and silently fell back to the deterministic order. That short-circuit is gone.) The
+  `anonymous` flag still threads from `resolveTurnAccess` → `/messages` → `buildTurnInvokers` for
+  caller compatibility but **no longer gates** selection.
 - **Gating.** Sub-flag `APP_QUESTIONNAIRES_ADAPTIVE_DATA_SLOTS_ENABLED`
   (`isAdaptiveDataSlotSelectionEnabled` = master AND data-slots AND live-sessions AND this sub-flag),
   off by default. The `/messages` route wires the invoker only in data-slot mode with the flag on,
@@ -273,6 +275,28 @@ question slots) and asks the seeded **selector agent** which to pursue next.
   checklist adds a "Data slots embedded for adaptive selection" check — required when the feature is
   on AND the version has data slots, **launch-only** (the preview gate opts out; the lazy backstop
   covers rehearsal). Mirrors the question-slot embedding operability.
+
+### Deepen a volunteered tangent (be led by the respondent)
+
+A respondent often volunteers a **strong opinion about something we weren't asking about** — "our
+KPIs are useless", "the CRM is a mess" — mid-answer or on a tangent. The extractor is told to
+**capture that signal anyway** (the "VOLUNTEERED TOPICS" rule in `extraction-prompt.ts`: when a
+message bears a clear, strongly-voiced opinion about a specific named subject, fill the slot for
+**that** subject even when it isn't the active topic, pinning the matching question's pole). But once
+that off-topic slot is filled it **drops out of `unfilled`**, so the interviewer would never follow
+up on the very thing the respondent is animated about — the **capture-and-drop gap**.
+
+`runDataSlotTurn` closes it. Each turn it computes **deepen candidates**: slots that got a `direct`,
+non-provisional fill **this turn** on a key **other than** the active slot (i.e. a just-volunteered
+tangent that is now covered). These are prepended to the selector's `candidatePool` (ahead of
+`unfilled`) so the selector **can choose to go a little deeper** — and the seeded selector prompt now
+leads with "FOLLOW WHERE THE RESPONDENT IS STEERING": a clearly volunteered topic outweighs finishing
+the current area and the listed order. A deepen pick is framed as a **follow-up** (`isReask`, never
+`isTransition`) with the rationale _"Following up on what they raised about {name} before moving
+on."_ It is **bounded to deepen once**: once targeted, that slot becomes the active slot next turn, so
+it no longer qualifies as a non-active tangent — the conversation deepens once, then moves on. When
+the adaptive selector is off (or returns no pick), the deterministic `pickNextDataSlot` runs over
+`unfilled` only, so deepen has no effect — it is purely an adaptive-selection enrichment.
 
 ## Respondent panel
 

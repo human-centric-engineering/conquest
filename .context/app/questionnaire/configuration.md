@@ -24,7 +24,7 @@ single JSON column for the profile fields:
 
 | Setting                               | Column                     | Type                   | Default             |
 | ------------------------------------- | -------------------------- | ---------------------- | ------------------- |
-| Question selection strategy           | `selectionStrategy`        | String (enum)          | `'sequential'`      |
+| Question selection strategy           | `selectionStrategy`        | String (enum)          | `'adaptive'`        |
 | Completion: min questions             | `minQuestionsAnswered`     | Int                    | `0`                 |
 | Completion: coverage threshold        | `coverageThreshold`        | Float (0–1)            | `1.0`               |
 | Cost budget (USD / session)           | `costBudgetUsd`            | Float? (null = no cap) | `null`              |

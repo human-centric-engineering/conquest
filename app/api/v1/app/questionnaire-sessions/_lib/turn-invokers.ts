@@ -494,7 +494,9 @@ export async function buildTurnInvokers(opts: {
     // Adaptive data-slot selection — only does work when its sub-flag is on (else returns null and
     // the data-slot orchestrator keeps its deterministic topic-local pick). Fail-soft inside.
     async selectDataSlot(state, unfilled, context): Promise<DataSlotSelectOutcome | null> {
-      if (!dataSlotAdaptiveEnabled) return null;
+      if (!dataSlotAdaptiveEnabled) {
+        return null;
+      }
       return selectNextDataSlot({
         unfilled,
         // Rank the next data slot by what the respondent JUST said (see conversationWithCurrentAnswer).
