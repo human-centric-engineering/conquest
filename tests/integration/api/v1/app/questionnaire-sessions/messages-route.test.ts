@@ -1999,7 +1999,17 @@ describe('adaptive embedding lazy-ensure', () => {
   });
 
   it('does not call ensureVersionSlotsEmbedded when strategy is not adaptive', async () => {
-    // Default context has selectionStrategy: 'weighted' (from DEFAULT_QUESTIONNAIRE_CONFIG).
+    // `adaptive` is now the default strategy, so set a non-adaptive one explicitly to exercise the
+    // "no adaptive embedding" branch.
+    const base = loadedContext();
+    ctxMock.buildTurnContext.mockResolvedValue(
+      loadedContext({
+        base: {
+          ...base.base,
+          config: { ...base.base.config, selectionStrategy: 'sequential' },
+        },
+      })
+    );
     await drainSse(await POST(req({ message: 'hi' }), ctx));
 
     // ensureVersionSlotsEmbedded is only called by adaptive or prefilter paths.

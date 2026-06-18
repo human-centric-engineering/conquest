@@ -201,7 +201,7 @@ describe('buildTurnContext', () => {
   it('resolves an absent config row to defaults', async () => {
     (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(sessionGraph());
     const loaded = await buildTurnContext('sess-1');
-    expect(loaded!.base.config.selectionStrategy).toBe('sequential');
+    expect(loaded!.base.config.selectionStrategy).toBe('adaptive');
     expect(loaded!.base.config.contradictionMode).toBe('off');
   });
 

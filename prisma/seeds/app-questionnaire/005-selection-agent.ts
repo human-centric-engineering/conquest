@@ -4,8 +4,8 @@ import { QUESTIONNAIRE_SELECTOR_AGENT_SLUG } from '@/lib/app/questionnaire/const
 
 /**
  * System prompt for the adaptive-selection agent. This is **load-bearing**: the
- * selector runs through `streamChat`, so these instructions ARE the system prompt
- * sent to the model. The per-turn user message (goal, transcript, already-answered
+ * selector runs as a direct structured completion, so these instructions ARE the
+ * system prompt sent to the model. The per-turn user message (goal, transcript, already-answered
  * set, and the numbered candidates with their guidelines/rationale) is assembled at
  * run time by `_lib/adaptive-deps.ts` (`buildSelectorPrompt`). Editing this field in
  * the admin UI changes how the questionnaire selects its next question.
@@ -16,16 +16,22 @@ and a short numbered list of CANDIDATE questions (each with optional "Looking fo
 "Why it matters" rationale). The candidates have already been filtered to eligible, unanswered questions \
 and pre-ranked by relevance — your job is to choose the single best one to ask next.
 
-Choose the candidate that:
-- follows most naturally from what the respondent just said, keeping the conversation coherent rather \
-than jumping topics;
+FOLLOW WHERE THE RESPONDENT IS STEERING. When they volunteer, dwell on, or voice a strong opinion or \
+feeling about a specific topic — e.g. "our KPIs are useless", "I want to talk about X" — choose the \
+candidate that matches THAT topic, even when it sits in a DIFFERENT area from the one you were just \
+exploring. A clearly volunteered or insisted-upon topic OUTWEIGHS finishing the current area and \
+outweighs the listed order. Lingering on a topic they have plainly moved on from reads as not \
+listening — don't do it.
+
+Otherwise — when nothing has been strongly volunteered — choose the candidate that:
+- follows most naturally from what the respondent just said;
 - best advances the questionnaire's stated goal;
 - builds on the thread they have opened (pick up the detail they just volunteered before changing subject);
 - does NOT re-tread ground already covered by the answered questions.
 
 Use each candidate's guidelines and rationale to judge intent, not just the surface wording. Prefer \
-continuity and goal-fit over the order the candidates are listed in. Choose 0 ONLY when none of the \
-candidates genuinely fit what the respondent is talking about — this should be rare.
+relevance to what they just said and goal-fit over the order the candidates are listed in. Choose 0 \
+ONLY when none of the candidates genuinely fit what the respondent is talking about — this should be rare.
 
 Reply with ONLY a JSON object: {"choice": <1-based number of the chosen candidate, or 0 if none fits>, \
 "rationale": "<one short sentence on why>"}. No prose outside the JSON.`;
@@ -33,7 +39,8 @@ Reply with ONLY a JSON object: {"choice": <1-based number of the chosen candidat
 /**
  * Seed the questionnaire adaptive-selection agent (F4.1).
  *
- * Driven via `drainStreamChat` (the same path the evaluation judges use): the
+ * Driven via a direct structured completion (the same path the seriousness/
+ * sensitivity judges use, so it runs for anonymous + preview sessions): the
  * adaptive strategy hands it the recent transcript + similarity-ranked candidates
  * and parses its `{ choice, rationale }` JSON. Ships with empty `model`/`provider`
  * so it resolves dynamically via `agent-resolver.ts`. `visibility: 'internal'`

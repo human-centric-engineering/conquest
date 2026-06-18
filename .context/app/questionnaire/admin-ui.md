@@ -216,9 +216,10 @@ builder with **placeholder inputs** (`{{ questionnaire goal }}`, `{{ question 1 
 and rendering the messages verbatim — the tokens make clear it's the prompt _shape_,
 filled at run time with the real questionnaire + transcript, not example data.
 
-**Exception — the Question Selector.** It runs through `streamChat`, so its
-`systemInstructions` **are** its system prompt (load-bearing — editing it changes
-selection). Its catalog entry sets `instructionsAreLoadBearing: true`, and the UI flips
+**Exception — the Question Selector.** It runs as a direct structured completion
+(`runSelectorCompletion`) with its `systemInstructions` passed as the system message, so they
+**are** its system prompt (load-bearing — editing it changes selection). Its catalog entry sets
+`instructionsAreLoadBearing: true`, and the UI flips
 the per-agent note accordingly. Only its per-turn **user** message is code-built (by
 `buildSelectorPrompt`).
 

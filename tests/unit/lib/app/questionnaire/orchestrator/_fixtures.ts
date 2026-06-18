@@ -16,6 +16,8 @@ import type { ContradictionFinding } from '@/lib/app/questionnaire/contradiction
 import type { RefinementDecision } from '@/lib/app/questionnaire/refinement/types';
 import type {
   CapabilityInvokers,
+  DataSlotSelectOutcome,
+  DataSlotTarget,
   DetectOutcome,
   ExistingAnswerView,
   ExtractOutcome,
@@ -127,6 +129,12 @@ export interface StubConfig {
   serious?: Partial<SeriousnessOutcome>;
   /** Dedicated sensitivity-detector outcome; defaults to "nothing detected" so the step is inert. */
   sensitivity?: Partial<SensitivityDetectOutcome>;
+  /**
+   * Adaptive data-slot selector outcome. ABSENT (key omitted) → the `selectDataSlot` invoker is not
+   * wired (the orchestrator uses its deterministic topic-local pick — the default for most tests).
+   * Provide a value (or `null`) to wire it and drive the adaptive branch.
+   */
+  selectDataSlot?: DataSlotSelectOutcome | null;
 }
 
 export interface StubCalls {
@@ -136,6 +144,12 @@ export interface StubCalls {
   select: TurnState[];
   serious: TurnState[];
   sensitivity: TurnState[];
+  /** Records (state, candidate pool, context) each time the adaptive data-slot selector is invoked. */
+  selectData: Array<{
+    state: TurnState;
+    unfilled: DataSlotTarget[];
+    context: { activeTheme: string | null; parkedTheme: string | null };
+  }>;
 }
 
 /** Stub invokers that record calls and return configured outcomes. */
@@ -150,6 +164,7 @@ export function stubInvokers(cfg: StubConfig = {}): {
     select: [],
     serious: [],
     sensitivity: [],
+    selectData: [],
   };
   const invokers: CapabilityInvokers = {
     async extractAnswers(s) {
@@ -185,5 +200,13 @@ export function stubInvokers(cfg: StubConfig = {}): {
       return { assessment: null, costUsd: 0, ...cfg.sensitivity };
     },
   };
+  // Wire the adaptive data-slot selector ONLY when the config opts in (key present) — otherwise the
+  // orchestrator keeps its deterministic topic-local pick, which is the default most tests want.
+  if ('selectDataSlot' in cfg) {
+    invokers.selectDataSlot = async (s, unfilled, context) => {
+      calls.selectData.push({ state: s, unfilled, context });
+      return cfg.selectDataSlot ?? null;
+    };
+  }
   return { invokers, calls };
 }

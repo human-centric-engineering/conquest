@@ -1,16 +1,19 @@
 /**
  * Unit test: adaptive data-slot selection (the impure seam behind the `selectDataSlot` invoker).
  *
- * Mocks the embedder, the pgvector ranking, and the selector-agent stream. Asserts the fail-soft
+ * Mocks the embedder, the pgvector ranking, and the shared selector completion. Asserts the fail-soft
  * guards (no message, <2 candidates, no embeddings, selector error, off-range pick all → null) and
  * the happy path (ranked candidates → an in-pool key + the selector spend), plus that the candidate
- * set keeps a same-theme slot so the topic-local rhythm stays available.
+ * set keeps a same-theme slot so the topic-local rhythm stays available. Anonymous sessions now run
+ * the selector too — it's a direct structured completion (no persisted conversation / user FK).
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('@/lib/orchestration/knowledge/embedder', () => ({ embedText: vi.fn() }));
-vi.mock('@/lib/orchestration/evaluations/drain-stream-chat', () => ({ drainStreamChat: vi.fn() }));
+vi.mock('@/app/api/v1/app/questionnaires/_lib/selector-completion', () => ({
+  runSelectorCompletion: vi.fn(),
+}));
 vi.mock('@/app/api/v1/app/questionnaires/_lib/data-slot-embeddings', () => ({
   rankDataSlotsByVector: vi.fn(),
 }));
@@ -21,11 +24,34 @@ import {
   type DataSlotSelectionContext,
 } from '@/app/api/v1/app/questionnaire-sessions/_lib/data-slot-selection';
 import { embedText } from '@/lib/orchestration/knowledge/embedder';
-import { drainStreamChat } from '@/lib/orchestration/evaluations/drain-stream-chat';
+import { runSelectorCompletion } from '@/app/api/v1/app/questionnaires/_lib/selector-completion';
 import { rankDataSlotsByVector } from '@/app/api/v1/app/questionnaires/_lib/data-slot-embeddings';
 import type { DataSlotTarget } from '@/lib/app/questionnaire/orchestrator';
 
 type Mock = ReturnType<typeof vi.fn>;
+
+/** Build a {@link SelectorCompletionResult}-shaped value for the mocked helper. */
+function selResult(
+  over: Partial<{
+    parsed: { choice: number; rationale: string } | null;
+    costUsd: number;
+    latencyMs: number;
+    tokensIn: number;
+    tokensOut: number;
+    errorCode: string;
+  }> = {}
+) {
+  return {
+    parsed: { choice: 1, rationale: 'follows naturally' },
+    model: 'gpt-4o',
+    provider: 'openai',
+    costUsd: 0.003,
+    latencyMs: 1,
+    tokensIn: 0,
+    tokensOut: 0,
+    ...over,
+  };
+}
 
 function ds(id: string, theme: string): DataSlotTarget {
   return {
@@ -64,11 +90,7 @@ beforeEach(() => {
     costUsd: 0.0000009,
   });
   (rankDataSlotsByVector as unknown as Mock).mockResolvedValue(['d3', 'd2', 'd4']);
-  (drainStreamChat as unknown as Mock).mockResolvedValue({
-    assistantText: '{"choice": 1, "rationale": "follows naturally"}',
-    costUsd: 0.003,
-    errorCode: null,
-  });
+  (runSelectorCompletion as unknown as Mock).mockResolvedValue(selResult());
 });
 
 describe('selectNextDataSlot — fail-soft guards', () => {
@@ -87,39 +109,34 @@ describe('selectNextDataSlot — fail-soft guards', () => {
     expect(await selectNextDataSlot(ctx())).toBeNull();
   });
 
-  it('returns null on a selector stream error', async () => {
-    (drainStreamChat as unknown as Mock).mockResolvedValue({
-      assistantText: '',
-      costUsd: 0,
-      errorCode: 'provider_error',
-    });
+  it('returns null on a selector completion error', async () => {
+    (runSelectorCompletion as unknown as Mock).mockResolvedValue(
+      selResult({ parsed: null, errorCode: 'completion_failed', costUsd: 0 })
+    );
     expect(await selectNextDataSlot(ctx())).toBeNull();
   });
 
   it('returns null when the selector declines (choice 0) or picks out of range', async () => {
-    (drainStreamChat as unknown as Mock).mockResolvedValue({
-      assistantText: '{"choice": 0, "rationale": "none fit"}',
-      costUsd: 0.001,
-      errorCode: null,
-    });
+    (runSelectorCompletion as unknown as Mock).mockResolvedValue(
+      selResult({ parsed: { choice: 0, rationale: 'none fit' }, costUsd: 0.001 })
+    );
     expect(await selectNextDataSlot(ctx())).toBeNull();
   });
 
-  it('returns null on an unparseable selector reply', async () => {
-    (drainStreamChat as unknown as Mock).mockResolvedValue({
-      assistantText: 'not json',
-      costUsd: 0,
-      errorCode: null,
-    });
+  it('returns null when the selector reply was unparseable (helper reports completion_failed)', async () => {
+    (runSelectorCompletion as unknown as Mock).mockResolvedValue(
+      selResult({ parsed: null, errorCode: 'completion_failed', costUsd: 0 })
+    );
     expect(await selectNextDataSlot(ctx())).toBeNull();
   });
 
-  it('returns null for an anonymous session without embedding or calling the selector', async () => {
-    // The selector's streamChat persists an AiConversation keyed to a real user; an anon session's
-    // synthetic userId has no user row, so we must never reach it — defer to the deterministic pick.
-    expect(await selectNextDataSlot(ctx({ anonymous: true }))).toBeNull();
-    expect(embedText).not.toHaveBeenCalled();
-    expect(drainStreamChat).not.toHaveBeenCalled();
+  it('RUNS the selector for an anonymous session (structured completion — no user FK)', async () => {
+    // The selector is now a direct structured completion with no persisted conversation, so an
+    // anonymous (no-login) / preview session must reach it — adaptive selection is no longer skipped.
+    const result = await selectNextDataSlot(ctx({ anonymous: true }));
+    expect(result).toEqual({ dataSlotKey: 'd1', rationale: 'follows naturally', costUsd: 0.003 });
+    expect(embedText).toHaveBeenCalled();
+    expect(runSelectorCompletion).toHaveBeenCalled();
   });
 });
 
@@ -147,7 +164,7 @@ describe('selectNextDataSlot — inspector capture', () => {
     const recordInspectorCall = vi.fn();
     await selectNextDataSlot(ctx({ recordInspectorCall }));
 
-    expect(recordInspectorCall).toHaveBeenCalledTimes(1);
+    // First trace is the embedding ranking; the second is the selector pick (asserted below).
     const trace = recordInspectorCall.mock.calls[0][0];
     expect(trace.kind).toBe('embedding');
     expect(trace.label).toBe('Adaptive data-slot ranking');
@@ -166,13 +183,15 @@ describe('selectNextDataSlot — inspector capture', () => {
   });
 
   it('also records the selector LLM pick (cost + tokens + prompt/response)', async () => {
-    (drainStreamChat as unknown as Mock).mockResolvedValue({
-      assistantText: '{"choice": 1, "rationale": "follows naturally"}',
-      costUsd: 0.003,
-      latencyMs: 540,
-      tokenUsage: { input: 220, output: 18 },
-      errorCode: null,
-    });
+    (runSelectorCompletion as unknown as Mock).mockResolvedValue(
+      selResult({
+        parsed: { choice: 1, rationale: 'follows naturally' },
+        costUsd: 0.003,
+        latencyMs: 540,
+        tokensIn: 220,
+        tokensOut: 18,
+      })
+    );
     const recordInspectorCall = vi.fn();
     await selectNextDataSlot(ctx({ recordInspectorCall }));
 
@@ -185,7 +204,7 @@ describe('selectNextDataSlot — inspector capture', () => {
     expect(pick.tokensIn).toBe(220);
     expect(pick.tokensOut).toBe(18);
     expect(pick.prompt[0].content).toContain('Candidate topics to explore next');
-    expect(pick.response).toContain('"choice": 1');
+    expect(pick.response).toContain('"choice":1');
   });
 });
 
@@ -196,11 +215,9 @@ describe('selectNextDataSlot — parkedTheme bridging', () => {
     // sameTheme is suppressed (stayTheme = null when parkedTheme is set).
     // pool before bridging: deduped ranked → [d3, d2, d4]
     // After bridging: d2 removed (theme A = parkedTheme) → [d3, d4], bridged.length > 0 so pool = bridged.
-    (drainStreamChat as unknown as Mock).mockResolvedValue({
-      assistantText: '{"choice": 1, "rationale": "bridge to B"}',
-      costUsd: 0.002,
-      errorCode: null,
-    });
+    (runSelectorCompletion as unknown as Mock).mockResolvedValue(
+      selResult({ parsed: { choice: 1, rationale: 'bridge to B' }, costUsd: 0.002 })
+    );
     const result = await selectNextDataSlot(ctx({ activeTheme: 'A', parkedTheme: 'A' }));
     // choice 1 in bridged pool [d3, d4] → d3
     expect(result).not.toBeNull();
@@ -212,11 +229,9 @@ describe('selectNextDataSlot — parkedTheme bridging', () => {
     // so the code keeps the existing pool rather than reducing it to empty.
     // unfilled: [d1(A), d2(A)], parkedTheme=A → bridged = [] → pool unchanged → candidates = [d1, d2]
     (rankDataSlotsByVector as unknown as Mock).mockResolvedValue(['d1', 'd2']);
-    (drainStreamChat as unknown as Mock).mockResolvedValue({
-      assistantText: '{"choice": 2, "rationale": "only theme A left"}',
-      costUsd: 0.001,
-      errorCode: null,
-    });
+    (runSelectorCompletion as unknown as Mock).mockResolvedValue(
+      selResult({ parsed: { choice: 2, rationale: 'only theme A left' }, costUsd: 0.001 })
+    );
     const result = await selectNextDataSlot(
       ctx({
         unfilled: [ds('d1', 'A'), ds('d2', 'A')],
@@ -248,11 +263,9 @@ describe('selectNextDataSlot — parkedTheme bridging', () => {
 describe('selectNextDataSlot — out-of-range choice', () => {
   it('returns null when the selector picks a number beyond the candidate count', async () => {
     // The existing test covers choice=0; this covers choice > candidates.length.
-    (drainStreamChat as unknown as Mock).mockResolvedValue({
-      assistantText: '{"choice": 99, "rationale": "way out of range"}',
-      costUsd: 0.001,
-      errorCode: null,
-    });
+    (runSelectorCompletion as unknown as Mock).mockResolvedValue(
+      selResult({ parsed: { choice: 99, rationale: 'way out of range' }, costUsd: 0.001 })
+    );
     expect(await selectNextDataSlot(ctx())).toBeNull();
   });
 });

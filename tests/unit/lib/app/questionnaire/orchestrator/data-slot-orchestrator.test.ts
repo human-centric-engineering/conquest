@@ -943,3 +943,87 @@ describe('runDataSlotTurn — contradiction detection + refinement (parity with 
     expect(calls.detect).toHaveLength(0);
   });
 });
+
+describe('runDataSlotTurn — deepen a volunteered tangent', () => {
+  it('re-surfaces a just-captured non-active topic so the selector can go deeper (framed as a re-ask)', async () => {
+    const { invokers, calls } = stubInvokers({
+      // The respondent volunteered a strong opinion on d_be (Business Execution) while we were
+      // exploring Strategy — a direct fill on a NON-active slot, which covers it immediately.
+      extract: { dataSlotFills: [fill('d_be', 0.8, 'direct')] },
+      // The adaptive selector chooses the deepen candidate.
+      selectDataSlot: {
+        dataSlotKey: 'd_be',
+        rationale: 'follow the KPIs they raised',
+        costUsd: 0.002,
+      },
+    });
+    const result = await runDataSlotTurn(
+      dsState({
+        questions: [q({ id: 'q1' })],
+        dataSlots: [
+          ds({ id: 'd_strat', theme: 'Strategy', ordinal: 0 }),
+          ds({ id: 'd_strat2', theme: 'Strategy', ordinal: 1 }),
+          ds({ id: 'd_be', theme: 'Business Execution', ordinal: 2 }),
+        ],
+        activeDataSlotKey: 'd_strat',
+      }),
+      invokers
+    );
+    // The covered, just-volunteered slot was offered to the selector even though it is not "unfilled".
+    const pool = calls.selectData[0]?.unfilled.map((s) => s.id) ?? [];
+    expect(pool).toContain('d_be');
+    // …and the pick is framed as a follow-up (re-ask), not a fresh transition into a new area.
+    expect(result.response.kind).toBe('data_slot');
+    if (result.response.kind === 'data_slot') {
+      expect(result.response.dataSlotId).toBe('d_be');
+      expect(result.response.isReask).toBe(true);
+      expect(result.response.isTransition).toBe(false);
+    }
+  });
+
+  it('does not re-offer a volunteered slot once it is the active slot (deepen once, then move on)', async () => {
+    const { invokers, calls } = stubInvokers({
+      // d_be is now the ACTIVE slot (we deepened it last turn) and is re-filled this turn.
+      extract: { dataSlotFills: [fill('d_be', 0.8, 'direct')] },
+      selectDataSlot: { dataSlotKey: 'd_strat', rationale: 'move on', costUsd: 0.001 },
+    });
+    const result = await runDataSlotTurn(
+      dsState({
+        questions: [q({ id: 'q1' })],
+        dataSlots: [
+          ds({ id: 'd_strat', theme: 'Strategy', ordinal: 0 }),
+          ds({ id: 'd_be', theme: 'Business Execution', ordinal: 1 }),
+        ],
+        activeDataSlotKey: 'd_be',
+      }),
+      invokers
+    );
+    // d_be is active → excluded from the deepen set → not re-surfaced; pool is just the unfilled set.
+    const pool = calls.selectData[0]?.unfilled.map((s) => s.id) ?? [];
+    expect(pool).not.toContain('d_be');
+    expect(pool).toContain('d_strat');
+    expect(result.response.kind).toBe('data_slot');
+  });
+
+  it('does not deepen an INFERRED (non-direct) volunteered fill — only strong, stated opinions', async () => {
+    const { invokers, calls } = stubInvokers({
+      // A covered-but-INFERRED fill on a non-active slot is not a strong, stated volunteer — it is
+      // captured-and-done (covered by confidence) and must NOT be re-surfaced for deepening.
+      extract: { dataSlotFills: [fill('d_be', 0.9, 'inferred')] },
+      selectDataSlot: { dataSlotKey: 'd_strat', rationale: 'continue', costUsd: 0.001 },
+    });
+    await runDataSlotTurn(
+      dsState({
+        questions: [q({ id: 'q1' })],
+        dataSlots: [
+          ds({ id: 'd_strat', theme: 'Strategy', ordinal: 0 }),
+          ds({ id: 'd_be', theme: 'Business Execution', ordinal: 1 }),
+        ],
+        activeDataSlotKey: 'd_strat',
+      }),
+      invokers
+    );
+    const pool = calls.selectData[0]?.unfilled.map((s) => s.id) ?? [];
+    expect(pool).not.toContain('d_be');
+  });
+});

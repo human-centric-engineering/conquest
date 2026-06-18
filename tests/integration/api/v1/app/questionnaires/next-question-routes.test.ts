@@ -79,7 +79,7 @@ const PARAMS = { id: 'qn-1', vid: 'v1' };
 /**
  * A version with one section holding two optional questions: q1 (weight 1,
  * first) and q2 (weight 5, second). Sequential prefers q1; weighted prefers q2.
- * `config: null` → the lazy default (sequential, coverage 1, min 0).
+ * `config: null` → the lazy default (now `adaptive`, coverage 1, min 0).
  */
 function versionRow(config: Record<string, unknown> | null = null) {
   return {
@@ -173,6 +173,22 @@ describe('body validation', () => {
 
 describe('selection wiring', () => {
   it('uses the saved (sequential) strategy and asks the first question', async () => {
+    // The app default is now `adaptive`; save an explicit sequential config so this pins the
+    // sequential wiring deterministically (without depending on adaptive's mocked LLM deps).
+    prismaMock.appQuestionnaireVersion.findFirst.mockResolvedValue(
+      versionRow({
+        selectionStrategy: 'sequential',
+        minQuestionsAnswered: 0,
+        coverageThreshold: 1,
+        costBudgetUsd: null,
+        maxQuestionsPerSession: null,
+        voiceEnabled: false,
+        contradictionMode: 'off',
+        contradictionWindowN: 0,
+        anonymousMode: false,
+        profileFields: [],
+      })
+    );
     const res = await POST(req({ answered: [] }), ctx(PARAMS));
     expect(res.status).toBe(200);
     const body = await res.json();

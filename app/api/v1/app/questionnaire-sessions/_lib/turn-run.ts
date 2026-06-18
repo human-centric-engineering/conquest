@@ -26,7 +26,10 @@ import {
   persistRefinement,
   upsertAnswerSlot,
 } from '@/app/api/v1/app/questionnaires/_lib/answer-slots';
-import { upsertDataSlotFill } from '@/app/api/v1/app/questionnaires/_lib/data-slot-fills';
+import {
+  upsertDataSlotFill,
+  reconcileChatDataSlotFills,
+} from '@/app/api/v1/app/questionnaires/_lib/data-slot-fills';
 import { recordTurn } from '@/app/api/v1/app/questionnaires/_lib/turns';
 
 /**
@@ -67,6 +70,10 @@ export async function persistTurn(opts: {
 }): Promise<string> {
   const sideEffectAnswerIds: string[] = [];
   const sideEffectDataSlotIds: string[] = [];
+  // Question slots this turn actually answered (extraction or refinement) — drives the chat-mode
+  // data-slot reconciliation below. Respondent-edited slots we skip writing are NOT included
+  // (their fills are already kept in sync by the form-mode `reconcileDataSlotFills`).
+  const answeredQuestionSlotIds: string[] = [];
 
   // P-presentation: answers the respondent set themselves in form view are authoritative.
   // The per-turn pipeline must not silently overwrite them — skip any extraction/refinement
@@ -85,6 +92,7 @@ export async function persistTurn(opts: {
       confidence: intent.confidence,
     });
     sideEffectAnswerIds.push(id);
+    answeredQuestionSlotIds.push(slotId);
   }
 
   for (const decision of opts.refinements) {
@@ -113,6 +121,7 @@ export async function persistTurn(opts: {
       });
       if (!sideEffectAnswerIds.includes(id)) sideEffectAnswerIds.push(id);
     }
+    answeredQuestionSlotIds.push(slotId);
   }
 
   // Data Slots feature: upsert the data-slot fills (the respondent-facing capture).
@@ -131,6 +140,18 @@ export async function persistTurn(opts: {
       sideEffectDataSlotIds.push(id);
     }
   }
+
+  // Chat-mode data-slot reconciliation: the extractor can answer a mapped question while leaving its
+  // PARENT data slot empty (a generation miss the prompt asks it to avoid but can't guarantee). Fill
+  // that gap deterministically from the answers just written — the same safety net the form surface
+  // already has (`reconcileDataSlotFills`). Gap-filling only: it skips any slot that already has a fill
+  // (incl. the extractor's just-written ones above), so it never overwrites a richer paraphrase. A
+  // no-op when the version has no data slots or nothing was answered.
+  const reconciledDataSlotIds = await reconcileChatDataSlotFills({
+    sessionId: opts.sessionId,
+    answeredQuestionSlotIds,
+  });
+  sideEffectDataSlotIds.push(...reconciledDataSlotIds);
 
   // Probe-confirm flow: park a raised probe or clear a resolved one on the session. `undefined` =
   // leave untouched (the common case); `null` writes SQL NULL (DbNull) to clear.

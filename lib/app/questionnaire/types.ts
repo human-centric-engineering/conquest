@@ -565,7 +565,7 @@ export const SENSITIVITY_FLAGGED_EVENT = 'sensitivity_flagged';
  * default-config from an untouched one.
  */
 export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
-  selectionStrategy: 'sequential',
+  selectionStrategy: 'adaptive',
   minQuestionsAnswered: 0,
   coverageThreshold: 1,
   costBudgetUsd: null,

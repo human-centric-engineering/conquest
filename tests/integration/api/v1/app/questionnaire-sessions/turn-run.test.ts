@@ -23,7 +23,10 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/answer-slots', () => ({
 }));
 vi.mock('@/app/api/v1/app/questionnaires/_lib/turns', () => ({ recordTurn: seamMock.recordTurn }));
 
-const dataSlotMock = vi.hoisted(() => ({ upsertDataSlotFill: vi.fn() }));
+const dataSlotMock = vi.hoisted(() => ({
+  upsertDataSlotFill: vi.fn(),
+  reconcileChatDataSlotFills: vi.fn(),
+}));
 vi.mock('@/app/api/v1/app/questionnaires/_lib/data-slot-fills', () => dataSlotMock);
 
 const prismaMock = vi.hoisted(() => ({
@@ -81,6 +84,9 @@ beforeEach(() => {
   // Default: no respondent-edited slots (P-presentation protection; overridden per-test).
   (seamMock.loadRespondentEditedSlotIds as Mock).mockResolvedValue(new Set<string>());
   (dataSlotMock.upsertDataSlotFill as Mock).mockResolvedValue('ds-fill-1');
+  // Default: the chat-mode gap-filler finds nothing to reconcile (its own behaviour is covered by
+  // reconcile-chat-data-slot-fills.test.ts). Overridden in the wiring test below.
+  (dataSlotMock.reconcileChatDataSlotFills as Mock).mockResolvedValue([]);
 });
 
 describe('persistTurn', () => {
@@ -342,6 +348,46 @@ describe('persistTurn', () => {
     expect(dataSlotMock.upsertDataSlotFill).not.toHaveBeenCalled();
     expect(seamMock.recordTurn).toHaveBeenCalledWith(
       expect.objectContaining({ sideEffectDataSlotIds: [] })
+    );
+  });
+
+  it('runs the chat-mode gap-filler over the answered slots and records the fills it synthesises', async () => {
+    (seamMock.upsertAnswerSlot as Mock).mockResolvedValue('ans-q1');
+    // The turn answered the `kpis` question; the gap-filler returns a synthesised fill id for a parent
+    // slot that had no fill (it skips already-filled slots itself, via a DB read).
+    (dataSlotMock.reconcileChatDataSlotFills as Mock).mockResolvedValue(['ds-fill-gap']);
+
+    await persistTurn({
+      sessionId: 'sess-1',
+      userMessage: 'badly thought out KPIs',
+      agentResponse: 'r',
+      targetedQuestionId: null,
+      toolCalls: [],
+      costUsd: 0,
+      upserts: [intent('kpis', false)],
+      refinements: [],
+      keyToSlotId: new Map([['kpis', 'slot-kpis']]),
+      dataSlotFills: [
+        {
+          dataSlotKey: 'goal',
+          value: 'grow',
+          paraphrase: 'Grow the team',
+          confidence: 0.9,
+          provenance: 'direct',
+        },
+      ],
+      dataSlotKeyToId: new Map([['goal', 'ds-1']]),
+    });
+
+    // Reconciler is handed the question slots answered this turn (it queries existing fills itself to
+    // decide which parent slots are empty).
+    expect(dataSlotMock.reconcileChatDataSlotFills).toHaveBeenCalledWith({
+      sessionId: 'sess-1',
+      answeredQuestionSlotIds: ['slot-kpis'],
+    });
+    // Both the extractor's fill id and the gap-filler's synthesised id land on the turn.
+    expect(seamMock.recordTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ sideEffectDataSlotIds: ['ds-fill-1', 'ds-fill-gap'] })
     );
   });
 

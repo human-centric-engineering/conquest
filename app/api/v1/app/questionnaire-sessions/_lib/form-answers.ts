@@ -30,6 +30,7 @@ import type { RefinementHistoryEntry } from '@/lib/app/questionnaire/refinement/
 import {
   upsertDataSlotFill,
   clearDataSlotFill,
+  formatFillValue,
 } from '@/app/api/v1/app/questionnaires/_lib/data-slot-fills';
 
 /** Minimal session shape the PUT route needs: access fields + status + version. */
@@ -195,25 +196,6 @@ export async function clearAnswer(
   await client.appAnswerSlot.deleteMany({
     where: { sessionId, questionSlotId },
   });
-}
-
-/** Deterministic, panel-facing restatement of one answered value (no LLM). */
-function formatFillValue(value: unknown): string {
-  if (value === null || value === undefined) return '';
-  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
-  if (Array.isArray(value))
-    return value
-      .map((v) => formatFillValue(v))
-      .filter(Boolean)
-      .join(', ');
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'bigint') {
-    return String(value).trim();
-  }
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return '';
-  }
 }
 
 /**
