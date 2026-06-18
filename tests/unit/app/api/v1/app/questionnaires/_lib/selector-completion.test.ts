@@ -22,6 +22,16 @@ vi.mock('@/lib/orchestration/evaluations/parse-structured', async (importOrigina
   ...(await importOriginal<object>()),
   runStructuredCompletion: vi.fn(),
 }));
+const loggerMock = vi.hoisted(() => ({
+  warn: vi.fn(),
+  info: vi.fn(),
+  error: vi.fn(),
+  debug: vi.fn(),
+}));
+vi.mock('@/lib/logging', () => ({ logger: loggerMock }));
+
+/** Let the fire-and-forget `logCost(...).catch(...)` microtask settle. */
+const flushMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 import {
   parseSelectorOutput,
@@ -132,6 +142,38 @@ describe('runSelectorCompletion', () => {
     await runSelectorCompletion({ userMessage: 'pick one', sessionId: 'sess-1' });
     const opts = (runStructuredCompletion as unknown as Mock).mock.calls[0][0];
     expect(opts.messages).toEqual([{ role: 'user', content: 'pick one' }]);
+  });
+
+  it('runs without an agent row — no system message and cost logged without an agentId', async () => {
+    (prisma.aiAgent.findUnique as unknown as Mock).mockResolvedValue(null);
+    const result = await runSelectorCompletion({ userMessage: 'pick one', sessionId: 'sess-1' });
+
+    // Still resolves a pick (provider/model resolution gets the empty-agent fallback shape).
+    expect(result.parsed).toEqual({ choice: 2, rationale: 'flows naturally' });
+    expect(resolveAgentProviderAndModel).toHaveBeenCalledWith(
+      { provider: '', model: '', fallbackProviders: [] },
+      'chat'
+    );
+    // No persona → user message only.
+    const opts = (runStructuredCompletion as unknown as Mock).mock.calls[0][0];
+    expect(opts.messages).toEqual([{ role: 'user', content: 'pick one' }]);
+    // Cost still attributed to the session, but with no agentId key.
+    const costArg = (logCost as unknown as Mock).mock.calls[0][0];
+    expect(costArg).not.toHaveProperty('agentId');
+    expect(costArg.metadata).toMatchObject({ appQuestionnaireSessionId: 'sess-1' });
+  });
+
+  it('logs (and swallows) a rejected cost write without failing the pick', async () => {
+    (logCost as unknown as Mock).mockRejectedValue(new Error('cost sink down'));
+    const result = await runSelectorCompletion({ userMessage: 'pick one', sessionId: 'sess-1' });
+
+    // The pick is unaffected — cost logging is fire-and-forget.
+    expect(result.parsed).toEqual({ choice: 2, rationale: 'flows naturally' });
+    await flushMicrotasks();
+    expect(loggerMock.error).toHaveBeenCalledWith(
+      'selector: logCost rejected',
+      expect.objectContaining({ sessionId: 'sess-1' })
+    );
   });
 
   it('fails soft to errorCode "no_provider" when resolution throws', async () => {

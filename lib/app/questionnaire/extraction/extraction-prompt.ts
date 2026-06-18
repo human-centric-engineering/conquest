@@ -217,7 +217,10 @@ when it was raised on a tangent or is not the topic you asked about. NEVER retur
 "dataSlotFills" empty: if a message was clear enough to answer a question, it informs a data slot too. \
 And the converse — for every fill you emit on a slot that "answers questions: …", confirm you also \
 emitted an "answers" entry for each mapped question the position determines (or deliberately omitted one \
-the message doesn't pin down).`;
+the message doesn't pin down). AND PER SLOT THE OTHER WAY: whenever you emit an "answers" entry for a \
+question that a data slot lists under "answers questions: …", you MUST also emit (or refresh) THAT \
+slot's fill — a directly answered mapped question can NEVER leave its parent data slot empty, even when \
+the question came up on a tangent or was not the one you asked about.`;
 
 /**
  * Appended to the system rules ONLY when sensitivity awareness is on (gated by the platform flag +

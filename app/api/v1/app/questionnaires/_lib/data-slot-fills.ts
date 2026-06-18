@@ -8,6 +8,7 @@
 import type { Prisma } from '@prisma/client';
 
 import { prisma } from '@/lib/db/client';
+import { logger } from '@/lib/logging';
 import { jsonInput } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
 import type { AnswerProvenance } from '@/lib/app/questionnaire/types';
 import type { DataSlotFillHistoryEntry } from '@/lib/app/questionnaire/panel/types';
@@ -108,4 +109,147 @@ export async function clearDataSlotFill(
   client: DbClient = prisma
 ): Promise<void> {
   await client.appDataSlotFill.deleteMany({ where: { sessionId, dataSlotId } });
+}
+
+/**
+ * Deterministic, panel-facing restatement of one answered value (no LLM). Shared by the form-mode
+ * reconciler (`form-answers.ts`) and the chat-mode gap-filler ({@link reconcileChatDataSlotFills}).
+ */
+export function formatFillValue(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  if (Array.isArray(value))
+    return value
+      .map((v) => formatFillValue(v))
+      .filter(Boolean)
+      .join(', ');
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'bigint') {
+    return String(value).trim();
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Chat-mode data-slot reconciliation (gap-filler).
+ *
+ * The extractor emits per-question answers AND per-data-slot fills in ONE call, and the prompt asks
+ * it to keep the two in sync. But a generation miss can answer a mapped question while leaving its
+ * PARENT data slot empty — the panel then shows no inferred comment for a topic the respondent
+ * clearly addressed (e.g. "badly thought out KPIs" answers `performance_kpis` but its slot
+ * `business_execution` stays blank). The form surface already closes the analogous gap
+ * deterministically (`reconcileDataSlotFills`); chat had no such safety net. This is it.
+ *
+ * GAP-FILLING, not overwriting: only synthesises a fill for a data slot that has NO fill yet AND a
+ * mapped question answered this session. It never touches a slot that already holds a fill — whether
+ * the extractor wrote it THIS turn (its fills are persisted before this runs) or it was captured on an
+ * earlier turn. Overwriting would clobber the extractor's richer natural-language paraphrase, or a
+ * prior respondent-stated `direct` capture, and downgrade its provenance — evolving a NON-empty slot
+ * is the extractor's job, not ours. The synthesised paraphrase leads with each contributing answer's
+ * stored `rationale` — already a natural-language restatement — falling back to the formatted value,
+ * so it reads like a real inferred comment without a second LLM call. Unlike the form reconciler it
+ * never CLEARS a slot (the extractor owns deletions).
+ *
+ * Returns the `AppDataSlotFill` row ids it wrote, so the caller can stamp them with `lastUpdatedTurnId`.
+ */
+export async function reconcileChatDataSlotFills(opts: {
+  sessionId: string;
+  /** Question slot ids written by extraction/refinement this turn (the answers to propagate up). */
+  answeredQuestionSlotIds: string[];
+  client?: DbClient;
+}): Promise<string[]> {
+  const client = opts.client ?? prisma;
+  if (opts.answeredQuestionSlotIds.length === 0) return [];
+
+  // Which data slots do this turn's answered questions feed?
+  const links = await client.appDataSlotQuestion.findMany({
+    where: { questionSlotId: { in: opts.answeredQuestionSlotIds } },
+    select: { dataSlotId: true, dataSlot: { select: { key: true } } },
+  });
+  const keyById = new Map(links.map((l) => [l.dataSlotId, l.dataSlot.key]));
+  const candidateIds = [...new Set(links.map((l) => l.dataSlotId))];
+  if (candidateIds.length === 0) return [];
+
+  // GAP-FILL ONLY: drop any candidate that already has a fill (the extractor's this-turn write is
+  // already persisted, so this also covers slots the LLM just filled). We never overwrite an existing
+  // fill — that would clobber a richer paraphrase or a respondent-stated `direct` capture.
+  const existing = await client.appDataSlotFill.findMany({
+    where: { sessionId: opts.sessionId, dataSlotId: { in: candidateIds } },
+    select: { dataSlotId: true },
+  });
+  const filled = new Set(existing.map((e) => e.dataSlotId));
+  const dataSlotIds = candidateIds.filter((id) => !filled.has(id));
+  if (dataSlotIds.length === 0) return [];
+
+  const writtenIds: string[] = [];
+  const reconciledKeys: string[] = [];
+
+  for (const dataSlotId of dataSlotIds) {
+    // All questions this slot maps to (a slot can cover several), and the session's CURRENT answers.
+    const mapped = await client.appDataSlotQuestion.findMany({
+      where: { dataSlotId },
+      select: { questionSlot: { select: { id: true, key: true } } },
+    });
+    const mappedIds = mapped.map((m) => m.questionSlot.id);
+    const answers = await client.appAnswerSlot.findMany({
+      where: { sessionId: opts.sessionId, questionSlotId: { in: mappedIds } },
+      select: { questionSlotId: true, value: true, rationale: true, confidence: true },
+    });
+    const byQid = new Map(answers.map((a) => [a.questionSlotId, a]));
+
+    const answered = mapped
+      .map((m) => ({ key: m.questionSlot.key, answer: byQid.get(m.questionSlot.id) }))
+      .filter(
+        (m): m is { key: string; answer: NonNullable<(typeof m)['answer']> } =>
+          m.answer !== undefined
+      );
+
+    // We only reached here because a mapped question was answered this turn, so this is ~always ≥1.
+    // Guard anyway: never write an empty fill, and (unlike form mode) never clear — extraction owns that.
+    if (answered.length === 0) continue;
+
+    // Structured, diffable value (keyed by question) drives the fill's change-history; the paraphrase
+    // leads with each answer's natural-language rationale, falling back to the formatted value.
+    const value = Object.fromEntries(answered.map((a) => [a.key, a.answer.value]));
+    const paraphrase = answered
+      .map((a) => {
+        const formatted = formatFillValue(a.answer.value);
+        const rationale = (a.answer.rationale ?? '').trim();
+        if (formatted && rationale) return `${formatted} — ${rationale}`;
+        return rationale || formatted;
+      })
+      .filter(Boolean)
+      .join('; ');
+    const confidence = Math.max(...answered.map((a) => a.answer.confidence ?? 0.5));
+
+    const id = await upsertDataSlotFill(
+      opts.sessionId,
+      dataSlotId,
+      {
+        value,
+        paraphrase,
+        confidence,
+        // Derived from the underlying answer(s): "inferred" when one mapped question fixes the slot,
+        // "synthesised" when it rolls up several. Never "direct" — the respondent didn't state the fill.
+        provenance: answered.length === 1 ? 'inferred' : 'synthesised',
+        provisional: false,
+      },
+      client
+    );
+    writtenIds.push(id);
+    reconciledKeys.push(keyById.get(dataSlotId) ?? dataSlotId);
+  }
+
+  if (reconciledKeys.length > 0) {
+    // An invariant breach worth surfacing: extraction answered a mapped question but left its data
+    // slot empty. Frequency here measures how often the prompt rule misses (and whether it needs work).
+    logger.warn(
+      'questionnaire: extraction answered a mapped question but left its data slot empty; reconciled deterministically',
+      { sessionId: opts.sessionId, dataSlotKeys: reconciledKeys }
+    );
+  }
+  return writtenIds;
 }

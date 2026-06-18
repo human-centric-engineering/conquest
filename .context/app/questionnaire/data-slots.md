@@ -30,9 +30,24 @@ data-slot fill records the respondent's answer in their **natural words** — "M
 records the **mapped form value** — the choice slug `other`, the tenure bucket `gt3` — because that
 is the deliverable. The extractor emits BOTH in one call (`answers` = mapped slugs, `dataSlotFills`
 = natural values); the mapping from natural → slug runs in the background and is never surfaced. So
-a fill never carries a form code/label, and a data slot's freshness on a correction (engineering →
-Marketing) is the extractor's job — there is no deterministic answer→fill reconcile on the chat path
-(that would leak the form value into the natural panel).
+keeping a data slot fresh on a correction (engineering → Marketing) is primarily the extractor's
+job — we don't blindly recompute every fill from its form values, because that would leak the form
+code/label into the natural panel.
+
+There is ONE deterministic safety net on the chat path: a **gap-filler**
+(`reconcileChatDataSlotFills`, `data-slot-fills.ts`). The extractor can answer a mapped question
+while leaving its PARENT slot empty (a generation miss the prompt asks it to avoid but can't
+guarantee — e.g. "badly thought out KPIs" answers `performance_kpis` but its slot `business_execution`
+stays blank). After the per-turn answer writes, the gap-filler synthesises a fill for any slot whose
+mapped question was answered this turn but which has **no fill yet** — it skips any slot that already
+has one (the extractor's just-written fills included), so it never overwrites a richer paraphrase or a
+prior respondent-stated `direct` capture; evolving a non-empty slot stays the extractor's job. To
+avoid the form-code leak, the
+synthesised paraphrase **leads with the answer's stored `rationale`** (already natural language),
+falling back to the formatted value only when there is none; provenance is `inferred` (one mapped
+question) or `synthesised` (several), never `direct`. Each gap-fill is logged (an invariant breach
+worth tracking). This mirrors the reverse direction — a form edit recomputing its mapped slots —
+which lives in `reconcileDataSlotFills` (`form-answers.ts`).
 
 `AppDataSlot` is exclusively the **saved/live** set. A generated-but-unsaved proposal lives in a
 separate `AppDataSlotDraft` (one JSON-snapshot row per version, `versionId @unique`, cascades with
