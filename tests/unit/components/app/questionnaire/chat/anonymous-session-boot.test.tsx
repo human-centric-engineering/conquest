@@ -43,6 +43,7 @@ vi.mock('@/components/app/questionnaire/session-workspace', () => ({
     accessToken,
     autoStart,
     initialTurns,
+    initialInspectorTurns,
   }: SessionWorkspaceProps) => (
     <div
       data-testid="questionnaire-chat"
@@ -50,6 +51,7 @@ vi.mock('@/components/app/questionnaire/session-workspace', () => ({
       data-access-token={accessToken ?? ''}
       data-auto-start={String(autoStart ?? false)}
       data-turn-count={String(initialTurns?.length ?? 0)}
+      data-inspector-count={String(initialInspectorTurns?.length ?? 0)}
     />
   ),
 }));
@@ -133,9 +135,31 @@ function jsonResponse(body: unknown, ok = true): Response {
   } as unknown as Response;
 }
 
-/** A transcript-read response body (`GET …/transcript`). */
-function transcriptResponse(turns: Array<{ role: string; content: string }>) {
-  return { success: true, data: { turns } };
+/** A transcript-read response body (`GET …/transcript`). Optionally carries the admin-only
+ *  Preview Turn Inspector traces (present only for a preview session with the toggle on). */
+function transcriptResponse(
+  turns: Array<{ role: string; content: string }>,
+  inspectorTurns?: unknown[]
+) {
+  return { success: true, data: { turns, ...(inspectorTurns ? { inspectorTurns } : {}) } };
+}
+
+/** A minimal valid persisted inspector turn (passes `inspectorTurnSchema`). */
+function inspectorTurn(turnIndex: number) {
+  return {
+    turnIndex,
+    calls: [
+      {
+        label: 'Interviewer',
+        model: 'm',
+        provider: 'p',
+        latencyMs: 5,
+        costUsd: 0.001,
+        prompt: [],
+        response: 'r',
+      },
+    ],
+  };
 }
 
 /** Was a create POST (anonymous or preview) issued? Transcript GETs don't count. */
@@ -247,6 +271,55 @@ describe('AnonymousSessionBoot', () => {
       const chat = screen.getByTestId('questionnaire-chat');
       expect(chat).toHaveAttribute('data-turn-count', '2');
       expect(chat).toHaveAttribute('data-auto-start', 'false');
+      expect(buildWelcomeTurns).not.toHaveBeenCalled();
+    });
+
+    it('seeds persisted inspector traces so a resumed preview re-hydrates the drawer', async () => {
+      fakeStorage.setItem(STORAGE_KEY, storedSession('prev-sess', 'prev-tok', futureExpiry()));
+      fakeFetch.mockResolvedValueOnce(
+        jsonResponse(
+          transcriptResponse(
+            [{ role: 'assistant', content: 'Earlier question?' }],
+            [inspectorTurn(0)]
+          )
+        )
+      );
+
+      render(<AnonymousSessionBoot versionId={VERSION_ID} />);
+      await waitFor(() => {
+        expect(screen.getByTestId('questionnaire-chat')).toBeInTheDocument();
+      });
+
+      expect(screen.getByTestId('questionnaire-chat')).toHaveAttribute('data-inspector-count', '1');
+    });
+
+    it('keeps the replayed transcript when a malformed inspector trace is returned (fail-soft)', async () => {
+      // A corrupt/oversized inspector trace must NOT take down the whole transcript parse — the
+      // conversation has to survive even when the admin-only debug data is unusable.
+      fakeStorage.setItem(STORAGE_KEY, storedSession('prev-sess', 'prev-tok', futureExpiry()));
+      fakeFetch.mockResolvedValueOnce(
+        jsonResponse(
+          transcriptResponse(
+            [
+              { role: 'assistant', content: 'Earlier question?' },
+              { role: 'user', content: 'An earlier answer' },
+            ],
+            // calls:[] violates inspectorTurnSchema's min(1) — a malformed element.
+            [{ turnIndex: 0, calls: [] }]
+          )
+        )
+      );
+      vi.mocked(buildWelcomeTurns).mockClear();
+
+      render(<AnonymousSessionBoot versionId={VERSION_ID} />);
+      await waitFor(() => {
+        expect(screen.getByTestId('questionnaire-chat')).toBeInTheDocument();
+      });
+
+      // Transcript preserved (2 turns, no fresh greeting); inspector degraded to empty.
+      const chat = screen.getByTestId('questionnaire-chat');
+      expect(chat).toHaveAttribute('data-turn-count', '2');
+      expect(chat).toHaveAttribute('data-inspector-count', '0');
       expect(buildWelcomeTurns).not.toHaveBeenCalled();
     });
 

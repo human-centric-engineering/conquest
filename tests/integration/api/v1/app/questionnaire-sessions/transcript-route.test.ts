@@ -23,7 +23,7 @@ vi.mock('@/lib/db/client', () => ({
   prisma: { appQuestionnaireSession: { findUnique: dbMock.findUnique } },
 }));
 
-const transcriptMock = vi.hoisted(() => ({ loadTranscript: vi.fn() }));
+const transcriptMock = vi.hoisted(() => ({ loadTranscript: vi.fn(), loadInspectorTurns: vi.fn() }));
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/transcript', () => transcriptMock);
 
 // Real resolveTurnAccess runs; stub only the token verify.
@@ -58,12 +58,41 @@ const TURNS = [
   },
 ];
 
+// Default session: a non-preview owner session (inspector gate off).
+function session(over: Record<string, unknown> = {}) {
+  return {
+    id: 'sess-1',
+    respondentUserId: USER,
+    isPreview: false,
+    version: { config: { previewInspectorEnabled: false } },
+    ...over,
+  };
+}
+
+const INSPECTOR_TURNS = [
+  {
+    turnIndex: 0,
+    calls: [
+      {
+        label: 'Kickoff',
+        model: 'm',
+        provider: 'p',
+        latencyMs: 1,
+        costUsd: 0,
+        prompt: [],
+        response: 'r',
+      },
+    ],
+  },
+];
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(isFeatureEnabled).mockResolvedValue(true);
   setAuth(mockAuthenticatedUser());
-  dbMock.findUnique.mockResolvedValue({ id: 'sess-1', respondentUserId: USER });
+  dbMock.findUnique.mockResolvedValue(session());
   transcriptMock.loadTranscript.mockResolvedValue(TURNS);
+  transcriptMock.loadInspectorTurns.mockResolvedValue(INSPECTOR_TURNS);
 });
 
 describe('gate order', () => {
@@ -95,7 +124,7 @@ describe('authenticated access', () => {
 
   it('403s an authenticated user who does not own the session', async () => {
     // The signed-in user (default mock id) is not this session's respondent.
-    dbMock.findUnique.mockResolvedValue({ id: 'sess-1', respondentUserId: 'a-different-user' });
+    dbMock.findUnique.mockResolvedValue(session({ respondentUserId: 'a-different-user' }));
     const res = await GET(req(), ctx);
     expect(res.status).toBe(403);
     expect(transcriptMock.loadTranscript).not.toHaveBeenCalled();
@@ -105,7 +134,7 @@ describe('authenticated access', () => {
 describe('anonymous access', () => {
   beforeEach(() => {
     // Anonymous session: no owner; access rides the signed token.
-    dbMock.findUnique.mockResolvedValue({ id: 'sess-1', respondentUserId: null });
+    dbMock.findUnique.mockResolvedValue(session({ respondentUserId: null }));
     setAuth(null);
   });
 
@@ -127,5 +156,41 @@ describe('anonymous access', () => {
     const res = await GET(req({ 'x-session-token': 'tok' }), ctx);
     expect(res.status).toBe(401);
     expect(transcriptMock.loadTranscript).not.toHaveBeenCalled();
+  });
+});
+
+describe('preview turn-inspector hydration', () => {
+  type Body = { data: { turns: unknown; inspectorTurns?: unknown } };
+
+  it('replays the persisted inspector traces for a preview session with the toggle on', async () => {
+    dbMock.findUnique.mockResolvedValue(
+      session({ isPreview: true, version: { config: { previewInspectorEnabled: true } } })
+    );
+    const res = await GET(req(), ctx);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Body;
+    expect(body.data.inspectorTurns).toEqual(INSPECTOR_TURNS);
+    expect(transcriptMock.loadInspectorTurns).toHaveBeenCalledWith('sess-1');
+  });
+
+  it('omits inspector traces (and never loads them) when the toggle is off', async () => {
+    dbMock.findUnique.mockResolvedValue(
+      session({ isPreview: true, version: { config: { previewInspectorEnabled: false } } })
+    );
+    const res = await GET(req(), ctx);
+    const body = (await res.json()) as Body;
+    expect(body.data).not.toHaveProperty('inspectorTurns');
+    expect(transcriptMock.loadInspectorTurns).not.toHaveBeenCalled();
+  });
+
+  it('omits inspector traces for a non-preview session even if the toggle is on', async () => {
+    // A real respondent must never receive admin telemetry, regardless of the version config.
+    dbMock.findUnique.mockResolvedValue(
+      session({ isPreview: false, version: { config: { previewInspectorEnabled: true } } })
+    );
+    const res = await GET(req(), ctx);
+    const body = (await res.json()) as Body;
+    expect(body.data).not.toHaveProperty('inspectorTurns');
+    expect(transcriptMock.loadInspectorTurns).not.toHaveBeenCalled();
   });
 });

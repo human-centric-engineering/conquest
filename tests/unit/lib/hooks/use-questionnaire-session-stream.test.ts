@@ -418,6 +418,72 @@ describe('useQuestionnaireSessionStream', () => {
     expect(result.current.turns[0]).toEqual(resumeTurn);
   });
 
+  it('seeds initialInspectorTurns so a resumed preview re-hydrates the drawer before any send', () => {
+    // The Preview Turn Inspector drawer mounts on `inspectorTurns.length > 0`; without this seed a
+    // reload would leave it empty until the next live frame. The resume replay restores it.
+    const seeded = [
+      {
+        turnIndex: 0,
+        calls: [
+          {
+            label: 'Kickoff',
+            model: 'm',
+            provider: 'p',
+            latencyMs: 1,
+            costUsd: 0,
+            prompt: [],
+            response: 'r',
+          },
+        ],
+      },
+    ];
+    const { result } = renderHook(() =>
+      useQuestionnaireSessionStream({ sessionId: SESSION_ID, initialInspectorTurns: seeded })
+    );
+
+    expect(result.current.inspectorTurns).toEqual(seeded);
+  });
+
+  it('defaults inspectorTurns to empty when no seed is provided (real respondent)', () => {
+    const { result } = renderHook(() => useQuestionnaireSessionStream({ sessionId: SESSION_ID }));
+    expect(result.current.inspectorTurns).toEqual([]);
+  });
+
+  it('appends a live `inspector` frame to inspectorTurns so the drawer grows mid-session', async () => {
+    // The resume seed is covered above; this pins the LIVE path — a preview turn's `inspector`
+    // frame must accumulate onto the drawer, else a reloaded preview would show only the seed and
+    // never gain the new turn's trace.
+    const liveTurn = {
+      turnIndex: 1,
+      calls: [
+        {
+          label: 'Interviewer',
+          model: 'm',
+          provider: 'p',
+          latencyMs: 5,
+          costUsd: 0.001,
+          prompt: [],
+          response: 'reply',
+        },
+      ],
+    };
+    fetchMock.mockResolvedValue(
+      streamResponse([
+        frame('start', { conversationId: SESSION_ID, messageId: SESSION_ID }),
+        frame('inspector', liveTurn),
+        frame('content', { delta: 'Noted.' }),
+        frame('done', { costUsd: 0.001 }),
+      ])
+    );
+
+    const { result } = renderHook(() => useQuestionnaireSessionStream({ sessionId: SESSION_ID }));
+    await act(async () => {
+      await result.current.sendMessage('hi');
+    });
+
+    expect(result.current.inspectorTurns).toEqual([liveTurn]);
+  });
+
   it('surfaces a network interruption mid-stream as NETWORK_ERROR with interrupted message', async () => {
     // Arrange: reader delivers one delta then throws
     const encoder = new TextEncoder();

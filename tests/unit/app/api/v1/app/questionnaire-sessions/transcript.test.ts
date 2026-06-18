@@ -15,9 +15,25 @@ vi.mock('@/lib/db/client', () => ({
   prisma: { appQuestionnaireTurn: { findMany: (...args: unknown[]) => findMany(...args) } },
 }));
 
-import { loadTranscript } from '@/app/api/v1/app/questionnaire-sessions/_lib/transcript';
+import {
+  loadTranscript,
+  loadInspectorTurns,
+} from '@/app/api/v1/app/questionnaire-sessions/_lib/transcript';
 
 type Row = { userMessage: string; agentResponse: string; warnings: unknown };
+
+/** A minimal valid persisted agent-call trace (satisfies `agentCallTraceSchema`). */
+function call(label: string) {
+  return {
+    label,
+    model: 'gpt-x',
+    provider: 'openai',
+    latencyMs: 12,
+    costUsd: 0.0003,
+    prompt: [{ role: 'system', content: 'prompt' }],
+    response: 'response',
+  };
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -95,5 +111,66 @@ describe('loadTranscript', () => {
       { role: 'user', content: 'c' },
       { role: 'assistant', content: 'd' },
     ]);
+  });
+});
+
+describe('loadInspectorTurns', () => {
+  it('reads turns ordinal-ascending, selecting ordinal + inspectorCalls', async () => {
+    findMany.mockResolvedValue([]);
+    await loadInspectorTurns('sess-1');
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { sessionId: 'sess-1' },
+        orderBy: { ordinal: 'asc' },
+        select: { ordinal: true, inspectorCalls: true },
+      })
+    );
+  });
+
+  it('maps the 1-based ordinal to the live 0-based turnIndex (ordinal − 1)', async () => {
+    // Reproduces the index the live `inspector` frame used (`selectionRound`), so a hydrated turn
+    // lines up with the same transcript user message the drawer derives context from.
+    findMany.mockResolvedValue([
+      { ordinal: 1, inspectorCalls: [call('Kickoff')] },
+      { ordinal: 2, inspectorCalls: [call('Extractor'), call('Interviewer')] },
+    ]);
+
+    const turns = await loadInspectorTurns('sess-1');
+
+    expect(turns).toEqual([
+      { turnIndex: 0, calls: [expect.objectContaining({ label: 'Kickoff' })] },
+      {
+        turnIndex: 1,
+        calls: [
+          expect.objectContaining({ label: 'Extractor' }),
+          expect.objectContaining({ label: 'Interviewer' }),
+        ],
+      },
+    ]);
+  });
+
+  it('skips a turn that captured no calls (the live frame only emits when calls exist)', async () => {
+    findMany.mockResolvedValue([
+      { ordinal: 1, inspectorCalls: [] },
+      { ordinal: 2, inspectorCalls: [call('Interviewer')] },
+    ]);
+
+    const turns = await loadInspectorTurns('sess-1');
+
+    expect(turns).toEqual([
+      { turnIndex: 1, calls: [expect.objectContaining({ label: 'Interviewer' })] },
+    ]);
+  });
+
+  it('fails soft, dropping a turn whose persisted inspectorCalls JSON is malformed', async () => {
+    findMany.mockResolvedValue([
+      { ordinal: 1, inspectorCalls: { not: 'an array' } },
+      { ordinal: 2, inspectorCalls: [{ label: 'no model/provider' }] }, // missing required fields
+      { ordinal: 3, inspectorCalls: [call('Good')] },
+    ]);
+
+    const turns = await loadInspectorTurns('sess-1');
+
+    expect(turns).toEqual([{ turnIndex: 2, calls: [expect.objectContaining({ label: 'Good' })] }]);
   });
 });

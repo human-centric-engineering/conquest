@@ -32,6 +32,8 @@ import type { PresentationMode, ReasoningPlacement } from '@/lib/app/questionnai
 import { ANSWER_PROVENANCES } from '@/lib/app/questionnaire/types';
 import type { QuestionnaireTurn } from '@/lib/app/questionnaire/chat/types';
 import { REASONING_STEP_KINDS, REASONING_TONES } from '@/lib/app/questionnaire/reasoning';
+import { inspectorTurnSchema } from '@/lib/app/questionnaire/inspector/schema';
+import type { TurnInspectorData } from '@/lib/app/questionnaire/inspector';
 
 interface AnonymousSessionBootProps {
   versionId: string;
@@ -90,6 +92,12 @@ type BootState =
       accessToken: string;
       /** Seeded transcript: a replayed conversation on resume, else the fresh welcome turn. */
       initialTurns: QuestionnaireTurn[];
+      /**
+       * Preview Turn Inspector (admin-only): the persisted per-turn traces, replayed on resume so the
+       * drawer re-hydrates instead of waiting for the next turn. Empty for a real respondent — the
+       * transcript route only returns them for a preview session with the inspector toggle on.
+       */
+      initialInspectorTurns: TurnInspectorData[];
       /** Open proactively only on a fresh session (no prior turns to replay). */
       autoStart: boolean;
     }
@@ -125,6 +133,12 @@ const transcriptResponseSchema = z.object({
             .optional(),
         })
       ),
+      // Preview Turn Inspector (admin-only): present only when the session is a preview with the
+      // inspector toggle on; absent for a real respondent. Validated with the same schema the live
+      // `inspector` frame parses through. `.catch([])` keeps a malformed trace from failing the whole
+      // parse — admin debug data must never wipe the respondent's replayed transcript (the same
+      // fail-soft contract the warnings/reasoning replay uses server-side).
+      inspectorTurns: z.array(inspectorTurnSchema).catch([]).optional(),
     })
     .optional(),
 });
@@ -137,16 +151,21 @@ const transcriptResponseSchema = z.object({
 async function fetchTranscript(
   sessionId: string,
   accessToken: string
-): Promise<QuestionnaireTurn[]> {
+): Promise<{ turns: QuestionnaireTurn[]; inspectorTurns: TurnInspectorData[] }> {
+  const empty = { turns: [], inspectorTurns: [] };
   try {
     const res = await fetch(API.APP.QUESTIONNAIRE_SESSIONS.transcript(sessionId), {
       headers: { 'X-Session-Token': accessToken },
     });
-    if (!res.ok) return [];
+    if (!res.ok) return empty;
     const parsed = transcriptResponseSchema.safeParse(await res.json());
-    return parsed.success ? (parsed.data.data?.turns ?? []) : [];
+    if (!parsed.success) return empty;
+    return {
+      turns: parsed.data.data?.turns ?? [],
+      inspectorTurns: parsed.data.data?.inspectorTurns ?? [],
+    };
   } catch {
-    return [];
+    return empty;
   }
 }
 
@@ -265,7 +284,7 @@ export function AnonymousSessionBoot({
       // already has turns — e.g. a refresh of a session in progress. A fresh session has none, so
       // it shows the branded welcome and auto-opens the first question. (The token is client-only,
       // so unlike the authenticated page this can't SSR-seed — hence the on-boot fetch.)
-      const turns = await fetchTranscript(sessionId, accessToken);
+      const { turns, inspectorTurns } = await fetchTranscript(sessionId, accessToken);
       const resumed = turns.length > 0;
       setState({
         phase: 'ready',
@@ -274,6 +293,11 @@ export function AnonymousSessionBoot({
         initialTurns: resumed
           ? turns
           : buildWelcomeTurns({ welcomeCopy, voiceInputEnabled, anonymous }),
+        // Pass the fetched traces straight through — the route already returns [] (or omits the
+        // field) for a fresh or non-preview session, so this is empty in exactly those cases. No
+        // `resumed` gate: that signal is about the transcript, and gating inspector data on it would
+        // drop fetched traces if the two ever diverged (e.g. traces present, transcript empty).
+        initialInspectorTurns: inspectorTurns,
         autoStart: !resumed,
       });
     })();
@@ -310,6 +334,7 @@ export function AnonymousSessionBoot({
       // seeds its replayed transcript (so the prior conversation + its notices are restored) and
       // does NOT auto-open — the last asked question is already on screen from the replay.
       initialTurns={state.initialTurns}
+      initialInspectorTurns={state.initialInspectorTurns}
       autoStart={state.autoStart}
       presentationMode={presentationMode}
       voiceInputEnabled={voiceInputEnabled}
