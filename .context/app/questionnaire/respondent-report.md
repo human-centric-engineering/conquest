@@ -46,9 +46,21 @@ client-scoped `reportKnowledge` view, uploads to the platform documents endpoint
 tag stamped on, lists the client's documents, and deletes them — degrading to a clear notice when the
 questionnaire has no attributed client.
 
-> **Deferred (Phase 4b):** the AI config-crafting chat + admin-interview assistant (a `ChatInterface`
-> wired to a `craft-report-config` capability that proposes instructions/background context). The
-> manual Generation fields are the source of truth; the assistant is an additive authoring aid.
+### Config-crafting assistant (Phase 4b)
+
+The Generation panel embeds `ReportConfigAssistant`
+(`components/admin/questionnaires/report/report-config-assistant.tsx`) — a conversational helper that
+interviews the admin and proposes report config. Each turn POSTs the transcript + the editor's live
+generation values to `POST …/versions/:vid/report/craft` (`reportCraft` in `lib/api/endpoints.ts`),
+which runs `craftReportConfig` (`lib/app/questionnaire/report/craft.ts`): it resolves the seeded
+`app-respondent-report-assistant` agent (046) and runs the shared structured-completion runner,
+returning `{ reply, suggestions }`. `suggestions` carries the **full** proposed text for any of
+`instructions` / `structure` / `backgroundContext`; the admin applies a field wholesale via a
+per-field "Apply" button (which calls back into the editor — config still saves through the normal
+PATCH). The route is admin-only, gated on the master flag, and per-admin rate-limited
+(`reportConfigAssistLimiter`). Stateless server-side — the transcript lives in the component. This
+mirrors the generative-authoring **refine** pattern (a structured app turn), not the platform chat
+tool-loop.
 
 ## Per-client knowledge isolation (tag-based)
 

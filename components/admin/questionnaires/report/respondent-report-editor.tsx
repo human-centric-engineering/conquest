@@ -31,6 +31,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FieldHelp } from '@/components/ui/field-help';
 import { ClientKnowledgePanel } from '@/components/admin/questionnaires/report/client-knowledge-panel';
+import { ReportConfigAssistant } from '@/components/admin/questionnaires/report/report-config-assistant';
 import {
   RESPONDENT_REPORT_BACKGROUND_MAX_LENGTH,
   RESPONDENT_REPORT_INSTRUCTIONS_MAX_LENGTH,
@@ -195,6 +196,18 @@ export function RespondentReportEditor({
               (Content tab) to use them.
             </p>
           )}
+
+          <ReportConfigAssistant
+            questionnaireId={questionnaireId}
+            versionId={versionId}
+            current={{
+              instructions: value.generation.instructions,
+              structure: value.generation.structure,
+              backgroundContext: value.generation.backgroundContext,
+            }}
+            onApply={patchGeneration}
+            disabled={isSaving || !insights}
+          />
 
           <div className="space-y-1.5">
             <Label htmlFor="rr-instructions" className="flex items-center gap-1">

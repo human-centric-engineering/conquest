@@ -860,6 +860,15 @@ export const APP_QUESTIONNAIRES_RESPONDENT_REPORT_FLAG =
 export const RESPONDENT_REPORT_AGENT_SLUG = 'app-respondent-report';
 
 /**
+ * Slug of the seeded Respondent Report **config assistant** `AiAgent` — the conversational helper in
+ * the Generation tab that interviews the admin and proposes report generation config (instructions /
+ * structure / background context). Distinct from the report WRITER agent: this one authors config,
+ * it doesn't write respondent-facing reports. Empty `model`/`provider` (runtime-resolved); seeded by
+ * `046-report-config-assistant-agent.ts`.
+ */
+export const RESPONDENT_REPORT_ASSISTANT_AGENT_SLUG = 'app-respondent-report-assistant';
+
+/**
  * Slug of the seeded composer `AiAgent` (generative authoring). A distinct agent
  * from the document extractor: composition and document extraction carry their
  * own budgets and personas. Ships with empty `model`/`provider` so it resolves
