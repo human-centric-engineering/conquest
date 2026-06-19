@@ -851,6 +851,15 @@ export const APP_QUESTIONNAIRES_RESPONDENT_REPORT_FLAG =
   'APP_QUESTIONNAIRES_RESPONDENT_REPORT_ENABLED';
 
 /**
+ * Slug of the seeded Respondent Report `AiAgent` — assembles the per-respondent insights section
+ * (mode `raw_plus_insights`) from the captured answers, the admin's generation config, and the
+ * optional client knowledge base. Ships with empty `model`/`provider` so it resolves dynamically via
+ * `agent-resolver.ts`; the generation pipeline loads it by slug. App-prefixed to avoid collision
+ * with core agents. Seeded by `045-respondent-report-agent.ts`.
+ */
+export const RESPONDENT_REPORT_AGENT_SLUG = 'app-respondent-report';
+
+/**
  * Slug of the seeded composer `AiAgent` (generative authoring). A distinct agent
  * from the document extractor: composition and document extraction carry their
  * own budgets and personas. Ships with empty `model`/`provider` so it resolves

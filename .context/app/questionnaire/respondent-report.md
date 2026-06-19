@@ -52,3 +52,26 @@ A questionnaire with no attributed demo client has no client corpus — the view
 GDPR erasure). Status `queued → processing → ready | failed`, the generated `content`, `costUsd`, and
 worker lease columns (`lockedBy`/`lockedAt`) for the maintenance-tick generation worker (mirrors the
 evaluations batch worker). Raw-only mode never creates a row.
+
+## Generation pipeline (mode 2, async)
+
+1. **Enqueue** — the submit route calls `enqueueRespondentReport(sessionId)`
+   (`lib/app/questionnaire/report/enqueue.ts`) after `markSessionCompleted`. It creates a `queued`
+   row only when the platform flag is on AND the version's config is `enabled` + `raw_plus_insights`.
+   Idempotent (upsert by `sessionId`); best-effort — a failure never fails submission.
+2. **Worker** — `processQueuedRespondentReports()` (`lib/app/questionnaire/report/worker.ts`) runs in
+   the maintenance-tick background chain (`lib/orchestration/maintenance/run-tick.ts`, task
+   `respondentReports`). It lease-claims queued/orphan-stale rows (single conditional UPDATE; 5-min
+   lease TTL), drains up to 5 per tick within a 45s budget, and marks each `ready` (+ content + cost)
+   or `failed` (+ error), clearing the lease either way.
+3. **Generation** — `generateRespondentReport(sessionId)` (`lib/app/questionnaire/report/generate.ts`)
+   loads the answers (`loadSessionExport` → `buildAnswerPanelView` → `buildAnswerTranscript`),
+   optionally retrieves client-KB snippets (scoped via `resolveClientKnowledgeDocumentIds` →
+   `searchKnowledge({ documentIds })`), resolves the seeded `app-respondent-report` agent
+   (`agent-resolver`), and runs the shared structured-completion runner (parse → retry-once → cost
+   sum). Returns validated `RespondentReportContent` (`{ summary, sections[], actions[] }`) + USD cost.
+   Blank generation config falls back to the agent's default persona — generic insights, no KB.
+
+The agent (`RESPONDENT_REPORT_AGENT_SLUG = 'app-respondent-report'`) is seeded disabled-of-impact by
+`045-respondent-report-agent.ts` with an empty provider/model (resolved at runtime) and a monthly
+budget cap; `visibility: 'internal'`.

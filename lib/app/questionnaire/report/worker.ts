@@ -1,0 +1,134 @@
+/**
+ * Respondent Report generation worker.
+ *
+ * Called once per maintenance-tick from the background chain in
+ * `lib/orchestration/maintenance/run-tick.ts` (NEVER awaited on the HTTP path). Drains up to a small
+ * batch of `queued` reports per tick under a wall-clock budget so a backlog clears without stalling
+ * the tick. Crash-safe via a lease (`lockedBy`/`lockedAt`): a row whose lease is stale (worker
+ * crashed mid-generation) is re-claimable on a later tick. The claim is a single conditional UPDATE,
+ * so two concurrent workers can never both hold the same row — mirrors the evaluations batch worker
+ * (lib/orchestration/evaluations/run-claim.ts).
+ */
+
+import { prisma } from '@/lib/db/client';
+import { logger } from '@/lib/logging';
+import { generateRespondentReport } from '@/lib/app/questionnaire/report/generate';
+
+/**
+ * Prisma's `updateMany` data input for this model, derived from the client value so lib/app stays
+ * storage-agnostic (no `@prisma/client` import). Used to land the generated content into the Json
+ * column without a `Prisma.InputJsonValue` import.
+ */
+type ReportUpdateData = Parameters<typeof prisma.appRespondentReport.updateMany>[0]['data'];
+
+/** Lease TTL — a `processing` row whose lock is older than this is treated as orphaned. */
+export const REPORT_LEASE_TTL_MS = 5 * 60 * 1000;
+/** Max reports drained per tick (each is one LLM call). */
+const MAX_PER_TICK = 5;
+/** Wall-clock budget per tick — stop claiming new work past this even if more is queued. */
+const TICK_BUDGET_MS = 45_000;
+/** Cap the stored failure message. */
+const ERROR_MAX = 1000;
+
+export interface ReportWorkerResult {
+  claimed: number;
+  succeeded: number;
+  failed: number;
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** The claim predicate: queued + unlocked, intentionally-released, or orphan-stale. */
+function claimableWhere(orphanCutoff: Date) {
+  return {
+    OR: [
+      { status: 'queued', lockedBy: null },
+      { status: 'processing', lockedBy: null },
+      { status: 'processing', lockedAt: { lt: orphanCutoff } },
+    ],
+  };
+}
+
+/** Atomically claim the oldest claimable report. Returns its id + sessionId, or null. */
+async function claimNextReport(
+  workerId: string
+): Promise<{ id: string; sessionId: string } | null> {
+  const orphanCutoff = new Date(Date.now() - REPORT_LEASE_TTL_MS);
+
+  const candidate = await prisma.appRespondentReport.findFirst({
+    where: claimableWhere(orphanCutoff),
+    orderBy: { createdAt: 'asc' },
+    select: { id: true },
+  });
+  if (!candidate) return null;
+
+  const result = await prisma.appRespondentReport.updateMany({
+    where: { id: candidate.id, ...claimableWhere(orphanCutoff) },
+    data: { status: 'processing', lockedBy: workerId, lockedAt: new Date() },
+  });
+  if (result.count === 0) return null; // another worker won the race
+
+  return prisma.appRespondentReport.findUnique({
+    where: { id: candidate.id },
+    select: { id: true, sessionId: true },
+  });
+}
+
+/** Generate + persist one claimed report. Returns whether it succeeded. */
+async function driveReport(claimed: { id: string; sessionId: string }): Promise<boolean> {
+  try {
+    const { content, costUsd } = await generateRespondentReport(claimed.sessionId);
+    await prisma.appRespondentReport.updateMany({
+      where: { id: claimed.id, status: 'processing' },
+      data: {
+        status: 'ready',
+        content,
+        costUsd,
+        generatedAt: new Date(),
+        error: null,
+        lockedBy: null,
+        lockedAt: null,
+      } as unknown as ReportUpdateData,
+    });
+    return true;
+  } catch (err) {
+    logger.error('respondent report generation failed', {
+      reportId: claimed.id,
+      sessionId: claimed.sessionId,
+      error: errorMessage(err),
+    });
+    await prisma.appRespondentReport.updateMany({
+      where: { id: claimed.id, status: 'processing' },
+      data: {
+        status: 'failed',
+        error: errorMessage(err).slice(0, ERROR_MAX),
+        lockedBy: null,
+        lockedAt: null,
+      },
+    });
+    return false;
+  }
+}
+
+/**
+ * Drain queued respondent reports for this tick. Claims up to {@link MAX_PER_TICK} within
+ * {@link TICK_BUDGET_MS}; stops early when nothing is claimable.
+ */
+export async function processQueuedRespondentReports(): Promise<ReportWorkerResult> {
+  const workerId = `report-worker:${crypto.randomUUID()}`;
+  const deadline = Date.now() + TICK_BUDGET_MS;
+  const out: ReportWorkerResult = { claimed: 0, succeeded: 0, failed: 0 };
+
+  while (out.claimed < MAX_PER_TICK && Date.now() < deadline) {
+    const claimed = await claimNextReport(workerId);
+    if (!claimed) break;
+    out.claimed += 1;
+    const ok = await driveReport(claimed);
+    if (ok) out.succeeded += 1;
+    else out.failed += 1;
+  }
+
+  return out;
+}
