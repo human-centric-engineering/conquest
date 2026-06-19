@@ -375,6 +375,8 @@ export const API = {
       /** Version run-time configuration (PATCH partial config — F3.1). */
       versionConfig: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/config`,
+      /** Respondent Report: the attributed client's knowledge corpus (GET — client-scoped list). */
+      reportKnowledge: (id: string): string => `/api/v1/app/questionnaires/${id}/report/knowledge`,
       /** Pre-launch cost estimate (GET `?respondents=N` — F3.3). */
       versionCostEstimate: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/cost-estimate`,
