@@ -24,6 +24,32 @@ Per-version, stored as the `respondentReport` JSON slice on `AppQuestionnaireCon
 `lib/app/questionnaire/authoring/config-schema.ts`; defensive read projection
 `narrowRespondentReportSettings` in `lib/app/questionnaire/report/settings.ts`. Disabled by default.
 
+## Admin configuration UI
+
+The **Respondent report** workspace tab (`app/admin/questionnaires/[id]/v/[vid]/respondent-report`)
+renders `RespondentReportEditor` (`components/admin/questionnaires/report/respondent-report-editor.tsx`)
+— a self-contained controlled-state editor with four inner tabs that all edit one
+`RespondentReportSettings` block, saved whole through the config PATCH (`respondentReport` slice):
+
+- **Content** — enable toggle, mode selector, and the raw-content includes (questions-as-presented;
+  data-slot values when the data-slots feature is on).
+- **Generation** (effective in `raw_plus_insights`) — instructions, structure, and background-context
+  textareas, the `useClientKnowledge` toggle, and the embedded `ClientKnowledgePanel`.
+- **Delivery** — on-screen / download toggles (email deferred).
+- **Appearance** — note that branding inherits the demo client's theme.
+
+The page reads the resolved config from the cached version graph (no second fetch) and passes the
+`respondentReport` slice in; the editor saves via `apiClient.patch` and `router.refresh()`.
+
+`ClientKnowledgePanel` (`components/admin/questionnaires/report/client-knowledge-panel.tsx`) reads the
+client-scoped `reportKnowledge` view, uploads to the platform documents endpoint with the client's
+tag stamped on, lists the client's documents, and deletes them — degrading to a clear notice when the
+questionnaire has no attributed client.
+
+> **Deferred (Phase 4b):** the AI config-crafting chat + admin-interview assistant (a `ChatInterface`
+> wired to a `craft-report-config` capability that proposes instructions/background context). The
+> manual Generation fields are the source of truth; the assistant is an additive authoring aid.
+
 ## Per-client knowledge isolation (tag-based)
 
 Modes 2/3 can ground insights in a client-specific knowledge base with strict no-bleed isolation —
