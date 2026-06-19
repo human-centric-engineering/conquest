@@ -137,4 +137,39 @@ describe('buildAnswerTranscript', () => {
     ];
     expect(buildAnswerTranscript({ ...base, sections })).toContain('A: a, b, c');
   });
+
+  it('formats scalar answer types (boolean, number, object) and renders null as "(no answer)"', () => {
+    const sections: PanelSectionView[] = [
+      {
+        sectionId: 's1',
+        title: 'Mixed',
+        slots: [
+          slot({ slotKey: 'b', prompt: 'Agree?', value: true, answered: true }),
+          slot({ slotKey: 'n', prompt: 'Score?', value: 7, answered: true }),
+          slot({ slotKey: 'o', prompt: 'Meta?', value: { a: 1 }, answered: true }),
+          // An answered slot can still carry a null value — it must render, not be dropped.
+          slot({ slotKey: 'z', prompt: 'Blank?', value: null, answered: true }),
+        ],
+      },
+    ];
+    const text = buildAnswerTranscript({ ...base, sections });
+    expect(text).toContain('A: true');
+    expect(text).toContain('A: 7');
+    expect(text).toContain('A: {"a":1}');
+    expect(text).toContain('Q: Blank?\nA: (no answer)');
+  });
+
+  it('omits goal/audience header lines when absent', () => {
+    const sections: PanelSectionView[] = [
+      { sectionId: 's1', title: 'S', slots: [slot({ answered: true, value: 'x' })] },
+    ];
+    const text = buildAnswerTranscript({
+      questionnaireTitle: 'T',
+      goal: null,
+      audienceSummary: null,
+      sections,
+    });
+    expect(text).not.toContain('Goal:');
+    expect(text).not.toContain('Audience:');
+  });
 });

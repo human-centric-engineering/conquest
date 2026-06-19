@@ -84,4 +84,20 @@ describe('POST …/report/craft', () => {
     const res = await POST(req(validBody), ctx);
     expect(res.status).toBe(502);
   });
+
+  it('502s and stringifies a non-Error rejection', async () => {
+    (craftReportConfig as unknown as Mock).mockRejectedValue('plain string failure');
+    const res = await POST(req(validBody), ctx);
+    expect(res.status).toBe(502);
+  });
+
+  it('429s when the per-admin assist rate limit is exceeded', async () => {
+    const spy = vi
+      .spyOn(reportConfigAssistLimiter, 'check')
+      .mockReturnValue({ success: false, limit: 60, remaining: 0, reset: Date.now() + 1000 });
+    const res = await POST(req(validBody), ctx);
+    expect(res.status).toBe(429);
+    expect(craftReportConfig).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
 });

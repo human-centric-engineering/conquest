@@ -52,8 +52,16 @@ describe('enqueueRespondentReport', () => {
     expect(arg.update).toEqual({});
   });
 
-  it('does nothing when the platform flag is off', async () => {
+  it('does nothing when the master flag is off', async () => {
     (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
+    await expect(enqueueRespondentReport('sess-1')).resolves.toBe(false);
+    expect(prisma.appRespondentReport.upsert).not.toHaveBeenCalled();
+  });
+
+  it('does nothing when only the respondent-report sub-flag is off (master on)', async () => {
+    (isFeatureEnabled as unknown as Mock)
+      .mockResolvedValueOnce(true) // master
+      .mockResolvedValueOnce(false); // sub-flag
     await expect(enqueueRespondentReport('sess-1')).resolves.toBe(false);
     expect(prisma.appRespondentReport.upsert).not.toHaveBeenCalled();
   });

@@ -45,6 +45,9 @@ function fakeProvider(responseJson: object) {
   const chat = vi.fn().mockResolvedValue({
     content: JSON.stringify(responseJson),
     usage: { inputTokens: 100, outputTokens: 50 },
+    // Match the real LlmResponse contract (provider.chat returns these too).
+    model: 'test-model',
+    finishReason: 'stop',
   });
   return { provider: { chat }, chat };
 }
@@ -206,10 +209,113 @@ describe('generateRespondentReport', () => {
     await expect(generateRespondentReport('sess-x')).rejects.toThrow(/not found/i);
   });
 
+  it('throws when the session export cannot be loaded', async () => {
+    (loadSessionExport as Mock).mockResolvedValue(null);
+    const { provider } = fakeProvider(VALID_RESPONSE);
+    (getProvider as Mock).mockResolvedValue(provider);
+    await expect(generateRespondentReport('sess-1')).rejects.toThrow(/export not found/i);
+  });
+
   it('throws when the report agent is not seeded', async () => {
     (prisma.aiAgent.findUnique as Mock).mockResolvedValue(null);
     const { provider } = fakeProvider(VALID_RESPONSE);
     (getProvider as Mock).mockResolvedValue(provider);
     await expect(generateRespondentReport('sess-1')).rejects.toThrow(/not seeded/i);
+  });
+
+  it('continues ungrounded when KB search throws (best-effort grounding)', async () => {
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionMeta({
+        respondentReport: {
+          enabled: true,
+          mode: 'raw_plus_insights',
+          generation: {
+            instructions: '',
+            structure: '',
+            backgroundContext: '',
+            useClientKnowledge: true,
+          },
+        },
+        demoClientId: 'clt-1',
+      })
+    );
+    (resolveClientKnowledgeDocumentIds as Mock).mockResolvedValue(['doc-a']);
+    (searchKnowledge as Mock).mockRejectedValue(new Error('vector store down'));
+    const { provider, chat } = fakeProvider(VALID_RESPONSE);
+    (getProvider as Mock).mockResolvedValue(provider);
+
+    // Does not throw — the report is still produced without grounding.
+    const result = await generateRespondentReport('sess-1');
+    expect(result.content).toEqual(VALID_RESPONSE);
+    const system = (chat.mock.calls[0][0] as Array<{ role: string; content: string }>).find(
+      (m) => m.role === 'system'
+    );
+    expect(system?.content).not.toContain('Reference material');
+  });
+
+  it('skips KB search when the client has no documents', async () => {
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionMeta({
+        respondentReport: {
+          enabled: true,
+          mode: 'raw_plus_insights',
+          generation: {
+            instructions: '',
+            structure: '',
+            backgroundContext: '',
+            useClientKnowledge: true,
+          },
+        },
+        demoClientId: 'clt-1',
+      })
+    );
+    (resolveClientKnowledgeDocumentIds as Mock).mockResolvedValue([]); // no docs tagged
+    const { provider } = fakeProvider(VALID_RESPONSE);
+    (getProvider as Mock).mockResolvedValue(provider);
+
+    await generateRespondentReport('sess-1');
+    expect(searchKnowledge).not.toHaveBeenCalled();
+  });
+
+  it('threads populated instructions/structure/background into the system prompt', async () => {
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionMeta({
+        respondentReport: {
+          enabled: true,
+          mode: 'raw_plus_insights',
+          generation: {
+            instructions: 'Be warm and concise.',
+            structure: 'Summary, then themes.',
+            backgroundContext: 'Quarterly pulse for managers.',
+            useClientKnowledge: false,
+          },
+        },
+      })
+    );
+    const { provider, chat } = fakeProvider(VALID_RESPONSE);
+    (getProvider as Mock).mockResolvedValue(provider);
+
+    await generateRespondentReport('sess-1');
+    const system = (chat.mock.calls[0][0] as Array<{ role: string; content: string }>).find(
+      (m) => m.role === 'system'
+    );
+    expect(system?.content).toContain('Be warm and concise.');
+    expect(system?.content).toContain('Summary, then themes.');
+    expect(system?.content).toContain('Quarterly pulse for managers.');
+  });
+
+  it('falls back to the audience role when there is no description', async () => {
+    (loadSessionExport as Mock).mockResolvedValue({
+      ...loadedExport(),
+      audience: { role: 'Line managers' },
+    });
+    const { provider, chat } = fakeProvider(VALID_RESPONSE);
+    (getProvider as Mock).mockResolvedValue(provider);
+
+    await generateRespondentReport('sess-1');
+    const user = (chat.mock.calls[0][0] as Array<{ role: string; content: string }>).find(
+      (m) => m.role === 'user'
+    );
+    expect(user?.content).toContain('Audience: Line managers');
   });
 });

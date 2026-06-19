@@ -50,9 +50,11 @@ export function SessionComplete({
 
   // Respondent report view (polls while insights generate). When no report is configured the view
   // is `enabled: false` and the screen keeps its default responses-PDF download (F7.4 behaviour).
-  const { view } = useRespondentReport(sessionId, accessToken);
+  const { view, loaded } = useRespondentReport(sessionId, accessToken);
   const reportEnabled = view?.enabled ?? false;
-  const showDownload = reportEnabled ? view!.download : true;
+  // Hold the download button until the view resolves so a `download: false` config never flashes a
+  // clickable button in the gap before the first fetch settles. No report configured → default on.
+  const showDownload = loaded ? (reportEnabled ? view!.download : true) : false;
   const showInsights =
     reportEnabled &&
     view!.onScreen &&

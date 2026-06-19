@@ -10,6 +10,7 @@
  *     transcript fed to the report agent.
  */
 
+import { isRecord } from '@/lib/utils';
 import type { SessionExportModel } from '@/lib/app/questionnaire/export/types';
 
 /**
@@ -45,10 +46,6 @@ export const REPORT_SECTION_BODY_MAX = 6000;
 export const REPORT_ACTION_MAX = 1000;
 export const REPORT_MAX_SECTIONS = 12;
 export const REPORT_MAX_ACTIONS = 12;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
 
 function trimTo(value: unknown, max: number): string | null {
   if (typeof value !== 'string') return null;

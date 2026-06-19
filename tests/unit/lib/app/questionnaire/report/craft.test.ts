@@ -54,6 +54,9 @@ function fakeProvider(responseJson: object) {
   const chat = vi.fn().mockResolvedValue({
     content: JSON.stringify(responseJson),
     usage: { inputTokens: 20, outputTokens: 10 },
+    // Match the real LlmResponse contract (provider.chat returns these too).
+    model: 'test-model',
+    finishReason: 'stop',
   });
   return { provider: { chat }, chat };
 }

@@ -45,6 +45,18 @@ describe('buildRespondentReportClientView', () => {
     expect(view?.insights).toBeNull();
   });
 
+  it('reports disabled when only the respondent-report sub-flag is off (master on)', async () => {
+    (isFeatureEnabled as unknown as Mock)
+      .mockResolvedValueOnce(true) // master
+      .mockResolvedValueOnce(false); // sub-flag
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      session({ enabled: true, mode: 'raw_plus_insights' })
+    );
+    const view = await buildRespondentReportClientView('s1');
+    expect(view?.enabled).toBe(false);
+    expect(view?.insights).toBeNull();
+  });
+
   it('carries no insights for raw mode', async () => {
     (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
       session({ enabled: true, mode: 'raw' })

@@ -25,6 +25,18 @@ beforeEach(() => {
 });
 
 describe('ClientKnowledgePanel', () => {
+  it('shows a loading state before the fetch settles', () => {
+    (apiClient.get as unknown as Mock).mockReturnValue(new Promise(() => {})); // never resolves
+    render(<ClientKnowledgePanel questionnaireId="qn-1" />);
+    expect(screen.getByText(/Loading knowledge base/i)).toBeInTheDocument();
+  });
+
+  it('surfaces a load error', async () => {
+    (apiClient.get as unknown as Mock).mockRejectedValue(new Error('boom'));
+    render(<ClientKnowledgePanel questionnaireId="qn-1" />);
+    expect(await screen.findByText(/Could not load the knowledge base/i)).toBeInTheDocument();
+  });
+
   it('shows the unattributed notice when there is no client', async () => {
     (apiClient.get as unknown as Mock).mockResolvedValue({
       client: null,
@@ -81,6 +93,71 @@ describe('ClientKnowledgePanel', () => {
     expect(body.getAll('tagIds')).toEqual(['tag-1']);
 
     vi.unstubAllGlobals();
+  });
+
+  it('surfaces an upload failure from the documents endpoint', async () => {
+    (apiClient.get as unknown as Mock).mockResolvedValue({
+      client: { id: 'clt-1', name: 'Acme' },
+      knowledgeTagId: 'tag-1',
+      documents: [],
+    });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 413,
+      json: async () => ({ error: { message: 'Too big' } }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<ClientKnowledgePanel questionnaireId="qn-1" />);
+    await screen.findByText(/Private corpus/i);
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File(['x'], 'a.md')] } });
+
+    expect(await screen.findByText(/Too big/i)).toBeInTheDocument();
+    vi.unstubAllGlobals();
+  });
+
+  it('renders a zero-chunk document without a chunk count', async () => {
+    (apiClient.get as unknown as Mock).mockResolvedValue({
+      client: { id: 'clt-1', name: 'Acme' },
+      knowledgeTagId: 'tag-1',
+      documents: [
+        {
+          id: 'doc-x',
+          name: 'Pending',
+          fileName: 'p.pdf',
+          status: 'processing',
+          chunkCount: 0,
+          sourceUrl: null,
+          createdAt: '2026-06-01T00:00:00.000Z',
+        },
+      ],
+    });
+    render(<ClientKnowledgePanel questionnaireId="qn-1" />);
+    expect(await screen.findByText('Pending')).toBeInTheDocument();
+    expect(screen.getByText(/^processing$/)).toBeInTheDocument();
+  });
+
+  it('surfaces a delete failure', async () => {
+    (apiClient.get as unknown as Mock).mockResolvedValue({
+      client: { id: 'clt-1', name: 'Acme' },
+      knowledgeTagId: 'tag-1',
+      documents: [
+        {
+          id: 'doc-a',
+          name: 'Playbook',
+          fileName: 'p.md',
+          status: 'ready',
+          chunkCount: 4,
+          sourceUrl: null,
+          createdAt: '2026-06-01T00:00:00.000Z',
+        },
+      ],
+    });
+    (apiClient.delete as unknown as Mock).mockRejectedValue(new Error('nope'));
+    render(<ClientKnowledgePanel questionnaireId="qn-1" />);
+    fireEvent.click(await screen.findByRole('button', { name: /Delete Playbook/i }));
+    expect(await screen.findByText(/Could not delete the document/i)).toBeInTheDocument();
   });
 
   it('deletes a document via the platform endpoint', async () => {

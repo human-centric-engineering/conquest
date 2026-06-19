@@ -22,6 +22,7 @@ import {
   RESPONDENT_REPORT_BACKGROUND_MAX_LENGTH,
   RESPONDENT_REPORT_INSTRUCTIONS_MAX_LENGTH,
 } from '@/lib/app/questionnaire/types';
+import { isRecord } from '@/lib/utils';
 
 const REPLY_MAX_LENGTH = 4000;
 const CRAFT_MAX_TOKENS = 2048;
@@ -51,10 +52,6 @@ export interface ReportConfigSuggestions {
 export interface CraftReportConfigResult {
   reply: string;
   suggestions: ReportConfigSuggestions;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 function trimTo(value: unknown, max: number): string | undefined {

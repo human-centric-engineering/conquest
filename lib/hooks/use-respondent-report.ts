@@ -15,6 +15,8 @@ import { API } from '@/lib/api/endpoints';
 import type { RespondentReportClientView } from '@/lib/app/questionnaire/report/view';
 
 const POLL_INTERVAL_MS = 3000;
+/** Hard cap on polls so a persistently-down endpoint (or a never-enqueued report) can't poll forever. */
+const MAX_POLLS = 60;
 
 export interface UseRespondentReportResult {
   view: RespondentReportClientView | null;
@@ -31,9 +33,14 @@ export function useRespondentReport(
 
   useEffect(() => {
     let cancelled = false;
+    let attempts = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
 
     const tick = async () => {
+      attempts += 1;
+      // `terminal` stays false on a fetch failure too, so a transient error reschedules a retry
+      // rather than freezing the screen on "preparing…" forever.
+      let terminal = false;
       try {
         const headers: Record<string, string> = {};
         if (accessToken) headers['X-Session-Token'] = accessToken;
@@ -49,16 +56,25 @@ export function useRespondentReport(
           };
           if (!cancelled && body.success) {
             setView(body.data);
-            const status = body.data.insights?.status;
-            if (body.data.enabled && (status === 'queued' || status === 'processing')) {
-              timer = setTimeout(() => void tick(), POLL_INTERVAL_MS);
-            }
+            const v = body.data;
+            const status = v.insights?.status;
+            // Nothing more to wait for: no report, raw-only, or generation already settled.
+            terminal =
+              !v.enabled ||
+              v.mode !== 'raw_plus_insights' ||
+              v.insights === null ||
+              status === 'ready' ||
+              status === 'failed';
           }
         }
       } catch {
-        // Transient — leave the last view; the screen degrades gracefully.
+        // Transient — leave the last view; we retry below (terminal is still false).
       } finally {
         if (!cancelled) setLoaded(true);
+      }
+
+      if (!cancelled && !terminal && attempts < MAX_POLLS) {
+        timer = setTimeout(() => void tick(), POLL_INTERVAL_MS);
       }
     };
 

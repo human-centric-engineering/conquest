@@ -151,4 +151,40 @@ describe('RespondentReportEditor', () => {
     renderEditor({ mode: 'raw_plus_insights' });
     expect(screen.queryByTestId('kb-panel')).not.toBeInTheDocument();
   });
+
+  it('edits content, generation, and delivery toggles into the save payload', () => {
+    const { container } = renderEditor({ mode: 'raw_plus_insights' });
+    const sw = (id: string) => container.querySelector(`#${id}`) as HTMLInputElement;
+
+    fireEvent.click(sw('rr-enabled')); // false → true
+    fireEvent.click(sw('rr-questions')); // true → false
+    fireEvent.click(sw('rr-dataslots')); // false → true
+    fireEvent.click(sw('rr-onscreen')); // true → false
+    fireEvent.click(sw('rr-download')); // true → false
+    fireEvent.click(sw('rr-kb')); // false → true
+    fireEvent.change(screen.getByPlaceholderText(/Warm and encouraging/i), {
+      target: { value: 'Be warm.' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /save configuration/i }));
+    const rr = (apiClient.patch as unknown as Mock).mock.calls[0][1].body.respondentReport;
+    expect(rr.enabled).toBe(true);
+    expect(rr.rawIncludes).toEqual({ dataSlots: true, questionsAsPresented: false });
+    expect(rr.delivery).toEqual({ onScreen: false, download: false });
+    expect(rr.generation.instructions).toBe('Be warm.');
+    expect(rr.generation.useClientKnowledge).toBe(true);
+  });
+
+  it('shows an error message when saving fails', async () => {
+    (apiClient.patch as unknown as Mock).mockRejectedValueOnce(new Error('nope'));
+    renderEditor({ enabled: true });
+    fireEvent.click(screen.getByRole('button', { name: /save configuration/i }));
+    expect(await screen.findByText(/Could not save the report config/i)).toBeInTheDocument();
+  });
+
+  it('confirms a successful save', async () => {
+    renderEditor({ enabled: true });
+    fireEvent.click(screen.getByRole('button', { name: /save configuration/i }));
+    expect(await screen.findByText(/^Saved\.$/)).toBeInTheDocument();
+  });
 });

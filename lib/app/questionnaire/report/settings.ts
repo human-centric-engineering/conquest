@@ -16,10 +16,7 @@ import {
   type RespondentReportMode,
   type RespondentReportSettings,
 } from '@/lib/app/questionnaire/types';
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
+import { isRecord } from '@/lib/utils';
 
 function asBool(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback;

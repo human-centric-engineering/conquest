@@ -40,12 +40,16 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** The claim predicate: queued + unlocked, intentionally-released, or orphan-stale. */
+/**
+ * The claim predicate: a fresh queued row, or an orphaned `processing` row whose lease has gone
+ * stale (the worker crashed mid-generation). Unlike the evaluations worker, this one never releases
+ * a lease mid-flight — it runs each report to a terminal state in one go — so there is no
+ * `processing + lockedBy: null` (intentionally-released) case to re-claim.
+ */
 function claimableWhere(orphanCutoff: Date) {
   return {
     OR: [
       { status: 'queued', lockedBy: null },
-      { status: 'processing', lockedBy: null },
       { status: 'processing', lockedAt: { lt: orphanCutoff } },
     ],
   };
