@@ -67,6 +67,28 @@ describe('buildRespondentReportClientView', () => {
     expect(view?.insights).toBeNull();
   });
 
+  it('exposes the insights object for narrative mode (an AI mode)', async () => {
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      session(
+        { enabled: true, mode: 'narrative' },
+        {
+          status: 'ready',
+          content: { summary: 'Your story.', sections: [], actions: ['Do X'] },
+          generatedAt: new Date('2026-06-19T12:00:00Z'),
+          error: null,
+        }
+      )
+    );
+    const view = await buildRespondentReportClientView('s1');
+    expect(view?.mode).toBe('narrative');
+    expect(view?.insights?.status).toBe('ready');
+    expect(view?.insights?.content).toEqual({
+      summary: 'Your story.',
+      sections: [],
+      actions: ['Do X'],
+    });
+  });
+
   it('reports queued insights when enabled in mode 2 with no row yet', async () => {
     (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
       session({ enabled: true, mode: 'raw_plus_insights' }, null)

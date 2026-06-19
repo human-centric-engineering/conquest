@@ -304,6 +304,36 @@ describe('generateRespondentReport', () => {
     expect(system?.content).toContain('Quarterly pulse for managers.');
   });
 
+  it('uses the woven-narrative framing for mode `narrative`', async () => {
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionMeta({ respondentReport: { enabled: true, mode: 'narrative' } })
+    );
+    const { provider, chat } = fakeProvider(VALID_RESPONSE);
+    (getProvider as Mock).mockResolvedValue(provider);
+
+    await generateRespondentReport('sess-1');
+    const system = (chat.mock.calls[0][0] as Array<{ role: string; content: string }>).find(
+      (m) => m.role === 'system'
+    );
+    // Narrative-specific weaving directive present, mode-2 framing absent; output shape unchanged.
+    expect(system?.content).toContain('single woven report');
+    expect(system?.content).toContain('woven chapter');
+    expect(system?.content).not.toContain('AI-generated insights');
+    expect(system?.content.toLowerCase()).toContain('actionable');
+  });
+
+  it('keeps the insights framing (not the narrative framing) for mode `raw_plus_insights`', async () => {
+    const { provider, chat } = fakeProvider(VALID_RESPONSE);
+    (getProvider as Mock).mockResolvedValue(provider);
+
+    await generateRespondentReport('sess-1');
+    const system = (chat.mock.calls[0][0] as Array<{ role: string; content: string }>).find(
+      (m) => m.role === 'system'
+    );
+    expect(system?.content).toContain('personalised report');
+    expect(system?.content).not.toContain('single woven report');
+  });
+
   it('falls back to the audience role when there is no description', async () => {
     (loadSessionExport as Mock).mockResolvedValue({
       ...loadedExport(),

@@ -42,6 +42,7 @@ import {
 const MODE_LABELS: Record<RespondentReportMode, string> = {
   raw: 'Raw answers only',
   raw_plus_insights: 'Raw answers + AI insights',
+  narrative: 'Narrative report',
 };
 
 export interface RespondentReportEditorProps {

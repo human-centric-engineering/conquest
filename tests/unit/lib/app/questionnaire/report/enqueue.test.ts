@@ -74,6 +74,15 @@ describe('enqueueRespondentReport', () => {
     expect(prisma.appRespondentReport.upsert).not.toHaveBeenCalled();
   });
 
+  it('queues a report for narrative mode (an AI mode, generated async)', async () => {
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue({
+      version: { config: { respondentReport: { enabled: true, mode: 'narrative' } } },
+    });
+    await expect(enqueueRespondentReport('sess-1')).resolves.toBe(true);
+    const arg = (prisma.appRespondentReport.upsert as Mock).mock.calls[0][0];
+    expect(arg.create).toMatchObject({ sessionId: 'sess-1', mode: 'narrative', status: 'queued' });
+  });
+
   it('does nothing for raw mode (no row needed — renders on demand)', async () => {
     (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue({
       version: { config: { respondentReport: { enabled: true, mode: 'raw' } } },

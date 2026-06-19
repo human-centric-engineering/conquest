@@ -435,17 +435,31 @@ export const DEFAULT_TONE_SETTINGS: ToneSettings = {
  * respondent completes the questionnaire. The first of two report kinds; the later cross-respondent
  * Cohort Report (`cohort`) gets its own config when built.
  *
- * Modes (v1):
+ * Modes:
  *   - `raw` — answers only (data-slot values and/or the questions as presented). Deterministic,
  *     rendered on demand; needs no stored report row.
  *   - `raw_plus_insights` — the raw report plus an AI-generated, actionable insights section,
  *     assembled by the report agent (optionally grounded in the client knowledge base). Generated
  *     once, async, after submit (stored in `AppRespondentReport`).
+ *   - `narrative` — a single woven report: the respondent's answers are integrated into flowing,
+ *     analysed prose (analyses, insights, advice) rather than shown as a separate raw section. Same
+ *     async lifecycle and stored content shape as `raw_plus_insights`; the deliverable is the woven
+ *     report only (no separate raw answer list).
  *
- * `narrative` (a fully woven report) is deferred to v2 — not in this tuple yet.
+ * `raw_plus_insights` and `narrative` are the AI modes — both stand up the report agent and persist a
+ * row in `AppRespondentReport`; `raw` renders deterministically with no row.
  */
-export const RESPONDENT_REPORT_MODES = ['raw', 'raw_plus_insights'] as const;
+export const RESPONDENT_REPORT_MODES = ['raw', 'raw_plus_insights', 'narrative'] as const;
 export type RespondentReportMode = (typeof RESPONDENT_REPORT_MODES)[number];
+
+/**
+ * The AI modes: both stand up the report agent, generate async, and persist an `AppRespondentReport`
+ * row. `raw` is excluded (deterministic, on-demand, no row). Use this wherever the code must decide
+ * "does this mode generate insights?" so the two modes never drift apart.
+ */
+export function isAiRespondentReportMode(mode: RespondentReportMode): boolean {
+  return mode === 'raw_plus_insights' || mode === 'narrative';
+}
 
 /** Lifecycle of a stored mode-2 report (the async tick-worker pipeline). */
 export const RESPONDENT_REPORT_STATUSES = ['queued', 'processing', 'ready', 'failed'] as const;
@@ -458,8 +472,9 @@ export const RESPONDENT_REPORT_BACKGROUND_MAX_LENGTH = 8000;
 
 /**
  * The resolved respondent-report config block. `enabled` master-gates the feature for this version;
- * `mode` selects raw vs raw+insights; `rawIncludes` chooses what the raw section shows; `generation`
- * carries the AI knobs (only consulted in `raw_plus_insights`); `delivery` chooses how the
+ * `mode` selects raw / raw+insights / narrative; `rawIncludes` chooses what the raw section shows
+ * (ignored by `narrative`, which has no separate raw section); `generation` carries the AI knobs
+ * (consulted by both AI modes — `raw_plus_insights` and `narrative`); `delivery` chooses how the
  * respondent receives it (email deferred to v2). Also gated by the platform flag
  * `APP_QUESTIONNAIRES_RESPONDENT_REPORT_ENABLED`.
  */

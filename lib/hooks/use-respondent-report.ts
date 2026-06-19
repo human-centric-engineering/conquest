@@ -12,6 +12,7 @@
 import { useEffect, useState } from 'react';
 
 import { API } from '@/lib/api/endpoints';
+import { isAiRespondentReportMode } from '@/lib/app/questionnaire/types';
 import type { RespondentReportClientView } from '@/lib/app/questionnaire/report/view';
 
 const POLL_INTERVAL_MS = 3000;
@@ -58,10 +59,11 @@ export function useRespondentReport(
             setView(body.data);
             const v = body.data;
             const status = v.insights?.status;
-            // Nothing more to wait for: no report, raw-only, or generation already settled.
+            // Nothing more to wait for: no report, raw-only, or generation already settled. The AI
+            // modes (raw_plus_insights, narrative) generate async, so keep polling for both.
             terminal =
               !v.enabled ||
-              v.mode !== 'raw_plus_insights' ||
+              !isAiRespondentReportMode(v.mode) ||
               v.insights === null ||
               status === 'ready' ||
               status === 'failed';

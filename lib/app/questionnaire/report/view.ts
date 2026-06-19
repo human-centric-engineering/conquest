@@ -2,9 +2,9 @@
  * Respondent Report — the respondent-facing view (completion screen + report endpoint).
  *
  * Resolves what a respondent should see after completing: whether a report is enabled (config AND
- * platform flag), its mode + delivery, and — for `raw_plus_insights` — the generation status and
- * content (from `AppRespondentReport`). Raw mode and disabled reports carry `insights: null`. Pure
- * data assembly behind a mockable seam; the endpoint adds access control.
+ * platform flag), its mode + delivery, and — for the AI modes (`raw_plus_insights`, `narrative`) — the
+ * generation status and content (from `AppRespondentReport`). Raw mode and disabled reports carry
+ * `insights: null`. Pure data assembly behind a mockable seam; the endpoint adds access control.
  */
 
 import { prisma } from '@/lib/db/client';
@@ -13,7 +13,11 @@ import {
   APP_QUESTIONNAIRES_FLAG,
   APP_QUESTIONNAIRES_RESPONDENT_REPORT_FLAG,
 } from '@/lib/app/questionnaire/constants';
-import type { RespondentReportMode, RespondentReportStatus } from '@/lib/app/questionnaire/types';
+import {
+  isAiRespondentReportMode,
+  type RespondentReportMode,
+  type RespondentReportStatus,
+} from '@/lib/app/questionnaire/types';
 import { narrowRespondentReportSettings } from '@/lib/app/questionnaire/report/settings';
 import {
   validateRespondentReportContent,
@@ -26,7 +30,7 @@ export interface RespondentReportClientView {
   mode: RespondentReportMode;
   onScreen: boolean;
   download: boolean;
-  /** Insights state for `raw_plus_insights`; `null` for raw mode or when disabled. */
+  /** Insights state for the AI modes (`raw_plus_insights`, `narrative`); `null` for raw / disabled. */
   insights: {
     status: RespondentReportStatus;
     content: RespondentReportContent | null;
@@ -68,7 +72,7 @@ export async function buildRespondentReportClientView(
     download: settings.delivery.download,
   };
 
-  if (!enabled || settings.mode !== 'raw_plus_insights') {
+  if (!enabled || !isAiRespondentReportMode(settings.mode)) {
     return { ...base, insights: null };
   }
 

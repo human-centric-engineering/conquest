@@ -13,8 +13,14 @@ The per-respondent report delivered after a respondent completes a questionnaire
 - **`raw_plus_insights`** — the raw report plus an AI-generated, actionable insights section,
   assembled by the report agent (optionally grounded in the client knowledge base). Generated once,
   asynchronously, after submit and stored in `AppRespondentReport`.
+- **`narrative`** — a single woven report: the respondent's answers are integrated into flowing,
+  analysed prose (analyses, insights, advice) rather than shown as a separate raw section. Same async
+  lifecycle, agent, and stored content shape as `raw_plus_insights`; the difference is the prompt
+  (woven framing) and the deliverable (the woven report **only** — no separate raw answer list).
 
-`narrative` (a fully woven report) is deferred (v2).
+`raw_plus_insights` and `narrative` are the **AI modes** — both stand up the report agent, generate
+async, and persist an `AppRespondentReport` row. The shared predicate is `isAiRespondentReportMode`
+in `lib/app/questionnaire/types.ts`; `raw` renders deterministically with no row.
 
 ## Configuration
 
@@ -33,7 +39,7 @@ renders `RespondentReportEditor` (`components/admin/questionnaires/report/respon
 
 - **Content** — enable toggle, mode selector, and the raw-content includes (questions-as-presented;
   data-slot values when the data-slots feature is on).
-- **Generation** (effective in `raw_plus_insights`) — instructions, structure, and background-context
+- **Generation** (effective in the AI modes `raw_plus_insights` / `narrative`) — instructions, structure, and background-context
   textareas, the `useClientKnowledge` toggle, and the embedded `ClientKnowledgePanel`.
 - **Delivery** — on-screen / download toggles (email deferred).
 - **Appearance** — note that branding inherits the demo client's theme.
