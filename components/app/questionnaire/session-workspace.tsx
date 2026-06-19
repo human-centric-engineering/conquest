@@ -85,6 +85,10 @@ export interface SessionWorkspaceProps {
    * when it's absent.
    */
   reasoningPlacement?: ReasoningPlacement | null;
+  /** "Animated" placement: base dwell (ms) the reasoning summary stays open for up to two steps. */
+  reasoningDwellMs?: number;
+  /** "Animated" placement: extra dwell (ms) per reasoning step beyond two. */
+  reasoningPerItemMs?: number;
 }
 
 export function SessionWorkspace({
@@ -101,6 +105,8 @@ export function SessionWorkspace({
   presentationMode = 'chat',
   initialFormView,
   reasoningPlacement,
+  reasoningDwellMs,
+  reasoningPerItemMs,
 }: SessionWorkspaceProps) {
   const showChat = presentationMode === 'chat' || presentationMode === 'both';
   const showForm = presentationMode === 'form' || presentationMode === 'both';
@@ -225,6 +231,8 @@ export function SessionWorkspace({
           voiceInputEnabled={voiceInputEnabled}
           attachmentInputEnabled={attachmentInputEnabled}
           reasoningPlacement={reasoningPlacement}
+          reasoningDwellMs={reasoningDwellMs}
+          reasoningPerItemMs={reasoningPerItemMs}
           // Fresh sessions (autoStart) type the seeded greeting in, like a streamed reply;
           // resumes render their history instantly.
           animateOpening={autoStart}

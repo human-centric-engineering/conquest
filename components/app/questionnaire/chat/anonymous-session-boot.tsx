@@ -70,6 +70,10 @@ interface AnonymousSessionBootProps {
    * forwarded to the workspace.
    */
   reasoningPlacement?: ReasoningPlacement | null;
+  /** "Animated" placement: base dwell (ms) the reasoning summary stays open for up to two steps. */
+  reasoningDwellMs?: number;
+  /** "Animated" placement: extra dwell (ms) per reasoning step beyond two. */
+  reasoningPerItemMs?: number;
 }
 
 interface StoredAnonSession {
@@ -208,6 +212,8 @@ export function AnonymousSessionBoot({
   inviteToken,
   presentationMode = 'chat',
   reasoningPlacement,
+  reasoningDwellMs,
+  reasoningPerItemMs,
 }: AnonymousSessionBootProps) {
   const [state, setState] = useState<BootState>({ phase: 'creating' });
   // Dedup the create across React 19 StrictMode's double-invoke (which would otherwise mint two
@@ -340,6 +346,8 @@ export function AnonymousSessionBoot({
       voiceInputEnabled={voiceInputEnabled}
       attachmentInputEnabled={attachmentInputEnabled}
       reasoningPlacement={reasoningPlacement}
+      reasoningDwellMs={reasoningDwellMs}
+      reasoningPerItemMs={reasoningPerItemMs}
     />
   );
 }

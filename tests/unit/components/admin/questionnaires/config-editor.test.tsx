@@ -205,6 +205,16 @@ describe('ConfigEditor', () => {
     expect(bodyOf(specs)).toMatchObject({ selectionStrategy: 'weighted' });
   });
 
+  it('lists Adaptive first in the selection-strategy dropdown', () => {
+    setup({ selectionStrategy: 'sequential' });
+    const selects = screen.getAllByRole('combobox');
+    const options = Array.from((selects[0] as HTMLSelectElement).options).map((o) => o.value);
+    // Adaptive is the top option even when it isn't the saved value.
+    expect(options[0]).toBe('adaptive');
+    // The deterministic strategies still follow, none dropped.
+    expect(options).toEqual(['adaptive', 'sequential', 'random', 'weighted']);
+  });
+
   // ── minQuestionsAnswered / coverageThreshold ─────────────────────────────────
 
   it('renders minQuestionsAnswered input with the stored value', () => {
@@ -329,7 +339,7 @@ describe('ConfigEditor', () => {
     setup({ reasoningStreamEnabled: false });
     expect(screen.queryByText(/keep the reasoning on each turn/i)).not.toBeInTheDocument();
     // The group heading is always there; the placement options inside the conditional block are not
-    expect(screen.queryByRole('option', { name: /live overlay/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /animated/i })).not.toBeInTheDocument();
   });
 
   it('toggling reasoning off hides sub-controls and sends reasoningStreamEnabled:false', () => {
@@ -366,6 +376,32 @@ describe('ConfigEditor', () => {
     fireEvent.click(switchNear(/^Keep the reasoning on each turn/));
     clickSave();
     expect(bodyOf(specs).reasoningStreamPersist).toBe(false);
+  });
+
+  it('shows the dwell timing inputs only for the Animated placement and PATCHes them as integers', () => {
+    const { specs } = setup({
+      reasoningStreamEnabled: true,
+      reasoningStreamPlacement: 'overlay',
+      reasoningStreamDwellMs: 2000,
+      reasoningStreamPerItemMs: 330,
+    });
+    const dwell = screen.getByLabelText(/reasoning dwell/i);
+    const perItem = screen.getByLabelText(/extra dwell per reasoning step/i);
+
+    fireEvent.change(dwell, { target: { value: '3000' } });
+    fireEvent.change(perItem, { target: { value: '400' } });
+    clickSave();
+
+    expect(bodyOf(specs)).toMatchObject({
+      reasoningStreamDwellMs: 3000,
+      reasoningStreamPerItemMs: 400,
+    });
+  });
+
+  it('hides the dwell timing inputs for the Inline placement', () => {
+    setup({ reasoningStreamEnabled: true, reasoningStreamPlacement: 'inline' });
+    expect(screen.queryByLabelText(/reasoning dwell/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/extra dwell per reasoning step/i)).not.toBeInTheDocument();
   });
 
   // ── Access mode ──────────────────────────────────────────────────────────────

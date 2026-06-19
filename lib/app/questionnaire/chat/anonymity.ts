@@ -15,6 +15,7 @@
 import { prisma } from '@/lib/db/client';
 import {
   ACCESS_MODES,
+  DEFAULT_QUESTIONNAIRE_CONFIG,
   narrowToEnum,
   PRESENTATION_MODES,
   REASONING_PLACEMENTS,
@@ -113,4 +114,29 @@ export async function resolveReasoningPlacementForVersion(
     REASONING_PLACEMENTS,
     'overlay'
   );
+}
+
+/**
+ * Resolve the "Animated" placement dwell timing for a launched version (no-login / preview surface):
+ * the base dwell (ms) the reasoning summary stays open for up to two steps, and the extra dwell (ms)
+ * per step beyond two. Config is 1:1 and lazy — absent = the {@link DEFAULT_QUESTIONNAIRE_CONFIG}
+ * values. The surface combines these with the per-turn step count to size the open duration.
+ */
+export async function resolveReasoningDwellForVersion(
+  versionId: string
+): Promise<{ dwellMs: number; perItemMs: number }> {
+  const version = await prisma.appQuestionnaireVersion.findUnique({
+    where: { id: versionId },
+    select: {
+      config: { select: { reasoningStreamDwellMs: true, reasoningStreamPerItemMs: true } },
+    },
+  });
+  return {
+    dwellMs:
+      version?.config?.reasoningStreamDwellMs ??
+      DEFAULT_QUESTIONNAIRE_CONFIG.reasoningStreamDwellMs,
+    perItemMs:
+      version?.config?.reasoningStreamPerItemMs ??
+      DEFAULT_QUESTIONNAIRE_CONFIG.reasoningStreamPerItemMs,
+  };
 }

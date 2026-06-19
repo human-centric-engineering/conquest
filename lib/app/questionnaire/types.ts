@@ -224,12 +224,14 @@ export const ANSWER_SLOT_PANEL_SCOPES = ['full_progress', 'answered_only'] as co
 export type AnswerSlotPanelScope = (typeof ANSWER_SLOT_PANEL_SCOPES)[number];
 
 /**
- * Where the live "watch it think" reasoning trace renders on the respondent surface (demo feature).
- * `overlay` shows an animated thinking feed in place of the typing dots while the turn runs, then
- * collapses to a compact chip on the settled turn; `inline` renders a quiet collapsible disclosure
- * beneath each assistant turn. An admin chooses per version on the Settings tab; both are gated by
- * the platform flag `APP_QUESTIONNAIRES_REASONING_STREAM_ENABLED`. See
- * `lib/app/questionnaire/reasoning` and [[feature-flags-are-db-rows]].
+ * How the per-turn "watch it think" reasoning trace reveals itself on the respondent surface (demo
+ * feature). `overlay` ("Animated") mounts the newest turn's trace open, then animates it closed after
+ * a brief dwell so the respondent glimpses the reasoning before it tucks away; `inline` renders a
+ * quiet collapsible disclosure that stays closed until the respondent opens it. Both show the same
+ * collapsed "Reasoning · N" chip on settled / historical turns. An admin chooses per version on the
+ * Settings tab; both are gated by the platform flag `APP_QUESTIONNAIRES_REASONING_STREAM_ENABLED`.
+ * The enum value `overlay` is retained for config compatibility even though the UI now labels it
+ * "Animated". See `lib/app/questionnaire/reasoning` and [[feature-flags-are-db-rows]].
  */
 export const REASONING_PLACEMENTS = ['overlay', 'inline'] as const;
 export type ReasoningPlacement = (typeof REASONING_PLACEMENTS)[number];
@@ -518,6 +520,19 @@ export type QuestionnaireConfigShape = {
   /** Where the reasoning trace renders ({@link REASONING_PLACEMENTS}); default `overlay`. */
   reasoningStreamPlacement: ReasoningPlacement;
   /**
+   * "Animated" placement only: how long (ms) the newest turn's reasoning summary stays open before
+   * it tucks away — the base dwell for a trace of **up to two** steps. Larger traces get
+   * {@link reasoningStreamPerItemMs} added per step beyond two, so a longer summary stays up long
+   * enough to read. Also gates the reply (the next question waits for the close). Default 2000.
+   */
+  reasoningStreamDwellMs: number;
+  /**
+   * "Animated" placement only: extra dwell (ms) added per reasoning step **beyond the second**, so
+   * the open duration scales with how much there is to read. Default 750. Total dwell =
+   * `reasoningStreamDwellMs + max(0, steps - 2) * reasoningStreamPerItemMs`.
+   */
+  reasoningStreamPerItemMs: number;
+  /**
    * Persist each turn's reasoning trace on the turn record so it replays on resume / scroll-back
    * (and is available to admin later). `false` = live-only (resumed turns show no trace).
    */
@@ -590,6 +605,8 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   presentationMode: 'chat',
   reasoningStreamEnabled: true,
   reasoningStreamPlacement: 'overlay',
+  reasoningStreamDwellMs: 2000,
+  reasoningStreamPerItemMs: 750,
   reasoningStreamPersist: true,
   // Admin-only debugging surface — off by default; an operator turns it on per version.
   previewInspectorEnabled: false,

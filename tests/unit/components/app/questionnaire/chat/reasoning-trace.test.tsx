@@ -1,25 +1,33 @@
 /**
- * ReasoningTrace — live "watch it think" feed for the respondent chat (demo feature).
+ * ReasoningTrace — per-turn "watch it think" disclosure for the respondent chat (demo feature).
  *
  * Test Coverage:
- * - `live` variant: renders titled panel with role="status", "Working it through" heading,
- *   all step rows visible without needing a click.
- * - `collapsed` variant: renders a compact chip showing step count; starts closed; expands
- *   on click to reveal step rows; collapses on second click.
- * - Each ReasoningStepKind renders its step label inside the list (icon driven by STEP_ICONS map).
- * - Empty steps array renders nothing (null).
- * - Optional affordances: confidence pips render when `confidence` is present; `detail`,
- *   `rationale`, and `sourceQuote` render conditionally; they are absent when omitted.
- * - Tone variants: `neutral` / `insight` / `caution` all render without crashing.
+ * - Renders a compact "Reasoning · N" chip whose count comes from the steps array.
+ * - Default (no `autoReveal`): mounts CLOSED (`aria-expanded="false"`); a click toggles it open,
+ *   a second click closes it.
+ * - `autoReveal` (the "Animated" placement, newest turn): mounts OPEN and auto-collapses after
+ *   AUTO_REVEAL_DWELL_MS; the respondent can still re-open by clicking.
+ * - The step rows stay mounted regardless of open/closed state (the collapse is an animated CSS
+ *   grid-rows transition, not a DOM unmount) — so open/closed is asserted via `aria-expanded`,
+ *   not text presence.
+ * - Each ReasoningStepKind renders its step label; empty steps array renders nothing (null).
+ * - Optional affordances: confidence pips (with band aria-label); `detail` / `rationale` /
+ *   `sourceQuote` render conditionally; tone variants render without crashing.
  *
  * @see components/app/questionnaire/chat/reasoning-trace.tsx
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-import { ReasoningTrace } from '@/components/app/questionnaire/chat/reasoning-trace';
+import {
+  ReasoningTrace,
+  AUTO_REVEAL_DWELL_MS,
+  AUTO_REVEAL_PER_ITEM_MS,
+  AUTO_REVEAL_ITEM_THRESHOLD,
+  computeReasoningDwellMs,
+} from '@/components/app/questionnaire/chat/reasoning-trace';
 import type { ReasoningStep, ReasoningStepKind } from '@/lib/app/questionnaire/reasoning';
 
 // ---------------------------------------------------------------------------
@@ -52,101 +60,29 @@ describe('ReasoningTrace — empty steps', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders nothing when steps is an empty array (live variant)', () => {
-    // Arrange
-    const { container } = render(<ReasoningTrace steps={[]} variant="live" />);
-
-    // Assert: component returns null — nothing in the DOM.
-    expect(container.firstChild).toBeNull();
-  });
-
-  it('renders nothing when steps is an empty array (collapsed variant)', () => {
-    // Arrange
-    const { container } = render(<ReasoningTrace steps={[]} variant="collapsed" />);
+  it('renders nothing when steps is an empty array (default)', () => {
+    // Arrange / Act
+    const { container } = render(<ReasoningTrace steps={[]} />);
 
     // Assert: no chip, no button, no list.
     expect(container.firstChild).toBeNull();
     expect(screen.queryByRole('button')).toBeNull();
   });
-});
 
-// ---------------------------------------------------------------------------
-// Live variant
-// ---------------------------------------------------------------------------
+  it('renders nothing when steps is an empty array even with autoReveal', () => {
+    // Arrange / Act
+    const { container } = render(<ReasoningTrace steps={[]} autoReveal />);
 
-describe('ReasoningTrace — live variant', () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it('renders a role="status" container with aria-label "Agent reasoning"', () => {
-    // Arrange
-    const steps = [makeStep({ label: 'Captured "What is your name?"' })];
-
-    // Act
-    render(<ReasoningTrace steps={steps} variant="live" />);
-
-    // Assert: live panel uses polite status for screen readers.
-    const panel = screen.getByRole('status', { name: /agent reasoning/i });
-    expect(panel).toBeInTheDocument();
-  });
-
-  it('renders the "Working it through" heading', () => {
-    // Arrange
-    const steps = [makeStep()];
-
-    // Act
-    render(<ReasoningTrace steps={steps} variant="live" />);
-
-    // Assert: the live panel clearly signals the agent is working.
-    expect(screen.getByText('Working it through')).toBeInTheDocument();
-  });
-
-  it('renders step labels without requiring any interaction', () => {
-    // Arrange: live mode is always open — rows appear immediately.
-    const steps = [
-      makeStep({ label: 'First step label' }),
-      makeStep({ kind: 'selection', label: 'Second step label' }),
-    ];
-
-    // Act
-    render(<ReasoningTrace steps={steps} variant="live" />);
-
-    // Assert: both step labels are visible without a click.
-    expect(screen.getByText('First step label')).toBeInTheDocument();
-    expect(screen.getByText('Second step label')).toBeInTheDocument();
-  });
-
-  it('does NOT render the collapsed chip button', () => {
-    // Arrange
-    const steps = [makeStep()];
-
-    // Act
-    render(<ReasoningTrace steps={steps} variant="live" />);
-
-    // Assert: no "Reasoning · N" chip exists in live mode.
-    expect(screen.queryByRole('button')).toBeNull();
-  });
-
-  it('accepts an optional className without crashing', () => {
-    // Arrange
-    const steps = [makeStep()];
-
-    // Act — no assertion on className applied (presentational only), just verify no crash.
-    const { container } = render(
-      <ReasoningTrace steps={steps} variant="live" className="custom-class" />
-    );
-
-    // Assert: component still renders its container.
-    expect(container.firstChild).toBeInTheDocument();
+    // Assert: still null — the auto-reveal timer is harmless when there is nothing to show.
+    expect(container.firstChild).toBeNull();
   });
 });
 
 // ---------------------------------------------------------------------------
-// Collapsed variant
+// The chip + default (closed) behaviour
 // ---------------------------------------------------------------------------
 
-describe('ReasoningTrace — collapsed variant', () => {
+describe('ReasoningTrace — chip + default closed state', () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -156,98 +92,187 @@ describe('ReasoningTrace — collapsed variant', () => {
     const steps = [makeStep(), makeStep({ kind: 'selection' }), makeStep({ kind: 'completion' })];
 
     // Act
-    render(<ReasoningTrace steps={steps} variant="collapsed" />);
+    render(<ReasoningTrace steps={steps} />);
 
     // Assert: the chip text shows the count the component computed from the steps array.
     expect(screen.getByRole('button', { name: /reasoning/i })).toBeInTheDocument();
     expect(screen.getByText('Reasoning · 3')).toBeInTheDocument();
   });
 
-  it('starts collapsed — step rows are NOT visible before any click', () => {
-    // Arrange
-    const steps = [makeStep({ label: 'Hidden step label' })];
+  it('starts closed — aria-expanded="false" without autoReveal', () => {
+    // Arrange / Act
+    render(<ReasoningTrace steps={[makeStep()]} />);
 
-    // Act
-    render(<ReasoningTrace steps={steps} variant="collapsed" />);
-
-    // Assert: no list items visible initially — collapsed by default.
-    expect(screen.queryByText('Hidden step label')).toBeNull();
-  });
-
-  it('has aria-expanded="false" on the chip button when closed', () => {
-    // Arrange
-    const steps = [makeStep()];
-
-    // Act
-    render(<ReasoningTrace steps={steps} variant="collapsed" />);
-
-    // Assert: ARIA state matches the visual state (collapsed).
-    const btn = screen.getByRole('button', { name: /reasoning/i });
-    expect(btn).toHaveAttribute('aria-expanded', 'false');
-  });
-
-  it('expands to show step rows when the chip is clicked', async () => {
-    // Arrange
-    const user = userEvent.setup();
-    const steps = [makeStep({ label: 'Visible after click' })];
-
-    // Act
-    render(<ReasoningTrace steps={steps} variant="collapsed" />);
-    await user.click(screen.getByRole('button', { name: /reasoning/i }));
-
-    // Assert: the step label is now in the DOM — the component revealed the list.
-    expect(screen.getByText('Visible after click')).toBeInTheDocument();
-  });
-
-  it('has aria-expanded="true" on the chip button when open', async () => {
-    // Arrange
-    const user = userEvent.setup();
-    const steps = [makeStep()];
-
-    // Act
-    render(<ReasoningTrace steps={steps} variant="collapsed" />);
-    await user.click(screen.getByRole('button', { name: /reasoning/i }));
-
-    // Assert: ARIA state updated to reflect expanded state.
-    expect(screen.getByRole('button', { name: /reasoning/i })).toHaveAttribute(
-      'aria-expanded',
-      'true'
-    );
-  });
-
-  it('collapses again on a second click — hides step rows', async () => {
-    // Arrange
-    const user = userEvent.setup();
-    const steps = [makeStep({ label: 'Will disappear again' })];
-
-    // Act: expand then collapse.
-    render(<ReasoningTrace steps={steps} variant="collapsed" />);
-    await user.click(screen.getByRole('button', { name: /reasoning/i }));
-    await user.click(screen.getByRole('button', { name: /reasoning/i }));
-
-    // Assert: step row hidden again after second click.
-    expect(screen.queryByText('Will disappear again')).toBeNull();
+    // Assert: the disclosure is collapsed by default (the quiet "Inline" placement).
     expect(screen.getByRole('button', { name: /reasoning/i })).toHaveAttribute(
       'aria-expanded',
       'false'
     );
   });
 
-  it('shows all step labels when expanded with multiple steps', async () => {
+  it('opens on click and closes again on a second click', async () => {
     // Arrange
     const user = userEvent.setup();
-    const steps = [
-      makeStep({ label: 'Step one label' }),
-      makeStep({ kind: 'contradiction', label: 'Step two label' }),
-    ];
+    render(<ReasoningTrace steps={[makeStep()]} />);
+    const btn = screen.getByRole('button', { name: /reasoning/i });
+
+    // Act + Assert: first click opens.
+    await user.click(btn);
+    expect(btn).toHaveAttribute('aria-expanded', 'true');
+
+    // Act + Assert: second click closes.
+    await user.click(btn);
+    expect(btn).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('keeps step rows mounted regardless of open/closed (animated collapse, not unmount)', () => {
+    // Arrange: closed by default — but the rows are still in the DOM so the collapse can animate.
+    render(<ReasoningTrace steps={[makeStep({ label: 'Always mounted label' })]} />);
+
+    // Assert: the label is present even while collapsed (visibility is a CSS concern here).
+    expect(screen.getByText('Always mounted label')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /reasoning/i })).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    );
+  });
+
+  it('hides the always-mounted rows from assistive tech while collapsed, reveals them when open', async () => {
+    // The rows stay in the DOM (so the grid-rows collapse can animate), so the collapsed content
+    // must carry aria-hidden/inert — otherwise a screen reader reads every step while the chip
+    // reports aria-expanded="false". The button's aria-controls points at the content region.
+    const user = userEvent.setup();
+    render(<ReasoningTrace steps={[makeStep({ label: 'Hidden-while-closed label' })]} />);
+
+    const btn = screen.getByRole('button', { name: /reasoning/i });
+    const content = document.getElementById(btn.getAttribute('aria-controls') ?? '');
+    expect(content).not.toBeNull();
+
+    // Closed: content is hidden from AT.
+    expect(content).toHaveAttribute('aria-hidden', 'true');
+
+    // Open: content is exposed to AT.
+    await user.click(btn);
+    expect(content).not.toHaveAttribute('aria-hidden', 'true');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// autoReveal — the "Animated" placement, newest turn
+// ---------------------------------------------------------------------------
+
+describe('ReasoningTrace — autoReveal', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('mounts OPEN when autoReveal is set', () => {
+    // Arrange: fake timers so the auto-collapse setTimeout never fires for real and can't leak
+    // into a sibling test (afterEach restores real timers).
+    vi.useFakeTimers();
 
     // Act
-    render(<ReasoningTrace steps={steps} variant="collapsed" />);
-    await user.click(screen.getByRole('button', { name: /reasoning/i }));
+    render(<ReasoningTrace steps={[makeStep()]} autoReveal />);
 
-    // Assert: all step labels rendered — the list has both rows.
-    expect(screen.getByText('Step one label')).toBeInTheDocument();
-    expect(screen.getByText('Step two label')).toBeInTheDocument();
+    // Assert: the newest turn's reasoning is shown immediately.
+    expect(screen.getByRole('button', { name: /reasoning/i })).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    );
+  });
+
+  it('auto-collapses after AUTO_REVEAL_DWELL_MS', () => {
+    // Arrange: fake timers so we can advance past the dwell deterministically.
+    vi.useFakeTimers();
+    render(<ReasoningTrace steps={[makeStep()]} autoReveal />);
+    const btn = screen.getByRole('button', { name: /reasoning/i });
+    expect(btn).toHaveAttribute('aria-expanded', 'true');
+
+    // Act: advance past the dwell.
+    act(() => {
+      vi.advanceTimersByTime(AUTO_REVEAL_DWELL_MS);
+    });
+
+    // Assert: it tucked itself away.
+    expect(btn).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('does NOT auto-collapse before the dwell elapses', () => {
+    // Arrange
+    vi.useFakeTimers();
+    render(<ReasoningTrace steps={[makeStep()]} autoReveal />);
+    const btn = screen.getByRole('button', { name: /reasoning/i });
+
+    // Act: advance to just before the dwell.
+    act(() => {
+      vi.advanceTimersByTime(AUTO_REVEAL_DWELL_MS - 1);
+    });
+
+    // Assert: still open.
+    expect(btn).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('lets the respondent re-open after the auto-collapse', () => {
+    // Arrange: advance past the dwell so it has closed itself.
+    vi.useFakeTimers();
+    render(<ReasoningTrace steps={[makeStep()]} autoReveal />);
+    const btn = screen.getByRole('button', { name: /reasoning/i });
+    act(() => {
+      vi.advanceTimersByTime(AUTO_REVEAL_DWELL_MS);
+    });
+    expect(btn).toHaveAttribute('aria-expanded', 'false');
+
+    // Act: a manual click re-opens (fireEvent under fake timers — no userEvent async clock).
+    act(() => {
+      btn.click();
+    });
+
+    // Assert
+    expect(btn).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('auto-collapses at a custom dwellMs rather than the default', () => {
+    // The dwell is now per-turn (sized to the step count); the component honours the prop.
+    vi.useFakeTimers();
+    render(<ReasoningTrace steps={[makeStep()]} autoReveal dwellMs={2660} />);
+    const btn = screen.getByRole('button', { name: /reasoning/i });
+
+    // Still open at the default dwell — the custom dwell is longer.
+    act(() => {
+      vi.advanceTimersByTime(AUTO_REVEAL_DWELL_MS);
+    });
+    expect(btn).toHaveAttribute('aria-expanded', 'true');
+
+    // Closes once the custom dwell elapses.
+    act(() => {
+      vi.advanceTimersByTime(2660 - AUTO_REVEAL_DWELL_MS);
+    });
+    expect(btn).toHaveAttribute('aria-expanded', 'false');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// computeReasoningDwellMs — dwell scales with step count
+// ---------------------------------------------------------------------------
+
+describe('computeReasoningDwellMs', () => {
+  it('returns the base dwell for up to the threshold (two) steps', () => {
+    expect(computeReasoningDwellMs(0)).toBe(AUTO_REVEAL_DWELL_MS);
+    expect(computeReasoningDwellMs(1)).toBe(AUTO_REVEAL_DWELL_MS);
+    expect(computeReasoningDwellMs(AUTO_REVEAL_ITEM_THRESHOLD)).toBe(AUTO_REVEAL_DWELL_MS);
+  });
+
+  it('adds the per-item dwell for each step beyond the threshold', () => {
+    expect(computeReasoningDwellMs(3)).toBe(AUTO_REVEAL_DWELL_MS + AUTO_REVEAL_PER_ITEM_MS);
+    expect(computeReasoningDwellMs(5)).toBe(AUTO_REVEAL_DWELL_MS + 3 * AUTO_REVEAL_PER_ITEM_MS);
+  });
+
+  it('uses the supplied base and per-item overrides (the admin-tunable config)', () => {
+    // 4 steps → base 3000 + (4 - 2) * 500 = 4000
+    expect(computeReasoningDwellMs(4, 3000, 500)).toBe(4000);
+    // At/under threshold → exactly the base, no per-item applied
+    expect(computeReasoningDwellMs(2, 3000, 500)).toBe(3000);
   });
 });
 
@@ -261,13 +286,13 @@ describe('ReasoningTrace — each ReasoningStepKind', () => {
   });
 
   for (const kind of ALL_KINDS) {
-    it(`renders the step label for kind="${kind}"`, async () => {
-      // Arrange: use live variant so steps are always visible (no click needed).
+    it(`renders the step label for kind="${kind}"`, () => {
+      // Arrange: rows are always mounted, so the label is present without a click.
       const label = `Label for ${kind}`;
       const steps = [makeStep({ kind, label })];
 
       // Act
-      render(<ReasoningTrace steps={steps} variant="live" />);
+      render(<ReasoningTrace steps={steps} />);
 
       // Assert: the step label produced by the component (not the input array) is in the DOM.
       expect(screen.getByText(label)).toBeInTheDocument();
@@ -285,35 +310,17 @@ describe('ReasoningTrace — tone variants', () => {
   });
 
   it('renders a step with tone="neutral" without crashing', () => {
-    // Arrange
-    const steps = [makeStep({ tone: 'neutral', label: 'Neutral step' })];
-
-    // Act
-    render(<ReasoningTrace steps={steps} variant="live" />);
-
-    // Assert: the label is rendered — tone difference is stylistic, not structural.
+    render(<ReasoningTrace steps={[makeStep({ tone: 'neutral', label: 'Neutral step' })]} />);
     expect(screen.getByText('Neutral step')).toBeInTheDocument();
   });
 
   it('renders a step with tone="insight" without crashing', () => {
-    // Arrange
-    const steps = [makeStep({ tone: 'insight', label: 'Insight step' })];
-
-    // Act
-    render(<ReasoningTrace steps={steps} variant="live" />);
-
-    // Assert
+    render(<ReasoningTrace steps={[makeStep({ tone: 'insight', label: 'Insight step' })]} />);
     expect(screen.getByText('Insight step')).toBeInTheDocument();
   });
 
   it('renders a step with tone="caution" without crashing', () => {
-    // Arrange
-    const steps = [makeStep({ tone: 'caution', label: 'Caution step' })];
-
-    // Act
-    render(<ReasoningTrace steps={steps} variant="live" />);
-
-    // Assert
+    render(<ReasoningTrace steps={[makeStep({ tone: 'caution', label: 'Caution step' })]} />);
     expect(screen.getByText('Caution step')).toBeInTheDocument();
   });
 });
@@ -328,116 +335,59 @@ describe('ReasoningTrace — optional affordances', () => {
   });
 
   it('renders step.detail when present', () => {
-    // Arrange
-    const steps = [makeStep({ detail: 'Some supporting detail text' })];
-
-    // Act
-    render(<ReasoningTrace steps={steps} variant="live" />);
-
-    // Assert: the detail paragraph is rendered below the headline.
+    render(<ReasoningTrace steps={[makeStep({ detail: 'Some supporting detail text' })]} />);
     expect(screen.getByText('Some supporting detail text')).toBeInTheDocument();
   });
 
-  it('does NOT render a detail element when step.detail is absent', () => {
-    // Arrange: no detail property.
-    const steps = [makeStep({ label: 'Only a label' })];
+  it('does NOT render a detail/rationale/quote paragraph when those are absent', () => {
+    // Arrange: only a label — the label is a <span>, so there should be no <p> elements at all.
+    render(<ReasoningTrace steps={[makeStep({ label: 'Only a label' })]} />);
 
-    // Act
-    render(<ReasoningTrace steps={steps} variant="live" />);
-
-    // Assert: only the label is present, no extra paragraph.
+    // Assert
     expect(screen.getByText('Only a label')).toBeInTheDocument();
-    // detail text is undefined so we can't query for it; verify count of paragraphs via container.
-    const paragraphs = document.querySelectorAll('p');
-    expect(paragraphs.length).toBe(0);
+    expect(document.querySelectorAll('p').length).toBe(0);
   });
 
   it('renders step.rationale when present', () => {
-    // Arrange
-    const steps = [makeStep({ rationale: 'Because the respondent implied it.' })];
-
-    // Act
-    render(<ReasoningTrace steps={steps} variant="live" />);
-
-    // Assert: rationale text is visible.
+    render(
+      <ReasoningTrace steps={[makeStep({ rationale: 'Because the respondent implied it.' })]} />
+    );
     expect(screen.getByText('Because the respondent implied it.')).toBeInTheDocument();
   });
 
-  it('renders step.sourceQuote wrapped in quotes when present', () => {
-    // Arrange: the component wraps the source quote in typographic quotes.
-    const steps = [makeStep({ sourceQuote: 'I earn about 50k a year' })];
+  it('renders step.sourceQuote wrapped in typographic quotes when present', () => {
+    // Arrange: the component wraps the source quote in curly quotes (U+201C / U+201D).
+    render(<ReasoningTrace steps={[makeStep({ sourceQuote: 'I earn about 50k a year' })]} />);
 
-    // Act
-    render(<ReasoningTrace steps={steps} variant="live" />);
-
-    // Assert: the component emits the quote text inside a paragraph.
-    // The JSX is: `"{step.sourceQuote}"` — three text nodes rendered by React, so RTL's
-    // getByText regex tries to match the `textContent` of a single element that joins them.
-    // Use a string matcher against the paragraph's combined textContent.
+    // Assert: the quote text is rendered inside a paragraph, wrapped in curly quotes. The JSX is
+    // `"{step.sourceQuote}"` (three text nodes), so match against the paragraph's textContent.
     const paragraph = screen.getByText((_, element) => {
       if (!element || element.tagName !== 'P') return false;
       return (element.textContent ?? '').includes('I earn about 50k a year');
     });
     expect(paragraph).toBeInTheDocument();
-    // The component renders curly left/right quotes (U+201C / U+201D) around the sourceQuote.
     expect(paragraph.textContent).toMatch(/“.*”/);
-  });
-
-  it('does NOT render a sourceQuote paragraph when sourceQuote is absent', () => {
-    // Arrange
-    const steps = [makeStep({ label: 'No quote step' })];
-
-    // Act
-    render(<ReasoningTrace steps={steps} variant="live" />);
-
-    // Assert: nothing that looks like a quoted span in the DOM.
-    const allText = document.body.textContent ?? '';
-    expect(allText).not.toContain('"');
   });
 
   // Pip bands derive from the canonical confidenceBand (high ≥0.85, moderate ≥0.6, low <0.6),
   // so the trace's aria-label matches the answer-panel confidence chip.
-  it('renders confidence pips with aria-label when step.confidence is present', () => {
-    // Arrange: confidence 0.9 → band 'high' → 3 pips → "high confidence"
-    const steps = [makeStep({ confidence: 0.9, label: 'High-confidence step' })];
-
-    // Act
-    render(<ReasoningTrace steps={steps} variant="live" />);
-
-    // Assert: the ConfidencePips span has an aria-label that names the band.
+  it('renders high confidence pips with a band aria-label', () => {
+    render(<ReasoningTrace steps={[makeStep({ confidence: 0.9, label: 'High step' })]} />);
     expect(screen.getByLabelText(/high confidence/i)).toBeInTheDocument();
   });
 
   it('renders moderate confidence pips when confidence is 0.6', () => {
-    // Arrange: 0.6 ≥ 0.6 → band 'moderate' → level 2 → "moderate confidence"
-    const steps = [makeStep({ confidence: 0.6, label: 'Moderate-confidence step' })];
-
-    // Act
-    render(<ReasoningTrace steps={steps} variant="live" />);
-
-    // Assert
+    render(<ReasoningTrace steps={[makeStep({ confidence: 0.6, label: 'Moderate step' })]} />);
     expect(screen.getByLabelText(/moderate confidence/i)).toBeInTheDocument();
   });
 
   it('renders low confidence pips when confidence is 0.3', () => {
-    // Arrange: 0.3 < 0.6 → band 'low' → level 1 → "low confidence"
-    const steps = [makeStep({ confidence: 0.3, label: 'Low-confidence step' })];
-
-    // Act
-    render(<ReasoningTrace steps={steps} variant="live" />);
-
-    // Assert
+    render(<ReasoningTrace steps={[makeStep({ confidence: 0.3, label: 'Low step' })]} />);
     expect(screen.getByLabelText(/low confidence/i)).toBeInTheDocument();
   });
 
   it('does NOT render confidence pips when confidence is absent', () => {
-    // Arrange: no confidence property.
-    const steps = [makeStep({ label: 'No confidence step' })];
-
-    // Act
-    render(<ReasoningTrace steps={steps} variant="live" />);
-
-    // Assert: no element with a confidence-related aria-label in the DOM.
+    render(<ReasoningTrace steps={[makeStep({ label: 'No confidence step' })]} />);
     expect(screen.queryByLabelText(/confidence/i)).toBeNull();
   });
 });

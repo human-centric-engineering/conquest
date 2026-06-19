@@ -73,13 +73,6 @@ export interface UseQuestionnaireSessionStreamReturn {
   /** The animated assistant text for the in-flight turn (empty until the first delta). */
   streamingText: string;
   /**
-   * The live "watch it think" reasoning steps for the in-flight turn (demo feature) — populated
-   * from the single `reasoning` frame the route emits before the reply, so the overlay can reveal
-   * them while the answer types. Empty when no turn is streaming or the feature is off. On settle the
-   * steps move onto the committed assistant turn's `reasoning`.
-   */
-  streamingReasoning: ReasoningStep[];
-  /**
    * Preview Turn Inspector (admin-only): the per-turn agent-call traces accumulated this session,
    * oldest first. Seeded from the persisted traces on resume (`initialInspectorTurns`) and extended
    * by each live `inspector` frame — both of which the server emits solely for a preview session
@@ -219,9 +212,6 @@ export function useQuestionnaireSessionStream(
 
   const [turns, setTurns] = useState<QuestionnaireTurn[]>(initialTurns ?? []);
   const [streaming, setStreaming] = useState(false);
-  // Live reasoning steps for the in-flight turn (demo feature). Reset at the start of each turn,
-  // populated from the `reasoning` frame, and cleared on commit (the steps move onto the turn).
-  const [streamingReasoning, setStreamingReasoning] = useState<ReasoningStep[]>([]);
   // Preview Turn Inspector (admin-only): traces accumulate across the session, appended per
   // `inspector` frame. Seeded from the persisted traces on resume (so a reload re-hydrates the
   // drawer instead of waiting for the next turn). Never populated for a real respondent — the
@@ -269,7 +259,6 @@ export function useQuestionnaireSessionStream(
       setError(null);
       setStatus('streaming');
       setStreaming(true);
-      setStreamingReasoning([]);
       typing.reset();
 
       const controller = new AbortController();
@@ -280,8 +269,8 @@ export function useQuestionnaireSessionStream(
       // be attached to the committed assistant turn — pinned beneath that reply, not a transient
       // banner that the next send wipes.
       const streamWarnings: SessionWarning[] = [];
-      // The turn's reasoning trace (a single frame, before the content deltas) — surfaced live to
-      // the overlay and attached to the committed turn so it collapses into the turn's history.
+      // The turn's reasoning trace (a single frame, before the content deltas) — attached to the
+      // committed turn so it shows as that turn's collapsed reasoning disclosure.
       let streamReasoning: ReasoningStep[] = [];
       let streamError: ChatErrorState | null = null;
 
@@ -340,9 +329,8 @@ export function useQuestionnaireSessionStream(
                   ...(ev.detail ? { detail: ev.detail } : {}),
                 });
               } else if (ev.type === 'reasoning') {
-                // Single frame before the reply — surface the steps live for the overlay reveal.
+                // Single frame before the reply — kept to attach onto the committed turn below.
                 streamReasoning = ev.steps;
-                setStreamingReasoning(ev.steps);
               } else if (ev.type === 'inspector') {
                 // Admin preview only — append this turn's agent-call trace to the session log.
                 const turn = { turnIndex: ev.turnIndex, calls: ev.calls };
@@ -373,9 +361,6 @@ export function useQuestionnaireSessionStream(
             },
           ]);
         }
-        // The steps now live on the committed turn — clear the live buffer so the overlay yields
-        // to the turn's own (collapsed) reasoning view.
-        setStreamingReasoning([]);
 
         if (streamError) {
           setStatus('error');
@@ -443,7 +428,6 @@ export function useQuestionnaireSessionStream(
     turns,
     streaming,
     streamingText: typing.displayText,
-    streamingReasoning,
     inspectorTurns,
     status,
     error,

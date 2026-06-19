@@ -185,6 +185,49 @@ describe('useQuestionnaireSessionStream', () => {
     expect(result.current.status).toBe('idle');
   });
 
+  it('attaches a reasoning frame onto the committed turn (the only path that surfaces the trace)', async () => {
+    // The live overlay was removed — reasoning now reaches the UI ONLY by riding on the committed
+    // assistant turn (rendered as its collapsed "Reasoning · N" disclosure). A single `reasoning`
+    // frame arrives before the content deltas; its steps must land on `turn.reasoning`.
+    const steps = [
+      { kind: 'extraction', label: 'Captured your name', tone: 'neutral' },
+      { kind: 'selection', label: 'Asking about your role next', tone: 'insight' },
+    ];
+    fetchMock.mockResolvedValue(
+      streamResponse([
+        frame('start', { conversationId: SESSION_ID, messageId: SESSION_ID }),
+        frame('reasoning', { steps }),
+        frame('content', { delta: 'Got it.' }),
+        frame('done', { costUsd: 0 }),
+      ])
+    );
+
+    const { result } = renderHook(() => useQuestionnaireSessionStream({ sessionId: SESSION_ID }));
+    await act(async () => {
+      await result.current.sendMessage('hi');
+    });
+
+    expect(result.current.turns.at(-1)).toEqual({
+      role: 'assistant',
+      content: 'Got it.',
+      reasoning: steps,
+    });
+    expect(result.current.status).toBe('idle');
+  });
+
+  it('omits the reasoning key entirely when no reasoning frame arrives', async () => {
+    // The committed turn must not carry an empty `reasoning: []` — the attachment is conditional on
+    // a frame actually arriving, so the false branch leaves the key off.
+    fetchMock.mockResolvedValue(streamResponse(HAPPY_FRAMES));
+
+    const { result } = renderHook(() => useQuestionnaireSessionStream({ sessionId: SESSION_ID }));
+    await act(async () => {
+      await result.current.sendMessage('hi');
+    });
+
+    expect(result.current.turns.at(-1)).not.toHaveProperty('reasoning');
+  });
+
   it('maps a 402 to a terminal cost-capped state and keeps the user turn', async () => {
     fetchMock.mockResolvedValue(errorResponse(402, 'COST_CAP_REACHED'));
 

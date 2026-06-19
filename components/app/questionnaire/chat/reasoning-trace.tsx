@@ -1,18 +1,18 @@
 'use client';
 
 /**
- * ReasoningTrace — the live "watch it think" feed in the respondent chat (demo feature).
+ * ReasoningTrace — the per-turn "watch it think" disclosure in the respondent chat (demo feature).
  *
- * Renders the per-turn {@link ReasoningStep}[] the `/messages` route streams (and persists). It is
- * the single clearest "this is an agent, not a form" signal: the respondent sees what the agent
- * captured (with how it read it + how sure it is), any contradiction it noticed, and *why* it asks
- * the next question.
+ * Renders the {@link ReasoningStep}[] the `/messages` route emits (and persists). It is the single
+ * clearest "this is an agent, not a form" signal: the respondent sees what the agent captured (with
+ * how it read it + how sure it is), any contradiction it noticed, and *why* it asks the next question.
  *
- * Two variants, chosen by the version's placement setting:
- *  - `live` — shown WHILE the turn streams, in place of the plain thinking dots: a titled feed whose
- *    rows rise in one-by-one (staggered `cq-rise`) so the reasoning visibly assembles.
- *  - `collapsed` — shown on a SETTLED turn: a compact "Reasoning · N" chip that expands to the same
- *    rows. Used for both placements' turn history (overlay collapses to it; inline is only this).
+ * Always a compact "Reasoning · N" chip that expands to the rows; the expand/collapse is animated.
+ * The version's placement setting drives only how it *starts*:
+ *  - "Animated" (`overlay`) passes `autoReveal` on the NEWEST turn, so it mounts open and then
+ *    animates closed after {@link AUTO_REVEAL_DWELL_MS} — a glimpse of the reasoning before it tucks
+ *    away. Historical / older turns mount closed.
+ *  - "Inline" never passes `autoReveal`: every turn mounts closed and opens only on a click.
  *
  * Presentational only — the steps are decided server-side and respondent-safe by construction
  * (no abuse / sensitivity content; see `lib/app/questionnaire/reasoning`). Brand colour comes from
@@ -21,15 +21,15 @@
  * `// DEMO-ONLY:` questionnaire-domain surface for the sales demo.
  */
 
-import { useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import {
-  ArrowRight,
   Brain,
   ChevronDown,
   GitCompareArrows,
   ListChecks,
   RefreshCw,
   Sparkles,
+  ArrowRight,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -77,15 +77,7 @@ function ConfidencePips({ confidence }: { confidence: number }) {
 }
 
 /** One reasoning row: glyph, headline, optional detail / source quote, optional confidence pips. */
-function StepRow({
-  step,
-  animate,
-  index,
-}: {
-  step: ReasoningStep;
-  animate: boolean;
-  index: number;
-}) {
+function StepRow({ step }: { step: ReasoningStep }) {
   const Icon = STEP_ICONS[step.kind];
   // Tone tints the glyph: insight = brand accent, caution = amber, neutral = muted.
   const glyphColor =
@@ -95,10 +87,7 @@ function StepRow({
         ? 'var(--color-amber-600, #d97706)'
         : 'var(--color-muted-foreground)';
   return (
-    <li
-      className={cn('flex items-start gap-2.5', animate && 'cq-rise')}
-      style={animate ? { animationDelay: `${index * 110}ms` } : undefined}
-    >
+    <li className="flex items-start gap-2.5">
       <span
         aria-hidden="true"
         className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md"
@@ -135,74 +124,105 @@ function StepRow({
   );
 }
 
+/** Default base dwell (ms) the "Animated" placement holds a trace of up to two steps open. */
+export const AUTO_REVEAL_DWELL_MS = 2000;
+
+/** Default extra dwell (ms) added per reasoning step beyond the second. */
+export const AUTO_REVEAL_PER_ITEM_MS = 750;
+
+/** Step count up to which the base dwell applies; each step beyond adds the per-item dwell. */
+export const AUTO_REVEAL_ITEM_THRESHOLD = 2;
+
+/**
+ * Duration of the grid-rows collapse animation. Single-sourced into the inline transition so the
+ * chat surface can wait for the trace to finish tucking away before it types the next question in
+ * (see `questionnaire-chat.tsx`). Keep in sync with the easing class on the content wrapper.
+ */
+export const AUTO_REVEAL_COLLAPSE_MS = 300;
+
+/**
+ * Dwell (ms) for a trace of `stepCount` steps: the base dwell for up to {@link
+ * AUTO_REVEAL_ITEM_THRESHOLD} steps, plus `perItemMs` for each step beyond — so a longer summary
+ * stays open long enough to read. `baseMs`/`perItemMs` come from the version config (admin-tunable).
+ */
+export function computeReasoningDwellMs(
+  stepCount: number,
+  baseMs: number = AUTO_REVEAL_DWELL_MS,
+  perItemMs: number = AUTO_REVEAL_PER_ITEM_MS
+): number {
+  return baseMs + Math.max(0, stepCount - AUTO_REVEAL_ITEM_THRESHOLD) * perItemMs;
+}
+
 export interface ReasoningTraceProps {
   steps: ReasoningStep[];
-  /** `live` (streaming, animated, always open) vs `collapsed` (settled turn, toggle to open). */
-  variant: 'live' | 'collapsed';
+  /**
+   * When true (the "Animated" placement, newest turn only), the trace mounts OPEN and animates
+   * itself closed after {@link dwellMs}. When false/omitted, it mounts closed and opens only when
+   * the respondent clicks the chip.
+   */
+  autoReveal?: boolean;
+  /** How long (ms) to stay open before auto-collapsing under `autoReveal`. Default base dwell. */
+  dwellMs?: number;
   className?: string;
 }
 
-export function ReasoningTrace({ steps, variant, className }: ReasoningTraceProps) {
-  // Collapsed turns start closed (the chip); live always renders open. A respondent can peek.
-  const [open, setOpen] = useState(variant === 'live');
+export function ReasoningTrace({
+  steps,
+  autoReveal = false,
+  dwellMs = AUTO_REVEAL_DWELL_MS,
+  className,
+}: ReasoningTraceProps) {
+  const [open, setOpen] = useState(autoReveal);
+  const contentId = useId();
+
+  // "Animated" placement: hold the newest turn's trace open for a beat, then tuck it away with the
+  // same animated collapse a manual toggle uses. One-shot on mount — a later prop change (this turn
+  // ceasing to be the newest) must not re-open it, and the respondent can still re-open by click.
+  useEffect(() => {
+    if (!autoReveal) return;
+    const t = setTimeout(() => setOpen(false), dwellMs);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only; `autoReveal`/`dwellMs` fixed per turn
+  }, []);
+
   if (steps.length === 0) return null;
 
-  const list = (
-    <ul className={cn('flex flex-col gap-2.5', variant === 'collapsed' && 'mt-2.5')}>
-      {steps.map((step, i) => (
-        <StepRow key={i} step={step} animate={variant === 'live'} index={i} />
-      ))}
-    </ul>
-  );
-
-  if (variant === 'collapsed') {
-    return (
-      <div className={cn(className)}>
-        <button
-          type="button"
-          onClick={() => setOpen((o) => !o)}
-          aria-expanded={open}
-          className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 rounded-md text-xs font-medium transition-colors"
-        >
-          <Brain className="h-3.5 w-3.5" style={{ color: ACCENT }} aria-hidden="true" />
-          <span>Reasoning · {steps.length}</span>
-          <ChevronDown
-            className={cn('h-3.5 w-3.5 transition-transform', open && 'rotate-180')}
-            aria-hidden="true"
-          />
-        </button>
-        {open && list}
-      </div>
-    );
-  }
-
-  // Live: a titled, brand-tinted panel that reads as the agent working in real time.
   return (
-    <div
-      role="status"
-      aria-label="Agent reasoning"
-      className={cn('rounded-xl border px-3.5 py-3', className)}
-      style={{
-        borderColor: `color-mix(in srgb, ${ACCENT} 30%, transparent)`,
-        backgroundColor: `color-mix(in srgb, ${ACCENT} 5%, transparent)`,
-      }}
-    >
-      <div className="mb-2.5 flex items-center gap-2">
-        <Brain className="h-4 w-4" style={{ color: ACCENT }} aria-hidden="true" />
-        <span className="text-foreground text-xs font-semibold tracking-wide">
-          Working it through
-        </span>
-        <span className="ml-1 inline-flex gap-1" aria-hidden="true">
-          {[0, 1, 2].map((i) => (
-            <span
-              key={i}
-              className="h-1 w-1 animate-bounce rounded-full"
-              style={{ backgroundColor: ACCENT, animationDelay: `${i * 0.15}s` }}
-            />
-          ))}
-        </span>
+    <div className={cn(className)}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        aria-controls={contentId}
+        className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 rounded-md text-xs font-medium transition-colors"
+      >
+        <Brain className="h-3.5 w-3.5" style={{ color: ACCENT }} aria-hidden="true" />
+        <span>Reasoning · {steps.length}</span>
+        <ChevronDown
+          className={cn('h-3.5 w-3.5 transition-transform', open && 'rotate-180')}
+          aria-hidden="true"
+        />
+      </button>
+      {/* Animated open/close: the grid-rows 0fr↔1fr trick collapses smoothly with dynamic-height
+          content (no fixed max-height guess). The inner wrapper clips the rows mid-transition.
+          `motion-reduce` honours a respondent's reduced-motion preference. The rows stay mounted so
+          the collapse can animate, so `aria-hidden`/`inert` mirror the visual state — without them a
+          screen reader would read every step while the chip still reports `aria-expanded="false"`. */}
+      <div
+        className="grid transition-[grid-template-rows] ease-out motion-reduce:transition-none"
+        style={{
+          gridTemplateRows: open ? '1fr' : '0fr',
+          transitionDuration: `${AUTO_REVEAL_COLLAPSE_MS}ms`,
+        }}
+      >
+        <div id={contentId} className="overflow-hidden" aria-hidden={!open} inert={!open}>
+          <ul className="mt-2.5 flex flex-col gap-2.5">
+            {steps.map((step, i) => (
+              <StepRow key={i} step={step} />
+            ))}
+          </ul>
+        </div>
       </div>
-      {list}
     </div>
   );
 }
