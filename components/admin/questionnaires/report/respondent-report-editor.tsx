@@ -6,9 +6,10 @@
  * A self-contained controlled-state editor (not threaded through the version-editor's `run`, since
  * this is a standalone tab): the four panels (Content / Generation / Delivery / Appearance) edit one
  * `RespondentReportSettings` block, and a single Save sends it through the shared config PATCH
- * (`respondentReport` slice). `<FieldHelp>` on every non-obvious control. The Generation panel is the
- * only one that matters in `raw_plus_insights` mode — it's hinted (not hidden) in raw mode so the
- * admin sees what enabling insights unlocks.
+ * (`respondentReport` slice). `<FieldHelp>` on every non-obvious control. The Generation panel applies
+ * to the AI modes (`raw_plus_insights`, `narrative`) — hinted (not hidden) in raw mode so the admin
+ * sees what enabling an AI report unlocks; narrative also hides the raw-content toggles (it has no
+ * separate raw section).
  */
 
 import { useState } from 'react';
@@ -33,6 +34,7 @@ import { FieldHelp } from '@/components/ui/field-help';
 import { ClientKnowledgePanel } from '@/components/admin/questionnaires/report/client-knowledge-panel';
 import { ReportConfigAssistant } from '@/components/admin/questionnaires/report/report-config-assistant';
 import {
+  isAiRespondentReportMode,
   RESPONDENT_REPORT_BACKGROUND_MAX_LENGTH,
   RESPONDENT_REPORT_INSTRUCTIONS_MAX_LENGTH,
   type RespondentReportMode,
@@ -65,7 +67,10 @@ export function RespondentReportEditor({
   const [error, setError] = useState<string | null>(null);
   const [savedOk, setSavedOk] = useState(false);
 
-  const insights = value.mode === 'raw_plus_insights';
+  // Both AI modes (raw_plus_insights, narrative) consult the generation config + agent.
+  const usesAgent = isAiRespondentReportMode(value.mode);
+  // Narrative weaves answers into the report — there's no separate raw section to configure.
+  const narrative = value.mode === 'narrative';
 
   function patch(next: Partial<RespondentReportSettings>) {
     setValue((v) => ({ ...v, ...next }));
@@ -127,7 +132,9 @@ export function RespondentReportEditor({
               <FieldHelp title="Report mode">
                 <strong>Raw answers only</strong> shows the respondent their captured answers.
                 <strong> Raw + AI insights</strong> adds a personalised, AI-generated insights
-                section (generated after submission).
+                section below the answers. <strong>Narrative report</strong> weaves the answers into
+                one flowing, analysed report (no separate raw section). Both AI modes are generated
+                after submission.
               </FieldHelp>
             </Label>
             <Select
@@ -148,53 +155,64 @@ export function RespondentReportEditor({
             </Select>
           </div>
 
-          <div className="space-y-2">
-            <Label className="flex items-center gap-1">
-              Raw content
-              <FieldHelp title="Raw content">
-                Choose what the raw section shows the respondent.
-              </FieldHelp>
-            </Label>
-            <div className="flex items-center gap-2">
-              <Switch
-                checked={value.rawIncludes.questionsAsPresented}
-                onCheckedChange={(v) =>
-                  patch({
-                    rawIncludes: { ...value.rawIncludes, questionsAsPresented: v },
-                  })
-                }
-                disabled={isSaving}
-                id="rr-questions"
-              />
-              <Label htmlFor="rr-questions" className="text-sm font-normal">
-                Questions &amp; answers as presented
+          {/* Raw content is the separate answer section — narrative weaves answers in, so it has no
+              such section and these toggles don't apply. */}
+          {narrative ? (
+            <p className="text-muted-foreground rounded-md border border-dashed p-3 text-sm">
+              A narrative report weaves the respondent&rsquo;s answers into one woven report — there
+              is no separate raw answer section to configure. Shape it on the{' '}
+              <span className="text-foreground font-medium">Generation</span> tab.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              <Label className="flex items-center gap-1">
+                Raw content
+                <FieldHelp title="Raw content">
+                  Choose what the raw section shows the respondent.
+                </FieldHelp>
               </Label>
-            </div>
-            {dataSlotsEnabled && (
               <div className="flex items-center gap-2">
                 <Switch
-                  checked={value.rawIncludes.dataSlots}
+                  checked={value.rawIncludes.questionsAsPresented}
                   onCheckedChange={(v) =>
-                    patch({ rawIncludes: { ...value.rawIncludes, dataSlots: v } })
+                    patch({
+                      rawIncludes: { ...value.rawIncludes, questionsAsPresented: v },
+                    })
                   }
                   disabled={isSaving}
-                  id="rr-dataslots"
+                  id="rr-questions"
                 />
-                <Label htmlFor="rr-dataslots" className="text-sm font-normal">
-                  Captured data-slot values
+                <Label htmlFor="rr-questions" className="text-sm font-normal">
+                  Questions &amp; answers as presented
                 </Label>
               </div>
-            )}
-          </div>
+              {dataSlotsEnabled && (
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={value.rawIncludes.dataSlots}
+                    onCheckedChange={(v) =>
+                      patch({ rawIncludes: { ...value.rawIncludes, dataSlots: v } })
+                    }
+                    disabled={isSaving}
+                    id="rr-dataslots"
+                  />
+                  <Label htmlFor="rr-dataslots" className="text-sm font-normal">
+                    Captured data-slot values
+                  </Label>
+                </div>
+              )}
+            </div>
+          )}
         </TabsContent>
 
         {/* ── Generation ────────────────────────────────────────────────────── */}
         <TabsContent value="generation" className="space-y-5 pt-4">
-          {!insights && (
+          {!usesAgent && (
             <p className="text-muted-foreground rounded-md border border-dashed p-3 text-sm">
-              These settings shape the AI insights section. Switch the mode to{' '}
-              <span className="text-foreground font-medium">Raw answers + AI insights</span>{' '}
-              (Content tab) to use them.
+              These settings shape the AI report. Switch the mode to{' '}
+              <span className="text-foreground font-medium">Raw answers + AI insights</span> or{' '}
+              <span className="text-foreground font-medium">Narrative report</span> (Content tab) to
+              use them.
             </p>
           )}
 
@@ -207,7 +225,7 @@ export function RespondentReportEditor({
               backgroundContext: value.generation.backgroundContext,
             }}
             onApply={patchGeneration}
-            disabled={isSaving || !insights}
+            disabled={isSaving || !usesAgent}
           />
 
           <div className="space-y-1.5">
@@ -223,7 +241,7 @@ export function RespondentReportEditor({
               value={value.generation.instructions}
               maxLength={RESPONDENT_REPORT_INSTRUCTIONS_MAX_LENGTH}
               rows={3}
-              disabled={isSaving || !insights}
+              disabled={isSaving || !usesAgent}
               placeholder="e.g. Warm and encouraging; plain language; address the respondent as 'you'."
               onChange={(e) => patchGeneration({ instructions: e.target.value })}
             />
@@ -234,7 +252,7 @@ export function RespondentReportEditor({
               Desired structure
               <FieldHelp title="Structure">
                 Describe the sections you want, in order — e.g. &ldquo;summary, three themes, then
-                next steps&rdquo;.
+                next steps&rdquo;. In narrative mode these become the woven report&rsquo;s chapters.
               </FieldHelp>
             </Label>
             <Textarea
@@ -242,7 +260,7 @@ export function RespondentReportEditor({
               value={value.generation.structure}
               maxLength={RESPONDENT_REPORT_INSTRUCTIONS_MAX_LENGTH}
               rows={3}
-              disabled={isSaving || !insights}
+              disabled={isSaving || !usesAgent}
               placeholder="e.g. A short summary, then strengths, then areas to develop, then recommended actions."
               onChange={(e) => patchGeneration({ structure: e.target.value })}
             />
@@ -262,7 +280,7 @@ export function RespondentReportEditor({
               value={value.generation.backgroundContext}
               maxLength={RESPONDENT_REPORT_BACKGROUND_MAX_LENGTH}
               rows={5}
-              disabled={isSaving || !insights}
+              disabled={isSaving || !usesAgent}
               placeholder="e.g. This is a quarterly engagement pulse. Low autonomy scores usually point to process friction; emphasise practical, low-effort actions."
               onChange={(e) => patchGeneration({ backgroundContext: e.target.value })}
             />
@@ -273,7 +291,7 @@ export function RespondentReportEditor({
               <Switch
                 checked={value.generation.useClientKnowledge}
                 onCheckedChange={(v) => patchGeneration({ useClientKnowledge: v })}
-                disabled={isSaving || !insights}
+                disabled={isSaving || !usesAgent}
                 id="rr-kb"
               />
               <Label htmlFor="rr-kb" className="flex items-center gap-1">
@@ -285,7 +303,7 @@ export function RespondentReportEditor({
                 </FieldHelp>
               </Label>
             </div>
-            {insights && value.generation.useClientKnowledge && (
+            {usesAgent && value.generation.useClientKnowledge && (
               <ClientKnowledgePanel questionnaireId={questionnaireId} />
             )}
           </div>

@@ -136,6 +136,43 @@ describe('RespondentReportEditor', () => {
     expect(screen.getByPlaceholderText(/Warm and encouraging/i)).not.toBeDisabled();
   });
 
+  it('offers the narrative mode option', () => {
+    renderEditor({ mode: 'raw' });
+    const select = screen.getByTestId('mode-select');
+    const values = Array.from(select.querySelectorAll('option')).map((o) =>
+      o.getAttribute('value')
+    );
+    expect(values).toContain('narrative');
+  });
+
+  it('enables the generation fields in narrative mode (an AI mode)', () => {
+    renderEditor({ mode: 'narrative' });
+    expect(screen.getByPlaceholderText(/Warm and encouraging/i)).not.toBeDisabled();
+  });
+
+  it('hides the raw-content toggles in narrative mode (woven, no separate raw section)', () => {
+    const { container } = renderEditor({ mode: 'narrative' });
+    expect(container.querySelector('#rr-questions')).toBeNull();
+    expect(container.querySelector('#rr-dataslots')).toBeNull();
+    expect(screen.getByText(/no separate raw answer section/i)).toBeInTheDocument();
+  });
+
+  it('keeps the raw-content toggles for raw + insights modes', () => {
+    const { container } = renderEditor({ mode: 'raw_plus_insights' });
+    expect(container.querySelector('#rr-questions')).not.toBeNull();
+  });
+
+  it('shows the embedded KB panel for narrative + useClientKnowledge', () => {
+    renderEditor({
+      mode: 'narrative',
+      generation: {
+        ...DEFAULT_RESPONDENT_REPORT_SETTINGS.generation,
+        useClientKnowledge: true,
+      },
+    });
+    expect(screen.getByTestId('kb-panel')).toBeInTheDocument();
+  });
+
   it('shows the embedded KB panel only when insights + useClientKnowledge are on', () => {
     renderEditor({
       mode: 'raw_plus_insights',
