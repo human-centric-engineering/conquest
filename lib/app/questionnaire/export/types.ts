@@ -21,6 +21,7 @@
 import type { ResolvedTheme } from '@/lib/app/questionnaire/theming';
 import type { PanelSectionView } from '@/lib/app/questionnaire/panel/types';
 import type { ProfileValues } from '@/lib/app/questionnaire/profile/profile-values';
+import type { RespondentReportContent } from '@/lib/app/questionnaire/report/content';
 
 /** The respondent identity shown in the PDF header (name only — never email). */
 export interface ExportRespondent {
@@ -63,4 +64,9 @@ export interface SessionExportModel {
   answeredCount: number;
   /** Total slots in the version. */
   totalCount: number;
+  /**
+   * The AI insights section (Respondent Report mode `raw_plus_insights`), or null when the report is
+   * raw-only / disabled / not yet generated. Rendered above the answers in the PDF.
+   */
+  insights?: RespondentReportContent | null;
 }

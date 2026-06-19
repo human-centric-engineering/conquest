@@ -8,6 +8,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
+// The completion screen polls the report view on mount; stub it to "no report configured" so these
+// base-screen tests exercise the default responses-PDF download path (report behaviour is covered in
+// session-complete-report.test.tsx).
+vi.mock('@/lib/hooks/use-respondent-report', () => ({
+  useRespondentReport: () => ({ view: { enabled: false }, loaded: true }),
+}));
+
 import { SessionComplete } from '@/components/app/questionnaire/lifecycle/session-complete';
 
 describe('SessionComplete', () => {

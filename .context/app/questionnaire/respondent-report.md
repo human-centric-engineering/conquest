@@ -101,3 +101,22 @@ evaluations batch worker). Raw-only mode never creates a row.
 The agent (`RESPONDENT_REPORT_AGENT_SLUG = 'app-respondent-report'`) is seeded disabled-of-impact by
 `045-respondent-report-agent.ts` with an empty provider/model (resolved at runtime) and a monthly
 budget cap; `visibility: 'internal'`.
+
+## Respondent delivery
+
+- **Status endpoint** — `GET /api/v1/app/questionnaire-sessions/:id/report` (`report` in
+  `lib/api/endpoints.ts`) serves both respondent kinds via `resolveTurnAccess` (auth cookie or
+  `X-Session-Token`). It returns the `RespondentReportClientView` built by
+  `buildRespondentReportClientView` (`lib/app/questionnaire/report/view.ts`): `enabled` (config AND
+  platform flag), `mode`, delivery toggles, and — for mode 2 — the insights `{ status, content,
+generatedAt, error }` (a queued/processing status while the worker runs; a missing row reads as
+  `queued`).
+- **Completion screen** — `SessionComplete` calls `useRespondentReport`
+  (`lib/hooks/use-respondent-report.ts`, 3s poll until terminal) and renders the insights inline
+  (preparing → ready summary/sections/actions → calm failure fallback) when `onScreen` + mode 2; the
+  Download PDF button is gated on `delivery.download` (and defaults on when no report is configured,
+  preserving the F7.4 responses export).
+- **PDF** — `SessionExportModel.insights` carries the ready content into the PDF; the `export.pdf`
+  route loads it via `buildRespondentReportClientView` (ready only) and `SessionPdfDocument` renders a
+  "Your insights" section above the answers, so the on-screen and downloaded artifacts match.
+  Anonymous respondents download via the session token; raw / not-yet-ready → answers only.

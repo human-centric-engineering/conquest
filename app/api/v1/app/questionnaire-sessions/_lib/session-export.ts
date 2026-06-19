@@ -38,6 +38,7 @@ import {
   type ProfileValues,
 } from '@/lib/app/questionnaire/profile/profile-values';
 import type { SessionExportModel } from '@/lib/app/questionnaire/export/types';
+import type { RespondentReportContent } from '@/lib/app/questionnaire/report/content';
 
 /** Raw demo-client theme columns (or null when the questionnaire is unattributed). */
 interface RawTheme {
@@ -251,7 +252,8 @@ async function fetchLogoDataUri(url: string | null): Promise<string | null> {
  * authorises, so the logo fetch never runs for an unauthorised request.
  */
 export async function buildSessionExportPdfModel(
-  loaded: LoadedSessionExport
+  loaded: LoadedSessionExport,
+  insights: RespondentReportContent | null = null
 ): Promise<SessionExportModel> {
   const logoDataUri = await fetchLogoDataUri(loaded.theme.logoUrl);
   if (loaded.theme.logoUrl && !logoDataUri) {
@@ -276,6 +278,7 @@ export async function buildSessionExportPdfModel(
     status: loaded.status,
     sections: loaded.sections,
     answers: loaded.answers,
+    insights,
   };
 
   return buildSessionExportModel(input);

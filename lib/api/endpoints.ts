@@ -542,6 +542,8 @@ export const API = {
       submit: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/submit`,
       /** Download the session's results as a branded PDF (GET — F7.4). */
       exportPdf: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/export.pdf`,
+      /** Respondent report status + content — completion screen polls this (GET). */
+      report: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/report`,
     },
     /** Persisted turn-evaluation search surface (admin) — cross-session list + detail. */
     TURN_EVALUATIONS: {
