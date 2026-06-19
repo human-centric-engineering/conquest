@@ -110,6 +110,8 @@ export const CONFIG_SELECT = {
   presentationMode: true,
   reasoningStreamEnabled: true,
   reasoningStreamPlacement: true,
+  reasoningStreamDwellMs: true,
+  reasoningStreamPerItemMs: true,
   reasoningStreamPersist: true,
   previewInspectorEnabled: true,
   tone: true,
@@ -141,6 +143,8 @@ type ConfigRow = {
   presentationMode: string;
   reasoningStreamEnabled: boolean;
   reasoningStreamPlacement: string;
+  reasoningStreamDwellMs: number;
+  reasoningStreamPerItemMs: number;
   reasoningStreamPersist: boolean;
   previewInspectorEnabled: boolean;
   tone: Prisma.JsonValue;
@@ -235,6 +239,8 @@ export function toConfigView(row: ConfigRow | null): ConfigView {
     presentationMode: asPresentationMode(row.presentationMode),
     reasoningStreamEnabled: row.reasoningStreamEnabled,
     reasoningStreamPlacement: asReasoningPlacement(row.reasoningStreamPlacement),
+    reasoningStreamDwellMs: row.reasoningStreamDwellMs,
+    reasoningStreamPerItemMs: row.reasoningStreamPerItemMs,
     reasoningStreamPersist: row.reasoningStreamPersist,
     previewInspectorEnabled: row.previewInspectorEnabled,
     tone: narrowToneSettings(row.tone),

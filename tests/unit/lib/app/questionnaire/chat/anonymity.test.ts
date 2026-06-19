@@ -33,7 +33,9 @@ import {
   resolveAttachmentsEnabledForVersion,
   resolvePresentationModeForVersion,
   resolveReasoningPlacementForVersion,
+  resolveReasoningDwellForVersion,
 } from '@/lib/app/questionnaire/chat/anonymity';
+import { DEFAULT_QUESTIONNAIRE_CONFIG } from '@/lib/app/questionnaire/types';
 
 describe('resolveAnonymousForVersion', () => {
   beforeEach(() => {
@@ -353,6 +355,53 @@ describe('resolveReasoningPlacementForVersion', () => {
       where: { id: 'ver-xyz' },
       select: {
         config: { select: { reasoningStreamEnabled: true, reasoningStreamPlacement: true } },
+      },
+    });
+  });
+});
+
+describe('resolveReasoningDwellForVersion', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns the config defaults when no config row exists', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: null,
+    } as never);
+    expect(await resolveReasoningDwellForVersion('ver-abc')).toEqual({
+      dwellMs: DEFAULT_QUESTIONNAIRE_CONFIG.reasoningStreamDwellMs,
+      perItemMs: DEFAULT_QUESTIONNAIRE_CONFIG.reasoningStreamPerItemMs,
+    });
+  });
+
+  it('returns the config defaults when the version row is null', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue(null);
+    expect(await resolveReasoningDwellForVersion('ver-missing')).toEqual({
+      dwellMs: DEFAULT_QUESTIONNAIRE_CONFIG.reasoningStreamDwellMs,
+      perItemMs: DEFAULT_QUESTIONNAIRE_CONFIG.reasoningStreamPerItemMs,
+    });
+  });
+
+  it('returns the stored dwell timing when configured', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: { reasoningStreamDwellMs: 1500, reasoningStreamPerItemMs: 250 },
+    } as never);
+    expect(await resolveReasoningDwellForVersion('ver-abc')).toEqual({
+      dwellMs: 1500,
+      perItemMs: 250,
+    });
+  });
+
+  it('selects only the two dwell fields for the given version', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: { reasoningStreamDwellMs: 2000, reasoningStreamPerItemMs: 330 },
+    } as never);
+    await resolveReasoningDwellForVersion('ver-xyz');
+    expect(prisma.appQuestionnaireVersion.findUnique).toHaveBeenCalledWith({
+      where: { id: 'ver-xyz' },
+      select: {
+        config: { select: { reasoningStreamDwellMs: true, reasoningStreamPerItemMs: true } },
       },
     });
   });

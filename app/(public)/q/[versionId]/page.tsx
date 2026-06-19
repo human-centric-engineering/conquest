@@ -18,6 +18,7 @@ import {
   resolveAttachmentsEnabledForVersion,
   resolvePresentationModeForVersion,
   resolveReasoningPlacementForVersion,
+  resolveReasoningDwellForVersion,
   resolveVoiceEnabledForVersion,
 } from '@/lib/app/questionnaire/chat/anonymity';
 import { resolveAdminPreviewMeta } from '@/lib/app/questionnaire/chat/preview-nav';
@@ -77,6 +78,7 @@ export default async function PublicQuestionnairePage({
     voiceConfigured,
     attachmentsConfigured,
     reasoningPlacementConfigured,
+    reasoningDwell,
     previewMeta,
   ] = await Promise.all([
     isVoiceInputEnabled(),
@@ -88,6 +90,7 @@ export default async function PublicQuestionnairePage({
     resolveVoiceEnabledForVersion(versionId),
     resolveAttachmentsEnabledForVersion(versionId),
     resolveReasoningPlacementForVersion(versionId),
+    resolveReasoningDwellForVersion(versionId),
     preview ? resolveAdminPreviewMeta(versionId) : Promise.resolve(null),
   ]);
   const voiceInputEnabled = voicePlatform && voiceConfigured;
@@ -136,6 +139,8 @@ export default async function PublicQuestionnairePage({
             anonymous={anonymous}
             presentationMode={presentationMode}
             reasoningPlacement={reasoningPlacement}
+            reasoningDwellMs={reasoningDwell.dwellMs}
+            reasoningPerItemMs={reasoningDwell.perItemMs}
             welcomeCopy={theme.welcomeCopy}
           />
         </BrandThemeProvider>

@@ -9,6 +9,7 @@
  * @see components/admin/questionnaires/save-button.tsx
  */
 
+import { StrictMode } from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -68,6 +69,28 @@ describe('SaveButton', () => {
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled());
     expect(screen.queryByRole('button', { name: 'Saved' })).not.toBeInTheDocument();
+  });
+
+  it('still reaches "Saved" under StrictMode (the mounted-ref must be restored on re-setup)', async () => {
+    // Regression: StrictMode runs the mount effect setup → cleanup → setup. The cleanup flips the
+    // internal `mounted` ref to false; if the setup doesn't restore it, a successful save's
+    // `setPhase('saved')` is short-circuited and the button sticks spinning on "Saving…" forever
+    // even though `onSave` resolved. Rendering under StrictMode exercises that double-invoke.
+    const user = userEvent.setup();
+    render(
+      <StrictMode>
+        <SaveButton onSave={() => Promise.resolve()} savedDurationMs={50}>
+          Save configuration
+        </SaveButton>
+      </StrictMode>
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Save configuration' }));
+    // The phase must advance past "saving" — proving the guard wasn't tripped by a stale ref.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Saved' })).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Save configuration' })).toBeEnabled()
+    );
   });
 
   it('stays disabled when the caller-supplied disabled flag is set', () => {

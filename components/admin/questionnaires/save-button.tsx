@@ -50,6 +50,11 @@ export function SaveButton({
   const mounted = useRef(true);
 
   useEffect(() => {
+    // Restore on every (re)mount — NOT just via the useRef initialiser. React StrictMode (dev) runs
+    // setup → cleanup → setup, and a genuine remount runs cleanup → setup; without resetting here,
+    // `mounted` stays `false` after the first cleanup, so every later save short-circuits its
+    // `setPhase('saved')` guard and the button sticks spinning on "Saving…" even though it saved.
+    mounted.current = true;
     return () => {
       mounted.current = false;
       if (timer.current) clearTimeout(timer.current);

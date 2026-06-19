@@ -290,6 +290,10 @@ const unit: SeedUnit = {
             'can take a break or stop at any time.',
           supportResourceUrl: 'https://www.mind.org.uk/information-support/',
           answerSlotPanelScope: DEFAULT_QUESTIONNAIRE_CONFIG.answerSlotPanelScope,
+          // "Animated" reasoning-stream timing — seed the defaults explicitly so the demo's open
+          // duration scales with the step count (base dwell + per-step extra) out of the box.
+          reasoningStreamDwellMs: DEFAULT_QUESTIONNAIRE_CONFIG.reasoningStreamDwellMs,
+          reasoningStreamPerItemMs: DEFAULT_QUESTIONNAIRE_CONFIG.reasoningStreamPerItemMs,
           profileFields: [],
         },
       });

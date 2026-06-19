@@ -107,6 +107,8 @@ describe('loadSessionSurfaceConfig', () => {
                     attachmentsEnabled: true,
                     reasoningStreamEnabled: true,
                     reasoningStreamPlacement: true,
+                    reasoningStreamDwellMs: true,
+                    reasoningStreamPerItemMs: true,
                   },
                 },
               },
@@ -129,6 +131,8 @@ describe('loadSessionSurfaceConfig', () => {
           attachmentsEnabled: false,
           reasoningStreamEnabled: false,
           reasoningStreamPlacement: 'sidebar',
+          reasoningStreamDwellMs: 2000,
+          reasoningStreamPerItemMs: 330,
         },
       });
       findUnique.mockResolvedValue(dbRow);
@@ -145,6 +149,8 @@ describe('loadSessionSurfaceConfig', () => {
         attachmentsEnabled: false,
         reasoningStreamEnabled: false,
         reasoningStreamPlacement: 'sidebar',
+        reasoningStreamDwellMs: 2000,
+        reasoningStreamPerItemMs: 330,
       });
     });
 
@@ -185,7 +191,7 @@ describe('loadSessionSurfaceConfig', () => {
       expect(result!.config).toBeNull();
     });
 
-    it('returns all six config fields with their exact DB values', async () => {
+    it('returns all eight config fields with their exact DB values', async () => {
       const expectedConfig: SessionSurfaceConfig['config'] = {
         anonymousMode: false,
         presentationMode: 'chat',
@@ -193,12 +199,14 @@ describe('loadSessionSurfaceConfig', () => {
         attachmentsEnabled: true,
         reasoningStreamEnabled: true,
         reasoningStreamPlacement: 'inline',
+        reasoningStreamDwellMs: 1500,
+        reasoningStreamPerItemMs: 250,
       };
       findUnique.mockResolvedValue(makeDbRow({ config: expectedConfig }));
 
       const result = await loadSessionSurfaceConfig('sess-full');
 
-      // All six config fields must be present and match the DB values — none omitted
+      // All eight config fields must be present and match the DB values — none omitted
       expect(result!.config).toEqual(expectedConfig);
     });
   });

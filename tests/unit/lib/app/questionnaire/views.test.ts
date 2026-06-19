@@ -169,6 +169,8 @@ function makeConfigView(overrides: Partial<ConfigView> = {}): ConfigView {
     presentationMode: 'chat',
     reasoningStreamEnabled: false,
     reasoningStreamPlacement: 'overlay',
+    reasoningStreamDwellMs: 2000,
+    reasoningStreamPerItemMs: 330,
     reasoningStreamPersist: false,
     previewInspectorEnabled: false,
     tone: {

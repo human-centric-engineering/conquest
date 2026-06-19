@@ -163,6 +163,10 @@ export const updateConfigSchema = z
     // flag APP_QUESTIONNAIRES_REASONING_STREAM_ENABLED. placement = overlay | inline.
     reasoningStreamEnabled: z.boolean().optional(),
     reasoningStreamPlacement: z.enum(REASONING_PLACEMENTS).optional(),
+    // "Animated" placement timing: base dwell (ms) the summary stays open for up to two steps, plus
+    // extra dwell (ms) per step beyond two. Bounded to keep the demo snappy and the wait sane.
+    reasoningStreamDwellMs: z.number().int().min(0).max(10000).optional(),
+    reasoningStreamPerItemMs: z.number().int().min(0).max(5000).optional(),
     reasoningStreamPersist: z.boolean().optional(),
     // Preview Turn Inspector (admin-only). When on, an admin previewing as a respondent can open
     // a per-turn console of the agent calls, raw prompts/responses, model, latency, and cost. Only

@@ -214,6 +214,10 @@ model AppQuestionnaireConfig {
   // persist = save the trace on each turn so it replays on resume / scroll-back. (lib/.../reasoning)
   reasoningStreamEnabled   Boolean @default(true)
   reasoningStreamPlacement String  @default("overlay")
+  // "Animated" placement timing: base dwell (ms) the summary stays open for up to two steps, plus
+  // extra dwell (ms) per step beyond two. Total = dwell + max(0, steps - 2) * perItem. (reasoning-trace)
+  reasoningStreamDwellMs   Int     @default(2000)
+  reasoningStreamPerItemMs Int     @default(750)
   reasoningStreamPersist   Boolean @default(true)
 
   // Preview Turn Inspector (admin-only): when on, an admin previewing as a respondent can open a

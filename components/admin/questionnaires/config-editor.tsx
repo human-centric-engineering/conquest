@@ -64,7 +64,6 @@ import {
   PRESENTATION_MODES,
   PROFILE_FIELD_TYPES,
   REASONING_PLACEMENTS,
-  SELECTION_STRATEGIES,
   TONE_LEVEL_MAX,
   TONE_LEVEL_MIN,
   TONE_PERSONA_MAX_LENGTH,
@@ -91,6 +90,19 @@ const SELECTION_STRATEGY_LABELS: Record<SelectionStrategy, string> = {
   weighted: 'Weighted (by question weight)',
   adaptive: 'Adaptive (agent-chosen)',
 };
+
+/**
+ * Display order for the Selection strategy dropdown — Adaptive first (the most capable / recommended
+ * strategy), then the deterministic ones. Deliberately distinct from the canonical
+ * `SELECTION_STRATEGIES` order (which drives validation/types), so reordering the menu can't shift
+ * any default. Any strategy missing here would simply not render, so keep it exhaustive.
+ */
+const SELECTION_STRATEGY_ORDER: SelectionStrategy[] = [
+  'adaptive',
+  'sequential',
+  'random',
+  'weighted',
+];
 
 const CONTRADICTION_MODE_LABELS: Record<ContradictionMode, string> = {
   off: 'Off',
@@ -123,7 +135,7 @@ const PRESENTATION_MODE_LABELS: Record<PresentationMode, string> = {
 };
 
 const REASONING_PLACEMENT_LABELS: Record<ReasoningPlacement, string> = {
-  overlay: 'Live overlay (animates, then tucks away)',
+  overlay: 'Animated (opens, then tucks away)',
   inline: 'Inline (quiet, under each turn)',
 };
 
@@ -426,6 +438,12 @@ export function ConfigEditor({
   const [reasoningStreamPlacement, setReasoningStreamPlacement] = useState<ReasoningPlacement>(
     config.reasoningStreamPlacement
   );
+  const [reasoningStreamDwellMs, setReasoningStreamDwellMs] = useState(
+    String(config.reasoningStreamDwellMs)
+  );
+  const [reasoningStreamPerItemMs, setReasoningStreamPerItemMs] = useState(
+    String(config.reasoningStreamPerItemMs)
+  );
   const [reasoningStreamPersist, setReasoningStreamPersist] = useState(
     config.reasoningStreamPersist
   );
@@ -467,6 +485,8 @@ export function ConfigEditor({
     setPresentationMode(config.presentationMode);
     setReasoningStreamEnabled(config.reasoningStreamEnabled);
     setReasoningStreamPlacement(config.reasoningStreamPlacement);
+    setReasoningStreamDwellMs(String(config.reasoningStreamDwellMs));
+    setReasoningStreamPerItemMs(String(config.reasoningStreamPerItemMs));
     setReasoningStreamPersist(config.reasoningStreamPersist);
     setPreviewInspectorEnabled(config.previewInspectorEnabled);
     setProfileFields(config.profileFields.map(toRow));
@@ -554,6 +574,22 @@ export function ConfigEditor({
         // reasoning-stream flag to take effect.
         reasoningStreamEnabled,
         reasoningStreamPlacement,
+        // "Animated" timing (ms): base dwell (≤2 steps) + extra per step beyond two. Bounds mirror
+        // the config schema; blank/garbage falls back to the stored value rather than weakening it.
+        reasoningStreamDwellMs: boundedNumber(
+          reasoningStreamDwellMs,
+          0,
+          10000,
+          config.reasoningStreamDwellMs,
+          true
+        ),
+        reasoningStreamPerItemMs: boundedNumber(
+          reasoningStreamPerItemMs,
+          0,
+          5000,
+          config.reasoningStreamPerItemMs,
+          true
+        ),
         reasoningStreamPersist,
         // Preview Turn Inspector (admin-only). Surfaces only inside an admin preview session.
         previewInspectorEnabled,
@@ -604,7 +640,7 @@ export function ConfigEditor({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {SELECTION_STRATEGIES.filter(
+              {SELECTION_STRATEGY_ORDER.filter(
                 // Hide adaptive when its sub-flag is off — unless it's the saved
                 // value, so the Select still shows a label rather than blank.
                 (s) =>
@@ -799,7 +835,7 @@ export function ConfigEditor({
         icon={Brain}
         accent="bg-indigo-500/10 text-indigo-600 dark:text-indigo-400"
         title="Reasoning stream"
-        description="Show a live “watch it think” feed beside the chat — answers captured, contradictions spotted, and why the next question was chosen. Also requires the platform reasoning-stream flag."
+        description="Show a per-turn “watch it think” trace in the chat — answers captured, contradictions spotted, and why the next question was chosen. Also requires the platform reasoning-stream flag."
       >
         <div className="flex items-center gap-2">
           <Switch
@@ -824,10 +860,12 @@ export function ConfigEditor({
               <Label className="text-sm font-medium">
                 Placement{' '}
                 <FieldHelp title="Reasoning stream placement">
-                  Where the feed appears. <strong>Live overlay</strong> animates the steps in place
-                  of the typing dots while the agent works, then collapses to a small “reasoning”
-                  chip on the finished turn — the most striking for a live demo.{' '}
-                  <strong>Inline</strong> is quieter: a collapsible note tucked beneath each reply.
+                  How the reasoning reveals on each turn. <strong>Animated</strong> opens the newest
+                  turn&apos;s reasoning automatically, holds it for two seconds, then animates it
+                  closed to a small “reasoning” chip — and the next question only starts typing once
+                  it has tucked away, so the respondent reads the reasoning first. Eye-catching for
+                  a live demo. <strong>Inline</strong> is quieter: the chip stays closed until the
+                  respondent clicks to expand it.
                 </FieldHelp>
               </Label>
               <Select
@@ -847,6 +885,51 @@ export function ConfigEditor({
                 </SelectContent>
               </Select>
             </div>
+            {/* Animated-only timing: the dwell scales with how many reasoning steps the turn has. */}
+            {reasoningStreamPlacement === 'overlay' && (
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label className="text-sm font-medium">
+                    Reasoning dwell (ms){' '}
+                    <FieldHelp title="Reasoning dwell">
+                      How long the reasoning summary stays open before it tucks away, for a trace of
+                      up to two steps. The next question starts typing only after it closes. Default
+                      2000 (2s).
+                    </FieldHelp>
+                  </Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={10000}
+                    step={100}
+                    aria-label="Reasoning dwell in milliseconds"
+                    value={reasoningStreamDwellMs}
+                    onChange={(e) => setReasoningStreamDwellMs(e.target.value)}
+                    disabled={busy}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-sm font-medium">
+                    Extra per item (ms){' '}
+                    <FieldHelp title="Extra dwell per reasoning step">
+                      Added to the dwell for each reasoning step beyond the second, so a longer
+                      summary stays open long enough to read. Total ={' '}
+                      <code>dwell + max(0, steps − 2) × this</code>. Default 750.
+                    </FieldHelp>
+                  </Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={5000}
+                    step={10}
+                    aria-label="Extra dwell per reasoning step in milliseconds"
+                    value={reasoningStreamPerItemMs}
+                    onChange={(e) => setReasoningStreamPerItemMs(e.target.value)}
+                    disabled={busy}
+                  />
+                </div>
+              </div>
+            )}
             <div className="flex items-center gap-2">
               <Switch
                 checked={reasoningStreamPersist}
@@ -858,8 +941,8 @@ export function ConfigEditor({
                 <FieldHelp title="Persist the reasoning trace">
                   When on, each turn&apos;s reasoning is saved so it replays if the respondent
                   resumes the session or scrolls back — and is available to you afterwards. When
-                  off, the feed is live-only: it shows as the turn happens, but resumed or earlier
-                  turns show nothing.
+                  off, it shows only on the turn as it happens; resumed or earlier turns show
+                  nothing.
                 </FieldHelp>
               </Label>
             </div>

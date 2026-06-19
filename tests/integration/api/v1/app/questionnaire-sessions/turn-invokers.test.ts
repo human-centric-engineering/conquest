@@ -116,6 +116,8 @@ function state(over: Partial<TurnState> = {}): TurnState {
       presentationMode: 'chat',
       reasoningStreamEnabled: true,
       reasoningStreamPlacement: 'overlay',
+      reasoningStreamDwellMs: 2000,
+      reasoningStreamPerItemMs: 330,
       reasoningStreamPersist: true,
       previewInspectorEnabled: false,
       tone: DEFAULT_TONE_SETTINGS,

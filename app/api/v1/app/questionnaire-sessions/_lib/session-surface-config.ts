@@ -24,6 +24,8 @@ export interface SessionSurfaceConfig {
     attachmentsEnabled: boolean;
     reasoningStreamEnabled: boolean;
     reasoningStreamPlacement: string;
+    reasoningStreamDwellMs: number;
+    reasoningStreamPerItemMs: number;
   } | null;
 }
 
@@ -46,6 +48,8 @@ export async function loadSessionSurfaceConfig(
               attachmentsEnabled: true,
               reasoningStreamEnabled: true,
               reasoningStreamPlacement: true,
+              reasoningStreamDwellMs: true,
+              reasoningStreamPerItemMs: true,
             },
           },
         },

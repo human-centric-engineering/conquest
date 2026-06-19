@@ -11,9 +11,13 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 
 import type { UseQuestionnaireSessionStreamReturn } from '@/lib/hooks/use-questionnaire-session-stream';
+import {
+  AUTO_REVEAL_DWELL_MS,
+  AUTO_REVEAL_COLLAPSE_MS,
+} from '@/components/app/questionnaire/chat/reasoning-trace';
 
 const sendMessage = vi.fn();
 const dismissError = vi.fn();
@@ -68,7 +72,6 @@ function makeReturn(
     turns: [],
     streaming: false,
     streamingText: '',
-    streamingReasoning: [],
     inspectorTurns: [],
     status: 'idle',
     error: null,
@@ -171,6 +174,119 @@ describe('QuestionnaireChat', () => {
     // Both the later turn AND the earlier turn's notice are present.
     expect(screen.getByText('Second question.')).toBeInTheDocument();
     expect(screen.getByText("Let's keep it genuine please.")).toBeInTheDocument();
+  });
+
+  it('renders the reasoning trace closed for a turn already present at mount (historical, overlay placement)', () => {
+    // The "Animated" (overlay) placement auto-reveals only NEWLY-ARRIVED turns. A turn present at
+    // mount is history — it must render the collapsed chip closed, never flashing open on load.
+    hookReturn = makeReturn({
+      turns: [
+        {
+          role: 'assistant',
+          content: 'A question.',
+          reasoning: [{ kind: 'extraction', label: 'Captured your name', tone: 'neutral' }],
+        },
+      ],
+    });
+    render(<QuestionnaireChat sessionId="s1" stream={hookReturn} reasoningPlacement="overlay" />);
+
+    const chip = screen.getByRole('button', { name: /reasoning/i });
+    expect(chip).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('auto-reveals (mounts open) the reasoning trace on the newest turn under the overlay placement', async () => {
+    // Mount with just the respondent's turn so `openingTurnCount` is 1; the assistant turn then
+    // ARRIVES (index 1 ≥ openingTurnCount) and is the newest, so its trace auto-reveals open.
+    hookReturn = makeReturn({ turns: [{ role: 'user', content: 'Ada' }] });
+    const { rerender } = render(
+      <QuestionnaireChat sessionId="s1" stream={hookReturn} reasoningPlacement="overlay" />
+    );
+
+    hookReturn = makeReturn({
+      turns: [
+        { role: 'user', content: 'Ada' },
+        {
+          role: 'assistant',
+          content: 'Thanks, Ada.',
+          reasoning: [{ kind: 'selection', label: 'Asking about your role next', tone: 'insight' }],
+        },
+      ],
+    });
+    rerender(<QuestionnaireChat sessionId="s1" stream={hookReturn} reasoningPlacement="overlay" />);
+
+    // The trace mounts OPEN (autoReveal) — the chip's disclosure is expanded on arrival.
+    const chip = await screen.findByRole('button', { name: /reasoning/i });
+    expect(chip).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('holds the next question back until the auto-revealed reasoning has closed (overlay)', () => {
+    // The respondent should read the reasoning first: under "Animated", the reply must not start
+    // typing until the trace has dwelled (2s) and animated closed. Fake timers drive the sequence.
+    vi.useFakeTimers();
+    try {
+      hookReturn = makeReturn({ turns: [{ role: 'user', content: 'Ada' }] });
+      const { rerender } = render(
+        <QuestionnaireChat sessionId="s1" stream={hookReturn} reasoningPlacement="overlay" />
+      );
+
+      hookReturn = makeReturn({
+        turns: [
+          { role: 'user', content: 'Ada' },
+          {
+            role: 'assistant',
+            content: 'What is your current role?',
+            reasoning: [
+              { kind: 'selection', label: 'Asking about your role next', tone: 'insight' },
+            ],
+          },
+        ],
+      });
+      act(() => {
+        rerender(
+          <QuestionnaireChat sessionId="s1" stream={hookReturn} reasoningPlacement="overlay" />
+        );
+      });
+
+      // During the hold: the reasoning is open and the question has NOT begun typing.
+      const chip = screen.getByRole('button', { name: /reasoning/i });
+      expect(chip).toHaveAttribute('aria-expanded', 'true');
+      expect(screen.queryByText(/What is your current role/)).not.toBeInTheDocument();
+
+      // After the 2s dwell: the trace has closed, but the question is still held (collapse pending).
+      act(() => {
+        vi.advanceTimersByTime(AUTO_REVEAL_DWELL_MS);
+      });
+      expect(chip).toHaveAttribute('aria-expanded', 'false');
+      expect(screen.queryByText(/What is your current role/)).not.toBeInTheDocument();
+
+      // The collapse window elapses → the hold releases and the typewriter is kicked off (the
+      // interval is created on this commit, so it needs a further tick to actually type).
+      act(() => {
+        vi.advanceTimersByTime(AUTO_REVEAL_COLLAPSE_MS);
+      });
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(screen.getByText(/What is your current role/)).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not render a reasoning trace when no placement is set even if the turn carries steps', () => {
+    // Feature off (no placement) ⇒ TurnReasoning renders nothing regardless of the turn's steps.
+    hookReturn = makeReturn({
+      turns: [
+        {
+          role: 'assistant',
+          content: 'A question.',
+          reasoning: [{ kind: 'extraction', label: 'Captured your name', tone: 'neutral' }],
+        },
+      ],
+    });
+    render(<QuestionnaireChat sessionId="s1" stream={hookReturn} />);
+
+    expect(screen.queryByRole('button', { name: /reasoning/i })).not.toBeInTheDocument();
   });
 
   it('sends on Send click and clears the composer', () => {

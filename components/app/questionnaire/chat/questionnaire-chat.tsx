@@ -44,7 +44,13 @@ import { ChatErrorPanel } from '@/components/app/questionnaire/chat/chat-error-p
 import { ContradictionNotice } from '@/components/app/questionnaire/chat/contradiction-notice';
 import { SeriousnessNotice } from '@/components/app/questionnaire/chat/seriousness-notice';
 import { SupportNotice } from '@/components/app/questionnaire/chat/support-notice';
-import { ReasoningTrace } from '@/components/app/questionnaire/chat/reasoning-trace';
+import {
+  ReasoningTrace,
+  AUTO_REVEAL_DWELL_MS,
+  AUTO_REVEAL_PER_ITEM_MS,
+  AUTO_REVEAL_COLLAPSE_MS,
+  computeReasoningDwellMs,
+} from '@/components/app/questionnaire/chat/reasoning-trace';
 import { TurnInspectorDrawer } from '@/components/app/questionnaire/chat/turn-inspector-drawer';
 
 export interface QuestionnaireChatProps {
@@ -59,12 +65,22 @@ export interface QuestionnaireChatProps {
   /** Show the attachment affordance (gated server-side on the attachment-input flag). */
   attachmentInputEnabled?: boolean;
   /**
-   * Live "watch it think" reasoning placement (demo feature) — `overlay` shows an animated feed
-   * while a turn streams then collapses it onto the turn; `inline` shows only the quiet collapsed
-   * trace beneath each turn. `undefined`/null = the feature is off (no trace rendered), which is
-   * what the page passes when the platform flag or the version toggle is off.
+   * "Watch it think" reasoning placement (demo feature) — `overlay` ("Animated") mounts the newest
+   * turn's collapsed trace open then animates it closed after a beat; `inline` shows the quiet
+   * collapsed trace beneath each turn (opens on click only). `undefined`/null = the feature is off
+   * (no trace rendered), which is what the page passes when the platform flag or version toggle is off.
    */
   reasoningPlacement?: ReasoningPlacement | null;
+  /**
+   * "Animated" placement timing (ms): how long the newest turn's reasoning summary stays open for
+   * up to two steps. Defaults to {@link AUTO_REVEAL_DWELL_MS}. Admin-tunable per version.
+   */
+  reasoningDwellMs?: number;
+  /**
+   * "Animated" placement timing (ms): extra dwell added per reasoning step beyond two, so a longer
+   * summary stays open long enough to read. Defaults to {@link AUTO_REVEAL_PER_ITEM_MS}.
+   */
+  reasoningPerItemMs?: number;
   /**
    * Type the seeded opening turn(s) in (the welcome greeting) instead of snapping them in
    * fully-formed. Replies that arrive *after* mount always type in regardless; this flag only
@@ -109,21 +125,31 @@ function TurnNotices({ warnings }: { warnings?: SessionWarning[] }) {
 }
 
 /**
- * The settled (collapsed) reasoning trace for one assistant turn, rendered **above** the reply —
- * directly under the respondent's message it processed, before the agent's reply. The trace is about
- * reading that message and choosing what to ask next, so it belongs there, not below the reply.
- * Shown for BOTH placements' history (overlay collapses to this once the turn settles; inline only
- * ever shows this). Renders nothing when the feature is off (no placement) or the turn had no trace.
+ * The collapsed reasoning trace for one assistant turn, rendered **above** the reply — directly under
+ * the respondent's message it processed, before the agent's reply. The trace is about reading that
+ * message and choosing what to ask next, so it belongs there, not below the reply. Renders nothing
+ * when the feature is off (no placement) or the turn had no trace.
+ *
+ * `autoReveal` (the "Animated"/`overlay` placement, newest turn only) makes it mount open and tuck
+ * itself away after a beat; otherwise it mounts closed (the quiet "Inline" disclosure, and every
+ * historical turn).
  */
 function TurnReasoning({
   steps,
   placement,
+  autoReveal = false,
+  dwellMs,
 }: {
   steps?: ReasoningStep[];
   placement?: ReasoningPlacement | null;
+  autoReveal?: boolean;
+  /** How long the trace stays open under `autoReveal` (ms) — sized to the step count by the caller. */
+  dwellMs?: number;
 }) {
   if (!placement || !steps || steps.length === 0) return null;
-  return <ReasoningTrace steps={steps} variant="collapsed" className="mb-2.5" />;
+  return (
+    <ReasoningTrace steps={steps} autoReveal={autoReveal} dwellMs={dwellMs} className="mb-2.5" />
+  );
 }
 
 function UserBubble({ content }: { content: string }) {
@@ -182,6 +208,9 @@ function TypewriterAssistantTurn({
   warnings,
   reasoning,
   reasoningPlacement,
+  reasoningAutoReveal = false,
+  reasoningDwellMs,
+  reasoningHoldMs = 0,
   onDone,
 }: {
   content: string;
@@ -190,10 +219,23 @@ function TypewriterAssistantTurn({
   /** The turn's reasoning trace, rendered collapsed beneath the reply once it has typed in. */
   reasoning?: ReasoningStep[];
   reasoningPlacement?: ReasoningPlacement | null;
+  /** "Animated" placement, newest turn: mount the trace open and tuck it away after a beat. */
+  reasoningAutoReveal?: boolean;
+  /** How long the auto-revealed trace stays open (ms) — sized to the step count by the caller. */
+  reasoningDwellMs?: number;
+  /**
+   * Hold the reply back for this long (ms) before it types in — used by the "Animated" placement so
+   * the next question doesn't appear until the auto-revealed reasoning has finished tucking away.
+   * `0` types immediately. The reasoning trace is rendered throughout the hold (it owns its own
+   * open→close timing); only the reply is gated.
+   */
+  reasoningHoldMs?: number;
   /** Fired once when the message has fully typed in (used to chain the opening turns). */
   onDone?: () => void;
 }) {
   const [shown, setShown] = useState(0);
+  // Gate the reply on the reasoning's dwell+collapse so the question doesn't race the trace closing.
+  const [holding, setHolding] = useState(reasoningHoldMs > 0);
   // Keep the latest callback without re-running the typing effect (which would restart the timer).
   const onDoneRef = useRef(onDone);
   useEffect(() => {
@@ -201,6 +243,14 @@ function TypewriterAssistantTurn({
   });
 
   useEffect(() => {
+    if (reasoningHoldMs <= 0) return;
+    const t = setTimeout(() => setHolding(false), reasoningHoldMs);
+    return () => clearTimeout(t);
+  }, [reasoningHoldMs]);
+
+  useEffect(() => {
+    // Don't start typing while the reasoning is still on screen — the reply waits for the hold.
+    if (holding) return;
     setShown(0);
     if (content.length === 0) {
       onDoneRef.current?.();
@@ -216,15 +266,22 @@ function TypewriterAssistantTurn({
       }
     }, TYPE_TICK_MS);
     return () => clearInterval(id);
-  }, [content]);
+  }, [content, holding]);
 
   const done = shown >= content.length;
   return (
     <AssistantTurn>
-      {/* Reasoning sits ABOVE the reply — directly under the respondent's message it processed —
-          and shows as the reply types, so it reads as "here's what I worked out, now my question." */}
-      <TurnReasoning steps={reasoning} placement={reasoningPlacement} />
-      {done ? (
+      {/* Reasoning sits ABOVE the reply. Under the "Animated" placement it shows open first, then
+          tucks away — and the reply is held back (below) until it has, so it reads as
+          "here's what I worked out" → (tucks away) → "now my question." */}
+      <TurnReasoning
+        steps={reasoning}
+        placement={reasoningPlacement}
+        autoReveal={reasoningAutoReveal}
+        dwellMs={reasoningDwellMs}
+      />
+      {/* While holding, only the reasoning is on screen — the reply has not begun yet. */}
+      {holding ? null : done ? (
         <>
           <div className="prose prose-sm dark:prose-invert max-w-none">
             <Markdown>{content}</Markdown>
@@ -257,6 +314,9 @@ function RevealedAssistantTurn({
   warnings,
   reasoning,
   reasoningPlacement,
+  reasoningAutoReveal = false,
+  reasoningDwellMs,
+  reasoningHoldMs = 0,
   beatMs,
   onDone,
 }: {
@@ -266,6 +326,12 @@ function RevealedAssistantTurn({
   /** The turn's reasoning trace, rendered collapsed beneath the reply once it has typed in. */
   reasoning?: ReasoningStep[];
   reasoningPlacement?: ReasoningPlacement | null;
+  /** "Animated" placement, newest turn: mount the trace open and tuck it away after a beat. */
+  reasoningAutoReveal?: boolean;
+  /** How long the auto-revealed trace stays open (ms) — sized to the step count by the caller. */
+  reasoningDwellMs?: number;
+  /** Hold the reply back until the auto-revealed reasoning has tucked away (ms); `0` = no hold. */
+  reasoningHoldMs?: number;
   /** Pre-type "Thinking…" pause in ms; `0` types immediately (a normal post-answer reply). */
   beatMs: number;
   onDone: () => void;
@@ -290,6 +356,9 @@ function RevealedAssistantTurn({
       warnings={warnings}
       reasoning={reasoning}
       reasoningPlacement={reasoningPlacement}
+      reasoningAutoReveal={reasoningAutoReveal}
+      reasoningDwellMs={reasoningDwellMs}
+      reasoningHoldMs={reasoningHoldMs}
       onDone={onDone}
     />
   );
@@ -302,23 +371,13 @@ export function QuestionnaireChat({
   voiceInputEnabled = false,
   attachmentInputEnabled = false,
   reasoningPlacement,
+  reasoningDwellMs = AUTO_REVEAL_DWELL_MS,
+  reasoningPerItemMs = AUTO_REVEAL_PER_ITEM_MS,
   animateOpening = false,
   className,
 }: QuestionnaireChatProps) {
-  const {
-    turns,
-    streaming,
-    streamingReasoning,
-    inspectorTurns,
-    status,
-    error,
-    canSend,
-    sendMessage,
-    dismissError,
-  } = stream;
-  // Overlay placement shows the live feed in place of the thinking dots; inline keeps the plain
-  // dots and only reveals the (collapsed) trace once the turn settles.
-  const showLiveOverlay = reasoningPlacement === 'overlay' && streamingReasoning.length > 0;
+  const { turns, streaming, inspectorTurns, status, error, canSend, sendMessage, dismissError } =
+    stream;
 
   const [input, setInput] = useState('');
   const [voiceError, setVoiceError] = useState<string | null>(null);
@@ -448,6 +507,23 @@ export function QuestionnaireChat({
             // The active turn (and already-typed ones, which re-render settled): beat → type, and
             // advance the queue on completion. A settled turn passes beat 0 and a no-op onDone.
             const isActive = i === revealCursor;
+            // "Animated" placement auto-reveals only the NEWEST turn, and only when it arrived this
+            // session (index past the resumed history) — so a reload doesn't flash every turn open.
+            const reasoningAutoReveal =
+              reasoningPlacement === 'overlay' && i === turns.length - 1 && i >= openingTurnCount;
+            // The open duration scales with how much there is to read: base dwell for up to two
+            // steps, plus the per-item dwell for each step beyond. Both come from the version config.
+            const stepCount = turn.reasoning?.length ?? 0;
+            const reasoningDwell = computeReasoningDwellMs(
+              stepCount,
+              reasoningDwellMs,
+              reasoningPerItemMs
+            );
+            // When the trace auto-reveals AND this turn actually has steps to show, hold the reply
+            // back until the trace has dwelled and finished tucking away — so the next question
+            // doesn't appear until the reasoning summary closes. No steps ⇒ no hold (no dead air).
+            const reasoningHoldMs =
+              reasoningAutoReveal && stepCount > 0 ? reasoningDwell + AUTO_REVEAL_COLLAPSE_MS : 0;
             return (
               <RevealedAssistantTurn
                 key={i}
@@ -455,6 +531,9 @@ export function QuestionnaireChat({
                 warnings={turn.warnings}
                 reasoning={turn.reasoning}
                 reasoningPlacement={reasoningPlacement}
+                reasoningAutoReveal={reasoningAutoReveal}
+                reasoningDwellMs={reasoningDwell}
+                reasoningHoldMs={reasoningHoldMs}
                 beatMs={isActive ? beatForTurn(i) : 0}
                 onDone={isActive ? () => setRevealCursor((c) => Math.max(c, i + 1)) : () => {}}
               />
@@ -467,14 +546,10 @@ export function QuestionnaireChat({
               while earlier opening messages are still revealing. */}
           {streaming && revealCursor >= turns.length && (
             <AssistantTurn>
-              {/* Overlay placement: once the reasoning frame lands, the live feed replaces the dots
-                  so the respondent watches the agent work; until then (and for inline) the calm
-                  thinking dots stand in. */}
-              {showLiveOverlay ? (
-                <ReasoningTrace variant="live" steps={streamingReasoning} />
-              ) : (
-                <ThinkingIndicator />
-              )}
+              {/* A calm "thinking" indicator stands in while the reply composes; the reasoning trace
+                  reveals on the settled turn (above), tucking itself away under the "Animated"
+                  placement. */}
+              <ThinkingIndicator />
             </AssistantTurn>
           )}
 

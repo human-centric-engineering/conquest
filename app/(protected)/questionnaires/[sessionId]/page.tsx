@@ -162,6 +162,8 @@ export default async function QuestionnaireSessionPage({
           voiceInputEnabled={voiceInputEnabled}
           attachmentInputEnabled={attachmentInputEnabled}
           reasoningPlacement={reasoningPlacement}
+          reasoningDwellMs={row.config?.reasoningStreamDwellMs}
+          reasoningPerItemMs={row.config?.reasoningStreamPerItemMs}
         />
       </BrandThemeProvider>
     </div>
