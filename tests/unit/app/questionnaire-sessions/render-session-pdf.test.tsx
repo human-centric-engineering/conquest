@@ -72,6 +72,26 @@ describe('renderSessionPdf', () => {
     expect(startsWithPdfMagic(pdf)).toBe(true);
   }, 20000);
 
+  it('renders the AI insights section (Respondent Report mode 2)', async () => {
+    const pdf = await renderSessionPdf(
+      model({
+        insights: {
+          summary: 'You are highly engaged.',
+          sections: [{ heading: 'Strengths', body: 'Consistent positivity across the board.' }],
+          actions: ['Block weekly focus time', 'Share your approach with the team'],
+        },
+      })
+    );
+    expect(startsWithPdfMagic(pdf)).toBe(true);
+  }, 20000);
+
+  it('renders an insights section with no sub-sections or actions', async () => {
+    const pdf = await renderSessionPdf(
+      model({ insights: { summary: 'Short and sweet.', sections: [], actions: [] } })
+    );
+    expect(startsWithPdfMagic(pdf)).toBe(true);
+  }, 20000);
+
   it('renders the remaining header + slot branches without throwing', async () => {
     // Exercises: a branded logo, no goal/audience header rows, an unscored answer
     // (no confidence meta), a multi-entry refinement history, an unparseable

@@ -22,6 +22,7 @@ import { reapZombieExecutions } from '@/lib/orchestration/engine/execution-reape
 import { backfillMissingEmbeddings } from '@/lib/orchestration/chat/message-embedder';
 import { enforceRetentionPolicies } from '@/lib/orchestration/retention';
 import { processPendingEvaluationRuns } from '@/lib/orchestration/evaluations/run-worker';
+import { processQueuedRespondentReports } from '@/lib/app/questionnaire/report/worker';
 
 /** Module-level guard against overlapping tick executions. */
 let tickRunning = false;
@@ -49,6 +50,7 @@ export const BACKGROUND_TASK_NAMES = [
   'retention',
   'pendingExecutionRecovery',
   'evaluationRuns',
+  'respondentReports',
 ] as const;
 
 /**
@@ -108,6 +110,7 @@ export async function runMaintenanceTick(): Promise<TickResult> {
     enforceRetentionPolicies(),
     processPendingExecutions(),
     processPendingEvaluationRuns(),
+    processQueuedRespondentReports(),
   ])
     .then((settled) => {
       const summary = Object.fromEntries(

@@ -296,3 +296,69 @@ describe('updateConfigSchema — tone (F-tone)', () => {
     ).toBe(false);
   });
 });
+
+describe('updateConfigSchema — respondentReport (Respondent Report)', () => {
+  /** A complete report block — the editor always sends the whole thing. */
+  const fullReport = {
+    enabled: true,
+    mode: 'raw_plus_insights' as const,
+    rawIncludes: { dataSlots: true, questionsAsPresented: true },
+    generation: {
+      instructions: 'Warm, concise, second person.',
+      structure: 'Summary, then three themes, then next steps.',
+      backgroundContext: 'This client runs quarterly engagement pulses.',
+      useClientKnowledge: true,
+    },
+    delivery: { onScreen: true, download: true },
+  };
+
+  it('accepts a well-formed full report block', () => {
+    expect(updateConfigSchema.safeParse({ respondentReport: fullReport }).success).toBe(true);
+  });
+
+  it('rejects an unknown mode', () => {
+    expect(
+      updateConfigSchema.safeParse({ respondentReport: { ...fullReport, mode: 'narrative' } })
+        .success
+    ).toBe(false);
+  });
+
+  it('rejects a partial block (a missing sub-object) — the block is sent whole', () => {
+    const { delivery: _omit, ...partial } = fullReport;
+    void _omit;
+    expect(updateConfigSchema.safeParse({ respondentReport: partial }).success).toBe(false);
+  });
+
+  it('rejects unknown keys at any level', () => {
+    expect(
+      updateConfigSchema.safeParse({ respondentReport: { ...fullReport, bogus: true } }).success
+    ).toBe(false);
+    expect(
+      updateConfigSchema.safeParse({
+        respondentReport: {
+          ...fullReport,
+          rawIncludes: { ...fullReport.rawIncludes, extra: true },
+        },
+      }).success
+    ).toBe(false);
+  });
+
+  it('rejects over-long free-text fields', () => {
+    expect(
+      updateConfigSchema.safeParse({
+        respondentReport: {
+          ...fullReport,
+          generation: { ...fullReport.generation, instructions: 'x'.repeat(4001) },
+        },
+      }).success
+    ).toBe(false);
+    expect(
+      updateConfigSchema.safeParse({
+        respondentReport: {
+          ...fullReport,
+          generation: { ...fullReport.generation, backgroundContext: 'x'.repeat(8001) },
+        },
+      }).success
+    ).toBe(false);
+  });
+});

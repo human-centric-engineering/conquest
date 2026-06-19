@@ -15,12 +15,14 @@
  */
 
 import { useCallback, useRef, useState } from 'react';
-import { CheckCircle2, Download } from 'lucide-react';
+import { CheckCircle2, Download, Loader2 } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { SessionRefChip } from '@/components/app/questionnaire/lifecycle/session-ref-chip';
 import { API } from '@/lib/api/endpoints';
+import { useRespondentReport } from '@/lib/hooks/use-respondent-report';
+import type { RespondentReportContent } from '@/lib/app/questionnaire/report/content';
 
 export interface SessionCompleteProps {
   /** The session to export. */
@@ -45,6 +47,19 @@ export function SessionComplete({
   const [error, setError] = useState(false);
   // Guard against a double-click kicking off two concurrent renders.
   const inFlightRef = useRef(false);
+
+  // Respondent report view (polls while insights generate). When no report is configured the view
+  // is `enabled: false` and the screen keeps its default responses-PDF download (F7.4 behaviour).
+  const { view, loaded } = useRespondentReport(sessionId, accessToken);
+  const reportEnabled = view?.enabled ?? false;
+  // Hold the download button until the view resolves so a `download: false` config never flashes a
+  // clickable button in the gap before the first fetch settles. No report configured → default on.
+  const showDownload = loaded ? (reportEnabled ? view!.download : true) : false;
+  const showInsights =
+    reportEnabled &&
+    view!.onScreen &&
+    view!.mode === 'raw_plus_insights' &&
+    view!.insights !== null;
 
   const handleDownload = useCallback(() => {
     if (inFlightRef.current) return;
@@ -84,7 +99,10 @@ export function SessionComplete({
       <div
         role="status"
         aria-live="polite"
-        className="bg-card flex max-w-md flex-col items-center gap-4 rounded-2xl border px-8 py-10 text-center"
+        className={cn(
+          'bg-card flex flex-col items-center gap-4 rounded-2xl border px-8 py-10 text-center',
+          showInsights ? 'max-w-2xl' : 'max-w-md'
+        )}
       >
         <span
           className="flex h-14 w-14 items-center justify-center rounded-full"
@@ -107,16 +125,20 @@ export function SessionComplete({
           </p>
         </div>
 
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={handleDownload}
-          disabled={downloading}
-        >
-          <Download className="h-4 w-4" aria-hidden="true" />
-          {downloading ? 'Preparing…' : 'Download PDF'}
-        </Button>
+        {showInsights && view?.insights && <ReportInsights insights={view.insights} />}
+
+        {showDownload && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleDownload}
+            disabled={downloading}
+          >
+            <Download className="h-4 w-4" aria-hidden="true" />
+            {downloading ? 'Preparing…' : 'Download PDF'}
+          </Button>
+        )}
         {error && (
           <p className="text-destructive text-xs" role="alert">
             Couldn&rsquo;t prepare your PDF. Please try again.
@@ -129,6 +151,62 @@ export function SessionComplete({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/** The AI insights section on the completion screen — preparing / ready / failed states. */
+function ReportInsights({
+  insights,
+}: {
+  insights: {
+    status: 'queued' | 'processing' | 'ready' | 'failed';
+    content: RespondentReportContent | null;
+    generatedAt: string | null;
+    error: string | null;
+  };
+}) {
+  if (insights.status === 'failed') {
+    return (
+      <p className="text-muted-foreground text-sm" role="status">
+        We couldn&rsquo;t prepare your personalised insights this time. Your responses were saved.
+      </p>
+    );
+  }
+
+  if (insights.status !== 'ready' || !insights.content) {
+    return (
+      <div
+        className="text-muted-foreground flex items-center gap-2 text-sm"
+        role="status"
+        aria-live="polite"
+      >
+        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+        Preparing your personalised report…
+      </div>
+    );
+  }
+
+  const { summary, sections, actions } = insights.content;
+  return (
+    <div className="w-full space-y-4 border-t pt-4 text-left">
+      <p className="text-foreground text-sm leading-relaxed">{summary}</p>
+      {sections.map((section, i) => (
+        <div key={i} className="space-y-1">
+          <h2 className="text-foreground text-sm font-semibold">{section.heading}</h2>
+          <p className="text-muted-foreground text-sm leading-relaxed">{section.body}</p>
+        </div>
+      ))}
+      {actions.length > 0 && (
+        <div className="space-y-1">
+          <h2 className="text-foreground text-sm font-semibold">What you can do next</h2>
+          <ul className="text-muted-foreground list-disc space-y-1 pl-5 text-sm">
+            {actions.map((action, i) => (
+              <li key={i}>{action}</li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

@@ -23,7 +23,10 @@ import type {
   QuestionnaireVersionSummary,
   VersionGraphView,
 } from '@/lib/app/questionnaire/views';
-import { DEFAULT_TONE_SETTINGS } from '@/lib/app/questionnaire/types';
+import {
+  DEFAULT_RESPONDENT_REPORT_SETTINGS,
+  DEFAULT_TONE_SETTINGS,
+} from '@/lib/app/questionnaire/types';
 import type { AttributedDemoClient, DemoClientView } from '@/lib/app/questionnaire/demo-clients';
 import type { QuestionnaireWorkspaceFlags } from '@/lib/app/questionnaire/workspace-data';
 
@@ -208,6 +211,7 @@ function makeGraph(over: Partial<VersionGraphView> = {}): VersionGraphView {
       reasoningStreamPersist: true,
       previewInspectorEnabled: false,
       tone: DEFAULT_TONE_SETTINGS,
+      respondentReport: DEFAULT_RESPONDENT_REPORT_SETTINGS,
     },
     ...over,
   };
@@ -219,6 +223,7 @@ function makeFlags(over: Partial<QuestionnaireWorkspaceFlags> = {}): Questionnai
     adaptiveDataSlots: false,
     dataSlots: false,
     designEval: false,
+    respondentReport: false,
     ...over,
   } as QuestionnaireWorkspaceFlags;
 }

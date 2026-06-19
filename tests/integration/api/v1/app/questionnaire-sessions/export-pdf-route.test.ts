@@ -29,6 +29,10 @@ vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/render-session-pdf', () =>
 const tokenMock = vi.hoisted(() => ({ verifySessionToken: vi.fn() }));
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/session-access-token', () => tokenMock);
 
+// The route asks for the report view to decide whether to embed insights — mock it to "no report".
+const reportViewMock = vi.hoisted(() => ({ buildRespondentReportClientView: vi.fn() }));
+vi.mock('@/lib/app/questionnaire/report/view', () => reportViewMock);
+
 import { GET } from '@/app/api/v1/app/questionnaire-sessions/[id]/export.pdf/route';
 import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
@@ -85,6 +89,7 @@ beforeEach(() => {
   setAuth(mockAuthenticatedUser());
   exportMock.loadSessionExport.mockResolvedValue(loaded(USER));
   exportMock.buildSessionExportPdfModel.mockResolvedValue(model());
+  reportViewMock.buildRespondentReportClientView.mockResolvedValue(null);
   renderMock.renderSessionPdf.mockResolvedValue(Buffer.from('%PDF-1.7\n%mock'));
 });
 

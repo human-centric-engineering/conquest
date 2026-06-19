@@ -32,6 +32,7 @@ import {
 } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-export';
 import { renderSessionPdf } from '@/app/api/v1/app/questionnaire-sessions/_lib/render-session-pdf';
 import { sessionPdfResponse } from '@/app/api/v1/app/questionnaire-sessions/_lib/pdf-response';
+import { buildRespondentReportClientView } from '@/lib/app/questionnaire/report/view';
 
 export const runtime = 'nodejs';
 
@@ -52,7 +53,12 @@ async function handleExportPdf(
       return errorResponse(access.message, { code: access.code, status: access.status });
     }
 
-    const model = await buildSessionExportPdfModel(loaded);
+    // Include the AI insights in the PDF when the report is a ready mode-2 report (the on-screen
+    // and PDF artifacts should match). Raw-only / not-yet-ready → null (answers only).
+    const reportView = await buildRespondentReportClientView(sessionId);
+    const insights = reportView?.insights?.status === 'ready' ? reportView.insights.content : null;
+
+    const model = await buildSessionExportPdfModel(loaded, insights);
     const pdf = await renderSessionPdf(model);
 
     log.info('Session export PDF generated', {

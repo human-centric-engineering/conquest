@@ -19,7 +19,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
 import type { VersionGraphView, TagView } from '@/lib/app/questionnaire/views';
-import { DEFAULT_TONE_SETTINGS } from '@/lib/app/questionnaire/types';
+import {
+  DEFAULT_RESPONDENT_REPORT_SETTINGS,
+  DEFAULT_TONE_SETTINGS,
+} from '@/lib/app/questionnaire/types';
 import type {
   QuestionDistributionsResult,
   CompletionFunnelResult,
@@ -170,6 +173,7 @@ function makeGraph(over: Partial<VersionGraphView> = {}): VersionGraphView {
       reasoningStreamPersist: true,
       previewInspectorEnabled: false,
       tone: DEFAULT_TONE_SETTINGS,
+      respondentReport: DEFAULT_RESPONDENT_REPORT_SETTINGS,
     },
     ...over,
   };

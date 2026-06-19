@@ -244,6 +244,31 @@ describe('upsert + response', () => {
     expect((await res.json()).data.tone).toEqual(tone);
   });
 
+  it('writes the respondentReport block through the JSON boundary and narrows it back', async () => {
+    const respondentReport = {
+      enabled: true,
+      mode: 'raw_plus_insights' as const,
+      rawIncludes: { dataSlots: true, questionsAsPresented: true },
+      generation: {
+        instructions: 'Warm and concise.',
+        structure: 'Summary, themes, next steps.',
+        backgroundContext: 'Quarterly engagement pulse.',
+        useClientKnowledge: true,
+      },
+      delivery: { onScreen: true, download: true },
+    };
+    prismaMock.appQuestionnaireConfig.upsert.mockResolvedValue(configRow({ respondentReport }));
+
+    const res = await configPATCH(req({ respondentReport }), ctx(PARAMS));
+    expect(res.status).toBe(200);
+    const call = prismaMock.appQuestionnaireConfig.upsert.mock.calls[0][0];
+    // The JSON column is written on both create + update paths.
+    expect(call.create.respondentReport).toEqual(respondentReport);
+    expect(call.update.respondentReport).toEqual(respondentReport);
+    // The response view carries the narrowed block back to the editor.
+    expect((await res.json()).data.respondentReport).toEqual(respondentReport);
+  });
+
   it('forks a launched version and writes to the new draft', async () => {
     prismaMock.appQuestionnaireVersion.findFirst.mockResolvedValue({
       id: 'v1',

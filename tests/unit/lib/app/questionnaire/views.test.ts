@@ -185,6 +185,18 @@ function makeConfigView(overrides: Partial<ConfigView> = {}): ConfigView {
       humour: { enabled: false, level: 3 },
       persona: { enabled: false, text: '' },
     },
+    respondentReport: {
+      enabled: false,
+      mode: 'raw',
+      rawIncludes: { dataSlots: false, questionsAsPresented: true },
+      generation: {
+        instructions: '',
+        structure: '',
+        backgroundContext: '',
+        useClientKnowledge: false,
+      },
+      delivery: { onScreen: true, download: true },
+    },
     ...overrides,
   };
 }

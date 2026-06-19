@@ -45,6 +45,7 @@ single JSON column for the profile fields:
 | Answer panel scope                    | `answerSlotPanelScope`     | String (enum)          | `'full_progress'`   |
 | Presentation mode                     | `presentationMode`         | String (enum)          | `'chat'`            |
 | Interviewer tone & persona            | `tone`                     | Json (object)          | all dimensions off  |
+| Respondent Report                     | `respondentReport`         | Json (object)          | disabled, raw mode  |
 
 The enums are `const` tuples in `lib/app/questionnaire/types.ts` (single source of
 truth — the Zod schema, the read-view narrowing, and the editor's `<Select>`
@@ -86,6 +87,17 @@ reading complexity, humour) plus a free-text `persona`. Each dimension is off by
 default block changes nothing. The live phraser renders the **enabled** dimensions into its system
 prompt; gated additionally by the platform flag `APP_QUESTIONNAIRES_TONE_ENABLED`. See
 [`interviewer-tone.md`](./interviewer-tone.md).
+
+`respondentReport` (report kind `respondent`) is the per-respondent report delivered after a
+respondent completes the questionnaire — a single JSON object (`RespondentReportSettings`):
+`enabled`, `mode` (`raw | raw_plus_insights`), `rawIncludes` (data-slot values / questions as
+presented), a `generation` block (free-text instructions + structure, a flat `backgroundContext`
+blob, and `useClientKnowledge`), and `delivery` toggles (on-screen / download). Disabled by default,
+so the default block changes nothing; gated additionally by the platform flag
+`APP_QUESTIONNAIRES_RESPONDENT_REPORT_ENABLED`. Narrowed on read by `narrowRespondentReportSettings`
+(`lib/app/questionnaire/report/settings.ts`). The mode-2 (`raw_plus_insights`) report is generated
+once, asynchronously, after submit and stored in `AppRespondentReport`; raw mode renders on demand.
+The `cohort` report kind (cross-respondent analysis) is a separate, later feature.
 
 ### Profile fields (JSON, not a relational model)
 

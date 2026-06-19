@@ -37,6 +37,7 @@ import { SessionTransitionError } from '@/lib/app/questionnaire/session';
 import { resolveTurnAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-access';
 import { buildTurnContext } from '@/app/api/v1/app/questionnaires/_lib/turn-context';
 import { markSessionCompleted } from '@/app/api/v1/app/questionnaires/_lib/sessions';
+import { enqueueRespondentReport } from '@/lib/app/questionnaire/report/enqueue';
 
 async function handleSubmit(
   request: NextRequest,
@@ -86,6 +87,14 @@ async function handleSubmit(
     try {
       const status = await markSessionCompleted(sessionId, { reason: 'respondent_submit' });
       log.info('Respondent session submitted', { sessionId, status });
+      // Queue the respondent report when the version is configured for it (mode raw_plus_insights).
+      // Best-effort — a queue failure must never fail the submission the respondent just made.
+      await enqueueRespondentReport(sessionId).catch((err) => {
+        log.error('Failed to enqueue respondent report', {
+          sessionId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
       return successResponse({ sessionId, status });
     } catch (err) {
       if (err instanceof SessionTransitionError) {

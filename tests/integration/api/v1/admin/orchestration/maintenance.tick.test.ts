@@ -81,6 +81,9 @@ vi.mock('@/lib/orchestration/retention', () => ({
 vi.mock('@/lib/orchestration/evaluations/run-worker', () => ({
   processPendingEvaluationRuns: vi.fn(),
 }));
+vi.mock('@/lib/app/questionnaire/report/worker', () => ({
+  processQueuedRespondentReports: vi.fn(),
+}));
 
 // ─── Imports ─────────────────────────────────────────────────────────────────
 
@@ -97,6 +100,7 @@ import { reapZombieExecutions } from '@/lib/orchestration/engine/execution-reape
 import { backfillMissingEmbeddings } from '@/lib/orchestration/chat/message-embedder';
 import { enforceRetentionPolicies } from '@/lib/orchestration/retention';
 import { processPendingEvaluationRuns } from '@/lib/orchestration/evaluations/run-worker';
+import { processQueuedRespondentReports } from '@/lib/app/questionnaire/report/worker';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -157,6 +161,11 @@ describe('POST /api/v1/admin/orchestration/maintenance/tick', () => {
       failed: 0,
       cancelled: 0,
     });
+    vi.mocked(processQueuedRespondentReports).mockResolvedValue({
+      claimed: 0,
+      succeeded: 0,
+      failed: 0,
+    });
     vi.mocked(processOrphanedExecutions).mockResolvedValue({
       recovered: 0,
       exhausted: 0,
@@ -202,6 +211,7 @@ describe('POST /api/v1/admin/orchestration/maintenance/tick', () => {
       'retention',
       'pendingExecutionRecovery',
       'evaluationRuns',
+      'respondentReports',
     ]);
     expect(body.data.durationMs).toEqual(expect.any(Number));
   });

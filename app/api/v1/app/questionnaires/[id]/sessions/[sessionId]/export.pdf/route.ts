@@ -29,6 +29,7 @@ import {
 } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-export';
 import { renderSessionPdf } from '@/app/api/v1/app/questionnaire-sessions/_lib/render-session-pdf';
 import { sessionPdfResponse } from '@/app/api/v1/app/questionnaire-sessions/_lib/pdf-response';
+import { buildRespondentReportClientView } from '@/lib/app/questionnaire/report/view';
 
 export const runtime = 'nodejs';
 
@@ -45,7 +46,13 @@ const handleAdminExportPdf = withAdminAuth<{ id: string; sessionId: string }>(
         return errorResponse('Session not found', { code: 'NOT_FOUND', status: 404 });
       }
 
-      const model = await buildSessionExportPdfModel(loaded);
+      // Embed the AI insights when the report is a ready mode-2 report, so the admin's PDF matches
+      // what the respondent received (the respondent route does the same).
+      const reportView = await buildRespondentReportClientView(sessionId);
+      const insights =
+        reportView?.insights?.status === 'ready' ? reportView.insights.content : null;
+
+      const model = await buildSessionExportPdfModel(loaded, insights);
       const pdf = await renderSessionPdf(model);
 
       log.info('Admin session export PDF generated', {

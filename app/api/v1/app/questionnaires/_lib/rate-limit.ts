@@ -238,3 +238,19 @@ export const composeLimiter = createRateLimiter({
   interval: COMPOSE_RATE_LIMIT_INTERVAL_MS,
   maxRequests: COMPOSE_RATE_LIMIT_MAX,
 });
+
+/**
+ * Respondent-report config-assistant sub-cap (F10.1 Phase 4b). Each turn is one reasoning-model
+ * call that interviews the admin and proposes report config — real paid work, like a refine turn. An
+ * admin chats back and forth several times while crafting, so 60/min (same order as the per-turn
+ * previews) is ample while bounding a hammered assistant. Keyed on the admin user id, who owns the spend.
+ */
+export const REPORT_CONFIG_ASSIST_RATE_LIMIT_MAX = 60;
+
+/** Sliding-window length for {@link reportConfigAssistLimiter}, in milliseconds. */
+export const REPORT_CONFIG_ASSIST_RATE_LIMIT_INTERVAL_MS = 60_000;
+
+export const reportConfigAssistLimiter = createRateLimiter({
+  interval: REPORT_CONFIG_ASSIST_RATE_LIMIT_INTERVAL_MS,
+  maxRequests: REPORT_CONFIG_ASSIST_RATE_LIMIT_MAX,
+});

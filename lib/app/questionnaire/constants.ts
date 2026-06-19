@@ -840,6 +840,35 @@ export const APP_QUESTIONNAIRES_REASONING_STREAM_FLAG =
 export const APP_QUESTIONNAIRES_TONE_FLAG = 'APP_QUESTIONNAIRES_TONE_ENABLED';
 
 /**
+ * Platform feature flag gating the **Respondent Report** (report kind `respondent`) — the
+ * per-respondent summary delivered after a respondent completes the questionnaire, configured from
+ * its own workspace tab. The first of two report kinds; the later cross-respondent **Cohort Report**
+ * (`cohort`) gets its own flag when built. DB-backed, seeded disabled by `044-respondent-report-flag.ts`.
+ * Opt-in on top of APP_QUESTIONNAIRES_ENABLED. When off, the workspace tab is hidden and the page
+ * `notFound()`s.
+ */
+export const APP_QUESTIONNAIRES_RESPONDENT_REPORT_FLAG =
+  'APP_QUESTIONNAIRES_RESPONDENT_REPORT_ENABLED';
+
+/**
+ * Slug of the seeded Respondent Report `AiAgent` — assembles the per-respondent insights section
+ * (mode `raw_plus_insights`) from the captured answers, the admin's generation config, and the
+ * optional client knowledge base. Ships with empty `model`/`provider` so it resolves dynamically via
+ * `agent-resolver.ts`; the generation pipeline loads it by slug. App-prefixed to avoid collision
+ * with core agents. Seeded by `045-respondent-report-agent.ts`.
+ */
+export const RESPONDENT_REPORT_AGENT_SLUG = 'app-respondent-report';
+
+/**
+ * Slug of the seeded Respondent Report **config assistant** `AiAgent` — the conversational helper in
+ * the Generation tab that interviews the admin and proposes report generation config (instructions /
+ * structure / background context). Distinct from the report WRITER agent: this one authors config,
+ * it doesn't write respondent-facing reports. Empty `model`/`provider` (runtime-resolved); seeded by
+ * `046-report-config-assistant-agent.ts`.
+ */
+export const RESPONDENT_REPORT_ASSISTANT_AGENT_SLUG = 'app-respondent-report-assistant';
+
+/**
  * Slug of the seeded composer `AiAgent` (generative authoring). A distinct agent
  * from the document extractor: composition and document extraction carry their
  * own budgets and personas. Ships with empty `model`/`provider` so it resolves

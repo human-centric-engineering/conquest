@@ -73,6 +73,23 @@ const styles = StyleSheet.create({
     marginTop: 18,
     marginBottom: 8,
   },
+  insightsSummary: {
+    marginBottom: 8,
+    lineHeight: 1.4,
+  },
+  insightsHeading: {
+    fontFamily: 'Helvetica-Bold',
+    marginTop: 8,
+    marginBottom: 3,
+  },
+  insightsBody: {
+    marginBottom: 4,
+    lineHeight: 1.4,
+  },
+  insightsAction: {
+    marginBottom: 2,
+    paddingLeft: 8,
+  },
   slot: {
     marginBottom: 12,
     paddingLeft: 10,
@@ -188,6 +205,32 @@ function SlotBlock({ slot }: { slot: PanelSlotView }) {
   );
 }
 
+/** The AI insights section (Respondent Report mode 2), rendered above the answers when present. */
+function InsightsSection({ insights }: { insights: NonNullable<SessionExportModel['insights']> }) {
+  return (
+    <View>
+      <Text style={styles.sectionTitle}>Your insights</Text>
+      <Text style={styles.insightsSummary}>{insights.summary}</Text>
+      {insights.sections.map((section, i) => (
+        <View key={i}>
+          <Text style={styles.insightsHeading}>{section.heading}</Text>
+          <Text style={styles.insightsBody}>{section.body}</Text>
+        </View>
+      ))}
+      {insights.actions.length > 0 && (
+        <View>
+          <Text style={styles.insightsHeading}>What you can do next</Text>
+          {insights.actions.map((action, i) => (
+            <Text key={i} style={styles.insightsAction}>
+              {`• ${action}`}
+            </Text>
+          ))}
+        </View>
+      )}
+    </View>
+  );
+}
+
 export interface SessionPdfDocumentProps {
   model: SessionExportModel;
 }
@@ -242,6 +285,8 @@ export function SessionPdfDocument({ model }: SessionPdfDocumentProps) {
             {`${model.answeredCount} of ${model.totalCount} questions answered`}
           </Text>
         </View>
+
+        {model.insights && <InsightsSection insights={model.insights} />}
 
         {model.sections.map((section) => (
           <View key={section.sectionId}>

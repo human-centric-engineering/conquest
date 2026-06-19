@@ -375,6 +375,11 @@ export const API = {
       /** Version run-time configuration (PATCH partial config — F3.1). */
       versionConfig: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/config`,
+      /** Respondent Report: the attributed client's knowledge corpus (GET — client-scoped list). */
+      reportKnowledge: (id: string): string => `/api/v1/app/questionnaires/${id}/report/knowledge`,
+      /** Respondent Report: one config-crafting assistant turn (POST — Generation-tab chat). */
+      reportCraft: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/report/craft`,
       /** Pre-launch cost estimate (GET `?respondents=N` — F3.3). */
       versionCostEstimate: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/cost-estimate`,
@@ -540,6 +545,8 @@ export const API = {
       submit: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/submit`,
       /** Download the session's results as a branded PDF (GET — F7.4). */
       exportPdf: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/export.pdf`,
+      /** Respondent report status + content — completion screen polls this (GET). */
+      report: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/report`,
     },
     /** Persisted turn-evaluation search surface (admin) — cross-session list + detail. */
     TURN_EVALUATIONS: {

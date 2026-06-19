@@ -26,6 +26,7 @@ import {
 import { resolveTheme, type DemoClientTheme } from '@/lib/app/questionnaire/theming';
 import type { ProfileValues } from '@/lib/app/questionnaire/profile/profile-values';
 import type { SessionExportModel } from '@/lib/app/questionnaire/export/types';
+import type { RespondentReportContent } from '@/lib/app/questionnaire/report/content';
 
 /** The plain inputs the DB seam hands the builder. */
 export interface SessionExportInput {
@@ -49,6 +50,8 @@ export interface SessionExportInput {
   status: SessionStatus;
   sections: PanelSectionInput[];
   answers: PanelAnswerInput[];
+  /** AI insights (Respondent Report mode 2), or null/absent for raw-only. */
+  insights?: RespondentReportContent | null;
 }
 
 /**
@@ -94,5 +97,6 @@ export function buildSessionExportModel(input: SessionExportInput): SessionExpor
     sections: panel.sections,
     answeredCount: panel.answeredCount,
     totalCount: panel.totalCount,
+    insights: input.insights ?? null,
   };
 }

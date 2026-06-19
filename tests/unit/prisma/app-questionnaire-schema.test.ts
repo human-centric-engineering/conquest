@@ -97,6 +97,12 @@ describe('questionnaire datamodel (Prisma.dmmf)', () => {
       expect(field.kind).toBe('scalar');
     }
 
+    // Respondent Report: the client's dedicated KnowledgeTag id — a plain scalar String, no
+    // @relation (UG-1 + a deliberate seam so the app never forks the platform knowledge schema).
+    expect(getField(model, 'knowledgeTagId').type).toBe('String');
+    expect(getField(model, 'knowledgeTagId').kind).toBe('scalar');
+    expect(model.fields.some((f) => f.relationName?.includes('KnowledgeTag'))).toBe(false);
+
     // Reverse relation back to the attributed questionnaires (count + delete guard).
     const questionnaires = getField(model, 'questionnaires');
     expect(questionnaires.kind).toBe('object');
@@ -310,6 +316,8 @@ describe('questionnaire datamodel (Prisma.dmmf)', () => {
     expect(getField(model, 'profileFields').type).toBe('Json');
     // F-tone — interviewer tone & persona stored as a single JSON block (ToneSettings).
     expect(getField(model, 'tone').type).toBe('Json');
+    // Respondent Report — the per-version report config stored as a single JSON block.
+    expect(getField(model, 'respondentReport').type).toBe('Json');
 
     const version = getField(model, 'version');
     expect(version.kind).toBe('object');
@@ -1086,6 +1094,76 @@ describe('app_questionnaire_tone migration SQL (F-tone)', () => {
     expect(executableSql).not.toContain('searchVector');
     // Exactly one executable statement — our single ALTER TABLE.
     expect(executableSql.match(/ALTER TABLE/g) ?? []).toHaveLength(1);
+  });
+});
+
+describe('app_respondent_report datamodel + migration SQL (Respondent Report)', () => {
+  it('AppRespondentReport maps the expected table + fields, 1:1 with the session', () => {
+    const model = getModel('AppRespondentReport');
+    expect(model.dbName).toBe('app_respondent_report');
+
+    expect(getField(model, 'sessionId').type).toBe('String');
+    expect(getField(model, 'sessionId').kind).toBe('scalar');
+    expect(getField(model, 'mode').type).toBe('String');
+    expect(getField(model, 'status').type).toBe('String');
+    expect(getField(model, 'content').type).toBe('Json');
+    expect(getField(model, 'costUsd').type).toBe('Float');
+    expect(getField(model, 'error').type).toBe('String');
+    // Lease columns mirror the evaluations batch worker for crash-safe recovery.
+    expect(getField(model, 'lockedBy').type).toBe('String');
+    expect(getField(model, 'lockedAt').type).toBe('DateTime');
+    expect(getField(model, 'generatedAt').type).toBe('DateTime');
+
+    const session = getField(model, 'session');
+    expect(session.kind).toBe('object');
+    expect(session.type).toBe('AppQuestionnaireSession');
+    // Shares the relation with the reverse `respondentReport` field on the session.
+    expect(session.relationName).toBe(
+      getField(getModel('AppQuestionnaireSession'), 'respondentReport').relationName
+    );
+  });
+
+  it('AppQuestionnaireSession carries the respondentReport reverse relation (1:1)', () => {
+    const report = getField(getModel('AppQuestionnaireSession'), 'respondentReport');
+    expect(report.kind).toBe('object');
+    expect(report.type).toBe('AppRespondentReport');
+    // 1:1, not a list (Prisma 7's minimal DMMF leaves isList undefined for a to-one relation).
+    expect(report.isList ?? false).toBe(false);
+  });
+
+  const sql = readMigrationSql('_app_questionnaire_respondent_report');
+  const executableSql = executableLines(sql);
+
+  it('creates exactly the app_respondent_report table', () => {
+    expect(sql).toContain('CREATE TABLE "app_respondent_report"');
+    expect(executableSql.match(/CREATE TABLE/g) ?? []).toHaveLength(1);
+  });
+
+  it('adds the respondentReport config column and the demo-client knowledgeTagId column', () => {
+    expect(sql).toMatch(
+      /ALTER TABLE "app_questionnaire_config" ADD COLUMN\s+"respondentReport" JSONB NOT NULL DEFAULT '\{\}'/
+    );
+    expect(sql).toMatch(/ALTER TABLE "app_demo_client" ADD COLUMN\s+"knowledgeTagId" TEXT;/);
+  });
+
+  it('declares the session FK with ON DELETE CASCADE — respondent data follows the session', () => {
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "app_respondent_report_sessionId_fkey"[\s\S]*REFERENCES "app_questionnaire_session"\("id"\)[\s\S]*ON DELETE CASCADE/
+    );
+  });
+
+  it('enforces one report per session and indexes the worker claim by (status,lockedAt)', () => {
+    expect(sql).toContain('CREATE UNIQUE INDEX "app_respondent_report_sessionId_key"');
+    expect(sql).toContain('CREATE INDEX "app_respondent_report_status_lockedAt_idx"');
+  });
+
+  it('contains no platform (unmodelled-object) operations — the schema-fold strip holds', () => {
+    // `migrate dev` re-emitted the five pgvector DROP INDEX + the GENERATED searchVector ALTER.
+    // Stripped by hand; this guard fails if a regeneration leaks them back in.
+    expect(executableSql).not.toContain('DROP INDEX');
+    expect(executableSql).not.toContain('ai_knowledge');
+    expect(executableSql).not.toContain('ai_message');
+    expect(executableSql).not.toContain('searchVector');
   });
 });
 
