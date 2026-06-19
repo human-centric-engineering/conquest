@@ -77,23 +77,23 @@ vi.mock('@/components/ui/select', () => ({
     <option value={value}>{children}</option>
   ),
 }));
-vi.mock('@/components/admin/questionnaires/report/client-knowledge-panel', () => ({
-  ClientKnowledgePanel: () => <div data-testid="kb-panel" />,
-}));
-
 import { apiClient } from '@/lib/api/client';
 import { RespondentReportEditor } from '@/components/admin/questionnaires/report/respondent-report-editor';
 import { DEFAULT_RESPONDENT_REPORT_SETTINGS } from '@/lib/app/questionnaire/types';
 
 type Mock = ReturnType<typeof vi.fn>;
 
-function renderEditor(over: Partial<typeof DEFAULT_RESPONDENT_REPORT_SETTINGS> = {}) {
+function renderEditor(
+  over: Partial<typeof DEFAULT_RESPONDENT_REPORT_SETTINGS> = {},
+  client: { id: string; name: string } | null = { id: 'clt-1', name: 'Acme' }
+) {
   return render(
     <RespondentReportEditor
       questionnaireId="qn-1"
       versionId="v1"
       initial={{ ...DEFAULT_RESPONDENT_REPORT_SETTINGS, ...over }}
       dataSlotsEnabled
+      client={client}
     />
   );
 }
@@ -162,18 +162,7 @@ describe('RespondentReportEditor', () => {
     expect(container.querySelector('#rr-questions')).not.toBeNull();
   });
 
-  it('shows the embedded KB panel for narrative + useClientKnowledge', () => {
-    renderEditor({
-      mode: 'narrative',
-      generation: {
-        ...DEFAULT_RESPONDENT_REPORT_SETTINGS.generation,
-        useClientKnowledge: true,
-      },
-    });
-    expect(screen.getByTestId('kb-panel')).toBeInTheDocument();
-  });
-
-  it('shows the embedded KB panel only when insights + useClientKnowledge are on', () => {
+  it('links to the client KB page when grounding is on (insights or narrative)', () => {
     renderEditor({
       mode: 'raw_plus_insights',
       generation: {
@@ -181,12 +170,50 @@ describe('RespondentReportEditor', () => {
         useClientKnowledge: true,
       },
     });
-    expect(screen.getByTestId('kb-panel')).toBeInTheDocument();
+    const link = screen.getByRole('link', { name: /Manage Acme.s knowledge base/i });
+    expect(link).toHaveAttribute('href', '/admin/demo-clients/clt-1');
   });
 
-  it('hides the KB panel when useClientKnowledge is off', () => {
+  it('also links to the client KB page in narrative mode', () => {
+    renderEditor({
+      mode: 'narrative',
+      generation: {
+        ...DEFAULT_RESPONDENT_REPORT_SETTINGS.generation,
+        useClientKnowledge: true,
+      },
+    });
+    expect(screen.getByRole('link', { name: /Manage Acme.s knowledge base/i })).toBeInTheDocument();
+  });
+
+  it('does not embed a document uploader (management lives on the client page)', () => {
+    renderEditor({
+      mode: 'raw_plus_insights',
+      generation: {
+        ...DEFAULT_RESPONDENT_REPORT_SETTINGS.generation,
+        useClientKnowledge: true,
+      },
+    });
+    expect(screen.queryByRole('button', { name: /Upload document/i })).not.toBeInTheDocument();
+  });
+
+  it('shows the no-client notice when grounding is on but no client is attributed', () => {
+    renderEditor(
+      {
+        mode: 'raw_plus_insights',
+        generation: {
+          ...DEFAULT_RESPONDENT_REPORT_SETTINGS.generation,
+          useClientKnowledge: true,
+        },
+      },
+      null
+    );
+    expect(screen.getByText(/No demo client is attributed/i)).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /knowledge base/i })).not.toBeInTheDocument();
+  });
+
+  it('hides the KB link when useClientKnowledge is off', () => {
     renderEditor({ mode: 'raw_plus_insights' });
-    expect(screen.queryByTestId('kb-panel')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /knowledge base/i })).not.toBeInTheDocument();
   });
 
   it('edits content, generation, and delivery toggles into the save payload', () => {

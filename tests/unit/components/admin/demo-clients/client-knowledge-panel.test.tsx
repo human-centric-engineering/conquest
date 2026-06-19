@@ -1,10 +1,11 @@
 /**
- * ClientKnowledgePanel — component tests.
+ * ClientKnowledgePanel — component tests (demo-client KB section).
  *
- * Covers the unattributed-client notice, listing the client's documents, the tag-stamped upload, and
- * delete. The client-scoped fetch (`reportKnowledge`) is mocked via apiClient.
+ * Covers the loading + unavailable states, listing the client's documents, the tag-stamped upload,
+ * and delete. The client-scoped fetch (`DEMO_CLIENTS.knowledge`) is mocked via apiClient. The panel is
+ * keyed on a `clientId` + `clientName` (the corpus is client-owned, managed on the client's page).
  *
- * @see components/admin/questionnaires/report/client-knowledge-panel.tsx
+ * @see components/admin/demo-clients/client-knowledge-panel.tsx
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -16,39 +17,56 @@ vi.mock('@/lib/api/client', () => ({
 }));
 
 import { apiClient } from '@/lib/api/client';
-import { ClientKnowledgePanel } from '@/components/admin/questionnaires/report/client-knowledge-panel';
+import { ClientKnowledgePanel } from '@/components/admin/demo-clients/client-knowledge-panel';
 
 type Mock = ReturnType<typeof vi.fn>;
+
+function renderPanel() {
+  return render(<ClientKnowledgePanel clientId="clt-1" clientName="Acme" />);
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
 });
 
 describe('ClientKnowledgePanel', () => {
+  it('fetches the client-scoped knowledge endpoint', async () => {
+    (apiClient.get as unknown as Mock).mockResolvedValue({
+      client: { id: 'clt-1', name: 'Acme' },
+      knowledgeTagId: 'tag-1',
+      documents: [],
+    });
+    renderPanel();
+    await waitFor(() =>
+      expect(apiClient.get as unknown as Mock).toHaveBeenCalledWith(
+        '/api/v1/app/demo-clients/clt-1/knowledge'
+      )
+    );
+  });
+
   it('shows a loading state before the fetch settles', () => {
     (apiClient.get as unknown as Mock).mockReturnValue(new Promise(() => {})); // never resolves
-    render(<ClientKnowledgePanel questionnaireId="qn-1" />);
+    renderPanel();
     expect(screen.getByText(/Loading knowledge base/i)).toBeInTheDocument();
   });
 
   it('surfaces a load error', async () => {
     (apiClient.get as unknown as Mock).mockRejectedValue(new Error('boom'));
-    render(<ClientKnowledgePanel questionnaireId="qn-1" />);
+    renderPanel();
     expect(await screen.findByText(/Could not load the knowledge base/i)).toBeInTheDocument();
   });
 
-  it('shows the unattributed notice when there is no client', async () => {
+  it('shows an unavailable notice when the tag could not be resolved', async () => {
     (apiClient.get as unknown as Mock).mockResolvedValue({
-      client: null,
+      client: { id: 'clt-1', name: 'Acme' },
       knowledgeTagId: null,
       documents: [],
     });
-
-    render(<ClientKnowledgePanel questionnaireId="qn-1" />);
-    expect(await screen.findByText(/No client attributed/i)).toBeInTheDocument();
+    renderPanel();
+    expect(await screen.findByText(/knowledge base is unavailable/i)).toBeInTheDocument();
   });
 
-  it('lists the client documents', async () => {
+  it('lists the client documents under the client name', async () => {
     (apiClient.get as unknown as Mock).mockResolvedValue({
       client: { id: 'clt-1', name: 'Acme' },
       knowledgeTagId: 'tag-1',
@@ -65,7 +83,7 @@ describe('ClientKnowledgePanel', () => {
       ],
     });
 
-    render(<ClientKnowledgePanel questionnaireId="qn-1" />);
+    renderPanel();
     expect(await screen.findByText('Playbook')).toBeInTheDocument();
     expect(screen.getByText(/Acme/)).toBeInTheDocument();
   });
@@ -79,7 +97,7 @@ describe('ClientKnowledgePanel', () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
     vi.stubGlobal('fetch', fetchMock);
 
-    render(<ClientKnowledgePanel questionnaireId="qn-1" />);
+    renderPanel();
     await screen.findByText(/Private corpus/i);
 
     const input = document.querySelector('input[type="file"]') as HTMLInputElement;
@@ -108,7 +126,7 @@ describe('ClientKnowledgePanel', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    render(<ClientKnowledgePanel questionnaireId="qn-1" />);
+    renderPanel();
     await screen.findByText(/Private corpus/i);
     const input = document.querySelector('input[type="file"]') as HTMLInputElement;
     fireEvent.change(input, { target: { files: [new File(['x'], 'a.md')] } });
@@ -133,7 +151,7 @@ describe('ClientKnowledgePanel', () => {
         },
       ],
     });
-    render(<ClientKnowledgePanel questionnaireId="qn-1" />);
+    renderPanel();
     expect(await screen.findByText('Pending')).toBeInTheDocument();
     expect(screen.getByText(/^processing$/)).toBeInTheDocument();
   });
@@ -155,7 +173,7 @@ describe('ClientKnowledgePanel', () => {
       ],
     });
     (apiClient.delete as unknown as Mock).mockRejectedValue(new Error('nope'));
-    render(<ClientKnowledgePanel questionnaireId="qn-1" />);
+    renderPanel();
     fireEvent.click(await screen.findByRole('button', { name: /Delete Playbook/i }));
     expect(await screen.findByText(/Could not delete the document/i)).toBeInTheDocument();
   });
@@ -177,7 +195,7 @@ describe('ClientKnowledgePanel', () => {
       ],
     });
 
-    render(<ClientKnowledgePanel questionnaireId="qn-1" />);
+    renderPanel();
     fireEvent.click(await screen.findByRole('button', { name: /Delete Playbook/i }));
 
     await waitFor(() =>

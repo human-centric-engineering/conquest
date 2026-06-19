@@ -375,8 +375,6 @@ export const API = {
       /** Version run-time configuration (PATCH partial config — F3.1). */
       versionConfig: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/config`,
-      /** Respondent Report: the attributed client's knowledge corpus (GET — client-scoped list). */
-      reportKnowledge: (id: string): string => `/api/v1/app/questionnaires/${id}/report/knowledge`,
       /** Respondent Report: one config-crafting assistant turn (POST — Generation-tab chat). */
       reportCraft: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/report/craft`,
@@ -573,6 +571,8 @@ export const API = {
       byId: (id: string): string => `/api/v1/app/demo-clients/${id}`,
       /** DEMO-ONLY (F6.4): reset the session graph for a client's questionnaires (POST). */
       resetSessions: (id: string): string => `/api/v1/app/demo-clients/${id}/reset-sessions`,
+      /** The client's private knowledge corpus (GET — client-scoped list, grounds its reports). */
+      knowledge: (id: string): string => `/api/v1/app/demo-clients/${id}/knowledge`,
     },
   },
 } as const;

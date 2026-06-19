@@ -115,6 +115,7 @@ auth), `withAdminAuth` (401/403), and audited. Registry: `API.APP.DEMO_CLIENTS`.
 | `PATCH /api/v1/app/demo-clients/:id`               | Edit any identity or theme field                                                   | `404`, `409 SLUG_CONFLICT`                                  |
 | `DELETE /api/v1/app/demo-clients/:id`              | Delete (guarded)                                                                   | `404`, `409 DEMO_CLIENT_IN_USE`                             |
 | `POST /api/v1/app/demo-clients/:id/reset-sessions` | Reset session graph (F6.4)                                                         | `400 CONFIRM_SLUG_MISMATCH`, `409 ANONYMOUS_MODE_PROTECTED` |
+| `GET /api/v1/app/demo-clients/:id/knowledge`       | The client's private knowledge corpus (F10.1) — grounds its Respondent Reports     | `404`                                                       |
 | `PATCH /api/v1/app/questionnaires/:id`             | Attribute / detach (`demoClientId`); also renames with `{ title }` (not demo-only) | `404`, `404 DEMO_CLIENT_NOT_FOUND`                          |
 
 **Slug is derive-with-override:** omit it on create and the server derives a
@@ -153,6 +154,14 @@ a typed-confirmation guard and an anonymous-mode refusal. See
   _Branding_ column (a swatch/thumbnail only for fields actually set; "Default" when
   none) and **full** on the detail page / live form preview (the resolved brand the
   respondent sees, defaults filled).
+- **Knowledge base (F10.1).** The detail page carries a **"Knowledge base"** section
+  (`<ClientKnowledgePanel>` from `components/admin/demo-clients/`) — upload / list / delete for the
+  client's private corpus, used to ground its **Respondent Reports**. The corpus is client-owned and
+  shared across all the client's questionnaires, so it lives here (not per questionnaire); a
+  questionnaire's report opts into grounding via its own toggle and links here to manage the docs.
+  Backed by `GET /demo-clients/:id/knowledge` → `getClientKnowledgeViewForClient`; documents carry the
+  client's dedicated `KnowledgeTag` for strict per-client isolation. See
+  [respondent-report.md](./respondent-report.md#per-client-knowledge-isolation-tag-based).
 - The questionnaire detail page (`/admin/questionnaires/:id`) carries the
   attribution `<DemoClientAssign>` picker (active clients + the current one) and a
   **`<CloneForClientDialog>`** "Clone for client" action (below).

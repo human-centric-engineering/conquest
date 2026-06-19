@@ -47,10 +47,12 @@ renders `RespondentReportEditor` (`components/admin/questionnaires/report/respon
 The page reads the resolved config from the cached version graph (no second fetch) and passes the
 `respondentReport` slice in; the editor saves via `apiClient.patch` and `router.refresh()`.
 
-`ClientKnowledgePanel` (`components/admin/questionnaires/report/client-knowledge-panel.tsx`) reads the
-client-scoped `reportKnowledge` view, uploads to the platform documents endpoint with the client's
-tag stamped on, lists the client's documents, and deletes them — degrading to a clear notice when the
-questionnaire has no attributed client.
+The Generation panel does **not** manage documents — the knowledge base is owned by the **demo
+client** (shared across all that client's questionnaires), so upload/list/delete lives on the client's
+page (see below). When `useClientKnowledge` is on, the panel shows a note + a link to the attributed
+client's page (or a "no client attributed" notice when the questionnaire is generic). The page passes
+the attributed client to the editor via `getQuestionnaireDetailCached` (no extra fetch — the workspace
+chrome already loads it).
 
 ### Config-crafting assistant (Phase 4b)
 
@@ -81,14 +83,17 @@ Modes 2/3 can ground insights in a client-specific knowledge base with strict no
 - A client's documents are those carrying its tag. `resolveClientKnowledgeDocumentIds(clientId)`
   returns that id list, used as the vector-search `SearchFilters.documentIds` allowlist
   (`lib/orchestration/knowledge/search.ts`) so retrieval is scoped to one client only.
-- The Generation-tab KB viewer reads `GET /api/v1/app/questionnaires/:id/report/knowledge`
-  (`reportKnowledge` in `lib/api/endpoints.ts`) — an app-side, client-scoped list. We deliberately do
-  **not** call the platform's global documents list (it would show every client's docs). Uploads go
-  through the platform upload endpoint with the client's tag pre-applied; only the scoped list lives
-  app-side.
+- The KB is **managed on the demo-client page** (`/admin/demo-clients/[id]`, a "Knowledge base"
+  section rendering `ClientKnowledgePanel` from `components/admin/demo-clients/`), since the corpus
+  belongs to the client, not a questionnaire. The panel reads the client-scoped list from
+  `GET /api/v1/app/demo-clients/:id/knowledge` (`DEMO_CLIENTS.knowledge` in `lib/api/endpoints.ts`) →
+  `getClientKnowledgeViewForClient(clientId)`. We deliberately do **not** call the platform's global
+  documents list (it would show every client's docs). Uploads go through the platform upload endpoint
+  with the client's tag pre-applied; only the scoped list lives app-side.
 
-A questionnaire with no attributed demo client has no client corpus — the view returns
-`client: null` and client knowledge is unavailable for its reports.
+A demo client always has its own corpus (the tag is provisioned on demand). A questionnaire with no
+attributed demo client simply can't ground its reports — its report editor shows a "no client
+attributed" notice instead of a link.
 
 ## Storage (AI modes)
 

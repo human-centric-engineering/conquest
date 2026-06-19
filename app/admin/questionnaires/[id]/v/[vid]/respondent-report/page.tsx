@@ -16,6 +16,7 @@ import { notFound } from 'next/navigation';
 import { RespondentReportEditor } from '@/components/admin/questionnaires/report/respondent-report-editor';
 import { DEFAULT_RESPONDENT_REPORT_SETTINGS } from '@/lib/app/questionnaire/types';
 import {
+  getQuestionnaireDetailCached,
   getVersionGraphCached,
   resolveQuestionnaireWorkspaceFlags,
 } from '@/lib/app/questionnaire/workspace-data';
@@ -34,8 +35,16 @@ export default async function RespondentReportTab({ params }: PageProps) {
   if (!flags.respondentReport) notFound();
 
   const { id, vid } = await params;
-  const graph = await getVersionGraphCached(id, vid);
+  const [graph, detail] = await Promise.all([
+    getVersionGraphCached(id, vid),
+    getQuestionnaireDetailCached(id),
+  ]);
   const settings = graph?.config.respondentReport ?? DEFAULT_RESPONDENT_REPORT_SETTINGS;
+  // The attributed demo client owns the KB the report can ground in — passed so the Generation tab
+  // can link to its page (document management lives there, not per questionnaire).
+  const client = detail?.demoClient
+    ? { id: detail.demoClient.id, name: detail.demoClient.name }
+    : null;
 
   return (
     <div className="space-y-4">
@@ -51,6 +60,7 @@ export default async function RespondentReportTab({ params }: PageProps) {
         versionId={vid}
         initial={settings}
         dataSlotsEnabled={flags.dataSlots}
+        client={client}
       />
     </div>
   );

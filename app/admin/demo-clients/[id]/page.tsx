@@ -18,6 +18,7 @@ import { DemoClientActions } from '@/components/admin/demo-clients/demo-client-a
 import { AttributedQuestionnaires } from '@/components/admin/demo-clients/attributed-questionnaires';
 import { ResetSessionsDialog } from '@/components/admin/demo-clients/reset-sessions-dialog';
 import { DemoClientThemePreview } from '@/components/admin/demo-clients/demo-client-theme-preview';
+import { ClientKnowledgePanel } from '@/components/admin/demo-clients/client-knowledge-panel';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
@@ -123,6 +124,20 @@ export default async function DemoClientDetailPage({ params }: PageProps) {
       <section className="space-y-3 rounded-md border px-4 py-4">
         <h2 className="text-sm font-medium">Brand preview</h2>
         <DemoClientThemePreview theme={client} />
+      </section>
+
+      {/* The client's private knowledge corpus — shared across all its questionnaires. A
+          questionnaire's Respondent Report opts into grounding via its own toggle; the documents
+          themselves are owned and managed here, isolated from other clients. */}
+      <section className="space-y-3 rounded-md border px-4 py-4">
+        <div className="space-y-1">
+          <h2 className="text-sm font-medium">Knowledge base</h2>
+          <p className="text-muted-foreground text-xs">
+            Private reference material used to ground this client&rsquo;s Respondent Reports. Each
+            client&rsquo;s documents are isolated from every other client&rsquo;s.
+          </p>
+        </div>
+        <ClientKnowledgePanel clientId={client.id} clientName={client.name} />
       </section>
 
       <DemoClientForm client={client} />

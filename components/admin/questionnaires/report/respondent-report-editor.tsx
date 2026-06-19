@@ -14,6 +14,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { Loader2 } from 'lucide-react';
 
 import { apiClient, APIClientError } from '@/lib/api/client';
@@ -31,7 +32,6 @@ import {
 } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FieldHelp } from '@/components/ui/field-help';
-import { ClientKnowledgePanel } from '@/components/admin/questionnaires/report/client-knowledge-panel';
 import { ReportConfigAssistant } from '@/components/admin/questionnaires/report/report-config-assistant';
 import {
   isAiRespondentReportMode,
@@ -53,6 +53,8 @@ export interface RespondentReportEditorProps {
   initial: RespondentReportSettings;
   /** Whether the data-slots feature is on (gates the data-slot include toggle). */
   dataSlotsEnabled: boolean;
+  /** The questionnaire's attributed demo client (whose KB grounds reports), or null when generic. */
+  client: { id: string; name: string } | null;
 }
 
 export function RespondentReportEditor({
@@ -60,6 +62,7 @@ export function RespondentReportEditor({
   versionId,
   initial,
   dataSlotsEnabled,
+  client,
 }: RespondentReportEditorProps) {
   const router = useRouter();
   const [value, setValue] = useState<RespondentReportSettings>(initial);
@@ -303,9 +306,28 @@ export function RespondentReportEditor({
                 </FieldHelp>
               </Label>
             </div>
-            {usesAgent && value.generation.useClientKnowledge && (
-              <ClientKnowledgePanel questionnaireId={questionnaireId} />
-            )}
+            {usesAgent &&
+              value.generation.useClientKnowledge &&
+              (client ? (
+                <p className="text-muted-foreground rounded-md border border-dashed p-3 text-sm">
+                  Documents are managed on the client&rsquo;s page (the corpus is shared across all{' '}
+                  {client.name}&rsquo;s questionnaires).{' '}
+                  <Link
+                    href={`/admin/demo-clients/${client.id}`}
+                    className="text-foreground font-medium underline underline-offset-2"
+                  >
+                    Manage {client.name}&rsquo;s knowledge base
+                  </Link>
+                  .
+                </p>
+              ) : (
+                <p className="text-muted-foreground rounded-md border border-dashed p-3 text-sm">
+                  No demo client is attributed to this questionnaire, so there is no private
+                  knowledge base to ground reports in. Attribute one on the{' '}
+                  <span className="text-foreground font-medium">Settings</span> tab, then manage its
+                  documents from the client&rsquo;s page.
+                </p>
+              ))}
           </div>
         </TabsContent>
 

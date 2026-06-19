@@ -20,7 +20,7 @@ export function clientKnowledgeTagSlug(clientId: string): string {
   return `app-client-${clientId}`;
 }
 
-/** A client's document as surfaced to the Generation-tab KB viewer (trimmed list item). */
+/** A client's document as surfaced to the demo-client KB panel (trimmed list item). */
 export interface ClientKnowledgeDocument {
   id: string;
   name: string;
@@ -107,22 +107,22 @@ export async function resolveClientKnowledgeDocumentIds(clientId: string): Promi
 }
 
 /**
- * The client-scoped KB view for a questionnaire's attributed client: ensures the client's tag exists,
- * then lists the documents carrying it. Returns an unattributed view (`client: null`) when the
- * questionnaire has no demo client — there is no corpus to scope to in that case.
+ * The KB view for a demo client: ensures the client's tag exists, then lists the documents carrying
+ * it. Returns an unattributed view (`client: null`) when the client id doesn't resolve. Client-keyed
+ * because the corpus belongs to the client (shared across all its questionnaires), so document
+ * management lives on the demo-client page — not per questionnaire.
  */
-export async function getClientKnowledgeViewForQuestionnaire(
-  questionnaireId: string
+export async function getClientKnowledgeViewForClient(
+  clientId: string
 ): Promise<ClientKnowledgeView> {
-  const questionnaire = await prisma.appQuestionnaire.findUnique({
-    where: { id: questionnaireId },
-    select: { demoClient: { select: { id: true, name: true } } },
+  const found = await prisma.appDemoClient.findUnique({
+    where: { id: clientId },
+    select: { id: true, name: true },
   });
-  const client = questionnaire?.demoClient ?? null;
-  if (!client) return { client: null, knowledgeTagId: null, documents: [] };
+  if (!found) return { client: null, knowledgeTagId: null, documents: [] };
 
-  const tagId = await ensureClientKnowledgeTag(client.id);
-  if (!tagId) return { client, knowledgeTagId: null, documents: [] };
+  const tagId = await ensureClientKnowledgeTag(found.id);
+  if (!tagId) return { client: found, knowledgeTagId: null, documents: [] };
 
   const rows = await prisma.aiKnowledgeDocument.findMany({
     where: { tags: { some: { tagId } } },
@@ -139,7 +139,7 @@ export async function getClientKnowledgeViewForQuestionnaire(
   });
 
   return {
-    client,
+    client: found,
     knowledgeTagId: tagId,
     documents: rows.map((d) => ({
       id: d.id,
