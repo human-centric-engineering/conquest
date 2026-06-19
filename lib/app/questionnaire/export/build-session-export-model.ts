@@ -50,8 +50,10 @@ export interface SessionExportInput {
   status: SessionStatus;
   sections: PanelSectionInput[];
   answers: PanelAnswerInput[];
-  /** AI insights (Respondent Report mode 2), or null/absent for raw-only. */
+  /** AI report content (Respondent Report AI modes), or null/absent for raw-only. */
   insights?: RespondentReportContent | null;
+  /** Woven-narrative deliverable: render the report alone, omit the raw answer listing. */
+  narrativeOnly?: boolean;
 }
 
 /**
@@ -98,5 +100,6 @@ export function buildSessionExportModel(input: SessionExportInput): SessionExpor
     answeredCount: panel.answeredCount,
     totalCount: panel.totalCount,
     insights: input.insights ?? null,
+    narrativeOnly: input.narrativeOnly ?? false,
   };
 }

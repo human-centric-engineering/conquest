@@ -253,7 +253,8 @@ async function fetchLogoDataUri(url: string | null): Promise<string | null> {
  */
 export async function buildSessionExportPdfModel(
   loaded: LoadedSessionExport,
-  insights: RespondentReportContent | null = null
+  insights: RespondentReportContent | null = null,
+  narrativeOnly = false
 ): Promise<SessionExportModel> {
   const logoDataUri = await fetchLogoDataUri(loaded.theme.logoUrl);
   if (loaded.theme.logoUrl && !logoDataUri) {
@@ -279,6 +280,7 @@ export async function buildSessionExportPdfModel(
     sections: loaded.sections,
     answers: loaded.answers,
     insights,
+    narrativeOnly,
   };
 
   return buildSessionExportModel(input);

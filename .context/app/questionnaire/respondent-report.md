@@ -90,18 +90,19 @@ Modes 2/3 can ground insights in a client-specific knowledge base with strict no
 A questionnaire with no attributed demo client has no client corpus — the view returns
 `client: null` and client knowledge is unavailable for its reports.
 
-## Storage (mode 2)
+## Storage (AI modes)
 
 `AppRespondentReport` — one row per session (1:1, `onDelete: Cascade` so it follows the session and
 GDPR erasure). Status `queued → processing → ready | failed`, the generated `content`, `costUsd`, and
 worker lease columns (`lockedBy`/`lockedAt`) for the maintenance-tick generation worker (mirrors the
 evaluations batch worker). Raw-only mode never creates a row.
 
-## Generation pipeline (mode 2, async)
+## Generation pipeline (AI modes, async)
 
 1. **Enqueue** — the submit route calls `enqueueRespondentReport(sessionId)`
    (`lib/app/questionnaire/report/enqueue.ts`) after `markSessionCompleted`. It creates a `queued`
-   row only when the platform flag is on AND the version's config is `enabled` + `raw_plus_insights`.
+   row only when the platform flag is on AND the version's config is `enabled` + an AI mode
+   (`raw_plus_insights` or `narrative`, via `isAiRespondentReportMode`).
    Idempotent (upsert by `sessionId`); best-effort — a failure never fails submission.
 2. **Worker** — `processQueuedRespondentReports()` (`lib/app/questionnaire/report/worker.ts`) runs in
    the maintenance-tick background chain (`lib/orchestration/maintenance/run-tick.ts`, task
@@ -126,15 +127,22 @@ budget cap; `visibility: 'internal'`.
   `lib/api/endpoints.ts`) serves both respondent kinds via `resolveTurnAccess` (auth cookie or
   `X-Session-Token`). It returns the `RespondentReportClientView` built by
   `buildRespondentReportClientView` (`lib/app/questionnaire/report/view.ts`): `enabled` (config AND
-  platform flag), `mode`, delivery toggles, and — for mode 2 — the insights `{ status, content,
-generatedAt, error }` (a queued/processing status while the worker runs; a missing row reads as
-  `queued`).
+  platform flag), `mode`, delivery toggles, and — for the AI modes (`raw_plus_insights`, `narrative`)
+  — the insights `{ status, content, generatedAt, error }` (a queued/processing status while the
+  worker runs; a missing row reads as `queued`).
 - **Completion screen** — `SessionComplete` calls `useRespondentReport`
-  (`lib/hooks/use-respondent-report.ts`, 3s poll until terminal) and renders the insights inline
-  (preparing → ready summary/sections/actions → calm failure fallback) when `onScreen` + mode 2; the
-  Download PDF button is gated on `delivery.download` (and defaults on when no report is configured,
-  preserving the F7.4 responses export).
-- **PDF** — `SessionExportModel.insights` carries the ready content into the PDF; the `export.pdf`
-  route loads it via `buildRespondentReportClientView` (ready only) and `SessionPdfDocument` renders a
-  "Your insights" section above the answers, so the on-screen and downloaded artifacts match.
-  Anonymous respondents download via the session token; raw / not-yet-ready → answers only.
+  (`lib/hooks/use-respondent-report.ts`, 3s poll until terminal) and renders the generated content
+  inline (preparing → ready summary/sections/actions → calm failure fallback) when `onScreen` + an AI
+  mode; the Download PDF button is gated on `delivery.download` (and defaults on when no report is
+  configured, preserving the F7.4 responses export). The completion screen never lists raw answers, so
+  a narrative report already shows woven-only on screen.
+- **PDF** — `SessionExportModel.insights` carries the ready content into the PDF and
+  `SessionExportModel.narrativeOnly` selects the layout. The respondent `export.pdf` route loads the
+  report via `buildRespondentReportClientView` (ready only):
+  - **`raw_plus_insights`** → a "Your insights" section above the full answer record (raw + insights).
+  - **`narrative`** → `narrativeOnly: true`: `SessionPdfDocument` renders the report alone under "Your
+    personalised report" and **omits** the raw section/slot listing and the answered-count — the woven
+    report is the whole deliverable.
+    The **admin** session PDF (`questionnaires/:id/sessions/:sessionId/export.pdf`) embeds the same ready
+    content but never sets `narrativeOnly`, so admins keep the full audit alongside the report. Anonymous
+    respondents download via the session token; raw / not-yet-ready → answers only.

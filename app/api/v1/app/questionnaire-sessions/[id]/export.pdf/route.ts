@@ -53,12 +53,14 @@ async function handleExportPdf(
       return errorResponse(access.message, { code: access.code, status: access.status });
     }
 
-    // Include the AI insights in the PDF when the report is a ready mode-2 report (the on-screen
-    // and PDF artifacts should match). Raw-only / not-yet-ready → null (answers only).
+    // Include the AI report in the PDF when ready (the on-screen and PDF artifacts should match).
+    // Raw-only / not-yet-ready → null (answers only). For the woven `narrative` mode the report IS
+    // the deliverable: render it alone and omit the raw answer listing (`narrativeOnly`).
     const reportView = await buildRespondentReportClientView(sessionId);
     const insights = reportView?.insights?.status === 'ready' ? reportView.insights.content : null;
+    const narrativeOnly = insights !== null && reportView?.mode === 'narrative';
 
-    const model = await buildSessionExportPdfModel(loaded, insights);
+    const model = await buildSessionExportPdfModel(loaded, insights, narrativeOnly);
     const pdf = await renderSessionPdf(model);
 
     log.info('Session export PDF generated', {

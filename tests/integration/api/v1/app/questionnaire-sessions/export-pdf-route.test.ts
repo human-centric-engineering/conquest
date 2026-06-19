@@ -154,6 +154,61 @@ describe('authenticated access', () => {
   });
 });
 
+describe('respondent report embedding', () => {
+  const readyContent = { summary: 'Your story.', sections: [], actions: ['Do X'] };
+
+  it('embeds a ready narrative report and renders it woven-only (narrativeOnly)', async () => {
+    reportViewMock.buildRespondentReportClientView.mockResolvedValue({
+      enabled: true,
+      mode: 'narrative',
+      onScreen: true,
+      download: true,
+      insights: { status: 'ready', content: readyContent, generatedAt: null, error: null },
+    });
+    const res = await GET(req(), ctx);
+    expect(res.status).toBe(200);
+    expect(exportMock.buildSessionExportPdfModel).toHaveBeenCalledWith(
+      expect.anything(),
+      readyContent,
+      true
+    );
+  });
+
+  it('embeds a ready mode-2 report but keeps the raw answers (narrativeOnly false)', async () => {
+    reportViewMock.buildRespondentReportClientView.mockResolvedValue({
+      enabled: true,
+      mode: 'raw_plus_insights',
+      onScreen: true,
+      download: true,
+      insights: { status: 'ready', content: readyContent, generatedAt: null, error: null },
+    });
+    const res = await GET(req(), ctx);
+    expect(res.status).toBe(200);
+    expect(exportMock.buildSessionExportPdfModel).toHaveBeenCalledWith(
+      expect.anything(),
+      readyContent,
+      false
+    );
+  });
+
+  it('passes no insights and no narrative layout when the report is not ready', async () => {
+    reportViewMock.buildRespondentReportClientView.mockResolvedValue({
+      enabled: true,
+      mode: 'narrative',
+      onScreen: true,
+      download: true,
+      insights: { status: 'processing', content: null, generatedAt: null, error: null },
+    });
+    const res = await GET(req(), ctx);
+    expect(res.status).toBe(200);
+    expect(exportMock.buildSessionExportPdfModel).toHaveBeenCalledWith(
+      expect.anything(),
+      null,
+      false
+    );
+  });
+});
+
 describe('anonymous (no-login) access', () => {
   it('200s a valid session-token-bearing anonymous caller', async () => {
     setAuth(mockUnauthenticatedUser());
