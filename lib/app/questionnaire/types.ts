@@ -431,6 +431,75 @@ export const DEFAULT_TONE_SETTINGS: ToneSettings = {
 };
 
 /**
+ * Respondent Report (report kind `respondent`) — the per-respondent report delivered after a
+ * respondent completes the questionnaire. The first of two report kinds; the later cross-respondent
+ * Cohort Report (`cohort`) gets its own config when built.
+ *
+ * Modes (v1):
+ *   - `raw` — answers only (data-slot values and/or the questions as presented). Deterministic,
+ *     rendered on demand; needs no stored report row.
+ *   - `raw_plus_insights` — the raw report plus an AI-generated, actionable insights section,
+ *     assembled by the report agent (optionally grounded in the client knowledge base). Generated
+ *     once, async, after submit (stored in `AppRespondentReport`).
+ *
+ * `narrative` (a fully woven report) is deferred to v2 — not in this tuple yet.
+ */
+export const RESPONDENT_REPORT_MODES = ['raw', 'raw_plus_insights'] as const;
+export type RespondentReportMode = (typeof RESPONDENT_REPORT_MODES)[number];
+
+/** Lifecycle of a stored mode-2 report (the async tick-worker pipeline). */
+export const RESPONDENT_REPORT_STATUSES = ['queued', 'processing', 'ready', 'failed'] as const;
+export type RespondentReportStatus = (typeof RESPONDENT_REPORT_STATUSES)[number];
+
+/** Max length of the admin's free-text generation instruction / structure fields (Zod bound). */
+export const RESPONDENT_REPORT_INSTRUCTIONS_MAX_LENGTH = 4000;
+/** Max length of the flat background-context blob fed to the report agent (Zod bound). */
+export const RESPONDENT_REPORT_BACKGROUND_MAX_LENGTH = 8000;
+
+/**
+ * The resolved respondent-report config block. `enabled` master-gates the feature for this version;
+ * `mode` selects raw vs raw+insights; `rawIncludes` chooses what the raw section shows; `generation`
+ * carries the AI knobs (only consulted in `raw_plus_insights`); `delivery` chooses how the
+ * respondent receives it (email deferred to v2). Also gated by the platform flag
+ * `APP_QUESTIONNAIRES_RESPONDENT_REPORT_ENABLED`.
+ */
+export type RespondentReportSettings = {
+  enabled: boolean;
+  mode: RespondentReportMode;
+  rawIncludes: {
+    /** Include the captured data-slot values (Data Slots feature). */
+    dataSlots: boolean;
+    /** Include the questions and answers as they were presented to the respondent. */
+    questionsAsPresented: boolean;
+  };
+  generation: {
+    /** Free-text style/voice instructions for the report agent. */
+    instructions: string;
+    /** Free-text desired structure/outline for the report. */
+    structure: string;
+    /** Flat background-context blob (from the admin interview) the agent always sees. */
+    backgroundContext: string;
+    /** Ground insights in the attributed client's knowledge base when available. */
+    useClientKnowledge: boolean;
+  };
+  delivery: {
+    /** Show the report on the completion screen. */
+    onScreen: boolean;
+    /** Offer a downloadable PDF. */
+    download: boolean;
+  };
+};
+
+/** Feature off, raw mode, sensible includes/delivery — today's behaviour (no report unless enabled). */
+export const DEFAULT_RESPONDENT_REPORT_SETTINGS: RespondentReportSettings = {
+  enabled: false,
+  mode: 'raw',
+  rawIncludes: { dataSlots: false, questionsAsPresented: true },
+  generation: { instructions: '', structure: '', backgroundContext: '', useClientKnowledge: false },
+  delivery: { onScreen: true, download: true },
+};
+
+/**
  * The full resolved shape of a version's configuration — one field per
  * `AppQuestionnaireConfig` column. The read view returns this (defaults when no
  * row exists); the editor and PATCH body are partials of it.
@@ -551,6 +620,12 @@ export type QuestionnaireConfigShape = {
    * `APP_QUESTIONNAIRES_TONE_ENABLED` is on. Threaded to the phraser via `buildToneInstructions`.
    */
   tone: ToneSettings;
+  /**
+   * Respondent Report — the per-respondent report delivered after completion. See
+   * {@link RespondentReportSettings}. Off by default; only takes effect when the platform flag
+   * `APP_QUESTIONNAIRES_RESPONDENT_REPORT_ENABLED` is on.
+   */
+  respondentReport: RespondentReportSettings;
 };
 
 /**
@@ -611,4 +686,5 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   // Admin-only debugging surface — off by default; an operator turns it on per version.
   previewInspectorEnabled: false,
   tone: DEFAULT_TONE_SETTINGS,
+  respondentReport: DEFAULT_RESPONDENT_REPORT_SETTINGS,
 };

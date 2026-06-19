@@ -26,6 +26,9 @@ import {
   PRESENTATION_MODES,
   PROFILE_FIELD_TYPES,
   REASONING_PLACEMENTS,
+  RESPONDENT_REPORT_BACKGROUND_MAX_LENGTH,
+  RESPONDENT_REPORT_INSTRUCTIONS_MAX_LENGTH,
+  RESPONDENT_REPORT_MODES,
   SELECTION_STRATEGIES,
   TONE_LEVEL_MAX,
   TONE_LEVEL_MIN,
@@ -114,6 +117,39 @@ const toneSettingsSchema = z
   .strict();
 
 /**
+ * Respondent Report (report kind `respondent`) — the full {@link RespondentReportSettings} block.
+ * Sent whole (not partial) by the editor; every sub-object present so a save can clear a toggle.
+ * `strict()` at every level rejects unknown keys. Gated additionally by the platform flag
+ * `APP_QUESTIONNAIRES_RESPONDENT_REPORT_ENABLED`.
+ */
+const respondentReportSettingsSchema = z
+  .object({
+    enabled: z.boolean(),
+    mode: z.enum(RESPONDENT_REPORT_MODES),
+    rawIncludes: z
+      .object({
+        dataSlots: z.boolean(),
+        questionsAsPresented: z.boolean(),
+      })
+      .strict(),
+    generation: z
+      .object({
+        instructions: z.string().trim().max(RESPONDENT_REPORT_INSTRUCTIONS_MAX_LENGTH),
+        structure: z.string().trim().max(RESPONDENT_REPORT_INSTRUCTIONS_MAX_LENGTH),
+        backgroundContext: z.string().trim().max(RESPONDENT_REPORT_BACKGROUND_MAX_LENGTH),
+        useClientKnowledge: z.boolean(),
+      })
+      .strict(),
+    delivery: z
+      .object({
+        onScreen: z.boolean(),
+        download: z.boolean(),
+      })
+      .strict(),
+  })
+  .strict();
+
+/**
  * PATCH a version's configuration. All fields optional (partial save); at least
  * one required. Numbers are bounded to sane authoring ranges; nullable budget/cap
  * fields use `null` to mean "no cap" (an omitted key leaves the stored value).
@@ -175,6 +211,9 @@ export const updateConfigSchema = z
     // Interviewer tone & persona (F-tone). Sent whole when present; gated additionally by the
     // platform flag APP_QUESTIONNAIRES_TONE_ENABLED.
     tone: toneSettingsSchema.optional(),
+    // Respondent Report. Sent whole when present; gated additionally by the platform flag
+    // APP_QUESTIONNAIRES_RESPONDENT_REPORT_ENABLED.
+    respondentReport: respondentReportSettingsSchema.optional(),
   })
   .refine((b) => Object.values(b).some((v) => v !== undefined), {
     message: 'Provide at least one field to update',

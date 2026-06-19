@@ -25,6 +25,7 @@ function makeFlags(over: Partial<QuestionnaireWorkspaceFlags> = {}): Questionnai
     liveSessions: true,
     adaptive: true,
     adaptiveDataSlots: true,
+    respondentReport: true,
     ...over,
   };
 }
@@ -83,7 +84,13 @@ describe('visibleWorkspaceTabs', () => {
     expect(ids).toContain('data-slots');
     expect(ids).toContain('evaluations');
     expect(ids).toContain('invitations');
+    expect(ids).toContain('respondent-report');
     expect(ids).toContain('analytics');
+  });
+
+  it('hides the respondent-report tab when the respondentReport flag is off', () => {
+    const tabs = visibleWorkspaceTabs(makeFlags({ respondentReport: false }));
+    expect(tabs.find((t) => t.id === 'respondent-report')).toBeUndefined();
   });
 
   it('hides the data-slots tab when the dataSlots flag is off', () => {
@@ -108,8 +115,10 @@ describe('visibleWorkspaceTabs', () => {
   });
 
   it('returns an empty-ish list when all sub-flag tabs are hidden', () => {
-    const tabs = visibleWorkspaceTabs(makeFlags({ dataSlots: false, designEval: false }));
-    // data-slots and evaluations should be the only hidden ones
+    const tabs = visibleWorkspaceTabs(
+      makeFlags({ dataSlots: false, designEval: false, respondentReport: false })
+    );
+    // data-slots, evaluations, and respondent-report should be the only hidden ones
     const flaggedTabIds = QUESTIONNAIRE_WORKSPACE_TABS.filter((t) => t.flag).map((t) => t.id);
     for (const id of flaggedTabIds) {
       expect(tabs.find((t) => t.id === id)).toBeUndefined();

@@ -53,7 +53,10 @@ import type {
   QuestionnaireDetail,
   VersionGraphView,
 } from '@/lib/app/questionnaire/views';
-import { DEFAULT_TONE_SETTINGS } from '@/lib/app/questionnaire/types';
+import {
+  DEFAULT_RESPONDENT_REPORT_SETTINGS,
+  DEFAULT_TONE_SETTINGS,
+} from '@/lib/app/questionnaire/types';
 import type { DataSlotView } from '@/lib/app/questionnaire/data-slots';
 import {
   getEvaluationAddQuestionSeed,
@@ -122,6 +125,7 @@ function makeGraph(over: Partial<VersionGraphView> = {}): VersionGraphView {
       reasoningStreamPersist: true,
       previewInspectorEnabled: false,
       tone: DEFAULT_TONE_SETTINGS,
+      respondentReport: DEFAULT_RESPONDENT_REPORT_SETTINGS,
     },
     ...over,
   };
@@ -675,19 +679,20 @@ describe('resolveQuestionnaireWorkspaceFlags', () => {
         liveSessions: true,
         adaptive: true,
         adaptiveDataSlots: true,
+        respondentReport: true,
       });
     });
 
-    it('resolves all 6 flags in a single Promise.all (6 isFeatureEnabled calls)', async () => {
+    it('resolves all 7 flags in a single Promise.all (7 isFeatureEnabled calls)', async () => {
       // Arrange
       mockIsFeatureEnabled.mockResolvedValue(true);
 
       // Act
       await resolveQuestionnaireWorkspaceFlags();
 
-      // Assert: exactly 6 calls — one per flag constant; prevents regression
+      // Assert: exactly 7 calls — one per flag constant; prevents regression
       // where sub-flag helpers re-resolved the master flag independently
-      expect(mockIsFeatureEnabled).toHaveBeenCalledTimes(6);
+      expect(mockIsFeatureEnabled).toHaveBeenCalledTimes(7);
     });
   });
 
@@ -758,6 +763,7 @@ describe('resolveQuestionnaireWorkspaceFlags', () => {
           'designEval',
           'liveSessions',
           'master',
+          'respondentReport',
         ].sort()
       );
     });

@@ -59,7 +59,10 @@ import {
   EXTRACT_ANSWER_SLOTS_CAPABILITY_SLUG,
   REFINE_ANSWER_CAPABILITY_SLUG,
 } from '@/lib/app/questionnaire/constants';
-import { DEFAULT_TONE_SETTINGS } from '@/lib/app/questionnaire/types';
+import {
+  DEFAULT_RESPONDENT_REPORT_SETTINGS,
+  DEFAULT_TONE_SETTINGS,
+} from '@/lib/app/questionnaire/types';
 import type { TurnState } from '@/lib/app/questionnaire/orchestrator';
 import type { CapabilitySlotView } from '@/app/api/v1/app/questionnaires/_lib/turn-context';
 
@@ -121,6 +124,7 @@ function state(over: Partial<TurnState> = {}): TurnState {
       reasoningStreamPersist: true,
       previewInspectorEnabled: false,
       tone: DEFAULT_TONE_SETTINGS,
+      respondentReport: DEFAULT_RESPONDENT_REPORT_SETTINGS,
     },
     questions: [
       {

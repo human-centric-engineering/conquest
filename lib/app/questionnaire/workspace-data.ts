@@ -27,6 +27,7 @@ import {
   APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG,
   APP_QUESTIONNAIRES_FLAG,
   APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG,
+  APP_QUESTIONNAIRES_RESPONDENT_REPORT_FLAG,
 } from '@/lib/app/questionnaire/constants';
 import type { DataSlotView } from '@/lib/app/questionnaire/data-slots';
 import type {
@@ -212,6 +213,8 @@ export interface QuestionnaireWorkspaceFlags {
   adaptive: boolean;
   /** Adaptive data-slot selection (embedding-ranked next-slot pick) — gates the data-slot embed step + launch check. */
   adaptiveDataSlots: boolean;
+  /** Respondent Report tab (report kind `respondent`) — per-respondent post-completion summary. */
+  respondentReport: boolean;
 }
 
 /**
@@ -224,15 +227,23 @@ export interface QuestionnaireWorkspaceFlags {
  */
 export const resolveQuestionnaireWorkspaceFlags = cache(
   async (): Promise<QuestionnaireWorkspaceFlags> => {
-    const [master, dataSlots, designEval, liveSessions, adaptive, adaptiveDataSlots] =
-      await Promise.all([
-        isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
-        isFeatureEnabled(APP_QUESTIONNAIRES_DATA_SLOTS_FLAG),
-        isFeatureEnabled(APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG),
-        isFeatureEnabled(APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG),
-        isFeatureEnabled(APP_QUESTIONNAIRES_ADAPTIVE_FLAG),
-        isFeatureEnabled(APP_QUESTIONNAIRES_ADAPTIVE_DATA_SLOTS_FLAG),
-      ]);
+    const [
+      master,
+      dataSlots,
+      designEval,
+      liveSessions,
+      adaptive,
+      adaptiveDataSlots,
+      respondentReport,
+    ] = await Promise.all([
+      isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
+      isFeatureEnabled(APP_QUESTIONNAIRES_DATA_SLOTS_FLAG),
+      isFeatureEnabled(APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG),
+      isFeatureEnabled(APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG),
+      isFeatureEnabled(APP_QUESTIONNAIRES_ADAPTIVE_FLAG),
+      isFeatureEnabled(APP_QUESTIONNAIRES_ADAPTIVE_DATA_SLOTS_FLAG),
+      isFeatureEnabled(APP_QUESTIONNAIRES_RESPONDENT_REPORT_FLAG),
+    ]);
     return {
       master,
       dataSlots: master && dataSlots,
@@ -242,6 +253,7 @@ export const resolveQuestionnaireWorkspaceFlags = cache(
       // Adaptive data-slot selection also depends on the data-slots + live-sessions flags (it only
       // runs in live data-slot mode); AND them here so the workspace flag matches the runtime gate.
       adaptiveDataSlots: master && dataSlots && liveSessions && adaptiveDataSlots,
+      respondentReport: master && respondentReport,
     };
   }
 );

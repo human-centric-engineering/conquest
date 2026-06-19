@@ -56,9 +56,10 @@ const allFlagsOn: QuestionnaireWorkspaceFlags = {
   liveSessions: true,
   adaptive: true,
   adaptiveDataSlots: true,
+  respondentReport: true,
 };
 
-/** Flags that disable optional tabs (dataSlots and designEval hidden). */
+/** Flags that disable optional tabs (dataSlots, designEval, respondentReport hidden). */
 const flagsAllOff: QuestionnaireWorkspaceFlags = {
   master: true,
   dataSlots: false,
@@ -66,6 +67,7 @@ const flagsAllOff: QuestionnaireWorkspaceFlags = {
   liveSessions: false,
   adaptive: false,
   adaptiveDataSlots: false,
+  respondentReport: false,
 };
 
 function renderNav(pathname: string, flags = allFlagsOn) {

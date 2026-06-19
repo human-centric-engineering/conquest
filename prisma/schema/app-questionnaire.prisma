@@ -232,6 +232,13 @@ model AppQuestionnaireConfig {
   // Fed into the phraser system prompt by buildToneInstructions (lib/.../chat/tone.ts). (types.ts)
   tone Json @default("{}")
 
+  // Respondent Report (report kind `respondent`): RespondentReportSettings — the per-respondent
+  // report delivered after completion (mode, raw-content includes, AI generation knobs, delivery).
+  // Off by default; only takes effect when the platform flag
+  // APP_QUESTIONNAIRES_RESPONDENT_REPORT_ENABLED is on. Narrowed by narrowRespondentReportSettings
+  // (lib/.../report/settings.ts). (types.ts)
+  respondentReport Json @default("{}")
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -444,6 +451,12 @@ model AppDemoClient {
   logoBackgroundColor   String? // colour painted behind the logo (hex); null falls back to surfaceColor when the backdrop is enabled
   logoBackgroundEnabled Boolean @default(false) // "apply this colour as the logo background" — the admin toggle
 
+  // Respondent Report: this client's dedicated KnowledgeTag id (KnowledgeTag is a platform model;
+  // a plain String, no @relation — UG-1 and a deliberate seam, so the app never forks the platform
+  // knowledge schema). Provisioned on first KB use; documents tagged with it are the client's
+  // private corpus, isolated from other clients at query time. Null = no client KB yet.
+  knowledgeTagId String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -516,6 +529,7 @@ model AppQuestionnaireSession {
   turns           AppQuestionnaireTurn[]
   turnEvaluations AppQuestionnaireTurnEvaluation[]
   profileSnapshot AppRespondentProfileSnapshot?
+  respondentReport AppRespondentReport?
 
   @@index([versionId])
   @@index([versionId, isPreview])
@@ -563,6 +577,36 @@ model AppRespondentProfileSnapshot {
 
   @@index([respondentUserId])
   @@map("app_respondent_profile_snapshot")
+}
+
+/// The generated Respondent Report (report kind `respondent`) for one completed session — 1:1 with
+/// the session. Created `queued` at submit ONLY when the version's `respondentReport` config is
+/// enabled in mode `raw_plus_insights`; the deterministic raw-only mode renders on demand and needs
+/// no row. The maintenance-tick worker leases a queued row, runs the report agent (optionally
+/// grounded in the attributed client's knowledge base), and writes `ready` + `content` (or `failed`
+/// + `error`).
+///
+/// Respondent data: `onDelete: Cascade` from the session so session deletion + GDPR erasure remove
+/// it natively. The lease columns (`lockedBy`/`lockedAt`) mirror the evaluations batch worker
+/// (lib/orchestration/evaluations/run-worker.ts) for crash-safe recovery of stale claims.
+model AppRespondentReport {
+  id          String    @id @default(cuid())
+  sessionId   String    @unique
+  mode        String // RESPONDENT_REPORT_MODES (types.ts); only `raw_plus_insights` persists a row
+  status      String    @default("queued") // RESPONDENT_REPORT_STATUSES: queued | processing | ready | failed
+  content     Json? // RespondentReportContent (insights payload); null until ready
+  costUsd     Float? // generation cost actual; null until ready
+  error       String? // failure message when status = failed
+  lockedBy    String? // worker host holding the lease; null when idle
+  lockedAt    DateTime? // lease acquired-at; stale after the worker threshold (claimable again)
+  generatedAt DateTime? // when content was written (status → ready)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  session AppQuestionnaireSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([status, lockedAt])
+  @@map("app_respondent_report")
 }
 
 /// One captured answer for a question slot within a session. F4.2 produces the

@@ -141,6 +141,7 @@ function makeFlags(over: Partial<QuestionnaireWorkspaceFlags> = {}): Questionnai
     liveSessions: true,
     adaptive: false,
     adaptiveDataSlots: false,
+    respondentReport: false,
     ...over,
   };
 }

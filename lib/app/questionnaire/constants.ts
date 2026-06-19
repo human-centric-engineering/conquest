@@ -840,6 +840,17 @@ export const APP_QUESTIONNAIRES_REASONING_STREAM_FLAG =
 export const APP_QUESTIONNAIRES_TONE_FLAG = 'APP_QUESTIONNAIRES_TONE_ENABLED';
 
 /**
+ * Platform feature flag gating the **Respondent Report** (report kind `respondent`) — the
+ * per-respondent summary delivered after a respondent completes the questionnaire, configured from
+ * its own workspace tab. The first of two report kinds; the later cross-respondent **Cohort Report**
+ * (`cohort`) gets its own flag when built. DB-backed, seeded disabled by `044-respondent-report-flag.ts`.
+ * Opt-in on top of APP_QUESTIONNAIRES_ENABLED. When off, the workspace tab is hidden and the page
+ * `notFound()`s.
+ */
+export const APP_QUESTIONNAIRES_RESPONDENT_REPORT_FLAG =
+  'APP_QUESTIONNAIRES_RESPONDENT_REPORT_ENABLED';
+
+/**
  * Slug of the seeded composer `AiAgent` (generative authoring). A distinct agent
  * from the document extractor: composition and document extraction carry their
  * own budgets and personas. Ships with empty `model`/`provider` so it resolves

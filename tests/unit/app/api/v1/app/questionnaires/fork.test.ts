@@ -347,6 +347,18 @@ describe('forkVersionIfLaunched — fork', () => {
         contradictionWindowN: 5,
         anonymousMode: false,
         profileFields: [{ key: 'role', label: 'Role', type: 'text', required: true }],
+        respondentReport: {
+          enabled: true,
+          mode: 'raw_plus_insights',
+          rawIncludes: { dataSlots: false, questionsAsPresented: true },
+          generation: {
+            instructions: 'Be concise.',
+            structure: '',
+            backgroundContext: 'Quarterly pulse.',
+            useClientKnowledge: true,
+          },
+          delivery: { onScreen: true, download: true },
+        },
       },
     });
 
@@ -363,6 +375,12 @@ describe('forkVersionIfLaunched — fork', () => {
       contradictionMode: 'flag',
       contradictionWindowN: 5,
       profileFields: [{ key: 'role', label: 'Role', type: 'text', required: true }],
+      // The respondentReport JSON slice forks with the version (1:1 config copy).
+      respondentReport: {
+        enabled: true,
+        mode: 'raw_plus_insights',
+        generation: { useClientKnowledge: true },
+      },
     });
   });
 
