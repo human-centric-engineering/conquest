@@ -41,6 +41,7 @@ vi.mock('@/lib/app/questionnaire/feature-flag', () => ({
   isVoiceInputEnabled: vi.fn(),
   isAttachmentInputEnabled: vi.fn(),
   isReasoningStreamEnabled: vi.fn(),
+  isIntroScreenEnabled: vi.fn(),
 }));
 
 /**
@@ -106,6 +107,7 @@ vi.mock('@/components/app/questionnaire/chat/brand-theme-provider', () => ({
 import PublicQuestionnairePage, { metadata } from '@/app/(public)/q/[versionId]/page';
 import {
   isAttachmentInputEnabled,
+  isIntroScreenEnabled,
   isLiveSessionsEnabled,
   isReasoningStreamEnabled,
   isVoiceInputEnabled,
@@ -159,6 +161,7 @@ describe('PublicQuestionnairePage', () => {
     vi.mocked(isVoiceInputEnabled).mockResolvedValue(false);
     vi.mocked(isAttachmentInputEnabled).mockResolvedValue(false);
     vi.mocked(isReasoningStreamEnabled).mockResolvedValue(false);
+    vi.mocked(isIntroScreenEnabled).mockResolvedValue(false);
     vi.mocked(resolveThemeForVersion).mockResolvedValue(MOCK_THEME);
     vi.mocked(resolveAnonymousForVersion).mockResolvedValue(false);
     vi.mocked(resolvePresentationModeForVersion).mockResolvedValue('chat');

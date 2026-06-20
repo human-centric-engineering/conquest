@@ -71,6 +71,21 @@ describe('resolveSessionIntro', () => {
     expect(mockMember).not.toHaveBeenCalled();
   });
 
+  it('skips the cohort background lookup entirely when the intro is disabled', async () => {
+    // The splash never renders when disabled, so the (possibly cohort-overridden) background is
+    // unused — resolving it would be a wasted per-session DB round-trip.
+    mockSession.mockResolvedValue(
+      sessionRow({
+        cohortMemberId: 'm1',
+        intro: { enabled: false, background: 'Version background', buttonLabel: '' },
+      }) as never
+    );
+    const intro = await resolveSessionIntro('s1');
+    expect(intro!.enabled).toBe(false);
+    expect(intro!.background).toBe('');
+    expect(mockMember).not.toHaveBeenCalled();
+  });
+
   it('replaces the background with a non-empty cohort override', async () => {
     mockSession.mockResolvedValue(sessionRow({ cohortMemberId: 'm1' }) as never);
     mockMember.mockResolvedValue({

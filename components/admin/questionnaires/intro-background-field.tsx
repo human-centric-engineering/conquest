@@ -165,14 +165,14 @@ export function IntroBackgroundField({
               value={brief}
               onChange={(e) => setBrief(e.target.value)}
               onKeyDown={(e) => {
-                if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && brief.trim()) {
+                if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && brief.trim() && !anyBusy) {
                   e.preventDefault();
                   void runAuthor({ mode: 'generate', brief: brief.trim() }, 'generate');
                 }
               }}
               placeholder="e.g. Acme is running this with its engineering teams to understand collaboration. Results shape how we support teams; responses are anonymous."
               className="min-h-24 text-sm"
-              disabled={busy === 'generate'}
+              disabled={anyBusy}
             />
             <div className="flex items-center justify-end gap-2">
               <Button
@@ -180,7 +180,7 @@ export function IntroBackgroundField({
                 onClick={() =>
                   void runAuthor({ mode: 'generate', brief: brief.trim() }, 'generate')
                 }
-                disabled={busy === 'generate' || !brief.trim()}
+                disabled={anyBusy || !brief.trim()}
               >
                 {busy === 'generate' ? (
                   <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
@@ -225,7 +225,12 @@ export function IntroBackgroundField({
               value={instruction}
               onChange={(e) => setInstruction(e.target.value)}
               onKeyDown={(e) => {
-                if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && instruction.trim()) {
+                if (
+                  (e.metaKey || e.ctrlKey) &&
+                  e.key === 'Enter' &&
+                  instruction.trim() &&
+                  !anyBusy
+                ) {
                   e.preventDefault();
                   void runAuthor(
                     { mode: 'refine', currentText: value, instruction: instruction.trim() },
@@ -235,7 +240,7 @@ export function IntroBackgroundField({
               }}
               placeholder="e.g. Make it shorter and reassure them it's anonymous."
               className="min-h-20 text-sm"
-              disabled={busy === 'refine'}
+              disabled={anyBusy}
             />
             <div className="flex items-center justify-end gap-2">
               <Button
@@ -246,7 +251,7 @@ export function IntroBackgroundField({
                     'refine'
                   )
                 }
-                disabled={busy === 'refine' || !instruction.trim()}
+                disabled={anyBusy || !instruction.trim()}
               >
                 {busy === 'refine' ? (
                   <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />

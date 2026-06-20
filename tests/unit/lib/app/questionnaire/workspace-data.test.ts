@@ -64,6 +64,8 @@ import {
   getQuestionnaireDetailCached,
   getVersionGraphCached,
   getVersionDataSlotCountCached,
+  getVersionEmbeddingCoverageCached,
+  getVersionDataSlotEmbeddingCoverageCached,
   resolveQuestionnaireWorkspaceFlags,
 } from '@/lib/app/questionnaire/workspace-data';
 
@@ -385,7 +387,8 @@ describe('getVersionDataSlotCountCached', () => {
     it('returns the number of slots when the fetch succeeds and body.success=true', async () => {
       // Arrange: three data slots in the response
       const slots = [makeSlot(0), makeSlot(1), makeSlot(2)];
-      mockServerFetch.mockResolvedValueOnce(makeOkResponse());
+      const okResponse = makeOkResponse();
+      mockServerFetch.mockResolvedValueOnce(okResponse);
       mockParseApiResponse.mockResolvedValueOnce({ success: true, data: { slots } });
 
       // Act
@@ -394,6 +397,9 @@ describe('getVersionDataSlotCountCached', () => {
       // Assert: the function counts slots.length — NOT the raw mock length;
       // this proves the function reads body.data.slots and computes length.
       expect(count).toBe(3);
+      // Assert: parseApiResponse receives the actual Response object that serverFetch resolved —
+      // confirms the function forwards the real Response, not a copy or wrapper.
+      expect(mockParseApiResponse).toHaveBeenCalledWith(okResponse);
     });
 
     it('returns 0 when the slot list is empty', async () => {
@@ -489,6 +495,222 @@ describe('getVersionDataSlotCountCached', () => {
       // Assert: error is surfaced through structured logging
       expect(mockLogger.error).toHaveBeenCalledWith(
         'workspace: data slot count fetch failed',
+        fetchError
+      );
+    });
+  });
+});
+
+// ─── getVersionEmbeddingCoverageCached ────────────────────────────────────────
+
+describe('getVersionEmbeddingCoverageCached', () => {
+  describe('success path', () => {
+    it('returns the coverage object when the fetch succeeds and body.success=true', async () => {
+      // Arrange
+      const coverage = { total: 10, embedded: 8, missing: 2 };
+      mockServerFetch.mockResolvedValueOnce(makeOkResponse());
+      mockParseApiResponse.mockResolvedValueOnce({ success: true, data: coverage });
+
+      // Act
+      const result = await getVersionEmbeddingCoverageCached('qn-1', 'ver-1');
+
+      // Assert: the function unwraps body.data and returns it — not the mock shape directly.
+      // Proves the code reads total/embedded/missing from the parsed body.
+      expect(result).toEqual({ total: 10, embedded: 8, missing: 2 });
+    });
+
+    it('calls serverFetch with the embed-questions endpoint containing both id and versionId', async () => {
+      // Arrange
+      mockServerFetch.mockResolvedValueOnce(makeOkResponse());
+      mockParseApiResponse.mockResolvedValueOnce({
+        success: true,
+        data: { total: 0, embedded: 0, missing: 0 },
+      });
+
+      // Act
+      await getVersionEmbeddingCoverageCached('qn-abc', 'ver-xyz');
+
+      // Assert: the correct endpoint was targeted with both path parameters
+      expect(mockServerFetch).toHaveBeenCalledWith(
+        expect.stringMatching(
+          /\/api\/v1\/app\/questionnaires\/qn-abc\/versions\/ver-xyz\/embed-questions/
+        )
+      );
+    });
+  });
+
+  describe('!res.ok path', () => {
+    it('returns the zero default object when serverFetch responds with !ok', async () => {
+      // Arrange
+      mockServerFetch.mockResolvedValueOnce(makeErrorResponse());
+
+      // Act
+      const result = await getVersionEmbeddingCoverageCached('qn-1', 'ver-1');
+
+      // Assert: documented fallback on !ok is { total: 0, embedded: 0, missing: 0 }
+      expect(result).toEqual({ total: 0, embedded: 0, missing: 0 });
+    });
+
+    it('does not call parseApiResponse when res.ok is false', async () => {
+      // Arrange
+      mockServerFetch.mockResolvedValueOnce(makeErrorResponse());
+
+      // Act
+      await getVersionEmbeddingCoverageCached('qn-1', 'ver-1');
+
+      // Assert: parse never runs on a failed response
+      expect(mockParseApiResponse).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('body.success=false path', () => {
+    it('returns the zero default object when parseApiResponse returns success=false', async () => {
+      // Arrange
+      mockServerFetch.mockResolvedValueOnce(makeOkResponse());
+      mockParseApiResponse.mockResolvedValueOnce({
+        success: false,
+        error: { code: 'INTERNAL_ERROR' },
+      });
+
+      // Act
+      const result = await getVersionEmbeddingCoverageCached('qn-1', 'ver-1');
+
+      // Assert: body.success=false → zero default so transient errors never wrongly block launch
+      expect(result).toEqual({ total: 0, embedded: 0, missing: 0 });
+    });
+  });
+
+  describe('fetch throws path', () => {
+    it('returns the zero default object when serverFetch rejects', async () => {
+      // Arrange
+      mockServerFetch.mockRejectedValueOnce(new Error('Connection refused'));
+
+      // Act
+      const result = await getVersionEmbeddingCoverageCached('qn-1', 'ver-1');
+
+      // Assert: documented fallback is { total: 0, embedded: 0, missing: 0 }
+      expect(result).toEqual({ total: 0, embedded: 0, missing: 0 });
+    });
+
+    it('logs the error via logger.error with the correct message when serverFetch throws', async () => {
+      // Arrange
+      const fetchError = new Error('Connection refused');
+      mockServerFetch.mockRejectedValueOnce(fetchError);
+
+      // Act
+      await getVersionEmbeddingCoverageCached('qn-1', 'ver-1');
+
+      // Assert: error is surfaced through structured logging with the correct message
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        'workspace: embedding coverage fetch failed',
+        fetchError
+      );
+    });
+  });
+});
+
+// ─── getVersionDataSlotEmbeddingCoverageCached ────────────────────────────────
+
+describe('getVersionDataSlotEmbeddingCoverageCached', () => {
+  describe('success path', () => {
+    it('returns the coverage object when the fetch succeeds and body.success=true', async () => {
+      // Arrange
+      const coverage = { total: 5, embedded: 3, missing: 2 };
+      mockServerFetch.mockResolvedValueOnce(makeOkResponse());
+      mockParseApiResponse.mockResolvedValueOnce({ success: true, data: coverage });
+
+      // Act
+      const result = await getVersionDataSlotEmbeddingCoverageCached('qn-1', 'ver-1');
+
+      // Assert: the function unwraps body.data and returns it — not the mock shape directly.
+      // Proves the code reads total/embedded/missing from the parsed body.
+      expect(result).toEqual({ total: 5, embedded: 3, missing: 2 });
+    });
+
+    it('calls serverFetch with the embed-data-slots endpoint containing both id and versionId', async () => {
+      // Arrange
+      mockServerFetch.mockResolvedValueOnce(makeOkResponse());
+      mockParseApiResponse.mockResolvedValueOnce({
+        success: true,
+        data: { total: 0, embedded: 0, missing: 0 },
+      });
+
+      // Act
+      await getVersionDataSlotEmbeddingCoverageCached('qn-abc', 'ver-xyz');
+
+      // Assert: the correct data-slot embeddings endpoint was targeted with both path parameters
+      expect(mockServerFetch).toHaveBeenCalledWith(
+        expect.stringMatching(
+          /\/api\/v1\/app\/questionnaires\/qn-abc\/versions\/ver-xyz\/embed-data-slots/
+        )
+      );
+    });
+  });
+
+  describe('!res.ok path', () => {
+    it('returns the zero default object when serverFetch responds with !ok', async () => {
+      // Arrange
+      mockServerFetch.mockResolvedValueOnce(makeErrorResponse());
+
+      // Act
+      const result = await getVersionDataSlotEmbeddingCoverageCached('qn-1', 'ver-1');
+
+      // Assert: documented fallback on !ok is { total: 0, embedded: 0, missing: 0 }
+      expect(result).toEqual({ total: 0, embedded: 0, missing: 0 });
+    });
+
+    it('does not call parseApiResponse when res.ok is false', async () => {
+      // Arrange
+      mockServerFetch.mockResolvedValueOnce(makeErrorResponse());
+
+      // Act
+      await getVersionDataSlotEmbeddingCoverageCached('qn-1', 'ver-1');
+
+      // Assert: parse never runs on a failed response
+      expect(mockParseApiResponse).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('body.success=false path', () => {
+    it('returns the zero default object when parseApiResponse returns success=false', async () => {
+      // Arrange
+      mockServerFetch.mockResolvedValueOnce(makeOkResponse());
+      mockParseApiResponse.mockResolvedValueOnce({
+        success: false,
+        error: { code: 'INTERNAL_ERROR' },
+      });
+
+      // Act
+      const result = await getVersionDataSlotEmbeddingCoverageCached('qn-1', 'ver-1');
+
+      // Assert: body.success=false → zero default so transient errors never wrongly block launch
+      expect(result).toEqual({ total: 0, embedded: 0, missing: 0 });
+    });
+  });
+
+  describe('fetch throws path', () => {
+    it('returns the zero default object when serverFetch rejects', async () => {
+      // Arrange
+      mockServerFetch.mockRejectedValueOnce(new Error('Connection refused'));
+
+      // Act
+      const result = await getVersionDataSlotEmbeddingCoverageCached('qn-1', 'ver-1');
+
+      // Assert: documented fallback is { total: 0, embedded: 0, missing: 0 }
+      expect(result).toEqual({ total: 0, embedded: 0, missing: 0 });
+    });
+
+    it('logs the error via logger.error with the correct message when serverFetch throws', async () => {
+      // Arrange
+      const fetchError = new Error('Connection refused');
+      mockServerFetch.mockRejectedValueOnce(fetchError);
+
+      // Act
+      await getVersionDataSlotEmbeddingCoverageCached('qn-1', 'ver-1');
+
+      // Assert: error is surfaced through structured logging with the data-slot-specific message
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        'workspace: data-slot embedding coverage fetch failed',
         fetchError
       );
     });
@@ -650,6 +872,36 @@ describe('getEvaluationAddQuestionSeed', () => {
     const seed = await getEvaluationAddQuestionSeed('qn-1', 'ver-1', 'run-1:find-1');
     expect(seed).toBeNull();
   });
+
+  it('sets sectionKey to null when targetKey does not start with "section:" and op has no sectionKey', async () => {
+    // Arrange: targetKey is 'question:q1' — not a section key. The op also has no sectionKey.
+    // The source falls through the `op.sectionKey ??` path, then checks targetKey.startsWith('section:'),
+    // which is false, so the ternary returns null.
+    mockServerFetch.mockResolvedValueOnce(makeOkResponse());
+    mockParseApiResponse.mockResolvedValueOnce({
+      success: true,
+      data: runDetailWith([
+        makeFinding({
+          targetKey: 'question:q1',
+          proposedEdit: {
+            op: 'add_question',
+            prompt: 'What is your budget?',
+            type: 'free_text',
+            // no sectionKey on the op
+          },
+        }),
+      ]),
+    });
+
+    // Act
+    const seed = await getEvaluationAddQuestionSeed('qn-1', 'ver-1', 'run-1:find-1');
+
+    // Assert: sectionKey must be null because the targetKey is not a 'section:' prefix key
+    // and the op does not supply one. Verifies the ternary logic in the source.
+    expect(seed).not.toBeNull();
+    expect(seed!.sectionKey).toBeNull();
+    expect(seed!.prompt).toBe('What is your budget?');
+  });
 });
 
 // ─── resolveQuestionnaireWorkspaceFlags ───────────────────────────────────────
@@ -686,15 +938,33 @@ describe('resolveQuestionnaireWorkspaceFlags', () => {
       });
     });
 
-    it('resolves all 8 flags in a single Promise.all (8 isFeatureEnabled calls)', async () => {
+    it('resolves each flag constant by its exact env-var name', async () => {
       // Arrange
       mockIsFeatureEnabled.mockResolvedValue(true);
 
       // Act
       await resolveQuestionnaireWorkspaceFlags();
 
-      // Assert: exactly 8 calls — one per flag constant; prevents regression
-      // where sub-flag helpers re-resolved the master flag independently
+      // Assert: each flag constant is looked up by its exact string name — verifies the
+      // Promise.all wires the right constant for each field, not just "some 8 calls".
+      // Uses toHaveBeenCalledWith rather than a bare count so a renamed constant fails loudly.
+      expect(mockIsFeatureEnabled).toHaveBeenCalledWith('APP_QUESTIONNAIRES_ENABLED');
+      expect(mockIsFeatureEnabled).toHaveBeenCalledWith('APP_QUESTIONNAIRES_DATA_SLOTS_ENABLED');
+      expect(mockIsFeatureEnabled).toHaveBeenCalledWith(
+        'APP_QUESTIONNAIRES_DESIGN_EVALUATION_ENABLED'
+      );
+      expect(mockIsFeatureEnabled).toHaveBeenCalledWith('APP_QUESTIONNAIRES_LIVE_SESSIONS_ENABLED');
+      expect(mockIsFeatureEnabled).toHaveBeenCalledWith(
+        'APP_QUESTIONNAIRES_ADAPTIVE_STRATEGY_ENABLED'
+      );
+      expect(mockIsFeatureEnabled).toHaveBeenCalledWith(
+        'APP_QUESTIONNAIRES_ADAPTIVE_DATA_SLOTS_ENABLED'
+      );
+      expect(mockIsFeatureEnabled).toHaveBeenCalledWith(
+        'APP_QUESTIONNAIRES_RESPONDENT_REPORT_ENABLED'
+      );
+      expect(mockIsFeatureEnabled).toHaveBeenCalledWith('APP_QUESTIONNAIRES_INTRO_SCREEN_ENABLED');
+      // Also verify exactly 8 calls — prevents accidental re-resolution of the master flag
       expect(mockIsFeatureEnabled).toHaveBeenCalledTimes(8);
     });
   });

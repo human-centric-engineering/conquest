@@ -80,18 +80,44 @@ renders the background markdown with the same `react-markdown` + `prose` treatme
 ## Admin surface
 
 - **Settings tab → Intro screen card** (`config-editor.tsx`, gated on the `introScreen` workspace
-  flag): enable toggle, background markdown textarea, button-label input. Saved whole in the config
-  PATCH (like the tone block).
-- **Cohort form** (`cohort-form.tsx`): "Intro background override" textarea.
+  flag): enable toggle, the background editor (see below), and the button-label input. Saved whole in
+  the config PATCH (like the tone block).
+- **Cohort form** (`cohort-form.tsx`): the same background editor as the "Intro background override"
+  (wired into react-hook-form via `watch`/`setValue`).
+
+## Background authoring — upload / generate / refine (F12.2)
+
+The background field is a shared control, `IntroBackgroundField`
+(`components/admin/questionnaires/intro-background-field.tsx`), a controlled markdown textarea plus a
+toolbar with three helpers. Each just **populates the field** — nothing persists here; the admin
+reviews and saves via the existing config / cohort PATCH.
+
+- **Upload document** → `POST …/intro-background/parse` (multipart): runs `parseDocument`
+  (`lib/orchestration/knowledge/parsers`) and returns the extracted text, trimmed + capped. No LLM.
+- **Generate with AI** → `POST …/intro-background/author` `{ mode: 'generate', brief }`.
+- **Refine with AI** → `POST …/intro-background/author` `{ mode: 'refine', currentText, instruction }`
+  (disabled until there's text to refine).
+
+Both author modes dispatch the **`app_author_intro_background`** capability
+(`AppAuthorIntroBackgroundCapability`), which runs one structured LLM call returning
+`{ background }` (trimmed + capped) and reuses the seeded **composer agent** (the same authoring
+binding as compose / refine-structure — no new agent). The prompts
+(`lib/app/questionnaire/intro/authoring-prompt.ts`) fix a warm, plain, British-English respondent
+voice and the JSON contract. Routes are gated by `withIntroScreenEnabled`, admin-auth, and a
+per-admin LLM/upload sub-cap (the compose / ingest limiters).
 
 ## Where the code lives
 
-| Concern                 | Location                                                                      |
-| ----------------------- | ----------------------------------------------------------------------------- |
-| Settings type/default   | `lib/app/questionnaire/types.ts` (`IntroSettings`)                            |
-| Narrow / copy / resolve | `lib/app/questionnaire/intro/{settings,copy,resolve}.ts`                      |
-| Read endpoint           | `app/api/v1/app/questionnaire-sessions/[id]/intro/route.ts`                   |
-| Gate + splash UI        | `components/app/questionnaire/intro/{session-entry,questionnaire-splash}.tsx` |
-| Admin config card       | `components/admin/questionnaires/config-editor.tsx`                           |
-| Cohort override field   | `components/admin/cohorts/cohort-form.tsx`                                    |
-| Flag                    | `APP_QUESTIONNAIRES_INTRO_SCREEN_FLAG`; seed `048-intro-screen-flag.ts`       |
+| Concern                 | Location                                                                                                              |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Settings type/default   | `lib/app/questionnaire/types.ts` (`IntroSettings`)                                                                    |
+| Narrow / copy / resolve | `lib/app/questionnaire/intro/{settings,copy,resolve}.ts`                                                              |
+| Authoring prompts       | `lib/app/questionnaire/intro/authoring-prompt.ts`                                                                     |
+| Authoring capability    | `lib/app/questionnaire/capabilities/author-intro-background.ts`                                                       |
+| Read endpoint           | `app/api/v1/app/questionnaire-sessions/[id]/intro/route.ts`                                                           |
+| Authoring endpoints     | `app/api/v1/app/questionnaires/intro-background/{author,parse}/route.ts`                                              |
+| Gate + splash UI        | `components/app/questionnaire/intro/{session-entry,questionnaire-splash}.tsx`                                         |
+| Admin config card       | `components/admin/questionnaires/config-editor.tsx`                                                                   |
+| Background editor       | `components/admin/questionnaires/intro-background-field.tsx`                                                          |
+| Cohort override field   | `components/admin/cohorts/cohort-form.tsx`                                                                            |
+| Flag                    | `APP_QUESTIONNAIRES_INTRO_SCREEN_FLAG`; seeds `048-intro-screen-flag.ts`, `049-author-intro-background-capability.ts` |

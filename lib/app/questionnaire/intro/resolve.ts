@@ -70,7 +70,11 @@ export async function resolveSessionIntro(sessionId: string): Promise<ResolvedSe
     'chat'
   );
 
-  const background = await resolveBackground(intro.background, session.cohortMemberId);
+  // Only resolve the (possibly cohort-overridden) background when the splash will actually render —
+  // skipping the cohort lookup spares a per-session DB round-trip on every intro-disabled session.
+  const background = intro.enabled
+    ? await resolveBackground(intro.background, session.cohortMemberId)
+    : '';
 
   return {
     enabled: intro.enabled,

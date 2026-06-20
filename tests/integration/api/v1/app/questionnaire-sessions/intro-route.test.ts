@@ -33,7 +33,10 @@ vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/session-access-token', () 
 import { GET } from '@/app/api/v1/app/questionnaire-sessions/[id]/intro/route';
 import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
-import { APP_QUESTIONNAIRES_INTRO_SCREEN_FLAG } from '@/lib/app/questionnaire/constants';
+import {
+  APP_QUESTIONNAIRES_INTRO_SCREEN_FLAG,
+  APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG,
+} from '@/lib/app/questionnaire/constants';
 import { mockAuthenticatedUser } from '@/tests/helpers/auth';
 
 type Mock = ReturnType<typeof vi.fn>;
@@ -75,7 +78,10 @@ beforeEach(() => {
 
 describe('gate order', () => {
   it('404s when the live-sessions flag is off, before load or access', async () => {
-    vi.mocked(isFeatureEnabled).mockResolvedValue(false);
+    // Master flag on, live-sessions specifically off — isolates the live-sessions gate.
+    vi.mocked(isFeatureEnabled).mockImplementation(async (f) =>
+      f === APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG ? false : true
+    );
     const res = await GET(req(), ctx);
     expect(res.status).toBe(404);
     expect(dbMock.findUnique).not.toHaveBeenCalled();
@@ -118,6 +124,9 @@ describe('anonymous access', () => {
     tokenMock.verifySessionToken.mockReturnValue({ ok: true, sessionId: 'sess-1' });
     const res = await GET(req({ 'x-session-token': 'tok' }), ctx);
     expect(res.status).toBe(200);
+    const body = (await res.json()) as { success: boolean; data: { intro: unknown } };
+    expect(body.success).toBe(true);
+    expect(body.data.intro).toEqual(RESOLVED_INTRO);
     expect(introMock.resolveSessionIntro).toHaveBeenCalledWith('sess-1');
   });
 
