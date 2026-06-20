@@ -5,6 +5,7 @@ import { notFound } from 'next/navigation';
 
 import {
   isAttachmentInputEnabled,
+  isIntroScreenEnabled,
   isLiveSessionsEnabled,
   isReasoningStreamEnabled,
   isVoiceInputEnabled,
@@ -80,6 +81,7 @@ export default async function PublicQuestionnairePage({
     reasoningPlacementConfigured,
     reasoningDwell,
     previewMeta,
+    introScreenEnabled,
   ] = await Promise.all([
     isVoiceInputEnabled(),
     isAttachmentInputEnabled(),
@@ -92,6 +94,7 @@ export default async function PublicQuestionnairePage({
     resolveReasoningPlacementForVersion(versionId),
     resolveReasoningDwellForVersion(versionId),
     preview ? resolveAdminPreviewMeta(versionId) : Promise.resolve(null),
+    isIntroScreenEnabled(),
   ]);
   const voiceInputEnabled = voicePlatform && voiceConfigured;
   const attachmentInputEnabled = attachmentPlatform && attachmentsConfigured;
@@ -142,6 +145,7 @@ export default async function PublicQuestionnairePage({
             reasoningDwellMs={reasoningDwell.dwellMs}
             reasoningPerItemMs={reasoningDwell.perItemMs}
             welcomeCopy={theme.welcomeCopy}
+            introScreenEnabled={introScreenEnabled}
           />
         </BrandThemeProvider>
       </div>

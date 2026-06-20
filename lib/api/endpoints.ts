@@ -533,6 +533,8 @@ export const API = {
         `/api/v1/app/questionnaire-sessions/${id}/turns/${ordinal}/evaluate-saved`,
       /** Replayed transcript — prior turns + their persisted side-band notices (GET — F7.1 resume). */
       transcript: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/transcript`,
+      /** Resolved respondent intro / splash — adaptive copy + background (GET — intro screen). */
+      intro: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/intro`,
       /** Answer-slot panel state — live read for the respondent panel (GET) (F7.2). */
       answers: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/answers`,
       /** Session lifecycle/status — completion-offer + cost tier + anon (GET) (F7.3). */

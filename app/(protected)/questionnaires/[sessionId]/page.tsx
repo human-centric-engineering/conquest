@@ -5,14 +5,16 @@ import { getServerSession } from '@/lib/auth/utils';
 import { clearInvalidSession } from '@/lib/auth/clear-session';
 import {
   isAttachmentInputEnabled,
+  isIntroScreenEnabled,
   isLiveSessionsEnabled,
   isReasoningStreamEnabled,
   isVoiceInputEnabled,
 } from '@/lib/app/questionnaire/feature-flag';
-import { SessionWorkspace } from '@/components/app/questionnaire/session-workspace';
+import { SessionEntry } from '@/components/app/questionnaire/intro/session-entry';
 import { BrandThemeProvider } from '@/components/app/questionnaire/chat/brand-theme-provider';
 import { buildWelcomeTurns } from '@/lib/app/questionnaire/chat/greeting';
 import { resolveThemeForSession } from '@/lib/app/questionnaire/chat/theme';
+import { resolveSessionIntro } from '@/lib/app/questionnaire/intro/resolve';
 import { loadAnswerPanelState } from '@/app/api/v1/app/questionnaire-sessions/_lib/answer-panel';
 import { loadSessionStatus } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-status';
 import { loadSessionSurfaceConfig } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-surface-config';
@@ -133,6 +135,10 @@ export default async function QuestionnaireSessionPage({
       : null;
   const initialStatus = initialChatStatus(status?.view, row.status === 'active');
 
+  // Respondent intro / splash (admin opt-in). Resolve only when the platform flag is on; the
+  // per-version `intro.enabled` (and a fresh session) are the second gate, applied in SessionEntry.
+  const intro = (await isIntroScreenEnabled()) ? await resolveSessionIntro(sessionId) : null;
+
   // Resumed = the session already has turns. Replay them (transcript-only — the conversation is
   // its own context); a fresh session shows the branded welcome + guidance and auto-opens. Keyed
   // on turn count, not answers: a session can have turns with no captured answer yet (e.g. an
@@ -150,7 +156,8 @@ export default async function QuestionnaireSessionPage({
   return (
     <div className="mx-auto h-[calc(100vh-12rem)] max-w-6xl">
       <BrandThemeProvider theme={theme}>
-        <SessionWorkspace
+        <SessionEntry
+          intro={intro}
           sessionId={sessionId}
           initialTurns={initialTurns}
           autoStart={!resumed}
