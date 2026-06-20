@@ -79,6 +79,7 @@ import { streamOfferMessage } from '@/app/api/v1/app/questionnaire-sessions/_lib
 import { streamQuestionMessage } from '@/app/api/v1/app/questionnaire-sessions/_lib/question-stream';
 import { buildPriorAnswersDigest } from '@/app/api/v1/app/questionnaire-sessions/_lib/prior-answers';
 import { resolveTurnAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-access';
+import { assertRoundAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/round-access';
 
 const bodySchema = z
   .object({
@@ -129,6 +130,27 @@ async function handleMessage(
         code: 'SESSION_NOT_ACTIVE',
         status: 409,
       });
+    }
+
+    // Cohorts & Rounds: re-gate a round-scoped session every turn. A round that has closed or
+    // fallen outside its window mid-session is PAUSED first (mirroring the cost-cap precedent —
+    // the status gate above then 409s every later turn), so the time-bound is enforced even for
+    // an in-flight respondent; a removed member is refused (403) WITHOUT pausing, so re-adding
+    // them lets the session resume. A since-deleted round no longer gates (onMissingRound:allow).
+    if (loaded.session.roundId) {
+      const verdict = await assertRoundAccess({
+        roundId: loaded.session.roundId,
+        cohortMemberId: loaded.session.cohortMemberId,
+        versionId: loaded.session.versionId,
+        onMissingRound: 'allow',
+      });
+      if (!verdict.ok) {
+        if (verdict.code === 'ROUND_NOT_OPEN' || verdict.code === 'ROUND_WINDOW_CLOSED') {
+          await pauseSession(sessionId, { reason: 'round_closed' });
+        }
+        log.info('Live turn refused: round access', { sessionId, code: verdict.code });
+        return errorResponse(verdict.message, { code: verdict.code, status: verdict.status });
+      }
     }
 
     const limit = turnLimiter.check(access.rateKey);

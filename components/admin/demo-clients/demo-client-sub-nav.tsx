@@ -13,26 +13,29 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
-import { DEMO_CLIENT_TABS, demoClientTabHref } from '@/lib/app/questionnaire/demo-clients/nav';
+import { demoClientTabHref, demoClientTabs } from '@/lib/app/questionnaire/demo-clients/nav';
 import { cn } from '@/lib/utils';
 
 interface DemoClientSubNavProps {
   clientId: string;
+  /** Whether the Cohorts & Rounds tabs are shown (the `APP_QUESTIONNAIRES_COHORTS` flag). */
+  cohortsEnabled?: boolean;
 }
 
 function isTabActive(href: string, pathname: string, exact?: boolean): boolean {
   return exact ? pathname === href : pathname === href || pathname.startsWith(`${href}/`);
 }
 
-export function DemoClientSubNav({ clientId }: DemoClientSubNavProps) {
+export function DemoClientSubNav({ clientId, cohortsEnabled = false }: DemoClientSubNavProps) {
   const pathname = usePathname();
+  const tabs = demoClientTabs({ cohortsEnabled });
 
   return (
     <nav
       aria-label="Demo client sections"
       className="-mb-px flex items-center gap-1 overflow-x-auto"
     >
-      {DEMO_CLIENT_TABS.map((tab) => {
+      {tabs.map((tab) => {
         const href = demoClientTabHref(clientId, tab);
         const active = isTabActive(href, pathname, tab.exact);
         return (

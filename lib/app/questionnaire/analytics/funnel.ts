@@ -16,7 +16,10 @@
 
 import { prisma } from '@/lib/db/client';
 import { isCohortSuppressed } from '@/lib/app/questionnaire/analytics/privacy';
-import type { AnalyticsScope } from '@/lib/app/questionnaire/analytics/query-schema';
+import {
+  roundSessionFilter,
+  type AnalyticsScope,
+} from '@/lib/app/questionnaire/analytics/query-schema';
 import type {
   CompletionFunnelResult,
   FunnelStage,
@@ -59,11 +62,14 @@ export async function getCompletionFunnel(scope: AnalyticsScope): Promise<Comple
 
   // Invitations in scope, excluding revoked. A respondent links to a session two ways:
   // `userId` (account-bound accept flow) or `invitationId` (frictionless token flow, no account).
+  // Round-bound invitations carry the same `roundId` as their sessions (the grant), so the
+  // invited→opened legs scope to the round too — not just the started→completed legs.
   const invitations = await prisma.appQuestionnaireInvitation.findMany({
     where: {
       versionId: scope.versionId,
       createdAt: { gte: scope.from, lt: scope.to },
       revokedAt: null,
+      ...roundSessionFilter(scope.roundId),
     },
     select: { id: true, sentAt: true, openedAt: true, userId: true },
   });
@@ -75,6 +81,7 @@ export async function getCompletionFunnel(scope: AnalyticsScope): Promise<Comple
       versionId: scope.versionId,
       isPreview: false,
       createdAt: { gte: scope.from, lt: scope.to },
+      ...roundSessionFilter(scope.roundId),
     },
     select: { respondentUserId: true, invitationId: true, status: true },
   });

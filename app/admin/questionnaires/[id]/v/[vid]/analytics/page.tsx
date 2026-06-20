@@ -14,9 +14,10 @@ import { ExportButtons } from '@/components/admin/questionnaires/analytics/expor
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
-import { isQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
+import { isQuestionnairesEnabled, isCohortsEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { getAnalyticsDefaultDateInputs } from '@/lib/app/questionnaire/analytics';
 import { getVersionGraphCached } from '@/lib/app/questionnaire/workspace-data';
+import { listRoundsForVersion } from '@/app/api/v1/app/rounds/_lib/read';
 import type {
   CompletionFunnelResult,
   QuestionDistributionsResult,
@@ -32,15 +33,16 @@ export const metadata: Metadata = {
 
 interface PageProps {
   params: Promise<{ id: string; vid: string }>;
-  searchParams: Promise<{ from?: string; to?: string; tagIds?: string }>;
+  searchParams: Promise<{ from?: string; to?: string; tagIds?: string; roundId?: string }>;
 }
 
-/** Build the shared analytics query string (date window + tag filter). */
-function buildQuery(sp: { from?: string; to?: string; tagIds?: string }): string {
+/** Build the shared analytics query string (date window + tag filter + round scope). */
+function buildQuery(sp: { from?: string; to?: string; tagIds?: string; roundId?: string }): string {
   const qs = new URLSearchParams();
   if (sp.from) qs.set('from', sp.from);
   if (sp.to) qs.set('to', sp.to);
   if (sp.tagIds) qs.set('tagIds', sp.tagIds);
+  if (sp.roundId) qs.set('roundId', sp.roundId);
   return qs.toString() ? `?${qs.toString()}` : '';
 }
 
@@ -127,11 +129,17 @@ export default async function AnalyticsTab({ params, searchParams }: PageProps) 
     from: sp.from || defaultFrom,
     to: sp.to || defaultTo,
     tagIds: (sp.tagIds ?? '').split(',').filter((t) => t.length > 0),
+    roundId: sp.roundId || undefined,
   };
   const query = buildQuery(sp);
 
   const graph = await getVersionGraphCached(id, vid);
   const tagVocabulary: TagView[] = graph?.tags ?? [];
+  // Round-scope options (Cohorts & Rounds): only when the feature is on, and only rounds that
+  // actually produced sessions for this version — so the selector appears just when it's useful.
+  const roundScope = (await isCohortsEnabled())
+    ? await listRoundsForVersion(vid)
+    : { rounds: [], hasOpenEnded: false };
   const [distributions, funnel, cost, safeguarding] = await Promise.all([
     getDistributions(id, vid, query),
     getFunnel(id, vid, query),
@@ -170,6 +178,8 @@ export default async function AnalyticsTab({ params, searchParams }: PageProps) 
         funnel={funnel}
         cost={cost}
         filters={filters}
+        roundOptions={roundScope.rounds}
+        hasOpenEnded={roundScope.hasOpenEnded}
       />
     </div>
   );

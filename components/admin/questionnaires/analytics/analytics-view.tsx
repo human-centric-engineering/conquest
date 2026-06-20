@@ -9,7 +9,10 @@
  */
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { AnalyticsFilters } from '@/components/admin/questionnaires/analytics/analytics-filters';
+import {
+  AnalyticsFilters,
+  type AnalyticsRoundChoice,
+} from '@/components/admin/questionnaires/analytics/analytics-filters';
 import { QuestionDistributionPanel } from '@/components/admin/questionnaires/analytics/question-distribution-panel';
 import { CompletionFunnelPanel } from '@/components/admin/questionnaires/analytics/completion-funnel-panel';
 import { CostPanel } from '@/components/admin/questionnaires/analytics/cost-panel';
@@ -25,7 +28,10 @@ export interface AnalyticsViewProps {
   distributions: QuestionDistributionsResult | null;
   funnel: CompletionFunnelResult | null;
   cost: QuestionnaireCostResult | null;
-  filters: { from: string; to: string; tagIds: string[] };
+  filters: { from: string; to: string; tagIds: string[]; roundId?: string };
+  /** Round-scope options for the filter; empty hides the selector. */
+  roundOptions: AnalyticsRoundChoice[];
+  hasOpenEnded: boolean;
 }
 
 export function AnalyticsView({
@@ -34,10 +40,17 @@ export function AnalyticsView({
   funnel,
   cost,
   filters,
+  roundOptions,
+  hasOpenEnded,
 }: AnalyticsViewProps) {
   return (
     <div className="space-y-6">
-      <AnalyticsFilters tagVocabulary={tagVocabulary} filters={filters} />
+      <AnalyticsFilters
+        tagVocabulary={tagVocabulary}
+        filters={filters}
+        roundOptions={roundOptions}
+        hasOpenEnded={hasOpenEnded}
+      />
 
       <Tabs defaultValue="distributions">
         <TabsList>

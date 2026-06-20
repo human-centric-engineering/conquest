@@ -139,8 +139,25 @@
     animation: cq-pulse 1.4s ease-in-out infinite;
   }
 
+  /* Gentle "live" breathing for a small status dot (e.g. an open round). */
+  @keyframes cq-livedot {
+    0%,
+    100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.45;
+      transform: scale(0.82);
+    }
+  }
+  .cq-livedot {
+    animation: cq-livedot 1.8s ease-in-out infinite;
+  }
+
   @media (prefers-reduced-motion: reduce) {
-    .cq-pulse {
+    .cq-pulse,
+    .cq-livedot {
       animation: none;
     }
   }

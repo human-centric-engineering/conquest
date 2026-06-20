@@ -28,7 +28,10 @@ model AppQuestionnaire {
   updatedAt    DateTime @updatedAt
 
   versions   AppQuestionnaireVersion[]
-  demoClient AppDemoClient?            @relation(fields: [demoClientId], references: [id], onDelete: SetNull)
+  demoClient AppDemoClient?              @relation(fields: [demoClientId], references: [id], onDelete: SetNull)
+  // Rounds this questionnaire is offered within (M:N via the join). Cascade: deleting a
+  // questionnaire removes its round-item rows (the round itself survives).
+  roundItems AppQuestionnaireRoundItem[]
 
   @@index([status])
   @@index([demoClientId])
@@ -114,6 +117,13 @@ model AppQuestionnaireInvitation {
   userId          String? // respondent User.id, set on registration; plain String, no FK (UG-1)
   invitedByUserId String // admin User.id; plain String, no FK (UG-1)
   demoClientId    String? // DEMO-ONLY (F3.4): brand snapshot at send time; null = generic Sunrise theme
+  // Cohorts & Rounds: when this invitation was minted for a round, the round + the cohort member
+  // it belongs to. Plain String, no @relation (UG-1, as `userId`). This is the SERVER-TRUSTED
+  // source of a session's round context — the session-create paths read it from the resolved
+  // invitation (never from the client body), so a respondent can't forge round membership. Null
+  // for a plain (non-round) invitation. See app/api/v1/app/rounds/_lib/invites.ts.
+  roundId         String?
+  cohortMemberId  String?
   expiresAt       DateTime // token expiry (INVITATION_TOKEN_EXPIRY_DAYS from now)
   sentAt          DateTime? // first successful email send
   openedAt        DateTime? // first landing-page validation of the token
@@ -130,6 +140,8 @@ model AppQuestionnaireInvitation {
   @@index([email])
   @@index([userId])
   @@index([demoClientId])
+  @@index([roundId])
+  @@index([roundId, cohortMemberId])
   @@map("app_questionnaire_invitation")
 }
 
@@ -467,8 +479,124 @@ model AppDemoClient {
   // delete (see AppQuestionnaireInvitation); the 409-guard counts questionnaires, not
   // these, so deleting a client clears its sent invitations' brand to the default.
   invitations    AppQuestionnaireInvitation[]
+  // Cohorts (groups of people) belonging to this demo client. Cascade on delete: a
+  // cohort is meaningless without its client. Members + rounds cascade in turn.
+  cohorts        AppCohort[]
 
   @@map("app_demo_client")
+}
+
+/// A COHORT — a named group of people (e.g. a team) that belongs to a demo client.
+/// The reusable roster a round is delivered to. Identity + description only; the
+/// people live in AppCohortMember, the deliveries in AppQuestionnaireRound.
+///
+/// A person (by email) may belong to MULTIPLE cohorts under the same demo client —
+/// membership is per-cohort (AppCohortMember `@@unique([cohortId, email])`), with no
+/// global email uniqueness, so cohorts freely overlap.
+///
+/// `demoClientId` is a real @relation (onDelete: Cascade): app-internal config, not an
+/// identity↔answer edge, so it stays fully modelled. `createdBy` is the admin who
+/// created it — plain String, no @relation (UG-1 house style, as elsewhere here).
+model AppCohort {
+  id           String   @id @default(cuid())
+  demoClientId String
+  name         String // required display name ("Q1 Leadership Team")
+  description  String? // optional internal note
+  createdBy    String? // admin User.id; plain String, no FK (UG-1)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  demoClient AppDemoClient           @relation(fields: [demoClientId], references: [id], onDelete: Cascade)
+  members    AppCohortMember[]
+  rounds     AppQuestionnaireRound[]
+
+  @@index([demoClientId])
+  @@map("app_cohort")
+}
+
+/// One person on a cohort's roster — email + display name, decoupled from platform
+/// User accounts (respondents are typically anonymous/invited, not logged in). A
+/// member is added/removed DURING a round; removal (status = removed) revokes access
+/// without deleting the row, so session history that points back here survives.
+///
+/// `@@unique([cohortId, email])` scopes uniqueness to the cohort — the same email may
+/// recur across cohorts of the same demo client (multi-cohort membership). `cohortId`
+/// is a real @relation (onDelete: Cascade): app-internal roster config.
+model AppCohortMember {
+  id        String    @id @default(cuid())
+  cohortId  String
+  email     String // the person's address (roster identity; not a login)
+  name      String // display name
+  notes     String? // optional admin note
+  status    String    @default("active") // COHORT_MEMBER_STATUSES (rounds/types.ts): active | removed
+  addedAt   DateTime  @default(now())
+  removedAt DateTime? // set when status → removed
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  cohort AppCohort @relation(fields: [cohortId], references: [id], onDelete: Cascade)
+
+  @@unique([cohortId, email])
+  @@index([cohortId])
+  @@map("app_cohort_member")
+}
+
+/// A ROUND — a time-bound delivery of one or more questionnaires to a cohort.
+///
+/// A round is the ONLY way to make a questionnaire time-bound: a session started
+/// outside a round carries no roundId and stays open-ended (today's behaviour). The
+/// window (`opensAt`/`closesAt`) is adjustable mid-round; `status` runs
+/// draft → open → closed, and an admin may close it manually (stamping
+/// `closedAt`/`closedBy`). A round may bundle several DISTINCT questionnaires via
+/// AppQuestionnaireRoundItem.
+///
+/// `cohortId` is a real @relation (onDelete: Cascade). `name` defaults (at create) to
+/// the questionnaire title + dates but is editable. `createdBy`/`closedBy` are plain
+/// Strings (UG-1).
+model AppQuestionnaireRound {
+  id          String    @id @default(cuid())
+  cohortId    String
+  name        String // required (default = questionnaire title + dates, editable)
+  description String? // optional
+  status      String    @default("draft") // ROUND_STATUSES (rounds/types.ts): draft | open | closed
+  opensAt     DateTime? // window start; null = no lower bound until opened
+  closesAt    DateTime? // window end; adjustable mid-round
+  closedAt    DateTime? // manual/auto close timestamp
+  closedBy    String? // admin User.id who closed it; plain String, no FK (UG-1)
+  createdBy   String? // admin User.id; plain String, no FK (UG-1)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  cohort AppCohort                   @relation(fields: [cohortId], references: [id], onDelete: Cascade)
+  items  AppQuestionnaireRoundItem[]
+
+  @@index([cohortId])
+  @@index([status])
+  @@map("app_questionnaire_round")
+}
+
+/// M:N join: a questionnaire offered within a round. Distinct questionnaires per round
+/// (the round bundles a survey pack). `versionId` is an OPTIONAL pin — when set the
+/// round targets that exact version; when null the round follows the questionnaire's
+/// current launched version (sessions still pin to whichever version they begin on).
+///
+/// `roundId` + `questionnaireId` are real @relations (both onDelete: Cascade) — pure
+/// app-internal config. `versionId` is a plain String pointer (UG-1), validated at the
+/// seam, so it needs no reverse relation on the version and tolerates a re-fork.
+model AppQuestionnaireRoundItem {
+  id              String   @id @default(cuid())
+  roundId         String
+  questionnaireId String
+  versionId       String? // optional version pin; null = current launched version
+  createdAt       DateTime @default(now())
+
+  round         AppQuestionnaireRound @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  questionnaire AppQuestionnaire      @relation(fields: [questionnaireId], references: [id], onDelete: Cascade)
+
+  @@unique([roundId, questionnaireId])
+  @@index([roundId])
+  @@index([questionnaireId])
+  @@map("app_questionnaire_round_item")
 }
 
 /// A respondent's run over one launched version — the minimal slice of F4.6's
@@ -503,6 +631,15 @@ model AppQuestionnaireSession {
   // ONLY for per-invitee STATUS (started/completed); under anonymousMode, never to attribute answers
   // (the completion-tracking-only invariant — see invitations/linkage.ts).
   invitationId         String?
+  // Cohorts & Rounds: the round this session runs within (time-bound delivery) and the
+  // cohort member it belongs to, or null for an open-ended (non-round) session. BOTH are
+  // plain String, no @relation — the SAME deliberate UG-1 posture as `invitationId`:
+  // they are identity↔answer POINTERS read for access enforcement (round window + member
+  // status) and per-round/per-member completion STATS, and must never become a graph edge
+  // that cascades answer content. A session with `roundId = null` is never time-bound. See
+  // lib/app/questionnaire/rounds/access.ts.
+  roundId              String?
+  cohortMemberId       String?
   // Seriousness / abuse gate: cumulative count of non-genuine answers flagged this session.
   // The route increments it; at `config.abuseThreshold` the session is abandoned.
   abuseStrikes         Int      @default(0)
@@ -522,18 +659,20 @@ model AppQuestionnaireSession {
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
-  version         AppQuestionnaireVersion          @relation(fields: [versionId], references: [id], onDelete: Cascade)
-  answers         AppAnswerSlot[]
-  dataSlotFills   AppDataSlotFill[]
-  events          AppQuestionnaireSessionEvent[]
-  turns           AppQuestionnaireTurn[]
-  turnEvaluations AppQuestionnaireTurnEvaluation[]
-  profileSnapshot AppRespondentProfileSnapshot?
+  version          AppQuestionnaireVersion          @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  answers          AppAnswerSlot[]
+  dataSlotFills    AppDataSlotFill[]
+  events           AppQuestionnaireSessionEvent[]
+  turns            AppQuestionnaireTurn[]
+  turnEvaluations  AppQuestionnaireTurnEvaluation[]
+  profileSnapshot  AppRespondentProfileSnapshot?
   respondentReport AppRespondentReport?
 
   @@index([versionId])
   @@index([versionId, isPreview])
   @@index([invitationId])
+  @@index([roundId])
+  @@index([cohortMemberId])
   // DRIFT WARNING: a raw-SQL PARTIAL UNIQUE INDEX
   // (idx_app_questionnaire_session_preview_per_version, migration
   // 20260605141500) enforces at most one preview session per version

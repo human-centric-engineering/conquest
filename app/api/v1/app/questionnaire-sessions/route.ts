@@ -40,6 +40,10 @@ const profileValuesSchema = z.record(
   z.union([z.string().max(2000), z.number()])
 );
 
+// Cohorts & Rounds: a session's round context is NOT accepted from the request — it's derived
+// server-side from the respondent's invitation (the trusted grant), so it can't be forged. The
+// invitation-token body therefore needs no round fields; the version-direct (walk-up) body is
+// never round-bound.
 const bodySchema = z.union([
   z
     .object({

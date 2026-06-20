@@ -83,6 +83,8 @@ describe('createSessionFromInvitation', () => {
         data: {
           versionId: 'v1',
           respondentUserId: USER,
+          roundId: null,
+          cohortMemberId: null,
           publicRef: expect.stringMatching(/^[0-9A-HJKMNP-TV-Z]{8}$/),
           isPreview: false,
           status: 'active',

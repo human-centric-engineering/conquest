@@ -19,6 +19,14 @@ One shared filter (`analytics-filters.tsx`) drives all three views through the U
 - **Tag filter** — `tagIds` (comma-separated). Restricts the **distributions** view to questions
   carrying any selected tag; the funnel and cost views ignore it.
 - **Version** — `?v=` (the page owns this, SSR links), like the evaluations/invitations sub-pages.
+- **Round scope** — `roundId` (Cohorts & Rounds). Absent = **all sessions** (the version-wide,
+  mixed view). A round id = **only that round's** sessions, so one cohort's run of the questionnaire
+  is analysed in isolation — different cohorts/rounds of the same questionnaire are never blended.
+  The literal `none` = only non-round (open-ended) sessions. The selector lists just the rounds that
+  actually produced sessions for this version (`listRoundsForVersion`), and only appears when the
+  `APP_QUESTIONNAIRES_COHORTS` flag is on. The translation point is `roundSessionFilter(roundId)` in
+  `query-schema.ts`, spread into every aggregator's session `where` (and the funnel's round-bound
+  invitation query) so all surfaces scope identically. See [cohorts.md](../app/questionnaire/cohorts.md).
 
 All aggregations count **non-preview** sessions only (`isPreview = false`).
 

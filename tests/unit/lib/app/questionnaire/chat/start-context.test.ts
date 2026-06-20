@@ -57,13 +57,20 @@ function invitationRow(opts: {
   anonymousMode?: boolean;
   profileFields?: unknown;
   config?: unknown;
+  roundId?: string | null;
 }) {
-  const { versionId = 'ver_1', anonymousMode = false, profileFields = PROFILE_FIELDS } = opts;
+  const {
+    versionId = 'ver_1',
+    anonymousMode = false,
+    profileFields = PROFILE_FIELDS,
+    roundId = null,
+  } = opts;
   // `as never` — the source uses a Prisma `select`, so the real return is a partial of
   // the full model; the project convention for partial-select mocks is to cast (see
   // tests/unit/lib/app/questionnaire/chat/theme.test.ts).
   return {
     versionId,
+    roundId,
     version: {
       config: 'config' in opts ? opts.config : { anonymousMode, profileFields },
     },
@@ -179,7 +186,30 @@ describe('loadStartContext', () => {
         respondentUserId: RESPONDENT_ID,
         isPreview: false,
         status: { in: ['active', 'paused'] },
+        // A non-round invitation resumes only non-round (roundId: null) sessions.
+        roundId: null,
       });
+    });
+
+    it('scopes the resumable lookup to the invitation’s round (round-bound invitation)', async () => {
+      // Cohorts & Rounds: a round-bound invitation must resume only the SAME round's session —
+      // mirroring createSessionFromInvitation, so the start page and create route agree on
+      // resumability (the divergence resumable-session.ts forbids).
+      mockInvitationFindUnique.mockResolvedValue(
+        invitationRow({
+          versionId: 'ver_42',
+          anonymousMode: false,
+          profileFields: PROFILE_FIELDS,
+          roundId: 'round_7',
+        })
+      );
+      mockSessionFindFirst.mockResolvedValue({ id: 'sess_round' } as never);
+
+      const result = await loadStartContext({ invitationToken: 'tok' }, RESPONDENT_ID);
+
+      expect(result).toEqual({ kind: 'resume', sessionId: 'sess_round' });
+      const where = mockSessionFindFirst.mock.calls[0][0]!.where as Record<string, unknown>;
+      expect(where).toMatchObject({ versionId: 'ver_42', roundId: 'round_7' });
     });
 
     it('returns needs-profile with the parsed fields when collection is required and no session exists', async () => {

@@ -20,7 +20,10 @@
 import { prisma } from '@/lib/db/client';
 import { narrowToEnum, SESSION_STATUSES, type SessionStatus } from '@/lib/app/questionnaire/types';
 import { isCohortSuppressed } from '@/lib/app/questionnaire/analytics/privacy';
-import type { AnalyticsScope } from '@/lib/app/questionnaire/analytics/query-schema';
+import {
+  roundSessionFilter,
+  type AnalyticsScope,
+} from '@/lib/app/questionnaire/analytics/query-schema';
 import type {
   CostCapabilityBucket,
   CostDayPoint,
@@ -82,7 +85,11 @@ export async function getQuestionnaireCostBreakdown(
   // together.
   const [sessions, config] = await Promise.all([
     prisma.appQuestionnaireSession.findMany({
-      where: { versionId: scope.versionId, isPreview: false },
+      where: {
+        versionId: scope.versionId,
+        isPreview: false,
+        ...roundSessionFilter(scope.roundId),
+      },
       select: { id: true, status: true, createdAt: true },
     }),
     prisma.appQuestionnaireConfig.findUnique({
@@ -153,7 +160,11 @@ export async function getQuestionnaireCostBreakdown(
     }
   }
 
-  // 2. Design-time cost: rows tagged with this version id.
+  // 2. Design-time cost: rows tagged with this version id. NOT round-scoped (and the daily trend's
+  // design-time leg likewise): authoring spend (extraction, generative authoring, evaluation)
+  // predates any round and isn't attributable to one. So under a round scope the RUNTIME leg is
+  // round-filtered while this design-time figure stays version-wide — a deliberate asymmetry, not
+  // a missing filter.
   let designTimeCostUsd = 0;
   const designRows = await prisma.$queryRawUnsafe<CapabilityRow[]>(
     `

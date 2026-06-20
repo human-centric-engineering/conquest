@@ -32,6 +32,28 @@ export const DEMO_CLIENT_TABS: readonly DemoClientTab[] = [
   { id: 'management', label: 'Management', segment: 'management' },
 ];
 
+/**
+ * The Cohorts & Rounds tabs — appended to the sub-nav only when the
+ * `APP_QUESTIONNAIRES_COHORTS` flag is on (resolved server-side in the layout and threaded
+ * down to the client sub-nav). Inserted before Management so the destructive demo-ops tab
+ * stays last.
+ */
+export const DEMO_CLIENT_COHORT_TABS: readonly DemoClientTab[] = [
+  { id: 'cohorts', label: 'Cohorts', segment: 'cohorts' },
+  { id: 'rounds', label: 'Rounds', segment: 'rounds' },
+];
+
+/**
+ * Resolve the visible tab list. The cohorts/rounds tabs are flag-gated; everything else is
+ * always shown, with Management kept last. Pure — the caller resolves the flag.
+ */
+export function demoClientTabs(opts: { cohortsEnabled: boolean }): readonly DemoClientTab[] {
+  if (!opts.cohortsEnabled) return DEMO_CLIENT_TABS;
+  const rest = DEMO_CLIENT_TABS.filter((t) => t.id !== 'management');
+  const management = DEMO_CLIENT_TABS.filter((t) => t.id === 'management');
+  return [...rest, ...DEMO_CLIENT_COHORT_TABS, ...management];
+}
+
 /** Base path for a demo-client detail surface. */
 export function demoClientBase(id: string): string {
   return `/admin/demo-clients/${id}`;

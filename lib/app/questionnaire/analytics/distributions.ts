@@ -27,7 +27,10 @@ import { typeConfigSchemaFor } from '@/lib/app/questionnaire/authoring/type-conf
 import { isCohortSuppressed } from '@/lib/app/questionnaire/analytics/privacy';
 import type { TagColor } from '@/lib/app/questionnaire/types';
 import type { TagView } from '@/lib/app/questionnaire/views';
-import type { AnalyticsScope } from '@/lib/app/questionnaire/analytics/query-schema';
+import {
+  roundSessionFilter,
+  type AnalyticsScope,
+} from '@/lib/app/questionnaire/analytics/query-schema';
 import type {
   DistributionDetail,
   HistogramBin,
@@ -260,6 +263,7 @@ export async function getQuestionDistributions(
       versionId: scope.versionId,
       isPreview: false,
       createdAt: { gte: scope.from, lt: scope.to },
+      ...roundSessionFilter(scope.roundId),
     },
     select: { id: true, status: true },
   });

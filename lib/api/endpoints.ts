@@ -574,5 +574,33 @@ export const API = {
       /** The client's private knowledge corpus (GET — client-scoped list, grounds its reports). */
       knowledge: (id: string): string => `/api/v1/app/demo-clients/${id}/knowledge`,
     },
+    /** Cohorts — groups of people (a team) under a demo client. Gated by APP_QUESTIONNAIRES_COHORTS. */
+    COHORTS: {
+      /** List (GET `?demoClientId=` + `?q=`) + create (POST). */
+      ROOT: '/api/v1/app/cohorts',
+      /** Detail (GET), edit (PATCH), delete (DELETE). */
+      byId: (id: string): string => `/api/v1/app/cohorts/${id}`,
+      /** Roster: list (GET) + add member (POST). */
+      members: (id: string): string => `/api/v1/app/cohorts/${id}/members`,
+      /** Edit (PATCH) / soft-remove (DELETE) one member. */
+      member: (id: string, memberId: string): string =>
+        `/api/v1/app/cohorts/${id}/members/${memberId}`,
+    },
+    /** Rounds — time-bound deliveries of questionnaires to a cohort. Gated by APP_QUESTIONNAIRES_COHORTS. */
+    ROUNDS: {
+      /** List (GET `?demoClientId=` | `?cohortId=` + `?q=`) + create (POST). */
+      ROOT: '/api/v1/app/rounds',
+      /** Detail (GET), edit (PATCH — name/desc/dates/status), delete (DELETE). */
+      byId: (id: string): string => `/api/v1/app/rounds/${id}`,
+      /** Manually close a round (POST → status `closed`, stamps closedAt/closedBy). */
+      close: (id: string): string => `/api/v1/app/rounds/${id}/close`,
+      /** Generate per-member invitations for the round (POST → counts + minted links). */
+      invitations: (id: string): string => `/api/v1/app/rounds/${id}/invitations`,
+      /** Bundled questionnaires: attach (POST). */
+      questionnaires: (id: string): string => `/api/v1/app/rounds/${id}/questionnaires`,
+      /** Detach one bundled questionnaire (DELETE). */
+      questionnaire: (id: string, itemId: string): string =>
+        `/api/v1/app/rounds/${id}/questionnaires/${itemId}`,
+    },
   },
 } as const;
