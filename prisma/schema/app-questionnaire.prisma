@@ -592,7 +592,7 @@ model AppRespondentProfileSnapshot {
 model AppRespondentReport {
   id          String    @id @default(cuid())
   sessionId   String    @unique
-  mode        String // RESPONDENT_REPORT_MODES (types.ts); only `raw_plus_insights` persists a row
+  mode        String // RESPONDENT_REPORT_MODES (types.ts); the AI modes `raw_plus_insights` + `narrative` persist a row
   status      String    @default("queued") // RESPONDENT_REPORT_STATUSES: queued | processing | ready | failed
   content     Json? // RespondentReportContent (insights payload); null until ready
   costUsd     Float? // generation cost actual; null until ready

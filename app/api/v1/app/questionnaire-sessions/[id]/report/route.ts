@@ -3,8 +3,9 @@
  *
  * GET /api/v1/app/questionnaire-sessions/:id/report
  *   Serves both respondent kinds (authenticated owner + no-login anonymous, via `resolveTurnAccess`).
- *   Returns whether a report is enabled, its mode + delivery, and — for `raw_plus_insights` — the
- *   generation status and (once ready) the insights content. The completion screen polls this until
+ *   Returns whether a report is enabled, its mode + delivery, and — for the AI modes
+ *   (`raw_plus_insights`, `narrative`) — the generation status and (once ready) the report content.
+ *   The completion screen polls this until
  *   the status is terminal.
  *
  *   Gate order: live-sessions flag (404 before auth) → load → access (401/403) → view.

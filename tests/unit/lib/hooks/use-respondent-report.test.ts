@@ -96,6 +96,41 @@ describe('useRespondentReport', () => {
     vi.useRealTimers();
   });
 
+  it('polls a narrative report while it generates and stops when ready', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          enabled: true,
+          mode: 'narrative',
+          onScreen: true,
+          download: true,
+          insights: { status: 'processing', content: null, generatedAt: null, error: null },
+        })
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          enabled: true,
+          mode: 'narrative',
+          onScreen: true,
+          download: true,
+          insights: { status: 'ready', content: null, generatedAt: null, error: null },
+        })
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderHook(() => useRespondentReport('s1'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1); // processing → schedules a poll
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(fetchMock).toHaveBeenCalledTimes(2); // ready → terminal
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    vi.useRealTimers();
+  });
+
   it('settles loaded even when the fetch throws', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network')));
     const { result } = renderHook(() => useRespondentReport('s1'));

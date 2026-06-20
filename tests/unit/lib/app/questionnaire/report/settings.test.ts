@@ -43,7 +43,7 @@ describe('narrowRespondentReportSettings', () => {
 
   it('falls back to the default mode for an unknown mode and coerces non-booleans', () => {
     const result = narrowRespondentReportSettings({
-      mode: 'narrative', // not in the v1 tuple
+      mode: 'full_essay', // not in the tuple
       enabled: 'yes', // not a boolean
       rawIncludes: { dataSlots: 1, questionsAsPresented: false },
     });
@@ -51,6 +51,11 @@ describe('narrowRespondentReportSettings', () => {
     expect(result.enabled).toBe(false);
     expect(result.rawIncludes.dataSlots).toBe(false); // non-boolean → default (false)
     expect(result.rawIncludes.questionsAsPresented).toBe(false);
+  });
+
+  it('accepts narrative as a valid mode', () => {
+    const result = narrowRespondentReportSettings({ enabled: true, mode: 'narrative' });
+    expect(result.mode).toBe('narrative');
   });
 
   it('trims and length-caps the free-text generation fields', () => {

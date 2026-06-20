@@ -85,6 +85,25 @@ describe('renderSessionPdf', () => {
     expect(startsWithPdfMagic(pdf)).toBe(true);
   }, 20000);
 
+  it('renders the woven narrative deliverable (narrativeOnly) without throwing', async () => {
+    const pdf = await renderSessionPdf(
+      model({
+        narrativeOnly: true,
+        insights: {
+          summary: 'Your story so far.',
+          sections: [{ heading: 'Where you are now', body: 'Woven prose with your answers.' }],
+          actions: ['Try this next'],
+        },
+      })
+    );
+    expect(startsWithPdfMagic(pdf)).toBe(true);
+  }, 20000);
+
+  it('threads narrativeOnly through the model (default false)', () => {
+    expect(model().narrativeOnly).toBe(false);
+    expect(model({ narrativeOnly: true }).narrativeOnly).toBe(true);
+  });
+
   it('renders an insights section with no sub-sections or actions', async () => {
     const pdf = await renderSessionPdf(
       model({ insights: { summary: 'Short and sweet.', sections: [], actions: [] } })

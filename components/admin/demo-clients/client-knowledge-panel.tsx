@@ -1,13 +1,14 @@
 'use client';
 
 /**
- * Client Knowledge panel (embedded in the Respondent Report → Generation tab).
+ * Client Knowledge panel (demo-client detail page → Knowledge base section).
  *
- * Lists + manages the attributed demo client's private knowledge corpus, scoped to the client's
- * dedicated tag so there is no cross-client bleed. Reads the client-scoped view from
- * `GET …/:id/report/knowledge` (never the platform global list), uploads through the platform
- * documents endpoint with the client's tag pre-applied, and deletes via the platform endpoint.
- * Degrades to a clear notice when the questionnaire has no attributed client (no corpus to scope to).
+ * Lists + manages a demo client's private knowledge corpus, scoped to the client's dedicated tag so
+ * there is no cross-client bleed. Reads the client-scoped view from `GET …/demo-clients/:id/knowledge`
+ * (never the platform global list), uploads through the platform documents endpoint with the client's
+ * tag pre-applied, and deletes via the platform endpoint. The corpus is client-owned and shared
+ * across all the client's questionnaires — a questionnaire's Respondent Report opts into grounding via
+ * its own "use client knowledge" toggle, but the documents live here.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -21,10 +22,11 @@ import type { ClientKnowledgeView } from '@/lib/app/questionnaire/report/client-
 const ACCEPT = '.md,.markdown,.txt,.csv,.docx,.pdf,.epub';
 
 export interface ClientKnowledgePanelProps {
-  questionnaireId: string;
+  clientId: string;
+  clientName: string;
 }
 
-export function ClientKnowledgePanel({ questionnaireId }: ClientKnowledgePanelProps) {
+export function ClientKnowledgePanel({ clientId, clientName }: ClientKnowledgePanelProps) {
   const [view, setView] = useState<ClientKnowledgeView | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -36,7 +38,7 @@ export function ClientKnowledgePanel({ questionnaireId }: ClientKnowledgePanelPr
     setError(null);
     try {
       const data = await apiClient.get<ClientKnowledgeView>(
-        API.APP.QUESTIONNAIRES.reportKnowledge(questionnaireId)
+        API.APP.DEMO_CLIENTS.knowledge(clientId)
       );
       setView(data);
     } catch (err) {
@@ -44,7 +46,7 @@ export function ClientKnowledgePanel({ questionnaireId }: ClientKnowledgePanelPr
     } finally {
       setLoading(false);
     }
-  }, [questionnaireId]);
+  }, [clientId]);
 
   useEffect(() => {
     void load();
@@ -99,15 +101,12 @@ export function ClientKnowledgePanel({ questionnaireId }: ClientKnowledgePanelPr
     );
   }
 
-  if (!view?.client || !view.knowledgeTagId) {
+  if (!view?.knowledgeTagId) {
     return (
       <div className="rounded-lg border border-dashed p-4 text-sm">
-        <p className="text-foreground font-medium">No client attributed</p>
-        <p className="text-muted-foreground mt-1">
-          Attribute a demo client to this questionnaire (Settings tab) to give its reports a private
-          knowledge base. Documents are isolated per client.
+        <p className="text-muted-foreground">
+          The knowledge base is unavailable right now. {error ?? 'Please try again.'}
         </p>
-        {error && <p className="text-destructive mt-2 text-xs">{error}</p>}
       </div>
     );
   }
@@ -118,8 +117,8 @@ export function ClientKnowledgePanel({ questionnaireId }: ClientKnowledgePanelPr
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
         <p className="text-muted-foreground text-sm">
-          Private corpus for <span className="text-foreground font-medium">{view.client.name}</span>{' '}
-          — used to ground this questionnaire&rsquo;s report insights. Isolated from other clients.
+          Private corpus for <span className="text-foreground font-medium">{clientName}</span> —
+          used to ground its Respondent Reports. Isolated from other clients.
         </p>
         <div>
           <input
@@ -154,8 +153,8 @@ export function ClientKnowledgePanel({ questionnaireId }: ClientKnowledgePanelPr
 
       {view.documents.length === 0 ? (
         <p className="text-muted-foreground rounded-md border border-dashed p-4 text-sm">
-          No documents yet. Upload reference material (PDF, Markdown, DOCX, …) to ground the
-          report&rsquo;s insights for this client.
+          No documents yet. Upload reference material (PDF, Markdown, DOCX, …) to ground this
+          client&rsquo;s Respondent Reports.
         </p>
       ) : (
         <ul className="divide-border divide-y rounded-md border">

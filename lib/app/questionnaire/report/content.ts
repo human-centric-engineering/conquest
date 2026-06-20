@@ -1,6 +1,7 @@
 /**
  * Respondent Report generated content — the shape stored in `AppRespondentReport.content` and
- * rendered on the completion screen + in the PDF (mode `raw_plus_insights`).
+ * rendered on the completion screen + in the PDF (the AI modes `raw_plus_insights` and `narrative`
+ * share this shape; `narrative` fills `sections` with woven chapters rather than discrete insights).
  *
  * Two pure pieces, no I/O:
  *   - {@link validateRespondentReportContent} narrows the agent's parsed JSON onto the strict

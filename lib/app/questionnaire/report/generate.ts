@@ -1,7 +1,7 @@
 /**
- * Respondent Report generation (mode `raw_plus_insights`).
+ * Respondent Report generation (the AI modes: `raw_plus_insights` and `narrative`).
  *
- * Assembles the per-respondent insights payload from: the captured answers (as a Q&A transcript),
+ * Assembles the per-respondent report content from: the captured answers (as a Q&A transcript),
  * the admin's generation config (instructions / structure / flat background context), and — when
  * enabled and available — snippets retrieved from the attributed client's knowledge base (scoped via
  * the client tag, so no cross-client bleed). Runs the seeded report agent through the shared
@@ -67,13 +67,20 @@ function buildReportMessages(opts: {
 }): LlmMessage[] {
   const { agentInstructions, settings, transcript, knowledge } = opts;
   const gen = settings.generation;
+  const narrative = settings.mode === 'narrative';
 
   const system: string[] = [];
   if (agentInstructions.trim()) system.push(agentInstructions.trim());
   system.push(
-    'You write a personalised report for the respondent who just completed this questionnaire. ' +
-      'Address the respondent directly (second person). Ground every statement in their actual ' +
-      'answers — never invent facts.'
+    narrative
+      ? 'You write a single woven report for the respondent who just completed this questionnaire. ' +
+          'Address the respondent directly (second person). Weave their actual answers into flowing, ' +
+          'analysed prose — integrate the answers into the narrative rather than listing them ' +
+          'separately, and develop analysis, insights, and advice throughout. Ground every statement ' +
+          'in their actual answers — never invent facts.'
+      : 'You write a personalised report for the respondent who just completed this questionnaire. ' +
+          'Address the respondent directly (second person). Ground every statement in their actual ' +
+          'answers — never invent facts.'
   );
   if (gen.instructions.trim()) system.push(`Style and voice guidance:\n${gen.instructions.trim()}`);
   if (gen.structure.trim()) system.push(`Desired structure:\n${gen.structure.trim()}`);
@@ -84,8 +91,12 @@ function buildReportMessages(opts: {
       `Reference material (use it to inform and substantiate the insights; cite naturally, do not quote verbatim):\n${knowledge.trim()}`
     );
   system.push(
-    'Make the insights ACTIONABLE: the `actions` array must contain concrete next steps the ' +
-      'respondent can take.'
+    narrative
+      ? 'Make it ACTIONABLE: the `actions` array must contain concrete next steps the respondent can ' +
+          'take. Use `summary` as an opening framing, and each `sections[]` entry as a woven chapter ' +
+          '(heading + flowing body that integrates their answers with your analysis).'
+      : 'Make the insights ACTIONABLE: the `actions` array must contain concrete next steps the ' +
+          'respondent can take.'
   );
   system.push(
     'Respond with ONLY a JSON object of this exact shape (no prose, no code fence):\n' +

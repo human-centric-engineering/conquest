@@ -11,7 +11,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
-import type { VersionGraphView } from '@/lib/app/questionnaire/views';
+import type { QuestionnaireDetail, VersionGraphView } from '@/lib/app/questionnaire/views';
 import type { QuestionnaireWorkspaceFlags } from '@/lib/app/questionnaire/workspace-data';
 import {
   DEFAULT_QUESTIONNAIRE_CONFIG,
@@ -27,6 +27,7 @@ vi.mock('next/navigation', () => ({ notFound: mockNotFound, redirect: vi.fn() })
 
 const workspaceDataMock = vi.hoisted(() => ({
   getVersionGraphCached: vi.fn<() => Promise<VersionGraphView | null>>(),
+  getQuestionnaireDetailCached: vi.fn<() => Promise<QuestionnaireDetail | null>>(),
   resolveQuestionnaireWorkspaceFlags: vi.fn<() => Promise<QuestionnaireWorkspaceFlags>>(),
 }));
 vi.mock('@/lib/app/questionnaire/workspace-data', () => workspaceDataMock);
@@ -37,6 +38,7 @@ vi.mock('@/components/admin/questionnaires/report/respondent-report-editor', () 
     versionId: string;
     initial: { mode: string };
     dataSlotsEnabled: boolean;
+    client: { id: string; name: string } | null;
   }) => (
     <div
       data-testid="rr-editor"
@@ -44,6 +46,8 @@ vi.mock('@/components/admin/questionnaires/report/respondent-report-editor', () 
       data-vid={props.versionId}
       data-mode={props.initial.mode}
       data-dataslots={String(props.dataSlotsEnabled)}
+      data-client-id={props.client?.id ?? ''}
+      data-client-name={props.client?.name ?? ''}
     />
   ),
 }));
@@ -68,6 +72,7 @@ const ctx = { params: Promise.resolve({ id: 'qn-1', vid: 'v1' }) };
 beforeEach(() => {
   vi.clearAllMocks();
   workspaceDataMock.resolveQuestionnaireWorkspaceFlags.mockResolvedValue(flags());
+  workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue(null);
   workspaceDataMock.getVersionGraphCached.mockResolvedValue({
     config: {
       ...DEFAULT_QUESTIONNAIRE_CONFIG,
@@ -104,5 +109,23 @@ describe('RespondentReportTab', () => {
     expect(screen.getByTestId('rr-editor').dataset.mode).toBe(
       DEFAULT_RESPONDENT_REPORT_SETTINGS.mode
     );
+  });
+
+  it('forwards the attributed demo client (id + name) to the editor', async () => {
+    workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue({
+      demoClient: { id: 'client-9', slug: 'acme', name: 'Acme Bank' },
+    } as unknown as QuestionnaireDetail);
+    render(await RespondentReportTab({ params: ctx.params }));
+    const editor = screen.getByTestId('rr-editor');
+    expect(editor.dataset.clientId).toBe('client-9');
+    expect(editor.dataset.clientName).toBe('Acme Bank');
+  });
+
+  it('passes a null client for a generic (unattributed) questionnaire', async () => {
+    workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue({
+      demoClient: null,
+    } as unknown as QuestionnaireDetail);
+    render(await RespondentReportTab({ params: ctx.params }));
+    expect(screen.getByTestId('rr-editor').dataset.clientId).toBe('');
   });
 });

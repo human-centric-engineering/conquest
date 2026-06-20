@@ -65,8 +65,15 @@ export interface SessionExportModel {
   /** Total slots in the version. */
   totalCount: number;
   /**
-   * The AI insights section (Respondent Report mode `raw_plus_insights`), or null when the report is
-   * raw-only / disabled / not yet generated. Rendered above the answers in the PDF.
+   * The AI report content (Respondent Report AI modes `raw_plus_insights` / `narrative`), or null
+   * when the report is raw-only / disabled / not yet generated. Rendered above the answers in the PDF.
    */
   insights?: RespondentReportContent | null;
+  /**
+   * When true, the woven `narrative` report **is** the deliverable: the PDF renders the report
+   * content alone (titled "Your personalised report") and omits the raw section/slot listing. The
+   * respondent's PDF route sets this for a ready narrative report; the admin audit PDF never does
+   * (admins keep the full answer record alongside the report).
+   */
+  narrativeOnly?: boolean;
 }

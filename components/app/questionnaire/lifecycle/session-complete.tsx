@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button';
 import { SessionRefChip } from '@/components/app/questionnaire/lifecycle/session-ref-chip';
 import { API } from '@/lib/api/endpoints';
 import { useRespondentReport } from '@/lib/hooks/use-respondent-report';
+import { isAiRespondentReportMode } from '@/lib/app/questionnaire/types';
 import type { RespondentReportContent } from '@/lib/app/questionnaire/report/content';
 
 export interface SessionCompleteProps {
@@ -55,10 +56,12 @@ export function SessionComplete({
   // Hold the download button until the view resolves so a `download: false` config never flashes a
   // clickable button in the gap before the first fetch settles. No report configured → default on.
   const showDownload = loaded ? (reportEnabled ? view!.download : true) : false;
+  // Both AI modes (raw_plus_insights, narrative) render their generated content here; the
+  // completion screen never lists raw answers, so a narrative report already shows woven-only.
   const showInsights =
     reportEnabled &&
     view!.onScreen &&
-    view!.mode === 'raw_plus_insights' &&
+    isAiRespondentReportMode(view!.mode) &&
     view!.insights !== null;
 
   const handleDownload = useCallback(() => {

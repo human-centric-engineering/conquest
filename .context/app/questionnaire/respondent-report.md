@@ -13,8 +13,14 @@ The per-respondent report delivered after a respondent completes a questionnaire
 - **`raw_plus_insights`** — the raw report plus an AI-generated, actionable insights section,
   assembled by the report agent (optionally grounded in the client knowledge base). Generated once,
   asynchronously, after submit and stored in `AppRespondentReport`.
+- **`narrative`** — a single woven report: the respondent's answers are integrated into flowing,
+  analysed prose (analyses, insights, advice) rather than shown as a separate raw section. Same async
+  lifecycle, agent, and stored content shape as `raw_plus_insights`; the difference is the prompt
+  (woven framing) and the deliverable (the woven report **only** — no separate raw answer list).
 
-`narrative` (a fully woven report) is deferred (v2).
+`raw_plus_insights` and `narrative` are the **AI modes** — both stand up the report agent, generate
+async, and persist an `AppRespondentReport` row. The shared predicate is `isAiRespondentReportMode`
+in `lib/app/questionnaire/types.ts`; `raw` renders deterministically with no row.
 
 ## Configuration
 
@@ -33,7 +39,7 @@ renders `RespondentReportEditor` (`components/admin/questionnaires/report/respon
 
 - **Content** — enable toggle, mode selector, and the raw-content includes (questions-as-presented;
   data-slot values when the data-slots feature is on).
-- **Generation** (effective in `raw_plus_insights`) — instructions, structure, and background-context
+- **Generation** (effective in the AI modes `raw_plus_insights` / `narrative`) — instructions, structure, and background-context
   textareas, the `useClientKnowledge` toggle, and the embedded `ClientKnowledgePanel`.
 - **Delivery** — on-screen / download toggles (email deferred).
 - **Appearance** — note that branding inherits the demo client's theme.
@@ -41,10 +47,12 @@ renders `RespondentReportEditor` (`components/admin/questionnaires/report/respon
 The page reads the resolved config from the cached version graph (no second fetch) and passes the
 `respondentReport` slice in; the editor saves via `apiClient.patch` and `router.refresh()`.
 
-`ClientKnowledgePanel` (`components/admin/questionnaires/report/client-knowledge-panel.tsx`) reads the
-client-scoped `reportKnowledge` view, uploads to the platform documents endpoint with the client's
-tag stamped on, lists the client's documents, and deletes them — degrading to a clear notice when the
-questionnaire has no attributed client.
+The Generation panel does **not** manage documents — the knowledge base is owned by the **demo
+client** (shared across all that client's questionnaires), so upload/list/delete lives on the client's
+page (see below). When `useClientKnowledge` is on, the panel shows a note + a link to the attributed
+client's page (or a "no client attributed" notice when the questionnaire is generic). The page passes
+the attributed client to the editor via `getQuestionnaireDetailCached` (no extra fetch — the workspace
+chrome already loads it).
 
 ### Config-crafting assistant (Phase 4b)
 
@@ -75,27 +83,31 @@ Modes 2/3 can ground insights in a client-specific knowledge base with strict no
 - A client's documents are those carrying its tag. `resolveClientKnowledgeDocumentIds(clientId)`
   returns that id list, used as the vector-search `SearchFilters.documentIds` allowlist
   (`lib/orchestration/knowledge/search.ts`) so retrieval is scoped to one client only.
-- The Generation-tab KB viewer reads `GET /api/v1/app/questionnaires/:id/report/knowledge`
-  (`reportKnowledge` in `lib/api/endpoints.ts`) — an app-side, client-scoped list. We deliberately do
-  **not** call the platform's global documents list (it would show every client's docs). Uploads go
-  through the platform upload endpoint with the client's tag pre-applied; only the scoped list lives
-  app-side.
+- The KB is **managed on the demo-client page** (`/admin/demo-clients/[id]`, a "Knowledge base"
+  section rendering `ClientKnowledgePanel` from `components/admin/demo-clients/`), since the corpus
+  belongs to the client, not a questionnaire. The panel reads the client-scoped list from
+  `GET /api/v1/app/demo-clients/:id/knowledge` (`DEMO_CLIENTS.knowledge` in `lib/api/endpoints.ts`) →
+  `getClientKnowledgeViewForClient(clientId)`. We deliberately do **not** call the platform's global
+  documents list (it would show every client's docs). Uploads go through the platform upload endpoint
+  with the client's tag pre-applied; only the scoped list lives app-side.
 
-A questionnaire with no attributed demo client has no client corpus — the view returns
-`client: null` and client knowledge is unavailable for its reports.
+A demo client always has its own corpus (the tag is provisioned on demand). A questionnaire with no
+attributed demo client simply can't ground its reports — its report editor shows a "no client
+attributed" notice instead of a link.
 
-## Storage (mode 2)
+## Storage (AI modes)
 
 `AppRespondentReport` — one row per session (1:1, `onDelete: Cascade` so it follows the session and
 GDPR erasure). Status `queued → processing → ready | failed`, the generated `content`, `costUsd`, and
 worker lease columns (`lockedBy`/`lockedAt`) for the maintenance-tick generation worker (mirrors the
 evaluations batch worker). Raw-only mode never creates a row.
 
-## Generation pipeline (mode 2, async)
+## Generation pipeline (AI modes, async)
 
 1. **Enqueue** — the submit route calls `enqueueRespondentReport(sessionId)`
    (`lib/app/questionnaire/report/enqueue.ts`) after `markSessionCompleted`. It creates a `queued`
-   row only when the platform flag is on AND the version's config is `enabled` + `raw_plus_insights`.
+   row only when the platform flag is on AND the version's config is `enabled` + an AI mode
+   (`raw_plus_insights` or `narrative`, via `isAiRespondentReportMode`).
    Idempotent (upsert by `sessionId`); best-effort — a failure never fails submission.
 2. **Worker** — `processQueuedRespondentReports()` (`lib/app/questionnaire/report/worker.ts`) runs in
    the maintenance-tick background chain (`lib/orchestration/maintenance/run-tick.ts`, task
@@ -120,15 +132,22 @@ budget cap; `visibility: 'internal'`.
   `lib/api/endpoints.ts`) serves both respondent kinds via `resolveTurnAccess` (auth cookie or
   `X-Session-Token`). It returns the `RespondentReportClientView` built by
   `buildRespondentReportClientView` (`lib/app/questionnaire/report/view.ts`): `enabled` (config AND
-  platform flag), `mode`, delivery toggles, and — for mode 2 — the insights `{ status, content,
-generatedAt, error }` (a queued/processing status while the worker runs; a missing row reads as
-  `queued`).
+  platform flag), `mode`, delivery toggles, and — for the AI modes (`raw_plus_insights`, `narrative`)
+  — the insights `{ status, content, generatedAt, error }` (a queued/processing status while the
+  worker runs; a missing row reads as `queued`).
 - **Completion screen** — `SessionComplete` calls `useRespondentReport`
-  (`lib/hooks/use-respondent-report.ts`, 3s poll until terminal) and renders the insights inline
-  (preparing → ready summary/sections/actions → calm failure fallback) when `onScreen` + mode 2; the
-  Download PDF button is gated on `delivery.download` (and defaults on when no report is configured,
-  preserving the F7.4 responses export).
-- **PDF** — `SessionExportModel.insights` carries the ready content into the PDF; the `export.pdf`
-  route loads it via `buildRespondentReportClientView` (ready only) and `SessionPdfDocument` renders a
-  "Your insights" section above the answers, so the on-screen and downloaded artifacts match.
-  Anonymous respondents download via the session token; raw / not-yet-ready → answers only.
+  (`lib/hooks/use-respondent-report.ts`, 3s poll until terminal) and renders the generated content
+  inline (preparing → ready summary/sections/actions → calm failure fallback) when `onScreen` + an AI
+  mode; the Download PDF button is gated on `delivery.download` (and defaults on when no report is
+  configured, preserving the F7.4 responses export). The completion screen never lists raw answers, so
+  a narrative report already shows woven-only on screen.
+- **PDF** — `SessionExportModel.insights` carries the ready content into the PDF and
+  `SessionExportModel.narrativeOnly` selects the layout. The respondent `export.pdf` route loads the
+  report via `buildRespondentReportClientView` (ready only):
+  - **`raw_plus_insights`** → a "Your insights" section above the full answer record (raw + insights).
+  - **`narrative`** → `narrativeOnly: true`: `SessionPdfDocument` renders the report alone under "Your
+    personalised report" and **omits** the raw section/slot listing and the answered-count — the woven
+    report is the whole deliverable.
+    The **admin** session PDF (`questionnaires/:id/sessions/:sessionId/export.pdf`) embeds the same ready
+    content but never sets `narrativeOnly`, so admins keep the full audit alongside the report. Anonymous
+    respondents download via the session token; raw / not-yet-ready → answers only.

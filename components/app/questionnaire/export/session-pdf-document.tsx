@@ -205,11 +205,20 @@ function SlotBlock({ slot }: { slot: PanelSlotView }) {
   );
 }
 
-/** The AI insights section (Respondent Report mode 2), rendered above the answers when present. */
-function InsightsSection({ insights }: { insights: NonNullable<SessionExportModel['insights']> }) {
+/**
+ * The AI report section. For mode 2 it sits above the raw answers (title "Your insights"); for the
+ * woven `narrative` mode it is the whole deliverable (title "Your personalised report").
+ */
+function InsightsSection({
+  insights,
+  title,
+}: {
+  insights: NonNullable<SessionExportModel['insights']>;
+  title: string;
+}) {
   return (
     <View>
-      <Text style={styles.sectionTitle}>Your insights</Text>
+      <Text style={styles.sectionTitle}>{title}</Text>
       <Text style={styles.insightsSummary}>{insights.summary}</Text>
       {insights.sections.map((section, i) => (
         <View key={i}>
@@ -239,9 +248,11 @@ export interface SessionPdfDocumentProps {
 export function SessionPdfDocument({ model }: SessionPdfDocumentProps) {
   const accent = model.theme.accentColor;
   const respondentLabel = model.respondent ? model.respondent.name : 'Anonymous respondent';
+  // Narrative mode: the woven report is the whole document — no raw answer listing, no answered-count.
+  const narrativeOnly = model.narrativeOnly === true;
 
   return (
-    <Document title={`${model.questionnaireTitle} — responses`}>
+    <Document title={`${model.questionnaireTitle} — ${narrativeOnly ? 'report' : 'responses'}`}>
       <Page size="A4" style={styles.page}>
         <View style={[styles.header, { borderBottomColor: accent }]}>
           {model.theme.logoUrl && <Image src={model.theme.logoUrl} style={styles.logo} />}
@@ -281,21 +292,30 @@ export function SessionPdfDocument({ model }: SessionPdfDocumentProps) {
             {formatDate(model.completedAt)}
           </Text>
 
-          <Text style={styles.progress}>
-            {`${model.answeredCount} of ${model.totalCount} questions answered`}
-          </Text>
+          {!narrativeOnly && (
+            <Text style={styles.progress}>
+              {`${model.answeredCount} of ${model.totalCount} questions answered`}
+            </Text>
+          )}
         </View>
 
-        {model.insights && <InsightsSection insights={model.insights} />}
+        {model.insights && (
+          <InsightsSection
+            insights={model.insights}
+            title={narrativeOnly ? 'Your personalised report' : 'Your insights'}
+          />
+        )}
 
-        {model.sections.map((section) => (
-          <View key={section.sectionId}>
-            <Text style={styles.sectionTitle}>{section.title}</Text>
-            {section.slots.map((slot) => (
-              <SlotBlock key={slot.slotKey} slot={slot} />
-            ))}
-          </View>
-        ))}
+        {/* Raw answer record — omitted for the woven narrative deliverable. */}
+        {!narrativeOnly &&
+          model.sections.map((section) => (
+            <View key={section.sectionId}>
+              <Text style={styles.sectionTitle}>{section.title}</Text>
+              {section.slots.map((slot) => (
+                <SlotBlock key={slot.slotKey} slot={slot} />
+              ))}
+            </View>
+          ))}
 
         <View style={styles.footer} fixed>
           <Text>{`Generated ${formatDate(model.generatedAt)}`}</Text>

@@ -16,7 +16,6 @@ vi.mock('@/lib/db/client', () => ({
     knowledgeTag: { findUnique: vi.fn(), upsert: vi.fn() },
     aiKnowledgeDocumentTag: { findMany: vi.fn() },
     aiKnowledgeDocument: { findMany: vi.fn() },
-    appQuestionnaire: { findUnique: vi.fn() },
   },
 }));
 vi.mock('@/lib/logging', () => ({ logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() } }));
@@ -26,7 +25,7 @@ import {
   clientKnowledgeTagSlug,
   ensureClientKnowledgeTag,
   resolveClientKnowledgeDocumentIds,
-  getClientKnowledgeViewForQuestionnaire,
+  getClientKnowledgeViewForClient,
 } from '@/lib/app/questionnaire/report/client-knowledge';
 
 beforeEach(() => {
@@ -141,30 +140,30 @@ describe('resolveClientKnowledgeDocumentIds', () => {
   });
 });
 
-describe('getClientKnowledgeViewForQuestionnaire', () => {
-  it('returns an unattributed view when the questionnaire has no demo client', async () => {
-    vi.mocked(prisma.appQuestionnaire.findUnique).mockResolvedValue({ demoClient: null } as never);
+describe('getClientKnowledgeViewForClient', () => {
+  it('returns an unattributed view when the client id does not resolve', async () => {
+    vi.mocked(prisma.appDemoClient.findUnique).mockResolvedValue(null);
 
-    await expect(getClientKnowledgeViewForQuestionnaire('qn-1')).resolves.toEqual({
+    await expect(getClientKnowledgeViewForClient('clt-x')).resolves.toEqual({
       client: null,
       knowledgeTagId: null,
       documents: [],
     });
-    // No tag provisioning or document query when there's no client.
+    // No tag provisioning or document query when the client doesn't exist.
     expect(prisma.knowledgeTag.upsert).not.toHaveBeenCalled();
     expect(prisma.aiKnowledgeDocument.findMany).not.toHaveBeenCalled();
   });
 
   it('ensures the tag and lists the client’s documents scoped to that tag', async () => {
-    vi.mocked(prisma.appQuestionnaire.findUnique).mockResolvedValue({
-      demoClient: { id: 'clt-1', name: 'Acme' },
-    } as never);
-    // ensureClientKnowledgeTag path: pointer already set + tag exists.
-    vi.mocked(prisma.appDemoClient.findUnique).mockResolvedValue({
-      id: 'clt-1',
-      name: 'Acme',
-      knowledgeTagId: 'tag-1',
-    } as never);
+    // Two reads with different selects: the view's own lookup ({id,name}) then
+    // ensureClientKnowledgeTag ({id,name,knowledgeTagId}, pointer set + tag exists).
+    vi.mocked(prisma.appDemoClient.findUnique)
+      .mockResolvedValueOnce({ id: 'clt-1', name: 'Acme' } as never)
+      .mockResolvedValueOnce({
+        id: 'clt-1',
+        name: 'Acme',
+        knowledgeTagId: 'tag-1',
+      } as never);
     vi.mocked(prisma.knowledgeTag.findUnique).mockResolvedValue({ id: 'tag-1' } as never);
     vi.mocked(prisma.aiKnowledgeDocument.findMany).mockResolvedValue([
       {
@@ -178,7 +177,7 @@ describe('getClientKnowledgeViewForQuestionnaire', () => {
       },
     ] as never);
 
-    const view = await getClientKnowledgeViewForQuestionnaire('qn-1');
+    const view = await getClientKnowledgeViewForClient('clt-1');
     expect(view.client).toEqual({ id: 'clt-1', name: 'Acme' });
     expect(view.knowledgeTagId).toBe('tag-1');
     expect(view.documents).toEqual([

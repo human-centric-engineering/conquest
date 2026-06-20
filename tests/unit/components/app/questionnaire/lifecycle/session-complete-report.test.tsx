@@ -68,6 +68,41 @@ describe('SessionComplete — respondent report', () => {
     expect(screen.getByText(/What you can do next/i)).toBeInTheDocument();
   });
 
+  it('renders the woven report on-screen for narrative mode when ready', () => {
+    mockView({
+      enabled: true,
+      mode: 'narrative',
+      onScreen: true,
+      download: true,
+      insights: {
+        status: 'ready',
+        generatedAt: '2026-06-19T12:00:00.000Z',
+        error: null,
+        content: {
+          summary: 'Here is your story so far.',
+          sections: [{ heading: 'Where you are now', body: 'Woven prose with your answers.' }],
+          actions: ['Try this next'],
+        },
+      },
+    });
+    render(<SessionComplete sessionId="s1" answeredCount={3} />);
+    expect(screen.getByText('Here is your story so far.')).toBeInTheDocument();
+    expect(screen.getByText('Where you are now')).toBeInTheDocument();
+    expect(screen.getByText('Try this next')).toBeInTheDocument();
+  });
+
+  it('shows the preparing state for a narrative report still generating', () => {
+    mockView({
+      enabled: true,
+      mode: 'narrative',
+      onScreen: true,
+      download: true,
+      insights: { status: 'processing', content: null, generatedAt: null, error: null },
+    });
+    render(<SessionComplete sessionId="s1" answeredCount={3} />);
+    expect(screen.getByText(/Preparing your personalised report/i)).toBeInTheDocument();
+  });
+
   it('shows a calm fallback when generation failed', () => {
     mockView({
       enabled: true,

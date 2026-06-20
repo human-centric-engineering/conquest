@@ -316,9 +316,16 @@ describe('updateConfigSchema — respondentReport (Respondent Report)', () => {
     expect(updateConfigSchema.safeParse({ respondentReport: fullReport }).success).toBe(true);
   });
 
-  it('rejects an unknown mode', () => {
+  it('accepts the narrative mode', () => {
     expect(
       updateConfigSchema.safeParse({ respondentReport: { ...fullReport, mode: 'narrative' } })
+        .success
+    ).toBe(true);
+  });
+
+  it('rejects an unknown mode', () => {
+    expect(
+      updateConfigSchema.safeParse({ respondentReport: { ...fullReport, mode: 'full_essay' } })
         .success
     ).toBe(false);
   });

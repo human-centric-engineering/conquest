@@ -87,7 +87,8 @@ async function handleSubmit(
     try {
       const status = await markSessionCompleted(sessionId, { reason: 'respondent_submit' });
       log.info('Respondent session submitted', { sessionId, status });
-      // Queue the respondent report when the version is configured for it (mode raw_plus_insights).
+      // Queue the respondent report when the version is configured for an AI mode (raw_plus_insights
+      // or narrative).
       // Best-effort — a queue failure must never fail the submission the respondent just made.
       await enqueueRespondentReport(sessionId).catch((err) => {
         log.error('Failed to enqueue respondent report', {

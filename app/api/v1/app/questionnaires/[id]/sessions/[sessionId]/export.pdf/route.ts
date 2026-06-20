@@ -46,8 +46,9 @@ const handleAdminExportPdf = withAdminAuth<{ id: string; sessionId: string }>(
         return errorResponse('Session not found', { code: 'NOT_FOUND', status: 404 });
       }
 
-      // Embed the AI insights when the report is a ready mode-2 report, so the admin's PDF matches
-      // what the respondent received (the respondent route does the same).
+      // Embed the AI report (mode 2 or narrative) when ready, so the admin's PDF reflects what the
+      // respondent received. Unlike the respondent route, the admin PDF keeps the full audit (raw
+      // answers) alongside the report — it never sets `narrativeOnly`.
       const reportView = await buildRespondentReportClientView(sessionId);
       const insights =
         reportView?.insights?.status === 'ready' ? reportView.insights.content : null;
