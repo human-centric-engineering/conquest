@@ -26,6 +26,7 @@ import {
   ListChecks,
   Mail,
   MessageSquareText,
+  PanelTop,
   Plus,
   ScanSearch,
   ShieldCheck,
@@ -60,6 +61,8 @@ import {
   ANSWER_FIT_MODES,
   ANSWER_SLOT_PANEL_SCOPES,
   CONTRADICTION_MODES,
+  INTRO_BACKGROUND_MAX_LENGTH,
+  INTRO_BUTTON_LABEL_MAX_LENGTH,
   INVITEE_FIELD_LABELS,
   PRESENTATION_MODES,
   PROFILE_FIELD_TYPES,
@@ -68,6 +71,7 @@ import {
   TONE_LEVEL_MIN,
   TONE_PERSONA_MAX_LENGTH,
   type AccessMode,
+  type IntroSettings,
   type AnswerFitMode,
   type AnswerSlotPanelScope,
   type ContradictionMode,
@@ -373,6 +377,7 @@ export function ConfigEditor({
   config,
   questionCount,
   adaptiveEnabled = true,
+  introScreenEnabled = false,
   run,
   busy,
 }: {
@@ -387,6 +392,11 @@ export function ConfigEditor({
    * still renders a label). Defaults to `true` for non-questionnaire mounts.
    */
   adaptiveEnabled?: boolean;
+  /**
+   * Whether the respondent intro / splash sub-flag is on. When `false` the Intro screen card is
+   * hidden (the per-version toggle would be inert). Defaults to `false` for non-questionnaire mounts.
+   */
+  introScreenEnabled?: boolean;
   run: RunMutation;
   busy: boolean;
 }) {
@@ -456,6 +466,8 @@ export function ConfigEditor({
   // Interviewer tone & persona (F-tone): the whole block edited as one object. Helpers below patch
   // a single dimension / the persona immutably.
   const [tone, setTone] = useState<ToneSettings>(config.tone);
+  // Respondent intro / splash (admin opt-in): the whole block edited as one object.
+  const [intro, setIntro] = useState<IntroSettings>(config.intro);
 
   // Resync from the server graph after each refetch (mirrors version-editor.tsx).
   useEffect(() => {
@@ -491,6 +503,7 @@ export function ConfigEditor({
     setPreviewInspectorEnabled(config.previewInspectorEnabled);
     setProfileFields(config.profileFields.map(toRow));
     setTone(config.tone);
+    setIntro(config.intro);
   }, [config]);
 
   const contradictionOff = contradictionMode === 'off';
@@ -596,6 +609,13 @@ export function ConfigEditor({
         // Interviewer tone & persona (F-tone). Sent whole; trim the persona text. Requires the
         // platform tone flag to take effect.
         tone: { ...tone, persona: { ...tone.persona, text: tone.persona.text.trim() } },
+        // Respondent intro / splash. Sent whole; trim the background + button label. Requires the
+        // platform intro-screen flag AND `enabled` to surface to a respondent.
+        intro: {
+          enabled: intro.enabled,
+          background: intro.background.trim(),
+          buttonLabel: intro.buttonLabel.trim(),
+        },
         profileFields: profileFields.map((f) => ({
           key: f.key.trim(),
           label: f.label.trim(),
@@ -827,6 +847,80 @@ export function ConfigEditor({
           </Label>
         </div>
       </SettingsGroup>
+
+      {/* ── 2a-intro. Respondent intro / splash — an admin opt-in cover screen shown before the
+             questionnaire starts. Hidden entirely when the platform intro-screen flag is off (the
+             toggle would be inert). The "how it works / what you'll get" copy is derived at runtime
+             from the presentation mode + respondent-report settings — only the background and button
+             label are authored here. ── */}
+      {introScreenEnabled && (
+        <SettingsGroup
+          icon={PanelTop}
+          accent="bg-sky-500/10 text-sky-600 dark:text-sky-400"
+          title="Intro screen"
+          description="An optional cover screen shown before the questionnaire starts — it introduces the process and what the respondent gets at the end (both adapt automatically to the settings above), plus an admin-authored background section."
+        >
+          <div className="flex items-center gap-2">
+            <Switch
+              checked={intro.enabled}
+              onCheckedChange={(enabled) => setIntro((i) => ({ ...i, enabled }))}
+              disabled={busy}
+            />
+            <Label className="text-sm font-medium">
+              Show the intro screen{' '}
+              <FieldHelp title="Intro screen">
+                When on, respondents see a short welcome screen before the questionnaire begins,
+                explaining how it works (this adapts to the presentation mode) and what they&apos;ll
+                receive at the end (this adapts to the Respondent Report settings). They press a
+                button to start — no question is asked until they do. Off by default, so existing
+                questionnaires are unchanged. Also requires the platform intro-screen flag.
+              </FieldHelp>
+            </Label>
+          </div>
+          {intro.enabled && (
+            <div className="border-border/60 ml-1 space-y-4 border-l pl-4">
+              <div className="space-y-1.5">
+                <Label className="text-sm font-medium">
+                  Background{' '}
+                  <FieldHelp title="About this questionnaire">
+                    An optional section shown on the intro screen, in your own words — what this
+                    questionnaire is about, who&apos;s running it, its purpose, and how the results
+                    will be used. Markdown is supported (headings, bold, lists, links). Leave blank
+                    to show just the standard guidance. A cohort can override this with its own
+                    text.
+                  </FieldHelp>
+                </Label>
+                <Textarea
+                  rows={6}
+                  value={intro.background}
+                  onChange={(e) => setIntro((i) => ({ ...i, background: e.target.value }))}
+                  maxLength={INTRO_BACKGROUND_MAX_LENGTH}
+                  placeholder={
+                    'About this questionnaire\n\nThis short survey is run by **Acme** to understand how our teams are working together. Your answers help shape how we support you — and they take about 10 minutes.'
+                  }
+                  disabled={busy}
+                />
+              </div>
+              <div className="space-y-1.5 sm:max-w-xs">
+                <Label className="text-sm font-medium">
+                  Button label{' '}
+                  <FieldHelp title="Button label">
+                    The text on the button that starts the questionnaire. Leave blank for a sensible
+                    default that matches the presentation mode (e.g. “Start the conversation”).
+                  </FieldHelp>
+                </Label>
+                <Input
+                  value={intro.buttonLabel}
+                  onChange={(e) => setIntro((i) => ({ ...i, buttonLabel: e.target.value }))}
+                  maxLength={INTRO_BUTTON_LABEL_MAX_LENGTH}
+                  placeholder="Start the conversation"
+                  disabled={busy}
+                />
+              </div>
+            </div>
+          )}
+        </SettingsGroup>
+      )}
 
       {/* ── 2b. Reasoning stream — the live "watch it think" demo feature. Sits with the respondent
              experience (it's a respondent-facing surface) but in its own group so the marquee toggle

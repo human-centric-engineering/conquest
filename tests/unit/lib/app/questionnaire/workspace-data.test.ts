@@ -682,19 +682,20 @@ describe('resolveQuestionnaireWorkspaceFlags', () => {
         adaptive: true,
         adaptiveDataSlots: true,
         respondentReport: true,
+        introScreen: true,
       });
     });
 
-    it('resolves all 7 flags in a single Promise.all (7 isFeatureEnabled calls)', async () => {
+    it('resolves all 8 flags in a single Promise.all (8 isFeatureEnabled calls)', async () => {
       // Arrange
       mockIsFeatureEnabled.mockResolvedValue(true);
 
       // Act
       await resolveQuestionnaireWorkspaceFlags();
 
-      // Assert: exactly 7 calls — one per flag constant; prevents regression
+      // Assert: exactly 8 calls — one per flag constant; prevents regression
       // where sub-flag helpers re-resolved the master flag independently
-      expect(mockIsFeatureEnabled).toHaveBeenCalledTimes(7);
+      expect(mockIsFeatureEnabled).toHaveBeenCalledTimes(8);
     });
   });
 
@@ -763,6 +764,7 @@ describe('resolveQuestionnaireWorkspaceFlags', () => {
           'adaptiveDataSlots',
           'dataSlots',
           'designEval',
+          'introScreen',
           'liveSessions',
           'master',
           'respondentReport',

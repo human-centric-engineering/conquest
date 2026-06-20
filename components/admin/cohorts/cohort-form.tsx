@@ -34,6 +34,7 @@ import { cohortDetailHref, type CohortDetail } from '@/lib/app/questionnaire/rou
 const formSchema = z.object({
   name: z.string().trim().min(1, 'Name is required').max(120),
   description: z.string().trim().max(1000),
+  introBackground: z.string().trim().max(8000),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -65,6 +66,7 @@ export function CohortForm({ demoClientId, cohort, onSuccess, onCancel }: Cohort
     defaultValues: {
       name: cohort?.name ?? '',
       description: cohort?.description ?? '',
+      introBackground: cohort?.introBackground ?? '',
     },
   });
 
@@ -73,13 +75,15 @@ export function CohortForm({ demoClientId, cohort, onSuccess, onCancel }: Cohort
     setError(null);
     try {
       const description = values.description.trim() === '' ? null : values.description.trim();
+      const introBackground =
+        values.introBackground.trim() === '' ? null : values.introBackground.trim();
       if (isEdit) {
         await apiClient.patch<CohortDetail>(API.APP.COHORTS.byId(cohort.id), {
-          body: { name: values.name, description },
+          body: { name: values.name, description, introBackground },
         });
       } else {
         const created = await apiClient.post<CohortDetail>(API.APP.COHORTS.ROOT, {
-          body: { demoClientId, name: values.name, description },
+          body: { demoClientId, name: values.name, description, introBackground },
         });
         router.push(cohortDetailHref(demoClientId, created.id));
       }
@@ -130,6 +134,27 @@ export function CohortForm({ demoClientId, cohort, onSuccess, onCancel }: Cohort
           {...register('description')}
         />
         <FormError message={errors.description?.message} />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="cohort-intro-background" className="flex items-center gap-1">
+          Intro background override
+          <FieldHelp title="Intro background override">
+            Respondent-facing background shown on this cohort&apos;s intro screen — what the
+            questionnaire is about, who&apos;s running it, and how results are used. When set, it{' '}
+            <strong>replaces</strong> the questionnaire-level background for this cohort&apos;s
+            respondents; leave blank to inherit. Markdown is supported. Only appears when the intro
+            screen is enabled on the questionnaire.
+          </FieldHelp>
+        </Label>
+        <Textarea
+          id="cohort-intro-background"
+          placeholder="Leave blank to inherit the questionnaire's background"
+          rows={5}
+          disabled={isLoading}
+          {...register('introBackground')}
+        />
+        <FormError message={errors.introBackground?.message} />
       </div>
 
       {error && (
