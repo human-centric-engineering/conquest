@@ -8,17 +8,17 @@
  *     the cohort detail page.
  *
  * SSR-provided rows (no per-row fetch). An `open` round carries a Close action behind a
- * confirm dialog (POST …/close), using the per-row pending-state pattern. Row click
- * drills into the round detail page.
+ * confirm dialog (POST …/close), using the per-row pending-state pattern. Row click drills
+ * into the round detail page. Status + window read as a live badge + humanised phrase;
+ * completion renders as an accent bar. Empty scopes get an inviting state with the next step.
  */
 
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Loader2, Plus, XCircle } from 'lucide-react';
+import { CalendarClock, ChevronRight, Loader2, Plus, Users, XCircle } from 'lucide-react';
 
 import { apiClient, APIClientError } from '@/lib/api/client';
 import { API } from '@/lib/api/endpoints';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   AlertDialog,
@@ -42,39 +42,28 @@ import {
 } from '@/components/ui/table';
 import { RoundForm } from '@/components/admin/cohorts/round-form';
 import {
+  CohortEmptyState,
+  CompletionBar,
+  humanizeWindow,
+  RoundStatusBadge,
+} from '@/components/admin/cohorts/cohort-ui';
+import {
+  cohortsTabHref,
   roundDetailHref,
   type RoundDetail,
-  type RoundStatus,
   type RoundView,
 } from '@/lib/app/questionnaire/rounds';
 
 function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  });
+  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-function formatRate(rate: number): string {
-  return `${Math.round(rate * 100)}%`;
-}
-
-function formatWindow(opensAt: string | null, closesAt: string | null): string {
-  if (!opensAt && !closesAt) return '—';
+function windowRange(opensAt: string | null, closesAt: string | null): string | null {
   if (opensAt && closesAt) return `${formatDate(opensAt)} – ${formatDate(closesAt)}`;
   if (opensAt) return `from ${formatDate(opensAt)}`;
-  return `until ${formatDate(closesAt as string)}`;
+  if (closesAt) return `until ${formatDate(closesAt)}`;
+  return null;
 }
-
-const STATUS_BADGE: Record<
-  RoundStatus,
-  { label: string; variant: 'default' | 'secondary' | 'outline' }
-> = {
-  draft: { label: 'Draft', variant: 'outline' },
-  open: { label: 'Open', variant: 'default' },
-  closed: { label: 'Closed', variant: 'secondary' },
-};
 
 interface CohortScopeProps {
   scope: 'cohort';
@@ -124,7 +113,44 @@ export function RoundsTable(props: RoundsTableProps) {
     }
   };
 
-  const colSpan = isClientScope ? 9 : 8;
+  const colSpan = isClientScope ? 8 : 7;
+  const isEmpty = rounds.length === 0;
+
+  // Truly-empty scopes get an inviting state rather than a blank table.
+  if (isEmpty && !(showForm && !isClientScope)) {
+    return (
+      <div className="space-y-3">
+        <div className="rounded-xl border">
+          {isClientScope ? (
+            <CohortEmptyState
+              icon={<CalendarClock className="h-5 w-5" />}
+              title="No rounds yet"
+              body="A round is a time-bound delivery of questionnaires to a cohort. Open a cohort to create its first round."
+              action={
+                <Button variant="outline" onClick={() => router.push(cohortsTabHref(demoClientId))}>
+                  <Users className="mr-2 h-4 w-4" />
+                  View cohorts
+                </Button>
+              }
+            />
+          ) : (
+            <CohortEmptyState
+              icon={<CalendarClock className="h-5 w-5" />}
+              title="No rounds for this cohort"
+              body="Run a round to deliver one or more questionnaires to this cohort within a set window."
+              action={
+                <Button onClick={() => setShowForm(true)}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Create the first round
+                </Button>
+              }
+            />
+          )}
+        </div>
+        {error && <p className="text-destructive text-xs">{error}</p>}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-3">
@@ -156,110 +182,119 @@ export function RoundsTable(props: RoundsTableProps) {
         />
       )}
 
-      <div className="rounded-md border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Name</TableHead>
-              {isClientScope && <TableHead>Cohort</TableHead>}
-              <TableHead>Status</TableHead>
-              <TableHead>Window</TableHead>
-              <TableHead className="text-right">Members</TableHead>
-              <TableHead className="text-right">Started</TableHead>
-              <TableHead className="text-right">Completed</TableHead>
-              <TableHead className="text-right">Completion</TableHead>
-              <TableHead className="w-px" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filtered.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={colSpan} className="text-muted-foreground py-10 text-center">
-                  {rounds.length === 0 ? 'No rounds yet.' : 'No rounds match your search.'}
-                </TableCell>
+      {!isEmpty && (
+        <div className="overflow-hidden rounded-xl border">
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead>Name</TableHead>
+                {isClientScope && <TableHead>Cohort</TableHead>}
+                <TableHead>Status</TableHead>
+                <TableHead>Window</TableHead>
+                <TableHead className="text-right">Members</TableHead>
+                <TableHead>Completion</TableHead>
+                <TableHead className="text-right">Action</TableHead>
+                <TableHead className="w-8" />
               </TableRow>
-            ) : (
-              filtered.map((round) => {
-                const badge = STATUS_BADGE[round.status];
-                const isPending = pendingId === round.id;
-                return (
-                  <TableRow
-                    key={round.id}
-                    className="cursor-pointer"
-                    onClick={() => router.push(roundDetailHref(demoClientId, round.id))}
-                  >
-                    <TableCell className="font-medium">{round.name}</TableCell>
-                    {isClientScope && (
-                      <TableCell className="text-muted-foreground">{round.cohortName}</TableCell>
-                    )}
-                    <TableCell>
-                      <Badge variant={badge.variant}>{badge.label}</Badge>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {formatWindow(round.opensAt, round.closesAt)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">{round.memberCount}</TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {round.stats.sessionsStarted}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {round.stats.sessionsCompleted}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {round.stats.sessionsStarted === 0 ? (
-                        <span className="text-muted-foreground">—</span>
-                      ) : (
-                        formatRate(round.stats.completionRate)
-                      )}
-                    </TableCell>
-                    <TableCell
-                      className="text-right"
-                      // Stop the row-navigation click so the dialog can open in place.
-                      onClick={(e) => e.stopPropagation()}
+            </TableHeader>
+            <TableBody>
+              {filtered.length === 0 ? (
+                <TableRow className="hover:bg-transparent">
+                  <TableCell colSpan={colSpan} className="text-muted-foreground py-10 text-center">
+                    No rounds match “{query.trim()}”.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                filtered.map((round) => {
+                  const isPending = pendingId === round.id;
+                  const range = windowRange(round.opensAt, round.closesAt);
+                  return (
+                    <TableRow
+                      key={round.id}
+                      className="group cursor-pointer hover:bg-[color:var(--cq-accent-muted)]"
+                      onClick={() => router.push(roundDetailHref(demoClientId, round.id))}
                     >
-                      {round.status === 'open' && (
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="text-destructive hover:text-destructive"
-                              disabled={isPending}
-                            >
-                              {isPending ? (
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              ) : (
-                                <XCircle className="mr-2 h-4 w-4" />
-                              )}
-                              Close
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>Close “{round.name}”?</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                Closing ends the round — respondents can no longer start or continue
-                                it. This can&rsquo;t be undone from here (you&rsquo;d reopen it on
-                                the round detail page).
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
-                              <AlertDialogAction onClick={() => void closeRound(round.id)}>
-                                Close round
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
+                      <TableCell className="font-medium">{round.name}</TableCell>
+                      {isClientScope && (
+                        <TableCell className="text-muted-foreground">{round.cohortName}</TableCell>
                       )}
-                    </TableCell>
-                  </TableRow>
-                );
-              })
-            )}
-          </TableBody>
-        </Table>
-      </div>
+                      <TableCell>
+                        <RoundStatusBadge status={round.status} />
+                      </TableCell>
+                      <TableCell>
+                        <div className="leading-tight">
+                          <div className="text-sm">
+                            {humanizeWindow(round.status, round.opensAt, round.closesAt)}
+                          </div>
+                          {range && (
+                            <div className="text-muted-foreground text-xs tabular-nums">
+                              {range}
+                            </div>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">{round.memberCount}</TableCell>
+                      <TableCell>
+                        <CompletionBar
+                          started={round.stats.sessionsStarted}
+                          completed={round.stats.sessionsCompleted}
+                          rate={round.stats.completionRate}
+                          variant="full"
+                        />
+                      </TableCell>
+                      <TableCell
+                        className="text-right"
+                        // Stop the row-navigation click so the dialog can open in place.
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {round.status === 'open' ? (
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-destructive hover:text-destructive"
+                                disabled={isPending}
+                              >
+                                {isPending ? (
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                ) : (
+                                  <XCircle className="mr-2 h-4 w-4" />
+                                )}
+                                Close
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Close “{round.name}”?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  Closing ends the round — respondents can no longer start or
+                                  continue it. You can reopen it from the round detail page.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => void closeRound(round.id)}>
+                                  Close round
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        ) : (
+                          <span className="text-muted-foreground/50 text-xs">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        <ChevronRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5 group-hover:text-[color:var(--cq-accent)]" />
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      )}
 
       {error && <p className="text-destructive text-xs">{error}</p>}
     </div>

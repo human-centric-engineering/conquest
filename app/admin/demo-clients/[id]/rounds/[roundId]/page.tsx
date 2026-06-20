@@ -17,22 +17,21 @@ import { ChevronLeft } from 'lucide-react';
 
 import { CqStatTiles, type CqStat } from '@/components/admin/cq-stat-tiles';
 import { RoundHeaderActions } from '@/components/admin/cohorts/round-header-actions';
+import {
+  RoundStatusBadge,
+  SectionHeading,
+  humanizeWindow,
+} from '@/components/admin/cohorts/cohort-ui';
 import { RoundInvitesPanel } from '@/components/admin/cohorts/round-invites-panel';
 import {
   RoundQuestionnairesPanel,
   type AttachableQuestionnaire,
 } from '@/components/admin/cohorts/round-questionnaires-panel';
-import { Badge } from '@/components/ui/badge';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
 import { isCohortsEnabled } from '@/lib/app/questionnaire/feature-flag';
-import {
-  cohortDetailHref,
-  roundsTabHref,
-  type RoundDetail,
-  type RoundStatus,
-} from '@/lib/app/questionnaire/rounds';
+import { cohortDetailHref, roundsTabHref, type RoundDetail } from '@/lib/app/questionnaire/rounds';
 import type { QuestionnaireListItem } from '@/lib/app/questionnaire/views';
 
 export const metadata: Metadata = {
@@ -43,15 +42,6 @@ export const metadata: Metadata = {
 interface PageProps {
   params: Promise<{ id: string; roundId: string }>;
 }
-
-const STATUS_BADGE: Record<
-  RoundStatus,
-  { label: string; variant: 'default' | 'secondary' | 'outline' }
-> = {
-  draft: { label: 'Draft', variant: 'outline' },
-  open: { label: 'Open', variant: 'default' },
-  closed: { label: 'Closed', variant: 'secondary' },
-};
 
 function formatDateTime(iso: string | null): string {
   if (!iso) return '—';
@@ -100,7 +90,6 @@ export default async function RoundDetailPage({ params }: PageProps) {
   if (!round) notFound();
 
   const attachable = await getAttachable(id);
-  const badge = STATUS_BADGE[round.status];
 
   const statTiles: CqStat[] = [
     { label: 'Members', value: round.memberCount },
@@ -129,14 +118,20 @@ export default async function RoundDetailPage({ params }: PageProps) {
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div className="space-y-1">
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-xl font-semibold">{round.name}</h1>
-            <Badge variant={badge.variant}>{badge.label}</Badge>
+            <h1 className="text-xl font-semibold tracking-tight">{round.name}</h1>
+            <RoundStatusBadge status={round.status} />
+            <span className="text-muted-foreground text-xs">
+              {humanizeWindow(round.status, round.opensAt, round.closesAt)}
+            </span>
           </div>
           {round.description && (
             <p className="text-muted-foreground max-w-prose text-sm">{round.description}</p>
           )}
           <p className="text-muted-foreground text-xs">
-            <Link href={cohortDetailHref(id, round.cohortId)} className="hover:underline">
+            <Link
+              href={cohortDetailHref(id, round.cohortId)}
+              className="hover:text-[color:var(--cq-accent)] hover:underline"
+            >
               {round.cohortName}
             </Link>{' '}
             · Opens {formatDateTime(round.opensAt)} · Closes {formatDateTime(round.closesAt)}
@@ -148,14 +143,11 @@ export default async function RoundDetailPage({ params }: PageProps) {
 
       <CqStatTiles stats={statTiles} />
 
-      <section className="space-y-3 rounded-md border px-4 py-4">
-        <div className="space-y-1">
-          <h2 className="text-sm font-medium">Bundled questionnaires</h2>
-          <p className="text-muted-foreground text-xs">
-            Every member completes each questionnaire bundled here. Attach one from this
-            client&rsquo;s questionnaires, or detach to remove it from the round.
-          </p>
-        </div>
+      <section className="space-y-3 rounded-xl border px-4 py-4">
+        <SectionHeading title="Bundled questionnaires">
+          Every member completes each questionnaire bundled here. Attach one from this
+          client&rsquo;s questionnaires, or detach to remove it from the round.
+        </SectionHeading>
         <RoundQuestionnairesPanel
           roundId={round.id}
           questionnaires={round.questionnaires}
@@ -163,15 +155,12 @@ export default async function RoundDetailPage({ params }: PageProps) {
         />
       </section>
 
-      <section className="space-y-3 rounded-md border px-4 py-4">
-        <div className="space-y-1">
-          <h2 className="text-sm font-medium">Member invitations</h2>
-          <p className="text-muted-foreground text-xs">
-            Generate a secure, round-bound link per active cohort member. The link carries the round
-            membership, so each respondent&rsquo;s session is enforced against this round&rsquo;s
-            window and their membership.
-          </p>
-        </div>
+      <section className="space-y-3 rounded-xl border px-4 py-4">
+        <SectionHeading title="Member invitations">
+          Generate a secure, round-bound link per active cohort member. The link carries the round
+          membership, so each respondent&rsquo;s session is enforced against this round&rsquo;s
+          window and their membership.
+        </SectionHeading>
         <RoundInvitesPanel roundId={round.id} questionnaireCount={round.questionnaireCount} />
       </section>
     </div>

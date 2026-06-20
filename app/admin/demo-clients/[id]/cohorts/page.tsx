@@ -13,6 +13,7 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 
 import { CohortsTable } from '@/components/admin/cohorts/cohorts-table';
+import { SectionHeading } from '@/components/admin/cohorts/cohort-ui';
 import { CqStatTiles, type CqStat } from '@/components/admin/cq-stat-tiles';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
@@ -71,13 +72,10 @@ export default async function DemoClientCohortsTab({ params }: PageProps) {
 
   return (
     <div className="space-y-6">
-      <div className="space-y-1">
-        <h2 className="text-sm font-medium">Cohorts</h2>
-        <p className="text-muted-foreground text-xs">
-          Groups of people you deliver rounds of questionnaires to. Open a cohort to manage its
-          roster and rounds.
-        </p>
-      </div>
+      <SectionHeading title="Cohorts">
+        Groups of people you deliver rounds of questionnaires to. Open a cohort to manage its roster
+        and rounds.
+      </SectionHeading>
 
       <CqStatTiles stats={statTiles} />
 

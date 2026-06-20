@@ -17,6 +17,7 @@ import { ChevronLeft } from 'lucide-react';
 import { CohortHeaderActions } from '@/components/admin/cohorts/cohort-header-actions';
 import { CohortMembersPanel } from '@/components/admin/cohorts/cohort-members-panel';
 import { RoundsTable } from '@/components/admin/cohorts/rounds-table';
+import { CompletionBar, SectionHeading } from '@/components/admin/cohorts/cohort-ui';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
@@ -77,38 +78,50 @@ export default async function CohortDetailPage({ params }: PageProps) {
       </nav>
 
       <header className="flex flex-wrap items-start justify-between gap-4">
-        <div className="space-y-1">
-          <h1 className="text-xl font-semibold">{cohort.name}</h1>
+        <div className="space-y-1.5">
+          <h1 className="text-xl font-semibold tracking-tight">{cohort.name}</h1>
           {cohort.description && (
             <p className="text-muted-foreground max-w-prose text-sm">{cohort.description}</p>
           )}
-          <p className="text-muted-foreground text-xs">
-            {cohort.memberCount} active {cohort.memberCount === 1 ? 'member' : 'members'} ·{' '}
-            {cohort.roundCount} {cohort.roundCount === 1 ? 'round' : 'rounds'}
-          </p>
+          <div className="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+            <span>
+              <span className="text-foreground font-medium tabular-nums">{cohort.memberCount}</span>{' '}
+              active {cohort.memberCount === 1 ? 'member' : 'members'}
+            </span>
+            <span aria-hidden>·</span>
+            <span>
+              <span className="text-foreground font-medium tabular-nums">{cohort.roundCount}</span>{' '}
+              {cohort.roundCount === 1 ? 'round' : 'rounds'}
+            </span>
+            {cohort.stats.sessionsStarted > 0 && (
+              <>
+                <span aria-hidden>·</span>
+                <CompletionBar
+                  started={cohort.stats.sessionsStarted}
+                  completed={cohort.stats.sessionsCompleted}
+                  rate={cohort.stats.completionRate}
+                  variant="full"
+                />
+              </>
+            )}
+          </div>
         </div>
         <CohortHeaderActions demoClientId={id} cohort={cohort} />
       </header>
 
-      <section className="space-y-3 rounded-md border px-4 py-4">
-        <div className="space-y-1">
-          <h2 className="text-sm font-medium">Roster</h2>
-          <p className="text-muted-foreground text-xs">
-            The people in this cohort. Removing a member revokes access without deleting their
-            existing sessions; reactivate to restore access.
-          </p>
-        </div>
+      <section className="space-y-3 rounded-xl border px-4 py-4">
+        <SectionHeading title="Roster">
+          The people in this cohort. Removing a member revokes access without deleting their
+          existing sessions; reactivate to restore access.
+        </SectionHeading>
         <CohortMembersPanel cohortId={cohort.id} members={cohort.members} />
       </section>
 
-      <section className="space-y-3 rounded-md border px-4 py-4">
-        <div className="space-y-1">
-          <h2 className="text-sm font-medium">Rounds</h2>
-          <p className="text-muted-foreground text-xs">
-            Time-bound deliveries of questionnaires to this cohort. Leave a new round&rsquo;s name
-            blank to default it to the cohort name plus the window dates.
-          </p>
-        </div>
+      <section className="space-y-3 rounded-xl border px-4 py-4">
+        <SectionHeading title="Rounds">
+          Time-bound deliveries of questionnaires to this cohort. Leave a new round&rsquo;s name
+          blank to default it to the cohort name plus the window dates.
+        </SectionHeading>
         <RoundsTable scope="cohort" demoClientId={id} cohortId={cohort.id} rounds={rounds} />
       </section>
     </div>

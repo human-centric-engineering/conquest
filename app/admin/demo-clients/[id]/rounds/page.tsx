@@ -14,6 +14,7 @@ import { notFound } from 'next/navigation';
 
 import { CqStatTiles, type CqStat } from '@/components/admin/cq-stat-tiles';
 import { RoundsTable } from '@/components/admin/cohorts/rounds-table';
+import { SectionHeading } from '@/components/admin/cohorts/cohort-ui';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
@@ -65,13 +66,10 @@ export default async function DemoClientRoundsTab({ params }: PageProps) {
 
   return (
     <div className="space-y-6">
-      <div className="space-y-1">
-        <h2 className="text-sm font-medium">Rounds</h2>
-        <p className="text-muted-foreground text-xs">
-          Time-bound deliveries of questionnaires to this client&rsquo;s cohorts. Create a round
-          from a cohort&rsquo;s detail page; open the round to attach questionnaires.
-        </p>
-      </div>
+      <SectionHeading title="Rounds">
+        Time-bound deliveries of questionnaires to this client&rsquo;s cohorts. Create a round from
+        a cohort&rsquo;s detail page; open the round to attach questionnaires.
+      </SectionHeading>
 
       <CqStatTiles stats={statTiles} />
 

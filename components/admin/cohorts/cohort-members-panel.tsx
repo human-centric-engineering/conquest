@@ -11,11 +11,11 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Loader2, RotateCcw, UserMinus } from 'lucide-react';
+import { Loader2, RotateCcw, UserMinus, UserPlus } from 'lucide-react';
 
 import { apiClient, APIClientError } from '@/lib/api/client';
 import { API } from '@/lib/api/endpoints';
-import { Badge } from '@/components/ui/badge';
+import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import {
   Table,
@@ -26,7 +26,12 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { CohortMemberForm } from '@/components/admin/cohorts/cohort-member-form';
-import type { CohortMemberStatus, CohortMemberView } from '@/lib/app/questionnaire/rounds';
+import {
+  CohortEmptyState,
+  MemberAvatar,
+  MemberStatusPill,
+} from '@/components/admin/cohorts/cohort-ui';
+import type { CohortMemberView } from '@/lib/app/questionnaire/rounds';
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, {
@@ -35,14 +40,6 @@ function formatDate(iso: string): string {
     day: 'numeric',
   });
 }
-
-const STATUS_BADGE: Record<
-  CohortMemberStatus,
-  { label: string; variant: 'default' | 'secondary' }
-> = {
-  active: { label: 'Active', variant: 'default' },
-  removed: { label: 'Removed', variant: 'secondary' },
-};
 
 export interface CohortMembersPanelProps {
   cohortId: string;
@@ -83,41 +80,61 @@ export function CohortMembersPanel({ cohortId, members }: CohortMembersPanelProp
     }
   };
 
+  const activeCount = members.filter((m) => m.status === 'active').length;
+
   return (
     <div className="space-y-4">
       <CohortMemberForm cohortId={cohortId} />
 
-      <div className="rounded-md border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Email</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="text-right">Added</TableHead>
-              <TableHead className="w-px" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {members.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={5} className="text-muted-foreground py-10 text-center">
-                  No members yet. Add people above to deliver rounds to them.
-                </TableCell>
+      {members.length === 0 ? (
+        <div className="rounded-xl border">
+          <CohortEmptyState
+            icon={<UserPlus className="h-5 w-5" />}
+            title="No members yet"
+            body="Add people by name and email above. They’ll receive a secure link when you run a round — and you can add or remove members at any time, even mid-round."
+          />
+        </div>
+      ) : (
+        <div className="overflow-hidden rounded-xl border">
+          <div className="text-muted-foreground bg-muted/40 flex items-center justify-between border-b px-4 py-2 text-xs">
+            <span>
+              <span className="text-foreground font-medium tabular-nums">{activeCount}</span> active
+              {members.length > activeCount && <> · {members.length - activeCount} removed</>}
+            </span>
+          </div>
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead>Member</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="text-right">Added</TableHead>
+                <TableHead className="w-px" />
               </TableRow>
-            ) : (
-              members.map((member) => {
-                const badge = STATUS_BADGE[member.status];
+            </TableHeader>
+            <TableBody>
+              {members.map((member) => {
                 const isPending = pendingId === member.id;
                 const isRemoved = member.status === 'removed';
                 return (
-                  <TableRow key={member.id}>
-                    <TableCell className="font-medium">{member.name}</TableCell>
-                    <TableCell className="text-muted-foreground">{member.email}</TableCell>
+                  <TableRow
+                    key={member.id}
+                    className={cn('hover:bg-transparent', isRemoved && 'opacity-60')}
+                  >
                     <TableCell>
-                      <Badge variant={badge.variant}>{badge.label}</Badge>
+                      <div className="flex items-center gap-3">
+                        <MemberAvatar name={member.name} dimmed={isRemoved} />
+                        <div className="min-w-0 leading-tight">
+                          <div className="truncate font-medium">{member.name}</div>
+                          <div className="text-muted-foreground truncate text-xs">
+                            {member.email}
+                          </div>
+                        </div>
+                      </div>
                     </TableCell>
-                    <TableCell className="text-muted-foreground text-right">
+                    <TableCell>
+                      <MemberStatusPill status={member.status} />
+                    </TableCell>
+                    <TableCell className="text-muted-foreground text-right text-sm tabular-nums">
                       {formatDate(member.addedAt)}
                     </TableCell>
                     <TableCell className="text-right">
@@ -154,11 +171,11 @@ export function CohortMembersPanel({ cohortId, members }: CohortMembersPanelProp
                     </TableCell>
                   </TableRow>
                 );
-              })
-            )}
-          </TableBody>
-        </Table>
-      </div>
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      )}
 
       {error && <p className="text-destructive text-xs">{error}</p>}
     </div>
