@@ -54,6 +54,7 @@ import { FieldHelp } from '@/components/ui/field-help';
 import { cn } from '@/lib/utils';
 import { CostEstimateCard } from '@/components/admin/questionnaires/cost-estimate-card';
 import { AdaptiveEmbeddingStep } from '@/components/admin/questionnaires/adaptive-embedding-step';
+import { IntroBackgroundField } from '@/components/admin/questionnaires/intro-background-field';
 import { API } from '@/lib/api/endpoints';
 import {
   ACCESS_MODES,
@@ -61,7 +62,6 @@ import {
   ANSWER_FIT_MODES,
   ANSWER_SLOT_PANEL_SCOPES,
   CONTRADICTION_MODES,
-  INTRO_BACKGROUND_MAX_LENGTH,
   INTRO_BUTTON_LABEL_MAX_LENGTH,
   INVITEE_FIELD_LABELS,
   PRESENTATION_MODES,
@@ -890,15 +890,11 @@ export function ConfigEditor({
                     text.
                   </FieldHelp>
                 </Label>
-                <Textarea
-                  rows={6}
+                <IntroBackgroundField
                   value={intro.background}
-                  onChange={(e) => setIntro((i) => ({ ...i, background: e.target.value }))}
-                  maxLength={INTRO_BACKGROUND_MAX_LENGTH}
-                  placeholder={
-                    'About this questionnaire\n\nThis short survey is run by **Acme** to understand how our teams are working together. Your answers help shape how we support you — and they take about 10 minutes.'
-                  }
+                  onChange={(v) => setIntro((i) => ({ ...i, background: v }))}
                   disabled={busy}
+                  placeholder="Tell respondents what this questionnaire is about, who's running it, and how results are used — or upload a document / generate it with AI."
                 />
               </div>
               <div className="space-y-1.5 sm:max-w-xs">

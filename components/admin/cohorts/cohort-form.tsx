@@ -26,6 +26,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { FieldHelp } from '@/components/ui/field-help';
 import { FormError } from '@/components/forms/form-error';
+import { IntroBackgroundField } from '@/components/admin/questionnaires/intro-background-field';
 import { cohortDetailHref, type CohortDetail } from '@/lib/app/questionnaire/rounds';
 
 // Local form schema: the domain `createCohortSchema` carries `demoClientId` (route-supplied)
@@ -59,6 +60,8 @@ export function CohortForm({ demoClientId, cohort, onSuccess, onCancel }: Cohort
   const {
     register,
     handleSubmit,
+    watch,
+    setValue,
     formState: { errors, isDirty },
   } = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -147,12 +150,13 @@ export function CohortForm({ demoClientId, cohort, onSuccess, onCancel }: Cohort
             screen is enabled on the questionnaire.
           </FieldHelp>
         </Label>
-        <Textarea
+        <IntroBackgroundField
           id="cohort-intro-background"
-          placeholder="Leave blank to inherit the questionnaire's background"
-          rows={5}
+          value={watch('introBackground')}
+          onChange={(v) => setValue('introBackground', v, { shouldDirty: true })}
           disabled={isLoading}
-          {...register('introBackground')}
+          rows={5}
+          placeholder="Leave blank to inherit the questionnaire's background — or upload / generate cohort-specific text."
         />
         <FormError message={errors.introBackground?.message} />
       </div>
