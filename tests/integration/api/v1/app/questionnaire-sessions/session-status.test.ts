@@ -89,6 +89,8 @@ function ctx(
       versionId: 'ver-1',
       respondentUserId: over.respondentUserId === undefined ? 'user-1' : over.respondentUserId,
       isPreview: false,
+      roundId: null,
+      cohortMemberId: null,
     },
     base: {
       sessionId: 'sess-1',

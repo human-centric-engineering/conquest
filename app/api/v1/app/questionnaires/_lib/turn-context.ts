@@ -101,6 +101,10 @@ export interface LoadedTurnContext {
     isPreview: boolean;
     /** Short support reference shown to the respondent; null for rows predating the column. */
     publicRef?: string | null;
+    /** Cohorts & Rounds: the round this session runs within (null = open-ended, not gated). */
+    roundId: string | null;
+    /** Cohorts & Rounds: the cohort member the session belongs to (null when round-less or link-grant). */
+    cohortMemberId: string | null;
   };
   base: TurnContextBase;
   /** Richer slot views for the capability args (the orchestrator only needs QuestionView). */
@@ -144,6 +148,10 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
       versionId: true,
       respondentUserId: true,
       publicRef: true,
+      // Cohorts & Rounds: the round + member this session belongs to — read by the continue-time
+      // access guard (round window + active membership). Null on every open-ended session.
+      roundId: true,
+      cohortMemberId: true,
       // Admin preview marker — gates the admin-only Turn Inspector telemetry in the route.
       isPreview: true,
       // Seriousness / abuse gate: the prior strike count the orchestrator folds a new strike into.
@@ -389,6 +397,8 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
       respondentUserId: session.respondentUserId,
       isPreview: session.isPreview,
       publicRef: session.publicRef,
+      roundId: session.roundId,
+      cohortMemberId: session.cohortMemberId,
     },
     base: {
       sessionId: session.id,

@@ -30,6 +30,8 @@ export const listQuestionnairesQuerySchema = z.object({
   q: z.string().trim().min(1).max(200).optional(),
   // Status vocabulary is the single-source tuple in the domain types module.
   status: z.enum(APP_QUESTIONNAIRE_STATUSES).optional(),
+  /** DEMO-ONLY (F2.5.1): restrict to questionnaires attributed to this demo client. */
+  demoClientId: z.string().trim().min(1).max(64).optional(),
   sortBy: z.enum(['updatedAt', 'createdAt', 'title']).default('updatedAt'),
   sortOrder: z.enum(['asc', 'desc']).default('desc'),
 });
@@ -50,12 +52,13 @@ export interface ListQuestionnairesResult {
 export async function listQuestionnaires(
   query: ListQuestionnairesQuery
 ): Promise<ListQuestionnairesResult> {
-  const { page, limit, q, status, sortBy, sortOrder } = query;
+  const { page, limit, q, status, demoClientId, sortBy, sortOrder } = query;
   const skip = (page - 1) * limit;
 
   const where: Prisma.AppQuestionnaireWhereInput = {};
   if (status) where.status = status;
   if (q) where.title = { contains: q, mode: 'insensitive' };
+  if (demoClientId) where.demoClientId = demoClientId;
 
   const [rows, total] = await Promise.all([
     prisma.appQuestionnaire.findMany({

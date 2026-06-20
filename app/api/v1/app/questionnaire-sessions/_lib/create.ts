@@ -32,6 +32,7 @@ import {
   findResumableSession,
   findResumableSessionByInvitation,
 } from '@/lib/app/questionnaire/chat/resumable-session';
+import { assertRoundAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/round-access';
 import { recordSessionCreated } from '@/app/api/v1/app/questionnaires/_lib/sessions';
 import { loadLaunchReadiness } from '@/app/api/v1/app/questionnaires/_lib/launchability';
 import {
@@ -39,6 +40,28 @@ import {
   validateProfileValues,
   type ProfileValues,
 } from '@/lib/app/questionnaire/profile/profile-values';
+
+/**
+ * Cohorts & Rounds: the round a session runs within, plus the cohort member it belongs to.
+ * This is derived from the respondent's **invitation** (the server-trusted grant) — NOT from
+ * the client request — so round membership can't be forged. Absent = an open-ended, non-time-bound
+ * session (today's behaviour). When present, {@link assertRoundAccess} gates the start (window +
+ * active membership) and both ids are persisted so the continue/resume paths can re-check.
+ */
+export interface RoundContext {
+  roundId: string;
+  cohortMemberId: string | null;
+}
+
+/** Lift the round context off a resolved invitation row, or undefined for a plain invitation. */
+function roundContextOf(invitation: {
+  roundId: string | null;
+  cohortMemberId: string | null;
+}): RoundContext | undefined {
+  return invitation.roundId
+    ? { roundId: invitation.roundId, cohortMemberId: invitation.cohortMemberId }
+    : undefined;
+}
 
 /** A created-or-resumed session, or a typed failure the route maps to an HTTP status. */
 export type CreateSessionResult =
@@ -107,6 +130,10 @@ export async function createSessionFromInvitation(
       userId: true,
       status: true,
       versionId: true,
+      // Cohorts & Rounds: the SERVER-TRUSTED round context (set when this invitation was minted
+      // for a round). The session inherits it from here — never from the client request.
+      roundId: true,
+      cohortMemberId: true,
       version: {
         select: {
           status: true,
@@ -156,7 +183,25 @@ export async function createSessionFromInvitation(
   );
   if (!capture.ok) return capture;
 
-  const existing = await findResumableSession(invitation.versionId, respondentUserId);
+  // Cohorts & Rounds: a round-bound invitation carries its round context. Gate the start
+  // (window + active membership) before any write; the context comes from the trusted
+  // invitation row, so it can't be forged by the caller.
+  const round = roundContextOf(invitation);
+  if (round) {
+    const verdict = await assertRoundAccess({
+      roundId: round.roundId,
+      cohortMemberId: round.cohortMemberId,
+      versionId: invitation.versionId,
+      onMissingRound: 'deny',
+    });
+    if (!verdict.ok) return verdict;
+  }
+
+  const existing = await findResumableSession(
+    invitation.versionId,
+    respondentUserId,
+    round?.roundId
+  );
   if (existing) return { ok: true, session: existing, resumed: true };
 
   const session = await prisma.$transaction(async (tx) => {
@@ -164,6 +209,8 @@ export async function createSessionFromInvitation(
       data: {
         versionId: invitation.versionId,
         respondentUserId,
+        roundId: round?.roundId ?? null,
+        cohortMemberId: round?.cohortMemberId ?? null,
         publicRef: generateSessionRef(),
         isPreview: false,
         status: 'active',
@@ -221,6 +268,8 @@ export async function createSessionForVersion(
     };
   }
 
+  // A walk-up (no invitation) start is never round-bound — a round delivers to known cohort
+  // members via per-member invitations, so there's no round context to enforce here.
   const existing = await findResumableSession(versionId, respondentUserId);
   if (existing) return { ok: true, session: existing, resumed: true };
 
@@ -333,6 +382,8 @@ export async function createAnonymousSession(versionId: string): Promise<CreateS
     };
   }
 
+  // A no-login public walk-up is never round-bound (no cohort member to bind to); rounds are
+  // delivered via per-member invitations (the from-invite path inherits the round context).
   const session = await prisma.$transaction(async (tx) => {
     const created = await tx.appQuestionnaireSession.create({
       data: {
@@ -371,6 +422,9 @@ export async function createSessionFromInviteToken(token: string): Promise<Creat
       versionId: true,
       revokedAt: true,
       expiresAt: true,
+      // Cohorts & Rounds: the server-trusted round context this frictionless link carries.
+      roundId: true,
+      cohortMemberId: true,
       version: { select: { status: true } },
     },
   });
@@ -408,8 +462,21 @@ export async function createSessionFromInviteToken(token: string): Promise<Creat
     };
   }
 
+  // Cohorts & Rounds: a round-bound frictionless link carries its round context on the
+  // invitation. Gate the start before any write — trusted source, not the caller.
+  const round = roundContextOf(invitation);
+  if (round) {
+    const verdict = await assertRoundAccess({
+      roundId: round.roundId,
+      cohortMemberId: round.cohortMemberId,
+      versionId: invitation.versionId,
+      onMissingRound: 'deny',
+    });
+    if (!verdict.ok) return verdict;
+  }
+
   // Idempotent re-entry: a previously-booted, still-open session for this invitation.
-  const existing = await findResumableSessionByInvitation(invitation.id);
+  const existing = await findResumableSessionByInvitation(invitation.id, round?.roundId);
   if (existing) return { ok: true, session: existing, resumed: true };
 
   const from = narrowToEnum<AppInvitationStatus>(
@@ -425,6 +492,8 @@ export async function createSessionFromInviteToken(token: string): Promise<Creat
         versionId: invitation.versionId,
         respondentUserId: null,
         invitationId: invitation.id,
+        roundId: round?.roundId ?? null,
+        cohortMemberId: round?.cohortMemberId ?? null,
         publicRef: generateSessionRef(),
         isPreview: false,
         status: 'active',

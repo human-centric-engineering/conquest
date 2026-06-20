@@ -24,7 +24,8 @@ export interface ResumableSession {
  */
 export async function findResumableSession(
   versionId: string,
-  respondentUserId: string
+  respondentUserId: string,
+  roundId?: string | null
 ): Promise<ResumableSession | null> {
   return prisma.appQuestionnaireSession.findFirst({
     where: {
@@ -32,6 +33,10 @@ export async function findResumableSession(
       respondentUserId,
       isPreview: false,
       status: { in: ['active', 'paused'] },
+      // Cohorts & Rounds: resume must be round-scoped. A non-round start (roundId undefined)
+      // matches only non-round sessions (roundId null); a round start matches the SAME round —
+      // so a closed round can't resume a stale session and two rounds keep separate sessions.
+      roundId: roundId ?? null,
     },
     orderBy: { createdAt: 'desc' },
     select: { id: true, status: true, versionId: true },
@@ -44,13 +49,16 @@ export async function findResumableSession(
  * Lets a re-opened invite link resume rather than minting a second session. Most-recent first.
  */
 export async function findResumableSessionByInvitation(
-  invitationId: string
+  invitationId: string,
+  roundId?: string | null
 ): Promise<ResumableSession | null> {
   return prisma.appQuestionnaireSession.findFirst({
     where: {
       invitationId,
       isPreview: false,
       status: { in: ['active', 'paused'] },
+      // Round-scoped resume (see findResumableSession) — keep a per-round session distinct.
+      roundId: roundId ?? null,
     },
     orderBy: { createdAt: 'desc' },
     select: { id: true, status: true, versionId: true },

@@ -31,6 +31,7 @@ import { validateRequestBody } from '@/lib/api/validation';
 import { withLiveSessionsEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { SessionTransitionError } from '@/lib/app/questionnaire/session';
 import { resolveTurnAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-access';
+import { assertRoundAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/round-access';
 import {
   loadSessionResumeState,
   pauseSession,
@@ -51,7 +52,13 @@ async function handleLifecycle(
     // the current status, so there's no need for the full turn context here.
     const row = await prisma.appQuestionnaireSession.findUnique({
       where: { id: sessionId },
-      select: { id: true, respondentUserId: true },
+      select: {
+        id: true,
+        respondentUserId: true,
+        versionId: true,
+        roundId: true,
+        cohortMemberId: true,
+      },
     });
     if (!row) return errorResponse('Session not found', { code: 'NOT_FOUND', status: 404 });
 
@@ -70,6 +77,22 @@ async function handleLifecycle(
     }
 
     const body = await validateRequestBody(request, bodySchema);
+
+    // Cohorts & Rounds: a respondent may only resume a round-scoped session while the round is
+    // still open AND they're still an active member — a closed round / removed member can't be
+    // re-entered. (A since-deleted round no longer gates.) Pausing stays available regardless.
+    if (body.action === 'resume' && row.roundId) {
+      const verdict = await assertRoundAccess({
+        roundId: row.roundId,
+        cohortMemberId: row.cohortMemberId,
+        versionId: row.versionId,
+        onMissingRound: 'allow',
+      });
+      if (!verdict.ok) {
+        log.info('Resume refused: round access', { sessionId, code: verdict.code });
+        return errorResponse(verdict.message, { code: verdict.code, status: verdict.status });
+      }
+    }
 
     try {
       if (body.action === 'resume') {

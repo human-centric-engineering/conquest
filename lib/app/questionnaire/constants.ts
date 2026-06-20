@@ -851,6 +851,17 @@ export const APP_QUESTIONNAIRES_RESPONDENT_REPORT_FLAG =
   'APP_QUESTIONNAIRES_RESPONDENT_REPORT_ENABLED';
 
 /**
+ * Platform feature flag gating **Cohorts & Rounds** — grouping people into cohorts under a demo
+ * client and delivering questionnaires to them as time-bound rounds (the only way to make a
+ * questionnaire time-bound; a roundless session stays open-ended). DB-backed, seeded disabled by
+ * `047-cohorts-flag.ts`. Opt-in on top of APP_QUESTIONNAIRES_ENABLED. When off, the admin
+ * cohort/round routes + demo-client tabs `404`/hide, and the respondent session guard is inert
+ * (no session carries a `roundId`). This is the *feature* flag — distinct from the future
+ * cross-respondent **Cohort Report** (`cohort`), which gets its own flag when built.
+ */
+export const APP_QUESTIONNAIRES_COHORTS_FLAG = 'APP_QUESTIONNAIRES_COHORTS_ENABLED';
+
+/**
  * Slug of the seeded Respondent Report `AiAgent` — assembles the per-respondent insights section
  * (mode `raw_plus_insights`) from the captured answers, the admin's generation config, and the
  * optional client knowledge base. Ships with empty `model`/`provider` so it resolves dynamically via

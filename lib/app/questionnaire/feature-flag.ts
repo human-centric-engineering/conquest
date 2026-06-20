@@ -24,6 +24,7 @@ import {
   APP_QUESTIONNAIRES_REASONING_STREAM_FLAG,
   APP_QUESTIONNAIRES_TONE_FLAG,
   APP_QUESTIONNAIRES_RESPONDENT_REPORT_FLAG,
+  APP_QUESTIONNAIRES_COHORTS_FLAG,
   APP_QUESTIONNAIRES_FLAG,
 } from '@/lib/app/questionnaire/constants';
 import { isFeatureEnabled } from '@/lib/feature-flags';
@@ -52,6 +53,7 @@ export {
   APP_QUESTIONNAIRES_GENERATIVE_AUTHORING_FLAG,
   APP_QUESTIONNAIRES_REASONING_STREAM_FLAG,
   APP_QUESTIONNAIRES_RESPONDENT_REPORT_FLAG,
+  APP_QUESTIONNAIRES_COHORTS_FLAG,
 };
 
 /**
@@ -636,4 +638,55 @@ export async function isToneEnabled(): Promise<boolean> {
     isFeatureEnabled(APP_QUESTIONNAIRES_TONE_FLAG),
   ]);
   return app && live && tone;
+}
+
+/**
+ * Whether **Cohorts & Rounds** is enabled — grouping people into cohorts under a demo client and
+ * delivering questionnaires to them as time-bound rounds. Requires BOTH the master app flag and the
+ * cohorts sub-flag — a master-only child (like data-slots), NOT live-dependent: the admin authors
+ * cohorts/rounds before any session exists. The respondent-side access *enforcement* additionally
+ * runs inside the already-gated session routes, but the round/member guard only ever fires when a
+ * session actually carries a `roundId`, so it stays inert until a round is created here.
+ *
+ * Server-only (resolves both flags from the database).
+ */
+export async function isCohortsEnabled(): Promise<boolean> {
+  const [app, cohorts] = await Promise.all([
+    isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_COHORTS_FLAG),
+  ]);
+  return app && cohorts;
+}
+
+/**
+ * Flag gate for the cohort/round admin routes — 404 when either the master flag or the cohorts
+ * sub-flag is off, `null` when both are on. The {@link ensureQuestionnairesEnabled} analogue for the
+ * cohorts surface; call it first, before any auth or handler work.
+ *
+ * Server-only (resolves both flags from the database).
+ */
+export async function ensureCohortsEnabled(): Promise<Response | null> {
+  if (await isCohortsEnabled()) {
+    return null;
+  }
+  return errorResponse('Not found', { code: 'NOT_FOUND', status: 404 });
+}
+
+/**
+ * Wrap a cohort/round route handler so the cohorts gate runs **before** anything else (auth,
+ * handler work) — the order a disabled sub-feature needs to look like a missing route rather than a
+ * 401. The {@link withQuestionnairesEnabled} analogue for the cohorts surface.
+ *
+ * ```ts
+ * export const POST = withCohortsEnabled(handleCreateCohort);
+ * ```
+ */
+export function withCohortsEnabled<C>(
+  handler: (request: NextRequest, context: C) => Promise<Response>
+): (request: NextRequest, context: C) => Promise<Response> {
+  return async (request, context) => {
+    const blocked = await ensureCohortsEnabled();
+    if (blocked) return blocked;
+    return handler(request, context);
+  };
 }

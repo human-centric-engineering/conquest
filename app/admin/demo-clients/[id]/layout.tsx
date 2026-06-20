@@ -20,7 +20,7 @@ import { ChevronLeft } from 'lucide-react';
 import { BreadcrumbLabel } from '@/components/admin/breadcrumb-context';
 import { DemoClientSubNav } from '@/components/admin/demo-clients/demo-client-sub-nav';
 import { Badge } from '@/components/ui/badge';
-import { isQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
+import { isQuestionnairesEnabled, isCohortsEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { getDemoClientDetailCached } from '@/lib/app/questionnaire/demo-clients/detail-data';
 
 export const metadata: Metadata = {
@@ -37,7 +37,10 @@ export default async function DemoClientDetailLayout({ params, children }: Layou
   if (!(await isQuestionnairesEnabled())) notFound();
 
   const { id } = await params;
-  const client = await getDemoClientDetailCached(id);
+  const [client, cohortsEnabled] = await Promise.all([
+    getDemoClientDetailCached(id),
+    isCohortsEnabled(),
+  ]);
   if (!client) notFound();
 
   return (
@@ -74,7 +77,7 @@ export default async function DemoClientDetailLayout({ params, children }: Layou
             {client.questionnaireCount === 1 ? 'questionnaire' : 'questionnaires'}
           </p>
         </div>
-        <DemoClientSubNav clientId={client.id} />
+        <DemoClientSubNav clientId={client.id} cohortsEnabled={cohortsEnabled} />
       </header>
 
       {children}
