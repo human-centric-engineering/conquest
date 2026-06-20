@@ -33,11 +33,14 @@ import { createSessionFromInviteToken } from '@/app/api/v1/app/questionnaire-ses
 
 type Mock = ReturnType<typeof vi.fn>;
 const NEW_SESSION = { id: 'sess-new', status: 'active', versionId: 'v1' };
-const FUTURE = new Date('2027-01-01T00:00:00.000Z');
+// Far-future bounds: the production paths gate on the LIVE clock (assertRoundAccess defaults
+// now=new Date(); createSessionFromInviteToken checks expiresAt <= Date.now()), so a near-future
+// fixture would turn these into time bombs that fail once real time passes the date.
+const FUTURE = new Date('2099-01-01T00:00:00.000Z');
 const OPEN_ROUND = {
   status: 'open',
   opensAt: new Date('2026-01-01T00:00:00.000Z'),
-  closesAt: new Date('2026-12-31T00:00:00.000Z'),
+  closesAt: new Date('2099-12-31T00:00:00.000Z'),
   cohortId: 'co-1',
   items: [{ questionnaireId: 'q-1' }],
 };

@@ -47,6 +47,8 @@ vi.mock('next/navigation', () => ({
 
 const flagMock = vi.hoisted(() => ({
   isQuestionnairesEnabled: vi.fn(),
+  // Cohorts & Rounds: the analytics page gates the round-scope selector on this flag.
+  isCohortsEnabled: vi.fn(),
 }));
 vi.mock('@/lib/app/questionnaire/feature-flag', () => flagMock);
 
@@ -56,6 +58,13 @@ const workspaceDataMock = vi.hoisted(() => ({
   getVersionGraphCached: vi.fn<() => Promise<VersionGraphView | null>>(),
 }));
 vi.mock('@/lib/app/questionnaire/workspace-data', () => workspaceDataMock);
+
+// ─── rounds read mock (for the analytics round-scope selector) ───────────────
+
+const roundsReadMock = vi.hoisted(() => ({
+  listRoundsForVersion: vi.fn(),
+}));
+vi.mock('@/app/api/v1/app/rounds/_lib/read', () => roundsReadMock);
 
 // ─── server-fetch mock ────────────────────────────────────────────────────────
 
@@ -246,6 +255,9 @@ function renderPage({ id = 'qn-1', vid = 'ver-1', searchParams = {} }: RenderPag
 beforeEach(() => {
   vi.clearAllMocks();
   flagMock.isQuestionnairesEnabled.mockResolvedValue(true);
+  // Cohorts off by default for these tests — the round selector is absent unless a test opts in.
+  flagMock.isCohortsEnabled.mockResolvedValue(false);
+  roundsReadMock.listRoundsForVersion.mockResolvedValue({ rounds: [], hasOpenEnded: false });
   workspaceDataMock.getVersionGraphCached.mockResolvedValue(makeGraph());
 
   // By default all three fetches succeed with real data objects.

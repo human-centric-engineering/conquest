@@ -28,13 +28,13 @@ vi.mock('@/app/api/v1/app/rounds/_lib/read', async (importOriginal) => {
   return { ...real, listRounds: vi.fn(), getRoundDetail: vi.fn() };
 });
 
-import { POST as createPOST } from '@/app/api/v1/app/rounds/route';
+import { GET as listGET, POST as createPOST } from '@/app/api/v1/app/rounds/route';
 import { POST as closePOST } from '@/app/api/v1/app/rounds/[id]/close/route';
 import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
-import { getRoundDetail } from '@/app/api/v1/app/rounds/_lib/read';
-import { mockAdminUser } from '@/tests/helpers/auth';
+import { getRoundDetail, listRounds } from '@/app/api/v1/app/rounds/_lib/read';
+import { mockAdminUser, mockUnauthenticatedUser } from '@/tests/helpers/auth';
 
 type Mock = ReturnType<typeof vi.fn>;
 const ROUNDS_URL = 'http://localhost:3000/api/v1/app/rounds';
@@ -46,6 +46,9 @@ function jsonReq(body: unknown, url = ROUNDS_URL): NextRequest {
     json: () => Promise.resolve(body),
   } as unknown as NextRequest;
 }
+function getReq(url: string): NextRequest {
+  return { url, headers: new Headers() } as unknown as NextRequest;
+}
 function postReq(url: string): NextRequest {
   return { url, headers: new Headers() } as unknown as NextRequest;
 }
@@ -55,6 +58,41 @@ beforeEach(() => {
   vi.mocked(isFeatureEnabled).mockResolvedValue(true);
   (auth.api.getSession as unknown as Mock).mockResolvedValue(mockAdminUser());
   (getRoundDetail as unknown as Mock).mockResolvedValue({ id: 'r-1' });
+});
+
+describe('GET /api/v1/app/rounds', () => {
+  it('404s when the cohorts flag is off, before auth', async () => {
+    vi.mocked(isFeatureEnabled).mockResolvedValue(false);
+    const res = await listGET(getReq(`${ROUNDS_URL}?demoClientId=dc-1`));
+    expect(res.status).toBe(404);
+    expect(auth.api.getSession).not.toHaveBeenCalled();
+  });
+
+  it('401s an unauthenticated caller', async () => {
+    (auth.api.getSession as unknown as Mock).mockResolvedValue(mockUnauthenticatedUser());
+    const res = await listGET(getReq(`${ROUNDS_URL}?demoClientId=dc-1`));
+    expect(res.status).toBe(401);
+  });
+
+  it('400s when neither demoClientId nor cohortId is supplied', async () => {
+    const res = await listGET(getReq(ROUNDS_URL));
+    expect(res.status).toBe(400);
+    expect(listRounds).not.toHaveBeenCalled();
+  });
+
+  it('lists rounds for a demo-client scope', async () => {
+    (listRounds as unknown as Mock).mockResolvedValue([{ id: 'r-1', name: 'July round' }]);
+    const res = await listGET(getReq(`${ROUNDS_URL}?demoClientId=dc-1&q=jul`));
+    expect(res.status).toBe(200);
+    expect(listRounds).toHaveBeenCalledWith({
+      demoClientId: 'dc-1',
+      cohortId: undefined,
+      q: 'jul',
+    });
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    expect(body.data).toHaveLength(1);
+  });
 });
 
 describe('POST /api/v1/app/rounds', () => {
@@ -105,7 +143,9 @@ describe('POST /api/v1/app/rounds/:id/close', () => {
     const data = prismaMock.appQuestionnaireRound.update.mock.calls[0][0].data;
     expect(data.status).toBe('closed');
     expect(data.closedAt).toBeInstanceOf(Date);
-    expect(data.closedBy).toBeTruthy();
+    // closedBy is the acting admin's user id (the close-action audit field) — a real string,
+    // not just any truthy value.
+    expect(data.closedBy).toBe(mockAdminUser().user.id);
     expect(logAdminAction).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'app_round.close' })
     );

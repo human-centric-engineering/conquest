@@ -27,6 +27,13 @@ export const questionnaireAnalyticsQuerySchema = z.object({
   to: z.string().date().optional(),
   /** Comma-separated `AppQuestionTag` ids; restricts the distributions view. */
   tagIds: z.string().optional(),
+  /**
+   * Cohorts & Rounds scope. Absent = all sessions (the mixed, version-wide view). A round id =
+   * ONLY that round's sessions (so one cohort's run of a questionnaire is analysed in isolation,
+   * never blended with another cohort's round). The literal `none` = only non-round (open-ended)
+   * sessions.
+   */
+  roundId: z.string().min(1).max(64).optional(),
 });
 
 export type QuestionnaireAnalyticsQuery = z.infer<typeof questionnaireAnalyticsQuerySchema>;
@@ -42,6 +49,8 @@ export interface AnalyticsScope {
   to: Date;
   /** Empty array = no tag filter (all questions). */
   tagIds: string[];
+  /** Round scope: `undefined` = all sessions; `'none'` = open-ended only; else a round id. */
+  roundId?: string;
 }
 
 /** Build a concrete {@link AnalyticsScope} from a validated query + version id. */
@@ -54,7 +63,21 @@ export function resolveAnalyticsScope(
     .split(',')
     .map((id) => id.trim())
     .filter((id) => id.length > 0);
-  return { versionId, from, to, tagIds };
+  return { versionId, from, to, tagIds, roundId: query.roundId };
+}
+
+/**
+ * The Prisma `where` fragment a round scope contributes to a SESSION (or round-aware invitation)
+ * query. `undefined` → no constraint (all sessions); `'none'` → only non-round sessions
+ * (`roundId: null`); a round id → only that round. Spread into the aggregators' `where` so every
+ * view scopes identically — one cohort's round is never blended with another's.
+ */
+export function roundSessionFilter(roundId: string | undefined): {
+  roundId?: string | null;
+} {
+  if (roundId === undefined) return {};
+  if (roundId === 'none') return { roundId: null };
+  return { roundId };
 }
 
 /** `YYYY-MM-DD` defaults for the filter's `<input type="date">` controls. */

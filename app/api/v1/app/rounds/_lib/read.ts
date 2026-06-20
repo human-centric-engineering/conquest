@@ -109,6 +109,42 @@ export async function listRounds(filter: ListRoundsFilter): Promise<RoundView[]>
   return rows.map((row) => toRoundView(row, members.get(row.cohortId) ?? 0, perRound.get(row.id)));
 }
 
+/** One round option for the analytics round-scope selector. */
+export interface AnalyticsRoundOption {
+  id: string;
+  name: string;
+  cohortName: string;
+}
+
+/**
+ * The rounds that actually produced sessions for a version — the options the analytics round
+ * filter offers, so an admin can isolate one cohort's run from another's. `hasOpenEnded` flags
+ * whether any non-round (open-ended) sessions exist, gating the "No round" option. One grouped
+ * sweep over sessions + one rounds read; newest round first.
+ */
+export async function listRoundsForVersion(
+  versionId: string
+): Promise<{ rounds: AnalyticsRoundOption[]; hasOpenEnded: boolean }> {
+  const grouped = await prisma.appQuestionnaireSession.groupBy({
+    by: ['roundId'],
+    where: { versionId, isPreview: false },
+    _count: { _all: true },
+  });
+  const roundIds = grouped.map((g) => g.roundId).filter((r): r is string => typeof r === 'string');
+  const hasOpenEnded = grouped.some((g) => g.roundId === null);
+  if (roundIds.length === 0) return { rounds: [], hasOpenEnded };
+
+  const rows = await prisma.appQuestionnaireRound.findMany({
+    where: { id: { in: roundIds } },
+    orderBy: { createdAt: 'desc' },
+    select: { id: true, name: true, cohort: { select: { name: true } } },
+  });
+  return {
+    rounds: rows.map((r) => ({ id: r.id, name: r.name, cohortName: r.cohort.name })),
+    hasOpenEnded,
+  };
+}
+
 /** Project a round's bundled questionnaires (round items) to the display view. */
 function toRoundQuestionnaires(
   items: {

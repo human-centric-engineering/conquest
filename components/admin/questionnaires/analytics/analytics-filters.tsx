@@ -14,16 +14,44 @@ import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { FieldHelp } from '@/components/ui/field-help';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { TagChip } from '@/components/admin/questionnaires/tag-chip';
 import { cn } from '@/lib/utils';
 import type { TagView } from '@/lib/app/questionnaire/views';
 
-export interface AnalyticsFiltersProps {
-  tagVocabulary: TagView[];
-  filters: { from: string; to: string; tagIds: string[] };
+/** One round the analytics can be scoped to (a cohort's run of this questionnaire). */
+export interface AnalyticsRoundChoice {
+  id: string;
+  name: string;
+  cohortName: string;
 }
 
-export function AnalyticsFilters({ tagVocabulary, filters }: AnalyticsFiltersProps) {
+/** Sentinel select values for the round scope (real round ids are cuids, so no collision). */
+const ROUND_ALL = '__all__';
+const ROUND_NONE = 'none';
+
+export interface AnalyticsFiltersProps {
+  tagVocabulary: TagView[];
+  filters: { from: string; to: string; tagIds: string[]; roundId?: string };
+  /** Rounds that produced sessions for this version; empty hides the round selector. */
+  roundOptions: AnalyticsRoundChoice[];
+  /** Whether any non-round (open-ended) sessions exist (gates the "No round" option). */
+  hasOpenEnded: boolean;
+}
+
+export function AnalyticsFilters({
+  tagVocabulary,
+  filters,
+  roundOptions,
+  hasOpenEnded,
+}: AnalyticsFiltersProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -39,6 +67,14 @@ export function AnalyticsFilters({ tagVocabulary, filters }: AnalyticsFiltersPro
       if (value) params.set(key, value);
       else params.delete(key);
     });
+
+  const setRound = (value: string) =>
+    push((params) => {
+      if (value === ROUND_ALL) params.delete('roundId');
+      else params.set('roundId', value);
+    });
+
+  const showRoundFilter = roundOptions.length > 0 || hasOpenEnded;
 
   const toggleTag = (tagId: string) =>
     push((params) => {
@@ -91,6 +127,34 @@ export function AnalyticsFilters({ tagVocabulary, filters }: AnalyticsFiltersPro
             className="w-40"
           />
         </div>
+
+        {showRoundFilter && (
+          <div className="space-y-1">
+            <Label className="flex items-center gap-1 text-xs">
+              Round
+              <FieldHelp title="Scope to a round">
+                Isolate one cohort&rsquo;s run of this questionnaire. Each round is a separate
+                cohort over a set window, so analysing them together would blend different groups.
+                &ldquo;All sessions&rdquo; shows every respondent across all rounds.
+              </FieldHelp>
+            </Label>
+            <Select value={filters.roundId ?? ROUND_ALL} onValueChange={setRound}>
+              <SelectTrigger className="w-64" aria-label="Round scope">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ROUND_ALL}>All sessions</SelectItem>
+                {(roundOptions.length > 0 || hasOpenEnded) && <SelectSeparator />}
+                {roundOptions.map((r) => (
+                  <SelectItem key={r.id} value={r.id}>
+                    {r.name} · {r.cohortName}
+                  </SelectItem>
+                ))}
+                {hasOpenEnded && <SelectItem value={ROUND_NONE}>No round (open-ended)</SelectItem>}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
       </div>
 
       {tagVocabulary.length > 0 && (

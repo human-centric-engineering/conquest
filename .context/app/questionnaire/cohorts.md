@@ -18,9 +18,12 @@ untouched. The round's window (`opensAt`/`closesAt`, adjustable mid-round) plus 
 A person (by email) may belong to **multiple cohorts** under the same demo client — membership is
 per-cohort, with no global email uniqueness, so cohorts freely overlap.
 
-> **Out of scope (this phase):** cross-respondent analytics/reports over a whole round. This
-> phase ships only basic per-round/per-member completion counts. The cross-respondent **Cohort
-> Report** (`cohort` report kind) is a later stage with its own flag.
+> **Analytics scoping:** the questionnaire [Analytics](../admin/questionnaire-analytics.md) surface
+> can be **scoped to a round** (`?roundId=`) — distributions, funnel, cost, and safeguarding all
+> filter to one round's sessions, so a cohort's run is analysed in isolation rather than blended with
+> another cohort's round on the same questionnaire. A generated **cross-respondent Cohort Report**
+> (`cohort` report kind) — a single narrative over a whole round — remains a later stage with its
+> own flag; this phase ships the per-round scoping + completion counts.
 
 ## Data model
 

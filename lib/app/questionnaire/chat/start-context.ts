@@ -43,6 +43,11 @@ export async function loadStartContext(
     where: { tokenHash: hashInvitationToken(request.invitationToken) },
     select: {
       versionId: true,
+      // Cohorts & Rounds: a round-bound invitation's session is round-scoped, so resume must
+      // match on the SAME roundId — otherwise this resolver and `createSessionFromInvitation`
+      // disagree about resumability (the divergence resumable-session.ts forbids): the create
+      // path would resume the round session while this page re-prompts for a profile.
+      roundId: true,
       version: { select: { config: { select: { anonymousMode: true, profileFields: true } } } },
     },
   });
@@ -52,7 +57,11 @@ export async function loadStartContext(
   const profileFields = parseProfileFields(invitation.version.config?.profileFields);
   if (anonymous || profileFields.length === 0) return { kind: 'start-now' };
 
-  const existing = await findResumableSession(invitation.versionId, respondentUserId);
+  const existing = await findResumableSession(
+    invitation.versionId,
+    respondentUserId,
+    invitation.roundId
+  );
   if (existing) return { kind: 'resume', sessionId: existing.id };
 
   return { kind: 'needs-profile', profileFields };

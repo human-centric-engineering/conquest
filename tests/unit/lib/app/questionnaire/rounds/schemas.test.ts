@@ -6,9 +6,12 @@ import { describe, it, expect } from 'vitest';
 
 import {
   createCohortSchema,
+  updateCohortSchema,
   createCohortMemberSchema,
+  updateCohortMemberSchema,
   createRoundSchema,
   updateRoundSchema,
+  attachRoundQuestionnaireSchema,
   defaultRoundName,
 } from '@/lib/app/questionnaire/rounds';
 
@@ -27,6 +30,17 @@ describe('createCohortSchema', () => {
   });
 });
 
+describe('updateCohortSchema', () => {
+  it('requires at least one field', () => {
+    expect(updateCohortSchema.safeParse({}).success).toBe(false);
+  });
+
+  it('coerces an empty description to null', () => {
+    const parsed = updateCohortSchema.parse({ description: '   ' });
+    expect(parsed.description).toBeNull();
+  });
+});
+
 describe('createCohortMemberSchema', () => {
   it('lowercases the email and requires a name', () => {
     const parsed = createCohortMemberSchema.parse({ email: 'Jo@Acme.COM', name: 'Jo' });
@@ -35,6 +49,27 @@ describe('createCohortMemberSchema', () => {
 
   it('rejects an invalid email', () => {
     expect(createCohortMemberSchema.safeParse({ email: 'nope', name: 'Jo' }).success).toBe(false);
+  });
+});
+
+describe('updateCohortMemberSchema', () => {
+  it('accepts status "active" (re-activation) but rejects "removed"', () => {
+    expect(updateCohortMemberSchema.safeParse({ status: 'active' }).success).toBe(true);
+    expect(updateCohortMemberSchema.safeParse({ status: 'removed' }).success).toBe(false);
+  });
+
+  it('requires at least one field', () => {
+    expect(updateCohortMemberSchema.safeParse({}).success).toBe(false);
+  });
+});
+
+describe('attachRoundQuestionnaireSchema', () => {
+  it('requires a questionnaireId and accepts an optional nullable versionId', () => {
+    expect(attachRoundQuestionnaireSchema.safeParse({ questionnaireId: 'q-1' }).success).toBe(true);
+    expect(
+      attachRoundQuestionnaireSchema.safeParse({ questionnaireId: 'q-1', versionId: null }).success
+    ).toBe(true);
+    expect(attachRoundQuestionnaireSchema.safeParse({ versionId: 'v-1' }).success).toBe(false);
   });
 });
 

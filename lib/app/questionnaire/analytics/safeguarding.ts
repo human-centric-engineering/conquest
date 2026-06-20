@@ -8,7 +8,10 @@
 
 import { prisma } from '@/lib/db/client';
 import { isCohortSuppressed } from '@/lib/app/questionnaire/analytics/privacy';
-import type { AnalyticsScope } from '@/lib/app/questionnaire/analytics/query-schema';
+import {
+  roundSessionFilter,
+  type AnalyticsScope,
+} from '@/lib/app/questionnaire/analytics/query-schema';
 import type { SafeguardingSummary } from '@/lib/app/questionnaire/analytics/views';
 
 /**
@@ -24,6 +27,7 @@ export async function getSafeguardingSummary(scope: AnalyticsScope): Promise<Saf
       versionId: scope.versionId,
       isPreview: false,
       createdAt: { gte: scope.from, lt: scope.to },
+      ...roundSessionFilter(scope.roundId),
     },
     select: { sensitivityLevel: true },
   });

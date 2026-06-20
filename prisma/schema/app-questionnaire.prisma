@@ -121,7 +121,7 @@ model AppQuestionnaireInvitation {
   // it belongs to. Plain String, no @relation (UG-1, as `userId`). This is the SERVER-TRUSTED
   // source of a session's round context — the session-create paths read it from the resolved
   // invitation (never from the client body), so a respondent can't forge round membership. Null
-  // for a plain (non-round) invitation. See lib/app/questionnaire/invitations/round-invites.ts.
+  // for a plain (non-round) invitation. See app/api/v1/app/rounds/_lib/invites.ts.
   roundId         String?
   cohortMemberId  String?
   expiresAt       DateTime // token expiry (INVITATION_TOKEN_EXPIRY_DAYS from now)

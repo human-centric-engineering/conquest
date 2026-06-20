@@ -44,24 +44,49 @@ export interface GenerateRoundInvitesResult {
   links: MintedRoundInviteLink[];
 }
 
-/** Resolve the version to invite to for a round item: the pin, else the current launched version. */
-async function resolveItemVersionId(item: {
-  questionnaireId: string;
-  versionId: string | null;
-}): Promise<string | null> {
-  if (item.versionId) return item.versionId;
-  const launched = await prisma.appQuestionnaireVersion.findFirst({
-    where: { questionnaireId: item.questionnaireId, status: 'launched' },
-    orderBy: { versionNumber: 'desc' },
-    select: { id: true },
-  });
-  return launched?.id ?? null;
+/**
+ * Resolve each round item to the version to invite to — the pinned version, else the
+ * questionnaire's current launched version — in a FIXED number of queries (one launched-version
+ * sweep for all unpinned items), not one query per item.
+ */
+async function resolveItemVersions(
+  items: { questionnaireId: string; versionId: string | null }[]
+): Promise<Map<string, string | null>> {
+  const resolved = new Map<string, string | null>();
+  const unpinnedQids = items.filter((i) => !i.versionId).map((i) => i.questionnaireId);
+  let launchedByQuestionnaire = new Map<string, string>();
+  if (unpinnedQids.length > 0) {
+    // Highest versionNumber first → the first row seen per questionnaire is its current launched one.
+    const launched = await prisma.appQuestionnaireVersion.findMany({
+      where: { questionnaireId: { in: unpinnedQids }, status: 'launched' },
+      orderBy: { versionNumber: 'desc' },
+      select: { id: true, questionnaireId: true },
+    });
+    launchedByQuestionnaire = launched.reduce((map, v) => {
+      if (!map.has(v.questionnaireId)) map.set(v.questionnaireId, v.id);
+      return map;
+    }, new Map<string, string>());
+  }
+  for (const item of items) {
+    resolved.set(
+      item.questionnaireId,
+      item.versionId ?? launchedByQuestionnaire.get(item.questionnaireId) ?? null
+    );
+  }
+  return resolved;
 }
 
 /**
  * Generate (top up) the round's per-member invitations. Returns counts + the newly-minted links.
  * A round that isn't usable yet (no items, no active members, no launched versions) simply
  * returns zero `created` — never throws.
+ *
+ * Query budget is bounded regardless of cohort size: one round read, one member read, one
+ * launched-version sweep, one existing-invitation sweep, then one `create` per minted link (each
+ * invitation carries a unique token, so the writes can't be a single `createMany`). Idempotency
+ * (skip a member already invited for a (version, round) pair) is best-effort against the loaded
+ * snapshot — two concurrent generations could both create; the admin one-shot nature makes that
+ * race acceptable, and a re-run simply reports the duplicates as `skipped`.
  */
 export async function generateRoundInvitations(
   roundId: string,
@@ -80,11 +105,14 @@ export async function generateRoundInvitations(
     return { created: 0, skipped: 0, unlaunchedQuestionnaires: 0, activeMembers: 0, links: [] };
   }
 
-  // Active members of the round's cohort (reached via the round → cohort relation).
-  const activeMembers = await prisma.appCohortMember.findMany({
-    where: { cohort: { rounds: { some: { id: roundId } } }, status: 'active' },
-    select: { id: true, email: true, name: true },
-  });
+  // Active members of the round's cohort + each item's resolved version (both fan-outs batched).
+  const [activeMembers, versionByQuestionnaire] = await Promise.all([
+    prisma.appCohortMember.findMany({
+      where: { cohort: { rounds: { some: { id: roundId } } }, status: 'active' },
+      select: { id: true, email: true, name: true },
+    }),
+    resolveItemVersions(round.items),
+  ]);
 
   const demoClientId = round.cohort.demoClientId;
   const result: GenerateRoundInvitesResult = {
@@ -95,26 +123,40 @@ export async function generateRoundInvitations(
     links: [],
   };
 
+  // One sweep of the round's existing invitations → a `${versionId}:${memberId}` set for O(1)
+  // idempotency checks, instead of a findFirst per (item, member) pair.
+  const resolvedVersionIds = [
+    ...new Set([...versionByQuestionnaire.values()].filter(Boolean)),
+  ] as string[];
+  const existing =
+    resolvedVersionIds.length > 0
+      ? await prisma.appQuestionnaireInvitation.findMany({
+          where: { roundId, versionId: { in: resolvedVersionIds } },
+          select: { versionId: true, cohortMemberId: true },
+        })
+      : [];
+  const existingKeys = new Set(existing.map((e) => `${e.versionId}:${e.cohortMemberId}`));
+
+  // Pin the token expiry to the round's close date — but only when it's still in the FUTURE, else a
+  // past close date would mint already-expired (dead-on-arrival) links. Fall back to the default.
+  const now = new Date();
+  const windowExpiry =
+    round.closesAt && round.closesAt.getTime() > now.getTime() ? round.closesAt : null;
+
   for (const item of round.items) {
-    const versionId = await resolveItemVersionId(item);
+    const versionId = versionByQuestionnaire.get(item.questionnaireId) ?? null;
     if (!versionId) {
       result.unlaunchedQuestionnaires += 1;
       continue;
     }
 
     for (const member of activeMembers) {
-      // Idempotent: one invitation per (version, round, member).
-      const existing = await prisma.appQuestionnaireInvitation.findFirst({
-        where: { versionId, roundId, cohortMemberId: member.id },
-        select: { id: true },
-      });
-      if (existing) {
+      if (existingKeys.has(`${versionId}:${member.id}`)) {
         result.skipped += 1;
         continue;
       }
 
-      const minted = mintInvitationToken();
-      const expiresAt = round.closesAt ?? minted.expiresAt;
+      const minted = mintInvitationToken(now);
       await prisma.appQuestionnaireInvitation.create({
         data: {
           versionId,
@@ -126,10 +168,12 @@ export async function generateRoundInvitations(
           demoClientId,
           roundId,
           cohortMemberId: member.id,
-          expiresAt,
+          expiresAt: windowExpiry ?? minted.expiresAt,
         },
         select: { id: true },
       });
+      // Guard against a duplicate questionnaire bundled twice resolving to the same version+member.
+      existingKeys.add(`${versionId}:${member.id}`);
 
       result.created += 1;
       result.links.push({
