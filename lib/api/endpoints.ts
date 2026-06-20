@@ -359,6 +359,10 @@ export const API = {
       /** Conversational refine of a draft version's structure (POST JSON). */
       composeRefine: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/compose/refine`,
+      /** Extract plain text from an uploaded document for the intro background (POST multipart). */
+      introBackgroundParse: '/api/v1/app/questionnaires/intro-background/parse',
+      /** Generate / refine the intro background markdown with AI (POST JSON). */
+      introBackgroundAuthor: '/api/v1/app/questionnaires/intro-background/author',
       /** Questionnaire detail (GET); rename or demo-client attribution (PATCH). */
       byId: (id: string): string => `/api/v1/app/questionnaires/${id}`,
       /** One version's full section/question graph (GET); version-meta edit (PATCH). */

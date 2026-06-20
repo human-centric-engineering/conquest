@@ -16,6 +16,7 @@
 import { registerAppCapability } from '@/lib/orchestration/capabilities/registry';
 import {
   AppAssignDataSlotsCapability,
+  AppAuthorIntroBackgroundCapability,
   AppComposeCompletionOfferCapability,
   AppComposeQuestionnaireCapability,
   AppDetectContradictionsCapability,
@@ -87,4 +88,9 @@ export function initAppCapabilities(): void {
   // agent; inert until the same flags are on (only the flag-gated refine route dispatches it), so
   // unconditional registration here is safe.
   registerAppCapability(new AppRefineQuestionnaireStructureCapability());
+
+  // Respondent intro — generate / refine the "about this questionnaire" background markdown. Reuses
+  // the composer agent; inert until the APP_QUESTIONNAIRES_ENABLED + intro-screen flags are on (only
+  // the flag-gated intro-background author route dispatches it), so unconditional registration is safe.
+  registerAppCapability(new AppAuthorIntroBackgroundCapability());
 }

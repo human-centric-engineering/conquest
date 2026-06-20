@@ -974,3 +974,47 @@ export const REFINE_QUESTIONNAIRE_STRUCTURE_FUNCTION_DEFINITION: CapabilityFunct
     required: ['currentStructure', 'instruction'],
   },
 };
+
+/** Slug of the author-intro-background capability — generate or refine the respondent intro
+ * "about this questionnaire" markdown (F12.2). Reuses the composer agent. */
+export const AUTHOR_INTRO_BACKGROUND_CAPABILITY_SLUG = 'app_author_intro_background';
+
+/** `AiCapability.executionHandler` for the author-intro-background capability. */
+export const AUTHOR_INTRO_BACKGROUND_HANDLER = 'AppAuthorIntroBackgroundCapability';
+
+/**
+ * The author-intro-background capability's OpenAI-compatible function definition — single source of
+ * truth shared by the `BaseCapability` subclass and the `AiCapability` seed row. `generate` writes a
+ * fresh intro section from a brief; `refine` rewrites supplied text per an instruction. Returns
+ * `{ background }` (markdown). Dispatched programmatically by the intro-background author route.
+ */
+export const AUTHOR_INTRO_BACKGROUND_FUNCTION_DEFINITION: CapabilityFunctionDefinition = {
+  name: AUTHOR_INTRO_BACKGROUND_CAPABILITY_SLUG,
+  description:
+    'Write or refine the respondent-facing "about this questionnaire" intro section (markdown). mode=generate composes a fresh section from a plain-English brief; mode=refine rewrites the supplied current text per an instruction. Returns { background } markdown. Dispatched programmatically by the intro-background author route.',
+  parameters: {
+    type: 'object',
+    properties: {
+      mode: {
+        type: 'string',
+        enum: ['generate', 'refine'],
+        description:
+          'generate = compose from a brief; refine = rewrite currentText per instruction.',
+      },
+      brief: {
+        type: 'string',
+        description:
+          'Plain-English description of the questionnaire / company / purpose (generate).',
+      },
+      currentText: {
+        type: 'string',
+        description: 'The current intro markdown to rewrite (refine).',
+      },
+      instruction: {
+        type: 'string',
+        description: "The admin's plain-English instruction for how to rewrite the text (refine).",
+      },
+    },
+    required: ['mode'],
+  },
+};
