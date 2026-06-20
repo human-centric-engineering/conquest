@@ -8,7 +8,7 @@
  * @see components/admin/demo-clients/client-knowledge-panel.tsx
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 
 vi.mock('@/lib/api/client', () => ({
@@ -16,7 +16,7 @@ vi.mock('@/lib/api/client', () => ({
   APIClientError: class extends Error {},
 }));
 
-import { apiClient } from '@/lib/api/client';
+import { apiClient, APIClientError } from '@/lib/api/client';
 import { ClientKnowledgePanel } from '@/components/admin/demo-clients/client-knowledge-panel';
 
 type Mock = ReturnType<typeof vi.fn>;
@@ -27,6 +27,12 @@ function renderPanel() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+// Guaranteed teardown for the upload tests that vi.stubGlobal('fetch', …): if an
+// assertion throws mid-test, the stub must not leak into the next test's global fetch.
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe('ClientKnowledgePanel', () => {
@@ -54,6 +60,13 @@ describe('ClientKnowledgePanel', () => {
     (apiClient.get as unknown as Mock).mockRejectedValue(new Error('boom'));
     renderPanel();
     expect(await screen.findByText(/Could not load the knowledge base/i)).toBeInTheDocument();
+  });
+
+  it('surfaces the APIClientError message on a load failure', async () => {
+    (apiClient.get as unknown as Mock).mockRejectedValue(new APIClientError('Forbidden corpus'));
+    renderPanel();
+    // APIClientError → its own message is shown, not the generic fallback
+    expect(await screen.findByText(/Forbidden corpus/i)).toBeInTheDocument();
   });
 
   it('shows an unavailable notice when the tag could not be resolved', async () => {
@@ -109,8 +122,6 @@ describe('ClientKnowledgePanel', () => {
     const body = init.body as FormData;
     expect(body.get('file')).toBeTruthy();
     expect(body.getAll('tagIds')).toEqual(['tag-1']);
-
-    vi.unstubAllGlobals();
   });
 
   it('surfaces an upload failure from the documents endpoint', async () => {
@@ -132,7 +143,42 @@ describe('ClientKnowledgePanel', () => {
     fireEvent.change(input, { target: { files: [new File(['x'], 'a.md')] } });
 
     expect(await screen.findByText(/Too big/i)).toBeInTheDocument();
-    vi.unstubAllGlobals();
+  });
+
+  it('falls back to a status-coded message when the upload error body has no message', async () => {
+    (apiClient.get as unknown as Mock).mockResolvedValue({
+      client: { id: 'clt-1', name: 'Acme' },
+      knowledgeTagId: 'tag-1',
+      documents: [],
+    });
+    // Body parses but carries no error.message → the `?? \`Upload failed (status)\`` fallback fires.
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({}) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderPanel();
+    await screen.findByText(/Private corpus/i);
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File(['x'], 'a.md')] } });
+
+    expect(await screen.findByText(/Upload failed \(500\)/i)).toBeInTheDocument();
+  });
+
+  it('ignores a file-input change that carries no file', async () => {
+    (apiClient.get as unknown as Mock).mockResolvedValue({
+      client: { id: 'clt-1', name: 'Acme' },
+      knowledgeTagId: 'tag-1',
+      documents: [],
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderPanel();
+    await screen.findByText(/Private corpus/i);
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    // No file selected (e.g. the user cancelled the picker) → the `if (file)` guard short-circuits.
+    fireEvent.change(input, { target: { files: [] } });
+
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('renders a zero-chunk document without a chunk count', async () => {
@@ -176,6 +222,29 @@ describe('ClientKnowledgePanel', () => {
     renderPanel();
     fireEvent.click(await screen.findByRole('button', { name: /Delete Playbook/i }));
     expect(await screen.findByText(/Could not delete the document/i)).toBeInTheDocument();
+  });
+
+  it('surfaces the APIClientError message on a delete failure', async () => {
+    (apiClient.get as unknown as Mock).mockResolvedValue({
+      client: { id: 'clt-1', name: 'Acme' },
+      knowledgeTagId: 'tag-1',
+      documents: [
+        {
+          id: 'doc-a',
+          name: 'Playbook',
+          fileName: 'p.md',
+          status: 'ready',
+          chunkCount: 4,
+          sourceUrl: null,
+          createdAt: '2026-06-01T00:00:00.000Z',
+        },
+      ],
+    });
+    (apiClient.delete as unknown as Mock).mockRejectedValue(new APIClientError('Locked document'));
+    renderPanel();
+    fireEvent.click(await screen.findByRole('button', { name: /Delete Playbook/i }));
+    // APIClientError → its own message is shown, not the generic fallback
+    expect(await screen.findByText(/Locked document/i)).toBeInTheDocument();
   });
 
   it('deletes a document via the platform endpoint', async () => {

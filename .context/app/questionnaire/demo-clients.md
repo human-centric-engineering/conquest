@@ -134,9 +134,22 @@ a typed-confirmation guard and an anonymous-mode refusal. See
 
 - `/admin/demo-clients` — list + "New demo client".
 - `/admin/demo-clients/new` — create form.
-- `/admin/demo-clients/:id` — edit form + delete (disabled with an explanation
-  while attributed) + an **"Attributed questionnaires"** list (each row links to the
-  questionnaire editor) so the admin can act on the delete guard's instruction.
+- `/admin/demo-clients/:id/…` — the detail surface, split into **route-based sub-tabs**
+  (the sibling of the questionnaire workspace at `…/v/:vid/…`). A shared
+  `[id]/layout.tsx` owns the chrome — breadcrumb, sticky header (name + Active/Inactive
+  badge + slug · count), and the `<DemoClientSubNav>` tab bar — and resolves the client
+  once via `getDemoClientDetailCached` (React `cache()`), so each tab page reuses the
+  fetch for free. Tabs (registry in `lib/app/questionnaire/demo-clients/nav.ts`, all
+  always-on — no per-tab flags):
+  - **Overview** (`/:id`) — the **"Attributed questionnaires"** list (each row links to
+    the questionnaire editor, with the make-generic / reassign menus that unblock the
+    delete guard) + the saved **brand preview**.
+  - **Branding** (`/:id/branding`) — the `<DemoClientForm>` (identity fields + brand
+    theming + live preview), intact.
+  - **Knowledge** (`/:id/knowledge`) — the `<ClientKnowledgePanel>` (below).
+  - **Management** (`/:id/management`) — the destructive demo-ops: **Reset sessions** and
+    **Delete** (disabled with an explanation while questionnaires are still attributed —
+    act on the delete guard from the Overview tab's row menus).
 - Both forms carry a **"Brand theming"** fieldset (F3.4 / F7.1+): CTA colour, accent
   colour, logo URL, welcome copy, plus a **"Session chrome"** sub-block — surface colour,
   CTA gradient end, and an **"Apply a colour behind the logo"** toggle (the requested
@@ -154,8 +167,8 @@ a typed-confirmation guard and an anonymous-mode refusal. See
   _Branding_ column (a swatch/thumbnail only for fields actually set; "Default" when
   none) and **full** on the detail page / live form preview (the resolved brand the
   respondent sees, defaults filled).
-- **Knowledge base (F10.1).** The detail page carries a **"Knowledge base"** section
-  (`<ClientKnowledgePanel>` from `components/admin/demo-clients/`) — upload / list / delete for the
+- **Knowledge base (F10.1).** The detail surface's **Knowledge** tab carries the
+  `<ClientKnowledgePanel>` (from `components/admin/demo-clients/`) — upload / list / delete for the
   client's private corpus, used to ground its **Respondent Reports**. The corpus is client-owned and
   shared across all the client's questionnaires, so it lives here (not per questionnaire); a
   questionnaire's report opts into grounding via its own toggle and links here to manage the docs.
