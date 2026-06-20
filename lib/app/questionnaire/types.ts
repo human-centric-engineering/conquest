@@ -514,6 +514,34 @@ export const DEFAULT_RESPONDENT_REPORT_SETTINGS: RespondentReportSettings = {
   delivery: { onScreen: true, download: true },
 };
 
+/** Max length of the respondent-facing intro background blob (Zod bound; cohort override shares it). */
+export const INTRO_BACKGROUND_MAX_LENGTH = 8000;
+/** Max length of the admin-authored proceed-button label on the intro screen (Zod bound). */
+export const INTRO_BUTTON_LABEL_MAX_LENGTH = 60;
+
+/**
+ * Respondent intro / splash screen — an admin opt-in screen shown BEFORE the questionnaire starts.
+ * `enabled` master-gates it for this version (off by default, so existing launched versions are
+ * unchanged); `background` is the admin-authored markdown "about this questionnaire" section
+ * (company, team, purpose, how results are used) — optionally REPLACED per cohort by
+ * `AppCohort.introBackground`; `buttonLabel` is the proceed button's text (`''` = a per-mode default).
+ * The rest of the splash copy (how it works, what you'll get) is DERIVED from `presentationMode` +
+ * `respondentReport` at runtime, never stored. Also gated by the platform flag
+ * `APP_QUESTIONNAIRES_INTRO_SCREEN_ENABLED`. See `lib/app/questionnaire/intro`.
+ */
+export type IntroSettings = {
+  enabled: boolean;
+  background: string;
+  buttonLabel: string;
+};
+
+/** Intro off, no background, default per-mode button — today's behaviour (straight into the chat). */
+export const DEFAULT_INTRO_SETTINGS: IntroSettings = {
+  enabled: false,
+  background: '',
+  buttonLabel: '',
+};
+
 /**
  * The full resolved shape of a version's configuration — one field per
  * `AppQuestionnaireConfig` column. The read view returns this (defaults when no
@@ -641,6 +669,12 @@ export type QuestionnaireConfigShape = {
    * `APP_QUESTIONNAIRES_RESPONDENT_REPORT_ENABLED` is on.
    */
   respondentReport: RespondentReportSettings;
+  /**
+   * Respondent intro / splash screen shown before the questionnaire starts. See
+   * {@link IntroSettings}. Off by default; only takes effect when the platform flag
+   * `APP_QUESTIONNAIRES_INTRO_SCREEN_ENABLED` is on.
+   */
+  intro: IntroSettings;
 };
 
 /**
@@ -702,4 +736,5 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   previewInspectorEnabled: false,
   tone: DEFAULT_TONE_SETTINGS,
   respondentReport: DEFAULT_RESPONDENT_REPORT_SETTINGS,
+  intro: DEFAULT_INTRO_SETTINGS,
 };

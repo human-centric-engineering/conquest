@@ -54,6 +54,7 @@ const handleCreate = withAdminAuth(async (request: NextRequest, session) => {
       demoClientId: body.demoClientId,
       name: body.name,
       description: body.description ?? null,
+      introBackground: body.introBackground ?? null,
       createdBy: session.user.id,
     },
     select: { id: true, name: true },

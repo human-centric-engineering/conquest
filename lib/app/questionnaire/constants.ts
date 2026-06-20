@@ -862,6 +862,17 @@ export const APP_QUESTIONNAIRES_RESPONDENT_REPORT_FLAG =
 export const APP_QUESTIONNAIRES_COHORTS_FLAG = 'APP_QUESTIONNAIRES_COHORTS_ENABLED';
 
 /**
+ * Platform feature flag gating the **respondent intro / splash screen** — an admin opt-in screen
+ * shown before the questionnaire starts that explains how it works (adapts to the presentation mode),
+ * what the respondent will receive at the end (adapts to the respondent-report settings), and an
+ * admin-authored "about this questionnaire" background section (optionally overridden per cohort).
+ * DB-backed, seeded disabled by `048-intro-screen-flag.ts`. Opt-in on top of
+ * APP_QUESTIONNAIRES_ENABLED, AND per-version (`config.intro.enabled`) — the respondent surface ANDs
+ * them, so the splash stays off until both the flag and the version toggle are on.
+ */
+export const APP_QUESTIONNAIRES_INTRO_SCREEN_FLAG = 'APP_QUESTIONNAIRES_INTRO_SCREEN_ENABLED';
+
+/**
  * Slug of the seeded Respondent Report `AiAgent` — assembles the per-respondent insights section
  * (mode `raw_plus_insights`) from the captured answers, the admin's generation config, and the
  * optional client knowledge base. Ships with empty `model`/`provider` so it resolves dynamically via

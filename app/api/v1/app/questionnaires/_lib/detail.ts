@@ -42,6 +42,7 @@ import {
 import { parseInviteeFields } from '@/lib/app/questionnaire/invitations/invitee-fields';
 import { narrowToneSettings } from '@/lib/app/questionnaire/chat/tone';
 import { narrowRespondentReportSettings } from '@/lib/app/questionnaire/report/settings';
+import { narrowIntroSettings } from '@/lib/app/questionnaire/intro/settings';
 import type {
   ConfigView,
   QuestionnaireDetail,
@@ -117,6 +118,7 @@ export const CONFIG_SELECT = {
   previewInspectorEnabled: true,
   tone: true,
   respondentReport: true,
+  intro: true,
 } as const;
 
 type ConfigRow = {
@@ -151,6 +153,7 @@ type ConfigRow = {
   previewInspectorEnabled: boolean;
   tone: Prisma.JsonValue;
   respondentReport: Prisma.JsonValue;
+  intro: Prisma.JsonValue;
 };
 
 /** Narrow a stored `selectionStrategy` to the enum (default when unknown). */
@@ -248,6 +251,7 @@ export function toConfigView(row: ConfigRow | null): ConfigView {
     previewInspectorEnabled: row.previewInspectorEnabled,
     tone: narrowToneSettings(row.tone),
     respondentReport: narrowRespondentReportSettings(row.respondentReport),
+    intro: narrowIntroSettings(row.intro),
     saved: true,
   };
 }

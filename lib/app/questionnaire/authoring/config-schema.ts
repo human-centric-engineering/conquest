@@ -22,6 +22,8 @@ import {
   ANSWER_FIT_MODES,
   ANSWER_SLOT_PANEL_SCOPES,
   CONTRADICTION_MODES,
+  INTRO_BACKGROUND_MAX_LENGTH,
+  INTRO_BUTTON_LABEL_MAX_LENGTH,
   INVITEE_FIELD_KEYS,
   PRESENTATION_MODES,
   PROFILE_FIELD_TYPES,
@@ -150,6 +152,19 @@ const respondentReportSettingsSchema = z
   .strict();
 
 /**
+ * Respondent intro / splash screen — the full {@link IntroSettings} block. Sent whole (not partial)
+ * by the editor; every key present so a save can clear the toggle. `strict()` rejects unknown keys.
+ * Gated additionally by the platform flag `APP_QUESTIONNAIRES_INTRO_SCREEN_ENABLED`.
+ */
+const introSettingsSchema = z
+  .object({
+    enabled: z.boolean(),
+    background: z.string().trim().max(INTRO_BACKGROUND_MAX_LENGTH),
+    buttonLabel: z.string().trim().max(INTRO_BUTTON_LABEL_MAX_LENGTH),
+  })
+  .strict();
+
+/**
  * PATCH a version's configuration. All fields optional (partial save); at least
  * one required. Numbers are bounded to sane authoring ranges; nullable budget/cap
  * fields use `null` to mean "no cap" (an omitted key leaves the stored value).
@@ -214,6 +229,9 @@ export const updateConfigSchema = z
     // Respondent Report. Sent whole when present; gated additionally by the platform flag
     // APP_QUESTIONNAIRES_RESPONDENT_REPORT_ENABLED.
     respondentReport: respondentReportSettingsSchema.optional(),
+    // Respondent intro / splash screen. Sent whole when present; gated additionally by the platform
+    // flag APP_QUESTIONNAIRES_INTRO_SCREEN_ENABLED.
+    intro: introSettingsSchema.optional(),
   })
   .refine((b) => Object.values(b).some((v) => v !== undefined), {
     message: 'Provide at least one field to update',

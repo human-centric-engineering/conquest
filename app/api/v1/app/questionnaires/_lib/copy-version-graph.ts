@@ -116,6 +116,7 @@ export async function copyVersionGraph(
         inviteeFields: jsonInput(source.config.inviteeFields),
         tone: jsonInput(source.config.tone),
         respondentReport: jsonInput(source.config.respondentReport),
+        intro: jsonInput(source.config.intro),
       },
     });
   }

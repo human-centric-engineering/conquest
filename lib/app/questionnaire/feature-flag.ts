@@ -25,6 +25,7 @@ import {
   APP_QUESTIONNAIRES_TONE_FLAG,
   APP_QUESTIONNAIRES_RESPONDENT_REPORT_FLAG,
   APP_QUESTIONNAIRES_COHORTS_FLAG,
+  APP_QUESTIONNAIRES_INTRO_SCREEN_FLAG,
   APP_QUESTIONNAIRES_FLAG,
 } from '@/lib/app/questionnaire/constants';
 import { isFeatureEnabled } from '@/lib/feature-flags';
@@ -54,6 +55,7 @@ export {
   APP_QUESTIONNAIRES_REASONING_STREAM_FLAG,
   APP_QUESTIONNAIRES_RESPONDENT_REPORT_FLAG,
   APP_QUESTIONNAIRES_COHORTS_FLAG,
+  APP_QUESTIONNAIRES_INTRO_SCREEN_FLAG,
 };
 
 /**
@@ -656,6 +658,23 @@ export async function isCohortsEnabled(): Promise<boolean> {
     isFeatureEnabled(APP_QUESTIONNAIRES_COHORTS_FLAG),
   ]);
   return app && cohorts;
+}
+
+/**
+ * Whether the **respondent intro / splash screen** may be shown. Requires BOTH the master app flag
+ * and the intro sub-flag — a master-only child (like cohorts/data-slots), NOT live-dependent: the
+ * admin authors the intro before any session exists, and the screen renders ahead of the turn loop.
+ * The per-version `config.intro.enabled` toggle is the second gate (the respondent surface ANDs
+ * them), so the splash stays off until the flag AND the version opt-in are both on.
+ *
+ * Server-only (resolves both flags from the database).
+ */
+export async function isIntroScreenEnabled(): Promise<boolean> {
+  const [app, intro] = await Promise.all([
+    isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_INTRO_SCREEN_FLAG),
+  ]);
+  return app && intro;
 }
 
 /**

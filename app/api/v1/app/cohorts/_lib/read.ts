@@ -30,6 +30,7 @@ const COHORT_SELECT = {
   demoClientId: true,
   name: true,
   description: true,
+  introBackground: true,
   createdAt: true,
   updatedAt: true,
   // Filtered relation count: only ACTIVE members make the headline roster size.
@@ -70,6 +71,7 @@ function toCohortView(row: CohortRow, stats: RoundSessionCounts | undefined): Co
     demoClientId: row.demoClientId,
     name: row.name,
     description: row.description,
+    introBackground: row.introBackground,
     memberCount: row._count.members,
     roundCount: row._count.rounds,
     stats: toCompletionStats(stats),

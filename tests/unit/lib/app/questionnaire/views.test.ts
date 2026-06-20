@@ -197,6 +197,7 @@ function makeConfigView(overrides: Partial<ConfigView> = {}): ConfigView {
       },
       delivery: { onScreen: true, download: true },
     },
+    intro: { enabled: false, background: '', buttonLabel: '' },
     ...overrides,
   };
 }

@@ -9,6 +9,8 @@
 
 import { z } from 'zod';
 
+import { INTRO_BACKGROUND_MAX_LENGTH } from '@/lib/app/questionnaire/types';
+
 const NAME_MAX = 120;
 const DESCRIPTION_MAX = 1000;
 const NOTES_MAX = 1000;
@@ -39,13 +41,17 @@ export const createCohortSchema = z.object({
   demoClientId: z.string().min(1, 'Demo client is required'),
   name: nameField,
   description: optionalTextField(DESCRIPTION_MAX).optional(),
+  // Respondent intro background override — replaces the questionnaire-level text for this cohort's
+  // respondents when set; empty/absent inherits. Respondent-facing (distinct from `description`).
+  introBackground: optionalTextField(INTRO_BACKGROUND_MAX_LENGTH).optional(),
 });
 
-/** Edit a cohort's identity. At least one field. */
+/** Edit a cohort's identity + intro override. At least one field. */
 export const updateCohortSchema = z
   .object({
     name: nameField,
     description: optionalTextField(DESCRIPTION_MAX),
+    introBackground: optionalTextField(INTRO_BACKGROUND_MAX_LENGTH),
   })
   .partial()
   .refine((b) => Object.keys(b).length > 0, { message: 'At least one field must be provided' });

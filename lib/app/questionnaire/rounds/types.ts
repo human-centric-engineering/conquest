@@ -43,6 +43,12 @@ export interface CohortView {
   demoClientId: string;
   name: string;
   description: string | null;
+  /**
+   * Respondent intro background override (markdown). When non-empty, REPLACES the questionnaire-level
+   * "about this questionnaire" text for this cohort's respondents; null inherits. Respondent-facing —
+   * distinct from `description` (a private admin note).
+   */
+  introBackground: string | null;
   /** Active members on the roster (removed members excluded from the headline count). */
   memberCount: number;
   /** Rounds belonging to this cohort. */
