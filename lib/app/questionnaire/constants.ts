@@ -873,6 +873,29 @@ export const APP_QUESTIONNAIRES_COHORTS_FLAG = 'APP_QUESTIONNAIRES_COHORTS_ENABL
 export const APP_QUESTIONNAIRES_INTRO_SCREEN_FLAG = 'APP_QUESTIONNAIRES_INTRO_SCREEN_ENABLED';
 
 /**
+ * Platform feature flag gating **Round Additional Context** (the "interviewer briefing") — per-round
+ * admin-authored facts/figures/background the interviewer draws on when asking, optionally attributed
+ * to a single question. Round-level, off by default per round (`AppQuestionnaireRound.contextEnabled`);
+ * this flag is the platform-wide master gate on top of which the per-round toggle ANDs. Requires
+ * APP_QUESTIONNAIRES_ENABLED AND APP_QUESTIONNAIRES_COHORTS_ENABLED (briefings hang off rounds, which
+ * only exist when cohorts are on). DB-backed, seeded disabled by `050-round-context-flag.ts`. When off,
+ * the authoring routes/panel 404/hide and no briefing is ever injected into the interviewer prompt.
+ */
+export const APP_QUESTIONNAIRES_ROUND_CONTEXT_FLAG = 'APP_QUESTIONNAIRES_ROUND_CONTEXT_ENABLED';
+
+/**
+ * Platform feature flag gating **Learning Mode** — the interviewer is given generalised, anonymised
+ * themes from prior respondents *in the same round* and uses them subtly to colour phrasing AND
+ * (under the `adaptive` strategy) to probe divergent topics harder. Round-level, off by default per
+ * round (`AppQuestionnaireRound.learningEnabled`); this flag is the platform-wide master gate the
+ * per-round toggle ANDs. Requires APP_QUESTIONNAIRES_ENABLED AND APP_QUESTIONNAIRES_COHORTS_ENABLED.
+ * **Introduces bias by design** (later answers are influenced by earlier ones) — the admin UI warns,
+ * and a k-anonymity threshold suppresses learning until enough respondents have completed. DB-backed,
+ * seeded disabled by `051-learning-mode-flag.ts`. When off, no peer context is ever aggregated or injected.
+ */
+export const APP_QUESTIONNAIRES_LEARNING_MODE_FLAG = 'APP_QUESTIONNAIRES_LEARNING_MODE_ENABLED';
+
+/**
  * Slug of the seeded Respondent Report `AiAgent` — assembles the per-respondent insights section
  * (mode `raw_plus_insights`) from the captured answers, the admin's generation config, and the
  * optional client knowledge base. Ships with empty `model`/`provider` so it resolves dynamically via

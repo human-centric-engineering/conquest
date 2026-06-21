@@ -14,6 +14,11 @@ import {
   attachRoundQuestionnaireSchema,
   defaultRoundName,
 } from '@/lib/app/questionnaire/rounds';
+import {
+  resolveLearningConfig,
+  DEFAULT_LEARNING_CONFIG,
+  MIN_RESPONDENTS_FLOOR,
+} from '@/lib/app/questionnaire/rounds/types';
 
 describe('createCohortSchema', () => {
   it('requires demoClientId and name; trims and nulls an empty description', () => {
@@ -106,6 +111,43 @@ describe('updateRoundSchema', () => {
 
   it('requires at least one field', () => {
     expect(updateRoundSchema.safeParse({}).success).toBe(false);
+  });
+
+  it('accepts the context + learning toggles on their own', () => {
+    expect(updateRoundSchema.safeParse({ contextEnabled: true }).success).toBe(true);
+    expect(updateRoundSchema.safeParse({ learningEnabled: true }).success).toBe(true);
+  });
+
+  it('accepts a partial learningConfig and clamps below the floor', () => {
+    expect(updateRoundSchema.safeParse({ learningConfig: { minRespondents: 5 } }).success).toBe(
+      true
+    );
+    // Below the k-anonymity floor is rejected at the boundary (the route never stores it).
+    expect(updateRoundSchema.safeParse({ learningConfig: { minRespondents: 1 } }).success).toBe(
+      false
+    );
+  });
+});
+
+describe('resolveLearningConfig', () => {
+  it('returns the defaults for an empty/absent JSON column', () => {
+    expect(resolveLearningConfig({})).toEqual(DEFAULT_LEARNING_CONFIG);
+    expect(resolveLearningConfig(null)).toEqual(DEFAULT_LEARNING_CONFIG);
+    expect(resolveLearningConfig(undefined)).toEqual(DEFAULT_LEARNING_CONFIG);
+  });
+
+  it('honours a stored minRespondents above the floor', () => {
+    expect(resolveLearningConfig({ minRespondents: 7 })).toEqual({ minRespondents: 7 });
+  });
+
+  it('clamps a stored value below the floor up to the floor (never trusts a sub-floor row)', () => {
+    expect(resolveLearningConfig({ minRespondents: 1 })).toEqual({
+      minRespondents: MIN_RESPONDENTS_FLOOR,
+    });
+  });
+
+  it('falls back to the default for a non-numeric value', () => {
+    expect(resolveLearningConfig({ minRespondents: 'lots' })).toEqual(DEFAULT_LEARNING_CONFIG);
   });
 });
 

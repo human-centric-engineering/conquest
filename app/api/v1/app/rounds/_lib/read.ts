@@ -14,6 +14,7 @@ import { prisma } from '@/lib/db/client';
 import { narrowToEnum } from '@/lib/app/questionnaire/types';
 import {
   ROUND_STATUSES,
+  resolveLearningConfig,
   type RoundDetail,
   type RoundQuestionnaireView,
   type RoundView,
@@ -33,6 +34,9 @@ const ROUND_SELECT = {
   opensAt: true,
   closesAt: true,
   closedAt: true,
+  contextEnabled: true,
+  learningEnabled: true,
+  learningConfig: true,
   createdAt: true,
   updatedAt: true,
   _count: { select: { items: true } },
@@ -56,6 +60,9 @@ function toRoundView(
     opensAt: row.opensAt ? row.opensAt.toISOString() : null,
     closesAt: row.closesAt ? row.closesAt.toISOString() : null,
     closedAt: row.closedAt ? row.closedAt.toISOString() : null,
+    contextEnabled: row.contextEnabled,
+    learningEnabled: row.learningEnabled,
+    learningConfig: resolveLearningConfig(row.learningConfig),
     questionnaireCount: row._count.items,
     memberCount,
     stats: toCompletionStats(stats),

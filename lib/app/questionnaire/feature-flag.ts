@@ -26,6 +26,8 @@ import {
   APP_QUESTIONNAIRES_RESPONDENT_REPORT_FLAG,
   APP_QUESTIONNAIRES_COHORTS_FLAG,
   APP_QUESTIONNAIRES_INTRO_SCREEN_FLAG,
+  APP_QUESTIONNAIRES_ROUND_CONTEXT_FLAG,
+  APP_QUESTIONNAIRES_LEARNING_MODE_FLAG,
   APP_QUESTIONNAIRES_FLAG,
 } from '@/lib/app/questionnaire/constants';
 import { isFeatureEnabled } from '@/lib/feature-flags';
@@ -56,6 +58,8 @@ export {
   APP_QUESTIONNAIRES_RESPONDENT_REPORT_FLAG,
   APP_QUESTIONNAIRES_COHORTS_FLAG,
   APP_QUESTIONNAIRES_INTRO_SCREEN_FLAG,
+  APP_QUESTIONNAIRES_ROUND_CONTEXT_FLAG,
+  APP_QUESTIONNAIRES_LEARNING_MODE_FLAG,
 };
 
 /**
@@ -736,4 +740,76 @@ export function withCohortsEnabled<C>(
     if (blocked) return blocked;
     return handler(request, context);
   };
+}
+
+/**
+ * Whether **Round Additional Context** (the "interviewer briefing") may run. Requires the master app
+ * flag, the **cohorts** flag (briefings hang off rounds), AND the round-context sub-flag. Like
+ * cohorts it's NOT live-dependent at authoring time — admins write briefings before any session.
+ * The per-round `AppQuestionnaireRound.contextEnabled` toggle is the second gate; the interviewer
+ * injection ANDs this resolver with that toggle, so a briefing only ever reaches the prompt when the
+ * flag AND the per-round switch are both on. When this returns `false`, the authoring routes/panel
+ * 404/hide and no briefing is ever injected.
+ *
+ * Server-only (resolves the flags from the database).
+ */
+export async function isRoundContextEnabled(): Promise<boolean> {
+  const [app, cohorts, context] = await Promise.all([
+    isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_COHORTS_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_ROUND_CONTEXT_FLAG),
+  ]);
+  return app && cohorts && context;
+}
+
+/**
+ * Flag gate for the round-context authoring routes — 404 when any of the master / cohorts /
+ * round-context flags is off, `null` when all are on. The {@link ensureCohortsEnabled} analogue for
+ * the briefing surface; call it first, before any auth or handler work.
+ *
+ * Server-only (resolves the flags from the database).
+ */
+export async function ensureRoundContextEnabled(): Promise<Response | null> {
+  if (await isRoundContextEnabled()) {
+    return null;
+  }
+  return errorResponse('Not found', { code: 'NOT_FOUND', status: 404 });
+}
+
+/**
+ * Wrap a round-context route handler so the round-context gate runs **before** anything else (auth,
+ * handler work) — the order a disabled sub-feature needs to look like a missing route rather than a
+ * 401. The {@link withCohortsEnabled} analogue for the briefing surface.
+ *
+ * ```ts
+ * export const POST = withRoundContextEnabled(withAdminAuth(handleCreateContextEntry));
+ * ```
+ */
+export function withRoundContextEnabled<C>(
+  handler: (request: NextRequest, context: C) => Promise<Response>
+): (request: NextRequest, context: C) => Promise<Response> {
+  return async (request, context) => {
+    const blocked = await ensureRoundContextEnabled();
+    if (blocked) return blocked;
+    return handler(request, context);
+  };
+}
+
+/**
+ * Whether **Learning Mode** may run. Requires the master app flag, the **cohorts** flag (learning is
+ * scoped to a round's respondents), AND the learning-mode sub-flag. Like cohorts/round-context it's a
+ * master-style child, not live-dependent at the flag level — the per-round
+ * `AppQuestionnaireRound.learningEnabled` toggle plus the k-anonymity threshold are the further gates
+ * the runtime ANDs. **Introduces bias by design**, so it stays opt-in at every level. When this
+ * returns `false`, no peer context is ever aggregated, no digest is built, and nothing is injected.
+ *
+ * Server-only (resolves the flags from the database).
+ */
+export async function isLearningModeEnabled(): Promise<boolean> {
+  const [app, cohorts, learning] = await Promise.all([
+    isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_COHORTS_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_LEARNING_MODE_FLAG),
+  ]);
+  return app && cohorts && learning;
 }

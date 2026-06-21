@@ -27,6 +27,45 @@ export type CohortMemberStatus = (typeof COHORT_MEMBER_STATUSES)[number];
 export const ROUND_STATUSES = ['draft', 'open', 'closed'] as const;
 export type RoundStatus = (typeof ROUND_STATUSES)[number];
 
+/**
+ * Learning Mode tuning, persisted lazily on `AppQuestionnaireRound.learningConfig` (a `{}` JSON
+ * column that resolves to {@link DEFAULT_LEARNING_CONFIG} at read time, mirroring
+ * `AppQuestionnaireConfig`'s lazy-defaults pattern). Kept tiny on purpose — one knob today.
+ */
+export interface LearningConfigShape {
+  /**
+   * **k-anonymity threshold.** The minimum number of completed, non-preview respondents (in the
+   * round, on the same version) before ANY generalised theme is surfaced — at both the round level
+   * and per slot. Guards against de-anonymisation ("the one other person said X"). Default 3; the
+   * UI enforces a floor of 2.
+   */
+  minRespondents: number;
+}
+
+/** Default Learning Mode tuning — applied when the round's `learningConfig` JSON is absent/`{}`. */
+export const DEFAULT_LEARNING_CONFIG: LearningConfigShape = {
+  minRespondents: 3,
+};
+
+/** Lower bound the UI + schema enforce on {@link LearningConfigShape.minRespondents}. */
+export const MIN_RESPONDENTS_FLOOR = 2;
+
+/**
+ * Resolve the raw `learningConfig` JSON column (an opaque `{}` by default) to a fully-defaulted
+ * {@link LearningConfigShape}. Pure + defensive: any missing/invalid field falls back to its default,
+ * and `minRespondents` is clamped to the {@link MIN_RESPONDENTS_FLOOR} floor — the read path never
+ * trusts a stored value below it. Mirrors how `AppQuestionnaireConfig` resolves an absent row.
+ */
+export function resolveLearningConfig(raw: unknown): LearningConfigShape {
+  const obj = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const min = obj.minRespondents;
+  const minRespondents =
+    typeof min === 'number' && Number.isFinite(min)
+      ? Math.max(MIN_RESPONDENTS_FLOOR, Math.floor(min))
+      : DEFAULT_LEARNING_CONFIG.minRespondents;
+  return { minRespondents };
+}
+
 /** Completion roll-up shared by the cohort + round list rows (computed by `_lib/stats.ts`). */
 export interface RoundCompletionStats {
   /** Non-preview sessions started within the round (or across the cohort's rounds). */
@@ -98,6 +137,12 @@ export interface RoundView {
   opensAt: string | null;
   closesAt: string | null;
   closedAt: string | null;
+  /** Additional Context ("interviewer briefing") on/off for this round (off by default). */
+  contextEnabled: boolean;
+  /** Learning Mode on/off for this round (off by default; introduces bias by design). */
+  learningEnabled: boolean;
+  /** Resolved Learning Mode tuning (defaults applied; never the raw `{}`). */
+  learningConfig: LearningConfigShape;
   /** How many questionnaires the round bundles. */
   questionnaireCount: number;
   /** Active members of the round's cohort (the population the round is delivered to). */

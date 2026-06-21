@@ -22,6 +22,7 @@ import { computeChanges, logAdminAction } from '@/lib/orchestration/audit/admin-
 
 import { withCohortsEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { updateRoundSchema } from '@/lib/app/questionnaire/rounds';
+import { resolveLearningConfig } from '@/lib/app/questionnaire/rounds/types';
 import { getRoundDetail } from '@/app/api/v1/app/rounds/_lib/read';
 
 type Params = { id: string };
@@ -51,6 +52,9 @@ const handleUpdate = withAdminAuth<Params>(async (request, session, { params }) 
       status: true,
       opensAt: true,
       closesAt: true,
+      contextEnabled: true,
+      learningEnabled: true,
+      learningConfig: true,
     },
   });
   if (!before) throw new NotFoundError('Round not found');
@@ -71,6 +75,13 @@ const handleUpdate = withAdminAuth<Params>(async (request, session, { params }) 
   // Reopening (status → open/draft) clears the manual-close stamp.
   const reopening = body.status !== undefined && before.status === 'closed';
 
+  // Learning tuning is MERGED onto the stored JSON (a partial PATCH can set one knob without
+  // resending the rest), so the column always holds the full, resolved shape going forward.
+  const mergedLearningConfig =
+    body.learningConfig !== undefined
+      ? { ...resolveLearningConfig(before.learningConfig), ...body.learningConfig }
+      : undefined;
+
   const updated = await prisma.appQuestionnaireRound.update({
     where: { id },
     data: {
@@ -79,6 +90,9 @@ const handleUpdate = withAdminAuth<Params>(async (request, session, { params }) 
       ...(body.opensAt !== undefined ? { opensAt: body.opensAt } : {}),
       ...(body.closesAt !== undefined ? { closesAt: body.closesAt } : {}),
       ...(body.status !== undefined ? { status: body.status } : {}),
+      ...(body.contextEnabled !== undefined ? { contextEnabled: body.contextEnabled } : {}),
+      ...(body.learningEnabled !== undefined ? { learningEnabled: body.learningEnabled } : {}),
+      ...(mergedLearningConfig !== undefined ? { learningConfig: mergedLearningConfig } : {}),
       ...(reopening ? { closedAt: null, closedBy: null } : {}),
     },
     select: {
@@ -88,6 +102,9 @@ const handleUpdate = withAdminAuth<Params>(async (request, session, { params }) 
       status: true,
       opensAt: true,
       closesAt: true,
+      contextEnabled: true,
+      learningEnabled: true,
+      learningConfig: true,
     },
   });
 

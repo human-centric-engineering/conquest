@@ -10,10 +10,14 @@
 import { z } from 'zod';
 
 import { INTRO_BACKGROUND_MAX_LENGTH } from '@/lib/app/questionnaire/types';
+import { MIN_RESPONDENTS_FLOOR } from '@/lib/app/questionnaire/rounds/types';
 
 const NAME_MAX = 120;
 const DESCRIPTION_MAX = 1000;
 const NOTES_MAX = 1000;
+
+// Learning Mode k-anonymity ceiling — a sane upper bound so the field can't be set absurdly high.
+const MIN_RESPONDENTS_CEILING = 100;
 
 const nameField = z.string().trim().min(1, 'Name is required').max(NAME_MAX);
 
@@ -105,8 +109,19 @@ export const createRoundSchema = z
   .refine(windowRefinement, windowMessage);
 
 /**
- * Edit a round: name / description / window / status. `status` may move only between
- * `draft` and `open` here — CLOSING is the dedicated `POST …/close` action (it stamps
+ * Learning Mode tuning, as accepted on a round PATCH. Today one knob: the k-anonymity threshold,
+ * clamped to [{@link MIN_RESPONDENTS_FLOOR}, {@link MIN_RESPONDENTS_CEILING}]. Partial so the PATCH
+ * can set the flags without resending tuning; the route merges it onto the stored JSON.
+ */
+export const learningConfigSchema = z
+  .object({
+    minRespondents: z.coerce.number().int().min(MIN_RESPONDENTS_FLOOR).max(MIN_RESPONDENTS_CEILING),
+  })
+  .partial();
+
+/**
+ * Edit a round: name / description / window / status / context + learning toggles. `status` may move
+ * only between `draft` and `open` here — CLOSING is the dedicated `POST …/close` action (it stamps
  * `closedAt`/`closedBy`). At least one field.
  */
 export const updateRoundSchema = z
@@ -116,6 +131,12 @@ export const updateRoundSchema = z
     opensAt: nullableInstant,
     closesAt: nullableInstant,
     status: z.enum(['draft', 'open']),
+    // Additional Context ("interviewer briefing") on/off for this round.
+    contextEnabled: z.boolean(),
+    // Learning Mode on/off for this round (introduces bias by design — the UI warns).
+    learningEnabled: z.boolean(),
+    // Learning Mode tuning; merged onto the stored JSON by the route.
+    learningConfig: learningConfigSchema,
   })
   .partial()
   .refine((b) => Object.keys(b).length > 0, { message: 'At least one field must be provided' })
@@ -133,6 +154,7 @@ export type CreateCohortMemberInput = z.infer<typeof createCohortMemberSchema>;
 export type UpdateCohortMemberInput = z.infer<typeof updateCohortMemberSchema>;
 export type CreateRoundInput = z.infer<typeof createRoundSchema>;
 export type UpdateRoundInput = z.infer<typeof updateRoundSchema>;
+export type LearningConfigInput = z.infer<typeof learningConfigSchema>;
 export type AttachRoundQuestionnaireInput = z.infer<typeof attachRoundQuestionnaireSchema>;
 
 /**
