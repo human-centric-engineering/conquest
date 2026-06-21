@@ -267,6 +267,27 @@ describe('buildStreamingQuestionPrompt', () => {
     );
   });
 
+  it('renders the peer_context block (anonymised, light-touch) when peerContext is supplied', () => {
+    const system = text(
+      buildStreamingQuestionPrompt({
+        ...INPUT,
+        peerContext: ['Several respondents mentioned workload pressure around month-end.'],
+      })[0].content
+    );
+    expect(system).toContain('<peer_context>');
+    expect(system).toContain('workload pressure around month-end');
+    // Must enforce aggregate-only, non-leading, never-name-or-quote framing.
+    expect(system).toMatch(/NEVER name or quote an individual/i);
+    expect(system).toMatch(/never present\b.*\bas fact|expected answer/i);
+  });
+
+  it('omits the peer_context block entirely when there is none', () => {
+    expect(text(buildStreamingQuestionPrompt(INPUT)[0].content)).not.toContain('<peer_context>');
+    expect(
+      text(buildStreamingQuestionPrompt({ ...INPUT, peerContext: [] })[0].content)
+    ).not.toContain('<peer_context>');
+  });
+
   it('switches to opening framing (no acknowledgement) when isOpening', () => {
     const system = text(buildStreamingQuestionPrompt({ ...INPUT, isOpening: true })[0].content);
     expect(system).toMatch(/first question/i);

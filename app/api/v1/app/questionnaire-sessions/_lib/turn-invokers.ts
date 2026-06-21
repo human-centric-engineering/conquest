@@ -152,6 +152,12 @@ export async function buildTurnInvokers(opts: {
   /** Version goal — framing handed to the adaptive selector (read only by `adaptive`). */
   goal?: string;
   /**
+   * Learning Mode (adaptive probing): per-question-key peer divergence (0–1) from the round's digest.
+   * Threaded into the adaptive selector's {@link SelectionContext} so it can lean toward probing
+   * topics where earlier respondents split. Absent unless Learning Mode is active for the round.
+   */
+  peerDivergenceByKey?: Record<string, number>;
+  /**
    * Preview Turn Inspector (admin-only): when provided, each agent/LLM call pushes a trace here.
    * The route only supplies it for a preview session with the inspector toggle on, so capture is
    * off (zero overhead) for real respondents. See `lib/app/questionnaire/inspector`.
@@ -196,6 +202,7 @@ export async function buildTurnInvokers(opts: {
     adaptiveEnabled,
     dataSlotAdaptiveEnabled,
     goal,
+    peerDivergenceByKey,
     dataSlotCandidates,
     sensitivityAware,
     answerFitMode,
@@ -475,6 +482,7 @@ export async function buildTurnInvokers(opts: {
         sessionId: state.sessionId,
         ...(conversation.length > 0 ? { recentMessages: conversation } : {}),
         ...(goal ? { goal } : {}),
+        ...(peerDivergenceByKey ? { peerDivergenceByKey } : {}),
       };
       // Adaptive's embedding + LLM path runs only when its sub-flag is on; otherwise it
       // degrades to `weighted` via the strategy's own fallback (no deps passed).

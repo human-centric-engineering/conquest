@@ -105,6 +105,25 @@ describe('buildSelectorPrompt', () => {
     expect(prompt).not.toContain('Questionnaire goal:');
     expect(prompt).not.toContain('Already answered');
   });
+
+  it('surfaces peer divergence per candidate and adds the probe nudge (Learning Mode)', () => {
+    const prompt = buildSelectorPrompt({
+      recentMessages: ['hi'],
+      candidates: [
+        { id: 'q1', key: 'blockers', prompt: 'What blocked you?', peerDivergence: 0.8 },
+        { id: 'q2', key: 'ease', prompt: 'How easy was it?', peerDivergence: 0.1 },
+      ],
+      sessionId: 's1',
+    });
+    expect(prompt).toMatch(/Earlier respondents diverged: high \(0\.80\)/);
+    expect(prompt).toMatch(/Earlier respondents diverged: low \(0\.10\)/);
+    expect(prompt).toMatch(/lean toward a topic where earlier respondents diverged more/i);
+  });
+
+  it('adds no probe nudge when no candidate carries peer divergence', () => {
+    const prompt = buildSelectorPrompt({ recentMessages: ['hi'], candidates, sessionId: 's1' });
+    expect(prompt).not.toMatch(/earlier respondents diverged/i);
+  });
 });
 
 describe('buildAdaptiveDeps — embedText + rankByVector delegation', () => {

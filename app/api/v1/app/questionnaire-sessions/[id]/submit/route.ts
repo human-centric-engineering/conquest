@@ -38,6 +38,8 @@ import { resolveTurnAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/
 import { buildTurnContext } from '@/app/api/v1/app/questionnaires/_lib/turn-context';
 import { markSessionCompleted } from '@/app/api/v1/app/questionnaires/_lib/sessions';
 import { enqueueRespondentReport } from '@/lib/app/questionnaire/report/enqueue';
+import { isLearningModeEnabled } from '@/lib/app/questionnaire/feature-flag';
+import { refreshRoundLearningDigest } from '@/lib/app/questionnaire/learning/digest';
 
 async function handleSubmit(
   request: NextRequest,
@@ -96,6 +98,20 @@ async function handleSubmit(
           error: err instanceof Error ? err.message : String(err),
         });
       });
+      // Learning Mode: rebuild this round's peer-theme digest so the NEXT respondent sees the
+      // just-completed session folded in. Gated by the platform flag + the round having a roundId;
+      // the builder itself re-checks the per-round toggle + k-anonymity. Best-effort + fail-soft —
+      // a digest failure must never fail the submission. (The builder is internally idempotent.)
+      if (loaded.session.roundId && (await isLearningModeEnabled())) {
+        const roundId = loaded.session.roundId;
+        await refreshRoundLearningDigest(roundId, loaded.session.versionId).catch((err) => {
+          log.error('Failed to refresh round learning digest', {
+            sessionId,
+            roundId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+      }
       return successResponse({ sessionId, status });
     } catch (err) {
       if (err instanceof SessionTransitionError) {

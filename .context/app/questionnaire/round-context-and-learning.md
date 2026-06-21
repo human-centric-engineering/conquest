@@ -77,6 +77,31 @@ that?") and, under the `adaptive` strategy, probing divergent topics harder.
   — master AND cohorts AND this sub-flag) **AND** the per-round `learningEnabled` toggle **AND** the
   k-anonymity threshold being met.
 
+### Runtime (backend)
+
+`lib/app/questionnaire/learning/digest.ts`:
+
+- `refreshRoundLearningDigest(roundId, versionId)` — rebuilds the digest. Loads completed, non-preview,
+  **non-high-sensitivity** sessions; below `minRespondents` it **clears** the digest (so a shrunk
+  corpus can't leave stale rows) and returns. Otherwise it aggregates per slot (data-slot paraphrases
+  preferred, else question answers), keeps only slots with ≥ `minRespondents` distinct respondents,
+  and runs **one** composer-agent LLM call to produce a generalised `insight` + `divergence` per slot.
+  Writes wholesale in a transaction (delete + createMany). Fully **fail-soft**: a transient LLM error
+  leaves the existing digest untouched (never wipes on error). Triggered best-effort from the submit
+  route after a session completes — so the next respondent sees the just-finished one folded in. The
+  current respondent is excluded structurally (their session is still `active`, not in the corpus).
+- `loadRoundPeerDigest(roundId, versionId)` — read for injection; `null` when the round toggle is off.
+
+**Injection.** The live messages route loads the digest once per turn and, at phrasing time, passes
+the asked slot's `insight` as `QuestionComposeInput.peerContext` → a `<peer_context>` section in
+`buildStreamingQuestionPrompt` with strict framing (aggregate-only, never name/quote/lead, at most
+once). **Adaptive probing** (chosen over phrasing-only): per-question-key `divergence` flows through
+`buildTurnInvokers` → `SelectionContext.peerDivergenceByKey` → the `adaptive` selector, which surfaces
+each candidate's divergence band and nudges the LLM to probe split topics harder — **only** under the
+`adaptive` strategy (other strategies stay phrasing-only). When peer context is injected, a one-off
+`learning_applied` session event is recorded (`lib/app/questionnaire/learning/events.ts`) as the
+precise bias-audit signal.
+
 ## Round config
 
 `AppQuestionnaireRound` gains three columns (migration `…_app_round_context_and_learning`):

@@ -39,6 +39,7 @@ import {
   isContradictionDetectionEnabled,
   isCostCapEnforcementEnabled,
   isDataSlotsEnabled,
+  isLearningModeEnabled,
   isQuestionPhrasingEnabled,
   isReasoningStreamEnabled,
   isRoundContextEnabled,
@@ -48,6 +49,8 @@ import {
   withLiveSessionsEnabled,
 } from '@/lib/app/questionnaire/feature-flag';
 import { selectBriefingLines } from '@/lib/app/questionnaire/rounds/briefing';
+import { loadRoundPeerDigest } from '@/lib/app/questionnaire/learning/digest';
+import { recordLearningApplied } from '@/lib/app/questionnaire/learning/events';
 import { buildReasoningTrace, type ReasoningStep } from '@/lib/app/questionnaire/reasoning';
 import type { AgentCallTrace } from '@/lib/app/questionnaire/inspector';
 import type { SessionWarning } from '@/lib/app/questionnaire/chat/types';
@@ -228,6 +231,7 @@ async function handleMessage(
       toneFlag,
       dataSlotAdaptive,
       roundContextFlag,
+      learningModeFlag,
     ] = await Promise.all([
       isAnswerExtractionEnabled(),
       isContradictionDetectionEnabled(),
@@ -243,6 +247,7 @@ async function handleMessage(
       isToneEnabled(),
       isAdaptiveDataSlotSelectionEnabled(),
       isRoundContextEnabled(),
+      isLearningModeEnabled(),
     ]);
 
     // Adaptive selection ranks unanswered questions by vector similarity, which needs each slot's
@@ -284,6 +289,25 @@ async function handleMessage(
       roundContextFlag && loaded.session.roundId
         ? await loadRoundBriefing(loaded.session.roundId, loaded.session.versionId)
         : null;
+
+    // Learning Mode: load this round's peer-theme digest once per turn (null when the flag is off,
+    // the session isn't round-scoped, or the round's learningEnabled toggle is off). Indexed by
+    // `${kind}:${key}` for the phraser, plus a question-key → divergence map for adaptive probing.
+    const peerInsights =
+      learningModeFlag && loaded.session.roundId
+        ? await loadRoundPeerDigest(loaded.session.roundId, loaded.session.versionId)
+        : null;
+    const peerInsightByKey = new Map(
+      (peerInsights ?? []).map((p) => [`${p.slotKind}:${p.slotKey}`, p])
+    );
+    // Adaptive probing: peers' divergence per QUESTION key — leans the adaptive selector toward
+    // topics where earlier respondents split. Only question-kind insights drive selection.
+    const peerDivergenceByKey: Record<string, number> = {};
+    for (const p of peerInsights ?? []) {
+      if (p.slotKind === 'question' && typeof p.divergence === 'number') {
+        peerDivergenceByKey[p.slotKey] = p.divergence;
+      }
+    }
 
     // Adaptive data-slot selection (50+-slot scale): when its sub-flag is on AND we're in data-slot
     // mode, the orchestrator ranks unfilled slots by embedding similarity + an LLM pick. Like the
@@ -486,6 +510,9 @@ async function handleMessage(
       ...(prefilterActive ? { extractionCandidateSlots: extractionQuestionSlots } : {}),
       activeQuestionKey: loaded.activeQuestionKey,
       adaptiveEnabled: adaptive,
+      // Learning Mode (adaptive probing): per-question-key peer divergence, so the adaptive selector
+      // can lean toward topics where earlier respondents split. Empty unless learning is active.
+      ...(Object.keys(peerDivergenceByKey).length > 0 ? { peerDivergenceByKey } : {}),
       // Adaptive data-slot selection: wire the embedding-ranked LLM selector only in data-slot mode
       // with the sub-flag on; otherwise the orchestrator keeps its deterministic topic-local pick.
       dataSlotAdaptiveEnabled: dataSlotAdaptiveActive,
@@ -648,6 +675,10 @@ async function handleMessage(
         const dsBriefing = briefingEntries
           ? selectBriefingLines(briefingEntries, dsRelevantIds)
           : [];
+        // Learning Mode: peer theme for this data slot (if any), threaded as peer context + audited.
+        const dsSlotKey = dataSlots.find((s) => s.id === r.dataSlotId)?.key;
+        const dsPeer = dsSlotKey ? peerInsightByKey.get(`data_slot:${dsSlotKey}`) : undefined;
+        if (dsPeer) void recordLearningApplied(sessionId);
         const phrased = yield* streamQuestionMessage({
           input: {
             prompt: `${r.name} — ${r.description}`,
@@ -662,6 +693,7 @@ async function handleMessage(
             isTransition: r.isTransition,
             ...(priorAnswers.length > 0 ? { priorAnswers } : {}),
             ...(dsBriefing.length > 0 ? { briefing: dsBriefing } : {}),
+            ...(dsPeer ? { peerContext: [dsPeer.insight] } : {}),
             ...(r.isReask && currentUnderstanding ? { currentUnderstanding } : {}),
             ...(isFinalAttempt ? { isFinalAttempt: true } : {}),
             ...sensitivityPhraserInput,
@@ -701,6 +733,9 @@ async function handleMessage(
               new Set(result.targetedQuestionId ? [result.targetedQuestionId] : [])
             )
           : [];
+        // Learning Mode: peer theme for the asked question (if any), threaded as peer context + audited.
+        const qPeer = targetedKey ? peerInsightByKey.get(`question:${targetedKey}`) : undefined;
+        if (qPeer) void recordLearningApplied(sessionId);
         const phrased = yield* streamQuestionMessage({
           input: {
             prompt: result.response.text,
@@ -716,6 +751,7 @@ async function handleMessage(
             questionsAsked: state.selectionRound,
             ...(priorAnswers.length > 0 ? { priorAnswers } : {}),
             ...(qBriefing.length > 0 ? { briefing: qBriefing } : {}),
+            ...(qPeer ? { peerContext: [qPeer.insight] } : {}),
             ...sensitivityPhraserInput,
             ...tonePhraserInput,
           },

@@ -80,6 +80,15 @@ export interface QuestionComposeInput {
    * → the block is omitted. Built by `_lib/round-briefing.ts` + `rounds/briefing.ts`.
    */
   briefing?: string[];
+  /**
+   * Learning Mode peer context: generalised, anonymised themes from PRIOR respondents in the same
+   * round (built by `lib/app/questionnaire/learning`). Each entry a one-line theme. The interviewer
+   * may weave ONE in lightly to deepen this question ("some people mentioned X — how do you feel
+   * about that?"), but must NEVER name or quote an individual, present it as fact, or imply a
+   * "right" answer. Absent/empty → the block is omitted. Introduces bias by design (the admin opts
+   * in per round); the prompt keeps the touch light and non-leading.
+   */
+  peerContext?: string[];
   /** The respondent's message this turn (to acknowledge); empty on the opening turn. */
   lastUserMessage: string;
   /** True when this same question was just asked and the prior answer wasn't captured. */
@@ -310,6 +319,24 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
               'quietly inform a sharper, more knowledgeable question where it genuinely helps; ' +
               'otherwise ignore them:',
             input.briefing.map((b) => `- ${b}`).join('\n')
+          )
+        : ''
+    ),
+    // Learning Mode: generalised, anonymised themes from EARLIER respondents in this round. The
+    // interviewer may gently raise ONE to deepen the conversation, in aggregate terms only — never
+    // naming or quoting anyone, never as fact, never implying a "correct" answer. Used sparingly so
+    // it enriches rather than leads. Omitted when absent.
+    section(
+      'peer_context',
+      input.peerContext && input.peerContext.length > 0
+        ? joinSections(
+            'What EARLIER respondents (in general) have tended to say around this area — use with ' +
+              'care, and ONLY if it helps this person open up. You MAY gently reference it in ' +
+              'aggregate ("some people have mentioned…", "a few felt…") and invite their own view, ' +
+              'at MOST once and never every turn. NEVER name or quote an individual, never present ' +
+              'it as fact or the expected answer, and never pressure them to agree. If in doubt, ' +
+              'leave it out and just ask the question:',
+            input.peerContext.map((p) => `- ${p}`).join('\n')
           )
         : ''
     ),

@@ -40,6 +40,7 @@ export function ctx(input: {
   sessionId?: string;
   recentMessages?: string[];
   goal?: string;
+  peerDivergenceByKey?: Record<string, number>;
 }): SelectionContext {
   return {
     questions: input.questions,
@@ -49,5 +50,6 @@ export function ctx(input: {
     sessionId: input.sessionId ?? 'sess-1',
     ...(input.recentMessages ? { recentMessages: input.recentMessages } : {}),
     ...(input.goal !== undefined ? { goal: input.goal } : {}),
+    ...(input.peerDivergenceByKey ? { peerDivergenceByKey: input.peerDivergenceByKey } : {}),
   };
 }
