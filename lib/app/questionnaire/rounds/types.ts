@@ -160,6 +160,25 @@ export interface RoundDetail extends RoundView {
 /** How a briefing entry was authored — drives the admin-UI provenance badge. */
 export type RoundContextSource = 'manual' | 'upload' | 'ai_suggested';
 
+/** One question a briefing entry can be attributed to (the admin attribution picker's leaf). */
+export interface BriefableQuestion {
+  id: string;
+  prompt: string;
+  sectionTitle: string;
+}
+
+/**
+ * A bundled questionnaire resolved to its effective version + briefable questions — the source for
+ * the admin attribution picker. The admin picks a questionnaire (→ its `versionId`), then "General"
+ * or one of its `questions`, when authoring a briefing entry.
+ */
+export interface BriefableQuestionnaire {
+  questionnaireId: string;
+  title: string;
+  versionId: string;
+  questions: BriefableQuestion[];
+}
+
 /**
  * One Additional Context ("interviewer briefing") entry, serialized for the admin UI. `questionSlotId`
  * null = a general entry (applies to the whole version); else attributed to one question.

@@ -85,3 +85,10 @@ export {
   type AuthorIntroBackgroundArgs,
   type AuthorIntroBackgroundData,
 } from '@/lib/app/questionnaire/capabilities/author-intro-background';
+
+export {
+  AppSuggestRoundBriefingCapability,
+  type SuggestRoundBriefingArgs,
+  type SuggestRoundBriefingData,
+  type SuggestedBriefingEntry,
+} from '@/lib/app/questionnaire/capabilities/suggest-round-briefing';

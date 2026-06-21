@@ -13,7 +13,11 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db/client';
 import { narrowToEnum } from '@/lib/app/questionnaire/types';
 import { ROUND_CONTEXT_SOURCES } from '@/lib/app/questionnaire/rounds/schemas';
-import type { RoundContextEntryView } from '@/lib/app/questionnaire/rounds/types';
+import type {
+  BriefableQuestionnaire,
+  BriefableQuestion,
+  RoundContextEntryView,
+} from '@/lib/app/questionnaire/rounds/types';
 
 const ENTRY_SELECT = {
   id: true,
@@ -134,4 +138,115 @@ export async function assertSlotInVersion(
     select: { id: true },
   });
   return slot !== null;
+}
+
+/**
+ * Resolve each round item to its effective version — the pinned `versionId`, else the questionnaire's
+ * current launched version (highest `versionNumber` with `status = launched`). One launched sweep over
+ * the unpinned questionnaires (mirrors the invites lib's `resolveItemVersions`). Items with no
+ * resolvable version are dropped by the caller — there's nothing to brief against yet.
+ */
+async function resolveItemVersions(
+  items: { questionnaireId: string; versionId: string | null }[]
+): Promise<Map<string, string | null>> {
+  const resolved = new Map<string, string | null>();
+  const unpinned = items.filter((i) => !i.versionId).map((i) => i.questionnaireId);
+  let launchedByQuestionnaire = new Map<string, string>();
+  if (unpinned.length > 0) {
+    const launched = await prisma.appQuestionnaireVersion.findMany({
+      where: { questionnaireId: { in: unpinned }, status: 'launched' },
+      orderBy: { versionNumber: 'desc' },
+      select: { id: true, questionnaireId: true },
+    });
+    launchedByQuestionnaire = launched.reduce((map, v) => {
+      if (!map.has(v.questionnaireId)) map.set(v.questionnaireId, v.id);
+      return map;
+    }, new Map<string, string>());
+  }
+  for (const item of items) {
+    resolved.set(
+      item.questionnaireId,
+      item.versionId ?? launchedByQuestionnaire.get(item.questionnaireId) ?? null
+    );
+  }
+  return resolved;
+}
+
+/**
+ * A single version's goal + briefable questions — the input the suggest capability evaluates. One
+ * version read + one question sweep. Returns null when the version is unknown.
+ */
+export async function loadVersionForSuggest(
+  versionId: string
+): Promise<{ goal: string | null; questions: BriefableQuestion[] } | null> {
+  const version = await prisma.appQuestionnaireVersion.findUnique({
+    where: { id: versionId },
+    select: { goal: true },
+  });
+  if (!version) return null;
+  const slots = await prisma.appQuestionSlot.findMany({
+    where: { versionId },
+    orderBy: [{ section: { ordinal: 'asc' } }, { ordinal: 'asc' }],
+    select: { id: true, prompt: true, section: { select: { title: true } } },
+  });
+  return {
+    goal: version.goal,
+    questions: slots.map((s) => ({ id: s.id, prompt: s.prompt, sectionTitle: s.section.title })),
+  };
+}
+
+/**
+ * The round's bundled questionnaires with their briefable questions — the source for the admin
+ * attribution picker. Each questionnaire resolves to one effective version (pinned or current
+ * launched); its question slots are listed in section → ordinal order. Questionnaires with no
+ * resolvable version are omitted (nothing to attribute to yet). Fixed query budget: one items read,
+ * one launched-version sweep, one question sweep.
+ */
+export async function listBriefableQuestionnaires(
+  roundId: string
+): Promise<BriefableQuestionnaire[]> {
+  const items = await prisma.appQuestionnaireRoundItem.findMany({
+    where: { roundId },
+    orderBy: { createdAt: 'asc' },
+    select: {
+      questionnaireId: true,
+      versionId: true,
+      questionnaire: { select: { title: true } },
+    },
+  });
+  if (items.length === 0) return [];
+
+  const resolved = await resolveItemVersions(items);
+  const versionIds = [...new Set([...resolved.values()].filter((v): v is string => !!v))];
+  if (versionIds.length === 0) return [];
+
+  const slots = await prisma.appQuestionSlot.findMany({
+    where: { versionId: { in: versionIds } },
+    orderBy: [{ section: { ordinal: 'asc' } }, { ordinal: 'asc' }],
+    select: {
+      id: true,
+      prompt: true,
+      versionId: true,
+      section: { select: { title: true } },
+    },
+  });
+  const byVersion = new Map<string, BriefableQuestion[]>();
+  for (const s of slots) {
+    const list = byVersion.get(s.versionId) ?? [];
+    list.push({ id: s.id, prompt: s.prompt, sectionTitle: s.section.title });
+    byVersion.set(s.versionId, list);
+  }
+
+  return items
+    .map((it): BriefableQuestionnaire | null => {
+      const versionId = resolved.get(it.questionnaireId);
+      if (!versionId) return null;
+      return {
+        questionnaireId: it.questionnaireId,
+        title: it.questionnaire.title,
+        versionId,
+        questions: byVersion.get(versionId) ?? [],
+      };
+    })
+    .filter((q): q is BriefableQuestionnaire => q !== null);
 }

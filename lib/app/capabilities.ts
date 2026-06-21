@@ -27,6 +27,7 @@ import {
   AppRefineAnswerCapability,
   AppRefineDataSlotCapability,
   AppRefineQuestionnaireStructureCapability,
+  AppSuggestRoundBriefingCapability,
 } from '@/lib/app/questionnaire/capabilities';
 
 export function initAppCapabilities(): void {
@@ -93,4 +94,10 @@ export function initAppCapabilities(): void {
   // the composer agent; inert until the APP_QUESTIONNAIRES_ENABLED + intro-screen flags are on (only
   // the flag-gated intro-background author route dispatches it), so unconditional registration is safe.
   registerAppCapability(new AppAuthorIntroBackgroundCapability());
+
+  // Round Additional Context — propose interviewer "briefing" notes from a questionnaire (+ optional
+  // source material). Reuses the composer agent; inert until the APP_QUESTIONNAIRES_ENABLED + cohorts
+  // + round-context flags are on (only the flag-gated suggest route dispatches it), so unconditional
+  // registration here is safe.
+  registerAppCapability(new AppSuggestRoundBriefingCapability());
 }

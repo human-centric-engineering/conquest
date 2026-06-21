@@ -3,9 +3,9 @@
 Two independently-flagged, **round-level** capabilities that enrich the live interviewer. Both hang
 off `AppQuestionnaireRound` (see [cohorts.md](./cohorts.md)) and are **off by default** at every level.
 
-> **Status:** Phases 1–2 shipped — foundation + Additional Context backend (CRUD API + runtime
-> injection). The admin UI / AI authoring and all of Learning Mode land in later phases. This doc
-> grows with them.
+> **Status:** Additional Context is complete (phases 1–3) — foundation, backend (CRUD + runtime
+> injection), and the admin UI with document upload + AI-suggested notes. Learning Mode lands in the
+> later phases. This doc grows with them.
 
 ## Additional Context (the "interviewer briefing")
 
@@ -31,8 +31,21 @@ to a single question. Think of it as briefing an interviewer before they walk in
 | `PATCH`  | `/api/v1/app/rounds/:id/context/:eid` | Re-attribute / retitle / rewrite / reorder      |
 | `DELETE` | `/api/v1/app/rounds/:id/context/:eid` | Remove an entry                                 |
 
-All gated by `withRoundContextEnabled` + `withAdminAuth`, audited. Create/PATCH validate that the
+Plus two AI-authoring routes: `POST …/context/suggest` (the composer agent proposes briefing notes
+from a version's questions + optional source material — returns `{ entries }` the admin reviews) and
+`POST …/context/parse` (multipart → extracts text from an uploaded doc for the content field). All
+gated by `withRoundContextEnabled` + `withAdminAuth`, audited. Create/PATCH validate that the
 `versionId` is one the round bundles and any `questionSlotId` belongs to that version (else 400).
+
+### Admin UI
+
+`components/admin/cohorts/round-context-panel.tsx` on the round detail page: the `contextEnabled`
+toggle, a list grouped by bundled questionnaire (title + content preview + a `manual`/`upload`/`AI`
+provenance badge + the attached question or "General"), an add/edit form with an attribution picker
+(questionnaire → General or a specific question), a per-entry delete, **Upload document** (→ parse →
+fills content), and **Suggest with AI** (proposals the admin accepts one at a time). The
+`AppSuggestRoundBriefingCapability` (composer-agent-bound, seed `052`) backs the suggest flow; the
+section is hidden whenever the round-context flag is off.
 
 ### Runtime injection
 

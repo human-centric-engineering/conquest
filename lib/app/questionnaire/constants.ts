@@ -1041,3 +1041,53 @@ export const AUTHOR_INTRO_BACKGROUND_FUNCTION_DEFINITION: CapabilityFunctionDefi
     required: ['mode'],
   },
 };
+
+/**
+ * Slug of the suggest-round-briefing capability — the "have an agent evaluate the questionnaire and
+ * propose interviewer briefing notes" flow. One source of truth shared by the `BaseCapability`
+ * subclass, its `AiCapability` seed row, and the suggest route. Reuses the composer agent.
+ */
+export const SUGGEST_ROUND_BRIEFING_CAPABILITY_SLUG = 'app_suggest_round_briefing';
+
+/** `AiCapability.executionHandler` for the suggest-round-briefing capability. */
+export const SUGGEST_ROUND_BRIEFING_HANDLER = 'AppSuggestRoundBriefingCapability';
+
+/**
+ * The suggest-round-briefing capability's OpenAI-compatible function definition — single source of
+ * truth shared by the `BaseCapability` subclass and the `AiCapability` seed row. Given a
+ * questionnaire's goal + questions (and optional admin-supplied source material), it proposes a set
+ * of interviewer-briefing notes — facts/figures/background that would help the interviewer ask each
+ * question well — each optionally attributed to one of the provided question ids. Returns
+ * `{ entries: [{ questionId?, title, content }] }`. The route maps the proposals back for admin
+ * review; nothing is persisted by the capability. Dispatched programmatically by the suggest route.
+ */
+export const SUGGEST_ROUND_BRIEFING_FUNCTION_DEFINITION: CapabilityFunctionDefinition = {
+  name: SUGGEST_ROUND_BRIEFING_CAPABILITY_SLUG,
+  description:
+    'Evaluate a questionnaire and propose interviewer "briefing" notes — facts, figures, and background that would help an interviewer ask its questions knowledgeably. Each note may be attributed to one provided question id (a focused briefing) or left general (whole-questionnaire). Use any admin-supplied source material as the factual basis; otherwise suggest the KINDS of background worth gathering, framed as prompts to the admin. Returns { entries: [{ questionId?, title, content }] }. Dispatched programmatically by the suggest route.',
+  parameters: {
+    type: 'object',
+    properties: {
+      goal: {
+        type: 'string',
+        description: 'The questionnaire goal, for framing (optional).',
+      },
+      questions: {
+        type: 'array',
+        description:
+          'The questions a note may be attributed to: [{ id, prompt, sectionTitle }]. A proposed entry’s questionId, when set, MUST be one of these ids.',
+        items: { type: 'object', additionalProperties: true },
+      },
+      sourceText: {
+        type: 'string',
+        description:
+          'Optional admin-supplied background material (pasted or extracted from an upload) to base the notes on. When absent, propose the kinds of background worth gathering.',
+      },
+      maxEntries: {
+        type: 'number',
+        description: 'Soft cap on how many briefing notes to propose.',
+      },
+    },
+    required: ['questions'],
+  },
+};

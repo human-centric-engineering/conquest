@@ -27,10 +27,15 @@ import {
   RoundQuestionnairesPanel,
   type AttachableQuestionnaire,
 } from '@/components/admin/cohorts/round-questionnaires-panel';
+import { RoundContextPanel } from '@/components/admin/cohorts/round-context-panel';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
-import { isCohortsEnabled } from '@/lib/app/questionnaire/feature-flag';
+import { isCohortsEnabled, isRoundContextEnabled } from '@/lib/app/questionnaire/feature-flag';
+import {
+  listBriefableQuestionnaires,
+  listRoundContextEntries,
+} from '@/app/api/v1/app/rounds/_lib/context';
 import { cohortDetailHref, roundsTabHref, type RoundDetail } from '@/lib/app/questionnaire/rounds';
 import type { QuestionnaireListItem } from '@/lib/app/questionnaire/views';
 
@@ -90,6 +95,13 @@ export default async function RoundDetailPage({ params }: PageProps) {
   if (!round) notFound();
 
   const attachable = await getAttachable(id);
+
+  // Round Additional Context ("interviewer briefing") — gated by its own flag; the section is hidden
+  // entirely when off. Reads go straight through the route `_lib` (server component), no extra HTTP.
+  const roundContextOn = await isRoundContextEnabled();
+  const [contextEntries, briefable] = roundContextOn
+    ? await Promise.all([listRoundContextEntries(roundId), listBriefableQuestionnaires(roundId)])
+    : [[], []];
 
   const statTiles: CqStat[] = [
     { label: 'Members', value: round.memberCount },
@@ -154,6 +166,22 @@ export default async function RoundDetailPage({ params }: PageProps) {
           attachable={attachable}
         />
       </section>
+
+      {roundContextOn && (
+        <section className="space-y-3 rounded-xl border px-4 py-4">
+          <SectionHeading title="Additional context">
+            Brief the interviewer with facts, figures, and background for this round&rsquo;s
+            questions — attach a note to one question or keep it general. The interviewer draws on
+            these quietly; it never reads them aloud.
+          </SectionHeading>
+          <RoundContextPanel
+            roundId={round.id}
+            contextEnabled={round.contextEnabled}
+            entries={contextEntries}
+            briefable={briefable}
+          />
+        </section>
+      )}
 
       <section className="space-y-3 rounded-xl border px-4 py-4">
         <SectionHeading title="Member invitations">
