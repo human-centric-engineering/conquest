@@ -156,3 +156,26 @@ export interface RoundView {
 export interface RoundDetail extends RoundView {
   questionnaires: RoundQuestionnaireView[];
 }
+
+/** How a briefing entry was authored — drives the admin-UI provenance badge. */
+export type RoundContextSource = 'manual' | 'upload' | 'ai_suggested';
+
+/**
+ * One Additional Context ("interviewer briefing") entry, serialized for the admin UI. `questionSlotId`
+ * null = a general entry (applies to the whole version); else attributed to one question.
+ * `questionPrompt` is the denormalised prompt of the attributed question (null for general entries, or
+ * when the question no longer exists after a version fork — an orphan the admin can re-attach).
+ */
+export interface RoundContextEntryView {
+  id: string;
+  roundId: string;
+  versionId: string;
+  questionSlotId: string | null;
+  questionPrompt: string | null;
+  title: string;
+  content: string;
+  source: RoundContextSource;
+  ordinal: number;
+  createdAt: string;
+  updatedAt: string;
+}

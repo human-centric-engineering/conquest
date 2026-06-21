@@ -245,6 +245,28 @@ describe('buildStreamingQuestionPrompt', () => {
     expect(withEmpty).not.toMatch(/already shared this session/i);
   });
 
+  it('renders the briefing block (for-you-only) when briefing is supplied', () => {
+    const system = text(
+      buildStreamingQuestionPrompt({
+        ...INPUT,
+        briefing: ['Revenue: £4m ARR last year', 'Headcount: 32 staff across 3 offices'],
+      })[0].content
+    );
+    expect(system).toContain('<briefing>');
+    expect(system).toContain('£4m ARR last year');
+    expect(system).toContain('32 staff across 3 offices');
+    // Must be framed as the interviewer's own briefing, never read out or attributed to the respondent.
+    expect(system).toMatch(/do NOT read these out|for YOU only/i);
+    expect(system).toMatch(/attribute them to the respondent/i);
+  });
+
+  it('omits the briefing block entirely when there is none', () => {
+    expect(text(buildStreamingQuestionPrompt(INPUT)[0].content)).not.toContain('<briefing>');
+    expect(text(buildStreamingQuestionPrompt({ ...INPUT, briefing: [] })[0].content)).not.toContain(
+      '<briefing>'
+    );
+  });
+
   it('switches to opening framing (no acknowledgement) when isOpening', () => {
     const system = text(buildStreamingQuestionPrompt({ ...INPUT, isOpening: true })[0].content);
     expect(system).toMatch(/first question/i);

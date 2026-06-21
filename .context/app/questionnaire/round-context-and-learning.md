@@ -3,8 +3,9 @@
 Two independently-flagged, **round-level** capabilities that enrich the live interviewer. Both hang
 off `AppQuestionnaireRound` (see [cohorts.md](./cohorts.md)) and are **off by default** at every level.
 
-> **Status:** Phase 1 (foundation) shipped — schema, flags, round config. Authoring + runtime
-> injection land in later phases. This doc grows with them.
+> **Status:** Phases 1–2 shipped — foundation + Additional Context backend (CRUD API + runtime
+> injection). The admin UI / AI authoring and all of Learning Mode land in later phases. This doc
+> grows with them.
 
 ## Additional Context (the "interviewer briefing")
 
@@ -20,6 +21,28 @@ to a single question. Think of it as briefing an interviewer before they walk in
 - **Gating:** the platform flag `APP_QUESTIONNAIRES_ROUND_CONTEXT_ENABLED`
   (`isRoundContextEnabled()` — master AND cohorts AND this sub-flag) **AND** the per-round
   `contextEnabled` toggle. Both must be on before anything reaches the prompt.
+
+### API
+
+| Method   | Route                                 | Purpose                                         |
+| -------- | ------------------------------------- | ----------------------------------------------- |
+| `GET`    | `/api/v1/app/rounds/:id/context`      | List entries (optional `?versionId=` filter)    |
+| `POST`   | `/api/v1/app/rounds/:id/context`      | Create (general or `questionSlotId`-attributed) |
+| `PATCH`  | `/api/v1/app/rounds/:id/context/:eid` | Re-attribute / retitle / rewrite / reorder      |
+| `DELETE` | `/api/v1/app/rounds/:id/context/:eid` | Remove an entry                                 |
+
+All gated by `withRoundContextEnabled` + `withAdminAuth`, audited. Create/PATCH validate that the
+`versionId` is one the round bundles and any `questionSlotId` belongs to that version (else 400).
+
+### Runtime injection
+
+The live turn route (`questionnaire-sessions/[id]/messages`) loads the round's entries once per turn
+(`loadRoundBriefing`, returns `null` when off), then at phrasing time `selectBriefingLines` keeps the
+general entries plus those attributed to the asked question — for a data-slot turn, the slot's
+`mappedQuestionKeys` resolve to question slot ids. The result lands in `QuestionComposeInput.briefing`
+→ a `<briefing>` section in `buildStreamingQuestionPrompt`, framed strictly as the interviewer's own
+briefing (never read aloud, quoted, or attributed to the respondent). Capped to
+`BRIEFING_MAX_ENTRIES` entries / `BRIEFING_MAX_CONTENT_CHARS` chars each.
 
 ## Learning Mode
 

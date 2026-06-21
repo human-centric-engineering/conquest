@@ -71,6 +71,15 @@ export interface QuestionComposeInput {
    * → the block is omitted (no behaviour change). Built by `_lib/prior-answers.ts`.
    */
   priorAnswers?: string[];
+  /**
+   * Round Additional Context ("interviewer briefing"): admin-authored facts/figures/background for
+   * the question being asked — each entry a `"<title>: <content>"` line. Direct-injected (no vector
+   * search) for the selected question's attributed entries plus the round's general entries. The
+   * interviewer may draw on these to ask a sharper, better-informed question, but must NOT read them
+   * out as a list, quote them verbatim, or treat them as something the respondent said. Absent/empty
+   * → the block is omitted. Built by `_lib/round-briefing.ts` + `rounds/briefing.ts`.
+   */
+  briefing?: string[];
   /** The respondent's message this turn (to acknowledge); empty on the opening turn. */
   lastUserMessage: string;
   /** True when this same question was just asked and the prior answer wasn't captured. */
@@ -286,6 +295,23 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
         calibration.join(' '),
         treadCarefully
       )
+    ),
+    // Round Additional Context ("interviewer briefing"): background facts the admin attached for this
+    // question. The interviewer may quietly draw on them to ask a sharper, better-informed question —
+    // but they are YOUR briefing, not the respondent's words: never read them out as a list, never
+    // quote them verbatim, never present a fact as something the respondent told you. Omitted when
+    // absent (the section collapses to '').
+    section(
+      'briefing',
+      input.briefing && input.briefing.length > 0
+        ? joinSections(
+            'Background you have been briefed on for this question (for YOU only — do NOT read these ' +
+              'out, list them, quote them verbatim, or attribute them to the respondent). Let them ' +
+              'quietly inform a sharper, more knowledgeable question where it genuinely helps; ' +
+              'otherwise ignore them:',
+            input.briefing.map((b) => `- ${b}`).join('\n')
+          )
+        : ''
     ),
     // Tone & persona clauses (when configured) are more specific than the defaults above, so they
     // govern. Mimicry, when enabled, owns tone-matching — so the default "match their tone" line is

@@ -148,6 +148,45 @@ export const attachRoundQuestionnaireSchema = z.object({
   versionId: z.string().min(1).nullable().optional(),
 });
 
+// ---------------------------------------------------------------------------
+// Round Additional Context ("interviewer briefing") entries
+// ---------------------------------------------------------------------------
+
+const CONTEXT_TITLE_MAX = 200;
+const CONTEXT_CONTENT_MAX = 5000;
+
+/** Entry provenance — how the briefing note was authored (drives the admin-UI badge). */
+export const ROUND_CONTEXT_SOURCES = ['manual', 'upload', 'ai_suggested'] as const;
+
+/**
+ * Create one briefing entry under a round. `versionId` scopes it to one bundled questionnaire
+ * version; `questionSlotId` attributes it to a single question (omit/null = general briefing for the
+ * whole version). The route validates that both ids belong to the round before persisting.
+ */
+export const createRoundContextEntrySchema = z.object({
+  versionId: z.string().min(1, 'Version is required'),
+  questionSlotId: z.string().min(1).nullable().optional(),
+  title: z.string().trim().min(1, 'Title is required').max(CONTEXT_TITLE_MAX),
+  content: z.string().trim().min(1, 'Content is required').max(CONTEXT_CONTENT_MAX),
+  source: z.enum(ROUND_CONTEXT_SOURCES).optional(),
+  ordinal: z.coerce.number().int().min(0).optional(),
+});
+
+/**
+ * Edit a briefing entry: re-attribute (`questionSlotId`), retitle, rewrite, or reorder. At least one
+ * field. `versionId` and `source` are immutable post-create (re-create to move an entry to another
+ * version). `questionSlotId: null` explicitly makes an attributed entry general again.
+ */
+export const updateRoundContextEntrySchema = z
+  .object({
+    questionSlotId: z.string().min(1).nullable(),
+    title: z.string().trim().min(1, 'Title is required').max(CONTEXT_TITLE_MAX),
+    content: z.string().trim().min(1, 'Content is required').max(CONTEXT_CONTENT_MAX),
+    ordinal: z.coerce.number().int().min(0),
+  })
+  .partial()
+  .refine((b) => Object.keys(b).length > 0, { message: 'At least one field must be provided' });
+
 export type CreateCohortInput = z.infer<typeof createCohortSchema>;
 export type UpdateCohortInput = z.infer<typeof updateCohortSchema>;
 export type CreateCohortMemberInput = z.infer<typeof createCohortMemberSchema>;
@@ -156,6 +195,8 @@ export type CreateRoundInput = z.infer<typeof createRoundSchema>;
 export type UpdateRoundInput = z.infer<typeof updateRoundSchema>;
 export type LearningConfigInput = z.infer<typeof learningConfigSchema>;
 export type AttachRoundQuestionnaireInput = z.infer<typeof attachRoundQuestionnaireSchema>;
+export type CreateRoundContextEntryInput = z.infer<typeof createRoundContextEntrySchema>;
+export type UpdateRoundContextEntryInput = z.infer<typeof updateRoundContextEntrySchema>;
 
 /**
  * Derive the default round name when the admin doesn't supply one: the cohort name plus the
