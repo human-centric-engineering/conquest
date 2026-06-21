@@ -32,7 +32,10 @@ import {
   findResumableSession,
   findResumableSessionByInvitation,
 } from '@/lib/app/questionnaire/chat/resumable-session';
-import { assertRoundAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/round-access';
+import {
+  assertRoundAccess,
+  resolveCohortSubgroupId,
+} from '@/app/api/v1/app/questionnaire-sessions/_lib/round-access';
 import { recordSessionCreated } from '@/app/api/v1/app/questionnaires/_lib/sessions';
 import { loadLaunchReadiness } from '@/app/api/v1/app/questionnaires/_lib/launchability';
 import {
@@ -204,6 +207,9 @@ export async function createSessionFromInvitation(
   );
   if (existing) return { ok: true, session: existing, resumed: true };
 
+  // Snapshot the member's subgroup (for per-phase stats) — null for non-round/no-subgroup sessions.
+  const cohortSubgroupId = round ? await resolveCohortSubgroupId(round.cohortMemberId) : null;
+
   const session = await prisma.$transaction(async (tx) => {
     const created = await tx.appQuestionnaireSession.create({
       data: {
@@ -211,6 +217,7 @@ export async function createSessionFromInvitation(
         respondentUserId,
         roundId: round?.roundId ?? null,
         cohortMemberId: round?.cohortMemberId ?? null,
+        cohortSubgroupId,
         publicRef: generateSessionRef(),
         isPreview: false,
         status: 'active',
@@ -479,6 +486,9 @@ export async function createSessionFromInviteToken(token: string): Promise<Creat
   const existing = await findResumableSessionByInvitation(invitation.id, round?.roundId);
   if (existing) return { ok: true, session: existing, resumed: true };
 
+  // Snapshot the member's subgroup (for per-phase stats) — null for non-round/no-subgroup sessions.
+  const cohortSubgroupId = round ? await resolveCohortSubgroupId(round.cohortMemberId) : null;
+
   const from = narrowToEnum<AppInvitationStatus>(
     invitation.status,
     APP_INVITATION_STATUSES,
@@ -494,6 +504,7 @@ export async function createSessionFromInviteToken(token: string): Promise<Creat
         invitationId: invitation.id,
         roundId: round?.roundId ?? null,
         cohortMemberId: round?.cohortMemberId ?? null,
+        cohortSubgroupId,
         publicRef: generateSessionRef(),
         isPreview: false,
         status: 'active',

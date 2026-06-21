@@ -27,13 +27,15 @@ beforeEach(() => {
   vi.clearAllMocks();
   prismaMock.appQuestionnaireRound.findUnique.mockResolvedValue({
     id: 'r-1',
+    opensAt: null,
     closesAt: CLOSES,
     cohort: { demoClientId: 'dc-1' },
     items: [{ questionnaireId: 'q-1', versionId: 'v-1' }], // pinned version
+    phases: [],
   });
   prismaMock.appCohortMember.findMany.mockResolvedValue([
-    { id: 'm-1', email: 'a@x.com', name: 'A' },
-    { id: 'm-2', email: 'b@x.com', name: 'B' },
+    { id: 'm-1', email: 'a@x.com', name: 'A', subgroupId: null },
+    { id: 'm-2', email: 'b@x.com', name: 'B', subgroupId: null },
   ]);
   prismaMock.appQuestionnaireVersion.findMany.mockResolvedValue([]);
   prismaMock.appQuestionnaireInvitation.findMany.mockResolvedValue([]);
@@ -79,9 +81,11 @@ describe('generateRoundInvitations', () => {
   it('resolves an unpinned item to its current launched version (one batched sweep)', async () => {
     prismaMock.appQuestionnaireRound.findUnique.mockResolvedValue({
       id: 'r-1',
+      opensAt: null,
       closesAt: null,
       cohort: { demoClientId: 'dc-1' },
       items: [{ questionnaireId: 'q-1', versionId: null }],
+      phases: [],
     });
     // Highest versionNumber first — the generator takes the first row per questionnaire.
     prismaMock.appQuestionnaireVersion.findMany.mockResolvedValue([
@@ -97,9 +101,11 @@ describe('generateRoundInvitations', () => {
   it('reports (does not invite) an unpinned item with no launched version', async () => {
     prismaMock.appQuestionnaireRound.findUnique.mockResolvedValue({
       id: 'r-1',
+      opensAt: null,
       closesAt: null,
       cohort: { demoClientId: 'dc-1' },
       items: [{ questionnaireId: 'q-1', versionId: null }],
+      phases: [],
     });
     prismaMock.appQuestionnaireVersion.findMany.mockResolvedValue([]); // nothing launched
     const res = await generateRoundInvitations('r-1', 'admin-1');
@@ -111,9 +117,11 @@ describe('generateRoundInvitations', () => {
   it('falls back to the default expiry when the round close date is already past (no dead links)', async () => {
     prismaMock.appQuestionnaireRound.findUnique.mockResolvedValue({
       id: 'r-1',
+      opensAt: null,
       closesAt: new Date('2000-01-01T00:00:00.000Z'), // long past
       cohort: { demoClientId: 'dc-1' },
       items: [{ questionnaireId: 'q-1', versionId: 'v-1' }],
+      phases: [],
     });
     const res = await generateRoundInvitations('r-1', 'admin-1');
     expect(res.created).toBe(2);
@@ -121,6 +129,31 @@ describe('generateRoundInvitations', () => {
     const expiresAt = prismaMock.appQuestionnaireInvitation.create.mock.calls[0][0].data
       .expiresAt as Date;
     expect(expiresAt.getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it('pins a phased member’s expiry to their HARD phase close, not the round close', async () => {
+    const PHASE_CLOSE = new Date(Date.now() + 1000 * 60 * 60 * 24 * 3); // +3 days (before round close)
+    prismaMock.appQuestionnaireRound.findUnique.mockResolvedValue({
+      id: 'r-1',
+      opensAt: null,
+      closesAt: CLOSES,
+      cohort: { demoClientId: 'dc-1' },
+      items: [{ questionnaireId: 'q-1', versionId: 'v-1' }],
+      phases: [{ subgroupId: 'sg-1', opensAt: null, closesAt: PHASE_CLOSE, endMode: 'hard' }],
+    });
+    prismaMock.appCohortMember.findMany.mockResolvedValue([
+      { id: 'm-1', email: 'a@x.com', name: 'A', subgroupId: 'sg-1' }, // phased
+      { id: 'm-2', email: 'b@x.com', name: 'B', subgroupId: null }, // no phase → round close
+    ]);
+    await generateRoundInvitations('r-1', 'admin-1');
+    const byMember = new Map(
+      prismaMock.appQuestionnaireInvitation.create.mock.calls.map((c) => [
+        c[0].data.cohortMemberId,
+        c[0].data.expiresAt as Date,
+      ])
+    );
+    expect(byMember.get('m-1')).toEqual(PHASE_CLOSE);
+    expect(byMember.get('m-2')).toEqual(CLOSES);
   });
 
   it('returns zero for an unknown round (never throws)', async () => {

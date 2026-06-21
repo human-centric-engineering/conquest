@@ -792,6 +792,11 @@ model AppQuestionnaireSession {
   // lib/app/questionnaire/rounds/access.ts.
   roundId              String?
   cohortMemberId       String?
+  // Cohorts & Rounds (phasing): the cohort SUBGROUP the member belonged to at session start, snapshot
+  // here (plain String, no @relation — the SAME UG-1 posture as `roundId`/`cohortMemberId`) so
+  // per-phase completion STATS group without a member join and survive later roster edits. Null for
+  // non-round sessions, or members with no subgroup. Read for stats only, never to attribute answers.
+  cohortSubgroupId     String?
   // Seriousness / abuse gate: cumulative count of non-genuine answers flagged this session.
   // The route increments it; at `config.abuseThreshold` the session is abandoned.
   abuseStrikes         Int      @default(0)
@@ -825,6 +830,7 @@ model AppQuestionnaireSession {
   @@index([invitationId])
   @@index([roundId])
   @@index([cohortMemberId])
+  @@index([cohortSubgroupId])
   // DRIFT WARNING: a raw-SQL PARTIAL UNIQUE INDEX
   // (idx_app_questionnaire_session_preview_per_version, migration
   // 20260605141500) enforces at most one preview session per version

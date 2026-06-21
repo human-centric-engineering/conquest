@@ -10,8 +10,9 @@
  * Reuses the existing invitation token machinery (`mintInvitationToken`) and the frictionless
  * link shape (`/q/[versionId]?i=<token>`), so a round invitation flows through the exact same
  * no-login session path as a regular frictionless invite — it just additionally carries the
- * round binding. The token expiry is pinned to the round's `closesAt` when set (the link dies
- * with the round), else the default invitation expiry.
+ * round binding. The token expiry is pinned to each member's EFFECTIVE close (their subgroup
+ * phase's hard close when staggered, else the round's `closesAt`) when that is in the future, so a
+ * link dies with the member's actual window; otherwise it falls back to the default expiry.
  *
  * Idempotent: a member who already has an invitation for a (version, round) pair is skipped, so
  * re-running after adding members tops up the roster without duplicating links.
@@ -19,6 +20,9 @@
 
 import { prisma } from '@/lib/db/client';
 import { mintInvitationToken } from '@/lib/app/questionnaire/invitations/token';
+import { narrowToEnum } from '@/lib/app/questionnaire/types';
+import { ROUND_PHASE_END_MODES } from '@/lib/app/questionnaire/rounds/types';
+import { resolveEffectiveWindow, type PhaseWindow } from '@/lib/app/questionnaire/rounds/phases';
 import { resolveItemVersions } from '@/app/api/v1/app/rounds/_lib/versions';
 
 /** One freshly-minted link returned to the admin (plaintext token — generation-time only). */
@@ -65,9 +69,12 @@ export async function generateRoundInvitations(
     where: { id: roundId },
     select: {
       id: true,
+      opensAt: true,
       closesAt: true,
       cohort: { select: { demoClientId: true } },
       items: { select: { questionnaireId: true, versionId: true } },
+      // Staggered subgroup phases — a member's token expiry pins to THEIR effective close.
+      phases: { select: { subgroupId: true, opensAt: true, closesAt: true, endMode: true } },
     },
   });
   if (!round) {
@@ -78,10 +85,23 @@ export async function generateRoundInvitations(
   const [activeMembers, versionByQuestionnaire] = await Promise.all([
     prisma.appCohortMember.findMany({
       where: { cohort: { rounds: { some: { id: roundId } } }, status: 'active' },
-      select: { id: true, email: true, name: true },
+      select: { id: true, email: true, name: true, subgroupId: true },
     }),
     resolveItemVersions(round.items),
   ]);
+
+  // Index phases by subgroup so each member's effective close is an O(1) lookup.
+  const phaseBySubgroup = new Map<string, PhaseWindow>(
+    round.phases.map((p) => [
+      p.subgroupId,
+      {
+        opensAt: p.opensAt,
+        closesAt: p.closesAt,
+        endMode: narrowToEnum(p.endMode, ROUND_PHASE_END_MODES, 'hard'),
+      },
+    ])
+  );
+  const roundWindow = { opensAt: round.opensAt, closesAt: round.closesAt };
 
   const demoClientId = round.cohort.demoClientId;
   const result: GenerateRoundInvitesResult = {
@@ -106,11 +126,16 @@ export async function generateRoundInvitations(
       : [];
   const existingKeys = new Set(existing.map((e) => `${e.versionId}:${e.cohortMemberId}`));
 
-  // Pin the token expiry to the round's close date — but only when it's still in the FUTURE, else a
-  // past close date would mint already-expired (dead-on-arrival) links. Fall back to the default.
   const now = new Date();
-  const windowExpiry =
-    round.closesAt && round.closesAt.getTime() > now.getTime() ? round.closesAt : null;
+
+  // Each member's token expiry pins to THEIR effective close (the phase's hard close, else the round
+  // close) — but only when it's still in the FUTURE, else a past close would mint already-expired
+  // (dead-on-arrival) links. Falls back to the default invitation expiry.
+  const memberWindowExpiry = (subgroupId: string | null): Date | null => {
+    const phase = subgroupId ? (phaseBySubgroup.get(subgroupId) ?? null) : null;
+    const effClose = resolveEffectiveWindow(roundWindow, phase).closesAt;
+    return effClose && effClose.getTime() > now.getTime() ? effClose : null;
+  };
 
   for (const item of round.items) {
     const versionId = versionByQuestionnaire.get(item.questionnaireId) ?? null;
@@ -137,7 +162,7 @@ export async function generateRoundInvitations(
           demoClientId,
           roundId,
           cohortMemberId: member.id,
-          expiresAt: windowExpiry ?? minted.expiresAt,
+          expiresAt: memberWindowExpiry(member.subgroupId) ?? minted.expiresAt,
         },
         select: { id: true },
       });

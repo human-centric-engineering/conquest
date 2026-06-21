@@ -15,12 +15,15 @@
 
 import { prisma } from '@/lib/db/client';
 import { narrowToEnum } from '@/lib/app/questionnaire/types';
+import { isRoundPhasesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import {
   evaluateRoundAccess,
   type RoundAccessVerdict,
 } from '@/lib/app/questionnaire/rounds/access';
+import type { PhaseWindow } from '@/lib/app/questionnaire/rounds/phases';
 import {
   COHORT_MEMBER_STATUSES,
+  ROUND_PHASE_END_MODES,
   ROUND_STATUSES,
   type CohortMemberStatus,
 } from '@/lib/app/questionnaire/rounds/types';
@@ -40,6 +43,22 @@ export interface AssertRoundAccessInput {
   onMissingRound: 'deny' | 'allow';
   /** Evaluation instant (defaults to now). */
   now?: Date;
+}
+
+/**
+ * The cohort SUBGROUP a member currently belongs to (or null) — snapshot onto the session at create
+ * so per-phase completion stats group without a member join and survive later roster edits. Resolved
+ * independently of the round-phases flag: the assignment is plain roster config, harmless to record.
+ */
+export async function resolveCohortSubgroupId(
+  cohortMemberId: string | null
+): Promise<string | null> {
+  if (!cohortMemberId) return null;
+  const m = await prisma.appCohortMember.findUnique({
+    where: { id: cohortMemberId },
+    select: { subgroupId: true },
+  });
+  return m?.subgroupId ?? null;
 }
 
 export async function assertRoundAccess(input: AssertRoundAccessInput): Promise<RoundAccessResult> {
@@ -71,17 +90,39 @@ export async function assertRoundAccess(input: AssertRoundAccessInput): Promise<
     : false;
 
   // Member resolution: a missing member, or one from a DIFFERENT cohort than the round's,
-  // is treated as removed (it can't be a legitimate member of this round).
+  // is treated as removed (it can't be a legitimate member of this round). We also read the
+  // member's subgroup, so a staggered phase window can apply.
   let member: { status: CohortMemberStatus } | null = null;
+  let subgroupId: string | null = null;
   if (input.cohortMemberId) {
     const m = await prisma.appCohortMember.findUnique({
       where: { id: input.cohortMemberId },
-      select: { status: true, cohortId: true },
+      select: { status: true, cohortId: true, subgroupId: true },
     });
-    member =
-      m && m.cohortId === round.cohortId
-        ? { status: narrowToEnum(m.status, COHORT_MEMBER_STATUSES, 'active') }
-        : { status: 'removed' };
+    if (m && m.cohortId === round.cohortId) {
+      member = { status: narrowToEnum(m.status, COHORT_MEMBER_STATUSES, 'active') };
+      subgroupId = m.subgroupId;
+    } else {
+      member = { status: 'removed' };
+    }
+  }
+
+  // Phase resolution (feature-flagged): the member's subgroup may have a staggered window on this
+  // round. When the flag is off, or the member has no subgroup / no phase, `phase` stays null and the
+  // round's own window applies — today's behaviour.
+  let phase: PhaseWindow | null = null;
+  if (subgroupId && (await isRoundPhasesEnabled())) {
+    const p = await prisma.appRoundPhase.findUnique({
+      where: { roundId_subgroupId: { roundId: input.roundId, subgroupId } },
+      select: { opensAt: true, closesAt: true, endMode: true },
+    });
+    if (p) {
+      phase = {
+        opensAt: p.opensAt,
+        closesAt: p.closesAt,
+        endMode: narrowToEnum(p.endMode, ROUND_PHASE_END_MODES, 'hard'),
+      };
+    }
   }
 
   const verdict: RoundAccessVerdict = evaluateRoundAccess({
@@ -91,6 +132,7 @@ export async function assertRoundAccess(input: AssertRoundAccessInput): Promise<
       closesAt: round.closesAt,
     },
     member,
+    phase,
     questionnaireInRound,
     now,
   });
