@@ -371,3 +371,40 @@ export async function loadRoundPeerDigest(
     divergence: r.divergence,
   }));
 }
+
+/** One digest row enriched for the admin preview (carries audit fields the runtime read omits). */
+export interface LearningDigestRow {
+  versionId: string;
+  slotKind: PeerSlotKind;
+  slotKey: string;
+  insight: string;
+  respondentCount: number;
+  divergence: number | null;
+  refreshedAt: string;
+}
+
+/** A round's full digest (all versions), newest-first — the admin Learning panel's preview source. */
+export async function listRoundLearningDigest(roundId: string): Promise<LearningDigestRow[]> {
+  const rows = await prisma.appRoundLearningDigest.findMany({
+    where: { roundId },
+    orderBy: [{ refreshedAt: 'desc' }, { slotKey: 'asc' }],
+    select: {
+      versionId: true,
+      slotKind: true,
+      slotKey: true,
+      insight: true,
+      respondentCount: true,
+      divergence: true,
+      refreshedAt: true,
+    },
+  });
+  return rows.map((r) => ({
+    versionId: r.versionId,
+    slotKind: r.slotKind === 'question' ? 'question' : 'data_slot',
+    slotKey: r.slotKey,
+    insight: r.insight,
+    respondentCount: r.respondentCount,
+    divergence: r.divergence,
+    refreshedAt: r.refreshedAt.toISOString(),
+  }));
+}

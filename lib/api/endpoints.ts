@@ -616,6 +616,8 @@ export const API = {
       contextSuggest: (id: string): string => `/api/v1/app/rounds/${id}/context/suggest`,
       /** Extract text from an uploaded document for briefing content (POST multipart → { text }). */
       contextParse: (id: string): string => `/api/v1/app/rounds/${id}/context/parse`,
+      /** Learning Mode — manually rebuild this round's peer-theme digest (POST → per-version summary). */
+      learningRebuild: (id: string): string => `/api/v1/app/rounds/${id}/learning/rebuild`,
     },
   },
 } as const;

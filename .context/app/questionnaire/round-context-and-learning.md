@@ -3,9 +3,9 @@
 Two independently-flagged, **round-level** capabilities that enrich the live interviewer. Both hang
 off `AppQuestionnaireRound` (see [cohorts.md](./cohorts.md)) and are **off by default** at every level.
 
-> **Status:** Additional Context is complete (phases 1–3) — foundation, backend (CRUD + runtime
-> injection), and the admin UI with document upload + AI-suggested notes. Learning Mode lands in the
-> later phases. This doc grows with them.
+> **Status:** Both features complete. Additional Context (phases 1–3): foundation, backend (CRUD +
+> runtime injection), admin UI with upload + AI suggest. Learning Mode (phases 1, 4–5): foundation,
+> backend (digest + injection + adaptive probing), admin UI with the bias warning + rebuild.
 
 ## Additional Context (the "interviewer briefing")
 
@@ -101,6 +101,23 @@ each candidate's divergence band and nudges the LLM to probe split topics harder
 `adaptive` strategy (other strategies stay phrasing-only). When peer context is injected, a one-off
 `learning_applied` session event is recorded (`lib/app/questionnaire/learning/events.ts`) as the
 precise bias-audit signal.
+
+### Admin UI + bias surfacing
+
+`components/admin/cohorts/round-learning-panel.tsx` on the round detail page: a **prominent, always-on
+bias warning**, the `learningEnabled` toggle, the `minRespondents` (k-anonymity) control, a preview of
+the current themes (insight + respondent count + a divergence band + last-built time), and a manual
+**Rebuild** (`POST …/learning/rebuild`, gated by `withLearningModeEnabled`, rebuilds every bundled
+version). The round header shows a `Learning · biased` pill whenever the round has learning on, so the
+caveat travels with any results view. The interviewer's injected peer context is already visible in
+the Preview Turn Inspector (it's part of the phrasing prompt the inspector records).
+
+### Erasure
+
+The digest holds **no individual data** (generalised text only). On respondent erasure the row count
+shrinks; the digest is rebuilt wholesale on the next completion (and the admin can force a **Rebuild**
+immediately). A below-threshold corpus after erasure clears the digest entirely. So erasure needs no
+bespoke `eraseUser` hook — the rebuild-on-completion + manual rebuild keep it consistent.
 
 ## Round config
 

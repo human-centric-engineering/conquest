@@ -13,7 +13,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { ChevronLeft } from 'lucide-react';
+import { ChevronLeft, Sparkles } from 'lucide-react';
 
 import { CqStatTiles, type CqStat } from '@/components/admin/cq-stat-tiles';
 import { RoundHeaderActions } from '@/components/admin/cohorts/round-header-actions';
@@ -28,14 +28,20 @@ import {
   type AttachableQuestionnaire,
 } from '@/components/admin/cohorts/round-questionnaires-panel';
 import { RoundContextPanel } from '@/components/admin/cohorts/round-context-panel';
+import { RoundLearningPanel } from '@/components/admin/cohorts/round-learning-panel';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
-import { isCohortsEnabled, isRoundContextEnabled } from '@/lib/app/questionnaire/feature-flag';
+import {
+  isCohortsEnabled,
+  isLearningModeEnabled,
+  isRoundContextEnabled,
+} from '@/lib/app/questionnaire/feature-flag';
 import {
   listBriefableQuestionnaires,
   listRoundContextEntries,
 } from '@/app/api/v1/app/rounds/_lib/context';
+import { listRoundLearningDigest } from '@/lib/app/questionnaire/learning/digest';
 import { cohortDetailHref, roundsTabHref, type RoundDetail } from '@/lib/app/questionnaire/rounds';
 import type { QuestionnaireListItem } from '@/lib/app/questionnaire/views';
 
@@ -96,12 +102,16 @@ export default async function RoundDetailPage({ params }: PageProps) {
 
   const attachable = await getAttachable(id);
 
-  // Round Additional Context ("interviewer briefing") — gated by its own flag; the section is hidden
-  // entirely when off. Reads go straight through the route `_lib` (server component), no extra HTTP.
-  const roundContextOn = await isRoundContextEnabled();
-  const [contextEntries, briefable] = roundContextOn
-    ? await Promise.all([listRoundContextEntries(roundId), listBriefableQuestionnaires(roundId)])
-    : [[], []];
+  // Round Additional Context + Learning Mode — each gated by its own flag; the sections hide entirely
+  // when off. Reads go straight through the `_lib` (server component), no extra HTTP. `briefable` is
+  // shared (both panels need version titles), loaded once when either feature is on.
+  const [roundContextOn, learningOn] = await Promise.all([
+    isRoundContextEnabled(),
+    isLearningModeEnabled(),
+  ]);
+  const briefable = roundContextOn || learningOn ? await listBriefableQuestionnaires(roundId) : [];
+  const contextEntries = roundContextOn ? await listRoundContextEntries(roundId) : [];
+  const learningDigest = learningOn ? await listRoundLearningDigest(roundId) : [];
 
   const statTiles: CqStat[] = [
     { label: 'Members', value: round.memberCount },
@@ -132,6 +142,14 @@ export default async function RoundDetailPage({ params }: PageProps) {
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-xl font-semibold tracking-tight">{round.name}</h1>
             <RoundStatusBadge status={round.status} />
+            {learningOn && round.learningEnabled && (
+              <span
+                className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-400"
+                title="Learning Mode is on — later respondents are influenced by earlier ones, so results carry intentional bias."
+              >
+                <Sparkles className="h-3 w-3" /> Learning · biased
+              </span>
+            )}
             <span className="text-muted-foreground text-xs">
               {humanizeWindow(round.status, round.opensAt, round.closesAt)}
             </span>
@@ -178,6 +196,23 @@ export default async function RoundDetailPage({ params }: PageProps) {
             roundId={round.id}
             contextEnabled={round.contextEnabled}
             entries={contextEntries}
+            briefable={briefable}
+          />
+        </section>
+      )}
+
+      {learningOn && (
+        <section className="space-y-3 rounded-xl border px-4 py-4">
+          <SectionHeading title="Learning mode">
+            Let the interviewer draw on what earlier respondents in this round have said to enrich
+            later conversations. Powerful for depth &mdash; but it introduces bias, so it stays off
+            until you opt in.
+          </SectionHeading>
+          <RoundLearningPanel
+            roundId={round.id}
+            learningEnabled={round.learningEnabled}
+            learningConfig={round.learningConfig}
+            digest={learningDigest}
             briefable={briefable}
           />
         </section>

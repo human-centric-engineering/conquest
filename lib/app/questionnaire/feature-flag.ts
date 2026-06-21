@@ -813,3 +813,31 @@ export async function isLearningModeEnabled(): Promise<boolean> {
   ]);
   return app && cohorts && learning;
 }
+
+/**
+ * Flag gate for the Learning Mode admin routes (e.g. digest rebuild) — 404 when any of the master /
+ * cohorts / learning-mode flags is off, `null` when all are on. The {@link ensureRoundContextEnabled}
+ * analogue for the learning surface; call it first, before any auth or handler work.
+ *
+ * Server-only (resolves the flags from the database).
+ */
+export async function ensureLearningModeEnabled(): Promise<Response | null> {
+  if (await isLearningModeEnabled()) {
+    return null;
+  }
+  return errorResponse('Not found', { code: 'NOT_FOUND', status: 404 });
+}
+
+/**
+ * Wrap a Learning Mode admin route handler so the learning gate runs **before** anything else (auth,
+ * handler work). The {@link withRoundContextEnabled} analogue for the learning surface.
+ */
+export function withLearningModeEnabled<C>(
+  handler: (request: NextRequest, context: C) => Promise<Response>
+): (request: NextRequest, context: C) => Promise<Response> {
+  return async (request, context) => {
+    const blocked = await ensureLearningModeEnabled();
+    if (blocked) return blocked;
+    return handler(request, context);
+  };
+}
