@@ -19,10 +19,15 @@
  */
 
 import { prisma } from '@/lib/db/client';
+import { logger } from '@/lib/logging';
 import { mintInvitationToken } from '@/lib/app/questionnaire/invitations/token';
 import { narrowToEnum } from '@/lib/app/questionnaire/types';
 import { ROUND_PHASE_END_MODES } from '@/lib/app/questionnaire/rounds/types';
 import { resolveEffectiveWindow, type PhaseWindow } from '@/lib/app/questionnaire/rounds/phases';
+import {
+  resolveDemoClientTheme,
+  sendRoundInvitationEmail,
+} from '@/app/api/v1/app/questionnaires/[id]/invitations/_lib/send';
 import { resolveItemVersions } from '@/app/api/v1/app/rounds/_lib/versions';
 
 /** One freshly-minted link returned to the admin (plaintext token — generation-time only). */
@@ -45,8 +50,24 @@ export interface GenerateRoundInvitesResult {
   unlaunchedQuestionnaires: number;
   /** Active members at generation time. */
   activeMembers: number;
+  /** Emails sent this run (only when `send` was requested; each flips the invitation to `sent`). */
+  sent: number;
   /** The links minted this run (for the admin to copy/send). */
   links: MintedRoundInviteLink[];
+}
+
+export interface GenerateRoundInvitesOptions {
+  /**
+   * Restrict to one subgroup's members — the per-phase staggered send (e.g. send the leadership
+   * phase now, the rest later). Omit for every active member (the whole-cohort generate).
+   */
+  subgroupId?: string | null;
+  /**
+   * Email each freshly-minted frictionless link and flip the invitation `pending → sent`. Default
+   * false — the round invites panel mints copy/paste links without sending. Best-effort: a failed
+   * send leaves the invitation `pending` (re-runnable), it never throws.
+   */
+  send?: boolean;
 }
 
 /**
@@ -63,7 +84,8 @@ export interface GenerateRoundInvitesResult {
  */
 export async function generateRoundInvitations(
   roundId: string,
-  invitedByUserId: string
+  invitedByUserId: string,
+  options: GenerateRoundInvitesOptions = {}
 ): Promise<GenerateRoundInvitesResult> {
   const round = await prisma.appQuestionnaireRound.findUnique({
     where: { id: roundId },
@@ -72,23 +94,46 @@ export async function generateRoundInvitations(
       opensAt: true,
       closesAt: true,
       cohort: { select: { demoClientId: true } },
-      items: { select: { questionnaireId: true, versionId: true } },
+      items: {
+        select: {
+          questionnaireId: true,
+          versionId: true,
+          questionnaire: { select: { title: true } },
+        },
+      },
       // Staggered subgroup phases — a member's token expiry pins to THEIR effective close.
       phases: { select: { subgroupId: true, opensAt: true, closesAt: true, endMode: true } },
     },
   });
   if (!round) {
-    return { created: 0, skipped: 0, unlaunchedQuestionnaires: 0, activeMembers: 0, links: [] };
+    return {
+      created: 0,
+      skipped: 0,
+      unlaunchedQuestionnaires: 0,
+      activeMembers: 0,
+      sent: 0,
+      links: [],
+    };
   }
 
-  // Active members of the round's cohort + each item's resolved version (both fan-outs batched).
+  // Active members of the round's cohort (optionally one subgroup) + each item's resolved version.
   const [activeMembers, versionByQuestionnaire] = await Promise.all([
     prisma.appCohortMember.findMany({
-      where: { cohort: { rounds: { some: { id: roundId } } }, status: 'active' },
+      where: {
+        cohort: { rounds: { some: { id: roundId } } },
+        status: 'active',
+        ...(options.subgroupId ? { subgroupId: options.subgroupId } : {}),
+      },
       select: { id: true, email: true, name: true, subgroupId: true },
     }),
     resolveItemVersions(round.items),
   ]);
+
+  // Email send needs the questionnaire title (per item) + the demo client's brand theme (once).
+  const titleByQuestionnaire = new Map(
+    round.items.map((it) => [it.questionnaireId, it.questionnaire.title])
+  );
+  const theme = options.send ? await resolveDemoClientTheme(round.cohort.demoClientId) : null;
 
   // Index phases by subgroup so each member's effective close is an O(1) lookup.
   const phaseBySubgroup = new Map<string, PhaseWindow>(
@@ -109,6 +154,7 @@ export async function generateRoundInvitations(
     skipped: 0,
     unlaunchedQuestionnaires: 0,
     activeMembers: activeMembers.length,
+    sent: 0,
     links: [],
   };
 
@@ -151,7 +197,8 @@ export async function generateRoundInvitations(
       }
 
       const minted = mintInvitationToken(now);
-      await prisma.appQuestionnaireInvitation.create({
+      const expiresAt = memberWindowExpiry(member.subgroupId) ?? minted.expiresAt;
+      const created = await prisma.appQuestionnaireInvitation.create({
         data: {
           versionId,
           email: member.email,
@@ -162,7 +209,7 @@ export async function generateRoundInvitations(
           demoClientId,
           roundId,
           cohortMemberId: member.id,
-          expiresAt: memberWindowExpiry(member.subgroupId) ?? minted.expiresAt,
+          expiresAt,
         },
         select: { id: true },
       });
@@ -178,8 +225,83 @@ export async function generateRoundInvitations(
         versionId,
         url: `/q/${versionId}?i=${minted.token}`,
       });
+
+      // Optional send: email the frictionless link now (we still hold the plaintext token) and flip
+      // the invitation to `sent`. Best-effort — a failed send leaves it `pending` for a later re-run.
+      if (options.send && theme) {
+        try {
+          const sendResult = await sendRoundInvitationEmail({
+            to: member.email,
+            inviteeName: member.name,
+            questionnaireTitle: titleByQuestionnaire.get(item.questionnaireId) ?? 'a questionnaire',
+            versionId,
+            token: minted.token,
+            expiresAt,
+            theme,
+          });
+          if (sendResult.success) {
+            await prisma.appQuestionnaireInvitation.update({
+              where: { id: created.id },
+              data: { status: 'sent', sentAt: new Date() },
+            });
+            result.sent += 1;
+          } else {
+            logger.warn('Round invitation email failed to send', {
+              roundId,
+              invitationId: created.id,
+            });
+          }
+        } catch (err) {
+          logger.error('Round invitation email threw', err);
+        }
+      }
     }
   }
 
   return result;
+}
+
+export interface DispatchDuePhaseInvitesResult {
+  /** Phases whose window had opened and were processed this run. */
+  phasesProcessed: number;
+  /** Invitations created across those phases. */
+  created: number;
+  /** Emails sent across those phases. */
+  sent: number;
+}
+
+/**
+ * Auto-stagger: generate + send invitations for every phase whose window has OPENED on an open round.
+ * The maintenance hook (cron / scheduled workflow) calls this each tick; generation is idempotent, so
+ * a phase is effectively dispatched once (later ticks create/send nothing because every member is
+ * already invited). A phase with no `opensAt` is never auto-dispatched here — it has no staggered
+ * start to wait for, so the admin sends it (or the whole round) directly.
+ *
+ * Best-effort and bounded: one phase sweep, then the per-phase generator (itself a fixed query
+ * budget). A failed individual phase is logged and skipped — one bad round never blocks the rest.
+ */
+export async function dispatchDuePhaseInvitations(
+  invitedByUserId: string,
+  now: Date = new Date()
+): Promise<DispatchDuePhaseInvitesResult> {
+  const duePhases = await prisma.appRoundPhase.findMany({
+    where: { opensAt: { not: null, lte: now }, round: { status: 'open' } },
+    select: { id: true, roundId: true, subgroupId: true },
+  });
+
+  const summary: DispatchDuePhaseInvitesResult = { phasesProcessed: 0, created: 0, sent: 0 };
+  for (const phase of duePhases) {
+    try {
+      const res = await generateRoundInvitations(phase.roundId, invitedByUserId, {
+        subgroupId: phase.subgroupId,
+        send: true,
+      });
+      summary.phasesProcessed += 1;
+      summary.created += res.created;
+      summary.sent += res.sent;
+    } catch (err) {
+      logger.error('Phase invite dispatch failed', err);
+    }
+  }
+  return summary;
 }

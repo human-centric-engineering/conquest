@@ -627,6 +627,11 @@ export const API = {
       phases: (id: string): string => `/api/v1/app/rounds/${id}/phases`,
       /** One phase: edit (PATCH) + delete (DELETE). */
       phase: (id: string, phaseId: string): string => `/api/v1/app/rounds/${id}/phases/${phaseId}`,
+      /** Generate + email one phase's invitations now (POST → staggered send). */
+      phaseSendInvites: (id: string, phaseId: string): string =>
+        `/api/v1/app/rounds/${id}/phases/${phaseId}/send-invites`,
+      /** Maintenance: dispatch invites for every phase whose window has opened (POST → cron hook). */
+      dispatchPhaseInvites: (): string => `/api/v1/app/rounds/maintenance/dispatch-phase-invites`,
     },
   },
 } as const;

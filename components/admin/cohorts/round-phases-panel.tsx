@@ -11,7 +11,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { CalendarClock, Check, Loader2, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { CalendarClock, Check, Loader2, Pencil, Plus, Send, Trash2, X } from 'lucide-react';
 
 import { apiClient, APIClientError } from '@/lib/api/client';
 import { API } from '@/lib/api/endpoints';
@@ -109,6 +109,8 @@ export function RoundPhasesPanel({
 
   // Per-row state.
   const [pendingId, setPendingId] = useState<string | null>(null);
+  const [sendingId, setSendingId] = useState<string | null>(null);
+  const [sentNote, setSentNote] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<EditDraft>({ opensAt: '', closesAt: '', endMode: 'hard' });
 
@@ -179,6 +181,27 @@ export function RoundPhasesPanel({
       setError(err instanceof APIClientError ? err.message : 'Could not delete the phase.');
     } finally {
       setPendingId(null);
+    }
+  };
+
+  const sendInvites = async (phaseId: string) => {
+    setSendingId(phaseId);
+    setError(null);
+    setSentNote(null);
+    try {
+      const res = await apiClient.post<{ sent: number; created: number; skipped: number }>(
+        API.APP.ROUNDS.phaseSendInvites(roundId, phaseId)
+      );
+      setSentNote(
+        res.sent > 0
+          ? `Sent ${res.sent} invitation${res.sent === 1 ? '' : 's'}.`
+          : 'No new invitations to send (everyone already invited).'
+      );
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof APIClientError ? err.message : 'Could not send invitations.');
+    } finally {
+      setSendingId(null);
     }
   };
 
@@ -417,6 +440,19 @@ export function RoundPhasesPanel({
                           <Button
                             variant="ghost"
                             size="sm"
+                            disabled={isPending || sendingId === phase.id}
+                            title="Generate + email this subgroup's invitations now"
+                            onClick={() => void sendInvites(phase.id)}
+                          >
+                            {sendingId === phase.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Send className="h-4 w-4" />
+                            )}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
                             disabled={isPending}
                             onClick={() => startEdit(phase)}
                           >
@@ -446,6 +482,7 @@ export function RoundPhasesPanel({
         </div>
       )}
 
+      {sentNote && <p className="text-muted-foreground text-xs">{sentNote}</p>}
       {error && <p className="text-destructive text-xs">{error}</p>}
     </div>
   );

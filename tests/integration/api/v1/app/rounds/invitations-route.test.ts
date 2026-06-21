@@ -71,7 +71,9 @@ describe('POST /api/v1/app/rounds/:id/invitations', () => {
   it('generates invitations and audits it', async () => {
     const res = await POST(req(), ctx);
     expect(res.status).toBe(201);
-    expect(genMock.generateRoundInvitations).toHaveBeenCalledWith('r-1', expect.any(String));
+    expect(genMock.generateRoundInvitations).toHaveBeenCalledWith('r-1', expect.any(String), {
+      send: false,
+    });
     expect(logAdminAction).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'app_round.generate_invitations' })
     );

@@ -8,6 +8,10 @@
  *   client body), so round membership can't be forged. Idempotent — re-running tops up newly
  *   added members. Returns counts + the freshly-minted frictionless links.
  *
+ *   Optional body `{ send: true }` also EMAILS each freshly-minted link (frictionless no-login
+ *   URL) and flips it to `sent`; omitted/false mints copy/paste links without sending. For
+ *   STAGGERED per-subgroup sending see `…/phases/:phaseId/send-invites`.
+ *
  * Cohorts flag-gate first (404 when off), then `withAdminAuth`. Audited.
  */
 
@@ -33,7 +37,16 @@ const handleGenerate = withAdminAuth<{ id: string }>(async (request, session, { 
   });
   if (!round) throw new NotFoundError('Round not found');
 
-  const result = await generateRoundInvitations(id, session.user.id);
+  // Optional `{ send }` flag — tolerate an absent/empty body (the panel posts none today).
+  let send = false;
+  try {
+    const body: unknown = await request.json();
+    send = !!(body && typeof body === 'object' && (body as { send?: unknown }).send === true);
+  } catch {
+    /* no body — generate copy/paste links only */
+  }
+
+  const result = await generateRoundInvitations(id, session.user.id, { send });
 
   logAdminAction({
     userId: session.user.id,
@@ -44,6 +57,7 @@ const handleGenerate = withAdminAuth<{ id: string }>(async (request, session, { 
     metadata: {
       created: result.created,
       skipped: result.skipped,
+      sent: result.sent,
       activeMembers: result.activeMembers,
     },
     clientIp,
@@ -52,6 +66,7 @@ const handleGenerate = withAdminAuth<{ id: string }>(async (request, session, { 
     id,
     created: result.created,
     skipped: result.skipped,
+    sent: result.sent,
   });
 
   return successResponse(result, undefined, { status: 201 });
