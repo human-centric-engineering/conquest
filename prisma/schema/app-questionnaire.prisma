@@ -580,6 +580,7 @@ model AppCohortSubgroup {
 
   cohort  AppCohort         @relation(fields: [cohortId], references: [id], onDelete: Cascade)
   members AppCohortMember[]
+  phases  AppRoundPhase[]
 
   @@unique([cohortId, name])
   @@index([cohortId])
@@ -626,10 +627,49 @@ model AppQuestionnaireRound {
   items          AppQuestionnaireRoundItem[]
   contextEntries AppRoundContextEntry[]
   learningDigest AppRoundLearningDigest[]
+  phases         AppRoundPhase[]
 
   @@index([cohortId])
   @@index([status])
   @@map("app_questionnaire_round")
+}
+
+/// A ROUND PHASE — a staggered access window for one cohort SUBGROUP within a round. This is how a
+/// round lets one subgroup go before the rest: e.g. the Senior Leadership Team takes the round in
+/// week 1, everyone else from week 2. A member's effective window is their subgroup's phase window
+/// (narrowed within the round's own window); members with no subgroup, or whose subgroup has no phase
+/// here, fall back to the round window — so a round with zero phases behaves exactly as before.
+///
+/// `opensAt`/`closesAt` are the phase bounds; the admin seam validates them to nest inside the round
+/// window. `endMode` decides what the phase close means for access:
+///   - `hard`    → assigned members LOSE access at the phase `closesAt` (a real cutoff);
+///   - `relaxed` → the phase `closesAt` is only a target (used for staggered notifications); access
+///                 continues until the ROUND `closesAt`.
+/// The phase `opensAt` is always enforced (staggering the START is the point). See
+/// lib/app/questionnaire/rounds/access.ts (`resolveEffectiveWindow` + `evaluateRoundAccess`).
+///
+/// `roundId` + `subgroupId` are real @relations (both onDelete: Cascade) — pure app-internal config.
+/// `createdBy` is a plain String (UG-1). `@@unique([roundId, subgroupId])`: one phase per subgroup
+/// per round.
+model AppRoundPhase {
+  id         String   @id @default(cuid())
+  roundId    String
+  subgroupId String
+  opensAt    DateTime? // phase window start; null = inherit the round's lower bound
+  closesAt   DateTime? // phase window end; null = inherit the round's upper bound
+  endMode    String   @default("hard") // ROUND_PHASE_END_MODES (rounds/types.ts): hard | relaxed
+  ordinal    Int      @default(0) // author-controlled display order within the round
+  createdBy  String? // admin User.id; plain String, no FK (UG-1)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  round    AppQuestionnaireRound @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  subgroup AppCohortSubgroup     @relation(fields: [subgroupId], references: [id], onDelete: Cascade)
+
+  @@unique([roundId, subgroupId])
+  @@index([roundId])
+  @@index([subgroupId])
+  @@map("app_round_phase")
 }
 
 /// Additional Context ("interviewer briefing"): one admin-authored fact/figure/background note for a

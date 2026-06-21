@@ -66,6 +66,19 @@ export function resolveLearningConfig(raw: unknown): LearningConfigShape {
   return { minRespondents };
 }
 
+/**
+ * What a round phase's close date means for the assigned subgroup's access:
+ * - `hard`    → members LOSE access at the phase `closesAt` (a real cutoff);
+ * - `relaxed` → the phase `closesAt` is only a target (used for staggered notifications); access
+ *               continues until the ROUND `closesAt`.
+ * The phase `opensAt` is always enforced regardless of end mode — staggering the START is the point.
+ */
+export const ROUND_PHASE_END_MODES = ['hard', 'relaxed'] as const;
+export type RoundPhaseEndMode = (typeof ROUND_PHASE_END_MODES)[number];
+
+/** Default end mode for a new phase — a hard cutoff at the phase close date. */
+export const DEFAULT_ROUND_PHASE_END_MODE: RoundPhaseEndMode = 'hard';
+
 /** Completion roll-up shared by the cohort + round list rows (computed by `_lib/stats.ts`). */
 export interface RoundCompletionStats {
   /** Non-preview sessions started within the round (or across the cohort's rounds). */
@@ -171,9 +184,30 @@ export interface RoundView {
   updatedAt: string;
 }
 
-/** Round detail = the list row plus the bundled questionnaires. */
+/**
+ * One round phase, serialized for the admin UI — a staggered window for one cohort subgroup. The
+ * subgroup name is denormalised so the phases panel can label rows without a second fetch.
+ */
+export interface RoundPhaseView {
+  id: string;
+  roundId: string;
+  subgroupId: string;
+  /** Denormalised subgroup name for display. */
+  subgroupName: string;
+  opensAt: string | null;
+  closesAt: string | null;
+  endMode: RoundPhaseEndMode;
+  ordinal: number;
+  /** Active members of the subgroup (the population this phase's window applies to). */
+  memberCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Round detail = the list row plus the bundled questionnaires and any staggered subgroup phases. */
 export interface RoundDetail extends RoundView {
   questionnaires: RoundQuestionnaireView[];
+  phases: RoundPhaseView[];
 }
 
 /** How a briefing entry was authored — drives the admin-UI provenance badge. */

@@ -623,6 +623,10 @@ export const API = {
       contextParse: (id: string): string => `/api/v1/app/rounds/${id}/context/parse`,
       /** Learning Mode — manually rebuild this round's peer-theme digest (POST → per-version summary). */
       learningRebuild: (id: string): string => `/api/v1/app/rounds/${id}/learning/rebuild`,
+      /** Phases (staggered subgroup windows): list (GET) + create (POST). */
+      phases: (id: string): string => `/api/v1/app/rounds/${id}/phases`,
+      /** One phase: edit (PATCH) + delete (DELETE). */
+      phase: (id: string, phaseId: string): string => `/api/v1/app/rounds/${id}/phases/${phaseId}`,
     },
   },
 } as const;

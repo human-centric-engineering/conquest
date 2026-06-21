@@ -98,6 +98,20 @@ describe('getRoundDetail', () => {
           questionnaire: { title: 'Onboarding survey' },
         },
       ],
+      phases: [
+        {
+          id: 'ph-1',
+          roundId: 'r-1',
+          subgroupId: 'sg-1',
+          opensAt: new Date('2026-07-01'),
+          closesAt: new Date('2026-07-07'),
+          endMode: 'hard',
+          ordinal: 0,
+          createdAt: new Date('2026-06-20'),
+          updatedAt: new Date('2026-06-20'),
+          subgroup: { name: 'Senior Leadership Team', _count: { members: 1 } },
+        },
+      ],
     });
     prismaMock.appCohortMember.groupBy.mockResolvedValue([
       { cohortId: 'co-1', _count: { _all: 2 } },
@@ -108,6 +122,15 @@ describe('getRoundDetail', () => {
     expect(detail?.memberCount).toBe(2);
     expect(detail?.questionnaires).toEqual([
       { itemId: 'item-1', questionnaireId: 'q-1', title: 'Onboarding survey', versionId: 'v-1' },
+    ]);
+    expect(detail?.phases).toEqual([
+      expect.objectContaining({
+        id: 'ph-1',
+        subgroupId: 'sg-1',
+        subgroupName: 'Senior Leadership Team',
+        endMode: 'hard',
+        memberCount: 1,
+      }),
     ]);
   });
 });

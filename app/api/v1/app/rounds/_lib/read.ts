@@ -13,9 +13,11 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db/client';
 import { narrowToEnum } from '@/lib/app/questionnaire/types';
 import {
+  ROUND_PHASE_END_MODES,
   ROUND_STATUSES,
   resolveLearningConfig,
   type RoundDetail,
+  type RoundPhaseView,
   type RoundQuestionnaireView,
   type RoundView,
 } from '@/lib/app/questionnaire/rounds/types';
@@ -169,7 +171,42 @@ function toRoundQuestionnaires(
   }));
 }
 
-/** One round by id with its bundled questionnaires, or null when unknown. */
+/** The phase row shape selected for the round detail (with its subgroup name + active-member count). */
+const ROUND_PHASE_SELECT = {
+  id: true,
+  roundId: true,
+  subgroupId: true,
+  opensAt: true,
+  closesAt: true,
+  endMode: true,
+  ordinal: true,
+  createdAt: true,
+  updatedAt: true,
+  subgroup: {
+    select: { name: true, _count: { select: { members: { where: { status: 'active' } } } } },
+  },
+} as const satisfies Prisma.AppRoundPhaseSelect;
+
+type RoundPhaseRow = Prisma.AppRoundPhaseGetPayload<{ select: typeof ROUND_PHASE_SELECT }>;
+
+/** Project a round's phases (already ordered) to the display view. */
+function toRoundPhases(phases: RoundPhaseRow[]): RoundPhaseView[] {
+  return phases.map((p) => ({
+    id: p.id,
+    roundId: p.roundId,
+    subgroupId: p.subgroupId,
+    subgroupName: p.subgroup.name,
+    opensAt: p.opensAt ? p.opensAt.toISOString() : null,
+    closesAt: p.closesAt ? p.closesAt.toISOString() : null,
+    endMode: narrowToEnum(p.endMode, ROUND_PHASE_END_MODES, 'hard'),
+    ordinal: p.ordinal,
+    memberCount: p.subgroup._count.members,
+    createdAt: p.createdAt.toISOString(),
+    updatedAt: p.updatedAt.toISOString(),
+  }));
+}
+
+/** One round by id with its bundled questionnaires and staggered subgroup phases, or null when unknown. */
 export async function getRoundDetail(id: string): Promise<RoundDetail | null> {
   const row = await prisma.appQuestionnaireRound.findUnique({
     where: { id },
@@ -184,6 +221,10 @@ export async function getRoundDetail(id: string): Promise<RoundDetail | null> {
           questionnaire: { select: { title: true } },
         },
       },
+      phases: {
+        orderBy: [{ ordinal: 'asc' }, { opensAt: 'asc' }],
+        select: ROUND_PHASE_SELECT,
+      },
     },
   });
   if (!row) return null;
@@ -196,5 +237,6 @@ export async function getRoundDetail(id: string): Promise<RoundDetail | null> {
   return {
     ...toRoundView(row, members.get(row.cohortId) ?? 0, perRound.get(row.id)),
     questionnaires: toRoundQuestionnaires(row.items),
+    phases: toRoundPhases(row.phases),
   };
 }

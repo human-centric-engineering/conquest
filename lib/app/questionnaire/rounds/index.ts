@@ -10,5 +10,6 @@
 export * from '@/lib/app/questionnaire/rounds/types';
 export * from '@/lib/app/questionnaire/rounds/schemas';
 export * from '@/lib/app/questionnaire/rounds/access';
+export * from '@/lib/app/questionnaire/rounds/phases';
 export * from '@/lib/app/questionnaire/rounds/briefing';
 export * from '@/lib/app/questionnaire/rounds/nav';
