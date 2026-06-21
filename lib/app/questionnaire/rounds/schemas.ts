@@ -72,15 +72,39 @@ export const createCohortMemberSchema = z.object({
 });
 
 /**
- * Edit a roster member: identity fields and/or re-activation. `status` accepts only
- * `active` here — REMOVING a member is the soft DELETE on the member route (it also stamps
- * `removedAt`); PATCH `status: active` is how you put a removed member back. At least one field.
+ * Edit a roster member: identity fields, re-activation, and/or subgroup assignment. `status` accepts
+ * only `active` here — REMOVING a member is the soft DELETE on the member route (it also stamps
+ * `removedAt`); PATCH `status: active` is how you put a removed member back. `subgroupId: null`
+ * unassigns the member from any subgroup; a non-null value must reference a subgroup of the SAME
+ * cohort (the route validates). At least one field.
  */
 export const updateCohortMemberSchema = z
   .object({
     name: nameField,
     notes: optionalTextField(NOTES_MAX),
     status: z.literal('active'),
+    subgroupId: z.string().min(1).nullable(),
+  })
+  .partial()
+  .refine((b) => Object.keys(b).length > 0, { message: 'At least one field must be provided' });
+
+// ---------------------------------------------------------------------------
+// Cohort subgroups
+// ---------------------------------------------------------------------------
+
+/** Create a subgroup under a cohort. Name is unique within the cohort (DB-enforced → 409). */
+export const createCohortSubgroupSchema = z.object({
+  name: nameField,
+  description: optionalTextField(DESCRIPTION_MAX).optional(),
+  ordinal: z.coerce.number().int().min(0).optional(),
+});
+
+/** Edit a subgroup's identity / order. At least one field. */
+export const updateCohortSubgroupSchema = z
+  .object({
+    name: nameField,
+    description: optionalTextField(DESCRIPTION_MAX),
+    ordinal: z.coerce.number().int().min(0),
   })
   .partial()
   .refine((b) => Object.keys(b).length > 0, { message: 'At least one field must be provided' });
@@ -191,6 +215,8 @@ export type CreateCohortInput = z.infer<typeof createCohortSchema>;
 export type UpdateCohortInput = z.infer<typeof updateCohortSchema>;
 export type CreateCohortMemberInput = z.infer<typeof createCohortMemberSchema>;
 export type UpdateCohortMemberInput = z.infer<typeof updateCohortMemberSchema>;
+export type CreateCohortSubgroupInput = z.infer<typeof createCohortSubgroupSchema>;
+export type UpdateCohortSubgroupInput = z.infer<typeof updateCohortSubgroupSchema>;
 export type CreateRoundInput = z.infer<typeof createRoundSchema>;
 export type UpdateRoundInput = z.infer<typeof updateRoundSchema>;
 export type LearningConfigInput = z.infer<typeof learningConfigSchema>;

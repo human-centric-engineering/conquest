@@ -106,13 +106,32 @@ export interface CohortMemberView {
   name: string;
   notes: string | null;
   status: CohortMemberStatus;
+  /** Which subgroup the member belongs to (null = unassigned → uses the round's own window). */
+  subgroupId: string | null;
   addedAt: string;
   removedAt: string | null;
 }
 
-/** Cohort detail = the list row plus its roster. Rounds are loaded by the rounds list. */
+/**
+ * A reusable subgroup of a cohort's roster (e.g. "Senior Leadership Team"). Defined once on the
+ * cohort and carried across rounds; a round attaches a staggered window to it via a round phase.
+ */
+export interface CohortSubgroupView {
+  id: string;
+  cohortId: string;
+  name: string;
+  description: string | null;
+  ordinal: number;
+  /** Active members currently assigned to this subgroup. */
+  memberCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Cohort detail = the list row plus its roster and subgroups. Rounds are loaded by the rounds list. */
 export interface CohortDetail extends CohortView {
   members: CohortMemberView[];
+  subgroups: CohortSubgroupView[];
 }
 
 /** One questionnaire offered within a round (a round-item row, enriched for display). */

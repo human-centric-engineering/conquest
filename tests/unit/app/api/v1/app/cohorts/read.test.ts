@@ -145,6 +145,18 @@ describe('getCohortDetail', () => {
       updatedAt: new Date('2026-06-01'),
       _count: { members: 2, rounds: 1 },
       members: MEMBERS,
+      subgroups: [
+        {
+          id: 'sg-1',
+          cohortId: 'co-1',
+          name: 'Senior Leadership Team',
+          description: null,
+          ordinal: 0,
+          createdAt: new Date('2026-06-01'),
+          updatedAt: new Date('2026-06-01'),
+          _count: { members: 1 },
+        },
+      ],
     });
     prismaMock.appQuestionnaireRound.findMany.mockResolvedValue([{ id: 'r-1' }]);
     prismaMock.appQuestionnaireSession.groupBy.mockResolvedValue([
@@ -154,6 +166,9 @@ describe('getCohortDetail', () => {
     const detail = await getCohortDetail('co-1');
     expect(detail?.members.map((m) => m.name)).toEqual(['Amy', 'Zoe', 'Bob']); // active A→Z, removed last
     expect(detail?.stats).toMatchObject({ sessionsStarted: 2, sessionsCompleted: 2 });
+    expect(detail?.subgroups).toEqual([
+      expect.objectContaining({ id: 'sg-1', name: 'Senior Leadership Team', memberCount: 1 }),
+    ]);
   });
 });
 

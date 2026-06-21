@@ -521,6 +521,7 @@ model AppCohort {
   demoClient AppDemoClient           @relation(fields: [demoClientId], references: [id], onDelete: Cascade)
   members    AppCohortMember[]
   rounds     AppQuestionnaireRound[]
+  subgroups  AppCohortSubgroup[]
 
   @@index([demoClientId])
   @@map("app_cohort")
@@ -535,22 +536,54 @@ model AppCohort {
 /// recur across cohorts of the same demo client (multi-cohort membership). `cohortId`
 /// is a real @relation (onDelete: Cascade): app-internal roster config.
 model AppCohortMember {
-  id        String    @id @default(cuid())
-  cohortId  String
-  email     String // the person's address (roster identity; not a login)
-  name      String // display name
-  notes     String? // optional admin note
-  status    String    @default("active") // COHORT_MEMBER_STATUSES (rounds/types.ts): active | removed
-  addedAt   DateTime  @default(now())
-  removedAt DateTime? // set when status → removed
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  id         String    @id @default(cuid())
+  cohortId   String
+  // Optional subgroup assignment within the cohort (a member is in 0 or 1 subgroup). Drives a
+  // round's staggered access windows: a round attaches a window to each subgroup via AppRoundPhase.
+  // onDelete: SetNull — deleting a subgroup unassigns its members but keeps the roster + history.
+  subgroupId String?
+  email      String // the person's address (roster identity; not a login)
+  name       String // display name
+  notes      String? // optional admin note
+  status     String    @default("active") // COHORT_MEMBER_STATUSES (rounds/types.ts): active | removed
+  addedAt    DateTime  @default(now())
+  removedAt  DateTime? // set when status → removed
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
-  cohort AppCohort @relation(fields: [cohortId], references: [id], onDelete: Cascade)
+  cohort   AppCohort          @relation(fields: [cohortId], references: [id], onDelete: Cascade)
+  subgroup AppCohortSubgroup? @relation(fields: [subgroupId], references: [id], onDelete: SetNull)
 
   @@unique([cohortId, email])
   @@index([cohortId])
+  @@index([subgroupId])
   @@map("app_cohort_member")
+}
+
+/// A SUBGROUP of a cohort — a named partition of the roster (e.g. "Senior Leadership Team") that
+/// rounds use to STAGGER access. The subgroup itself is reusable config (defined once on the cohort,
+/// carried across every round that cohort runs); a round gives it a window + end mode via
+/// AppRoundPhase. A member belongs to at most one subgroup (AppCohortMember.subgroupId); members with
+/// no subgroup fall back to the round's own window.
+///
+/// `cohortId` is a real @relation (onDelete: Cascade): app-internal roster config. `createdBy` is a
+/// plain String, no @relation (UG-1 house style, as on AppCohort).
+model AppCohortSubgroup {
+  id          String   @id @default(cuid())
+  cohortId    String
+  name        String // required display name ("Senior Leadership Team")
+  description String? // optional internal note
+  ordinal     Int      @default(0) // author-controlled order within the cohort
+  createdBy   String? // admin User.id; plain String, no FK (UG-1)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  cohort  AppCohort         @relation(fields: [cohortId], references: [id], onDelete: Cascade)
+  members AppCohortMember[]
+
+  @@unique([cohortId, name])
+  @@index([cohortId])
+  @@map("app_cohort_subgroup")
 }
 
 /// A ROUND — a time-bound delivery of one or more questionnaires to a cohort.
@@ -566,28 +599,28 @@ model AppCohortMember {
 /// the questionnaire title + dates but is editable. `createdBy`/`closedBy` are plain
 /// Strings (UG-1).
 model AppQuestionnaireRound {
-  id          String    @id @default(cuid())
-  cohortId    String
-  name        String // required (default = questionnaire title + dates, editable)
-  description String? // optional
-  status      String    @default("draft") // ROUND_STATUSES (rounds/types.ts): draft | open | closed
-  opensAt     DateTime? // window start; null = no lower bound until opened
-  closesAt    DateTime? // window end; adjustable mid-round
-  closedAt    DateTime? // manual/auto close timestamp
-  closedBy    String? // admin User.id who closed it; plain String, no FK (UG-1)
-  createdBy   String? // admin User.id; plain String, no FK (UG-1)
+  id              String    @id @default(cuid())
+  cohortId        String
+  name            String // required (default = questionnaire title + dates, editable)
+  description     String? // optional
+  status          String    @default("draft") // ROUND_STATUSES (rounds/types.ts): draft | open | closed
+  opensAt         DateTime? // window start; null = no lower bound until opened
+  closesAt        DateTime? // window end; adjustable mid-round
+  closedAt        DateTime? // manual/auto close timestamp
+  closedBy        String? // admin User.id who closed it; plain String, no FK (UG-1)
+  createdBy       String? // admin User.id; plain String, no FK (UG-1)
   // Additional Context ("interviewer briefing"): when true AND the platform flag is on, briefing
   // entries authored for this round are injected into the interviewer prompt. Off by default.
-  contextEnabled  Boolean  @default(false)
+  contextEnabled  Boolean   @default(false)
   // Learning Mode: when true AND the platform flag is on, generalised anonymised themes from prior
   // respondents in THIS round colour the interviewer's phrasing + adaptive probing. Off by default;
   // introduces bias by design (the admin UI warns). Gated additionally by a k-anonymity threshold.
-  learningEnabled Boolean  @default(false)
+  learningEnabled Boolean   @default(false)
   // Learning Mode tuning (LearningConfigShape in rounds/types.ts): { minRespondents } and future knobs.
   // `{}` resolves to defaults at read time, mirroring AppQuestionnaireConfig's lazy-defaults pattern.
-  learningConfig  Json     @default("{}")
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  learningConfig  Json      @default("{}")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   cohort         AppCohort                   @relation(fields: [cohortId], references: [id], onDelete: Cascade)
   items          AppQuestionnaireRoundItem[]

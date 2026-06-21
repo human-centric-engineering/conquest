@@ -588,9 +588,14 @@ export const API = {
       byId: (id: string): string => `/api/v1/app/cohorts/${id}`,
       /** Roster: list (GET) + add member (POST). */
       members: (id: string): string => `/api/v1/app/cohorts/${id}/members`,
-      /** Edit (PATCH) / soft-remove (DELETE) one member. */
+      /** Edit (PATCH — incl. subgroup assignment) / soft-remove (DELETE) one member. */
       member: (id: string, memberId: string): string =>
         `/api/v1/app/cohorts/${id}/members/${memberId}`,
+      /** Subgroups (reusable roster partitions for round phasing): list (GET) + create (POST). */
+      subgroups: (id: string): string => `/api/v1/app/cohorts/${id}/subgroups`,
+      /** One subgroup: edit (PATCH) + delete (DELETE). */
+      subgroup: (id: string, subgroupId: string): string =>
+        `/api/v1/app/cohorts/${id}/subgroups/${subgroupId}`,
     },
     /** Rounds — time-bound deliveries of questionnaires to a cohort. Gated by APP_QUESTIONNAIRES_COHORTS. */
     ROUNDS: {

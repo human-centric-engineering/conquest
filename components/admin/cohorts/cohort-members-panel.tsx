@@ -25,13 +25,23 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { CohortMemberForm } from '@/components/admin/cohorts/cohort-member-form';
 import {
   CohortEmptyState,
   MemberAvatar,
   MemberStatusPill,
 } from '@/components/admin/cohorts/cohort-ui';
-import type { CohortMemberView } from '@/lib/app/questionnaire/rounds';
+import type { CohortMemberView, CohortSubgroupView } from '@/lib/app/questionnaire/rounds';
+
+/** Sentinel for the "no subgroup" option — `<Select>` can't use an empty-string value. */
+const NO_SUBGROUP = '__none__';
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, {
@@ -44,13 +54,36 @@ function formatDate(iso: string): string {
 export interface CohortMembersPanelProps {
   cohortId: string;
   members: CohortMemberView[];
+  /**
+   * The cohort's subgroups, when round phasing is enabled — renders a per-member subgroup selector.
+   * Omitted/empty hides the column entirely (the feature is off, or no subgroups exist yet).
+   */
+  subgroups?: CohortSubgroupView[];
 }
 
-export function CohortMembersPanel({ cohortId, members }: CohortMembersPanelProps) {
+export function CohortMembersPanel({ cohortId, members, subgroups = [] }: CohortMembersPanelProps) {
   const router = useRouter();
   // Id of the row whose status is currently changing (drives the spinner).
   const [pendingId, setPendingId] = useState<string | null>(null);
+  // Id of the row whose subgroup assignment is in flight (separate so it doesn't disable remove).
+  const [assigningId, setAssigningId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const showSubgroups = subgroups.length > 0;
+
+  const assignSubgroup = async (memberId: string, value: string) => {
+    setAssigningId(memberId);
+    setError(null);
+    try {
+      await apiClient.patch<CohortMemberView>(API.APP.COHORTS.member(cohortId, memberId), {
+        body: { subgroupId: value === NO_SUBGROUP ? null : value },
+      });
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof APIClientError ? err.message : 'Could not change the subgroup.');
+    } finally {
+      setAssigningId(null);
+    }
+  };
 
   const removeMember = async (memberId: string) => {
     setPendingId(memberId);
@@ -107,6 +140,7 @@ export function CohortMembersPanel({ cohortId, members }: CohortMembersPanelProp
               <TableRow className="hover:bg-transparent">
                 <TableHead>Member</TableHead>
                 <TableHead>Status</TableHead>
+                {showSubgroups && <TableHead>Subgroup</TableHead>}
                 <TableHead className="text-right">Added</TableHead>
                 <TableHead className="w-px" />
               </TableRow>
@@ -134,6 +168,27 @@ export function CohortMembersPanel({ cohortId, members }: CohortMembersPanelProp
                     <TableCell>
                       <MemberStatusPill status={member.status} />
                     </TableCell>
+                    {showSubgroups && (
+                      <TableCell>
+                        <Select
+                          value={member.subgroupId ?? NO_SUBGROUP}
+                          disabled={isRemoved || assigningId === member.id}
+                          onValueChange={(v) => void assignSubgroup(member.id, v)}
+                        >
+                          <SelectTrigger className="h-8 w-[180px]">
+                            <SelectValue placeholder="No subgroup" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={NO_SUBGROUP}>No subgroup</SelectItem>
+                            {subgroups.map((sg) => (
+                              <SelectItem key={sg.id} value={sg.id}>
+                                {sg.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </TableCell>
+                    )}
                     <TableCell className="text-muted-foreground text-right text-sm tabular-nums">
                       {formatDate(member.addedAt)}
                     </TableCell>

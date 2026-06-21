@@ -896,6 +896,18 @@ export const APP_QUESTIONNAIRES_ROUND_CONTEXT_FLAG = 'APP_QUESTIONNAIRES_ROUND_C
 export const APP_QUESTIONNAIRES_LEARNING_MODE_FLAG = 'APP_QUESTIONNAIRES_LEARNING_MODE_ENABLED';
 
 /**
+ * Platform feature flag gating **Round Phases** — staggered access windows for cohort subgroups, so
+ * one subgroup (e.g. the Senior Leadership Team) can take a round before the rest of the cohort. A
+ * subgroup is reusable cohort config (`AppCohortSubgroup`); a round attaches a window + end mode to it
+ * (`AppRoundPhase`). Requires APP_QUESTIONNAIRES_ENABLED AND APP_QUESTIONNAIRES_COHORTS_ENABLED
+ * (phases hang off rounds). DB-backed, seeded disabled by `052-round-phases-flag.ts`. When off, the
+ * subgroup/phase authoring routes + panels 404/hide and the respondent access guard falls back to the
+ * round's own window for everyone (today's behaviour). The per-member window is otherwise the member's
+ * subgroup phase, narrowed within the round window.
+ */
+export const APP_QUESTIONNAIRES_ROUND_PHASES_FLAG = 'APP_QUESTIONNAIRES_ROUND_PHASES_ENABLED';
+
+/**
  * Slug of the seeded Respondent Report `AiAgent` — assembles the per-respondent insights section
  * (mode `raw_plus_insights`) from the captured answers, the admin's generation config, and the
  * optional client knowledge base. Ships with empty `model`/`provider` so it resolves dynamically via
