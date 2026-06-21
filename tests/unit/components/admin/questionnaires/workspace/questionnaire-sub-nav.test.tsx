@@ -57,6 +57,7 @@ const allFlagsOn: QuestionnaireWorkspaceFlags = {
   adaptive: true,
   adaptiveDataSlots: true,
   respondentReport: true,
+  introScreen: true,
 };
 
 /** Flags that disable optional tabs (dataSlots, designEval, respondentReport hidden). */
@@ -68,6 +69,7 @@ const flagsAllOff: QuestionnaireWorkspaceFlags = {
   adaptive: false,
   adaptiveDataSlots: false,
   respondentReport: false,
+  introScreen: false,
 };
 
 function renderNav(pathname: string, flags = allFlagsOn) {

@@ -45,9 +45,15 @@ function formatDate(iso: string): string {
 export interface CohortsTableProps {
   demoClientId: string;
   cohorts: CohortView[];
+  /** Platform intro-screen sub-flag — threaded to the new-cohort form's intro override. */
+  introScreenEnabled?: boolean;
 }
 
-export function CohortsTable({ demoClientId, cohorts }: CohortsTableProps) {
+export function CohortsTable({
+  demoClientId,
+  cohorts,
+  introScreenEnabled = false,
+}: CohortsTableProps) {
   const router = useRouter();
   const [query, setQuery] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -93,6 +99,7 @@ export function CohortsTable({ demoClientId, cohorts }: CohortsTableProps) {
           </DialogHeader>
           <CohortForm
             demoClientId={demoClientId}
+            introScreenEnabled={introScreenEnabled}
             onSuccess={() => setDialogOpen(false)}
             onCancel={() => setDialogOpen(false)}
           />

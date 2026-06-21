@@ -26,8 +26,9 @@ import { Loader2 } from 'lucide-react';
 
 import { API } from '@/lib/api/endpoints';
 import { Button } from '@/components/ui/button';
-import { SessionWorkspace } from '@/components/app/questionnaire/session-workspace';
+import { SessionEntry } from '@/components/app/questionnaire/intro/session-entry';
 import { buildWelcomeTurns } from '@/lib/app/questionnaire/chat/greeting';
+import type { ResolvedSessionIntro } from '@/lib/app/questionnaire/intro/resolve';
 import type { PresentationMode, ReasoningPlacement } from '@/lib/app/questionnaire/types';
 import { ANSWER_PROVENANCES } from '@/lib/app/questionnaire/types';
 import type { QuestionnaireTurn } from '@/lib/app/questionnaire/chat/types';
@@ -74,6 +75,12 @@ interface AnonymousSessionBootProps {
   reasoningDwellMs?: number;
   /** "Animated" placement: extra dwell (ms) per reasoning step beyond two. */
   reasoningPerItemMs?: number;
+  /**
+   * Respondent intro / splash platform flag (resolved server-side). When on, a FRESH session fetches
+   * its resolved intro on boot and gates the workspace behind the splash; the per-version
+   * `intro.enabled` inside the payload is the second gate. Off → no fetch, straight into the surface.
+   */
+  introScreenEnabled?: boolean;
 }
 
 interface StoredAnonSession {
@@ -104,6 +111,8 @@ type BootState =
       initialInspectorTurns: TurnInspectorData[];
       /** Open proactively only on a fresh session (no prior turns to replay). */
       autoStart: boolean;
+      /** Resolved intro for the splash gate; null when off, on resume, or when the fetch fails soft. */
+      intro: ResolvedSessionIntro | null;
     }
   | { phase: 'error'; message: string };
 
@@ -173,6 +182,46 @@ async function fetchTranscript(
   }
 }
 
+/** Resolved-intro response shape — validated at the fetch boundary (no `as` on the wire). */
+const introSectionSchema = z.object({ heading: z.string(), body: z.string() });
+const resolvedIntroSchema = z.object({
+  enabled: z.boolean(),
+  questionnaireTitle: z.string(),
+  background: z.string(),
+  copy: z.object({
+    howItWorks: introSectionSchema,
+    whatYouGet: introSectionSchema.nullable(),
+    goodToKnow: z.array(z.string()),
+    buttonLabel: z.string(),
+  }),
+});
+const introResponseSchema = z.object({
+  success: z.boolean(),
+  data: z.object({ intro: resolvedIntroSchema.nullable() }).optional(),
+});
+
+/**
+ * Fetch the session's resolved intro (token-authed). Fails soft to `null` on any error — a splash
+ * read must never block the surface from opening; the worst case is no intro screen, exactly the
+ * pre-feature behaviour. Only called for a fresh session when the platform flag is on.
+ */
+async function fetchIntro(
+  sessionId: string,
+  accessToken: string
+): Promise<ResolvedSessionIntro | null> {
+  try {
+    const res = await fetch(API.APP.QUESTIONNAIRE_SESSIONS.intro(sessionId), {
+      headers: { 'X-Session-Token': accessToken },
+    });
+    if (!res.ok) return null;
+    const parsed = introResponseSchema.safeParse(await res.json());
+    if (!parsed.success) return null;
+    return parsed.data.data?.intro ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function storageKey(versionId: string, preview: boolean, inviteToken?: string): string {
   // Invite sessions key on the token (truncated) — a shared device must not cross two invitees.
   if (inviteToken) return `qn.invite.${inviteToken.slice(0, 16)}`;
@@ -214,6 +263,7 @@ export function AnonymousSessionBoot({
   reasoningPlacement,
   reasoningDwellMs,
   reasoningPerItemMs,
+  introScreenEnabled = false,
 }: AnonymousSessionBootProps) {
   const [state, setState] = useState<BootState>({ phase: 'creating' });
   // Dedup the create across React 19 StrictMode's double-invoke (which would otherwise mint two
@@ -292,10 +342,15 @@ export function AnonymousSessionBoot({
       // so unlike the authenticated page this can't SSR-seed — hence the on-boot fetch.)
       const { turns, inspectorTurns } = await fetchTranscript(sessionId, accessToken);
       const resumed = turns.length > 0;
+      // Splash only fronts a FRESH session (resume drops straight back in), so the intro fetch is
+      // skipped on resume and when the platform flag is off — no wasted round-trip.
+      const intro =
+        introScreenEnabled && !resumed ? await fetchIntro(sessionId, accessToken) : null;
       setState({
         phase: 'ready',
         sessionId,
         accessToken,
+        intro,
         initialTurns: resumed
           ? turns
           : buildWelcomeTurns({ welcomeCopy, voiceInputEnabled, anonymous }),
@@ -307,7 +362,15 @@ export function AnonymousSessionBoot({
         autoStart: !resumed,
       });
     })();
-  }, [versionId, preview, inviteToken, welcomeCopy, voiceInputEnabled, anonymous]);
+  }, [
+    versionId,
+    preview,
+    inviteToken,
+    welcomeCopy,
+    voiceInputEnabled,
+    anonymous,
+    introScreenEnabled,
+  ]);
 
   if (state.phase === 'creating') {
     return (
@@ -333,7 +396,8 @@ export function AnonymousSessionBoot({
   }
 
   return (
-    <SessionWorkspace
+    <SessionEntry
+      intro={state.intro}
       sessionId={state.sessionId}
       accessToken={state.accessToken}
       // A fresh session seeds the welcome turn and auto-opens the first question; a resumed one

@@ -25,6 +25,7 @@ import {
   APP_QUESTIONNAIRES_TONE_FLAG,
   APP_QUESTIONNAIRES_RESPONDENT_REPORT_FLAG,
   APP_QUESTIONNAIRES_COHORTS_FLAG,
+  APP_QUESTIONNAIRES_INTRO_SCREEN_FLAG,
   APP_QUESTIONNAIRES_FLAG,
 } from '@/lib/app/questionnaire/constants';
 import { isFeatureEnabled } from '@/lib/feature-flags';
@@ -54,6 +55,7 @@ export {
   APP_QUESTIONNAIRES_REASONING_STREAM_FLAG,
   APP_QUESTIONNAIRES_RESPONDENT_REPORT_FLAG,
   APP_QUESTIONNAIRES_COHORTS_FLAG,
+  APP_QUESTIONNAIRES_INTRO_SCREEN_FLAG,
 };
 
 /**
@@ -656,6 +658,51 @@ export async function isCohortsEnabled(): Promise<boolean> {
     isFeatureEnabled(APP_QUESTIONNAIRES_COHORTS_FLAG),
   ]);
   return app && cohorts;
+}
+
+/**
+ * Whether the **respondent intro / splash screen** may be shown. Requires BOTH the master app flag
+ * and the intro sub-flag — a master-only child (like cohorts/data-slots), NOT live-dependent: the
+ * admin authors the intro before any session exists, and the screen renders ahead of the turn loop.
+ * The per-version `config.intro.enabled` toggle is the second gate (the respondent surface ANDs
+ * them), so the splash stays off until the flag AND the version opt-in are both on.
+ *
+ * Server-only (resolves both flags from the database).
+ */
+export async function isIntroScreenEnabled(): Promise<boolean> {
+  const [app, intro] = await Promise.all([
+    isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_INTRO_SCREEN_FLAG),
+  ]);
+  return app && intro;
+}
+
+/**
+ * Flag gate for the intro-background authoring routes (parse / generate / refine) — 404 when either
+ * the master flag or the intro-screen sub-flag is off, `null` when both are on. The
+ * {@link ensureQuestionnairesEnabled} analogue for the intro authoring surface; call it first.
+ *
+ * Server-only (resolves both flags from the database).
+ */
+export async function ensureIntroScreenEnabled(): Promise<Response | null> {
+  if (await isIntroScreenEnabled()) {
+    return null;
+  }
+  return errorResponse('Not found', { code: 'NOT_FOUND', status: 404 });
+}
+
+/**
+ * Wrap an intro-background authoring route handler so the intro gate runs **before** anything else
+ * (auth, handler work). The {@link withQuestionnairesEnabled} analogue for the intro authoring surface.
+ */
+export function withIntroScreenEnabled<C>(
+  handler: (request: NextRequest, context: C) => Promise<Response>
+): (request: NextRequest, context: C) => Promise<Response> {
+  return async (request, context) => {
+    const blocked = await ensureIntroScreenEnabled();
+    if (blocked) return blocked;
+    return handler(request, context);
+  };
 }
 
 /**

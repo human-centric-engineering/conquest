@@ -251,6 +251,13 @@ model AppQuestionnaireConfig {
   // (lib/.../report/settings.ts). (types.ts)
   respondentReport Json @default("{}")
 
+  // Respondent intro / splash screen (IntroSettings — types.ts): an admin opt-in screen shown before
+  // the questionnaire starts (enabled toggle, admin-authored "about this questionnaire" background
+  // markdown, proceed-button label). Off by default; only takes effect when the platform flag
+  // APP_QUESTIONNAIRES_INTRO_SCREEN_ENABLED is on. Background optionally replaced per cohort
+  // (AppCohort.introBackground). Narrowed by narrowIntroSettings (lib/.../intro/settings.ts).
+  intro Json @default("{}")
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -498,13 +505,18 @@ model AppDemoClient {
 /// identity↔answer edge, so it stays fully modelled. `createdBy` is the admin who
 /// created it — plain String, no @relation (UG-1 house style, as elsewhere here).
 model AppCohort {
-  id           String   @id @default(cuid())
-  demoClientId String
-  name         String // required display name ("Q1 Leadership Team")
-  description  String? // optional internal note
-  createdBy    String? // admin User.id; plain String, no FK (UG-1)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id              String   @id @default(cuid())
+  demoClientId    String
+  name            String // required display name ("Q1 Leadership Team")
+  description     String? // optional internal note
+  createdBy       String? // admin User.id; plain String, no FK (UG-1)
+  // Respondent intro / splash override: when set (non-empty), REPLACES the questionnaire-level
+  // background ("about this questionnaire") for this cohort's respondents; null/empty inherits the
+  // version text. Resolved by resolveSessionIntro (lib/.../intro/resolve.ts). Respondent-facing, so
+  // it is NOT a private admin note like `description`.
+  introBackground String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   demoClient AppDemoClient           @relation(fields: [demoClientId], references: [id], onDelete: Cascade)
   members    AppCohortMember[]

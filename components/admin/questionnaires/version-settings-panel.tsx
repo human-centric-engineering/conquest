@@ -30,12 +30,15 @@ export interface VersionSettingsPanelProps {
   graph: VersionGraphView;
   /** Adaptive selection sub-flag state, threaded to the strategy picker. */
   adaptiveEnabled: boolean;
+  /** Respondent intro / splash sub-flag state, threaded to the Intro card. */
+  introScreenEnabled: boolean;
 }
 
 export function VersionSettingsPanel({
   questionnaireId,
   graph,
   adaptiveEnabled,
+  introScreenEnabled,
 }: VersionSettingsPanelProps) {
   const router = useRouter();
   const versionId = graph.id;
@@ -102,6 +105,7 @@ export function VersionSettingsPanel({
           config={graph.config}
           questionCount={questionCount}
           adaptiveEnabled={adaptiveEnabled}
+          introScreenEnabled={introScreenEnabled}
           run={run}
           busy={busy}
         />

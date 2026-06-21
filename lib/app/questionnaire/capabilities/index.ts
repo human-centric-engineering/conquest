@@ -79,3 +79,9 @@ export {
   type RefineQuestionnaireStructureArgs,
   type RefineQuestionnaireStructureData,
 } from '@/lib/app/questionnaire/capabilities/refine-questionnaire-structure';
+
+export {
+  AppAuthorIntroBackgroundCapability,
+  type AuthorIntroBackgroundArgs,
+  type AuthorIntroBackgroundData,
+} from '@/lib/app/questionnaire/capabilities/author-intro-background';

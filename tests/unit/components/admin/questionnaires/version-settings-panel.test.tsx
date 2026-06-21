@@ -79,7 +79,12 @@ beforeEach(() => {
 describe('VersionSettingsPanel', () => {
   it('renders the config editor with the derived version id, question count, and adaptive flag', () => {
     render(
-      <VersionSettingsPanel questionnaireId="qn-1" graph={graph({ id: 'ver-9' })} adaptiveEnabled />
+      <VersionSettingsPanel
+        questionnaireId="qn-1"
+        graph={graph({ id: 'ver-9' })}
+        adaptiveEnabled
+        introScreenEnabled={false}
+      />
     );
     expect(screen.getByText('Configuration')).toBeInTheDocument();
     expect(screen.getByTestId('cfg')).toHaveAttribute('data-adaptive', 'true');
@@ -87,12 +92,26 @@ describe('VersionSettingsPanel', () => {
   });
 
   it('no longer renders the goal/audience editor (moved to the Structure tab)', () => {
-    render(<VersionSettingsPanel questionnaireId="qn-1" graph={graph()} adaptiveEnabled={false} />);
+    render(
+      <VersionSettingsPanel
+        questionnaireId="qn-1"
+        graph={graph()}
+        adaptiveEnabled={false}
+        introScreenEnabled={false}
+      />
+    );
     expect(screen.queryByText('Goal & audience')).not.toBeInTheDocument();
   });
 
   it('runs an edit through authoringMutate and refreshes', async () => {
-    render(<VersionSettingsPanel questionnaireId="qn-1" graph={graph()} adaptiveEnabled={false} />);
+    render(
+      <VersionSettingsPanel
+        questionnaireId="qn-1"
+        graph={graph()}
+        adaptiveEnabled={false}
+        introScreenEnabled={false}
+      />
+    );
     fireEvent.click(screen.getByTestId('cfg'));
     await waitFor(() =>
       expect(mutateMock.authoringMutate).toHaveBeenCalledWith('PATCH', '/cfg', {})
@@ -106,7 +125,14 @@ describe('VersionSettingsPanel', () => {
       data: {},
       meta: { forked: true, versionId: 'ver-2', versionNumber: 2 },
     });
-    render(<VersionSettingsPanel questionnaireId="qn-1" graph={graph()} adaptiveEnabled={false} />);
+    render(
+      <VersionSettingsPanel
+        questionnaireId="qn-1"
+        graph={graph()}
+        adaptiveEnabled={false}
+        introScreenEnabled={false}
+      />
+    );
     fireEvent.click(screen.getByTestId('cfg'));
     await waitFor(() =>
       expect(router.replace).toHaveBeenCalledWith('/admin/questionnaires/qn-1/v/ver-2/settings')
@@ -116,7 +142,14 @@ describe('VersionSettingsPanel', () => {
 
   it('surfaces an error when the mutation fails', async () => {
     mutateMock.authoringMutate.mockRejectedValue(new Error('nope'));
-    render(<VersionSettingsPanel questionnaireId="qn-1" graph={graph()} adaptiveEnabled={false} />);
+    render(
+      <VersionSettingsPanel
+        questionnaireId="qn-1"
+        graph={graph()}
+        adaptiveEnabled={false}
+        introScreenEnabled={false}
+      />
+    );
     fireEvent.click(screen.getByTestId('cfg'));
     await waitFor(() => expect(screen.getByText('nope')).toBeInTheDocument());
   });

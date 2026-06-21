@@ -39,7 +39,7 @@ const handleUpdate = withAdminAuth<{ id: string }>(async (request, session, { pa
 
   const before = await prisma.appCohort.findUnique({
     where: { id },
-    select: { id: true, name: true, description: true },
+    select: { id: true, name: true, description: true, introBackground: true },
   });
   if (!before) throw new NotFoundError('Cohort not found');
 
@@ -50,8 +50,9 @@ const handleUpdate = withAdminAuth<{ id: string }>(async (request, session, { pa
     data: {
       ...(body.name !== undefined ? { name: body.name } : {}),
       ...(body.description !== undefined ? { description: body.description } : {}),
+      ...(body.introBackground !== undefined ? { introBackground: body.introBackground } : {}),
     },
-    select: { id: true, name: true, description: true },
+    select: { id: true, name: true, description: true, introBackground: true },
   });
 
   logAdminAction({

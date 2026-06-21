@@ -18,7 +18,7 @@ import { CqStatTiles, type CqStat } from '@/components/admin/cq-stat-tiles';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
-import { isCohortsEnabled } from '@/lib/app/questionnaire/feature-flag';
+import { isCohortsEnabled, isIntroScreenEnabled } from '@/lib/app/questionnaire/feature-flag';
 import type { CohortView } from '@/lib/app/questionnaire/rounds';
 
 export const metadata: Metadata = {
@@ -53,7 +53,7 @@ export default async function DemoClientCohortsTab({ params }: PageProps) {
   if (!(await isCohortsEnabled())) notFound();
 
   const { id } = await params;
-  const cohorts = await getCohorts(id);
+  const [cohorts, introScreenEnabled] = await Promise.all([getCohorts(id), isIntroScreenEnabled()]);
 
   const totalStarted = cohorts.reduce((sum, c) => sum + c.stats.sessionsStarted, 0);
   const statTiles: CqStat[] = [
@@ -79,7 +79,7 @@ export default async function DemoClientCohortsTab({ params }: PageProps) {
 
       <CqStatTiles stats={statTiles} />
 
-      <CohortsTable demoClientId={id} cohorts={cohorts} />
+      <CohortsTable demoClientId={id} cohorts={cohorts} introScreenEnabled={introScreenEnabled} />
     </div>
   );
 }

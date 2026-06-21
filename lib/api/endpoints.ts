@@ -359,6 +359,10 @@ export const API = {
       /** Conversational refine of a draft version's structure (POST JSON). */
       composeRefine: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/compose/refine`,
+      /** Extract plain text from an uploaded document for the intro background (POST multipart). */
+      introBackgroundParse: '/api/v1/app/questionnaires/intro-background/parse',
+      /** Generate / refine the intro background markdown with AI (POST JSON). */
+      introBackgroundAuthor: '/api/v1/app/questionnaires/intro-background/author',
       /** Questionnaire detail (GET); rename or demo-client attribution (PATCH). */
       byId: (id: string): string => `/api/v1/app/questionnaires/${id}`,
       /** One version's full section/question graph (GET); version-meta edit (PATCH). */
@@ -533,6 +537,8 @@ export const API = {
         `/api/v1/app/questionnaire-sessions/${id}/turns/${ordinal}/evaluate-saved`,
       /** Replayed transcript — prior turns + their persisted side-band notices (GET — F7.1 resume). */
       transcript: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/transcript`,
+      /** Resolved respondent intro / splash — adaptive copy + background (GET — intro screen). */
+      intro: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/intro`,
       /** Answer-slot panel state — live read for the respondent panel (GET) (F7.2). */
       answers: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/answers`,
       /** Session lifecycle/status — completion-offer + cost tier + anon (GET) (F7.3). */
