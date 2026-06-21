@@ -34,7 +34,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { CohortEmptyState } from '@/components/admin/cohorts/cohort-ui';
+import { CohortEmptyState, CompletionBar } from '@/components/admin/cohorts/cohort-ui';
 import type {
   CohortSubgroupView,
   RoundDetail,
@@ -309,6 +309,7 @@ export function RoundPhasesPanel({
                 <TableHead>Subgroup</TableHead>
                 <TableHead>Window</TableHead>
                 <TableHead>End mode</TableHead>
+                <TableHead>Completion</TableHead>
                 <TableHead className="w-px" />
               </TableRow>
             </TableHeader>
@@ -363,6 +364,14 @@ export function RoundPhasesPanel({
                             </SelectContent>
                           </Select>
                         </TableCell>
+                        <TableCell>
+                          <CompletionBar
+                            started={phase.stats.sessionsStarted}
+                            completed={phase.stats.sessionsCompleted}
+                            rate={phase.stats.completionRate}
+                            variant="full"
+                          />
+                        </TableCell>
                         <TableCell className="text-right whitespace-nowrap">
                           <Button
                             variant="ghost"
@@ -395,6 +404,14 @@ export function RoundPhasesPanel({
                           <span className="text-muted-foreground text-xs">
                             {phase.endMode === 'hard' ? 'Hard cutoff' : 'Relaxed'}
                           </span>
+                        </TableCell>
+                        <TableCell>
+                          <CompletionBar
+                            started={phase.stats.sessionsStarted}
+                            completed={phase.stats.sessionsCompleted}
+                            rate={phase.stats.completionRate}
+                            variant="full"
+                          />
                         </TableCell>
                         <TableCell className="text-right whitespace-nowrap">
                           <Button

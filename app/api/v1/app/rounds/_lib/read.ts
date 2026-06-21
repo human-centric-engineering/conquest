@@ -23,6 +23,7 @@ import {
 } from '@/lib/app/questionnaire/rounds/types';
 import {
   sessionCountsByRound,
+  sessionCountsBySubgroup,
   toCompletionStats,
   type RoundSessionCounts,
 } from '@/app/api/v1/app/rounds/_lib/stats';
@@ -189,8 +190,11 @@ const ROUND_PHASE_SELECT = {
 
 type RoundPhaseRow = Prisma.AppRoundPhaseGetPayload<{ select: typeof ROUND_PHASE_SELECT }>;
 
-/** Project a round's phases (already ordered) to the display view. */
-function toRoundPhases(phases: RoundPhaseRow[]): RoundPhaseView[] {
+/** Project a round's phases (already ordered) to the display view, with per-subgroup completion. */
+function toRoundPhases(
+  phases: RoundPhaseRow[],
+  statsBySubgroup: Map<string, RoundSessionCounts>
+): RoundPhaseView[] {
   return phases.map((p) => ({
     id: p.id,
     roundId: p.roundId,
@@ -201,6 +205,7 @@ function toRoundPhases(phases: RoundPhaseRow[]): RoundPhaseView[] {
     endMode: narrowToEnum(p.endMode, ROUND_PHASE_END_MODES, 'hard'),
     ordinal: p.ordinal,
     memberCount: p.subgroup._count.members,
+    stats: toCompletionStats(statsBySubgroup.get(p.subgroupId)),
     createdAt: p.createdAt.toISOString(),
     updatedAt: p.updatedAt.toISOString(),
   }));
@@ -229,14 +234,17 @@ export async function getRoundDetail(id: string): Promise<RoundDetail | null> {
   });
   if (!row) return null;
 
-  const [members, perRound] = await Promise.all([
+  const [members, perRound, perSubgroup] = await Promise.all([
     activeMemberCounts([row.cohortId]),
     sessionCountsByRound([row.id]),
+    row.phases.length > 0
+      ? sessionCountsBySubgroup(row.id)
+      : Promise.resolve(new Map<string, RoundSessionCounts>()),
   ]);
 
   return {
     ...toRoundView(row, members.get(row.cohortId) ?? 0, perRound.get(row.id)),
     questionnaires: toRoundQuestionnaires(row.items),
-    phases: toRoundPhases(row.phases),
+    phases: toRoundPhases(row.phases, perSubgroup),
   };
 }

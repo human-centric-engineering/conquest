@@ -12,7 +12,11 @@ vi.mock('@/lib/db/client', () => ({
   prisma: { appQuestionnaireSession: { groupBy: vi.fn() } },
 }));
 
-import { sessionCountsByRound, toCompletionStats } from '@/app/api/v1/app/rounds/_lib/stats';
+import {
+  sessionCountsByRound,
+  sessionCountsBySubgroup,
+  toCompletionStats,
+} from '@/app/api/v1/app/rounds/_lib/stats';
 import { prisma } from '@/lib/db/client';
 
 type Mock = ReturnType<typeof vi.fn>;
@@ -53,6 +57,31 @@ describe('sessionCountsByRound', () => {
     groupBy.mockResolvedValue([{ roundId: null, status: 'completed', _count: { _all: 9 } }]);
     const map = await sessionCountsByRound(['r1']);
     expect(map.size).toBe(0);
+  });
+});
+
+describe('sessionCountsBySubgroup', () => {
+  it('folds status groups into per-subgroup started/completed, skipping null subgroups', async () => {
+    groupBy.mockResolvedValue([
+      { cohortSubgroupId: 'sg1', status: 'active', _count: { _all: 2 } },
+      { cohortSubgroupId: 'sg1', status: 'completed', _count: { _all: 3 } },
+      { cohortSubgroupId: null, status: 'completed', _count: { _all: 5 } }, // round-window remainder
+    ]);
+    const map = await sessionCountsBySubgroup('r1');
+    expect(map.get('sg1')).toEqual({ started: 5, completed: 3 });
+    expect(map.has('null')).toBe(false);
+    expect(map.size).toBe(1);
+  });
+
+  it('scopes the query to the round and excludes preview sessions', async () => {
+    groupBy.mockResolvedValue([]);
+    await sessionCountsBySubgroup('r1');
+    expect(groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        by: ['cohortSubgroupId', 'status'],
+        where: expect.objectContaining({ roundId: 'r1', isPreview: false }),
+      })
+    );
   });
 });
 

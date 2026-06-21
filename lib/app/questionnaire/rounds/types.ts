@@ -200,6 +200,8 @@ export interface RoundPhaseView {
   ordinal: number;
   /** Active members of the subgroup (the population this phase's window applies to). */
   memberCount: number;
+  /** Completion within this phase (sessions whose snapshot subgroup matches), for the admin view. */
+  stats: RoundCompletionStats;
   createdAt: string;
   updatedAt: string;
 }
