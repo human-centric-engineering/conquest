@@ -92,7 +92,7 @@ describe('GET /api/v1/app/rounds', () => {
     });
     const body = await res.json();
     expect(body.success).toBe(true);
-    expect(body.data).toHaveLength(1);
+    expect(body.data).toEqual([{ id: 'r-1', name: 'July round' }]);
   });
 });
 
@@ -187,6 +187,7 @@ describe('PATCH /api/v1/app/rounds/:id — context + learning toggles', () => {
       ctx
     );
     expect(res.status).toBe(200);
+    expect((await res.json()).success).toBe(true);
     const data = prismaMock.appQuestionnaireRound.update.mock.calls[0][0].data;
     expect(data.contextEnabled).toBe(true);
     expect(data.learningEnabled).toBe(true);

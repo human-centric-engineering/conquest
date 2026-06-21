@@ -87,9 +87,11 @@ that?") and, under the `adaptive` strategy, probing divergent topics harder.
   preferred, else question answers), keeps only slots with ≥ `minRespondents` distinct respondents,
   and runs **one** composer-agent LLM call to produce a generalised `insight` + `divergence` per slot.
   Writes wholesale in a transaction (delete + createMany). Fully **fail-soft**: a transient LLM error
-  leaves the existing digest untouched (never wipes on error). Triggered best-effort from the submit
-  route after a session completes — so the next respondent sees the just-finished one folded in. The
-  current respondent is excluded structurally (their session is still `active`, not in the corpus).
+  leaves the existing digest untouched (never wipes on error). Triggered **fire-and-forget** from the
+  submit route after a session completes (the LLM call must not block the respondent's submit
+  confirmation) — so the next respondent sees the just-finished one folded in; a missed rebuild
+  self-heals on the next completion or a manual admin Rebuild. The current respondent is excluded
+  structurally (their session is still `active`, not in the corpus).
 - `loadRoundPeerDigest(roundId, versionId)` — read for injection; `null` when the round toggle is off.
 
 **Injection.** The live messages route loads the digest once per turn and, at phrasing time, passes

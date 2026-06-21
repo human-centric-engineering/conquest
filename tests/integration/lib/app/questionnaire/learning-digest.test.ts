@@ -120,7 +120,9 @@ describe('refreshRoundLearningDigest — build', () => {
     const res = await refreshRoundLearningDigest('r1', 'v1');
     expect(res.built).toBe(true);
     expect(res.slotCount).toBe(1);
-    expect(prismaMock.$transaction).toHaveBeenCalled();
+    // Atomic replace: deleteMany + createMany are issued as the two ops of ONE transaction.
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+    expect(prismaMock.$transaction.mock.calls[0][0]).toHaveLength(2);
     const rows = prismaMock.appRoundLearningDigest.createMany.mock.calls[0][0].data;
     expect(rows[0]).toMatchObject({
       roundId: 'r1',
@@ -141,6 +143,32 @@ describe('refreshRoundLearningDigest — build', () => {
     const res = await refreshRoundLearningDigest('r1', 'v1');
     expect(res.reason).toBe('no_qualifying_slots');
     expect(runStructuredCompletion).not.toHaveBeenCalled();
+  });
+
+  it('uses the value fallback when a fill has no paraphrase', async () => {
+    // paraphrase null/empty → valueToSample(value); the slot still qualifies and builds.
+    prismaMock.appDataSlotFill.findMany.mockResolvedValue([
+      { dataSlotId: 'd1', paraphrase: null, value: 'heavy load' },
+      { dataSlotId: 'd1', paraphrase: '', value: 'manageable' },
+      { dataSlotId: 'd1', paraphrase: '  ', value: 'too much' },
+    ]);
+    const res = await refreshRoundLearningDigest('r1', 'v1');
+    expect(res.built).toBe(true);
+    // The samples handed to the model came from the value fallback, not paraphrase.
+    const prompt = (runStructuredCompletion as Mock).mock.calls[0][0].messages[0].content as string;
+    expect(prompt).toContain('heavy load');
+  });
+
+  it('returns no_themes when the model only returns keys for slots we never offered', async () => {
+    // generaliseThemes filters out hallucinated keys → empty themes → no_themes (digest cleared).
+    (runStructuredCompletion as Mock).mockResolvedValue({
+      value: { themes: [{ key: 'HALLUCINATED', insight: 'made up', divergence: 0.5 }] },
+      tokenUsage: { input: 1, output: 1 },
+    });
+    const res = await refreshRoundLearningDigest('r1', 'v1');
+    expect(res.reason).toBe('no_themes');
+    expect(prismaMock.appRoundLearningDigest.deleteMany).toHaveBeenCalled();
+    expect(prismaMock.appRoundLearningDigest.createMany).not.toHaveBeenCalled();
   });
 
   it('falls back to question answers when the version has no data slots', async () => {
@@ -167,6 +195,37 @@ describe('refreshRoundLearningDigest — build', () => {
     expect(prismaMock.$transaction).not.toHaveBeenCalled();
     // Must NOT have cleared an existing (possibly-valid) digest on a transient error.
     expect(prismaMock.appRoundLearningDigest.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('treats a missing composer agent as generalisation_failed (no wipe)', async () => {
+    prismaMock.aiAgent.findUnique.mockResolvedValue(null);
+    const res = await refreshRoundLearningDigest('r1', 'v1');
+    expect(res.reason).toBe('generalisation_failed');
+    expect(runStructuredCompletion).not.toHaveBeenCalled();
+    expect(prismaMock.appRoundLearningDigest.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('treats an unresolvable provider as generalisation_failed (no wipe)', async () => {
+    (resolveAgentProviderAndModel as Mock).mockRejectedValue(new Error('no provider'));
+    const res = await refreshRoundLearningDigest('r1', 'v1');
+    expect(res.reason).toBe('generalisation_failed');
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('clears + returns no_themes when the model returns an empty theme set', async () => {
+    (runStructuredCompletion as Mock).mockResolvedValue({
+      value: { themes: [] },
+      tokenUsage: { input: 1, output: 1 },
+    });
+    const res = await refreshRoundLearningDigest('r1', 'v1');
+    expect(res.reason).toBe('no_themes');
+    expect(prismaMock.appRoundLearningDigest.deleteMany).toHaveBeenCalled();
+  });
+
+  it('returns early (no aggregation) when the round is gone', async () => {
+    prismaMock.appQuestionnaireRound.findUnique.mockResolvedValue(null);
+    const res = await refreshRoundLearningDigest('r1', 'v1');
+    expect(res).toEqual({ built: false, reason: 'learning_disabled' });
   });
 });
 

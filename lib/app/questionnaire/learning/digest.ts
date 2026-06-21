@@ -304,30 +304,39 @@ export async function refreshRoundLearningDigest(
       return { built: false, reason: 'no_qualifying_slots' };
     }
 
-    const themes = await generaliseThemes(slots.slice(0, MAX_SLOTS));
+    // Only the first MAX_SLOTS are sent to the model; key/count lookups below must use the SAME set
+    // so a theme can never resolve a kind/count from a slot the model never saw.
+    const sent = slots.slice(0, MAX_SLOTS);
+    const themes = await generaliseThemes(sent);
     if (themes === null) return { built: false, reason: 'generalisation_failed' };
     if (themes.length === 0) {
       await clearDigest(roundId, versionId);
       return { built: false, reason: 'no_themes' };
     }
 
-    const kindByKey = new Map(slots.map((s) => [s.key, s.kind]));
+    const kindByKey = new Map(sent.map((s) => [s.key, s.kind]));
     const rows = themes
       .map((t) => {
         const kind = kindByKey.get(t.key);
-        if (!kind) return null;
+        const respondentCount = kind ? respondentCountByKey.get(`${kind}:${t.key}`) : undefined;
+        // Skip a theme whose key/count we can't resolve — never fabricate a count from the corpus size.
+        if (!kind || respondentCount === undefined) return null;
         return {
           roundId,
           versionId,
           slotKind: kind,
           slotKey: t.key,
           insight: t.insight,
-          respondentCount: respondentCountByKey.get(`${kind}:${t.key}`) ?? sessions.length,
+          respondentCount,
           divergence: t.divergence,
           sessionsCovered: sessions.length,
         };
       })
       .filter((r): r is NonNullable<typeof r> => r !== null);
+    if (rows.length === 0) {
+      await clearDigest(roundId, versionId);
+      return { built: false, reason: 'no_themes' };
+    }
 
     // Replace wholesale so a shrunk corpus (e.g. after erasure) can't leave stale rows.
     await prisma.$transaction([

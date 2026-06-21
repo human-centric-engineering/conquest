@@ -91,7 +91,8 @@ describe('GET /api/v1/app/rounds/:id/context', () => {
     const res = await listGET(getReq(), collCtx);
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.data.entries).toHaveLength(1);
+    expect(body.success).toBe(true);
+    expect(body.data.entries).toEqual([{ id: 'e-1', title: 'Fact' }]);
   });
 });
 
@@ -103,6 +104,8 @@ describe('POST /api/v1/app/rounds/:id/context', () => {
     const res = await createPOST(jsonReq(valid), collCtx);
     expect(res.status).toBe(201);
     expect(prismaMock.appRoundContextEntry.create).toHaveBeenCalled();
+    const body = await res.json();
+    expect(body.success).toBe(true);
   });
 
   it('400s when the version is not bundled in the round', async () => {
@@ -153,6 +156,7 @@ describe('PATCH /api/v1/app/rounds/:id/context/:entryId', () => {
     const res = await updatePATCH(jsonReq({ title: 'New' }), entryCtx);
     expect(res.status).toBe(200);
     expect(prismaMock.appRoundContextEntry.update).toHaveBeenCalled();
+    expect((await res.json()).success).toBe(true);
   });
 
   it('400s a re-attribution to a question outside the version', async () => {
@@ -178,6 +182,7 @@ describe('DELETE /api/v1/app/rounds/:id/context/:entryId', () => {
     const res = await deleteDELETE(getReq(`${BASE}/e-1`), entryCtx);
     expect(res.status).toBe(200);
     expect(prismaMock.appRoundContextEntry.delete).toHaveBeenCalledWith({ where: { id: 'e-1' } });
+    expect(await res.json()).toEqual({ success: true, data: { id: 'e-1', deleted: true } });
   });
 
   it('404s an unknown entry', async () => {

@@ -13,6 +13,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db/client';
 import { narrowToEnum } from '@/lib/app/questionnaire/types';
 import { ROUND_CONTEXT_SOURCES } from '@/lib/app/questionnaire/rounds/schemas';
+import { resolveItemVersions } from '@/app/api/v1/app/rounds/_lib/versions';
 import type {
   BriefableQuestionnaire,
   BriefableQuestion,
@@ -138,38 +139,6 @@ export async function assertSlotInVersion(
     select: { id: true },
   });
   return slot !== null;
-}
-
-/**
- * Resolve each round item to its effective version — the pinned `versionId`, else the questionnaire's
- * current launched version (highest `versionNumber` with `status = launched`). One launched sweep over
- * the unpinned questionnaires (mirrors the invites lib's `resolveItemVersions`). Items with no
- * resolvable version are dropped by the caller — there's nothing to brief against yet.
- */
-async function resolveItemVersions(
-  items: { questionnaireId: string; versionId: string | null }[]
-): Promise<Map<string, string | null>> {
-  const resolved = new Map<string, string | null>();
-  const unpinned = items.filter((i) => !i.versionId).map((i) => i.questionnaireId);
-  let launchedByQuestionnaire = new Map<string, string>();
-  if (unpinned.length > 0) {
-    const launched = await prisma.appQuestionnaireVersion.findMany({
-      where: { questionnaireId: { in: unpinned }, status: 'launched' },
-      orderBy: { versionNumber: 'desc' },
-      select: { id: true, questionnaireId: true },
-    });
-    launchedByQuestionnaire = launched.reduce((map, v) => {
-      if (!map.has(v.questionnaireId)) map.set(v.questionnaireId, v.id);
-      return map;
-    }, new Map<string, string>());
-  }
-  for (const item of items) {
-    resolved.set(
-      item.questionnaireId,
-      item.versionId ?? launchedByQuestionnaire.get(item.questionnaireId) ?? null
-    );
-  }
-  return resolved;
 }
 
 /**

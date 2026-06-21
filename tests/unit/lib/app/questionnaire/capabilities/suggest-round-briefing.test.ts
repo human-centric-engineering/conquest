@@ -122,6 +122,29 @@ describe('execute', () => {
     expect(system).toMatch(/No source material was supplied/i);
   });
 
+  it('grounds the prompt in supplied source material when sourceText is present', async () => {
+    const cap = new AppSuggestRoundBriefingCapability();
+    await cap.execute({ ...ARGS, sourceText: 'Revenue: £4m, headcount: 32' }, CONTEXT);
+    const system = (runStructuredCompletion as Mock).mock.calls[0][0].messages[0].content as string;
+    expect(system).toMatch(/Base the notes on the supplied source material/i);
+    expect(system).not.toMatch(/No source material was supplied/i);
+    expect(system).toContain('Revenue: £4m, headcount: 32');
+  });
+
+  it('returns no_provider_configured when the agent binding is a non-record (empty binding)', async () => {
+    // Exercises readComposerAgentBinding's non-record fallback: a null composerAgent yields an empty
+    // binding, which resolveAgentProviderAndModel then rejects — surfaced as no_provider_configured.
+    (resolveAgentProviderAndModel as Mock).mockRejectedValue(new Error('no provider slug'));
+    const cap = new AppSuggestRoundBriefingCapability();
+    const result = await cap.execute(ARGS, {
+      userId: 'u1',
+      agentId: 'agent-1',
+      entityContext: { composerAgent: null },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('no_provider_configured');
+  });
+
   it('logs cost with the capability slug in metadata', async () => {
     const cap = new AppSuggestRoundBriefingCapability();
     await cap.execute(ARGS, CONTEXT);
@@ -169,5 +192,37 @@ describe('redactProvenance', () => {
     expect(safe.sourceText).not.toBe('Sensitive figures');
     const parsed = JSON.parse(resultPreview) as { data: { count: number } };
     expect(parsed.data.count).toBe(1);
+  });
+
+  it('serialises the full result as the preview on an error', () => {
+    const cap = new AppSuggestRoundBriefingCapability();
+    const { resultPreview } = cap.redactProvenance(ARGS, {
+      success: false,
+      error: { code: 'provider_unavailable', message: 'down' },
+    });
+    const parsed = JSON.parse(resultPreview) as { success: boolean };
+    expect(parsed.success).toBe(false);
+    expect(resultPreview).toContain('provider_unavailable');
+  });
+
+  it('truncates an over-long preview to 200 chars with an ellipsis', () => {
+    const cap = new AppSuggestRoundBriefingCapability();
+    const { resultPreview } = cap.redactProvenance(ARGS, {
+      success: false,
+      error: { code: 'suggest_failed', message: 'x'.repeat(500) },
+    });
+    expect(resultPreview.length).toBe(200);
+    expect(resultPreview.endsWith('…')).toBe(true);
+  });
+
+  it('omits goal/sourceText from safeArgs when they were not supplied', () => {
+    const cap = new AppSuggestRoundBriefingCapability();
+    const { args } = cap.redactProvenance(
+      { questions: ARGS.questions },
+      { success: true, data: { entries: [] } }
+    );
+    const safe = args as Record<string, unknown>;
+    expect(safe.goal).toBeUndefined();
+    expect(safe.sourceText).toBeUndefined();
   });
 });

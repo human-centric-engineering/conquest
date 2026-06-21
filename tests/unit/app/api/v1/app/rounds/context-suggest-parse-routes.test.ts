@@ -50,6 +50,7 @@ const { POST: parsePost } = (await import('@/app/api/v1/app/rounds/[id]/context/
 };
 
 import { loadComposerAgent } from '@/app/api/v1/app/questionnaires/_lib/compose-pipeline';
+import { composeLimiter, ingestLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
 import { parseDocument } from '@/lib/orchestration/knowledge/parsers';
 import { prisma } from '@/lib/db/client';
@@ -57,9 +58,11 @@ import {
   assertRoundBundlesVersion,
   loadVersionForSuggest,
 } from '@/app/api/v1/app/rounds/_lib/context';
+import { mockAdminUser } from '@/tests/helpers/auth';
 
 type Mock = ReturnType<typeof vi.fn>;
-const ADMIN = { user: { id: 'admin-1' } };
+// Full better-auth session shape (withAdminAuth is identity-mocked here, so we pass it directly).
+const ADMIN = mockAdminUser();
 const AGENT = { id: 'agent-1', provider: 'anthropic', model: 'claude', fallbackProviders: [] };
 const ctx = { params: Promise.resolve({ id: 'r-1' }) };
 
@@ -81,6 +84,10 @@ function uploadReq(file: File | null) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // clearAllMocks resets call history but NOT implementations set via mockReturnValue, so restore the
+  // limiters' default "allowed" each test (a prior rate-limit test would otherwise leak success:false).
+  (composeLimiter.check as Mock).mockReturnValue({ success: true });
+  (ingestLimiter.check as Mock).mockReturnValue({ success: true });
   (prisma.appQuestionnaireRound.findUnique as Mock).mockResolvedValue({ id: 'r-1' });
   (assertRoundBundlesVersion as Mock).mockResolvedValue(true);
   (loadVersionForSuggest as Mock).mockResolvedValue({
@@ -99,6 +106,7 @@ describe('POST …/context/suggest', () => {
     const res = await suggestPost(jsonReq({ versionId: 'v-1' }), ADMIN, ctx);
     expect(res.status).toBe(200);
     const body = await res.json();
+    expect(body.success).toBe(true);
     expect(body.data.entries).toEqual([{ questionSlotId: 'q1', title: 'T', content: 'C' }]);
   });
 
@@ -122,13 +130,39 @@ describe('POST …/context/suggest', () => {
     expect(res.status).toBe(400);
   });
 
-  it('maps a dispatch failure to an error status', async () => {
-    (capabilityDispatcher.dispatch as Mock).mockResolvedValue({
-      success: false,
-      error: { code: 'provider_unavailable', message: 'down' },
+  it('maps dispatch error codes to statuses (503 / 429 / 400)', async () => {
+    for (const [code, status] of [
+      ['provider_unavailable', 503],
+      ['rate_limited', 429],
+      ['invalid_args', 400],
+    ] as const) {
+      (capabilityDispatcher.dispatch as Mock).mockResolvedValue({
+        success: false,
+        error: { code, message: 'x' },
+      });
+      expect((await suggestPost(jsonReq({ versionId: 'v-1' }), ADMIN, ctx)).status).toBe(status);
+    }
+  });
+
+  it('429s when the per-admin sub-cap is exceeded (before any dispatch)', async () => {
+    (composeLimiter.check as Mock).mockReturnValue({ success: false, reset: 1 });
+    const res = await suggestPost(jsonReq({ versionId: 'v-1' }), ADMIN, ctx);
+    expect(res.status).toBe(429);
+    expect(capabilityDispatcher.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('surfaces the composer-not-configured response without dispatching', async () => {
+    (loadComposerAgent as Mock).mockResolvedValue({
+      ok: false,
+      response: new Response('no agent', { status: 503 }),
     });
     const res = await suggestPost(jsonReq({ versionId: 'v-1' }), ADMIN, ctx);
     expect(res.status).toBe(503);
+    expect(capabilityDispatcher.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('400s an invalid body (missing versionId)', async () => {
+    expect((await suggestPost(jsonReq({}), ADMIN, ctx)).status).toBe(400);
   });
 });
 
@@ -139,6 +173,7 @@ describe('POST …/context/parse', () => {
     const res = await parsePost(uploadReq(file), ADMIN);
     expect(res.status).toBe(200);
     const body = await res.json();
+    expect(body.success).toBe(true);
     expect(body.data.text).toBe('Revenue was £4m.');
   });
 
@@ -147,5 +182,26 @@ describe('POST …/context/parse', () => {
     const file = new File(['x'], 'empty.txt', { type: 'text/plain' });
     const res = await parsePost(uploadReq(file), ADMIN);
     expect(res.status).toBe(422);
+  });
+
+  it('422s when the parser throws', async () => {
+    (parseDocument as Mock).mockRejectedValue(new Error('corrupt pdf'));
+    const file = new File(['x'], 'bad.pdf', { type: 'application/pdf' });
+    const res = await parsePost(uploadReq(file), ADMIN);
+    expect(res.status).toBe(422);
+  });
+
+  it('429s when the ingest sub-cap is exceeded (before parsing)', async () => {
+    (ingestLimiter.check as Mock).mockReturnValue({ success: false, reset: 1 });
+    const file = new File(['x'], 'brief.txt', { type: 'text/plain' });
+    const res = await parsePost(uploadReq(file), ADMIN);
+    expect(res.status).toBe(429);
+    expect(parseDocument).not.toHaveBeenCalled();
+  });
+
+  it('rejects a missing file via the upload guard', async () => {
+    const res = await parsePost(uploadReq(null), ADMIN);
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(parseDocument).not.toHaveBeenCalled();
   });
 });

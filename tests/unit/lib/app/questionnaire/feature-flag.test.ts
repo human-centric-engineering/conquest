@@ -25,11 +25,13 @@ import {
   ensureVoiceInputEnabled,
   ensureTurnEvaluationEnabled,
   ensureRoundContextEnabled,
+  ensureLearningModeEnabled,
   withQuestionnairesEnabled,
   withLiveSessionsEnabled,
   withVoiceInputEnabled,
   withTurnEvaluationEnabled,
   withRoundContextEnabled,
+  withLearningModeEnabled,
   isRoundContextEnabled,
   isLearningModeEnabled,
   isQuestionnairesEnabled,
@@ -130,6 +132,10 @@ describe('questionnaire feature flag — flag names are stable', () => {
       'APP_QUESTIONNAIRES_QUESTION_PHRASING_ENABLED'
     );
     expect(APP_QUESTIONNAIRES_DATA_SLOTS_FLAG).toBe('APP_QUESTIONNAIRES_DATA_SLOTS_ENABLED');
+    // Cohorts-family flags — a rename here would silently un-gate the round/context/learning surfaces.
+    expect(APP_QUESTIONNAIRES_COHORTS_FLAG).toBe('APP_QUESTIONNAIRES_COHORTS_ENABLED');
+    expect(APP_QUESTIONNAIRES_ROUND_CONTEXT_FLAG).toBe('APP_QUESTIONNAIRES_ROUND_CONTEXT_ENABLED');
+    expect(APP_QUESTIONNAIRES_LEARNING_MODE_FLAG).toBe('APP_QUESTIONNAIRES_LEARNING_MODE_ENABLED');
   });
 });
 
@@ -476,6 +482,33 @@ describe('route gates — ensure* return a 404 envelope when off, null when on',
     });
   });
 
+  describe('ensureLearningModeEnabled', () => {
+    it('returns null when master + cohorts + learning are on', async () => {
+      setFlags({
+        [APP_QUESTIONNAIRES_FLAG]: true,
+        [APP_QUESTIONNAIRES_COHORTS_FLAG]: true,
+        [APP_QUESTIONNAIRES_LEARNING_MODE_FLAG]: true,
+      });
+      await expect(ensureLearningModeEnabled()).resolves.toBeNull();
+    });
+    it('404s when the learning sub-flag is off even though master + cohorts are on', async () => {
+      setFlags({
+        [APP_QUESTIONNAIRES_FLAG]: true,
+        [APP_QUESTIONNAIRES_COHORTS_FLAG]: true,
+        [APP_QUESTIONNAIRES_LEARNING_MODE_FLAG]: false,
+      });
+      await expect404(await ensureLearningModeEnabled());
+    });
+    it('404s when cohorts is off even though master + learning are on', async () => {
+      setFlags({
+        [APP_QUESTIONNAIRES_FLAG]: true,
+        [APP_QUESTIONNAIRES_COHORTS_FLAG]: false,
+        [APP_QUESTIONNAIRES_LEARNING_MODE_FLAG]: true,
+      });
+      await expect404(await ensureLearningModeEnabled());
+    });
+  });
+
   describe('ensureVoiceInputEnabled', () => {
     it('returns null when master + live-sessions + voice are on', async () => {
       setFlags({
@@ -567,6 +600,16 @@ describe('with* gate wrappers — run the flag gate before the handler', () => {
         APP_QUESTIONNAIRES_ROUND_CONTEXT_FLAG,
       ],
       blockFlag: APP_QUESTIONNAIRES_ROUND_CONTEXT_FLAG,
+    },
+    {
+      name: 'withLearningModeEnabled',
+      wrap: withLearningModeEnabled,
+      enableFlags: [
+        APP_QUESTIONNAIRES_FLAG,
+        APP_QUESTIONNAIRES_COHORTS_FLAG,
+        APP_QUESTIONNAIRES_LEARNING_MODE_FLAG,
+      ],
+      blockFlag: APP_QUESTIONNAIRES_LEARNING_MODE_FLAG,
     },
   ];
 

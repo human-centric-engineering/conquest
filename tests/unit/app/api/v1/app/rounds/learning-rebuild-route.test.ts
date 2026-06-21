@@ -35,9 +35,11 @@ const { POST } = (await import('@/app/api/v1/app/rounds/[id]/learning/rebuild/ro
 import { prisma } from '@/lib/db/client';
 import { refreshRoundLearningDigest } from '@/lib/app/questionnaire/learning/digest';
 import { listBriefableQuestionnaires } from '@/app/api/v1/app/rounds/_lib/context';
+import { mockAdminUser } from '@/tests/helpers/auth';
 
 type Mock = ReturnType<typeof vi.fn>;
-const ADMIN = { user: { id: 'admin-1' } };
+// Full better-auth session shape (withAdminAuth is identity-mocked here, so we pass it directly).
+const ADMIN = mockAdminUser();
 const ctx = { params: Promise.resolve({ id: 'r-1' }) };
 const req = () =>
   new NextRequest('http://localhost/api/v1/app/rounds/r-1/learning/rebuild', { method: 'POST' });
@@ -60,13 +62,16 @@ describe('POST …/learning/rebuild', () => {
     expect(refreshRoundLearningDigest).toHaveBeenCalledWith('r-1', 'v-1');
     expect(refreshRoundLearningDigest).toHaveBeenCalledWith('r-1', 'v-2');
     const body = await res.json();
+    expect(body.success).toBe(true);
     expect(body.data.versions).toHaveLength(2);
-    expect(body.data.versions[0]).toMatchObject({ versionId: 'v-1', built: true });
+    // The per-version summary carries the builder's full result (incl. slotCount), not just built.
+    expect(body.data.versions[0]).toMatchObject({ versionId: 'v-1', built: true, slotCount: 2 });
   });
 
-  it('raises a not-found error for an unknown round (→ 404 via the admin-auth wrapper)', async () => {
-    // withAdminAuth is mocked as identity here, so the NotFoundError it would normally convert to a
-    // 404 envelope surfaces as a throw — we assert the round guard fires before any rebuild work.
+  it('throws NotFoundError for an unknown round (real withAdminAuth converts this to a 404)', async () => {
+    // withAdminAuth is identity-mocked here, so the NotFoundError surfaces as a throw rather than the
+    // 404 envelope the real guard produces via handleAPIError. We assert the round guard fires before
+    // any rebuild work; the guard's error→404 conversion is covered by withAdminAuth's own tests.
     (prisma.appQuestionnaireRound.findUnique as Mock).mockResolvedValue(null);
     await expect(POST(req(), ADMIN, ctx)).rejects.toThrow('Round not found');
     expect(refreshRoundLearningDigest).not.toHaveBeenCalled();

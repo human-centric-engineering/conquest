@@ -109,9 +109,11 @@ export default async function RoundDetailPage({ params }: PageProps) {
     isRoundContextEnabled(),
     isLearningModeEnabled(),
   ]);
-  const briefable = roundContextOn || learningOn ? await listBriefableQuestionnaires(roundId) : [];
-  const contextEntries = roundContextOn ? await listRoundContextEntries(roundId) : [];
-  const learningDigest = learningOn ? await listRoundLearningDigest(roundId) : [];
+  const [briefable, contextEntries, learningDigest] = await Promise.all([
+    roundContextOn || learningOn ? listBriefableQuestionnaires(roundId) : Promise.resolve([]),
+    roundContextOn ? listRoundContextEntries(roundId) : Promise.resolve([]),
+    learningOn ? listRoundLearningDigest(roundId) : Promise.resolve([]),
+  ]);
 
   const statTiles: CqStat[] = [
     { label: 'Members', value: round.memberCount },
