@@ -71,6 +71,24 @@ export interface QuestionComposeInput {
    * → the block is omitted (no behaviour change). Built by `_lib/prior-answers.ts`.
    */
   priorAnswers?: string[];
+  /**
+   * Round Additional Context ("interviewer briefing"): admin-authored facts/figures/background for
+   * the question being asked — each entry a `"<title>: <content>"` line. Direct-injected (no vector
+   * search) for the selected question's attributed entries plus the round's general entries. The
+   * interviewer may draw on these to ask a sharper, better-informed question, but must NOT read them
+   * out as a list, quote them verbatim, or treat them as something the respondent said. Absent/empty
+   * → the block is omitted. Built by `_lib/round-briefing.ts` + `rounds/briefing.ts`.
+   */
+  briefing?: string[];
+  /**
+   * Learning Mode peer context: generalised, anonymised themes from PRIOR respondents in the same
+   * round (built by `lib/app/questionnaire/learning`). Each entry a one-line theme. The interviewer
+   * may weave ONE in lightly to deepen this question ("some people mentioned X — how do you feel
+   * about that?"), but must NEVER name or quote an individual, present it as fact, or imply a
+   * "right" answer. Absent/empty → the block is omitted. Introduces bias by design (the admin opts
+   * in per round); the prompt keeps the touch light and non-leading.
+   */
+  peerContext?: string[];
   /** The respondent's message this turn (to acknowledge); empty on the opening turn. */
   lastUserMessage: string;
   /** True when this same question was just asked and the prior answer wasn't captured. */
@@ -286,6 +304,41 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
         calibration.join(' '),
         treadCarefully
       )
+    ),
+    // Round Additional Context ("interviewer briefing"): background facts the admin attached for this
+    // question. The interviewer may quietly draw on them to ask a sharper, better-informed question —
+    // but they are YOUR briefing, not the respondent's words: never read them out as a list, never
+    // quote them verbatim, never present a fact as something the respondent told you. Omitted when
+    // absent (the section collapses to '').
+    section(
+      'briefing',
+      input.briefing && input.briefing.length > 0
+        ? joinSections(
+            'Background you have been briefed on for this question (for YOU only — do NOT read these ' +
+              'out, list them, quote them verbatim, or attribute them to the respondent). Let them ' +
+              'quietly inform a sharper, more knowledgeable question where it genuinely helps; ' +
+              'otherwise ignore them:',
+            input.briefing.map((b) => `- ${b}`).join('\n')
+          )
+        : ''
+    ),
+    // Learning Mode: generalised, anonymised themes from EARLIER respondents in this round. The
+    // interviewer may gently raise ONE to deepen the conversation, in aggregate terms only — never
+    // naming or quoting anyone, never as fact, never implying a "correct" answer. Used sparingly so
+    // it enriches rather than leads. Omitted when absent.
+    section(
+      'peer_context',
+      input.peerContext && input.peerContext.length > 0
+        ? joinSections(
+            'What EARLIER respondents (in general) have tended to say around this area — use with ' +
+              'care, and ONLY if it helps this person open up. You MAY gently reference it in ' +
+              'aggregate ("some people have mentioned…", "a few felt…") and invite their own view, ' +
+              'at MOST once and never every turn. NEVER name or quote an individual, never present ' +
+              'it as fact or the expected answer, and never pressure them to agree. If in doubt, ' +
+              'leave it out and just ask the question:',
+            input.peerContext.map((p) => `- ${p}`).join('\n')
+          )
+        : ''
     ),
     // Tone & persona clauses (when configured) are more specific than the defaults above, so they
     // govern. Mimicry, when enabled, owns tone-matching — so the default "match their tone" line is

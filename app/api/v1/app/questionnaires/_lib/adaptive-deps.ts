@@ -42,11 +42,19 @@ export function buildSelectorPrompt(input: LlmPickInput): string {
 
   // Each candidate: its prompt, then any guidelines / rationale on indented sub-lines
   // so the model judges on intent, not just wording. Absent fields are simply omitted.
+  // Learning Mode (adaptive probing): does any candidate carry a peer-divergence signal?
+  const hasPeerDivergence = input.candidates.some((c) => typeof c.peerDivergence === 'number');
+
   const candidates = numberedList(
     input.candidates.map((c) => {
       const lines = [c.prompt ?? c.key];
       if (c.guidelines) lines.push(`   - Looking for: ${c.guidelines}`);
       if (c.rationale) lines.push(`   - Why it matters: ${c.rationale}`);
+      // Surface earlier respondents' divergence so the selector can probe split topics harder.
+      if (typeof c.peerDivergence === 'number') {
+        const band = c.peerDivergence >= 0.66 ? 'high' : c.peerDivergence >= 0.33 ? 'some' : 'low';
+        lines.push(`   - Earlier respondents diverged: ${band} (${c.peerDivergence.toFixed(2)})`);
+      }
       return lines.join('\n');
     })
   );
@@ -64,7 +72,12 @@ export function buildSelectorPrompt(input: LlmPickInput): string {
     section(
       'task',
       'Pick the candidate that follows most naturally from the conversation and best advances ' +
-        'the goal — favour continuity over list order, and choose 0 if none fit.\n' +
+        'the goal — favour continuity over list order, and choose 0 if none fit.' +
+        (hasPeerDivergence
+          ? ' All else close, lean toward a topic where earlier respondents diverged more (richer ' +
+            'follow-up territory) — but never at the cost of conversational flow.'
+          : '') +
+        '\n' +
         jsonOutputContract(
           '{"choice": <1-based number, or 0 if none fits>, "rationale": "<one short sentence>"}',
           { preface: 'Reply with ONLY this JSON' }

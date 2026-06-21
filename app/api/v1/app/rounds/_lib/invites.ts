@@ -19,6 +19,7 @@
 
 import { prisma } from '@/lib/db/client';
 import { mintInvitationToken } from '@/lib/app/questionnaire/invitations/token';
+import { resolveItemVersions } from '@/app/api/v1/app/rounds/_lib/versions';
 
 /** One freshly-minted link returned to the admin (plaintext token — generation-time only). */
 export interface MintedRoundInviteLink {
@@ -42,38 +43,6 @@ export interface GenerateRoundInvitesResult {
   activeMembers: number;
   /** The links minted this run (for the admin to copy/send). */
   links: MintedRoundInviteLink[];
-}
-
-/**
- * Resolve each round item to the version to invite to — the pinned version, else the
- * questionnaire's current launched version — in a FIXED number of queries (one launched-version
- * sweep for all unpinned items), not one query per item.
- */
-async function resolveItemVersions(
-  items: { questionnaireId: string; versionId: string | null }[]
-): Promise<Map<string, string | null>> {
-  const resolved = new Map<string, string | null>();
-  const unpinnedQids = items.filter((i) => !i.versionId).map((i) => i.questionnaireId);
-  let launchedByQuestionnaire = new Map<string, string>();
-  if (unpinnedQids.length > 0) {
-    // Highest versionNumber first → the first row seen per questionnaire is its current launched one.
-    const launched = await prisma.appQuestionnaireVersion.findMany({
-      where: { questionnaireId: { in: unpinnedQids }, status: 'launched' },
-      orderBy: { versionNumber: 'desc' },
-      select: { id: true, questionnaireId: true },
-    });
-    launchedByQuestionnaire = launched.reduce((map, v) => {
-      if (!map.has(v.questionnaireId)) map.set(v.questionnaireId, v.id);
-      return map;
-    }, new Map<string, string>());
-  }
-  for (const item of items) {
-    resolved.set(
-      item.questionnaireId,
-      item.versionId ?? launchedByQuestionnaire.get(item.questionnaireId) ?? null
-    );
-  }
-  return resolved;
 }
 
 /**

@@ -115,6 +115,13 @@ export interface SelectionContext {
    * the goal, not just the one nearest the last message. `null`/absent when unset.
    */
   goal?: string | null;
+  /**
+   * Learning Mode (adaptive probing): per-question-**key** peer divergence (0–1) from the round's
+   * digest — how much EARLIER respondents split on that topic. Read only by `adaptive`, which hands
+   * it to the selector LLM so it can lean toward probing high-divergence topics harder. Absent unless
+   * Learning Mode is active for the session's round. Other strategies ignore it (phrasing-only there).
+   */
+  peerDivergenceByKey?: Record<string, number>;
 }
 
 /**
@@ -172,6 +179,12 @@ export interface LlmPickInput {
     prompt?: string;
     guidelines?: string | null;
     rationale?: string | null;
+    /**
+     * Learning Mode peer divergence (0–1) for this candidate's topic — how much earlier respondents
+     * split on it. Present only when Learning Mode is active; the selector leans toward higher values
+     * (richer follow-up territory) without letting it override conversational flow.
+     */
+    peerDivergence?: number;
   }>;
   /** The questionnaire's goal (version-level), for framing. Absent when unset. */
   goal?: string | null;

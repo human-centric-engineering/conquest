@@ -28,7 +28,10 @@ import type { NextRequest } from 'next/server';
 import { successResponse, errorResponse } from '@/lib/api/responses';
 import { getRouteLogger } from '@/lib/api/context';
 import { ConflictError, handleAPIError } from '@/lib/api/errors';
-import { withLiveSessionsEnabled } from '@/lib/app/questionnaire/feature-flag';
+import {
+  withLiveSessionsEnabled,
+  isLearningModeEnabled,
+} from '@/lib/app/questionnaire/feature-flag';
 import {
   assessCompletion,
   resolveCompletion,
@@ -38,6 +41,7 @@ import { resolveTurnAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/
 import { buildTurnContext } from '@/app/api/v1/app/questionnaires/_lib/turn-context';
 import { markSessionCompleted } from '@/app/api/v1/app/questionnaires/_lib/sessions';
 import { enqueueRespondentReport } from '@/lib/app/questionnaire/report/enqueue';
+import { refreshRoundLearningDigest } from '@/lib/app/questionnaire/learning/digest';
 
 async function handleSubmit(
   request: NextRequest,
@@ -96,6 +100,24 @@ async function handleSubmit(
           error: err instanceof Error ? err.message : String(err),
         });
       });
+      // Learning Mode: rebuild this round's peer-theme digest so the NEXT respondent sees the
+      // just-completed session folded in. Gated by the platform flag + the round having a roundId;
+      // the builder itself re-checks the per-round toggle + k-anonymity. FIRE-AND-FORGET — the
+      // rebuild makes an LLM call (up to DIGEST_TIMEOUT_MS), so awaiting it would block THIS
+      // respondent's submit confirmation behind work that only benefits the next respondent. We let
+      // it run after the response; a missed rebuild self-heals on the next completion (or a manual
+      // admin Rebuild). Fail-soft: errors are logged, never surfaced. (Long-running server runtime;
+      // not a per-request-killed serverless function.)
+      if (loaded.session.roundId && (await isLearningModeEnabled())) {
+        const roundId = loaded.session.roundId;
+        void refreshRoundLearningDigest(roundId, loaded.session.versionId).catch((err) => {
+          log.error('Failed to refresh round learning digest', {
+            sessionId,
+            roundId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+      }
       return successResponse({ sessionId, status });
     } catch (err) {
       if (err instanceof SessionTransitionError) {

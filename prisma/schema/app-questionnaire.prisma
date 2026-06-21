@@ -576,15 +576,82 @@ model AppQuestionnaireRound {
   closedAt    DateTime? // manual/auto close timestamp
   closedBy    String? // admin User.id who closed it; plain String, no FK (UG-1)
   createdBy   String? // admin User.id; plain String, no FK (UG-1)
+  // Additional Context ("interviewer briefing"): when true AND the platform flag is on, briefing
+  // entries authored for this round are injected into the interviewer prompt. Off by default.
+  contextEnabled  Boolean  @default(false)
+  // Learning Mode: when true AND the platform flag is on, generalised anonymised themes from prior
+  // respondents in THIS round colour the interviewer's phrasing + adaptive probing. Off by default;
+  // introduces bias by design (the admin UI warns). Gated additionally by a k-anonymity threshold.
+  learningEnabled Boolean  @default(false)
+  // Learning Mode tuning (LearningConfigShape in rounds/types.ts): { minRespondents } and future knobs.
+  // `{}` resolves to defaults at read time, mirroring AppQuestionnaireConfig's lazy-defaults pattern.
+  learningConfig  Json     @default("{}")
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  cohort AppCohort                   @relation(fields: [cohortId], references: [id], onDelete: Cascade)
-  items  AppQuestionnaireRoundItem[]
+  cohort         AppCohort                   @relation(fields: [cohortId], references: [id], onDelete: Cascade)
+  items          AppQuestionnaireRoundItem[]
+  contextEntries AppRoundContextEntry[]
+  learningDigest AppRoundLearningDigest[]
 
   @@index([cohortId])
   @@index([status])
   @@map("app_questionnaire_round")
+}
+
+/// Additional Context ("interviewer briefing"): one admin-authored fact/figure/background note for a
+/// round. Retrieved by DIRECT FK lookup (no vector search): when the interviewer selects a question,
+/// the entries for that `questionSlotId` PLUS the round's general entries (`questionSlotId = null`)
+/// for that `versionId` are injected verbatim into the phrasing prompt. `versionId` scopes a
+/// multi-questionnaire round so one questionnaire's briefing never bleeds into another; it's a plain
+/// String pointer (UG-1), validated at the seam, tolerant of a re-fork. `questionSlotId` is likewise a
+/// plain String (version-specific): if the version forks, an entry may orphan — the admin re-attaches.
+model AppRoundContextEntry {
+  id             String   @id @default(cuid())
+  roundId        String
+  versionId      String // scopes the round's briefing to one bundled questionnaire version (UG-1 pointer)
+  questionSlotId String? // null = general briefing for the whole version; else attributed to one question
+  title          String
+  content        String   @db.Text // the fact/figure/background, injected verbatim
+  source         String   @default("manual") // manual | upload | ai_suggested (provenance for the admin UI)
+  ordinal        Int      @default(0) // author-controlled order within (round, version, attribution)
+  createdBy      String? // admin User.id; plain String, no FK (UG-1)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  round AppQuestionnaireRound @relation(fields: [roundId], references: [id], onDelete: Cascade)
+
+  @@index([roundId])
+  @@index([roundId, versionId, questionSlotId])
+  @@map("app_round_context_entry")
+}
+
+/// Learning Mode digest: a cached, generalised, anonymised theme synthesised from prior respondents'
+/// answers to ONE slot within a round. Rebuilt when a session completes (one batched LLM call per
+/// refresh), then read cheaply each turn — never re-aggregated live. Keyed per `versionId` so sessions
+/// that ran different pinned versions don't mix, and per (slotKind, slotKey) so a data slot and a
+/// question with the same key stay distinct. `insight` is generalised text only (no names, no verbatim
+/// quotes); `respondentCount` records how many respondents it synthesises (k-anonymity display + audit);
+/// `divergence` (0–1) feeds the adaptive selector's probe-harder weighting; `sessionsCovered` is the
+/// completed-session count at last refresh, for staleness. Holds NO individual data — but is rebuilt on
+/// the next completion (and on erasure) so it stays consistent with the surviving corpus.
+model AppRoundLearningDigest {
+  id              String   @id @default(cuid())
+  roundId         String
+  versionId       String // per-version so differently-pinned sessions don't mix (UG-1 pointer)
+  slotKind        String // data_slot | question
+  slotKey         String // stable key within the version
+  insight         String   @db.Text // generalised, anonymised theme — no names, no quotes
+  respondentCount Int // distinct respondents synthesised (k-anonymity display + audit)
+  divergence      Float? // 0–1 spread across respondents; feeds adaptive-probing priority
+  sessionsCovered Int // completed-session count at last refresh (staleness check)
+  refreshedAt     DateTime @default(now())
+
+  round AppQuestionnaireRound @relation(fields: [roundId], references: [id], onDelete: Cascade)
+
+  @@unique([roundId, versionId, slotKind, slotKey])
+  @@index([roundId, versionId])
+  @@map("app_round_learning_digest")
 }
 
 /// M:N join: a questionnaire offered within a round. Distinct questionnaires per round

@@ -873,6 +873,29 @@ export const APP_QUESTIONNAIRES_COHORTS_FLAG = 'APP_QUESTIONNAIRES_COHORTS_ENABL
 export const APP_QUESTIONNAIRES_INTRO_SCREEN_FLAG = 'APP_QUESTIONNAIRES_INTRO_SCREEN_ENABLED';
 
 /**
+ * Platform feature flag gating **Round Additional Context** (the "interviewer briefing") — per-round
+ * admin-authored facts/figures/background the interviewer draws on when asking, optionally attributed
+ * to a single question. Round-level, off by default per round (`AppQuestionnaireRound.contextEnabled`);
+ * this flag is the platform-wide master gate on top of which the per-round toggle ANDs. Requires
+ * APP_QUESTIONNAIRES_ENABLED AND APP_QUESTIONNAIRES_COHORTS_ENABLED (briefings hang off rounds, which
+ * only exist when cohorts are on). DB-backed, seeded disabled by `050-round-context-flag.ts`. When off,
+ * the authoring routes/panel 404/hide and no briefing is ever injected into the interviewer prompt.
+ */
+export const APP_QUESTIONNAIRES_ROUND_CONTEXT_FLAG = 'APP_QUESTIONNAIRES_ROUND_CONTEXT_ENABLED';
+
+/**
+ * Platform feature flag gating **Learning Mode** — the interviewer is given generalised, anonymised
+ * themes from prior respondents *in the same round* and uses them subtly to colour phrasing AND
+ * (under the `adaptive` strategy) to probe divergent topics harder. Round-level, off by default per
+ * round (`AppQuestionnaireRound.learningEnabled`); this flag is the platform-wide master gate the
+ * per-round toggle ANDs. Requires APP_QUESTIONNAIRES_ENABLED AND APP_QUESTIONNAIRES_COHORTS_ENABLED.
+ * **Introduces bias by design** (later answers are influenced by earlier ones) — the admin UI warns,
+ * and a k-anonymity threshold suppresses learning until enough respondents have completed. DB-backed,
+ * seeded disabled by `051-learning-mode-flag.ts`. When off, no peer context is ever aggregated or injected.
+ */
+export const APP_QUESTIONNAIRES_LEARNING_MODE_FLAG = 'APP_QUESTIONNAIRES_LEARNING_MODE_ENABLED';
+
+/**
  * Slug of the seeded Respondent Report `AiAgent` — assembles the per-respondent insights section
  * (mode `raw_plus_insights`) from the captured answers, the admin's generation config, and the
  * optional client knowledge base. Ships with empty `model`/`provider` so it resolves dynamically via
@@ -1016,5 +1039,55 @@ export const AUTHOR_INTRO_BACKGROUND_FUNCTION_DEFINITION: CapabilityFunctionDefi
       },
     },
     required: ['mode'],
+  },
+};
+
+/**
+ * Slug of the suggest-round-briefing capability — the "have an agent evaluate the questionnaire and
+ * propose interviewer briefing notes" flow. One source of truth shared by the `BaseCapability`
+ * subclass, its `AiCapability` seed row, and the suggest route. Reuses the composer agent.
+ */
+export const SUGGEST_ROUND_BRIEFING_CAPABILITY_SLUG = 'app_suggest_round_briefing';
+
+/** `AiCapability.executionHandler` for the suggest-round-briefing capability. */
+export const SUGGEST_ROUND_BRIEFING_HANDLER = 'AppSuggestRoundBriefingCapability';
+
+/**
+ * The suggest-round-briefing capability's OpenAI-compatible function definition — single source of
+ * truth shared by the `BaseCapability` subclass and the `AiCapability` seed row. Given a
+ * questionnaire's goal + questions (and optional admin-supplied source material), it proposes a set
+ * of interviewer-briefing notes — facts/figures/background that would help the interviewer ask each
+ * question well — each optionally attributed to one of the provided question ids. Returns
+ * `{ entries: [{ questionId?, title, content }] }`. The route maps the proposals back for admin
+ * review; nothing is persisted by the capability. Dispatched programmatically by the suggest route.
+ */
+export const SUGGEST_ROUND_BRIEFING_FUNCTION_DEFINITION: CapabilityFunctionDefinition = {
+  name: SUGGEST_ROUND_BRIEFING_CAPABILITY_SLUG,
+  description:
+    'Evaluate a questionnaire and propose interviewer "briefing" notes — facts, figures, and background that would help an interviewer ask its questions knowledgeably. Each note may be attributed to one provided question id (a focused briefing) or left general (whole-questionnaire). Use any admin-supplied source material as the factual basis; otherwise suggest the KINDS of background worth gathering, framed as prompts to the admin. Returns { entries: [{ questionId?, title, content }] }. Dispatched programmatically by the suggest route.',
+  parameters: {
+    type: 'object',
+    properties: {
+      goal: {
+        type: 'string',
+        description: 'The questionnaire goal, for framing (optional).',
+      },
+      questions: {
+        type: 'array',
+        description:
+          'The questions a note may be attributed to: [{ id, prompt, sectionTitle }]. A proposed entry’s questionId, when set, MUST be one of these ids.',
+        items: { type: 'object', additionalProperties: true },
+      },
+      sourceText: {
+        type: 'string',
+        description:
+          'Optional admin-supplied background material (pasted or extracted from an upload) to base the notes on. When absent, propose the kinds of background worth gathering.',
+      },
+      maxEntries: {
+        type: 'number',
+        description: 'Soft cap on how many briefing notes to propose.',
+      },
+    },
+    required: ['questions'],
   },
 };

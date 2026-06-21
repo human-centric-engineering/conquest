@@ -39,13 +39,18 @@ import {
   isContradictionDetectionEnabled,
   isCostCapEnforcementEnabled,
   isDataSlotsEnabled,
+  isLearningModeEnabled,
   isQuestionPhrasingEnabled,
   isReasoningStreamEnabled,
+  isRoundContextEnabled,
   isSeriousnessGateEnabled,
   isSensitivityAwarenessEnabled,
   isToneEnabled,
   withLiveSessionsEnabled,
 } from '@/lib/app/questionnaire/feature-flag';
+import { selectBriefingLines } from '@/lib/app/questionnaire/rounds/briefing';
+import { loadRoundPeerDigest } from '@/lib/app/questionnaire/learning/digest';
+import { recordLearningApplied } from '@/lib/app/questionnaire/learning/events';
 import { buildReasoningTrace, type ReasoningStep } from '@/lib/app/questionnaire/reasoning';
 import type { AgentCallTrace } from '@/lib/app/questionnaire/inspector';
 import type { SessionWarning } from '@/lib/app/questionnaire/chat/types';
@@ -77,6 +82,7 @@ import { buildTurnInvokers } from '@/app/api/v1/app/questionnaire-sessions/_lib/
 import { persistTurn } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-run';
 import { streamOfferMessage } from '@/app/api/v1/app/questionnaire-sessions/_lib/offer-stream';
 import { streamQuestionMessage } from '@/app/api/v1/app/questionnaire-sessions/_lib/question-stream';
+import { loadRoundBriefing } from '@/app/api/v1/app/questionnaire-sessions/_lib/round-briefing';
 import { buildPriorAnswersDigest } from '@/app/api/v1/app/questionnaire-sessions/_lib/prior-answers';
 import { resolveTurnAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-access';
 import { assertRoundAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/round-access';
@@ -224,6 +230,8 @@ async function handleMessage(
       reasoningStreamFlag,
       toneFlag,
       dataSlotAdaptive,
+      roundContextFlag,
+      learningModeFlag,
     ] = await Promise.all([
       isAnswerExtractionEnabled(),
       isContradictionDetectionEnabled(),
@@ -238,6 +246,8 @@ async function handleMessage(
       isReasoningStreamEnabled(),
       isToneEnabled(),
       isAdaptiveDataSlotSelectionEnabled(),
+      isRoundContextEnabled(),
+      isLearningModeEnabled(),
     ]);
 
     // Adaptive selection ranks unanswered questions by vector similarity, which needs each slot's
@@ -270,6 +280,34 @@ async function handleMessage(
     // data slots (the conversation targets data slots; questions fill in the background).
     const dataSlots = loaded.base.dataSlots ?? [];
     const dataSlotMode = dataSlotsFlag && dataSlots.length > 0;
+
+    // Round Additional Context ("interviewer briefing"): load this round's entries for the running
+    // version once per turn. `null` when the platform flag is off, the session isn't round-scoped, or
+    // the round's per-round `contextEnabled` toggle is off — in every case nothing is injected. The
+    // entries are filtered down to the asked question by `selectBriefingLines` at phrasing time.
+    const briefingEntries =
+      roundContextFlag && loaded.session.roundId
+        ? await loadRoundBriefing(loaded.session.roundId, loaded.session.versionId)
+        : null;
+
+    // Learning Mode: load this round's peer-theme digest once per turn (null when the flag is off,
+    // the session isn't round-scoped, or the round's learningEnabled toggle is off). Indexed by
+    // `${kind}:${key}` for the phraser, plus a question-key → divergence map for adaptive probing.
+    const peerInsights =
+      learningModeFlag && loaded.session.roundId
+        ? await loadRoundPeerDigest(loaded.session.roundId, loaded.session.versionId)
+        : null;
+    const peerInsightByKey = new Map(
+      (peerInsights ?? []).map((p) => [`${p.slotKind}:${p.slotKey}`, p])
+    );
+    // Adaptive probing: peers' divergence per QUESTION key — leans the adaptive selector toward
+    // topics where earlier respondents split. Only question-kind insights drive selection.
+    const peerDivergenceByKey: Record<string, number> = {};
+    for (const p of peerInsights ?? []) {
+      if (p.slotKind === 'question' && typeof p.divergence === 'number') {
+        peerDivergenceByKey[p.slotKey] = p.divergence;
+      }
+    }
 
     // Adaptive data-slot selection (50+-slot scale): when its sub-flag is on AND we're in data-slot
     // mode, the orchestrator ranks unfilled slots by embedding similarity + an LLM pick. Like the
@@ -472,6 +510,9 @@ async function handleMessage(
       ...(prefilterActive ? { extractionCandidateSlots: extractionQuestionSlots } : {}),
       activeQuestionKey: loaded.activeQuestionKey,
       adaptiveEnabled: adaptive,
+      // Learning Mode (adaptive probing): per-question-key peer divergence, so the adaptive selector
+      // can lean toward topics where earlier respondents split. Empty unless learning is active.
+      ...(Object.keys(peerDivergenceByKey).length > 0 ? { peerDivergenceByKey } : {}),
       // Adaptive data-slot selection: wire the embedding-ranked LLM selector only in data-slot mode
       // with the sub-flag on; otherwise the orchestrator keeps its deterministic topic-local pick.
       dataSlotAdaptiveEnabled: dataSlotAdaptiveActive,
@@ -624,6 +665,20 @@ async function handleMessage(
           questionPromptByKey,
           excludeDataSlotId: r.dataSlotId,
         });
+        // Briefing: a data slot abstracts one or more questions — gather their slot ids (via key→id)
+        // so entries attributed to any of them, plus the round's general entries, inform this ask.
+        const dsRelevantIds = new Set(
+          (dataSlots.find((s) => s.id === r.dataSlotId)?.mappedQuestionKeys ?? [])
+            .map((k) => keyToSlotId.get(k))
+            .filter((sid): sid is string => typeof sid === 'string')
+        );
+        const dsBriefing = briefingEntries
+          ? selectBriefingLines(briefingEntries, dsRelevantIds)
+          : [];
+        // Learning Mode: peer theme for this data slot (if any), threaded as peer context + audited.
+        const dsSlotKey = dataSlots.find((s) => s.id === r.dataSlotId)?.key;
+        const dsPeer = dsSlotKey ? peerInsightByKey.get(`data_slot:${dsSlotKey}`) : undefined;
+        if (dsPeer) void recordLearningApplied(sessionId);
         const phrased = yield* streamQuestionMessage({
           input: {
             prompt: `${r.name} — ${r.description}`,
@@ -637,6 +692,8 @@ async function handleMessage(
             questionsAsked: state.selectionRound,
             isTransition: r.isTransition,
             ...(priorAnswers.length > 0 ? { priorAnswers } : {}),
+            ...(dsBriefing.length > 0 ? { briefing: dsBriefing } : {}),
+            ...(dsPeer ? { peerContext: [dsPeer.insight] } : {}),
             ...(r.isReask && currentUnderstanding ? { currentUnderstanding } : {}),
             ...(isFinalAttempt ? { isFinalAttempt: true } : {}),
             ...sensitivityPhraserInput,
@@ -668,6 +725,17 @@ async function handleMessage(
           questionPromptByKey,
           excludeQuestionKey: targetedKey,
         });
+        // Briefing: entries attributed to the asked question (its id) plus the round's general
+        // entries inform this ask. Empty set on the rare turn with no targeted id → general only.
+        const qBriefing = briefingEntries
+          ? selectBriefingLines(
+              briefingEntries,
+              new Set(result.targetedQuestionId ? [result.targetedQuestionId] : [])
+            )
+          : [];
+        // Learning Mode: peer theme for the asked question (if any), threaded as peer context + audited.
+        const qPeer = targetedKey ? peerInsightByKey.get(`question:${targetedKey}`) : undefined;
+        if (qPeer) void recordLearningApplied(sessionId);
         const phrased = yield* streamQuestionMessage({
           input: {
             prompt: result.response.text,
@@ -682,6 +750,8 @@ async function handleMessage(
             isOpening: state.selectionRound === 0,
             questionsAsked: state.selectionRound,
             ...(priorAnswers.length > 0 ? { priorAnswers } : {}),
+            ...(qBriefing.length > 0 ? { briefing: qBriefing } : {}),
+            ...(qPeer ? { peerContext: [qPeer.insight] } : {}),
             ...sensitivityPhraserInput,
             ...tonePhraserInput,
           },

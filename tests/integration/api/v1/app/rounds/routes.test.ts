@@ -30,6 +30,7 @@ vi.mock('@/app/api/v1/app/rounds/_lib/read', async (importOriginal) => {
 
 import { GET as listGET, POST as createPOST } from '@/app/api/v1/app/rounds/route';
 import { POST as closePOST } from '@/app/api/v1/app/rounds/[id]/close/route';
+import { PATCH as updatePATCH } from '@/app/api/v1/app/rounds/[id]/route';
 import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
@@ -91,7 +92,7 @@ describe('GET /api/v1/app/rounds', () => {
     });
     const body = await res.json();
     expect(body.success).toBe(true);
-    expect(body.data).toHaveLength(1);
+    expect(body.data).toEqual([{ id: 'r-1', name: 'July round' }]);
   });
 });
 
@@ -159,6 +160,75 @@ describe('POST /api/v1/app/rounds/:id/close', () => {
     });
     const res = await closePOST(postReq(url), ctx);
     expect(res.status).toBe(409);
+    expect(prismaMock.appQuestionnaireRound.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('PATCH /api/v1/app/rounds/:id — context + learning toggles', () => {
+  const ctx = { params: Promise.resolve({ id: 'r-1' }) };
+  const url = `${ROUNDS_URL}/r-1`;
+
+  it('persists the context + learning toggles', async () => {
+    prismaMock.appQuestionnaireRound.findUnique.mockResolvedValue({
+      id: 'r-1',
+      name: 'Round',
+      description: null,
+      status: 'draft',
+      opensAt: null,
+      closesAt: null,
+      contextEnabled: false,
+      learningEnabled: false,
+      learningConfig: {},
+    });
+    prismaMock.appQuestionnaireRound.update.mockResolvedValue({ id: 'r-1', name: 'Round' });
+
+    const res = await updatePATCH(
+      jsonReq({ contextEnabled: true, learningEnabled: true }, url),
+      ctx
+    );
+    expect(res.status).toBe(200);
+    expect((await res.json()).success).toBe(true);
+    const data = prismaMock.appQuestionnaireRound.update.mock.calls[0][0].data;
+    expect(data.contextEnabled).toBe(true);
+    expect(data.learningEnabled).toBe(true);
+  });
+
+  it('merges a partial learningConfig onto the stored JSON (defaults preserved)', async () => {
+    prismaMock.appQuestionnaireRound.findUnique.mockResolvedValue({
+      id: 'r-1',
+      name: 'Round',
+      description: null,
+      status: 'draft',
+      opensAt: null,
+      closesAt: null,
+      contextEnabled: false,
+      learningEnabled: true,
+      // Stored config already above the floor; the PATCH bumps it.
+      learningConfig: { minRespondents: 4 },
+    });
+    prismaMock.appQuestionnaireRound.update.mockResolvedValue({ id: 'r-1', name: 'Round' });
+
+    const res = await updatePATCH(jsonReq({ learningConfig: { minRespondents: 6 } }, url), ctx);
+    expect(res.status).toBe(200);
+    const data = prismaMock.appQuestionnaireRound.update.mock.calls[0][0].data;
+    expect(data.learningConfig).toEqual({ minRespondents: 6 });
+  });
+
+  it('rejects a sub-floor minRespondents at the boundary (never stored)', async () => {
+    prismaMock.appQuestionnaireRound.findUnique.mockResolvedValue({
+      id: 'r-1',
+      name: 'Round',
+      description: null,
+      status: 'draft',
+      opensAt: null,
+      closesAt: null,
+      contextEnabled: false,
+      learningEnabled: false,
+      learningConfig: {},
+    });
+
+    const res = await updatePATCH(jsonReq({ learningConfig: { minRespondents: 1 } }, url), ctx);
+    expect(res.status).toBe(400);
     expect(prismaMock.appQuestionnaireRound.update).not.toHaveBeenCalled();
   });
 });

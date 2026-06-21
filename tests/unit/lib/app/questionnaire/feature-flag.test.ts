@@ -17,14 +17,23 @@ import {
   APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG,
   APP_QUESTIONNAIRES_DATA_SLOTS_FLAG,
   APP_QUESTIONNAIRES_ADAPTIVE_DATA_SLOTS_FLAG,
+  APP_QUESTIONNAIRES_COHORTS_FLAG,
+  APP_QUESTIONNAIRES_ROUND_CONTEXT_FLAG,
+  APP_QUESTIONNAIRES_LEARNING_MODE_FLAG,
   ensureQuestionnairesEnabled,
   ensureLiveSessionsEnabled,
   ensureVoiceInputEnabled,
   ensureTurnEvaluationEnabled,
+  ensureRoundContextEnabled,
+  ensureLearningModeEnabled,
   withQuestionnairesEnabled,
   withLiveSessionsEnabled,
   withVoiceInputEnabled,
   withTurnEvaluationEnabled,
+  withRoundContextEnabled,
+  withLearningModeEnabled,
+  isRoundContextEnabled,
+  isLearningModeEnabled,
   isQuestionnairesEnabled,
   isAdaptiveSelectionEnabled,
   isAnswerExtractionEnabled,
@@ -77,6 +86,9 @@ const ALL_FLAGS = [
   APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG,
   APP_QUESTIONNAIRES_DATA_SLOTS_FLAG,
   APP_QUESTIONNAIRES_ADAPTIVE_DATA_SLOTS_FLAG,
+  APP_QUESTIONNAIRES_COHORTS_FLAG,
+  APP_QUESTIONNAIRES_ROUND_CONTEXT_FLAG,
+  APP_QUESTIONNAIRES_LEARNING_MODE_FLAG,
 ] as const;
 
 /** A map with every flag on (the baseline each truth-table test perturbs from). */
@@ -120,6 +132,10 @@ describe('questionnaire feature flag — flag names are stable', () => {
       'APP_QUESTIONNAIRES_QUESTION_PHRASING_ENABLED'
     );
     expect(APP_QUESTIONNAIRES_DATA_SLOTS_FLAG).toBe('APP_QUESTIONNAIRES_DATA_SLOTS_ENABLED');
+    // Cohorts-family flags — a rename here would silently un-gate the round/context/learning surfaces.
+    expect(APP_QUESTIONNAIRES_COHORTS_FLAG).toBe('APP_QUESTIONNAIRES_COHORTS_ENABLED');
+    expect(APP_QUESTIONNAIRES_ROUND_CONTEXT_FLAG).toBe('APP_QUESTIONNAIRES_ROUND_CONTEXT_ENABLED');
+    expect(APP_QUESTIONNAIRES_LEARNING_MODE_FLAG).toBe('APP_QUESTIONNAIRES_LEARNING_MODE_ENABLED');
   });
 });
 
@@ -242,6 +258,27 @@ const SUB_FLAG_RESOLVERS: ReadonlyArray<{
       APP_QUESTIONNAIRES_ADAPTIVE_DATA_SLOTS_FLAG,
     ],
   },
+  {
+    // Cohorts-dependent child: master + cohorts (briefings hang off rounds) + its own sub-flag.
+    // NOT live-dependent — briefings are authored before any session.
+    name: 'isRoundContextEnabled',
+    fn: isRoundContextEnabled,
+    requires: [
+      APP_QUESTIONNAIRES_FLAG,
+      APP_QUESTIONNAIRES_COHORTS_FLAG,
+      APP_QUESTIONNAIRES_ROUND_CONTEXT_FLAG,
+    ],
+  },
+  {
+    // Cohorts-dependent child: master + cohorts (learning is round-scoped) + its own sub-flag.
+    name: 'isLearningModeEnabled',
+    fn: isLearningModeEnabled,
+    requires: [
+      APP_QUESTIONNAIRES_FLAG,
+      APP_QUESTIONNAIRES_COHORTS_FLAG,
+      APP_QUESTIONNAIRES_LEARNING_MODE_FLAG,
+    ],
+  },
 ];
 
 describe('sub-flag resolvers — truth tables', () => {
@@ -259,7 +296,9 @@ describe('sub-flag resolvers — truth tables', () => {
             ? 'master'
             : off === APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG
               ? 'live-sessions'
-              : 'its own sub-flag';
+              : off === APP_QUESTIONNAIRES_COHORTS_FLAG
+                ? 'cohorts'
+                : 'its own sub-flag';
         it(`is false when ${label} (${off}) is off`, async () => {
           const flags = Object.fromEntries(requires.map((f) => [f, true]));
           flags[off] = false;
@@ -298,6 +337,8 @@ describe('sub-flag independence — one flag off suppresses only its own surface
       flag: APP_QUESTIONNAIRES_ADAPTIVE_DATA_SLOTS_FLAG,
       resolver: isAdaptiveDataSlotSelectionEnabled,
     },
+    { flag: APP_QUESTIONNAIRES_ROUND_CONTEXT_FLAG, resolver: isRoundContextEnabled },
+    { flag: APP_QUESTIONNAIRES_LEARNING_MODE_FLAG, resolver: isLearningModeEnabled },
   ];
 
   for (const { flag, resolver } of INDEPENDENT_PAIRS) {
@@ -414,6 +455,60 @@ describe('route gates — ensure* return a 404 envelope when off, null when on',
     });
   });
 
+  describe('ensureRoundContextEnabled', () => {
+    it('returns null when master + cohorts + round-context are on', async () => {
+      setFlags({
+        [APP_QUESTIONNAIRES_FLAG]: true,
+        [APP_QUESTIONNAIRES_COHORTS_FLAG]: true,
+        [APP_QUESTIONNAIRES_ROUND_CONTEXT_FLAG]: true,
+      });
+      await expect(ensureRoundContextEnabled()).resolves.toBeNull();
+    });
+    it('404s when the round-context sub-flag is off even though master + cohorts are on', async () => {
+      setFlags({
+        [APP_QUESTIONNAIRES_FLAG]: true,
+        [APP_QUESTIONNAIRES_COHORTS_FLAG]: true,
+        [APP_QUESTIONNAIRES_ROUND_CONTEXT_FLAG]: false,
+      });
+      await expect404(await ensureRoundContextEnabled());
+    });
+    it('404s when cohorts is off even though master + round-context are on', async () => {
+      setFlags({
+        [APP_QUESTIONNAIRES_FLAG]: true,
+        [APP_QUESTIONNAIRES_COHORTS_FLAG]: false,
+        [APP_QUESTIONNAIRES_ROUND_CONTEXT_FLAG]: true,
+      });
+      await expect404(await ensureRoundContextEnabled());
+    });
+  });
+
+  describe('ensureLearningModeEnabled', () => {
+    it('returns null when master + cohorts + learning are on', async () => {
+      setFlags({
+        [APP_QUESTIONNAIRES_FLAG]: true,
+        [APP_QUESTIONNAIRES_COHORTS_FLAG]: true,
+        [APP_QUESTIONNAIRES_LEARNING_MODE_FLAG]: true,
+      });
+      await expect(ensureLearningModeEnabled()).resolves.toBeNull();
+    });
+    it('404s when the learning sub-flag is off even though master + cohorts are on', async () => {
+      setFlags({
+        [APP_QUESTIONNAIRES_FLAG]: true,
+        [APP_QUESTIONNAIRES_COHORTS_FLAG]: true,
+        [APP_QUESTIONNAIRES_LEARNING_MODE_FLAG]: false,
+      });
+      await expect404(await ensureLearningModeEnabled());
+    });
+    it('404s when cohorts is off even though master + learning are on', async () => {
+      setFlags({
+        [APP_QUESTIONNAIRES_FLAG]: true,
+        [APP_QUESTIONNAIRES_COHORTS_FLAG]: false,
+        [APP_QUESTIONNAIRES_LEARNING_MODE_FLAG]: true,
+      });
+      await expect404(await ensureLearningModeEnabled());
+    });
+  });
+
   describe('ensureVoiceInputEnabled', () => {
     it('returns null when master + live-sessions + voice are on', async () => {
       setFlags({
@@ -495,6 +590,26 @@ describe('with* gate wrappers — run the flag gate before the handler', () => {
       wrap: withTurnEvaluationEnabled,
       enableFlags: [APP_QUESTIONNAIRES_FLAG, APP_QUESTIONNAIRES_TURN_EVALUATION_FLAG],
       blockFlag: APP_QUESTIONNAIRES_TURN_EVALUATION_FLAG,
+    },
+    {
+      name: 'withRoundContextEnabled',
+      wrap: withRoundContextEnabled,
+      enableFlags: [
+        APP_QUESTIONNAIRES_FLAG,
+        APP_QUESTIONNAIRES_COHORTS_FLAG,
+        APP_QUESTIONNAIRES_ROUND_CONTEXT_FLAG,
+      ],
+      blockFlag: APP_QUESTIONNAIRES_ROUND_CONTEXT_FLAG,
+    },
+    {
+      name: 'withLearningModeEnabled',
+      wrap: withLearningModeEnabled,
+      enableFlags: [
+        APP_QUESTIONNAIRES_FLAG,
+        APP_QUESTIONNAIRES_COHORTS_FLAG,
+        APP_QUESTIONNAIRES_LEARNING_MODE_FLAG,
+      ],
+      blockFlag: APP_QUESTIONNAIRES_LEARNING_MODE_FLAG,
     },
   ];
 

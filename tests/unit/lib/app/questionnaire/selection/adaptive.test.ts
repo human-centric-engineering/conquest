@@ -115,6 +115,27 @@ describe('adaptive strategy — happy path', () => {
     );
   });
 
+  it('threads peer divergence (by key) onto the matching candidate for adaptive probing', async () => {
+    const dp = deps();
+    const c = ctx({
+      questions: [
+        q({ id: 'a', ordinal: 0 }),
+        q({ id: 'b', ordinal: 1 }),
+        q({ id: 'c', ordinal: 2 }),
+      ],
+      answered: [{ questionId: 'a', confidence: null }],
+      recentMessages: ['hello'],
+      // Keyed by question key (defaults to id in the fixture).
+      peerDivergenceByKey: { b: 0.9 },
+    });
+    await select(c, dp);
+
+    const candidates = (dp.llmPick as ReturnType<typeof vi.fn>).mock.calls[0][0].candidates;
+    expect(candidates.find((x: { id: string }) => x.id === 'b').peerDivergence).toBe(0.9);
+    // A candidate without a divergence entry carries none.
+    expect(candidates.find((x: { id: string }) => x.id === 'c').peerDivergence).toBeUndefined();
+  });
+
   it('asks the only remaining candidate directly without spending on the LLM', async () => {
     const dp = deps();
     const c = ctx({

@@ -10,10 +10,14 @@
 import { z } from 'zod';
 
 import { INTRO_BACKGROUND_MAX_LENGTH } from '@/lib/app/questionnaire/types';
+import { MIN_RESPONDENTS_FLOOR } from '@/lib/app/questionnaire/rounds/types';
 
 const NAME_MAX = 120;
 const DESCRIPTION_MAX = 1000;
 const NOTES_MAX = 1000;
+
+// Learning Mode k-anonymity ceiling — a sane upper bound so the field can't be set absurdly high.
+const MIN_RESPONDENTS_CEILING = 100;
 
 const nameField = z.string().trim().min(1, 'Name is required').max(NAME_MAX);
 
@@ -105,8 +109,19 @@ export const createRoundSchema = z
   .refine(windowRefinement, windowMessage);
 
 /**
- * Edit a round: name / description / window / status. `status` may move only between
- * `draft` and `open` here — CLOSING is the dedicated `POST …/close` action (it stamps
+ * Learning Mode tuning, as accepted on a round PATCH. Today one knob: the k-anonymity threshold,
+ * clamped to [{@link MIN_RESPONDENTS_FLOOR}, {@link MIN_RESPONDENTS_CEILING}]. Partial so the PATCH
+ * can set the flags without resending tuning; the route merges it onto the stored JSON.
+ */
+export const learningConfigSchema = z
+  .object({
+    minRespondents: z.coerce.number().int().min(MIN_RESPONDENTS_FLOOR).max(MIN_RESPONDENTS_CEILING),
+  })
+  .partial();
+
+/**
+ * Edit a round: name / description / window / status / context + learning toggles. `status` may move
+ * only between `draft` and `open` here — CLOSING is the dedicated `POST …/close` action (it stamps
  * `closedAt`/`closedBy`). At least one field.
  */
 export const updateRoundSchema = z
@@ -116,6 +131,12 @@ export const updateRoundSchema = z
     opensAt: nullableInstant,
     closesAt: nullableInstant,
     status: z.enum(['draft', 'open']),
+    // Additional Context ("interviewer briefing") on/off for this round.
+    contextEnabled: z.boolean(),
+    // Learning Mode on/off for this round (introduces bias by design — the UI warns).
+    learningEnabled: z.boolean(),
+    // Learning Mode tuning; merged onto the stored JSON by the route.
+    learningConfig: learningConfigSchema,
   })
   .partial()
   .refine((b) => Object.keys(b).length > 0, { message: 'At least one field must be provided' })
@@ -127,13 +148,55 @@ export const attachRoundQuestionnaireSchema = z.object({
   versionId: z.string().min(1).nullable().optional(),
 });
 
+// ---------------------------------------------------------------------------
+// Round Additional Context ("interviewer briefing") entries
+// ---------------------------------------------------------------------------
+
+const CONTEXT_TITLE_MAX = 200;
+const CONTEXT_CONTENT_MAX = 5000;
+
+/** Entry provenance — how the briefing note was authored (drives the admin-UI badge). */
+export const ROUND_CONTEXT_SOURCES = ['manual', 'upload', 'ai_suggested'] as const;
+
+/**
+ * Create one briefing entry under a round. `versionId` scopes it to one bundled questionnaire
+ * version; `questionSlotId` attributes it to a single question (omit/null = general briefing for the
+ * whole version). The route validates that both ids belong to the round before persisting.
+ */
+export const createRoundContextEntrySchema = z.object({
+  versionId: z.string().min(1, 'Version is required'),
+  questionSlotId: z.string().min(1).nullable().optional(),
+  title: z.string().trim().min(1, 'Title is required').max(CONTEXT_TITLE_MAX),
+  content: z.string().trim().min(1, 'Content is required').max(CONTEXT_CONTENT_MAX),
+  source: z.enum(ROUND_CONTEXT_SOURCES).optional(),
+  ordinal: z.coerce.number().int().min(0).optional(),
+});
+
+/**
+ * Edit a briefing entry: re-attribute (`questionSlotId`), retitle, rewrite, or reorder. At least one
+ * field. `versionId` and `source` are immutable post-create (re-create to move an entry to another
+ * version). `questionSlotId: null` explicitly makes an attributed entry general again.
+ */
+export const updateRoundContextEntrySchema = z
+  .object({
+    questionSlotId: z.string().min(1).nullable(),
+    title: z.string().trim().min(1, 'Title is required').max(CONTEXT_TITLE_MAX),
+    content: z.string().trim().min(1, 'Content is required').max(CONTEXT_CONTENT_MAX),
+    ordinal: z.coerce.number().int().min(0),
+  })
+  .partial()
+  .refine((b) => Object.keys(b).length > 0, { message: 'At least one field must be provided' });
+
 export type CreateCohortInput = z.infer<typeof createCohortSchema>;
 export type UpdateCohortInput = z.infer<typeof updateCohortSchema>;
 export type CreateCohortMemberInput = z.infer<typeof createCohortMemberSchema>;
 export type UpdateCohortMemberInput = z.infer<typeof updateCohortMemberSchema>;
 export type CreateRoundInput = z.infer<typeof createRoundSchema>;
 export type UpdateRoundInput = z.infer<typeof updateRoundSchema>;
+export type LearningConfigInput = z.infer<typeof learningConfigSchema>;
 export type AttachRoundQuestionnaireInput = z.infer<typeof attachRoundQuestionnaireSchema>;
+export type CreateRoundContextEntryInput = z.infer<typeof createRoundContextEntrySchema>;
+export type UpdateRoundContextEntryInput = z.infer<typeof updateRoundContextEntrySchema>;
 
 /**
  * Derive the default round name when the admin doesn't supply one: the cohort name plus the

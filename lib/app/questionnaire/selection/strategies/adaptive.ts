@@ -96,13 +96,19 @@ async function select(ctx: SelectionContext, deps?: StrategyDeps): Promise<Selec
     const candidates = rankedIds
       .map((id) => byId.get(id))
       .filter((q): q is QuestionView => q !== undefined)
-      .map((q) => ({
-        id: q.id,
-        key: q.key,
-        prompt: q.prompt,
-        guidelines: q.guidelines,
-        rationale: q.rationale,
-      }));
+      .map((q) => {
+        // Learning Mode (adaptive probing): attach this topic's peer divergence (by key) so the
+        // selector can lean toward probing where earlier respondents split. Absent when not learning.
+        const peerDivergence = ctx.peerDivergenceByKey?.[q.key];
+        return {
+          id: q.id,
+          key: q.key,
+          prompt: q.prompt,
+          guidelines: q.guidelines,
+          rationale: q.rationale,
+          ...(typeof peerDivergence === 'number' ? { peerDivergence } : {}),
+        };
+      });
 
     // Prompts of questions already answered (deterministic order) — so the selector
     // sees what's covered and doesn't pick a question that re-treads it.
