@@ -966,8 +966,11 @@ describe('resolveQuestionnaireWorkspaceFlags', () => {
         'APP_QUESTIONNAIRES_RESPONDENT_REPORT_ENABLED'
       );
       expect(mockIsFeatureEnabled).toHaveBeenCalledWith('APP_QUESTIONNAIRES_INTRO_SCREEN_ENABLED');
-      // Also verify exactly 8 calls — prevents accidental re-resolution of the master flag
-      expect(mockIsFeatureEnabled).toHaveBeenCalledTimes(8);
+      // Cohort report (incl. the Scoring tab) requires cohorts + its own sub-flag.
+      expect(mockIsFeatureEnabled).toHaveBeenCalledWith('APP_QUESTIONNAIRES_COHORTS_ENABLED');
+      expect(mockIsFeatureEnabled).toHaveBeenCalledWith('APP_QUESTIONNAIRES_COHORT_REPORT_ENABLED');
+      // Also verify exactly 10 calls — prevents accidental re-resolution of the master flag
+      expect(mockIsFeatureEnabled).toHaveBeenCalledTimes(10);
     });
   });
 
@@ -1034,6 +1037,7 @@ describe('resolveQuestionnaireWorkspaceFlags', () => {
         [
           'adaptive',
           'adaptiveDataSlots',
+          'cohortReport',
           'dataSlots',
           'designEval',
           'introScreen',

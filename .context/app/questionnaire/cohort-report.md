@@ -110,6 +110,32 @@ The admin surface is the **Cohort report** section on the round detail page
 and read the narrative + charts + recommendations + actions. The full block editor + per-section
 AI-assist land in F14.5.
 
+## Deterministic scoring (F14.4)
+
+The "hard rules" path — scoring a questionnaire like a psychometric instrument (e.g. Big Five). A
+versioned **`AppScoringSchema`** (1:1 with a version, forks on launch like config) defines named
+**scales**, the **items** that feed each (a question/data-slot key → scale, with `weight` +
+`reverse`), the combine **method** (`sum`/`mean`), and **band** cutoffs. The pure engine
+`scoreSession` (`scoring/score.ts`) turns one respondent's numeric answers into per-scale raw scores
+
+- normalised position + band; `scoring/compute.ts` is the I/O layer (loads answers, scores, and
+  optionally persists **`AppRespondentScore`** rows).
+
+**Both authoring paths, one schema:**
+
+- **Visual builder** — `ScoringBuilder` (`components/admin/questionnaires/cohort-report/`) on the
+  **Scoring** workspace tab (gated by `flags.cohortReport`); saves via
+  `PATCH …/versions/:vid/scoring-schema` (forks-if-launched, recomputes scores).
+- **Upload** — `POST …/scoring-schema/extract` parses a scoring document and runs the cohort-report
+  agent (`scoring/extract.ts`) to PROPOSE a schema scoped to the version's real keys; the admin
+  reviews it in the builder and saves through the same PATCH.
+
+**Scored aggregation.** When `config.cohortReport.generation.scoringEnabled` is on and a schema
+exists, `buildCohortDataset` adds a `scoring` block: per-scale overall summaries (mean + band
+distribution) and per-dimension per-scale segment means — built from the same dimension groupings as
+the question segmentation, under the same k-anonymity floor. The narrative digest surfaces the scores
+so the report can reason over them as hard inputs.
+
 ## Data model
 
 - `AppQuestionnaireConfig.cohortReport` — the JSON settings column (above).

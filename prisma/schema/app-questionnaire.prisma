@@ -68,6 +68,7 @@ model AppQuestionnaireVersion {
   evaluationRuns  AppQuestionnaireEvaluationRun[]
   dataSlots       AppDataSlot[]
   dataSlotDraft   AppDataSlotDraft?
+  scoringSchema   AppScoringSchema?
 
   @@unique([questionnaireId, versionNumber])
   @@index([questionnaireId])
@@ -833,6 +834,7 @@ model AppQuestionnaireSession {
   turnEvaluations  AppQuestionnaireTurnEvaluation[]
   profileSnapshot  AppRespondentProfileSnapshot?
   respondentReport AppRespondentReport?
+  scores           AppRespondentScore[]
 
   @@index([versionId])
   @@index([versionId, isPreview])
@@ -971,6 +973,50 @@ model AppCohortReportRevision {
   @@unique([reportId, revisionNumber])
   @@index([reportId])
   @@map("app_cohort_report_revision")
+}
+
+/// A deterministic "hard rules" scoring schema for a version (report kind `cohort`, F14.4) — e.g.
+/// Big-Five-style scale scoring. 1:1 with a version (`versionId @unique`); forks with the version on
+/// launch (like config). `content` is the structured ScoringSchemaContent (scales, item→scale
+/// mappings with weight + reverse flag, band cutoffs, combine method) in lib/.../scoring/types.ts.
+/// `source` records whether it was authored in the visual builder or extracted from an uploaded
+/// document. Pure app config (no personal data): `createdBy` is a plain String (UG-1, no FK).
+model AppScoringSchema {
+  id        String   @id @default(cuid())
+  versionId String   @unique
+  name      String   @default("Scoring")
+  content   Json     @default("{}") // ScoringSchemaContent (scales / items / bands / method)
+  source    String   @default("manual") // SCORING_SCHEMA_SOURCES (types.ts): manual | upload
+  createdBy String? // admin User.id; plain String, no FK (UG-1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  version AppQuestionnaireVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@map("app_scoring_schema")
+}
+
+/// The deterministic scoring RESULT for one session against a scoring schema (F14.4) — per-scale
+/// raw/normalised score + band. Recomputed when answers or the schema change. `scores` is a
+/// { [scaleKey]: { raw, normalised, band } } map (RespondentScores in lib/.../scoring/types.ts).
+///
+/// Respondent-derived: `onDelete: Cascade` from the session so session deletion + GDPR erasure remove
+/// it natively. `@@unique([sessionId, schemaId])`: one result per session per schema (recompute
+/// upserts). `schemaId` is a plain String pointer (the schema may be re-authored; results are
+/// recomputed, not FK-cascaded from the schema).
+model AppRespondentScore {
+  id        String   @id @default(cuid())
+  sessionId String
+  schemaId  String // AppScoringSchema.id the scores were computed against; plain String (UG-1 posture)
+  scores    Json     @default("{}") // { [scaleKey]: { raw, normalised, band } }
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  session AppQuestionnaireSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, schemaId])
+  @@index([sessionId])
+  @@map("app_respondent_score")
 }
 
 /// One captured answer for a question slot within a session. F4.2 produces the

@@ -26,6 +26,7 @@ function makeFlags(over: Partial<QuestionnaireWorkspaceFlags> = {}): Questionnai
     adaptive: true,
     adaptiveDataSlots: true,
     respondentReport: true,
+    cohortReport: true,
     introScreen: false,
     ...over,
   };
@@ -117,9 +118,14 @@ describe('visibleWorkspaceTabs', () => {
 
   it('returns an empty-ish list when all sub-flag tabs are hidden', () => {
     const tabs = visibleWorkspaceTabs(
-      makeFlags({ dataSlots: false, designEval: false, respondentReport: false })
+      makeFlags({
+        dataSlots: false,
+        designEval: false,
+        respondentReport: false,
+        cohortReport: false,
+      })
     );
-    // data-slots, evaluations, and respondent-report should be the only hidden ones
+    // data-slots, evaluations, respondent-report, and scoring should be the only hidden ones
     const flaggedTabIds = QUESTIONNAIRE_WORKSPACE_TABS.filter((t) => t.flag).map((t) => t.id);
     for (const id of flaggedTabIds) {
       expect(tabs.find((t) => t.id === id)).toBeUndefined();

@@ -540,6 +540,18 @@ export type CohortReportPublishStatus = (typeof COHORT_REPORT_PUBLISH_STATUSES)[
 export const COHORT_REPORT_AUTHORS = ['ai', 'admin', 'ai_assist'] as const;
 export type CohortReportAuthor = (typeof COHORT_REPORT_AUTHORS)[number];
 
+/** How a deterministic scoring schema was authored: the visual builder, or extracted from a document. */
+export const SCORING_SCHEMA_SOURCES = ['manual', 'upload'] as const;
+export type ScoringSchemaSource = (typeof SCORING_SCHEMA_SOURCES)[number];
+
+/** How a scale combines its items: sum the (weighted) item values, or average them. */
+export const SCORING_METHODS = ['sum', 'mean'] as const;
+export type ScoringMethod = (typeof SCORING_METHODS)[number];
+
+/** Whether a scoring item reads a question slot's answer or a data slot's fill. */
+export const SCORING_ITEM_SOURCES = ['question', 'dataSlot'] as const;
+export type ScoringItemSource = (typeof SCORING_ITEM_SOURCES)[number];
+
 /** Overall report length the narrative agent targets. */
 export const COHORT_REPORT_LENGTHS = ['brief', 'standard', 'detailed'] as const;
 export type CohortReportLength = (typeof COHORT_REPORT_LENGTHS)[number];

@@ -51,6 +51,51 @@ export interface CohortSegmentation {
   segments: CohortSegment[];
 }
 
+/* ── Deterministic scoring aggregation (F14.4) ────────────────────────────── */
+
+/** One scale's overall aggregate across the cohort. */
+export interface CohortScaleSummary {
+  scaleKey: string;
+  scaleName: string;
+  /** Respondents with this scale scored. */
+  respondents: number;
+  /** Mean raw score, or null when suppressed (too few). */
+  mean: number | null;
+  /** Count of respondents per band label (empty when suppressed). */
+  bandCounts: { label: string; count: number }[];
+  /** True when `0 < respondents < kThreshold` (mean + band detail withheld). */
+  suppressed: boolean;
+}
+
+/** One scale's mean for one segment of a dimension. */
+export interface CohortScaleSegmentValue {
+  value: string;
+  label: string;
+  respondents: number;
+  mean: number | null;
+  suppressed: boolean;
+}
+
+/** One scale compared across a dimension's segments. */
+export interface CohortScaleBySegment {
+  scaleKey: string;
+  scaleName: string;
+  segments: CohortScaleSegmentValue[];
+}
+
+/** Scored comparison for one dimension. */
+export interface CohortScoringByDimension {
+  dimensionKey: string;
+  dimensionLabel: string;
+  scales: CohortScaleBySegment[];
+}
+
+/** The deterministic-scoring aggregate, present only when scoring is enabled + a schema exists. */
+export interface CohortScoring {
+  scales: CohortScaleSummary[];
+  byDimension: CohortScoringByDimension[];
+}
+
 /**
  * The full cross-respondent analytical substrate for one round + version. Built by
  * `buildCohortDataset`; consumed by charts, the analysis/narrative agents, and the admin UI.
@@ -73,6 +118,8 @@ export interface CohortDataset {
   overall: QuestionDistribution[];
   /** Per-dimension segmentation; empty when anonymous or there are no eligible dimensions. */
   segmentation: CohortSegmentation[];
+  /** Deterministic scoring aggregate; undefined when scoring is off or no schema is authored. */
+  scoring?: CohortScoring;
 }
 
 /** Sentinel `SegmentDimension.key` for the cohort-subgroup axis (not a profile field key). */

@@ -51,6 +51,8 @@ export async function copyVersionGraph(
       // Reuse the read view's column set so a new config column is copied automatically
       // — no separate list here to fall out of sync (F3.1).
       config: { select: CONFIG_SELECT },
+      // Deterministic scoring schema (F14.4): forks with the version (like config/tags).
+      scoringSchema: { select: { name: true, content: true, source: true } },
       tags: {
         select: {
           id: true,
@@ -118,6 +120,18 @@ export async function copyVersionGraph(
         respondentReport: jsonInput(source.config.respondentReport),
         cohortReport: jsonInput(source.config.cohortReport),
         intro: jsonInput(source.config.intro),
+      },
+    });
+  }
+
+  // F14.4: copy the scoring schema when one exists (1:1 with the version).
+  if (source.scoringSchema) {
+    await tx.appScoringSchema.create({
+      data: {
+        versionId: targetVersionId,
+        name: source.scoringSchema.name,
+        content: jsonInput(source.scoringSchema.content),
+        source: source.scoringSchema.source,
       },
     });
   }

@@ -379,6 +379,12 @@ export const API = {
       /** Version run-time configuration (PATCH partial config — F3.1). */
       versionConfig: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/config`,
+      /** Deterministic scoring schema (GET read + builder picker · PUT save — F14.4). */
+      scoringSchema: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/scoring-schema`,
+      /** Extract a scoring schema proposal from an uploaded document (POST multipart — F14.4). */
+      scoringSchemaExtract: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/scoring-schema/extract`,
       /** Respondent Report: one config-crafting assistant turn (POST — Generation-tab chat). */
       reportCraft: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/report/craft`,

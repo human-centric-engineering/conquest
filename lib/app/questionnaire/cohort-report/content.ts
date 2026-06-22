@@ -204,6 +204,30 @@ export function buildCohortDatasetDigest(dataset: CohortDataset): string {
     }
   }
 
+  if (dataset.scoring && dataset.scoring.scales.length > 0) {
+    lines.push('', 'SCORING (deterministic scales):');
+    for (const scale of dataset.scoring.scales) {
+      if (scale.suppressed || scale.mean === null) {
+        lines.push(`  ${scale.scaleName}: [hidden — too few respondents]`);
+        continue;
+      }
+      const bands = scale.bandCounts.map((b) => `${b.label}=${b.count}`).join(', ');
+      lines.push(
+        `  ${scale.scaleName}: mean ${scale.mean.toFixed(2)} (n=${scale.respondents})${bands ? ` — ${bands}` : ''}`
+      );
+    }
+    for (const dim of dataset.scoring.byDimension) {
+      for (const scale of dim.scales) {
+        const parts = scale.segments
+          .filter((s) => !s.suppressed && s.mean !== null)
+          .map((s) => `${s.label}=${s.mean!.toFixed(2)}`);
+        if (parts.length > 0) {
+          lines.push(`  ${scale.scaleName} by ${dim.dimensionLabel}: ${parts.join(', ')}`);
+        }
+      }
+    }
+  }
+
   // Bound the digest so a huge questionnaire can't blow the prompt.
   return lines.join('\n').slice(0, 16_000);
 }

@@ -23,7 +23,19 @@ import {
   type SessionForDistribution,
   type SlotForDistribution,
 } from '@/lib/app/questionnaire/analytics/distributions';
-import { K_ANONYMITY_THRESHOLD } from '@/lib/app/questionnaire/analytics/privacy';
+import {
+  K_ANONYMITY_THRESHOLD,
+  isCohortSuppressed,
+} from '@/lib/app/questionnaire/analytics/privacy';
+import { narrowCohortReportSettings } from '@/lib/app/questionnaire/cohort-report/settings';
+import { narrowScoringSchemaContent } from '@/lib/app/questionnaire/scoring/schema-validation';
+import { buildScoringInputs, scoreSessions } from '@/lib/app/questionnaire/scoring/compute';
+import type { RespondentScores } from '@/lib/app/questionnaire/scoring/types';
+import type {
+  CohortScoring,
+  CohortScaleSummary,
+  CohortScaleBySegment,
+} from '@/lib/app/questionnaire/cohort-report/types';
 import {
   narrowToEnum,
   PROFILE_FIELD_TYPES,
@@ -52,6 +64,107 @@ export interface BuildCohortDatasetParams {
 interface SegmentableSession extends SessionForDistribution {
   subgroupId: string | null;
   profile: Record<string, unknown>;
+}
+
+/** A dimension and its session buckets — the shared substrate for both segmentation + scoring. */
+interface DimensionGrouping {
+  dimension: SegmentDimension;
+  buckets: Array<{ value: string; label: string; sessions: SegmentableSession[] }>;
+}
+
+/** Mean of a finite-number list, or null when empty. */
+function meanOf(values: number[]): number | null {
+  return values.length === 0 ? null : values.reduce((a, b) => a + b, 0) / values.length;
+}
+
+/**
+ * Aggregate deterministic scores across the cohort (F14.4): per-scale overall summaries (mean + band
+ * distribution) and per-dimension per-scale segment means. Returns undefined when no schema is
+ * authored or it has no items. k-anonymity: a scale/segment below the floor reports `mean: null` and
+ * no band counts (`suppressed: true`).
+ */
+async function buildScoring(
+  versionId: string,
+  sessions: SegmentableSession[],
+  groupings: DimensionGrouping[]
+): Promise<CohortScoring | undefined> {
+  const schemaRow = await prisma.appScoringSchema.findUnique({
+    where: { versionId },
+    select: { content: true },
+  });
+  if (!schemaRow) return undefined;
+  const schema = narrowScoringSchemaContent(schemaRow.content);
+  if (schema.items.length === 0 || schema.scales.length === 0) return undefined;
+
+  const inputs = await buildScoringInputs(versionId);
+  const scoresBySession = await scoreSessions(
+    schema,
+    sessions.map((s) => s.id),
+    inputs
+  );
+
+  /** Collect raw scores + band labels for a scale across a set of sessions. */
+  const collect = (scaleKey: string, sessionIds: string[]) => {
+    const raws: number[] = [];
+    const bands: (string | null)[] = [];
+    for (const id of sessionIds) {
+      const score: RespondentScores | undefined = scoresBySession.get(id);
+      const scale = score?.[scaleKey];
+      if (!scale) continue;
+      raws.push(scale.raw);
+      bands.push(scale.band);
+    }
+    return { raws, bands };
+  };
+
+  const allIds = sessions.map((s) => s.id);
+  const scales: CohortScaleSummary[] = schema.scales.map((scale) => {
+    const { raws, bands } = collect(scale.key, allIds);
+    const suppressed = isCohortSuppressed(raws.length);
+    const bandCounts: { label: string; count: number }[] = [];
+    if (!suppressed) {
+      const counts = new Map<string, number>();
+      for (const b of bands) {
+        if (b) counts.set(b, (counts.get(b) ?? 0) + 1);
+      }
+      for (const [label, count] of counts) bandCounts.push({ label, count });
+    }
+    return {
+      scaleKey: scale.key,
+      scaleName: scale.name,
+      respondents: raws.length,
+      mean: suppressed ? null : meanOf(raws),
+      bandCounts,
+      suppressed,
+    };
+  });
+
+  const byDimension = groupings.map((g) => ({
+    dimensionKey: g.dimension.key,
+    dimensionLabel: g.dimension.label,
+    scales: schema.scales.map(
+      (scale): CohortScaleBySegment => ({
+        scaleKey: scale.key,
+        scaleName: scale.name,
+        segments: g.buckets.map((b) => {
+          const { raws } = collect(
+            scale.key,
+            b.sessions.map((s) => s.id)
+          );
+          const suppressed = isCohortSuppressed(raws.length);
+          return {
+            value: b.value,
+            label: b.label,
+            respondents: raws.length,
+            mean: suppressed ? null : meanOf(raws),
+            suppressed,
+          };
+        }),
+      })
+    ),
+  }));
+
+  return { scales, byDimension };
 }
 
 /** Coerce a stored profile value to a finite number, or null. */
@@ -136,12 +249,13 @@ export async function buildCohortDataset(params: BuildCohortDatasetParams): Prom
     orderBy: [{ section: { ordinal: 'asc' } }, { ordinal: 'asc' }],
   });
 
-  // The version's profile schema + anonymous mode (config is 1:1 and lazy — absent = no profile).
+  // The version's profile schema + anonymous mode + cohort-report config (lazy; absent = defaults).
   const config = await prisma.appQuestionnaireConfig.findUnique({
     where: { versionId },
-    select: { profileFields: true, anonymousMode: true },
+    select: { profileFields: true, anonymousMode: true, cohortReport: true },
   });
   const anonymous = config?.anonymousMode ?? false;
+  const scoringEnabled = narrowCohortReportSettings(config?.cohortReport).generation.scoringEnabled;
   const profileFields: ProfileFieldConfig[] =
     !anonymous && Array.isArray(config?.profileFields)
       ? (config.profileFields as unknown as ProfileFieldConfig[])
@@ -196,8 +310,9 @@ export async function buildCohortDataset(params: BuildCohortDatasetParams): Prom
   const overallAnswers = sessions.flatMap((s) => answersBySession.get(s.id) ?? []);
   const overall = assembleQuestionDistributions(slots, sessions, overallAnswers);
 
-  // Segmentation — skipped entirely in anonymous mode (no profile axis to split on).
-  const segmentation: CohortSegmentation[] = [];
+  // Build the dimension groupings (dimension → buckets of sessions) once; both the per-question
+  // segmentation and the scored aggregation (F14.4) derive from them. Skipped in anonymous mode.
+  const groupings: DimensionGrouping[] = [];
   if (!anonymous) {
     // Profile-field dimensions (select buckets by option; number buckets by range).
     for (const field of eligibleProfileDimensions(profileFields)) {
@@ -232,12 +347,10 @@ export async function buildCohortDataset(params: BuildCohortDatasetParams): Prom
           buckets.get(val)!.push(s);
         }
       }
-      const segments = [...buckets.entries()]
+      const bucketList = [...buckets.entries()]
         .filter(([, segSessions]) => segSessions.length > 0)
-        .map(([value, segSessions]) =>
-          buildSegment(value, value, slots, segSessions, answersBySession)
-        );
-      if (segments.length > 0) segmentation.push({ dimension, segments });
+        .map(([value, segSessions]) => ({ value, label: value, sessions: segSessions }));
+      if (bucketList.length > 0) groupings.push({ dimension, buckets: bucketList });
     }
 
     // Subgroup dimension — present only when at least one session carries a subgroup.
@@ -250,21 +363,31 @@ export async function buildCohortDataset(params: BuildCohortDatasetParams): Prom
         select: { id: true, name: true },
       });
       const nameById = new Map(subgroups.map((g) => [g.id, g.name]));
-      const segments: CohortSegment[] = subgroupIds.map((id) => {
-        const segSessions = sessions.filter((s) => s.subgroupId === id);
-        return buildSegment(id, nameById.get(id) ?? id, slots, segSessions, answersBySession);
-      });
-      segmentation.push({
+      groupings.push({
         dimension: {
           key: SUBGROUP_DIMENSION_KEY,
           label: 'Subgroup',
           source: 'subgroup',
           kind: 'subgroup',
         },
-        segments,
+        buckets: subgroupIds.map((id) => ({
+          value: id,
+          label: nameById.get(id) ?? id,
+          sessions: sessions.filter((s) => s.subgroupId === id),
+        })),
       });
     }
   }
+
+  const segmentation: CohortSegmentation[] = groupings.map((g) => ({
+    dimension: g.dimension,
+    segments: g.buckets.map((b) =>
+      buildSegment(b.value, b.label, slots, b.sessions, answersBySession)
+    ),
+  }));
+
+  // Scored aggregation (F14.4) — present only when scoring is enabled + a schema exists.
+  const scoring = scoringEnabled ? await buildScoring(versionId, sessions, groupings) : undefined;
 
   return {
     roundId,
@@ -277,5 +400,6 @@ export async function buildCohortDataset(params: BuildCohortDatasetParams): Prom
     anonymous,
     overall: overall.questions,
     segmentation,
+    scoring,
   };
 }
