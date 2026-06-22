@@ -155,6 +155,20 @@ distribution) and per-dimension per-scale segment means — built from the same 
 the question segmentation, under the same k-anonymity floor. The narrative digest surfaces the scores
 so the report can reason over them as hard inputs.
 
+## Versioning, publish, PDF & search (F14.6)
+
+- **Revision history + restore** — `GET …/cohort-report/revisions` lists every revision (newest
+  first); `POST` restores one by appending it as a new `admin` revision (history is never rewritten).
+- **Publish** — `POST …/cohort-report/publish` pins a revision (`publishedRevisionNumber`, default
+  the head); `DELETE` reverts to draft. The panel shows which revision is live.
+- **Themed PDF** — `GET …/cohort-report/export.pdf?versionId=&revision=head|published|<n>` renders any
+  revision to a branded PDF (`CohortReportPdfDocument`, demo-client logo + accent via `resolveTheme`).
+  Section HTML is flattened to text paragraphs (`pdf-model.ts`'s `htmlToParagraphs`) and charts are
+  drawn as labelled bars from the shared `ChartData` — so a draft is downloadable at any point.
+- **Search** — `GET /api/v1/app/cohort-reports/search?q=&demoClientId=` searches PUBLISHED reports'
+  titles + section text and returns snippets. Within-report find is the browser's native search over
+  the rendered report.
+
 ## Data model
 
 - `AppQuestionnaireConfig.cohortReport` — the JSON settings column (above).
@@ -165,11 +179,11 @@ so the report can reason over them as hard inputs.
   section blocks) lives in `AppCohortReportRevision` rows (F14.3) so every generate / edit / AI-assist
   is version-controlled.
 
-## Roadmap
+## Roadmap (all shipped)
 
 - **F14.1** ✅ — dataset & segmentation foundation, flag, config, base model.
-- **F14.2** — `ChartSpec` + recharts web charts (shared series layer reused by the PDF).
-- **F14.3** — `app-cohort-report` agent + thematic-analysis & narrative capabilities; revisions; SSE generation.
-- **F14.4** — deterministic scoring engine (upload + visual builder), scored aggregation.
-- **F14.5** — Settings tab, structure templates, Tiptap block editor, per-section AI-assist.
-- **F14.6** — revision history/restore, publish, themed PDF (charts via react-pdf Svg), cross-report search.
+- **F14.2** ✅ — `ChartSpec` + recharts web charts (shared `ChartData` reused by the PDF).
+- **F14.3** ✅ — `app-cohort-report` agent + generation; revisions; charted narrative + actions.
+- **F14.4** ✅ — deterministic scoring engine (upload + visual builder), scored aggregation.
+- **F14.5** ✅ — settings + structure template, Tiptap block editor, per-section AI-assist.
+- **F14.6** ✅ — revision history/restore, publish, themed PDF (charts as bars), cross-report search.

@@ -647,6 +647,18 @@ export const API = {
         `/api/v1/app/rounds/${id}/cohort-report/generate`,
       /** Per-section AI-assist (POST `{ heading, body, instruction }` → revised section). */
       cohortReportRefine: (id: string): string => `/api/v1/app/rounds/${id}/cohort-report/refine`,
+      /** Revision history (GET) + restore (POST `{ versionId, revisionNumber }`). */
+      cohortReportRevisions: (id: string): string =>
+        `/api/v1/app/rounds/${id}/cohort-report/revisions`,
+      /** Publish (POST `{ versionId, revisionNumber? }`) / unpublish (DELETE `{ versionId }`). */
+      cohortReportPublish: (id: string): string => `/api/v1/app/rounds/${id}/cohort-report/publish`,
+      /** Themed PDF (GET `?versionId=&revision=head|published|<n>`). */
+      cohortReportPdf: (id: string): string => `/api/v1/app/rounds/${id}/cohort-report/export.pdf`,
+    },
+    /** Cohort reports (cross-round). */
+    COHORT_REPORTS: {
+      /** Search published cohort reports (GET `?q=&demoClientId=`). */
+      search: '/api/v1/app/cohort-reports/search',
     },
   },
 } as const;

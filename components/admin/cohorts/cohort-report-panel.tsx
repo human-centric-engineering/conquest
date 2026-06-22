@@ -11,7 +11,7 @@
  */
 
 import * as React from 'react';
-import { Loader2, Sparkles, RefreshCw, Pencil } from 'lucide-react';
+import { Loader2, Sparkles, RefreshCw, Pencil, Download, History, Globe } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { CohortChart } from '@/components/admin/questionnaires/cohort-report/charts/cohort-chart';
@@ -20,7 +20,10 @@ import { CohortReportEditor } from '@/components/admin/questionnaires/cohort-rep
 import { apiClient, APIClientError } from '@/lib/api/client';
 import { API } from '@/lib/api/endpoints';
 import { buildChartData } from '@/lib/app/questionnaire/cohort-report';
-import type { CohortReportView } from '@/lib/app/questionnaire/cohort-report';
+import type {
+  CohortReportView,
+  CohortReportRevisionSummary,
+} from '@/lib/app/questionnaire/cohort-report';
 import type { ChartSpec } from '@/lib/app/questionnaire/cohort-report/chart-types';
 
 export interface CohortReportPanelProps {
@@ -35,6 +38,8 @@ export function CohortReportPanel({ roundId, versions }: CohortReportPanelProps)
   const [loading, setLoading] = React.useState(false);
   const [generating, setGenerating] = React.useState(false);
   const [editing, setEditing] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
+  const [revisions, setRevisions] = React.useState<CohortReportRevisionSummary[] | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
   const load = React.useCallback(async () => {
@@ -73,6 +78,58 @@ export function CohortReportPanel({ roundId, versions }: CohortReportPanelProps)
       setGenerating(false);
     }
   }
+
+  async function handlePublishToggle() {
+    if (!view) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const path = API.APP.ROUNDS.cohortReportPublish(roundId);
+      const next =
+        view.publishStatus === 'published'
+          ? await apiClient.delete<CohortReportView>(path, { body: { versionId } })
+          : await apiClient.post<CohortReportView>(path, { body: { versionId } });
+      setView(next);
+    } catch (err) {
+      setError(err instanceof APIClientError ? err.message : 'Publish failed.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleHistory() {
+    if (revisions) {
+      setRevisions(null);
+      return;
+    }
+    try {
+      const data = await apiClient.get<{ revisions: CohortReportRevisionSummary[] }>(
+        API.APP.ROUNDS.cohortReportRevisions(roundId)
+      );
+      setRevisions(data.revisions);
+    } catch (err) {
+      setError(err instanceof APIClientError ? err.message : 'Failed to load history.');
+    }
+  }
+
+  async function restore(revisionNumber: number) {
+    setBusy(true);
+    setError(null);
+    try {
+      const next = await apiClient.post<CohortReportView>(
+        API.APP.ROUNDS.cohortReportRevisions(roundId),
+        { body: { versionId, revisionNumber } }
+      );
+      setView(next);
+      setRevisions(null);
+    } catch (err) {
+      setError(err instanceof APIClientError ? err.message : 'Restore failed.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const pdfHref = `${API.APP.ROUNDS.cohortReportPdf(roundId)}?versionId=${encodeURIComponent(versionId)}`;
 
   if (versions.length === 0) {
     return (
@@ -114,16 +171,60 @@ export function CohortReportPanel({ roundId, versions }: CohortReportPanelProps)
           {view?.exists ? 'Regenerate' : 'Generate report'}
         </Button>
         {content && !editing && (
-          <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
-            <Pencil className="h-4 w-4" /> Edit
-          </Button>
+          <>
+            <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
+              <Pencil className="h-4 w-4" /> Edit
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void handlePublishToggle()}
+              disabled={busy}
+            >
+              <Globe className="h-4 w-4" />
+              {view?.publishStatus === 'published' ? 'Unpublish' : 'Publish'}
+            </Button>
+            <Button variant="outline" size="sm" asChild>
+              <a href={pdfHref} target="_blank" rel="noopener noreferrer">
+                <Download className="h-4 w-4" /> PDF
+              </a>
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => void toggleHistory()}>
+              <History className="h-4 w-4" /> History
+            </Button>
+          </>
         )}
         {view?.status === 'ready' && view.revisionNumber !== null && (
           <span className="text-muted-foreground text-xs">
             Revision {view.revisionNumber} · {view.publishStatus}
+            {view.publishedRevisionNumber !== null && ` (r${view.publishedRevisionNumber} live)`}
           </span>
         )}
       </div>
+
+      {revisions && (
+        <div className="rounded-lg border p-3" data-testid="cohort-report-history">
+          <h4 className="mb-2 text-sm font-semibold">Revision history</h4>
+          <ul className="space-y-1 text-sm">
+            {revisions.map((r) => (
+              <li key={r.revisionNumber} className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">
+                  r{r.revisionNumber} · {r.authoredBy}
+                  {r.summary ? ` · ${r.summary}` : ''}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => void restore(r.revisionNumber)}
+                  disabled={busy}
+                >
+                  Restore
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 

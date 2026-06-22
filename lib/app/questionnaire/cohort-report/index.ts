@@ -44,6 +44,11 @@ export {
   ensureCohortReport,
   appendCohortReportRevision,
   markCohortReportFailed,
+  listCohortReportRevisions,
+  restoreCohortReportRevision,
+  setCohortReportPublish,
+  getCohortReportRevisionContent,
+  type CohortReportRevisionSummary,
 } from '@/lib/app/questionnaire/cohort-report/persist';
 export {
   buildCohortReportView,

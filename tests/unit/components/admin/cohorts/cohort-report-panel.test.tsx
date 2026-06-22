@@ -28,6 +28,7 @@ function view(overrides: Partial<CohortReportView> = {}): CohortReportView {
     title: 'Q1 — cohort report',
     status: 'ready',
     publishStatus: 'draft',
+    publishedRevisionNumber: null,
     costUsd: 0.02,
     error: null,
     generatedAt: '2026-06-22T00:00:00.000Z',

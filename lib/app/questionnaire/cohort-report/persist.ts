@@ -9,8 +9,20 @@
 
 import { prisma } from '@/lib/db/client';
 import type { CohortReportAuthor } from '@/lib/app/questionnaire/types';
-import type { CohortReportContent } from '@/lib/app/questionnaire/cohort-report/content';
+import {
+  validateCohortReportContent,
+  type CohortReportContent,
+} from '@/lib/app/questionnaire/cohort-report/content';
 import type { Prisma } from '@prisma/client';
+
+/** One revision's metadata for the history list (client-safe; no content). */
+export interface CohortReportRevisionSummary {
+  revisionNumber: number;
+  authoredBy: CohortReportAuthor;
+  summary: string | null;
+  costUsd: number | null;
+  createdAt: string;
+}
 
 /** Ensure the 1:1 report header exists for a round; returns its id. Idempotent. */
 export async function ensureCohortReport(params: {
@@ -83,4 +95,109 @@ export async function markCohortReportFailed(reportId: string, error: unknown): 
     where: { id: reportId },
     data: { status: 'failed', error: String(error).slice(0, 1000) },
   });
+}
+
+/** List a report's revisions, newest first (metadata only — no content). */
+export async function listCohortReportRevisions(
+  reportId: string
+): Promise<CohortReportRevisionSummary[]> {
+  const rows = await prisma.appCohortReportRevision.findMany({
+    where: { reportId },
+    orderBy: { revisionNumber: 'desc' },
+    select: {
+      revisionNumber: true,
+      authoredBy: true,
+      summary: true,
+      costUsd: true,
+      createdAt: true,
+    },
+  });
+  return rows.map((r) => ({
+    revisionNumber: r.revisionNumber,
+    authoredBy: (r.authoredBy as CohortReportAuthor) ?? 'ai',
+    summary: r.summary,
+    costUsd: r.costUsd,
+    createdAt: r.createdAt.toISOString(),
+  }));
+}
+
+/**
+ * Restore a past revision: append its content as a new `admin` revision (the working head), leaving
+ * history intact. Returns the new revision number, or null when the source revision doesn't exist.
+ */
+export async function restoreCohortReportRevision(params: {
+  reportId: string;
+  sourceRevisionNumber: number;
+  userId: string;
+}): Promise<number | null> {
+  const { reportId, sourceRevisionNumber, userId } = params;
+  const source = await prisma.appCohortReportRevision.findUnique({
+    where: { reportId_revisionNumber: { reportId, revisionNumber: sourceRevisionNumber } },
+    select: { content: true },
+  });
+  if (!source) return null;
+  return appendCohortReportRevision({
+    reportId,
+    content: validateCohortReportContent(source.content),
+    authoredBy: 'admin',
+    summary: `Restored revision ${sourceRevisionNumber}`,
+    userId,
+  });
+}
+
+/**
+ * Publish (pin a revision) or unpublish a report. `revisionNumber` = publish that revision; `null` =
+ * revert to draft. Validates the revision exists when publishing.
+ */
+export async function setCohortReportPublish(params: {
+  reportId: string;
+  revisionNumber: number | null;
+}): Promise<boolean> {
+  const { reportId, revisionNumber } = params;
+  if (revisionNumber !== null) {
+    const exists = await prisma.appCohortReportRevision.findUnique({
+      where: { reportId_revisionNumber: { reportId, revisionNumber } },
+      select: { revisionNumber: true },
+    });
+    if (!exists) return false;
+  }
+  await prisma.appCohortReport.update({
+    where: { id: reportId },
+    data: {
+      publishStatus: revisionNumber !== null ? 'published' : 'draft',
+      publishedRevisionNumber: revisionNumber,
+    },
+  });
+  return true;
+}
+
+/**
+ * Read one revision's content for a round, resolving `'head'` (highest), `'published'` (the pinned
+ * one, falling back to head), or a specific number. Returns null when there's no matching revision.
+ */
+export async function getCohortReportRevisionContent(
+  roundId: string,
+  which: number | 'head' | 'published'
+): Promise<{ content: CohortReportContent; revisionNumber: number; title: string } | null> {
+  const report = await prisma.appCohortReport.findUnique({
+    where: { roundId },
+    select: { id: true, title: true, publishedRevisionNumber: true },
+  });
+  if (!report) return null;
+
+  let revisionNumber: number | undefined;
+  if (typeof which === 'number') revisionNumber = which;
+  else if (which === 'published') revisionNumber = report.publishedRevisionNumber ?? undefined;
+
+  const row = await prisma.appCohortReportRevision.findFirst({
+    where: { reportId: report.id, ...(revisionNumber !== undefined ? { revisionNumber } : {}) },
+    orderBy: { revisionNumber: 'desc' },
+    select: { revisionNumber: true, content: true },
+  });
+  if (!row) return null;
+  return {
+    content: validateCohortReportContent(row.content),
+    revisionNumber: row.revisionNumber,
+    title: report.title,
+  };
 }

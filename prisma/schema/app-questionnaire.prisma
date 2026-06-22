@@ -935,6 +935,7 @@ model AppCohortReport {
   title         String
   status        String    @default("queued") // COHORT_REPORT_STATUSES (types.ts): queued | processing | ready | failed
   publishStatus String    @default("draft") // COHORT_REPORT_PUBLISH_STATUSES: draft | published
+  publishedRevisionNumber Int? // the AppCohortReportRevision.revisionNumber pinned as published; null when draft
   costUsd       Float? // cumulative generation cost actual; null until first generation
   error         String? // failure message when status = failed
   lockedBy      String? // worker host holding the lease; null when idle

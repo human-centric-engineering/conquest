@@ -35,6 +35,8 @@ export interface CohortReportView {
   title: string | null;
   status: CohortReportStatus | null;
   publishStatus: CohortReportPublishStatus | null;
+  /** The revision number pinned as published, or null when draft. */
+  publishedRevisionNumber: number | null;
   /** Cumulative generation cost, USD. */
   costUsd: number | null;
   error: string | null;
@@ -69,6 +71,7 @@ export async function buildCohortReportView(params: {
       title: true,
       status: true,
       publishStatus: true,
+      publishedRevisionNumber: true,
       costUsd: true,
       error: true,
       generatedAt: true,
@@ -89,6 +92,7 @@ export async function buildCohortReportView(params: {
       title: null,
       status: null,
       publishStatus: null,
+      publishedRevisionNumber: null,
       costUsd: null,
       error: null,
       generatedAt: null,
@@ -112,6 +116,7 @@ export async function buildCohortReportView(params: {
       COHORT_REPORT_PUBLISH_STATUSES,
       'draft'
     ),
+    publishedRevisionNumber: report.publishedRevisionNumber,
     costUsd: report.costUsd,
     error: report.error,
     generatedAt: report.generatedAt?.toISOString() ?? null,
