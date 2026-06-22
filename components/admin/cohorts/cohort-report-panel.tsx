@@ -1,0 +1,189 @@
+'use client';
+
+/**
+ * CohortReportPanel — the round's Cohort Report surface (report kind `cohort`, F14.3 read view).
+ *
+ * Picks a bundled version, loads its cohort-report view (status + working-head content + the dataset
+ * the charts render against), and offers Generate / Regenerate. Renders the woven narrative
+ * (markdown), the proposed charts (resolved client-side via the shared `buildChartData` → `CohortChart`),
+ * recommendations and actions. The full block editor + per-section AI-assist land in F14.5; this is
+ * the read + generate surface.
+ */
+
+import * as React from 'react';
+import { Loader2, Sparkles, RefreshCw } from 'lucide-react';
+
+import { Button } from '@/components/ui/button';
+import { MarkdownOrRawView } from '@/components/admin/orchestration/markdown-or-raw-view';
+import { CohortChart } from '@/components/admin/questionnaires/cohort-report/charts/cohort-chart';
+import { apiClient, APIClientError } from '@/lib/api/client';
+import { API } from '@/lib/api/endpoints';
+import { buildChartData } from '@/lib/app/questionnaire/cohort-report';
+import type { CohortReportView } from '@/lib/app/questionnaire/cohort-report';
+import type { ChartSpec } from '@/lib/app/questionnaire/cohort-report/chart-types';
+
+export interface CohortReportPanelProps {
+  roundId: string;
+  /** The round's bundled questionnaire versions (the analysis is per-version). */
+  versions: Array<{ versionId: string; title: string }>;
+}
+
+export function CohortReportPanel({ roundId, versions }: CohortReportPanelProps) {
+  const [versionId, setVersionId] = React.useState(versions[0]?.versionId ?? '');
+  const [view, setView] = React.useState<CohortReportView | null>(null);
+  const [loading, setLoading] = React.useState(false);
+  const [generating, setGenerating] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const load = React.useCallback(async () => {
+    if (!versionId) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await apiClient.get<CohortReportView>(
+        `${API.APP.ROUNDS.cohortReport(roundId)}?versionId=${encodeURIComponent(versionId)}`
+      );
+      setView(data);
+    } catch (err) {
+      setError(err instanceof APIClientError ? err.message : 'Failed to load the cohort report.');
+      setView(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [roundId, versionId]);
+
+  React.useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function handleGenerate() {
+    setGenerating(true);
+    setError(null);
+    try {
+      const data = await apiClient.post<CohortReportView>(
+        API.APP.ROUNDS.cohortReportGenerate(roundId),
+        { body: { versionId } }
+      );
+      setView(data);
+    } catch (err) {
+      setError(err instanceof APIClientError ? err.message : 'Cohort report generation failed.');
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  if (versions.length === 0) {
+    return (
+      <p className="text-muted-foreground text-sm">
+        Attach a questionnaire to this round to generate a cohort report.
+      </p>
+    );
+  }
+
+  const content = view?.content ?? null;
+  const dataset = view?.dataset ?? null;
+  const chartById = new Map<string, ChartSpec>((content?.charts ?? []).map((c) => [c.id, c]));
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3">
+        {versions.length > 1 && (
+          <select
+            value={versionId}
+            onChange={(e) => setVersionId(e.target.value)}
+            className="border-input bg-background rounded-md border px-2 py-1 text-sm"
+            aria-label="Questionnaire version"
+          >
+            {versions.map((v) => (
+              <option key={v.versionId} value={v.versionId}>
+                {v.title}
+              </option>
+            ))}
+          </select>
+        )}
+        <Button onClick={() => void handleGenerate()} disabled={generating || loading} size="sm">
+          {generating ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : view?.exists ? (
+            <RefreshCw className="h-4 w-4" />
+          ) : (
+            <Sparkles className="h-4 w-4" />
+          )}
+          {view?.exists ? 'Regenerate' : 'Generate report'}
+        </Button>
+        {view?.status === 'ready' && view.revisionNumber !== null && (
+          <span className="text-muted-foreground text-xs">
+            Revision {view.revisionNumber} · {view.publishStatus}
+          </span>
+        )}
+      </div>
+
+      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+
+      {loading && !content && (
+        <p className="text-muted-foreground flex items-center gap-2 text-sm">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+        </p>
+      )}
+
+      {generating && (
+        <p className="text-muted-foreground flex items-center gap-2 text-sm">
+          <Loader2 className="h-4 w-4 animate-spin" /> Analysing the cohort and writing the report…
+        </p>
+      )}
+
+      {!loading && !generating && !content && (
+        <p className="text-muted-foreground text-sm">
+          No report yet. Generate one to analyse this round&rsquo;s {dataset?.totalSessions ?? 0}{' '}
+          respondents.
+        </p>
+      )}
+
+      {content && dataset && (
+        <article className="space-y-6" data-testid="cohort-report-body">
+          {content.summary && (
+            <section>
+              <h3 className="mb-1 text-sm font-semibold">Summary</h3>
+              <MarkdownOrRawView content={content.summary} />
+            </section>
+          )}
+
+          {content.sections.map((section, i) => (
+            <section key={i} className="space-y-3">
+              <h3 className="text-base font-semibold">{section.heading}</h3>
+              <MarkdownOrRawView content={section.body} />
+              {section.chartIds
+                .map((id) => chartById.get(id))
+                .filter((spec): spec is ChartSpec => !!spec)
+                .map((spec) => (
+                  <CohortChart key={spec.id} data={buildChartData(spec, dataset)} />
+                ))}
+            </section>
+          ))}
+
+          {content.recommendations.length > 0 && (
+            <section>
+              <h3 className="mb-1 text-sm font-semibold">Recommendations</h3>
+              <ul className="list-disc space-y-1 pl-5 text-sm">
+                {content.recommendations.map((r, i) => (
+                  <li key={i}>{r}</li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {content.actions.length > 0 && (
+            <section>
+              <h3 className="mb-1 text-sm font-semibold">Actions</h3>
+              <ul className="list-disc space-y-1 pl-5 text-sm">
+                {content.actions.map((a, i) => (
+                  <li key={i}>{a}</li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </article>
+      )}
+    </div>
+  );
+}

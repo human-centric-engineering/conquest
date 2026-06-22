@@ -632,6 +632,13 @@ export const API = {
         `/api/v1/app/rounds/${id}/phases/${phaseId}/send-invites`,
       /** Maintenance: dispatch invites for every phase whose window has opened (POST → cron hook). */
       dispatchPhaseInvites: (): string => `/api/v1/app/rounds/maintenance/dispatch-phase-invites`,
+      /** Cohort Report read view (GET `?versionId=` → CohortReportView). */
+      cohortReport: (id: string): string => `/api/v1/app/rounds/${id}/cohort-report`,
+      /** Cohort Report analytical dataset (GET `?versionId=` → CohortDataset). */
+      cohortReportDataset: (id: string): string => `/api/v1/app/rounds/${id}/cohort-report/dataset`,
+      /** Generate the cohort report (POST `{ versionId }` → refreshed CohortReportView). */
+      cohortReportGenerate: (id: string): string =>
+        `/api/v1/app/rounds/${id}/cohort-report/generate`,
     },
   },
 } as const;

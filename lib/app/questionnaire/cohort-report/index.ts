@@ -23,6 +23,28 @@ export type {
 } from '@/lib/app/questionnaire/cohort-report/types';
 export { SUBGROUP_DIMENSION_KEY } from '@/lib/app/questionnaire/cohort-report/types';
 
+export {
+  validateCohortReportContent,
+  isUsableCohortReportContent,
+  buildCohortDatasetDigest,
+  buildChartCatalogText,
+  type CohortReportContent,
+  type CohortReportSection,
+} from '@/lib/app/questionnaire/cohort-report/content';
+export {
+  generateCohortReport,
+  type GeneratedCohortReport,
+} from '@/lib/app/questionnaire/cohort-report/generate';
+export {
+  ensureCohortReport,
+  appendCohortReportRevision,
+  markCohortReportFailed,
+} from '@/lib/app/questionnaire/cohort-report/persist';
+export {
+  buildCohortReportView,
+  type CohortReportView,
+} from '@/lib/app/questionnaire/cohort-report/view';
+
 export { buildChartData } from '@/lib/app/questionnaire/cohort-report/chart-series';
 export {
   COHORT_CHART_KINDS,

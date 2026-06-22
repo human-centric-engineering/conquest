@@ -942,10 +942,35 @@ model AppCohortReport {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  round AppQuestionnaireRound @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  round     AppQuestionnaireRound     @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  revisions AppCohortReportRevision[]
 
   @@index([status, lockedAt])
   @@map("app_cohort_report")
+}
+
+/// One version-controlled iteration of a Cohort Report's body. Every generation, manual edit, and
+/// AI-assisted edit appends a revision (never mutates an existing one), so the full authoring history
+/// is preserved and any revision can be restored (F14.6) or published. The working head is the
+/// highest `revisionNumber`; `content` is the ordered section blocks + charts + recommendations +
+/// actions (CohortReportContent in lib/.../cohort-report/content.ts). `authoredBy` records the
+/// origin (ai | admin | ai_assist). Cascade from the report; `createdBy` is a plain String (UG-1).
+model AppCohortReportRevision {
+  id             String   @id @default(cuid())
+  reportId       String
+  revisionNumber Int // 1-based; monotonic per report. Working head = MAX(revisionNumber).
+  content        Json // CohortReportContent (summary, sections, charts, recommendations, actions)
+  authoredBy     String   @default("ai") // COHORT_REPORT_AUTHORS (types.ts): ai | admin | ai_assist
+  summary        String? // short generation/change note shown in the revision history
+  costUsd        Float? // generation cost for an AI revision; null for a manual edit
+  createdBy      String? // admin User.id who created it; plain String, no FK (UG-1)
+  createdAt      DateTime @default(now())
+
+  report AppCohortReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@unique([reportId, revisionNumber])
+  @@index([reportId])
+  @@map("app_cohort_report_revision")
 }
 
 /// One captured answer for a question slot within a session. F4.2 produces the

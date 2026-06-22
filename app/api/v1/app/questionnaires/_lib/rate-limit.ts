@@ -254,3 +254,19 @@ export const reportConfigAssistLimiter = createRateLimiter({
   interval: REPORT_CONFIG_ASSIST_RATE_LIMIT_INTERVAL_MS,
   maxRequests: REPORT_CONFIG_ASSIST_RATE_LIMIT_MAX,
 });
+
+/**
+ * Cohort-report generation sub-cap (F14.3). Each generate runs the cohort dataset build plus one
+ * reasoning-model call over the whole round — a costly, slow sub-flow. Capped tightly at 10/min per
+ * admin (the ingest class), keyed on the admin user id who owns the spend, so a hammered "Generate"
+ * button can't run up the report bill. The deterministic dataset endpoint is not limited here.
+ */
+export const COHORT_REPORT_GENERATE_RATE_LIMIT_MAX = 10;
+
+/** Sliding-window length for {@link cohortReportGenerateLimiter}, in milliseconds. */
+export const COHORT_REPORT_GENERATE_RATE_LIMIT_INTERVAL_MS = 60_000;
+
+export const cohortReportGenerateLimiter = createRateLimiter({
+  interval: COHORT_REPORT_GENERATE_RATE_LIMIT_INTERVAL_MS,
+  maxRequests: COHORT_REPORT_GENERATE_RATE_LIMIT_MAX,
+});

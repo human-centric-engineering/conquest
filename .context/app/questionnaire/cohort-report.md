@@ -80,6 +80,36 @@ returns `empty: true`; a k-anonymity-suppressed question/segment returns `suppre
 omitted from a by-segment series) rather than a misleading zero. The analysis agent proposes a
 `ChartSpec[]` it judges significant (F14.3); the admin pins/adds/removes (F14.5).
 
+## Generation & revisions (F14.3)
+
+The report is produced by the seeded **`app-cohort-report`** agent (seed `055`) via a direct
+structured completion — the same direct-agent pattern as the Respondent Report (`report/generate.ts`),
+not a dispatcher capability. `generateCohortReport` (`cohort-report/generate.ts`) feeds the agent the
+k-anonymity-safe dataset digest + chart catalog (`content.ts`'s `buildCohortDatasetDigest` /
+`buildChartCatalogText`), the admin's generation config (length / detail / formality / instructions /
+structure template / background), and — when the toggles are on — the round briefing, cohort
+background, and client-KB snippets. It does the thematic analysis, weaves the narrative, **proposes
+the charts** (a `ChartSpec[]` referencing only the catalogued ids), and ends with recommendations +
+actions, all in one validated structured output (`validateCohortReportContent` drops malformed charts
+and dangling references — a bad generation can never persist a broken revision).
+
+**Revisions.** Every generation / edit / AI-assist appends an `AppCohortReportRevision`
+(`persist.ts`, never mutates) so the authoring history is preserved; the working head is the highest
+`revisionNumber`. `buildCohortReportView` (`view.ts`) assembles the client-safe read shape: header
+status + the head revision's content + the dataset the charts render against.
+
+### Endpoints
+
+- `GET …/cohort-report?versionId=` — the read view (`exists:false` before first generation).
+- `POST …/cohort-report/generate` `{ versionId }` — generate + append an AI revision; gated by the
+  flag AND the per-version `config.cohortReport.enabled` toggle; per-admin generate sub-cap (paid).
+- `GET …/cohort-report/dataset?versionId=` — the raw dataset (F14.1).
+
+The admin surface is the **Cohort report** section on the round detail page
+(`components/admin/cohorts/cohort-report-panel.tsx`): pick a bundled version, Generate / Regenerate,
+and read the narrative + charts + recommendations + actions. The full block editor + per-section
+AI-assist land in F14.5.
+
 ## Data model
 
 - `AppQuestionnaireConfig.cohortReport` — the JSON settings column (above).

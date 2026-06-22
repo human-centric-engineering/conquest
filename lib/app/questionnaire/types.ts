@@ -536,6 +536,10 @@ export type CohortReportStatus = (typeof COHORT_REPORT_STATUSES)[number];
 export const COHORT_REPORT_PUBLISH_STATUSES = ['draft', 'published'] as const;
 export type CohortReportPublishStatus = (typeof COHORT_REPORT_PUBLISH_STATUSES)[number];
 
+/** Origin of a cohort-report revision: full AI generation, manual admin edit, or AI-assisted edit. */
+export const COHORT_REPORT_AUTHORS = ['ai', 'admin', 'ai_assist'] as const;
+export type CohortReportAuthor = (typeof COHORT_REPORT_AUTHORS)[number];
+
 /** Overall report length the narrative agent targets. */
 export const COHORT_REPORT_LENGTHS = ['brief', 'standard', 'detailed'] as const;
 export type CohortReportLength = (typeof COHORT_REPORT_LENGTHS)[number];

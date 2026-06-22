@@ -872,6 +872,9 @@ export const APP_QUESTIONNAIRES_COHORTS_FLAG = 'APP_QUESTIONNAIRES_COHORTS_ENABL
  */
 export const APP_QUESTIONNAIRES_COHORT_REPORT_FLAG = 'APP_QUESTIONNAIRES_COHORT_REPORT_ENABLED';
 
+/** Slug of the seeded Cohort Report agent (report kind `cohort`); loaded by the generation pipeline. */
+export const COHORT_REPORT_AGENT_SLUG = 'app-cohort-report';
+
 /**
  * Platform feature flag gating the **respondent intro / splash screen** — an admin opt-in screen
  * shown before the questionnaire starts that explains how it works (adapts to the presentation mode),

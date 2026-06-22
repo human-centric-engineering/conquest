@@ -30,11 +30,13 @@ import {
 import { RoundContextPanel } from '@/components/admin/cohorts/round-context-panel';
 import { RoundLearningPanel } from '@/components/admin/cohorts/round-learning-panel';
 import { RoundPhasesPanel } from '@/components/admin/cohorts/round-phases-panel';
+import { CohortReportPanel } from '@/components/admin/cohorts/cohort-report-panel';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
 import {
   isCohortsEnabled,
+  isCohortReportEnabled,
   isLearningModeEnabled,
   isRoundContextEnabled,
   isRoundPhasesEnabled,
@@ -113,13 +115,16 @@ export default async function RoundDetailPage({ params }: PageProps) {
   // Round Additional Context + Learning Mode — each gated by its own flag; the sections hide entirely
   // when off. Reads go straight through the `_lib` (server component), no extra HTTP. `briefable` is
   // shared (both panels need version titles), loaded once when either feature is on.
-  const [roundContextOn, learningOn, phasesOn] = await Promise.all([
+  const [roundContextOn, learningOn, phasesOn, cohortReportOn] = await Promise.all([
     isRoundContextEnabled(),
     isLearningModeEnabled(),
     isRoundPhasesEnabled(),
+    isCohortReportEnabled(),
   ]);
   const [briefable, contextEntries, learningDigest, subgroups] = await Promise.all([
-    roundContextOn || learningOn ? listBriefableQuestionnaires(roundId) : Promise.resolve([]),
+    roundContextOn || learningOn || cohortReportOn
+      ? listBriefableQuestionnaires(roundId)
+      : Promise.resolve([]),
     roundContextOn ? listRoundContextEntries(roundId) : Promise.resolve([]),
     learningOn ? listRoundLearningDigest(roundId) : Promise.resolve([]),
     phasesOn
@@ -245,6 +250,20 @@ export default async function RoundDetailPage({ params }: PageProps) {
             learningConfig={round.learningConfig}
             digest={learningDigest}
             briefable={briefable}
+          />
+        </section>
+      )}
+
+      {cohortReportOn && (
+        <section className="space-y-3 rounded-xl border px-4 py-4">
+          <SectionHeading title="Cohort report">
+            Analyse this round across all respondents — segmented by the questionnaire&rsquo;s own
+            demographics — and generate a narrative report with charts, recommendations and actions.
+            Review and (soon) edit it here; privacy thresholds hide any group that is too small.
+          </SectionHeading>
+          <CohortReportPanel
+            roundId={round.id}
+            versions={briefable.map((b) => ({ versionId: b.versionId, title: b.title }))}
           />
         </section>
       )}
