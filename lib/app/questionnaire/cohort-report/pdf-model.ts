@@ -40,20 +40,32 @@ export interface CohortReportPdfModel {
   actions: string[];
 }
 
+/** Strip all HTML tags, looping to a fixpoint so a stripped match can't reconstruct a new tag. */
+function stripTags(input: string): string {
+  let prev: string;
+  let out = input;
+  do {
+    prev = out;
+    out = out.replace(/<[^>]+>/g, '');
+  } while (out !== prev);
+  return out;
+}
+
 /** Flatten an HTML (or markdown) body to plain-text paragraphs. Block tags → paragraph breaks. */
 export function htmlToParagraphs(body: string): string[] {
   const withBreaks = body
     .replace(/<\/(p|div|li|h[1-6]|blockquote)>/gi, '\n')
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<li[^>]*>/gi, '• ');
-  const stripped = withBreaks
-    .replace(/<[^>]+>/g, '') // remove remaining tags
+  // Decode `&amp;` LAST so an already-escaped entity like `&amp;lt;` decodes to the literal
+  // text `&lt;` rather than being double-unescaped into `<`.
+  const stripped = stripTags(withBreaks)
     .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&#39;|&apos;/g, "'")
-    .replace(/&quot;/g, '"');
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&');
   return stripped
     .split('\n')
     .map((p) => p.trim())

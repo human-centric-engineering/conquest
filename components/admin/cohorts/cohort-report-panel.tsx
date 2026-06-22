@@ -19,11 +19,9 @@ import { CohortSectionBody } from '@/components/admin/questionnaires/cohort-repo
 import { CohortReportEditor } from '@/components/admin/questionnaires/cohort-report/cohort-report-editor';
 import { apiClient, APIClientError } from '@/lib/api/client';
 import { API } from '@/lib/api/endpoints';
-import { buildChartData } from '@/lib/app/questionnaire/cohort-report';
-import type {
-  CohortReportView,
-  CohortReportRevisionSummary,
-} from '@/lib/app/questionnaire/cohort-report';
+import { buildChartData } from '@/lib/app/questionnaire/cohort-report/chart-series';
+import type { CohortReportView } from '@/lib/app/questionnaire/cohort-report/view';
+import type { CohortReportRevisionSummary } from '@/lib/app/questionnaire/cohort-report/persist';
 import type { ChartSpec } from '@/lib/app/questionnaire/cohort-report/chart-types';
 
 export interface CohortReportPanelProps {
