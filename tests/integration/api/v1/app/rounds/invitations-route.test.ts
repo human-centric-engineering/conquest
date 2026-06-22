@@ -37,6 +37,13 @@ const ctx = { params: Promise.resolve({ id: 'r-1' }) };
 function req(): NextRequest {
   return { url, headers: new Headers() } as unknown as NextRequest;
 }
+function jsonReq(body: unknown): NextRequest {
+  return {
+    url,
+    headers: new Headers({ 'content-type': 'application/json' }),
+    json: () => Promise.resolve(body),
+  } as unknown as NextRequest;
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -48,6 +55,7 @@ beforeEach(() => {
     skipped: 0,
     unlaunchedQuestionnaires: 0,
     activeMembers: 2,
+    sent: 0,
     links: [],
   });
 });
@@ -77,5 +85,20 @@ describe('POST /api/v1/app/rounds/:id/invitations', () => {
     expect(logAdminAction).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'app_round.generate_invitations' })
     );
+  });
+
+  it('passes send:true through when the body opts in', async () => {
+    const res = await POST(jsonReq({ send: true }), ctx);
+    expect(res.status).toBe(201);
+    expect(genMock.generateRoundInvitations).toHaveBeenCalledWith('r-1', expect.any(String), {
+      send: true,
+    });
+  });
+
+  it('falls back to send:false for a malformed body', async () => {
+    await POST(jsonReq({ send: 'yes' }), ctx); // wrong type → schema rejects → default false
+    expect(genMock.generateRoundInvitations).toHaveBeenCalledWith('r-1', expect.any(String), {
+      send: false,
+    });
   });
 });

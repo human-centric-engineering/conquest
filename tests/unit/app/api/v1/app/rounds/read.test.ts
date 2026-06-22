@@ -133,6 +133,73 @@ describe('getRoundDetail', () => {
       }),
     ]);
   });
+
+  it('returns empty phases (and skips the per-subgroup query) for a round with none', async () => {
+    prismaMock.appQuestionnaireRound.findUnique.mockResolvedValue({
+      id: 'r-1',
+      cohortId: 'co-1',
+      name: 'July round',
+      description: null,
+      status: 'open',
+      opensAt: null,
+      closesAt: null,
+      closedAt: null,
+      createdAt: new Date('2026-06-20'),
+      updatedAt: new Date('2026-06-20'),
+      _count: { items: 0 },
+      cohort: { id: 'co-1', name: 'Team A', demoClientId: 'dc-1' },
+      items: [],
+      phases: [],
+    });
+    prismaMock.appCohortMember.groupBy.mockResolvedValue([]);
+    prismaMock.appQuestionnaireSession.groupBy.mockResolvedValue([]);
+
+    const detail = await getRoundDetail('r-1');
+    expect(detail?.phases).toEqual([]);
+  });
+
+  it('serializes a phase whose window inherits the round (null opens/closes)', async () => {
+    prismaMock.appQuestionnaireRound.findUnique.mockResolvedValue({
+      id: 'r-1',
+      cohortId: 'co-1',
+      name: 'July round',
+      description: null,
+      status: 'open',
+      opensAt: null,
+      closesAt: null,
+      closedAt: null,
+      createdAt: new Date('2026-06-20'),
+      updatedAt: new Date('2026-06-20'),
+      _count: { items: 0 },
+      cohort: { id: 'co-1', name: 'Team A', demoClientId: 'dc-1' },
+      items: [],
+      phases: [
+        {
+          id: 'ph-2',
+          roundId: 'r-1',
+          subgroupId: 'sg-2',
+          opensAt: null,
+          closesAt: null,
+          endMode: 'relaxed',
+          ordinal: 1,
+          createdAt: new Date('2026-06-20'),
+          updatedAt: new Date('2026-06-20'),
+          subgroup: { name: 'Everyone else', _count: { members: 4 } },
+        },
+      ],
+    });
+    prismaMock.appCohortMember.groupBy.mockResolvedValue([]);
+    prismaMock.appQuestionnaireSession.groupBy.mockResolvedValue([]);
+
+    const detail = await getRoundDetail('r-1');
+    expect(detail?.phases[0]).toMatchObject({
+      id: 'ph-2',
+      opensAt: null,
+      closesAt: null,
+      endMode: 'relaxed',
+      memberCount: 4,
+    });
+  });
 });
 
 describe('listRoundsForVersion', () => {

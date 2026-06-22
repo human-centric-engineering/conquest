@@ -191,6 +191,7 @@ describe('generateRoundInvitations', () => {
     expect(prismaMock.appQuestionnaireInvitation.update).toHaveBeenCalledTimes(2);
     expect(prismaMock.appQuestionnaireInvitation.update.mock.calls[0][0].data).toMatchObject({
       status: 'sent',
+      sentAt: expect.any(Date),
     });
   });
 
@@ -217,6 +218,7 @@ describe('dispatchDuePhaseInvitations', () => {
     ]);
     const res = await dispatchDuePhaseInvitations('admin-1');
     expect(res.phasesProcessed).toBe(1);
+    expect(res.created).toBe(2); // aggregation fold over the per-phase generate result
     expect(res.sent).toBe(2); // both default members emailed
     // Queried only open rounds' phases whose opensAt has passed.
     expect(prismaMock.appRoundPhase.findMany).toHaveBeenCalledWith(

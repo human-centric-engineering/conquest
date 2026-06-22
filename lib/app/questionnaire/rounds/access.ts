@@ -96,9 +96,11 @@ export function evaluateRoundAccess(subject: RoundAccessSubject): RoundAccessVer
   const effective = resolveEffectiveWindow(round, phase ?? null);
 
   if (effective.opensAt && ms < effective.opensAt.getTime()) {
-    // A phase open is gating only when the phase itself sets one and we're before it; otherwise the
-    // round's own open is what hasn't been reached.
-    const byPhase = !!(phase?.opensAt && ms < phase.opensAt.getTime());
+    // A phase open is gating only when the phase sets one, we're before it, AND the round itself has
+    // already reached its own open time — otherwise the round (not the phase) is what hasn't opened,
+    // so a phased and a non-phased member of the same round see the same ROUND_NOT_OPEN reason.
+    const roundOpenReached = !round.opensAt || ms >= round.opensAt.getTime();
+    const byPhase = !!(phase?.opensAt && ms < phase.opensAt.getTime() && roundOpenReached);
     return byPhase
       ? {
           ok: false,

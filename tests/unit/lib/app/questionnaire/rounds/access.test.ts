@@ -141,5 +141,17 @@ describe('evaluateRoundAccess', () => {
     it('a null phase falls back to the round window (today’s behaviour)', () => {
       expect(evaluateRoundAccess(subject({ phase: null }))).toEqual({ ok: true });
     });
+
+    it('attributes a not-yet-open denial to the ROUND (not the phase) when the round itself has not opened', () => {
+      // Round is `open` in status but its opensAt is still in the future (admin flipped it early);
+      // a phased member should see ROUND_NOT_OPEN, the same as a non-phased member.
+      const v = evaluateRoundAccess(
+        subject({
+          round: { status: 'open', opensAt: LATER, closesAt: null },
+          phase: { opensAt: LATER, closesAt: null, endMode: 'hard' },
+        })
+      );
+      expect(v).toMatchObject({ ok: false, code: 'ROUND_NOT_OPEN' });
+    });
   });
 });

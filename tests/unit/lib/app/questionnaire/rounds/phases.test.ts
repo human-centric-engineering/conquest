@@ -31,7 +31,8 @@ describe('validatePhaseWindowNesting', () => {
       opensAt: d('2026-06-30T00:00:00Z'),
       closesAt: null,
     });
-    expect(r).toMatchObject({ ok: false });
+    // The message is public contract — it surfaces verbatim in the route's 422 error response.
+    expect(r).toEqual({ ok: false, message: 'A phase cannot open before the round opens.' });
   });
 
   it('rejects a phase closing after the round closes', () => {
@@ -39,7 +40,7 @@ describe('validatePhaseWindowNesting', () => {
       opensAt: null,
       closesAt: d('2026-08-01T00:00:00Z'),
     });
-    expect(r).toMatchObject({ ok: false });
+    expect(r).toEqual({ ok: false, message: 'A phase cannot close after the round closes.' });
   });
 
   it('rejects a phase whose close is not after its open', () => {
@@ -47,7 +48,15 @@ describe('validatePhaseWindowNesting', () => {
       opensAt: d('2026-07-10T00:00:00Z'),
       closesAt: d('2026-07-10T00:00:00Z'),
     });
-    expect(r).toMatchObject({ ok: false });
+    expect(r).toEqual({ ok: false, message: 'The phase close date must be after its open date.' });
+  });
+
+  it('rejects a phase that opens after the round closes (impossible window)', () => {
+    const r = validatePhaseWindowNesting(round, {
+      opensAt: d('2026-08-05T00:00:00Z'), // after round close, no phase close of its own
+      closesAt: null,
+    });
+    expect(r).toEqual({ ok: false, message: 'A phase cannot open after the round closes.' });
   });
 
   it('treats an unbounded round side as always satisfied', () => {
@@ -91,5 +100,24 @@ describe('resolveEffectiveWindow', () => {
   it('inherits a null phase bound from the round on that side', () => {
     const w = resolveEffectiveWindow(round, { opensAt: null, closesAt: null, endMode: 'hard' });
     expect(w).toEqual(round);
+  });
+
+  it('clamps a hard phase close to the round close when the round window shrank below it', () => {
+    // Phase was created when the round closed later; the round was since narrowed to 07-31.
+    const w = resolveEffectiveWindow(round, {
+      opensAt: d('2026-07-02T00:00:00Z'),
+      closesAt: d('2026-08-15T00:00:00Z'), // now beyond the round close
+      endMode: 'hard',
+    });
+    expect(w.closesAt).toEqual(round.closesAt); // clamped — round stays the outer cap
+  });
+
+  it('clamps a phase open up to the round open when the phase would open earlier', () => {
+    const w = resolveEffectiveWindow(round, {
+      opensAt: d('2026-06-20T00:00:00Z'), // before the round opens
+      closesAt: null,
+      endMode: 'hard',
+    });
+    expect(w.opensAt).toEqual(round.opensAt); // clamped up to the round open
   });
 });

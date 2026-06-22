@@ -32,6 +32,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { FieldHelp } from '@/components/ui/field-help';
 import { CohortMemberForm } from '@/components/admin/cohorts/cohort-member-form';
 import {
   CohortEmptyState,
@@ -140,7 +141,19 @@ export function CohortMembersPanel({ cohortId, members, subgroups = [] }: Cohort
               <TableRow className="hover:bg-transparent">
                 <TableHead>Member</TableHead>
                 <TableHead>Status</TableHead>
-                {showSubgroups && <TableHead>Subgroup</TableHead>}
+                {showSubgroups && (
+                  <TableHead>
+                    <span className="inline-flex items-center gap-1">
+                      Subgroup
+                      <FieldHelp title="Subgroup">
+                        Assign the member to a subgroup so a round can give that group its own
+                        access window (e.g. a leadership team goes first). &ldquo;No subgroup&rdquo;
+                        means they use the round&rsquo;s own window. Changing this affects future
+                        sessions.
+                      </FieldHelp>
+                    </span>
+                  </TableHead>
+                )}
                 <TableHead className="text-right">Added</TableHead>
                 <TableHead className="w-px" />
               </TableRow>

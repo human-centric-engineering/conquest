@@ -34,32 +34,18 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { CohortEmptyState, CompletionBar } from '@/components/admin/cohorts/cohort-ui';
+import {
+  CohortEmptyState,
+  CompletionBar,
+  isoToLocalInput,
+  localInputToIso,
+} from '@/components/admin/cohorts/cohort-ui';
 import type {
   CohortSubgroupView,
   RoundDetail,
   RoundPhaseEndMode,
   RoundPhaseView,
 } from '@/lib/app/questionnaire/rounds';
-
-/** ISO string → the `yyyy-MM-ddThh:mm` value a datetime-local input expects (local time). */
-function isoToLocalInput(iso: string | null): string {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(
-    d.getMinutes()
-  )}`;
-}
-
-/** A datetime-local value (local wall-clock) → an ISO string with offset, or null if blank. */
-function localInputToIso(value: string): string | null {
-  if (value.trim() === '') return null;
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toISOString();
-}
 
 function formatWindow(opensAt: string | null, closesAt: string | null): string {
   const fmt = (iso: string) =>
@@ -121,6 +107,7 @@ export function RoundPhasesPanel({
     if (subgroupId === '') return;
     setCreating(true);
     setError(null);
+    setSentNote(null);
     try {
       await apiClient.post<RoundDetail>(API.APP.ROUNDS.phases(roundId), {
         body: {
@@ -154,6 +141,7 @@ export function RoundPhasesPanel({
   const saveEdit = async (phaseId: string) => {
     setPendingId(phaseId);
     setError(null);
+    setSentNote(null);
     try {
       await apiClient.patch<RoundDetail>(API.APP.ROUNDS.phase(roundId, phaseId), {
         body: {
@@ -174,6 +162,7 @@ export function RoundPhasesPanel({
   const deletePhase = async (phaseId: string) => {
     setPendingId(phaseId);
     setError(null);
+    setSentNote(null);
     try {
       await apiClient.delete(API.APP.ROUNDS.phase(roundId, phaseId));
       router.refresh();

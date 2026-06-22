@@ -198,6 +198,15 @@ export const updateRoundPhaseSchema = z
   .refine((b) => Object.keys(b).length > 0, { message: 'At least one field must be provided' })
   .refine(windowRefinement, windowMessage);
 
+/**
+ * Body for the round invitations generate endpoint. `send` opts into emailing each freshly-minted
+ * frictionless link (default: mint copy/paste links only). The whole body is optional — the panel
+ * posts none — so the route treats an absent body as `{}`.
+ */
+export const generateRoundInvitationsSchema = z.object({
+  send: z.boolean().optional(),
+});
+
 /** Attach a questionnaire to a round (optionally pinning a version). */
 export const attachRoundQuestionnaireSchema = z.object({
   questionnaireId: z.string().min(1, 'Questionnaire is required'),
@@ -251,6 +260,7 @@ export type CreateCohortSubgroupInput = z.infer<typeof createCohortSubgroupSchem
 export type UpdateCohortSubgroupInput = z.infer<typeof updateCohortSubgroupSchema>;
 export type CreateRoundPhaseInput = z.infer<typeof createRoundPhaseSchema>;
 export type UpdateRoundPhaseInput = z.infer<typeof updateRoundPhaseSchema>;
+export type GenerateRoundInvitationsInput = z.infer<typeof generateRoundInvitationsSchema>;
 export type CreateRoundInput = z.infer<typeof createRoundSchema>;
 export type UpdateRoundInput = z.infer<typeof updateRoundSchema>;
 export type LearningConfigInput = z.infer<typeof learningConfigSchema>;

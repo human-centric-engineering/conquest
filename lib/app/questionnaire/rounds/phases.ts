@@ -51,17 +51,39 @@ export function validatePhaseWindowNesting(
   if (round.closesAt && phase.closesAt && phase.closesAt.getTime() > round.closesAt.getTime()) {
     return { ok: false, message: 'A phase cannot close after the round closes.' };
   }
+  // A phase that opens after the round closes would have an impossible (always-closed) window once its
+  // close inherits the round close — reject it even when the phase sets no close of its own.
+  if (round.closesAt && phase.opensAt && phase.opensAt.getTime() > round.closesAt.getTime()) {
+    return { ok: false, message: 'A phase cannot open after the round closes.' };
+  }
   return { ok: true };
+}
+
+/** The later (more restrictive START) of two optional bounds; `null` = unbounded on that side. */
+function laterOf(a: Date | null, b: Date | null): Date | null {
+  if (!a) return b;
+  if (!b) return a;
+  return a.getTime() >= b.getTime() ? a : b;
+}
+
+/** The earlier (more restrictive END) of two optional bounds; `null` = unbounded on that side. */
+function earlierOf(a: Date | null, b: Date | null): Date | null {
+  if (!a) return b;
+  if (!b) return a;
+  return a.getTime() <= b.getTime() ? a : b;
 }
 
 /**
  * Resolve the single window the access guard checks for a member, given the round window and the
  * member's phase (or `null` when the member has no subgroup phase here):
- *  - `opensAt`  = the phase open, else the round open (staggered START always applies);
- *  - `closesAt` = for a `hard` phase, the phase close, else the round close; for a `relaxed` phase the
- *                 round close (the phase close was only a target). With no phase, the round window
- *                 passes through unchanged.
- * A phase bound that is itself `null` inherits the round's bound on that side. Pure.
+ *  - `opensAt`  = the LATER of the phase open and the round open — staggering the START always applies,
+ *                 but a phase can never open before the round itself;
+ *  - `closesAt` = for a `hard` phase, the EARLIER of the phase close and the round close; for a
+ *                 `relaxed` phase the round close (the phase close was only a target). With no phase,
+ *                 the round window passes through unchanged.
+ * Clamping to the round window keeps the round the hard outer cap for everyone even if its window is
+ * narrowed AFTER phases were created — the admin write-time nesting check is belt-and-braces UX, this
+ * resolver is the load-time guarantee. A `null` bound is unbounded on that side. Pure.
  */
 export function resolveEffectiveWindow(
   round: AccessWindow,
@@ -71,7 +93,7 @@ export function resolveEffectiveWindow(
 
   const endMode = phase.endMode ?? DEFAULT_ROUND_PHASE_END_MODE;
   return {
-    opensAt: phase.opensAt ?? round.opensAt,
-    closesAt: endMode === 'hard' ? (phase.closesAt ?? round.closesAt) : round.closesAt,
+    opensAt: laterOf(phase.opensAt, round.opensAt),
+    closesAt: endMode === 'hard' ? earlierOf(phase.closesAt, round.closesAt) : round.closesAt,
   };
 }

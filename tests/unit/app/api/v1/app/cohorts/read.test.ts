@@ -10,6 +10,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const prismaMock = vi.hoisted(() => ({
   appCohort: { findMany: vi.fn(), findUnique: vi.fn() },
+  appCohortSubgroup: { findMany: vi.fn() },
   appQuestionnaireRound: { findMany: vi.fn() },
   appQuestionnaireSession: { groupBy: vi.fn() },
   appDemoClient: { findUnique: vi.fn() },
@@ -19,6 +20,7 @@ vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
 import {
   getCohortDetail,
   listCohortMembers,
+  listCohortSubgroups,
   listCohorts,
 } from '@/app/api/v1/app/cohorts/_lib/read';
 
@@ -185,6 +187,34 @@ describe('listCohortMembers', () => {
       'Amy:active',
       'Zoe:active',
       'Bob:removed',
+    ]);
+  });
+});
+
+describe('listCohortSubgroups', () => {
+  it('returns null when the cohort is unknown (no subgroup query)', async () => {
+    prismaMock.appCohort.findUnique.mockResolvedValue(null);
+    expect(await listCohortSubgroups('nope')).toBeNull();
+    expect(prismaMock.appCohortSubgroup.findMany).not.toHaveBeenCalled();
+  });
+
+  it('maps subgroup rows to views with their active-member count', async () => {
+    prismaMock.appCohort.findUnique.mockResolvedValue({ id: 'co-1' });
+    prismaMock.appCohortSubgroup.findMany.mockResolvedValue([
+      {
+        id: 'sg-1',
+        cohortId: 'co-1',
+        name: 'Senior Leadership Team',
+        description: 'execs',
+        ordinal: 0,
+        createdAt: new Date('2026-06-01'),
+        updatedAt: new Date('2026-06-01'),
+        _count: { members: 2 },
+      },
+    ]);
+    const subgroups = await listCohortSubgroups('co-1');
+    expect(subgroups).toEqual([
+      expect.objectContaining({ id: 'sg-1', name: 'Senior Leadership Team', memberCount: 2 }),
     ]);
   });
 });

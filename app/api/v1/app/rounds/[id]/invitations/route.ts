@@ -24,6 +24,7 @@ import { prisma } from '@/lib/db/client';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
 import { withCohortsEnabled } from '@/lib/app/questionnaire/feature-flag';
+import { generateRoundInvitationsSchema } from '@/lib/app/questionnaire/rounds';
 import { generateRoundInvitations } from '@/app/api/v1/app/rounds/_lib/invites';
 
 const handleGenerate = withAdminAuth<{ id: string }>(async (request, session, { params }) => {
@@ -37,11 +38,12 @@ const handleGenerate = withAdminAuth<{ id: string }>(async (request, session, { 
   });
   if (!round) throw new NotFoundError('Round not found');
 
-  // Optional `{ send }` flag — tolerate an absent/empty body (the panel posts none today).
+  // Optional `{ send }` flag — tolerate an absent/empty body (the panel posts none today) and
+  // validate it with Zod when present. Body parsing is wrapped because an absent body throws.
   let send = false;
   try {
-    const body: unknown = await request.json();
-    send = !!(body && typeof body === 'object' && (body as { send?: unknown }).send === true);
+    const parsed = generateRoundInvitationsSchema.safeParse(await request.json());
+    if (parsed.success) send = parsed.data.send ?? false;
   } catch {
     /* no body — generate copy/paste links only */
   }
