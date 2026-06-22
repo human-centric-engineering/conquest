@@ -21,6 +21,11 @@ import {
   ACCESS_MODES,
   ANSWER_FIT_MODES,
   ANSWER_SLOT_PANEL_SCOPES,
+  COHORT_REPORT_BACKGROUND_MAX_LENGTH,
+  COHORT_REPORT_DETAIL_LEVELS,
+  COHORT_REPORT_FORMALITIES,
+  COHORT_REPORT_INSTRUCTIONS_MAX_LENGTH,
+  COHORT_REPORT_LENGTHS,
   CONTRADICTION_MODES,
   INTRO_BACKGROUND_MAX_LENGTH,
   INTRO_BUTTON_LABEL_MAX_LENGTH,
@@ -152,6 +157,32 @@ const respondentReportSettingsSchema = z
   .strict();
 
 /**
+ * Cohort Report (report kind `cohort`) — the full {@link CohortReportSettings} block. Sent whole
+ * (not partial) by the editor; every sub-object present so a save can clear a toggle. `strict()` at
+ * every level rejects unknown keys. Gated additionally by the platform flags
+ * `APP_QUESTIONNAIRES_COHORT_REPORT_ENABLED` + `APP_QUESTIONNAIRES_COHORTS_ENABLED`.
+ */
+const cohortReportSettingsSchema = z
+  .object({
+    enabled: z.boolean(),
+    generation: z
+      .object({
+        length: z.enum(COHORT_REPORT_LENGTHS),
+        detailLevel: z.enum(COHORT_REPORT_DETAIL_LEVELS),
+        formality: z.enum(COHORT_REPORT_FORMALITIES),
+        instructions: z.string().trim().max(COHORT_REPORT_INSTRUCTIONS_MAX_LENGTH),
+        structure: z.string().trim().max(COHORT_REPORT_INSTRUCTIONS_MAX_LENGTH),
+        backgroundContext: z.string().trim().max(COHORT_REPORT_BACKGROUND_MAX_LENGTH),
+        useClientKnowledge: z.boolean(),
+        useRoundContext: z.boolean(),
+        useCohortContext: z.boolean(),
+        scoringEnabled: z.boolean(),
+      })
+      .strict(),
+  })
+  .strict();
+
+/**
  * Respondent intro / splash screen — the full {@link IntroSettings} block. Sent whole (not partial)
  * by the editor; every key present so a save can clear the toggle. `strict()` rejects unknown keys.
  * Gated additionally by the platform flag `APP_QUESTIONNAIRES_INTRO_SCREEN_ENABLED`.
@@ -229,6 +260,9 @@ export const updateConfigSchema = z
     // Respondent Report. Sent whole when present; gated additionally by the platform flag
     // APP_QUESTIONNAIRES_RESPONDENT_REPORT_ENABLED.
     respondentReport: respondentReportSettingsSchema.optional(),
+    // Cohort Report. Sent whole when present; gated additionally by the platform flags
+    // APP_QUESTIONNAIRES_COHORT_REPORT_ENABLED + APP_QUESTIONNAIRES_COHORTS_ENABLED.
+    cohortReport: cohortReportSettingsSchema.optional(),
     // Respondent intro / splash screen. Sent whole when present; gated additionally by the platform
     // flag APP_QUESTIONNAIRES_INTRO_SCREEN_ENABLED.
     intro: introSettingsSchema.optional(),

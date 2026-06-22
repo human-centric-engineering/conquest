@@ -251,6 +251,14 @@ model AppQuestionnaireConfig {
   // (lib/.../report/settings.ts). (types.ts)
   respondentReport Json @default("{}")
 
+  // Cohort Report (report kind `cohort`): CohortReportSettings — the cross-respondent
+  // analysis/charting/narrative generated over a round's submissions (length, detail, formality,
+  // structure template, AI knobs, context toggles, scoring toggle). Off by default; only takes
+  // effect when the platform flags APP_QUESTIONNAIRES_COHORT_REPORT_ENABLED +
+  // APP_QUESTIONNAIRES_COHORTS_ENABLED are on. Narrowed by narrowCohortReportSettings
+  // (lib/.../cohort-report/settings.ts). (types.ts)
+  cohortReport Json @default("{}")
+
   // Respondent intro / splash screen (IntroSettings — types.ts): an admin opt-in screen shown before
   // the questionnaire starts (enabled toggle, admin-authored "about this questionnaire" background
   // markdown, proceed-button label). Off by default; only takes effect when the platform flag
@@ -628,6 +636,7 @@ model AppQuestionnaireRound {
   contextEntries AppRoundContextEntry[]
   learningDigest AppRoundLearningDigest[]
   phases         AppRoundPhase[]
+  cohortReport   AppCohortReport?
 
   @@index([cohortId])
   @@index([status])
@@ -904,6 +913,39 @@ model AppRespondentReport {
 
   @@index([status, lockedAt])
   @@map("app_respondent_report")
+}
+
+/// The generated Cohort Report (report kind `cohort`) for one round — the cross-respondent
+/// analysis/charting/narrative an admin generates over the round's submissions. 1:1 with a round
+/// (`roundId @unique`). Pinned to the version the round delivered (`versionId`) so a later version
+/// fork never re-scopes a generated report. The report BODY (ordered section blocks) lives in
+/// `AppCohortReportRevision` rows (F14.3) so every generate / manual edit / AI-assist is
+/// version-controlled and a published revision can be pinned; this header row carries generation
+/// status + the lease (mirrors AppRespondentReport / the evaluations batch worker) and the
+/// draft/published lifecycle.
+///
+/// Round-internal config: `onDelete: Cascade` from the round. `createdBy` is a plain String admin
+/// `User.id` (UG-1, no FK) — config/audit attribution, not personal data that must cascade.
+model AppCohortReport {
+  id            String    @id @default(cuid())
+  roundId       String    @unique
+  versionId     String // the version the round delivered, pinned at creation; plain String (UG-1)
+  title         String
+  status        String    @default("queued") // COHORT_REPORT_STATUSES (types.ts): queued | processing | ready | failed
+  publishStatus String    @default("draft") // COHORT_REPORT_PUBLISH_STATUSES: draft | published
+  costUsd       Float? // cumulative generation cost actual; null until first generation
+  error         String? // failure message when status = failed
+  lockedBy      String? // worker host holding the lease; null when idle
+  lockedAt      DateTime? // lease acquired-at; stale after the worker threshold (claimable again)
+  generatedAt   DateTime? // when content was last (re)generated (status → ready)
+  createdBy     String? // admin User.id who created/triggered it; plain String, no FK (UG-1)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  round AppQuestionnaireRound @relation(fields: [roundId], references: [id], onDelete: Cascade)
+
+  @@index([status, lockedAt])
+  @@map("app_cohort_report")
 }
 
 /// One captured answer for a question slot within a session. F4.2 produces the

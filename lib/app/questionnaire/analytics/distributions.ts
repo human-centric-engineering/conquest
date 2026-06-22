@@ -227,59 +227,53 @@ function buildDetail(
   }
 }
 
+/** A question slot projected for distribution assembly (the columns the aggregator reads). */
+export interface SlotForDistribution {
+  id: string;
+  key: string;
+  prompt: string;
+  type: string;
+  typeConfig: unknown;
+  required: boolean;
+  section: { title: string; ordinal: number };
+  tags: { tag: { id: string; label: string; color: string | null } }[];
+}
+
+/** A session projected for distribution assembly — the denominator + completion split. */
+export interface SessionForDistribution {
+  id: string;
+  status: string;
+}
+
+/** An answer row projected for distribution assembly. */
+export interface AnswerForDistribution {
+  questionSlotId: string;
+  value: unknown;
+  confidence: number | null;
+  provenanceLabel: string;
+}
+
+/** The denominator/detail portion of a distributions result (everything but versionId + range). */
+export interface AssembledDistributions {
+  totalSessions: number;
+  completedSessions: number;
+  suppressed: boolean;
+  questions: QuestionDistribution[];
+}
+
 /**
- * Aggregate per-question answer distributions for a version over the non-preview
- * sessions in scope. Tag-filtered when `scope.tagIds` is non-empty.
+ * Pure in-memory assembly of per-question distributions from already-fetched slots, sessions and
+ * answers. Shared by {@link getQuestionDistributions} (version/round scope) and the F14.1 cohort
+ * dataset (which calls it once for the whole round and again per demographic segment, over a session
+ * subset — so segmentation reuses the exact same k-anonymity + detail logic). No I/O.
  */
-export async function getQuestionDistributions(
-  scope: AnalyticsScope
-): Promise<QuestionDistributionsResult> {
-  const range = { from: scope.from.toISOString(), to: scope.to.toISOString() };
-
-  // 1. The version's questions (optionally restricted to the tag filter), with
-  //    section + tag projections, in display order.
-  const slots = await prisma.appQuestionSlot.findMany({
-    where: {
-      versionId: scope.versionId,
-      ...(scope.tagIds.length > 0 ? { tags: { some: { tagId: { in: scope.tagIds } } } } : {}),
-    },
-    select: {
-      id: true,
-      key: true,
-      prompt: true,
-      type: true,
-      typeConfig: true,
-      required: true,
-      ordinal: true,
-      section: { select: { title: true, ordinal: true } },
-      tags: { select: { tag: { select: { id: true, label: true, color: true } } } },
-    },
-    orderBy: [{ section: { ordinal: 'asc' } }, { ordinal: 'asc' }],
-  });
-
-  // 2. The non-preview sessions in the window — the response-rate denominator.
-  const sessions = await prisma.appQuestionnaireSession.findMany({
-    where: {
-      versionId: scope.versionId,
-      isPreview: false,
-      createdAt: { gte: scope.from, lt: scope.to },
-      ...roundSessionFilter(scope.roundId),
-    },
-    select: { id: true, status: true },
-  });
-  const sessionIds = sessions.map((s) => s.id);
+export function assembleQuestionDistributions(
+  slots: SlotForDistribution[],
+  sessions: SessionForDistribution[],
+  answers: AnswerForDistribution[]
+): AssembledDistributions {
   const totalSessions = sessions.length;
   const completedSessions = sessions.filter((s) => s.status === 'completed').length;
-
-  // 3. The answers for those sessions + those questions, in one query.
-  const questionIds = slots.map((s) => s.id);
-  const answers =
-    sessionIds.length > 0 && questionIds.length > 0
-      ? await prisma.appAnswerSlot.findMany({
-          where: { sessionId: { in: sessionIds }, questionSlotId: { in: questionIds } },
-          select: { questionSlotId: true, value: true, confidence: true, provenanceLabel: true },
-        })
-      : [];
 
   // Group answers by question.
   const byQuestion = new Map<
@@ -353,13 +347,70 @@ export async function getQuestionDistributions(
     };
   });
 
+  return { totalSessions, completedSessions, suppressed, questions };
+}
+
+/** The standard slot projection for distribution assembly (the {@link SlotForDistribution} select). */
+export const DISTRIBUTION_SLOT_SELECT = {
+  id: true,
+  key: true,
+  prompt: true,
+  type: true,
+  typeConfig: true,
+  required: true,
+  ordinal: true,
+  section: { select: { title: true, ordinal: true } },
+  tags: { select: { tag: { select: { id: true, label: true, color: true } } } },
+} as const;
+
+/**
+ * Aggregate per-question answer distributions for a version over the non-preview
+ * sessions in scope. Tag-filtered when `scope.tagIds` is non-empty.
+ */
+export async function getQuestionDistributions(
+  scope: AnalyticsScope
+): Promise<QuestionDistributionsResult> {
+  const range = { from: scope.from.toISOString(), to: scope.to.toISOString() };
+
+  // 1. The version's questions (optionally restricted to the tag filter), with
+  //    section + tag projections, in display order.
+  const slots = await prisma.appQuestionSlot.findMany({
+    where: {
+      versionId: scope.versionId,
+      ...(scope.tagIds.length > 0 ? { tags: { some: { tagId: { in: scope.tagIds } } } } : {}),
+    },
+    select: DISTRIBUTION_SLOT_SELECT,
+    orderBy: [{ section: { ordinal: 'asc' } }, { ordinal: 'asc' }],
+  });
+
+  // 2. The non-preview sessions in the window — the response-rate denominator.
+  const sessions = await prisma.appQuestionnaireSession.findMany({
+    where: {
+      versionId: scope.versionId,
+      isPreview: false,
+      createdAt: { gte: scope.from, lt: scope.to },
+      ...roundSessionFilter(scope.roundId),
+    },
+    select: { id: true, status: true },
+  });
+  const sessionIds = sessions.map((s) => s.id);
+
+  // 3. The answers for those sessions + those questions, in one query.
+  const questionIds = slots.map((s) => s.id);
+  const answers =
+    sessionIds.length > 0 && questionIds.length > 0
+      ? await prisma.appAnswerSlot.findMany({
+          where: { sessionId: { in: sessionIds }, questionSlotId: { in: questionIds } },
+          select: { questionSlotId: true, value: true, confidence: true, provenanceLabel: true },
+        })
+      : [];
+
+  const assembled = assembleQuestionDistributions(slots, sessions, answers);
+
   return {
     versionId: scope.versionId,
     range,
-    totalSessions,
-    completedSessions,
-    suppressed,
-    questions,
+    ...assembled,
   };
 }
 

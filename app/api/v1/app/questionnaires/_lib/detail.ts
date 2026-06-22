@@ -42,6 +42,7 @@ import {
 import { parseInviteeFields } from '@/lib/app/questionnaire/invitations/invitee-fields';
 import { narrowToneSettings } from '@/lib/app/questionnaire/chat/tone';
 import { narrowRespondentReportSettings } from '@/lib/app/questionnaire/report/settings';
+import { narrowCohortReportSettings } from '@/lib/app/questionnaire/cohort-report/settings';
 import { narrowIntroSettings } from '@/lib/app/questionnaire/intro/settings';
 import type {
   ConfigView,
@@ -118,6 +119,7 @@ export const CONFIG_SELECT = {
   previewInspectorEnabled: true,
   tone: true,
   respondentReport: true,
+  cohortReport: true,
   intro: true,
 } as const;
 
@@ -153,6 +155,7 @@ type ConfigRow = {
   previewInspectorEnabled: boolean;
   tone: Prisma.JsonValue;
   respondentReport: Prisma.JsonValue;
+  cohortReport: Prisma.JsonValue;
   intro: Prisma.JsonValue;
 };
 
@@ -251,6 +254,7 @@ export function toConfigView(row: ConfigRow | null): ConfigView {
     previewInspectorEnabled: row.previewInspectorEnabled,
     tone: narrowToneSettings(row.tone),
     respondentReport: narrowRespondentReportSettings(row.respondentReport),
+    cohortReport: narrowCohortReportSettings(row.cohortReport),
     intro: narrowIntroSettings(row.intro),
     saved: true,
   };

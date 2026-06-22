@@ -1,0 +1,79 @@
+/**
+ * Cohort Report — client-safe view types (report kind `cohort`).
+ *
+ * The cross-respondent analytical substrate the charts (F14.2), the narrative agents (F14.3) and the
+ * admin UI all consume. Pure types, **client-safe** (no Prisma, no Next) — dates cross the HTTP
+ * boundary as ISO strings, so there are no `Date` objects here. Deliberately aggregate-only and
+ * k-anonymity-suppressed at the data boundary (it reuses the F8.1/F8.3 distribution machinery), so a
+ * small demographic segment can never re-identify a respondent.
+ */
+
+import type { QuestionDistribution } from '@/lib/app/questionnaire/analytics/views';
+
+/** Where a segmentation dimension comes from: a collected profile field, or cohort subgroup. */
+export type SegmentSource = 'profile' | 'subgroup';
+
+/** The shape of the bucket values within a dimension. */
+export type SegmentKind = 'select' | 'number' | 'subgroup';
+
+/**
+ * A demographic axis the cohort can be split on. `profile` dimensions are the admin's
+ * `profileFields` of type `select` (discrete) or `number` (bucketed, e.g. age groups); the single
+ * `subgroup` dimension splits by the respondent's cohort subgroup. The narrative agent proposes
+ * which dimensions are significant (F14.3); the admin can override.
+ */
+export interface SegmentDimension {
+  /** Profile field `key`, or the sentinel {@link SUBGROUP_DIMENSION_KEY} for the subgroup axis. */
+  key: string;
+  label: string;
+  source: SegmentSource;
+  kind: SegmentKind;
+}
+
+/** One demographic segment — a bucket within a dimension, with its own distributions. */
+export interface CohortSegment {
+  /** Bucket key: a `select` option value, a numeric-bucket label, or a subgroup id. */
+  value: string;
+  label: string;
+  /** Non-preview sessions in this segment. */
+  totalSessions: number;
+  /** Of those, how many reached `completed`. */
+  completedSessions: number;
+  /** True when `0 < totalSessions < kThreshold`: per-question detail is withheld for this segment. */
+  suppressed: boolean;
+  /** Per-question distributions over just this segment's sessions (suppressed when too small). */
+  questions: QuestionDistribution[];
+}
+
+/** All segments for one dimension. */
+export interface CohortSegmentation {
+  dimension: SegmentDimension;
+  segments: CohortSegment[];
+}
+
+/**
+ * The full cross-respondent analytical substrate for one round + version. Built by
+ * `buildCohortDataset`; consumed by charts, the analysis/narrative agents, and the admin UI.
+ */
+export interface CohortDataset {
+  roundId: string;
+  roundName: string;
+  versionId: string;
+  /** Non-preview sessions in the round for this version — the overall denominator. */
+  totalSessions: number;
+  /** Of those, how many reached `completed`. */
+  completedSessions: number;
+  /** The k-anonymity floor in force (the analytics {@link K_ANONYMITY_THRESHOLD}). */
+  kThreshold: number;
+  /** True when the whole round is non-empty but below the floor (overall detail withheld). */
+  suppressed: boolean;
+  /** True when the version collects no profile (anonymous mode) — no demographic segmentation. */
+  anonymous: boolean;
+  /** Overall (un-segmented) per-question distributions. */
+  overall: QuestionDistribution[];
+  /** Per-dimension segmentation; empty when anonymous or there are no eligible dimensions. */
+  segmentation: CohortSegmentation[];
+}
+
+/** Sentinel `SegmentDimension.key` for the cohort-subgroup axis (not a profile field key). */
+export const SUBGROUP_DIMENSION_KEY = '__subgroup__';

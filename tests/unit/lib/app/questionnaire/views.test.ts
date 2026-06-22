@@ -197,6 +197,21 @@ function makeConfigView(overrides: Partial<ConfigView> = {}): ConfigView {
       },
       delivery: { onScreen: true, download: true },
     },
+    cohortReport: {
+      enabled: false,
+      generation: {
+        length: 'standard',
+        detailLevel: 'standard',
+        formality: 'business',
+        instructions: '',
+        structure: '',
+        backgroundContext: '',
+        useClientKnowledge: false,
+        useRoundContext: true,
+        useCohortContext: true,
+        scoringEnabled: false,
+      },
+    },
     intro: { enabled: false, background: '', buttonLabel: '' },
     ...overrides,
   };
