@@ -11,11 +11,12 @@
  */
 
 import * as React from 'react';
-import { Loader2, Sparkles, RefreshCw } from 'lucide-react';
+import { Loader2, Sparkles, RefreshCw, Pencil } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
-import { MarkdownOrRawView } from '@/components/admin/orchestration/markdown-or-raw-view';
 import { CohortChart } from '@/components/admin/questionnaires/cohort-report/charts/cohort-chart';
+import { CohortSectionBody } from '@/components/admin/questionnaires/cohort-report/cohort-section-body';
+import { CohortReportEditor } from '@/components/admin/questionnaires/cohort-report/cohort-report-editor';
 import { apiClient, APIClientError } from '@/lib/api/client';
 import { API } from '@/lib/api/endpoints';
 import { buildChartData } from '@/lib/app/questionnaire/cohort-report';
@@ -33,6 +34,7 @@ export function CohortReportPanel({ roundId, versions }: CohortReportPanelProps)
   const [view, setView] = React.useState<CohortReportView | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [generating, setGenerating] = React.useState(false);
+  const [editing, setEditing] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   const load = React.useCallback(async () => {
@@ -111,6 +113,11 @@ export function CohortReportPanel({ roundId, versions }: CohortReportPanelProps)
           )}
           {view?.exists ? 'Regenerate' : 'Generate report'}
         </Button>
+        {content && !editing && (
+          <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
+            <Pencil className="h-4 w-4" /> Edit
+          </Button>
+        )}
         {view?.status === 'ready' && view.revisionNumber !== null && (
           <span className="text-muted-foreground text-xs">
             Revision {view.revisionNumber} · {view.publishStatus}
@@ -139,19 +146,32 @@ export function CohortReportPanel({ roundId, versions }: CohortReportPanelProps)
         </p>
       )}
 
-      {content && dataset && (
+      {content && dataset && editing && (
+        <CohortReportEditor
+          roundId={roundId}
+          versionId={versionId}
+          content={content}
+          onSaved={(v) => {
+            setView(v);
+            setEditing(false);
+          }}
+          onCancel={() => setEditing(false)}
+        />
+      )}
+
+      {content && dataset && !editing && (
         <article className="space-y-6" data-testid="cohort-report-body">
           {content.summary && (
             <section>
               <h3 className="mb-1 text-sm font-semibold">Summary</h3>
-              <MarkdownOrRawView content={content.summary} />
+              <CohortSectionBody body={content.summary} format="html" />
             </section>
           )}
 
           {content.sections.map((section, i) => (
             <section key={i} className="space-y-3">
               <h3 className="text-base font-semibold">{section.heading}</h3>
-              <MarkdownOrRawView content={section.body} />
+              <CohortSectionBody body={section.body} format={section.format} />
               {section.chartIds
                 .map((id) => chartById.get(id))
                 .filter((spec): spec is ChartSpec => !!spec)

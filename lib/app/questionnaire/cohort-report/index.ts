@@ -36,6 +36,11 @@ export {
   type GeneratedCohortReport,
 } from '@/lib/app/questionnaire/cohort-report/generate';
 export {
+  refineCohortReportSection,
+  type RefinedSection,
+} from '@/lib/app/questionnaire/cohort-report/refine';
+export { markdownToHtml } from '@/lib/app/questionnaire/cohort-report/richtext';
+export {
   ensureCohortReport,
   appendCohortReportRevision,
   markCohortReportFailed,

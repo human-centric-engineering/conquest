@@ -645,6 +645,8 @@ export const API = {
       /** Generate the cohort report (POST `{ versionId }` → refreshed CohortReportView). */
       cohortReportGenerate: (id: string): string =>
         `/api/v1/app/rounds/${id}/cohort-report/generate`,
+      /** Per-section AI-assist (POST `{ heading, body, instruction }` → revised section). */
+      cohortReportRefine: (id: string): string => `/api/v1/app/rounds/${id}/cohort-report/refine`,
     },
   },
 } as const;

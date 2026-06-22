@@ -25,6 +25,7 @@ import type { LlmMessage } from '@/lib/orchestration/llm/types';
 import { COHORT_REPORT_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
 import type { CohortReportSettings } from '@/lib/app/questionnaire/types';
 import { narrowCohortReportSettings } from '@/lib/app/questionnaire/cohort-report/settings';
+import { markdownToHtml } from '@/lib/app/questionnaire/cohort-report/richtext';
 import { resolveClientKnowledgeDocumentIds } from '@/lib/app/questionnaire/report/client-knowledge';
 import { buildCohortDataset } from '@/lib/app/questionnaire/cohort-report/dataset';
 import {
@@ -248,5 +249,17 @@ export async function generateCohortReport(params: {
     onFinalFailure: () => new Error('Cohort report response was not valid JSON after retry'),
   });
 
-  return { content: result.value, costUsd: result.costUsd };
+  // Sections are stored as HTML (one format for the editor + read view + PDF). The agent writes
+  // markdown, so convert each body at the boundary; sanitisation happens at render (client dompurify).
+  const content: CohortReportContent = {
+    ...result.value,
+    summary: markdownToHtml(result.value.summary),
+    sections: result.value.sections.map((s) => ({
+      ...s,
+      body: markdownToHtml(s.body),
+      format: 'html' as const,
+    })),
+  };
+
+  return { content, costUsd: result.costUsd };
 }

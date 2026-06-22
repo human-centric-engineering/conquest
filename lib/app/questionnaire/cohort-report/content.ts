@@ -20,11 +20,16 @@ import type { CohortDataset } from '@/lib/app/questionnaire/cohort-report/types'
 import type { QuestionDistribution } from '@/lib/app/questionnaire/analytics/views';
 import { isRecord } from '@/lib/utils';
 
+/** How a section's body string is encoded: AI-generated markdown, or editor-produced HTML. */
+export type CohortReportSectionFormat = 'markdown' | 'html';
+
 /** One woven narrative section: a heading, an analysed body, and optional referenced chart ids. */
 export interface CohortReportSection {
   heading: string;
-  /** Markdown body (F14.5's Tiptap editor edits this; F14.3 generates markdown). */
+  /** The section body — markdown when AI-generated (F14.3), HTML once edited in the Tiptap editor (F14.5). */
   body: string;
+  /** How {@link body} is encoded; defaults to `markdown`. The read view + PDF render accordingly. */
+  format?: CohortReportSectionFormat;
   /** Ids of charts (from {@link CohortReportContent.charts}) to render within this section. */
   chartIds: string[];
 }
@@ -120,7 +125,8 @@ export function validateCohortReportContent(raw: unknown): CohortReportContent {
             .filter((id): id is string => typeof id === 'string' && seenChartIds.has(id))
             .slice(0, MAX_CHARTS)
         : [];
-      sections.push({ heading, body, chartIds });
+      const format: CohortReportSectionFormat = s.format === 'html' ? 'html' : 'markdown';
+      sections.push({ heading, body, format, chartIds });
       if (sections.length >= MAX_SECTIONS) break;
     }
   }

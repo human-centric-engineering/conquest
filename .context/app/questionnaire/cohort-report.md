@@ -110,6 +110,25 @@ The admin surface is the **Cohort report** section on the round detail page
 and read the narrative + charts + recommendations + actions. The full block editor + per-section
 AI-assist land in F14.5.
 
+## Settings, templates & editing (F14.5)
+
+**Settings** (per version, `config.cohortReport`) — enable, length / detail / formality, a free-text
+**structure template** (the AI fills it; blank = auto), style/background, and the context + scoring
+toggles — are edited by `CohortReportSettingsForm` on the **Scoring** workspace tab (saved via the
+version-config PATCH, fork-on-launch like all config).
+
+**Editing.** A generated report is editable on the round panel (`CohortReportEditor`): a **Tiptap**
+WYSIWYG per section (bold/italic/lists/headings), reorder (up/down), add / delete / duplicate, and a
+**per-section AI-assist** ("make it shorter", "add the evidence") via `POST …/cohort-report/refine`
+(`refine.ts`, reuses the cohort-report agent). Saving `PATCH …/cohort-report` appends an `admin`
+revision — every edit is version-controlled.
+
+**Storage.** Section bodies are stored as **HTML** so the editor, read view and PDF speak one format.
+The AI writes markdown, converted once at the generation boundary (`markdownToHtml`, `richtext.ts`);
+the `CohortReportSection.format` field marks `html` vs legacy `markdown`. HTML is **sanitised at the
+render boundary** (`CohortSectionBody` → dompurify with an explicit tag allowlist), the standard XSS
+defence for stored rich text.
+
 ## Deterministic scoring (F14.4)
 
 The "hard rules" path — scoring a questionnaire like a psychometric instrument (e.g. Big Five). A

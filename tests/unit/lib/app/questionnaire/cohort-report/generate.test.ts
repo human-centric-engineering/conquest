@@ -118,8 +118,11 @@ describe('generateCohortReport', () => {
 
     const result = await generateCohortReport(params);
 
-    expect(result.content.summary).toBe('Engagement is high.');
+    // Bodies are converted markdown→HTML at the boundary (F14.5), so the summary is wrapped.
+    expect(result.content.summary).toContain('Engagement is high.');
+    expect(result.content.summary).toContain('<p>');
     expect(result.content.sections).toHaveLength(1);
+    expect(result.content.sections[0].format).toBe('html');
     expect(typeof result.costUsd).toBe('number');
 
     const messages = chat.mock.calls[0][0] as Array<{ role: string; content: string }>;
