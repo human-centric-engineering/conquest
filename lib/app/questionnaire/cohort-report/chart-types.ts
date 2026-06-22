@@ -23,6 +23,9 @@ export const COHORT_CHART_KINDS = [
   'response_rate_by_segment',
   'completion_by_segment',
   'segment_sizes',
+  // Data slots (the semantic substance, F14.7):
+  'dataslot_response_overall', // fill rate per data slot across the cohort
+  'dataslot_response_by_segment', // one data slot's fill rate across a dimension's segments
 ] as const;
 export type CohortChartKind = (typeof COHORT_CHART_KINDS)[number];
 
@@ -38,6 +41,8 @@ export interface ChartSpec {
   kind: CohortChartKind;
   /** The question this chart is about — required for the `question_*` kinds. */
   questionId?: string;
+  /** The data slot this chart is about — required for `dataslot_response_by_segment`. */
+  dataSlotKey?: string;
   /** The segmentation dimension key — required for `*_by_segment` + `segment_sizes`. */
   dimensionKey?: string;
   /** Rendering hint; defaults per kind. */

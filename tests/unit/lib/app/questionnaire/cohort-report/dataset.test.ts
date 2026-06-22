@@ -14,6 +14,8 @@ const findUniqueConfig = vi.fn();
 const findManySessions = vi.fn();
 const findManyAnswers = vi.fn();
 const findManySubgroups = vi.fn();
+const findManyDataSlots = vi.fn();
+const findManyDataSlotFills = vi.fn();
 
 vi.mock('@/lib/db/client', () => ({
   prisma: {
@@ -22,6 +24,8 @@ vi.mock('@/lib/db/client', () => ({
     appQuestionnaireSession: { findMany: (...a: unknown[]) => findManySessions(...a) },
     appAnswerSlot: { findMany: (...a: unknown[]) => findManyAnswers(...a) },
     appCohortSubgroup: { findMany: (...a: unknown[]) => findManySubgroups(...a) },
+    appDataSlot: { findMany: (...a: unknown[]) => findManyDataSlots(...a) },
+    appDataSlotFill: { findMany: (...a: unknown[]) => findManyDataSlotFills(...a) },
   },
 }));
 
@@ -62,6 +66,8 @@ beforeEach(() => {
   findManySlots.mockResolvedValue([SLOT]);
   findManyAnswers.mockResolvedValue([]);
   findManySubgroups.mockResolvedValue([]);
+  findManyDataSlots.mockResolvedValue([]);
+  findManyDataSlotFills.mockResolvedValue([]);
 });
 
 const params = { roundId: 'r1', roundName: 'Round One', versionId: 'v1' };
@@ -165,5 +171,64 @@ describe('buildCohortDataset', () => {
     expect(ds.overall).toHaveLength(1);
     // Subgroups are never queried in anonymous mode.
     expect(findManySubgroups).not.toHaveBeenCalled();
+  });
+
+  it('aggregates data slots overall and per segment (fill rate + confidence)', async () => {
+    findUniqueConfig.mockResolvedValue({
+      anonymousMode: false,
+      profileFields: [
+        { key: 'team', label: 'Team', type: 'select', required: false, options: ['Eng', 'Sales'] },
+      ],
+    });
+    findManySessions.mockResolvedValue([
+      ...Array.from({ length: 6 }, (_, i) => session({ id: `e${i}`, profile: { team: 'Eng' } })),
+      ...Array.from({ length: 6 }, (_, i) => session({ id: `s${i}`, profile: { team: 'Sales' } })),
+    ]);
+    findManyDataSlots.mockResolvedValue([
+      {
+        id: 'd1',
+        key: 'risk',
+        name: 'Risk appetite',
+        theme: 'Strategy',
+        description: 'how much risk',
+      },
+    ]);
+    // 8 of 12 filled (4 Eng + 1 Sales = 5), with confidences.
+    findManyDataSlotFills.mockResolvedValue([
+      ...Array.from({ length: 4 }, (_, i) => ({
+        sessionId: `e${i}`,
+        dataSlotId: 'd1',
+        confidence: 0.8,
+        provenanceLabel: 'direct',
+      })),
+      { sessionId: 's0', dataSlotId: 'd1', confidence: 0.6, provenanceLabel: 'inferred' },
+    ]);
+
+    const ds = await buildCohortDataset(params);
+
+    expect(ds.dataSlots).toBeDefined();
+    const slot = ds.dataSlots!.overall.find((s) => s.key === 'risk')!;
+    expect(slot.filled).toBe(5);
+    expect(slot.responseRate).toBeCloseTo(5 / 12, 5);
+    expect(slot.avgConfidence).toBeCloseTo(0.76, 2); // mean(0.8,0.8,0.8,0.8,0.6)
+    expect(slot.provenance.direct).toBe(4);
+    expect(slot.provenance.inferred).toBe(1);
+
+    const teamDim = ds.dataSlots!.byDimension.find((d) => d.dimensionKey === 'team')!;
+    const riskByTeam = teamDim.slots.find((s) => s.key === 'risk')!;
+    expect(riskByTeam.segments.find((s) => s.value === 'Eng')!.filled).toBe(4);
+    expect(riskByTeam.segments.find((s) => s.value === 'Sales')!.filled).toBe(1);
+  });
+
+  it('omits data slots when the version has none or no fills', async () => {
+    findUniqueConfig.mockResolvedValue({ anonymousMode: false, profileFields: [] });
+    findManySessions.mockResolvedValue([session({ id: 'a' }), session({ id: 'b' })]);
+    findManyDataSlots.mockResolvedValue([
+      { id: 'd1', key: 'risk', name: 'Risk', theme: 'S', description: 'x' },
+    ]);
+    findManyDataSlotFills.mockResolvedValue([]); // no fills
+
+    const ds = await buildCohortDataset(params);
+    expect(ds.dataSlots).toBeUndefined();
   });
 });

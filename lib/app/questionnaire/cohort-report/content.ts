@@ -87,6 +87,7 @@ function validateChartSpec(value: unknown): ChartSpec | null {
     title,
     kind: kind as ChartSpec['kind'],
     questionId: typeof value.questionId === 'string' ? value.questionId : undefined,
+    dataSlotKey: typeof value.dataSlotKey === 'string' ? value.dataSlotKey : undefined,
     dimensionKey: typeof value.dimensionKey === 'string' ? value.dimensionKey : undefined,
     display,
   };
@@ -210,6 +211,33 @@ export function buildCohortDatasetDigest(dataset: CohortDataset): string {
     }
   }
 
+  if (dataset.dataSlots && dataset.dataSlots.overall.length > 0) {
+    lines.push(
+      '',
+      'DATA SLOTS (the semantic positions captured — the substance of the responses):'
+    );
+    for (const slot of dataset.dataSlots.overall) {
+      if (slot.suppressed) {
+        lines.push(`  ${slot.name} [${slot.theme}]: [hidden — too few respondents]`);
+        continue;
+      }
+      const conf = slot.avgConfidence === null ? 'n/a' : slot.avgConfidence.toFixed(2);
+      lines.push(
+        `  ${slot.name} [${slot.theme}]: ${slot.filled} filled (${Math.round(slot.responseRate * 100)}%), avg confidence ${conf}`
+      );
+    }
+    for (const dim of dataset.dataSlots.byDimension) {
+      for (const slot of dim.slots) {
+        const parts = slot.segments
+          .filter((s) => !s.suppressed && s.totalSessions > 0)
+          .map((s) => `${s.label} ${Math.round((s.filled / s.totalSessions) * 100)}%`);
+        if (parts.length > 0) {
+          lines.push(`  ${slot.name} fill by ${dim.dimensionLabel}: ${parts.join(', ')}`);
+        }
+      }
+    }
+  }
+
   if (dataset.scoring && dataset.scoring.scales.length > 0) {
     lines.push('', 'SCORING (deterministic scales):');
     for (const scale of dataset.scoring.scales) {
@@ -246,6 +274,12 @@ export function buildChartCatalogText(dataset: CohortDataset): string {
   const lines: string[] = ['QUESTIONS (use as questionId):'];
   for (const q of dataset.overall) {
     lines.push(`  ${q.questionId} — "${q.prompt}" (${q.type})`);
+  }
+  if (dataset.dataSlots && dataset.dataSlots.overall.length > 0) {
+    lines.push('DATA SLOTS (use as dataSlotKey):');
+    for (const slot of dataset.dataSlots.overall) {
+      lines.push(`  ${slot.key} — ${slot.name} [${slot.theme}]`);
+    }
   }
   if (dataset.segmentation.length > 0) {
     lines.push('DIMENSIONS (use as dimensionKey):');

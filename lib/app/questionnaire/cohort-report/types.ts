@@ -8,7 +8,10 @@
  * small demographic segment can never re-identify a respondent.
  */
 
-import type { QuestionDistribution } from '@/lib/app/questionnaire/analytics/views';
+import type {
+  QuestionDistribution,
+  ProvenanceBreakdown,
+} from '@/lib/app/questionnaire/analytics/views';
 
 /** Where a segmentation dimension comes from: a collected profile field, or cohort subgroup. */
 export type SegmentSource = 'profile' | 'subgroup';
@@ -49,6 +52,60 @@ export interface CohortSegment {
 export interface CohortSegmentation {
   dimension: SegmentDimension;
   segments: CohortSegment[];
+}
+
+/* ── Data-slot aggregation (F14.7) ────────────────────────────────────────── */
+
+/**
+ * One data slot's cross-respondent aggregate — the semantic substance of the responses (the meat the
+ * thematic analysis works from). Aggregate + k-anonymity-safe (counts/rates/confidence/provenance);
+ * the raw respondent paraphrases that feed the narrative agent are loaded server-side only, never
+ * placed on this client-facing shape.
+ */
+export interface CohortDataSlotSummary {
+  key: string;
+  /** 1–4 word slot label. */
+  name: string;
+  /** Group/theme label. */
+  theme: string;
+  /** Sessions that filled this slot. */
+  filled: number;
+  /** `filled / totalSessions`. */
+  responseRate: number;
+  /** Mean fill confidence (0–1), or null when none recorded. */
+  avgConfidence: number | null;
+  provenance: ProvenanceBreakdown;
+  /** True when the cohort is below the floor — counts withheld. */
+  suppressed: boolean;
+}
+
+/** One data slot's fill rate within one segment of a dimension. */
+export interface CohortDataSlotSegmentValue {
+  value: string;
+  label: string;
+  filled: number;
+  totalSessions: number;
+  suppressed: boolean;
+}
+
+/** One data slot compared across a dimension's segments (fill rate). */
+export interface CohortDataSlotBySegment {
+  key: string;
+  name: string;
+  segments: CohortDataSlotSegmentValue[];
+}
+
+/** Data-slot fill comparison for one dimension. */
+export interface CohortDataSlotByDimension {
+  dimensionKey: string;
+  dimensionLabel: string;
+  slots: CohortDataSlotBySegment[];
+}
+
+/** The data-slot aggregate — present only when the version has data slots with fills. */
+export interface CohortDataSlots {
+  overall: CohortDataSlotSummary[];
+  byDimension: CohortDataSlotByDimension[];
 }
 
 /* ── Deterministic scoring aggregation (F14.4) ────────────────────────────── */
@@ -118,6 +175,8 @@ export interface CohortDataset {
   overall: QuestionDistribution[];
   /** Per-dimension segmentation; empty when anonymous or there are no eligible dimensions. */
   segmentation: CohortSegmentation[];
+  /** Data-slot aggregate (the semantic substance); undefined when the version has no data-slot fills. */
+  dataSlots?: CohortDataSlots;
   /** Deterministic scoring aggregate; undefined when scoring is off or no schema is authored. */
   scoring?: CohortScoring;
 }

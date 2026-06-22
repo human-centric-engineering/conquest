@@ -140,6 +140,30 @@ describe('buildCohortDatasetDigest', () => {
     expect(digest).toContain('Anonymous mode');
     expect(digest).not.toContain('BY TEAM');
   });
+
+  it('includes the data-slot section when present', () => {
+    const withSlots = buildCohortDatasetDigest({
+      ...dataset,
+      dataSlots: {
+        overall: [
+          {
+            key: 'risk',
+            name: 'Risk appetite',
+            theme: 'Strategy',
+            filled: 9,
+            responseRate: 0.75,
+            avgConfidence: 0.82,
+            provenance: { direct: 9, inferred: 0, synthesised: 0, refined: 0 },
+            suppressed: false,
+          },
+        ],
+        byDimension: [],
+      },
+    });
+    expect(withSlots).toContain('DATA SLOTS');
+    expect(withSlots).toContain('Risk appetite');
+    expect(withSlots).toContain('75%');
+  });
 });
 
 describe('buildChartCatalogText', () => {

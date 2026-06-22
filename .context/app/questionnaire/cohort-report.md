@@ -80,6 +80,22 @@ returns `empty: true`; a k-anonymity-suppressed question/segment returns `suppre
 omitted from a by-segment series) rather than a misleading zero. The analysis agent proposes a
 `ChartSpec[]` it judges significant (F14.3); the admin pins/adds/removes (F14.5).
 
+## Data slots — the semantic substance (F14.7)
+
+Data slots (`AppDataSlotFill`) carry the meat of the responses — the agent's natural-language
+restatement of each respondent's position per topic — so they are first-class in the cohort analysis:
+
+- **Aggregate** (`CohortDataset.dataSlots`, built in `dataset.ts`) — per slot: fill rate, mean
+  confidence, provenance breakdown overall, and fill rate per segment. Counts only (k-anonymity-safe),
+  reusing the same dimension groupings as question segmentation. Charted via the
+  `dataslot_response_overall` / `dataslot_response_by_segment` chart kinds; summarised in the digest.
+- **Raw thematic material** (`data-slot-material.ts`, **server-side only**) — for the narrative agent,
+  the per-slot respondent paraphrases are loaded into the prompt as the primary thematic-analysis
+  material, with an explicit instruction to **synthesise anonymised themes, never quote or attribute
+  an individual**. These raw positions never reach the client `CohortDataset`. k-anonymity: a slot
+  answered by fewer than the threshold contributes no samples, and the whole block is skipped for a
+  below-floor cohort.
+
 ## Generation & revisions (F14.3)
 
 The report is produced by the seeded **`app-cohort-report`** agent (seed `055`) via a direct

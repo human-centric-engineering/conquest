@@ -19,8 +19,12 @@ export type {
   SegmentDimension,
   CohortSegment,
   CohortSegmentation,
+  CohortDataSlots,
+  CohortDataSlotSummary,
+  CohortDataSlotByDimension,
   CohortDataset,
 } from '@/lib/app/questionnaire/cohort-report/types';
+export { buildDataSlotThemeMaterial } from '@/lib/app/questionnaire/cohort-report/data-slot-material';
 export { SUBGROUP_DIMENSION_KEY } from '@/lib/app/questionnaire/cohort-report/types';
 
 export {

@@ -39,14 +39,20 @@ import type {
 import {
   narrowToEnum,
   PROFILE_FIELD_TYPES,
+  ANSWER_PROVENANCES,
+  type AnswerProvenance,
   type ProfileFieldConfig,
 } from '@/lib/app/questionnaire/types';
+import type { ProvenanceBreakdown } from '@/lib/app/questionnaire/analytics/views';
 import { isRecord } from '@/lib/utils';
 import type {
   CohortDataset,
   CohortSegment,
   CohortSegmentation,
   SegmentDimension,
+  CohortDataSlots,
+  CohortDataSlotSummary,
+  CohortDataSlotByDimension,
 } from '@/lib/app/questionnaire/cohort-report/types';
 import { SUBGROUP_DIMENSION_KEY } from '@/lib/app/questionnaire/cohort-report/types';
 
@@ -75,6 +81,100 @@ interface DimensionGrouping {
 /** Mean of a finite-number list, or null when empty. */
 function meanOf(values: number[]): number | null {
   return values.length === 0 ? null : values.reduce((a, b) => a + b, 0) / values.length;
+}
+
+/** A zeroed provenance breakdown. */
+function emptyProvenance(): ProvenanceBreakdown {
+  return { direct: 0, inferred: 0, synthesised: 0, refined: 0 };
+}
+
+/**
+ * Aggregate the data slots — the semantic substance of the responses (F14.7) — across the cohort:
+ * per-slot fill rate / confidence / provenance overall, and fill rate per segment. Counts only
+ * (k-anonymity-safe); the raw paraphrases that feed the narrative agent are loaded separately,
+ * server-side. Returns undefined when the version has no data slots or no fills at all.
+ */
+async function buildDataSlots(
+  versionId: string,
+  sessions: SegmentableSession[],
+  groupings: DimensionGrouping[],
+  totalSessions: number
+): Promise<CohortDataSlots | undefined> {
+  const slots = await prisma.appDataSlot.findMany({
+    where: { versionId },
+    orderBy: { ordinal: 'asc' },
+    select: { id: true, key: true, name: true, theme: true },
+  });
+  if (slots.length === 0) return undefined;
+
+  const sessionIds = sessions.map((s) => s.id);
+  const fills =
+    sessionIds.length > 0
+      ? await prisma.appDataSlotFill.findMany({
+          where: { sessionId: { in: sessionIds } },
+          select: { sessionId: true, dataSlotId: true, confidence: true, provenanceLabel: true },
+        })
+      : [];
+  if (fills.length === 0) return undefined;
+
+  // Per-slot: the set of sessions that filled it, confidences, provenance tally.
+  const bySlot = new Map<
+    string,
+    { sessions: Set<string>; confidences: number[]; provenance: ProvenanceBreakdown }
+  >();
+  for (const slot of slots) {
+    bySlot.set(slot.id, { sessions: new Set(), confidences: [], provenance: emptyProvenance() });
+  }
+  for (const f of fills) {
+    const bucket = bySlot.get(f.dataSlotId);
+    if (!bucket) continue;
+    bucket.sessions.add(f.sessionId);
+    if (typeof f.confidence === 'number') bucket.confidences.push(f.confidence);
+    bucket.provenance[
+      narrowToEnum<AnswerProvenance>(f.provenanceLabel, ANSWER_PROVENANCES, 'direct')
+    ] += 1;
+  }
+
+  const overallSuppressed = isCohortSuppressed(totalSessions);
+  const overall: CohortDataSlotSummary[] = slots.map((slot) => {
+    const b = bySlot.get(slot.id)!;
+    const filled = b.sessions.size;
+    return {
+      key: slot.key,
+      name: slot.name,
+      theme: slot.theme,
+      filled: overallSuppressed ? 0 : filled,
+      responseRate: overallSuppressed || totalSessions === 0 ? 0 : filled / totalSessions,
+      avgConfidence: overallSuppressed ? null : meanOf(b.confidences),
+      provenance: overallSuppressed ? emptyProvenance() : b.provenance,
+      suppressed: overallSuppressed,
+    };
+  });
+
+  const byDimension: CohortDataSlotByDimension[] = groupings.map((g) => ({
+    dimensionKey: g.dimension.key,
+    dimensionLabel: g.dimension.label,
+    slots: slots.map((slot) => {
+      const filledSet = bySlot.get(slot.id)!.sessions;
+      return {
+        key: slot.key,
+        name: slot.name,
+        segments: g.buckets.map((bucket) => {
+          const segTotal = bucket.sessions.length;
+          const suppressed = isCohortSuppressed(segTotal);
+          return {
+            value: bucket.value,
+            label: bucket.label,
+            filled: suppressed ? 0 : bucket.sessions.filter((s) => filledSet.has(s.id)).length,
+            totalSessions: segTotal,
+            suppressed,
+          };
+        }),
+      };
+    }),
+  }));
+
+  return { overall, byDimension };
 }
 
 /**
@@ -386,6 +486,9 @@ export async function buildCohortDataset(params: BuildCohortDatasetParams): Prom
     ),
   }));
 
+  // Data-slot aggregation (F14.7) — the semantic substance; present when the version has fills.
+  const dataSlots = await buildDataSlots(versionId, sessions, groupings, overall.totalSessions);
+
   // Scored aggregation (F14.4) — present only when scoring is enabled + a schema exists.
   const scoring = scoringEnabled ? await buildScoring(versionId, sessions, groupings) : undefined;
 
@@ -400,6 +503,7 @@ export async function buildCohortDataset(params: BuildCohortDatasetParams): Prom
     anonymous,
     overall: overall.questions,
     segmentation,
+    dataSlots,
     scoring,
   };
 }

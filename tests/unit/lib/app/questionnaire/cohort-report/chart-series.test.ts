@@ -203,4 +203,74 @@ describe('buildChartData', () => {
     );
     expect(out.empty).toBe(true);
   });
+
+  it('plots data-slot fill rate overall (percent axis)', () => {
+    const ds = dataset({
+      dataSlots: {
+        overall: [
+          {
+            key: 'risk',
+            name: 'Risk',
+            theme: 'S',
+            filled: 6,
+            responseRate: 0.5,
+            avgConfidence: 0.8,
+            provenance: { direct: 6, inferred: 0, synthesised: 0, refined: 0 },
+            suppressed: false,
+          },
+        ],
+        byDimension: [],
+      },
+    });
+    const out = buildChartData(
+      { id: 'c', title: 'Engagement', kind: 'dataslot_response_overall' },
+      ds
+    );
+    expect(out.isPercent).toBe(true);
+    expect(out.data).toEqual([{ category: 'Risk', values: { count: 0.5 } }]);
+  });
+
+  it('plots one data slot fill rate across a dimension', () => {
+    const ds = dataset({
+      dataSlots: {
+        overall: [],
+        byDimension: [
+          {
+            dimensionKey: 'team',
+            dimensionLabel: 'Team',
+            slots: [
+              {
+                key: 'risk',
+                name: 'Risk',
+                segments: [
+                  { value: 'Eng', label: 'Eng', filled: 4, totalSessions: 8, suppressed: false },
+                  {
+                    value: 'Sales',
+                    label: 'Sales',
+                    filled: 3,
+                    totalSessions: 6,
+                    suppressed: false,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const out = buildChartData(
+      {
+        id: 'c',
+        title: 'Risk by team',
+        kind: 'dataslot_response_by_segment',
+        dataSlotKey: 'risk',
+        dimensionKey: 'team',
+      },
+      ds
+    );
+    expect(out.data).toEqual([
+      { category: 'Eng', values: { count: 0.5 } },
+      { category: 'Sales', values: { count: 0.5 } },
+    ]);
+  });
 });

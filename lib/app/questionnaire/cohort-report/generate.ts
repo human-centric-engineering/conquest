@@ -26,6 +26,7 @@ import { COHORT_REPORT_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
 import type { CohortReportSettings } from '@/lib/app/questionnaire/types';
 import { narrowCohortReportSettings } from '@/lib/app/questionnaire/cohort-report/settings';
 import { markdownToHtml } from '@/lib/app/questionnaire/cohort-report/richtext';
+import { buildDataSlotThemeMaterial } from '@/lib/app/questionnaire/cohort-report/data-slot-material';
 import { resolveClientKnowledgeDocumentIds } from '@/lib/app/questionnaire/report/client-knowledge';
 import { buildCohortDataset } from '@/lib/app/questionnaire/cohort-report/dataset';
 import {
@@ -72,9 +73,18 @@ function buildMessages(opts: {
   roundContext: string;
   cohortContext: string;
   knowledge: string;
+  dataSlotMaterial: string;
 }): LlmMessage[] {
-  const { agentInstructions, settings, digest, catalog, roundContext, cohortContext, knowledge } =
-    opts;
+  const {
+    agentInstructions,
+    settings,
+    digest,
+    catalog,
+    roundContext,
+    cohortContext,
+    knowledge,
+    dataSlotMaterial,
+  } = opts;
   const gen = settings.generation;
   const business = gen.formality === 'business';
 
@@ -106,6 +116,16 @@ function buildMessages(opts: {
       `Reference material (use it to substantiate the analysis; cite naturally, do not quote verbatim):\n${knowledge.trim()}`
     );
 
+  if (dataSlotMaterial.trim())
+    system.push(
+      'RESPONDENT POSITIONS BY DATA SLOT — this is the substance of the responses and the primary ' +
+        'material for your thematic analysis. Each heading is a data slot; the bullets are individual ' +
+        'respondents’ captured positions. SYNTHESISE anonymised themes, tensions, and patterns ' +
+        'across them — identify what is common, what diverges, and what is notable per the report ' +
+        'goals. NEVER quote a bullet verbatim or attribute a position to an individual; report only ' +
+        `aggregated themes.\n\n${dataSlotMaterial.trim()}`
+    );
+
   system.push(
     'Propose charts that illustrate your most significant findings, choosing from these kinds and ' +
       'ONLY the ids below:\n' +
@@ -113,7 +133,9 @@ function buildMessages(opts: {
       '- question_mean_by_segment (needs questionId + dimensionKey; likert/numeric only)\n' +
       '- response_rate_by_segment (needs questionId + dimensionKey)\n' +
       '- completion_by_segment (needs dimensionKey)\n' +
-      '- segment_sizes (needs dimensionKey)\n\n' +
+      '- segment_sizes (needs dimensionKey)\n' +
+      '- dataslot_response_overall (fill rate per data slot; no id needed)\n' +
+      '- dataslot_response_by_segment (needs dataSlotKey + dimensionKey)\n\n' +
       catalog
   );
   system.push(
@@ -124,7 +146,7 @@ function buildMessages(opts: {
   system.push(
     'Respond with ONLY a JSON object of this exact shape (no prose, no code fence):\n' +
       '{"summary": string, "sections": [{"heading": string, "body": string, "chartIds": [string]}], ' +
-      '"charts": [{"id": string, "title": string, "kind": string, "questionId"?: string, "dimensionKey"?: string}], ' +
+      '"charts": [{"id": string, "title": string, "kind": string, "questionId"?: string, "dataSlotKey"?: string, "dimensionKey"?: string}], ' +
       '"recommendations": [string], "actions": [string]}'
   );
 
@@ -162,6 +184,20 @@ export async function generateCohortReport(params: {
   const dataset = params.dataset ?? (await buildCohortDataset({ roundId, roundName, versionId }));
   const digest = buildCohortDatasetDigest(dataset);
   const catalog = buildChartCatalogText(dataset);
+
+  // 2b. Data-slot thematic material — the raw respondent positions, the substance of the analysis.
+  //     Only when the cohort is above the k-anonymity floor (the loader gates per-slot too).
+  let dataSlotMaterial = '';
+  if (!dataset.suppressed) {
+    const sessionRows = await prisma.appQuestionnaireSession.findMany({
+      where: { versionId, roundId, isPreview: false },
+      select: { id: true },
+    });
+    dataSlotMaterial = await buildDataSlotThemeMaterial({
+      versionId,
+      sessionIds: sessionRows.map((s) => s.id),
+    });
+  }
 
   // 3. Optional context: round briefing, cohort background, client KB.
   let roundContext = '';
@@ -229,6 +265,7 @@ export async function generateCohortReport(params: {
     roundContext,
     cohortContext,
     knowledge,
+    dataSlotMaterial,
   });
   const result = await runStructuredCompletion<CohortReportContent>({
     provider,

@@ -175,5 +175,44 @@ export function buildChartData(spec: ChartSpec, dataset: CohortDataset): ChartDa
         false,
         (seg) => seg.totalSessions
       );
+
+    case 'dataslot_response_overall': {
+      // One bar per data slot — its overall fill rate (the semantic engagement per topic).
+      const slots = dataset.dataSlots?.overall ?? [];
+      const data: ChartDatum[] = slots
+        .filter((s) => !s.suppressed)
+        .map((s) => ({ category: s.name, values: { count: s.responseRate } }));
+      return {
+        spec,
+        display: 'bar',
+        series: COUNT_SERIES,
+        data,
+        valueLabel: '% answered',
+        isPercent: true,
+        suppressed: false,
+        empty: data.length === 0,
+      };
+    }
+
+    case 'dataslot_response_by_segment': {
+      const dim = dataset.dataSlots?.byDimension.find((d) => d.dimensionKey === spec.dimensionKey);
+      const slot = dim?.slots.find((s) => s.key === spec.dataSlotKey);
+      const data: ChartDatum[] = (slot?.segments ?? [])
+        .filter((seg) => !seg.suppressed && seg.totalSessions > 0)
+        .map((seg) => ({
+          category: seg.label,
+          values: { count: seg.filled / seg.totalSessions },
+        }));
+      return {
+        spec,
+        display: spec.display ?? 'bar',
+        series: COUNT_SERIES,
+        data,
+        valueLabel: '% answered',
+        isPercent: true,
+        suppressed: false,
+        empty: data.length === 0,
+      };
+    }
   }
 }

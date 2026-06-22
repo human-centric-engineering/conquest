@@ -14,6 +14,9 @@ vi.mock('@/lib/db/client', () => ({
     appQuestionnaireConfig: { findUnique: vi.fn() },
     appQuestionnaireRound: { findUnique: vi.fn() },
     aiAgent: { findUnique: vi.fn() },
+    appQuestionnaireSession: { findMany: vi.fn() },
+    appDataSlot: { findMany: vi.fn() },
+    appDataSlotFill: { findMany: vi.fn() },
   },
 }));
 vi.mock('@/lib/logging', () => ({ logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() } }));
@@ -87,6 +90,9 @@ const params = { roundId: 'r1', roundName: 'Q1 Pulse', versionId: 'v1', dataset 
 
 beforeEach(() => {
   vi.clearAllMocks();
+  (prisma.appQuestionnaireSession.findMany as Mock).mockResolvedValue([]);
+  (prisma.appDataSlot.findMany as Mock).mockResolvedValue([]);
+  (prisma.appDataSlotFill.findMany as Mock).mockResolvedValue([]);
   (prisma.appQuestionnaireConfig.findUnique as Mock).mockResolvedValue({
     cohortReport: { enabled: true, generation: { useClientKnowledge: false } },
   });
