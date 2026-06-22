@@ -29,6 +29,19 @@ on 2026-06-01, and pulled into ConQuest in the same-day sync. Full gap analysis,
 proposed fix, and resolution notes live in [`upstream-gaps.md`](./upstream-gaps.md)
 (UG-1, UG-2).
 
+### Raised but not yet resolved
+
+On **2026-06-22**, eight further gaps surfaced during the ConQuest build were raised
+upstream as **UG-3 … UG-10** ([sunrise#301–#308](https://github.com/human-centric-engineering/sunrise/issues?q=label%3Aupstream-gap)):
+two bug fixes (copy-timer leak #301, date-stamped model selection #302), a brand-name
+seam (#305), two docs/skill gaps (`isSystem` reservation #303, marketing thin-shim
+#306), and three `proposal`-tagged ideas (runtime-prompt honesty indicator #304,
+structured-output enforcement #307, streaming-STT seam #308). They are tracked in
+[`upstream-gaps.md`](./upstream-gaps.md) at status `raised-upstream` and **graduate to
+the table above once merged and pulled down**. Note UG-6 (#304) is unlikely to be
+consumed by ConQuest itself — it already solves that need app-side with its admin Prompt
+Library — so it is filed as a gap for the next fork, not a carried patch.
+
 ## How an entry gets here
 
 The loop, per [`upstream-gaps.md`](./upstream-gaps.md) and the development plan's
