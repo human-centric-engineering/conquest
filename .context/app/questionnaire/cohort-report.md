@@ -64,6 +64,22 @@ demographic segmentation at all — the report is cohort-level only.
 `withCohortReportEnabled`. Validates the version is one the round bundles
 (`assertRoundBundlesVersion`) and returns the `CohortDataset`.
 
+## Charts — `ChartSpec` → `ChartData` (F14.2)
+
+Charts are **declarative**. A `ChartSpec` (`lib/app/questionnaire/cohort-report/chart-types.ts`)
+says _what_ to plot — a `kind` (`question_distribution`, `question_mean_by_segment`,
+`response_rate_by_segment`, `completion_by_segment`, `segment_sizes`), an optional `questionId` /
+`dimensionKey`, and a `display` hint. `buildChartData(spec, dataset)`
+(`chart-series.ts`, pure) resolves it against the `CohortDataset` into a uniform `ChartData`
+(categories × series). **One `ChartData` drives both renderers**: the recharts web component
+`CohortChart` (`components/admin/questionnaires/cohort-report/charts/cohort-chart.tsx`) and — later —
+the react-pdf chart (F14.6), so a chart looks identical on screen and in the download.
+
+`buildChartData` never throws on a bad spec: an unknown question/dimension or a free-text question
+returns `empty: true`; a k-anonymity-suppressed question/segment returns `suppressed: true` (or is
+omitted from a by-segment series) rather than a misleading zero. The analysis agent proposes a
+`ChartSpec[]` it judges significant (F14.3); the admin pins/adds/removes (F14.5).
+
 ## Data model
 
 - `AppQuestionnaireConfig.cohortReport` — the JSON settings column (above).

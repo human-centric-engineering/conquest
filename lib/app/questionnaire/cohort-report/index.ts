@@ -22,3 +22,15 @@ export type {
   CohortDataset,
 } from '@/lib/app/questionnaire/cohort-report/types';
 export { SUBGROUP_DIMENSION_KEY } from '@/lib/app/questionnaire/cohort-report/types';
+
+export { buildChartData } from '@/lib/app/questionnaire/cohort-report/chart-series';
+export {
+  COHORT_CHART_KINDS,
+  COHORT_CHART_DISPLAYS,
+  type CohortChartKind,
+  type CohortChartDisplay,
+  type ChartSpec,
+  type ChartSeriesDef,
+  type ChartDatum,
+  type ChartData,
+} from '@/lib/app/questionnaire/cohort-report/chart-types';
