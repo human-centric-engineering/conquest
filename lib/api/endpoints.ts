@@ -588,9 +588,14 @@ export const API = {
       byId: (id: string): string => `/api/v1/app/cohorts/${id}`,
       /** Roster: list (GET) + add member (POST). */
       members: (id: string): string => `/api/v1/app/cohorts/${id}/members`,
-      /** Edit (PATCH) / soft-remove (DELETE) one member. */
+      /** Edit (PATCH — incl. subgroup assignment) / soft-remove (DELETE) one member. */
       member: (id: string, memberId: string): string =>
         `/api/v1/app/cohorts/${id}/members/${memberId}`,
+      /** Subgroups (reusable roster partitions for round phasing): list (GET) + create (POST). */
+      subgroups: (id: string): string => `/api/v1/app/cohorts/${id}/subgroups`,
+      /** One subgroup: edit (PATCH) + delete (DELETE). */
+      subgroup: (id: string, subgroupId: string): string =>
+        `/api/v1/app/cohorts/${id}/subgroups/${subgroupId}`,
     },
     /** Rounds — time-bound deliveries of questionnaires to a cohort. Gated by APP_QUESTIONNAIRES_COHORTS. */
     ROUNDS: {
@@ -618,6 +623,15 @@ export const API = {
       contextParse: (id: string): string => `/api/v1/app/rounds/${id}/context/parse`,
       /** Learning Mode — manually rebuild this round's peer-theme digest (POST → per-version summary). */
       learningRebuild: (id: string): string => `/api/v1/app/rounds/${id}/learning/rebuild`,
+      /** Phases (staggered subgroup windows): list (GET) + create (POST). */
+      phases: (id: string): string => `/api/v1/app/rounds/${id}/phases`,
+      /** One phase: edit (PATCH) + delete (DELETE). */
+      phase: (id: string, phaseId: string): string => `/api/v1/app/rounds/${id}/phases/${phaseId}`,
+      /** Generate + email one phase's invitations now (POST → staggered send). */
+      phaseSendInvites: (id: string, phaseId: string): string =>
+        `/api/v1/app/rounds/${id}/phases/${phaseId}/send-invites`,
+      /** Maintenance: dispatch invites for every phase whose window has opened (POST → cron hook). */
+      dispatchPhaseInvites: (): string => `/api/v1/app/rounds/maintenance/dispatch-phase-invites`,
     },
   },
 } as const;

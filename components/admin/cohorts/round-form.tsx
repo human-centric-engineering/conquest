@@ -25,26 +25,8 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { FieldHelp } from '@/components/ui/field-help';
 import { FormError } from '@/components/forms/form-error';
+import { isoToLocalInput, localInputToIso } from '@/components/admin/cohorts/cohort-ui';
 import { roundDetailHref, type RoundDetail } from '@/lib/app/questionnaire/rounds';
-
-/** ISO string → the `yyyy-MM-ddThh:mm` value a datetime-local input expects (local time). */
-function isoToLocalInput(iso: string | null): string {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(
-    d.getMinutes()
-  )}`;
-}
-
-/** A datetime-local value (local wall-clock) → an ISO string with offset, or null if blank. */
-function localInputToIso(value: string): string | null {
-  if (value.trim() === '') return null;
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toISOString();
-}
 
 const formSchema = z
   .object({

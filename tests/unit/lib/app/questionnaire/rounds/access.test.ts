@@ -97,4 +97,61 @@ describe('evaluateRoundAccess', () => {
     );
     expect(v).toEqual({ ok: true });
   });
+
+  describe('with a subgroup phase', () => {
+    // Round is wide open (EARLIER → LATER); the phase narrows the member's window.
+    it('denies before the phase opens with PHASE_NOT_YET_OPEN (round is already open)', () => {
+      const v = evaluateRoundAccess(
+        subject({ phase: { opensAt: LATER, closesAt: null, endMode: 'hard' } })
+      );
+      expect(v).toMatchObject({ ok: false, code: 'PHASE_NOT_YET_OPEN', status: 409 });
+    });
+
+    it('allows inside the phase window even though the round is wider', () => {
+      const v = evaluateRoundAccess(
+        subject({ phase: { opensAt: EARLIER, closesAt: LATER, endMode: 'hard' } })
+      );
+      expect(v).toEqual({ ok: true });
+    });
+
+    it('denies after a HARD phase close with PHASE_WINDOW_CLOSED while the round is still open', () => {
+      const v = evaluateRoundAccess(
+        subject({ phase: { opensAt: EARLIER, closesAt: EARLIER, endMode: 'hard' } })
+      );
+      expect(v).toMatchObject({ ok: false, code: 'PHASE_WINDOW_CLOSED', status: 409 });
+    });
+
+    it('a RELAXED phase ignores its own past close — access continues to the round close', () => {
+      const v = evaluateRoundAccess(
+        subject({ phase: { opensAt: EARLIER, closesAt: EARLIER, endMode: 'relaxed' } })
+      );
+      expect(v).toEqual({ ok: true });
+    });
+
+    it('a RELAXED phase past the ROUND close denies as ROUND_WINDOW_CLOSED (not phase-scoped)', () => {
+      const v = evaluateRoundAccess(
+        subject({
+          round: { status: 'open', opensAt: EARLIER, closesAt: EARLIER },
+          phase: { opensAt: EARLIER, closesAt: null, endMode: 'relaxed' },
+        })
+      );
+      expect(v).toMatchObject({ ok: false, code: 'ROUND_WINDOW_CLOSED' });
+    });
+
+    it('a null phase falls back to the round window (today’s behaviour)', () => {
+      expect(evaluateRoundAccess(subject({ phase: null }))).toEqual({ ok: true });
+    });
+
+    it('attributes a not-yet-open denial to the ROUND (not the phase) when the round itself has not opened', () => {
+      // Round is `open` in status but its opensAt is still in the future (admin flipped it early);
+      // a phased member should see ROUND_NOT_OPEN, the same as a non-phased member.
+      const v = evaluateRoundAccess(
+        subject({
+          round: { status: 'open', opensAt: LATER, closesAt: null },
+          phase: { opensAt: LATER, closesAt: null, endMode: 'hard' },
+        })
+      );
+      expect(v).toMatchObject({ ok: false, code: 'ROUND_NOT_OPEN' });
+    });
+  });
 });

@@ -8,6 +8,10 @@
  *   client body), so round membership can't be forged. Idempotent — re-running tops up newly
  *   added members. Returns counts + the freshly-minted frictionless links.
  *
+ *   Optional body `{ send: true }` also EMAILS each freshly-minted link (frictionless no-login
+ *   URL) and flips it to `sent`; omitted/false mints copy/paste links without sending. For
+ *   STAGGERED per-subgroup sending see `…/phases/:phaseId/send-invites`.
+ *
  * Cohorts flag-gate first (404 when off), then `withAdminAuth`. Audited.
  */
 
@@ -20,6 +24,7 @@ import { prisma } from '@/lib/db/client';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
 import { withCohortsEnabled } from '@/lib/app/questionnaire/feature-flag';
+import { generateRoundInvitationsSchema } from '@/lib/app/questionnaire/rounds';
 import { generateRoundInvitations } from '@/app/api/v1/app/rounds/_lib/invites';
 
 const handleGenerate = withAdminAuth<{ id: string }>(async (request, session, { params }) => {
@@ -33,7 +38,17 @@ const handleGenerate = withAdminAuth<{ id: string }>(async (request, session, { 
   });
   if (!round) throw new NotFoundError('Round not found');
 
-  const result = await generateRoundInvitations(id, session.user.id);
+  // Optional `{ send }` flag — tolerate an absent/empty body (the panel posts none today) and
+  // validate it with Zod when present. Body parsing is wrapped because an absent body throws.
+  let send = false;
+  try {
+    const parsed = generateRoundInvitationsSchema.safeParse(await request.json());
+    if (parsed.success) send = parsed.data.send ?? false;
+  } catch {
+    /* no body — generate copy/paste links only */
+  }
+
+  const result = await generateRoundInvitations(id, session.user.id, { send });
 
   logAdminAction({
     userId: session.user.id,
@@ -44,6 +59,7 @@ const handleGenerate = withAdminAuth<{ id: string }>(async (request, session, { 
     metadata: {
       created: result.created,
       skipped: result.skipped,
+      sent: result.sent,
       activeMembers: result.activeMembers,
     },
     clientIp,
@@ -52,6 +68,7 @@ const handleGenerate = withAdminAuth<{ id: string }>(async (request, session, { 
     id,
     created: result.created,
     skipped: result.skipped,
+    sent: result.sent,
   });
 
   return successResponse(result, undefined, { status: 201 });

@@ -16,6 +16,7 @@ import {
   COHORT_MEMBER_STATUSES,
   type CohortDetail,
   type CohortMemberView,
+  type CohortSubgroupView,
   type CohortView,
 } from '@/lib/app/questionnaire/rounds/types';
 import {
@@ -42,6 +43,7 @@ type CohortRow = Prisma.AppCohortGetPayload<{ select: typeof COHORT_SELECT }>;
 const COHORT_MEMBER_SELECT = {
   id: true,
   cohortId: true,
+  subgroupId: true,
   email: true,
   name: true,
   notes: true,
@@ -60,9 +62,55 @@ export function toCohortMemberView(row: CohortMemberRow): CohortMemberView {
     name: row.name,
     notes: row.notes,
     status: narrowToEnum(row.status, COHORT_MEMBER_STATUSES, 'active'),
+    subgroupId: row.subgroupId,
     addedAt: row.addedAt.toISOString(),
     removedAt: row.removedAt ? row.removedAt.toISOString() : null,
   };
+}
+
+/** Identity columns + active-member count shared by every subgroup serializer. */
+const COHORT_SUBGROUP_SELECT = {
+  id: true,
+  cohortId: true,
+  name: true,
+  description: true,
+  ordinal: true,
+  createdAt: true,
+  updatedAt: true,
+  // Only ACTIVE members count toward a subgroup's headline size (mirrors the cohort roster rule).
+  _count: { select: { members: { where: { status: 'active' } } } },
+} as const satisfies Prisma.AppCohortSubgroupSelect;
+
+type CohortSubgroupRow = Prisma.AppCohortSubgroupGetPayload<{
+  select: typeof COHORT_SUBGROUP_SELECT;
+}>;
+
+export function toCohortSubgroupView(row: CohortSubgroupRow): CohortSubgroupView {
+  return {
+    id: row.id,
+    cohortId: row.cohortId,
+    name: row.name,
+    description: row.description,
+    ordinal: row.ordinal,
+    memberCount: row._count.members,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+/** A cohort's subgroups (by ordinal, then name), or null when the cohort is unknown. */
+export async function listCohortSubgroups(cohortId: string): Promise<CohortSubgroupView[] | null> {
+  const cohort = await prisma.appCohort.findUnique({
+    where: { id: cohortId },
+    select: { id: true },
+  });
+  if (!cohort) return null;
+  const rows = await prisma.appCohortSubgroup.findMany({
+    where: { cohortId },
+    orderBy: [{ ordinal: 'asc' }, { name: 'asc' }],
+    select: COHORT_SUBGROUP_SELECT,
+  });
+  return rows.map(toCohortSubgroupView);
 }
 
 function toCohortView(row: CohortRow, stats: RoundSessionCounts | undefined): CohortView {
@@ -122,7 +170,11 @@ export async function listCohorts(demoClientId: string, q?: string): Promise<Coh
 export async function getCohortDetail(id: string): Promise<CohortDetail | null> {
   const row = await prisma.appCohort.findUnique({
     where: { id },
-    select: { ...COHORT_SELECT, members: { select: COHORT_MEMBER_SELECT } },
+    select: {
+      ...COHORT_SELECT,
+      members: { select: COHORT_MEMBER_SELECT },
+      subgroups: { orderBy: [{ ordinal: 'asc' }, { name: 'asc' }], select: COHORT_SUBGROUP_SELECT },
+    },
   });
   if (!row) return null;
 
@@ -142,8 +194,9 @@ export async function getCohortDetail(id: string): Promise<CohortDetail | null> 
     if (a.status !== b.status) return a.status === 'active' ? -1 : 1;
     return a.name.localeCompare(b.name);
   });
+  const subgroups = row.subgroups.map(toCohortSubgroupView);
 
-  return { ...toCohortView(row, stats), members };
+  return { ...toCohortView(row, stats), members, subgroups };
 }
 
 /** A cohort's roster (active first, then by name), or null when the cohort is unknown. */

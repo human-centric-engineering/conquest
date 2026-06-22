@@ -55,6 +55,7 @@ const handleCreate = withAdminAuth<{ id: string }>(async (request, session, { pa
       select: {
         id: true,
         cohortId: true,
+        subgroupId: true,
         email: true,
         name: true,
         notes: true,

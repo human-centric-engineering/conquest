@@ -98,6 +98,20 @@ describe('getRoundDetail', () => {
           questionnaire: { title: 'Onboarding survey' },
         },
       ],
+      phases: [
+        {
+          id: 'ph-1',
+          roundId: 'r-1',
+          subgroupId: 'sg-1',
+          opensAt: new Date('2026-07-01'),
+          closesAt: new Date('2026-07-07'),
+          endMode: 'hard',
+          ordinal: 0,
+          createdAt: new Date('2026-06-20'),
+          updatedAt: new Date('2026-06-20'),
+          subgroup: { name: 'Senior Leadership Team', _count: { members: 1 } },
+        },
+      ],
     });
     prismaMock.appCohortMember.groupBy.mockResolvedValue([
       { cohortId: 'co-1', _count: { _all: 2 } },
@@ -109,6 +123,82 @@ describe('getRoundDetail', () => {
     expect(detail?.questionnaires).toEqual([
       { itemId: 'item-1', questionnaireId: 'q-1', title: 'Onboarding survey', versionId: 'v-1' },
     ]);
+    expect(detail?.phases).toEqual([
+      expect.objectContaining({
+        id: 'ph-1',
+        subgroupId: 'sg-1',
+        subgroupName: 'Senior Leadership Team',
+        endMode: 'hard',
+        memberCount: 1,
+      }),
+    ]);
+  });
+
+  it('returns empty phases (and skips the per-subgroup query) for a round with none', async () => {
+    prismaMock.appQuestionnaireRound.findUnique.mockResolvedValue({
+      id: 'r-1',
+      cohortId: 'co-1',
+      name: 'July round',
+      description: null,
+      status: 'open',
+      opensAt: null,
+      closesAt: null,
+      closedAt: null,
+      createdAt: new Date('2026-06-20'),
+      updatedAt: new Date('2026-06-20'),
+      _count: { items: 0 },
+      cohort: { id: 'co-1', name: 'Team A', demoClientId: 'dc-1' },
+      items: [],
+      phases: [],
+    });
+    prismaMock.appCohortMember.groupBy.mockResolvedValue([]);
+    prismaMock.appQuestionnaireSession.groupBy.mockResolvedValue([]);
+
+    const detail = await getRoundDetail('r-1');
+    expect(detail?.phases).toEqual([]);
+  });
+
+  it('serializes a phase whose window inherits the round (null opens/closes)', async () => {
+    prismaMock.appQuestionnaireRound.findUnique.mockResolvedValue({
+      id: 'r-1',
+      cohortId: 'co-1',
+      name: 'July round',
+      description: null,
+      status: 'open',
+      opensAt: null,
+      closesAt: null,
+      closedAt: null,
+      createdAt: new Date('2026-06-20'),
+      updatedAt: new Date('2026-06-20'),
+      _count: { items: 0 },
+      cohort: { id: 'co-1', name: 'Team A', demoClientId: 'dc-1' },
+      items: [],
+      phases: [
+        {
+          id: 'ph-2',
+          roundId: 'r-1',
+          subgroupId: 'sg-2',
+          opensAt: null,
+          closesAt: null,
+          endMode: 'relaxed',
+          ordinal: 1,
+          createdAt: new Date('2026-06-20'),
+          updatedAt: new Date('2026-06-20'),
+          subgroup: { name: 'Everyone else', _count: { members: 4 } },
+        },
+      ],
+    });
+    prismaMock.appCohortMember.groupBy.mockResolvedValue([]);
+    prismaMock.appQuestionnaireSession.groupBy.mockResolvedValue([]);
+
+    const detail = await getRoundDetail('r-1');
+    expect(detail?.phases[0]).toMatchObject({
+      id: 'ph-2',
+      opensAt: null,
+      closesAt: null,
+      endMode: 'relaxed',
+      memberCount: 4,
+    });
   });
 });
 

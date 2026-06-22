@@ -9,6 +9,10 @@ import {
   updateCohortSchema,
   createCohortMemberSchema,
   updateCohortMemberSchema,
+  createCohortSubgroupSchema,
+  updateCohortSubgroupSchema,
+  createRoundPhaseSchema,
+  updateRoundPhaseSchema,
   createRoundSchema,
   updateRoundSchema,
   attachRoundQuestionnaireSchema,
@@ -65,6 +69,77 @@ describe('updateCohortMemberSchema', () => {
 
   it('requires at least one field', () => {
     expect(updateCohortMemberSchema.safeParse({}).success).toBe(false);
+  });
+
+  it('accepts a subgroupId assignment and an explicit null (unassign)', () => {
+    expect(updateCohortMemberSchema.safeParse({ subgroupId: 'sg-1' }).success).toBe(true);
+    const cleared = updateCohortMemberSchema.parse({ subgroupId: null });
+    expect(cleared.subgroupId).toBeNull();
+  });
+
+  it('rejects a blank-string subgroupId (use null to unassign)', () => {
+    expect(updateCohortMemberSchema.safeParse({ subgroupId: '' }).success).toBe(false);
+  });
+});
+
+describe('createCohortSubgroupSchema', () => {
+  it('requires a name and nulls an empty description', () => {
+    const parsed = createCohortSubgroupSchema.parse({ name: '  SLT  ', description: '  ' });
+    expect(parsed).toMatchObject({ name: 'SLT', description: null });
+  });
+
+  it('rejects a blank name and a negative ordinal', () => {
+    expect(createCohortSubgroupSchema.safeParse({ name: '   ' }).success).toBe(false);
+    expect(createCohortSubgroupSchema.safeParse({ name: 'SLT', ordinal: -1 }).success).toBe(false);
+  });
+});
+
+describe('updateCohortSubgroupSchema', () => {
+  it('requires at least one field', () => {
+    expect(updateCohortSubgroupSchema.safeParse({}).success).toBe(false);
+  });
+
+  it('coerces an empty description to null', () => {
+    expect(updateCohortSubgroupSchema.parse({ description: '  ' }).description).toBeNull();
+  });
+});
+
+describe('createRoundPhaseSchema', () => {
+  it('requires a subgroupId and accepts an optional window + end mode', () => {
+    const parsed = createRoundPhaseSchema.parse({
+      subgroupId: 'sg-1',
+      opensAt: '2026-07-01T00:00:00Z',
+      closesAt: '2026-07-10T00:00:00Z',
+      endMode: 'relaxed',
+    });
+    expect(parsed.subgroupId).toBe('sg-1');
+    expect(parsed.opensAt).toBeInstanceOf(Date);
+    expect(parsed.endMode).toBe('relaxed');
+  });
+
+  it('rejects a missing subgroupId, a bad end mode, and an inverted window', () => {
+    expect(createRoundPhaseSchema.safeParse({}).success).toBe(false);
+    expect(createRoundPhaseSchema.safeParse({ subgroupId: 'sg', endMode: 'soft' }).success).toBe(
+      false
+    );
+    expect(
+      createRoundPhaseSchema.safeParse({
+        subgroupId: 'sg',
+        opensAt: '2026-07-10T00:00:00Z',
+        closesAt: '2026-07-01T00:00:00Z',
+      }).success
+    ).toBe(false);
+  });
+});
+
+describe('updateRoundPhaseSchema', () => {
+  it('requires at least one field', () => {
+    expect(updateRoundPhaseSchema.safeParse({}).success).toBe(false);
+  });
+
+  it('accepts a lone end-mode change and a null bound (inherit round)', () => {
+    expect(updateRoundPhaseSchema.safeParse({ endMode: 'hard' }).success).toBe(true);
+    expect(updateRoundPhaseSchema.parse({ closesAt: null }).closesAt).toBeNull();
   });
 });
 

@@ -11,7 +11,7 @@
  * member (scoped to the cohort in the path). Audited.
  */
 
-import { successResponse } from '@/lib/api/responses';
+import { errorResponse, successResponse } from '@/lib/api/responses';
 import { getRouteLogger } from '@/lib/api/context';
 import { NotFoundError } from '@/lib/api/errors';
 import { validateRequestBody } from '@/lib/api/validation';
@@ -27,6 +27,7 @@ import { toCohortMemberView } from '@/app/api/v1/app/cohorts/_lib/read';
 const MEMBER_SELECT = {
   id: true,
   cohortId: true,
+  subgroupId: true,
   email: true,
   name: true,
   notes: true,
@@ -51,6 +52,21 @@ const handleUpdate = withAdminAuth<Params>(async (request, session, { params }) 
 
   const body = await validateRequestBody(request, updateCohortMemberSchema);
 
+  // Subgroup assignment: a non-null target must belong to THIS cohort (else a 422). `null` unassigns.
+  if (body.subgroupId) {
+    const subgroup = await prisma.appCohortSubgroup.findFirst({
+      where: { id: body.subgroupId, cohortId: id },
+      select: { id: true },
+    });
+    if (!subgroup) {
+      return errorResponse('That subgroup does not belong to this cohort', {
+        code: 'SUBGROUP_NOT_IN_COHORT',
+        status: 422,
+        details: { subgroupId: ['Unknown subgroup for this cohort'] },
+      });
+    }
+  }
+
   const updated = await prisma.appCohortMember.update({
     where: { id: memberId },
     data: {
@@ -58,6 +74,8 @@ const handleUpdate = withAdminAuth<Params>(async (request, session, { params }) 
       ...(body.notes !== undefined ? { notes: body.notes } : {}),
       // Re-activation: clear the removed stamp so the roster reads clean.
       ...(body.status === 'active' ? { status: 'active', removedAt: null } : {}),
+      // Subgroup assignment (null unassigns; validated above when non-null).
+      ...(body.subgroupId !== undefined ? { subgroupId: body.subgroupId } : {}),
     },
     select: MEMBER_SELECT,
   });

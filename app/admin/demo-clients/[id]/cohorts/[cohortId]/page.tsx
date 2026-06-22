@@ -16,12 +16,17 @@ import { ChevronLeft } from 'lucide-react';
 
 import { CohortHeaderActions } from '@/components/admin/cohorts/cohort-header-actions';
 import { CohortMembersPanel } from '@/components/admin/cohorts/cohort-members-panel';
+import { CohortSubgroupsPanel } from '@/components/admin/cohorts/cohort-subgroups-panel';
 import { RoundsTable } from '@/components/admin/cohorts/rounds-table';
 import { CompletionBar, SectionHeading } from '@/components/admin/cohorts/cohort-ui';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
-import { isCohortsEnabled, isIntroScreenEnabled } from '@/lib/app/questionnaire/feature-flag';
+import {
+  isCohortsEnabled,
+  isIntroScreenEnabled,
+  isRoundPhasesEnabled,
+} from '@/lib/app/questionnaire/feature-flag';
 import { cohortsTabHref, type CohortDetail, type RoundView } from '@/lib/app/questionnaire/rounds';
 
 export const metadata: Metadata = {
@@ -64,9 +69,10 @@ export default async function CohortDetailPage({ params }: PageProps) {
   const cohort = await getCohort(cohortId);
   if (!cohort) notFound();
 
-  const [rounds, introScreenEnabled] = await Promise.all([
+  const [rounds, introScreenEnabled, roundPhasesEnabled] = await Promise.all([
     getCohortRounds(cohortId),
     isIntroScreenEnabled(),
+    isRoundPhasesEnabled(),
   ]);
 
   return (
@@ -116,12 +122,27 @@ export default async function CohortDetailPage({ params }: PageProps) {
         />
       </header>
 
+      {roundPhasesEnabled && (
+        <section className="space-y-3 rounded-xl border px-4 py-4">
+          <SectionHeading title="Subgroups">
+            Reusable partitions of this cohort&rsquo;s roster. A round can give each subgroup its
+            own access window so one group (e.g. a leadership team) takes it before the rest. Assign
+            members to a subgroup in the roster below.
+          </SectionHeading>
+          <CohortSubgroupsPanel cohortId={cohort.id} subgroups={cohort.subgroups} />
+        </section>
+      )}
+
       <section className="space-y-3 rounded-xl border px-4 py-4">
         <SectionHeading title="Roster">
           The people in this cohort. Removing a member revokes access without deleting their
           existing sessions; reactivate to restore access.
         </SectionHeading>
-        <CohortMembersPanel cohortId={cohort.id} members={cohort.members} />
+        <CohortMembersPanel
+          cohortId={cohort.id}
+          members={cohort.members}
+          subgroups={roundPhasesEnabled ? cohort.subgroups : []}
+        />
       </section>
 
       <section className="space-y-3 rounded-xl border px-4 py-4">

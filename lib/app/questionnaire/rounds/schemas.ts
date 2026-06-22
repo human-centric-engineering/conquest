@@ -10,7 +10,7 @@
 import { z } from 'zod';
 
 import { INTRO_BACKGROUND_MAX_LENGTH } from '@/lib/app/questionnaire/types';
-import { MIN_RESPONDENTS_FLOOR } from '@/lib/app/questionnaire/rounds/types';
+import { MIN_RESPONDENTS_FLOOR, ROUND_PHASE_END_MODES } from '@/lib/app/questionnaire/rounds/types';
 
 const NAME_MAX = 120;
 const DESCRIPTION_MAX = 1000;
@@ -72,15 +72,39 @@ export const createCohortMemberSchema = z.object({
 });
 
 /**
- * Edit a roster member: identity fields and/or re-activation. `status` accepts only
- * `active` here — REMOVING a member is the soft DELETE on the member route (it also stamps
- * `removedAt`); PATCH `status: active` is how you put a removed member back. At least one field.
+ * Edit a roster member: identity fields, re-activation, and/or subgroup assignment. `status` accepts
+ * only `active` here — REMOVING a member is the soft DELETE on the member route (it also stamps
+ * `removedAt`); PATCH `status: active` is how you put a removed member back. `subgroupId: null`
+ * unassigns the member from any subgroup; a non-null value must reference a subgroup of the SAME
+ * cohort (the route validates). At least one field.
  */
 export const updateCohortMemberSchema = z
   .object({
     name: nameField,
     notes: optionalTextField(NOTES_MAX),
     status: z.literal('active'),
+    subgroupId: z.string().min(1).nullable(),
+  })
+  .partial()
+  .refine((b) => Object.keys(b).length > 0, { message: 'At least one field must be provided' });
+
+// ---------------------------------------------------------------------------
+// Cohort subgroups
+// ---------------------------------------------------------------------------
+
+/** Create a subgroup under a cohort. Name is unique within the cohort (DB-enforced → 409). */
+export const createCohortSubgroupSchema = z.object({
+  name: nameField,
+  description: optionalTextField(DESCRIPTION_MAX).optional(),
+  ordinal: z.coerce.number().int().min(0).optional(),
+});
+
+/** Edit a subgroup's identity / order. At least one field. */
+export const updateCohortSubgroupSchema = z
+  .object({
+    name: nameField,
+    description: optionalTextField(DESCRIPTION_MAX),
+    ordinal: z.coerce.number().int().min(0),
   })
   .partial()
   .refine((b) => Object.keys(b).length > 0, { message: 'At least one field must be provided' });
@@ -142,6 +166,47 @@ export const updateRoundSchema = z
   .refine((b) => Object.keys(b).length > 0, { message: 'At least one field must be provided' })
   .refine(windowRefinement, windowMessage);
 
+// ---------------------------------------------------------------------------
+// Round phases (staggered subgroup windows)
+// ---------------------------------------------------------------------------
+
+/**
+ * Create a phase on a round for one cohort subgroup. `opensAt`/`closesAt` are the phase bounds (both
+ * optional → inherit the round's bound on that side); `endMode` decides whether the close is a hard
+ * cutoff or relaxes to the round close. The route additionally validates that the subgroup belongs to
+ * the round's cohort and that the window nests inside the round window (those need the loaded round).
+ */
+export const createRoundPhaseSchema = z
+  .object({
+    subgroupId: z.string().min(1, 'Subgroup is required'),
+    opensAt: nullableInstant.optional(),
+    closesAt: nullableInstant.optional(),
+    endMode: z.enum(ROUND_PHASE_END_MODES).optional(),
+    ordinal: z.coerce.number().int().min(0).optional(),
+  })
+  .refine(windowRefinement, windowMessage);
+
+/** Edit a phase's window / end mode / order. `subgroupId` is immutable post-create. At least one field. */
+export const updateRoundPhaseSchema = z
+  .object({
+    opensAt: nullableInstant,
+    closesAt: nullableInstant,
+    endMode: z.enum(ROUND_PHASE_END_MODES),
+    ordinal: z.coerce.number().int().min(0),
+  })
+  .partial()
+  .refine((b) => Object.keys(b).length > 0, { message: 'At least one field must be provided' })
+  .refine(windowRefinement, windowMessage);
+
+/**
+ * Body for the round invitations generate endpoint. `send` opts into emailing each freshly-minted
+ * frictionless link (default: mint copy/paste links only). The whole body is optional — the panel
+ * posts none — so the route treats an absent body as `{}`.
+ */
+export const generateRoundInvitationsSchema = z.object({
+  send: z.boolean().optional(),
+});
+
 /** Attach a questionnaire to a round (optionally pinning a version). */
 export const attachRoundQuestionnaireSchema = z.object({
   questionnaireId: z.string().min(1, 'Questionnaire is required'),
@@ -191,6 +256,11 @@ export type CreateCohortInput = z.infer<typeof createCohortSchema>;
 export type UpdateCohortInput = z.infer<typeof updateCohortSchema>;
 export type CreateCohortMemberInput = z.infer<typeof createCohortMemberSchema>;
 export type UpdateCohortMemberInput = z.infer<typeof updateCohortMemberSchema>;
+export type CreateCohortSubgroupInput = z.infer<typeof createCohortSubgroupSchema>;
+export type UpdateCohortSubgroupInput = z.infer<typeof updateCohortSubgroupSchema>;
+export type CreateRoundPhaseInput = z.infer<typeof createRoundPhaseSchema>;
+export type UpdateRoundPhaseInput = z.infer<typeof updateRoundPhaseSchema>;
+export type GenerateRoundInvitationsInput = z.infer<typeof generateRoundInvitationsSchema>;
 export type CreateRoundInput = z.infer<typeof createRoundSchema>;
 export type UpdateRoundInput = z.infer<typeof updateRoundSchema>;
 export type LearningConfigInput = z.infer<typeof learningConfigSchema>;

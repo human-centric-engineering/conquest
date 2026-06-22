@@ -29,6 +29,7 @@ import {
 } from '@/components/admin/cohorts/round-questionnaires-panel';
 import { RoundContextPanel } from '@/components/admin/cohorts/round-context-panel';
 import { RoundLearningPanel } from '@/components/admin/cohorts/round-learning-panel';
+import { RoundPhasesPanel } from '@/components/admin/cohorts/round-phases-panel';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
@@ -36,13 +37,20 @@ import {
   isCohortsEnabled,
   isLearningModeEnabled,
   isRoundContextEnabled,
+  isRoundPhasesEnabled,
 } from '@/lib/app/questionnaire/feature-flag';
 import {
   listBriefableQuestionnaires,
   listRoundContextEntries,
 } from '@/app/api/v1/app/rounds/_lib/context';
 import { listRoundLearningDigest } from '@/lib/app/questionnaire/learning/digest';
-import { cohortDetailHref, roundsTabHref, type RoundDetail } from '@/lib/app/questionnaire/rounds';
+import { listCohortSubgroups } from '@/app/api/v1/app/cohorts/_lib/read';
+import {
+  cohortDetailHref,
+  roundsTabHref,
+  type CohortSubgroupView,
+  type RoundDetail,
+} from '@/lib/app/questionnaire/rounds';
 import type { QuestionnaireListItem } from '@/lib/app/questionnaire/views';
 
 export const metadata: Metadata = {
@@ -105,14 +113,18 @@ export default async function RoundDetailPage({ params }: PageProps) {
   // Round Additional Context + Learning Mode — each gated by its own flag; the sections hide entirely
   // when off. Reads go straight through the `_lib` (server component), no extra HTTP. `briefable` is
   // shared (both panels need version titles), loaded once when either feature is on.
-  const [roundContextOn, learningOn] = await Promise.all([
+  const [roundContextOn, learningOn, phasesOn] = await Promise.all([
     isRoundContextEnabled(),
     isLearningModeEnabled(),
+    isRoundPhasesEnabled(),
   ]);
-  const [briefable, contextEntries, learningDigest] = await Promise.all([
+  const [briefable, contextEntries, learningDigest, subgroups] = await Promise.all([
     roundContextOn || learningOn ? listBriefableQuestionnaires(roundId) : Promise.resolve([]),
     roundContextOn ? listRoundContextEntries(roundId) : Promise.resolve([]),
     learningOn ? listRoundLearningDigest(roundId) : Promise.resolve([]),
+    phasesOn
+      ? listCohortSubgroups(round.cohortId)
+      : Promise.resolve<CohortSubgroupView[] | null>([]),
   ]);
 
   const statTiles: CqStat[] = [
@@ -186,6 +198,23 @@ export default async function RoundDetailPage({ params }: PageProps) {
           attachable={attachable}
         />
       </section>
+
+      {phasesOn && (
+        <section className="space-y-3 rounded-xl border px-4 py-4">
+          <SectionHeading title="Phases">
+            Stagger access by subgroup so one group can go before the rest — for example, a
+            leadership team in week one, everyone else from week two. Each phase&rsquo;s window must
+            sit inside the round window; members with no phase use the round&rsquo;s own window.
+          </SectionHeading>
+          <RoundPhasesPanel
+            roundId={round.id}
+            roundOpensAt={round.opensAt}
+            roundClosesAt={round.closesAt}
+            phases={round.phases}
+            subgroups={subgroups ?? []}
+          />
+        </section>
+      )}
 
       {roundContextOn && (
         <section className="space-y-3 rounded-xl border px-4 py-4">

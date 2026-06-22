@@ -61,7 +61,10 @@ describe('createSessionFromInvitation', () => {
     userId: USER,
     status: 'registered',
     versionId: 'v1',
-    version: { status: 'launched' },
+    // Mirror the real findUnique projection: round context + version config are always selected.
+    roundId: null,
+    cohortMemberId: null,
+    version: { status: 'launched', config: null },
     ...overrides,
   });
 
@@ -85,6 +88,7 @@ describe('createSessionFromInvitation', () => {
           respondentUserId: USER,
           roundId: null,
           cohortMemberId: null,
+          cohortSubgroupId: null,
           publicRef: expect.stringMatching(/^[0-9A-HJKMNP-TV-Z]{8}$/),
           isPreview: false,
           status: 'active',
@@ -368,8 +372,9 @@ describe('createPreviewSession (admin preview)', () => {
 });
 
 describe('createSessionFromInviteToken (frictionless, no-login)', () => {
-  const future = new Date(Date.now() + 60_000);
-  const past = new Date(Date.now() - 60_000);
+  // Wide bounds so the live-clock expiry check (create.ts) can't flip mid-run on a slow suite.
+  const future = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  const past = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
   const invite = (overrides = {}) => ({
     id: 'inv-1',
     status: 'sent',

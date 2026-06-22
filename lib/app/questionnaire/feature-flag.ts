@@ -28,6 +28,7 @@ import {
   APP_QUESTIONNAIRES_INTRO_SCREEN_FLAG,
   APP_QUESTIONNAIRES_ROUND_CONTEXT_FLAG,
   APP_QUESTIONNAIRES_LEARNING_MODE_FLAG,
+  APP_QUESTIONNAIRES_ROUND_PHASES_FLAG,
   APP_QUESTIONNAIRES_FLAG,
 } from '@/lib/app/questionnaire/constants';
 import { isFeatureEnabled } from '@/lib/feature-flags';
@@ -60,6 +61,7 @@ export {
   APP_QUESTIONNAIRES_INTRO_SCREEN_FLAG,
   APP_QUESTIONNAIRES_ROUND_CONTEXT_FLAG,
   APP_QUESTIONNAIRES_LEARNING_MODE_FLAG,
+  APP_QUESTIONNAIRES_ROUND_PHASES_FLAG,
 };
 
 /**
@@ -837,6 +839,53 @@ export function withLearningModeEnabled<C>(
 ): (request: NextRequest, context: C) => Promise<Response> {
   return async (request, context) => {
     const blocked = await ensureLearningModeEnabled();
+    if (blocked) return blocked;
+    return handler(request, context);
+  };
+}
+
+/**
+ * Whether **Round Phases** (staggered access windows for cohort subgroups) may run. Requires the
+ * master app flag, the **cohorts** flag (phases hang off rounds), AND the round-phases sub-flag. Like
+ * cohorts/round-context it's a master-style child, not live-dependent at the flag level — the presence
+ * of a subgroup phase on a round is the further gate the access guard ANDs. When this returns `false`,
+ * the subgroup/phase authoring routes + panels 404/hide and the respondent access guard falls back to
+ * the round's own window for everyone (today's behaviour).
+ *
+ * Server-only (resolves the flags from the database).
+ */
+export async function isRoundPhasesEnabled(): Promise<boolean> {
+  const [app, cohorts, phases] = await Promise.all([
+    isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_COHORTS_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_ROUND_PHASES_FLAG),
+  ]);
+  return app && cohorts && phases;
+}
+
+/**
+ * Flag gate for the round-phases authoring routes — 404 when any of the master / cohorts /
+ * round-phases flags is off, `null` when all are on. The {@link ensureRoundContextEnabled} analogue
+ * for the phases surface; call it first, before any auth or handler work.
+ *
+ * Server-only (resolves the flags from the database).
+ */
+export async function ensureRoundPhasesEnabled(): Promise<Response | null> {
+  if (await isRoundPhasesEnabled()) {
+    return null;
+  }
+  return errorResponse('Not found', { code: 'NOT_FOUND', status: 404 });
+}
+
+/**
+ * Wrap a round-phases route handler so the phases gate runs **before** anything else (auth, handler
+ * work). The {@link withRoundContextEnabled} analogue for the phases surface.
+ */
+export function withRoundPhasesEnabled<C>(
+  handler: (request: NextRequest, context: C) => Promise<Response>
+): (request: NextRequest, context: C) => Promise<Response> {
+  return async (request, context) => {
+    const blocked = await ensureRoundPhasesEnabled();
     if (blocked) return blocked;
     return handler(request, context);
   };

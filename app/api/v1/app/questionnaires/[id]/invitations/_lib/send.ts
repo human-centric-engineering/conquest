@@ -135,3 +135,29 @@ export function sendInvitationEmail(args: SendInvitationEmailArgs): Promise<Send
     }),
   });
 }
+
+export interface SendRoundInvitationEmailArgs extends SendInvitationEmailArgs {
+  /** The version the frictionless link targets — round invites open the no-login surface directly. */
+  versionId: string;
+}
+
+/**
+ * Render + send a ROUND invitation email — same template as {@link sendInvitationEmail}, but the CTA
+ * is the FRICTIONLESS no-login URL (`/q/:versionId?i=<token>`) rather than the account-registration
+ * accept page, because round invites boot a session straight from the token. Non-blocking.
+ */
+export function sendRoundInvitationEmail(
+  args: SendRoundInvitationEmailArgs
+): Promise<SendEmailResult> {
+  return sendEmail({
+    to: args.to,
+    subject: `You're invited to complete ${args.questionnaireTitle}`,
+    react: QuestionnaireInvitationEmail({
+      inviteeName: args.inviteeName,
+      questionnaireTitle: args.questionnaireTitle,
+      invitationUrl: buildFrictionlessInviteUrl(args.versionId, args.token),
+      expiresAt: args.expiresAt,
+      theme: args.theme,
+    }),
+  });
+}

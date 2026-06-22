@@ -41,6 +41,33 @@ export async function sessionCountsByRound(
   return result;
 }
 
+/**
+ * Per-SUBGROUP started/completed counts within ONE round (one grouped query), keyed by the session's
+ * `cohortSubgroupId` snapshot. Powers per-phase completion stats — an admin can see whether the
+ * leadership phase finished before the next opens. Sessions with no subgroup (the round-window
+ * remainder) carry a null snapshot and are skipped here; they're reflected in the round-level total.
+ */
+export async function sessionCountsBySubgroup(
+  roundId: string
+): Promise<Map<string, RoundSessionCounts>> {
+  const result = new Map<string, RoundSessionCounts>();
+
+  const groups = await prisma.appQuestionnaireSession.groupBy({
+    by: ['cohortSubgroupId', 'status'],
+    where: { roundId, isPreview: false },
+    _count: { _all: true },
+  });
+
+  for (const g of groups) {
+    if (!g.cohortSubgroupId) continue;
+    const entry = result.get(g.cohortSubgroupId) ?? { started: 0, completed: 0 };
+    entry.started += g._count._all;
+    if (g.status === 'completed') entry.completed += g._count._all;
+    result.set(g.cohortSubgroupId, entry);
+  }
+  return result;
+}
+
 /** Project raw counts to the client-facing completion view (rate rounded to 2 dp). */
 export function toCompletionStats(counts: RoundSessionCounts | undefined): RoundCompletionStats {
   const started = counts?.started ?? 0;
