@@ -119,11 +119,17 @@ jobs:
       - run: npm ci
       - run: npm run type-check
 
+  # Runs on EVERY PR, including docs-only ones — because `format:check` is
+  # repo-wide (Prettier formats Markdown too). If this job were gated to code
+  # changes, a docs-only PR could land an unformatted `.md` that the NEXT code
+  # PR's whole-repo `format:check` then fails on — attributed to whoever opened
+  # that unrelated PR. ESLint has no docs to check, so its step stays gated to
+  # code changes for economy; format always runs. (One job, not two, so the
+  # single `npm ci` is shared rather than paid twice per code PR.)
   lint:
     name: Lint & format
     runs-on: ubuntu-latest
     needs: config
-    if: needs.config.outputs.code == 'true'
     env:
       DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/sunrise_ci'
     steps:
@@ -146,7 +152,9 @@ jobs:
             lint-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
             lint-${{ runner.os }}-
       - run: npm ci
-      - run: npm run lint
+      - name: ESLint (code changes only)
+        if: needs.config.outputs.code == 'true'
+        run: npm run lint
       - run: npm run format:check
 
   build:
