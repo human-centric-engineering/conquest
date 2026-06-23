@@ -21,6 +21,7 @@ import { render, screen } from '@testing-library/react';
 import type { VersionGraphView, TagView } from '@/lib/app/questionnaire/views';
 import {
   DEFAULT_RESPONDENT_REPORT_SETTINGS,
+  DEFAULT_COHORT_REPORT_SETTINGS,
   DEFAULT_INTRO_SETTINGS,
   DEFAULT_TONE_SETTINGS,
 } from '@/lib/app/questionnaire/types';
@@ -184,6 +185,7 @@ function makeGraph(over: Partial<VersionGraphView> = {}): VersionGraphView {
       previewInspectorEnabled: false,
       tone: DEFAULT_TONE_SETTINGS,
       respondentReport: DEFAULT_RESPONDENT_REPORT_SETTINGS,
+      cohortReport: DEFAULT_COHORT_REPORT_SETTINGS,
       intro: DEFAULT_INTRO_SETTINGS,
     },
     ...over,

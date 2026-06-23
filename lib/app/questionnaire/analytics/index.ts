@@ -17,7 +17,13 @@ export {
 
 export {
   getQuestionDistributions,
+  assembleQuestionDistributions,
+  DISTRIBUTION_SLOT_SELECT,
   QUESTION_TYPE_LABELS,
+  type SlotForDistribution,
+  type SessionForDistribution,
+  type AnswerForDistribution,
+  type AssembledDistributions,
 } from '@/lib/app/questionnaire/analytics/distributions';
 export { getCompletionFunnel } from '@/lib/app/questionnaire/analytics/funnel';
 export { getQuestionnaireCostBreakdown } from '@/lib/app/questionnaire/analytics/cost';

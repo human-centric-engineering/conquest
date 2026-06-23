@@ -28,6 +28,8 @@ import {
   APP_QUESTIONNAIRES_FLAG,
   APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG,
   APP_QUESTIONNAIRES_RESPONDENT_REPORT_FLAG,
+  APP_QUESTIONNAIRES_COHORTS_FLAG,
+  APP_QUESTIONNAIRES_COHORT_REPORT_FLAG,
   APP_QUESTIONNAIRES_INTRO_SCREEN_FLAG,
 } from '@/lib/app/questionnaire/constants';
 import type { DataSlotView } from '@/lib/app/questionnaire/data-slots';
@@ -216,6 +218,8 @@ export interface QuestionnaireWorkspaceFlags {
   adaptiveDataSlots: boolean;
   /** Respondent Report tab (report kind `respondent`) — per-respondent post-completion summary. */
   respondentReport: boolean;
+  /** Scoring tab (report kind `cohort`) — the deterministic scoring builder (needs cohorts too). */
+  cohortReport: boolean;
   /** Respondent intro / splash screen — the Intro card in the config editor. */
   introScreen: boolean;
 }
@@ -238,6 +242,8 @@ export const resolveQuestionnaireWorkspaceFlags = cache(
       adaptive,
       adaptiveDataSlots,
       respondentReport,
+      cohorts,
+      cohortReport,
       introScreen,
     ] = await Promise.all([
       isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
@@ -247,6 +253,8 @@ export const resolveQuestionnaireWorkspaceFlags = cache(
       isFeatureEnabled(APP_QUESTIONNAIRES_ADAPTIVE_FLAG),
       isFeatureEnabled(APP_QUESTIONNAIRES_ADAPTIVE_DATA_SLOTS_FLAG),
       isFeatureEnabled(APP_QUESTIONNAIRES_RESPONDENT_REPORT_FLAG),
+      isFeatureEnabled(APP_QUESTIONNAIRES_COHORTS_FLAG),
+      isFeatureEnabled(APP_QUESTIONNAIRES_COHORT_REPORT_FLAG),
       isFeatureEnabled(APP_QUESTIONNAIRES_INTRO_SCREEN_FLAG),
     ]);
     return {
@@ -259,6 +267,8 @@ export const resolveQuestionnaireWorkspaceFlags = cache(
       // runs in live data-slot mode); AND them here so the workspace flag matches the runtime gate.
       adaptiveDataSlots: master && dataSlots && liveSessions && adaptiveDataSlots,
       respondentReport: master && respondentReport,
+      // Cohort report (incl. the Scoring tab) is round-scoped, so it also requires the cohorts flag.
+      cohortReport: master && cohorts && cohortReport,
       introScreen: master && introScreen,
     };
   }

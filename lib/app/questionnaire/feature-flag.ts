@@ -25,6 +25,7 @@ import {
   APP_QUESTIONNAIRES_TONE_FLAG,
   APP_QUESTIONNAIRES_RESPONDENT_REPORT_FLAG,
   APP_QUESTIONNAIRES_COHORTS_FLAG,
+  APP_QUESTIONNAIRES_COHORT_REPORT_FLAG,
   APP_QUESTIONNAIRES_INTRO_SCREEN_FLAG,
   APP_QUESTIONNAIRES_ROUND_CONTEXT_FLAG,
   APP_QUESTIONNAIRES_LEARNING_MODE_FLAG,
@@ -58,6 +59,7 @@ export {
   APP_QUESTIONNAIRES_REASONING_STREAM_FLAG,
   APP_QUESTIONNAIRES_RESPONDENT_REPORT_FLAG,
   APP_QUESTIONNAIRES_COHORTS_FLAG,
+  APP_QUESTIONNAIRES_COHORT_REPORT_FLAG,
   APP_QUESTIONNAIRES_INTRO_SCREEN_FLAG,
   APP_QUESTIONNAIRES_ROUND_CONTEXT_FLAG,
   APP_QUESTIONNAIRES_LEARNING_MODE_FLAG,
@@ -886,6 +888,58 @@ export function withRoundPhasesEnabled<C>(
 ): (request: NextRequest, context: C) => Promise<Response> {
   return async (request, context) => {
     const blocked = await ensureRoundPhasesEnabled();
+    if (blocked) return blocked;
+    return handler(request, context);
+  };
+}
+
+/**
+ * Whether the **Cohort Report** (report kind `cohort`) may run. Requires the master app flag, the
+ * **cohorts** flag (a cohort report is round-scoped — it analyses one round's submissions), AND the
+ * cohort-report sub-flag. Like round-context/learning it's a cohorts-style child, not live-dependent:
+ * the admin generates the report after a round has run, never inside a respondent turn. The
+ * per-version `config.cohortReport.enabled` toggle is the further gate the admin surface ANDs. When
+ * this returns `false`, the round cohort-report routes/tab 404/hide and no report is ever generated.
+ *
+ * Server-only (resolves the flags from the database).
+ */
+export async function isCohortReportEnabled(): Promise<boolean> {
+  const [app, cohorts, report] = await Promise.all([
+    isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_COHORTS_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_COHORT_REPORT_FLAG),
+  ]);
+  return app && cohorts && report;
+}
+
+/**
+ * Flag gate for the cohort-report routes — 404 when any of the master / cohorts / cohort-report
+ * flags is off, `null` when all are on. The {@link ensureCohortsEnabled} analogue for the
+ * cohort-report surface; call it first, before any auth or handler work.
+ *
+ * Server-only (resolves the flags from the database).
+ */
+export async function ensureCohortReportEnabled(): Promise<Response | null> {
+  if (await isCohortReportEnabled()) {
+    return null;
+  }
+  return errorResponse('Not found', { code: 'NOT_FOUND', status: 404 });
+}
+
+/**
+ * Wrap a cohort-report route handler so the cohort-report gate runs **before** anything else (auth,
+ * handler work) — the order a disabled sub-feature needs to look like a missing route rather than a
+ * 401. The {@link withCohortsEnabled} analogue for the cohort-report surface.
+ *
+ * ```ts
+ * export const GET = withCohortReportEnabled(handleCohortReportDataset);
+ * ```
+ */
+export function withCohortReportEnabled<C>(
+  handler: (request: NextRequest, context: C) => Promise<Response>
+): (request: NextRequest, context: C) => Promise<Response> {
+  return async (request, context) => {
+    const blocked = await ensureCohortReportEnabled();
     if (blocked) return blocked;
     return handler(request, context);
   };

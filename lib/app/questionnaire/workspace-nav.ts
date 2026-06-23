@@ -41,6 +41,7 @@ export const QUESTIONNAIRE_WORKSPACE_TABS: readonly WorkspaceTab[] = [
     segment: 'respondent-report',
     flag: 'respondentReport',
   },
+  { id: 'scoring', label: 'Scoring', segment: 'scoring', flag: 'cohortReport' },
   { id: 'analytics', label: 'Analytics', segment: 'analytics' },
   { id: 'evaluations', label: 'Evaluations', segment: 'evaluations', flag: 'designEval' },
   { id: 'extraction-changes', label: 'Extraction log', segment: 'extraction-changes' },

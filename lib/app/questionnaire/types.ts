@@ -514,6 +514,116 @@ export const DEFAULT_RESPONDENT_REPORT_SETTINGS: RespondentReportSettings = {
   delivery: { onScreen: true, download: true },
 };
 
+/* ── Report kinds ─────────────────────────────────────────────────────────── */
+
+/**
+ * The two questionnaire report kinds, discriminated from day one even though they ship separately.
+ * `respondent` = the per-respondent summary delivered after one session (P10, shipped); `cohort` =
+ * the cross-respondent analysis/charting/narrative an admin generates over a whole round's
+ * submissions (P14). Scope (one session vs many) is the axis where confusion happens, so the words
+ * carry it. Namespaces config rows, routes (`…/cohort-report`), and feature flags by kind.
+ */
+export const REPORT_KINDS = ['respondent', 'cohort'] as const;
+export type ReportKind = (typeof REPORT_KINDS)[number];
+
+/* ── Cohort Report (report kind `cohort`) ─────────────────────────────────── */
+
+/** Lifecycle of a generated cohort report (the async generation pipeline). Mirrors respondent report. */
+export const COHORT_REPORT_STATUSES = ['queued', 'processing', 'ready', 'failed'] as const;
+export type CohortReportStatus = (typeof COHORT_REPORT_STATUSES)[number];
+
+/** Whether a cohort report is a working draft or has been published (download/share). */
+export const COHORT_REPORT_PUBLISH_STATUSES = ['draft', 'published'] as const;
+export type CohortReportPublishStatus = (typeof COHORT_REPORT_PUBLISH_STATUSES)[number];
+
+/** Origin of a cohort-report revision: full AI generation, manual admin edit, or AI-assisted edit. */
+export const COHORT_REPORT_AUTHORS = ['ai', 'admin', 'ai_assist'] as const;
+export type CohortReportAuthor = (typeof COHORT_REPORT_AUTHORS)[number];
+
+/** How a deterministic scoring schema was authored: the visual builder, or extracted from a document. */
+export const SCORING_SCHEMA_SOURCES = ['manual', 'upload'] as const;
+export type ScoringSchemaSource = (typeof SCORING_SCHEMA_SOURCES)[number];
+
+/** How a scale combines its items: sum the (weighted) item values, or average them. */
+export const SCORING_METHODS = ['sum', 'mean'] as const;
+export type ScoringMethod = (typeof SCORING_METHODS)[number];
+
+/** Whether a scoring item reads a question slot's answer or a data slot's fill. */
+export const SCORING_ITEM_SOURCES = ['question', 'dataSlot'] as const;
+export type ScoringItemSource = (typeof SCORING_ITEM_SOURCES)[number];
+
+/** Overall report length the narrative agent targets. */
+export const COHORT_REPORT_LENGTHS = ['brief', 'standard', 'detailed'] as const;
+export type CohortReportLength = (typeof COHORT_REPORT_LENGTHS)[number];
+
+/** How deep the per-finding analysis goes (orthogonal to overall length). */
+export const COHORT_REPORT_DETAIL_LEVELS = ['overview', 'standard', 'deep'] as const;
+export type CohortReportDetailLevel = (typeof COHORT_REPORT_DETAIL_LEVELS)[number];
+
+/**
+ * Report formality. `business` opens with an executive summary and a structured spine; `informal`
+ * is looser and more conversational. Drives the narrative agent's outline + voice.
+ */
+export const COHORT_REPORT_FORMALITIES = ['business', 'informal'] as const;
+export type CohortReportFormality = (typeof COHORT_REPORT_FORMALITIES)[number];
+
+/** Max length of the admin's free-text generation instruction / structure-template fields (Zod bound). */
+export const COHORT_REPORT_INSTRUCTIONS_MAX_LENGTH = 4000;
+/** Max length of the flat background-context blob fed to the cohort-report agents (Zod bound). */
+export const COHORT_REPORT_BACKGROUND_MAX_LENGTH = 8000;
+
+/**
+ * The resolved cohort-report config block (per version). `enabled` master-gates the feature for this
+ * version; `generation` carries the AI knobs both the thematic-analysis and narrative agents consult.
+ * `structure` is the admin-authored outline the agent fills (empty = auto-structure). The `use*`
+ * toggles decide what context the agents may draw on. Also gated by the platform flag
+ * `APP_QUESTIONNAIRES_COHORT_REPORT_ENABLED` and (because cohort reports are round-scoped) by
+ * `APP_QUESTIONNAIRES_COHORTS_ENABLED`. Narrowed by `narrowCohortReportSettings`
+ * (lib/app/questionnaire/cohort-report/settings.ts).
+ */
+export type CohortReportSettings = {
+  enabled: boolean;
+  generation: {
+    /** Overall length the agent targets. */
+    length: CohortReportLength;
+    /** How deep the per-finding analysis goes. */
+    detailLevel: CohortReportDetailLevel;
+    /** Business (exec summary + structured) vs informal (looser). */
+    formality: CohortReportFormality;
+    /** Free-text style/voice instructions for the narrative agent. */
+    instructions: string;
+    /** Free-text desired structure/outline (the report "template"); empty = auto-structure. */
+    structure: string;
+    /** Flat background-context blob the agents always see. */
+    backgroundContext: string;
+    /** Ground analysis in the attributed client's knowledge base when available. */
+    useClientKnowledge: boolean;
+    /** Feed the round's Additional Context ("interviewer briefing") to the agents. */
+    useRoundContext: boolean;
+    /** Feed the cohort's intro/background to the agents. */
+    useCohortContext: boolean;
+    /** Include deterministic scoring results (when a scoring schema is configured). */
+    scoringEnabled: boolean;
+  };
+};
+
+/** Feature off, sensible business defaults — no cohort report unless enabled. */
+export const DEFAULT_COHORT_REPORT_SETTINGS: CohortReportSettings = {
+  enabled: false,
+  generation: {
+    length: 'standard',
+    detailLevel: 'standard',
+    formality: 'business',
+    instructions: '',
+    structure: '',
+    backgroundContext: '',
+    useClientKnowledge: false,
+    useRoundContext: true,
+    useCohortContext: true,
+    scoringEnabled: false,
+  },
+};
+
 /** Max length of the respondent-facing intro background blob (Zod bound; cohort override shares it). */
 export const INTRO_BACKGROUND_MAX_LENGTH = 8000;
 /** Max length of the admin-authored proceed-button label on the intro screen (Zod bound). */
@@ -670,6 +780,13 @@ export type QuestionnaireConfigShape = {
    */
   respondentReport: RespondentReportSettings;
   /**
+   * Cohort Report — the cross-respondent analysis/charting/narrative generated over a round's
+   * submissions. See {@link CohortReportSettings}. Off by default; only takes effect when the
+   * platform flags `APP_QUESTIONNAIRES_COHORT_REPORT_ENABLED` + `APP_QUESTIONNAIRES_COHORTS_ENABLED`
+   * are on.
+   */
+  cohortReport: CohortReportSettings;
+  /**
    * Respondent intro / splash screen shown before the questionnaire starts. See
    * {@link IntroSettings}. Off by default; only takes effect when the platform flag
    * `APP_QUESTIONNAIRES_INTRO_SCREEN_ENABLED` is on.
@@ -736,5 +853,6 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   previewInspectorEnabled: false,
   tone: DEFAULT_TONE_SETTINGS,
   respondentReport: DEFAULT_RESPONDENT_REPORT_SETTINGS,
+  cohortReport: DEFAULT_COHORT_REPORT_SETTINGS,
   intro: DEFAULT_INTRO_SETTINGS,
 };

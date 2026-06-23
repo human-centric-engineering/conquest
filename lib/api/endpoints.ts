@@ -379,6 +379,12 @@ export const API = {
       /** Version run-time configuration (PATCH partial config — F3.1). */
       versionConfig: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/config`,
+      /** Deterministic scoring schema (GET read + builder picker · PUT save — F14.4). */
+      scoringSchema: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/scoring-schema`,
+      /** Extract a scoring schema proposal from an uploaded document (POST multipart — F14.4). */
+      scoringSchemaExtract: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/scoring-schema/extract`,
       /** Respondent Report: one config-crafting assistant turn (POST — Generation-tab chat). */
       reportCraft: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/report/craft`,
@@ -632,6 +638,27 @@ export const API = {
         `/api/v1/app/rounds/${id}/phases/${phaseId}/send-invites`,
       /** Maintenance: dispatch invites for every phase whose window has opened (POST → cron hook). */
       dispatchPhaseInvites: (): string => `/api/v1/app/rounds/maintenance/dispatch-phase-invites`,
+      /** Cohort Report read view (GET `?versionId=` → CohortReportView). */
+      cohortReport: (id: string): string => `/api/v1/app/rounds/${id}/cohort-report`,
+      /** Cohort Report analytical dataset (GET `?versionId=` → CohortDataset). */
+      cohortReportDataset: (id: string): string => `/api/v1/app/rounds/${id}/cohort-report/dataset`,
+      /** Generate the cohort report (POST `{ versionId }` → refreshed CohortReportView). */
+      cohortReportGenerate: (id: string): string =>
+        `/api/v1/app/rounds/${id}/cohort-report/generate`,
+      /** Per-section AI-assist (POST `{ heading, body, instruction }` → revised section). */
+      cohortReportRefine: (id: string): string => `/api/v1/app/rounds/${id}/cohort-report/refine`,
+      /** Revision history (GET) + restore (POST `{ versionId, revisionNumber }`). */
+      cohortReportRevisions: (id: string): string =>
+        `/api/v1/app/rounds/${id}/cohort-report/revisions`,
+      /** Publish (POST `{ versionId, revisionNumber? }`) / unpublish (DELETE `{ versionId }`). */
+      cohortReportPublish: (id: string): string => `/api/v1/app/rounds/${id}/cohort-report/publish`,
+      /** Themed PDF (GET `?versionId=&revision=head|published|<n>`). */
+      cohortReportPdf: (id: string): string => `/api/v1/app/rounds/${id}/cohort-report/export.pdf`,
+    },
+    /** Cohort reports (cross-round). */
+    COHORT_REPORTS: {
+      /** Search published cohort reports (GET `?q=&demoClientId=`). */
+      search: '/api/v1/app/cohort-reports/search',
     },
   },
 } as const;

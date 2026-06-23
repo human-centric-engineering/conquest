@@ -68,6 +68,7 @@ model AppQuestionnaireVersion {
   evaluationRuns  AppQuestionnaireEvaluationRun[]
   dataSlots       AppDataSlot[]
   dataSlotDraft   AppDataSlotDraft?
+  scoringSchema   AppScoringSchema?
 
   @@unique([questionnaireId, versionNumber])
   @@index([questionnaireId])
@@ -250,6 +251,14 @@ model AppQuestionnaireConfig {
   // APP_QUESTIONNAIRES_RESPONDENT_REPORT_ENABLED is on. Narrowed by narrowRespondentReportSettings
   // (lib/.../report/settings.ts). (types.ts)
   respondentReport Json @default("{}")
+
+  // Cohort Report (report kind `cohort`): CohortReportSettings — the cross-respondent
+  // analysis/charting/narrative generated over a round's submissions (length, detail, formality,
+  // structure template, AI knobs, context toggles, scoring toggle). Off by default; only takes
+  // effect when the platform flags APP_QUESTIONNAIRES_COHORT_REPORT_ENABLED +
+  // APP_QUESTIONNAIRES_COHORTS_ENABLED are on. Narrowed by narrowCohortReportSettings
+  // (lib/.../cohort-report/settings.ts). (types.ts)
+  cohortReport Json @default("{}")
 
   // Respondent intro / splash screen (IntroSettings — types.ts): an admin opt-in screen shown before
   // the questionnaire starts (enabled toggle, admin-authored "about this questionnaire" background
@@ -628,6 +637,7 @@ model AppQuestionnaireRound {
   contextEntries AppRoundContextEntry[]
   learningDigest AppRoundLearningDigest[]
   phases         AppRoundPhase[]
+  cohortReport   AppCohortReport?
 
   @@index([cohortId])
   @@index([status])
@@ -824,6 +834,7 @@ model AppQuestionnaireSession {
   turnEvaluations  AppQuestionnaireTurnEvaluation[]
   profileSnapshot  AppRespondentProfileSnapshot?
   respondentReport AppRespondentReport?
+  scores           AppRespondentScore[]
 
   @@index([versionId])
   @@index([versionId, isPreview])
@@ -904,6 +915,109 @@ model AppRespondentReport {
 
   @@index([status, lockedAt])
   @@map("app_respondent_report")
+}
+
+/// The generated Cohort Report (report kind `cohort`) for one round — the cross-respondent
+/// analysis/charting/narrative an admin generates over the round's submissions. 1:1 with a round
+/// (`roundId @unique`). Pinned to the version the round delivered (`versionId`) so a later version
+/// fork never re-scopes a generated report. The report BODY (ordered section blocks) lives in
+/// `AppCohortReportRevision` rows (F14.3) so every generate / manual edit / AI-assist is
+/// version-controlled and a published revision can be pinned; this header row carries generation
+/// status + the lease (mirrors AppRespondentReport / the evaluations batch worker) and the
+/// draft/published lifecycle.
+///
+/// Round-internal config: `onDelete: Cascade` from the round. `createdBy` is a plain String admin
+/// `User.id` (UG-1, no FK) — config/audit attribution, not personal data that must cascade.
+model AppCohortReport {
+  id            String    @id @default(cuid())
+  roundId       String    @unique
+  versionId     String // the version the round delivered, pinned at creation; plain String (UG-1)
+  title         String
+  status        String    @default("queued") // COHORT_REPORT_STATUSES (types.ts): queued | processing | ready | failed
+  publishStatus String    @default("draft") // COHORT_REPORT_PUBLISH_STATUSES: draft | published
+  publishedRevisionNumber Int? // the AppCohortReportRevision.revisionNumber pinned as published; null when draft
+  costUsd       Float? // cumulative generation cost actual; null until first generation
+  error         String? // failure message when status = failed
+  lockedBy      String? // worker host holding the lease; null when idle
+  lockedAt      DateTime? // lease acquired-at; stale after the worker threshold (claimable again)
+  generatedAt   DateTime? // when content was last (re)generated (status → ready)
+  createdBy     String? // admin User.id who created/triggered it; plain String, no FK (UG-1)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  round     AppQuestionnaireRound     @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  revisions AppCohortReportRevision[]
+
+  @@index([status, lockedAt])
+  @@map("app_cohort_report")
+}
+
+/// One version-controlled iteration of a Cohort Report's body. Every generation, manual edit, and
+/// AI-assisted edit appends a revision (never mutates an existing one), so the full authoring history
+/// is preserved and any revision can be restored (F14.6) or published. The working head is the
+/// highest `revisionNumber`; `content` is the ordered section blocks + charts + recommendations +
+/// actions (CohortReportContent in lib/.../cohort-report/content.ts). `authoredBy` records the
+/// origin (ai | admin | ai_assist). Cascade from the report; `createdBy` is a plain String (UG-1).
+model AppCohortReportRevision {
+  id             String   @id @default(cuid())
+  reportId       String
+  revisionNumber Int // 1-based; monotonic per report. Working head = MAX(revisionNumber).
+  content        Json // CohortReportContent (summary, sections, charts, recommendations, actions)
+  authoredBy     String   @default("ai") // COHORT_REPORT_AUTHORS (types.ts): ai | admin | ai_assist
+  summary        String? // short generation/change note shown in the revision history
+  costUsd        Float? // generation cost for an AI revision; null for a manual edit
+  createdBy      String? // admin User.id who created it; plain String, no FK (UG-1)
+  createdAt      DateTime @default(now())
+
+  report AppCohortReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@unique([reportId, revisionNumber])
+  @@index([reportId])
+  @@map("app_cohort_report_revision")
+}
+
+/// A deterministic "hard rules" scoring schema for a version (report kind `cohort`, F14.4) — e.g.
+/// Big-Five-style scale scoring. 1:1 with a version (`versionId @unique`); forks with the version on
+/// launch (like config). `content` is the structured ScoringSchemaContent (scales, item→scale
+/// mappings with weight + reverse flag, band cutoffs, combine method) in lib/.../scoring/types.ts.
+/// `source` records whether it was authored in the visual builder or extracted from an uploaded
+/// document. Pure app config (no personal data): `createdBy` is a plain String (UG-1, no FK).
+model AppScoringSchema {
+  id        String   @id @default(cuid())
+  versionId String   @unique
+  name      String   @default("Scoring")
+  content   Json     @default("{}") // ScoringSchemaContent (scales / items / bands / method)
+  source    String   @default("manual") // SCORING_SCHEMA_SOURCES (types.ts): manual | upload
+  createdBy String? // admin User.id; plain String, no FK (UG-1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  version AppQuestionnaireVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@map("app_scoring_schema")
+}
+
+/// The deterministic scoring RESULT for one session against a scoring schema (F14.4) — per-scale
+/// raw/normalised score + band. Recomputed when answers or the schema change. `scores` is a
+/// { [scaleKey]: { raw, normalised, band } } map (RespondentScores in lib/.../scoring/types.ts).
+///
+/// Respondent-derived: `onDelete: Cascade` from the session so session deletion + GDPR erasure remove
+/// it natively. `@@unique([sessionId, schemaId])`: one result per session per schema (recompute
+/// upserts). `schemaId` is a plain String pointer (the schema may be re-authored; results are
+/// recomputed, not FK-cascaded from the schema).
+model AppRespondentScore {
+  id        String   @id @default(cuid())
+  sessionId String
+  schemaId  String // AppScoringSchema.id the scores were computed against; plain String (UG-1 posture)
+  scores    Json     @default("{}") // { [scaleKey]: { raw, normalised, band } }
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  session AppQuestionnaireSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, schemaId])
+  @@index([sessionId])
+  @@map("app_respondent_score")
 }
 
 /// One captured answer for a question slot within a session. F4.2 produces the

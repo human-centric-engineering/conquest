@@ -61,6 +61,7 @@ import {
 } from '@/lib/app/questionnaire/constants';
 import {
   DEFAULT_RESPONDENT_REPORT_SETTINGS,
+  DEFAULT_COHORT_REPORT_SETTINGS,
   DEFAULT_INTRO_SETTINGS,
   DEFAULT_TONE_SETTINGS,
 } from '@/lib/app/questionnaire/types';
@@ -126,6 +127,7 @@ function state(over: Partial<TurnState> = {}): TurnState {
       previewInspectorEnabled: false,
       tone: DEFAULT_TONE_SETTINGS,
       respondentReport: DEFAULT_RESPONDENT_REPORT_SETTINGS,
+      cohortReport: DEFAULT_COHORT_REPORT_SETTINGS,
       intro: DEFAULT_INTRO_SETTINGS,
     },
     questions: [

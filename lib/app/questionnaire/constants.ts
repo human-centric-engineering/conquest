@@ -862,6 +862,20 @@ export const APP_QUESTIONNAIRES_RESPONDENT_REPORT_FLAG =
 export const APP_QUESTIONNAIRES_COHORTS_FLAG = 'APP_QUESTIONNAIRES_COHORTS_ENABLED';
 
 /**
+ * Platform feature flag gating the **Cohort Report** (report kind `cohort`) — the cross-respondent
+ * analysis/charting/narrative report an admin generates over one round's submissions, segmented by
+ * the questionnaire's own demographics. The sibling of the per-respondent Respondent Report
+ * (`APP_QUESTIONNAIRES_RESPONDENT_REPORT_ENABLED`); see {@link APP_QUESTIONNAIRES_RESPONDENT_REPORT_FLAG}
+ * and the `ReportKind` enum. A cohort report is round-scoped, so it requires Cohorts & Rounds:
+ * APP_QUESTIONNAIRES_ENABLED AND APP_QUESTIONNAIRES_COHORTS_ENABLED AND this flag. DB-backed, seeded
+ * disabled by `054-cohort-report-flag.ts`. When off, the round cohort-report tab/routes 404/hide.
+ */
+export const APP_QUESTIONNAIRES_COHORT_REPORT_FLAG = 'APP_QUESTIONNAIRES_COHORT_REPORT_ENABLED';
+
+/** Slug of the seeded Cohort Report agent (report kind `cohort`); loaded by the generation pipeline. */
+export const COHORT_REPORT_AGENT_SLUG = 'app-cohort-report';
+
+/**
  * Platform feature flag gating the **respondent intro / splash screen** — an admin opt-in screen
  * shown before the questionnaire starts that explains how it works (adapts to the presentation mode),
  * what the respondent will receive at the end (adapts to the respondent-report settings), and an

@@ -57,6 +57,7 @@ const allFlagsOn: QuestionnaireWorkspaceFlags = {
   adaptive: true,
   adaptiveDataSlots: true,
   respondentReport: true,
+  cohortReport: true,
   introScreen: true,
 };
 
@@ -69,6 +70,7 @@ const flagsAllOff: QuestionnaireWorkspaceFlags = {
   adaptive: false,
   adaptiveDataSlots: false,
   respondentReport: false,
+  cohortReport: false,
   introScreen: false,
 };
 
