@@ -47,32 +47,62 @@ describe('InvitationsTable', () => {
     expect(screen.getAllByText('1')).toHaveLength(2); // started + completed
   });
 
-  it('copy-link POSTs the link route, copies the URL, and flips to "Copied"', async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, 'clipboard', {
-      value: { writeText },
-      configurable: true,
-    });
+  it('"Get link" POSTs the link route and reveals the URL in a dialog (not silently copied)', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ success: true, data: { url: 'https://app/q/v1?i=tok' } }),
+      json: async () => ({
+        success: true,
+        data: { url: 'https://app/q/v1?i=tok', expiresAt: new Date().toISOString() },
+      }),
     });
     vi.stubGlobal('fetch', fetchMock);
 
     render(<InvitationsTable questionnaireId="qn-1" invitations={[inv({ status: 'sent' })]} />);
 
-    fireEvent.click(screen.getByRole('button', { name: /copy link/i }));
+    fireEvent.click(screen.getByRole('button', { name: /get link/i }));
 
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith('https://app/q/v1?i=tok'));
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/v1/app/questionnaires/qn-1/invitations/inv-1/link',
-      expect.objectContaining({ method: 'POST' })
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/v1/app/questionnaires/qn-1/invitations/inv-1/link',
+        expect.objectContaining({ method: 'POST' })
+      )
     );
-    await screen.findByText('Copied');
+    // The URL is shown to the admin, not just written to the clipboard.
+    expect(await screen.findByDisplayValue('https://app/q/v1?i=tok')).toBeInTheDocument();
+    // The rotation warning is surfaced so the admin understands the side effect.
+    expect(screen.getByText(/invalidated any previous link/i)).toBeInTheDocument();
   });
 
-  it('hides copy-link for a revoked invitation', () => {
+  it('surfaces the server error message when link generation is rejected', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      json: async () => ({
+        success: false,
+        error: { code: 'NOT_ALLOWED', message: 'Not allowed' },
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<InvitationsTable questionnaireId="qn-1" invitations={[inv({ status: 'sent' })]} />);
+    fireEvent.click(screen.getByRole('button', { name: /get link/i }));
+
+    expect(await screen.findByText('Not allowed')).toBeInTheDocument();
+    // No reveal dialog opens on failure.
+    expect(screen.queryByText(/invalidated any previous link/i)).not.toBeInTheDocument();
+  });
+
+  it('surfaces a generic error when the link request throws', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error('network down'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<InvitationsTable questionnaireId="qn-1" invitations={[inv({ status: 'sent' })]} />);
+    fireEvent.click(screen.getByRole('button', { name: /get link/i }));
+
+    expect(await screen.findByText(/could not generate a link/i)).toBeInTheDocument();
+  });
+
+  it('hides "Get link" for a revoked invitation', () => {
     render(<InvitationsTable questionnaireId="qn-1" invitations={[inv({ status: 'revoked' })]} />);
-    expect(screen.queryByRole('button', { name: /copy link/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /get link/i })).not.toBeInTheDocument();
   });
 });

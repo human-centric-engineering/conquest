@@ -12,6 +12,7 @@ import { notFound } from 'next/navigation';
 import { InviteImportWizard } from '@/components/admin/questionnaires/invite-import-wizard';
 import { InvitationsTable } from '@/components/admin/questionnaires/invitations-table';
 import { CostEstimateCard } from '@/components/admin/questionnaires/cost-estimate-card';
+import { PublicRespondentLink } from '@/components/admin/questionnaires/public-respondent-link';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
@@ -78,6 +79,12 @@ export default async function InvitationsTab({ params }: PageProps) {
     isInvitationImportEnabled(),
   ]);
   const inviteeFields = graph?.config.inviteeFields ?? DEFAULT_INVITEE_FIELDS;
+  // The collective no-login link only works when the launched version permits a direct
+  // (no-invitation) start — i.e. access mode is `public` or `both`, not `invitation_only`.
+  const showPublicLink =
+    launchedVersion !== undefined && graph?.config.accessMode !== undefined
+      ? graph.config.accessMode !== 'invitation_only'
+      : false;
 
   return (
     <div className="space-y-4">
@@ -85,6 +92,12 @@ export default async function InvitationsTab({ params }: PageProps) {
         Invite respondents to complete the launched version. Each receives a unique link to register
         and begin — track their progress through to completion here.
       </p>
+
+      {launchedVersion && showPublicLink && (
+        <div className="bg-muted/40 max-w-2xl rounded-md border p-3">
+          <PublicRespondentLink versionId={launchedVersion.id} isLaunched />
+        </div>
+      )}
 
       {launchedVersion && (
         <CostEstimateCard questionnaireId={id} versionId={launchedVersion.id} variant="banner" />

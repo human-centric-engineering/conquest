@@ -147,11 +147,14 @@ app-layer dedup (live invite → `skipped`), mint, create, send. A send failure 
 row at `pending` (resend later) and does **not** fail the request — the response is a
 per-recipient result array (`sent`/`skipped`/`failed`).
 
-The **copy-link** route (`/link`) is the "didn't get the email?" escape hatch: it mints a
+The **get-link** route (`/link`) is the "didn't get the email?" escape hatch: it mints a
 fresh token and returns the no-login frictionless URL (`/q/:versionId?i=<token>`) for the
 admin to share manually. It does NOT email. ⚠️ It **rotates the token**, so any previously
 emailed/copied link stops working (an in-flight session survives — resume keys on
-`invitationId`). Refused (`409`) for revoked/completed invitations.
+`invitationId`). Refused (`409`) for revoked/completed invitations. Because tokens are
+hashed at rest (plaintext only ever in the email), there is no read-only "view the current
+link" — this route mints to return a usable URL. The admin "Get link" action therefore
+**reveals** the freshly-minted URL in a dialog (see Admin UI) rather than rotating silently.
 
 Public, token-gated (F3.2 PR2 — no auth guard, rate-limited):
 
@@ -176,6 +179,20 @@ Dedicated sub-route `app/admin/questionnaires/[id]/invitations/` (mirrors the F2
 extraction-changes sub-route), linked from the detail page. `InviteForm` (paste single
 or bulk emails) plus `InvitationsTable` (status badge, resend, revoke). The respondent
 landing + registration page lives at `/questionnaire-invite?token=` (F3.2 PR2).
+
+**Surfacing the links** (so an admin can see and share the URL a respondent uses):
+
+- **Per-invitee link** — the table's **Get link** button calls `/link` and **reveals** the
+  returned `/q/:versionId?i=<token>` URL in a dialog (read-only field + copy button + expiry),
+  with a warning that it replaced any previous link. It does not copy silently. Reveal-on-generate,
+  not view-without-rotation, because the plaintext token isn't stored (see Token security).
+- **Collective public link** — the tokenless `/q/:versionId` URL is shown via
+  `PublicRespondentLink` → `CopyLinkField` in two places: the Invitations tab header and the
+  Settings tab (under the access-mode selector). Gated on the version's `accessMode` being
+  `public`/`both` (the gate `createAnonymousSession` enforces) — hidden for `invitation_only`.
+  The absolute URL is built client-side from `window.location.origin` + the client-safe
+  `respondentPublicPath()` (`lib/app/questionnaire/respondent-url.ts`); the server-only builders
+  in `_lib/send.ts` share the same path.
 
 ## Data erasure (first app→User references)
 

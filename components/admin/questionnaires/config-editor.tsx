@@ -38,6 +38,7 @@ import type { LucideIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { SaveButton } from '@/components/admin/questionnaires/save-button';
 import { Input } from '@/components/ui/input';
+import { PublicRespondentLink } from '@/components/admin/questionnaires/public-respondent-link';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
@@ -378,6 +379,7 @@ export function ConfigEditor({
   questionCount,
   adaptiveEnabled = true,
   introScreenEnabled = false,
+  isVersionLaunched = false,
   run,
   busy,
 }: {
@@ -397,6 +399,12 @@ export function ConfigEditor({
    * hidden (the per-version toggle would be inert). Defaults to `false` for non-questionnaire mounts.
    */
   introScreenEnabled?: boolean;
+  /**
+   * Whether the version being edited is launched. Drives only the public-link helper note
+   * (a draft version's `/q/<versionId>` link won't boot a session until launch). Defaults to
+   * `false` for non-questionnaire mounts.
+   */
+  isVersionLaunched?: boolean;
   run: RunMutation;
   busy: boolean;
 }) {
@@ -1154,6 +1162,14 @@ export function ConfigEditor({
               ))}
             </SelectContent>
           </Select>
+          {/* The collective no-login link — only meaningful when a direct (no-invitation)
+              start is allowed. Follows the live selection so it appears/disappears as you change
+              the mode. Per-invitee links live on the Invitations tab. */}
+          {accessMode !== 'invitation_only' && (
+            <div className="pt-1">
+              <PublicRespondentLink versionId={versionId} isLaunched={isVersionLaunched} />
+            </div>
+          )}
         </div>
 
         <div className="space-y-2">
