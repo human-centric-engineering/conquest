@@ -265,7 +265,7 @@ _Status:_ **raised-upstream** ([sunrise#305](https://github.com/human-centric-en
 
 **Gap.** "Sunrise" is hardcoded across user-facing surfaces — root + route-group layout
 titles, `emails/*` templates, marketing copy (~45 refs). The only no-code seam is
-`EMAIL_FROM_NAME` (email *sender* display name); there is no `APP_NAME` equivalent for
+`EMAIL_FROM_NAME` (email _sender_ display name); there is no `APP_NAME` equivalent for
 the UI.
 
 **Why upstream.** Renaming is the most universal fork need, and the strings live in
