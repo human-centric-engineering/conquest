@@ -357,3 +357,37 @@ live fill deferred until the seam exists. Gate behind the existing
 **References.** [sunrise#308](https://github.com/human-centric-engineering/sunrise/issues/308) ·
 `lib/orchestration/llm/types.ts` · `lib/hooks/use-voice-recording.ts` ·
 `components/admin/orchestration/chat/mic-button.tsx`.
+
+---
+
+### UG-11 — `Lint & format` CI job skips docs-only PRs (repo-wide format check never runs)
+
+_Status:_ **raised-upstream** ([sunrise#314](https://github.com/human-centric-engineering/sunrise/issues/314)) · _Opened:_ 2026-06-23 · _Surfaced by:_ the UG-3…UG-10 ledger PR — a docs-only change landed an unformatted `.md`, which then failed a later, unrelated code PR
+
+**Gap.** The shared `.github/workflows/ci.yml` `lint` job (`Lint & format`) is gated
+`if: needs.config.outputs.code == 'true'`, so it is skipped entirely on docs-only PRs.
+But `npm run format:check` is **repo-wide** (`prettier --check … .`, Markdown included).
+So an unformatted `.md` can land on `main` via a docs-only PR — unchecked — then fail
+the **next** code PR's whole-repo `format:check`, misattributed to that unrelated PR.
+
+**Why upstream.** The gap is in the shared `ci.yml`, so it hits Sunrise and **every
+fork**. The fix is a platform-owned CI file — patching only downstream would diverge a
+file upstream actively maintains.
+
+**Proposed fix.** Remove the **job-level** `if` so `lint` runs on every PR; gate the
+**ESLint step** instead (`if: code == 'true'`) — ESLint has no docs to check, so docs
+PRs don't pay for it. Keep it **one job** so the single `npm ci` is shared (splitting
+off a separate always-on format job would double `npm ci` on every code PR — poor for a
+minute-capped fork). Note the exception in `.context/architecture/ci.md`.
+
+**Interim mitigation.** **Already applied locally** — PR #102 (the CI fix) + PR #101
+(the file that first tripped it). Unlike UG-3…UG-10, this is a **live carried patch**:
+ConQuest's `ci.yml` / `.context/architecture/ci.md` now diverge from upstream. Tracked
+as `pending-upstream` in [[development-plan#Carried Sunrise patches]]. The identical fix
+was recommended on
+[sunrise#314](https://github.com/human-centric-engineering/sunrise/issues/314) so the
+divergence retires **conflict-free** when a Sunrise release includes it and we sync.
+
+**References.**
+[sunrise#314](https://github.com/human-centric-engineering/sunrise/issues/314) ·
+`.github/workflows/ci.yml` · `.context/architecture/ci.md` · ConQuest PR #102 / #101.
