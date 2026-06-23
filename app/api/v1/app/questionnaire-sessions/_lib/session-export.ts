@@ -39,6 +39,7 @@ import {
 } from '@/lib/app/questionnaire/profile/profile-values';
 import type { SessionExportModel } from '@/lib/app/questionnaire/export/types';
 import type { RespondentReportContent } from '@/lib/app/questionnaire/report/content';
+import { fetchLogoDataUri } from '@/app/api/v1/app/questionnaire-sessions/_lib/fetch-logo-data-uri';
 
 /** Raw demo-client theme columns (or null when the questionnaire is unattributed). */
 interface RawTheme {
@@ -214,36 +215,6 @@ export async function loadSessionExport(sessionId: string): Promise<LoadedSessio
     sections,
     answers,
   };
-}
-
-/** How long to wait for the brand logo before rendering without it. */
-const LOGO_FETCH_TIMEOUT_MS = 3000;
-/** Cap the logo we embed (a runaway image shouldn't bloat the PDF / memory). */
-const LOGO_MAX_BYTES = 1_000_000;
-
-/**
- * Best-effort fetch of a brand logo as a base64 `data:` URI. Returns null on any failure
- * (absent URL, non-image, oversize, timeout, network error) so the document renders with
- * no logo rather than throwing mid-render. Only https URLs are fetched (the theme write
- * boundary already validates this; re-checked here as defence in depth).
- */
-async function fetchLogoDataUri(url: string | null): Promise<string | null> {
-  if (!url || !url.startsWith('https://')) return null;
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), LOGO_FETCH_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, { signal: controller.signal });
-    if (!res.ok) return null;
-    const contentType = res.headers.get('content-type') ?? '';
-    if (!contentType.startsWith('image/')) return null;
-    const buffer = Buffer.from(await res.arrayBuffer());
-    if (buffer.byteLength === 0 || buffer.byteLength > LOGO_MAX_BYTES) return null;
-    return `data:${contentType};base64,${buffer.toString('base64')}`;
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timeout);
-  }
 }
 
 /**

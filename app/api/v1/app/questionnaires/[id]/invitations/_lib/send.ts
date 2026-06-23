@@ -11,6 +11,10 @@ import { env } from '@/lib/env';
 import { sendEmail, type SendEmailResult } from '@/lib/email/send';
 import QuestionnaireInvitationEmail from '@/emails/questionnaire-invitation';
 import { INVITATION_BLOCKER_STATUSES } from '@/lib/app/questionnaire/invitations';
+import {
+  FRICTIONLESS_INVITE_PARAM,
+  respondentPublicPath,
+} from '@/lib/app/questionnaire/respondent-url';
 import { resolveTheme, type ResolvedTheme } from '@/lib/app/questionnaire/theming';
 
 /**
@@ -32,7 +36,7 @@ export function buildInvitationUrl(token: string): string {
  */
 export function buildFrictionlessInviteUrl(versionId: string, token: string): string {
   const base = env.NEXT_PUBLIC_APP_URL || process.env.BETTER_AUTH_URL || 'http://localhost:3000';
-  return `${base}/q/${versionId}?i=${token}`;
+  return `${base}${respondentPublicPath(versionId)}?${FRICTIONLESS_INVITE_PARAM}=${token}`;
 }
 
 export interface LaunchedVersionTarget {

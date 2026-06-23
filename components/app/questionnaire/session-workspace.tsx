@@ -34,6 +34,7 @@ import { ModeToggle } from '@/components/app/questionnaire/mode-toggle';
 import { SessionLifecycleBar } from '@/components/app/questionnaire/lifecycle/session-lifecycle-bar';
 import { CompletionOffer } from '@/components/app/questionnaire/lifecycle/completion-offer';
 import { SessionComplete } from '@/components/app/questionnaire/lifecycle/session-complete';
+import { TranscriptDownload } from '@/components/app/questionnaire/lifecycle/transcript-download';
 import type {
   QuestionnaireChatStatus,
   QuestionnaireTurn,
@@ -89,6 +90,14 @@ export interface SessionWorkspaceProps {
   reasoningDwellMs?: number;
   /** "Animated" placement: extra dwell (ms) per reasoning step beyond two. */
   reasoningPerItemMs?: number;
+  /**
+   * Read-only replay (admin session viewer): render just the transcript — no composer, lifecycle
+   * bar, answer panel, form, or completion screen — and make the panel/lifecycle hooks inert (no
+   * fetches), since the viewing admin holds no respondent credential. The respondent surface never
+   * sets this. For a continuable preview session the viewer omits this and passes a minted
+   * `accessToken` instead, getting the full interactive workspace.
+   */
+  readOnly?: boolean;
 }
 
 export function SessionWorkspace({
@@ -107,6 +116,7 @@ export function SessionWorkspace({
   reasoningPlacement,
   reasoningDwellMs,
   reasoningPerItemMs,
+  readOnly = false,
 }: SessionWorkspaceProps) {
   const showChat = presentationMode === 'chat' || presentationMode === 'both';
   const showForm = presentationMode === 'form' || presentationMode === 'both';
@@ -125,7 +135,12 @@ export function SessionWorkspace({
     lifecycleRefetchRef.current?.();
   }, []);
 
-  const panel = useAnswerPanel({ sessionId, accessToken, initialView: initialPanel });
+  const panel = useAnswerPanel({
+    sessionId,
+    accessToken,
+    initialView: initialPanel,
+    enabled: !readOnly,
+  });
 
   const stream = useQuestionnaireSessionStream({
     sessionId,
@@ -141,6 +156,7 @@ export function SessionWorkspace({
     accessToken,
     initialView: initialStatusView,
     applyStatus: stream.applyStatus,
+    enabled: !readOnly,
   });
 
   // Raw form surface (P-presentation). Inert in chat-only mode (`enabled: false` → no fetch).
@@ -152,7 +168,7 @@ export function SessionWorkspace({
     sessionId,
     accessToken,
     initialView: initialFormView,
-    enabled: showForm,
+    enabled: showForm && !readOnly,
     onSaved: onFormSaved,
   });
 
@@ -199,6 +215,25 @@ export function SessionWorkspace({
     setActiveView('chat');
     panel.refetch();
   }, [panel]);
+
+  // Read-only viewer (admin): just the transcript, no chrome. Rendered after all hooks so the
+  // panel/lifecycle/form hooks (inert via `enabled: false`) still obey the rules of hooks. A
+  // completed session is shown as its conversation here, not the respondent's completion screen.
+  if (readOnly) {
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        <QuestionnaireChat
+          sessionId={sessionId}
+          stream={stream}
+          readOnly
+          reasoningPlacement={reasoningPlacement}
+          reasoningDwellMs={reasoningDwellMs}
+          reasoningPerItemMs={reasoningPerItemMs}
+          className="min-h-0 flex-1"
+        />
+      </div>
+    );
+  }
 
   // Submitted → the conversation/form is done; show the confirmation in place of the workspace.
   if (stream.status === 'completed') {
@@ -280,6 +315,13 @@ export function SessionWorkspace({
         canResume={lifecycle.canResume}
         onPause={() => void lifecycle.pause()}
         onResume={() => void lifecycle.resume()}
+        // Offer the transcript download once a real conversation exists (past the opening
+        // question) and chat is in play — there's nothing to take away from an empty session.
+        download={
+          showChat && turnCount > 1 ? (
+            <TranscriptDownload sessionId={sessionId} accessToken={accessToken} variant="ghost" />
+          ) : undefined
+        }
         trailing={
           presentationMode === 'both' ? (
             <ModeToggle

@@ -47,9 +47,12 @@ vi.mock('@/components/app/questionnaire/form/questionnaire-form', () => ({
   QuestionnaireForm: () => <div data-testid="form" />,
 }));
 
-// Chat + lifecycle children are irrelevant here — marker stubs keep the render cheap.
+// Chat + lifecycle children are irrelevant here — marker stubs keep the render cheap. The chat
+// stub surfaces `readOnly` so the read-only-mode tests can assert it's threaded through.
 vi.mock('@/components/app/questionnaire/chat/questionnaire-chat', () => ({
-  QuestionnaireChat: () => <div data-testid="chat" />,
+  QuestionnaireChat: ({ readOnly }: { readOnly?: boolean }) => (
+    <div data-testid="chat" data-read-only={String(Boolean(readOnly))} />
+  ),
 }));
 // Lifecycle-bar stub surfaces the Pause/Resume handlers as buttons so the test can verify
 // the workspace wires them to the hook's actions.
@@ -362,6 +365,32 @@ describe('SessionWorkspace', () => {
   it('hides the completion offer when the session is not submittable', () => {
     setup({}, {}, { canSubmit: false });
     expect(screen.queryByTestId('completion-offer')).not.toBeInTheDocument();
+  });
+
+  describe('read-only mode (admin viewer)', () => {
+    it('renders only the read-only transcript — no panel, lifecycle bar, completion offer, or form', () => {
+      render(<SessionWorkspace sessionId="s1" readOnly />);
+      const chat = screen.getByTestId('chat');
+      expect(chat).toHaveAttribute('data-read-only', 'true');
+      expect(screen.queryByTestId('panel')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('lifecycle-bar')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('completion-offer')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('form')).not.toBeInTheDocument();
+    });
+
+    it('makes the panel, lifecycle, and form hooks inert (enabled: false) — no fetches', () => {
+      render(<SessionWorkspace sessionId="s1" readOnly />);
+      expect(panelHook.mock.calls[0][0]).toMatchObject({ enabled: false });
+      expect(lifecycleHook.mock.calls[0][0]).toMatchObject({ enabled: false });
+      expect(formHook.mock.calls[0][0]).toMatchObject({ enabled: false });
+    });
+
+    it('shows the conversation (not the completion screen) for a completed session', () => {
+      streamHook.mockReturnValue({ canSend: false, status: 'completed', sendMessage, applyStatus });
+      render(<SessionWorkspace sessionId="s1" readOnly />);
+      expect(screen.getByTestId('chat')).toBeInTheDocument();
+      expect(screen.queryByTestId('session-complete')).not.toBeInTheDocument();
+    });
   });
 
   describe('presentation mode (P-presentation)', () => {

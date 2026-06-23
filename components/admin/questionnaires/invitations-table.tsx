@@ -12,7 +12,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Check, Link2, Loader2 } from 'lucide-react';
+import { Link2, Loader2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -41,6 +41,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { CopyLinkField } from '@/components/admin/questionnaires/copy-link-field';
 import { InvitationStatusBadge } from '@/components/admin/questionnaires/invitation-status-badge';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse } from '@/lib/api/parse-response';
@@ -84,27 +92,31 @@ export function InvitationsTable({ questionnaireId, invitations }: InvitationsTa
   const router = useRouter();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
+  // The freshly-minted link to reveal in the dialog (null = closed). Held in state — not copied
+  // silently — so the admin sees the actual URL before sharing it.
+  const [revealed, setRevealed] = useState<{
+    email: string;
+    url: string;
+    expiresAt: string;
+  } | null>(null);
   const [versionFilter, setVersionFilter] = useState<string>(ALL);
   const [statusFilter, setStatusFilter] = useState<string>(ALL);
 
-  async function copyLink(id: string) {
-    setBusyId(id);
+  async function generateLink(inv: InvitationView) {
+    setBusyId(inv.id);
     setError(null);
     try {
-      const res = await fetch(API.APP.QUESTIONNAIRES.invitationLink(questionnaireId, id), {
+      const res = await fetch(API.APP.QUESTIONNAIRES.invitationLink(questionnaireId, inv.id), {
         method: 'POST',
         credentials: 'same-origin',
       });
-      const parsed = await parseApiResponse<{ url: string }>(res);
+      const parsed = await parseApiResponse<{ url: string; expiresAt: string }>(res);
       if (!parsed.success) {
         setError(parsed.error.message);
         return;
       }
-      await navigator.clipboard.writeText(parsed.data.url);
-      setCopiedId(id);
-      setTimeout(() => setCopiedId((c) => (c === id ? null : c)), 2500);
-      // Token rotated server-side — refresh so any stale expiry shows correctly.
+      setRevealed({ email: inv.email, url: parsed.data.url, expiresAt: parsed.data.expiresAt });
+      // Token rotated server-side — refresh so the table's Expires column reflects the new token.
       router.refresh();
     } catch {
       setError('Could not generate a link. Please try again.');
@@ -276,15 +288,15 @@ export function InvitationsTable({ questionnaireId, invitations }: InvitationsTa
                         variant="outline"
                         size="sm"
                         disabled={busy}
-                        title="Generate a no-login link to share manually (rotates the token — the previous link stops working)"
-                        onClick={() => void copyLink(inv.id)}
+                        title="Generate a fresh no-login link to share manually (replaces any previous link for this person)"
+                        onClick={() => void generateLink(inv)}
                       >
-                        {copiedId === inv.id ? (
-                          <Check className="mr-1.5 h-3 w-3 text-emerald-600" />
+                        {busy ? (
+                          <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
                         ) : (
                           <Link2 className="mr-1.5 h-3 w-3" />
                         )}
-                        {copiedId === inv.id ? 'Copied' : 'Copy link'}
+                        Get link
                       </Button>
                     )}
                     {canResend && (
@@ -329,6 +341,31 @@ export function InvitationsTable({ questionnaireId, invitations }: InvitationsTa
           })}
         </TableBody>
       </Table>
+
+      <Dialog open={revealed !== null} onOpenChange={(open) => !open && setRevealed(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>No-login link</DialogTitle>
+            <DialogDescription>
+              {revealed && (
+                <>
+                  Share this link with <strong>{revealed.email}</strong>. They open it to begin — no
+                  account needed.
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          {revealed && (
+            <div className="space-y-3">
+              <CopyLinkField url={revealed.url} />
+              <p className="text-muted-foreground text-xs">
+                Expires {formatDate(revealed.expiresAt)}. This created a fresh link and invalidated
+                any previous link for this person.
+              </p>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -27,6 +27,12 @@ export interface UseAnswerPanelOptions {
   accessToken?: string;
   /** SSR-resolved initial view (authenticated path); omit for anonymous. */
   initialView?: AnswerPanelView;
+  /**
+   * Whether the panel is live. `false` makes the hook inert — no mount fetch, `refetch` a no-op —
+   * for surfaces that don't show the panel (e.g. the admin read-only session viewer, which has no
+   * respondent credential to read it with). Defaults to `true`.
+   */
+  enabled?: boolean;
 }
 
 export interface UseAnswerPanelReturn {
@@ -41,11 +47,12 @@ interface SuccessEnvelope {
 }
 
 export function useAnswerPanel(options: UseAnswerPanelOptions): UseAnswerPanelReturn {
-  const { sessionId, accessToken, initialView } = options;
+  const { sessionId, accessToken, initialView, enabled = true } = options;
 
   const [view, setView] = useState<AnswerPanelView | null>(initialView ?? null);
-  // Only show the first-load spinner when we have nothing to paint yet (anonymous path).
-  const [loading, setLoading] = useState(initialView === undefined);
+  // Only show the first-load spinner when we have nothing to paint yet (anonymous path), and never
+  // when the hook is inert (it will never fetch).
+  const [loading, setLoading] = useState(enabled && initialView === undefined);
   const [error, setError] = useState(false);
 
   const inFlightRef = useRef(false);
@@ -59,6 +66,7 @@ export function useAnswerPanel(options: UseAnswerPanelOptions): UseAnswerPanelRe
   }, []);
 
   const refetch = useCallback(() => {
+    if (!enabled) return;
     if (inFlightRef.current) return;
     inFlightRef.current = true;
     setError(false);
@@ -83,7 +91,7 @@ export function useAnswerPanel(options: UseAnswerPanelOptions): UseAnswerPanelRe
         inFlightRef.current = false;
         if (mountedRef.current) setLoading(false);
       });
-  }, [sessionId, accessToken]);
+  }, [sessionId, accessToken, enabled]);
 
   // Initial load: only fetch when we have no SSR seed (anonymous path).
   useEffect(() => {

@@ -106,6 +106,7 @@ export function VersionSettingsPanel({
           questionCount={questionCount}
           adaptiveEnabled={adaptiveEnabled}
           introScreenEnabled={introScreenEnabled}
+          isVersionLaunched={graph.status === 'launched'}
           run={run}
           busy={busy}
         />

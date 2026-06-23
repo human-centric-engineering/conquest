@@ -38,6 +38,12 @@ export interface UseSessionLifecycleOptions {
   initialView?: SessionStatusView;
   /** Push the authoritative status into the shared stream (from {@link SessionWorkspace}). */
   applyStatus: (status: QuestionnaireChatStatus) => void;
+  /**
+   * Whether the lifecycle is live. `false` makes the hook inert — no mount fetch, `refetch` a no-op
+   * — for surfaces that don't drive lifecycle (e.g. the admin read-only session viewer, which has
+   * no respondent credential). Defaults to `true`.
+   */
+  enabled?: boolean;
 }
 
 export interface UseSessionLifecycleReturn {
@@ -72,11 +78,12 @@ const ACTION_FALLBACK = 'Something went wrong. Please try again.';
 export function useSessionLifecycle(
   options: UseSessionLifecycleOptions
 ): UseSessionLifecycleReturn {
-  const { sessionId, accessToken, initialView, applyStatus } = options;
+  const { sessionId, accessToken, initialView, applyStatus, enabled = true } = options;
   const anonymous = Boolean(accessToken);
 
   const [view, setView] = useState<SessionStatusView | null>(initialView ?? null);
-  const [loading, setLoading] = useState(initialView === undefined);
+  // No first-load spinner when inert — the hook will never fetch.
+  const [loading, setLoading] = useState(enabled && initialView === undefined);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -97,6 +104,7 @@ export function useSessionLifecycle(
   }, [accessToken]);
 
   const refetch = useCallback(() => {
+    if (!enabled) return;
     if (inFlightRef.current) return;
     inFlightRef.current = true;
 
@@ -117,7 +125,7 @@ export function useSessionLifecycle(
         inFlightRef.current = false;
         if (mountedRef.current) setLoading(false);
       });
-  }, [sessionId, authHeaders]);
+  }, [sessionId, authHeaders, enabled]);
 
   // Initial load only when there's no SSR seed (anonymous path).
   useEffect(() => {

@@ -123,9 +123,11 @@ describe('visibleWorkspaceTabs', () => {
         designEval: false,
         respondentReport: false,
         cohortReport: false,
+        liveSessions: false,
       })
     );
-    // data-slots, evaluations, respondent-report, and scoring should be the only hidden ones
+    // Every flag-gated tab (data-slots, sessions, respondent-report, scoring, evaluations)
+    // must be hidden once its flag is off — only the always-on tabs remain.
     const flaggedTabIds = QUESTIONNAIRE_WORKSPACE_TABS.filter((t) => t.flag).map((t) => t.id);
     for (const id of flaggedTabIds) {
       expect(tabs.find((t) => t.id === id)).toBeUndefined();

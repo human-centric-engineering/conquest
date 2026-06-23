@@ -88,6 +88,13 @@ export interface QuestionnaireChatProps {
    * it off on resume so a restored transcript renders its history instantly.
    */
   animateOpening?: boolean;
+  /**
+   * Read-only replay: render the transcript with no composer (no input, mic, or attachment row), for
+   * the admin session viewer reading a respondent's conversation. The respondent surface never sets
+   * this. Independent of the terminal-status composer hiding — a read-only `idle` session still hides
+   * the composer.
+   */
+  readOnly?: boolean;
   className?: string;
 }
 
@@ -374,6 +381,7 @@ export function QuestionnaireChat({
   reasoningDwellMs = AUTO_REVEAL_DWELL_MS,
   reasoningPerItemMs = AUTO_REVEAL_PER_ITEM_MS,
   animateOpening = false,
+  readOnly = false,
   className,
 }: QuestionnaireChatProps) {
   const { turns, streaming, inspectorTurns, status, error, canSend, sendMessage, dismissError } =
@@ -566,8 +574,8 @@ export function QuestionnaireChat({
         </div>
       </div>
 
-      {/* Composer */}
-      {!isTerminal && (
+      {/* Composer — hidden entirely in read-only replay (admin viewer) as well as terminal states. */}
+      {!isTerminal && !readOnly && (
         <div className="border-t px-4 py-3 sm:px-6">
           <div className="mx-auto max-w-2xl">
             {/* Pending attachments — strip above the input row, driven by the picker hook. */}

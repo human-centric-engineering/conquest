@@ -61,7 +61,7 @@ export interface SessionExportInput {
  * description; falls back to the role; returns null when neither is present (the rest
  * of the structured fields are too granular for a one-line PDF header).
  */
-function summariseAudience(audience: AudienceShape | null): string | null {
+export function summariseAudience(audience: AudienceShape | null): string | null {
   if (!audience) return null;
   const description = audience.description?.trim();
   if (description) return description;
