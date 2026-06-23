@@ -12,6 +12,9 @@
  * plain `<a download>`) so it can send the anonymous `X-Session-Token` header — a no-login
  * respondent has no cookie, only the client-held token. The blob is saved via an
  * object-URL; a transient error line appears if the request fails, keeping the calm tone.
+ *
+ * F7.6: adds a {@link TranscriptDownload} (themed PDF / plain text) of the conversation
+ * itself, always available once submitted — independent of the responses-report config.
  */
 
 import { useCallback, useRef, useState } from 'react';
@@ -20,6 +23,7 @@ import { CheckCircle2, Download, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { SessionRefChip } from '@/components/app/questionnaire/lifecycle/session-ref-chip';
+import { TranscriptDownload } from '@/components/app/questionnaire/lifecycle/transcript-download';
 import { API } from '@/lib/api/endpoints';
 import { useRespondentReport } from '@/lib/hooks/use-respondent-report';
 import { isAiRespondentReportMode } from '@/lib/app/questionnaire/types';
@@ -130,18 +134,23 @@ export function SessionComplete({
 
         {showInsights && view?.insights && <ReportInsights insights={view.insights} />}
 
-        {showDownload && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={handleDownload}
-            disabled={downloading}
-          >
-            <Download className="h-4 w-4" aria-hidden="true" />
-            {downloading ? 'Preparing…' : 'Download PDF'}
-          </Button>
-        )}
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          {showDownload && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleDownload}
+              disabled={downloading}
+            >
+              <Download className="h-4 w-4" aria-hidden="true" />
+              {downloading ? 'Preparing…' : 'Download PDF'}
+            </Button>
+          )}
+          {/* The conversation record is always available once submitted — a completed session
+              always has a transcript, independent of the responses-report config above. */}
+          <TranscriptDownload sessionId={sessionId} accessToken={accessToken} variant="outline" />
+        </div>
         {error && (
           <p className="text-destructive text-xs" role="alert">
             Couldn&rsquo;t prepare your PDF. Please try again.

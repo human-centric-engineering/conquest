@@ -39,6 +39,12 @@ export interface SessionLifecycleBarProps {
    * available immediately and costs no extra vertical space.
    */
   trailing?: ReactNode;
+  /**
+   * The transcript-download control (F7.6), rendered in the right cluster beside the ref chip.
+   * When present the strip always renders so the respondent can take their conversation away
+   * at any point in the session.
+   */
+  download?: ReactNode;
   className?: string;
 }
 
@@ -52,6 +58,7 @@ export function SessionLifecycleBar({
   onPause,
   onResume,
   trailing,
+  download,
   className,
 }: SessionLifecycleBarProps) {
   const anonymous = view?.anonymous ?? false;
@@ -72,7 +79,8 @@ export function SessionLifecycleBar({
     showPause ||
     actionError !== null ||
     ref !== null ||
-    trailing != null;
+    trailing != null ||
+    download != null;
   if (!showProgress && !hasStrip) return null;
 
   return (
@@ -113,6 +121,7 @@ export function SessionLifecycleBar({
 
           <span className="ml-auto inline-flex items-center gap-2">
             {ref && <SessionRefChip refRaw={ref} />}
+            {download}
             {actionError && (
               <span role="alert" className="text-destructive inline-flex items-center gap-1">
                 <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />

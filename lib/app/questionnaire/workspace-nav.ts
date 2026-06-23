@@ -35,6 +35,8 @@ export const QUESTIONNAIRE_WORKSPACE_TABS: readonly WorkspaceTab[] = [
   { id: 'structure', label: 'Structure', segment: 'structure' },
   { id: 'data-slots', label: 'Data slots', segment: 'data-slots', flag: 'dataSlots' },
   { id: 'invitations', label: 'Invitations', segment: 'invitations' },
+  // Sessions only exist once the live respondent surface is on, so gate the tab on it.
+  { id: 'sessions', label: 'Sessions', segment: 'sessions', flag: 'liveSessions' },
   {
     id: 'respondent-report',
     label: 'Respondent report',

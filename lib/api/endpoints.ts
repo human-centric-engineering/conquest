@@ -514,6 +514,15 @@ export const API = {
       /** Admin download of one session's results as a branded PDF (GET — F7.4). */
       sessionExportPdf: (id: string, sessionId: string): string =>
         `/api/v1/app/questionnaires/${id}/sessions/${sessionId}/export.pdf`,
+      /** Admin read of one session's conversation for the session viewer (GET). */
+      sessionTranscript: (id: string, sessionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/sessions/${sessionId}/transcript`,
+      /** Mint a continue token for a PREVIEW session so an admin can resume it (POST). */
+      sessionPreviewToken: (id: string, sessionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/sessions/${sessionId}/preview-token`,
+      /** Resolve a support reference → its session's viewer location (GET). */
+      sessionByRef: (ref: string): string =>
+        `/api/v1/app/questionnaires/sessions/by-ref/${encodeURIComponent(ref)}`,
     },
     /** Respondent live-session endpoints (F6.1/F6.2) — consumed by the F7.1 chat surface. */
     QUESTIONNAIRE_SESSIONS: {
@@ -555,6 +564,12 @@ export const API = {
       submit: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/submit`,
       /** Download the session's results as a branded PDF (GET — F7.4). */
       exportPdf: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/export.pdf`,
+      /** Download the chat transcript as a branded PDF (GET — F7.6). */
+      transcriptPdf: (id: string): string =>
+        `/api/v1/app/questionnaire-sessions/${id}/transcript.pdf`,
+      /** Download the chat transcript as plain text (GET — F7.6). */
+      transcriptText: (id: string): string =>
+        `/api/v1/app/questionnaire-sessions/${id}/transcript.txt`,
       /** Respondent report status + content — completion screen polls this (GET). */
       report: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/report`,
     },

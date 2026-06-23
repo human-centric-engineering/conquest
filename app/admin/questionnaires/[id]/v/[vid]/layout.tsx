@@ -22,6 +22,7 @@ import { BreadcrumbLabel } from '@/components/admin/breadcrumb-context';
 import { QuestionnaireSubNav } from '@/components/admin/questionnaires/workspace/questionnaire-sub-nav';
 import { VersionSelector } from '@/components/admin/questionnaires/workspace/version-selector';
 import { PreviewRespondentButton } from '@/components/admin/questionnaires/workspace/preview-respondent-button';
+import { SessionRefLookup } from '@/components/admin/questionnaires/sessions/session-ref-lookup';
 import { QUESTIONNAIRE_STATUS_BADGE } from '@/components/admin/questionnaires/status-badge';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -109,6 +110,8 @@ export default async function QuestionnaireWorkspaceLayout({ params, children }:
             <h1 className="text-2xl font-semibold">{detail.title}</h1>
             {viewingLive && <Badge variant={liveBadge.variant}>{liveBadge.label}</Badge>}
             <div className="ml-auto flex items-center gap-2">
+              {/* Quick "view a session by reference" — present wherever sessions can exist. */}
+              {flags.liveSessions && <SessionRefLookup compact />}
               {previewAvailable && <PreviewRespondentButton versionId={selected.id} />}
               <VersionSelector
                 questionnaireId={id}
