@@ -106,6 +106,34 @@ describe('AnswerSlotPanel', () => {
     expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '37');
   });
 
+  it('appends average confidence to the header when present (question mode)', () => {
+    render(<AnswerSlotPanel view={view({ averageConfidence: 0.9 })} />);
+    // Completion and the rounded average are shown together on one line.
+    expect(screen.getByText('1 of 2 answered · avg confidence 90%')).toBeInTheDocument();
+  });
+
+  it('appends average confidence to the blended header in data-slot mode', () => {
+    render(
+      <AnswerSlotPanel
+        view={view({
+          dataSlotGroups: [{ theme: 'Strategy', slots: [] }],
+          progressPercent: 37,
+          averageConfidence: 0.58,
+          answeredCount: 0,
+          totalCount: 71,
+        })}
+      />
+    );
+    expect(screen.getByText('37% complete · avg confidence 58%')).toBeInTheDocument();
+  });
+
+  it('omits the average-confidence suffix when none is scored yet', () => {
+    render(<AnswerSlotPanel view={view()} />);
+    // No averageConfidence on the view → header is the bare completion string.
+    expect(screen.getByText('1 of 2 answered')).toBeInTheDocument();
+    expect(screen.queryByText(/avg confidence/)).not.toBeInTheDocument();
+  });
+
   it('shows the current data-slot paraphrase and prior values as "Earlier:" history', () => {
     render(
       <AnswerSlotPanel

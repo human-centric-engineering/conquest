@@ -291,7 +291,8 @@ describe('buildAnswerExtractionPrompt — data slots', () => {
     expect(system).toContain('Not covered yet');
     // Issue #1: inferred fills must be hedged, not asserted as fact, and honestly low confidence.
     expect(system).toMatch(/HEDGED/i);
-    expect(system).toMatch(/≤ 0\.4/);
+    // Parked (asked-N×) slots get a best-effort inference at the rubric's low band (0.3–0.4).
+    expect(system).toMatch(/0\.3–0\.4/);
   });
 
   it('demands a substantive, evidence-bearing rationale (what was asked + what they said)', () => {

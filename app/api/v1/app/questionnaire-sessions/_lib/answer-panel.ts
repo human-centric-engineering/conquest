@@ -54,6 +54,17 @@ function asDataSlotHistory(value: unknown): DataSlotFillHistoryEntry[] {
   return Array.isArray(value) ? (value as DataSlotFillHistoryEntry[]) : [];
 }
 
+/**
+ * Mean of the non-null confidences, or `undefined` when none are scored — the panel header's
+ * "avg confidence" figure. An honest mean over every scored fill (a low-confidence tangential fill
+ * drags it down by design); `null`/unscored values are excluded, not treated as zero.
+ */
+function meanConfidence(values: Array<number | null>): number | undefined {
+  const scored = values.filter((c): c is number => c !== null && !Number.isNaN(c));
+  if (scored.length === 0) return undefined;
+  return scored.reduce((sum, c) => sum + c, 0) / scored.length;
+}
+
 /** Narrow a stored `provenanceLabel` (free String column) to the provenance enum, or null. */
 function asProvenance(value: string | null | undefined): AnswerProvenance | null {
   return value != null && (ANSWER_PROVENANCES as readonly string[]).includes(value)
@@ -179,6 +190,10 @@ export async function loadAnswerPanelState(
     answers,
   });
 
+  // Question mode: average confidence across answered question slots (data-slot mode overrides below).
+  const questionAvg = meanConfidence(answers.map((a) => a.confidence));
+  if (questionAvg !== undefined) view.averageConfidence = questionAvg;
+
   // Data Slots feature: when in data-slot mode, replace the question rows with themed data-slot
   // groups (paraphrase + confidence). The header/progress keep tracking the BACKGROUND questions
   // — the respondent sees the abstraction layer, never the raw question answers.
@@ -232,6 +247,11 @@ export async function loadAnswerPanelState(
       });
     }
     view.dataSlotGroups = groups;
+    // Average confidence in data-slot mode is the mean over the data-slot FILLS the respondent sees
+    // (their abstraction layer), not the hidden question answers — so it matches the rows on screen.
+    view.averageConfidence = meanConfidence(
+      groups.flatMap((g) => g.slots.map((s) => s.confidence))
+    );
     // Progress tracks the WEIGHTED question coverage — the same completeness figure the reasoning
     // trace's "X% covered so far" shows (`coverageRatio`) — so the two never disagree. Data slots
     // are the respondent-facing abstraction layer, not the deliverable, so they no longer move the

@@ -93,8 +93,8 @@ describe('buildReasoningTrace', () => {
     // inferred is an "insight" moment, not neutral.
     expect(extraction?.tone).toBe('insight');
     expect(extraction?.detail).toMatch(/Inferred/);
-    // 0.6 → canonical confidenceBand 'moderate' (matches the answer-panel chip).
-    expect(extraction?.detail).toMatch(/moderate confidence/);
+    // 0.6 → canonical confidenceBand 'tentative' (moderate is now ≥0.65; matches the answer-panel chip).
+    expect(extraction?.detail).toMatch(/tentative confidence/);
     // The extractor's own justification rides the separate rationale line.
     expect(extraction?.rationale).toBe('because');
   });
@@ -376,13 +376,16 @@ describe('buildReasoningTrace', () => {
     expect(extraction?.tone).toBe('insight');
   });
 
-  // Confidence words come from the canonical confidenceBand (high ≥0.85, moderate ≥0.6, low <0.6),
-  // so the trace detail agrees with the answer-panel chip — no per-surface threshold drift.
+  // Confidence words come from the canonical confidenceBand (high ≥0.85, moderate ≥0.65,
+  // tentative ≥0.45, low <0.45), so the trace detail agrees with the answer-panel chip — no
+  // per-surface threshold drift.
   it.each([
     ['high', 0.85],
     ['moderate', 0.84],
-    ['moderate', 0.6],
-    ['low', 0.59],
+    ['moderate', 0.65],
+    ['tentative', 0.64],
+    ['tentative', 0.45],
+    ['low', 0.44],
     ['low', 0.3],
   ])(
     'labels confidence as "%s confidence" at %d (canonical band thresholds)',

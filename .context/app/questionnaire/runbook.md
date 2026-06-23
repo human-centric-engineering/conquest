@@ -176,14 +176,15 @@ After a demo, wipe respondent data so the next prospect starts clean:
 
 ## 6. Troubleshooting
 
-| Symptom                                 | Cause / fix                                                                            |
-| --------------------------------------- | -------------------------------------------------------------------------------------- |
-| Admin route or page **404s**            | A feature flag is off — they're DB rows, not env vars. See [feature-flags.md].         |
-| Demo content didn't load after the seed | Seed no-op'd earlier — clear its `SeedHistory` row and re-seed (see **§1A** gotcha).   |
-| **409** when sending an invitation      | The version isn't launched / has no launched version — launch it (**§2.3**).           |
-| Chat page loads but won't stream        | `APP_QUESTIONNAIRES_LIVE_SESSIONS_ENABLED` off, or no LLM provider key configured.     |
-| Upload returns **422**                  | Scanned PDF with no extractable text — use a text-based source.                        |
-| Upload returns **409**                  | Exact bytes already ingested (SHA-256 dedup) — change the file or re-ingest the draft. |
+| Symptom                                                    | Cause / fix                                                                                                                                                                                            |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Admin route or page **404s**                               | A feature flag is off — they're DB rows, not env vars. See [feature-flags.md].                                                                                                                         |
+| Demo content didn't load after the seed                    | Seed no-op'd earlier — clear its `SeedHistory` row and re-seed (see **§1A** gotcha).                                                                                                                   |
+| **409** when sending an invitation                         | The version isn't launched / has no launched version — launch it (**§2.3**).                                                                                                                           |
+| Chat page loads but won't stream                           | `APP_QUESTIONNAIRES_LIVE_SESSIONS_ENABLED` off, or no LLM provider key configured.                                                                                                                     |
+| Upload returns **422**                                     | Scanned PDF with no extractable text — use a text-based source.                                                                                                                                        |
+| Upload returns **409**                                     | Exact bytes already ingested (SHA-256 dedup) — change the file or re-ingest the draft.                                                                                                                 |
+| Selector ignores the **deepen-low-confidence** instruction | Its system prompt changed in seed `005-selection-agent` but re-seeding only re-asserts `isSystem`. Run `npm run db:seed` on a fresh DB, or admin-edit the Questionnaire Selector agent's instructions. |
 
 ---
 

@@ -242,9 +242,11 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
     : input.isReask
       ? 'You already asked about this but could not capture a usable answer from their last reply. ' +
         (input.currentUnderstanding
-          ? `So far you understand: "${input.currentUnderstanding}". Do NOT repeat the same broad ` +
-            'question — ask a SHARPER, narrower follow-up that targets the specific piece still ' +
-            'missing. '
+          ? `So far you understand: "${input.currentUnderstanding}". Briefly NAME why you are ` +
+            'circling back — refer to what they touched on so the follow-up feels purposeful, not ' +
+            'repetitive ("Earlier you mentioned …, and I want to make sure I follow…"). Then, do ' +
+            'NOT repeat the same broad question — ask a SHARPER, narrower follow-up that targets ' +
+            'the specific piece still missing. '
           : 'Gently say you want to make sure you get it right, then ask again clearly, more ' +
             'specifically than before. ') +
         (input.isFinalAttempt
@@ -258,7 +260,9 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
           'same subject area and let their answer lead naturally into it (deepen before moving on). ' +
           'If their last answer was brief or surface-level, do not move on or pile on more ' +
           'questions: gently invite them to say a little more about what they just shared, with ' +
-          'ONE light follow-up ("What made you say that?", "Can you give an example?").';
+          'ONE light follow-up ("What made you say that?", "Can you give an example?") — and where ' +
+          'it is not obvious, briefly say why you are keen to hear more, so the nudge feels ' +
+          'purposeful rather than repetitive.';
 
   const system = joinSections(
     section(

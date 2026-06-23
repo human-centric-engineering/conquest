@@ -47,6 +47,26 @@ F4.2's extractor is restricted to the first three via `EXTRACTOR_EMITTED_PROVENA
 there's a consumer. F4.4 now emits `refined` (only on a genuine `refine`, not an
 `overwrite`) with no edit to the tuple.
 
+## Confidence rubric (the 0.3–1.0 nuance)
+
+`confidence` is **not** a coarse default. The prompt (`extraction/extraction-prompt.ts`) scores it
+across the full **0.3–1.0** range by three axes — **directness** (stated vs inferred), **elaboration**
+(a reason/example/specifics vs bare), and **certainty** — with explicit anchors:
+
+| Confidence | What it means                                         |
+| ---------- | ----------------------------------------------------- |
+| 0.9–1.0    | stated directly **and** backed by a reason or example |
+| 0.75–0.85  | a clear, direct answer with no elaboration            |
+| 0.45–0.6   | terse, vague, or non-descriptive — gettable but thin  |
+| 0.3–0.45   | reached only by a tangential, single-step inference   |
+
+A **closed** question (single/multi-choice, likert, numeric, date, boolean) is exempt from the
+elaboration axis: a complete, unambiguous answer is high (0.85–0.95) even when terse — only a genuinely
+uncertain _mapping_ drops it. The `rationale` should make a non-obvious score's basis legible ("Stated
+directly with an example, …"; "Inferred tangentially from their comment about …"). This nuance is what
+the answer-panel bands, the average-confidence header, and the deepen-low-confidence selection all read
+off; the golden-set eval (`extraction/eval/**`) measures it.
+
 ## Architecture — pure core + a capability
 
 The core lives in `lib/app/questionnaire/extraction/` and is **Prisma-free,

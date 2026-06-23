@@ -124,6 +124,25 @@ describe('buildSelectorPrompt', () => {
     const prompt = buildSelectorPrompt({ recentMessages: ['hi'], candidates, sessionId: 's1' });
     expect(prompt).not.toMatch(/earlier respondents diverged/i);
   });
+
+  it('flags a low-confidence candidate and adds the deepen nudge', () => {
+    const prompt = buildSelectorPrompt({
+      recentMessages: ['hi'],
+      candidates: [
+        { id: 'q1', key: 'blockers', prompt: 'What blocked you?', sectionLowConfidence: true },
+        { id: 'q2', key: 'ease', prompt: 'How easy was it?' },
+      ],
+      sessionId: 's1',
+    });
+    expect(prompt).toMatch(/We're unsure here/);
+    expect(prompt).toMatch(/lean toward choosing it to deepen/i);
+  });
+
+  it('adds no deepen nudge when no candidate is flagged low-confidence', () => {
+    const prompt = buildSelectorPrompt({ recentMessages: ['hi'], candidates, sessionId: 's1' });
+    expect(prompt).not.toMatch(/We're unsure here/);
+    expect(prompt).not.toMatch(/deepen that shaky answer/i);
+  });
 });
 
 describe('buildAdaptiveDeps — embedText + rankByVector delegation', () => {

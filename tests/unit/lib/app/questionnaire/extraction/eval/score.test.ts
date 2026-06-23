@@ -56,8 +56,11 @@ describe('classifyBand', () => {
   it('buckets at the band boundaries', () => {
     expect(classifyBand(CLEAR_BAND_MIN)).toBe('clear');
     expect(classifyBand(0.95)).toBe('clear');
+    // A terse/vague answer (rubric ~0.45–0.6) is partial — worth deepening, still gettable.
     expect(classifyBand(PARTIAL_BAND_MIN)).toBe('partial');
     expect(classifyBand(0.69)).toBe('partial');
+    // Below 0.45 is a tangential inference — the new low end the rubric distinguishes.
+    expect(classifyBand(0.44)).toBe('unclear');
     expect(classifyBand(0.39)).toBe('unclear');
     expect(classifyBand(0)).toBe('unclear');
   });
@@ -160,6 +163,23 @@ describe('aggregate', () => {
     const card = aggregate([]);
     expect(card.overallAccuracy).toBe(1);
     expect(card.expectations).toBe(0);
+  });
+
+  it('routes a failing knownGap fixture into failedKnownGaps, not failedRegressions', () => {
+    const tangential = GOLDEN_FIXTURES.find((f) => f.id === 'tangential-inference-is-unclear')!;
+    expect(tangential.knownGap).toBe(true);
+    // Score it deliberately wrong (a confident direct fill ≠ the expected inferred/unclear/uncovered),
+    // so the fixture fails — a knownGap failure must land apart from genuine regressions.
+    const failing = scoreFixture(
+      tangential,
+      output({
+        fills: [{ dataSlotKey: 'change_readiness', provenance: 'direct', confidence: 0.95 }],
+      })
+    );
+    expect(failing.pass).toBe(false);
+    const card = aggregate([failing]);
+    expect(card.failedKnownGaps).toContain('tangential-inference-is-unclear');
+    expect(card.failedRegressions).toEqual([]);
   });
 });
 

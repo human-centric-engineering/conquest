@@ -1,10 +1,11 @@
 /**
  * ConfidenceScore — a band-tinted chip showing the confidence as a label + raw percentage.
  *
- * Companion to {@link ConfidenceIndicator} (the quiet dot): this surfaces the actual score for the
- * demo answer panel, where the operator wants the number visible ("Confident · 88%"). Renders
- * nothing when the slot is unscored (no number to show). Band classes/label/percent come from the
- * shared pure helpers in `panel/confidence.ts`.
+ * Companion to {@link ConfidenceIndicator} (the quiet dot): this surfaces the actual score
+ * ("Confident · 88%") to respondents and operators alike, so the nuanced 30–100% capture-confidence
+ * range is visible at a glance rather than collapsed to a band word. Renders nothing when the slot
+ * is unscored (no number to show). Band classes/label/percent come from the shared pure helpers in
+ * `panel/confidence.ts`.
  */
 
 import { cn } from '@/lib/utils';

@@ -27,13 +27,26 @@ import type {
   GoldenFixture,
 } from '@/lib/app/questionnaire/extraction/eval/golden-set';
 
-/** Coarse confidence bands — the only resolution an LLM-emitted confidence can be trusted at. */
+/**
+ * Coarse confidence bands — the only resolution an LLM-emitted confidence can be trusted at.
+ * Three bands deliberately, not the finer extraction rubric's four anchors: the model emits noisy
+ * floats, so a battery asserting the 0.85 line between "clear-direct" and "direct-and-backed" would
+ * be measuring noise. The bands that MATTER for calibration are the ones with operational
+ * consequence: `clear` (covered, not re-asked), `partial` (a terse/vague reading worth deepening),
+ * `unclear` (a tangential inference). Under the finer rubric (0.3–1.0 by directness × elaboration ×
+ * certainty): direct/backed (0.9–1.0) and clear-direct (0.75–0.85) both land `clear`; a terse
+ * answer (0.45–0.6) lands `partial`; a tangential inference (0.3–0.45) lands `unclear`.
+ */
 export type ConfidenceBand = 'clear' | 'partial' | 'unclear';
 
-/** Lower bound of the `clear` band: a plainly-captured answer. */
+/** Lower bound of the `clear` band: a clear, direct answer (no elaboration needed). */
 export const CLEAR_BAND_MIN = 0.7;
-/** Lower bound of the `partial` band: a usable but hedged reading. Below it is `unclear`. */
-export const PARTIAL_BAND_MIN = 0.4;
+/**
+ * Lower bound of the `partial` band: a terse/vague but usable reading. Below it is `unclear` — a
+ * tangential inference. Set at 0.45 to sit on the rubric's terse(0.45–0.6) / tangential(0.3–0.45)
+ * seam, so the eval distinguishes "worth deepening" from "barely there".
+ */
+export const PARTIAL_BAND_MIN = 0.45;
 
 /** Bucket a raw 0–1 confidence into its coarse band. */
 export function classifyBand(confidence: number): ConfidenceBand {

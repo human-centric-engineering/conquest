@@ -43,11 +43,18 @@ function ProgressHeading({ view }: { view: AnswerPanelView }) {
   // Data-slot mode shows one balanced percentage (questions + data slots) — never the raw question
   // count, which the respondent never sees. Question mode keeps the familiar "N of M" / "N captured".
   const percent = view.progressPercent ?? 0;
-  const summary = dataSlotMode
+  const completion = dataSlotMode
     ? `${percent}% complete`
     : view.scope === 'answered_only'
       ? `${view.answeredCount} captured`
       : `${view.answeredCount} of ${view.totalCount} answered`;
+  // Average confidence across all captured slots, paired with completion ("… · avg confidence 58%").
+  // Honest mean: a tangential/low-confidence fill drags it down by design. Omitted until something
+  // scored has been captured.
+  const avgConfidence =
+    view.averageConfidence !== undefined ? Math.round(view.averageConfidence * 100) : null;
+  const summary =
+    avgConfidence !== null ? `${completion} · avg confidence ${avgConfidence}%` : completion;
   return (
     <div className="border-b px-4 py-3">
       <h2 className="text-sm font-semibold">
@@ -100,7 +107,8 @@ function DataSlotGroups({ groups }: { groups: DataSlotPanelGroup[] }) {
                       <>
                         <p className="text-muted-foreground mt-0.5 text-sm">{slot.paraphrase}</p>
                         <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                          {/* The actual confidence score (demo panel shows the number). */}
+                          {/* The confidence as label + raw % — shown to respondents so the
+                              nuanced 30–100% range reads at a glance, not just a band word. */}
                           <ConfidenceScore confidence={slot.confidence} />
                           {slot.provenance === 'inferred' || slot.provenance === 'synthesised' ? (
                             <span

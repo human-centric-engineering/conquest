@@ -299,6 +299,20 @@ describe('buildStreamingQuestionPrompt', () => {
     expect(system).toMatch(/could not capture a usable answer|re-ask/i);
   });
 
+  it('names WHY it is circling back on a re-ask with a current understanding (deepening probe)', () => {
+    const system = text(
+      buildStreamingQuestionPrompt({
+        ...INPUT,
+        isReask: true,
+        currentUnderstanding: 'They feel pay is the main issue',
+      })[0].content
+    );
+    // The deepening probe should be explicit about why it's returning, grounded in what they said.
+    expect(system).toMatch(/circling back/i);
+    expect(system).toMatch(/They feel pay is the main issue/);
+    expect(system).toMatch(/SHARPER, narrower follow-up/i);
+  });
+
   it('keeps choices/scale OPEN on a first ask — infers rather than reciting (Phase 5)', () => {
     const messages = buildStreamingQuestionPrompt({
       ...INPUT,

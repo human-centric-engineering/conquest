@@ -80,10 +80,20 @@ score = weight
 ```
 
 Ties break on document order. The constants (`UNDERCOVERED_SECTION_BONUS = 0.5`,
-`LOW_CONFIDENCE_MULT = 1.5`, `LOW_CONFIDENCE_THRESHOLD = 0.5`) are module
+`LOW_CONFIDENCE_MULT = 1.5`, `LOW_CONFIDENCE_THRESHOLD = 0.6`) are module
 constants in `selection/types.ts`, not config fields — tuned in code like the
-cost-estimation token constants. `weightedScores(ctx)` is exported so the math is
+cost-estimation token constants. `LOW_CONFIDENCE_THRESHOLD` is 0.6 (not 0.5) so it captures the
+finer extraction rubric's terse/vague band (~0.45–0.6) as "shaky ground worth revisiting" while a
+clear, direct answer (≥0.75) sits safely above it. `weightedScores(ctx)` is exported so the math is
 directly unit-testable.
+
+**Adaptive deepens shaky ground too.** The `adaptive` strategy now also reads confidence: it flags
+each candidate that sits in a section already holding a low-confidence answer (`sectionLowConfidence`,
+same threshold), and `buildSelectorPrompt` surfaces that as a "We're unsure here — probe to deepen it"
+sub-line. The selector's system prompt (seed `005-selection-agent`) is told to lean toward such a
+candidate as a genuine follow-up. **The seed must be re-seeded (`npm run db:seed`) or admin-edited for
+the instruction change to take effect** — re-seeding only re-asserts `isSystem`, so an existing agent
+keeps its stored instructions.
 
 **Where `weight` comes from.** `AppQuestionSlot.weight` is the base above and the
 numerator of `coverageRatio`. Admins set it per question in the **Structure editor** via a

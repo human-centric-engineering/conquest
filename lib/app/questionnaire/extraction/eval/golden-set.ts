@@ -142,7 +142,7 @@ export const GOLDEN_FIXTURES: GoldenFixture[] = [
   },
   {
     id: 'likert-inferred-from-sentiment',
-    note: 'A strong sentiment with no stated number maps to the scale by inference — covered, but provenance inferred.',
+    note: 'A strong sentiment with no stated number maps to the scale by inference — provenance inferred, but the dread firmly pins the bottom of the scale, so it lands clear + covered.',
     context: ctx({
       userMessage: 'I dread every single shift here.',
       activeQuestionKey: 'satisfaction',
@@ -153,7 +153,7 @@ export const GOLDEN_FIXTURES: GoldenFixture[] = [
         key: 'satisfaction',
         kind: 'answer',
         provenance: 'inferred',
-        band: 'partial',
+        band: 'clear',
         covered: true,
       },
     ],
@@ -211,5 +211,58 @@ export const GOLDEN_FIXTURES: GoldenFixture[] = [
     }),
     expectations: [],
     forbiddenKeys: ['blocker'],
+  },
+  {
+    id: 'terse-closed-stays-high',
+    note: 'Closed-question carve-out: a complete, unambiguous CLOSED answer is direct + clear + covered even when terse — brevity is not low confidence for a closed type. Guards against the rewrite over-correcting and marking terse closed answers down.',
+    context: ctx({
+      userMessage: '5',
+      activeQuestionKey: 'satisfaction',
+      candidateSlots: [likert('satisfaction', 'How satisfied are you at work? (1–5)', 1, 5)],
+      recentMessages: ['Agent: On a scale of 1 to 5, how satisfied are you at work?'],
+    }),
+    expectations: [
+      { key: 'satisfaction', kind: 'answer', provenance: 'direct', band: 'clear', covered: true },
+    ],
+  },
+  {
+    id: 'terse-qualitative-is-partial',
+    note: 'The nuance the rewrite adds: direct ≠ high confidence. A terse, vague FREE_TEXT answer is directly stated (so covered, not re-asked) but THIN — it lands in the partial band so the selector can choose to deepen it rather than treat it as a confident capture.',
+    context: ctx({
+      userMessage: "Yeah, it's alright I guess.",
+      activeQuestionKey: 'culture',
+      candidateSlots: [freeText('culture', 'How would you describe the team culture here?')],
+    }),
+    expectations: [
+      { key: 'culture', kind: 'answer', provenance: 'direct', band: 'partial', covered: true },
+    ],
+  },
+  {
+    id: 'tangential-inference-is-unclear',
+    note: 'The new low end: a position reached only by a weak, tangential inference should land in the unclear band and stay NOT covered (inferred + sub-threshold), so it remains eligible for a deepening follow-up. Flagged knownGap — emitting (and correctly low-scoring) a tangential fill is the calibration target, and a model miss here is reported apart from genuine regressions rather than gating the suite.',
+    context: ctx({
+      userMessage: 'We only just switched over to the new CRM last month.',
+      activeQuestionKey: 'tools',
+      candidateSlots: [freeText('tools', 'What tools do you use day to day?')],
+      dataSlotCandidates: [
+        {
+          key: 'change_readiness',
+          name: 'Change Readiness',
+          description: 'How well the organisation adapts to and absorbs change.',
+          theme: 'Organisation',
+        },
+      ],
+      recentMessages: ['Agent: What tools do you use day to day?'],
+    }),
+    expectations: [
+      {
+        key: 'change_readiness',
+        kind: 'dataSlotFill',
+        provenance: 'inferred',
+        band: 'unclear',
+        covered: false,
+      },
+    ],
+    knownGap: true,
   },
 ];

@@ -731,11 +731,14 @@ export function ConfigEditor({
           <Label className="text-sm font-medium">
             Data-slot attempts{' '}
             <FieldHelp title="Data-slot attempts">
-              How many times the agent asks about one data slot (topic) before it records its best
-              guess and moves on — so a respondent never gets stuck being asked the same thing.{' '}
-              <code className="text-xs">2</code> = ask once, then one sharper re-ask. The best guess
-              is shown as &ldquo;provisional · may revisit&rdquo; and can still be refined later.
-              Only applies in data-slot mode.
+              How many times the agent probes one data slot (topic) before it records its best guess
+              and moves on — so a respondent never gets stuck being asked the same thing.{' '}
+              <code className="text-xs">2</code> = ask once, then one sharper re-ask. This is the
+              ceiling on how hard a <em>shaky</em> answer is deepened: a terse, vague, or
+              only-inferred answer (low confidence) is the kind the agent circles back on, and a
+              higher value lets it probe such answers further at the cost of a longer conversation.
+              The best guess is shown as &ldquo;provisional · may revisit&rdquo; and can still be
+              refined later. Only applies in data-slot mode.
             </FieldHelp>
           </Label>
           <Input

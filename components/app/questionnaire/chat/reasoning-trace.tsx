@@ -48,9 +48,11 @@ const STEP_ICONS: Record<ReasoningStepKind, LucideIcon> = {
 const ACCENT = 'var(--app-accent-color, var(--color-primary))';
 
 /**
- * A "signal-strength" confidence pip — 1–3 filled bars for low / moderate / high. Compact +
- * glanceable. Bands and thresholds come from the canonical {@link confidenceBand} so the trace
- * agrees with the answer panel's confidence chip (no per-surface threshold drift).
+ * A "signal-strength" confidence pip — 1–3 filled bars. Coarser than the panel's four bands:
+ * high → 3, moderate → 2, and the two lower bands (tentative / low) share the single-bar rung,
+ * with the precise band word carried in the title/aria. Bands and thresholds come from the
+ * canonical {@link confidenceBand} so the trace agrees with the answer panel's chip (no
+ * per-surface threshold drift).
  */
 function ConfidencePips({ confidence }: { confidence: number }) {
   const band = confidenceBand(confidence);
