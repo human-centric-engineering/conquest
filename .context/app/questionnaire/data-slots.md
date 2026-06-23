@@ -329,9 +329,20 @@ the adaptive selector is off (or returns no pick), the deterministic `pickNextDa
 `inferred`/`synthesised` fills with an **"Inferred · {confidence band}"** pill (e.g. _Inferred ·
 unsure_) so a tentative reading is never mistaken for something the respondent said. Two prompt rules
 keep these honest: (1) an inferred paraphrase must be **hedged** ("may", "seems") and never asserted
-as fact; (2) a loose inference from a brief/vague message must carry **low confidence (≤ 0.4)**.
-Low-confidence inferences stay **visible** (labelled), so the respondent can see — and correct — what
-we're guessing. The extractor must **never record absence** ("tenure not provided"): a slot the
+as fact; (2) a loose, tangential inference from a brief/vague message must carry **low confidence
+(0.3–0.45)**. The confidence rubric is **finer** than the old three bands: it spans **0.3–1.0** keyed
+on directness × elaboration × certainty — a directly-stated position backed by a reason/example ≈
+0.9–1.0, a clear bare statement ≈ 0.75–0.85, a terse/vague answer ≈ 0.45–0.6, a tangential inference
+≈ 0.3–0.45 (the panel labels these "Confident / Fairly sure / Tentative / Unsure"). Low-confidence
+inferences stay **visible** (labelled), so the respondent can see — and correct — what we're guessing.
+
+**Low confidence biases the next question toward deepening.** A sub-threshold inferred/synthesised
+fill stays uncovered → eligible to re-target, and the adaptive selector is told which candidates sit
+in a shaky (low-confidence) area so it can choose to **probe deeper** there rather than move on (the
+weighted scorer already pulls back to such sections; `LOW_CONFIDENCE_THRESHOLD` is 0.6). The phraser
+then names _why_ it's circling back ("Earlier you mentioned …, and I want to make sure I follow…").
+A confidently-captured area is left alone. How hard a shaky answer is probed before it's parked is the
+admin's `maxDataSlotAttempts` (Settings tab). The extractor must **never record absence** ("tenure not provided"): a slot the
 message doesn't bear on is simply **omitted**, and the panel shows "Not covered yet" on its own.
 
 **Rationale = the evidence ("Why?").** The fill's `rationale` (the panel's _Why?_ expander) must carry
@@ -366,8 +377,11 @@ turns annotated with what a correctly-calibrated extractor should return, scored
 the pure `score.ts`: **provenance** (a STATED answer must be `direct`, not `inferred`), **band** (a
 clear answer must land in the `clear` confidence band, not be under-scored), and **covered** (the
 downstream consequence — would it be re-asked/parked?). Confidence is scored as a **coarse band**
-(`clear` ≥ 0.7 / `partial` ≥ 0.4 / `unclear`), never an exact float — an LLM-emitted confidence is
-not calibrated to that resolution. `npm run eval:extraction` runs the live `chat`-tier model over
+(`clear` ≥ 0.7 / `partial` ≥ 0.45 / `unclear`), never an exact float — an LLM-emitted confidence is
+not calibrated to the finer rubric's resolution. The `partial` cut sits at the rubric's
+terse(0.45–0.6) / tangential(0.3–0.45) seam, so the eval distinguishes "worth deepening" from
+"barely there"; the corpus now includes a terse-but-complete closed answer (clear), a terse
+qualitative answer (partial), and a tangential inference (unclear, `knownGap`). `npm run eval:extraction` runs the live `chat`-tier model over
 the set and prints a scorecard; run it before and after any prompt/model change. Fixtures flagged
 `knownGap` are cases the current prompt is expected to fail (the calibration target) and are
 reported apart from genuine regressions. The scorer + corpus are unit-tested (CI-safe, no LLM);

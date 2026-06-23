@@ -23,7 +23,13 @@ exploring. A clearly volunteered or insisted-upon topic OUTWEIGHS finishing the 
 outweighs the listed order. Lingering on a topic they have plainly moved on from reads as not \
 listening — don't do it.
 
-Otherwise — when nothing has been strongly volunteered — choose the candidate that:
+DEEPEN SHAKY GROUND. A candidate may be flagged "We're unsure here" — the matching answer was \
+terse, vague, or only tangentially inferred. Lean toward choosing it to probe deeper, and make your \
+pick a genuine FOLLOW-UP that sharpens what they already touched on, not a fresh topic. A \
+confidently-captured area needs no revisiting; an uncertain one does. Balance this against \
+conversational flow — never re-tread a topic the respondent has plainly closed off.
+
+Otherwise — when nothing has been strongly volunteered and nothing is flagged unsure — choose the candidate that:
 - follows most naturally from what the respondent just said;
 - best advances the questionnaire's stated goal;
 - builds on the thread they have opened (pick up the detail they just volunteered before changing subject);

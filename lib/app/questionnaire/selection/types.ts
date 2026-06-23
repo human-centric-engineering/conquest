@@ -185,6 +185,13 @@ export interface LlmPickInput {
      * (richer follow-up territory) without letting it override conversational flow.
      */
     peerDivergence?: number;
+    /**
+     * True when this candidate sits in a section that already holds a low-confidence answer (a
+     * terse, vague, or tangentially-inferred capture — confidence ≤ {@link LOW_CONFIDENCE_THRESHOLD}).
+     * The selector leans toward such a candidate to DEEPEN shaky ground, framing it as a genuine
+     * follow-up. Absent (omitted) when the section is confidently covered.
+     */
+    sectionLowConfidence?: boolean;
   }>;
   /** The questionnaire's goal (version-level), for framing. Absent when unset. */
   goal?: string | null;
@@ -250,5 +257,10 @@ export const LOW_CONFIDENCE_MULT = 1.5;
 /**
  * Confidence at or below which an answer counts as "low" for the bonus above.
  * Answers with `confidence === null` (unscored) never trip it.
+ *
+ * Set at 0.6 (not 0.5) to align with the finer extraction rubric (0.3–1.0 by
+ * directness × elaboration × certainty): a terse/vague answer now lands ~0.45–0.6,
+ * and that is exactly the "shaky ground worth revisiting" this bonus targets. A
+ * clear, direct answer (≥0.75) sits safely above it and does not trip a pull-back.
  */
-export const LOW_CONFIDENCE_THRESHOLD = 0.5;
+export const LOW_CONFIDENCE_THRESHOLD = 0.6;

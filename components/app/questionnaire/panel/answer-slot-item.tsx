@@ -68,7 +68,8 @@ export function AnswerSlotItem({ slot, onRevisit, canRevisit = false }: AnswerSl
               <span className="text-muted-foreground mt-0.5 block truncate text-sm">
                 {formatAnswerValue(slot.value)}
               </span>
-              {/* The actual confidence score (demo panel shows the number). */}
+              {/* The confidence as label + raw % ("Fairly sure · 62%") — shown to respondents so
+                  the nuanced 30–100% range is visible at a glance, not just a band word. */}
               <ConfidenceScore confidence={slot.confidence} className="mt-1" />
             </>
           ) : (

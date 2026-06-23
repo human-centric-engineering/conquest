@@ -369,16 +369,21 @@ describe('ReasoningTrace — optional affordances', () => {
     expect(paragraph.textContent).toMatch(/“.*”/);
   });
 
-  // Pip bands derive from the canonical confidenceBand (high ≥0.85, moderate ≥0.6, low <0.6),
-  // so the trace's aria-label matches the answer-panel confidence chip.
+  // Pip bands derive from the canonical confidenceBand (high ≥0.85, moderate ≥0.65,
+  // tentative ≥0.45, low <0.45), so the trace's aria-label matches the answer-panel confidence chip.
   it('renders high confidence pips with a band aria-label', () => {
     render(<ReasoningTrace steps={[makeStep({ confidence: 0.9, label: 'High step' })]} />);
     expect(screen.getByLabelText(/high confidence/i)).toBeInTheDocument();
   });
 
-  it('renders moderate confidence pips when confidence is 0.6', () => {
-    render(<ReasoningTrace steps={[makeStep({ confidence: 0.6, label: 'Moderate step' })]} />);
+  it('renders moderate confidence pips when confidence is 0.7', () => {
+    render(<ReasoningTrace steps={[makeStep({ confidence: 0.7, label: 'Moderate step' })]} />);
     expect(screen.getByLabelText(/moderate confidence/i)).toBeInTheDocument();
+  });
+
+  it('renders tentative confidence pips when confidence is 0.5', () => {
+    render(<ReasoningTrace steps={[makeStep({ confidence: 0.5, label: 'Tentative step' })]} />);
+    expect(screen.getByLabelText(/tentative confidence/i)).toBeInTheDocument();
   });
 
   it('renders low confidence pips when confidence is 0.3', () => {

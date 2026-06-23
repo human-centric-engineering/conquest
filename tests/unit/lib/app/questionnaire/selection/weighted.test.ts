@@ -51,6 +51,21 @@ describe('weightedScores — scoring math', () => {
     expect(byId.get('s1q2')!).toBeGreaterThan(byId.get('s2q1')!);
   });
 
+  it('treats a terse-band answer (0.55) as low-confidence under the raised 0.6 threshold', () => {
+    const c = ctx({
+      questions: [
+        q({ id: 's1q1', sectionId: 's1', sectionOrdinal: 0, ordinal: 0, weight: 1 }),
+        q({ id: 's1q2', sectionId: 's1', sectionOrdinal: 0, ordinal: 1, weight: 1 }),
+      ],
+      // 0.55 is the rubric's terse/vague band — above the old 0.5 cut, but the threshold is now
+      // 0.6, so it counts as shaky ground and s1q2 gets the pull-back multiplier.
+      answered: [{ questionId: 's1q1', confidence: 0.55 }],
+    });
+    const [top] = weightedScores(c);
+    expect(top.question.id).toBe('s1q2');
+    expect(top.score).toBeCloseTo(1.25 * LOW_CONFIDENCE_MULT);
+  });
+
   it('does not apply the low-confidence multiplier for unscored answers', () => {
     const c = ctx({
       questions: [

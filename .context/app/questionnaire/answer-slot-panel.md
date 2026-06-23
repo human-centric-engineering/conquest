@@ -101,11 +101,19 @@ brief skeleton before the first fetch.
 
 ## Confidence language
 
-`confidence.ts` maps a 0–1 confidence to a quiet, semantic band — high / moderate / low
-/ unscored — reusing the admin eval-chip thresholds (≥0.85 / ≥0.6) so the platform
-reads one visual language. The respondent sees a tinted dot + a band word
-("Confident" / "Fairly sure" / "Unsure" / "Captured"), never a raw number — confidence
-is felt, not totted up.
+`confidence.ts` maps a 0–1 confidence to a quiet, semantic band. Four scored bands (not the
+earlier three) track the finer extraction rubric (0.3–1.0 by directness × elaboration ×
+certainty): **high** ≥0.85 ("Confident"), **moderate** ≥0.65 ("Fairly sure"), **tentative**
+≥0.45 ("Tentative"), **low** <0.45 ("Unsure"), plus **unscored** ("Captured"). This deliberately
+**decouples** the respondent panel from the admin eval chips (`evaluation-metric-chips.tsx`, still
+two-cut at 0.85/0.6) — the panel needs the extra resolution to make the new nuance legible.
+
+The respondent sees a tinted dot (`ConfidenceIndicator`) **and** the label + raw percentage
+(`ConfidenceScore`, e.g. "Fairly sure · 62%") on every captured slot — by product decision the
+nuanced 30–100% range is shown, not collapsed to a band word. The panel header pairs completion
+with the **average confidence** across all filled slots (an honest mean — a tangential, low-confidence
+fill drags it down by design), computed server-side in `_lib/answer-panel.ts` and carried on
+`AnswerPanelView.averageConfidence`.
 
 ## Not here
 

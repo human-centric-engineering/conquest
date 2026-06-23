@@ -155,4 +155,12 @@ export interface AnswerPanelView {
    * sees. Absent in question mode (the header uses `answeredCount` / `totalCount`).
    */
   progressPercent?: number;
+  /**
+   * Mean capture confidence (0–1) across every FILLED slot — the data-slot fills in data-slot mode,
+   * or the answered question slots in question mode. The header pairs it with completion ("avg
+   * confidence 58%") so the respondent sees how sure we are about what we've captured, alongside how
+   * much is done. An honest mean over all fills (a tangential, low-confidence fill drags it down by
+   * design). Absent (`undefined`) when nothing scored has been captured yet — the header omits it.
+   */
+  averageConfidence?: number;
 }

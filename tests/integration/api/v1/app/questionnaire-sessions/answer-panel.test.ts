@@ -41,6 +41,8 @@ function row(over: Record<string, unknown> = {}) {
               type: 'free_text',
               typeConfig: null,
               required: true,
+              // weight is part of the real select and read by weightedCoverage in data-slot mode.
+              weight: 1,
             },
             {
               key: 'colour',
@@ -53,6 +55,7 @@ function row(over: Record<string, unknown> = {}) {
                 ],
               },
               required: false,
+              weight: 1,
             },
           ],
         },
@@ -96,6 +99,28 @@ describe('loadAnswerPanelState', () => {
     expect(loaded?.view.scope).toBe('full_progress');
     expect(loaded?.view.answeredCount).toBe(1);
     expect(loaded?.view.totalCount).toBe(2);
+    // Average confidence is the mean over scored answers (one answer at 0.9 → 0.9).
+    expect(loaded?.view.averageConfidence).toBeCloseTo(0.9);
+  });
+
+  it('omits averageConfidence when no answer carries a score', async () => {
+    findUnique.mockResolvedValue(
+      row({
+        answers: [
+          {
+            value: 'Ada',
+            confidence: null,
+            provenanceLabel: 'direct',
+            rationale: null,
+            lastUpdatedTurnId: null,
+            refinementHistory: [],
+            questionSlot: { key: 'name' },
+          },
+        ],
+      })
+    );
+    const loaded = await loadAnswerPanelState('sess-1');
+    expect(loaded?.view.averageConfidence).toBeUndefined();
   });
 
   it('resolves lastUpdatedTurnId to its 1-based turn ordinal', async () => {
@@ -198,6 +223,10 @@ describe('loadAnswerPanelState', () => {
             {
               dataSlotId: 'ds-1',
               paraphrase: 'Grow the team',
+              // provenanceLabel + rationale are part of the real Prisma select and read by the
+              // seam (asProvenance / the fill map) — include them so the fixture matches the row shape.
+              provenanceLabel: 'direct',
+              rationale: 'They said growing the team is the priority.',
               confidence: 0.9,
               provisional: false,
               refinementHistory: [{ previousParaphrase: 'Hire', previousConfidence: 0.4 }],
@@ -214,6 +243,9 @@ describe('loadAnswerPanelState', () => {
       const goal = group.slots.find((s) => s.key === 'goal')!;
       expect(goal.filled).toBe(true);
       expect(goal.paraphrase).toBe('Grow the team');
+      // The provenance + rationale flow through the seam to the view.
+      expect(goal.provenance).toBe('direct');
+      expect(goal.rationale).toBe('They said growing the team is the priority.');
       expect(goal.history).toEqual([{ paraphrase: 'Hire', confidence: 0.4 }]);
       const mood = group.slots.find((s) => s.key === 'mood')!;
       expect(mood.filled).toBe(false);
@@ -221,6 +253,9 @@ describe('loadAnswerPanelState', () => {
       // Question rows are suppressed; a blended progress percent is shown instead.
       expect(loaded?.view.sections).toEqual([]);
       expect(typeof loaded?.view.progressPercent).toBe('number');
+      // Average confidence in data-slot mode is the mean over the FILLS (ds-1 at 0.9; ds-2 unfilled
+      // contributes nothing), matching the data-slot rows the respondent sees — not the question answers.
+      expect(loaded?.view.averageConfidence).toBeCloseTo(0.9);
     });
 
     it('counts a provisional fill as filled even below the confidence threshold', async () => {
@@ -234,6 +269,8 @@ describe('loadAnswerPanelState', () => {
             {
               dataSlotId: 'ds-1',
               paraphrase: 'maybe',
+              provenanceLabel: 'inferred',
+              rationale: null,
               confidence: 0.1,
               provisional: true,
               refinementHistory: [],

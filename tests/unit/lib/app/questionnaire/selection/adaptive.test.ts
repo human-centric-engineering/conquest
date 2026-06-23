@@ -136,6 +136,57 @@ describe('adaptive strategy — happy path', () => {
     expect(candidates.find((x: { id: string }) => x.id === 'c').peerDivergence).toBeUndefined();
   });
 
+  it('flags a candidate whose section holds a low-confidence answer for deepening', async () => {
+    const dp = deps();
+    const c = ctx({
+      questions: [
+        // s1 holds a shaky (0.4) answer → its unanswered sibling 'b' should be flagged.
+        q({ id: 'a', sectionId: 's1', sectionOrdinal: 0, ordinal: 0 }),
+        q({ id: 'b', sectionId: 's1', sectionOrdinal: 0, ordinal: 1 }),
+        // s2 is confidently answered → its sibling 'c' is not flagged.
+        q({ id: 'c', sectionId: 's2', sectionOrdinal: 1, ordinal: 0 }),
+        q({ id: 'd', sectionId: 's2', sectionOrdinal: 1, ordinal: 1 }),
+      ],
+      answered: [
+        { questionId: 'a', confidence: 0.4 },
+        { questionId: 'c', confidence: 0.9 },
+      ],
+      recentMessages: ['hello'],
+    });
+    await select(c, dp);
+
+    const candidates = (dp.llmPick as ReturnType<typeof vi.fn>).mock.calls[0][0].candidates;
+    expect(candidates.find((x: { id: string }) => x.id === 'b').sectionLowConfidence).toBe(true);
+    // A candidate in a confidently-answered section carries no flag.
+    expect(
+      candidates.find((x: { id: string }) => x.id === 'd').sectionLowConfidence
+    ).toBeUndefined();
+  });
+
+  it('dedups duplicate answer rows by questionId (first row wins) so a confident current answer is not flagged shaky', async () => {
+    const dp = deps();
+    const c = ctx({
+      questions: [
+        q({ id: 'a', sectionId: 's1', sectionOrdinal: 0, ordinal: 0 }),
+        q({ id: 'b', sectionId: 's1', sectionOrdinal: 0, ordinal: 1 }),
+        // A second unanswered candidate so the pool > 1 and the LLM picker actually runs.
+        q({ id: 'c', sectionId: 's2', sectionOrdinal: 1, ordinal: 0 }),
+      ],
+      // Two rows for 'a' — the current (first) answer is confident; a stale earlier row is low.
+      // Matching weighted.ts's dedup, only the first row counts, so s1 is NOT flagged shaky.
+      answered: [
+        { questionId: 'a', confidence: 0.9 },
+        { questionId: 'a', confidence: 0.3 },
+      ],
+      recentMessages: ['hello'],
+    });
+    await select(c, dp);
+    const candidates = (dp.llmPick as ReturnType<typeof vi.fn>).mock.calls[0][0].candidates;
+    expect(
+      candidates.find((x: { id: string }) => x.id === 'b').sectionLowConfidence
+    ).toBeUndefined();
+  });
+
   it('asks the only remaining candidate directly without spending on the LLM', async () => {
     const dp = deps();
     const c = ctx({

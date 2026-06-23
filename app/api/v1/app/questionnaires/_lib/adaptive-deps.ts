@@ -44,6 +44,8 @@ export function buildSelectorPrompt(input: LlmPickInput): string {
   // so the model judges on intent, not just wording. Absent fields are simply omitted.
   // Learning Mode (adaptive probing): does any candidate carry a peer-divergence signal?
   const hasPeerDivergence = input.candidates.some((c) => typeof c.peerDivergence === 'number');
+  // Deepening: does any candidate sit in a section with a shaky (low-confidence) answer?
+  const hasLowConfidence = input.candidates.some((c) => c.sectionLowConfidence === true);
 
   const candidates = numberedList(
     input.candidates.map((c) => {
@@ -54,6 +56,12 @@ export function buildSelectorPrompt(input: LlmPickInput): string {
       if (typeof c.peerDivergence === 'number') {
         const band = c.peerDivergence >= 0.66 ? 'high' : c.peerDivergence >= 0.33 ? 'some' : 'low';
         lines.push(`   - Earlier respondents diverged: ${band} (${c.peerDivergence.toFixed(2)})`);
+      }
+      // Flag a candidate that would deepen shaky ground — its area holds a terse/vague/inferred answer.
+      if (c.sectionLowConfidence === true) {
+        lines.push(
+          "   - We're unsure here: this area's answer was terse, vague, or only inferred — probe to deepen it."
+        );
       }
       return lines.join('\n');
     })
@@ -73,6 +81,12 @@ export function buildSelectorPrompt(input: LlmPickInput): string {
       'task',
       'Pick the candidate that follows most naturally from the conversation and best advances ' +
         'the goal — favour continuity over list order, and choose 0 if none fit.' +
+        (hasLowConfidence
+          ? ' Where a candidate is flagged "We\'re unsure here", lean toward choosing it to deepen ' +
+            'that shaky answer — make it a genuine follow-up, not a fresh topic. A confidently-captured ' +
+            'area needs no revisiting; an uncertain one does. Never re-tread a topic the respondent has ' +
+            'plainly closed off.'
+          : '') +
         (hasPeerDivergence
           ? ' All else close, lean toward a topic where earlier respondents diverged more (richer ' +
             'follow-up territory) — but never at the cost of conversational flow.'

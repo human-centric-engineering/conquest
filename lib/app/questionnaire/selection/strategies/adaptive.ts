@@ -25,13 +25,36 @@ import {
   unansweredQuestions,
 } from '@/lib/app/questionnaire/selection/context';
 import { weightedScores } from '@/lib/app/questionnaire/selection/strategies/weighted';
-import type {
-  QuestionView,
-  SelectionContext,
-  SelectionDecision,
-  SelectionStrategyPlugin,
-  StrategyDeps,
+import {
+  LOW_CONFIDENCE_THRESHOLD,
+  type QuestionView,
+  type SelectionContext,
+  type SelectionDecision,
+  type SelectionStrategyPlugin,
+  type StrategyDeps,
 } from '@/lib/app/questionnaire/selection/types';
+
+/**
+ * Section ids that already hold a low-confidence answer (a terse, vague, or tangentially-inferred
+ * capture). Mirrors the `weighted` scorer's `hasLowConfidence` so both strategies treat the same
+ * answers as "shaky ground worth revisiting" — including its dedup of duplicate answer rows: only
+ * the FIRST row per question counts, so a question whose current answer is confident isn't flagged
+ * shaky by a stale earlier low-confidence row (and the two strategies can't disagree). Unscored
+ * answers (`confidence === null`) never count.
+ */
+function lowConfidenceSectionIds(ctx: SelectionContext): Set<string> {
+  const sectionByQuestion = new Map(ctx.questions.map((q) => [q.id, q.sectionId]));
+  const ids = new Set<string>();
+  const counted = new Set<string>();
+  for (const a of ctx.answered) {
+    if (counted.has(a.questionId)) continue; // dedup duplicate answer rows (matches weighted.ts)
+    counted.add(a.questionId);
+    if (a.confidence === null || a.confidence > LOW_CONFIDENCE_THRESHOLD) continue;
+    const sectionId = sectionByQuestion.get(a.questionId);
+    if (sectionId !== undefined) ids.add(sectionId);
+  }
+  return ids;
+}
 
 /** How many similarity-ranked candidates to hand the LLM. */
 export const ADAPTIVE_CANDIDATE_K = 5;
@@ -93,6 +116,7 @@ async function select(ctx: SelectionContext, deps?: StrategyDeps): Promise<Selec
       return weightedFallback(ctx, 'no slot embeddings to rank against');
     }
 
+    const lowConfSections = lowConfidenceSectionIds(ctx);
     const candidates = rankedIds
       .map((id) => byId.get(id))
       .filter((q): q is QuestionView => q !== undefined)
@@ -100,6 +124,9 @@ async function select(ctx: SelectionContext, deps?: StrategyDeps): Promise<Selec
         // Learning Mode (adaptive probing): attach this topic's peer divergence (by key) so the
         // selector can lean toward probing where earlier respondents split. Absent when not learning.
         const peerDivergence = ctx.peerDivergenceByKey?.[q.key];
+        // Deepening signal: flag a candidate whose section already holds a shaky answer, so the
+        // selector can choose it to probe deeper rather than treating the area as covered.
+        const sectionLowConfidence = lowConfSections.has(q.sectionId);
         return {
           id: q.id,
           key: q.key,
@@ -107,6 +134,7 @@ async function select(ctx: SelectionContext, deps?: StrategyDeps): Promise<Selec
           guidelines: q.guidelines,
           rationale: q.rationale,
           ...(typeof peerDivergence === 'number' ? { peerDivergence } : {}),
+          ...(sectionLowConfidence ? { sectionLowConfidence: true } : {}),
         };
       });
 

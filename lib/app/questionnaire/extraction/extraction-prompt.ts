@@ -42,18 +42,25 @@ from sentiment — do NOT expect, or wait for, a numeric rating.
 these", "Prefer not to say") IF the slot offers one (e.g. "Marketing" for a department with \
 options Engineering/Sales/Operations/Other → the "Other" value). Only when no option fits at all \
 and there is no catch-all do you omit the answer.
-- "confidence": 0–1, scored in three bands by how PLAINLY this value is supported — its CLARITY, not \
-how many times they've said it. CLEAR (~0.8): stated or unmistakably implied — the DEFAULT for a \
-clearly-answered question, even a brief or blunt one. PARTIAL (~0.5): a hedged or loosely-implied \
-reading. UNCLEAR (≤ 0.4): a weak guess off thin evidence. Never mark a clear answer down for being \
-brief, blunt, or said only once.
+- "confidence": 0–1, by how PLAINLY and how FULLY this value is supported. Weigh three things: how \
+DIRECTLY they gave it, how much they ELABORATED (a reason, an example, specifics), and how CERTAIN \
+they sounded. ~0.8 is NOT a default — use the whole 0.3–1.0 range. For a CLOSED question \
+(single_choice, multi_choice, likert, numeric, date, boolean) a complete, unambiguous answer is HIGH \
+(0.85–0.95) even when terse — a closed answer needs no elaboration to be complete, so do NOT mark it \
+down for brevity; only drop it when the mapping itself is genuinely uncertain. For a FREE_TEXT / \
+qualitative value, calibrate by depth: a direct statement backed by a reason or example → 0.9–1.0; a \
+clear, direct answer with no elaboration → 0.75–0.85; a terse, vague or non-descriptive answer where \
+the stance is gettable but thin → 0.45–0.6; a value reached only by a tangential inference → 0.3–0.45.
 - "provenance": one of ${EXTRACTOR_EMITTED_PROVENANCES.join(', ')}:
     "direct" — the value is stated in the message; include the exact "sourceQuote".
     "inferred" — the value follows by single-step reasoning from the message but isn't stated.
     "synthesised" — the value combines several turns / the wider conversation; no single span.
 - "rationale": a short, faithful reason for the value — what the respondent said that supports it, \
 not a restatement of the value itself. For an inferred value, name the words it follows from \
-("Said they hate their job → bottom of the satisfaction scale."). Keep it gender-neutral.
+("Said they hate their job → bottom of the satisfaction scale."). Where the confidence is not \
+self-evident, open the rationale with its basis ("Stated directly with an example, …"; "Inferred \
+tangentially from their comment about …"; "A terse 'it's fine' with nothing more, so …"). Keep it \
+gender-neutral.
 - "sourceQuote": the span of the respondent's message the value came from. REQUIRED for "direct".
 
 Rules:
@@ -124,23 +131,24 @@ in their role.", NOT "Their dissatisfaction is a blocker to their best work."). 
 WRONG), and NEVER a statement of ABSENCE — what is missing, not yet covered, or not provided ("Their \
 tenure and department are not provided." is WRONG; omit the slot instead). Capture the full \
 substance — if they gave several details, reflect them all.
-- "confidence": how PLAINLY the respondent has expressed THIS position — their CLARITY — in three \
-bands. Judge it on the FILL ITSELF (how clearly they conveyed their stance), NEVER inherited from a \
-mapped question's typed-value uncertainty. It is NOT a corroboration counter: a position stated \
-clearly is clear the FIRST time they say it.
-    • CLEAR (~0.8): they stated or unmistakably expressed this position — even bluntly, briefly, or in \
-one message ("extremely unlikely", "I hate my job", "pay, full stop" are all CLEAR). This is the \
-DEFAULT for any slot the message directly and clearly addresses. Do NOT mark a clear answer down \
-because the slot (blockers, concerns, needs, goals) COULD have further facets you haven't explored, \
-because they've only said it once, or because it maps onto a scale — score the substance they gave.
-    • PARTIAL (~0.5): a reasonable but hedged reading — a loose, single-step inference from a brief or \
-vague message (e.g. reading "blockers" out of "not satisfied") — where asking again would sharpen it.
-    • UNCLEAR (≤ 0.4): genuinely weak signal you are mostly guessing at; reserve a slot's lowest scores \
-for this — that is the case that should re-ask, not a clearly-stated answer.
-  Corroboration only ever nudges a clear position UPWARD: raise it a STEP toward ~0.9 as each new turn \
-confirms the same stance (≥ 0.95 only for something confirmed more than once), but it NEVER drags a \
-clearly-stated answer below CLEAR. When a slot's "current" line shows a prior confidence, step it up as \
-the position is corroborated rather than jumping straight to certainty.
+- "confidence": 0–1, by how PLAINLY and how FULLY the respondent expressed THIS position — weigh how \
+DIRECTLY they stated it, how much they ELABORATED (a reason, an example, specifics), and how CERTAIN \
+they sounded. Judge it on the FILL ITSELF, NEVER inherited from a mapped question's typed-value \
+uncertainty. Use the whole 0.3–1.0 range — ~0.8 is NOT a default. Anchors:
+    • 0.9–1.0 — stated directly AND backed by a reason, an example, or specifics ("I'd never recommend \
+us — onboarding wastes a week and nobody follows up", "pay is the issue, I'm 20% under market").
+    • 0.75–0.85 — a clear, direct answer with no elaboration ("extremely unlikely", "I hate my job", \
+"pay, full stop").
+    • 0.45–0.6 — terse, vague or non-descriptive, where the stance is gettable but thin ("it's fine", \
+"dunno, okay I guess") — asking again would sharpen it.
+    • 0.3–0.45 — reached only by a tangential, single-step inference from something they said about \
+another topic (e.g. reading "blockers" out of "not satisfied") — a weak signal worth revisiting.
+  Score the position on THIS turn's clarity; it does not start low merely because it was said only \
+once, nor because the slot (blockers, concerns, needs, goals) could have facets you haven't explored. \
+Corroboration only ever nudges a position UPWARD: raise it a STEP toward ~0.9 as each new turn confirms \
+the same stance (≥ 0.95 only for something confirmed more than once), but it NEVER drags a \
+directly-stated answer down. When a slot's "current" line shows a prior confidence, step it up as the \
+position is corroborated rather than jumping straight to certainty.
 - "provenance": ${EXTRACTOR_EMITTED_PROVENANCES.join(', ')} — judge whether the RESPONDENT STATED \
 their position on THIS slot's topic: "direct" when they expressed it outright (even bluntly — \
 "extremely unlikely" directly states a recommendation stance), "inferred" when it follows by one step \
@@ -157,8 +165,11 @@ is a significant blocker." A bare meta-statement that the message "informs this 
 it adds nothing ("Their statement about the company's purpose directly informs this topic." is WRONG; \
 say WHAT the statement was). The substance may be paraphrased but must uphold the meaning expressed in \
 the chat — do not soften, inflate, or drift from what they said. For an "inferred"/"synthesised" fill, \
-give both halves: what they said AND why it points to this reading ("…, which suggests …"). NEVER use \
-the words "data slot" or "slot" (internal jargon); name the subject by the topic or the slot's name.
+give both halves: what they said AND why it points to this reading ("…, which suggests …"). When the \
+confidence is not self-evident from the substance, make its basis legible — a low score should read \
+as tentative or tangential ("…, though they only touched on it in passing"), a high one as direct and \
+backed ("…, stated plainly and backed with an example"). NEVER use the words "data slot" or "slot" \
+(internal jargon); name the subject by the topic or the slot's name.
 - SUBJECT WORDING (paraphrase AND rationale): keep it gender-neutral and VARY it — alternate "the \
 respondent", "they"/"them", "this person" rather than starting every line with "They". Never assume or \
 imply a gender.
@@ -184,7 +195,7 @@ array.
 Some slots show a "status: asked N× without a clear answer" line — the conversation has tried \
 repeatedly and is about to move on. For EACH such slot you MUST output a fill: infer the most \
 plausible position from the ENTIRE conversation even if the signal is weak, set a LOW "confidence" \
-(≤ 0.4), and use provenance "inferred" or "synthesised". Never leave one of these slots empty — \
+(0.3–0.4), and use provenance "inferred" or "synthesised". Never leave one of these slots empty — \
 a tentative reading we can revisit is better than nothing.
 
 ANSWER THE MAPPED QUESTIONS — a slot may list "answers questions: <keys>": the candidate question(s) it \
@@ -198,9 +209,10 @@ my job" for a 1–5 satisfaction question is the bottom of the scale (1); "I'd n
 message) or "synthesised" (it draws on several turns), NEVER "direct" (they did not state the typed \
 value) — this concerns the mapped ANSWER's provenance ONLY; the data-slot FILL is judged SEPARATELY \
 and can still be "direct". Set the mapped answer's "confidence" by how firmly the position pins THAT \
-value: CLEAR (~0.8) when the position unmistakably fixes it (a blunt "I'd never recommend us" pins an \
-NPS near 0), PARTIAL (~0.5) when it only points at a range, UNCLEAR (≤ 0.4) when it barely constrains \
-the value — a firmly-pinned value is CLEAR even though its provenance is "inferred". APPROPRIATENESS GATE: emit a mapped \
+value: 0.85–0.95 when the position unmistakably fixes it (a blunt "I'd never recommend us" pins an NPS \
+near 0), 0.6–0.8 when it points at the right region, 0.4–0.55 when it only narrows the range, 0.3–0.4 \
+when it barely constrains the value — a firmly-pinned value is HIGH even though its provenance is \
+"inferred". APPROPRIATENESS GATE: emit a mapped \
 answer ONLY when the position genuinely fixes a value; if the slot is informed but the message does not \
 determine a particular question's answer (e.g. it asks for a specific number the message never implies), \
 OMIT that question rather than guess. Treat mapped answers like any other: re-evaluate them as evidence \

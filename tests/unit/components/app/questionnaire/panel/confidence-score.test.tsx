@@ -6,9 +6,10 @@
  * attribute format, and the optional className forwarding.
  *
  * Band thresholds (from lib/app/questionnaire/panel/confidence.ts):
- *   ≥ 0.85 → high  ("Confident")
- *   ≥ 0.60 → moderate ("Fairly sure")
- *   < 0.60 → low ("Unsure")
+ *   ≥ 0.85 → high      ("Confident")
+ *   ≥ 0.65 → moderate  ("Fairly sure")
+ *   ≥ 0.45 → tentative ("Tentative")
+ *   < 0.45 → low       ("Unsure")
  *
  * @see components/app/questionnaire/panel/confidence-score.tsx
  */
@@ -64,15 +65,15 @@ describe('ConfidenceScore', () => {
     });
   });
 
-  describe('moderate band (0.60 ≤ confidence < 0.85)', () => {
-    it('renders "Fairly sure" label at 0.60 (lower boundary)', () => {
-      render(<ConfidenceScore confidence={0.6} />);
+  describe('moderate band (0.65 ≤ confidence < 0.85)', () => {
+    it('renders "Fairly sure" label at 0.65 (lower boundary)', () => {
+      render(<ConfidenceScore confidence={0.65} />);
       expect(screen.getByText(/Fairly sure/)).toBeInTheDocument();
     });
 
-    it('renders the correct percentage at 0.60 (60%)', () => {
-      render(<ConfidenceScore confidence={0.6} />);
-      expect(screen.getByText(/60%/)).toBeInTheDocument();
+    it('renders the correct percentage at 0.65 (65%)', () => {
+      render(<ConfidenceScore confidence={0.65} />);
+      expect(screen.getByText(/65%/)).toBeInTheDocument();
     });
 
     it('renders "Fairly sure" with amber tint at 0.75', () => {
@@ -87,9 +88,32 @@ describe('ConfidenceScore', () => {
     });
   });
 
-  describe('low band (confidence < 0.60)', () => {
-    it('renders "Unsure" label at 0.59 (just below moderate threshold)', () => {
-      render(<ConfidenceScore confidence={0.59} />);
+  describe('tentative band (0.45 ≤ confidence < 0.65)', () => {
+    it('renders "Tentative" label at 0.45 (lower boundary)', () => {
+      render(<ConfidenceScore confidence={0.45} />);
+      expect(screen.getByText(/Tentative/)).toBeInTheDocument();
+    });
+
+    it('renders "Tentative" with orange tint at 0.6', () => {
+      render(<ConfidenceScore confidence={0.6} />);
+      const chip = screen.getByText(/Tentative/);
+      expect(chip.closest('span')!.className).toContain('orange');
+    });
+
+    it('renders the correct percentage at 0.6 (60%)', () => {
+      render(<ConfidenceScore confidence={0.6} />);
+      expect(screen.getByText(/60%/)).toBeInTheDocument();
+    });
+
+    it('renders "Tentative" at just below the moderate threshold (0.64)', () => {
+      render(<ConfidenceScore confidence={0.64} />);
+      expect(screen.getByText(/Tentative/)).toBeInTheDocument();
+    });
+  });
+
+  describe('low band (confidence < 0.45)', () => {
+    it('renders "Unsure" label at 0.44 (just below tentative threshold)', () => {
+      render(<ConfidenceScore confidence={0.44} />);
       expect(screen.getByText(/Unsure/)).toBeInTheDocument();
     });
 
