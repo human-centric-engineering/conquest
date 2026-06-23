@@ -1,0 +1,123 @@
+'use client';
+
+/**
+ * SlotMiniMap — a floating, vertical, scaled-down mirror of the data-slot scroll area (F7.8).
+ *
+ * Like the workflow-canvas minimap: one thin bar per slot (tinted by confidence band when filled, a
+ * faint sliver when not), stacked in list order and sized proportional to the real rows, with a
+ * "viewport window" rectangle showing what's currently on screen. Click or drag anywhere on the
+ * track to scrub the list to that position; the window follows the list as it scrolls. Purely a
+ * visual scroll aid (the real list + the after-turn stepper carry keyboard/SR navigation), so the
+ * track is `aria-hidden`.
+ *
+ * Presentational: all geometry is precomputed by `computeMiniMapModel` and passed in as percentages.
+ *
+ * `// DEMO-ONLY (F7.2):` questionnaire-domain (data slots + confidence) — a non-questionnaire fork
+ * strips this `panel/` directory.
+ */
+
+import { useRef } from 'react';
+
+import { cn } from '@/lib/utils';
+import type { ConfidenceBand } from '@/lib/app/questionnaire/panel/confidence';
+import type { MiniMapBar } from '@/lib/app/questionnaire/panel/minimap';
+
+export interface SlotMiniMapProps {
+  bars: MiniMapBar[];
+  /** The viewport window rectangle, as a percentage of the track. */
+  windowTopPct: number;
+  windowHeightPct: number;
+  /** Keys filled by the latest turn — pulsed once to draw the eye. */
+  newlyFilledKeys?: readonly string[];
+  /** Scrub the list to a fraction [0,1] of the content. `smooth` for a discrete tap, not a drag. */
+  onScrubToFraction: (fraction: number, smooth: boolean) => void;
+  className?: string;
+}
+
+/** Tailwind fill for a filled slot's bar, by confidence band. Unfilled bars use a faint sliver. */
+const FILLED_BAR_COLOR: Record<ConfidenceBand, string> = {
+  high: 'bg-emerald-500/80',
+  moderate: 'bg-amber-500/80',
+  tentative: 'bg-orange-500/80',
+  low: 'bg-red-500/80',
+  unscored: 'bg-foreground/40',
+};
+
+export function SlotMiniMap({
+  bars,
+  windowTopPct,
+  windowHeightPct,
+  newlyFilledKeys,
+  onScrubToFraction,
+  className,
+}: SlotMiniMapProps) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const draggingRef = useRef(false);
+  const newly = newlyFilledKeys && newlyFilledKeys.length > 0 ? new Set(newlyFilledKeys) : null;
+
+  const fractionFromY = (clientY: number): number => {
+    const el = trackRef.current;
+    if (!el) return 0;
+    const rect = el.getBoundingClientRect();
+    if (rect.height === 0) return 0;
+    return Math.min(1, Math.max(0, (clientY - rect.top) / rect.height));
+  };
+
+  return (
+    <div
+      ref={trackRef}
+      data-testid="slot-minimap"
+      aria-hidden="true"
+      onPointerDown={(e) => {
+        draggingRef.current = true;
+        if (e.currentTarget.setPointerCapture) {
+          try {
+            e.currentTarget.setPointerCapture(e.pointerId);
+          } catch {
+            // jsdom / unsupported — capture is a nicety, dragging still works without it.
+          }
+        }
+        onScrubToFraction(fractionFromY(e.clientY), true);
+      }}
+      onPointerMove={(e) => {
+        if (draggingRef.current) onScrubToFraction(fractionFromY(e.clientY), false);
+      }}
+      onPointerUp={(e) => {
+        draggingRef.current = false;
+        if (e.currentTarget.releasePointerCapture) {
+          try {
+            e.currentTarget.releasePointerCapture(e.pointerId);
+          } catch {
+            // no-op
+          }
+        }
+      }}
+      onPointerCancel={() => {
+        draggingRef.current = false;
+      }}
+      className={cn(
+        'bg-card/70 supports-[backdrop-filter]:bg-card/50 relative w-4 cursor-pointer touch-none rounded-md border shadow-sm backdrop-blur-sm',
+        className
+      )}
+    >
+      {bars.map((bar) => (
+        <div
+          key={bar.key}
+          data-bar-key={bar.key}
+          style={{ top: `${bar.topPct}%`, height: `${bar.heightPct}%` }}
+          className={cn(
+            'absolute inset-x-0.5 rounded-[2px]',
+            bar.filled ? FILLED_BAR_COLOR[bar.band] : 'bg-muted-foreground/15',
+            newly?.has(bar.key) && 'ring-primary ring-1'
+          )}
+        />
+      ))}
+      {/* The viewport window — what's currently visible in the list. Follows the scroll. */}
+      <div
+        data-testid="slot-minimap-window"
+        style={{ top: `${windowTopPct}%`, height: `${windowHeightPct}%` }}
+        className="border-primary/70 bg-primary/10 pointer-events-none absolute inset-x-0 rounded-sm border"
+      />
+    </div>
+  );
+}

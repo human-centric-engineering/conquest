@@ -145,6 +145,7 @@ export async function loadAnswerPanelState(
           confidence: true,
           rationale: true,
           provisional: true,
+          lastUpdatedTurnId: true,
           refinementHistory: true,
         },
       },
@@ -211,6 +212,10 @@ export async function loadAnswerPanelState(
           confidence: f.confidence,
           rationale: f.rationale,
           provisional: f.provisional,
+          // 1-based turn that last touched this fill (null when the turn is somehow missing) — used
+          // by the workspace to detect the fills a turn just produced and scroll to them.
+          answeredAtTurnIndex:
+            f.lastUpdatedTurnId != null ? (turnOrdinal.get(f.lastUpdatedTurnId) ?? null) : null,
           history: asDataSlotHistory(f.refinementHistory),
         },
       ])
@@ -239,6 +244,7 @@ export async function loadAnswerPanelState(
         rationale: fill?.rationale ?? null,
         filled,
         provisional,
+        answeredAtTurnIndex: fill?.answeredAtTurnIndex ?? null,
         // Prior values, oldest first (only present once the answer changed at least once).
         history: (fill?.history ?? []).map((h) => ({
           paraphrase: h.previousParaphrase,

@@ -4,11 +4,15 @@
  * @see components/app/questionnaire/panel/answer-slot-panel.tsx
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 
 import { AnswerSlotPanel } from '@/components/app/questionnaire/panel/answer-slot-panel';
-import type { AnswerPanelView, PanelSlotView } from '@/lib/app/questionnaire/panel/types';
+import type {
+  AnswerPanelView,
+  DataSlotPanelSlot,
+  PanelSlotView,
+} from '@/lib/app/questionnaire/panel/types';
 
 function answeredSlot(over: Partial<PanelSlotView> = {}): PanelSlotView {
   return {
@@ -152,6 +156,7 @@ describe('AnswerSlotPanel', () => {
                   rationale: 'They stated their age and corrected their gender.',
                   filled: true,
                   provisional: false,
+                  answeredAtTurnIndex: 2,
                   history: [{ paraphrase: 'A 25-year-old male.', confidence: 0.9 }],
                 },
               ],
@@ -183,6 +188,7 @@ describe('AnswerSlotPanel', () => {
                   rationale: null,
                   filled: true,
                   provisional: true,
+                  answeredAtTurnIndex: 1,
                   history: [],
                 },
               ],
@@ -196,7 +202,7 @@ describe('AnswerSlotPanel', () => {
     expect(screen.getByText(/provisional · may revisit/i)).toBeInTheDocument();
   });
 
-  it('flags an inferred data-slot fill with an "Inferred" marker and shows the confidence score', () => {
+  it('shows the "Inferred" marker and confidence score for an inferred-provenance slot (still uncovered)', () => {
     render(
       <AnswerSlotPanel
         view={view({
@@ -214,6 +220,7 @@ describe('AnswerSlotPanel', () => {
                   rationale: 'Read from their frustration about management.',
                   filled: false,
                   provisional: false,
+                  answeredAtTurnIndex: null,
                   history: [],
                 },
               ],
@@ -248,6 +255,7 @@ describe('AnswerSlotPanel', () => {
                   rationale: null,
                   filled: true,
                   provisional: false,
+                  answeredAtTurnIndex: 1,
                   history: [],
                 },
               ],
@@ -258,7 +266,9 @@ describe('AnswerSlotPanel', () => {
       />
     );
     expect(screen.getByText('They are not satisfied with their role.')).toBeInTheDocument();
-    expect(screen.queryByText(/^Inferred ·/)).not.toBeInTheDocument();
+    // The "Inferred" marker is a bare <span>Inferred</span> — assert the actual rendered text is
+    // absent (the old /^Inferred ·/ regex never matched any node, so it asserted nothing).
+    expect(screen.queryByText('Inferred')).not.toBeInTheDocument();
   });
 
   it('renders answered values and pending placeholders', () => {
@@ -308,5 +318,180 @@ describe('AnswerSlotPanel', () => {
     render(<AnswerSlotPanel view={view()} />);
     fireEvent.click(screen.getByText('What is your role?'));
     expect(screen.queryByRole('button', { name: 'Revisit' })).not.toBeInTheDocument();
+  });
+
+  // --- Slot overview minimap + after-turn stepper (data-slot mode) ---
+
+  function dataSlot(key: string, over: Partial<DataSlotPanelSlot> = {}): DataSlotPanelSlot {
+    return {
+      key,
+      name: key,
+      description: '',
+      paraphrase: 'Something captured.',
+      provenance: 'direct',
+      confidence: 0.9,
+      rationale: null,
+      filled: true,
+      provisional: false,
+      answeredAtTurnIndex: 1,
+      history: [],
+      ...over,
+    };
+  }
+
+  function dataSlotView(count: number): AnswerPanelView {
+    return view({
+      dataSlotGroups: [
+        {
+          theme: 'Demographics',
+          slots: Array.from({ length: count }, (_, i) => dataSlot(`slot-${i}`)),
+        },
+      ],
+      progressPercent: 40,
+    });
+  }
+
+  it('does not render the minimap when the list does not overflow (jsdom has zero layout)', () => {
+    // The minimap only appears when the content actually overflows the viewport. In jsdom every
+    // measured height is 0 → no overflow → no minimap. (Its appearance with real geometry is covered
+    // in the layout-stub describe below, and SlotMiniMap has its own component test.)
+    render(<AnswerSlotPanel view={dataSlotView(12)} />);
+    expect(screen.queryByTestId('slot-minimap')).not.toBeInTheDocument();
+  });
+
+  it('arms the stepper footer from newlyFilledKeys and steps through, decrementing the copy', () => {
+    render(
+      <AnswerSlotPanel view={dataSlotView(12)} newlyFilledKeys={['slot-0', 'slot-3', 'slot-7']} />
+    );
+    // Footer lands on the first newly-filled slot: two more to go.
+    expect(screen.getByText(/2 more answers recorded/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText(/2 more answers recorded/));
+    // Singular copy for the last hop.
+    expect(screen.getByText('1 more slot was answered')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('1 more slot was answered'));
+    // No footer on the final slot.
+    expect(screen.queryByText(/more answers recorded/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/more slot was answered/)).not.toBeInTheDocument();
+  });
+
+  it('shows no stepper footer when no slots were filled this turn', () => {
+    render(<AnswerSlotPanel view={dataSlotView(12)} newlyFilledKeys={[]} />);
+    expect(screen.queryByText(/more answers recorded/)).not.toBeInTheDocument();
+  });
+
+  // The scroll + measurement paths no-op in jsdom (zero layout height). Stub a non-zero layout and a
+  // ResizeObserver so the real scroll / minimap logic executes.
+  describe('navigation paths (with layout stubs)', () => {
+    let offsetHeightSpy: PropertyDescriptor | undefined;
+
+    beforeEach(() => {
+      // jsdom has no ResizeObserver; the measure effect bails without one.
+      vi.stubGlobal(
+        'ResizeObserver',
+        class {
+          observe() {}
+          unobserve() {}
+          disconnect() {}
+        }
+      );
+      // jsdom reports offsetHeight 0 → scrollToSlot bails; give it a real height.
+      offsetHeightSpy = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight');
+      Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+        configurable: true,
+        get: () => 500,
+      });
+      vi.spyOn(Element.prototype, 'scrollTo').mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      if (offsetHeightSpy) {
+        Object.defineProperty(HTMLElement.prototype, 'offsetHeight', offsetHeightSpy);
+      } else {
+        // No prior own-descriptor to restore — revert to jsdom's effective 0 so the 500 override
+        // can't leak into sibling tests that rely on the panel reading as not-laid-out.
+        Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+          configurable: true,
+          get: () => 0,
+        });
+      }
+      vi.restoreAllMocks();
+    });
+
+    it('auto-scrolls to the first newly-filled slot and highlights it, then steps to the next', () => {
+      render(<AnswerSlotPanel view={dataSlotView(12)} newlyFilledKeys={['slot-2', 'slot-9']} />);
+      // Smooth scroll (reduced-motion stub is false in this env) — assert the behaviour contract.
+      expect(Element.prototype.scrollTo).toHaveBeenCalledWith(
+        expect.objectContaining({ behavior: 'smooth' })
+      );
+      expect(document.getElementById('panel-slot-slot-2')?.className).toContain('ring-2');
+      // Stepping advances the scroll + highlight to the next newly-filled slot.
+      fireEvent.click(screen.getByText(/1 more slot was answered/));
+      expect(document.getElementById('panel-slot-slot-9')?.className).toContain('ring-2');
+    });
+
+    it('renders the minimap and scrubs the list when the content overflows', () => {
+      // Force overflow: scrollHeight > clientHeight, and give the container a real rect.
+      const scrollHeightSpy = Object.getOwnPropertyDescriptor(
+        HTMLElement.prototype,
+        'scrollHeight'
+      );
+      const clientHeightSpy = Object.getOwnPropertyDescriptor(
+        HTMLElement.prototype,
+        'clientHeight'
+      );
+      Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+        configurable: true,
+        get: () => 1000,
+      });
+      Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+        configurable: true,
+        get: () => 300,
+      });
+      const rectSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 100,
+        width: 0,
+        height: 100,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      });
+      try {
+        render(<AnswerSlotPanel view={dataSlotView(12)} />);
+        const minimap = screen.getByTestId('slot-minimap');
+        expect(minimap).toBeInTheDocument();
+        // A viewport window is drawn over the track.
+        expect(screen.getByTestId('slot-minimap-window')).toBeInTheDocument();
+        // The list reserves left padding so its text clears the floating minimap.
+        const scrollContainer = minimap.parentElement?.querySelector('.overflow-y-auto');
+        expect(scrollContainer?.className).toContain('pl-7');
+        // Clicking the track scrubs the list to the clicked fraction. With the stubs (scrollHeight
+        // 1000, clientHeight 300, track rect height 100), clientY 150 → fraction clamps to 1 →
+        // target = min(700, 1000 - 150) = 700.
+        fireEvent.pointerDown(minimap, { clientY: 150, pointerId: 1 });
+        expect(Element.prototype.scrollTo).toHaveBeenCalledWith(
+          expect.objectContaining({ top: 700 })
+        );
+      } finally {
+        if (scrollHeightSpy)
+          Object.defineProperty(HTMLElement.prototype, 'scrollHeight', scrollHeightSpy);
+        else
+          Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+            configurable: true,
+            get: () => 0,
+          });
+        if (clientHeightSpy)
+          Object.defineProperty(HTMLElement.prototype, 'clientHeight', clientHeightSpy);
+        else
+          Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+            configurable: true,
+            get: () => 0,
+          });
+        rectSpy.mockRestore();
+      }
+    });
   });
 });
