@@ -145,3 +145,215 @@ Procedure: [`../questionnaire/schema.md`](../questionnaire/schema.md).
 comment) · `prisma/schema/orchestration-conversations.prisma` ·
 [`../questionnaire/schema.md`](../questionnaire/schema.md) ·
 [`features/f0.1.md`](./features/f0.1.md) (Correction #1 / T0.1.3).
+
+---
+
+### UG-3 — `ExecutionDetailView` copy button leaks an uncleared `setTimeout`
+
+_Status:_ **raised-upstream** ([sunrise#301](https://github.com/human-centric-engineering/sunrise/issues/301)) · _Opened:_ 2026-06-22 · _Surfaced by:_ PR #72 (`feat/generative-authoring`), 2026-06-15
+
+**Gap.** The platform component `CollapsibleJsonCard` in
+`components/admin/orchestration/execution-detail-view.tsx` schedules
+`setTimeout(() => setCopied(false), 2000)` after a clipboard write but never clears
+it. If the component unmounts within 2s the timer fires `setState` on a dead
+component — a benign prod leak, but in tests it fires after jsdom teardown and throws
+`ReferenceError: window is not defined`, failing the whole vitest run.
+
+**Why upstream.** It's a platform component every consumer (and every fork's
+`--changed` test graph) inherits; not app-specific.
+
+**Proposed fix.** Track the timeout in a ref and `clearTimeout` on unmount and before
+re-arming. Check sibling copy handlers in the same file for the same pattern.
+
+**Interim mitigation.** No fork-edit of the component. ConQuest hardened its own test
+to drive the clipboard-unavailable catch path (`writeText` rejects → `catch` → no
+timer scheduled): `tests/unit/components/admin/orchestration/execution-detail-view.test.tsx`.
+
+**References.** [sunrise#301](https://github.com/human-centric-engineering/sunrise/issues/301).
+
+---
+
+### UG-4 — Admin-added (date-stamped) provider models can't be saved and are mis-tiered
+
+_Status:_ **raised-upstream** ([sunrise#302](https://github.com/human-centric-engineering/sunrise/issues/302)) · _Opened:_ 2026-06-22 · _Surfaced by:_ admin adding newer OpenAI models via discovery
+
+**Gap.** Two defects on date-stamped / discovery-added models (e.g.
+`gpt-5.5-pro-2026-04-23`). **(A)** Selecting one for a default-model assignment 400s
+with `VALIDATION_ERROR` — the settings PATCH validates before `hydrateFromDb()`, so
+the dropdown (DB-sourced) and write-validation (un-hydrated registry) disagree. **(B)**
+A frontier "pro" model is labelled `(budget)` / "Infrastructure" — `deriveTierRole()`
+falls back to `infrastructure` because the date suffix defeats name patterns, "pro"
+isn't a frontier signal, and null pricing → `medium`.
+
+**Why upstream.** Platform model registry + heuristics (`lib/orchestration/llm/**`);
+hits any fork using model discovery, the supported way to add models.
+
+**Proposed fix.** Hydrate before validate (or validate model ids against the same DB
+source the dropdown uses); add a shared date-stamp normaliser reused across name
+heuristics; recognise `pro`/`opus`/`ultra`/`-max` as frontier; degrade gracefully on
+unknown cost; provide a re-derive/override path for already-stored rows.
+
+**Interim mitigation.** Prefer statically-known model ids for default assignments;
+use the admin tier override for mislabelled rows. No platform edit carried.
+
+**References.** [sunrise#302](https://github.com/human-centric-engineering/sunrise/issues/302).
+
+---
+
+### UG-5 — Agent-builder skill doesn't document the `isSystem` core reservation
+
+_Status:_ **raised-upstream** ([sunrise#303](https://github.com/human-centric-engineering/sunrise/issues/303)) · _Opened:_ 2026-06-22 · _Surfaced by:_ seeding persistent questionnaire app agents
+
+**Gap.** `AiAgent.isSystem = true` is reserved for Sunrise core agents (it confers an
+undeletable / undeactivatable / instruction-locked / backup-excluded lifecycle). The
+API path can't set it, but the **seed path** can — and the `orchestration-solution-builder`
+skill never says so. A developer copying a core seed (`010-model-auditor.ts`,
+`016-evaluation-judges.ts`) as a template silently elevates an app agent into the
+reserved class.
+
+**Why upstream.** The skill and the reservation convention are platform-shipped;
+affects any fork that seeds agents. Same flag exists on `AiCapability` / `AiAgentProfile`.
+
+**Proposed fix.** Add the reservation rule to the skill + a correct app-agent seed
+scaffold (`isSystem: false`, explanatory comment); optional CI/`pre-pr` lint for
+`isSystem: true` in app-namespace seeds.
+
+**Interim mitigation.** ConQuest seeds set `isSystem: false` explicitly, and the
+`update` branch re-asserts `false` so re-seeding corrects any stray flag —
+`prisma/seeds/app-questionnaire/*`.
+
+**References.** [sunrise#303](https://github.com/human-centric-engineering/sunrise/issues/303) ·
+`prisma/seeds/app-questionnaire/006-answer-extractor-agent.ts`.
+
+---
+
+### UG-6 — No admin honesty indicator for agents whose prompt is built at runtime
+
+_Status:_ **raised-upstream — proposal** ([sunrise#304](https://github.com/human-centric-engineering/sunrise/issues/304)) · _Opened:_ 2026-06-22 · _Surfaced by:_ questionnaire capability agents (code-built prompts)
+
+**Gap.** An agent dispatched for its provider/model binding only — with its system
+prompt assembled in code — makes the stored `systemInstructions` / persona / guardrails
+/ brand-voice fields, and the admin "Effective prompt preview — what the LLM actually
+sees" panel, display text the model never receives. The platform gives no signal that
+these fields are inert.
+
+**Why upstream.** Programmatic capability dispatch (`extends BaseCapability`, structured
+prompts built per-call from live data) is a platform-encouraged pattern; any fork using
+it the intended way hits this. It is **deliberate and necessary**, not a bug to prevent.
+
+**Proposed fix.** Optional, advisory, app-populated `AiAgent.runtimePromptManaged`
+(+ `runtimePromptNote`), default off, behaviour-neutral; admin shows a per-agent
+"instructions bypassed" callout and re-labels the preview. Open scope: a richer
+registerable prompt-specimen seam (show the real runtime prompt) vs. the minimal flag.
+
+**Interim mitigation.** ConQuest already solves its own visibility need app-side, more
+richly than the proposal: an admin **Prompt Library** that renders the real code-built
+prompts (placeholder-tokenised) plus a per-agent `instructionsAreLoadBearing` flag. So
+ConQuest will **not** consume the core flag — this entry is "for the next fork", and a
+candidate to leave at proposal until a second fork needs it.
+
+**References.** [sunrise#304](https://github.com/human-centric-engineering/sunrise/issues/304) ·
+`app/api/v1/app/questionnaires/_lib/prompt-catalog.ts` ·
+`components/admin/questionnaires/prompt-library.tsx` ·
+[`../questionnaire/admin-ui.md`](../questionnaire/admin-ui.md) § "Prompt library".
+
+---
+
+### UG-7 — No brand-name seam (app name hardcoded as "Sunrise")
+
+_Status:_ **raised-upstream** ([sunrise#305](https://github.com/human-centric-engineering/sunrise/issues/305)) · _Opened:_ 2026-06-22 · _Surfaced by:_ ConQuest rebrand (2026-06-13)
+
+**Gap.** "Sunrise" is hardcoded across user-facing surfaces — root + route-group layout
+titles, `emails/*` templates, marketing copy (~45 refs). The only no-code seam is
+`EMAIL_FROM_NAME` (email *sender* display name); there is no `APP_NAME` equivalent for
+the UI.
+
+**Why upstream.** Renaming is the most universal fork need, and the strings live in
+layouts/emails that upstream actively maintains — fix it at the source.
+
+**Proposed fix.** A platform `BRAND` config driven by `NEXT_PUBLIC_APP_NAME` (default
+`'Sunrise'`), read by layouts + emails; `SUNRISE_VERSION` explicitly excluded.
+
+**Interim mitigation.** Until the seam lands, the app tolerates "Sunrise" in
+titles/emails or carries a local edit on those files (merge-cheap; retire on the seam).
+
+**References.** [sunrise#305](https://github.com/human-centric-engineering/sunrise/issues/305).
+
+---
+
+### UG-8 — Marketing-page customization forces fork-and-edit (no documented low-conflict pattern)
+
+_Status:_ **raised-upstream** ([sunrise#306](https://github.com/human-centric-engineering/sunrise/issues/306)) · _Opened:_ 2026-06-22 · _Surfaced by:_ ConQuest Home/About/Contact rebrand (2026-06-13)
+
+**Gap.** `CUSTOMIZATION.md` tells forks to edit `app/(public)/page.tsx`,
+`about/page.tsx`, `contact/page.tsx` directly — producing large conflicts whenever
+upstream touches them. No low-conflict pattern is documented. (The App Router won't let
+a second file resolve to `/`, so the canonical route file must be touched either way.)
+
+**Why upstream.** A docs/guidance gap in platform `CUSTOMIZATION.md` affecting every
+fork; the thin-shim is generic.
+
+**Proposed fix.** Document the **thin-shim** — reduce each route file to a one-line
+re-export, content lives in new `components/app/marketing/*` files (Contact reuses
+Sunrise `<ContactForm>` + `/api/v1/contact`, behaviour unchanged). Full content-seam
+deferred unless multi-fork.
+
+**Interim mitigation.** ConQuest uses the thin-shim locally — this is the carried
+approach the docs change would bless.
+
+**References.** [sunrise#306](https://github.com/human-centric-engineering/sunrise/issues/306).
+
+---
+
+### UG-9 — `runStructuredCompletion` doesn't forward a schema to the provider
+
+_Status:_ **raised-upstream — proposal** ([sunrise#307](https://github.com/human-centric-engineering/sunrise/issues/307)) · _Opened:_ 2026-06-22 · _Surfaced by:_ questionnaire extractor schema-drift bug
+
+**Gap.** `lib/orchestration/evaluations/parse-structured.ts` sends a free-form chat
+prompt and never forwards a JSON schema / `responseFormat`. The model's only contract
+is prose, so a prompt that omits a field name yields mis-keyed output and Zod
+validation fails for every item.
+
+**Why upstream.** Platform helper + provider adapters; shared by the evaluation summary
+handler, the metric scorer, and fork extractors. Patching in the fork would fork a
+platform seam.
+
+**Proposed fix.** Optional `responseSchema` → provider `responseFormat`
+(OpenAI `json_schema`; Anthropic forced-tool); purely additive, `parse` + temp-0 retry
+remain the fallback for providers that ignore it.
+
+**Interim mitigation.** Triggering bug already fixed downstream by naming the required
+fields in `lib/app/questionnaire/ingestion/extraction-prompt.ts`; the prose contract
+stays as belt-and-suspenders. This upstream change is hardening, not a bug fix.
+
+**References.** [sunrise#307](https://github.com/human-centric-engineering/sunrise/issues/307) ·
+`lib/app/questionnaire/ingestion/extraction-prompt.ts` ·
+`lib/app/questionnaire/ingestion/extraction-schema.ts` (`extractionJsonSchema`).
+
+---
+
+### UG-10 — STT provider seam is batch-only (no live/streaming transcription)
+
+_Status:_ **raised-upstream — proposal** ([sunrise#308](https://github.com/human-centric-engineering/sunrise/issues/308)) · _Opened:_ 2026-06-22 · _Surfaced by:_ P7 voice input (F6.2)
+
+**Gap.** `LlmProvider.transcribe()` (`lib/orchestration/llm/types.ts`) is batch-only —
+record, stop, upload, transcribe. There is no streaming variant for live interim
+transcripts (words appearing as the respondent speaks).
+
+**Why upstream.** A provider capability mirroring `chat()` → `chatStream()`; 4+ batch
+consumers (admin chat transcribe, embed STT, knowledge ingestion, the questionnaire
+transcribe route) already share the seam. An app-side realtime client would duplicate
+key/provider resolution and forgo cost tracking.
+
+**Proposed fix.** `transcribeStream()` + `TranscribeChunk`; server relays audio to the
+provider and streams partial/final back over the existing SSE bridge; a "live" mode on
+`MicButton`. The real risk is the client→server transport under Next 16 — **spike that
+first**.
+
+**Interim mitigation.** Batch voice input (`useVoiceRecording` / `MicButton`) stays;
+live fill deferred until the seam exists. Gate behind the existing
+`APP_QUESTIONNAIRES_VOICE_INPUT` flag (a DB `feature_flag` row).
+
+**References.** [sunrise#308](https://github.com/human-centric-engineering/sunrise/issues/308) ·
+`lib/orchestration/llm/types.ts` · `lib/hooks/use-voice-recording.ts` ·
+`components/admin/orchestration/chat/mic-button.tsx`.
