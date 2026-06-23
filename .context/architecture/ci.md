@@ -20,7 +20,7 @@ in parallel rather than serially:
 
 ```
 config ──┬─ typecheck
-         ├─ lint & format
+         ├─ lint & format   (always — Prettier check is repo-wide, docs incl.)
          ├─ build
          ├─ test-full   (4-way shard matrix)   ┐ exactly one test
          ├─ test-changed (single, PR only)     ┘ job runs (see below)
@@ -32,6 +32,14 @@ config ──┬─ typecheck
 `ci-status` is the single required check: it runs `always()` and fails only if a
 job that actually ran failed. Skipped jobs (docs-only changes, the inactive test
 mode, non-Docker PRs) are **not** failures, so they don't wedge the gate.
+
+**`lint & format` is the exception to docs-only skipping** — it runs on _every_
+PR. `format:check` is whole-repo (Prettier formats Markdown too), so a docs-only
+PR must be format-checked; otherwise an unformatted `.md` lands on `main` and the
+next code PR's repo-wide `format:check` fails on it. ESLint, which has no docs to
+check, stays gated to code changes via a step-level `if`, so docs PRs don't pay
+for a pointless lint — both checks share one `npm ci` rather than splitting into
+two jobs that would each reinstall.
 
 ### Universal speedups (on for everyone)
 
