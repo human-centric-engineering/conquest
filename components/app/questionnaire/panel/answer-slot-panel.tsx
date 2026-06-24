@@ -426,7 +426,12 @@ export function AnswerSlotPanel({
             <div
               ref={scrollRef}
               onScroll={(e) => setViewportTop(e.currentTarget.scrollTop)}
-              className={cn('h-full overflow-y-auto px-3 py-3', showMap && 'pl-7')}
+              className={cn(
+                'h-full overflow-y-auto px-3 py-3',
+                // When the minimap shows it becomes the scroll affordance: clear room for it on the
+                // right and hide the native bar so the two don't overlap on classic Windows scrollbars.
+                showMap && 'cq-no-scrollbar pr-8'
+              )}
             >
               {view.dataSlotGroups !== undefined ? (
                 groups.every((g) => g.slots.length === 0) ? (
@@ -490,7 +495,7 @@ export function AnswerSlotPanel({
                 windowHeightPct={miniMap.windowHeightPct}
                 recentlyFilledKeys={recentlyFilledSet}
                 onScrubToFraction={scrubToFraction}
-                className="absolute top-3 bottom-3 left-2"
+                className="absolute top-3 right-2 bottom-3"
               />
             ) : null}
           </div>

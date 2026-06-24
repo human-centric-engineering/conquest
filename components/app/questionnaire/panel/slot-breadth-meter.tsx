@@ -107,9 +107,6 @@ export function SlotBreadthMeter({ coverage, expandable, className }: SlotBreadt
               <span className={cn('min-w-0 flex-1', q.answered ? '' : 'text-muted-foreground/70')}>
                 {q.label}
               </span>
-              {!q.answered ? (
-                <span className="text-muted-foreground/60 shrink-0 italic">not yet</span>
-              ) : null}
             </li>
           ))}
         </ul>

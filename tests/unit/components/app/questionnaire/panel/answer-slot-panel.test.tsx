@@ -483,9 +483,11 @@ describe('AnswerSlotPanel', () => {
         expect(minimap).toBeInTheDocument();
         // A viewport window is drawn over the track.
         expect(screen.getByTestId('slot-minimap-window')).toBeInTheDocument();
-        // The list reserves left padding so its text clears the floating minimap.
+        // The list reserves right padding so its text clears the floating minimap, and hides its
+        // native scrollbar so the minimap stands in as the sole scroll affordance.
         const scrollContainer = minimap.parentElement?.querySelector('.overflow-y-auto');
-        expect(scrollContainer!.className).toContain('pl-7');
+        expect(scrollContainer!.className).toContain('pr-8');
+        expect(scrollContainer!.className).toContain('cq-no-scrollbar');
         // Clicking the track scrubs the list to the clicked fraction. With the stubs (scrollHeight
         // 1000, clientHeight 300, track rect height 100), clientY 150 → fraction clamps to 1 →
         // target = min(700, 1000 - 150) = 700.
