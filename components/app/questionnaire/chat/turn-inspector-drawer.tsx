@@ -184,12 +184,13 @@ export function TurnInspectorDrawer({ turns, sessionId, messages }: TurnInspecto
     // text/border vanish in light mode. The wrappers are layout-inert — every child is `fixed`.
     <div className="dark">
       <div className="cq-surface">
-        {/* Collapsed tab — always reachable on the right edge. */}
+        {/* Collapsed tab — tucked mostly off the right edge so it stays out of the way, leaving only a
+            slim handle. Hovering (or focusing) it slides the full tab back into view. */}
         {!open && (
           <button
             type="button"
             onClick={() => setOpen(true)}
-            className="group fixed top-1/2 right-0 z-50 flex -translate-y-1/2 flex-col items-center gap-2 rounded-l-lg border border-r-0 border-[var(--cq-accent-ring)] bg-zinc-950/95 py-3.5 pr-2 pl-2.5 shadow-[0_8px_28px_-12px_rgba(0,0,0,0.7)] backdrop-blur transition-colors hover:bg-zinc-900"
+            className="group fixed top-1/2 right-0 z-50 flex translate-x-[calc(100%_-_0.625rem)] -translate-y-1/2 flex-col items-center gap-2 rounded-l-lg border border-r-0 border-[var(--cq-accent-ring)] bg-zinc-950/95 py-3.5 pr-2 pl-2.5 shadow-[0_8px_28px_-12px_rgba(0,0,0,0.7)] backdrop-blur transition-[transform,background-color] duration-200 ease-out hover:translate-x-0 hover:bg-zinc-900 focus-visible:translate-x-0 motion-reduce:transition-none"
             aria-label="Open the admin turn inspector"
           >
             <ScanSearch

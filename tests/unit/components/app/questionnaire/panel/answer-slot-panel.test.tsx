@@ -110,7 +110,7 @@ describe('AnswerSlotPanel', () => {
     expect(screen.getByText('1 captured')).toBeInTheDocument();
   });
 
-  it('shows the captured-context header + first-turn explainer, never a percentage, in data-slot mode', () => {
+  it('shows the captured-context header + "How this works" link, never a percentage, in data-slot mode', () => {
     render(
       <AnswerSlotPanel
         view={view({
@@ -128,8 +128,11 @@ describe('AnswerSlotPanel', () => {
     expect(screen.queryByText('37% complete')).not.toBeInTheDocument();
     expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
     expect(screen.queryByText('0 of 71 answered')).not.toBeInTheDocument();
-    // First turn (nothing captured): the background-fill explainer is shown in full.
-    expect(screen.getByText(/filling out a questionnaire in the background/i)).toBeInTheDocument();
+    // The explainer is tucked behind a compact top-right link, not shown inline (so it costs no space).
+    expect(screen.getByRole('button', { name: /how this works/i })).toBeInTheDocument();
+    expect(
+      screen.queryByText(/filling out a questionnaire in the background/i)
+    ).not.toBeInTheDocument();
   });
 
   it('appends average confidence to the header when present (question mode)', () => {
@@ -161,7 +164,7 @@ describe('AnswerSlotPanel', () => {
     ).toBeInTheDocument();
   });
 
-  it('folds the explainer behind a "How this works" disclosure once context is captured', () => {
+  it('reveals the explainer in a modal when the "How this works" link is clicked', () => {
     render(
       <AnswerSlotPanel
         view={view({
@@ -172,9 +175,16 @@ describe('AnswerSlotPanel', () => {
         })}
       />
     );
-    // The explainer text is still in the DOM (inside <details>) but the toggle is present.
-    expect(screen.getByText('How this works')).toBeInTheDocument();
-    expect(screen.getByText(/filling out a questionnaire in the background/i)).toBeInTheDocument();
+    const trigger = screen.getByRole('button', { name: /how this works/i });
+    // Closed: the explainer is not in the DOM until the modal opens.
+    expect(
+      screen.queryByText(/filling out a questionnaire in the background/i)
+    ).not.toBeInTheDocument();
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole('dialog');
+    expect(
+      within(dialog).getByText(/filling out a questionnaire in the background/i)
+    ).toBeInTheDocument();
   });
 
   it('omits the average-confidence suffix when none is scored yet', () => {
@@ -542,6 +552,89 @@ describe('AnswerSlotPanel', () => {
     expect(document.getElementById('panel-slot-slot-1')!.className).toContain('cq-fill-glow');
     expect(document.getElementById('panel-slot-slot-4')!.className).toContain('cq-fill-glow');
     expect(document.getElementById('panel-slot-slot-2')!.className).not.toContain('cq-fill-glow');
+  });
+
+  // --- Auto-collapse of open disclosures on scroll / refetch (data-slot mode) ---
+
+  function scrollContainer(container: HTMLElement): HTMLElement {
+    const el = container.querySelector<HTMLElement>('.overflow-y-auto');
+    if (!el) throw new Error('scroll container not found');
+    return el;
+  }
+
+  it('collapses an open "Why?" rationale when the list is scrolled', () => {
+    const { container } = render(
+      <AnswerSlotPanel
+        view={view({
+          dataSlotGroups: [
+            {
+              theme: 'Strategy',
+              slots: [filledDataSlot({ rationale: 'Read from their tooling gripes.' })],
+            },
+          ],
+          progressPercent: 20,
+        })}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: /why/i }));
+    expect(screen.getByText('Read from their tooling gripes.')).toBeInTheDocument();
+
+    fireEvent.scroll(scrollContainer(container));
+    expect(screen.queryByText('Read from their tooling gripes.')).not.toBeInTheDocument();
+  });
+
+  it('collapses an open "Why?" rationale when the view refetches', () => {
+    const make = () =>
+      view({
+        dataSlotGroups: [
+          {
+            theme: 'Strategy',
+            slots: [filledDataSlot({ rationale: 'Read from their tooling gripes.' })],
+          },
+        ],
+        progressPercent: 20,
+      });
+    const { rerender } = render(<AnswerSlotPanel view={make()} />);
+    fireEvent.click(screen.getByRole('button', { name: /why/i }));
+    expect(screen.getByText('Read from their tooling gripes.')).toBeInTheDocument();
+
+    // A fresh view object (the workspace re-fetches after each settled turn) closes the disclosure.
+    rerender(<AnswerSlotPanel view={make()} />);
+    expect(screen.queryByText('Read from their tooling gripes.')).not.toBeInTheDocument();
+  });
+
+  it('collapses an expanded questions footer when the list is scrolled', () => {
+    const { container } = render(
+      <AnswerSlotPanel
+        view={view({
+          showSlotQuestions: true,
+          dataSlotGroups: [
+            {
+              theme: 'Strategy',
+              slots: [
+                filledDataSlot({
+                  rationale: null,
+                  coverage: {
+                    total: 2,
+                    answered: 1,
+                    questions: [
+                      { label: 'How do you sell today?', answered: true, confidence: 0.9 },
+                      { label: 'What blocks your pipeline?', answered: false, confidence: null },
+                    ],
+                  },
+                }),
+              ],
+            },
+          ],
+          progressPercent: 20,
+        })}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: /questions filled/i }));
+    expect(screen.getByText('How do you sell today?')).toBeInTheDocument();
+
+    fireEvent.scroll(scrollContainer(container));
+    expect(screen.queryByText('How do you sell today?')).not.toBeInTheDocument();
   });
 
   // The scroll + measurement paths no-op in jsdom (zero layout height). Stub a non-zero layout and a

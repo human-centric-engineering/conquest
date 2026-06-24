@@ -18,7 +18,7 @@
  * its own footer padding; the caller supplies only the border/background frame.
  */
 
-import { useId, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
@@ -32,6 +32,12 @@ export interface SlotBreadthMeterProps {
   coverage: DataSlotCoverage;
   /** When true, the meter expands to itemise the mapped questions (presentationMode `both`). */
   expandable: boolean;
+  /**
+   * When this number changes, an expanded questions list closes itself. The answer panel bumps it on
+   * scroll and on refetch so the footer doesn't stay open over a row it's scrolled past or that has
+   * since changed. Omit (undefined) to leave the meter under purely manual control.
+   */
+  collapseSignal?: number;
   className?: string;
 }
 
@@ -53,9 +59,19 @@ function Pips({ total, answered }: { total: number; answered: number }) {
   );
 }
 
-export function SlotBreadthMeter({ coverage, expandable, className }: SlotBreadthMeterProps) {
+export function SlotBreadthMeter({
+  coverage,
+  expandable,
+  collapseSignal,
+  className,
+}: SlotBreadthMeterProps) {
   const listId = useId();
   const [open, setOpen] = useState(false);
+  // Close the expanded questions list when the parent signals a collapse (scroll / refetch).
+  useEffect(() => {
+    if (collapseSignal === undefined) return;
+    setOpen(false);
+  }, [collapseSignal]);
   const { total, answered, questions } = coverage;
 
   // A slot that maps to no questions has no breadth to show.

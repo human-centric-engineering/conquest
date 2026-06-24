@@ -24,7 +24,16 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronRight } from 'lucide-react';
+import { HelpCircle } from 'lucide-react';
+
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
 
 import { cn } from '@/lib/utils';
 import { usePrefersReducedMotion } from '@/lib/hooks/use-prefers-reduced-motion';
@@ -111,35 +120,45 @@ function ProgressHeading({ view }: { view: AnswerPanelView }) {
     summary =
       avgConfidence !== null ? `${completion} · avg confidence ${avgConfidence}%` : completion;
   }
-  // First turn (nothing captured) shows the explainer in full; once context starts landing it folds
-  // into a quiet disclosure so the captured list takes over. Question mode keeps its plain summary.
-  const showExplainerExpanded = dataSlotMode && capturedCount === 0;
   return (
     <div className="border-b px-4 py-3">
-      <h2 className="text-sm font-semibold">
-        {dataSlotMode ? 'Capturing your context' : 'Your answers'}
-      </h2>
+      {/* Title row: the heading on the left, with the "How this works" explainer tucked into a compact
+          top-right modal link so it never costs vertical space in the header. */}
+      <div className="flex items-start justify-between gap-2">
+        <h2 className="text-sm font-semibold">
+          {dataSlotMode ? 'Capturing your context' : 'Your answers'}
+        </h2>
+        {dataSlotMode ? <HowThisWorksDialog /> : null}
+      </div>
       {(!dataSlotMode || capturedCount > 0) && (
         <p className="text-muted-foreground mt-0.5 text-xs tabular-nums">{summary}</p>
       )}
-      {dataSlotMode &&
-        (showExplainerExpanded ? (
-          <p className="text-muted-foreground mt-2 text-xs leading-relaxed">{CONTEXT_EXPLAINER}</p>
-        ) : (
-          <details className="group mt-2">
-            <summary className="text-muted-foreground hover:text-foreground inline-flex cursor-pointer list-none items-center gap-1 text-xs [&::-webkit-details-marker]:hidden">
-              <ChevronRight
-                className="h-3 w-3 transition-transform group-open:rotate-90"
-                aria-hidden="true"
-              />
-              How this works
-            </summary>
-            <p className="text-muted-foreground mt-2 text-xs leading-relaxed">
-              {CONTEXT_EXPLAINER}
-            </p>
-          </details>
-        ))}
     </div>
+  );
+}
+
+/** The "How this works" top-right link + modal — explains the background-capture mechanic on demand. */
+function HowThisWorksDialog() {
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <button
+          type="button"
+          className="text-muted-foreground hover:text-foreground inline-flex shrink-0 items-center gap-1 text-xs whitespace-nowrap underline-offset-2 transition-colors hover:underline"
+        >
+          <HelpCircle className="h-3.5 w-3.5" aria-hidden="true" />
+          How this works
+        </button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>How this works</DialogTitle>
+          <DialogDescription className="text-foreground/80 text-sm leading-relaxed">
+            {CONTEXT_EXPLAINER}
+          </DialogDescription>
+        </DialogHeader>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -162,6 +181,7 @@ function DataSlotRow({
   showSlotQuestions,
   stepperRemaining,
   onStepNext,
+  collapseSignal,
 }: {
   slot: DataSlotPanelSlot;
   highlighted: boolean;
@@ -172,6 +192,8 @@ function DataSlotRow({
   /** When non-null, render the "N more recorded" footer with this many slots still to come. */
   stepperRemaining: number | null;
   onStepNext: () => void;
+  /** Bumped by the panel on scroll / refetch so this row's open disclosures collapse themselves. */
+  collapseSignal: number;
 }) {
   return (
     <li
@@ -206,7 +228,11 @@ function DataSlotRow({
                   "Inferred" marker, with the "Why?" rationale disclosure flowing inline after them.
                   "Why?" explains the whole reading, so it's a row-level affordance here, not an
                   annotation on the confidence figure; its rationale still expands full-width below. */}
-              <NoticeWhy detail={slot.rationale ?? undefined} className="mt-1">
+              <NoticeWhy
+                detail={slot.rationale ?? undefined}
+                className="mt-1"
+                collapseSignal={collapseSignal}
+              >
                 <ConfidenceScore confidence={slot.confidence} />
                 {slot.provenance === 'inferred' || slot.provenance === 'synthesised' ? (
                   <span
@@ -247,7 +273,11 @@ function DataSlotRow({
           Suppressed when the slot maps to no questions (the meter would render nothing). */}
       {slot.coverage.total > 0 ? (
         <div className="border-border/60 bg-muted/20 -mx-3 mt-2 -mb-2 rounded-b-md border-t">
-          <SlotBreadthMeter coverage={slot.coverage} expandable={showSlotQuestions} />
+          <SlotBreadthMeter
+            coverage={slot.coverage}
+            expandable={showSlotQuestions}
+            collapseSignal={collapseSignal}
+          />
         </div>
       ) : null}
     </li>
@@ -269,6 +299,10 @@ export function AnswerSlotPanel({
 
   const [highlightedKey, setHighlightedKey] = useState<string | null>(null);
   const [announce, setAnnounce] = useState('');
+  // Monotonic "collapse open disclosures" signal. Bumped when the respondent scrolls the list or the
+  // view refetches, so any open "Why?" rationale / questions footer closes itself rather than lingering
+  // over content it no longer lines up with. Threaded down to each row's disclosures.
+  const [collapseSignal, setCollapseSignal] = useState(0);
   // Stepper cursor: index into `newlyFilledKeys`, or null when no after-turn fills are active.
   const [cursor, setCursor] = useState<number | null>(null);
   // Measured minimap geometry (content + row rects) and the live scroll offset, kept separate so a
@@ -355,6 +389,13 @@ export function AnswerSlotPanel({
       if (highlightTimer.current) clearTimeout(highlightTimer.current);
     };
   }, []);
+
+  // A refetch (the workspace hands a fresh view after each settled turn) collapses any open
+  // disclosure: the rationale/coverage behind it may have changed, so close rather than leave a stale
+  // panel hanging open. Scroll-driven collapses are bumped inline in the list's onScroll handler.
+  useEffect(() => {
+    setCollapseSignal((s) => s + 1);
+  }, [view]);
 
   // After-turn stepper: a new set of newly-filled keys arms the stepper at the top one and scrolls
   // to it. Keyed on the serialized keys so the same turn does not re-fire, and a new turn restarts.
@@ -457,7 +498,12 @@ export function AnswerSlotPanel({
           <div className="relative min-h-0 flex-1">
             <div
               ref={scrollRef}
-              onScroll={(e) => setViewportTop(e.currentTarget.scrollTop)}
+              onScroll={(e) => {
+                setViewportTop(e.currentTarget.scrollTop);
+                // Scrolling the list collapses any open "Why?" / questions disclosure so it doesn't
+                // float over a row it's scrolled away from.
+                setCollapseSignal((s) => s + 1);
+              }}
               className={cn(
                 'h-full overflow-y-auto px-3 py-3',
                 // When the minimap shows it becomes the scroll affordance: clear room for it on the
@@ -487,6 +533,7 @@ export function AnswerSlotPanel({
                               showSlotQuestions={view.showSlotQuestions ?? false}
                               stepperRemaining={focusedKey === slot.key ? stepperRemaining : null}
                               onStepNext={stepNext}
+                              collapseSignal={collapseSignal}
                             />
                           ))}
                         </ul>

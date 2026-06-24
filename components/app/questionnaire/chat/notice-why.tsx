@@ -9,7 +9,7 @@
  * no rationale to show. Presentational only; the text is decided upstream and respondent-safe.
  */
 
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { ChevronDown } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
@@ -26,12 +26,25 @@ export function NoticeWhy({
   detail,
   children,
   className,
+  collapseSignal,
 }: {
   detail?: string;
   children?: ReactNode;
   className?: string;
+  /**
+   * When this number changes, the disclosure closes itself. The answer panel bumps it on scroll and
+   * on refetch so an open rationale doesn't linger over content it has scrolled away from or that has
+   * since changed. Omit (undefined) to leave the disclosure under purely manual control.
+   */
+  collapseSignal?: number;
 }) {
   const [open, setOpen] = useState(false);
+  // Close when the parent signals a collapse (scroll / refetch). Skips the initial mount: the effect's
+  // first run carries the starting signal, and `open` already starts closed.
+  useEffect(() => {
+    if (collapseSignal === undefined) return;
+    setOpen(false);
+  }, [collapseSignal]);
   const hasDetail = Boolean(detail && detail.trim().length > 0);
   // Nothing to render when there's neither a rationale to disclose nor a cluster to host.
   if (!hasDetail && !children) return null;
