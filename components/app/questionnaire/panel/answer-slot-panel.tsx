@@ -144,10 +144,11 @@ function HowThisWorksDialog() {
       <DialogTrigger asChild>
         <button
           type="button"
-          className="text-muted-foreground hover:text-foreground inline-flex shrink-0 items-center gap-1 text-xs whitespace-nowrap underline-offset-2 transition-colors hover:underline"
+          aria-label="How this works"
+          title="How this works"
+          className="text-muted-foreground hover:text-foreground inline-flex shrink-0 items-center transition-colors"
         >
-          <HelpCircle className="h-3.5 w-3.5" aria-hidden="true" />
-          How this works
+          <HelpCircle className="h-4 w-4" aria-hidden="true" />
         </button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
