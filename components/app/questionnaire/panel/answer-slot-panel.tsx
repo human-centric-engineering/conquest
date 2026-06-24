@@ -32,7 +32,10 @@ import { ConfidenceIndicator } from '@/components/app/questionnaire/panel/confid
 import { ConfidenceScore } from '@/components/app/questionnaire/panel/confidence-score';
 import { NoticeWhy } from '@/components/app/questionnaire/chat/notice-why';
 import { SlotMiniMap } from '@/components/app/questionnaire/panel/slot-minimap';
-import { panelSlotDomId } from '@/lib/app/questionnaire/panel/newly-filled';
+import {
+  panelSlotDomId,
+  recentlyFilledByLatestTurn,
+} from '@/lib/app/questionnaire/panel/newly-filled';
 import { computeMiniMapModel, type MiniMapRowInput } from '@/lib/app/questionnaire/panel/minimap';
 import type {
   AnswerPanelView,
@@ -118,11 +121,14 @@ function moreRecordedLabel(remaining: number): string {
 function DataSlotRow({
   slot,
   highlighted,
+  recentlyFilled,
   stepperRemaining,
   onStepNext,
 }: {
   slot: DataSlotPanelSlot;
   highlighted: boolean;
+  /** Filled/updated by the most recent fill-turn — gently pulses until a newer turn fills something. */
+  recentlyFilled: boolean;
   /** When non-null, render the "N more recorded" footer with this many slots still to come. */
   stepperRemaining: number | null;
   onStepNext: () => void;
@@ -133,8 +139,10 @@ function DataSlotRow({
       data-slot-key={slot.key}
       tabIndex={-1}
       className={cn(
-        'rounded-md border px-3 py-2 transition-shadow duration-300 outline-none motion-reduce:transition-none',
-        highlighted && 'ring-primary/60 ring-2'
+        'rounded-md border px-3 py-2 transition-shadow duration-500 outline-none motion-reduce:transition-none',
+        highlighted && 'ring-primary/60 ring-2',
+        // Previous-turn highlight: a gentle, lasting accent wash (kept until a newer turn fills).
+        recentlyFilled && 'cq-fill-glow'
       )}
     >
       <div className="flex items-start gap-2">
@@ -243,6 +251,19 @@ export function AnswerSlotPanel({
         map.set(s.key, { name: s.name, filled: s.filled, confidence: s.confidence });
     return map;
   }, [groups]);
+
+  // Slots the MOST RECENT fill-turn captured — gently pulse in both the list and the minimap until a
+  // newer turn fills something (so the highlight persists "even after it has been viewed"). This is
+  // decoupled from `newlyFilledKeys` (which drives the one-shot stepper and clears on a no-fill turn).
+  const recentlyFilledSet = useMemo(
+    () =>
+      recentlyFilledByLatestTurn(
+        groups.flatMap((g) =>
+          g.slots.map((s) => ({ key: s.key, answeredAtTurnIndex: s.answeredAtTurnIndex }))
+        )
+      ),
+    [groups]
+  );
 
   // Scroll the list (its own container, never the window) to a slot, focus it, and pulse it.
   const scrollToSlot = useCallback(
@@ -413,6 +434,7 @@ export function AnswerSlotPanel({
                               key={slot.key}
                               slot={slot}
                               highlighted={highlightedKey === slot.key}
+                              recentlyFilled={recentlyFilledSet.has(slot.key)}
                               stepperRemaining={focusedKey === slot.key ? stepperRemaining : null}
                               onStepNext={stepNext}
                             />
@@ -453,7 +475,7 @@ export function AnswerSlotPanel({
                 bars={miniMap.bars}
                 windowTopPct={miniMap.windowTopPct}
                 windowHeightPct={miniMap.windowHeightPct}
-                newlyFilledKeys={newlyFilledKeys}
+                recentlyFilledKeys={recentlyFilledSet}
                 onScrubToFraction={scrubToFraction}
                 className="absolute top-3 bottom-3 left-2"
               />

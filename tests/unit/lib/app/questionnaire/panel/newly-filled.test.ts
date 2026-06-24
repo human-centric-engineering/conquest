@@ -10,6 +10,7 @@ import {
   dataSlotKeysInOrder,
   diffNewlyFilled,
   panelSlotDomId,
+  recentlyFilledByLatestTurn,
 } from '@/lib/app/questionnaire/panel/newly-filled';
 import type { AnswerPanelView, DataSlotPanelSlot } from '@/lib/app/questionnaire/panel/types';
 
@@ -45,6 +46,37 @@ function view(groups: Array<{ theme: string; slots: DataSlotPanelSlot[] }>): Ans
 describe('panelSlotDomId', () => {
   it('namespaces the slot key', () => {
     expect(panelSlotDomId('goal')).toBe('panel-slot-goal');
+  });
+});
+
+describe('recentlyFilledByLatestTurn', () => {
+  it('returns the keys whose answeredAtTurnIndex equals the maximum', () => {
+    const set = recentlyFilledByLatestTurn([
+      { key: 'a', answeredAtTurnIndex: 1 },
+      { key: 'b', answeredAtTurnIndex: 3 },
+      { key: 'c', answeredAtTurnIndex: 3 },
+      { key: 'd', answeredAtTurnIndex: 2 },
+    ]);
+    expect([...set].sort()).toEqual(['b', 'c']);
+  });
+
+  it('ignores null indices and returns empty when nothing has been filled', () => {
+    expect(recentlyFilledByLatestTurn([]).size).toBe(0);
+    expect(
+      recentlyFilledByLatestTurn([
+        { key: 'a', answeredAtTurnIndex: null },
+        { key: 'b', answeredAtTurnIndex: null },
+      ]).size
+    ).toBe(0);
+  });
+
+  it('persists on the latest fill-turn even when only one slot carries the max', () => {
+    const set = recentlyFilledByLatestTurn([
+      { key: 'a', answeredAtTurnIndex: 5 },
+      { key: 'b', answeredAtTurnIndex: null },
+      { key: 'c', answeredAtTurnIndex: 4 },
+    ]);
+    expect([...set]).toEqual(['a']);
   });
 });
 

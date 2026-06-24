@@ -141,6 +141,21 @@ address this (question mode is unchanged):
   **own** container (`scrollTo`, never the window), respects reduced motion
   (`usePrefersReducedMotion`), and moves focus + an `aria-live` announcement so keyboard/SR users
   follow the jump.
+- **Previous-turn highlight** — the slots the **most recent fill-turn** captured gently **pulse** in
+  every surface, and keep pulsing (they don't settle) until a newer turn fills something, so they stay
+  identifiable after being viewed. "Most recent fill-turn" = the slots whose `answeredAtTurnIndex`
+  equals the maximum, via `recentlyFilledByLatestTurn` (`newly-filled.ts`) — deliberately **decoupled**
+  from the diff-based `newlyFilledKeys` (which drives the one-shot stepper and clears on a no-fill
+  turn). Animations are the project's existing keyframes:
+  - **Data-slot list rows** → `cq-fill-glow` (a soft accent background that pulses in/out, non-dimming).
+  - **Minimap bars** → `ring-primary` + `cq-livedot` (a gentle opacity/scale breathe that keeps the
+    confidence colour).
+  - **Form view** (`SectionNavigator` + `QuestionnaireForm`) — the navigator dots for those questions
+    → `cq-livedot`; the filled answer block → `cq-fill-glow`. The form computes its own recently-filled
+    set from `view.sections[].slots[].answeredAtTurnIndex` (no workspace plumbing).
+
+  All three keyframes carry a `prefers-reduced-motion` fallback (`cq-fill-glow` keeps a resting tint;
+  `cq-livedot` falls back to full opacity), defined in `app/globals.css`.
 
 **How "newly filled" is known** (`newly-filled.ts`): the messages stream never tells the client a
 turn ordinal, so `SessionWorkspace` keeps the previous `AnswerPanelView` and **diffs** it against

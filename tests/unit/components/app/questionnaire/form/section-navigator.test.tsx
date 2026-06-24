@@ -77,6 +77,22 @@ describe('SectionNavigator', () => {
     expect(onJump).toHaveBeenCalledWith(1);
   });
 
+  it('gently pulses the dots filled by the most recent turn', () => {
+    const { container } = render(
+      <SectionNavigator
+        sections={SECTIONS}
+        activeIndex={0}
+        onJump={vi.fn()}
+        isAnswered={(k) => k === 'a' || k === 'b'}
+        isInferred={() => false}
+        isRecentlyFilled={(k) => k === 'b'}
+      />
+    );
+    const dots = Array.from(container.querySelectorAll<HTMLElement>('span.rounded-full'));
+    const pulsing = dots.filter((d) => d.className.includes('cq-livedot'));
+    expect(pulsing).toHaveLength(1); // only slot 'b' was filled this turn
+  });
+
   it('rings an inferred answer dot distinctly from a respondent-stated one', () => {
     const { container } = render(
       <SectionNavigator

@@ -339,12 +339,17 @@ describe('AnswerSlotPanel', () => {
     };
   }
 
-  function dataSlotView(count: number): AnswerPanelView {
+  function dataSlotView(count: number, latestTurnKeys: string[] = []): AnswerPanelView {
+    const latest = new Set(latestTurnKeys);
     return view({
       dataSlotGroups: [
         {
           theme: 'Demographics',
-          slots: Array.from({ length: count }, (_, i) => dataSlot(`slot-${i}`)),
+          // Keys in `latestTurnKeys` belong to a later fill-turn (index 2); the rest to turn 1 — so
+          // `recentlyFilledByLatestTurn` marks only the later ones.
+          slots: Array.from({ length: count }, (_, i) =>
+            dataSlot(`slot-${i}`, { answeredAtTurnIndex: latest.has(`slot-${i}`) ? 2 : 1 })
+          ),
         },
       ],
       progressPercent: 40,
@@ -377,6 +382,14 @@ describe('AnswerSlotPanel', () => {
   it('shows no stepper footer when no slots were filled this turn', () => {
     render(<AnswerSlotPanel view={dataSlotView(12)} newlyFilledKeys={[]} />);
     expect(screen.queryByText(/more answers recorded/)).not.toBeInTheDocument();
+  });
+
+  it('pulses the most-recent-turn slot rows (and leaves earlier rows unpulsed)', () => {
+    // slot-1 + slot-4 belong to the later fill-turn; the rest to an earlier one.
+    render(<AnswerSlotPanel view={dataSlotView(12, ['slot-1', 'slot-4'])} />);
+    expect(document.getElementById('panel-slot-slot-1')?.className).toContain('cq-fill-glow');
+    expect(document.getElementById('panel-slot-slot-4')?.className).toContain('cq-fill-glow');
+    expect(document.getElementById('panel-slot-slot-2')?.className).not.toContain('cq-fill-glow');
   });
 
   // The scroll + measurement paths no-op in jsdom (zero layout height). Stub a non-zero layout and a

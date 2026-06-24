@@ -18,6 +18,29 @@ export function panelSlotDomId(key: string): string {
 }
 
 /**
+ * The keys filled/updated by the MOST RECENT fill-turn — i.e. those whose `answeredAtTurnIndex`
+ * equals the maximum across all items. Used to keep the "previous-turn" highlight pulsing on both the
+ * data-slot and form surfaces: unlike the diff-based `diffNewlyFilled` (which drives the one-shot
+ * stepper and clears on a no-fill turn), this stays put until a newer turn actually fills something.
+ * Returns an empty set when nothing has been captured yet (all indices null).
+ */
+export function recentlyFilledByLatestTurn(
+  items: ReadonlyArray<{ key: string; answeredAtTurnIndex: number | null }>
+): Set<string> {
+  let max = 0;
+  for (const it of items) {
+    if (it.answeredAtTurnIndex != null && it.answeredAtTurnIndex > max)
+      max = it.answeredAtTurnIndex;
+  }
+  const result = new Set<string>();
+  if (max === 0) return result;
+  for (const it of items) {
+    if (it.answeredAtTurnIndex === max) result.add(it.key);
+  }
+  return result;
+}
+
+/**
  * All data-slot keys in panel display order (groups in order, slots within each group in order).
  * The stepper walks this order top-to-bottom, so it must match what the panel renders. Returns an
  * empty array when the view is null or not in data-slot mode.

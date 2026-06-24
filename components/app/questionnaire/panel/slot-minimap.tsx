@@ -27,8 +27,11 @@ export interface SlotMiniMapProps {
   /** The viewport window rectangle, as a percentage of the track. */
   windowTopPct: number;
   windowHeightPct: number;
-  /** Keys filled by the latest turn — pulsed once to draw the eye. */
-  newlyFilledKeys?: readonly string[];
+  /**
+   * Bars the most recent fill-turn captured — ringed and gently breathing (`cq-livedot`) so they
+   * stay marked until a newer turn fills something.
+   */
+  recentlyFilledKeys?: ReadonlySet<string>;
   /** Scrub the list to a fraction [0,1] of the content. `smooth` for a discrete tap, not a drag. */
   onScrubToFraction: (fraction: number, smooth: boolean) => void;
   className?: string;
@@ -47,13 +50,12 @@ export function SlotMiniMap({
   bars,
   windowTopPct,
   windowHeightPct,
-  newlyFilledKeys,
+  recentlyFilledKeys,
   onScrubToFraction,
   className,
 }: SlotMiniMapProps) {
   const trackRef = useRef<HTMLDivElement>(null);
   const draggingRef = useRef(false);
-  const newly = newlyFilledKeys && newlyFilledKeys.length > 0 ? new Set(newlyFilledKeys) : null;
 
   const fractionFromY = (clientY: number): number => {
     const el = trackRef.current;
@@ -108,7 +110,8 @@ export function SlotMiniMap({
           className={cn(
             'absolute inset-x-0.5 rounded-[2px]',
             bar.filled ? FILLED_BAR_COLOR[bar.band] : 'bg-muted-foreground/15',
-            newly?.has(bar.key) && 'ring-primary ring-1'
+            // Previous-turn bars stay ringed and gently breathe until a newer turn fills something.
+            recentlyFilledKeys?.has(bar.key) && 'ring-primary cq-livedot ring-1'
           )}
         />
       ))}

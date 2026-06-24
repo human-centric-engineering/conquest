@@ -111,6 +111,24 @@ describe('QuestionnaireForm', () => {
     expect(screen.queryByLabelText('Inferred answer — edit if needed')).not.toBeInTheDocument();
   });
 
+  it('gently pulses the answer block filled by the most recent turn', () => {
+    const v = view();
+    // 'team' carries the max answeredAtTurnIndex → it's the latest-turn fill; 'role' has none.
+    v.sections[0].slots[1].answeredAtTurnIndex = 2;
+    render(
+      <QuestionnaireForm
+        view={v}
+        loading={false}
+        values={{}}
+        statuses={{}}
+        onChange={noop}
+        onFlush={noop}
+      />
+    );
+    expect(screen.getByText('Team size?').closest('li')?.className).toContain('cq-fill-glow');
+    expect(screen.getByText('Your role?').closest('li')?.className).not.toContain('cq-fill-glow');
+  });
+
   it('navigates to the next section', () => {
     render(
       <QuestionnaireForm

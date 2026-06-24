@@ -52,18 +52,20 @@ describe('SlotMiniMap', () => {
     expect(win.style.height).toBe('25%');
   });
 
-  it('pulses a newly-filled bar', () => {
+  it('rings and gently breathes a previous-turn bar (recentlyFilledKeys)', () => {
     render(
       <SlotMiniMap
         bars={bars}
         windowTopPct={0}
         windowHeightPct={50}
-        newlyFilledKeys={['goal']}
+        recentlyFilledKeys={new Set(['goal'])}
         onScrubToFraction={vi.fn()}
       />
     );
     expect(bar('goal').className).toContain('ring-primary');
+    expect(bar('goal').className).toContain('cq-livedot');
     expect(bar('age').className).not.toContain('ring-primary');
+    expect(bar('age').className).not.toContain('cq-livedot');
   });
 
   it('scrubs to the clicked fraction of the track (smooth) on pointer down', () => {
