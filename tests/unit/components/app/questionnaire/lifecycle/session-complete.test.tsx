@@ -12,7 +12,13 @@ import userEvent from '@testing-library/user-event';
 // base-screen tests exercise the default responses-PDF download path (report behaviour is covered in
 // session-complete-report.test.tsx).
 vi.mock('@/lib/hooks/use-respondent-report', () => ({
-  useRespondentReport: () => ({ view: { enabled: false }, loaded: true }),
+  // Match the real UseRespondentReportResult shape (view, loaded, timedOut, retry).
+  useRespondentReport: () => ({
+    view: { enabled: false },
+    loaded: true,
+    timedOut: false,
+    retry: () => {},
+  }),
 }));
 
 import { SessionComplete } from '@/components/app/questionnaire/lifecycle/session-complete';

@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 
 import { useRespondentReport } from '@/lib/hooks/use-respondent-report';
 
@@ -131,10 +131,86 @@ describe('useRespondentReport', () => {
     vi.useRealTimers();
   });
 
+  it('stops polling once generation has failed (failed is terminal)', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          jsonResponse({
+            enabled: true,
+            mode: 'raw_plus_insights',
+            onScreen: true,
+            download: true,
+            insights: { status: 'queued', content: null, generatedAt: null, error: null },
+          })
+        )
+        .mockResolvedValue(
+          jsonResponse({
+            enabled: true,
+            mode: 'raw_plus_insights',
+            onScreen: true,
+            download: true,
+            insights: { status: 'failed', content: null, generatedAt: null, error: 'boom' },
+          })
+        );
+      vi.stubGlobal('fetch', fetchMock);
+
+      const { result } = renderHook(() => useRespondentReport('s1'));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetchMock).toHaveBeenCalledTimes(1); // queued → schedules a poll
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(fetchMock).toHaveBeenCalledTimes(2); // failed → terminal, no further poll
+      // Polling has stopped, and the timeout fallback never trips on a settled (failed) report.
+      await vi.advanceTimersByTimeAsync(6000);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(result.current.timedOut).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('settles loaded even when the fetch throws', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network')));
     const { result } = renderHook(() => useRespondentReport('s1'));
     await waitFor(() => expect(result.current.loaded).toBe(true));
     expect(result.current.view).toBeNull();
+  });
+
+  it('flags timedOut after exhausting the poll window, and retry resets it', async () => {
+    vi.useFakeTimers();
+    // Always still generating → the hook keeps polling until it hits the MAX_POLLS cap.
+    const queued = jsonResponse({
+      enabled: true,
+      mode: 'raw_plus_insights',
+      onScreen: true,
+      download: true,
+      insights: { status: 'queued', content: null, generatedAt: null, error: null },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(queued);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result } = renderHook(() => useRespondentReport('s1'));
+    await act(async () => void (await vi.advanceTimersByTimeAsync(0))); // attempt 1
+    expect(result.current.timedOut).toBe(false);
+    // 59 further polls at 3s → attempt 60 (the cap), after which no poll is scheduled.
+    for (let i = 0; i < 60; i++) {
+      await act(async () => void (await vi.advanceTimersByTimeAsync(3000)));
+    }
+    expect(result.current.timedOut).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(60);
+    // Polling has stopped — advancing further fires nothing.
+    await act(async () => void (await vi.advanceTimersByTimeAsync(3000)));
+    expect(fetchMock).toHaveBeenCalledTimes(60);
+
+    // retry restarts a fresh polling run and clears the timed-out flag.
+    await act(async () => {
+      result.current.retry();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(result.current.timedOut).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(61);
+
+    vi.useRealTimers();
   });
 });
