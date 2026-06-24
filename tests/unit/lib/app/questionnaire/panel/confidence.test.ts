@@ -13,6 +13,8 @@ import {
   confidenceBand,
   confidenceBandClasses,
   confidenceBandLabel,
+  confidenceBandSolidBg,
+  confidenceBandSolidClasses,
   confidencePercent,
 } from '@/lib/app/questionnaire/panel/confidence';
 
@@ -69,6 +71,37 @@ describe('confidenceBandClasses', () => {
     expect(confidenceBandClasses('tentative')).toContain('orange');
     expect(confidenceBandClasses('low')).toContain('red');
     expect(confidenceBandClasses('unscored')).toContain('muted');
+  });
+});
+
+describe('confidenceBandSolidClasses', () => {
+  it('returns the heavier /80 fill per band (the minimap darkness), keeping the band hue', () => {
+    // Each band maps to its own /80 fill; the dot + minimap bars read at this darkness, not the /15 tint.
+    expect(confidenceBandSolidClasses('high')).toContain('bg-emerald-500/80');
+    expect(confidenceBandSolidClasses('moderate')).toContain('bg-amber-500/80');
+    expect(confidenceBandSolidClasses('tentative')).toContain('bg-orange-500/80');
+    expect(confidenceBandSolidClasses('low')).toContain('bg-red-500/80');
+    // Unscored has no hue — a neutral foreground fill rather than a coloured one.
+    expect(confidenceBandSolidClasses('unscored')).toContain('bg-foreground/40');
+  });
+
+  it('is distinct from the quiet /15 tint for the same band', () => {
+    expect(confidenceBandSolidClasses('high')).not.toBe(confidenceBandClasses('high'));
+  });
+});
+
+describe('confidenceBandSolidBg', () => {
+  it('returns only the /80 background token per band — no text colour', () => {
+    // The shared source of truth for the solid fill (the minimap bar colour + the heavier dot).
+    expect(confidenceBandSolidBg('high')).toBe('bg-emerald-500/80');
+    expect(confidenceBandSolidBg('moderate')).toBe('bg-amber-500/80');
+    expect(confidenceBandSolidBg('tentative')).toBe('bg-orange-500/80');
+    expect(confidenceBandSolidBg('low')).toBe('bg-red-500/80');
+    expect(confidenceBandSolidBg('unscored')).toBe('bg-foreground/40');
+  });
+
+  it('is the bg half of confidenceBandSolidClasses (which adds the text colour)', () => {
+    expect(confidenceBandSolidClasses('moderate')).toContain(confidenceBandSolidBg('moderate'));
   });
 });
 

@@ -19,7 +19,7 @@
 import { useRef } from 'react';
 
 import { cn } from '@/lib/utils';
-import type { ConfidenceBand } from '@/lib/app/questionnaire/panel/confidence';
+import { confidenceBandSolidBg } from '@/lib/app/questionnaire/panel/confidence';
 import type { MiniMapBar } from '@/lib/app/questionnaire/panel/minimap';
 
 export interface SlotMiniMapProps {
@@ -36,15 +36,6 @@ export interface SlotMiniMapProps {
   onScrubToFraction: (fraction: number, smooth: boolean) => void;
   className?: string;
 }
-
-/** Tailwind fill for a filled slot's bar, by confidence band. Unfilled bars use a faint sliver. */
-const FILLED_BAR_COLOR: Record<ConfidenceBand, string> = {
-  high: 'bg-emerald-500/80',
-  moderate: 'bg-amber-500/80',
-  tentative: 'bg-orange-500/80',
-  low: 'bg-red-500/80',
-  unscored: 'bg-foreground/40',
-};
 
 export function SlotMiniMap({
   bars,
@@ -109,7 +100,7 @@ export function SlotMiniMap({
           style={{ top: `${bar.topPct}%`, height: `${bar.heightPct}%` }}
           className={cn(
             'absolute inset-x-0.5 rounded-[2px]',
-            bar.filled ? FILLED_BAR_COLOR[bar.band] : 'bg-muted-foreground/15',
+            bar.filled ? confidenceBandSolidBg(bar.band) : 'bg-muted-foreground/15',
             // Previous-turn bars stay ringed and gently breathe until a newer turn fills something.
             recentlyFilledKeys?.has(bar.key) && 'ring-primary cq-livedot ring-1'
           )}

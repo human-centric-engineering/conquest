@@ -9,33 +9,63 @@
  * no rationale to show. Presentational only; the text is decided upstream and respondent-safe.
  */
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { ChevronDown } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 
-export function NoticeWhy({ detail, className }: { detail?: string; className?: string }) {
+/**
+ * `children`, when given, render as a left-hand cluster on the SAME row as the "Why?" trigger
+ * (the trigger pushed to the far right via `ml-auto`); the rationale panel still expands full-width
+ * below. Used by the data-slot row to dock "Why?" against the confidence/provenance line — it
+ * explains the whole reading, so it reads as a row-level affordance, not an annotation on the
+ * confidence figure beside it. Without children the component is the original button-only
+ * disclosure (the seriousness / contradiction notice cards).
+ */
+export function NoticeWhy({
+  detail,
+  children,
+  className,
+}: {
+  detail?: string;
+  children?: ReactNode;
+  className?: string;
+}) {
   const [open, setOpen] = useState(false);
-  if (!detail || detail.trim().length === 0) return null;
+  const hasDetail = Boolean(detail && detail.trim().length > 0);
+  // Nothing to render when there's neither a rationale to disclose nor a cluster to host.
+  if (!hasDetail && !children) return null;
+
+  const trigger = hasDetail ? (
+    <button
+      type="button"
+      onClick={() => setOpen((o) => !o)}
+      aria-expanded={open}
+      className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-[11px] font-medium transition-colors"
+    >
+      <span>Why?</span>
+      <ChevronDown
+        className={cn('h-3 w-3 transition-transform', open && 'rotate-180')}
+        aria-hidden="true"
+      />
+    </button>
+  ) : null;
+
   return (
     <div className={cn('mt-1.5', className)}>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-[11px] font-medium transition-colors"
-      >
-        <span>Why?</span>
-        <ChevronDown
-          className={cn('h-3 w-3 transition-transform', open && 'rotate-180')}
-          aria-hidden="true"
-        />
-      </button>
-      {open && (
+      {children ? (
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <div className="flex flex-wrap items-center gap-1.5">{children}</div>
+          {trigger ? <div className="ml-auto">{trigger}</div> : null}
+        </div>
+      ) : (
+        trigger
+      )}
+      {open && hasDetail ? (
         <p className="text-muted-foreground/80 mt-0.5 text-[11px] leading-relaxed italic">
           {detail}
         </p>
-      )}
+      ) : null}
     </div>
   );
 }

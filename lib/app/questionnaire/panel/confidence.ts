@@ -28,20 +28,70 @@ export function confidenceBand(confidence: number | null): ConfidenceBand {
   return 'low';
 }
 
-/** Tailwind classes for a band — light-tinted, quiet (emerald → amber → orange → red). */
-export function confidenceBandClasses(band: ConfidenceBand): string {
+/**
+ * The band's text + dark-mode text colour — the one piece the quiet tint and the solid fill share.
+ * Private: callers want a complete class string ({@link confidenceBandClasses} /
+ * {@link confidenceBandSolidClasses}), not the text fragment alone. Literal per-branch so Tailwind's
+ * content scanner still sees every token.
+ */
+function confidenceBandTextClasses(band: ConfidenceBand): string {
   switch (band) {
     case 'high':
-      return 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300';
+      return 'text-emerald-700 dark:text-emerald-300';
     case 'moderate':
-      return 'bg-amber-500/15 text-amber-700 dark:text-amber-300';
+      return 'text-amber-700 dark:text-amber-300';
     case 'tentative':
-      return 'bg-orange-500/15 text-orange-700 dark:text-orange-300';
+      return 'text-orange-700 dark:text-orange-300';
     case 'low':
-      return 'bg-red-500/15 text-red-700 dark:text-red-300';
+      return 'text-red-700 dark:text-red-300';
     case 'unscored':
-      return 'bg-muted text-muted-foreground';
+      return 'text-muted-foreground';
   }
+}
+
+/**
+ * The band's SOLID `/80` background fill, on its own — the slot minimap's bar colour and the heavier
+ * dot fill ({@link confidenceBandSolidClasses} composes this with the text colour). The minimap wants
+ * only the `bg-*` token, so this is the shared source of truth both consumers read (no duplicated
+ * palette to drift). Literal per-branch so Tailwind's content scanner still sees every token.
+ */
+export function confidenceBandSolidBg(band: ConfidenceBand): string {
+  switch (band) {
+    case 'high':
+      return 'bg-emerald-500/80';
+    case 'moderate':
+      return 'bg-amber-500/80';
+    case 'tentative':
+      return 'bg-orange-500/80';
+    case 'low':
+      return 'bg-red-500/80';
+    case 'unscored':
+      return 'bg-foreground/40';
+  }
+}
+
+/** Tailwind classes for a band — light-tinted, quiet (emerald → amber → orange → red). */
+export function confidenceBandClasses(band: ConfidenceBand): string {
+  const tint =
+    band === 'high'
+      ? 'bg-emerald-500/15'
+      : band === 'moderate'
+        ? 'bg-amber-500/15'
+        : band === 'tentative'
+          ? 'bg-orange-500/15'
+          : band === 'low'
+            ? 'bg-red-500/15'
+            : 'bg-muted';
+  return `${tint} ${confidenceBandTextClasses(band)}`;
+}
+
+/**
+ * Solid (heavier) Tailwind classes for a band — the same `/80` fills the slot minimap uses for its
+ * bars (via {@link confidenceBandSolidBg}), so a dot rendered with these reads at the minimap's
+ * darkness rather than the quiet `/15` tint. Keeps the band text colour for the inset ring.
+ */
+export function confidenceBandSolidClasses(band: ConfidenceBand): string {
+  return `${confidenceBandSolidBg(band)} ${confidenceBandTextClasses(band)}`;
 }
 
 /**
