@@ -30,6 +30,7 @@ import { useSessionLifecycle } from '@/lib/hooks/use-session-lifecycle';
 import { QuestionnaireChat } from '@/components/app/questionnaire/chat/questionnaire-chat';
 import { AnswerSlotPanel } from '@/components/app/questionnaire/panel/answer-slot-panel';
 import { QuestionnaireForm } from '@/components/app/questionnaire/form/questionnaire-form';
+import { diffNewlyFilled } from '@/lib/app/questionnaire/panel/newly-filled';
 import { ModeToggle } from '@/components/app/questionnaire/mode-toggle';
 import { SessionLifecycleBar } from '@/components/app/questionnaire/lifecycle/session-lifecycle-bar';
 import { CompletionOffer } from '@/components/app/questionnaire/lifecycle/completion-offer';
@@ -124,6 +125,12 @@ export function SessionWorkspace({
   const [activeView, setActiveView] = useState<'chat' | 'form'>(
     presentationMode === 'form' ? 'form' : 'chat'
   );
+  // Data-slot mode: the slot keys the latest turn filled, fed to the panel so it can scroll to them
+  // and step through. Computed by diffing the previous panel snapshot against each new one (the
+  // stream never tells the client a turn ordinal, so a diff is the reliable signal). `prevPanelRef`
+  // holds the prior snapshot; the first (SSR/seed) view seeds it silently and emits nothing.
+  const prevPanelRef = useRef<AnswerPanelView | null>(null);
+  const [newlyFilledKeys, setNewlyFilledKeys] = useState<readonly string[]>([]);
   // Both reads refetch on each clean turn-settle. The stream reads its `onTurnSettled`
   // through a ref, so routing the refetches through refs here breaks the declaration
   // cycle (stream needs the settle handler; the hooks below need the stream's applyStatus).
@@ -196,6 +203,23 @@ export function SessionWorkspace({
     panelRefetchRef.current = panel.refetch;
     lifecycleRefetchRef.current = lifecycle.refetch;
   });
+
+  // Detect the data slots the latest refetch filled (data-slot mode only). On the first view we just
+  // seed the ref — never auto-scroll the seeded/SSR snapshot. Each later view diffs against the prior
+  // one; a new turn's fills replace the previous set (the panel restarts its stepper on identity).
+  const panelView = panel.view;
+  useEffect(() => {
+    if (panelView?.dataSlotGroups === undefined) {
+      prevPanelRef.current = panelView;
+      return;
+    }
+    const filled = diffNewlyFilled(prevPanelRef.current, panelView);
+    prevPanelRef.current = panelView;
+    // Always publish — a later turn that fills nothing must CLEAR the prior turn's keys so a stale
+    // stepper footer doesn't linger. The functional update keeps the empty array referentially stable
+    // (so the panel's stepper effect, keyed on the serialized keys, doesn't needlessly re-run).
+    setNewlyFilledKeys((prev) => (prev.length === 0 && filled.length === 0 ? prev : filled));
+  }, [panelView]);
 
   const handleRevisit = useCallback(
     (slot: PanelSlotView) => {
@@ -279,6 +303,7 @@ export function SessionWorkspace({
         loading={panel.loading}
         onRevisit={handleRevisit}
         canRevisit={stream.canSend}
+        newlyFilledKeys={newlyFilledKeys}
         className="hidden lg:flex"
       />
     </div>

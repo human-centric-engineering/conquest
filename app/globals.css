@@ -139,7 +139,8 @@
     animation: cq-pulse 1.4s ease-in-out infinite;
   }
 
-  /* Gentle "live" breathing for a small status dot (e.g. an open round). */
+  /* Gentle "live" breathing for a small status dot (e.g. an open round, or a slot/bar the
+     latest turn filled). Keeps the element's colour; only opacity + scale breathe. */
   @keyframes cq-livedot {
     0%,
     100% {
@@ -155,9 +156,27 @@
     animation: cq-livedot 1.8s ease-in-out infinite;
   }
 
+  /* Gentle "recently filled" wash for a row / field container — a soft accent background that
+     pulses in and out. Non-dimming (animates background-color, not content opacity) and leaves
+     box-shadow free for a co-existing focus ring. Reduced motion keeps the resting tint. */
+  @keyframes cq-fill-glow {
+    0%,
+    100% {
+      background-color: var(--cq-accent-muted);
+    }
+    50% {
+      background-color: transparent;
+    }
+  }
+  .cq-fill-glow {
+    background-color: var(--cq-accent-muted);
+    animation: cq-fill-glow 2s ease-in-out infinite;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .cq-pulse,
-    .cq-livedot {
+    .cq-livedot,
+    .cq-fill-glow {
       animation: none;
     }
   }

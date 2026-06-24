@@ -45,6 +45,28 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
     borderBottomWidth: 2,
   },
+  // Full-bleed brand banner: negative margins cancel the page's 48pt padding so the
+  // band runs edge-to-edge (top + sides), echoing the live chat surface band. Its own
+  // 48pt horizontal padding re-aligns the logo with the body content below.
+  banner: {
+    marginTop: -48,
+    marginHorizontal: -48,
+    marginBottom: 18,
+    paddingVertical: 18,
+    paddingHorizontal: 48,
+    alignItems: 'flex-start',
+  },
+  // The logo's own backdrop, drawn only when it differs from the band (matches the
+  // rounded `--app-logo-bg` chip the chat header paints behind the mark).
+  logoBackdrop: {
+    padding: 8,
+    borderRadius: 6,
+  },
+  bannerLogo: {
+    height: 36,
+    objectFit: 'contain',
+    alignSelf: 'flex-start',
+  },
   logo: {
     height: 32,
     marginBottom: 12,
@@ -54,7 +76,8 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 20,
     fontFamily: 'Helvetica-Bold',
-    marginBottom: 2,
+    lineHeight: 1.25,
+    marginBottom: 4,
   },
   subtitle: {
     fontSize: 11,
@@ -135,12 +158,33 @@ export interface TranscriptPdfDocumentProps {
 /** The full transcript export document. Server-rendered to a buffer by the route. */
 export function TranscriptPdfDocument({ model }: TranscriptPdfDocumentProps) {
   const accent = model.theme.accentColor;
+  // The chat surface bands the header in `surfaceColor` (falling back to the resolved
+  // logo backdrop); mirror that here so a branded logo sits in a full-width banner
+  // instead of floating on white. Null when the client sets no brand chrome → the plain
+  // logo-on-white header below.
+  const bandColor = model.theme.surfaceColor ?? model.theme.logoBackgroundColor;
+  const logoBg = model.theme.logoBackgroundColor;
+  const bannered = Boolean(bandColor && model.theme.logoUrl);
 
   return (
     <Document title={`${model.questionnaireTitle} — transcript`}>
       <Page size="A4" style={styles.page}>
+        {bannered && model.theme.logoUrl && (
+          <View style={[styles.banner, { backgroundColor: bandColor as string }]}>
+            {logoBg && logoBg !== bandColor ? (
+              <View style={[styles.logoBackdrop, { backgroundColor: logoBg }]}>
+                <Image src={model.theme.logoUrl} style={styles.bannerLogo} />
+              </View>
+            ) : (
+              <Image src={model.theme.logoUrl} style={styles.bannerLogo} />
+            )}
+          </View>
+        )}
+
         <View style={[styles.header, { borderBottomColor: accent }]}>
-          {model.theme.logoUrl && <Image src={model.theme.logoUrl} style={styles.logo} />}
+          {!bannered && model.theme.logoUrl && (
+            <Image src={model.theme.logoUrl} style={styles.logo} />
+          )}
           <Text style={styles.title}>{model.questionnaireTitle}</Text>
           <Text style={styles.subtitle}>Conversation transcript</Text>
 

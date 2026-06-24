@@ -60,6 +60,8 @@ function row(over: Record<string, unknown> = {}) {
           ],
         },
       ],
+      // Always present in the real select; the data-slot-mode tests override with real slots.
+      dataSlots: [],
     },
     answers: [
       {
@@ -76,6 +78,9 @@ function row(over: Record<string, unknown> = {}) {
       { id: 'turn-a', ordinal: 1 },
       { id: 'turn-b', ordinal: 2 },
     ],
+    // The real Prisma select always returns these; the data-slot-mode tests override them. Keeping
+    // them on the base fixture matches the row shape the seam actually receives.
+    dataSlotFills: [],
     ...over,
   };
 }
@@ -250,12 +255,69 @@ describe('loadAnswerPanelState', () => {
       const mood = group.slots.find((s) => s.key === 'mood')!;
       expect(mood.filled).toBe(false);
       expect(mood.paraphrase).toBeNull();
-      // Question rows are suppressed; a blended progress percent is shown instead.
+      // Question rows are suppressed; a blended progress percent is shown instead. The fixture has
+      // 1 of 2 equal-weight questions answered → weighted coverage 50%.
       expect(loaded?.view.sections).toEqual([]);
-      expect(typeof loaded?.view.progressPercent).toBe('number');
+      expect(loaded?.view.progressPercent).toBe(50);
       // Average confidence in data-slot mode is the mean over the FILLS (ds-1 at 0.9; ds-2 unfilled
       // contributes nothing), matching the data-slot rows the respondent sees — not the question answers.
       expect(loaded?.view.averageConfidence).toBeCloseTo(0.9);
+    });
+
+    it('resolves a data-slot fill lastUpdatedTurnId to its 1-based turn ordinal', async () => {
+      findUnique.mockResolvedValue(
+        row({
+          version: {
+            ...row().version,
+            dataSlots: [
+              { id: 'ds-1', key: 'goal', name: 'Goal', description: 'Why', theme: 'Goals' },
+              { id: 'ds-2', key: 'mood', name: 'Mood', description: 'How', theme: 'Goals' },
+            ],
+          },
+          dataSlotFills: [
+            {
+              dataSlotId: 'ds-1',
+              paraphrase: 'Grow the team',
+              provenanceLabel: 'direct',
+              rationale: null,
+              confidence: 0.9,
+              provisional: false,
+              lastUpdatedTurnId: 'turn-b', // → ordinal 2
+              refinementHistory: [],
+            },
+            // ds-2 unfilled → answeredAtTurnIndex stays null
+          ],
+        })
+      );
+      const loaded = await loadAnswerPanelState('sess-1', true);
+      const group = loaded!.view.dataSlotGroups![0];
+      expect(group.slots.find((s) => s.key === 'goal')!.answeredAtTurnIndex).toBe(2);
+      expect(group.slots.find((s) => s.key === 'mood')!.answeredAtTurnIndex).toBeNull();
+    });
+
+    it('leaves a data-slot answeredAtTurnIndex null when the turn id is absent or unmapped', async () => {
+      findUnique.mockResolvedValue(
+        row({
+          version: {
+            ...row().version,
+            dataSlots: [{ id: 'ds-1', key: 'goal', name: 'Goal', description: 'd', theme: 'T' }],
+          },
+          dataSlotFills: [
+            {
+              dataSlotId: 'ds-1',
+              paraphrase: 'maybe',
+              provenanceLabel: 'inferred',
+              rationale: null,
+              confidence: 0.9,
+              provisional: false,
+              lastUpdatedTurnId: 'turn-missing', // not in the turns map → null
+              refinementHistory: [],
+            },
+          ],
+        })
+      );
+      const loaded = await loadAnswerPanelState('sess-1', true);
+      expect(loaded!.view.dataSlotGroups![0].slots[0].answeredAtTurnIndex).toBeNull();
     });
 
     it('counts a provisional fill as filled even below the confidence threshold', async () => {

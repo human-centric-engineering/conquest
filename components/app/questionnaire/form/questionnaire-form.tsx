@@ -22,6 +22,7 @@ import { FieldHelp } from '@/components/ui/field-help';
 import { useWizard } from '@/lib/hooks/use-wizard';
 import { QuestionField } from '@/components/app/questionnaire/form/question-field';
 import { SectionNavigator } from '@/components/app/questionnaire/form/section-navigator';
+import { recentlyFilledByLatestTurn } from '@/lib/app/questionnaire/panel/newly-filled';
 import type { SaveStatus } from '@/lib/hooks/use-form-answers';
 import type { AnswerPanelView } from '@/lib/app/questionnaire/panel/types';
 
@@ -82,6 +83,22 @@ export function QuestionnaireForm({
     return set;
   }, [sections]);
 
+  // Questions the most recent fill-turn captured (max `answeredAtTurnIndex`) — gently pulsed in the
+  // navigator dots and on the answer block, so a respondent switching to the form sees what the last
+  // chat turn just filled. Persists until a newer turn fills something.
+  const recentlyFilledKeys = useMemo(
+    () =>
+      recentlyFilledByLatestTurn(
+        sections.flatMap((s) =>
+          s.slots.map((slot) => ({
+            key: slot.slotKey,
+            answeredAtTurnIndex: slot.answeredAtTurnIndex,
+          }))
+        )
+      ),
+    [sections]
+  );
+
   const isAnswered = (slotKey: string): boolean => {
     if (slotKey in values) return !isEmptyValue(values[slotKey]);
     return false;
@@ -89,6 +106,7 @@ export function QuestionnaireForm({
   // Once the respondent has a local value, it's their own — no longer "inferred".
   const isInferred = (slotKey: string): boolean =>
     inferredKeys.has(slotKey) && !(slotKey in values);
+  const isRecentlyFilled = (slotKey: string): boolean => recentlyFilledKeys.has(slotKey);
 
   if (loading && !view) {
     return (
@@ -125,6 +143,7 @@ export function QuestionnaireForm({
           onJump={wiz.goTo}
           isAnswered={isAnswered}
           isInferred={isInferred}
+          isRecentlyFilled={isRecentlyFilled}
         />
       </aside>
 
@@ -138,7 +157,14 @@ export function QuestionnaireForm({
             {section.slots.map((slot) => {
               const status = statuses[slot.slotKey] ?? 'idle';
               return (
-                <li key={slot.slotKey} className="space-y-2">
+                <li
+                  key={slot.slotKey}
+                  className={cn(
+                    'space-y-2',
+                    // Filled by the latest turn — a gentle lasting wash on the whole answer block.
+                    isRecentlyFilled(slot.slotKey) && 'cq-fill-glow rounded-md px-3 py-2'
+                  )}
+                >
                   <div className="flex items-start justify-between gap-2">
                     <label className="text-foreground text-sm font-medium">
                       {slot.prompt}

@@ -58,6 +58,9 @@ The filter lives in the pure builder, not the route — see below.
 | Pure view contracts               | `lib/app/questionnaire/panel/types.ts`                                                |
 | Pure join + scope filter + counts | `lib/app/questionnaire/panel/answer-panel.ts` (`buildAnswerPanelView`)                |
 | Confidence band mapping           | `lib/app/questionnaire/panel/confidence.ts`                                           |
+| Newly-filled diff + slot DOM ids  | `lib/app/questionnaire/panel/newly-filled.ts`                                         |
+| Minimap geometry (pure)           | `lib/app/questionnaire/panel/minimap.ts` (`computeMiniMapModel`)                      |
+| Minimap (data-slot mode)          | `components/app/questionnaire/panel/slot-minimap.tsx` (`SlotMiniMap`)                 |
 | DB read seam (one query)          | `app/api/v1/app/questionnaire-sessions/_lib/answer-panel.ts` (`loadAnswerPanelState`) |
 | Route                             | `app/api/v1/app/questionnaire-sessions/[id]/answers/route.ts`                         |
 | Live fetch hook                   | `lib/hooks/use-answer-panel.ts`                                                       |
@@ -114,6 +117,54 @@ nuanced 30–100% range is shown, not collapsed to a band word. The panel header
 with the **average confidence** across all filled slots (an honest mean — a tangential, low-confidence
 fill drags it down by design), computed server-side in `_lib/answer-panel.ts` and carried on
 `AnswerPanelView.averageConfidence`.
+
+## Navigation aids for long questionnaires (data-slot mode)
+
+A questionnaire with many data slots scrolls off-screen, so the respondent can't see overall
+coverage and can miss a slot the latest turn filled below the fold. Two **data-slot-mode-only** aids
+address this (question mode is unchanged):
+
+- **Minimap** (`SlotMiniMap`) — a floating, vertical, scaled-down mirror of the scroll area (like the
+  workflow-canvas minimap), pinned to the left edge of the list. One thin bar per slot, **sized and
+  positioned proportional to the real rows** (so it's a true mini-render, not an even grid), tinted by
+  confidence band when filled (`bg-emerald/amber/orange/red-500/80`) and a faint sliver when not. A
+  **viewport window** rectangle overlays what's currently on screen and follows the list as it
+  scrolls; click or drag the track to scrub the list (`onScrubToFraction`). No theme headers, no
+  legend, no raw numbers — purely a graphic. Geometry is measured from the live DOM (`scrollHeight`,
+  row rects) in `AnswerSlotPanel` and projected to percentages by the pure `computeMiniMapModel`
+  (`minimap.ts`); re-measured on content change + `ResizeObserver`, while a scroll only updates the
+  cheap `viewportTop`. Renders only past a slot-count floor (`OVERVIEW_MIN_SLOTS = 10`) **and** when
+  the content actually overflows. `aria-hidden` (the list + stepper carry keyboard/SR navigation).
+- **After-turn stepper** — when a turn fills slots, the panel scrolls to the topmost one, pulses it,
+  and (if more than one) a footer on the focused row reads "2 more answers recorded →"; clicking
+  steps down through each ("1 more slot was answered" on the last hop). Scrolling targets the panel's
+  **own** container (`scrollTo`, never the window), respects reduced motion
+  (`usePrefersReducedMotion`), and moves focus + an `aria-live` announcement so keyboard/SR users
+  follow the jump.
+- **Previous-turn highlight** — the slots the **most recent fill-turn** captured gently **pulse** in
+  every surface, and keep pulsing (they don't settle) until a newer turn fills something, so they stay
+  identifiable after being viewed. "Most recent fill-turn" = the slots whose `answeredAtTurnIndex`
+  equals the maximum, via `recentlyFilledByLatestTurn` (`newly-filled.ts`) — deliberately **decoupled**
+  from the diff-based `newlyFilledKeys` (which drives the one-shot stepper and clears on a no-fill
+  turn). Animations are the project's existing keyframes:
+  - **Data-slot list rows** → `cq-fill-glow` (a soft accent background that pulses in/out, non-dimming).
+  - **Minimap bars** → `ring-primary` + `cq-livedot` (a gentle opacity/scale breathe that keeps the
+    confidence colour).
+  - **Form view** (`SectionNavigator` + `QuestionnaireForm`) — the navigator dots for those questions
+    → `cq-livedot`; the filled answer block → `cq-fill-glow`. The form computes its own recently-filled
+    set from `view.sections[].slots[].answeredAtTurnIndex` (no workspace plumbing).
+
+  All three keyframes carry a `prefers-reduced-motion` fallback (`cq-fill-glow` keeps a resting tint;
+  `cq-livedot` falls back to full opacity), defined in `app/globals.css`.
+
+**How "newly filled" is known** (`newly-filled.ts`): the messages stream never tells the client a
+turn ordinal, so `SessionWorkspace` keeps the previous `AnswerPanelView` and **diffs** it against
+each new snapshot (`diffNewlyFilled`) — a slot counts as filled-this-turn when it went unfilled→filled
+**or** its `answeredAtTurnIndex` advanced (a refinement / value change / provisional→confident). The
+first (SSR/seed) view seeds the baseline silently and never auto-scrolls. The ordered keys flow into
+`AnswerSlotPanel`'s `newlyFilledKeys`; each slot row carries a stable `panelSlotDomId(key)` anchor.
+For this, `DataSlotPanelSlot` now also carries `answeredAtTurnIndex` (resolved in the read seam from
+the fill's `lastUpdatedTurnId`, like question slots).
 
 ## Not here
 

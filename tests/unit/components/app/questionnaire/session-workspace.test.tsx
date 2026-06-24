@@ -98,12 +98,19 @@ vi.mock('@/components/app/questionnaire/panel/answer-slot-panel', () => ({
     loading,
     canRevisit,
     onRevisit,
+    newlyFilledKeys,
   }: {
     loading: boolean;
     canRevisit: boolean;
     onRevisit: (slot: PanelSlotView) => void;
+    newlyFilledKeys?: readonly string[];
   }) => (
-    <div data-testid="panel" data-loading={String(loading)} data-can-revisit={String(canRevisit)}>
+    <div
+      data-testid="panel"
+      data-loading={String(loading)}
+      data-can-revisit={String(canRevisit)}
+      data-newly-filled={(newlyFilledKeys ?? []).join(',')}
+    >
       <button type="button" onClick={() => onRevisit(SLOT)}>
         revisit
       </button>
@@ -317,6 +324,64 @@ describe('SessionWorkspace', () => {
     const panel = screen.getByTestId('panel');
     expect(panel).toHaveAttribute('data-loading', 'true');
     expect(panel).toHaveAttribute('data-can-revisit', 'false');
+  });
+
+  it('diffs panel snapshots and passes the newly-filled data-slot keys down (seeding silently first)', () => {
+    // A data-slot view where `goal` is unfilled.
+    const before = {
+      status: 'active' as const,
+      scope: 'full_progress' as const,
+      sections: [],
+      answeredCount: 0,
+      totalCount: 0,
+      dataSlotGroups: [
+        {
+          theme: 'Goals',
+          slots: [
+            {
+              key: 'goal',
+              name: 'Goal',
+              description: '',
+              paraphrase: null,
+              provenance: null,
+              confidence: null,
+              rationale: null,
+              filled: false,
+              provisional: false,
+              answeredAtTurnIndex: null,
+              history: [],
+            },
+          ],
+        },
+      ],
+      progressPercent: 0,
+    };
+    streamHook.mockReturnValue({
+      canSend: true,
+      status: 'idle',
+      sendMessage,
+      kickoff,
+      applyStatus,
+    });
+    lifecycleHook.mockReturnValue(lifecycleReturn());
+    panelHook.mockReturnValue({ view: before, loading: false, error: false, refetch });
+    const { rerender } = render(<SessionWorkspace sessionId="s1" />);
+    // First snapshot only seeds the diff baseline — nothing is announced as newly filled.
+    expect(screen.getByTestId('panel')).toHaveAttribute('data-newly-filled', '');
+
+    // The turn fills `goal`.
+    const after = {
+      ...before,
+      dataSlotGroups: [
+        {
+          theme: 'Goals',
+          slots: [{ ...before.dataSlotGroups[0].slots[0], filled: true, answeredAtTurnIndex: 2 }],
+        },
+      ],
+    };
+    panelHook.mockReturnValue({ view: after, loading: false, error: false, refetch });
+    rerender(<SessionWorkspace sessionId="s1" />);
+    expect(screen.getByTestId('panel')).toHaveAttribute('data-newly-filled', 'goal');
   });
 
   it('sends a revisit turn through the shared stream when sending is allowed', () => {

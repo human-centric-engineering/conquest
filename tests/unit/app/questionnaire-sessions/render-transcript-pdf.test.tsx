@@ -89,4 +89,23 @@ describe('renderTranscriptPdf', () => {
     const pdf = await renderTranscriptPdf(model({ turns: [] }));
     expect(startsWithPdfMagic(pdf)).toBe(true);
   }, 20000);
+
+  it('renders the full-bleed brand-banner path (surface band + distinct logo backdrop)', async () => {
+    // surfaceColor → the full-width banner; a distinct logoBackgroundColor → the inner
+    // rounded backdrop. Exercises the bannered branch of the header.
+    const pdf = await renderTranscriptPdf(
+      model({
+        theme: {
+          ctaColor: '#111111',
+          accentColor: '#abcdef',
+          logoUrl: 'data:image/png;base64,iVBORw0KGgo=',
+          welcomeCopy: null,
+          surfaceColor: '#1c0f2e',
+          logoBackgroundColor: '#2d1b4e',
+          logoBackgroundEnabled: true,
+        },
+      })
+    );
+    expect(startsWithPdfMagic(pdf)).toBe(true);
+  }, 20000);
 });

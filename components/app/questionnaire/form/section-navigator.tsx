@@ -29,6 +29,8 @@ export interface SectionNavigatorProps {
   isAnswered: (slotKey: string) => boolean;
   /** Whether a slot's current answer was inferred by the agent (vs respondent-stated). */
   isInferred: (slotKey: string) => boolean;
+  /** Whether a slot was filled by the most recent fill-turn — its dot gently pulses. */
+  isRecentlyFilled?: (slotKey: string) => boolean;
   className?: string;
 }
 
@@ -38,6 +40,7 @@ export function SectionNavigator({
   onJump,
   isAnswered,
   isInferred,
+  isRecentlyFilled,
   className,
 }: SectionNavigatorProps) {
   return (
@@ -80,13 +83,16 @@ export function SectionNavigator({
                 {section.slots.map((slot) => {
                   const ans = isAnswered(slot.slotKey);
                   const inferred = ans && isInferred(slot.slotKey);
+                  const recent = isRecentlyFilled?.(slot.slotKey) ?? false;
                   return (
                     <span
                       key={slot.slotKey}
                       title={slot.prompt}
                       className={cn(
                         'h-2 w-2 rounded-full',
-                        !ans && 'border-muted-foreground/40 border border-dashed'
+                        !ans && 'border-muted-foreground/40 border border-dashed',
+                        // Filled by the latest turn — gently breathes until a newer turn fills.
+                        recent && 'cq-livedot'
                       )}
                       style={
                         ans

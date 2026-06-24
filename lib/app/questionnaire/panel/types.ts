@@ -113,6 +113,12 @@ export interface DataSlotPanelSlot {
    */
   provisional: boolean;
   /**
+   * 1-based turn that last captured/updated this fill, or null when not yet filled. Mirrors
+   * `PanelSlotView.answeredAtTurnIndex`; lets the workspace diff two snapshots to spot the slots a
+   * given turn filled (so the panel can scroll to them) without leaking the raw turn count.
+   */
+  answeredAtTurnIndex: number | null;
+  /**
    * Prior paraphrases for this slot when the respondent changed their answer, oldest first. Empty
    * when the slot was filled once and never changed. Lets the panel show "Earlier: …" so a
    * correction (e.g. 25-year-old male → female) is visible, not silently overwritten.
