@@ -91,7 +91,10 @@ describe('SlotBreadthMeter', () => {
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByText('Your name?')).toBeInTheDocument();
-    // The unanswered question still lists, distinguished by muted styling rather than a "not yet" label.
+    // The unanswered question still lists. Visually it's distinguished by muted styling + an empty
+    // (aria-hidden) circle, but the state stays legible to screen readers via an sr-only suffix —
+    // answered questions carry the ConfidenceIndicator's aria-label, unanswered get "not yet answered".
     expect(screen.getByText('Favourite colour?')).toBeInTheDocument();
+    expect(screen.getByText('— not yet answered')).toBeInTheDocument();
   });
 });

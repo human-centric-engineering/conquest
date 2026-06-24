@@ -139,6 +139,9 @@ export function SlotBreadthMeter({
               )}
               <span className={cn('min-w-0 flex-1', q.answered ? '' : 'text-muted-foreground/70')}>
                 {q.label}
+                {/* Answered state is conveyed visually by the confidence dot vs. the empty (aria-hidden)
+                    circle; keep it legible to screen readers without re-cluttering the row. */}
+                {!q.answered ? <span className="sr-only"> — not yet answered</span> : null}
               </span>
             </li>
           ))}
