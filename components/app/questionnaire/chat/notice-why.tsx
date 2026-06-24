@@ -9,29 +9,53 @@
  * no rationale to show. Presentational only; the text is decided upstream and respondent-safe.
  */
 
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { ChevronDown } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 
 /**
- * `children`, when given, render as a left-hand cluster on the SAME row as the "Why?" trigger
- * (the trigger pushed to the far right via `ml-auto`); the rationale panel still expands full-width
- * below. Used by the data-slot row to dock "Why?" against the confidence/provenance line — it
- * explains the whole reading, so it reads as a row-level affordance, not an annotation on the
- * confidence figure beside it. Without children the component is the original button-only
- * disclosure (the seriousness / contradiction notice cards).
+ * `children`, when given, render inline on the SAME row as the "Why?" trigger, which flows directly
+ * after them (no right-dock); the rationale panel still expands full-width below. Used by the
+ * data-slot row to sit "Why?" alongside the confidence/provenance line — it explains the whole
+ * reading, so it reads as a row-level affordance, not an annotation on the confidence figure beside
+ * it. Without children the component is the original button-only disclosure (the seriousness /
+ * contradiction notice cards).
  */
 export function NoticeWhy({
   detail,
   children,
   className,
+  collapseSignal,
+  outOfView,
 }: {
   detail?: string;
   children?: ReactNode;
   className?: string;
+  /**
+   * When this number changes, the disclosure closes itself. The answer panel bumps it on refetch so an
+   * open rationale doesn't linger over content that has since changed. Omit (undefined) to leave the
+   * disclosure under purely manual control.
+   */
+  collapseSignal?: number;
+  /**
+   * True once the host row has scrolled fully out of view. The disclosure closes when this flips true
+   * (not on every scroll), so a small scroll leaves it open but scrolling past the row collapses it.
+   */
+  outOfView?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  // Close when the parent signals a collapse (refetch). Skips the initial mount: the effect's first
+  // run carries the starting signal, and `open` already starts closed.
+  useEffect(() => {
+    if (collapseSignal === undefined) return;
+    setOpen(false);
+  }, [collapseSignal]);
+  // Close once the row scrolls fully out of view (false → true). Re-entering view (true → false) is a
+  // no-op — it stays closed until manually reopened.
+  useEffect(() => {
+    if (outOfView) setOpen(false);
+  }, [outOfView]);
   const hasDetail = Boolean(detail && detail.trim().length > 0);
   // Nothing to render when there's neither a rationale to disclose nor a cluster to host.
   if (!hasDetail && !children) return null;
@@ -54,9 +78,9 @@ export function NoticeWhy({
   return (
     <div className={cn('mt-1.5', className)}>
       {children ? (
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <div className="flex flex-wrap items-center gap-1.5">{children}</div>
-          {trigger ? <div className="ml-auto">{trigger}</div> : null}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+          {children}
+          {trigger}
         </div>
       ) : (
         trigger

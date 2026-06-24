@@ -24,12 +24,12 @@ describe('SlotBreadthMeter', () => {
 
   it('shows the N-of-M summary with pluralised wording', () => {
     render(<SlotBreadthMeter coverage={coverage({ total: 5, answered: 3 })} expandable={false} />);
-    expect(screen.getByText('3 of 5 questions')).toBeInTheDocument();
+    expect(screen.getByText('3 of 5 questions filled')).toBeInTheDocument();
   });
 
   it('uses the singular when the slot maps to one question', () => {
     render(<SlotBreadthMeter coverage={coverage({ total: 1, answered: 0 })} expandable={false} />);
-    expect(screen.getByText('0 of 1 question')).toBeInTheDocument();
+    expect(screen.getByText('0 of 1 question filled')).toBeInTheDocument();
   });
 
   it('collapses the pips past MAX_PIPS (>6), keeping the fraction label', () => {
@@ -37,7 +37,7 @@ describe('SlotBreadthMeter', () => {
       <SlotBreadthMeter coverage={coverage({ total: 7, answered: 3 })} expandable={false} />
     );
     // The fraction label still reads, but the pip row is suppressed so a many-question slot never sprawls.
-    expect(screen.getByText('3 of 7 questions')).toBeInTheDocument();
+    expect(screen.getByText('3 of 7 questions filled')).toBeInTheDocument();
     // The pips render as fixed-width rounded bars (h-1.5 w-2.5); none are present past the cap.
     expect(container.querySelectorAll('span.h-1\\.5.w-2\\.5')).toHaveLength(0);
   });
@@ -69,7 +69,7 @@ describe('SlotBreadthMeter', () => {
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
 
-  it('toggles the itemised question list (label + "not yet" state) in both mode', () => {
+  it('toggles the itemised question list (answered + unanswered) in both mode', () => {
     render(
       <SlotBreadthMeter
         coverage={coverage({
@@ -91,8 +91,10 @@ describe('SlotBreadthMeter', () => {
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByText('Your name?')).toBeInTheDocument();
+    // The unanswered question still lists. Visually it's distinguished by muted styling + an empty
+    // (aria-hidden) circle, but the state stays legible to screen readers via an sr-only suffix —
+    // answered questions carry the ConfidenceIndicator's aria-label, unanswered get "not yet answered".
     expect(screen.getByText('Favourite colour?')).toBeInTheDocument();
-    // The unanswered question is flagged.
-    expect(screen.getByText('not yet')).toBeInTheDocument();
+    expect(screen.getByText('— not yet answered')).toBeInTheDocument();
   });
 });

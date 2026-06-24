@@ -79,6 +79,12 @@ export interface DataSlotFillHistoryEntry {
   previousParaphrase: string | null;
   /** The confidence of that prior value, or null. */
   previousConfidence: number | null;
+  /**
+   * The agent's justification for that prior value at the time, or null when none was recorded.
+   * Snapshotted at change-time so the panel's evolution view can show *why* each step read as it
+   * did. Optional/absent on entries written before per-change rationale was captured.
+   */
+  previousRationale?: string | null;
   /** ISO timestamp stamped at the persistence seam when the change was recorded. */
   changedAt?: string;
 }
@@ -119,11 +125,18 @@ export interface DataSlotPanelSlot {
    */
   answeredAtTurnIndex: number | null;
   /**
-   * Prior paraphrases for this slot when the respondent changed their answer, oldest first. Empty
-   * when the slot was filled once and never changed. Lets the panel show "Earlier: …" so a
-   * correction (e.g. 25-year-old male → female) is visible, not silently overwritten.
+   * Prior states of this slot when the respondent changed their answer, oldest first. Empty when the
+   * slot was filled once and never changed. Powers the row's "Edited" affordance, which opens the
+   * full evolution (current reading + each prior step's paraphrase, confidence, rationale and time)
+   * so a correction (e.g. 25-year-old male → female) is inspectable, not silently overwritten.
+   * `rationale`/`changedAt` are null on steps recorded before those were captured.
    */
-  history: Array<{ paraphrase: string | null; confidence: number | null }>;
+  history: Array<{
+    paraphrase: string | null;
+    confidence: number | null;
+    rationale: string | null;
+    changedAt: string | null;
+  }>;
   /**
    * Breadth: how many of this slot's mapped background questions the session has answered. The
    * panel renders `answered`/`total` as a segmented pip meter (always), expandable to the itemised

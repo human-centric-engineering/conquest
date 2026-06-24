@@ -24,6 +24,16 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { HelpCircle } from 'lucide-react';
+
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
 
 import { cn } from '@/lib/utils';
 import { usePrefersReducedMotion } from '@/lib/hooks/use-prefers-reduced-motion';
@@ -33,6 +43,7 @@ import { ConfidenceScore } from '@/components/app/questionnaire/panel/confidence
 import { NoticeWhy } from '@/components/app/questionnaire/chat/notice-why';
 import { SlotMiniMap } from '@/components/app/questionnaire/panel/slot-minimap';
 import { SlotBreadthMeter } from '@/components/app/questionnaire/panel/slot-breadth-meter';
+import { SlotHistoryDialog } from '@/components/app/questionnaire/panel/slot-history-dialog';
 import {
   panelSlotDomId,
   recentlyFilledByLatestTurn,
@@ -49,6 +60,17 @@ import type {
 const OVERVIEW_MIN_SLOTS = 10;
 /** How long a scrolled-to slot keeps its highlight ring (ms). */
 const HIGHLIGHT_MS = 1500;
+
+/**
+ * What the captured-context panel is *for* — shown in full on the first turn (when nothing is
+ * captured yet) and tucked behind a "How this works" disclosure thereafter. Names the mechanic the
+ * respondent can't otherwise see: this conversation is quietly completing a questionnaire, so the
+ * captured-context list is a by-product, not a to-do list whose length signals "almost done".
+ */
+const CONTEXT_EXPLAINER =
+  'As the conversation continues, we’ll record a high-level summary below. We’ll also be filling out ' +
+  'a questionnaire in the background. You’re encouraged to speak your mind and expand as much as you ' +
+  'like so we can try to fill several questions from a single turn in the chat.';
 
 export interface AnswerSlotPanelProps {
   /** The panel view, or null while the first (anonymous) fetch is in flight. */
@@ -69,43 +91,75 @@ export interface AnswerSlotPanelProps {
 
 function ProgressHeading({ view }: { view: AnswerPanelView }) {
   const dataSlotMode = view.dataSlotGroups !== undefined;
-  // Data-slot mode shows one balanced percentage (questions + data slots) — never the raw question
-  // count, which the respondent never sees. Question mode keeps the familiar "N of M" / "N captured".
-  const percent = view.progressPercent ?? 0;
-  const completion = dataSlotMode
-    ? `${percent}% complete`
-    : view.scope === 'answered_only'
-      ? `${view.answeredCount} captured`
-      : `${view.answeredCount} of ${view.totalCount} answered`;
-  // Average confidence across all captured slots, paired with completion ("… · avg confidence 58%").
-  // Honest mean: a tangential/low-confidence fill drags it down by design. Omitted until something
-  // scored has been captured.
+  // How many context slots we've actually captured. Deliberately NOT a "% complete" anymore: the
+  // single completion figure lives in the labelled "Through the questionnaire" bar up top. Showing a
+  // second percentage here invited the panel to read as "almost done" once a few slots filled, even
+  // though questionnaire coverage was still low. A plain count describes what the panel holds without
+  // competing with that bar.
+  const capturedCount = dataSlotMode
+    ? (view.dataSlotGroups ?? []).reduce((n, g) => n + g.slots.filter((s) => s.filled).length, 0)
+    : view.answeredCount;
+  // Total context areas (filled + still-open data slots) — the denominator the respondent sees in
+  // data-slot mode ("12 of 35 context areas captured").
+  const totalAreas = dataSlotMode
+    ? (view.dataSlotGroups ?? []).reduce((n, g) => n + g.slots.length, 0)
+    : view.totalCount;
+  // Average confidence across all captured slots. Honest mean: a tangential/low-confidence fill drags
+  // it down by design. Omitted until something scored has been captured.
   const avgConfidence =
     view.averageConfidence !== undefined ? Math.round(view.averageConfidence * 100) : null;
-  const summary =
-    avgConfidence !== null ? `${completion} · avg confidence ${avgConfidence}%` : completion;
+  let summary: string;
+  if (dataSlotMode) {
+    const base = `${capturedCount} of ${totalAreas} context areas captured`;
+    summary = avgConfidence !== null ? `${base} with ${avgConfidence}% confidence` : base;
+  } else {
+    const completion =
+      view.scope === 'answered_only'
+        ? `${view.answeredCount} captured`
+        : `${view.answeredCount} of ${view.totalCount} answered`;
+    summary =
+      avgConfidence !== null ? `${completion} · avg confidence ${avgConfidence}%` : completion;
+  }
   return (
     <div className="border-b px-4 py-3">
-      <h2 className="text-sm font-semibold">
-        {dataSlotMode ? 'What we’re learning' : 'Your answers'}
-      </h2>
-      <p className="text-muted-foreground mt-0.5 text-xs tabular-nums">{summary}</p>
-      {dataSlotMode ? (
-        <div
-          className="bg-muted mt-2 h-1.5 overflow-hidden rounded-full"
-          role="progressbar"
-          aria-valuenow={percent}
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-label="Completion progress"
-        >
-          <div
-            className="bg-primary h-full rounded-full transition-[width] duration-500 ease-out"
-            style={{ width: `${percent}%` }}
-          />
-        </div>
-      ) : null}
+      {/* Title row: the heading on the left, with the "How this works" explainer tucked into a compact
+          top-right modal link so it never costs vertical space in the header. */}
+      <div className="flex items-start justify-between gap-2">
+        <h2 className="text-sm font-semibold">
+          {dataSlotMode ? 'Capturing your context' : 'Your answers'}
+        </h2>
+        {dataSlotMode ? <HowThisWorksDialog /> : null}
+      </div>
+      {(!dataSlotMode || capturedCount > 0) && (
+        <p className="text-muted-foreground mt-0.5 text-xs tabular-nums">{summary}</p>
+      )}
     </div>
+  );
+}
+
+/** The "How this works" top-right link + modal — explains the background-capture mechanic on demand. */
+function HowThisWorksDialog() {
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <button
+          type="button"
+          aria-label="How this works"
+          title="How this works"
+          className="text-muted-foreground hover:text-foreground inline-flex shrink-0 items-center transition-colors"
+        >
+          <HelpCircle className="h-4 w-4" aria-hidden="true" />
+        </button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>How this works</DialogTitle>
+          <DialogDescription className="text-foreground/80 text-sm leading-relaxed">
+            {CONTEXT_EXPLAINER}
+          </DialogDescription>
+        </DialogHeader>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -115,10 +169,11 @@ function moreRecordedLabel(remaining: number): string {
 }
 
 /**
- * One data-slot row (Data Slots feature): the short name, the agent's paraphrase, a confidence dot
- * + score, an "Inferred" marker, the breadth meter (how many mapped questions are answered — a count,
- * distinct from the confidence hue), the "Why?" rationale disclosure, and prior values. Carries the
- * DOM anchor + highlight + stepper footer the panel injects for after-turn navigation.
+ * One data-slot row (Data Slots feature): the short name with an "Edited" pill in its top-right
+ * corner (opens the answer's evolution), the agent's paraphrase, a confidence dot + score, an
+ * "Inferred" marker, the breadth meter (how many mapped questions are answered — a count, distinct
+ * from the confidence hue), and the inline "Why?" rationale disclosure. Carries the DOM anchor +
+ * highlight + stepper footer the panel injects for after-turn navigation.
  */
 function DataSlotRow({
   slot,
@@ -127,6 +182,8 @@ function DataSlotRow({
   showSlotQuestions,
   stepperRemaining,
   onStepNext,
+  collapseSignal,
+  outOfView,
 }: {
   slot: DataSlotPanelSlot;
   highlighted: boolean;
@@ -137,6 +194,10 @@ function DataSlotRow({
   /** When non-null, render the "N more recorded" footer with this many slots still to come. */
   stepperRemaining: number | null;
   onStepNext: () => void;
+  /** Bumped by the panel on refetch so this row's open disclosures collapse themselves. */
+  collapseSignal: number;
+  /** True once this row has scrolled fully out of view — collapses its open disclosures. */
+  outOfView: boolean;
 }) {
   return (
     <li
@@ -157,15 +218,26 @@ function DataSlotRow({
           className={cn('mt-1', recentlyFilled && 'cq-livedot')}
         />
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium">{slot.name}</p>
+          {/* Name row carries the "Edited" pill in the top-right corner (above the answer text). The
+              pill renders nothing unless the slot changed at least once; opens the full evolution
+              (replaces the old inline strikethrough "Earlier:" list). */}
+          <div className="flex items-start gap-2">
+            <p className="min-w-0 flex-1 text-sm font-medium">{slot.name}</p>
+            <SlotHistoryDialog slot={slot} />
+          </div>
           {slot.paraphrase ? (
             <>
               <p className="text-muted-foreground mt-0.5 text-sm">{slot.paraphrase}</p>
               {/* Confidence (label + raw % — the nuanced 30–100% range reads at a glance) and the
-                  "Inferred" marker, with the "Why?" rationale disclosure docked to the row's right
-                  edge. "Why?" explains the whole reading, so it's a row-level affordance here, not an
+                  "Inferred" marker, with the "Why?" rationale disclosure flowing inline after them.
+                  "Why?" explains the whole reading, so it's a row-level affordance here, not an
                   annotation on the confidence figure; its rationale still expands full-width below. */}
-              <NoticeWhy detail={slot.rationale ?? undefined} className="mt-1">
+              <NoticeWhy
+                detail={slot.rationale ?? undefined}
+                className="mt-1"
+                collapseSignal={collapseSignal}
+                outOfView={outOfView}
+              >
                 <ConfidenceScore confidence={slot.confidence} />
                 {slot.provenance === 'inferred' || slot.provenance === 'synthesised' ? (
                   <span
@@ -180,9 +252,6 @@ function DataSlotRow({
           ) : (
             <p className="text-muted-foreground/70 mt-0.5 text-xs italic">Not covered yet</p>
           )}
-          {/* Breadth: how many of the slot's background questions are answered — a count, distinct
-              from the confidence dot's quality hue. Expands to the questions in `both` mode. */}
-          <SlotBreadthMeter coverage={slot.coverage} expandable={showSlotQuestions} />
           {slot.provisional ? (
             <p
               className="text-muted-foreground/60 mt-0.5 text-[11px] italic"
@@ -190,21 +259,6 @@ function DataSlotRow({
             >
               provisional · may revisit
             </p>
-          ) : null}
-          {slot.history.length > 0 ? (
-            <ul className="mt-1 space-y-0.5">
-              {slot.history
-                .filter((h) => h.paraphrase)
-                .map((h, i) => (
-                  <li
-                    key={i}
-                    className="text-muted-foreground/70 text-xs line-through"
-                    title="An earlier answer you later changed"
-                  >
-                    Earlier: {h.paraphrase}
-                  </li>
-                ))}
-            </ul>
           ) : null}
           {stepperRemaining != null && stepperRemaining > 0 ? (
             <button
@@ -218,6 +272,20 @@ function DataSlotRow({
           ) : null}
         </div>
       </div>
+      {/* Breadth lives in the card footer — full-width, flush to the bottom edge, separated by a
+          hairline. It's a per-slot count (how many mapped questions are answered), distinct from the
+          confidence dot's quality hue, so it reads as a footer summary rather than an inline note.
+          Suppressed when the slot maps to no questions (the meter would render nothing). */}
+      {slot.coverage.total > 0 ? (
+        <div className="border-border/60 bg-muted/20 -mx-3 mt-2 -mb-2 rounded-b-md border-t">
+          <SlotBreadthMeter
+            coverage={slot.coverage}
+            expandable={showSlotQuestions}
+            collapseSignal={collapseSignal}
+            outOfView={outOfView}
+          />
+        </div>
+      ) : null}
     </li>
   );
 }
@@ -237,6 +305,10 @@ export function AnswerSlotPanel({
 
   const [highlightedKey, setHighlightedKey] = useState<string | null>(null);
   const [announce, setAnnounce] = useState('');
+  // Monotonic "collapse open disclosures" signal. Bumped when the respondent scrolls the list or the
+  // view refetches, so any open "Why?" rationale / questions footer closes itself rather than lingering
+  // over content it no longer lines up with. Threaded down to each row's disclosures.
+  const [collapseSignal, setCollapseSignal] = useState(0);
   // Stepper cursor: index into `newlyFilledKeys`, or null when no after-turn fills are active.
   const [cursor, setCursor] = useState<number | null>(null);
   // Measured minimap geometry (content + row rects) and the live scroll offset, kept separate so a
@@ -324,6 +396,14 @@ export function AnswerSlotPanel({
     };
   }, []);
 
+  // A refetch (the workspace hands a fresh view after each settled turn) collapses any open
+  // disclosure: the rationale/coverage behind it may have changed, so close rather than leave a stale
+  // panel hanging open. Scroll-driven collapses are per-row instead (a row closes once it scrolls out
+  // of view — see `outOfViewKeys`), not a blanket close on every scroll.
+  useEffect(() => {
+    setCollapseSignal((s) => s + 1);
+  }, [view]);
+
   // After-turn stepper: a new set of newly-filled keys arms the stepper at the top one and scrolls
   // to it. Keyed on the serialized keys so the same turn does not re-fire, and a new turn restarts.
   const newlyKey = newlyFilledKeys ? newlyFilledKeys.join(' ') : '';
@@ -402,6 +482,24 @@ export function AnswerSlotPanel({
   );
   const showMap = dataSlotMode && totalSlots > OVERVIEW_MIN_SLOTS && miniMap.overflow;
 
+  // Keys of slots whose row has scrolled fully out of the visible window — used to collapse a row's
+  // open "Why?" / questions disclosure once you've scrolled past it, rather than on the first pixel of
+  // scroll. A row counts as out only when it's entirely above or entirely below the viewport, so a
+  // disclosure stays open while any part of its row is still in the focus window. Empty until geometry
+  // is measured (the rows carry content-space tops/heights; `viewportTop` is the live scroll offset).
+  const outOfViewKeys = useMemo(() => {
+    const out = new Set<string>();
+    const viewTop = viewportTop;
+    const viewBottom = viewportTop + geometry.viewportHeight;
+    // No measured viewport (pre-measure / hidden) → treat nothing as out, so we never close blindly.
+    if (geometry.viewportHeight === 0) return out;
+    for (const row of geometry.rows) {
+      const rowBottom = row.top + row.height;
+      if (rowBottom <= viewTop || row.top >= viewBottom) out.add(row.key);
+    }
+    return out;
+  }, [geometry, viewportTop]);
+
   const focusedKey = cursor !== null && newlyFilledKeys ? (newlyFilledKeys[cursor] ?? null) : null;
   const stepperRemaining =
     cursor !== null && newlyFilledKeys ? newlyFilledKeys.length - cursor - 1 : 0;
@@ -425,13 +523,23 @@ export function AnswerSlotPanel({
           <div className="relative min-h-0 flex-1">
             <div
               ref={scrollRef}
-              onScroll={(e) => setViewportTop(e.currentTarget.scrollTop)}
-              className={cn('h-full overflow-y-auto px-3 py-3', showMap && 'pl-7')}
+              onScroll={(e) => {
+                // Just track the offset. An open "Why?" / questions disclosure no longer closes on the
+                // first pixel of scroll — it collapses only once its row scrolls fully out of view (see
+                // `outOfViewKeys` / the `outOfView` prop), so a small nudge leaves it open.
+                setViewportTop(e.currentTarget.scrollTop);
+              }}
+              className={cn(
+                'h-full overflow-y-auto px-3 py-3',
+                // When the minimap shows it becomes the scroll affordance: clear room for it on the
+                // right and hide the native bar so the two don't overlap on classic Windows scrollbars.
+                showMap && 'cq-no-scrollbar pr-8'
+              )}
             >
               {view.dataSlotGroups !== undefined ? (
                 groups.every((g) => g.slots.length === 0) ? (
                   <p className="text-muted-foreground px-1 py-4 text-sm">
-                    As you chat, we’ll show what we’re learning here.
+                    As you chat, the context we capture will appear here.
                   </p>
                 ) : (
                   <div ref={contentRef} className="space-y-4">
@@ -450,6 +558,8 @@ export function AnswerSlotPanel({
                               showSlotQuestions={view.showSlotQuestions ?? false}
                               stepperRemaining={focusedKey === slot.key ? stepperRemaining : null}
                               onStepNext={stepNext}
+                              collapseSignal={collapseSignal}
+                              outOfView={outOfViewKeys.has(slot.key)}
                             />
                           ))}
                         </ul>
@@ -490,7 +600,7 @@ export function AnswerSlotPanel({
                 windowHeightPct={miniMap.windowHeightPct}
                 recentlyFilledKeys={recentlyFilledSet}
                 onScrubToFraction={scrubToFraction}
-                className="absolute top-3 bottom-3 left-2"
+                className="absolute top-3 right-2 bottom-3"
               />
             ) : null}
           </div>

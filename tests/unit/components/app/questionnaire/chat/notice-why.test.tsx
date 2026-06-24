@@ -118,9 +118,12 @@ describe('NoticeWhy', () => {
       expect(button.closest('div')).toHaveClass('custom-spacing');
     });
 
-    it('renders without error when className is omitted', () => {
+    it('keeps the base wrapper class and leaks nothing when className is omitted', () => {
       render(<NoticeWhy detail="Some detail." />);
-      expect(screen.getByRole('button')).toBeInTheDocument();
+      // cn() must drop the absent className cleanly: base class survives, no "undefined" string.
+      const wrapper = screen.getByRole('button').closest('div');
+      expect(wrapper).toHaveClass('mt-1.5');
+      expect(wrapper?.className).not.toContain('undefined');
     });
   });
 
@@ -145,14 +148,16 @@ describe('NoticeWhy', () => {
       expect(screen.getByRole('button', { name: /why\?/i })).toBeInTheDocument();
     });
 
-    it('pushes the trigger to the right of the cluster (ml-auto)', () => {
+    it('flows the trigger inline after the cluster in a wrapping flex row', () => {
       render(
         <NoticeWhy detail="Reason.">
           <span>cluster</span>
         </NoticeWhy>
       );
-      // The trigger sits in an ml-auto wrapper so it docks to the row's right edge, not beside the cluster.
-      expect(screen.getByRole('button').closest('div')).toHaveClass('ml-auto');
+      // The trigger now reads as a row-level affordance flowing directly after the cluster (no
+      // right-dock), so the wrapper is a wrapping flex row rather than an ml-auto push.
+      const wrapper = screen.getByRole('button').closest('div');
+      expect(wrapper).toHaveClass('flex', 'flex-wrap', 'items-center');
     });
 
     it('still renders the cluster when there is no detail (no trigger, no null)', () => {

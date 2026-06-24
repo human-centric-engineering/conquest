@@ -11,12 +11,14 @@
  *
  * The pips render up to {@link MAX_PIPS} segments; past that the meter drops the pips and shows the
  * fraction alone so a many-question slot never sprawls. When `expandable` (presentationMode `both`,
- * where the respondent also sees the form), the meter is a disclosure button that itemises the
- * mapped questions — each with a tick/empty state and its own confidence dot. Otherwise it is inert
- * summary text: the count shows, but the raw prompts stay hidden (the chat-mode abstraction).
+ * where the respondent also sees the form), the meter is a full-width disclosure button — it fills its
+ * footer so a click anywhere toggles, with the chevron docked to the right edge — itemising the mapped
+ * questions, each with a tick/empty state and its own confidence dot. Otherwise it is inert summary
+ * text: the count shows, but the raw prompts stay hidden (the chat-mode abstraction). The meter owns
+ * its own footer padding; the caller supplies only the border/background frame.
  */
 
-import { useId, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
@@ -30,6 +32,17 @@ export interface SlotBreadthMeterProps {
   coverage: DataSlotCoverage;
   /** When true, the meter expands to itemise the mapped questions (presentationMode `both`). */
   expandable: boolean;
+  /**
+   * When this number changes, an expanded questions list closes itself. The answer panel bumps it on
+   * refetch so the footer doesn't stay open over a row whose coverage has since changed. Omit
+   * (undefined) to leave the meter under purely manual control.
+   */
+  collapseSignal?: number;
+  /**
+   * True once the host row has scrolled fully out of view. The list closes when this flips true (not on
+   * every scroll), so a small scroll leaves it open but scrolling past the row collapses it.
+   */
+  outOfView?: boolean;
   className?: string;
 }
 
@@ -51,15 +64,30 @@ function Pips({ total, answered }: { total: number; answered: number }) {
   );
 }
 
-export function SlotBreadthMeter({ coverage, expandable, className }: SlotBreadthMeterProps) {
+export function SlotBreadthMeter({
+  coverage,
+  expandable,
+  collapseSignal,
+  outOfView,
+  className,
+}: SlotBreadthMeterProps) {
   const listId = useId();
   const [open, setOpen] = useState(false);
+  // Close the expanded questions list when the parent signals a collapse (refetch).
+  useEffect(() => {
+    if (collapseSignal === undefined) return;
+    setOpen(false);
+  }, [collapseSignal]);
+  // Close once the row scrolls fully out of view (false → true); re-entering view is a no-op.
+  useEffect(() => {
+    if (outOfView) setOpen(false);
+  }, [outOfView]);
   const { total, answered, questions } = coverage;
 
   // A slot that maps to no questions has no breadth to show.
   if (total === 0) return null;
 
-  const label = `${answered} of ${total} ${total === 1 ? 'question' : 'questions'}`;
+  const label = `${answered} of ${total} ${total === 1 ? 'question' : 'questions'} filled`;
   // Itemise only when the panel is allowed to AND the prompts were actually shipped.
   const canExpand = expandable && questions.length > 0;
 
@@ -71,29 +99,34 @@ export function SlotBreadthMeter({ coverage, expandable, className }: SlotBreadt
   );
 
   if (!canExpand) {
-    return <div className={cn('mt-1', className)}>{summary}</div>;
+    return <div className={cn('px-3 pt-0.5 pb-1.5', className)}>{summary}</div>;
   }
 
   return (
-    <div className={cn('mt-1', className)}>
+    <div className={cn(className)}>
+      {/* Full-bleed header button: spans the whole footer width so a click anywhere toggles, with the
+          chevron docked to the right edge (justify-between). */}
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-controls={listId}
-        className="hover:text-foreground inline-flex items-center gap-1 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-current/40"
+        className={cn(
+          'hover:bg-muted/40 hover:text-foreground flex w-full items-center justify-between gap-2 px-3 pt-0.5 pb-1.5 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-current/40 focus-visible:ring-inset',
+          !open && 'rounded-b-md'
+        )}
       >
         {summary}
         <ChevronDown
           aria-hidden="true"
           className={cn(
-            'text-muted-foreground h-3 w-3 transition-transform duration-200 motion-reduce:transition-none',
+            'text-muted-foreground h-3 w-3 shrink-0 transition-transform duration-200 motion-reduce:transition-none',
             open && 'rotate-180'
           )}
         />
       </button>
       {open ? (
-        <ul id={listId} className="border-border/60 mt-1.5 space-y-1 border-l pl-2.5">
+        <ul id={listId} className="border-border/60 mt-1 mb-2 ml-3 space-y-1 border-l pl-2.5">
           {questions.map((q, i) => (
             <li key={i} className="flex items-start gap-1.5 text-xs">
               {q.answered ? (
@@ -106,10 +139,10 @@ export function SlotBreadthMeter({ coverage, expandable, className }: SlotBreadt
               )}
               <span className={cn('min-w-0 flex-1', q.answered ? '' : 'text-muted-foreground/70')}>
                 {q.label}
+                {/* Answered state is conveyed visually by the confidence dot vs. the empty (aria-hidden)
+                    circle; keep it legible to screen readers without re-cluttering the row. */}
+                {!q.answered ? <span className="sr-only"> — not yet answered</span> : null}
               </span>
-              {!q.answered ? (
-                <span className="text-muted-foreground/60 shrink-0 italic">not yet</span>
-              ) : null}
             </li>
           ))}
         </ul>

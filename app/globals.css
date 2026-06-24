@@ -193,6 +193,16 @@
     animation: terminal-blink 1s steps(2, start) infinite;
   }
 
+  /* Hide the native scrollbar while keeping the element scrollable (wheel/trackpad/touch/keyboard
+     all still work). Used by the data-slot panel when the SlotMiniMap takes over as the visible
+     scroll affordance, so the two don't sit on top of each other on Windows/Linux classic bars. */
+  .cq-no-scrollbar {
+    scrollbar-width: none; /* Firefox + Chrome 121+ */
+  }
+  .cq-no-scrollbar::-webkit-scrollbar {
+    display: none; /* Safari + older WebKit/Blink */
+  }
+
   @keyframes terminal-blink {
     to {
       visibility: hidden;

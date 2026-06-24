@@ -73,6 +73,13 @@ export function SlotMiniMap({
         onScrubToFraction(fractionFromY(e.clientY), true);
       }}
       onPointerMove={(e) => {
+        // Scrub only while a button is actually held (a real drag), not on a bare hover. `buttons === 0`
+        // also self-heals a stuck drag: if a `pointerup` was missed (released off-element / outside the
+        // window), `draggingRef` could linger true and make plain hovers scrub — clear it here.
+        if (e.buttons === 0) {
+          draggingRef.current = false;
+          return;
+        }
         if (draggingRef.current) onScrubToFraction(fractionFromY(e.clientY), false);
       }}
       onPointerUp={(e) => {
@@ -89,7 +96,7 @@ export function SlotMiniMap({
         draggingRef.current = false;
       }}
       className={cn(
-        'bg-card/70 supports-[backdrop-filter]:bg-card/50 relative w-4 cursor-pointer touch-none rounded-md border shadow-sm backdrop-blur-sm',
+        'bg-card/70 supports-[backdrop-filter]:bg-card/50 relative w-5 cursor-grab touch-none rounded-md border shadow-sm backdrop-blur-sm active:cursor-grabbing',
         className
       )}
     >
@@ -106,12 +113,20 @@ export function SlotMiniMap({
           )}
         />
       ))}
-      {/* The viewport window — what's currently visible in the list. Follows the scroll. */}
+      {/* The viewport window — what's currently visible, and the draggable thumb now that the
+          minimap stands in for the native scrollbar. A shaded grey fill (translucent, so the
+          confidence bars read through it) plus a centred grip make it an obvious grab target. */}
       <div
         data-testid="slot-minimap-window"
         style={{ top: `${windowTopPct}%`, height: `${windowHeightPct}%` }}
-        className="border-primary/70 bg-primary/10 pointer-events-none absolute inset-x-0 rounded-sm border"
-      />
+        className="border-foreground/25 bg-muted-foreground/25 pointer-events-none absolute inset-x-0 flex items-center justify-center overflow-hidden rounded-sm border shadow-sm"
+      >
+        <span aria-hidden="true" className="flex flex-col items-center gap-[3px]">
+          <span className="bg-foreground/40 h-px w-2 rounded-full" />
+          <span className="bg-foreground/40 h-px w-2 rounded-full" />
+          <span className="bg-foreground/40 h-px w-2 rounded-full" />
+        </span>
+      </div>
     </div>
   );
 }

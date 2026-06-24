@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 
 import { AnswerSlotPanel } from '@/components/app/questionnaire/panel/answer-slot-panel';
 import type {
@@ -46,6 +46,24 @@ function pendingSlot(over: Partial<PanelSlotView> = {}): PanelSlotView {
     rationale: null,
     answeredAtTurnIndex: null,
     refinementHistory: [],
+    ...over,
+  };
+}
+
+function filledDataSlot(over: Partial<DataSlotPanelSlot> = {}): DataSlotPanelSlot {
+  return {
+    key: 'strategy',
+    name: 'Strategy',
+    description: 'Their strategic priorities.',
+    paraphrase: 'Focused on restructuring go-to-market.',
+    provenance: 'direct',
+    confidence: 0.58,
+    rationale: null,
+    filled: true,
+    provisional: false,
+    answeredAtTurnIndex: 1,
+    history: [],
+    coverage: { total: 0, answered: 0, questions: [] },
     ...over,
   };
 }
@@ -92,7 +110,7 @@ describe('AnswerSlotPanel', () => {
     expect(screen.getByText('1 captured')).toBeInTheDocument();
   });
 
-  it('shows a blended percentage (not the raw question count) in data-slot mode', () => {
+  it('shows the captured-context header + "How this works" link, never a percentage, in data-slot mode', () => {
     render(
       <AnswerSlotPanel
         view={view({
@@ -104,10 +122,17 @@ describe('AnswerSlotPanel', () => {
         })}
       />
     );
-    expect(screen.getByText('What we’re learning')).toBeInTheDocument();
-    expect(screen.getByText('37% complete')).toBeInTheDocument();
+    expect(screen.getByText('Capturing your context')).toBeInTheDocument();
+    // The panel no longer carries its own percentage/bar — the labelled questionnaire bar up top
+    // owns "% complete", so nothing here reads as a second completion meter.
+    expect(screen.queryByText('37% complete')).not.toBeInTheDocument();
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
     expect(screen.queryByText('0 of 71 answered')).not.toBeInTheDocument();
-    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '37');
+    // The explainer is tucked behind a compact top-right link, not shown inline (so it costs no space).
+    expect(screen.getByRole('button', { name: /how this works/i })).toBeInTheDocument();
+    expect(
+      screen.queryByText(/filling out a questionnaire in the background/i)
+    ).not.toBeInTheDocument();
   });
 
   it('appends average confidence to the header when present (question mode)', () => {
@@ -116,11 +141,16 @@ describe('AnswerSlotPanel', () => {
     expect(screen.getByText('1 of 2 answered · avg confidence 90%')).toBeInTheDocument();
   });
 
-  it('appends average confidence to the blended header in data-slot mode', () => {
+  it('shows captured-of-total context areas and average confidence in data-slot mode', () => {
     render(
       <AnswerSlotPanel
         view={view({
-          dataSlotGroups: [{ theme: 'Strategy', slots: [] }],
+          dataSlotGroups: [
+            {
+              theme: 'Strategy',
+              slots: [filledDataSlot(), filledDataSlot({ key: 'pricing', filled: false })],
+            },
+          ],
           progressPercent: 37,
           averageConfidence: 0.58,
           answeredCount: 0,
@@ -128,7 +158,33 @@ describe('AnswerSlotPanel', () => {
         })}
       />
     );
-    expect(screen.getByText('37% complete · avg confidence 58%')).toBeInTheDocument();
+    // Captured count over the total number of context areas, paired with confidence — no percentage.
+    expect(
+      screen.getByText('1 of 2 context areas captured with 58% confidence')
+    ).toBeInTheDocument();
+  });
+
+  it('reveals the explainer in a modal when the "How this works" link is clicked', () => {
+    render(
+      <AnswerSlotPanel
+        view={view({
+          dataSlotGroups: [{ theme: 'Strategy', slots: [filledDataSlot()] }],
+          progressPercent: 37,
+          answeredCount: 0,
+          totalCount: 71,
+        })}
+      />
+    );
+    const trigger = screen.getByRole('button', { name: /how this works/i });
+    // Closed: the explainer is not in the DOM until the modal opens.
+    expect(
+      screen.queryByText(/filling out a questionnaire in the background/i)
+    ).not.toBeInTheDocument();
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole('dialog');
+    expect(
+      within(dialog).getByText(/filling out a questionnaire in the background/i)
+    ).toBeInTheDocument();
   });
 
   it('omits the average-confidence suffix when none is scored yet', () => {
@@ -138,7 +194,7 @@ describe('AnswerSlotPanel', () => {
     expect(screen.queryByText(/avg confidence/)).not.toBeInTheDocument();
   });
 
-  it('shows the current data-slot paraphrase and prior values as "Earlier:" history', () => {
+  it('shows the current data-slot paraphrase and an "Edited" affordance for changed answers', () => {
     render(
       <AnswerSlotPanel
         view={view({
@@ -157,7 +213,14 @@ describe('AnswerSlotPanel', () => {
                   filled: true,
                   provisional: false,
                   answeredAtTurnIndex: 2,
-                  history: [{ paraphrase: 'A 25-year-old male.', confidence: 0.9 }],
+                  history: [
+                    {
+                      paraphrase: 'A 25-year-old male.',
+                      confidence: 0.9,
+                      rationale: 'First reading from their intro.',
+                      changedAt: '2026-06-24T13:30:00.000Z',
+                    },
+                  ],
                   coverage: { total: 0, answered: 0, questions: [] },
                 },
               ],
@@ -168,7 +231,101 @@ describe('AnswerSlotPanel', () => {
       />
     );
     expect(screen.getByText('A 25-year-old female.')).toBeInTheDocument();
-    expect(screen.getByText('Earlier: A 25-year-old male.')).toBeInTheDocument();
+    // The old inline strikethrough "Earlier: …" is gone — prior values live behind the dialog.
+    expect(screen.queryByText('Earlier: A 25-year-old male.')).not.toBeInTheDocument();
+    // A single edit shows the count: "1 Edit" (singular).
+    const trigger = screen.getByRole('button', { name: /how this answer evolved/i });
+    expect(trigger).toHaveTextContent('1 Edit');
+  });
+
+  it('opens the evolution dialog showing the current reading and each prior step with its rationale', () => {
+    render(
+      <AnswerSlotPanel
+        view={view({
+          dataSlotGroups: [
+            {
+              theme: 'Demographics',
+              slots: [
+                {
+                  key: 'demographics',
+                  name: 'Employee Demographics',
+                  description: 'Age + gender',
+                  paraphrase: 'A 25-year-old female.',
+                  provenance: 'direct',
+                  confidence: 0.95,
+                  rationale: 'They corrected their stated gender.',
+                  filled: true,
+                  provisional: false,
+                  answeredAtTurnIndex: 2,
+                  history: [
+                    {
+                      paraphrase: 'A 25-year-old male.',
+                      confidence: 0.9,
+                      rationale: 'First reading from their intro.',
+                      changedAt: '2026-06-24T13:30:00.000Z',
+                    },
+                  ],
+                  coverage: { total: 0, answered: 0, questions: [] },
+                },
+              ],
+            },
+          ],
+          progressPercent: 20,
+        })}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: /how this answer evolved/i }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('How this answer evolved')).toBeInTheDocument();
+    expect(within(dialog).getByText('Current')).toBeInTheDocument();
+    // Both readings + their per-step rationales are in the timeline.
+    expect(within(dialog).getByText('“A 25-year-old female.”')).toBeInTheDocument();
+    expect(within(dialog).getByText('“A 25-year-old male.”')).toBeInTheDocument();
+    expect(within(dialog).getByText(/First reading from their intro\./)).toBeInTheDocument();
+  });
+
+  it('labels a legacy prior step (no captured rationale) as "Reason not recorded"', () => {
+    render(
+      <AnswerSlotPanel
+        view={view({
+          dataSlotGroups: [
+            {
+              theme: 'Demographics',
+              slots: [
+                {
+                  key: 'demographics',
+                  name: 'Employee Demographics',
+                  description: 'Age + gender',
+                  paraphrase: 'A 25-year-old female.',
+                  provenance: 'direct',
+                  confidence: 0.95,
+                  rationale: 'They corrected their stated gender.',
+                  filled: true,
+                  provisional: false,
+                  answeredAtTurnIndex: 2,
+                  // Recorded before per-change rationale capture: rationale/changedAt are null.
+                  history: [
+                    {
+                      paraphrase: 'A 25-year-old male.',
+                      confidence: 0.9,
+                      rationale: null,
+                      changedAt: null,
+                    },
+                  ],
+                  coverage: { total: 0, answered: 0, questions: [] },
+                },
+              ],
+            },
+          ],
+          progressPercent: 20,
+        })}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: /how this answer evolved/i }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('Reason not recorded')).toBeInTheDocument();
+    // The current reading still shows its own rationale.
+    expect(within(dialog).getByText(/They corrected their stated gender\./)).toBeInTheDocument();
   });
 
   it('marks a provisional data slot as "provisional · may revisit"', () => {
@@ -397,6 +554,155 @@ describe('AnswerSlotPanel', () => {
     expect(document.getElementById('panel-slot-slot-2')!.className).not.toContain('cq-fill-glow');
   });
 
+  // --- Auto-collapse of open disclosures on scroll / refetch (data-slot mode) ---
+
+  function scrollContainer(container: HTMLElement): HTMLElement {
+    const el = container.querySelector<HTMLElement>('.overflow-y-auto');
+    if (!el) throw new Error('scroll container not found');
+    return el;
+  }
+
+  it('keeps an open "Why?" rationale open on a scroll that leaves its row in view', () => {
+    const { container } = render(
+      <AnswerSlotPanel
+        view={view({
+          dataSlotGroups: [
+            {
+              theme: 'Strategy',
+              slots: [filledDataSlot({ rationale: 'Read from their tooling gripes.' })],
+            },
+          ],
+          progressPercent: 20,
+        })}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: /why/i }));
+    expect(screen.getByText('Read from their tooling gripes.')).toBeInTheDocument();
+
+    // A plain scroll (row still within the viewport) no longer closes it — only scrolling past does.
+    fireEvent.scroll(scrollContainer(container));
+    expect(screen.getByText('Read from their tooling gripes.')).toBeInTheDocument();
+  });
+
+  it('collapses an open "Why?" rationale once its row scrolls fully out of view', () => {
+    // Measure geometry so the panel can tell a row has left the viewport: a 100px viewport at top 0,
+    // the single row 50px tall at content-top 0. Scrolling to 200 puts the row entirely above the view.
+    const rect = (top: number, height: number): DOMRect => ({
+      top,
+      height,
+      bottom: top + height,
+      left: 0,
+      right: 0,
+      width: 0,
+      x: 0,
+      y: top,
+      toJSON: () => ({}),
+    });
+    const gbcr = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: Element
+    ) {
+      if (this.classList.contains('overflow-y-auto')) return rect(0, 100);
+      if (this.hasAttribute('data-slot-key')) return rect(0, 50);
+      return rect(0, 0);
+    });
+    const sizeFor = (el: HTMLElement, big: number) =>
+      el.classList.contains('overflow-y-auto') ? big : 0;
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+      configurable: true,
+      get(this: HTMLElement) {
+        return sizeFor(this, 100);
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+      configurable: true,
+      get(this: HTMLElement) {
+        return sizeFor(this, 1000);
+      },
+    });
+
+    try {
+      const { container } = render(
+        <AnswerSlotPanel
+          view={view({
+            dataSlotGroups: [
+              {
+                theme: 'Strategy',
+                slots: [filledDataSlot({ rationale: 'Read from their tooling gripes.' })],
+              },
+            ],
+            progressPercent: 20,
+          })}
+        />
+      );
+      fireEvent.click(screen.getByRole('button', { name: /why/i }));
+      expect(screen.getByText('Read from their tooling gripes.')).toBeInTheDocument();
+
+      const el = scrollContainer(container);
+      Object.defineProperty(el, 'scrollTop', { configurable: true, value: 200 });
+      fireEvent.scroll(el);
+      expect(screen.queryByText('Read from their tooling gripes.')).not.toBeInTheDocument();
+    } finally {
+      gbcr.mockRestore();
+      Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight');
+      Reflect.deleteProperty(HTMLElement.prototype, 'scrollHeight');
+    }
+  });
+
+  it('collapses an open "Why?" rationale when the view refetches', () => {
+    const make = () =>
+      view({
+        dataSlotGroups: [
+          {
+            theme: 'Strategy',
+            slots: [filledDataSlot({ rationale: 'Read from their tooling gripes.' })],
+          },
+        ],
+        progressPercent: 20,
+      });
+    const { rerender } = render(<AnswerSlotPanel view={make()} />);
+    fireEvent.click(screen.getByRole('button', { name: /why/i }));
+    expect(screen.getByText('Read from their tooling gripes.')).toBeInTheDocument();
+
+    // A fresh view object (the workspace re-fetches after each settled turn) closes the disclosure.
+    rerender(<AnswerSlotPanel view={make()} />);
+    expect(screen.queryByText('Read from their tooling gripes.')).not.toBeInTheDocument();
+  });
+
+  it('keeps an expanded questions footer open on a scroll that leaves its row in view', () => {
+    const { container } = render(
+      <AnswerSlotPanel
+        view={view({
+          showSlotQuestions: true,
+          dataSlotGroups: [
+            {
+              theme: 'Strategy',
+              slots: [
+                filledDataSlot({
+                  rationale: null,
+                  coverage: {
+                    total: 2,
+                    answered: 1,
+                    questions: [
+                      { label: 'How do you sell today?', answered: true, confidence: 0.9 },
+                      { label: 'What blocks your pipeline?', answered: false, confidence: null },
+                    ],
+                  },
+                }),
+              ],
+            },
+          ],
+          progressPercent: 20,
+        })}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: /questions filled/i }));
+    expect(screen.getByText('How do you sell today?')).toBeInTheDocument();
+
+    // Same per-row rule as "Why?": a scroll that keeps the row in view leaves the footer expanded.
+    fireEvent.scroll(scrollContainer(container));
+    expect(screen.getByText('How do you sell today?')).toBeInTheDocument();
+  });
+
   // The scroll + measurement paths no-op in jsdom (zero layout height). Stub a non-zero layout and a
   // ResizeObserver so the real scroll / minimap logic executes.
   describe('navigation paths (with layout stubs)', () => {
@@ -483,9 +789,11 @@ describe('AnswerSlotPanel', () => {
         expect(minimap).toBeInTheDocument();
         // A viewport window is drawn over the track.
         expect(screen.getByTestId('slot-minimap-window')).toBeInTheDocument();
-        // The list reserves left padding so its text clears the floating minimap.
+        // The list reserves right padding so its text clears the floating minimap, and hides its
+        // native scrollbar so the minimap stands in as the sole scroll affordance.
         const scrollContainer = minimap.parentElement?.querySelector('.overflow-y-auto');
-        expect(scrollContainer!.className).toContain('pl-7');
+        expect(scrollContainer!.className).toContain('pr-8');
+        expect(scrollContainer!.className).toContain('cq-no-scrollbar');
         // Clicking the track scrubs the list to the clicked fraction. With the stubs (scrollHeight
         // 1000, clientHeight 300, track rect height 100), clientY 150 → fraction clamps to 1 →
         // target = min(700, 1000 - 150) = 700.

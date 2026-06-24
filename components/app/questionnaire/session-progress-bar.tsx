@@ -44,7 +44,7 @@ export function SessionProgressBar({ coverage, className }: SessionProgressBarPr
           }}
         />
       </div>
-      <span className="text-muted-foreground shrink-0 text-xs tabular-nums">{pct}%</span>
+      <span className="text-muted-foreground shrink-0 text-xs tabular-nums">{pct}% completed</span>
     </div>
   );
 }

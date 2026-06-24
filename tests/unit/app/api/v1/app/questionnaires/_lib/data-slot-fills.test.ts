@@ -87,15 +87,14 @@ describe('upsertDataSlotFill — first capture (CREATE)', () => {
     expect(call?.data?.rationale).toBeNull();
   });
 
-  it('defaults provisional to false, and persists it when the fill is parked', async () => {
+  it('defaults provisional to false when the fill omits it', async () => {
     await upsertDataSlotFill(SESSION_ID, SLOT_ID, FILL);
     expect((prismaMock.appDataSlotFill.create as Mock).mock.calls[0]?.[0]?.data?.provisional).toBe(
       false
     );
+  });
 
-    vi.clearAllMocks();
-    prismaMock.appDataSlotFill.findUnique.mockResolvedValue(null);
-    prismaMock.appDataSlotFill.create.mockResolvedValue({ id: 'created-2' });
+  it('persists provisional when the fill is parked', async () => {
     await upsertDataSlotFill(SESSION_ID, SLOT_ID, { ...FILL, provisional: true });
     expect((prismaMock.appDataSlotFill.create as Mock).mock.calls[0]?.[0]?.data?.provisional).toBe(
       true
@@ -131,6 +130,7 @@ describe('upsertDataSlotFill — update + history', () => {
       value: { age: 25, gender: 'male' },
       paraphrase: 'A 25-year-old male.',
       confidence: 0.9,
+      rationale: 'First reading from their intro.',
       refinementHistory: [],
     });
 
@@ -147,6 +147,8 @@ describe('upsertDataSlotFill — update + history', () => {
       previousValue: { age: 25, gender: 'male' },
       previousParaphrase: 'A 25-year-old male.',
       previousConfidence: 0.9,
+      // The prior rationale is snapshotted so the panel's evolution view can show why it changed.
+      previousRationale: 'First reading from their intro.',
     });
     expect(typeof call?.data?.refinementHistory[0].changedAt).toBe('string');
     // The new value/paraphrase still land on the row.
