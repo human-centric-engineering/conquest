@@ -24,6 +24,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronRight } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { usePrefersReducedMotion } from '@/lib/hooks/use-prefers-reduced-motion';
@@ -50,6 +51,16 @@ const OVERVIEW_MIN_SLOTS = 10;
 /** How long a scrolled-to slot keeps its highlight ring (ms). */
 const HIGHLIGHT_MS = 1500;
 
+/**
+ * What the captured-context panel is *for* — shown in full on the first turn (when nothing is
+ * captured yet) and tucked behind a "How this works" disclosure thereafter. Names the mechanic the
+ * respondent can't otherwise see: this conversation is quietly completing a questionnaire, so the
+ * captured-context list is a by-product, not a to-do list whose length signals "almost done".
+ */
+const CONTEXT_EXPLAINER =
+  'As the conversation continues, we’ll record a high-level summary below. It’s filling out your ' +
+  'questionnaire in the background — so you don’t have to fill in any forms.';
+
 export interface AnswerSlotPanelProps {
   /** The panel view, or null while the first (anonymous) fetch is in flight. */
   view: AnswerPanelView | null;
@@ -69,42 +80,63 @@ export interface AnswerSlotPanelProps {
 
 function ProgressHeading({ view }: { view: AnswerPanelView }) {
   const dataSlotMode = view.dataSlotGroups !== undefined;
-  // Data-slot mode shows one balanced percentage (questions + data slots) — never the raw question
-  // count, which the respondent never sees. Question mode keeps the familiar "N of M" / "N captured".
-  const percent = view.progressPercent ?? 0;
-  const completion = dataSlotMode
-    ? `${percent}% complete`
-    : view.scope === 'answered_only'
-      ? `${view.answeredCount} captured`
-      : `${view.answeredCount} of ${view.totalCount} answered`;
-  // Average confidence across all captured slots, paired with completion ("… · avg confidence 58%").
-  // Honest mean: a tangential/low-confidence fill drags it down by design. Omitted until something
-  // scored has been captured.
+  // How many context slots we've actually captured. Deliberately NOT a "% complete" anymore: the
+  // single completion figure lives in the labelled "Through the questionnaire" bar up top. Showing a
+  // second percentage here invited the panel to read as "almost done" once a few slots filled, even
+  // though questionnaire coverage was still low. A plain count describes what the panel holds without
+  // competing with that bar.
+  const capturedCount = dataSlotMode
+    ? (view.dataSlotGroups ?? []).reduce((n, g) => n + g.slots.filter((s) => s.filled).length, 0)
+    : view.answeredCount;
+  // Total context areas (filled + still-open data slots) — the denominator the respondent sees in
+  // data-slot mode ("12 of 35 context areas captured").
+  const totalAreas = dataSlotMode
+    ? (view.dataSlotGroups ?? []).reduce((n, g) => n + g.slots.length, 0)
+    : view.totalCount;
+  // Average confidence across all captured slots. Honest mean: a tangential/low-confidence fill drags
+  // it down by design. Omitted until something scored has been captured.
   const avgConfidence =
     view.averageConfidence !== undefined ? Math.round(view.averageConfidence * 100) : null;
-  const summary =
-    avgConfidence !== null ? `${completion} · avg confidence ${avgConfidence}%` : completion;
+  let summary: string;
+  if (dataSlotMode) {
+    const base = `${capturedCount} of ${totalAreas} context areas captured`;
+    summary = avgConfidence !== null ? `${base} with ${avgConfidence}% confidence` : base;
+  } else {
+    const completion =
+      view.scope === 'answered_only'
+        ? `${view.answeredCount} captured`
+        : `${view.answeredCount} of ${view.totalCount} answered`;
+    summary =
+      avgConfidence !== null ? `${completion} · avg confidence ${avgConfidence}%` : completion;
+  }
+  // First turn (nothing captured) shows the explainer in full; once context starts landing it folds
+  // into a quiet disclosure so the captured list takes over. Question mode keeps its plain summary.
+  const showExplainerExpanded = dataSlotMode && capturedCount === 0;
   return (
     <div className="border-b px-4 py-3">
       <h2 className="text-sm font-semibold">
-        {dataSlotMode ? 'What we’re learning' : 'Your answers'}
+        {dataSlotMode ? 'Capturing your context' : 'Your answers'}
       </h2>
-      <p className="text-muted-foreground mt-0.5 text-xs tabular-nums">{summary}</p>
-      {dataSlotMode ? (
-        <div
-          className="bg-muted mt-2 h-1.5 overflow-hidden rounded-full"
-          role="progressbar"
-          aria-valuenow={percent}
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-label="Completion progress"
-        >
-          <div
-            className="bg-primary h-full rounded-full transition-[width] duration-500 ease-out"
-            style={{ width: `${percent}%` }}
-          />
-        </div>
-      ) : null}
+      {(!dataSlotMode || capturedCount > 0) && (
+        <p className="text-muted-foreground mt-0.5 text-xs tabular-nums">{summary}</p>
+      )}
+      {dataSlotMode &&
+        (showExplainerExpanded ? (
+          <p className="text-muted-foreground mt-2 text-xs leading-relaxed">{CONTEXT_EXPLAINER}</p>
+        ) : (
+          <details className="group mt-2">
+            <summary className="text-muted-foreground hover:text-foreground inline-flex cursor-pointer list-none items-center gap-1 text-xs [&::-webkit-details-marker]:hidden">
+              <ChevronRight
+                className="h-3 w-3 transition-transform group-open:rotate-90"
+                aria-hidden="true"
+              />
+              How this works
+            </summary>
+            <p className="text-muted-foreground mt-2 text-xs leading-relaxed">
+              {CONTEXT_EXPLAINER}
+            </p>
+          </details>
+        ))}
     </div>
   );
 }
@@ -436,7 +468,7 @@ export function AnswerSlotPanel({
               {view.dataSlotGroups !== undefined ? (
                 groups.every((g) => g.slots.length === 0) ? (
                   <p className="text-muted-foreground px-1 py-4 text-sm">
-                    As you chat, we’ll show what we’re learning here.
+                    As you chat, the context we capture will appear here.
                   </p>
                 ) : (
                   <div ref={contentRef} className="space-y-4">

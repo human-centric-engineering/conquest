@@ -50,6 +50,24 @@ function pendingSlot(over: Partial<PanelSlotView> = {}): PanelSlotView {
   };
 }
 
+function filledDataSlot(over: Partial<DataSlotPanelSlot> = {}): DataSlotPanelSlot {
+  return {
+    key: 'strategy',
+    name: 'Strategy',
+    description: 'Their strategic priorities.',
+    paraphrase: 'Focused on restructuring go-to-market.',
+    provenance: 'direct',
+    confidence: 0.58,
+    rationale: null,
+    filled: true,
+    provisional: false,
+    answeredAtTurnIndex: 1,
+    history: [],
+    coverage: { total: 0, answered: 0, questions: [] },
+    ...over,
+  };
+}
+
 function view(over: Partial<AnswerPanelView> = {}): AnswerPanelView {
   return {
     status: 'active',
@@ -92,7 +110,7 @@ describe('AnswerSlotPanel', () => {
     expect(screen.getByText('1 captured')).toBeInTheDocument();
   });
 
-  it('shows a blended percentage (not the raw question count) in data-slot mode', () => {
+  it('shows the captured-context header + first-turn explainer, never a percentage, in data-slot mode', () => {
     render(
       <AnswerSlotPanel
         view={view({
@@ -104,10 +122,16 @@ describe('AnswerSlotPanel', () => {
         })}
       />
     );
-    expect(screen.getByText('What we’re learning')).toBeInTheDocument();
-    expect(screen.getByText('37% complete')).toBeInTheDocument();
+    expect(screen.getByText('Capturing your context')).toBeInTheDocument();
+    // The panel no longer carries its own percentage/bar — the labelled questionnaire bar up top
+    // owns "% complete", so nothing here reads as a second completion meter.
+    expect(screen.queryByText('37% complete')).not.toBeInTheDocument();
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
     expect(screen.queryByText('0 of 71 answered')).not.toBeInTheDocument();
-    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '37');
+    // First turn (nothing captured): the background-fill explainer is shown in full.
+    expect(
+      screen.getByText(/filling out your questionnaire in the background/i)
+    ).toBeInTheDocument();
   });
 
   it('appends average confidence to the header when present (question mode)', () => {
@@ -116,11 +140,16 @@ describe('AnswerSlotPanel', () => {
     expect(screen.getByText('1 of 2 answered · avg confidence 90%')).toBeInTheDocument();
   });
 
-  it('appends average confidence to the blended header in data-slot mode', () => {
+  it('shows captured-of-total context areas and average confidence in data-slot mode', () => {
     render(
       <AnswerSlotPanel
         view={view({
-          dataSlotGroups: [{ theme: 'Strategy', slots: [] }],
+          dataSlotGroups: [
+            {
+              theme: 'Strategy',
+              slots: [filledDataSlot(), filledDataSlot({ key: 'pricing', filled: false })],
+            },
+          ],
           progressPercent: 37,
           averageConfidence: 0.58,
           answeredCount: 0,
@@ -128,7 +157,28 @@ describe('AnswerSlotPanel', () => {
         })}
       />
     );
-    expect(screen.getByText('37% complete · avg confidence 58%')).toBeInTheDocument();
+    // Captured count over the total number of context areas, paired with confidence — no percentage.
+    expect(
+      screen.getByText('1 of 2 context areas captured with 58% confidence')
+    ).toBeInTheDocument();
+  });
+
+  it('folds the explainer behind a "How this works" disclosure once context is captured', () => {
+    render(
+      <AnswerSlotPanel
+        view={view({
+          dataSlotGroups: [{ theme: 'Strategy', slots: [filledDataSlot()] }],
+          progressPercent: 37,
+          answeredCount: 0,
+          totalCount: 71,
+        })}
+      />
+    );
+    // The explainer text is still in the DOM (inside <details>) but the toggle is present.
+    expect(screen.getByText('How this works')).toBeInTheDocument();
+    expect(
+      screen.getByText(/filling out your questionnaire in the background/i)
+    ).toBeInTheDocument();
   });
 
   it('omits the average-confidence suffix when none is scored yet', () => {
