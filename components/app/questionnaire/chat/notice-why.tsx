@@ -15,12 +15,12 @@ import { ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 /**
- * `children`, when given, render as a left-hand cluster on the SAME row as the "Why?" trigger
- * (the trigger pushed to the far right via `ml-auto`); the rationale panel still expands full-width
- * below. Used by the data-slot row to dock "Why?" against the confidence/provenance line — it
- * explains the whole reading, so it reads as a row-level affordance, not an annotation on the
- * confidence figure beside it. Without children the component is the original button-only
- * disclosure (the seriousness / contradiction notice cards).
+ * `children`, when given, render inline on the SAME row as the "Why?" trigger, which flows directly
+ * after them (no right-dock); the rationale panel still expands full-width below. Used by the
+ * data-slot row to sit "Why?" alongside the confidence/provenance line — it explains the whole
+ * reading, so it reads as a row-level affordance, not an annotation on the confidence figure beside
+ * it. Without children the component is the original button-only disclosure (the seriousness /
+ * contradiction notice cards).
  */
 export function NoticeWhy({
   detail,
@@ -54,9 +54,9 @@ export function NoticeWhy({
   return (
     <div className={cn('mt-1.5', className)}>
       {children ? (
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <div className="flex flex-wrap items-center gap-1.5">{children}</div>
-          {trigger ? <div className="ml-auto">{trigger}</div> : null}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+          {children}
+          {trigger}
         </div>
       ) : (
         trigger

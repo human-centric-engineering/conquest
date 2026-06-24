@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 
 import { AnswerSlotPanel } from '@/components/app/questionnaire/panel/answer-slot-panel';
 import type {
@@ -129,9 +129,7 @@ describe('AnswerSlotPanel', () => {
     expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
     expect(screen.queryByText('0 of 71 answered')).not.toBeInTheDocument();
     // First turn (nothing captured): the background-fill explainer is shown in full.
-    expect(
-      screen.getByText(/filling out your questionnaire in the background/i)
-    ).toBeInTheDocument();
+    expect(screen.getByText(/filling out a questionnaire in the background/i)).toBeInTheDocument();
   });
 
   it('appends average confidence to the header when present (question mode)', () => {
@@ -176,9 +174,7 @@ describe('AnswerSlotPanel', () => {
     );
     // The explainer text is still in the DOM (inside <details>) but the toggle is present.
     expect(screen.getByText('How this works')).toBeInTheDocument();
-    expect(
-      screen.getByText(/filling out your questionnaire in the background/i)
-    ).toBeInTheDocument();
+    expect(screen.getByText(/filling out a questionnaire in the background/i)).toBeInTheDocument();
   });
 
   it('omits the average-confidence suffix when none is scored yet', () => {
@@ -188,7 +184,7 @@ describe('AnswerSlotPanel', () => {
     expect(screen.queryByText(/avg confidence/)).not.toBeInTheDocument();
   });
 
-  it('shows the current data-slot paraphrase and prior values as "Earlier:" history', () => {
+  it('shows the current data-slot paraphrase and an "Edited" affordance for changed answers', () => {
     render(
       <AnswerSlotPanel
         view={view({
@@ -207,7 +203,14 @@ describe('AnswerSlotPanel', () => {
                   filled: true,
                   provisional: false,
                   answeredAtTurnIndex: 2,
-                  history: [{ paraphrase: 'A 25-year-old male.', confidence: 0.9 }],
+                  history: [
+                    {
+                      paraphrase: 'A 25-year-old male.',
+                      confidence: 0.9,
+                      rationale: 'First reading from their intro.',
+                      changedAt: '2026-06-24T13:30:00.000Z',
+                    },
+                  ],
                   coverage: { total: 0, answered: 0, questions: [] },
                 },
               ],
@@ -218,7 +221,101 @@ describe('AnswerSlotPanel', () => {
       />
     );
     expect(screen.getByText('A 25-year-old female.')).toBeInTheDocument();
-    expect(screen.getByText('Earlier: A 25-year-old male.')).toBeInTheDocument();
+    // The old inline strikethrough "Earlier: …" is gone — prior values live behind the dialog.
+    expect(screen.queryByText('Earlier: A 25-year-old male.')).not.toBeInTheDocument();
+    // A single edit shows the bare "Edited" trigger (no count).
+    const trigger = screen.getByRole('button', { name: /how this answer evolved/i });
+    expect(trigger).toHaveTextContent('Edited');
+  });
+
+  it('opens the evolution dialog showing the current reading and each prior step with its rationale', () => {
+    render(
+      <AnswerSlotPanel
+        view={view({
+          dataSlotGroups: [
+            {
+              theme: 'Demographics',
+              slots: [
+                {
+                  key: 'demographics',
+                  name: 'Employee Demographics',
+                  description: 'Age + gender',
+                  paraphrase: 'A 25-year-old female.',
+                  provenance: 'direct',
+                  confidence: 0.95,
+                  rationale: 'They corrected their stated gender.',
+                  filled: true,
+                  provisional: false,
+                  answeredAtTurnIndex: 2,
+                  history: [
+                    {
+                      paraphrase: 'A 25-year-old male.',
+                      confidence: 0.9,
+                      rationale: 'First reading from their intro.',
+                      changedAt: '2026-06-24T13:30:00.000Z',
+                    },
+                  ],
+                  coverage: { total: 0, answered: 0, questions: [] },
+                },
+              ],
+            },
+          ],
+          progressPercent: 20,
+        })}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: /how this answer evolved/i }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('How this answer evolved')).toBeInTheDocument();
+    expect(within(dialog).getByText('Current')).toBeInTheDocument();
+    // Both readings + their per-step rationales are in the timeline.
+    expect(within(dialog).getByText('“A 25-year-old female.”')).toBeInTheDocument();
+    expect(within(dialog).getByText('“A 25-year-old male.”')).toBeInTheDocument();
+    expect(within(dialog).getByText(/First reading from their intro\./)).toBeInTheDocument();
+  });
+
+  it('labels a legacy prior step (no captured rationale) as "Reason not recorded"', () => {
+    render(
+      <AnswerSlotPanel
+        view={view({
+          dataSlotGroups: [
+            {
+              theme: 'Demographics',
+              slots: [
+                {
+                  key: 'demographics',
+                  name: 'Employee Demographics',
+                  description: 'Age + gender',
+                  paraphrase: 'A 25-year-old female.',
+                  provenance: 'direct',
+                  confidence: 0.95,
+                  rationale: 'They corrected their stated gender.',
+                  filled: true,
+                  provisional: false,
+                  answeredAtTurnIndex: 2,
+                  // Recorded before per-change rationale capture: rationale/changedAt are null.
+                  history: [
+                    {
+                      paraphrase: 'A 25-year-old male.',
+                      confidence: 0.9,
+                      rationale: null,
+                      changedAt: null,
+                    },
+                  ],
+                  coverage: { total: 0, answered: 0, questions: [] },
+                },
+              ],
+            },
+          ],
+          progressPercent: 20,
+        })}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: /how this answer evolved/i }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('Reason not recorded')).toBeInTheDocument();
+    // The current reading still shows its own rationale.
+    expect(within(dialog).getByText(/They corrected their stated gender\./)).toBeInTheDocument();
   });
 
   it('marks a provisional data slot as "provisional · may revisit"', () => {

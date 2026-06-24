@@ -131,6 +131,7 @@ describe('upsertDataSlotFill — update + history', () => {
       value: { age: 25, gender: 'male' },
       paraphrase: 'A 25-year-old male.',
       confidence: 0.9,
+      rationale: 'First reading from their intro.',
       refinementHistory: [],
     });
 
@@ -147,6 +148,8 @@ describe('upsertDataSlotFill — update + history', () => {
       previousValue: { age: 25, gender: 'male' },
       previousParaphrase: 'A 25-year-old male.',
       previousConfidence: 0.9,
+      // The prior rationale is snapshotted so the panel's evolution view can show why it changed.
+      previousRationale: 'First reading from their intro.',
     });
     expect(typeof call?.data?.refinementHistory[0].changedAt).toBe('string');
     // The new value/paraphrase still land on the row.

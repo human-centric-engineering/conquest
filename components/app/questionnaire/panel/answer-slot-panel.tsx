@@ -34,6 +34,7 @@ import { ConfidenceScore } from '@/components/app/questionnaire/panel/confidence
 import { NoticeWhy } from '@/components/app/questionnaire/chat/notice-why';
 import { SlotMiniMap } from '@/components/app/questionnaire/panel/slot-minimap';
 import { SlotBreadthMeter } from '@/components/app/questionnaire/panel/slot-breadth-meter';
+import { SlotHistoryDialog } from '@/components/app/questionnaire/panel/slot-history-dialog';
 import {
   panelSlotDomId,
   recentlyFilledByLatestTurn,
@@ -58,8 +59,9 @@ const HIGHLIGHT_MS = 1500;
  * captured-context list is a by-product, not a to-do list whose length signals "almost done".
  */
 const CONTEXT_EXPLAINER =
-  'As the conversation continues, we’ll record a high-level summary below. It’s filling out your ' +
-  'questionnaire in the background — so you don’t have to fill in any forms.';
+  'As the conversation continues, we’ll record a high-level summary below. We’ll also be filling out ' +
+  'a questionnaire in the background. You’re encouraged to speak your mind and expand as much as you ' +
+  'like so we can try to fill several questions from a single turn in the chat.';
 
 export interface AnswerSlotPanelProps {
   /** The panel view, or null while the first (anonymous) fetch is in flight. */
@@ -147,10 +149,11 @@ function moreRecordedLabel(remaining: number): string {
 }
 
 /**
- * One data-slot row (Data Slots feature): the short name, the agent's paraphrase, a confidence dot
- * + score, an "Inferred" marker, the breadth meter (how many mapped questions are answered — a count,
- * distinct from the confidence hue), the "Why?" rationale disclosure, and prior values. Carries the
- * DOM anchor + highlight + stepper footer the panel injects for after-turn navigation.
+ * One data-slot row (Data Slots feature): the short name with an "Edited" pill in its top-right
+ * corner (opens the answer's evolution), the agent's paraphrase, a confidence dot + score, an
+ * "Inferred" marker, the breadth meter (how many mapped questions are answered — a count, distinct
+ * from the confidence hue), and the inline "Why?" rationale disclosure. Carries the DOM anchor +
+ * highlight + stepper footer the panel injects for after-turn navigation.
  */
 function DataSlotRow({
   slot,
@@ -189,13 +192,19 @@ function DataSlotRow({
           className={cn('mt-1', recentlyFilled && 'cq-livedot')}
         />
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium">{slot.name}</p>
+          {/* Name row carries the "Edited" pill in the top-right corner (above the answer text). The
+              pill renders nothing unless the slot changed at least once; opens the full evolution
+              (replaces the old inline strikethrough "Earlier:" list). */}
+          <div className="flex items-start gap-2">
+            <p className="min-w-0 flex-1 text-sm font-medium">{slot.name}</p>
+            <SlotHistoryDialog slot={slot} />
+          </div>
           {slot.paraphrase ? (
             <>
               <p className="text-muted-foreground mt-0.5 text-sm">{slot.paraphrase}</p>
               {/* Confidence (label + raw % — the nuanced 30–100% range reads at a glance) and the
-                  "Inferred" marker, with the "Why?" rationale disclosure docked to the row's right
-                  edge. "Why?" explains the whole reading, so it's a row-level affordance here, not an
+                  "Inferred" marker, with the "Why?" rationale disclosure flowing inline after them.
+                  "Why?" explains the whole reading, so it's a row-level affordance here, not an
                   annotation on the confidence figure; its rationale still expands full-width below. */}
               <NoticeWhy detail={slot.rationale ?? undefined} className="mt-1">
                 <ConfidenceScore confidence={slot.confidence} />
@@ -212,9 +221,6 @@ function DataSlotRow({
           ) : (
             <p className="text-muted-foreground/70 mt-0.5 text-xs italic">Not covered yet</p>
           )}
-          {/* Breadth: how many of the slot's background questions are answered — a count, distinct
-              from the confidence dot's quality hue. Expands to the questions in `both` mode. */}
-          <SlotBreadthMeter coverage={slot.coverage} expandable={showSlotQuestions} />
           {slot.provisional ? (
             <p
               className="text-muted-foreground/60 mt-0.5 text-[11px] italic"
@@ -222,21 +228,6 @@ function DataSlotRow({
             >
               provisional · may revisit
             </p>
-          ) : null}
-          {slot.history.length > 0 ? (
-            <ul className="mt-1 space-y-0.5">
-              {slot.history
-                .filter((h) => h.paraphrase)
-                .map((h, i) => (
-                  <li
-                    key={i}
-                    className="text-muted-foreground/70 text-xs line-through"
-                    title="An earlier answer you later changed"
-                  >
-                    Earlier: {h.paraphrase}
-                  </li>
-                ))}
-            </ul>
           ) : null}
           {stepperRemaining != null && stepperRemaining > 0 ? (
             <button
@@ -250,6 +241,15 @@ function DataSlotRow({
           ) : null}
         </div>
       </div>
+      {/* Breadth lives in the card footer — full-width, flush to the bottom edge, separated by a
+          hairline. It's a per-slot count (how many mapped questions are answered), distinct from the
+          confidence dot's quality hue, so it reads as a footer summary rather than an inline note.
+          Suppressed when the slot maps to no questions (the meter would render nothing). */}
+      {slot.coverage.total > 0 ? (
+        <div className="border-border/60 bg-muted/20 -mx-3 mt-2 -mb-2 rounded-b-md border-t">
+          <SlotBreadthMeter coverage={slot.coverage} expandable={showSlotQuestions} />
+        </div>
+      ) : null}
     </li>
   );
 }

@@ -66,7 +66,14 @@ export async function upsertDataSlotFill(
 
   const existing = await client.appDataSlotFill.findUnique({
     where: { sessionId_dataSlotId: { sessionId, dataSlotId } },
-    select: { id: true, value: true, paraphrase: true, confidence: true, refinementHistory: true },
+    select: {
+      id: true,
+      value: true,
+      paraphrase: true,
+      confidence: true,
+      rationale: true,
+      refinementHistory: true,
+    },
   });
 
   if (!existing) {
@@ -86,6 +93,7 @@ export async function upsertDataSlotFill(
       previousValue: existing.value,
       previousParaphrase: existing.paraphrase,
       previousConfidence: existing.confidence,
+      previousRationale: existing.rationale,
       changedAt: new Date().toISOString(),
     });
   }

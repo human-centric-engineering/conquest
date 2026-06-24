@@ -283,10 +283,13 @@ export async function loadAnswerPanelState(
         filled,
         provisional,
         answeredAtTurnIndex: fill?.answeredAtTurnIndex ?? null,
-        // Prior values, oldest first (only present once the answer changed at least once).
+        // Prior states, oldest first (only present once the answer changed at least once) — the
+        // evolution the row's "Edited" dialog walks through, each step with its own why + when.
         history: (fill?.history ?? []).map((h) => ({
           paraphrase: h.previousParaphrase,
           confidence: h.previousConfidence,
+          rationale: h.previousRationale ?? null,
+          changedAt: h.changedAt ?? null,
         })),
         coverage,
       });

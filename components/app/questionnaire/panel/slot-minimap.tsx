@@ -73,6 +73,13 @@ export function SlotMiniMap({
         onScrubToFraction(fractionFromY(e.clientY), true);
       }}
       onPointerMove={(e) => {
+        // Scrub only while a button is actually held (a real drag), not on a bare hover. `buttons === 0`
+        // also self-heals a stuck drag: if a `pointerup` was missed (released off-element / outside the
+        // window), `draggingRef` could linger true and make plain hovers scrub — clear it here.
+        if (e.buttons === 0) {
+          draggingRef.current = false;
+          return;
+        }
         if (draggingRef.current) onScrubToFraction(fractionFromY(e.clientY), false);
       }}
       onPointerUp={(e) => {

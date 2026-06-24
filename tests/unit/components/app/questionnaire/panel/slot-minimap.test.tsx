@@ -118,12 +118,44 @@ describe('SlotMiniMap', () => {
       toJSON: () => ({}),
     });
     fireEvent.pointerDown(track, { clientY: 0, pointerId: 1 });
-    fireEvent.pointerMove(track, { clientY: 100, pointerId: 1 });
+    // `buttons: 1` — the primary button is held, i.e. a genuine drag (not a hover).
+    fireEvent.pointerMove(track, { clientY: 100, pointerId: 1, buttons: 1 });
     expect(onScrubToFraction).toHaveBeenLastCalledWith(0.5, false);
     // After release, moves no longer scrub.
     fireEvent.pointerUp(track, { clientY: 100, pointerId: 1 });
     onScrubToFraction.mockClear();
-    fireEvent.pointerMove(track, { clientY: 200, pointerId: 1 });
+    fireEvent.pointerMove(track, { clientY: 200, pointerId: 1, buttons: 1 });
+    expect(onScrubToFraction).not.toHaveBeenCalled();
+  });
+
+  it('does not scrub on a bare hover (no button held), even after a missed pointer-up', () => {
+    const onScrubToFraction = vi.fn();
+    render(
+      <SlotMiniMap
+        bars={bars}
+        windowTopPct={0}
+        windowHeightPct={50}
+        onScrubToFraction={onScrubToFraction}
+      />
+    );
+    const track = screen.getByTestId('slot-minimap');
+    vi.spyOn(track, 'getBoundingClientRect').mockReturnValue({
+      top: 0,
+      height: 200,
+      left: 0,
+      right: 0,
+      bottom: 200,
+      width: 16,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+    // Press to start a drag, then a `pointerup` is missed (released off-element / outside the window),
+    // so the drag flag could linger. A subsequent hover (buttons: 0) must NOT scrub.
+    fireEvent.pointerDown(track, { clientY: 0, pointerId: 1 });
+    onScrubToFraction.mockClear();
+    fireEvent.pointerMove(track, { clientY: 120, pointerId: 1, buttons: 0 });
+    fireEvent.pointerMove(track, { clientY: 160, pointerId: 1, buttons: 0 });
     expect(onScrubToFraction).not.toHaveBeenCalled();
   });
 

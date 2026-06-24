@@ -266,7 +266,10 @@ describe('loadAnswerPanelState', () => {
       // The provenance + rationale flow through the seam to the view.
       expect(goal.provenance).toBe('direct');
       expect(goal.rationale).toBe('They said growing the team is the priority.');
-      expect(goal.history).toEqual([{ paraphrase: 'Hire', confidence: 0.4 }]);
+      // A legacy history entry (no per-change rationale/timestamp captured) projects those as null.
+      expect(goal.history).toEqual([
+        { paraphrase: 'Hire', confidence: 0.4, rationale: null, changedAt: null },
+      ]);
       const mood = group.slots.find((s) => s.key === 'mood')!;
       expect(mood.filled).toBe(false);
       expect(mood.paraphrase).toBeNull();
