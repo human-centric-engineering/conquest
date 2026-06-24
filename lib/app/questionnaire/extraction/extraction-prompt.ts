@@ -44,13 +44,17 @@ options Engineering/Sales/Operations/Other → the "Other" value). Only when no 
 and there is no catch-all do you omit the answer.
 - "confidence": 0–1, by how PLAINLY and how FULLY this value is supported. Weigh three things: how \
 DIRECTLY they gave it, how much they ELABORATED (a reason, an example, specifics), and how CERTAIN \
-they sounded. ~0.8 is NOT a default — use the whole 0.3–1.0 range. For a CLOSED question \
-(single_choice, multi_choice, likert, numeric, date, boolean) a complete, unambiguous answer is HIGH \
-(0.85–0.95) even when terse — a closed answer needs no elaboration to be complete, so do NOT mark it \
-down for brevity; only drop it when the mapping itself is genuinely uncertain. For a FREE_TEXT / \
-qualitative value, calibrate by depth: a direct statement backed by a reason or example → 0.9–1.0; a \
-clear, direct answer with no elaboration → 0.75–0.85; a terse, vague or non-descriptive answer where \
-the stance is gettable but thin → 0.45–0.6; a value reached only by a tangential inference → 0.3–0.45.
+they sounded. ~0.8 is NOT a default — use the whole 0.3–1.0 range, and lean CAUTIOUS: the high band \
+(≥ 0.85) is EARNED by depth, not granted for a bare stance. For a CLOSED question (single_choice, \
+multi_choice, likert, numeric, date, boolean) a complete, unambiguous answer is HIGH (0.85–0.95) even \
+when terse — a closed question ASKS for a terse answer, so it needs no elaboration to be complete; do \
+NOT mark it down for brevity, only drop it when the mapping itself is genuinely uncertain. For a \
+FREE_TEXT / qualitative value, elaboration is what earns confidence — calibrate by depth: a direct \
+statement FLESHED OUT with a reason, an example, or specifics → 0.85–1.0 (detail earns this the FIRST \
+time it is said, not only on repetition); a clear, direct, unambiguous stance with NO elaboration → \
+0.65–0.8 (certain but unreasoned — a notch below "confident"); a terse, vague or non-descriptive \
+answer where the stance is gettable but thin → 0.45–0.6; a throwaway quip, a deflection, or a value \
+reached only by a tangential inference → 0.3–0.45.
 - "provenance": one of ${EXTRACTOR_EMITTED_PROVENANCES.join(', ')}:
     "direct" — the value is stated in the message; include the exact "sourceQuote".
     "inferred" — the value follows by single-step reasoning from the message but isn't stated.
@@ -134,15 +138,18 @@ substance — if they gave several details, reflect them all.
 - "confidence": 0–1, by how PLAINLY and how FULLY the respondent expressed THIS position — weigh how \
 DIRECTLY they stated it, how much they ELABORATED (a reason, an example, specifics), and how CERTAIN \
 they sounded. Judge it on the FILL ITSELF, NEVER inherited from a mapped question's typed-value \
-uncertainty. Use the whole 0.3–1.0 range — ~0.8 is NOT a default. Anchors:
-    • 0.9–1.0 — stated directly AND backed by a reason, an example, or specifics ("I'd never recommend \
-us — onboarding wastes a week and nobody follows up", "pay is the issue, I'm 20% under market").
-    • 0.75–0.85 — a clear, direct answer with no elaboration ("extremely unlikely", "I hate my job", \
-"pay, full stop").
-    • 0.45–0.6 — terse, vague or non-descriptive, where the stance is gettable but thin ("it's fine", \
-"dunno, okay I guess") — asking again would sharpen it.
-    • 0.3–0.45 — reached only by a tangential, single-step inference from something they said about \
-another topic (e.g. reading "blockers" out of "not satisfied") — a weak signal worth revisiting.
+uncertainty. Use the whole 0.3–1.0 range — ~0.8 is NOT a default, and lean CAUTIOUS: the high band \
+(≥ 0.85) is EARNED by depth, not granted for a bare stance. Anchors:
+    • 0.85–1.0 — stated directly AND backed by a reason, an example, or specifics ("I'd never recommend \
+us — onboarding wastes a week and nobody follows up", "pay is the issue, I'm 20% under market"); \
+detail earns this the FIRST time it is said, not only on repetition.
+    • 0.65–0.8 — a clear, direct, unambiguous stance with no elaboration ("extremely unlikely", "I hate \
+my job", "pay, full stop") — certain but unreasoned, so a notch below "confident".
+    • 0.45–0.6 — terse, vague, non-descriptive, or a throwaway quip, where the stance is gettable but \
+thin ("it's fine", "dunno, okay I guess") — asking again would sharpen it.
+    • 0.3–0.45 — a deflection, or reached only by a tangential, single-step inference from something \
+they said about another topic (e.g. reading "blockers" out of "not satisfied") — a weak signal worth \
+revisiting.
   Score the position on THIS turn's clarity; it does not start low merely because it was said only \
 once, nor because the slot (blockers, concerns, needs, goals) could have facets you haven't explored. \
 Corroboration only ever nudges a position UPWARD: raise it a STEP toward ~0.9 as each new turn confirms \
