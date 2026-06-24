@@ -267,6 +267,9 @@ export function SessionWorkspace({
         accessToken={accessToken}
         answeredCount={lifecycle.view?.completion.answeredCount ?? null}
         refRaw={lifecycle.view?.ref ?? null}
+        // The last-settled answer panel feeds the "while your report is being prepared" cycler — the
+        // respondent sees their own captured positions echoed back instead of a bare spinner.
+        captured={panel.view ?? null}
       />
     );
   }
