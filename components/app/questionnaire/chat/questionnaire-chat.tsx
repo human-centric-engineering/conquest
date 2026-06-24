@@ -594,7 +594,13 @@ export function QuestionnaireChat({
                 onKeyDown={handleKeyDown}
                 disabled={!canSend}
                 rows={1}
-                placeholder={streaming ? 'Waiting for a reply…' : 'Type your answer…'}
+                placeholder={
+                  streaming
+                    ? 'Waiting for a reply…'
+                    : voiceInputEnabled
+                      ? 'Speak your thoughts with the mic, or type…'
+                      : 'Share your thoughts…'
+                }
                 aria-label="Your answer"
                 className="max-h-40 min-h-[2.5rem] resize-none overflow-y-auto"
               />
@@ -618,6 +624,11 @@ export function QuestionnaireChat({
                   disabled={!canSend}
                   // Match the Send button's height (h-9) — the mic defaults to size="sm" (h-8).
                   className="h-9"
+                  // Give the idle mic the branded CTA colour so it reads as a
+                  // "press me" affordance. Only applies when idle — the red
+                  // recording/transcribing cues are left untouched. Uses the
+                  // solid CTA var (falls back to the platform primary).
+                  idleClassName="border-transparent bg-[var(--app-cta-color,var(--color-primary))] text-white shadow-sm hover:text-white hover:opacity-90 hover:bg-[var(--app-cta-color,var(--color-primary))]"
                   extraHeaders={accessToken ? { 'X-Session-Token': accessToken } : undefined}
                   onTranscript={(text) => {
                     setVoiceError(null);
