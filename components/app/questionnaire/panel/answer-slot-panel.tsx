@@ -32,6 +32,7 @@ import { ConfidenceIndicator } from '@/components/app/questionnaire/panel/confid
 import { ConfidenceScore } from '@/components/app/questionnaire/panel/confidence-score';
 import { NoticeWhy } from '@/components/app/questionnaire/chat/notice-why';
 import { SlotMiniMap } from '@/components/app/questionnaire/panel/slot-minimap';
+import { SlotBreadthMeter } from '@/components/app/questionnaire/panel/slot-breadth-meter';
 import {
   panelSlotDomId,
   recentlyFilledByLatestTurn,
@@ -115,13 +116,15 @@ function moreRecordedLabel(remaining: number): string {
 
 /**
  * One data-slot row (Data Slots feature): the short name, the agent's paraphrase, a confidence dot
- * + score, an "Inferred" marker, the "Why?" rationale disclosure, and prior values. Carries the DOM
- * anchor + highlight + stepper footer the panel injects for after-turn navigation.
+ * + score, an "Inferred" marker, the breadth meter (how many mapped questions are answered — a count,
+ * distinct from the confidence hue), the "Why?" rationale disclosure, and prior values. Carries the
+ * DOM anchor + highlight + stepper footer the panel injects for after-turn navigation.
  */
 function DataSlotRow({
   slot,
   highlighted,
   recentlyFilled,
+  showSlotQuestions,
   stepperRemaining,
   onStepNext,
 }: {
@@ -129,6 +132,8 @@ function DataSlotRow({
   highlighted: boolean;
   /** Filled/updated by the most recent fill-turn — gently pulses until a newer turn fills something. */
   recentlyFilled: boolean;
+  /** Whether the breadth meter may itemise its mapped questions (presentationMode `both`). */
+  showSlotQuestions: boolean;
   /** When non-null, render the "N more recorded" footer with this many slots still to come. */
   stepperRemaining: number | null;
   onStepNext: () => void;
@@ -146,15 +151,21 @@ function DataSlotRow({
       )}
     >
       <div className="flex items-start gap-2">
-        <ConfidenceIndicator confidence={slot.confidence} className="mt-1" />
+        <ConfidenceIndicator
+          confidence={slot.confidence}
+          solid
+          className={cn('mt-1', recentlyFilled && 'cq-livedot')}
+        />
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium">{slot.name}</p>
           {slot.paraphrase ? (
             <>
               <p className="text-muted-foreground mt-0.5 text-sm">{slot.paraphrase}</p>
-              <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                {/* The confidence as label + raw % — shown to respondents so the
-                    nuanced 30–100% range reads at a glance, not just a band word. */}
+              {/* Confidence (label + raw % — the nuanced 30–100% range reads at a glance) and the
+                  "Inferred" marker, with the "Why?" rationale disclosure docked to the row's right
+                  edge. "Why?" explains the whole reading, so it's a row-level affordance here, not an
+                  annotation on the confidence figure; its rationale still expands full-width below. */}
+              <NoticeWhy detail={slot.rationale ?? undefined} className="mt-1">
                 <ConfidenceScore confidence={slot.confidence} />
                 {slot.provenance === 'inferred' || slot.provenance === 'synthesised' ? (
                   <span
@@ -164,13 +175,14 @@ function DataSlotRow({
                     Inferred
                   </span>
                 ) : null}
-              </div>
-              {/* The agent's rationale for this reading, behind a "Why?" disclosure. */}
-              <NoticeWhy detail={slot.rationale ?? undefined} />
+              </NoticeWhy>
             </>
           ) : (
             <p className="text-muted-foreground/70 mt-0.5 text-xs italic">Not covered yet</p>
           )}
+          {/* Breadth: how many of the slot's background questions are answered — a count, distinct
+              from the confidence dot's quality hue. Expands to the questions in `both` mode. */}
+          <SlotBreadthMeter coverage={slot.coverage} expandable={showSlotQuestions} />
           {slot.provisional ? (
             <p
               className="text-muted-foreground/60 mt-0.5 text-[11px] italic"
@@ -435,6 +447,7 @@ export function AnswerSlotPanel({
                               slot={slot}
                               highlighted={highlightedKey === slot.key}
                               recentlyFilled={recentlyFilledSet.has(slot.key)}
+                              showSlotQuestions={view.showSlotQuestions ?? false}
                               stepperRemaining={focusedKey === slot.key ? stepperRemaining : null}
                               onStepNext={stepNext}
                             />

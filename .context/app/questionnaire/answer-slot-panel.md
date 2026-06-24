@@ -61,6 +61,7 @@ The filter lives in the pure builder, not the route — see below.
 | Newly-filled diff + slot DOM ids  | `lib/app/questionnaire/panel/newly-filled.ts`                                         |
 | Minimap geometry (pure)           | `lib/app/questionnaire/panel/minimap.ts` (`computeMiniMapModel`)                      |
 | Minimap (data-slot mode)          | `components/app/questionnaire/panel/slot-minimap.tsx` (`SlotMiniMap`)                 |
+| Breadth meter (data-slot mode)    | `components/app/questionnaire/panel/slot-breadth-meter.tsx` (`SlotBreadthMeter`)      |
 | DB read seam (one query)          | `app/api/v1/app/questionnaire-sessions/_lib/answer-panel.ts` (`loadAnswerPanelState`) |
 | Route                             | `app/api/v1/app/questionnaire-sessions/[id]/answers/route.ts`                         |
 | Live fetch hook                   | `lib/hooks/use-answer-panel.ts`                                                       |
@@ -117,6 +118,29 @@ nuanced 30–100% range is shown, not collapsed to a band word. The panel header
 with the **average confidence** across all filled slots (an honest mean — a tangential, low-confidence
 fill drags it down by design), computed server-side in `_lib/answer-panel.ts` and carried on
 `AnswerPanelView.averageConfidence`.
+
+## Breadth — coverage of a slot's background questions (data-slot mode)
+
+A data slot maps to one-or-more questions (`AppDataSlotQuestion`, M:N). The fill's `confidence` is
+the agent's **certainty about the captured position** — it says nothing about how many of the slot's
+background questions are actually answered. **Breadth** is that second, orthogonal axis: it makes the
+2×2 legible (a slot can read "Confident" yet cover only 2 of 5 questions). Confidence stays the pure
+quality signal; breadth is purely additive (`confidence.ts` is untouched).
+
+Each `DataSlotPanelSlot` carries `coverage: { total, answered, questions[] }`, computed in the read
+seam from the slot's mapped question keys ∩ the session's answers. The panel renders it via
+`SlotBreadthMeter`:
+
+- **Always** — a neutral, **hue-free segmented pip meter** (`▰▰▰▱▱`) + "N of M questions", in every
+  presentation mode. The pips deliberately use a different visual grammar from the confidence dot
+  (count vs. quality hue), so the two never read as duplicate signals. Past `MAX_PIPS` (6) the pips
+  drop and the fraction shows alone, so a many-question slot never sprawls.
+- **`both` mode only** — the meter becomes a disclosure button that itemises the mapped questions,
+  each with a tick / empty state and its **own** confidence dot. Gated on `presentationMode === 'both'`
+  (where the respondent also sees the form), carried as `AnswerPanelView.showSlotQuestions`. In
+  chat/form-only the raw prompts are **never shipped** (`coverage.questions` is `[]`) — the count
+  summary alone preserves the chat-mode abstraction. Question order follows the questionnaire's own
+  order, not the M:N join's insertion order.
 
 ## Navigation aids for long questionnaires (data-slot mode)
 

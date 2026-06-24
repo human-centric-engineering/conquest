@@ -29,7 +29,7 @@ function row(over: Record<string, unknown> = {}) {
     status: 'active',
     respondentUserId: 'user-1',
     version: {
-      config: { answerSlotPanelScope: 'full_progress' },
+      config: { answerSlotPanelScope: 'full_progress', presentationMode: 'chat' },
       sections: [
         {
           id: 'sec-1',
@@ -220,8 +220,23 @@ describe('loadAnswerPanelState', () => {
           version: {
             ...row().version,
             dataSlots: [
-              { id: 'ds-1', key: 'goal', name: 'Goal', description: 'Why', theme: 'Goals' },
-              { id: 'ds-2', key: 'mood', name: 'Mood', description: 'How', theme: 'Goals' },
+              {
+                id: 'ds-1',
+                key: 'goal',
+                name: 'Goal',
+                description: 'Why',
+                theme: 'Goals',
+                // Maps to both questions; only `name` is answered → breadth 1 of 2.
+                questions: [{ questionSlot: { key: 'name' } }, { questionSlot: { key: 'colour' } }],
+              },
+              {
+                id: 'ds-2',
+                key: 'mood',
+                name: 'Mood',
+                description: 'How',
+                theme: 'Goals',
+                questions: [{ questionSlot: { key: 'colour' } }], // unanswered → breadth 0 of 1
+              },
             ],
           },
           dataSlotFills: [
@@ -262,6 +277,78 @@ describe('loadAnswerPanelState', () => {
       // Average confidence in data-slot mode is the mean over the FILLS (ds-1 at 0.9; ds-2 unfilled
       // contributes nothing), matching the data-slot rows the respondent sees — not the question answers.
       expect(loaded?.view.averageConfidence).toBeCloseTo(0.9);
+      // Breadth: ds-1 maps to name (answered) + colour (pending) → 1 of 2; ds-2 maps to colour → 0 of 1.
+      expect(goal.coverage.total).toBe(2);
+      expect(goal.coverage.answered).toBe(1);
+      expect(mood.coverage).toEqual({ total: 1, answered: 0, questions: [] });
+      // Chat mode never ships the raw prompts — the meter shows the summary alone.
+      expect(loaded?.view.showSlotQuestions).toBe(false);
+      expect(goal.coverage.questions).toEqual([]);
+    });
+
+    it('itemises a slot’s mapped questions (label + per-question completeness) in both mode', async () => {
+      findUnique.mockResolvedValue(
+        row({
+          version: {
+            ...row().version,
+            config: { answerSlotPanelScope: 'full_progress', presentationMode: 'both' },
+            dataSlots: [
+              {
+                id: 'ds-1',
+                key: 'goal',
+                name: 'Goal',
+                description: 'Why',
+                theme: 'Goals',
+                // Join order is colour-then-name; the seam re-sorts to version order (name, colour).
+                questions: [{ questionSlot: { key: 'colour' } }, { questionSlot: { key: 'name' } }],
+              },
+            ],
+          },
+          dataSlotFills: [],
+        })
+      );
+      const loaded = await loadAnswerPanelState('sess-1', true);
+      expect(loaded?.view.showSlotQuestions).toBe(true);
+      const goal = loaded!.view.dataSlotGroups![0].slots[0];
+      // Itemised in version order, each carrying its own answered/confidence state.
+      expect(goal.coverage.questions).toEqual([
+        { label: 'Your name?', answered: true, confidence: 0.9 },
+        { label: 'Favourite colour?', answered: false, confidence: null },
+      ]);
+    });
+
+    it('narrows an unrecognised fill provenanceLabel to null (drops the Inferred badge safely)', async () => {
+      findUnique.mockResolvedValue(
+        row({
+          version: {
+            ...row().version,
+            dataSlots: [
+              {
+                id: 'ds-1',
+                key: 'goal',
+                name: 'Goal',
+                description: 'd',
+                theme: 'T',
+                questions: [],
+              },
+            ],
+          },
+          dataSlotFills: [
+            {
+              dataSlotId: 'ds-1',
+              paraphrase: 'maybe',
+              provenanceLabel: 'garbage', // not in ANSWER_PROVENANCES → must narrow to null
+              rationale: null,
+              confidence: 0.9,
+              provisional: false,
+              lastUpdatedTurnId: null,
+              refinementHistory: [],
+            },
+          ],
+        })
+      );
+      const loaded = await loadAnswerPanelState('sess-1', true);
+      expect(loaded!.view.dataSlotGroups![0].slots[0].provenance).toBeNull();
     });
 
     it('resolves a data-slot fill lastUpdatedTurnId to its 1-based turn ordinal', async () => {
@@ -270,8 +357,23 @@ describe('loadAnswerPanelState', () => {
           version: {
             ...row().version,
             dataSlots: [
-              { id: 'ds-1', key: 'goal', name: 'Goal', description: 'Why', theme: 'Goals' },
-              { id: 'ds-2', key: 'mood', name: 'Mood', description: 'How', theme: 'Goals' },
+              {
+                id: 'ds-1',
+                key: 'goal',
+                name: 'Goal',
+                description: 'Why',
+                theme: 'Goals',
+                // Maps to both questions; only `name` is answered → breadth 1 of 2.
+                questions: [{ questionSlot: { key: 'name' } }, { questionSlot: { key: 'colour' } }],
+              },
+              {
+                id: 'ds-2',
+                key: 'mood',
+                name: 'Mood',
+                description: 'How',
+                theme: 'Goals',
+                questions: [{ questionSlot: { key: 'colour' } }], // unanswered → breadth 0 of 1
+              },
             ],
           },
           dataSlotFills: [
@@ -300,7 +402,16 @@ describe('loadAnswerPanelState', () => {
         row({
           version: {
             ...row().version,
-            dataSlots: [{ id: 'ds-1', key: 'goal', name: 'Goal', description: 'd', theme: 'T' }],
+            dataSlots: [
+              {
+                id: 'ds-1',
+                key: 'goal',
+                name: 'Goal',
+                description: 'd',
+                theme: 'T',
+                questions: [],
+              },
+            ],
           },
           dataSlotFills: [
             {
@@ -325,7 +436,16 @@ describe('loadAnswerPanelState', () => {
         row({
           version: {
             ...row().version,
-            dataSlots: [{ id: 'ds-1', key: 'goal', name: 'Goal', description: 'd', theme: 'T' }],
+            dataSlots: [
+              {
+                id: 'ds-1',
+                key: 'goal',
+                name: 'Goal',
+                description: 'd',
+                theme: 'T',
+                questions: [],
+              },
+            ],
           },
           dataSlotFills: [
             {
@@ -364,7 +484,14 @@ describe('loadAnswerPanelState', () => {
           version: {
             ...row().version,
             dataSlots: [
-              { id: 'ds-1', key: 'goal', name: 'Goal', description: 'Why', theme: 'Goals' },
+              {
+                id: 'ds-1',
+                key: 'goal',
+                name: 'Goal',
+                description: 'Why',
+                theme: 'Goals',
+                questions: [],
+              },
             ],
           },
           dataSlotFills: [],

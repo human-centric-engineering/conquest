@@ -211,6 +211,8 @@ describe('buildAnswerExtractionPrompt — attachments', () => {
     expect(Array.isArray(content)).toBe(true);
     const parts = content as ContentPart[];
     // First part is the text (carrying the message + an attachment note); then one part per file.
+    // Pin the count so a dropped attachment part fails here rather than passing the per-index checks.
+    expect(parts).toHaveLength(3);
     expect(parts[0]).toMatchObject({ type: 'text' });
     expect((parts[0] as { text: string }).text).toContain('see attached');
     expect((parts[0] as { text: string }).text).toContain('attached 2 file');
@@ -336,6 +338,42 @@ describe('buildAnswerExtractionPrompt — data slots', () => {
     expect(systemContent(messages)).toMatch(/CORRECTS?/);
   });
 
+  it('omits the (confidence …) annotation on the current line when confidence is non-numeric', () => {
+    const messages = buildAnswerExtractionPrompt({
+      ...ctx({ candidateSlots: [slot({ key: 'q1' })], activeQuestionKey: null }),
+      dataSlotCandidates: [
+        {
+          key: 'demographics',
+          name: 'Employee Demographics',
+          description: 'Age + gender',
+          theme: 'About',
+          current: { value: { age: 25 }, paraphrase: 'A 25-year-old.', confidence: null },
+        },
+      ],
+    });
+    const content = userContent(messages);
+    expect(content).toContain('current: A 25-year-old.');
+    // A null confidence must not render a "(confidence …)" suffix on the line.
+    expect(content).not.toMatch(/current: A 25-year-old\.\s*\(confidence/);
+  });
+
+  it('serialises the current value as JSON when no paraphrase is recorded', () => {
+    const messages = buildAnswerExtractionPrompt({
+      ...ctx({ candidateSlots: [slot({ key: 'q1' })], activeQuestionKey: null }),
+      dataSlotCandidates: [
+        {
+          key: 'department',
+          name: 'Department',
+          description: 'Their team',
+          theme: 'About',
+          current: { value: { raw: 'Marketing' }, paraphrase: null, confidence: 0.5 },
+        },
+      ],
+    });
+    // Paraphrase null → the line falls back to the JSON-serialised value, not `undefined`.
+    expect(userContent(messages)).toContain('current: {"raw":"Marketing"} (confidence 0.50)');
+  });
+
   it('instructs the model to re-scan every slot and keep the paraphrase a superset', () => {
     const messages = buildAnswerExtractionPrompt({
       ...ctx({ candidateSlots: [slot({ key: 'q1' })], activeQuestionKey: null }),
@@ -399,6 +437,23 @@ describe('buildAnswerExtractionPrompt — data slots', () => {
     expect(content).toMatch(/BEST-EFFORT inference/i);
     // The system rules require a fill for such a slot rather than leaving it empty.
     expect(systemContent(messages)).toMatch(/MUST output a fill/i);
+  });
+
+  it('defaults a parked slot’s attempt count to 1 when attempts is omitted', () => {
+    const messages = buildAnswerExtractionPrompt({
+      ...ctx({ candidateSlots: [slot({ key: 'q1' })], activeQuestionKey: null }),
+      dataSlotCandidates: [
+        {
+          key: 'blockers',
+          name: 'Workplace Blockers',
+          description: 'What gets in the way',
+          theme: 'Wellbeing',
+          parkPending: true,
+          // attempts omitted → `?? 1` default
+        },
+      ],
+    });
+    expect(userContent(messages)).toMatch(/status: asked 1× without a clear answer/);
   });
 });
 

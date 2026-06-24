@@ -158,6 +158,7 @@ describe('AnswerSlotPanel', () => {
                   provisional: false,
                   answeredAtTurnIndex: 2,
                   history: [{ paraphrase: 'A 25-year-old male.', confidence: 0.9 }],
+                  coverage: { total: 0, answered: 0, questions: [] },
                 },
               ],
             },
@@ -190,6 +191,7 @@ describe('AnswerSlotPanel', () => {
                   provisional: true,
                   answeredAtTurnIndex: 1,
                   history: [],
+                  coverage: { total: 0, answered: 0, questions: [] },
                 },
               ],
             },
@@ -222,6 +224,7 @@ describe('AnswerSlotPanel', () => {
                   provisional: false,
                   answeredAtTurnIndex: null,
                   history: [],
+                  coverage: { total: 0, answered: 0, questions: [] },
                 },
               ],
             },
@@ -257,6 +260,7 @@ describe('AnswerSlotPanel', () => {
                   provisional: false,
                   answeredAtTurnIndex: 1,
                   history: [],
+                  coverage: { total: 0, answered: 0, questions: [] },
                 },
               ],
             },
@@ -335,6 +339,7 @@ describe('AnswerSlotPanel', () => {
       provisional: false,
       answeredAtTurnIndex: 1,
       history: [],
+      coverage: { total: 0, answered: 0, questions: [] },
       ...over,
     };
   }
@@ -387,9 +392,9 @@ describe('AnswerSlotPanel', () => {
   it('pulses the most-recent-turn slot rows (and leaves earlier rows unpulsed)', () => {
     // slot-1 + slot-4 belong to the later fill-turn; the rest to an earlier one.
     render(<AnswerSlotPanel view={dataSlotView(12, ['slot-1', 'slot-4'])} />);
-    expect(document.getElementById('panel-slot-slot-1')?.className).toContain('cq-fill-glow');
-    expect(document.getElementById('panel-slot-slot-4')?.className).toContain('cq-fill-glow');
-    expect(document.getElementById('panel-slot-slot-2')?.className).not.toContain('cq-fill-glow');
+    expect(document.getElementById('panel-slot-slot-1')!.className).toContain('cq-fill-glow');
+    expect(document.getElementById('panel-slot-slot-4')!.className).toContain('cq-fill-glow');
+    expect(document.getElementById('panel-slot-slot-2')!.className).not.toContain('cq-fill-glow');
   });
 
   // The scroll + measurement paths no-op in jsdom (zero layout height). Stub a non-zero layout and a
@@ -437,10 +442,10 @@ describe('AnswerSlotPanel', () => {
       expect(Element.prototype.scrollTo).toHaveBeenCalledWith(
         expect.objectContaining({ behavior: 'smooth' })
       );
-      expect(document.getElementById('panel-slot-slot-2')?.className).toContain('ring-2');
+      expect(document.getElementById('panel-slot-slot-2')!.className).toContain('ring-2');
       // Stepping advances the scroll + highlight to the next newly-filled slot.
       fireEvent.click(screen.getByText(/1 more slot was answered/));
-      expect(document.getElementById('panel-slot-slot-9')?.className).toContain('ring-2');
+      expect(document.getElementById('panel-slot-slot-9')!.className).toContain('ring-2');
     });
 
     it('renders the minimap and scrubs the list when the content overflows', () => {
@@ -480,7 +485,7 @@ describe('AnswerSlotPanel', () => {
         expect(screen.getByTestId('slot-minimap-window')).toBeInTheDocument();
         // The list reserves left padding so its text clears the floating minimap.
         const scrollContainer = minimap.parentElement?.querySelector('.overflow-y-auto');
-        expect(scrollContainer?.className).toContain('pl-7');
+        expect(scrollContainer!.className).toContain('pl-7');
         // Clicking the track scrubs the list to the clicked fraction. With the stubs (scrollHeight
         // 1000, clientHeight 300, track rect height 100), clientY 150 → fraction clamps to 1 →
         // target = min(700, 1000 - 150) = 700.

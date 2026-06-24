@@ -26,6 +26,7 @@ function slot(over: Partial<DataSlotPanelSlot> & { key: string }): DataSlotPanel
     provisional: false,
     answeredAtTurnIndex: null,
     history: [],
+    coverage: { total: 0, answered: 0, questions: [] },
     ...over,
   };
 }

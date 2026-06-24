@@ -9,15 +9,11 @@
  * @see components/app/questionnaire/chat/notice-why.tsx
  */
 
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { NoticeWhy } from '@/components/app/questionnaire/chat/notice-why';
-
-afterEach(() => {
-  vi.restoreAllMocks();
-});
 
 describe('NoticeWhy', () => {
   describe('renders nothing when there is no usable detail', () => {
@@ -132,8 +128,54 @@ describe('NoticeWhy', () => {
     it('marks the icon aria-hidden to exclude it from the accessibility tree', () => {
       render(<NoticeWhy detail="Some detail." />);
 
-      const hiddenSvgs = document.querySelectorAll('svg[aria-hidden="true"]');
-      expect(hiddenSvgs.length).toBeGreaterThan(0);
+      // Scope to the button's own icon — not any aria-hidden SVG that might exist elsewhere.
+      const icon = screen.getByRole('button').querySelector('svg');
+      expect(icon).toHaveAttribute('aria-hidden', 'true');
+    });
+  });
+
+  describe('children cluster (the data-slot row layout)', () => {
+    it('renders the left-hand cluster alongside the "Why?" trigger when children are given', () => {
+      render(
+        <NoticeWhy detail="The agent inferred this.">
+          <span>Confident · 90%</span>
+        </NoticeWhy>
+      );
+      expect(screen.getByText('Confident · 90%')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /why\?/i })).toBeInTheDocument();
+    });
+
+    it('pushes the trigger to the right of the cluster (ml-auto)', () => {
+      render(
+        <NoticeWhy detail="Reason.">
+          <span>cluster</span>
+        </NoticeWhy>
+      );
+      // The trigger sits in an ml-auto wrapper so it docks to the row's right edge, not beside the cluster.
+      expect(screen.getByRole('button').closest('div')).toHaveClass('ml-auto');
+    });
+
+    it('still renders the cluster when there is no detail (no trigger, no null)', () => {
+      const { container } = render(
+        <NoticeWhy>
+          <span>cluster only</span>
+        </NoticeWhy>
+      );
+      expect(container).not.toBeEmptyDOMElement();
+      expect(screen.getByText('cluster only')).toBeInTheDocument();
+      expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    });
+
+    it('expands the rationale below the cluster row on click', async () => {
+      const user = userEvent.setup();
+      render(
+        <NoticeWhy detail="Full-width rationale.">
+          <span>Confident · 90%</span>
+        </NoticeWhy>
+      );
+      expect(screen.queryByText('Full-width rationale.')).not.toBeInTheDocument();
+      await user.click(screen.getByRole('button'));
+      expect(screen.getByText('Full-width rationale.')).toBeInTheDocument();
     });
   });
 });

@@ -124,6 +124,46 @@ export interface DataSlotPanelSlot {
    * correction (e.g. 25-year-old male → female) is visible, not silently overwritten.
    */
   history: Array<{ paraphrase: string | null; confidence: number | null }>;
+  /**
+   * Breadth: how many of this slot's mapped background questions the session has answered. The
+   * panel renders `answered`/`total` as a segmented pip meter (always), expandable to the itemised
+   * `questions` when `AnswerPanelView.showSlotQuestions` is set (presentationMode `both`).
+   */
+  coverage: DataSlotCoverage;
+}
+
+/**
+ * One mapped background question's completeness within this session — a row in a data slot's
+ * breadth disclosure (Data Slots feature). The respondent sees these only in `both` presentation
+ * mode (where the form view also exposes the questions); chat/form-only never ship the prompts.
+ */
+export interface DataSlotQuestionCoverage {
+  /** Short question prompt — the label shown in the expanded breadth list. */
+  label: string;
+  /** True once the session has captured an answer for this question. */
+  answered: boolean;
+  /** The answer's 0–1 capture confidence, or null when unanswered / unscored. */
+  confidence: number | null;
+}
+
+/**
+ * How much of a data slot's background-question set the session has answered (Data Slots feature) —
+ * the BREADTH axis, deliberately distinct from the fill's `confidence` (the agent's certainty about
+ * the captured position). A slot can be confidently filled yet cover only 2 of 5 of its questions;
+ * breadth makes that legible where a single confidence figure cannot. The panel renders `answered`/
+ * `total` as a segmented pip meter, always. `questions` is itemised only when `showSlotQuestions`.
+ */
+export interface DataSlotCoverage {
+  /** Number of questions mapped to this slot (the meter's denominator). */
+  total: number;
+  /** How many of them have an answer in this session (the meter's numerator). */
+  answered: number;
+  /**
+   * The mapped questions with per-question completeness, in version order. Populated only when the
+   * panel may itemise them (presentationMode `both`); empty otherwise, so chat/form-only mode never
+   * ships the raw prompts — the `answered`/`total` summary is enough for the meter.
+   */
+  questions: DataSlotQuestionCoverage[];
 }
 
 /** A themed group of data slots (the panel groups by the generator's theme). */
@@ -169,4 +209,11 @@ export interface AnswerPanelView {
    * design). Absent (`undefined`) when nothing scored has been captured yet — the header omits it.
    */
   averageConfidence?: number;
+  /**
+   * Data Slots feature: true when a slot's breadth meter may expand to its underlying questions —
+   * i.e. presentationMode is `both`, where the respondent also sees the form, so revealing the
+   * mapped prompts doesn't break the chat-mode abstraction. When false/absent the meter still shows
+   * the `answered`/`total` summary but does not itemise (and `coverage.questions` is empty).
+   */
+  showSlotQuestions?: boolean;
 }

@@ -98,11 +98,21 @@ export async function loadAnswerPanelState(
       respondentUserId: true,
       version: {
         select: {
-          config: { select: { answerSlotPanelScope: true } },
-          // Data Slots feature: the version's data slots (rendered when dataSlotMode).
+          // `presentationMode` gates whether the breadth meter may itemise a slot's mapped
+          // questions — only in `both`, where the respondent also sees the form (Data Slots feature).
+          config: { select: { answerSlotPanelScope: true, presentationMode: true } },
+          // Data Slots feature: the version's data slots (rendered when dataSlotMode), each with the
+          // keys of the questions it abstracts over (M:N) so the seam can compute per-slot breadth.
           dataSlots: {
             orderBy: { ordinal: 'asc' },
-            select: { id: true, key: true, name: true, description: true, theme: true },
+            select: {
+              id: true,
+              key: true,
+              name: true,
+              description: true,
+              theme: true,
+              questions: { select: { questionSlot: { select: { key: true } } } },
+            },
           },
           sections: {
             orderBy: { ordinal: 'asc' },
@@ -202,6 +212,18 @@ export async function loadAnswerPanelState(
   // it edits the underlying questions directly, so it keeps the question sections and never
   // swaps in the data-slot groups. The chat panel still shows the data-slot abstraction.
   if (!forForm && dataSlotMode && row.version.dataSlots.length > 0) {
+    // Breadth inputs, built once: which questions are answered (+ their confidence), each
+    // question's prompt + version order, and whether the panel may itemise the mapped questions
+    // (only in `both` mode — see `showSlotQuestions`). `orderIndex` keeps a slot's question list in
+    // the questionnaire's own order rather than the M:N join's insertion order.
+    const presentationMode = row.version.config?.presentationMode ?? 'chat';
+    const showSlotQuestions = presentationMode === 'both';
+    const orderedQuestions = row.version.sections.flatMap((s) => s.questions);
+    const promptByKey = new Map(orderedQuestions.map((q) => [q.key, q.prompt]));
+    const orderIndex = new Map(orderedQuestions.map((q, i) => [q.key, i]));
+    const answeredKeys = new Set(row.answers.map((a) => a.questionSlot.key));
+    const confidenceByKey = new Map(row.answers.map((a) => [a.questionSlot.key, a.confidence]));
+
     const fillByDataSlotId = new Map(
       row.dataSlotFills.map((f) => [
         f.dataSlotId,
@@ -228,6 +250,22 @@ export async function loadAnswerPanelState(
       // (the respondent sees forward progress; the marker flags it as tentative).
       const provisional = fill?.provisional ?? false;
       const filled = (fill?.confidence ?? 0) >= DATA_SLOT_FILLED_THRESHOLD || provisional;
+      // Breadth: this slot's mapped questions, in version order, with per-question completeness.
+      // `questions` is itemised only in `both` mode; otherwise the meter shows the summary alone.
+      const mappedKeys = ds.questions
+        .map((q) => q.questionSlot.key)
+        .sort((a, b) => (orderIndex.get(a) ?? 0) - (orderIndex.get(b) ?? 0));
+      const coverage = {
+        total: mappedKeys.length,
+        answered: mappedKeys.filter((k) => answeredKeys.has(k)).length,
+        questions: showSlotQuestions
+          ? mappedKeys.map((k) => ({
+              label: promptByKey.get(k) ?? k,
+              answered: answeredKeys.has(k),
+              confidence: answeredKeys.has(k) ? (confidenceByKey.get(k) ?? null) : null,
+            }))
+          : [],
+      };
       let group = byTheme.get(ds.theme);
       if (!group) {
         group = { theme: ds.theme, slots: [] };
@@ -250,9 +288,11 @@ export async function loadAnswerPanelState(
           paraphrase: h.previousParaphrase,
           confidence: h.previousConfidence,
         })),
+        coverage,
       });
     }
     view.dataSlotGroups = groups;
+    view.showSlotQuestions = showSlotQuestions;
     // Average confidence in data-slot mode is the mean over the data-slot FILLS the respondent sees
     // (their abstraction layer), not the hidden question answers — so it matches the rows on screen.
     view.averageConfidence = meanConfidence(
@@ -266,7 +306,6 @@ export async function loadAnswerPanelState(
     const coverageQuestions = row.version.sections.flatMap((s) =>
       s.questions.map((q) => ({ id: q.key, weight: q.weight }))
     );
-    const answeredKeys = new Set(row.answers.map((a) => a.questionSlot.key));
     view.progressPercent = Math.round(weightedCoverage(coverageQuestions, answeredKeys) * 100);
     // Question rows are suppressed in data-slot mode; the header/progress use the coverage percent.
     view.sections = [];
