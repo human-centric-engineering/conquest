@@ -111,7 +111,7 @@ export function SlotHistoryDialog({ slot }: { slot: DataSlotPanelSlot }) {
           aria-label={`See how this answer evolved — ${editCount} ${editCount === 1 ? 'edit' : 'edits'}`}
         >
           <History className="h-3 w-3" aria-hidden="true" />
-          Edited{editCount > 1 ? ` ·${editCount}` : ''}
+          {editCount} {editCount === 1 ? 'Edit' : 'Edits'}
         </button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">

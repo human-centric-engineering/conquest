@@ -233,9 +233,9 @@ describe('AnswerSlotPanel', () => {
     expect(screen.getByText('A 25-year-old female.')).toBeInTheDocument();
     // The old inline strikethrough "Earlier: …" is gone — prior values live behind the dialog.
     expect(screen.queryByText('Earlier: A 25-year-old male.')).not.toBeInTheDocument();
-    // A single edit shows the bare "Edited" trigger (no count).
+    // A single edit shows the count: "1 Edit" (singular).
     const trigger = screen.getByRole('button', { name: /how this answer evolved/i });
-    expect(trigger).toHaveTextContent('Edited');
+    expect(trigger).toHaveTextContent('1 Edit');
   });
 
   it('opens the evolution dialog showing the current reading and each prior step with its rationale', () => {

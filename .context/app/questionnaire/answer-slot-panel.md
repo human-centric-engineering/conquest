@@ -62,6 +62,7 @@ The filter lives in the pure builder, not the route — see below.
 | Minimap geometry (pure)           | `lib/app/questionnaire/panel/minimap.ts` (`computeMiniMapModel`)                      |
 | Minimap (data-slot mode)          | `components/app/questionnaire/panel/slot-minimap.tsx` (`SlotMiniMap`)                 |
 | Breadth meter (data-slot mode)    | `components/app/questionnaire/panel/slot-breadth-meter.tsx` (`SlotBreadthMeter`)      |
+| Edit-history dialog (data-slot)   | `components/app/questionnaire/panel/slot-history-dialog.tsx` (`SlotHistoryDialog`)    |
 | DB read seam (one query)          | `app/api/v1/app/questionnaire-sessions/_lib/answer-panel.ts` (`loadAnswerPanelState`) |
 | Route                             | `app/api/v1/app/questionnaire-sessions/[id]/answers/route.ts`                         |
 | Live fetch hook                   | `lib/hooks/use-answer-panel.ts`                                                       |
@@ -141,6 +142,23 @@ seam from the slot's mapped question keys ∩ the session's answers. The panel r
   chat/form-only the raw prompts are **never shipped** (`coverage.questions` is `[]`) — the count
   summary alone preserves the chat-mode abstraction. Question order follows the questionnaire's own
   order, not the M:N join's insertion order.
+
+## Answer evolution — the "Edited" history dialog (data-slot mode)
+
+When a respondent changes a captured position (e.g. _25-year-old male → female_), the prior reading
+isn't silently overwritten: each change pushes a step onto the fill's refinement history, and
+`upsertDataSlotFill` (`_lib/data-slot-fills.ts`) snapshots `previousValue / previousParaphrase /
+previousConfidence / previousRationale` plus a `changedAt` ISO stamp. The read seam projects those
+onto `DataSlotPanelSlot.history` (oldest-first; `rationale`/`changedAt` are `null` on steps recorded
+before per-change capture existed).
+
+The row surfaces this as a quiet **"N Edit(s)" pill** rather than the old inline strikethrough list,
+which crowded the row. Opening it (`SlotHistoryDialog`) reveals the full evolution as a **newest-first
+timeline** — the current reading on top, then each prior step with its paraphrase, confidence, the
+agent's rationale at the time (or an explicit _"Reason not recorded"_ when absent), and a compact
+locale stamp (invalid/absent → _"Earlier"_). Steps that never carried a reading are filtered out, and
+the dialog renders **nothing** when no prior states remain — so a once-and-done slot shows no pill.
+Read-only display; inherits the brand CSS vars from the panel's `BrandThemeProvider`.
 
 ## Navigation aids for long questionnaires (data-slot mode)
 
