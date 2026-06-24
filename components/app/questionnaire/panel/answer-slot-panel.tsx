@@ -182,6 +182,7 @@ function DataSlotRow({
   stepperRemaining,
   onStepNext,
   collapseSignal,
+  outOfView,
 }: {
   slot: DataSlotPanelSlot;
   highlighted: boolean;
@@ -192,8 +193,10 @@ function DataSlotRow({
   /** When non-null, render the "N more recorded" footer with this many slots still to come. */
   stepperRemaining: number | null;
   onStepNext: () => void;
-  /** Bumped by the panel on scroll / refetch so this row's open disclosures collapse themselves. */
+  /** Bumped by the panel on refetch so this row's open disclosures collapse themselves. */
   collapseSignal: number;
+  /** True once this row has scrolled fully out of view — collapses its open disclosures. */
+  outOfView: boolean;
 }) {
   return (
     <li
@@ -232,6 +235,7 @@ function DataSlotRow({
                 detail={slot.rationale ?? undefined}
                 className="mt-1"
                 collapseSignal={collapseSignal}
+                outOfView={outOfView}
               >
                 <ConfidenceScore confidence={slot.confidence} />
                 {slot.provenance === 'inferred' || slot.provenance === 'synthesised' ? (
@@ -277,6 +281,7 @@ function DataSlotRow({
             coverage={slot.coverage}
             expandable={showSlotQuestions}
             collapseSignal={collapseSignal}
+            outOfView={outOfView}
           />
         </div>
       ) : null}
@@ -392,7 +397,8 @@ export function AnswerSlotPanel({
 
   // A refetch (the workspace hands a fresh view after each settled turn) collapses any open
   // disclosure: the rationale/coverage behind it may have changed, so close rather than leave a stale
-  // panel hanging open. Scroll-driven collapses are bumped inline in the list's onScroll handler.
+  // panel hanging open. Scroll-driven collapses are per-row instead (a row closes once it scrolls out
+  // of view — see `outOfViewKeys`), not a blanket close on every scroll.
   useEffect(() => {
     setCollapseSignal((s) => s + 1);
   }, [view]);
@@ -475,6 +481,24 @@ export function AnswerSlotPanel({
   );
   const showMap = dataSlotMode && totalSlots > OVERVIEW_MIN_SLOTS && miniMap.overflow;
 
+  // Keys of slots whose row has scrolled fully out of the visible window — used to collapse a row's
+  // open "Why?" / questions disclosure once you've scrolled past it, rather than on the first pixel of
+  // scroll. A row counts as out only when it's entirely above or entirely below the viewport, so a
+  // disclosure stays open while any part of its row is still in the focus window. Empty until geometry
+  // is measured (the rows carry content-space tops/heights; `viewportTop` is the live scroll offset).
+  const outOfViewKeys = useMemo(() => {
+    const out = new Set<string>();
+    const viewTop = viewportTop;
+    const viewBottom = viewportTop + geometry.viewportHeight;
+    // No measured viewport (pre-measure / hidden) → treat nothing as out, so we never close blindly.
+    if (geometry.viewportHeight === 0) return out;
+    for (const row of geometry.rows) {
+      const rowBottom = row.top + row.height;
+      if (rowBottom <= viewTop || row.top >= viewBottom) out.add(row.key);
+    }
+    return out;
+  }, [geometry, viewportTop]);
+
   const focusedKey = cursor !== null && newlyFilledKeys ? (newlyFilledKeys[cursor] ?? null) : null;
   const stepperRemaining =
     cursor !== null && newlyFilledKeys ? newlyFilledKeys.length - cursor - 1 : 0;
@@ -499,10 +523,10 @@ export function AnswerSlotPanel({
             <div
               ref={scrollRef}
               onScroll={(e) => {
+                // Just track the offset. An open "Why?" / questions disclosure no longer closes on the
+                // first pixel of scroll — it collapses only once its row scrolls fully out of view (see
+                // `outOfViewKeys` / the `outOfView` prop), so a small nudge leaves it open.
                 setViewportTop(e.currentTarget.scrollTop);
-                // Scrolling the list collapses any open "Why?" / questions disclosure so it doesn't
-                // float over a row it's scrolled away from.
-                setCollapseSignal((s) => s + 1);
               }}
               className={cn(
                 'h-full overflow-y-auto px-3 py-3',
@@ -534,6 +558,7 @@ export function AnswerSlotPanel({
                               stepperRemaining={focusedKey === slot.key ? stepperRemaining : null}
                               onStepNext={stepNext}
                               collapseSignal={collapseSignal}
+                              outOfView={outOfViewKeys.has(slot.key)}
                             />
                           ))}
                         </ul>

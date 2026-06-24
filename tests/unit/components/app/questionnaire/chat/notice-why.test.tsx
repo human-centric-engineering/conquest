@@ -118,9 +118,12 @@ describe('NoticeWhy', () => {
       expect(button.closest('div')).toHaveClass('custom-spacing');
     });
 
-    it('renders without error when className is omitted', () => {
+    it('keeps the base wrapper class and leaks nothing when className is omitted', () => {
       render(<NoticeWhy detail="Some detail." />);
-      expect(screen.getByRole('button')).toBeInTheDocument();
+      // cn() must drop the absent className cleanly: base class survives, no "undefined" string.
+      const wrapper = screen.getByRole('button').closest('div');
+      expect(wrapper).toHaveClass('mt-1.5');
+      expect(wrapper?.className).not.toContain('undefined');
     });
   });
 

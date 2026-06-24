@@ -27,24 +27,35 @@ export function NoticeWhy({
   children,
   className,
   collapseSignal,
+  outOfView,
 }: {
   detail?: string;
   children?: ReactNode;
   className?: string;
   /**
-   * When this number changes, the disclosure closes itself. The answer panel bumps it on scroll and
-   * on refetch so an open rationale doesn't linger over content it has scrolled away from or that has
-   * since changed. Omit (undefined) to leave the disclosure under purely manual control.
+   * When this number changes, the disclosure closes itself. The answer panel bumps it on refetch so an
+   * open rationale doesn't linger over content that has since changed. Omit (undefined) to leave the
+   * disclosure under purely manual control.
    */
   collapseSignal?: number;
+  /**
+   * True once the host row has scrolled fully out of view. The disclosure closes when this flips true
+   * (not on every scroll), so a small scroll leaves it open but scrolling past the row collapses it.
+   */
+  outOfView?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  // Close when the parent signals a collapse (scroll / refetch). Skips the initial mount: the effect's
-  // first run carries the starting signal, and `open` already starts closed.
+  // Close when the parent signals a collapse (refetch). Skips the initial mount: the effect's first
+  // run carries the starting signal, and `open` already starts closed.
   useEffect(() => {
     if (collapseSignal === undefined) return;
     setOpen(false);
   }, [collapseSignal]);
+  // Close once the row scrolls fully out of view (false → true). Re-entering view (true → false) is a
+  // no-op — it stays closed until manually reopened.
+  useEffect(() => {
+    if (outOfView) setOpen(false);
+  }, [outOfView]);
   const hasDetail = Boolean(detail && detail.trim().length > 0);
   // Nothing to render when there's neither a rationale to disclose nor a cluster to host.
   if (!hasDetail && !children) return null;

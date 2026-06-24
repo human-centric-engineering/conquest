@@ -562,7 +562,7 @@ describe('AnswerSlotPanel', () => {
     return el;
   }
 
-  it('collapses an open "Why?" rationale when the list is scrolled', () => {
+  it('keeps an open "Why?" rationale open on a scroll that leaves its row in view', () => {
     const { container } = render(
       <AnswerSlotPanel
         view={view({
@@ -579,8 +579,73 @@ describe('AnswerSlotPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: /why/i }));
     expect(screen.getByText('Read from their tooling gripes.')).toBeInTheDocument();
 
+    // A plain scroll (row still within the viewport) no longer closes it — only scrolling past does.
     fireEvent.scroll(scrollContainer(container));
-    expect(screen.queryByText('Read from their tooling gripes.')).not.toBeInTheDocument();
+    expect(screen.getByText('Read from their tooling gripes.')).toBeInTheDocument();
+  });
+
+  it('collapses an open "Why?" rationale once its row scrolls fully out of view', () => {
+    // Measure geometry so the panel can tell a row has left the viewport: a 100px viewport at top 0,
+    // the single row 50px tall at content-top 0. Scrolling to 200 puts the row entirely above the view.
+    const rect = (top: number, height: number): DOMRect => ({
+      top,
+      height,
+      bottom: top + height,
+      left: 0,
+      right: 0,
+      width: 0,
+      x: 0,
+      y: top,
+      toJSON: () => ({}),
+    });
+    const gbcr = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: Element
+    ) {
+      if (this.classList.contains('overflow-y-auto')) return rect(0, 100);
+      if (this.hasAttribute('data-slot-key')) return rect(0, 50);
+      return rect(0, 0);
+    });
+    const sizeFor = (el: HTMLElement, big: number) =>
+      el.classList.contains('overflow-y-auto') ? big : 0;
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+      configurable: true,
+      get(this: HTMLElement) {
+        return sizeFor(this, 100);
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+      configurable: true,
+      get(this: HTMLElement) {
+        return sizeFor(this, 1000);
+      },
+    });
+
+    try {
+      const { container } = render(
+        <AnswerSlotPanel
+          view={view({
+            dataSlotGroups: [
+              {
+                theme: 'Strategy',
+                slots: [filledDataSlot({ rationale: 'Read from their tooling gripes.' })],
+              },
+            ],
+            progressPercent: 20,
+          })}
+        />
+      );
+      fireEvent.click(screen.getByRole('button', { name: /why/i }));
+      expect(screen.getByText('Read from their tooling gripes.')).toBeInTheDocument();
+
+      const el = scrollContainer(container);
+      Object.defineProperty(el, 'scrollTop', { configurable: true, value: 200 });
+      fireEvent.scroll(el);
+      expect(screen.queryByText('Read from their tooling gripes.')).not.toBeInTheDocument();
+    } finally {
+      gbcr.mockRestore();
+      Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight');
+      Reflect.deleteProperty(HTMLElement.prototype, 'scrollHeight');
+    }
   });
 
   it('collapses an open "Why?" rationale when the view refetches', () => {
@@ -603,7 +668,7 @@ describe('AnswerSlotPanel', () => {
     expect(screen.queryByText('Read from their tooling gripes.')).not.toBeInTheDocument();
   });
 
-  it('collapses an expanded questions footer when the list is scrolled', () => {
+  it('keeps an expanded questions footer open on a scroll that leaves its row in view', () => {
     const { container } = render(
       <AnswerSlotPanel
         view={view({
@@ -633,8 +698,9 @@ describe('AnswerSlotPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: /questions filled/i }));
     expect(screen.getByText('How do you sell today?')).toBeInTheDocument();
 
+    // Same per-row rule as "Why?": a scroll that keeps the row in view leaves the footer expanded.
     fireEvent.scroll(scrollContainer(container));
-    expect(screen.queryByText('How do you sell today?')).not.toBeInTheDocument();
+    expect(screen.getByText('How do you sell today?')).toBeInTheDocument();
   });
 
   // The scroll + measurement paths no-op in jsdom (zero layout height). Stub a non-zero layout and a

@@ -87,15 +87,14 @@ describe('upsertDataSlotFill — first capture (CREATE)', () => {
     expect(call?.data?.rationale).toBeNull();
   });
 
-  it('defaults provisional to false, and persists it when the fill is parked', async () => {
+  it('defaults provisional to false when the fill omits it', async () => {
     await upsertDataSlotFill(SESSION_ID, SLOT_ID, FILL);
     expect((prismaMock.appDataSlotFill.create as Mock).mock.calls[0]?.[0]?.data?.provisional).toBe(
       false
     );
+  });
 
-    vi.clearAllMocks();
-    prismaMock.appDataSlotFill.findUnique.mockResolvedValue(null);
-    prismaMock.appDataSlotFill.create.mockResolvedValue({ id: 'created-2' });
+  it('persists provisional when the fill is parked', async () => {
     await upsertDataSlotFill(SESSION_ID, SLOT_ID, { ...FILL, provisional: true });
     expect((prismaMock.appDataSlotFill.create as Mock).mock.calls[0]?.[0]?.data?.provisional).toBe(
       true

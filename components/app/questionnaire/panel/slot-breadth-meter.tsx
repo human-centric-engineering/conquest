@@ -34,10 +34,15 @@ export interface SlotBreadthMeterProps {
   expandable: boolean;
   /**
    * When this number changes, an expanded questions list closes itself. The answer panel bumps it on
-   * scroll and on refetch so the footer doesn't stay open over a row it's scrolled past or that has
-   * since changed. Omit (undefined) to leave the meter under purely manual control.
+   * refetch so the footer doesn't stay open over a row whose coverage has since changed. Omit
+   * (undefined) to leave the meter under purely manual control.
    */
   collapseSignal?: number;
+  /**
+   * True once the host row has scrolled fully out of view. The list closes when this flips true (not on
+   * every scroll), so a small scroll leaves it open but scrolling past the row collapses it.
+   */
+  outOfView?: boolean;
   className?: string;
 }
 
@@ -63,15 +68,20 @@ export function SlotBreadthMeter({
   coverage,
   expandable,
   collapseSignal,
+  outOfView,
   className,
 }: SlotBreadthMeterProps) {
   const listId = useId();
   const [open, setOpen] = useState(false);
-  // Close the expanded questions list when the parent signals a collapse (scroll / refetch).
+  // Close the expanded questions list when the parent signals a collapse (refetch).
   useEffect(() => {
     if (collapseSignal === undefined) return;
     setOpen(false);
   }, [collapseSignal]);
+  // Close once the row scrolls fully out of view (false → true); re-entering view is a no-op.
+  useEffect(() => {
+    if (outOfView) setOpen(false);
+  }, [outOfView]);
   const { total, answered, questions } = coverage;
 
   // A slot that maps to no questions has no breadth to show.
