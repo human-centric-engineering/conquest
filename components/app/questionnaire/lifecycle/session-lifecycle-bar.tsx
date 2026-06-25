@@ -72,15 +72,10 @@ export function SessionLifecycleBar({
   // just the progress bar.
   const showProgress = view !== null;
   const ref = view?.ref ?? null;
-  const hasStrip =
-    anonymous ||
-    showCostHint ||
-    showResume ||
-    showPause ||
-    actionError !== null ||
-    ref !== null ||
-    trailing != null ||
-    download != null;
+  // The right cluster splits into two wrap-units: an info chip and the action controls.
+  const hasInfo = ref !== null || download != null;
+  const hasActions = actionError !== null || showResume || showPause || trailing != null;
+  const hasStrip = anonymous || showCostHint || hasInfo || hasActions;
   if (!showProgress && !hasStrip) return null;
 
   return (
@@ -119,28 +114,45 @@ export function SessionLifecycleBar({
             </span>
           )}
 
-          <span className="ml-auto inline-flex items-center gap-2">
-            {ref && <SessionRefChip refRaw={ref} />}
-            {download}
-            {actionError && (
-              <span role="alert" className="text-destructive inline-flex items-center gap-1">
-                <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
-                {actionError}
+          {/* Two cohesive wrap-units, not a flat row: the info chip (ref/download) and the action
+              controls (status + trailing toggle/review) each stay intact and wrap as a block, so on
+              narrow screens the controls drop to a tidy right-aligned line instead of fragmenting. */}
+          <span className="ml-auto flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
+            {hasInfo && (
+              <span className="inline-flex items-center gap-2">
+                {ref && <SessionRefChip refRaw={ref} />}
+                {download}
               </span>
             )}
-            {showResume && (
-              <Button type="button" variant="outline" size="sm" onClick={onResume} disabled={busy}>
-                <PlayCircle className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
-                Resume
-              </Button>
+            {hasActions && (
+              <span className="inline-flex items-center gap-2">
+                {actionError && (
+                  <span role="alert" className="text-destructive inline-flex items-center gap-1">
+                    <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
+                    {actionError}
+                  </span>
+                )}
+                {showResume && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={onResume}
+                    disabled={busy}
+                  >
+                    <PlayCircle className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                    Resume
+                  </Button>
+                )}
+                {showPause && (
+                  <Button type="button" variant="ghost" size="sm" onClick={onPause} disabled={busy}>
+                    <PauseCircle className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                    Pause
+                  </Button>
+                )}
+                {trailing}
+              </span>
             )}
-            {showPause && (
-              <Button type="button" variant="ghost" size="sm" onClick={onPause} disabled={busy}>
-                <PauseCircle className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
-                Pause
-              </Button>
-            )}
-            {trailing}
           </span>
         </div>
       )}

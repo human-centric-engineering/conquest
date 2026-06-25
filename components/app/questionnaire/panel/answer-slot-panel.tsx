@@ -56,8 +56,6 @@ import type {
   PanelSlotView,
 } from '@/lib/app/questionnaire/panel/types';
 
-/** Show the minimap only once the list is long enough to need one (and actually overflows). */
-const OVERVIEW_MIN_SLOTS = 10;
 /** How long a scrolled-to slot keeps its highlight ring (ms). */
 const HIGHLIGHT_MS = 1500;
 
@@ -86,6 +84,13 @@ export interface AnswerSlotPanelProps {
    * slots changed this turn.
    */
   newlyFilledKeys?: readonly string[];
+  /**
+   * Force-hide the native scrollbar on the scroll area even when the minimap isn't shown. The
+   * mobile review drawer sets this: touch scrolling needs no visible bar, and a native scrollbar
+   * would otherwise appear beside the minimap-governed list. Desktop leaves it off so question
+   * mode (no minimap) keeps its native bar as the scroll affordance.
+   */
+  hideNativeScrollbar?: boolean;
   className?: string;
 }
 
@@ -296,6 +301,7 @@ export function AnswerSlotPanel({
   onRevisit,
   canRevisit = false,
   newlyFilledKeys,
+  hideNativeScrollbar = false,
   className,
 }: AnswerSlotPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -325,7 +331,6 @@ export function AnswerSlotPanel({
     () => view?.dataSlotGroups ?? [],
     [view?.dataSlotGroups]
   );
-  const totalSlots = useMemo(() => groups.reduce((n, g) => n + g.slots.length, 0), [groups]);
 
   // Slot key -> name (aria-live announcement) and -> fill state (minimap bar colour).
   const slotMetaByKey = useMemo(() => {
@@ -480,7 +485,10 @@ export function AnswerSlotPanel({
       }),
     [geometry, viewportTop]
   );
-  const showMap = dataSlotMode && totalSlots > OVERVIEW_MIN_SLOTS && miniMap.overflow;
+  // The minimap is the scroll affordance, so show it whenever the list actually overflows —
+  // regardless of slot count. (A small questionnaire like a few-slot survey overflows too, and
+  // with native scrollbars suppressed it would otherwise have no scroll cue at all.)
+  const showMap = dataSlotMode && miniMap.overflow;
 
   // Keys of slots whose row has scrolled fully out of the visible window — used to collapse a row's
   // open "Why?" / questions disclosure once you've scrolled past it, rather than on the first pixel of
@@ -533,7 +541,9 @@ export function AnswerSlotPanel({
                 'h-full overflow-y-auto px-3 py-3',
                 // When the minimap shows it becomes the scroll affordance: clear room for it on the
                 // right and hide the native bar so the two don't overlap on classic Windows scrollbars.
-                showMap && 'cq-no-scrollbar pr-8'
+                showMap && 'cq-no-scrollbar pr-8',
+                // In the drawer (touch), suppress the native bar even without a minimap.
+                hideNativeScrollbar && !showMap && 'cq-no-scrollbar'
               )}
             >
               {view.dataSlotGroups !== undefined ? (

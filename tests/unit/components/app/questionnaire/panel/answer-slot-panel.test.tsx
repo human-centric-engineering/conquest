@@ -554,6 +554,22 @@ describe('AnswerSlotPanel', () => {
     expect(document.getElementById('panel-slot-slot-2')!.className).not.toContain('cq-fill-glow');
   });
 
+  // --- Native scrollbar suppression (drawer / touch) ---
+
+  it('keeps the native scrollbar in question mode by default (no minimap to stand in)', () => {
+    const { container } = render(<AnswerSlotPanel view={view()} />);
+    const el = container.querySelector('.overflow-y-auto');
+    expect(el).not.toBeNull();
+    expect(el).not.toHaveClass('cq-no-scrollbar');
+  });
+
+  it('hides the native scrollbar when hideNativeScrollbar is set (the drawer case)', () => {
+    const { container } = render(<AnswerSlotPanel view={view()} hideNativeScrollbar />);
+    const el = container.querySelector('.overflow-y-auto');
+    expect(el).not.toBeNull();
+    expect(el).toHaveClass('cq-no-scrollbar');
+  });
+
   // --- Auto-collapse of open disclosures on scroll / refetch (data-slot mode) ---
 
   function scrollContainer(container: HTMLElement): HTMLElement {
@@ -607,6 +623,10 @@ describe('AnswerSlotPanel', () => {
     });
     const sizeFor = (el: HTMLElement, big: number) =>
       el.classList.contains('overflow-y-auto') ? big : 0;
+    // Save the prior descriptors so teardown restores (not deletes) them — deleting would strip
+    // jsdom's own getters and leak undefined heights into later tests.
+    const clientHeightSpy = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight');
+    const scrollHeightSpy = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight');
     Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
       configurable: true,
       get(this: HTMLElement) {
@@ -643,8 +663,12 @@ describe('AnswerSlotPanel', () => {
       expect(screen.queryByText('Read from their tooling gripes.')).not.toBeInTheDocument();
     } finally {
       gbcr.mockRestore();
-      Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight');
-      Reflect.deleteProperty(HTMLElement.prototype, 'scrollHeight');
+      if (clientHeightSpy)
+        Object.defineProperty(HTMLElement.prototype, 'clientHeight', clientHeightSpy);
+      else Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight');
+      if (scrollHeightSpy)
+        Object.defineProperty(HTMLElement.prototype, 'scrollHeight', scrollHeightSpy);
+      else Reflect.deleteProperty(HTMLElement.prototype, 'scrollHeight');
     }
   });
 
@@ -801,6 +825,59 @@ describe('AnswerSlotPanel', () => {
         expect(Element.prototype.scrollTo).toHaveBeenCalledWith(
           expect.objectContaining({ top: 700 })
         );
+      } finally {
+        if (scrollHeightSpy)
+          Object.defineProperty(HTMLElement.prototype, 'scrollHeight', scrollHeightSpy);
+        else
+          Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+            configurable: true,
+            get: () => 0,
+          });
+        if (clientHeightSpy)
+          Object.defineProperty(HTMLElement.prototype, 'clientHeight', clientHeightSpy);
+        else
+          Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+            configurable: true,
+            get: () => 0,
+          });
+        rectSpy.mockRestore();
+      }
+    });
+
+    it('renders the minimap for a SMALL overflowing list too (no slot-count floor)', () => {
+      // Regression: a few-slot questionnaire (e.g. Northwind) overflows but has well under the old
+      // 10-slot threshold. With native scrollbars suppressed, the minimap must still appear as its
+      // scroll affordance — overflow is the only condition that matters now.
+      const scrollHeightSpy = Object.getOwnPropertyDescriptor(
+        HTMLElement.prototype,
+        'scrollHeight'
+      );
+      const clientHeightSpy = Object.getOwnPropertyDescriptor(
+        HTMLElement.prototype,
+        'clientHeight'
+      );
+      Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+        configurable: true,
+        get: () => 1000,
+      });
+      Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+        configurable: true,
+        get: () => 300,
+      });
+      const rectSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 100,
+        width: 0,
+        height: 100,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      });
+      try {
+        render(<AnswerSlotPanel view={dataSlotView(4)} />);
+        expect(screen.getByTestId('slot-minimap')).toBeInTheDocument();
       } finally {
         if (scrollHeightSpy)
           Object.defineProperty(HTMLElement.prototype, 'scrollHeight', scrollHeightSpy);

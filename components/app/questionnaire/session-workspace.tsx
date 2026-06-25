@@ -22,6 +22,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ClipboardList } from 'lucide-react';
 
 import { useQuestionnaireSessionStream } from '@/lib/hooks/use-questionnaire-session-stream';
 import { useAnswerPanel } from '@/lib/hooks/use-answer-panel';
@@ -29,6 +30,8 @@ import { useFormAnswers } from '@/lib/hooks/use-form-answers';
 import { useSessionLifecycle } from '@/lib/hooks/use-session-lifecycle';
 import { QuestionnaireChat } from '@/components/app/questionnaire/chat/questionnaire-chat';
 import { AnswerSlotPanel } from '@/components/app/questionnaire/panel/answer-slot-panel';
+import { AnswerReviewDrawer } from '@/components/app/questionnaire/panel/answer-review-drawer';
+import { Button } from '@/components/ui/button';
 import { QuestionnaireForm } from '@/components/app/questionnaire/form/questionnaire-form';
 import { diffNewlyFilled } from '@/lib/app/questionnaire/panel/newly-filled';
 import { ModeToggle } from '@/components/app/questionnaire/mode-toggle';
@@ -131,6 +134,8 @@ export function SessionWorkspace({
   // holds the prior snapshot; the first (SSR/seed) view seeds it silently and emits nothing.
   const prevPanelRef = useRef<AnswerPanelView | null>(null);
   const [newlyFilledKeys, setNewlyFilledKeys] = useState<readonly string[]>([]);
+  // Mobile "Review answers" bottom-sheet (below `lg`, where the side panel is hidden).
+  const [reviewOpen, setReviewOpen] = useState(false);
   // Both reads refetch on each clean turn-settle. The stream reads its `onTurnSettled`
   // through a ref, so routing the refetches through refs here breaks the declaration
   // cycle (stream needs the settle handler; the hooks below need the stream's applyStatus).
@@ -203,6 +208,20 @@ export function SessionWorkspace({
     panelRefetchRef.current = panel.refetch;
     lifecycleRefetchRef.current = lifecycle.refetch;
   });
+
+  // The mobile review sheet only makes sense below `lg` (where the side panel is hidden). If the
+  // viewport grows past `lg` while it's open, close it so it doesn't linger over the now-visible
+  // side panel. The trigger is already `lg:hidden`; this just covers the live-resize edge.
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('matchMedia' in window)) return;
+    const mq = window.matchMedia('(min-width: 1024px)');
+    const close = () => {
+      if (mq.matches) setReviewOpen(false);
+    };
+    close();
+    mq.addEventListener('change', close);
+    return () => mq.removeEventListener('change', close);
+  }, []);
 
   // Detect the data slots the latest refetch filled (data-slot mode only). On the first view we just
   // seed the ref — never auto-scroll the seeded/SSR snapshot. Each later view diffs against the prior
@@ -280,6 +299,54 @@ export function SessionWorkspace({
     stream.status === 'cost_capped' ||
     stream.status === 'expired';
 
+  // Short progress label for the mobile "Review answers" trigger, mirroring the panel's own
+  // ProgressHeading: percent in data-slot mode, "N of M" in question mode.
+  const reviewCountLabel = panel.view
+    ? panel.view.progressPercent !== undefined
+      ? `${panel.view.progressPercent}% complete`
+      : `${panel.view.answeredCount} of ${panel.view.totalCount}`
+    : null;
+
+  // Right-cluster controls: the "both"-mode surface toggle and the mobile answer-review trigger.
+  // Kept `undefined` when neither applies so the lifecycle strip still collapses to nothing on a
+  // plain form-only session (the bar renders the strip whenever `trailing` is present).
+  const showReviewTrigger = showChat; // the answer panel only rides the chat surface
+  const trailingControls =
+    presentationMode === 'both' || showReviewTrigger ? (
+      <>
+        {presentationMode === 'both' && (
+          <ModeToggle
+            value={activeView}
+            onChange={(v) => (v === 'form' ? showFormView() : showChatView())}
+          />
+        )}
+        {showReviewTrigger && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            // Pill shape echoes the ModeToggle so the two read as one control group when they
+            // share a wrapped row on mobile. Hidden once the side panel returns (`lg`).
+            className="rounded-full lg:hidden"
+            onClick={() => setReviewOpen(true)}
+            aria-haspopup="dialog"
+            aria-expanded={reviewOpen}
+            aria-label={`Review answers${reviewCountLabel ? `, ${reviewCountLabel}` : ''}`}
+          >
+            <ClipboardList className="h-3.5 w-3.5" aria-hidden="true" />
+            Review answers
+            {/* The count is redundant with the top progress bar's percent; show it only where
+                there's room (≥sm), so phones get a compact icon + label that won't squash. */}
+            {reviewCountLabel && (
+              <span className="text-muted-foreground ml-1.5 hidden sm:inline">
+                · {reviewCountLabel}
+              </span>
+            )}
+          </Button>
+        )}
+      </>
+    ) : undefined;
+
   const chatSurface = (
     <div className="grid h-full min-h-0 gap-4 lg:grid-cols-[1fr_22rem] xl:grid-cols-[1fr_26rem]">
       <div className="flex min-h-0 flex-col gap-3">
@@ -350,14 +417,21 @@ export function SessionWorkspace({
             <TranscriptDownload sessionId={sessionId} accessToken={accessToken} variant="ghost" />
           ) : undefined
         }
-        trailing={
-          presentationMode === 'both' ? (
-            <ModeToggle
-              value={activeView}
-              onChange={(v) => (v === 'form' ? showFormView() : showChatView())}
-            />
-          ) : undefined
-        }
+        trailing={trailingControls}
+      />
+
+      <AnswerReviewDrawer
+        open={reviewOpen}
+        onOpenChange={setReviewOpen}
+        view={panel.view}
+        loading={panel.loading}
+        canRevisit={stream.canSend}
+        newlyFilledKeys={newlyFilledKeys}
+        // Revisiting sends the respondent back to chat to re-answer, so dismiss the sheet.
+        onRevisit={(slot) => {
+          handleRevisit(slot);
+          setReviewOpen(false);
+        }}
       />
 
       {presentationMode === 'both' ? (
