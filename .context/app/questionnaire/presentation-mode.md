@@ -43,8 +43,15 @@ flows through the same `SessionWorkspace`.
   sees the respondent's own answer next turn. Empty values persist as a CLEAR (row
   delete). Local input values stay authoritative across save round-trips; the returned
   view refreshes the completeness map + provenance. `refresh()` re-seeds from a fresh
-  GET on entering the form (so chat-inferred answers appear); `enabled: false` keeps
-  the hook inert in chat-only mode.
+  GET on entering the form (so chat-inferred answers appear, and clears stale per-slot
+  statuses); `enabled: false` keeps the hook inert in chat-only mode.
+- **Persistent save indicator**: because there's no Save button, the hook also exposes an
+  aggregate `saveState` (idle/saving/saved/error — a debounced-but-unsent edit already
+  counts as `saving`, so it never falsely reads `saved`) and `lastSavedAt`. `QuestionnaireForm`
+  renders these in its section header via the authoring editors' `SaveStatus` pill
+  (`components/admin/questionnaires/save-status.tsx`), so the respondent always sees
+  "Saving… / All changes saved · 2m ago" and trusts nothing is lost. A per-slot hint still
+  appears next to each edited field for field-level feedback.
 
 ## Read model: `?view=form`
 

@@ -57,6 +57,8 @@ export interface LoadedSessionExport {
   questionnaireId: string;
   questionnaireTitle: string;
   versionNumber: number;
+  /** The session's support reference (`publicRef`), or null for a row predating the column. */
+  ref: string | null;
   goal: string | null;
   audience: AudienceShape | null;
   anonymous: boolean;
@@ -91,6 +93,7 @@ export async function loadSessionExport(sessionId: string): Promise<LoadedSessio
       id: true,
       status: true,
       respondentUserId: true,
+      publicRef: true,
       updatedAt: true,
       version: {
         select: {
@@ -114,7 +117,7 @@ export async function loadSessionExport(sessionId: string): Promise<LoadedSessio
               title: true,
               questions: {
                 orderBy: { ordinal: 'asc' },
-                select: { key: true, prompt: true, type: true, required: true },
+                select: { key: true, prompt: true, type: true, required: true, typeConfig: true },
               },
             },
           },
@@ -177,6 +180,7 @@ export async function loadSessionExport(sessionId: string): Promise<LoadedSessio
       slotKey: q.key,
       prompt: q.prompt,
       type: q.type,
+      typeConfig: q.typeConfig,
       required: q.required,
     })),
   }));
@@ -199,6 +203,7 @@ export async function loadSessionExport(sessionId: string): Promise<LoadedSessio
     questionnaireId: row.version.questionnaireId,
     questionnaireTitle: row.version.questionnaire.title,
     versionNumber: row.version.versionNumber,
+    ref: row.publicRef ?? null,
     goal: row.version.goal,
     audience: asAudience(row.version.audience),
     anonymous,
@@ -237,6 +242,7 @@ export async function buildSessionExportPdfModel(
   const input: SessionExportInput = {
     questionnaireTitle: loaded.questionnaireTitle,
     versionNumber: loaded.versionNumber,
+    ref: loaded.ref,
     goal: loaded.goal,
     audience: loaded.audience,
     anonymous: loaded.anonymous,

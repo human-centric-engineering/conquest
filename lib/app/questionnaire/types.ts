@@ -733,6 +733,14 @@ export type QuestionnaireConfigShape = {
    */
   presentationMode: PresentationMode;
   /**
+   * Inline answer correction (Variant B): when on, the respondent can "fix" an answer the latest
+   * turn captured through a small inline editor — beneath the most-recent turn in the chat and on
+   * the answer-panel row — instead of sending a fresh chat turn. Corrections route through the
+   * form-edit path (`PUT …/answers`), so they bypass the turn pipeline and never trigger a
+   * same-slot contradiction re-check. On by default; respondent-facing UX with no platform flag.
+   */
+  inlineCorrectionEnabled: boolean;
+  /**
    * Live "watch it think" reasoning trace (demo feature): show the agent's per-turn reasoning —
    * answers captured (with provenance + confidence), contradictions spotted, why the next question
    * was chosen — as a live feed beside the chat. On by default; only takes effect when the platform
@@ -844,6 +852,7 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   profileFields: [],
   answerSlotPanelScope: 'full_progress',
   presentationMode: 'chat',
+  inlineCorrectionEnabled: true,
   reasoningStreamEnabled: true,
   reasoningStreamPlacement: 'overlay',
   reasoningStreamDwellMs: 2000,

@@ -11,13 +11,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const findMany = vi.fn();
+const findUnique = vi.fn();
 vi.mock('@/lib/db/client', () => ({
-  prisma: { appQuestionnaireTurn: { findMany: (...args: unknown[]) => findMany(...args) } },
+  prisma: {
+    appQuestionnaireTurn: {
+      findMany: (...args: unknown[]) => findMany(...args),
+      findUnique: (...args: unknown[]) => findUnique(...args),
+    },
+  },
 }));
 
 import {
   loadTranscript,
   loadInspectorTurns,
+  findTurnByIdempotencyKey,
 } from '@/app/api/v1/app/questionnaire-sessions/_lib/transcript';
 
 type Row = { userMessage: string; agentResponse: string; warnings: unknown };
@@ -51,9 +58,12 @@ describe('loadTranscript', () => {
     );
   });
 
-  it('skips the empty-message kickoff turn’s user bubble but keeps its assistant reply', async () => {
+  it('skips the empty- or whitespace-only kickoff turn’s user bubble but keeps its assistant reply', async () => {
+    // Source gates the user bubble on `userMessage.trim().length > 0`, so a whitespace-only
+    // message is dropped too — covered by the second row, not just the bare-empty first.
     const rows: Row[] = [
       { userMessage: '', agentResponse: 'Opening question?', warnings: [] },
+      { userMessage: '   ', agentResponse: 'Still opening?', warnings: [] },
       { userMessage: 'My answer', agentResponse: 'Follow-up?', warnings: [] },
     ];
     findMany.mockResolvedValue(rows);
@@ -62,6 +72,7 @@ describe('loadTranscript', () => {
 
     expect(turns).toEqual([
       { role: 'assistant', content: 'Opening question?' },
+      { role: 'assistant', content: 'Still opening?' },
       { role: 'user', content: 'My answer' },
       { role: 'assistant', content: 'Follow-up?' },
     ]);
@@ -172,5 +183,57 @@ describe('loadInspectorTurns', () => {
     const turns = await loadInspectorTurns('sess-1');
 
     expect(turns).toEqual([{ turnIndex: 2, calls: [expect.objectContaining({ label: 'Good' })] }]);
+  });
+});
+
+describe('findTurnByIdempotencyKey', () => {
+  it('looks up the turn by the compound (sessionId, idempotencyKey) unique', async () => {
+    findUnique.mockResolvedValue(null);
+    await findTurnByIdempotencyKey('sess-1', 'key-abc');
+    expect(findUnique).toHaveBeenCalledWith({
+      where: { sessionId_idempotencyKey: { sessionId: 'sess-1', idempotencyKey: 'key-abc' } },
+      select: { id: true, agentResponse: true, warnings: true, reasoning: true },
+    });
+  });
+
+  it('returns null when no turn carries the key (the common retry case — first attempt never persisted)', async () => {
+    findUnique.mockResolvedValue(null);
+    expect(await findTurnByIdempotencyKey('sess-1', 'missing')).toBeNull();
+  });
+
+  it('returns the saved reply with validated warnings + reasoning for replay', async () => {
+    findUnique.mockResolvedValue({
+      id: 'turn-7',
+      agentResponse: 'Here is the reply.',
+      warnings: [{ code: 'contradiction', message: 'That differs.', detail: 'why' }],
+      reasoning: [{ kind: 'extraction', label: 'Captured role', tone: 'neutral' }],
+    });
+
+    const replay = await findTurnByIdempotencyKey('sess-1', 'key-abc');
+
+    expect(replay).toEqual({
+      id: 'turn-7',
+      agentResponse: 'Here is the reply.',
+      warnings: [{ code: 'contradiction', message: 'That differs.', detail: 'why' }],
+      reasoning: [{ kind: 'extraction', label: 'Captured role', tone: 'neutral' }],
+    });
+  });
+
+  it('fails soft on malformed warnings/reasoning JSON (replay degrades to empty, never throws)', async () => {
+    findUnique.mockResolvedValue({
+      id: 'turn-8',
+      agentResponse: 'Reply.',
+      warnings: { not: 'an array' },
+      reasoning: 'garbage',
+    });
+
+    const replay = await findTurnByIdempotencyKey('sess-1', 'key-bad');
+
+    expect(replay).toEqual({
+      id: 'turn-8',
+      agentResponse: 'Reply.',
+      warnings: [],
+      reasoning: [],
+    });
   });
 });

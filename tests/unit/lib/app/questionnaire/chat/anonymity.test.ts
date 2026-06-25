@@ -34,6 +34,7 @@ import {
   resolvePresentationModeForVersion,
   resolveReasoningPlacementForVersion,
   resolveReasoningDwellForVersion,
+  resolveInlineCorrectionForVersion,
 } from '@/lib/app/questionnaire/chat/anonymity';
 import { DEFAULT_QUESTIONNAIRE_CONFIG } from '@/lib/app/questionnaire/types';
 
@@ -159,6 +160,46 @@ describe('resolvePresentationModeForVersion', () => {
     expect(prisma.appQuestionnaireVersion.findUnique).toHaveBeenCalledWith({
       where: { id: 'ver-xyz' },
       select: { config: { select: { presentationMode: true } } },
+    });
+  });
+});
+
+describe('resolveInlineCorrectionForVersion', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns the stored toggle (off)', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: { inlineCorrectionEnabled: false },
+    } as never);
+    expect(await resolveInlineCorrectionForVersion('ver-abc')).toBe(false);
+  });
+
+  it('defaults to ON when the config row is absent', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: null,
+    } as never);
+    expect(await resolveInlineCorrectionForVersion('ver-abc')).toBe(
+      DEFAULT_QUESTIONNAIRE_CONFIG.inlineCorrectionEnabled
+    );
+  });
+
+  it('defaults to ON when the version is absent', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue(null);
+    expect(await resolveInlineCorrectionForVersion('ver-missing')).toBe(
+      DEFAULT_QUESTIONNAIRE_CONFIG.inlineCorrectionEnabled
+    );
+  });
+
+  it('selects only the inlineCorrectionEnabled field for the given version', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: { inlineCorrectionEnabled: true },
+    } as never);
+    await resolveInlineCorrectionForVersion('ver-xyz');
+    expect(prisma.appQuestionnaireVersion.findUnique).toHaveBeenCalledWith({
+      where: { id: 'ver-xyz' },
+      select: { config: { select: { inlineCorrectionEnabled: true } } },
     });
   });
 });

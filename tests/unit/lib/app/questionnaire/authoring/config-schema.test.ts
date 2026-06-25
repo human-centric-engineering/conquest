@@ -77,6 +77,11 @@ describe('updateConfigSchema', () => {
     expect(updateConfigSchema.safeParse({ presentationMode: 'telepathy' }).success).toBe(false);
   });
 
+  it('accepts the inline-correction toggle (Variant B), and rejects a non-boolean', () => {
+    expect(updateConfigSchema.safeParse({ inlineCorrectionEnabled: false }).success).toBe(true);
+    expect(updateConfigSchema.safeParse({ inlineCorrectionEnabled: 'yes' }).success).toBe(false);
+  });
+
   it('accepts null budget / cap as "no cap"', () => {
     const res = updateConfigSchema.safeParse({ costBudgetUsd: null, maxQuestionsPerSession: null });
     expect(res.success).toBe(true);

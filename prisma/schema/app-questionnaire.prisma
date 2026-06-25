@@ -217,6 +217,13 @@ model AppQuestionnaireConfig {
   // chat so existing launched versions are unchanged. (PRESENTATION_MODES — types.ts)
   presentationMode String @default("chat") // chat | form | both
 
+  // Inline answer correction (Variant B): let respondents "fix" an answer the latest turn captured
+  // directly via a small inline editor (in the chat beneath the most-recent turn and on the answer
+  // panel row) rather than by sending a fresh chat turn. Corrections route through the form-edit path
+  // (PUT …/answers), so they never run the turn pipeline — no contradiction re-check fires on a fix.
+  // On by default; respondent-facing UX with no platform flag (the admin toggles it per version).
+  inlineCorrectionEnabled Boolean @default(true)
+
   // Session-start profile fields (ProfileFieldConfig[] — types.ts).
   profileFields Json @default("[]")
 
@@ -1256,10 +1263,18 @@ model AppQuestionnaireTurn {
   // posture as the rest of the turn row.
   inspectorCalls        Json     @default("[]")
   costUsd               Float? // summed per-turn LLM spend; null until set
+  // Client-minted key for the send attempt that produced this turn (one per logical attempt, reused
+  // across that attempt's retries). The retry path (F7.x) re-sends the SAME key, so a turn the server
+  // already persisted — when the connection dropped after persist but before the client saw the
+  // stream close — is replayed from this row instead of re-run, and never duplicated. Null for turns
+  // recorded before the feature and for any send that omits a key. Postgres treats NULLs as distinct,
+  // so the unique below still permits many key-less turns per session.
+  idempotencyKey        String?
   createdAt             DateTime @default(now())
 
   session AppQuestionnaireSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
+  @@unique([sessionId, idempotencyKey]) // dedup a retried send within a session (NULLs stay distinct)
   @@index([sessionId])
   @@index([sessionId, ordinal])
   @@map("app_questionnaire_turn")

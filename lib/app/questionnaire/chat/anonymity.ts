@@ -93,6 +93,21 @@ export async function resolvePresentationModeForVersion(
 }
 
 /**
+ * Resolve `inlineCorrectionEnabled` (Variant B) for a launched version (no-login / preview
+ * respondent surface). Config is 1:1 and lazy — an absent row defaults to ON (respondent-facing UX,
+ * no platform flag). The authenticated surface reads it off its session-ownership query instead.
+ */
+export async function resolveInlineCorrectionForVersion(versionId: string): Promise<boolean> {
+  const version = await prisma.appQuestionnaireVersion.findUnique({
+    where: { id: versionId },
+    select: { config: { select: { inlineCorrectionEnabled: true } } },
+  });
+  return (
+    version?.config?.inlineCorrectionEnabled ?? DEFAULT_QUESTIONNAIRE_CONFIG.inlineCorrectionEnabled
+  );
+}
+
+/**
  * Resolve the live "watch it think" reasoning placement (demo feature) for a launched version
  * (no-login / preview respondent surface), or `null` when the version has the feature turned off.
  * The per-questionnaire opt-in; the caller ANDs the platform reasoning-stream flag and passes the

@@ -60,6 +60,15 @@ export interface PanelSlotView {
   refinementHistory: PanelRefinementEntry[];
 }
 
+/**
+ * The slot fields an input control actually reads — the key, prompt, and the type + typeConfig that
+ * pick and configure the control. A `Pick` of {@link PanelSlotView} so the raw form passes its full
+ * slot unchanged, while the inline-correction editor (Variant B) can pass a lighter shape built from
+ * a data slot's mapped-question coverage. Lives here (pure) so both the client editor and the pure
+ * correction-target builder share one definition.
+ */
+export type EditableSlot = Pick<PanelSlotView, 'slotKey' | 'prompt' | 'type' | 'typeConfig'>;
+
 /** One section grouping its slots (the panel renders sections in `ordinal` order). */
 export interface PanelSectionView {
   sectionId: string;
@@ -151,12 +160,27 @@ export interface DataSlotPanelSlot {
  * mode (where the form view also exposes the questions); chat/form-only never ship the prompts.
  */
 export interface DataSlotQuestionCoverage {
-  /** Short question prompt — the label shown in the expanded breadth list. */
+  /**
+   * Stable question key — the handle the inline-correction editor (Variant B) writes back through
+   * `PUT …/answers`. Lets a data-slot "fix" edit the underlying mapped questions; reconciliation
+   * then recomputes the slot's reading.
+   */
+  key: string;
+  /** Short question prompt — the label shown in the expanded breadth list / the editor field. */
   label: string;
+  /**
+   * Question input type + its stored config, so the inline-correction editor can render the right
+   * control (the same dispatch the raw form uses). Opaque JSON — read via the
+   * `lib/app/questionnaire/form/type-config.ts` helpers.
+   */
+  type: QuestionType;
+  typeConfig: unknown;
   /** True once the session has captured an answer for this question. */
   answered: boolean;
   /** The answer's 0–1 capture confidence, or null when unanswered / unscored. */
   confidence: number | null;
+  /** The currently-captured answer value (null when unanswered) — seeds the correction editor. */
+  value: unknown;
 }
 
 /**
@@ -172,9 +196,12 @@ export interface DataSlotCoverage {
   /** How many of them have an answer in this session (the meter's numerator). */
   answered: number;
   /**
-   * The mapped questions with per-question completeness, in version order. Populated only when the
-   * panel may itemise them (presentationMode `both`); empty otherwise, so chat/form-only mode never
-   * ships the raw prompts — the `answered`/`total` summary is enough for the meter.
+   * The mapped questions with per-question completeness, in version order. Populated when the panel
+   * may itemise them (presentationMode `both`) OR when inline correction is enabled (Variant B needs
+   * the editable questions to "fix" a data-slot reading); empty otherwise, so plain chat/form-only
+   * mode still never ships the raw prompts — the `answered`/`total` summary is enough for the meter.
+   * The breadth-list DISPLAY stays gated on {@link AnswerPanelView.showSlotQuestions}; correction
+   * reads this list directly.
    */
   questions: DataSlotQuestionCoverage[];
 }

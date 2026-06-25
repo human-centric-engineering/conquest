@@ -17,6 +17,7 @@ import { resolveThemeForVersion } from '@/lib/app/questionnaire/chat/theme';
 import {
   resolveAnonymousForVersion,
   resolveAttachmentsEnabledForVersion,
+  resolveInlineCorrectionForVersion,
   resolvePresentationModeForVersion,
   resolveReasoningPlacementForVersion,
   resolveReasoningDwellForVersion,
@@ -80,6 +81,7 @@ export default async function PublicQuestionnairePage({
     attachmentsConfigured,
     reasoningPlacementConfigured,
     reasoningDwell,
+    inlineCorrectionEnabled,
     previewMeta,
     introScreenEnabled,
   ] = await Promise.all([
@@ -93,6 +95,7 @@ export default async function PublicQuestionnairePage({
     resolveAttachmentsEnabledForVersion(versionId),
     resolveReasoningPlacementForVersion(versionId),
     resolveReasoningDwellForVersion(versionId),
+    resolveInlineCorrectionForVersion(versionId),
     preview ? resolveAdminPreviewMeta(versionId) : Promise.resolve(null),
     isIntroScreenEnabled(),
   ]);
@@ -144,6 +147,7 @@ export default async function PublicQuestionnairePage({
             reasoningPlacement={reasoningPlacement}
             reasoningDwellMs={reasoningDwell.dwellMs}
             reasoningPerItemMs={reasoningDwell.perItemMs}
+            inlineCorrectionEnabled={inlineCorrectionEnabled}
             welcomeCopy={theme.welcomeCopy}
             introScreenEnabled={introScreenEnabled}
           />

@@ -36,6 +36,7 @@ function makeError(overrides: Partial<ChatErrorState> = {}): ChatErrorState {
 describe('ChatErrorPanel — terminal statuses', () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   const terminalCases: QuestionnaireChatStatus[] = ['cost_capped', 'not_active', 'expired'];
@@ -131,11 +132,10 @@ describe('ChatErrorPanel — terminal statuses', () => {
 
     it('triggers a page reload when the "Reload" button is clicked', async () => {
       // Arrange: stub reload so the test environment doesn't perform a real navigation.
+      // Use vi.stubGlobal (not Object.defineProperty) so afterEach's unstubAllGlobals restores
+      // the real window.location — otherwise the stubbed reload leaks into later tests.
       const reloadSpy = vi.fn();
-      Object.defineProperty(window, 'location', {
-        value: { ...window.location, reload: reloadSpy },
-        writable: true,
-      });
+      vi.stubGlobal('location', { ...window.location, reload: reloadSpy });
       const error = makeError();
       const user = userEvent.setup();
 
@@ -239,4 +239,67 @@ describe('ChatErrorPanel — transient error status', () => {
     // Assert
     expect(screen.queryByRole('button', { name: /reload/i })).toBeNull();
   });
+
+  it('does NOT render a "Try again" button when onRetry is not provided', () => {
+    // Arrange: no retry callback → no button (the failure isn't recoverable via this surface).
+    const error = makeError();
+
+    // Act
+    render(<ChatErrorPanel status="error" error={error} />);
+
+    // Assert
+    expect(screen.queryByRole('button', { name: /try again/i })).toBeNull();
+  });
+
+  it('renders a "Try again" button when onRetry is provided', () => {
+    // Arrange
+    const error = makeError();
+    const onRetry = vi.fn();
+
+    // Act
+    render(<ChatErrorPanel status="error" error={error} onRetry={onRetry} />);
+
+    // Assert: the retry affordance is present so the respondent can resend without retyping.
+    expect(screen.getByRole('button', { name: /try again/i })).toBeInTheDocument();
+  });
+
+  it('calls onRetry when the "Try again" button is clicked', async () => {
+    // Arrange
+    const error = makeError();
+    const onRetry = vi.fn();
+    const user = userEvent.setup();
+
+    // Act
+    render(<ChatErrorPanel status="error" error={error} onRetry={onRetry} />);
+    await user.click(screen.getByRole('button', { name: /try again/i }));
+
+    // Assert: exactly one resend per click.
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Terminal statuses never offer retry (a re-send would just re-fail)
+// ---------------------------------------------------------------------------
+
+describe('ChatErrorPanel — terminal statuses never retry', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const terminalCases: QuestionnaireChatStatus[] = ['cost_capped', 'not_active', 'expired'];
+
+  for (const status of terminalCases) {
+    it(`does NOT show a "Try again" button for status="${status}" even when onRetry is provided`, () => {
+      // Arrange
+      const error = makeError();
+      const onRetry = vi.fn();
+
+      // Act
+      render(<ChatErrorPanel status={status} error={error} onRetry={onRetry} />);
+
+      // Assert: terminal panels are non-recoverable — no retry affordance.
+      expect(screen.queryByRole('button', { name: /try again/i })).toBeNull();
+    });
+  }
 });

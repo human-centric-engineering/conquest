@@ -134,13 +134,38 @@ phrasing); when off, there's no extra spend and behaviour is unchanged. The vers
   certainty, not just the new value. A refinement targeting a slot with no
   captured answer (shouldn't happen) falls back to a plain `refined`-provenance upsert.
 
+### Retry & idempotency (F7.x)
+
+A transport failure mid-turn used to be a dead end: the post stream isn't replayable, and a
+naïve re-send would mint a **duplicate turn** (no idempotency), so the surface only told the
+respondent to "try again" by retyping. Both halves are now fixed:
+
+- **Surface** — `useQuestionnaireSessionStream` mints one `idempotencyKey`
+  (`crypto.randomUUID()`) per logical send and **reuses it across that send's retries**. It
+  keeps the failed attempt (body + key + whether a respondent bubble was shown) and exposes
+  `retry()`, wired to the error banner's **"Try again"**. A retry re-sends the same body + key
+  and does **not** re-add the dangling user bubble. The attempt is dropped on a clean settle or
+  a dismiss. Retry is offered only for the transient (`status === 'error'`) bucket — never the
+  terminal cost-cap / not-active / expired panels (a re-send there would just re-fail).
+- **Route** — the turn body carries an optional `idempotencyKey` (validated as a UUID). At the
+  top of the stream the route calls `findTurnByIdempotencyKey(sessionId, key)`
+  (`_lib/transcript.ts`): if a turn was already persisted under it — the narrow case where the
+  first attempt's reply streamed **and** persisted but the connection dropped before the client
+  saw the close — it **replays** that saved reply (warnings → reasoning → content → done, the
+  live frame order) and returns, with **no second LLM spend and no duplicate row**. The common
+  retry (first attempt failed before persisting) finds nothing and runs fresh. The key is
+  stamped on the turn via `persistTurn` → `recordTurn`, guarded by a
+  `@@unique([sessionId, idempotencyKey])`; a concurrent double-submit that loses the unique race
+  resolves to the winner's row rather than throwing (NULLs stay distinct, so key-less turns are
+  unaffected).
+
 ## Routes & access
 
 | Route                                                    | Auth        | Purpose                                                             |
 | -------------------------------------------------------- | ----------- | ------------------------------------------------------------------- |
 | `POST /api/v1/app/questionnaire-sessions`                | `withAuth`  | Create (invitation-bound or logged-in-anonymous), idempotent resume |
 | `POST /api/v1/app/questionnaire-sessions/anonymous`      | **public**  | No-login anonymous create → returns a signed `accessToken`          |
-| `POST /api/v1/app/questionnaire-sessions/:id/messages`   | per-session | The streaming turn loop                                             |
+| `POST /api/v1/app/questionnaire-sessions/:id/messages`   | per-session | The streaming turn loop (replays on a repeated `idempotencyKey`)    |
 | `GET /api/v1/app/questionnaire-sessions/:id/transcript`  | per-session | Replayed transcript (prior turns + persisted notices) for resume    |
 | `POST /api/v1/app/questionnaire-sessions/:id/transcribe` | per-session | Voice input (F6.2) — audio → `{ text, durationMs, language? }`      |
 | `GET /api/v1/app/questionnaire-sessions/:id/status`      | per-session | Lifecycle status (F7.3) — completion-offer + cost tier + anon       |

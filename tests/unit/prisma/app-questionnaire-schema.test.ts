@@ -547,6 +547,10 @@ describe('questionnaire datamodel (Prisma.dmmf)', () => {
     // surface replays them inline on resume (not just transiently in the moment).
     expect(getField(model, 'warnings').type).toBe('Json');
     expect(getField(model, 'costUsd').type).toBe('Float');
+    // F7.x retry: per-attempt idempotency key (reused across retries) — a nullable plain scalar,
+    // backing the dedup-and-replay. Uniqueness lives in the migration SQL (asserted below).
+    expect(getField(model, 'idempotencyKey').type).toBe('String');
+    expect(getField(model, 'idempotencyKey').kind).toBe('scalar');
     expect(getField(model, 'createdAt').type).toBe('DateTime');
 
     const session = getField(model, 'session');
@@ -1046,6 +1050,34 @@ describe('app_questionnaire_turn migration SQL (F6.1)', () => {
     expect(executableSql).not.toContain('ai_knowledge');
     expect(executableSql).not.toContain('ai_message');
     expect(executableSql).not.toContain('searchVector');
+  });
+});
+
+describe('app_turn_idempotency_key migration SQL (F7.x retry)', () => {
+  const sql = readMigrationSql('_app_turn_idempotency_key');
+  const executableSql = executableLines(sql);
+
+  it('adds the nullable idempotencyKey column to the turn table', () => {
+    // Nullable TEXT — pre-feature turns and key-less sends stay null (distinct under the unique).
+    expect(sql).toMatch(/ALTER TABLE "app_questionnaire_turn" ADD COLUMN\s+"idempotencyKey" TEXT;/);
+  });
+
+  it('creates the composite (sessionId, idempotencyKey) unique that backs retry dedup', () => {
+    expect(sql).toContain(
+      'CREATE UNIQUE INDEX "app_questionnaire_turn_sessionId_idempotencyKey_key" ON "app_questionnaire_turn"("sessionId", "idempotencyKey")'
+    );
+  });
+
+  it('is additive only — no table create/drop and no platform DDL', () => {
+    // Same schema-fold footgun as the sibling app migrations: the diff re-emitted the pgvector
+    // DROP INDEX + the GENERATED searchVector ALTER. Stripped by hand; this guard fails on regress.
+    expect(executableSql).not.toContain('CREATE TABLE');
+    expect(executableSql).not.toContain('DROP INDEX');
+    expect(executableSql).not.toContain('ai_knowledge');
+    expect(executableSql).not.toContain('ai_message');
+    expect(executableSql).not.toContain('searchVector');
+    // Exactly one ALTER TABLE (the ADD COLUMN) — the unique index is the only other statement.
+    expect(executableSql.match(/ALTER TABLE/g) ?? []).toHaveLength(1);
   });
 });
 

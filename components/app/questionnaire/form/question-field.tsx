@@ -25,10 +25,10 @@ import {
 } from '@/lib/app/questionnaire/form/type-config';
 import { RadioGroup } from '@/components/app/questionnaire/form/radio-group';
 import { LikertScale } from '@/components/app/questionnaire/form/likert-scale';
-import type { PanelSlotView } from '@/lib/app/questionnaire/panel/types';
+import type { EditableSlot } from '@/lib/app/questionnaire/panel/types';
 
 export interface QuestionFieldProps {
-  slot: PanelSlotView;
+  slot: EditableSlot;
   value: unknown;
   onChange: (value: unknown) => void;
   onBlur?: () => void;

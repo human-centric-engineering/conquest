@@ -15,8 +15,12 @@
 import { z } from 'zod';
 
 import { prisma } from '@/lib/db/client';
-import type { QuestionnaireTurn } from '@/lib/app/questionnaire/chat/types';
-import { REASONING_STEP_KINDS, REASONING_TONES } from '@/lib/app/questionnaire/reasoning';
+import type { QuestionnaireTurn, SessionWarning } from '@/lib/app/questionnaire/chat/types';
+import {
+  REASONING_STEP_KINDS,
+  REASONING_TONES,
+  type ReasoningStep,
+} from '@/lib/app/questionnaire/reasoning';
 import { ANSWER_PROVENANCES } from '@/lib/app/questionnaire/types';
 import { inspectorTurnSchema } from '@/lib/app/questionnaire/inspector/schema';
 import type { TurnInspectorData } from '@/lib/app/questionnaire/inspector';
@@ -73,6 +77,41 @@ export async function loadTranscript(sessionId: string): Promise<QuestionnaireTu
     });
   }
   return turns;
+}
+
+/** The saved reply for one persisted turn, re-emitted by the retry dedup-and-replay path. */
+export interface ReplayTurn {
+  id: string;
+  agentResponse: string;
+  warnings: SessionWarning[];
+  reasoning: ReasoningStep[];
+}
+
+/**
+ * Look up a single persisted turn by the idempotency key of the send attempt that produced it, for
+ * the retry dedup-and-replay path (F7.x). When a retry re-sends a key whose turn the server already
+ * persisted — the narrow case where the first attempt's reply streamed AND persisted but the
+ * connection dropped before the client saw the stream close — the messages route replays this saved
+ * reply instead of re-running the turn, so the retry can never mint a duplicate row or re-spend on
+ * the LLM. Returns null when no turn carries the key (the common case: the first attempt failed
+ * before persisting, so the retry runs fresh). `warnings`/`reasoning` are validated at this boundary
+ * exactly as the transcript replay does, failing soft to empty.
+ */
+export async function findTurnByIdempotencyKey(
+  sessionId: string,
+  idempotencyKey: string
+): Promise<ReplayTurn | null> {
+  const row = await prisma.appQuestionnaireTurn.findUnique({
+    where: { sessionId_idempotencyKey: { sessionId, idempotencyKey } },
+    select: { id: true, agentResponse: true, warnings: true, reasoning: true },
+  });
+  if (!row) return null;
+  return {
+    id: row.id,
+    agentResponse: row.agentResponse,
+    warnings: warningsSchema.parse(row.warnings),
+    reasoning: reasoningSchema.parse(row.reasoning),
+  };
 }
 
 /**

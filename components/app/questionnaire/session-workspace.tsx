@@ -33,7 +33,11 @@ import { AnswerSlotPanel } from '@/components/app/questionnaire/panel/answer-slo
 import { AnswerReviewDrawer } from '@/components/app/questionnaire/panel/answer-review-drawer';
 import { Button } from '@/components/ui/button';
 import { QuestionnaireForm } from '@/components/app/questionnaire/form/questionnaire-form';
-import { diffNewlyFilled } from '@/lib/app/questionnaire/panel/newly-filled';
+import {
+  diffNewlyFilled,
+  diffNewlyFilledQuestions,
+} from '@/lib/app/questionnaire/panel/newly-filled';
+import { buildCorrectionTargets } from '@/lib/app/questionnaire/panel/correction-targets';
 import { ModeToggle } from '@/components/app/questionnaire/mode-toggle';
 import { SessionLifecycleBar } from '@/components/app/questionnaire/lifecycle/session-lifecycle-bar';
 import { CompletionOffer } from '@/components/app/questionnaire/lifecycle/completion-offer';
@@ -95,6 +99,13 @@ export interface SessionWorkspaceProps {
   /** "Animated" placement: extra dwell (ms) per reasoning step beyond two. */
   reasoningPerItemMs?: number;
   /**
+   * Inline answer correction (Variant B): show the "fix this answer" gesture beneath the most-recent
+   * chat turn and on the answer-panel rows, letting the respondent correct a just-captured answer
+   * without sending a fresh turn. Per-questionnaire toggle (default on); the page resolves it from the
+   * version config. Never shown in the read-only admin viewer.
+   */
+  inlineCorrectionEnabled?: boolean;
+  /**
    * Read-only replay (admin session viewer): render just the transcript — no composer, lifecycle
    * bar, answer panel, form, or completion screen — and make the panel/lifecycle hooks inert (no
    * fetches), since the viewing admin holds no respondent credential. The respondent surface never
@@ -120,6 +131,7 @@ export function SessionWorkspace({
   reasoningPlacement,
   reasoningDwellMs,
   reasoningPerItemMs,
+  inlineCorrectionEnabled = true,
   readOnly = false,
 }: SessionWorkspaceProps) {
   const showChat = presentationMode === 'chat' || presentationMode === 'both';
@@ -134,6 +146,11 @@ export function SessionWorkspace({
   // holds the prior snapshot; the first (SSR/seed) view seeds it silently and emits nothing.
   const prevPanelRef = useRef<AnswerPanelView | null>(null);
   const [newlyFilledKeys, setNewlyFilledKeys] = useState<readonly string[]>([]);
+  // The slot keys the most-recent turn filled, in BOTH modes — drives the inline-correction targets
+  // (Variant B). Distinct from `newlyFilledKeys` (data-slot-only, which drives the panel's scroll +
+  // stepper); the question-mode panel keeps its prior behaviour while the chat strip still learns the
+  // just-captured questions.
+  const [lastTurnFilledKeys, setLastTurnFilledKeys] = useState<readonly string[]>([]);
   // Mobile "Review answers" bottom-sheet (below `lg`, where the side panel is hidden).
   const [reviewOpen, setReviewOpen] = useState(false);
   // Both reads refetch on each clean turn-settle. The stream reads its `onTurnSettled`
@@ -228,16 +245,23 @@ export function SessionWorkspace({
   // one; a new turn's fills replace the previous set (the panel restarts its stepper on identity).
   const panelView = panel.view;
   useEffect(() => {
-    if (panelView?.dataSlotGroups === undefined) {
-      prevPanelRef.current = panelView;
-      return;
-    }
-    const filled = diffNewlyFilled(prevPanelRef.current, panelView);
-    prevPanelRef.current = panelView;
+    const prev = prevPanelRef.current;
+    prevPanelRef.current = panelView ?? null;
+    if (panelView == null) return;
     // Always publish — a later turn that fills nothing must CLEAR the prior turn's keys so a stale
-    // stepper footer doesn't linger. The functional update keeps the empty array referentially stable
-    // (so the panel's stepper effect, keyed on the serialized keys, doesn't needlessly re-run).
-    setNewlyFilledKeys((prev) => (prev.length === 0 && filled.length === 0 ? prev : filled));
+    // stepper footer / correction strip doesn't linger. The functional update keeps the empty array
+    // referentially stable (so effects keyed on the serialized keys don't needlessly re-run).
+    const publish = (set: typeof setLastTurnFilledKeys) => (filled: string[]) =>
+      set((p) => (p.length === 0 && filled.length === 0 ? p : filled));
+    if (panelView.dataSlotGroups) {
+      const filled = diffNewlyFilled(prev, panelView);
+      publish(setNewlyFilledKeys)(filled);
+      publish(setLastTurnFilledKeys)(filled);
+    } else {
+      // Question mode: the panel's scroll/stepper stays off (unchanged), but the chat strip still
+      // learns which questions the latest turn captured.
+      publish(setLastTurnFilledKeys)(diffNewlyFilledQuestions(prev, panelView));
+    }
   }, [panelView]);
 
   const handleRevisit = useCallback(
@@ -279,7 +303,12 @@ export function SessionWorkspace({
   }
 
   // Submitted → the conversation/form is done; show the confirmation in place of the workspace.
-  if (stream.status === 'completed') {
+  // Either the in-session submit flipped the stream to `completed`, OR the session was already
+  // completed when this surface loaded (a resume / reopen) — the lifecycle status read is the
+  // authority for the latter. Without this second arm a reopened completed session would drop
+  // into the chat and, on any further send, hit the "session no longer active" panel; instead it
+  // stays on the calm completion screen where the report download lives.
+  if (stream.status === 'completed' || lifecycle.view?.status === 'completed') {
     return (
       <SessionComplete
         sessionId={sessionId}
@@ -298,6 +327,19 @@ export function SessionWorkspace({
     stream.status === 'not_active' ||
     stream.status === 'cost_capped' ||
     stream.status === 'expired';
+
+  // Inline answer correction (Variant B). Allowed in the same interactive window the form accepts
+  // edits (active, non-terminal) — the write goes through `PUT …/answers`, which rejects a non-active
+  // session anyway. `correction` is the bundle the panel rows + chat strip share; `undefined` hides
+  // the gesture entirely (toggle off, read-only viewer, or a blocked session).
+  const canCorrect = inlineCorrectionEnabled && !readOnly && !formBlocked;
+  const correction = canCorrect
+    ? { sessionId, accessToken, onCorrected: onTurnSettled }
+    : undefined;
+  // The correction targets for the most-recent turn — what the chat strip offers to fix.
+  const correctionTargets = canCorrect
+    ? buildCorrectionTargets(panel.view, lastTurnFilledKeys)
+    : [];
 
   // Short progress label for the mobile "Review answers" trigger, mirroring the panel's own
   // ProgressHeading: percent in data-slot mode, "N of M" in question mode.
@@ -365,6 +407,8 @@ export function SessionWorkspace({
           // Fresh sessions (autoStart) type the seeded greeting in, like a streamed reply;
           // resumes render their history instantly.
           animateOpening={autoStart}
+          correctionTargets={correctionTargets}
+          onCorrected={onTurnSettled}
           className="min-h-0 flex-1"
         />
       </div>
@@ -374,6 +418,7 @@ export function SessionWorkspace({
         onRevisit={handleRevisit}
         canRevisit={stream.canSend}
         newlyFilledKeys={newlyFilledKeys}
+        correction={correction}
         className="hidden lg:flex"
       />
     </div>
@@ -389,6 +434,8 @@ export function SessionWorkspace({
         loading={form.loading}
         values={form.values}
         statuses={form.statuses}
+        saveState={form.saveState}
+        lastSavedAt={form.lastSavedAt}
         onChange={form.setValue}
         onFlush={form.flush}
         disabled={formBlocked}
@@ -427,6 +474,7 @@ export function SessionWorkspace({
         loading={panel.loading}
         canRevisit={stream.canSend}
         newlyFilledKeys={newlyFilledKeys}
+        correction={correction}
         // Revisiting sends the respondent back to chat to re-answer, so dismiss the sheet.
         onRevisit={(slot) => {
           handleRevisit(slot);

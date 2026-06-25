@@ -171,6 +171,8 @@ export default async function QuestionnaireSessionPage({
           reasoningPlacement={reasoningPlacement}
           reasoningDwellMs={row.config?.reasoningStreamDwellMs}
           reasoningPerItemMs={row.config?.reasoningStreamPerItemMs}
+          // Inline answer correction (Variant B): respondent-facing UX, default on; no platform flag.
+          inlineCorrectionEnabled={row.config?.inlineCorrectionEnabled ?? true}
         />
       </BrandThemeProvider>
     </div>

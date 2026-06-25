@@ -5,7 +5,8 @@
  *
  * Three terminal states get a distinct, calm panel (cost cap reached, session no longer
  * active, anonymous token expired); transient errors (network, rate-limit, defensive
- * stream error) render as a dismissible inline banner so the respondent can retry.
+ * stream error) render as a dismissible inline banner with a "Try again" action that
+ * resends the failed attempt (the message stays in the transcript — no retyping).
  */
 
 import { AlertTriangle, CheckCircle2, Clock, RefreshCw, X } from 'lucide-react';
@@ -19,6 +20,11 @@ interface ChatErrorPanelProps {
   error: ChatErrorState;
   /** Shown only for transient (`error`) states. */
   onDismiss?: () => void;
+  /**
+   * Resend the failed attempt — renders a "Try again" button on the transient banner. Provided only
+   * for transient (`error`) states; terminal states never retry (a re-send would just re-fail).
+   */
+  onRetry?: () => void;
   className?: string;
 }
 
@@ -28,7 +34,13 @@ const TERMINAL_ICON: Record<string, typeof CheckCircle2> = {
   expired: RefreshCw,
 };
 
-export function ChatErrorPanel({ status, error, onDismiss, className }: ChatErrorPanelProps) {
+export function ChatErrorPanel({
+  status,
+  error,
+  onDismiss,
+  onRetry,
+  className,
+}: ChatErrorPanelProps) {
   const isTerminal = status === 'cost_capped' || status === 'not_active' || status === 'expired';
 
   if (isTerminal) {
@@ -85,6 +97,12 @@ export function ChatErrorPanel({ status, error, onDismiss, className }: ChatErro
       <div className="min-w-0 flex-1">
         <p className="font-medium">{error.title}</p>
         <p className="text-muted-foreground">{error.message}</p>
+        {onRetry && (
+          <Button type="button" variant="outline" size="sm" onClick={onRetry} className="mt-2">
+            <RefreshCw className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+            Try again
+          </Button>
+        )}
       </div>
       {onDismiss && (
         <button

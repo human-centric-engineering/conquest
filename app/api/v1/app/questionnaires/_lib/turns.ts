@@ -76,6 +76,12 @@ export interface TurnWriteInput {
   inspectorCalls?: AgentCallTrace[];
   /** Summed per-turn LLM spend in USD; `null` until cost-summing is wired. */
   costUsd: number | null;
+  /**
+   * The send attempt's idempotency key (F7.x retry). Stamped on the row so a retry re-sending the
+   * same key is deduped (replayed) rather than re-run. Omitted for a send that carries no key
+   * (pre-feature turns); NULLs stay distinct under the `@@unique([sessionId, idempotencyKey])`.
+   */
+  idempotencyKey?: string | null;
 }
 
 /**
@@ -85,6 +91,36 @@ export interface TurnWriteInput {
  * doesn't resolve.
  */
 export async function recordTurn(input: TurnWriteInput): Promise<string> {
+  try {
+    return await writeTurn(input);
+  } catch (err) {
+    // Idempotency race (F7.x): two sends carrying the same key (a concurrent double-submit) both
+    // pass the route's pre-run replay check, then both insert — the loser hits the unique on
+    // `(sessionId, idempotencyKey)`. The winner persisted an equivalent turn, so return ITS id
+    // rather than throwing: the loser's reply already streamed, and re-failing it would only strand
+    // an already-answered respondent. Sequential retries never reach here — the route's replay
+    // check short-circuits them before the run.
+    if (
+      input.idempotencyKey &&
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === 'P2002'
+    ) {
+      const existing = await prisma.appQuestionnaireTurn.findUnique({
+        where: {
+          sessionId_idempotencyKey: {
+            sessionId: input.sessionId,
+            idempotencyKey: input.idempotencyKey,
+          },
+        },
+        select: { id: true },
+      });
+      if (existing) return existing.id;
+    }
+    throw err;
+  }
+}
+
+async function writeTurn(input: TurnWriteInput): Promise<string> {
   return prisma.$transaction(async (tx) => {
     const session = await tx.appQuestionnaireSession.findUnique({
       where: { id: input.sessionId },
@@ -121,6 +157,7 @@ export async function recordTurn(input: TurnWriteInput): Promise<string> {
           ? { inspectorCalls: jsonInput(input.inspectorCalls) }
           : {}),
         costUsd: input.costUsd,
+        ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
       },
       select: { id: true },
     });

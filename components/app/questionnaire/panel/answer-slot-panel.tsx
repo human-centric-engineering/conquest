@@ -55,6 +55,8 @@ import type {
   DataSlotPanelSlot,
   PanelSlotView,
 } from '@/lib/app/questionnaire/panel/types';
+import type { PanelCorrection } from '@/lib/app/questionnaire/panel/correction-targets';
+import { InlineAnswerEditor } from '@/components/app/questionnaire/panel/inline-answer-editor';
 
 /** How long a scrolled-to slot keeps its highlight ring (ms). */
 const HIGHLIGHT_MS = 1500;
@@ -91,6 +93,12 @@ export interface AnswerSlotPanelProps {
    * mode (no minimap) keeps its native bar as the scroll affordance.
    */
   hideNativeScrollbar?: boolean;
+  /**
+   * Inline answer correction (Variant B): when provided, an "Edit" affordance on each answered row
+   * opens the shared {@link InlineAnswerEditor} so the respondent can fix a captured answer in place.
+   * `undefined` hides it (toggle off / read-only / blocked session).
+   */
+  correction?: PanelCorrection;
   className?: string;
 }
 
@@ -189,6 +197,7 @@ function DataSlotRow({
   onStepNext,
   collapseSignal,
   outOfView,
+  correction,
 }: {
   slot: DataSlotPanelSlot;
   highlighted: boolean;
@@ -203,7 +212,17 @@ function DataSlotRow({
   collapseSignal: number;
   /** True once this row has scrolled fully out of view — collapses its open disclosures. */
   outOfView: boolean;
+  /** Inline correction bundle (Variant B); when present + the slot has mapped questions, show "Edit". */
+  correction?: PanelCorrection;
 }) {
+  const [editing, setEditing] = useState(false);
+  // A data-slot fix edits the underlying mapped questions; reconciliation then recomputes the reading.
+  // Built from the slot's coverage (populated when inline correction is on). No mapped questions → no Edit.
+  const editableQuestions = slot.coverage.questions.map((q) => ({
+    slot: { slotKey: q.key, prompt: q.label, type: q.type, typeConfig: q.typeConfig },
+    initialValue: q.value,
+  }));
+  const canEdit = correction != null && editableQuestions.length > 0;
   return (
     <li
       id={panelSlotDomId(slot.key)}
@@ -228,9 +247,28 @@ function DataSlotRow({
               (replaces the old inline strikethrough "Earlier:" list). */}
           <div className="flex items-start gap-2">
             <p className="min-w-0 flex-1 text-sm font-medium">{slot.name}</p>
+            {canEdit && !editing && (
+              <button
+                type="button"
+                onClick={() => setEditing(true)}
+                className="text-muted-foreground hover:text-foreground shrink-0 text-xs font-medium underline-offset-2 hover:underline"
+              >
+                Edit
+              </button>
+            )}
             <SlotHistoryDialog slot={slot} />
           </div>
-          {slot.paraphrase ? (
+          {editing && correction ? (
+            <div className="mt-2">
+              <InlineAnswerEditor
+                questions={editableQuestions}
+                sessionId={correction.sessionId}
+                accessToken={correction.accessToken}
+                onSaved={correction.onCorrected}
+                onCancel={() => setEditing(false)}
+              />
+            </div>
+          ) : slot.paraphrase ? (
             <>
               <p className="text-muted-foreground mt-0.5 text-sm">{slot.paraphrase}</p>
               {/* Confidence (label + raw % — the nuanced 30–100% range reads at a glance) and the
@@ -302,6 +340,7 @@ export function AnswerSlotPanel({
   canRevisit = false,
   newlyFilledKeys,
   hideNativeScrollbar = false,
+  correction,
   className,
 }: AnswerSlotPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -570,6 +609,7 @@ export function AnswerSlotPanel({
                               onStepNext={stepNext}
                               collapseSignal={collapseSignal}
                               outOfView={outOfViewKeys.has(slot.key)}
+                              correction={correction}
                             />
                           ))}
                         </ul>
@@ -595,6 +635,7 @@ export function AnswerSlotPanel({
                             slot={slot}
                             onRevisit={onRevisit}
                             canRevisit={canRevisit}
+                            correction={correction}
                           />
                         ))}
                       </ul>

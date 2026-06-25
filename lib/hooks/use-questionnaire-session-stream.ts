@@ -10,11 +10,13 @@
  * the per-turn side-band warnings (attached to the assistant turn they belong to, so they
  * persist as the conversation scrolls on), and the blocking/error status.
  *
- * Turn POSTs are NOT idempotent — a re-send would mint a duplicate turn server-side — so a
- * transport failure mid-stream is surfaced as an error for the respondent to retry manually
- * rather than auto-retried.
+ * Each send mints an idempotency key (reused across that send's retries) so a transport failure is
+ * recoverable: the hook keeps the failed attempt and exposes {@link UseQuestionnaireSessionStreamReturn.retry},
+ * which re-sends the SAME body + key without re-adding the already-shown respondent bubble. The
+ * server replays a turn it already persisted under that key rather than minting a duplicate (the
+ * narrow drop-after-persist case), so the retry is safe in every failure mode.
  *
- * @see app/api/v1/app/questionnaire-sessions/[id]/messages/route.ts — the SSE contract
+ * @see app/api/v1/app/questionnaire-sessions/[id]/messages/route.ts — the SSE contract + replay branch
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -92,6 +94,14 @@ export interface UseQuestionnaireSessionStreamReturn {
   kickoff: () => Promise<void>;
   /** Clear a transient error banner. */
   dismissError: () => void;
+  /**
+   * Re-send the last attempt after a transient failure (network drop, rate-limit, defensive stream
+   * error). Re-uses the failed attempt's body AND idempotency key — so a turn the server already
+   * persisted is replayed, not duplicated — and does NOT re-add the respondent bubble (the dangling
+   * user turn from the failed attempt is already on screen). No-op when there is no recoverable
+   * attempt to resend (a clean settle / dismiss clears it). Wired to the error banner's "Try again".
+   */
+  retry: () => Promise<void>;
   /**
    * Push an authoritative session status into the surface — the seam for lifecycle
    * actions (F7.3) that change status server-side: a respondent pause sets `not_active`,
@@ -227,12 +237,27 @@ export function useQuestionnaireSessionStream(
   const typing = useTypingAnimation({ chunkSize: 4 });
   const abortRef = useRef<AbortController | null>(null);
 
+  // The send attempt currently in flight / last failed, so a transient failure can be retried with
+  // the SAME payload and key. `key` is minted once per logical send and reused across its retries
+  // (the server dedups on it); `hasUserTurn` records whether the optimistic respondent bubble was
+  // added, so a retry never adds a second one. Cleared on a clean settle (see `streamTurn`).
+  const lastAttemptRef = useRef<{
+    body: Record<string, unknown>;
+    key: string;
+    hasUserTurn: boolean;
+  } | null>(null);
+
   // Abort any in-flight stream on unmount so the reader doesn't setState on a torn-down tree.
   useEffect(() => {
     return () => abortRef.current?.abort();
   }, []);
 
-  const dismissError = useCallback(() => setError(null), []);
+  const dismissError = useCallback(() => {
+    setError(null);
+    // Dismissing forgoes the retry — drop the attempt so a later `retry()` can't resend a turn the
+    // respondent chose to abandon (the next typed send mints its own key anyway).
+    lastAttemptRef.current = null;
+  }, []);
 
   const applyStatus = useCallback((next: QuestionnaireChatStatus) => {
     setStatus(next);
@@ -246,14 +271,23 @@ export function useQuestionnaireSessionStream(
   // carries no respondent message); `body` is the POST payload (`{ message, attachments }` or
   // `{ kickoff: true }`).
   const streamTurn = useCallback(
-    async (opts: { body: Record<string, unknown>; userTurn?: string }) => {
+    async (opts: { body: Record<string, unknown>; userTurn?: string; isRetry?: boolean }) => {
       // `BLOCKING_STATUSES` (streaming + the terminal cost-cap / not-active / expired states)
       // is the single source of truth for "no further input is meaningful" — the same set
       // `canSend` is derived from, so the guard and the composer can never disagree.
       if (BLOCKING_STATUSES.includes(status)) return;
 
-      // Optimistic: show the respondent's turn immediately (when present) and clear side-band state.
-      if (opts.userTurn !== undefined) {
+      // Mint an idempotency key for a fresh send; reuse the failed attempt's key on a retry so the
+      // server replays (not duplicates) a turn it already persisted under it. Record the attempt so
+      // a transient failure can resend the same body + key.
+      const prior = lastAttemptRef.current;
+      const key = opts.isRetry && prior ? prior.key : crypto.randomUUID();
+      const hasUserTurn = opts.isRetry && prior ? prior.hasUserTurn : opts.userTurn !== undefined;
+      lastAttemptRef.current = { body: opts.body, key, hasUserTurn };
+
+      // Optimistic: show the respondent's turn immediately (fresh send only — a retry's bubble is
+      // already on screen from the failed attempt) and clear side-band state.
+      if (!opts.isRetry && opts.userTurn !== undefined) {
         setTurns((prev) => [...prev, { role: 'user', content: opts.userTurn as string }]);
       }
       setError(null);
@@ -282,7 +316,7 @@ export function useQuestionnaireSessionStream(
           method: 'POST',
           credentials: 'include',
           headers,
-          body: JSON.stringify(opts.body),
+          body: JSON.stringify({ ...opts.body, idempotencyKey: key }),
           signal: controller.signal,
         });
 
@@ -367,6 +401,8 @@ export function useQuestionnaireSessionStream(
           setError(streamError);
         } else {
           setStatus('idle');
+          // Settled cleanly — the attempt succeeded, so drop it: a later send mints a fresh key.
+          lastAttemptRef.current = null;
           // The turn (and any answers it captured) is now persisted — let the panel refresh.
           onTurnSettledRef.current?.();
         }
@@ -418,6 +454,15 @@ export function useQuestionnaireSessionStream(
     await streamTurn({ body: { kickoff: true } });
   }, [streamTurn]);
 
+  // Retry the last failed attempt (the error banner's "Try again"). Re-sends the same body + key
+  // via `isRetry`, which reuses the attempt's key and skips re-adding the respondent bubble. No-op
+  // once the attempt has been cleared (a clean settle or a dismiss).
+  const retry = useCallback(async () => {
+    const attempt = lastAttemptRef.current;
+    if (!attempt) return;
+    await streamTurn({ body: attempt.body, isRetry: true });
+  }, [streamTurn]);
+
   // The composer accepts input when idle or recovering from a transient error — but never
   // while streaming or in a terminal blocking state (cost cap / not active / expired).
   // `BLOCKING_STATUSES` is the single source of truth: `streaming` is itself a blocking
@@ -435,6 +480,7 @@ export function useQuestionnaireSessionStream(
     sendMessage,
     kickoff,
     dismissError,
+    retry,
     applyStatus,
   };
 }

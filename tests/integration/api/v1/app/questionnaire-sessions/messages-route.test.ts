@@ -91,6 +91,12 @@ const prefilterMock = vi.hoisted(() => ({
 }));
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/extraction-candidates', () => prefilterMock);
 
+// Retry dedup (F7.x): the route looks up a persisted turn by the attempt's idempotency key and
+// replays it instead of re-running. Mocked so a test can return a saved turn; defaults to null (no
+// prior turn → fresh run), so the standard tests — which carry no key — are unaffected.
+const transcriptMock = vi.hoisted(() => ({ findTurnByIdempotencyKey: vi.fn() }));
+vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/transcript', () => transcriptMock);
+
 import { POST } from '@/app/api/v1/app/questionnaire-sessions/[id]/messages/route';
 import {
   ABUSE_ABANDON_REASON,
@@ -266,6 +272,8 @@ beforeEach(() => {
   sessionsMock.hasCostCapReachedEvent.mockResolvedValue(false);
   // Reasoning trace: default to empty so the standard turn tests are unaffected.
   reasoningMock.buildReasoningTrace.mockReturnValue([]);
+  // Retry dedup: default to "no prior turn under this key" so a standard send runs fresh.
+  transcriptMock.findTurnByIdempotencyKey.mockResolvedValue(null);
 });
 
 /** A loaded context carrying a USD budget; `answered` optionally pre-answers the only question. */
@@ -2278,5 +2286,91 @@ describe('reasoning stream in data-slot mode', () => {
 
     // The reasoning frame is emitted.
     expect(frames.map((f) => f.event)).toContain('reasoning');
+  });
+});
+
+describe('retry dedup-and-replay (F7.x)', () => {
+  const KEY = '11111111-1111-4111-8111-111111111111';
+
+  it('replays a turn already persisted under the key instead of re-running it', async () => {
+    // Arrange: the attempt's key resolves to a saved turn (the narrow drop-after-persist case).
+    transcriptMock.findTurnByIdempotencyKey.mockResolvedValue({
+      id: 'turn-prior',
+      agentResponse: 'Your saved reply.',
+      warnings: [{ code: 'contradiction', message: 'Noticed earlier.', detail: 'why' }],
+      reasoning: [],
+    });
+
+    // Act
+    const frames = await drainSse(await POST(req({ message: 'hi', idempotencyKey: KEY }), ctx));
+
+    // Assert: the lookup used this session + key.
+    expect(transcriptMock.findTurnByIdempotencyKey).toHaveBeenCalledWith('sess-1', KEY);
+
+    // The saved reply streams back (reassembled from the chunked content frames).
+    const content = frames
+      .filter((f) => f.event === 'content')
+      .map((f) => (f.data as { delta: string }).delta)
+      .join('');
+    expect(content).toBe('Your saved reply.');
+
+    // The persisted warning replays too, and the frame order matches a live turn.
+    expect(frames.map((f) => f.event)).toEqual(['start', 'warning', 'content', 'done']);
+
+    // Crucially: NO re-run and NO duplicate persist.
+    expect(runMock.persistTurn).not.toHaveBeenCalled();
+  });
+
+  it('replays the saved reasoning trace and a detail-less warning in live frame order', async () => {
+    // The other replay shape: a turn whose saved trace is non-empty and whose warning carried no
+    // detail — exercises the reasoning-frame branch and the omitted-detail branch of the replay.
+    const steps = [{ label: 'Re-read the prior answers', detail: null }];
+    transcriptMock.findTurnByIdempotencyKey.mockResolvedValue({
+      id: 'turn-prior',
+      agentResponse: 'Replayed with reasoning.',
+      warnings: [{ code: 'support', message: 'Reach a human anytime.' }],
+      reasoning: steps,
+    });
+
+    const frames = await drainSse(await POST(req({ message: 'hi', idempotencyKey: KEY }), ctx));
+
+    // Reasoning frame appears (and before content), carrying the saved steps verbatim.
+    expect(frames.map((f) => f.event)).toEqual([
+      'start',
+      'warning',
+      'reasoning',
+      'content',
+      'done',
+    ]);
+    const reasoningFrame = frames.find((f) => f.event === 'reasoning');
+    expect((reasoningFrame!.data as { steps: unknown[] }).steps).toEqual(steps);
+
+    // The detail-less warning replays without a `detail` field.
+    const warningFrame = frames.find((f) => f.event === 'warning');
+    expect(warningFrame!.data).toEqual({
+      type: 'warning',
+      code: 'support',
+      message: 'Reach a human anytime.',
+    });
+    expect(warningFrame!.data).not.toHaveProperty('detail');
+
+    expect(runMock.persistTurn).not.toHaveBeenCalled();
+  });
+
+  it('runs fresh (and persists with the key) when the key has no prior turn — the common retry', async () => {
+    // Arrange: default mock already returns null (no prior turn under the key).
+    // Act
+    const frames = await drainSse(await POST(req({ message: 'hi', idempotencyKey: KEY }), ctx));
+
+    // Assert: a real turn ran and was persisted, stamped with the key for a future retry to dedup on.
+    expect(frames.map((f) => f.event)).toContain('content');
+    expect(runMock.persistTurn).toHaveBeenCalledTimes(1);
+    expect(runMock.persistTurn.mock.calls[0][0]).toMatchObject({ idempotencyKey: KEY });
+  });
+
+  it('rejects a non-UUID idempotency key at validation (400)', async () => {
+    const res = await POST(req({ message: 'hi', idempotencyKey: 'not-a-uuid' }), ctx);
+    expect(res.status).toBe(400);
+    expect(transcriptMock.findTurnByIdempotencyKey).not.toHaveBeenCalled();
   });
 });

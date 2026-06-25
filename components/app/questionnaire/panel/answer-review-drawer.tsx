@@ -24,6 +24,7 @@ import { X } from 'lucide-react';
 import { Dialog, DialogOverlay, DialogPortal } from '@/components/ui/dialog';
 import { AnswerSlotPanel } from '@/components/app/questionnaire/panel/answer-slot-panel';
 import type { AnswerPanelView, PanelSlotView } from '@/lib/app/questionnaire/panel/types';
+import type { PanelCorrection } from '@/lib/app/questionnaire/panel/correction-targets';
 
 export interface AnswerReviewDrawerProps {
   open: boolean;
@@ -35,6 +36,8 @@ export interface AnswerReviewDrawerProps {
   onRevisit: (slot: PanelSlotView) => void;
   canRevisit: boolean;
   newlyFilledKeys: readonly string[];
+  /** Inline correction bundle (Variant B), forwarded to {@link AnswerSlotPanel}. */
+  correction?: PanelCorrection;
 }
 
 export function AnswerReviewDrawer({
@@ -45,6 +48,7 @@ export function AnswerReviewDrawer({
   onRevisit,
   canRevisit,
   newlyFilledKeys,
+  correction,
 }: AnswerReviewDrawerProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -73,6 +77,7 @@ export function AnswerReviewDrawer({
             onRevisit={onRevisit}
             canRevisit={canRevisit}
             newlyFilledKeys={newlyFilledKeys}
+            correction={correction}
             // The minimap is the scroll affordance; suppress the native bar (touch needs none).
             hideNativeScrollbar
             className="min-h-0 flex-1 rounded-none border-0 bg-transparent"

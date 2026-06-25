@@ -138,25 +138,88 @@ describe('buildAnswerTranscript', () => {
     expect(buildAnswerTranscript({ ...base, sections })).toContain('A: a, b, c');
   });
 
-  it('formats scalar answer types (boolean, number, object) and renders null as "(no answer)"', () => {
+  it('renders choice answers as their option labels, not stored keys', () => {
+    const choiceConfig = {
+      choices: [
+        { value: 'opt_a', label: 'Very satisfied' },
+        { value: 'opt_b', label: 'Dissatisfied' },
+      ],
+    };
+    const sections: PanelSectionView[] = [
+      {
+        sectionId: 's1',
+        title: 'Feedback',
+        slots: [
+          slot({
+            slotKey: 'sat',
+            prompt: 'Satisfaction?',
+            type: 'single_choice',
+            typeConfig: choiceConfig,
+            value: 'opt_a',
+            answered: true,
+          }),
+          slot({
+            slotKey: 'likes',
+            prompt: 'Liked?',
+            type: 'multi_choice',
+            typeConfig: choiceConfig,
+            value: ['opt_a', 'opt_b'],
+            answered: true,
+          }),
+        ],
+      },
+    ];
+    const text = buildAnswerTranscript({ ...base, sections });
+    expect(text).toContain('A: Very satisfied');
+    expect(text).toContain('A: Very satisfied, Dissatisfied');
+    expect(text).not.toContain('opt_a');
+  });
+
+  it('renders boolean/number/object scalars via the shared slot formatter (untyped booleans → Yes/No)', () => {
     const sections: PanelSectionView[] = [
       {
         sectionId: 's1',
         title: 'Mixed',
         slots: [
+          // A free-text slot carrying a bare boolean reads as Yes/No (the shared formatter's default),
+          // not the raw "true"/"false" the old transcript-only formatter emitted.
           slot({ slotKey: 'b', prompt: 'Agree?', value: true, answered: true }),
           slot({ slotKey: 'n', prompt: 'Score?', value: 7, answered: true }),
           slot({ slotKey: 'o', prompt: 'Meta?', value: { a: 1 }, answered: true }),
-          // An answered slot can still carry a null value — it must render, not be dropped.
+          // An answered slot can still carry a null value — it must render (as the em-dash), not be dropped.
           slot({ slotKey: 'z', prompt: 'Blank?', value: null, answered: true }),
         ],
       },
     ];
     const text = buildAnswerTranscript({ ...base, sections });
-    expect(text).toContain('A: true');
+    expect(text).toContain('A: Yes');
     expect(text).toContain('A: 7');
     expect(text).toContain('A: {"a":1}');
-    expect(text).toContain('Q: Blank?\nA: (no answer)');
+    expect(text).toContain('Q: Blank?\nA: —');
+  });
+
+  it('renders a boolean question with its configured true/false labels (matches the PDF/panel)', () => {
+    // Regression: the transcript must use the same label-aware rendering as the PDF, so a boolean
+    // question with custom labels reads "Strongly agree", never "true".
+    const sections: PanelSectionView[] = [
+      {
+        sectionId: 's1',
+        title: 'Agreement',
+        slots: [
+          slot({
+            slotKey: 'agree',
+            prompt: 'Do you agree?',
+            type: 'boolean',
+            typeConfig: { trueLabel: 'Strongly agree', falseLabel: 'Strongly disagree' },
+            value: true,
+            answered: true,
+          }),
+        ],
+      },
+    ];
+    const text = buildAnswerTranscript({ ...base, sections });
+    expect(text).toContain('A: Strongly agree');
+    expect(text).not.toContain('A: true');
   });
 
   it('omits goal/audience header lines when absent', () => {

@@ -32,6 +32,8 @@ import type { RespondentReportContent } from '@/lib/app/questionnaire/report/con
 export interface SessionExportInput {
   questionnaireTitle: string;
   versionNumber: number;
+  /** The session's support reference (`publicRef`), or null for a row predating the column. */
+  ref: string | null;
   goal: string | null;
   /** Structured audience (or null); summarised to one line for the header. */
   audience: AudienceShape | null;
@@ -88,6 +90,7 @@ export function buildSessionExportModel(input: SessionExportInput): SessionExpor
   return {
     questionnaireTitle: input.questionnaireTitle,
     versionNumber: input.versionNumber,
+    ref: input.ref,
     goal: input.goal,
     audienceSummary: summariseAudience(input.audience),
     respondent,

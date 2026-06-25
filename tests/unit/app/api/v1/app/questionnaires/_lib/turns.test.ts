@@ -19,7 +19,7 @@ const txMock = vi.hoisted(() => ({
 
 const prismaMock = vi.hoisted(() => ({
   $transaction: vi.fn(),
-  appQuestionnaireTurn: { aggregate: vi.fn() },
+  appQuestionnaireTurn: { aggregate: vi.fn(), findUnique: vi.fn() },
 }));
 
 vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
@@ -340,7 +340,7 @@ describe('recordTurn', () => {
     expect(createData).not.toHaveProperty('reasoning');
   });
 
-  it('maps null to Prisma.JsonNull for toolCalls and sideEffectAnswerIds (jsonInput helper)', async () => {
+  it('passes empty toolCalls/sideEffectAnswerIds arrays through jsonInput unchanged and stores null costUsd as null', async () => {
     // Passing empty arrays → jsonInput should return the array as-is (not Prisma.JsonNull).
     // Passing null costUsd → Prisma stores as NULL.
     await recordTurn({
@@ -364,7 +364,7 @@ describe('recordTurn', () => {
     expect(createData.costUsd).toBeNull();
   });
 
-  it('jsonInput maps null/undefined to Prisma.JsonNull for the sideEffectDataSlotIds field', async () => {
+  it('stores a non-empty sideEffectDataSlotIds array as the array (not Prisma.JsonNull)', async () => {
     // sideEffectDataSlotIds is passed as a non-empty array → stored as that array.
     await recordTurn({
       sessionId: 'sess-1',
@@ -384,6 +384,91 @@ describe('recordTurn', () => {
     // The field should be the array value (not Prisma.JsonNull).
     expect(createData.sideEffectDataSlotIds).toEqual(['fill-x']);
     expect(createData.sideEffectDataSlotIds).not.toBe(Prisma.JsonNull);
+  });
+
+  // ── idempotency key (F7.x retry dedup) ──────────────────────────────────────
+
+  it('stamps idempotencyKey on the create data when provided', async () => {
+    await recordTurn({
+      sessionId: 'sess-1',
+      userMessage: 'm',
+      agentResponse: 'a',
+      targetedQuestionId: null,
+      toolCalls: [],
+      sideEffectAnswerIds: [],
+      costUsd: null,
+      idempotencyKey: 'key-123',
+    });
+
+    const createData = txMock.appQuestionnaireTurn.create.mock.calls[0][0].data as Record<
+      string,
+      unknown
+    >;
+    expect(createData.idempotencyKey).toBe('key-123');
+  });
+
+  it('omits idempotencyKey from the create data when absent', async () => {
+    await recordTurn({
+      sessionId: 'sess-1',
+      userMessage: 'm',
+      agentResponse: 'a',
+      targetedQuestionId: null,
+      toolCalls: [],
+      sideEffectAnswerIds: [],
+      costUsd: null,
+    });
+
+    const createData = txMock.appQuestionnaireTurn.create.mock.calls[0][0].data as Record<
+      string,
+      unknown
+    >;
+    expect(createData).not.toHaveProperty('idempotencyKey');
+  });
+
+  it('on a unique-violation (concurrent same-key insert) returns the existing turn id instead of throwing', async () => {
+    // A concurrent double-submit with the same key: the loser hits the unique constraint. recordTurn
+    // resolves it to the winner's row rather than re-failing an already-answered respondent.
+    const p2002 = new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+      code: 'P2002',
+      clientVersion: 'test',
+    });
+    prismaMock.$transaction.mockRejectedValueOnce(p2002);
+    prismaMock.appQuestionnaireTurn.findUnique.mockResolvedValue({ id: 'turn-winner' });
+
+    const id = await recordTurn({
+      sessionId: 'sess-1',
+      userMessage: 'm',
+      agentResponse: 'a',
+      targetedQuestionId: null,
+      toolCalls: [],
+      sideEffectAnswerIds: [],
+      costUsd: null,
+      idempotencyKey: 'dup-key',
+    });
+
+    expect(id).toBe('turn-winner');
+    expect(prismaMock.appQuestionnaireTurn.findUnique).toHaveBeenCalledWith({
+      where: { sessionId_idempotencyKey: { sessionId: 'sess-1', idempotencyKey: 'dup-key' } },
+      select: { id: true },
+    });
+  });
+
+  it('re-throws a non-P2002 error unchanged (no idempotency swallow)', async () => {
+    prismaMock.$transaction.mockRejectedValueOnce(new Error('db down'));
+
+    await expect(
+      recordTurn({
+        sessionId: 'sess-1',
+        userMessage: 'm',
+        agentResponse: 'a',
+        targetedQuestionId: null,
+        toolCalls: [],
+        sideEffectAnswerIds: [],
+        costUsd: null,
+        idempotencyKey: 'key-x',
+      })
+    ).rejects.toThrow('db down');
+    expect(prismaMock.appQuestionnaireTurn.findUnique).not.toHaveBeenCalled();
   });
 });
 

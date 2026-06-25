@@ -44,6 +44,7 @@ single JSON column for the profile fields:
 | Session-start profile fields          | `profileFields`            | Json (array)           | `[]`                |
 | Answer panel scope                    | `answerSlotPanelScope`     | String (enum)          | `'full_progress'`   |
 | Presentation mode                     | `presentationMode`         | String (enum)          | `'chat'`            |
+| Inline answer correction              | `inlineCorrectionEnabled`  | Boolean                | `true`              |
 | Interviewer tone & persona            | `tone`                     | Json (object)          | all dimensions off  |
 | Respondent Report                     | `respondentReport`         | Json (object)          | disabled, raw mode  |
 
@@ -80,6 +81,19 @@ respondent server pages (authenticated `[sessionId]` + public `/q/[versionId]`),
 which dispatch the surface and seed the full form view for `form`/`both`. Defaults
 to `chat` so existing launched versions are unchanged. See
 `.context/app/questionnaire/presentation-mode.md`.
+
+`inlineCorrectionEnabled` (Variant B) turns on the "fix this answer" gesture: the respondent
+can correct an answer the latest turn just captured through a small inline editor — beneath the
+most-recent message in the chat (the `CorrectionStrip`) and on the answer-panel rows — instead of
+sending a corrective chat turn. The fix saves through the form-edit path (`PUT …/answers`), so it
+**bypasses the turn pipeline entirely**: no extraction, no contradiction re-check (a corrective chat
+turn would otherwise risk a false same-slot contradiction warning). In data-slot mode a fix edits the
+slot's mapped questions and reconciliation recomputes the reading; a data slot with no mapped
+questions shows no gesture. On by default — respondent-facing UX with **no platform flag** (unlike
+voice/attachments/reasoning); the admin toggles it per version on the Settings tab. The respondent
+pages resolve it (`resolveInlineCorrectionForVersion` / `loadSessionSurfaceConfig`) and pass it to
+`SessionWorkspace`; the read-only admin session viewer never shows it. See
+`.context/app/questionnaire/answer-slot-panel.md`.
 
 `tone` (F-tone) is the interviewer's voice — a single JSON object (`ToneSettings`) of nine
 enable-toggle + 1–5 sliders (empathy, mirroring, formality, mimicry, verbosity, warmth, curiosity,
