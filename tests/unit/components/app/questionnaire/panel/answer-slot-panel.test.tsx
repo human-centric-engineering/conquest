@@ -481,6 +481,30 @@ describe('AnswerSlotPanel', () => {
     expect(screen.queryByRole('button', { name: 'Revisit' })).not.toBeInTheDocument();
   });
 
+  // --- Inline correction (Variant B): the per-row "Edit answer" gesture ---
+
+  it('hides "Edit answer" when no correction bundle is supplied', () => {
+    render(<AnswerSlotPanel view={view()} />);
+    fireEvent.click(screen.getByText('What is your role?'));
+    expect(screen.queryByRole('button', { name: 'Edit answer' })).not.toBeInTheDocument();
+  });
+
+  it('opens the seeded inline editor on "Edit answer" and Cancel restores the row', () => {
+    render(
+      <AnswerSlotPanel view={view()} correction={{ sessionId: 'sess-1', onCorrected: vi.fn() }} />
+    );
+    fireEvent.click(screen.getByText('What is your role?'));
+
+    // Editing is off until the gesture; the answer reads as text, not an input.
+    expect(screen.queryByDisplayValue('Engineer')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit answer' }));
+    expect(screen.getByDisplayValue('Engineer')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByDisplayValue('Engineer')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Edit answer' })).toBeInTheDocument();
+  });
+
   // --- Slot overview minimap + after-turn stepper (data-slot mode) ---
 
   function dataSlot(key: string, over: Partial<DataSlotPanelSlot> = {}): DataSlotPanelSlot {
@@ -707,8 +731,24 @@ describe('AnswerSlotPanel', () => {
                     total: 2,
                     answered: 1,
                     questions: [
-                      { label: 'How do you sell today?', answered: true, confidence: 0.9 },
-                      { label: 'What blocks your pipeline?', answered: false, confidence: null },
+                      {
+                        key: 'sell_today',
+                        label: 'How do you sell today?',
+                        type: 'free_text',
+                        typeConfig: null,
+                        answered: true,
+                        confidence: 0.9,
+                        value: 'Direct sales',
+                      },
+                      {
+                        key: 'pipeline_block',
+                        label: 'What blocks your pipeline?',
+                        type: 'free_text',
+                        typeConfig: null,
+                        answered: false,
+                        confidence: null,
+                        value: null,
+                      },
                     ],
                   },
                 }),

@@ -103,6 +103,7 @@ describe('loadSessionSurfaceConfig', () => {
                   select: {
                     anonymousMode: true,
                     presentationMode: true,
+                    inlineCorrectionEnabled: true,
                     voiceEnabled: true,
                     attachmentsEnabled: true,
                     reasoningStreamEnabled: true,
@@ -127,6 +128,7 @@ describe('loadSessionSurfaceConfig', () => {
         config: {
           anonymousMode: true,
           presentationMode: 'form',
+          inlineCorrectionEnabled: false,
           voiceEnabled: true,
           attachmentsEnabled: false,
           reasoningStreamEnabled: false,
@@ -145,6 +147,7 @@ describe('loadSessionSurfaceConfig', () => {
       expect(result!.config).toEqual({
         anonymousMode: true,
         presentationMode: 'form',
+        inlineCorrectionEnabled: false,
         voiceEnabled: true,
         attachmentsEnabled: false,
         reasoningStreamEnabled: false,
@@ -191,10 +194,11 @@ describe('loadSessionSurfaceConfig', () => {
       expect(result!.config).toBeNull();
     });
 
-    it('returns all eight config fields with their exact DB values', async () => {
+    it('returns all config fields with their exact DB values', async () => {
       const expectedConfig: SessionSurfaceConfig['config'] = {
         anonymousMode: false,
         presentationMode: 'chat',
+        inlineCorrectionEnabled: true,
         voiceEnabled: true,
         attachmentsEnabled: true,
         reasoningStreamEnabled: true,
@@ -206,7 +210,7 @@ describe('loadSessionSurfaceConfig', () => {
 
       const result = await loadSessionSurfaceConfig('sess-full');
 
-      // All eight config fields must be present and match the DB values — none omitted
+      // Every config field must be present and match the DB values — none omitted
       expect(result!.config).toEqual(expectedConfig);
     });
   });

@@ -93,6 +93,40 @@ side. Two consequences:
 hook call moved up to `SessionWorkspace`); its rendering is otherwise unchanged and it
 stays a single readable column.
 
+## Inline answer correction (Variant B)
+
+`Revisit` re-asks a question via a fresh chat turn; **inline correction** is the lighter
+alternative — fix what the latest turn just captured _in place_, without spending a turn.
+Gated by the per-version `inlineCorrectionEnabled` config (default on; **no platform flag** —
+respondent-facing UX). Two surfaces, one shared editor:
+
+- **Chat strip** (`components/.../chat/correction-strip.tsx`): rendered beneath the transcript
+  once the latest reply has settled (`composerReady`), listing what the turn recorded
+  ("`<prompt>` → `<value>`") with a per-item "Fix". The targets are resolved upstream in
+  `SessionWorkspace` from the panel view + the keys the latest turn filled
+  (`buildCorrectionTargets` over `lastTurnFilledKeys`).
+- **Panel rows**: `AnswerSlotItem` gains an "Edit answer" action in its expanded detail (beside
+  Revisit); `DataSlotRow` gains an "Edit" link when the slot has mapped questions.
+
+The shared `InlineAnswerEditor` (`components/.../panel/inline-answer-editor.tsx`) always edits
+**question** slots, reusing `QuestionField` for the per-type control, and saves through
+`useInlineCorrection` → `PUT …/answers` — the same form-edit path, so the write records a `manual`
+refinement entry, flips the slot to `refined` + `respondentEdited`, and (data-slot mode) reconciles
+the reading. Crucially it **bypasses the turn pipeline**, so a correction never runs extraction or
+contradiction detection — that's the whole point: a corrective chat turn risks a false same-slot
+contradiction warning; an inline fix can't.
+
+- **Question mode:** the target is the slot itself (one editable question).
+- **Data-slot mode:** the target's editable questions are the slot's _mapped_ questions, surfaced
+  via `coverage.questions` (now enriched with `key`/`type`/`typeConfig`/`value`, populated when
+  `showSlotQuestions` **or** `inlineCorrectionEnabled`). A fix edits those questions and the PUT's
+  reconciliation recomputes the reading; a slot with **no** mapped questions shows no gesture.
+
+`SessionWorkspace` computes the just-filled keys for the chat strip in both modes: data-slot mode
+reuses `diffNewlyFilled`; question mode uses the new `diffNewlyFilledQuestions` (the panel's own
+scroll/stepper stays data-slot-only — unchanged). The gesture is hidden when the session is blocked
+(the `PUT` rejects a non-active session anyway) and in the read-only admin viewer.
+
 ## Layout
 
 Both respondent pages render `SessionWorkspace` inside the existing

@@ -9,10 +9,15 @@ import { describe, it, expect } from 'vitest';
 import {
   dataSlotKeysInOrder,
   diffNewlyFilled,
+  diffNewlyFilledQuestions,
   panelSlotDomId,
   recentlyFilledByLatestTurn,
 } from '@/lib/app/questionnaire/panel/newly-filled';
-import type { AnswerPanelView, DataSlotPanelSlot } from '@/lib/app/questionnaire/panel/types';
+import type {
+  AnswerPanelView,
+  DataSlotPanelSlot,
+  PanelSlotView,
+} from '@/lib/app/questionnaire/panel/types';
 
 function slot(over: Partial<DataSlotPanelSlot> & { key: string }): DataSlotPanelSlot {
   return {
@@ -226,5 +231,93 @@ describe('diffNewlyFilled', () => {
       },
     ]);
     expect(diffNewlyFilled(prev, next)).toEqual(['a2']);
+  });
+});
+
+function qSlot(over: Partial<PanelSlotView> & { slotKey: string }): PanelSlotView {
+  return {
+    prompt: over.slotKey,
+    type: 'free_text',
+    typeConfig: null,
+    required: false,
+    answered: false,
+    value: null,
+    provenance: null,
+    confidence: null,
+    rationale: null,
+    answeredAtTurnIndex: null,
+    refinementHistory: [],
+    ...over,
+  };
+}
+
+/** A question-mode view from sections (sectionId → its slots in display order). */
+function qView(sections: Array<{ sectionId: string; slots: PanelSlotView[] }>): AnswerPanelView {
+  return {
+    status: 'active',
+    scope: 'full_progress',
+    sections: sections.map((s) => ({ sectionId: s.sectionId, title: s.sectionId, slots: s.slots })),
+    answeredCount: 0,
+    totalCount: 0,
+  };
+}
+
+describe('diffNewlyFilledQuestions', () => {
+  it('returns [] on the first snapshot (prev is null)', () => {
+    const next = qView([{ sectionId: 'S', slots: [qSlot({ slotKey: 'q1', answered: true })] }]);
+    expect(diffNewlyFilledQuestions(null, next)).toEqual([]);
+  });
+
+  it('flags a question that went from unanswered to answered', () => {
+    const prev = qView([{ sectionId: 'S', slots: [qSlot({ slotKey: 'q1', answered: false })] }]);
+    const next = qView([
+      { sectionId: 'S', slots: [qSlot({ slotKey: 'q1', answered: true, answeredAtTurnIndex: 2 })] },
+    ]);
+    expect(diffNewlyFilledQuestions(prev, next)).toEqual(['q1']);
+  });
+
+  it('ignores an answer that was already captured and unchanged this turn', () => {
+    const prev = qView([
+      { sectionId: 'S', slots: [qSlot({ slotKey: 'q1', answered: true, answeredAtTurnIndex: 1 })] },
+    ]);
+    const next = qView([
+      { sectionId: 'S', slots: [qSlot({ slotKey: 'q1', answered: true, answeredAtTurnIndex: 1 })] },
+    ]);
+    expect(diffNewlyFilledQuestions(prev, next)).toEqual([]);
+  });
+
+  it('flags a refinement where the turn index advanced (still answered)', () => {
+    const prev = qView([
+      { sectionId: 'S', slots: [qSlot({ slotKey: 'q1', answered: true, answeredAtTurnIndex: 1 })] },
+    ]);
+    const next = qView([
+      { sectionId: 'S', slots: [qSlot({ slotKey: 'q1', answered: true, answeredAtTurnIndex: 3 })] },
+    ]);
+    expect(diffNewlyFilledQuestions(prev, next)).toEqual(['q1']);
+  });
+
+  it('preserves section then slot display order for a multi-question turn', () => {
+    const prev = qView([
+      { sectionId: 'S1', slots: [qSlot({ slotKey: 'a' }), qSlot({ slotKey: 'b' })] },
+      { sectionId: 'S2', slots: [qSlot({ slotKey: 'c' })] },
+    ]);
+    const next = qView([
+      {
+        sectionId: 'S1',
+        slots: [
+          qSlot({ slotKey: 'a', answered: true, answeredAtTurnIndex: 2 }),
+          qSlot({ slotKey: 'b' }),
+        ],
+      },
+      { sectionId: 'S2', slots: [qSlot({ slotKey: 'c', answered: true, answeredAtTurnIndex: 2 })] },
+    ]);
+    expect(diffNewlyFilledQuestions(prev, next)).toEqual(['a', 'c']);
+  });
+
+  it('returns [] when either snapshot is in data-slot mode (use diffNewlyFilled there)', () => {
+    const dataView = view([{ theme: 'A', slots: [slot({ key: 'a1', filled: true })] }]);
+    const qPrev = qView([{ sectionId: 'S', slots: [qSlot({ slotKey: 'q1' })] }]);
+    expect(diffNewlyFilledQuestions(dataView, qView([]))).toEqual([]);
+    expect(diffNewlyFilledQuestions(qPrev, dataView)).toEqual([]);
   });
 });

@@ -38,9 +38,12 @@ import { type AttachmentEntry } from '@/lib/hooks/use-attachments';
 import type { ChatAttachment } from '@/lib/orchestration/chat/types';
 import type { UseQuestionnaireSessionStreamReturn } from '@/lib/hooks/use-questionnaire-session-stream';
 import type { SessionWarning } from '@/lib/app/questionnaire/chat/types';
+import type { CorrectionTarget } from '@/lib/app/questionnaire/panel/correction-targets';
+import type { AnswerPanelView } from '@/lib/app/questionnaire/panel/types';
 import type { ReasoningStep } from '@/lib/app/questionnaire/reasoning';
 import type { ReasoningPlacement } from '@/lib/app/questionnaire/types';
 import { ChatErrorPanel } from '@/components/app/questionnaire/chat/chat-error-panel';
+import { CorrectionStrip } from '@/components/app/questionnaire/chat/correction-strip';
 import { ContradictionNotice } from '@/components/app/questionnaire/chat/contradiction-notice';
 import { SeriousnessNotice } from '@/components/app/questionnaire/chat/seriousness-notice';
 import { SupportNotice } from '@/components/app/questionnaire/chat/support-notice';
@@ -88,6 +91,15 @@ export interface QuestionnaireChatProps {
    * it off on resume so a restored transcript renders its history instantly.
    */
   animateOpening?: boolean;
+  /**
+   * Inline answer correction (Variant B): the slots the most-recent turn captured, resolved to
+   * editable targets. When non-empty (and the reply has settled) a {@link CorrectionStrip} renders
+   * beneath the transcript so the respondent can fix a just-captured answer inline. Empty/omitted
+   * hides it. Resolved upstream in SessionWorkspace.
+   */
+  correctionTargets?: CorrectionTarget[];
+  /** Refetch the panel/lifecycle after a successful inline correction. */
+  onCorrected?: (view: AnswerPanelView) => void;
   /**
    * Read-only replay: render the transcript with no composer (no input, mic, or attachment row), for
    * the admin session viewer reading a respondent's conversation. The respondent surface never sets
@@ -381,6 +393,8 @@ export function QuestionnaireChat({
   reasoningDwellMs = AUTO_REVEAL_DWELL_MS,
   reasoningPerItemMs = AUTO_REVEAL_PER_ITEM_MS,
   animateOpening = false,
+  correctionTargets = [],
+  onCorrected,
   readOnly = false,
   className,
 }: QuestionnaireChatProps) {
@@ -593,6 +607,19 @@ export function QuestionnaireChat({
               onDismiss={status === 'error' ? dismissError : undefined}
               // `retry` is async; the panel's onRetry is fire-and-forget (void).
               onRetry={status === 'error' ? () => void retry() : undefined}
+            />
+          )}
+
+          {/* Inline correction (Variant B): once the latest reply has fully settled (composerReady),
+              offer a quiet "fix what I just noted" strip for the slots this turn captured — so a
+              mis-heard answer is corrected here, not via a corrective turn that could trip a false
+              contradiction warning. Hidden in read-only replay and terminal states. */}
+          {!readOnly && !isTerminal && composerReady && correctionTargets.length > 0 && (
+            <CorrectionStrip
+              targets={correctionTargets}
+              sessionId={sessionId}
+              accessToken={accessToken}
+              onCorrected={(view) => onCorrected?.(view)}
             />
           )}
 

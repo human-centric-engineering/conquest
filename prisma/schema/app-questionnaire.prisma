@@ -217,6 +217,13 @@ model AppQuestionnaireConfig {
   // chat so existing launched versions are unchanged. (PRESENTATION_MODES — types.ts)
   presentationMode String @default("chat") // chat | form | both
 
+  // Inline answer correction (Variant B): let respondents "fix" an answer the latest turn captured
+  // directly via a small inline editor (in the chat beneath the most-recent turn and on the answer
+  // panel row) rather than by sending a fresh chat turn. Corrections route through the form-edit path
+  // (PUT …/answers), so they never run the turn pipeline — no contradiction re-check fires on a fix.
+  // On by default; respondent-facing UX with no platform flag (the admin toggles it per version).
+  inlineCorrectionEnabled Boolean @default(true)
+
   // Session-start profile fields (ProfileFieldConfig[] — types.ts).
   profileFields Json @default("[]")
 

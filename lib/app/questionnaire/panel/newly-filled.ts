@@ -10,7 +10,11 @@
  * isolation, mirroring `confidence.ts` / `answer-panel.ts`'s pure-core convention.
  */
 
-import type { AnswerPanelView, DataSlotPanelSlot } from '@/lib/app/questionnaire/panel/types';
+import type {
+  AnswerPanelView,
+  DataSlotPanelSlot,
+  PanelSlotView,
+} from '@/lib/app/questionnaire/panel/types';
 
 /** Stable DOM id for a panel slot row — shared by the minimap (scroll target) and the stepper. */
 export function panelSlotDomId(key: string): string {
@@ -93,6 +97,55 @@ export function diffNewlyFilled(
         slot.answeredAtTurnIndex != null &&
         slot.answeredAtTurnIndex !== (prior?.answeredAtTurnIndex ?? null);
       if (becameFilled || turnAdvanced) result.push(slot.key);
+    }
+  }
+  return result;
+}
+
+/** Index a view's question slots by key for O(1) before/after comparison. */
+function questionSlotsByKey(view: AnswerPanelView | null): Map<string, PanelSlotView> {
+  const map = new Map<string, PanelSlotView>();
+  if (!view) return map;
+  for (const section of view.sections) {
+    for (const slot of section.slots) map.set(slot.slotKey, slot);
+  }
+  return map;
+}
+
+/**
+ * The QUESTION-mode equivalent of {@link diffNewlyFilled} — the question slot keys a turn just
+ * captured or updated, in panel display order (sections in order, slots within each in order).
+ *
+ * A slot counts as "newly filled this turn" when, comparing the previous snapshot to the next:
+ *  - it was not `answered` before but is now (a fresh capture), OR
+ *  - it was already answered and its `answeredAtTurnIndex` advanced (a refinement / value change
+ *    this turn — the index moves whenever the latest turn re-touched it).
+ *
+ * Returns `[]` when `prev` is null (first paint / SSR seed — never auto-surface the seeded view),
+ * when either snapshot is in data-slot mode (use {@link diffNewlyFilled} there), or when nothing
+ * changed. Drives the chat-side "fix what you just said" correction strip (Variant B), which targets
+ * only the slots the most-recent turn filled.
+ */
+export function diffNewlyFilledQuestions(
+  prev: AnswerPanelView | null,
+  next: AnswerPanelView | null
+): string[] {
+  if (prev === null) return [];
+  // Question mode only — a data-slot snapshot has no comparable `sections` baseline.
+  if (prev.dataSlotGroups || next?.dataSlotGroups) return [];
+  if (!next) return [];
+
+  const before = questionSlotsByKey(prev);
+  const result: string[] = [];
+  for (const section of next.sections) {
+    for (const slot of section.slots) {
+      const prior = before.get(slot.slotKey);
+      const becameAnswered = slot.answered && !(prior?.answered ?? false);
+      const turnAdvanced =
+        slot.answered &&
+        slot.answeredAtTurnIndex != null &&
+        slot.answeredAtTurnIndex !== (prior?.answeredAtTurnIndex ?? null);
+      if (becameAnswered || turnAdvanced) result.push(slot.slotKey);
     }
   }
   return result;

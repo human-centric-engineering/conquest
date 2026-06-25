@@ -20,6 +20,7 @@ export interface SessionSurfaceConfig {
   config: {
     anonymousMode: boolean;
     presentationMode: string;
+    inlineCorrectionEnabled: boolean;
     voiceEnabled: boolean;
     attachmentsEnabled: boolean;
     reasoningStreamEnabled: boolean;
@@ -44,6 +45,7 @@ export async function loadSessionSurfaceConfig(
             select: {
               anonymousMode: true,
               presentationMode: true,
+              inlineCorrectionEnabled: true,
               voiceEnabled: true,
               attachmentsEnabled: true,
               reasoningStreamEnabled: true,

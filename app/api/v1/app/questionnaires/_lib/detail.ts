@@ -111,6 +111,7 @@ export const CONFIG_SELECT = {
   profileFields: true,
   answerSlotPanelScope: true,
   presentationMode: true,
+  inlineCorrectionEnabled: true,
   reasoningStreamEnabled: true,
   reasoningStreamPlacement: true,
   reasoningStreamDwellMs: true,
@@ -147,6 +148,7 @@ type ConfigRow = {
   profileFields: Prisma.JsonValue;
   answerSlotPanelScope: string;
   presentationMode: string;
+  inlineCorrectionEnabled: boolean;
   reasoningStreamEnabled: boolean;
   reasoningStreamPlacement: string;
   reasoningStreamDwellMs: number;
@@ -246,6 +248,7 @@ export function toConfigView(row: ConfigRow | null): ConfigView {
     profileFields: asProfileFields(row.profileFields),
     answerSlotPanelScope: asAnswerSlotPanelScope(row.answerSlotPanelScope),
     presentationMode: asPresentationMode(row.presentationMode),
+    inlineCorrectionEnabled: row.inlineCorrectionEnabled,
     reasoningStreamEnabled: row.reasoningStreamEnabled,
     reasoningStreamPlacement: asReasoningPlacement(row.reasoningStreamPlacement),
     reasoningStreamDwellMs: row.reasoningStreamDwellMs,

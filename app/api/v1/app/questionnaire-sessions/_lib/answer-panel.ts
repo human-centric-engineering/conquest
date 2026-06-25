@@ -19,6 +19,7 @@ import {
   ANSWER_PROVENANCES,
   ANSWER_SLOT_PANEL_SCOPES,
   DEFAULT_QUESTIONNAIRE_CONFIG,
+  QUESTION_TYPES,
   SESSION_STATUSES,
   narrowToEnum,
   type AnswerProvenance,
@@ -100,7 +101,15 @@ export async function loadAnswerPanelState(
         select: {
           // `presentationMode` gates whether the breadth meter may itemise a slot's mapped
           // questions — only in `both`, where the respondent also sees the form (Data Slots feature).
-          config: { select: { answerSlotPanelScope: true, presentationMode: true } },
+          // `inlineCorrectionEnabled` (Variant B) is a second reason to itemise: the inline "fix"
+          // editor needs each mapped question's editable shape to correct a data-slot reading.
+          config: {
+            select: {
+              answerSlotPanelScope: true,
+              presentationMode: true,
+              inlineCorrectionEnabled: true,
+            },
+          },
           // Data Slots feature: the version's data slots (rendered when dataSlotMode), each with the
           // keys of the questions it abstracts over (M:N) so the seam can compute per-slot breadth.
           dataSlots: {
@@ -218,11 +227,20 @@ export async function loadAnswerPanelState(
     // the questionnaire's own order rather than the M:N join's insertion order.
     const presentationMode = row.version.config?.presentationMode ?? 'chat';
     const showSlotQuestions = presentationMode === 'both';
+    // Inline correction (Variant B) also needs the mapped questions itemised — with their editable
+    // type/config/value — so a data-slot "fix" can edit the underlying questions. The breadth-list
+    // DISPLAY still gates on `showSlotQuestions`; this only governs whether `coverage.questions` is
+    // populated (so plain chat-only-without-correction keeps shipping nothing).
+    const inlineCorrectionEnabled = row.version.config?.inlineCorrectionEnabled ?? true;
+    const itemiseQuestions = showSlotQuestions || inlineCorrectionEnabled;
     const orderedQuestions = row.version.sections.flatMap((s) => s.questions);
     const promptByKey = new Map(orderedQuestions.map((q) => [q.key, q.prompt]));
+    const typeByKey = new Map(orderedQuestions.map((q) => [q.key, q.type]));
+    const typeConfigByKey = new Map(orderedQuestions.map((q) => [q.key, q.typeConfig]));
     const orderIndex = new Map(orderedQuestions.map((q, i) => [q.key, i]));
     const answeredKeys = new Set(row.answers.map((a) => a.questionSlot.key));
     const confidenceByKey = new Map(row.answers.map((a) => [a.questionSlot.key, a.confidence]));
+    const valueByKey = new Map(row.answers.map((a) => [a.questionSlot.key, a.value]));
 
     const fillByDataSlotId = new Map(
       row.dataSlotFills.map((f) => [
@@ -258,11 +276,15 @@ export async function loadAnswerPanelState(
       const coverage = {
         total: mappedKeys.length,
         answered: mappedKeys.filter((k) => answeredKeys.has(k)).length,
-        questions: showSlotQuestions
+        questions: itemiseQuestions
           ? mappedKeys.map((k) => ({
+              key: k,
               label: promptByKey.get(k) ?? k,
+              type: narrowToEnum(typeByKey.get(k) ?? 'free_text', QUESTION_TYPES, 'free_text'),
+              typeConfig: typeConfigByKey.get(k) ?? null,
               answered: answeredKeys.has(k),
               confidence: answeredKeys.has(k) ? (confidenceByKey.get(k) ?? null) : null,
+              value: valueByKey.get(k) ?? null,
             }))
           : [],
       };

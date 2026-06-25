@@ -12,8 +12,7 @@
  */
 
 import { isRecord } from '@/lib/utils';
-import { readChoicesConfig } from '@/lib/app/questionnaire/form/type-config';
-import type { PanelSlotView } from '@/lib/app/questionnaire/panel/types';
+import { formatSlotAnswer } from '@/lib/app/questionnaire/panel/format-slot-answer';
 import type { SessionExportModel } from '@/lib/app/questionnaire/export/types';
 
 /**
@@ -88,42 +87,6 @@ export function validateRespondentReportContent(parsed: unknown): RespondentRepo
   return { summary, sections, actions };
 }
 
-/** Render one scalar/object as a compact string (objects → JSON; never `[object Object]`). */
-function stringifyScalar(value: unknown): string {
-  if (value === null || value === undefined) return '';
-  if (typeof value === 'object') return JSON.stringify(value);
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-  return JSON.stringify(value);
-}
-
-/** Render a single captured answer value as a compact string for the transcript. */
-function formatAnswerValue(value: unknown): string {
-  if (value === null || value === undefined) return '(no answer)';
-  if (Array.isArray(value)) return value.map(stringifyScalar).join(', ');
-  return stringifyScalar(value);
-}
-
-/**
- * The respondent-facing text of a captured answer: a single/multi-choice answer is stored as its
- * option `value` (a slug), so map it to the option `label` the respondent actually saw before
- * formatting. Everything else (and any value whose key isn't in the option list) falls through to
- * {@link formatAnswerValue} unchanged, preserving the transcript's scalar rendering.
- */
-function formatSlotAnswerForTranscript(slot: PanelSlotView): string {
-  if (slot.type === 'single_choice' || slot.type === 'multi_choice') {
-    const config = readChoicesConfig(slot.type, slot.typeConfig);
-    if (config) {
-      const labelByValue = new Map(config.choices.map((c) => [c.value, c.label]));
-      const toLabel = (v: unknown): unknown =>
-        typeof v === 'string' && labelByValue.has(v) ? labelByValue.get(v) : v;
-      const mapped = Array.isArray(slot.value) ? slot.value.map(toLabel) : toLabel(slot.value);
-      return formatAnswerValue(mapped);
-    }
-  }
-  return formatAnswerValue(slot.value);
-}
-
 /**
  * Flatten the export model into a plain-text Q&A transcript for the report agent. Only answered
  * slots are included (an unanswered slot adds noise, not signal); sections with no answers are
@@ -142,8 +105,10 @@ export function buildAnswerTranscript(model: AnswerTranscriptInput): string {
     lines.push(`## ${section.title}`);
     for (const slot of answered) {
       lines.push(`Q: ${slot.prompt}`);
-      // Choice answers render their respondent-facing labels, not their stored option keys.
-      lines.push(`A: ${formatSlotAnswerForTranscript(slot)}`);
+      // Slot-aware rendering: choice answers show their respondent-facing labels (not stored option
+      // keys) and booleans honour their configured true/false labels — the same shared formatter the
+      // PDF and on-screen panel use, so the report transcript can't drift from what the respondent saw.
+      lines.push(`A: ${formatSlotAnswer(slot.type, slot.typeConfig, slot.value)}`);
     }
     lines.push('');
   }

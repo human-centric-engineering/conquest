@@ -55,7 +55,17 @@ describe('SlotBreadthMeter', () => {
         coverage={coverage({
           total: 2,
           answered: 1,
-          questions: [{ label: 'Your name?', answered: true, confidence: 0.9 }],
+          questions: [
+            {
+              key: 'name',
+              label: 'Your name?',
+              type: 'free_text',
+              typeConfig: null,
+              answered: true,
+              confidence: 0.9,
+              value: 'Ada',
+            },
+          ],
         })}
         expandable={false}
       />
@@ -76,8 +86,24 @@ describe('SlotBreadthMeter', () => {
           total: 2,
           answered: 1,
           questions: [
-            { label: 'Your name?', answered: true, confidence: 0.9 },
-            { label: 'Favourite colour?', answered: false, confidence: null },
+            {
+              key: 'name',
+              label: 'Your name?',
+              type: 'free_text',
+              typeConfig: null,
+              answered: true,
+              confidence: 0.9,
+              value: 'Ada',
+            },
+            {
+              key: 'colour',
+              label: 'Favourite colour?',
+              type: 'free_text',
+              typeConfig: null,
+              answered: false,
+              confidence: null,
+              value: null,
+            },
           ],
         })}
         expandable

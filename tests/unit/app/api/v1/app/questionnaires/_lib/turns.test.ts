@@ -340,7 +340,7 @@ describe('recordTurn', () => {
     expect(createData).not.toHaveProperty('reasoning');
   });
 
-  it('maps null to Prisma.JsonNull for toolCalls and sideEffectAnswerIds (jsonInput helper)', async () => {
+  it('passes empty toolCalls/sideEffectAnswerIds arrays through jsonInput unchanged and stores null costUsd as null', async () => {
     // Passing empty arrays → jsonInput should return the array as-is (not Prisma.JsonNull).
     // Passing null costUsd → Prisma stores as NULL.
     await recordTurn({
@@ -364,7 +364,7 @@ describe('recordTurn', () => {
     expect(createData.costUsd).toBeNull();
   });
 
-  it('jsonInput maps null/undefined to Prisma.JsonNull for the sideEffectDataSlotIds field', async () => {
+  it('stores a non-empty sideEffectDataSlotIds array as the array (not Prisma.JsonNull)', async () => {
     // sideEffectDataSlotIds is passed as a non-empty array → stored as that array.
     await recordTurn({
       sessionId: 'sess-1',

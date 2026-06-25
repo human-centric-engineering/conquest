@@ -450,6 +450,9 @@ export function ConfigEditor({
   const [presentationMode, setPresentationMode] = useState<PresentationMode>(
     config.presentationMode
   );
+  const [inlineCorrectionEnabled, setInlineCorrectionEnabled] = useState(
+    config.inlineCorrectionEnabled
+  );
   const [reasoningStreamEnabled, setReasoningStreamEnabled] = useState(
     config.reasoningStreamEnabled
   );
@@ -503,6 +506,7 @@ export function ConfigEditor({
     setSupportResourceUrl(config.supportResourceUrl);
     setAnswerSlotPanelScope(config.answerSlotPanelScope);
     setPresentationMode(config.presentationMode);
+    setInlineCorrectionEnabled(config.inlineCorrectionEnabled);
     setReasoningStreamEnabled(config.reasoningStreamEnabled);
     setReasoningStreamPlacement(config.reasoningStreamPlacement);
     setReasoningStreamDwellMs(String(config.reasoningStreamDwellMs));
@@ -591,6 +595,8 @@ export function ConfigEditor({
         supportResourceUrl: supportResourceUrl.trim(),
         answerSlotPanelScope,
         presentationMode,
+        // Inline answer correction (Variant B): respondent-facing UX, no platform flag.
+        inlineCorrectionEnabled,
         // Live "watch it think" reasoning stream (demo feature). Requires the platform
         // reasoning-stream flag to take effect.
         reasoningStreamEnabled,
@@ -817,6 +823,23 @@ export function ConfigEditor({
               </SelectContent>
             </Select>
           </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Switch
+            checked={inlineCorrectionEnabled}
+            onCheckedChange={setInlineCorrectionEnabled}
+            disabled={busy}
+          />
+          <Label className="text-sm font-medium">
+            Inline answer correction{' '}
+            <FieldHelp title="Inline answer correction">
+              Let respondents fix an answer the latest turn just captured with a small inline editor
+              — beneath the most-recent message in the chat and on the answer-panel rows — instead
+              of re-explaining in a new message. Corrections save directly (the same path as the
+              form view), so they don&apos;t spend a turn or trip a contradiction notice. On by
+              default.
+            </FieldHelp>
+          </Label>
         </div>
         <div className="flex items-center gap-2">
           <Switch checked={voiceEnabled} onCheckedChange={setVoiceEnabled} disabled={busy} />

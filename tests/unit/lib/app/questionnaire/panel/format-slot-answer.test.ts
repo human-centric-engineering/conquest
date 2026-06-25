@@ -64,4 +64,20 @@ describe('formatSlotAnswer', () => {
     expect(formatSlotAnswer('multi_choice', CHOICES, [])).toBe('—');
     expect(formatSlotAnswer('free_text', null, undefined)).toBe('—');
   });
+
+  it('formats non-choice array, boolean, bigint, and object values via the plain fallback', () => {
+    // These value types land on a slot type with no key→label map, so they fall through to
+    // formatValue's own branches (the renderer the on-screen panel shares).
+    expect(formatSlotAnswer('free_text', null, ['Alpha', 'Beta'])).toBe('Alpha, Beta');
+    expect(formatSlotAnswer('free_text', null, [])).toBe('—');
+    // A boolean on a non-boolean slot has no custom labels, so it reads Yes/No.
+    expect(formatSlotAnswer('free_text', null, true)).toBe('Yes');
+    expect(formatSlotAnswer('free_text', null, false)).toBe('No');
+    expect(formatSlotAnswer('numeric', null, 42n)).toBe('42');
+    expect(formatSlotAnswer('free_text', null, { tier: 'gold' })).toBe('{"tier":"gold"}');
+  });
+
+  it('renders an em-dash for a blank free-text string', () => {
+    expect(formatSlotAnswer('free_text', null, '   ')).toBe('—');
+  });
 });

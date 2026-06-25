@@ -58,9 +58,12 @@ describe('loadTranscript', () => {
     );
   });
 
-  it('skips the empty-message kickoff turn’s user bubble but keeps its assistant reply', async () => {
+  it('skips the empty- or whitespace-only kickoff turn’s user bubble but keeps its assistant reply', async () => {
+    // Source gates the user bubble on `userMessage.trim().length > 0`, so a whitespace-only
+    // message is dropped too — covered by the second row, not just the bare-empty first.
     const rows: Row[] = [
       { userMessage: '', agentResponse: 'Opening question?', warnings: [] },
+      { userMessage: '   ', agentResponse: 'Still opening?', warnings: [] },
       { userMessage: 'My answer', agentResponse: 'Follow-up?', warnings: [] },
     ];
     findMany.mockResolvedValue(rows);
@@ -69,6 +72,7 @@ describe('loadTranscript', () => {
 
     expect(turns).toEqual([
       { role: 'assistant', content: 'Opening question?' },
+      { role: 'assistant', content: 'Still opening?' },
       { role: 'user', content: 'My answer' },
       { role: 'assistant', content: 'Follow-up?' },
     ]);

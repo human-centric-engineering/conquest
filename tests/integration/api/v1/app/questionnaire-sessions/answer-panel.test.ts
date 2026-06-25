@@ -219,6 +219,13 @@ describe('loadAnswerPanelState', () => {
         row({
           version: {
             ...row().version,
+            // Inline correction OFF so this test isolates the showSlotQuestions (both-mode) gate:
+            // with neither gate on, chat mode ships no itemised questions at all.
+            config: {
+              answerSlotPanelScope: 'full_progress',
+              presentationMode: 'chat',
+              inlineCorrectionEnabled: false,
+            },
             dataSlots: [
               {
                 id: 'ds-1',
@@ -313,10 +320,76 @@ describe('loadAnswerPanelState', () => {
       const loaded = await loadAnswerPanelState('sess-1', true);
       expect(loaded?.view.showSlotQuestions).toBe(true);
       const goal = loaded!.view.dataSlotGroups![0].slots[0];
-      // Itemised in version order, each carrying its own answered/confidence state.
+      // Itemised in version order, each carrying its own answered/confidence state plus the editable
+      // shape (key/type/typeConfig/value) the inline-correction editor (Variant B) needs.
       expect(goal.coverage.questions).toEqual([
-        { label: 'Your name?', answered: true, confidence: 0.9 },
-        { label: 'Favourite colour?', answered: false, confidence: null },
+        {
+          key: 'name',
+          label: 'Your name?',
+          type: 'free_text',
+          typeConfig: null,
+          answered: true,
+          confidence: 0.9,
+          value: 'Ada',
+        },
+        {
+          key: 'colour',
+          label: 'Favourite colour?',
+          type: 'single_choice',
+          typeConfig: {
+            choices: [
+              { value: 'r', label: 'Red' },
+              { value: 'b', label: 'Blue' },
+            ],
+          },
+          answered: false,
+          confidence: null,
+          value: null,
+        },
+      ]);
+    });
+
+    it('itemises mapped questions in chat mode too when inline correction is on (Variant B)', async () => {
+      findUnique.mockResolvedValue(
+        row({
+          version: {
+            ...row().version,
+            // Chat mode, but inline correction ON (the default) → the editor needs the mapped
+            // questions, so coverage.questions is populated even though showSlotQuestions stays false.
+            config: {
+              answerSlotPanelScope: 'full_progress',
+              presentationMode: 'chat',
+              inlineCorrectionEnabled: true,
+            },
+            dataSlots: [
+              {
+                id: 'ds-1',
+                key: 'goal',
+                name: 'Goal',
+                description: 'Why',
+                theme: 'Goals',
+                questions: [{ questionSlot: { key: 'name' } }],
+              },
+            ],
+          },
+          dataSlotFills: [],
+        })
+      );
+      const loaded = await loadAnswerPanelState('sess-1', true);
+      // The breadth-list DISPLAY stays gated on showSlotQuestions (both mode only)…
+      expect(loaded?.view.showSlotQuestions).toBe(false);
+      // …but the editable questions are shipped so the correction editor can render them.
+      const goal = loaded!.view.dataSlotGroups![0].slots[0];
+      expect(goal.coverage.questions).toEqual([
+        {
+          key: 'name',
+          label: 'Your name?',
+          type: 'free_text',
+          typeConfig: null,
+          answered: true,
+          confidence: 0.9,
+          value: 'Ada',
+        },
       ]);
     });
 

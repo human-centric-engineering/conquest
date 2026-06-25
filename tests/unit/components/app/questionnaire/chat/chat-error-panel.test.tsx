@@ -36,6 +36,7 @@ function makeError(overrides: Partial<ChatErrorState> = {}): ChatErrorState {
 describe('ChatErrorPanel — terminal statuses', () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   const terminalCases: QuestionnaireChatStatus[] = ['cost_capped', 'not_active', 'expired'];
@@ -131,11 +132,10 @@ describe('ChatErrorPanel — terminal statuses', () => {
 
     it('triggers a page reload when the "Reload" button is clicked', async () => {
       // Arrange: stub reload so the test environment doesn't perform a real navigation.
+      // Use vi.stubGlobal (not Object.defineProperty) so afterEach's unstubAllGlobals restores
+      // the real window.location — otherwise the stubbed reload leaks into later tests.
       const reloadSpy = vi.fn();
-      Object.defineProperty(window, 'location', {
-        value: { ...window.location, reload: reloadSpy },
-        writable: true,
-      });
+      vi.stubGlobal('location', { ...window.location, reload: reloadSpy });
       const error = makeError();
       const user = userEvent.setup();
 

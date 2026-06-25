@@ -19,8 +19,10 @@ import { ConfidenceIndicator } from '@/components/app/questionnaire/panel/confid
 import { ConfidenceScore } from '@/components/app/questionnaire/panel/confidence-score';
 import { ProvenanceBadge } from '@/components/app/questionnaire/panel/provenance-badge';
 import { RefinementHistory } from '@/components/app/questionnaire/panel/refinement-history';
+import { InlineAnswerEditor } from '@/components/app/questionnaire/panel/inline-answer-editor';
 import { formatSlotAnswer } from '@/lib/app/questionnaire/panel/format-slot-answer';
 import type { PanelSlotView } from '@/lib/app/questionnaire/panel/types';
+import type { PanelCorrection } from '@/lib/app/questionnaire/panel/correction-targets';
 
 export interface AnswerSlotItemProps {
   slot: PanelSlotView;
@@ -28,11 +30,23 @@ export interface AnswerSlotItemProps {
   onRevisit?: (slot: PanelSlotView) => void;
   /** Whether a revisit can be sent right now (false while streaming / blocked). */
   canRevisit?: boolean;
+  /**
+   * Inline answer correction (Variant B): when present (and the slot is answered), an "Edit" action
+   * in the expanded detail opens the shared editor to fix this answer in place. Omit to hide it.
+   */
+  correction?: PanelCorrection;
 }
 
-export function AnswerSlotItem({ slot, onRevisit, canRevisit = false }: AnswerSlotItemProps) {
+export function AnswerSlotItem({
+  slot,
+  onRevisit,
+  canRevisit = false,
+  correction,
+}: AnswerSlotItemProps) {
   const [expanded, setExpanded] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const canEdit = correction != null && slot.answered;
 
   const expandable = slot.answered;
   const toggle = () => {
@@ -90,46 +104,82 @@ export function AnswerSlotItem({ slot, onRevisit, canRevisit = false }: AnswerSl
 
       {expandable && expanded && (
         <div className="mt-2 space-y-2 border-t pt-2 pl-[1.125rem]">
-          {slot.rationale && <p className="text-muted-foreground text-xs">{slot.rationale}</p>}
-          <RefinementHistory entries={slot.refinementHistory} />
+          {editing && correction ? (
+            // Inline correction (Variant B): fix this answer in place — a single-question editor,
+            // saved through the form-edit path (no contradiction re-check), then the panel refetches.
+            <InlineAnswerEditor
+              questions={[
+                {
+                  slot: {
+                    slotKey: slot.slotKey,
+                    prompt: slot.prompt,
+                    type: slot.type,
+                    typeConfig: slot.typeConfig,
+                  },
+                  initialValue: slot.value,
+                },
+              ]}
+              sessionId={correction.sessionId}
+              accessToken={correction.accessToken}
+              onSaved={correction.onCorrected}
+              onCancel={() => setEditing(false)}
+            />
+          ) : (
+            <>
+              {slot.rationale && <p className="text-muted-foreground text-xs">{slot.rationale}</p>}
+              <RefinementHistory entries={slot.refinementHistory} />
 
-          {onRevisit &&
-            (confirming ? (
-              <div className="flex items-center gap-2">
-                <span className="text-muted-foreground text-xs">Re-ask this question?</span>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  disabled={!canRevisit}
-                  onClick={() => {
-                    onRevisit(slot);
-                    setConfirming(false);
-                    setExpanded(false);
-                  }}
-                >
-                  Yes, revisit
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => setConfirming(false)}
-                >
-                  Cancel
-                </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                {canEdit && !confirming && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setEditing(true)}
+                  >
+                    Edit answer
+                  </Button>
+                )}
+                {onRevisit &&
+                  (confirming ? (
+                    <>
+                      <span className="text-muted-foreground text-xs">Re-ask this question?</span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        disabled={!canRevisit}
+                        onClick={() => {
+                          onRevisit(slot);
+                          setConfirming(false);
+                          setExpanded(false);
+                        }}
+                      >
+                        Yes, revisit
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setConfirming(false)}
+                      >
+                        Cancel
+                      </Button>
+                    </>
+                  ) : (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={!canRevisit}
+                      onClick={() => setConfirming(true)}
+                    >
+                      Revisit
+                    </Button>
+                  ))}
               </div>
-            ) : (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={!canRevisit}
-                onClick={() => setConfirming(true)}
-              >
-                Revisit
-              </Button>
-            ))}
+            </>
+          )}
         </div>
       )}
     </li>

@@ -241,6 +241,10 @@ export const updateConfigSchema = z
     // How the respondent completes the session: chat (conversation), form (raw sectioned
     // form), or both (toggle between them). Defaults to chat for existing versions.
     presentationMode: z.enum(PRESENTATION_MODES).optional(),
+    // Inline answer correction (Variant B): let respondents fix a just-captured answer inline
+    // (in the chat + on the answer panel) instead of sending a fresh turn. On by default;
+    // respondent-facing UX, no platform flag.
+    inlineCorrectionEnabled: z.boolean().optional(),
     // Live "watch it think" reasoning trace (demo feature). Gated additionally by the platform
     // flag APP_QUESTIONNAIRES_REASONING_STREAM_ENABLED. placement = overlay | inline.
     reasoningStreamEnabled: z.boolean().optional(),

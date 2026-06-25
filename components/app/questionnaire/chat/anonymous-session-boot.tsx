@@ -76,6 +76,11 @@ interface AnonymousSessionBootProps {
   /** "Animated" placement: extra dwell (ms) per reasoning step beyond two. */
   reasoningPerItemMs?: number;
   /**
+   * Inline answer correction (Variant B): resolved server-side from the version config (default on).
+   * Forwarded to the workspace, which shows the "fix this answer" gesture in the chat + panel.
+   */
+  inlineCorrectionEnabled?: boolean;
+  /**
    * Respondent intro / splash platform flag (resolved server-side). When on, a FRESH session fetches
    * its resolved intro on boot and gates the workspace behind the splash; the per-version
    * `intro.enabled` inside the payload is the second gate. Off → no fetch, straight into the surface.
@@ -263,6 +268,7 @@ export function AnonymousSessionBoot({
   reasoningPlacement,
   reasoningDwellMs,
   reasoningPerItemMs,
+  inlineCorrectionEnabled = true,
   introScreenEnabled = false,
 }: AnonymousSessionBootProps) {
   const [state, setState] = useState<BootState>({ phase: 'creating' });
@@ -412,6 +418,7 @@ export function AnonymousSessionBoot({
       reasoningPlacement={reasoningPlacement}
       reasoningDwellMs={reasoningDwellMs}
       reasoningPerItemMs={reasoningPerItemMs}
+      inlineCorrectionEnabled={inlineCorrectionEnabled}
     />
   );
 }

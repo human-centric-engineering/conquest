@@ -2321,6 +2321,42 @@ describe('retry dedup-and-replay (F7.x)', () => {
     expect(runMock.persistTurn).not.toHaveBeenCalled();
   });
 
+  it('replays the saved reasoning trace and a detail-less warning in live frame order', async () => {
+    // The other replay shape: a turn whose saved trace is non-empty and whose warning carried no
+    // detail — exercises the reasoning-frame branch and the omitted-detail branch of the replay.
+    const steps = [{ label: 'Re-read the prior answers', detail: null }];
+    transcriptMock.findTurnByIdempotencyKey.mockResolvedValue({
+      id: 'turn-prior',
+      agentResponse: 'Replayed with reasoning.',
+      warnings: [{ code: 'support', message: 'Reach a human anytime.' }],
+      reasoning: steps,
+    });
+
+    const frames = await drainSse(await POST(req({ message: 'hi', idempotencyKey: KEY }), ctx));
+
+    // Reasoning frame appears (and before content), carrying the saved steps verbatim.
+    expect(frames.map((f) => f.event)).toEqual([
+      'start',
+      'warning',
+      'reasoning',
+      'content',
+      'done',
+    ]);
+    const reasoningFrame = frames.find((f) => f.event === 'reasoning');
+    expect((reasoningFrame!.data as { steps: unknown[] }).steps).toEqual(steps);
+
+    // The detail-less warning replays without a `detail` field.
+    const warningFrame = frames.find((f) => f.event === 'warning');
+    expect(warningFrame!.data).toEqual({
+      type: 'warning',
+      code: 'support',
+      message: 'Reach a human anytime.',
+    });
+    expect(warningFrame!.data).not.toHaveProperty('detail');
+
+    expect(runMock.persistTurn).not.toHaveBeenCalled();
+  });
+
   it('runs fresh (and persists with the key) when the key has no prior turn — the common retry', async () => {
     // Arrange: default mock already returns null (no prior turn under the key).
     // Act
