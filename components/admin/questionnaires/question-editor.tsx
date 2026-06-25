@@ -40,9 +40,17 @@ import {
   QUESTION_TYPE_LABELS,
   type QuestionType,
 } from '@/lib/app/questionnaire/types';
-import { defaultTypeConfig, validateTypeConfig } from '@/lib/app/questionnaire/authoring';
+import {
+  defaultTypeConfig,
+  questionConfigIssue,
+  validateTypeConfig,
+} from '@/lib/app/questionnaire/authoring';
 import type { QuestionSlotView, SectionView, TagView } from '@/lib/app/questionnaire/views';
 
+import {
+  QuestionConfigWarning,
+  QUESTION_ISSUE_RING,
+} from '@/components/admin/questionnaires/question-config-warning';
 import { QuestionTagsEditor } from '@/components/admin/questionnaires/question-tags-editor';
 import type { RunMutation } from '@/components/admin/questionnaires/version-editor-types';
 
@@ -113,13 +121,18 @@ export function QuestionEditor({
 
   const currentSectionId = sections.find((s) => s.questions.some((q) => q.id === question.id))?.id;
 
+  // A question whose `typeConfig` doesn't satisfy its type (most often a likert
+  // missing its range or per-point labels). Drives the amber row treatment +
+  // inline chip so the admin can spot it before the launch gate does.
+  const configIssue = questionConfigIssue(question.type, question.typeConfig);
+
   return (
     <li
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
-      className={`group bg-card relative rounded-lg border p-3 transition-shadow hover:border-[var(--cq-accent-ring)] hover:shadow-sm ${
-        isDragging ? 'opacity-60 shadow-md' : ''
-      }`}
+      className={`group bg-card relative rounded-lg border p-3 transition-shadow hover:shadow-sm ${
+        configIssue ? QUESTION_ISSUE_RING : 'hover:border-[var(--cq-accent-ring)]'
+      } ${isDragging ? 'opacity-60 shadow-md' : ''}`}
     >
       {/* Connector tick onto the section spine. */}
       <span className="absolute top-6 -left-4 h-px w-4 bg-[var(--cq-accent-muted)]" aria-hidden />
@@ -163,6 +176,7 @@ export function QuestionEditor({
                   ))}
                 </SelectContent>
               </Select>
+              <QuestionConfigWarning issue={configIssue} />
             </div>
 
             <div className="flex items-center gap-1.5">
