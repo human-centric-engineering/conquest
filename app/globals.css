@@ -203,6 +203,18 @@
     display: none; /* Safari + older WebKit/Blink */
   }
 
+  /* Bottom-sheet drawer: the SlotMiniMap (or touch) is the scroll affordance, so suppress every
+     native scrollbar anywhere inside the sheet — whichever element ends up scrolling (the sheet,
+     the panel's inner list, a nested region) it stays bar-free. Scoped to the drawer subtree. */
+  .cq-suppress-scrollbars,
+  .cq-suppress-scrollbars * {
+    scrollbar-width: none; /* Firefox + Chrome 121+ */
+  }
+  .cq-suppress-scrollbars::-webkit-scrollbar,
+  .cq-suppress-scrollbars *::-webkit-scrollbar {
+    display: none; /* Safari + older WebKit/Blink */
+  }
+
   @keyframes terminal-blink {
     to {
       visibility: hidden;

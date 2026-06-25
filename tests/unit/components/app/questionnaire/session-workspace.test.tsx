@@ -13,7 +13,7 @@
 
 import type { ReactNode } from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 
 import type { PanelSlotView } from '@/lib/app/questionnaire/panel/types';
 
@@ -207,6 +207,15 @@ describe('SessionWorkspace', () => {
   it('wires the lifecycle hook to the shared stream applyStatus', () => {
     setup();
     expect(lifecycleHook.mock.calls[0][0]).toMatchObject({ applyStatus });
+  });
+
+  it('refreshes the lifecycle when the form reports a save (onSaved)', () => {
+    // A form save must re-pull the status so coverage / submit-readiness reflect the new answer.
+    render(<SessionWorkspace sessionId="s1" presentationMode="both" />);
+    const opts = formHook.mock.calls[0][0] as { onSaved?: () => void };
+    expect(typeof opts.onSaved).toBe('function');
+    opts.onSaved?.();
+    expect(lifecycleRefetch).toHaveBeenCalledTimes(1);
   });
 
   it('does NOT auto-fire the kickoff when autoStart is off (the default)', () => {
@@ -505,6 +514,73 @@ describe('SessionWorkspace', () => {
       fireEvent.click(screen.getByRole('tab', { name: 'Chat' }));
       expect(screen.getByRole('tab', { name: 'Chat' })).toHaveAttribute('aria-selected', 'true');
       expect(refetch).toHaveBeenCalled();
+    });
+  });
+
+  describe('mobile "Review answers" drawer', () => {
+    const questionView = {
+      status: 'active' as const,
+      scope: 'full_progress' as const,
+      sections: [],
+      answeredCount: 3,
+      totalCount: 8,
+    };
+    const dataSlotView = { ...questionView, dataSlotGroups: [], progressPercent: 40 };
+
+    it('renders a mobile-only trigger (lg:hidden) in chat mode', () => {
+      setup({}, { view: questionView });
+      const trigger = screen.getByRole('button', { name: /review answers/i });
+      expect(trigger).toHaveClass('lg:hidden');
+    });
+
+    it('omits the trigger in form-only mode (no answer panel there)', () => {
+      render(<SessionWorkspace sessionId="s1" presentationMode="form" />);
+      expect(screen.queryByRole('button', { name: /review answers/i })).not.toBeInTheDocument();
+    });
+
+    it('labels the trigger "N of M" in question mode', () => {
+      setup({}, { view: questionView });
+      expect(screen.getByRole('button', { name: 'Review answers, 3 of 8' })).toBeInTheDocument();
+    });
+
+    it('labels the trigger by percent in data-slot mode', () => {
+      setup({}, { view: dataSlotView });
+      expect(
+        screen.getByRole('button', { name: 'Review answers, 40% complete' })
+      ).toBeInTheDocument();
+    });
+
+    it('opens the drawer reusing the workspace panel view — no second fetch hook', () => {
+      setup({}, { view: questionView });
+      // One panel (the hidden desktop side panel) before the sheet opens.
+      expect(screen.getAllByTestId('panel')).toHaveLength(1);
+
+      fireEvent.click(screen.getByRole('button', { name: /review answers/i }));
+
+      const dialog = screen.getByRole('dialog');
+      // Two panels now — the desktop side panel plus the drawer panel — both fed by the workspace's
+      // single useAnswerPanel return value. Reusing the one view (not a second fetch hook) is what
+      // lets both render the same data; the drawer mounts no hook of its own.
+      expect(screen.getAllByTestId('panel')).toHaveLength(2);
+      expect(within(dialog).getByTestId('panel')).toBeInTheDocument();
+    });
+
+    it('closes the drawer when a revisit fires from inside it', () => {
+      setup({ canSend: true }, { view: questionView });
+      fireEvent.click(screen.getByRole('button', { name: /review answers/i }));
+
+      const dialog = screen.getByRole('dialog');
+      fireEvent.click(within(dialog).getByText('revisit'));
+
+      expect(sendMessage).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
+    it('keeps the both-mode ModeToggle alongside the trigger', () => {
+      panelHook.mockReturnValue({ view: questionView, loading: false, error: false, refetch });
+      render(<SessionWorkspace sessionId="s1" presentationMode="both" />);
+      expect(screen.getByRole('button', { name: /review answers/i })).toBeInTheDocument();
+      expect(screen.getAllByRole('tab')).toHaveLength(2);
     });
   });
 });

@@ -106,4 +106,16 @@ describe('SessionLifecycleBar', () => {
     renderBar({ canPause: true, actionError: 'Could not pause' });
     expect(screen.getByRole('alert')).toHaveTextContent('Could not pause');
   });
+
+  it('renders the session ref chip when the status view carries a ref', () => {
+    renderBar({ view: view({ ref: 'EWG5GZTG' }) });
+    // The info wrap-unit only renders when ref/download are present; the chip exposes the grouped
+    // reference via its aria-label.
+    expect(screen.getByRole('button', { name: /support reference/i })).toBeInTheDocument();
+  });
+
+  it('renders the download slot when one is supplied', () => {
+    renderBar({ download: <button type="button">Download transcript</button> });
+    expect(screen.getByRole('button', { name: /download transcript/i })).toBeInTheDocument();
+  });
 });
