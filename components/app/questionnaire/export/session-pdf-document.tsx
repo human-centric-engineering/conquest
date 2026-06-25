@@ -17,7 +17,8 @@
 
 import { Document, Page, Text, View, Image, StyleSheet } from '@react-pdf/renderer';
 
-import { formatAnswerValue } from '@/components/app/questionnaire/panel/format-answer-value';
+import { formatSlotAnswer } from '@/lib/app/questionnaire/panel/format-slot-answer';
+import { formatSessionRef } from '@/lib/app/questionnaire/session-ref';
 import type { PanelSlotView } from '@/lib/app/questionnaire/panel/types';
 import type { SessionExportModel } from '@/lib/app/questionnaire/export/types';
 
@@ -52,7 +53,11 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 20,
     fontFamily: 'Helvetica-Bold',
-    marginBottom: 6,
+    // An explicit line height sized to the 20pt title: the page's global 1.4 leaves the
+    // tall bold glyphs' box too short, so the first meta row rides up into the descenders.
+    // Pinning it here (plus the margin below) keeps the title and the Version line clear.
+    lineHeight: 1.2,
+    marginBottom: 10,
   },
   metaRow: {
     fontSize: 9,
@@ -181,7 +186,9 @@ function SlotBlock({ slot }: { slot: PanelSlotView }) {
       <Text style={styles.prompt}>{slot.prompt}</Text>
 
       {slot.answered ? (
-        <Text style={styles.answer}>{formatAnswerValue(slot.value)}</Text>
+        <Text style={styles.answer}>
+          {formatSlotAnswer(slot.type, slot.typeConfig, slot.value)}
+        </Text>
       ) : (
         <Text style={styles.notAnswered}>Not answered</Text>
       )}
@@ -195,7 +202,11 @@ function SlotBlock({ slot }: { slot: PanelSlotView }) {
           <Text style={styles.historyHeading}>Refinement history</Text>
           {slot.refinementHistory.map((entry, i) => (
             <Text key={i} style={styles.historyEntry}>
-              {`${formatAnswerValue(entry.previousValue)} → ${formatAnswerValue(entry.newValue)}`}
+              {`${formatSlotAnswer(slot.type, slot.typeConfig, entry.previousValue)} → ${formatSlotAnswer(
+                slot.type,
+                slot.typeConfig,
+                entry.newValue
+              )}`}
               {entry.source ? ` (${entry.source})` : ''}
             </Text>
           ))}
@@ -262,6 +273,12 @@ export function SessionPdfDocument({ model }: SessionPdfDocumentProps) {
             <Text style={styles.metaLabel}>Version </Text>
             {model.versionNumber}
           </Text>
+          {model.ref && (
+            <Text style={styles.metaRow}>
+              <Text style={styles.metaLabel}>Ref: </Text>
+              {formatSessionRef(model.ref)}
+            </Text>
+          )}
           {model.goal && (
             <Text style={styles.metaRow}>
               <Text style={styles.metaLabel}>Goal: </Text>

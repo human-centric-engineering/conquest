@@ -34,6 +34,12 @@ export interface SessionExportModel {
   questionnaireTitle: string;
   /** 1-based version number the session ran on. */
   versionNumber: number;
+  /**
+   * The session's raw support reference (`publicRef`), or null for a row predating the column.
+   * The document groups it for display (`formatSessionRef`) — the code a respondent quotes when
+   * reporting a problem, so it belongs in the header of their downloaded record.
+   */
+  ref: string | null;
   /** The version's stated goal, or null when unset. */
   goal: string | null;
   /** A one-line audience summary derived from the version's `AudienceShape`, or null. */

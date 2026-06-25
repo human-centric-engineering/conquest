@@ -22,6 +22,7 @@ function input(over: Partial<SessionExportInput> = {}): SessionExportInput {
   return {
     questionnaireTitle: 'Onboarding survey',
     versionNumber: 2,
+    ref: 'GSP289HB',
     goal: 'Understand new-hire needs',
     audience: { description: 'New engineering hires' },
     anonymous: false,
@@ -160,6 +161,7 @@ describe('buildSessionExportModel', () => {
       const model = buildSessionExportModel(input());
       expect(model.questionnaireTitle).toBe('Onboarding survey');
       expect(model.versionNumber).toBe(2);
+      expect(model.ref).toBe('GSP289HB');
       expect(model.goal).toBe('Understand new-hire needs');
       expect(model.completedAt).toBe('2026-06-01T10:00:00.000Z');
       expect(model.generatedAt).toBe('2026-06-07T12:00:00.000Z');

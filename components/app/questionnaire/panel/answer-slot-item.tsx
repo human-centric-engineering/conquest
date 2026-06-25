@@ -19,7 +19,7 @@ import { ConfidenceIndicator } from '@/components/app/questionnaire/panel/confid
 import { ConfidenceScore } from '@/components/app/questionnaire/panel/confidence-score';
 import { ProvenanceBadge } from '@/components/app/questionnaire/panel/provenance-badge';
 import { RefinementHistory } from '@/components/app/questionnaire/panel/refinement-history';
-import { formatAnswerValue } from '@/components/app/questionnaire/panel/format-answer-value';
+import { formatSlotAnswer } from '@/lib/app/questionnaire/panel/format-slot-answer';
 import type { PanelSlotView } from '@/lib/app/questionnaire/panel/types';
 
 export interface AnswerSlotItemProps {
@@ -66,7 +66,7 @@ export function AnswerSlotItem({ slot, onRevisit, canRevisit = false }: AnswerSl
           {slot.answered ? (
             <>
               <span className="text-muted-foreground mt-0.5 block truncate text-sm">
-                {formatAnswerValue(slot.value)}
+                {formatSlotAnswer(slot.type, slot.typeConfig, slot.value)}
               </span>
               {/* The confidence as label + raw % ("Fairly sure · 62%") — shown to respondents so
                   the nuanced 30–100% range is visible at a glance, not just a band word. */}

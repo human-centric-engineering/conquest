@@ -56,6 +56,7 @@ function model(over: Partial<SessionExportModel> = {}): SessionExportModel {
   return {
     questionnaireTitle: 'Onboarding survey',
     versionNumber: 2,
+    ref: 'GSP289HB',
     goal: null,
     audienceSummary: null,
     respondent: { name: 'Ada' },

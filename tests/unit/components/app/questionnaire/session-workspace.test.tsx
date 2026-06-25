@@ -416,6 +416,33 @@ describe('SessionWorkspace', () => {
     expect(screen.queryByTestId('panel')).not.toBeInTheDocument();
   });
 
+  it('shows the completion screen for a reopened completed session, not the "not active" chat', () => {
+    // On resume the stream starts idle (no in-session submit fired), so the lifecycle status read
+    // is the authority that the session is already done. Without this the surface would drop into
+    // the chat and 409 on any send, flashing the "session no longer active" panel.
+    setup(
+      { status: 'not_active', canSend: false },
+      {},
+      {
+        view: {
+          status: 'completed',
+          completion: {
+            kind: 'offer',
+            coverage: 1,
+            answeredCount: 6,
+            requiredUnansweredKeys: [],
+            capReached: false,
+          },
+          cost: null,
+          anonymous: true,
+          ref: 'GSP289HB',
+        },
+      }
+    );
+    expect(screen.getByTestId('session-complete')).toBeInTheDocument();
+    expect(screen.queryByTestId('chat')).not.toBeInTheDocument();
+  });
+
   it('wires the lifecycle bar Pause/Resume controls to the hook actions', () => {
     const pause = vi.fn();
     const resume = vi.fn();

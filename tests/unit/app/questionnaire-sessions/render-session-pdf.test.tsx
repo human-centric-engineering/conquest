@@ -21,6 +21,7 @@ function model(
   return buildSessionExportModel({
     questionnaireTitle: 'Onboarding survey',
     versionNumber: 1,
+    ref: 'GSP289HB',
     goal: 'Understand new-hire needs',
     audience: { description: 'New hires' },
     anonymous: false,

@@ -44,6 +44,7 @@ function row(over: Record<string, unknown> = {}) {
     id: 'sess-1',
     status: 'completed',
     respondentUserId: 'user-1',
+    publicRef: 'GSP289HB',
     updatedAt: new Date('2026-06-02T09:00:00.000Z'),
     version: {
       versionNumber: 3,
@@ -116,6 +117,7 @@ describe('loadSessionExport', () => {
     expect(loaded?.questionnaireId).toBe('q-1');
     expect(loaded?.questionnaireTitle).toBe('Onboarding survey');
     expect(loaded?.versionNumber).toBe(3);
+    expect(loaded?.ref).toBe('GSP289HB');
     expect(loaded?.goal).toBe('Understand needs');
     expect(loaded?.audience).toEqual({ description: 'New hires' });
     expect(loaded?.anonymous).toBe(false);
@@ -330,6 +332,7 @@ describe('buildSessionExportPdfModel', () => {
       questionnaireId: 'q-1',
       questionnaireTitle: 'Onboarding survey',
       versionNumber: 3,
+      ref: 'GSP289HB',
       goal: 'Understand needs',
       audience: { description: 'New hires' },
       anonymous: false,

@@ -138,6 +138,43 @@ describe('buildAnswerTranscript', () => {
     expect(buildAnswerTranscript({ ...base, sections })).toContain('A: a, b, c');
   });
 
+  it('renders choice answers as their option labels, not stored keys', () => {
+    const choiceConfig = {
+      choices: [
+        { value: 'opt_a', label: 'Very satisfied' },
+        { value: 'opt_b', label: 'Dissatisfied' },
+      ],
+    };
+    const sections: PanelSectionView[] = [
+      {
+        sectionId: 's1',
+        title: 'Feedback',
+        slots: [
+          slot({
+            slotKey: 'sat',
+            prompt: 'Satisfaction?',
+            type: 'single_choice',
+            typeConfig: choiceConfig,
+            value: 'opt_a',
+            answered: true,
+          }),
+          slot({
+            slotKey: 'likes',
+            prompt: 'Liked?',
+            type: 'multi_choice',
+            typeConfig: choiceConfig,
+            value: ['opt_a', 'opt_b'],
+            answered: true,
+          }),
+        ],
+      },
+    ];
+    const text = buildAnswerTranscript({ ...base, sections });
+    expect(text).toContain('A: Very satisfied');
+    expect(text).toContain('A: Very satisfied, Dissatisfied');
+    expect(text).not.toContain('opt_a');
+  });
+
   it('formats scalar answer types (boolean, number, object) and renders null as "(no answer)"', () => {
     const sections: PanelSectionView[] = [
       {

@@ -12,6 +12,8 @@
  */
 
 import { isRecord } from '@/lib/utils';
+import { readChoicesConfig } from '@/lib/app/questionnaire/form/type-config';
+import type { PanelSlotView } from '@/lib/app/questionnaire/panel/types';
 import type { SessionExportModel } from '@/lib/app/questionnaire/export/types';
 
 /**
@@ -103,6 +105,26 @@ function formatAnswerValue(value: unknown): string {
 }
 
 /**
+ * The respondent-facing text of a captured answer: a single/multi-choice answer is stored as its
+ * option `value` (a slug), so map it to the option `label` the respondent actually saw before
+ * formatting. Everything else (and any value whose key isn't in the option list) falls through to
+ * {@link formatAnswerValue} unchanged, preserving the transcript's scalar rendering.
+ */
+function formatSlotAnswerForTranscript(slot: PanelSlotView): string {
+  if (slot.type === 'single_choice' || slot.type === 'multi_choice') {
+    const config = readChoicesConfig(slot.type, slot.typeConfig);
+    if (config) {
+      const labelByValue = new Map(config.choices.map((c) => [c.value, c.label]));
+      const toLabel = (v: unknown): unknown =>
+        typeof v === 'string' && labelByValue.has(v) ? labelByValue.get(v) : v;
+      const mapped = Array.isArray(slot.value) ? slot.value.map(toLabel) : toLabel(slot.value);
+      return formatAnswerValue(mapped);
+    }
+  }
+  return formatAnswerValue(slot.value);
+}
+
+/**
  * Flatten the export model into a plain-text Q&A transcript for the report agent. Only answered
  * slots are included (an unanswered slot adds noise, not signal); sections with no answers are
  * skipped. Leads with the questionnaire goal/audience for grounding.
@@ -120,7 +142,8 @@ export function buildAnswerTranscript(model: AnswerTranscriptInput): string {
     lines.push(`## ${section.title}`);
     for (const slot of answered) {
       lines.push(`Q: ${slot.prompt}`);
-      lines.push(`A: ${formatAnswerValue(slot.value)}`);
+      // Choice answers render their respondent-facing labels, not their stored option keys.
+      lines.push(`A: ${formatSlotAnswerForTranscript(slot)}`);
     }
     lines.push('');
   }
