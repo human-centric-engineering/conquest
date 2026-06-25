@@ -4,6 +4,7 @@ import {
   validateTypeConfig,
   hasCompleteLikertLabels,
   typeConfigSchemaFor,
+  defaultTypeConfig,
 } from '@/lib/app/questionnaire/authoring/type-config-schema';
 
 /**
@@ -94,6 +95,31 @@ describe('validateTypeConfig — likert', () => {
       typeConfigSchemaFor('likert').safeParse({ min: 1, max: 5, minLabel: 'Low', maxLabel: 'High' })
         .success
     ).toBe(true);
+  });
+});
+
+describe('defaultTypeConfig', () => {
+  it('seeds a choice type with two distinct options that validate', () => {
+    for (const type of ['single_choice', 'multi_choice'] as const) {
+      const cfg = defaultTypeConfig(type);
+      expect(validateTypeConfig(type, cfg).ok).toBe(true);
+    }
+  });
+
+  it('seeds a likert with a fully-labelled scale that satisfies the write schema', () => {
+    const cfg = defaultTypeConfig('likert') as { min: number; max: number; labels: string[] };
+    expect(cfg).toMatchObject({ min: 1, max: 5 });
+    expect(cfg.labels).toHaveLength(5);
+    // Crucially, the default must pass the strict write schema (the editor relies on this).
+    expect(hasCompleteLikertLabels(cfg)).toBe(true);
+    expect(validateTypeConfig('likert', cfg).ok).toBe(true);
+  });
+
+  it('seeds numeric/boolean as an empty (valid) config and config-less types as null', () => {
+    expect(defaultTypeConfig('numeric')).toEqual({});
+    expect(defaultTypeConfig('boolean')).toEqual({});
+    expect(defaultTypeConfig('free_text')).toBeNull();
+    expect(defaultTypeConfig('date')).toBeNull();
   });
 });
 

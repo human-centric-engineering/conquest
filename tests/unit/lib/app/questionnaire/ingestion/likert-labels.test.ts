@@ -29,6 +29,11 @@ describe('genericLikertLabels', () => {
     expect(genericLikertLabels(0, 10)).toHaveLength(11);
     expect(genericLikertLabels(-1, 0)).toEqual(['Very low', 'Very high']);
   });
+
+  it('returns no labels for a degenerate (single-point or inverted) scale', () => {
+    expect(genericLikertLabels(3, 3)).toEqual([]);
+    expect(genericLikertLabels(5, 2)).toEqual([]);
+  });
 });
 
 describe('buildLikertLabelMessages', () => {
@@ -75,5 +80,12 @@ describe('parseLikertLabelDecision', () => {
     ).toBeNull();
     expect(parseLikertLabelDecision('not json', bounds)).toBeNull();
     expect(parseLikertLabelDecision('{"numeric": false}', bounds)).toBeNull();
+  });
+
+  it('returns null for valid JSON that is not an object (bare number or string)', () => {
+    // `JSON.parse` succeeds for these, so they skip the catch and hit the typeof guard.
+    expect(parseLikertLabelDecision('42', bounds)).toBeNull();
+    expect(parseLikertLabelDecision('"agree"', bounds)).toBeNull();
+    expect(parseLikertLabelDecision('null', bounds)).toBeNull();
   });
 });

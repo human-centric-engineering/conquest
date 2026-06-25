@@ -178,8 +178,14 @@ function buildDetail(
       }
       // Prefer a per-point label for every bucket; fall back to legacy endpoint labels,
       // then to the bare number — so each bar reads as a word once the scale is labelled.
+      // Require every entry non-empty (matching readLikertConfig) so a blank label never
+      // renders as "3 ()".
       const perPoint =
-        bounds?.labels && bounds.labels.length === max - min + 1 ? bounds.labels : null;
+        bounds?.labels &&
+        bounds.labels.length === max - min + 1 &&
+        bounds.labels.every((l) => l.trim().length > 0)
+          ? bounds.labels
+          : null;
       const buckets: ValueBucket[] = [];
       for (let v = min; v <= max; v += 1) {
         const word =

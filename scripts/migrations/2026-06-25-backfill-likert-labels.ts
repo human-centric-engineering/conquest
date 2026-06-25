@@ -2,6 +2,8 @@ import dotenv from 'dotenv';
 dotenv.config({ path: '.env.local' });
 dotenv.config({ path: '.env' });
 
+import { z } from 'zod';
+
 import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
 import { resolveAgentProviderAndModel } from '@/lib/orchestration/llm/agent-resolver';
@@ -67,15 +69,16 @@ function parseFlags(argv: string[]): Flags {
   return flags;
 }
 
+// `typeConfig` is raw Prisma JSON — validate with Zod rather than casting it.
+const boundsShape = z.object({ min: z.number().int(), max: z.number().int() });
+const choiceWordsShape = z.object({ choices: z.array(z.string()) });
+
 /** Read coherent integer bounds from a likert config, or null when unusable. */
 function readBounds(typeConfig: unknown): { min: number; max: number } | null {
-  if (!typeConfig || typeof typeConfig !== 'object') return null;
-  const r = typeConfig as Record<string, unknown>;
-  const min = r.min;
-  const max = r.max;
-  if (typeof min !== 'number' || typeof max !== 'number') return null;
-  if (!Number.isInteger(min) || !Number.isInteger(max) || max <= min) return null;
-  return { min, max };
+  const parsed = boundsShape.safeParse(typeConfig);
+  if (!parsed.success) return null;
+  const { min, max } = parsed.data;
+  return max > min ? { min, max } : null;
 }
 
 /**
@@ -84,11 +87,11 @@ function readBounds(typeConfig: unknown): { min: number; max: number } | null {
  * proper 1..N labelled likert deterministically (no LLM needed).
  */
 function readChoiceLabels(typeConfig: unknown): string[] | null {
-  if (!typeConfig || typeof typeConfig !== 'object') return null;
-  const choices = (typeConfig as Record<string, unknown>).choices;
-  if (!Array.isArray(choices) || choices.length < 2) return null;
-  if (!choices.every((c) => typeof c === 'string' && c.trim().length > 0)) return null;
-  return choices.map((c) => (c as string).trim());
+  const parsed = choiceWordsShape.safeParse(typeConfig);
+  if (!parsed.success) return null;
+  const choices = parsed.data.choices.map((c) => c.trim());
+  if (choices.length < 2 || choices.some((c) => c.length === 0)) return null;
+  return choices;
 }
 
 interface Target {

@@ -127,6 +127,33 @@ describe('LaunchChecklist', () => {
     expect(configRow).toHaveTextContent('(not ready)');
   });
 
+  it('shows a scale-labels step only when the version has likert questions', () => {
+    // No likert questions → the row is absent (it would be a confusing always-green check).
+    const { rerender } = render(<LaunchChecklist {...READY} />);
+    expect(screen.queryByText('Every rating scale is labelled')).not.toBeInTheDocument();
+
+    // A likert with missing labels → the row appears, is not-ready, and links to the editor.
+    rerender(<LaunchChecklist {...READY} likertCount={2} unlabelledLikertCount={1} />);
+    expect(screen.getByText('Every rating scale is labelled').closest('li')).toHaveTextContent(
+      '(not ready)'
+    );
+    expect(
+      screen.getByRole('link', { name: /configure: every rating scale is labelled/i })
+    ).toHaveAttribute('href', '/admin/questionnaires/qn-1/v/v-1/structure?edit=1');
+
+    // All likert labelled → the row is ready.
+    rerender(<LaunchChecklist {...READY} likertCount={2} unlabelledLikertCount={0} />);
+    expect(screen.getByText('Every rating scale is labelled').closest('li')).toHaveTextContent(
+      '(ready)'
+    );
+  });
+
+  it('blocks Launch while a likert scale is unlabelled', async () => {
+    render(<LaunchChecklist {...READY} likertCount={2} unlabelledLikertCount={1} />);
+    await openDialog();
+    expect(screen.getByRole('button', { name: /^launch$/i })).toBeDisabled();
+  });
+
   it('shows a data-slots step linking to the data-slots tab only when required', () => {
     const { rerender } = render(<LaunchChecklist {...READY} />);
     expect(screen.queryByText('Data slots generated')).not.toBeInTheDocument();

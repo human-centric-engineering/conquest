@@ -120,6 +120,11 @@ describe('launchReadinessChecks', () => {
     });
     expect(someUnlabelled.find((c) => c.key === 'scaleLabels')?.ok).toBe(false);
     expect(isLaunchReady({ ...READY, likertCount: 3, unlabelledLikertCount: 1 })).toBe(false);
+
+    // unlabelledLikertCount omitted → defaults to 0 (treat as all labelled), so the check passes.
+    expect(
+      launchReadinessChecks({ ...READY, likertCount: 3 }).find((c) => c.key === 'scaleLabels')?.ok
+    ).toBe(true);
   });
 
   it('adds the embeddings check only when required, reflecting readiness', () => {

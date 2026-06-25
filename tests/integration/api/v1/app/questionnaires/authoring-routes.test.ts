@@ -139,6 +139,9 @@ beforeEach(() => {
   (isFeatureEnabled as unknown as Mock).mockResolvedValue(true);
   setAuth(mockAdminUser());
   (forkVersionIfLaunched as unknown as Mock).mockResolvedValue(noFork());
+  // Default the likert-slot read (launch readiness + key-collision both hit this mock) to empty,
+  // so no describe relies on an ancestor's leftover value; tests that need slots override locally.
+  prismaMock.appQuestionSlot.findMany.mockResolvedValue([]);
   // loadScopedVersion succeeds by default.
   prismaMock.appQuestionnaireVersion.findFirst.mockResolvedValue({
     id: 'v1',
@@ -266,12 +269,6 @@ describe('version-meta PATCH', () => {
 // ─── Status PATCH ─────────────────────────────────────────────────────────────
 
 describe('status PATCH', () => {
-  beforeEach(() => {
-    // Launch readiness queries the version's likert slots for the "scales labelled" check; default
-    // to none so the check is absent unless a test opts in.
-    prismaMock.appQuestionSlot.findMany.mockResolvedValue([]);
-  });
-
   it('rejects an illegal transition (archived → launched)', async () => {
     prismaMock.appQuestionnaireVersion.findFirst.mockResolvedValue({
       id: 'v1',
@@ -510,7 +507,7 @@ describe('question create', () => {
       key: 'k',
       sectionId: 'sec-1',
     });
-    await createQuestionPOST(
+    const res = await createQuestionPOST(
       req({
         prompt: 'Rate it',
         type: 'likert',
@@ -524,6 +521,7 @@ describe('question create', () => {
       }),
       ctx(QUESTION_PARAMS)
     );
+    expect(res.status).toBe(201);
     const data = prismaMock.appQuestionSlot.create.mock.calls[0][0].data;
     expect(data).toMatchObject({
       key: 'rating',

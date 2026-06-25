@@ -12,6 +12,8 @@
  * supplies the LLM plumbing.
  */
 
+import { z } from 'zod';
+
 import type { LlmMessage } from '@/lib/orchestration/llm/types';
 
 /**
@@ -84,6 +86,12 @@ function stripFence(raw: string): string {
   return fence ? fence[1].trim() : trimmed;
 }
 
+/** The model's reply shape — validated with Zod rather than cast (it's external LLM output). */
+const labelReplySchema = z.object({
+  numeric: z.boolean().optional(),
+  labels: z.array(z.string()).optional(),
+});
+
 /**
  * Parse the model's reply into a {@link LikertLabelDecision}, validated against the scale bounds.
  * Returns `null` for anything malformed (unparseable JSON, wrong label count, blank labels) so the
@@ -94,25 +102,22 @@ export function parseLikertLabelDecision(
   raw: string,
   bounds: { min: number; max: number }
 ): LikertLabelDecision | null {
-  let parsed: unknown;
+  let json: unknown;
   try {
-    parsed = JSON.parse(stripFence(raw));
+    json = JSON.parse(stripFence(raw));
   } catch {
     return null;
   }
-  if (!parsed || typeof parsed !== 'object') return null;
-  const obj = parsed as Record<string, unknown>;
 
-  if (obj.numeric === true) return { numeric: true };
+  const parsed = labelReplySchema.safeParse(json);
+  if (!parsed.success) return null;
 
+  if (parsed.data.numeric === true) return { numeric: true };
+
+  const labels = parsed.data.labels;
   const expected = bounds.max - bounds.min + 1;
-  const labels = obj.labels;
-  if (
-    Array.isArray(labels) &&
-    labels.length === expected &&
-    labels.every((l) => typeof l === 'string' && l.trim().length > 0)
-  ) {
-    return { numeric: false, labels: (labels as string[]).map((l) => l.trim()) };
+  if (labels && labels.length === expected && labels.every((l) => l.trim().length > 0)) {
+    return { numeric: false, labels: labels.map((l) => l.trim()) };
   }
   return null;
 }

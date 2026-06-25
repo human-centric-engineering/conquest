@@ -512,9 +512,14 @@ function BoundsEditor({
                 placeholder={`Label for ${minNum + i}`}
                 className="h-7 text-xs"
                 disabled={busy}
-                onChange={(e) =>
-                  setLabels(pointLabels.map((l, j) => (j === i ? e.target.value : l)))
-                }
+                onChange={(e) => {
+                  const next = e.target.value;
+                  // Reconcile against the latest committed labels (functional updater) rather than
+                  // a render-time snapshot, so a fast edit in another point can't clobber this one.
+                  setLabels((prev) =>
+                    Array.from({ length: pointCount }, (_, j) => (j === i ? next : (prev[j] ?? '')))
+                  );
+                }}
                 onBlur={() => saveWith(pointLabels)}
               />
             </div>
