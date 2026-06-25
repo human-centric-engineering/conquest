@@ -62,6 +62,10 @@ export interface LaunchChecklistProps {
   dataSlotEmbeddingsRequired?: boolean;
   /** True when every data slot is embedded (only checked when required). */
   dataSlotEmbeddingsReady?: boolean;
+  /** Number of likert questions in the version — the "every scale is labelled" row shows only when ≥1. */
+  likertCount?: number;
+  /** How many of those likert questions still lack complete per-point labels (launch requires 0). */
+  unlabelledLikertCount?: number;
 }
 
 interface LaunchCheck {
@@ -110,6 +114,8 @@ export function LaunchChecklist({
   embeddingsReady = false,
   dataSlotEmbeddingsRequired = false,
   dataSlotEmbeddingsReady = false,
+  likertCount = 0,
+  unlabelledLikertCount = 0,
 }: LaunchChecklistProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -130,6 +136,7 @@ export function LaunchChecklist({
     sections: structureHref,
     questions: structureHref,
     config: structureHref,
+    scaleLabels: structureHref,
     embeddings: `${base}/settings`,
     dataSlots: `${base}/data-slots`,
     dataSlotEmbeddings: `${base}/data-slots`,
@@ -139,6 +146,8 @@ export function LaunchChecklist({
     audience,
     sectionCount,
     questionCount,
+    likertCount,
+    unlabelledLikertCount,
     configSaved,
     dataSlotsRequired,
     dataSlotsReady,

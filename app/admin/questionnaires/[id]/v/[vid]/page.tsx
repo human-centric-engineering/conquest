@@ -25,6 +25,7 @@ import {
 } from '@/lib/app/questionnaire/workspace-data';
 import { workspaceVersionBase } from '@/lib/app/questionnaire/workspace-nav';
 import { isPreviewAvailable } from '@/lib/app/questionnaire/launch/readiness';
+import { hasCompleteLikertLabels } from '@/lib/app/questionnaire/authoring/type-config-schema';
 
 export const metadata: Metadata = {
   title: 'Overview · Questionnaire',
@@ -74,6 +75,14 @@ export default async function OverviewTab({ params }: PageProps) {
     dataSlotEmbeddingCoverage !== null &&
     dataSlotEmbeddingCoverage.total > 0 &&
     dataSlotEmbeddingCoverage.missing === 0;
+
+  // Launch requires every likert scale to carry per-point labels (the report renders words, not
+  // bare numbers). Count the unlabelled ones so the checklist can foreshadow the server gate.
+  const likertSlots =
+    graph?.sections.flatMap((s) => s.questions.filter((q) => q.type === 'likert')) ?? [];
+  const unlabelledLikertCount = likertSlots.filter(
+    (q) => !hasCompleteLikertLabels(q.typeConfig)
+  ).length;
 
   // Preview is available for a launched version OR a launchable draft (passes the same readiness
   // gate as launch — so an admin can rehearse before going live), and only when the live-sessions
@@ -143,6 +152,8 @@ export default async function OverviewTab({ params }: PageProps) {
               audience={graph.audience}
               sectionCount={selected.sectionCount}
               questionCount={selected.questionCount}
+              likertCount={likertSlots.length}
+              unlabelledLikertCount={unlabelledLikertCount}
               configSaved={graph.config.saved}
               dataSlotsRequired={flags.dataSlots}
               dataSlotsReady={dataSlotCount > 0}

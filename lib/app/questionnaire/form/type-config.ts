@@ -22,10 +22,17 @@ export interface FormChoicesConfig {
   allowOther: boolean;
 }
 
-/** A likert scale's integer bounds and optional endpoint labels. */
+/** A likert scale's integer bounds, per-point labels, and derived endpoint labels. */
 export interface FormLikertConfig {
   min: number;
   max: number;
+  /**
+   * One label per scale point (`labels[i]` describes value `min + i`), or `null`
+   * for a legacy/unlabelled row. When present, this is what the report renders for
+   * any answer value.
+   */
+  labels: string[] | null;
+  /** Endpoint labels for the form's scale display — derived from `labels` when present. */
   minLabel: string | null;
   maxLabel: string | null;
 }
@@ -70,12 +77,28 @@ export function readChoicesConfig(
 export function readLikertConfig(typeConfig: unknown): FormLikertConfig | null {
   const parsed = typeConfigSchemaFor('likert').safeParse(typeConfig);
   if (!parsed.success) return null;
-  const cfg = parsed.data as { min: number; max: number; minLabel?: string; maxLabel?: string };
+  const cfg = parsed.data as {
+    min: number;
+    max: number;
+    minLabel?: string;
+    maxLabel?: string;
+    labels?: string[];
+  };
+  // Per-point labels are canonical, but the read schema is lenient — accept the array only
+  // when it's complete (one non-empty entry per point), else treat the scale as unlabelled.
+  // Endpoints then prefer explicit minLabel/maxLabel, falling back to the labels array ends.
+  const labels =
+    Array.isArray(cfg.labels) &&
+    cfg.labels.length === cfg.max - cfg.min + 1 &&
+    cfg.labels.every((l) => l.trim().length > 0)
+      ? cfg.labels
+      : null;
   return {
     min: cfg.min,
     max: cfg.max,
-    minLabel: cfg.minLabel ?? null,
-    maxLabel: cfg.maxLabel ?? null,
+    labels,
+    minLabel: cfg.minLabel ?? labels?.[0] ?? null,
+    maxLabel: cfg.maxLabel ?? labels?.[labels.length - 1] ?? null,
   };
 }
 

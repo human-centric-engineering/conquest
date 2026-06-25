@@ -57,10 +57,21 @@ describe('readChoicesConfig', () => {
 });
 
 describe('readLikertConfig', () => {
-  it('parses bounds and endpoint labels', () => {
+  it('parses per-point labels and derives the endpoint labels from them', () => {
+    expect(readLikertConfig({ min: 1, max: 3, labels: ['Low', 'Mid', 'High'] })).toEqual({
+      min: 1,
+      max: 3,
+      labels: ['Low', 'Mid', 'High'],
+      minLabel: 'Low',
+      maxLabel: 'High',
+    });
+  });
+
+  it('reads a legacy endpoint-label config with no per-point labels', () => {
     expect(readLikertConfig({ min: 1, max: 5, minLabel: 'Low', maxLabel: 'High' })).toEqual({
       min: 1,
       max: 5,
+      labels: null,
       minLabel: 'Low',
       maxLabel: 'High',
     });
@@ -70,9 +81,22 @@ describe('readLikertConfig', () => {
     expect(readLikertConfig({ min: -2, max: 2 })).toEqual({
       min: -2,
       max: 2,
+      labels: null,
       minLabel: null,
       maxLabel: null,
     });
+  });
+
+  it('keeps the bounds but ignores a wrong-length or blank labels array (treated as unlabelled)', () => {
+    // A malformed labels array must not cost the caller the valid bounds.
+    expect(readLikertConfig({ min: 1, max: 5, labels: ['a', 'b'] })).toEqual({
+      min: 1,
+      max: 5,
+      labels: null,
+      minLabel: null,
+      maxLabel: null,
+    });
+    expect(readLikertConfig({ min: 1, max: 3, labels: ['Low', '', 'High'] })?.labels).toBeNull();
   });
 
   it('returns null for an unreadable config', () => {

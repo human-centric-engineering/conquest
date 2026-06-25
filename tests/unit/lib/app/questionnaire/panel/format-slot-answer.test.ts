@@ -59,6 +59,31 @@ describe('formatSlotAnswer', () => {
     expect(formatSlotAnswer('numeric', { min: 0, max: 10 }, 7)).toBe('7');
   });
 
+  describe('likert', () => {
+    const LIKERT = {
+      min: 1,
+      max: 5,
+      labels: ['Very dissatisfied', 'Dissatisfied', 'Neutral', 'Satisfied', 'Very satisfied'],
+    };
+
+    it('renders the per-point label for the answer value', () => {
+      expect(formatSlotAnswer('likert', LIKERT, 1)).toBe('Very dissatisfied');
+      expect(formatSlotAnswer('likert', LIKERT, 3)).toBe('Neutral');
+      expect(formatSlotAnswer('likert', LIKERT, 5)).toBe('Very satisfied');
+    });
+
+    it('honours a non-1 minimum when indexing labels', () => {
+      const bipolar = { min: -1, max: 1, labels: ['Against', 'Neutral', 'For'] };
+      expect(formatSlotAnswer('likert', bipolar, -1)).toBe('Against');
+      expect(formatSlotAnswer('likert', bipolar, 1)).toBe('For');
+    });
+
+    it('falls back to the number for an unlabelled scale or out-of-range value', () => {
+      expect(formatSlotAnswer('likert', { min: 1, max: 5 }, 3)).toBe('3');
+      expect(formatSlotAnswer('likert', LIKERT, 9)).toBe('9');
+    });
+  });
+
   it('renders an em-dash for a nullish answer regardless of type', () => {
     expect(formatSlotAnswer('single_choice', CHOICES, null)).toBe('—');
     expect(formatSlotAnswer('multi_choice', CHOICES, [])).toBe('—');

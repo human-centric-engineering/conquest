@@ -52,6 +52,8 @@ const LAUNCH_MISSING_MESSAGE: Record<LaunchCheckKey, string> = {
   sections: 'At least one section is required',
   questions: 'At least one question is required',
   config: 'Configuration must be saved before launch',
+  scaleLabels:
+    'Label every point of each rating scale before launch (or switch a purely numeric rating to the Numeric type)',
   embeddings: 'Generate question embeddings before launching the adaptive strategy',
   dataSlots: 'Generate data slots before launch',
   dataSlotEmbeddings: 'Generate data-slot embeddings before launching adaptive data-slot selection',

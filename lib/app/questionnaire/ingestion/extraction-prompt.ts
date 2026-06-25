@@ -58,6 +58,15 @@ Editorial decisions you SHOULD make:
 - Correct spelling and grammar in prompts.
 - Rewrite terse or ambiguous prompts into clear, self-contained questions.
 - Infer each question's answer type from one of: ${QUESTION_TYPES.join(', ')}.
+- For a "likert" scale, ALWAYS include in "suggestedTypeConfig": integer "min" and "max", \
+and a "labels" array with one short human-readable label per point — in order from "min" to \
+"max", length exactly (max − min + 1). Example for a 1–5 satisfaction scale: \
+{"min": 1, "max": 5, "labels": ["Very dissatisfied","Dissatisfied","Neutral","Satisfied","Very satisfied"]}. \
+These labels are what the final report shows instead of a bare number. If the source gives only \
+endpoint anchors, infer sensible labels for the points in between.
+- Use "likert" ONLY when each point carries a qualitative meaning. If a question asks for a \
+purely numeric rating with no qualitative scale (e.g. "rate 0–10", a count, an age, a percentage), \
+use "numeric" instead — numeric questions need no labels.
 - Merge duplicate questions; split a compound question into separate ones.
 - Add a section to group loose questions when the document implies one.
 - Infer the questionnaire's overall goal and its intended audience.
@@ -94,7 +103,7 @@ these top-level keys, using EXACTLY these field names:
       "key": "<stable unique slug>",
       "prompt": "<the question text shown to the respondent — REQUIRED>",
       "suggestedType": "<one of: ${QUESTION_TYPES.join(' | ')}>",
-      "suggestedTypeConfig": { <optional, e.g. {"choices": ["A","B"]} for choice types> },
+      "suggestedTypeConfig": { <choice: {"choices":["A","B"]}; likert: {"min":1,"max":5,"labels":["…","…","…","…","…"]} — required for likert> },
       "guidelines": "<optional answering guidance>",
       "rationale": "<optional why-this-question>",
       "extractionConfidence": <number between 0 and 1>,

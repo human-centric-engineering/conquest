@@ -65,10 +65,17 @@ function readLikert(typeConfig: unknown): {
   max: number;
   minLabel?: string;
   maxLabel?: string;
+  labels?: string[];
 } | null {
   const parsed = typeConfigSchemaFor('likert').safeParse(typeConfig);
   if (!parsed.success) return null;
-  return parsed.data as { min: number; max: number; minLabel?: string; maxLabel?: string };
+  return parsed.data as {
+    min: number;
+    max: number;
+    minLabel?: string;
+    maxLabel?: string;
+    labels?: string[];
+  };
 }
 
 function readBooleanLabels(typeConfig: unknown): { trueLabel: string; falseLabel: string } {
@@ -169,14 +176,23 @@ function buildDetail(
         counts.set(n, (counts.get(n) ?? 0) + 1);
         nums.push(n);
       }
+      // Prefer a per-point label for every bucket; fall back to legacy endpoint labels,
+      // then to the bare number — so each bar reads as a word once the scale is labelled.
+      // Require every entry non-empty (matching readLikertConfig) so a blank label never
+      // renders as "3 ()".
+      const perPoint =
+        bounds?.labels &&
+        bounds.labels.length === max - min + 1 &&
+        bounds.labels.every((l) => l.trim().length > 0)
+          ? bounds.labels
+          : null;
       const buckets: ValueBucket[] = [];
       for (let v = min; v <= max; v += 1) {
-        const label =
-          v === min && bounds?.minLabel
-            ? `${v} (${bounds.minLabel})`
-            : v === max && bounds?.maxLabel
-              ? `${v} (${bounds.maxLabel})`
-              : `${v}`;
+        const word =
+          perPoint?.[v - min] ??
+          (v === min ? bounds?.minLabel : undefined) ??
+          (v === max ? bounds?.maxLabel : undefined);
+        const label = word ? `${v} (${word})` : `${v}`;
         buckets.push({ value: `${v}`, label, count: counts.get(v) ?? 0 });
       }
       const mean = nums.length > 0 ? nums.reduce((a, b) => a + b, 0) / nums.length : null;

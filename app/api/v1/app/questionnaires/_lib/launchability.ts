@@ -18,6 +18,7 @@ import {
   launchReadinessChecks,
   type LaunchReadinessCheck,
 } from '@/lib/app/questionnaire/launch/readiness';
+import { hasCompleteLikertLabels } from '@/lib/app/questionnaire/authoring/type-config-schema';
 import { slotEmbeddingCoverage } from '@/app/api/v1/app/questionnaires/_lib/slot-embeddings';
 import { dataSlotEmbeddingCoverage } from '@/app/api/v1/app/questionnaires/_lib/data-slot-embeddings';
 
@@ -51,6 +52,7 @@ export async function loadLaunchReadiness(
     version,
     sectionCount,
     questionCount,
+    likertSlots,
     config,
     dataSlotsEnabled,
     dataSlotCount,
@@ -63,6 +65,11 @@ export async function loadLaunchReadiness(
     }),
     prisma.appQuestionnaireSection.count({ where: { versionId } }),
     prisma.appQuestionSlot.count({ where: { versionId } }),
+    // Likert configs, to enforce "every scale is labelled" before launch.
+    prisma.appQuestionSlot.findMany({
+      where: { versionId, type: 'likert' },
+      select: { typeConfig: true },
+    }),
     prisma.appQuestionnaireConfig.findUnique({
       where: { versionId },
       select: { selectionStrategy: true },
@@ -87,11 +94,17 @@ export async function loadLaunchReadiness(
     dataSlotEmbeddingsRequired ? dataSlotEmbeddingCoverage(versionId) : Promise.resolve(null),
   ]);
 
+  const unlabelledLikertCount = likertSlots.filter(
+    (s) => !hasCompleteLikertLabels(s.typeConfig)
+  ).length;
+
   const checks = launchReadinessChecks({
     goal: version?.goal ?? null,
     audience: version?.audience ?? null,
     sectionCount,
     questionCount,
+    likertCount: likertSlots.length,
+    unlabelledLikertCount,
     configSaved: config !== null,
     dataSlotsRequired: dataSlotsEnabled,
     dataSlotsReady: dataSlotCount >= 1,

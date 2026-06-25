@@ -13,6 +13,15 @@ export const metadata: Metadata = {
   title: 'Sunrise - Next.js Starter',
   description:
     'A production-ready Next.js starter template designed for rapid application development',
+  icons: {
+    icon: [
+      { url: '/favicon.ico', sizes: 'any' },
+      { url: '/favicon-32x32.png', type: 'image/png', sizes: '32x32' },
+      { url: '/favicon-16x16.png', type: 'image/png', sizes: '16x16' },
+    ],
+    apple: '/apple-touch-icon.png',
+  },
+  manifest: '/site.webmanifest',
 };
 
 export default async function RootLayout({

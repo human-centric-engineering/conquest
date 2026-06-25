@@ -48,7 +48,7 @@ const QUESTION_SHAPE = `{
   "key": "<stable unique slug, snake_case>",
   "prompt": "<the question text shown to the respondent — REQUIRED>",
   "suggestedType": "<one of: ${QUESTION_TYPES.join(' | ')}>",
-  "suggestedTypeConfig": { <optional, e.g. {"choices": ["A","B"]} for choice types> },
+  "suggestedTypeConfig": { <choice: {"choices":["A","B"]}; likert: {"min":1,"max":5,"labels":["…","…","…","…","…"]} — required for likert> },
   "guidelines": "<optional answering guidance>",
   "rationale": "<optional why-this-question>",
   "extractionConfidence": <number between 0 and 1; your confidence the question fits the brief>
@@ -67,6 +67,13 @@ const AUDIENCE_SHAPE = `{
 /** Common tail rule for every prompt: JSON only, no nulls, required fields. */
 const JSON_ONLY = `Respond with ONLY a single JSON object — no prose, no code fences. Omit any optional \
 field entirely rather than sending null. "prompt" and "suggestedType" are REQUIRED on every question.`;
+
+/** Shared scale rule: likert points must be labelled; numeric ratings stay numeric. */
+const SCALE_RULE = `For a "likert" question, ALWAYS set "suggestedTypeConfig" to integer "min" and \
+"max" plus a "labels" array with one short human-readable label per point (ordered min→max, length \
+exactly max − min + 1) — e.g. {"min":1,"max":5,"labels":["Strongly disagree","Disagree","Neutral","Agree","Strongly agree"]}. \
+These labels are shown in the final report instead of a bare number. Use "likert" only when each point \
+has a qualitative meaning; for a purely numeric rating (e.g. "rate 0–10", a count) use "numeric", which needs no labels.`;
 
 // ---------------------------------------------------------------------------
 // Phase 1 — outline (sections + inferred goal/audience)
@@ -123,6 +130,8 @@ section's ordinal. Keep keys unique within this section (snake_case).
 Output a JSON object with EXACTLY this key:
 { "questions": [ ${QUESTION_SHAPE} ] }
 
+${SCALE_RULE}
+
 ${JSON_ONLY}`;
 
 export function buildComposeSectionQuestionsPrompt(
@@ -167,7 +176,11 @@ Output a JSON object with EXACTLY these keys:
 }
 
 Design 2–7 sections; every question's "sectionOrdinal" must match a declared section "ordinal"; \
-question keys must be unique across the whole questionnaire (snake_case). ${JSON_ONLY}`;
+question keys must be unique across the whole questionnaire (snake_case).
+
+${SCALE_RULE}
+
+${JSON_ONLY}`;
 
 export function buildComposeFullPrompt(brief: string, adminSupplied?: AdminSupplied): LlmMessage[] {
   return [

@@ -139,6 +139,9 @@ beforeEach(() => {
   (isFeatureEnabled as unknown as Mock).mockResolvedValue(true);
   setAuth(mockAdminUser());
   (forkVersionIfLaunched as unknown as Mock).mockResolvedValue(noFork());
+  // Default the likert-slot read (launch readiness + key-collision both hit this mock) to empty,
+  // so no describe relies on an ancestor's leftover value; tests that need slots override locally.
+  prismaMock.appQuestionSlot.findMany.mockResolvedValue([]);
   // loadScopedVersion succeeds by default.
   prismaMock.appQuestionnaireVersion.findFirst.mockResolvedValue({
     id: 'v1',
@@ -366,6 +369,26 @@ describe('status PATCH', () => {
     expect(forkVersionIfLaunched).not.toHaveBeenCalled();
   });
 
+  it('blocks launch when a likert scale is unlabelled (scaleLabels gate)', async () => {
+    prismaMock.appQuestionnaireVersion.findUnique.mockResolvedValue({
+      goal: 'A goal',
+      audience: { role: 'patient' },
+    });
+    prismaMock.appQuestionnaireSection.count.mockResolvedValue(1);
+    prismaMock.appQuestionSlot.count.mockResolvedValue(1);
+    prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue({
+      selectionStrategy: 'sequential',
+    });
+    // One likert with bounds but no per-point labels → not launch-ready.
+    prismaMock.appQuestionSlot.findMany.mockResolvedValue([{ typeConfig: { min: 1, max: 5 } }]);
+
+    const res = await statusPATCH(req({ status: 'launched' }), ctx(VERSION_PARAMS));
+    const json = await res.json();
+    expect(res.status).toBe(400);
+    expect(json.success).toBe(false);
+    expect(json.error.details).toMatchObject({ scaleLabels: expect.any(Array) });
+  });
+
   // F3.2: a sent invitation pins a launched version — un-launching is refused.
   it('un-launches a launched version with no live invitations', async () => {
     prismaMock.appQuestionnaireVersion.findFirst.mockResolvedValue({
@@ -484,7 +507,7 @@ describe('question create', () => {
       key: 'k',
       sectionId: 'sec-1',
     });
-    await createQuestionPOST(
+    const res = await createQuestionPOST(
       req({
         prompt: 'Rate it',
         type: 'likert',
@@ -494,10 +517,11 @@ describe('question create', () => {
         required: true,
         weight: 1,
         ordinal: 0,
-        typeConfig: { min: 1, max: 5 },
+        typeConfig: { min: 1, max: 5, labels: ['Awful', 'Poor', 'Okay', 'Good', 'Great'] },
       }),
       ctx(QUESTION_PARAMS)
     );
+    expect(res.status).toBe(201);
     const data = prismaMock.appQuestionSlot.create.mock.calls[0][0].data;
     expect(data).toMatchObject({
       key: 'rating',
@@ -506,7 +530,7 @@ describe('question create', () => {
       weight: 1,
       guidelines: '1–5',
       rationale: 'satisfaction',
-      typeConfig: { min: 1, max: 5 },
+      typeConfig: { min: 1, max: 5, labels: ['Awful', 'Poor', 'Okay', 'Good', 'Great'] },
     });
     expect(prismaMock.appQuestionSlot.count).not.toHaveBeenCalled(); // explicit ordinal
   });
@@ -948,12 +972,16 @@ describe('question edit/delete', () => {
     prismaMock.appQuestionSlot.findFirst.mockResolvedValue({
       ...existingQuestion,
       type: 'likert',
-      typeConfig: { min: 1, max: 5 },
+      typeConfig: { min: 1, max: 5, labels: ['a', 'b', 'c', 'd', 'e'] },
     });
     prismaMock.appQuestionSlot.update.mockResolvedValue(existingQuestion);
-    await questionPATCH(req({ typeConfig: { min: 0, max: 10 } }), ctx(QUESTION_PARAMS));
+    // The stored type (likert) drives validation — a likert now requires per-point labels.
+    await questionPATCH(
+      req({ typeConfig: { min: 1, max: 3, labels: ['Low', 'Mid', 'High'] } }),
+      ctx(QUESTION_PARAMS)
+    );
     const data = prismaMock.appQuestionSlot.update.mock.calls[0][0].data;
-    expect(data.typeConfig).toEqual({ min: 0, max: 10 });
+    expect(data.typeConfig).toEqual({ min: 1, max: 3, labels: ['Low', 'Mid', 'High'] });
   });
 
   it('moves with an explicit ordinal (no append count)', async () => {

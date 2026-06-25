@@ -42,6 +42,17 @@ export interface LaunchReadinessInput {
   dataSlotEmbeddingsRequired?: boolean;
   /** True when every data slot is embedded (only checked when required). */
   dataSlotEmbeddingsReady?: boolean;
+  /**
+   * The number of `likert` question slots in the version. The "every scale is labelled" check is
+   * only shown when this is ≥1 — a questionnaire with no rating scales never sees it.
+   */
+  likertCount?: number;
+  /**
+   * How many of those likert slots lack complete per-point labels. Launch requires this to be 0:
+   * a labelled scale renders words (not bare numbers) in the report, and a purely numeric rating
+   * should use the `numeric` type instead. See [[hasCompleteLikertLabels]].
+   */
+  unlabelledLikertCount?: number;
 }
 
 /** Stable identifier for each check — maps to the server `missing` detail and a UI configure link. */
@@ -51,6 +62,7 @@ export type LaunchCheckKey =
   | 'sections'
   | 'questions'
   | 'config'
+  | 'scaleLabels'
   | 'embeddings'
   | 'dataSlots'
   | 'dataSlotEmbeddings';
@@ -87,6 +99,15 @@ export function launchReadinessChecks(input: LaunchReadinessInput): LaunchReadin
     { key: 'sections', ok: input.sectionCount >= 1, label: 'At least one section' },
     { key: 'questions', ok: input.questionCount >= 1, label: 'At least one question' },
     { key: 'config', ok: input.configSaved, label: 'Configuration saved' },
+    ...((input.likertCount ?? 0) >= 1
+      ? [
+          {
+            key: 'scaleLabels' as const,
+            ok: (input.unlabelledLikertCount ?? 0) === 0,
+            label: 'Every rating scale is labelled',
+          },
+        ]
+      : []),
     ...(input.embeddingsRequired
       ? [
           {
