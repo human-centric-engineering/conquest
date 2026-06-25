@@ -13,7 +13,12 @@ import { Badge } from '@/components/ui/badge';
 import { AUDIENCE_FIELDS, QUESTION_TYPE_LABELS } from '@/lib/app/questionnaire/types';
 import type { VersionGraphView } from '@/lib/app/questionnaire/views';
 
+import {
+  QuestionConfigWarning,
+  QUESTION_ISSUE_RING,
+} from '@/components/admin/questionnaires/question-config-warning';
 import { TagChip } from '@/components/admin/questionnaires/tag-chip';
+import { questionConfigIssue } from '@/lib/app/questionnaire/authoring';
 
 const AUDIENCE_FIELD_LABEL: Record<(typeof AUDIENCE_FIELDS)[number], string> = {
   description: 'Description',
@@ -139,41 +144,48 @@ export function VersionGraph({ graph }: { graph: VersionGraphView }) {
                 </p>
               ) : (
                 <ul className="space-y-3">
-                  {section.questions.map((q) => (
-                    <li key={q.id} className="rounded-md border p-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <p className="text-sm font-medium">{q.prompt}</p>
-                        <div className="flex shrink-0 items-center gap-1">
-                          <Badge variant="secondary" className="text-xs">
-                            {QUESTION_TYPE_LABELS[q.type] ?? q.type}
-                          </Badge>
-                          {q.required && (
-                            <Badge variant="outline" className="text-xs">
-                              required
+                  {section.questions.map((q) => {
+                    const issue = questionConfigIssue(q.type, q.typeConfig);
+                    return (
+                      <li
+                        key={q.id}
+                        className={`rounded-md border p-3 ${issue ? QUESTION_ISSUE_RING : ''}`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <p className="text-sm font-medium">{q.prompt}</p>
+                          <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
+                            <QuestionConfigWarning issue={issue} />
+                            <Badge variant="secondary" className="text-xs">
+                              {QUESTION_TYPE_LABELS[q.type] ?? q.type}
                             </Badge>
-                          )}
+                            {q.required && (
+                              <Badge variant="outline" className="text-xs">
+                                required
+                              </Badge>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                      {q.guidelines && (
-                        <p className="text-muted-foreground mt-1 text-sm">{q.guidelines}</p>
-                      )}
-                      <p className="text-muted-foreground mt-2 font-mono text-xs">
-                        key: {q.key}
-                        {q.extractionConfidence !== null && (
-                          <span className="ml-3">
-                            confidence: {Math.round(q.extractionConfidence * 100)}%
-                          </span>
+                        {q.guidelines && (
+                          <p className="text-muted-foreground mt-1 text-sm">{q.guidelines}</p>
                         )}
-                      </p>
-                      {q.tags.length > 0 && (
-                        <div className="mt-2 flex flex-wrap gap-1.5">
-                          {q.tags.map((t) => (
-                            <TagChip key={t.id} tag={t} />
-                          ))}
-                        </div>
-                      )}
-                    </li>
-                  ))}
+                        <p className="text-muted-foreground mt-2 font-mono text-xs">
+                          key: {q.key}
+                          {q.extractionConfidence !== null && (
+                            <span className="ml-3">
+                              confidence: {Math.round(q.extractionConfidence * 100)}%
+                            </span>
+                          )}
+                        </p>
+                        {q.tags.length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {q.tags.map((t) => (
+                              <TagChip key={t.id} tag={t} />
+                            ))}
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </section>

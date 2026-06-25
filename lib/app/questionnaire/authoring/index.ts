@@ -19,6 +19,10 @@ export {
   type TypeConfigValidation,
 } from '@/lib/app/questionnaire/authoring/type-config-schema';
 export {
+  questionConfigIssue,
+  type QuestionConfigIssue,
+} from '@/lib/app/questionnaire/authoring/config-health';
+export {
   updateVersionMetaSchema,
   updateVersionStatusSchema,
   createSectionSchema,
