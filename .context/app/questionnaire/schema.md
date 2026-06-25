@@ -270,11 +270,17 @@ questionSlotId)` (the upsert unique), with `value Json`, `provenanceLabel`,
   acceptable), `userMessage`/`agentResponse` (`@db.Text`), `targetedQuestionId String?`
   (plain String, no FK — symmetry with the JSON id array + UG-1 house style),
   `toolCalls Json` + `sideEffectAnswerIds Json` (read wholesale), `costUsd Float?`,
-  `createdAt`. Indexed `@@index([sessionId])` and `@@index([sessionId, ordinal])`. The
-  `recordTurn` seam writes a turn AND back-stamps `AppAnswerSlot.lastUpdatedTurnId` on the
-  answers it touched, in one transaction — the seam that finally fires that column.
-  Migration hand-stripped of the phantom pgvector DROPs (schema-shape test guards the
-  strip). See [`per-turn-orchestrator.md`](./per-turn-orchestrator.md).
+  `idempotencyKey String?` (F7.x retry — the send attempt's key, reused across its retries so
+  a turn already persisted under it is replayed, not duplicated; migration
+  `20260625082600_app_turn_idempotency_key`), `createdAt`. Indexed `@@index([sessionId])` and
+  `@@index([sessionId, ordinal])`, plus `@@unique([sessionId, idempotencyKey])` — the retry
+  dedup guard (NULLs stay distinct under Postgres, so the many key-less turns per session still
+  coexist; the **`ordinal`** column deliberately stays un-uniqued, as above). The `recordTurn`
+  seam writes a turn AND back-stamps `AppAnswerSlot.lastUpdatedTurnId` on the answers it
+  touched, in one transaction — the seam that finally fires that column; on the unique-race it
+  resolves to the winner's row rather than throwing. Both migrations hand-stripped of the
+  phantom pgvector DROPs (schema-shape test guards the strip). See
+  [`per-turn-orchestrator.md`](./per-turn-orchestrator.md).
 
 ### Respondent profile snapshot (F8.3 — P8)
 

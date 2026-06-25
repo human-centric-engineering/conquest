@@ -108,7 +108,11 @@ describe('useQuestionnaireSessionStream', () => {
     expect(result.current.turns).toEqual([{ role: 'assistant', content: 'Hello there.' }]);
     expect(result.current.status).toBe('idle');
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(JSON.parse(init.body as string)).toEqual({ kickoff: true });
+    // Every send (kickoff included) carries an idempotency key so a retry can dedup against it.
+    expect(JSON.parse(init.body as string)).toEqual({
+      kickoff: true,
+      idempotencyKey: expect.any(String),
+    });
   });
 
   it('recovers status to idle when the stream is aborted, never stranding the composer on streaming', async () => {
@@ -142,7 +146,10 @@ describe('useQuestionnaireSessionStream', () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe(API.APP.QUESTIONNAIRE_SESSIONS.messages(SESSION_ID));
     expect(init.method).toBe('POST');
-    expect(JSON.parse(init.body as string)).toEqual({ message: 'hi' });
+    expect(JSON.parse(init.body as string)).toEqual({
+      message: 'hi',
+      idempotencyKey: expect.any(String),
+    });
     expect((init.headers as Record<string, string>)['X-Session-Token']).toBeUndefined();
   });
 
@@ -627,5 +634,89 @@ describe('useQuestionnaireSessionStream', () => {
     expect(result.current.status).toBe('idle');
     expect(result.current.canSend).toBe(true);
     expect(result.current.error).toBeNull();
+  });
+
+  // ── retry (F7.x transient-failure recovery) ─────────────────────────────────
+
+  it('retry resends the failed turn reusing the SAME idempotency key and no second user bubble', async () => {
+    // Arrange: first send fails pre-stream (network drop → NETWORK_ERROR), leaving a dangling user
+    // turn and a preserved attempt. The retry then succeeds.
+    fetchMock
+      .mockRejectedValueOnce(new TypeError('network'))
+      .mockResolvedValueOnce(streamResponse(HAPPY_FRAMES));
+
+    const { result } = renderHook(() => useQuestionnaireSessionStream({ sessionId: SESSION_ID }));
+    await act(async () => {
+      await result.current.sendMessage('hi');
+    });
+    // Failed: user turn is on screen, transient error shown, composer still open.
+    expect(result.current.status).toBe('error');
+    expect(result.current.error!.code).toBe('NETWORK_ERROR');
+    expect(result.current.turns).toEqual([{ role: 'user', content: 'hi' }]);
+
+    await act(async () => {
+      await result.current.retry();
+    });
+
+    // The reply commits with NO duplicate user bubble (the dangling turn was reused).
+    expect(result.current.turns).toEqual([
+      { role: 'user', content: 'hi' },
+      { role: 'assistant', content: 'Hello there.' },
+    ]);
+    expect(result.current.status).toBe('idle');
+
+    // Both POSTs carry the same key — so the server replays a turn it already persisted.
+    const firstKey = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)
+      .idempotencyKey as string;
+    const retryKey = JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string)
+      .idempotencyKey as string;
+    expect(firstKey).toBeTruthy();
+    expect(retryKey).toBe(firstKey);
+  });
+
+  it('a fresh send after a clean settle mints a NEW idempotency key (attempt cleared on success)', async () => {
+    fetchMock.mockResolvedValue(streamResponse(HAPPY_FRAMES));
+    const { result } = renderHook(() => useQuestionnaireSessionStream({ sessionId: SESSION_ID }));
+
+    await act(async () => {
+      await result.current.sendMessage('first');
+    });
+    await act(async () => {
+      await result.current.sendMessage('second');
+    });
+
+    const firstKey = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)
+      .idempotencyKey as string;
+    const secondKey = JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string)
+      .idempotencyKey as string;
+    expect(secondKey).not.toBe(firstKey);
+  });
+
+  it('retry is a no-op once the attempt is cleared by dismissError', async () => {
+    fetchMock.mockResolvedValue(errorResponse(429, 'RATE_LIMITED'));
+    const { result } = renderHook(() => useQuestionnaireSessionStream({ sessionId: SESSION_ID }));
+    await act(async () => {
+      await result.current.sendMessage('hi');
+    });
+    expect(result.current.error!.code).toBe('RATE_LIMITED');
+
+    act(() => result.current.dismissError());
+    fetchMock.mockClear();
+
+    await act(async () => {
+      await result.current.retry();
+    });
+
+    // Dismiss dropped the attempt — retry resends nothing.
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('retry before any send is a harmless no-op', async () => {
+    const { result } = renderHook(() => useQuestionnaireSessionStream({ sessionId: SESSION_ID }));
+    await act(async () => {
+      await result.current.retry();
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.current.turns).toEqual([]);
   });
 });

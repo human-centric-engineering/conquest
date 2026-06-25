@@ -1256,10 +1256,18 @@ model AppQuestionnaireTurn {
   // posture as the rest of the turn row.
   inspectorCalls        Json     @default("[]")
   costUsd               Float? // summed per-turn LLM spend; null until set
+  // Client-minted key for the send attempt that produced this turn (one per logical attempt, reused
+  // across that attempt's retries). The retry path (F7.x) re-sends the SAME key, so a turn the server
+  // already persisted — when the connection dropped after persist but before the client saw the
+  // stream close — is replayed from this row instead of re-run, and never duplicated. Null for turns
+  // recorded before the feature and for any send that omits a key. Postgres treats NULLs as distinct,
+  // so the unique below still permits many key-less turns per session.
+  idempotencyKey        String?
   createdAt             DateTime @default(now())
 
   session AppQuestionnaireSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
+  @@unique([sessionId, idempotencyKey]) // dedup a retried send within a session (NULLs stay distinct)
   @@index([sessionId])
   @@index([sessionId, ordinal])
   @@map("app_questionnaire_turn")

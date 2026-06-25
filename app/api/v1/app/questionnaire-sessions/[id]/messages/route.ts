@@ -86,6 +86,7 @@ import { loadRoundBriefing } from '@/app/api/v1/app/questionnaire-sessions/_lib/
 import { buildPriorAnswersDigest } from '@/app/api/v1/app/questionnaire-sessions/_lib/prior-answers';
 import { resolveTurnAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-access';
 import { assertRoundAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/round-access';
+import { findTurnByIdempotencyKey } from '@/app/api/v1/app/questionnaire-sessions/_lib/transcript';
 
 const bodySchema = z
   .object({
@@ -99,6 +100,12 @@ const bodySchema = z
     kickoff: z.boolean().optional(),
     /** Optional files attached to this turn (images/documents) — read by the extractor. */
     attachments: chatAttachmentsArraySchema.optional(),
+    /**
+     * Idempotency key for this send attempt (F7.x retry). The surface mints one per logical send and
+     * reuses it across that send's retries, so a retry re-running a turn the server already persisted
+     * is replayed from that row rather than duplicated. Optional: a send without one is never deduped.
+     */
+    idempotencyKey: z.string().uuid().optional(),
   })
   .refine((b) => b.kickoff === true || (b.message?.trim().length ?? 0) > 0, {
     message: 'message is required',
@@ -166,6 +173,9 @@ async function handleMessage(
     // A kickoff carries no respondent answer — the opening question is selected, not extracted.
     // An empty `userMessage` is skipped by `recentMessages` and ignored by the opening phraser.
     const userMessage = body.kickoff ? '' : (body.message ?? '');
+    // Retry dedup key (F7.x): null when the send carried none. A retry re-sends the same key, so a
+    // turn already persisted under it is replayed below (not re-run); see `drive`'s replay branch.
+    const idempotencyKey = body.idempotencyKey ?? null;
 
     // Cost cap (F6.3): grade the session's spend so far against its budget at the turn
     // boundary, before any per-turn work. Hard (≥100%) refuses this turn with 402 and
@@ -558,6 +568,37 @@ async function handleMessage(
     > {
       yield { type: 'start', conversationId: sessionId, messageId: sessionId };
 
+      // Retry dedup-and-replay (F7.x): if this attempt's key already produced a persisted turn — the
+      // narrow case where the first attempt's reply streamed AND persisted but the connection dropped
+      // before the client saw the close, so the respondent retried — re-emit that saved reply instead
+      // of re-running the turn. No duplicate row, no second LLM spend. Frame order mirrors a live turn
+      // (warnings → reasoning → content → done) so the surface renders it identically. The common
+      // retry (first attempt failed before persisting) finds nothing here and falls through to a fresh
+      // run. Inspector frames are intentionally not replayed — they are preview-only telemetry and a
+      // resumed preview re-hydrates them from the persisted rows.
+      if (idempotencyKey) {
+        const replay = await findTurnByIdempotencyKey(sessionId, idempotencyKey);
+        if (replay) {
+          for (const w of replay.warnings) {
+            yield {
+              type: 'warning',
+              code: w.code,
+              message: w.message,
+              ...(w.detail ? { detail: w.detail } : {}),
+            };
+          }
+          if (replay.reasoning.length > 0) yield { type: 'reasoning', steps: replay.reasoning };
+          for (const delta of chunkText(replay.agentResponse)) yield { type: 'content', delta };
+          log.info('Live turn replayed (idempotent retry)', { sessionId, idempotencyKey });
+          yield {
+            type: 'done',
+            tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+            costUsd: 0,
+          };
+          return;
+        }
+      }
+
       // Data Slots feature: data-slot mode runs the parallel orchestrator (targets data slots,
       // fills questions in the background); otherwise the question-mode pipeline.
       const result = dataSlotMode
@@ -791,6 +832,9 @@ async function handleMessage(
             ? { pendingContradiction: result.sideEffects.pendingContradiction }
             : {}),
           keyToSlotId,
+          // Retry dedup (F7.x): stamp this attempt's key so a later retry re-sending it replays
+          // this turn instead of minting a duplicate.
+          ...(idempotencyKey ? { idempotencyKey } : {}),
           // Data Slots feature: persist the respondent-facing fills captured this turn + which
           // data slot this turn targeted (the re-ask/park counter source).
           ...(dataSlotMode

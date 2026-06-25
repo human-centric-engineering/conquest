@@ -67,6 +67,8 @@ export async function persistTurn(opts: {
    * untouched. Written before the turn is recorded so a mid-turn crash can't strand a stale probe.
    */
   pendingContradiction?: PendingContradiction | null;
+  /** The send attempt's idempotency key (F7.x retry) — stamped on the turn for dedup-and-replay. */
+  idempotencyKey?: string | null;
 }): Promise<string> {
   const sideEffectAnswerIds: string[] = [];
   const sideEffectDataSlotIds: string[] = [];
@@ -184,5 +186,6 @@ export async function persistTurn(opts: {
     sideEffectAnswerIds,
     sideEffectDataSlotIds,
     costUsd: opts.costUsd > 0 ? opts.costUsd : null,
+    ...(opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : {}),
   });
 }

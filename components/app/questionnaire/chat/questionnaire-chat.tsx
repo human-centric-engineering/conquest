@@ -384,8 +384,17 @@ export function QuestionnaireChat({
   readOnly = false,
   className,
 }: QuestionnaireChatProps) {
-  const { turns, streaming, inspectorTurns, status, error, canSend, sendMessage, dismissError } =
-    stream;
+  const {
+    turns,
+    streaming,
+    inspectorTurns,
+    status,
+    error,
+    canSend,
+    sendMessage,
+    dismissError,
+    retry,
+  } = stream;
 
   const [input, setInput] = useState('');
   const [voiceError, setVoiceError] = useState<string | null>(null);
@@ -417,6 +426,19 @@ export function QuestionnaireChat({
     if (turns[revealCursor]?.role === 'user') setRevealCursor((c) => c + 1);
   }, [revealCursor, turns]);
 
+  // The reveal queue is still typing committed turns onto the screen while the cursor hasn't
+  // reached the end. The HTTP stream (`streaming`/`canSend`) closes the instant a reply commits,
+  // but the typewriter keeps running after that — and on the opening burst the next question can
+  // still be fully hidden (`i > revealCursor`). Gating the composer on `canSend` alone therefore
+  // re-opened the box mid-reveal, letting a respondent answer a question they hadn't finished
+  // reading (or hadn't seen yet). `composerReady` keeps every input affordance closed until both
+  // clocks have settled — the stream is done AND the queue has caught up to the last turn.
+  const revealPending = revealCursor < turns.length;
+  const composerReady = canSend && !revealPending;
+  // The cue shown at the composer while it's held closed for a non-terminal reason: the agent is
+  // still composing (`streaming`), or the reply is still typing itself in (`revealPending`).
+  const composerHint = streaming ? 'Waiting for a reply…' : 'Revealing the reply…';
+
   /**
    * The pre-type "Thinking…" beat for the assistant turn at `index`. Only during the OPENING burst
    * (animating, and no respondent message has appeared yet): ~1s before the first message, ~1.5s
@@ -445,18 +467,20 @@ export function QuestionnaireChat({
     el.style.height = `${el.scrollHeight}px`;
   }, [input]);
 
-  // Refocus the composer when a turn finishes — the textarea is disabled while a reply streams,
-  // so we put the cursor back the moment it re-enables, ready for the next answer without a click.
-  const wasStreamingRef = useRef(false);
+  // Refocus the composer the moment it re-opens — it's disabled while a reply streams AND while the
+  // reveal queue types that reply in, so we put the cursor back once both have settled, ready for
+  // the next answer without a click. Keyed on `composerReady` (not bare `streaming`) so focus lands
+  // when the queue finishes revealing, not the instant the stream closes mid-typewriter.
+  const wasComposerBlockedRef = useRef(false);
   useEffect(() => {
-    if (wasStreamingRef.current && !streaming && canSend) {
+    if (wasComposerBlockedRef.current && composerReady) {
       textareaRef.current?.focus();
     }
-    wasStreamingRef.current = streaming;
-  }, [streaming, canSend]);
+    wasComposerBlockedRef.current = !composerReady;
+  }, [composerReady]);
 
   const handleSend = () => {
-    if (!canSend || input.trim().length === 0) return;
+    if (!composerReady || input.trim().length === 0) return;
     setVoiceError(null);
     void sendMessage(input, attachments.length > 0 ? attachments : undefined);
     setInput('');
@@ -567,6 +591,8 @@ export function QuestionnaireChat({
               status={status}
               error={error}
               onDismiss={status === 'error' ? dismissError : undefined}
+              // `retry` is async; the panel's onRetry is fire-and-forget (void).
+              onRetry={status === 'error' ? () => void retry() : undefined}
             />
           )}
 
@@ -586,17 +612,26 @@ export function QuestionnaireChat({
                 className="mb-2"
               />
             )}
+            {/* Explicit wait cue while the composer is held closed — the disabled box alone is a
+                silent dead end, especially when the reply is mid-reveal (no in-transcript "thinking"
+                indicator shows then). `role="status"` (inside ThinkingIndicator) announces the
+                changing label to assistive tech. */}
+            {!composerReady && (
+              <div className="mb-2">
+                <ThinkingIndicator message={composerHint} />
+              </div>
+            )}
             <div className="flex items-end gap-2">
               <Textarea
                 ref={textareaRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                disabled={!canSend}
+                disabled={!composerReady}
                 rows={1}
                 placeholder={
-                  streaming
-                    ? 'Waiting for a reply…'
+                  !composerReady
+                    ? composerHint
                     : voiceInputEnabled
                       ? 'Speak your thoughts with the mic, or type…'
                       : 'Share your thoughts…'
@@ -607,7 +642,7 @@ export function QuestionnaireChat({
               {attachmentInputEnabled && (
                 <AttachmentPickerButton
                   inlineThumbnails={false}
-                  disabled={!canSend}
+                  disabled={!composerReady}
                   pasteTarget={textareaRef}
                   controlsRef={attachControls}
                   onAttachmentsChange={setAttachments}
@@ -621,7 +656,7 @@ export function QuestionnaireChat({
                 <MicButton
                   agentId={sessionId}
                   endpoint={API.APP.QUESTIONNAIRE_SESSIONS.transcribe(sessionId)}
-                  disabled={!canSend}
+                  disabled={!composerReady}
                   // Match the Send button's height (h-9) — the mic defaults to size="sm" (h-8).
                   className="h-9"
                   // Give the idle mic the branded CTA colour so it reads as a
@@ -640,7 +675,7 @@ export function QuestionnaireChat({
               <Button
                 type="button"
                 onClick={handleSend}
-                disabled={!canSend || input.trim().length === 0}
+                disabled={!composerReady || input.trim().length === 0}
                 aria-label="Send"
                 className="shrink-0 text-white"
                 // The CTA gradient var resolves to a brand gradient (ctaColor→ctaColorEnd)

@@ -79,6 +79,7 @@ function makeReturn(
     sendMessage,
     kickoff: vi.fn(),
     dismissError,
+    retry: vi.fn(),
     applyStatus: vi.fn(),
     ...overrides,
   };
@@ -412,6 +413,62 @@ describe('QuestionnaireChat', () => {
     fireEvent.click(dismissBtn);
 
     expect(dismissError).toHaveBeenCalledTimes(1);
+  });
+
+  describe('composer wait cue + reveal-queue gate', () => {
+    it('shows a "Waiting for a reply…" cue at the composer while a reply is streaming', () => {
+      hookReturn = makeReturn({ streaming: true, canSend: false });
+      render(<QuestionnaireChat sessionId="s1" stream={hookReturn} />);
+
+      // The disabled box is no longer silent — an explicit status cue sits above it.
+      expect(screen.getByRole('status', { name: 'Waiting for a reply…' })).toBeInTheDocument();
+      expect(screen.getByLabelText('Your answer')).toBeDisabled();
+    });
+
+    it('keeps the composer disabled with a "Revealing the reply…" cue while the queue is still typing (stream already closed)', () => {
+      // The gate fix: streaming has ended (`canSend` true) but the opening greeting hasn't finished
+      // revealing. The composer must stay closed — and say why — so the respondent can't answer a
+      // question that is still typing onto the screen (or, on the opening burst, not yet visible).
+      hookReturn = makeReturn({
+        turns: [{ role: 'assistant', content: 'Welcome to the questionnaire.' }],
+        streaming: false,
+        canSend: true,
+      });
+      render(<QuestionnaireChat sessionId="s1" stream={hookReturn} animateOpening />);
+
+      expect(screen.getByLabelText('Your answer')).toBeDisabled();
+      expect(screen.getByRole('status', { name: 'Revealing the reply…' })).toBeInTheDocument();
+    });
+
+    it('does not send on Enter while the reveal queue is still typing', () => {
+      // `handleSend` guards on the same reveal-aware readiness as the disabled state, so even a
+      // forced keydown on the (disabled) textarea cannot race the queue.
+      hookReturn = makeReturn({
+        turns: [{ role: 'assistant', content: 'Welcome.' }],
+        streaming: false,
+        canSend: true,
+      });
+      render(<QuestionnaireChat sessionId="s1" stream={hookReturn} animateOpening />);
+
+      const textarea = screen.getByLabelText('Your answer');
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+
+      expect(sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('enables the composer and drops the wait cue once the stream has closed and the queue has caught up', () => {
+      // animateOpening off ⇒ the seeded turn is settled history (cursor already past it), stream idle.
+      hookReturn = makeReturn({
+        turns: [{ role: 'assistant', content: 'A settled question.' }],
+        streaming: false,
+        canSend: true,
+      });
+      render(<QuestionnaireChat sessionId="s1" stream={hookReturn} />);
+
+      expect(screen.getByLabelText('Your answer')).not.toBeDisabled();
+      // No "thinking" affordance anywhere — not in the transcript, not at the composer.
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    });
   });
 
   describe('opening animation', () => {
