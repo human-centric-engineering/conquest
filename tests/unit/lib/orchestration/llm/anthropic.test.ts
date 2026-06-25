@@ -1017,7 +1017,7 @@ describe('buildToolInputSchema helper (via chat params with tools)', () => {
     });
   });
 
-  it('always sets type:"object" at the top level of the input schema', async () => {
+  it('defaults a root-less schema to type:"object" at the top level', async () => {
     const provider = makeProvider();
     await provider.chat([{ role: 'user', content: 'go' }], {
       model: 'claude-haiku-4-5',
@@ -1025,14 +1025,36 @@ describe('buildToolInputSchema helper (via chat params with tools)', () => {
         {
           name: 'fn',
           description: 'desc',
-          // Note: type is something else; buildToolInputSchema should force 'object'
-          parameters: { type: 'string', properties: { q: { type: 'string' } } },
+          // No explicit root type — the common case for tool params; defaulted to object.
+          parameters: { properties: { q: { type: 'string' } } },
         },
       ],
     });
 
     const callArgs = createMock.mock.calls[0][0];
     expect(callArgs.tools[0].input_schema.type).toBe('object');
+  });
+
+  it('rejects a non-object root schema with invalid_schema instead of silently coercing it', async () => {
+    const provider = makeProvider();
+    let caught: unknown;
+    try {
+      await provider.chat([{ role: 'user', content: 'go' }], {
+        model: 'claude-haiku-4-5',
+        tools: [
+          {
+            name: 'fn',
+            description: 'desc',
+            parameters: { type: 'array', items: { type: 'string' } },
+          },
+        ],
+      });
+    } catch (err) {
+      caught = err;
+    }
+    expect((caught as { code?: string }).code).toBe('invalid_schema');
+    // The bad schema must never reach the SDK.
+    expect(createMock).not.toHaveBeenCalled();
   });
 
   it('preserves additional JSON Schema keys (properties, required)', async () => {
@@ -1459,6 +1481,87 @@ describe('AnthropicProvider.chat — structured output extraction (json_schema r
     // Tool choice must be forced to the extraction tool
     expect(callArgs.tool_choice).toEqual({ type: 'tool', name: '__structured_result' });
   });
+
+  it('sanitizes a schema name with disallowed characters into a valid Anthropic tool name', async () => {
+    createMock.mockResolvedValue({
+      content: [{ type: 'tool_use', id: 's', name: '__structured_x', input: {} }],
+      usage: { input_tokens: 1, output_tokens: 1 },
+      model: 'claude-haiku-4-5',
+      stop_reason: 'tool_use',
+    });
+
+    const provider = makeProvider();
+    await provider.chat([{ role: 'user', content: 'go' }], {
+      model: 'claude-haiku-4-5',
+      responseFormat: {
+        type: 'json_schema',
+        name: 'Customer Profile (v2)!',
+        schema: { type: 'object', properties: { a: { type: 'string' } } },
+      },
+    });
+
+    const callArgs = createMock.mock.calls[0][0] as {
+      tools: Array<{ name: string }>;
+      tool_choice: { name: string };
+    };
+    const toolName = callArgs.tools[0].name;
+    expect(toolName).toBe('__structured_Customer_Profile__v2__');
+    expect(toolName).toMatch(/^[a-zA-Z0-9_-]{1,64}$/);
+    expect(callArgs.tool_choice.name).toBe(toolName);
+  });
+
+  it('truncates an over-long schema name so the prefixed tool name stays within 64 chars', async () => {
+    createMock.mockResolvedValue({
+      content: [{ type: 'tool_use', id: 's', name: '__structured_x', input: {} }],
+      usage: { input_tokens: 1, output_tokens: 1 },
+      model: 'claude-haiku-4-5',
+      stop_reason: 'tool_use',
+    });
+
+    const provider = makeProvider();
+    await provider.chat([{ role: 'user', content: 'go' }], {
+      model: 'claude-haiku-4-5',
+      responseFormat: {
+        type: 'json_schema',
+        name: 'a'.repeat(120),
+        schema: { type: 'object', properties: { a: { type: 'string' } } },
+      },
+    });
+
+    const callArgs = createMock.mock.calls[0][0] as { tools: Array<{ name: string }> };
+    expect(callArgs.tools[0].name.length).toBe(64);
+    expect(callArgs.tools[0].name).toMatch(/^[a-zA-Z0-9_-]{1,64}$/);
+  });
+
+  it('throws truncated_no_output when a structured extraction hits max_tokens (non-empty partial JSON content)', async () => {
+    // A truncated forced-tool input still serializes to non-empty content, so
+    // the empty-output guard alone would miss it — the extraction path must
+    // surface the truncation regardless of content length.
+    createMock.mockResolvedValue({
+      content: [
+        { type: 'tool_use', id: 's', name: '__structured_result', input: { partial: true } },
+      ],
+      usage: { input_tokens: 5, output_tokens: 5 },
+      model: 'claude-haiku-4-5',
+      stop_reason: 'max_tokens',
+    });
+
+    const provider = makeProvider();
+    let caught: unknown;
+    try {
+      await provider.chat([{ role: 'user', content: 'compute' }], {
+        model: 'claude-haiku-4-5',
+        responseFormat: {
+          type: 'json_schema',
+          name: 'result',
+          schema: { type: 'object', properties: { value: { type: 'number' } } },
+        },
+      });
+    } catch (err) {
+      caught = err;
+    }
+    expect((caught as { code?: string }).code).toBe('truncated_no_output');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1728,5 +1831,47 @@ describe('AnthropicProvider.chatStream — structured output extraction (json_sc
     const done = chunks[chunks.length - 1] as { type: string; finishReason: string };
     expect(done.type).toBe('done');
     expect(done.finishReason).toBe('stop');
+  });
+
+  it('throws truncated_no_output when a streaming extraction hits max_tokens (mirrors the non-streaming guard)', async () => {
+    const events = [
+      { type: 'message_start', message: { usage: { input_tokens: 10 } } },
+      {
+        type: 'content_block_start',
+        index: 0,
+        content_block: { type: 'tool_use', id: 'struct_s1', name: '__structured_answer' },
+      },
+      {
+        type: 'content_block_delta',
+        index: 0,
+        // Truncated mid-input — the partial JSON won't parse cleanly.
+        delta: { type: 'input_json_delta', partial_json: '{"answer":' },
+      },
+      { type: 'content_block_stop', index: 0 },
+      {
+        type: 'message_delta',
+        delta: { stop_reason: 'max_tokens' },
+        usage: { output_tokens: 6 },
+      },
+    ];
+    createMock.mockResolvedValue(makeStream(events));
+
+    const provider = makeProvider();
+    let caught: unknown;
+    try {
+      for await (const _chunk of provider.chatStream([{ role: 'user', content: 'answer?' }], {
+        model: 'claude-haiku-4-5',
+        responseFormat: {
+          type: 'json_schema',
+          name: 'answer',
+          schema: { type: 'object', properties: { answer: { type: 'string' } } },
+        },
+      })) {
+        // drain
+      }
+    } catch (err) {
+      caught = err;
+    }
+    expect((caught as { code?: string }).code).toBe('truncated_no_output');
   });
 });
