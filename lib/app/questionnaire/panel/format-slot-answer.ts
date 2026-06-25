@@ -16,7 +16,11 @@
  */
 
 import type { QuestionType } from '@/lib/app/questionnaire/types';
-import { readBooleanConfig, readChoicesConfig } from '@/lib/app/questionnaire/form/type-config';
+import {
+  readBooleanConfig,
+  readChoicesConfig,
+  readLikertConfig,
+} from '@/lib/app/questionnaire/form/type-config';
 
 /** Plain value → string, mirroring the panel's value-only `formatAnswerValue`. */
 function formatValue(value: unknown): string {
@@ -36,9 +40,10 @@ function formatValue(value: unknown): string {
 
 /**
  * Render a captured answer with knowledge of its slot — choice keys become their labels,
- * booleans honour their custom labels — falling back to {@link formatValue} for free-text,
- * numeric, likert, and any value whose key isn't in the option list (so a stale answer
- * never renders blank).
+ * booleans honour their custom labels, and a likert point becomes its per-point label
+ * ("Neutral") — falling back to {@link formatValue} for free-text, numeric, an unlabelled
+ * scale, and any value whose key isn't in the option list (so a stale answer never renders
+ * blank).
  */
 export function formatSlotAnswer(type: QuestionType, typeConfig: unknown, value: unknown): string {
   if (value === null || value === undefined) return '—';
@@ -61,6 +66,17 @@ export function formatSlotAnswer(type: QuestionType, typeConfig: unknown, value:
   if (type === 'boolean' && typeof value === 'boolean') {
     const config = readBooleanConfig(typeConfig);
     return value ? config.trueLabel : config.falseLabel;
+  }
+
+  // Likert: a stored value is a scale point (an integer in [min, max]). Render the
+  // point's human-readable label ("Neutral") rather than a meaningless number. Falls
+  // back to the bare value for a legacy/unlabelled scale or an out-of-range point.
+  if (type === 'likert' && typeof value === 'number') {
+    const config = readLikertConfig(typeConfig);
+    if (config?.labels) {
+      const label = config.labels[value - config.min];
+      if (label) return label;
+    }
   }
 
   return formatValue(value);

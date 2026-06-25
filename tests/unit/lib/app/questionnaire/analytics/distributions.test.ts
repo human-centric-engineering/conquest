@@ -221,6 +221,34 @@ describe('getQuestionDistributions', () => {
     }
   });
 
+  it('labels each likert bucket from per-point labels when present', async () => {
+    findManySlots.mockResolvedValue([
+      slot({
+        id: 'ql',
+        type: 'likert',
+        typeConfig: {
+          min: 1,
+          max: 5,
+          labels: ['Very low', 'Low', 'Neutral', 'High', 'Very high'],
+        },
+      }),
+    ]);
+    findManySessions.mockResolvedValue(cohort(5));
+    findManyAnswers.mockResolvedValue([
+      { questionSlotId: 'ql', value: 3, confidence: null, provenanceLabel: 'direct' },
+    ]);
+
+    const result = await getQuestionDistributions(scope);
+    const q = result.questions[0];
+    expect(q.detail.kind).toBe('likert');
+    if (q.detail.kind === 'likert') {
+      // Every bucket — including the middle — reads as a word, not a bare number.
+      expect(q.detail.buckets[0].label).toBe('1 (Very low)');
+      expect(q.detail.buckets[2]).toEqual({ value: '3', label: '3 (Neutral)', count: 1 });
+      expect(q.detail.buckets[4].label).toBe('5 (Very high)');
+    }
+  });
+
   it('counts boolean answers with custom labels', async () => {
     findManySlots.mockResolvedValue([
       slot({ id: 'qb', type: 'boolean', typeConfig: { trueLabel: 'Yes', falseLabel: 'No' } }),

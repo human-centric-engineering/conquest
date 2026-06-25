@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
 
-import { validateTypeConfig } from '@/lib/app/questionnaire/authoring/type-config-schema';
+import {
+  validateTypeConfig,
+  hasCompleteLikertLabels,
+  typeConfigSchemaFor,
+} from '@/lib/app/questionnaire/authoring/type-config-schema';
 
 /**
  * Boundary contract for `typeConfig` per question type (F2.1 / PR2).
@@ -46,18 +50,63 @@ describe('validateTypeConfig — choice types', () => {
 });
 
 describe('validateTypeConfig — likert', () => {
-  it('accepts a bounded scale with labels', () => {
-    const res = validateTypeConfig('likert', { min: 1, max: 5, minLabel: 'Low', maxLabel: 'High' });
+  const fivePoint = ['Very low', 'Low', 'Neutral', 'High', 'Very high'];
+
+  it('accepts a bounded scale with one label per point', () => {
+    const res = validateTypeConfig('likert', { min: 1, max: 5, labels: fivePoint });
     expect(res.ok).toBe(true);
   });
 
+  it('requires labels — rejects a bounds-only config', () => {
+    // Write boundary now demands per-point labels (a numeric rating must use the numeric type).
+    expect(validateTypeConfig('likert', { min: 1, max: 5 }).ok).toBe(false);
+    expect(
+      validateTypeConfig('likert', { min: 1, max: 5, minLabel: 'Low', maxLabel: 'High' }).ok
+    ).toBe(false);
+  });
+
+  it('rejects a labels array of the wrong length', () => {
+    expect(validateTypeConfig('likert', { min: 1, max: 5, labels: ['a', 'b', 'c'] }).ok).toBe(
+      false
+    );
+    expect(validateTypeConfig('likert', { min: 1, max: 3, labels: fivePoint }).ok).toBe(false);
+  });
+
+  it('rejects a blank label', () => {
+    expect(validateTypeConfig('likert', { min: 1, max: 3, labels: ['Low', '', 'High'] }).ok).toBe(
+      false
+    );
+  });
+
   it('rejects max ≤ min', () => {
-    expect(validateTypeConfig('likert', { min: 5, max: 5 }).ok).toBe(false);
-    expect(validateTypeConfig('likert', { min: 5, max: 1 }).ok).toBe(false);
+    expect(validateTypeConfig('likert', { min: 5, max: 5, labels: ['a'] }).ok).toBe(false);
+    expect(validateTypeConfig('likert', { min: 5, max: 1, labels: ['a'] }).ok).toBe(false);
   });
 
   it('rejects non-integer bounds', () => {
-    expect(validateTypeConfig('likert', { min: 1, max: 5.5 }).ok).toBe(false);
+    expect(validateTypeConfig('likert', { min: 1, max: 5.5, labels: fivePoint }).ok).toBe(false);
+  });
+
+  it('read schema stays lenient — a legacy bounds-only config still parses (for answer validation)', () => {
+    // Bound-readers, scoring and answer validation must not reject a pre-backfill row.
+    expect(typeConfigSchemaFor('likert').safeParse({ min: 1, max: 5 }).success).toBe(true);
+    expect(
+      typeConfigSchemaFor('likert').safeParse({ min: 1, max: 5, minLabel: 'Low', maxLabel: 'High' })
+        .success
+    ).toBe(true);
+  });
+});
+
+describe('hasCompleteLikertLabels', () => {
+  it('is true only for a fully-labelled scale', () => {
+    expect(hasCompleteLikertLabels({ min: 1, max: 3, labels: ['Low', 'Mid', 'High'] })).toBe(true);
+  });
+
+  it('is false for a bounds-only, wrong-length, or non-likert config', () => {
+    expect(hasCompleteLikertLabels({ min: 1, max: 5 })).toBe(false);
+    expect(hasCompleteLikertLabels({ min: 1, max: 5, labels: ['Low', 'High'] })).toBe(false);
+    expect(hasCompleteLikertLabels({ choices: [] })).toBe(false);
+    expect(hasCompleteLikertLabels(null)).toBe(false);
   });
 });
 

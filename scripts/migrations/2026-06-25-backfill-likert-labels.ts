@@ -1,0 +1,295 @@
+import dotenv from 'dotenv';
+dotenv.config({ path: '.env.local' });
+dotenv.config({ path: '.env' });
+
+import { prisma } from '@/lib/db/client';
+import { logger } from '@/lib/logging';
+import { resolveAgentProviderAndModel } from '@/lib/orchestration/llm/agent-resolver';
+import { getProvider } from '@/lib/orchestration/llm/provider-manager';
+import { runStructuredCompletion } from '@/lib/orchestration/evaluations/parse-structured';
+import type { LlmProvider } from '@/lib/orchestration/llm/provider';
+import { validateTypeConfig, hasCompleteLikertLabels } from '@/lib/app/questionnaire/authoring';
+import {
+  buildLikertLabelMessages,
+  parseLikertLabelDecision,
+  genericLikertLabels,
+  type LikertLabelDecision,
+} from '@/lib/app/questionnaire/ingestion/likert-labels';
+
+/**
+ * Backfill per-point labels for unlabelled likert scales — 2026-06-25
+ * ===================================================================
+ *
+ * Likert questions store a bounded scale (`{min,max}`) but per-point labels are a later addition,
+ * so pre-existing questions render as bare numbers in the downloadable report ("1", "5"). This
+ * script visits every likert question whose scale isn't fully labelled and, per question, asks an
+ * LLM to either (a) name each point — written back as `typeConfig.labels` — or (b) declare the
+ * scale purely numeric, in which case the question's `type` is switched to `numeric` (the agreed
+ * exception, rather than fabricating words for a meaningless number).
+ *
+ * Idempotent: a likert already carrying one label per point is skipped. Fail-soft per question — a
+ * provider/parse failure falls back to a deterministic generic word ramp so the question is never
+ * left unlabelled (and never blocks launch). With no provider configured (or `--generic`), every
+ * question takes that deterministic fallback.
+ *
+ * Usage
+ * -----
+ *   tsx --env-file=.env.local scripts/migrations/2026-06-25-backfill-likert-labels.ts [flags]
+ *   # or: npm run db:backfill:likert-labels -- [flags]
+ *
+ * Flags
+ * -----
+ *   --dry-run                 List the questions that would change; write nothing.
+ *   --generic                 Skip the LLM; apply the deterministic generic labels to every scale.
+ *   --version=<id>            Limit to a single version id.
+ *   --questionnaire=<id>      Limit to all versions of one questionnaire.
+ *
+ * Safe to delete this file once every environment has been backfilled.
+ */
+
+interface Flags {
+  dryRun: boolean;
+  generic: boolean;
+  versionId?: string;
+  questionnaireId?: string;
+}
+
+function parseFlags(argv: string[]): Flags {
+  const flags: Flags = { dryRun: false, generic: false };
+  for (const arg of argv) {
+    if (arg === '--dry-run') flags.dryRun = true;
+    else if (arg === '--generic') flags.generic = true;
+    else if (arg.startsWith('--version=')) flags.versionId = arg.slice('--version='.length);
+    else if (arg.startsWith('--questionnaire='))
+      flags.questionnaireId = arg.slice('--questionnaire='.length);
+    else if (arg.startsWith('--')) throw new Error(`Unknown flag: ${arg}`);
+  }
+  return flags;
+}
+
+/** Read coherent integer bounds from a likert config, or null when unusable. */
+function readBounds(typeConfig: unknown): { min: number; max: number } | null {
+  if (!typeConfig || typeof typeConfig !== 'object') return null;
+  const r = typeConfig as Record<string, unknown>;
+  const min = r.min;
+  const max = r.max;
+  if (typeof min !== 'number' || typeof max !== 'number') return null;
+  if (!Number.isInteger(min) || !Number.isInteger(max) || max <= min) return null;
+  return { min, max };
+}
+
+/**
+ * Some likert rows were extracted with a `choices` string array (the option words) instead of
+ * `min`/`max` — those words ARE the per-point labels. Read them so the scale can be normalised to a
+ * proper 1..N labelled likert deterministically (no LLM needed).
+ */
+function readChoiceLabels(typeConfig: unknown): string[] | null {
+  if (!typeConfig || typeof typeConfig !== 'object') return null;
+  const choices = (typeConfig as Record<string, unknown>).choices;
+  if (!Array.isArray(choices) || choices.length < 2) return null;
+  if (!choices.every((c) => typeof c === 'string' && c.trim().length > 0)) return null;
+  return choices.map((c) => (c as string).trim());
+}
+
+interface Target {
+  id: string;
+  prompt: string;
+  typeConfig: unknown;
+  bounds: { min: number; max: number };
+  /** Pre-resolved labels (e.g. from a `choices` array) — applied directly, skipping the LLM. */
+  presetLabels?: string[];
+}
+
+async function findTargets(flags: Flags): Promise<Target[]> {
+  const slots = await prisma.appQuestionSlot.findMany({
+    where: {
+      type: 'likert',
+      ...(flags.versionId ? { versionId: flags.versionId } : {}),
+      ...(flags.questionnaireId
+        ? { section: { version: { questionnaireId: flags.questionnaireId } } }
+        : {}),
+    },
+    select: { id: true, prompt: true, typeConfig: true },
+    orderBy: { id: 'asc' },
+  });
+
+  const targets: Target[] = [];
+  for (const s of slots) {
+    if (hasCompleteLikertLabels(s.typeConfig)) continue; // already labelled — idempotent skip
+
+    const bounds = readBounds(s.typeConfig);
+    if (bounds) {
+      targets.push({ id: s.id, prompt: s.prompt, typeConfig: s.typeConfig, bounds });
+      continue;
+    }
+
+    // No usable bounds, but a `choices` word list ⇒ a 1..N scale whose words are the labels.
+    const choiceLabels = readChoiceLabels(s.typeConfig);
+    if (choiceLabels) {
+      targets.push({
+        id: s.id,
+        prompt: s.prompt,
+        typeConfig: s.typeConfig,
+        bounds: { min: 1, max: choiceLabels.length },
+        presetLabels: choiceLabels,
+      });
+      continue;
+    }
+
+    logger.warn('  ⚠️  skipping likert with unreadable bounds', { slotId: s.id });
+  }
+  return targets;
+}
+
+/** Resolve a provider for the labelling call, or null when none is configured. */
+async function resolveProvider(): Promise<{ provider: LlmProvider; model: string } | null> {
+  try {
+    const resolved = await resolveAgentProviderAndModel(
+      { provider: '', model: '', fallbackProviders: [] },
+      'reasoning'
+    );
+    const provider = await getProvider(resolved.providerSlug);
+    return { provider, model: resolved.model };
+  } catch (err) {
+    logger.warn('No LLM provider resolved — falling back to generic labels for every scale', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
+
+/** Decide labels (or numeric) for one question, via the LLM with a deterministic fallback. */
+async function decide(
+  target: Target,
+  llm: { provider: LlmProvider; model: string } | null
+): Promise<{ decision: LikertLabelDecision; source: 'llm' | 'generic' | 'choices' }> {
+  // A `choices` word list is already the labels — apply deterministically, no LLM.
+  if (target.presetLabels) {
+    return { decision: { numeric: false, labels: target.presetLabels }, source: 'choices' };
+  }
+  if (llm) {
+    try {
+      const decision = await runStructuredCompletion<LikertLabelDecision>({
+        provider: llm.provider,
+        model: llm.model,
+        messages: buildLikertLabelMessages({ prompt: target.prompt, ...target.bounds }),
+        maxTokens: 400,
+        timeoutMs: 30_000,
+        parse: (raw) => parseLikertLabelDecision(raw, target.bounds),
+        retryUserMessage:
+          'Return ONLY the JSON object: {"numeric": false, "labels": [ … one per point … ]} ' +
+          'or {"numeric": true}.',
+      });
+      return { decision: decision.value, source: 'llm' };
+    } catch (err) {
+      logger.warn('  ⚠️  LLM labelling failed; using generic labels', {
+        slotId: target.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return {
+    decision: { numeric: false, labels: genericLikertLabels(target.bounds.min, target.bounds.max) },
+    source: 'generic',
+  };
+}
+
+/** Apply a decision to one slot: write labels, or reclassify to numeric. Validates before writing. */
+async function apply(
+  target: Target,
+  decision: LikertLabelDecision
+): Promise<'labelled' | 'numeric'> {
+  if (decision.numeric) {
+    const numericConfig = { min: target.bounds.min, max: target.bounds.max };
+    const check = validateTypeConfig('numeric', numericConfig);
+    await prisma.appQuestionSlot.update({
+      where: { id: target.id },
+      data: { type: 'numeric', typeConfig: check.ok ? (check.value as object) : numericConfig },
+    });
+    return 'numeric';
+  }
+  const config = { min: target.bounds.min, max: target.bounds.max, labels: decision.labels };
+  const check = validateTypeConfig('likert', config);
+  if (!check.ok) {
+    // Shouldn't happen (labels match the point count), but never write an invalid config.
+    throw new Error(
+      `produced config failed validation: ${check.issues.map((i) => i.message).join('; ')}`
+    );
+  }
+  await prisma.appQuestionSlot.update({
+    where: { id: target.id },
+    data: { typeConfig: check.value as object },
+  });
+  return 'labelled';
+}
+
+async function main(): Promise<void> {
+  const flags = parseFlags(process.argv.slice(2));
+
+  logger.info('🏷️  Backfilling likert scale labels', {
+    dryRun: flags.dryRun,
+    generic: flags.generic,
+    scope: flags.versionId
+      ? `version ${flags.versionId}`
+      : flags.questionnaireId
+        ? `questionnaire ${flags.questionnaireId}`
+        : 'all likert questions',
+  });
+
+  const targets = await findTargets(flags);
+  if (targets.length === 0) {
+    logger.info('✅ Nothing to backfill — every likert scale is already labelled.');
+    return;
+  }
+  logger.info(`Found ${targets.length} unlabelled likert question(s).`);
+
+  if (flags.dryRun) {
+    for (const t of targets) {
+      logger.info('  • would label', {
+        slotId: t.id,
+        prompt: t.prompt,
+        scale: `${t.bounds.min}–${t.bounds.max}`,
+      });
+    }
+    logger.info('🟡 Dry run — nothing written. Re-run without --dry-run to apply.');
+    return;
+  }
+
+  const llm = flags.generic ? null : await resolveProvider();
+  const summary = { labelled: 0, numeric: 0, failed: 0 };
+  const bySource = { llm: 0, choices: 0, generic: 0 };
+
+  for (const t of targets) {
+    try {
+      const { decision, source } = await decide(t, llm);
+      const outcome = await apply(t, decision);
+      summary[outcome] += 1;
+      bySource[source] += 1;
+      logger.info(
+        `  ✅ ${outcome === 'numeric' ? 'reclassified → numeric' : 'labelled'} (${source})`,
+        {
+          slotId: t.id,
+          ...(outcome === 'labelled' && !decision.numeric ? { labels: decision.labels } : {}),
+        }
+      );
+    } catch (err) {
+      summary.failed += 1;
+      logger.error('  ❌ failed', {
+        slotId: t.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  logger.info('🎉 Backfill complete', { ...summary, bySource });
+  if (summary.failed > 0) process.exitCode = 1;
+}
+
+main()
+  .catch((err) => {
+    logger.error('❌ Backfill failed', err);
+    process.exit(1);
+  })
+  .finally(() => {
+    void prisma.$disconnect();
+  });

@@ -65,6 +65,11 @@ function asBounds(config: unknown): { min?: number; max?: number } {
   return { min: r.min as number | undefined, max: r.max as number | undefined };
 }
 
+function asLabels(config: unknown): string[] {
+  const l = asRecord(config).labels;
+  return Array.isArray(l) ? l.map((x) => (typeof x === 'string' ? x : '')) : [];
+}
+
 export function QuestionEditor({
   questionnaireId,
   versionId,
@@ -401,10 +406,16 @@ function ChoicesEditor({
 }
 
 /**
- * Min/max bounds editor for likert/numeric. Holds both bounds as local state and
- * only saves when the resulting config is valid — so editing one bound to a
- * temporarily-out-of-order value (min above the old max) doesn't fire a doomed
- * 400; the user can set the two bounds in either order.
+ * Min/max bounds editor for likert/numeric, plus per-point labels for likert. Holds
+ * bounds + labels as local state and only saves when the resulting config is valid —
+ * so editing one bound to a temporarily-out-of-order value (min above the old max), or
+ * a not-yet-filled label, doesn't fire a doomed 400; the user can set the bounds in
+ * either order and fill the labels at leisure.
+ *
+ * A likert MUST label every scale point (the write schema enforces it) — a purely
+ * numeric rating with no qualitative meaning should use the Numeric type instead. The
+ * label inputs surface that requirement: blank labels keep the config invalid, so the
+ * question can't be saved (or launched) half-labelled.
  */
 function BoundsEditor({
   type,
@@ -417,52 +428,99 @@ function BoundsEditor({
   busy: boolean;
   onSave: (config: unknown) => void;
 }) {
+  const isLikert = type === 'likert';
   const bounds = asBounds(config);
   const toStr = (n: number | undefined) => (n === undefined ? '' : String(n));
   const [min, setMin] = useState(toStr(bounds.min));
   const [max, setMax] = useState(toStr(bounds.max));
+  const [labels, setLabels] = useState<string[]>(asLabels(config));
 
   useEffect(() => {
     const b = asBounds(config);
     setMin(toStr(b.min));
     setMax(toStr(b.max));
+    setLabels(asLabels(config));
   }, [config]);
 
-  const save = () => {
+  // The number of scale points implied by the current (draft) bounds, and the labels
+  // reconciled to that count — preserving what's typed, padding new points with ''.
+  const minNum = Number(min);
+  const maxNum = Number(max);
+  const pointCount =
+    isLikert && Number.isInteger(minNum) && Number.isInteger(maxNum) && maxNum > minNum
+      ? maxNum - minNum + 1
+      : 0;
+  const pointLabels = Array.from({ length: pointCount }, (_, i) => labels[i] ?? '');
+
+  const saveWith = (nextLabels: string[]) => {
     const next: Record<string, unknown> = { ...asRecord(config) };
     if (min === '') delete next.min;
     else next.min = Number(min);
     if (max === '') delete next.max;
     else next.max = Number(max);
+    if (isLikert) next.labels = nextLabels;
+    else delete next.labels;
     const result = validateTypeConfig(type, next);
     if (result.ok) onSave(result.value);
-    // Invalid intermediate (e.g. min > max) → keep editing, no doomed request.
+    // Invalid intermediate (min > max, a blank label) → keep editing, no doomed request.
   };
 
   return (
-    <div className="flex items-end gap-3">
-      <div className="space-y-1">
-        <Label className="text-xs">Min</Label>
-        <Input
-          type="number"
-          value={min}
-          className="h-7 w-20 text-xs"
-          disabled={busy}
-          onChange={(e) => setMin(e.target.value)}
-          onBlur={save}
-        />
+    <div className="space-y-2">
+      <div className="flex items-end gap-3">
+        <div className="space-y-1">
+          <Label className="text-xs">Min</Label>
+          <Input
+            type="number"
+            value={min}
+            className="h-7 w-20 text-xs"
+            disabled={busy}
+            onChange={(e) => setMin(e.target.value)}
+            onBlur={() => saveWith(pointLabels)}
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Max</Label>
+          <Input
+            type="number"
+            value={max}
+            className="h-7 w-20 text-xs"
+            disabled={busy}
+            onChange={(e) => setMax(e.target.value)}
+            onBlur={() => saveWith(pointLabels)}
+          />
+        </div>
+        {isLikert && (
+          <FieldHelp title="Scale labels">
+            Label what each point on the scale <em>means</em> (e.g. <code>1</code> = “Very
+            dissatisfied”, <code>5</code> = “Very satisfied”). These labels appear in the
+            downloadable report instead of a bare number. Every point must be labelled — if the
+            question is a purely numeric rating with no qualitative meaning, switch its type to{' '}
+            <strong>Numeric</strong> instead.
+          </FieldHelp>
+        )}
       </div>
-      <div className="space-y-1">
-        <Label className="text-xs">Max</Label>
-        <Input
-          type="number"
-          value={max}
-          className="h-7 w-20 text-xs"
-          disabled={busy}
-          onChange={(e) => setMax(e.target.value)}
-          onBlur={save}
-        />
-      </div>
+      {isLikert && pointCount > 0 && (
+        <div className="bg-muted/40 grid gap-2 rounded-md p-2 sm:grid-cols-2">
+          {pointLabels.map((label, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <span className="text-muted-foreground w-6 text-right font-mono text-xs tabular-nums">
+                {minNum + i}
+              </span>
+              <Input
+                value={label}
+                placeholder={`Label for ${minNum + i}`}
+                className="h-7 text-xs"
+                disabled={busy}
+                onChange={(e) =>
+                  setLabels(pointLabels.map((l, j) => (j === i ? e.target.value : l)))
+                }
+                onBlur={() => saveWith(pointLabels)}
+              />
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

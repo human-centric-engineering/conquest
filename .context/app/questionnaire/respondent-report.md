@@ -9,7 +9,10 @@ The per-respondent report delivered after a respondent completes a questionnaire
 ## Modes
 
 - **`raw`** — answers only: the captured data-slot values and/or the questions as presented.
-  Deterministic; rendered on demand (no stored report row).
+  Deterministic; rendered on demand (no stored report row). Each answer is rendered slot-aware by
+  `formatSlotAnswer` — choice keys become their labels, booleans their custom labels, and a **likert
+  point becomes its per-point label** (value `3` ⇒ "Neutral", not a bare "3"); an unlabelled/legacy
+  scale falls back to the number. Labels are guaranteed at launch by the `scaleLabels` readiness check.
 - **`raw_plus_insights`** — the raw report plus an AI-generated, actionable insights section,
   assembled by the report agent (optionally grounded in the client knowledge base). Generated once,
   asynchronously, after submit and stored in `AppRespondentReport`.

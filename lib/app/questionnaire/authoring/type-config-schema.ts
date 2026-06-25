@@ -42,15 +42,53 @@ const choicesConfigSchema = z
     }
   });
 
-/** likert: a bounded integer scale, `max` strictly greater than `min`. */
-const likertConfigSchema = z
-  .object({
-    min: z.number().int(),
-    max: z.number().int(),
-    minLabel: z.string().min(1).optional(),
-    maxLabel: z.string().min(1).optional(),
-  })
-  .refine((c) => c.max > c.min, { message: 'max must be greater than min', path: ['max'] });
+/**
+ * likert base shape: a bounded integer scale plus optional per-point `labels`
+ * (one human-readable word per scale point, `labels[i]` describing value
+ * `min + i`). Legacy `minLabel`/`maxLabel` endpoint labels are still accepted so
+ * pre-backfill rows keep reading. The base is shared by the *read* schema (labels
+ * optional — bound-readers and answer validation must not reject an unlabelled row)
+ * and the *write* schema (labels required — see {@link likertWriteConfigSchema}).
+ */
+const likertBaseShape = z.object({
+  min: z.number().int(),
+  max: z.number().int(),
+  minLabel: z.string().min(1).optional(),
+  maxLabel: z.string().min(1).optional(),
+  /** Per-point labels (validated for completeness only by the *write* schema). */
+  labels: z.array(z.string()).optional(),
+});
+
+const likertMaxGtMin = (c: { min: number; max: number }) => c.max > c.min;
+const likertLabelsComplete = (c: { min: number; max: number; labels?: string[] }) =>
+  Array.isArray(c.labels) &&
+  c.labels.length === c.max - c.min + 1 &&
+  c.labels.every((l) => l.trim().length > 0);
+
+/**
+ * likert (read): bounded integer scale, `max > min`. Deliberately lenient on `labels` — a
+ * malformed/absent labels array must NOT cost the caller the valid bounds (answer validation,
+ * scoring and the form reader all parse through this via {@link typeConfigSchemaFor}). Label
+ * completeness is the write schema's concern; readers check the array themselves.
+ */
+const likertConfigSchema = likertBaseShape.refine(likertMaxGtMin, {
+  message: 'max must be greater than min',
+  path: ['max'],
+});
+
+/**
+ * likert (write): bounded scale PLUS a hard requirement that every scale point carries a
+ * non-empty label. A purely numeric rating (no qualitative meaning) must use the `numeric`
+ * type instead — there is deliberately no "unlabelled likert". Enforced at the authoring
+ * boundary by {@link validateTypeConfig} and reused by the launch gate.
+ */
+const likertWriteConfigSchema = likertBaseShape
+  .refine(likertMaxGtMin, { message: 'max must be greater than min', path: ['max'] })
+  .refine(likertLabelsComplete, {
+    message:
+      'a likert scale needs one label per point — label every point, or use the numeric type for an unlabelled rating',
+    path: ['labels'],
+  });
 
 /** numeric: optional coherent bounds + step/unit. */
 const numericConfigSchema = z
@@ -88,9 +126,30 @@ const SCHEMA_BY_TYPE: Record<QuestionType, z.ZodTypeAny> = {
   boolean: booleanConfigSchema,
 };
 
-/** The Zod schema that validates `typeConfig` for a given question type. */
+/**
+ * Write-side schemas: identical to {@link SCHEMA_BY_TYPE} except likert, which here
+ * requires complete per-point labels. Used by {@link validateTypeConfig} (the only
+ * write path) so admin edits / persisted configs are pinned tightly, while the
+ * read schemas stay lenient for legacy rows.
+ */
+const WRITE_SCHEMA_BY_TYPE: Record<QuestionType, z.ZodTypeAny> = {
+  ...SCHEMA_BY_TYPE,
+  likert: likertWriteConfigSchema,
+};
+
+/** The Zod schema that validates `typeConfig` for a given question type (read-side, lenient). */
 export function typeConfigSchemaFor(type: QuestionType): z.ZodTypeAny {
   return SCHEMA_BY_TYPE[type];
+}
+
+/**
+ * True when a likert `typeConfig` carries one non-empty label per scale point. The
+ * single source of truth for "this scale is fully labelled", reused by the launch
+ * gate, the ingestion normaliser, and the backfill script. Non-likert configs and
+ * unreadable input return `false`.
+ */
+export function hasCompleteLikertLabels(typeConfig: unknown): boolean {
+  return likertWriteConfigSchema.safeParse(typeConfig).success;
 }
 
 /** Discriminated result of validating a `typeConfig` against its question type. */
@@ -111,7 +170,7 @@ export function validateTypeConfig(type: QuestionType, raw: unknown): TypeConfig
     type === 'numeric' || type === 'boolean' || type === 'free_text' || type === 'date';
   const candidate = raw === undefined && optionalConfig ? {} : raw === undefined ? null : raw;
 
-  const result = typeConfigSchemaFor(type).safeParse(candidate);
+  const result = WRITE_SCHEMA_BY_TYPE[type].safeParse(candidate);
   return result.success
     ? { ok: true, value: result.data }
     : { ok: false, issues: result.error.issues };
@@ -134,7 +193,13 @@ export function defaultTypeConfig(type: QuestionType): unknown {
         ],
       };
     case 'likert':
-      return { min: 1, max: 5 };
+      // A labelled 5-point agree scale — the most common default and, crucially, one
+      // that already satisfies the write schema's "every point labelled" rule.
+      return {
+        min: 1,
+        max: 5,
+        labels: ['Strongly disagree', 'Disagree', 'Neutral', 'Agree', 'Strongly agree'],
+      };
     case 'numeric':
     case 'boolean':
       return {};

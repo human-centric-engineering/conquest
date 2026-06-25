@@ -110,7 +110,11 @@ const DEMO_EXTRACTION: ExtractQuestionnaireStructureData = {
       key: 'setup_ease',
       prompt: 'How easy was it to set up your account during onboarding?',
       suggestedType: 'likert',
-      suggestedTypeConfig: { min: 1, max: 5, minLabel: 'Very difficult', maxLabel: 'Very easy' },
+      suggestedTypeConfig: {
+        min: 1,
+        max: 5,
+        labels: ['Very difficult', 'Difficult', 'Neutral', 'Easy', 'Very easy'],
+      },
       extractionConfidence: 0.95,
     },
     {

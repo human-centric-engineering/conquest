@@ -7,8 +7,9 @@ respondent completes a session:
 - **chat** — the streaming conversation (the original surface, incl. the data-slots
   experience). Unchanged from before this feature.
 - **form** — the questionnaire as a raw, sectioned form: each question rendered with
-  the right control for its type (likert with configurable bounds incl. negatives,
-  free text, single/multi choice, yes/no, numeric, date), with a completeness map and
+  the right control for its type (likert with configurable bounds incl. negatives and
+  per-point labels surfaced as endpoint anchors, free text, single/multi choice, yes/no,
+  numeric, date), with a completeness map and
   prev/next section navigation.
 - **both** — the respondent toggles between chat and form mid-session. The form
   doubles as an **escape hatch** when the chat struggles to fill a slot, and lets the

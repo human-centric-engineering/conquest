@@ -100,6 +100,28 @@ describe('launchReadinessChecks', () => {
     expect(ready.find((c) => c.key === 'dataSlots')?.ok).toBe(true);
   });
 
+  it('adds the scale-labels check only when the version has likert questions', () => {
+    // No likert questions → no row (it would be a confusing always-green check).
+    expect(launchReadinessChecks(READY).some((c) => c.key === 'scaleLabels')).toBe(false);
+
+    // Has likert questions, all labelled → present and passing.
+    const allLabelled = launchReadinessChecks({
+      ...READY,
+      likertCount: 3,
+      unlabelledLikertCount: 0,
+    });
+    expect(allLabelled.find((c) => c.key === 'scaleLabels')?.ok).toBe(true);
+
+    // One scale missing labels → present and failing (blocks launch).
+    const someUnlabelled = launchReadinessChecks({
+      ...READY,
+      likertCount: 3,
+      unlabelledLikertCount: 1,
+    });
+    expect(someUnlabelled.find((c) => c.key === 'scaleLabels')?.ok).toBe(false);
+    expect(isLaunchReady({ ...READY, likertCount: 3, unlabelledLikertCount: 1 })).toBe(false);
+  });
+
   it('adds the embeddings check only when required, reflecting readiness', () => {
     // Absent by default (a non-adaptive version never needs embeddings).
     expect(launchReadinessChecks(READY).some((c) => c.key === 'embeddings')).toBe(false);
