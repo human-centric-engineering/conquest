@@ -279,7 +279,12 @@ export function SessionWorkspace({
   }
 
   // Submitted → the conversation/form is done; show the confirmation in place of the workspace.
-  if (stream.status === 'completed') {
+  // Either the in-session submit flipped the stream to `completed`, OR the session was already
+  // completed when this surface loaded (a resume / reopen) — the lifecycle status read is the
+  // authority for the latter. Without this second arm a reopened completed session would drop
+  // into the chat and, on any further send, hit the "session no longer active" panel; instead it
+  // stays on the calm completion screen where the report download lives.
+  if (stream.status === 'completed' || lifecycle.view?.status === 'completed') {
     return (
       <SessionComplete
         sessionId={sessionId}
@@ -389,6 +394,8 @@ export function SessionWorkspace({
         loading={form.loading}
         values={form.values}
         statuses={form.statuses}
+        saveState={form.saveState}
+        lastSavedAt={form.lastSavedAt}
         onChange={form.setValue}
         onFlush={form.flush}
         disabled={formBlocked}

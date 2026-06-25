@@ -197,6 +197,36 @@ describe('QuestionnaireForm', () => {
     expect(screen.getByText('This questionnaire has no questions yet.')).toBeInTheDocument();
   });
 
+  it('shows the persistent autosave indicator reflecting the aggregate save state', () => {
+    const { rerender } = render(
+      <QuestionnaireForm
+        view={view()}
+        loading={false}
+        values={{}}
+        statuses={{}}
+        saveState="idle"
+        lastSavedAt={null}
+        onChange={noop}
+        onFlush={noop}
+      />
+    );
+    // Idle: reassures that there's no Save button to hunt for.
+    expect(screen.getByText('Changes save automatically')).toBeInTheDocument();
+    rerender(
+      <QuestionnaireForm
+        view={view()}
+        loading={false}
+        values={{}}
+        statuses={{}}
+        saveState="saved"
+        lastSavedAt={Date.now()}
+        onChange={noop}
+        onFlush={noop}
+      />
+    );
+    expect(screen.getByText('All changes saved')).toBeInTheDocument();
+  });
+
   it('surfaces a per-slot save status hint', () => {
     render(
       <QuestionnaireForm

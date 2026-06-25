@@ -23,6 +23,9 @@ import { useWizard } from '@/lib/hooks/use-wizard';
 import { QuestionField } from '@/components/app/questionnaire/form/question-field';
 import { SectionNavigator } from '@/components/app/questionnaire/form/section-navigator';
 import { recentlyFilledByLatestTurn } from '@/lib/app/questionnaire/panel/newly-filled';
+// Reuse the authoring editors' autosave pill (idle/saving/saved/error + last-saved clock) so the
+// respondent form's persistent indicator reads identically to the admin structure editor's.
+import { SaveStatus as SaveStatusIndicator } from '@/components/admin/questionnaires/save-status';
 import type { SaveStatus } from '@/lib/hooks/use-form-answers';
 import type { AnswerPanelView } from '@/lib/app/questionnaire/panel/types';
 
@@ -31,6 +34,10 @@ export interface QuestionnaireFormProps {
   loading: boolean;
   values: Record<string, unknown>;
   statuses: Record<string, SaveStatus>;
+  /** Aggregate autosave state for the persistent header indicator. Defaults to `idle`. */
+  saveState?: SaveStatus;
+  /** Epoch ms of the last successful save, for the indicator's "saved · 2m ago" clock. */
+  lastSavedAt?: number | null;
   onChange: (slotKey: string, value: unknown) => void;
   onFlush: (slotKey: string) => void;
   /** Disable all inputs (e.g. a non-active session). */
@@ -58,6 +65,8 @@ export function QuestionnaireForm({
   loading,
   values,
   statuses,
+  saveState = 'idle',
+  lastSavedAt = null,
   onChange,
   onFlush,
   disabled = false,
@@ -150,9 +159,13 @@ export function QuestionnaireForm({
       {/* Active section */}
       <div className="flex min-h-0 flex-col">
         <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-          <h2 className="text-foreground text-lg font-semibold">
-            {section.title || `Section ${wiz.stepIndex + 1}`}
-          </h2>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-foreground text-lg font-semibold">
+              {section.title || `Section ${wiz.stepIndex + 1}`}
+            </h2>
+            {/* Persistent autosave indicator: nothing's lost, even though there's no Save button. */}
+            <SaveStatusIndicator state={saveState} lastSavedAt={lastSavedAt} />
+          </div>
           <ol className="mt-4 space-y-6">
             {section.slots.map((slot) => {
               const status = statuses[slot.slotKey] ?? 'idle';

@@ -54,6 +54,14 @@ export interface UseFormAnswersReturn {
   values: Record<string, unknown>;
   /** Per-slot save status keyed by slotKey. */
   statuses: Record<string, SaveStatus>;
+  /**
+   * Aggregate autosave state across all slots, for a single persistent save indicator.
+   * A debounced-but-unsent edit counts as `saving`, so it never claims `saved` while a
+   * change is still queued. Priority: error > saving > saved > idle.
+   */
+  saveState: SaveStatus;
+  /** Epoch ms of the last successful save this session, or null if none yet. */
+  lastSavedAt: number | null;
   /** Update a value (debounced autosave). An empty value clears the answer. */
   setValue: (slotKey: string, value: unknown) => void;
   /** Flush a pending save immediately (call on blur / before navigating away). */
@@ -96,6 +104,10 @@ export function useFormAnswers(options: UseFormAnswersOptions): UseFormAnswersRe
     seedValues(initialView ?? null)
   );
   const [statuses, setStatuses] = useState<Record<string, SaveStatus>>({});
+  // Count of slots with a scheduled-but-not-yet-fired debounce. Folded into `saveState` so the
+  // indicator reads "saving" during the debounce window, not just once the PUT is in flight.
+  const [pendingCount, setPendingCount] = useState(0);
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [loading, setLoading] = useState(initialView === undefined);
   const [error, setError] = useState(false);
 
@@ -149,7 +161,10 @@ export function useFormAnswers(options: UseFormAnswersOptions): UseFormAnswersRe
           const body = (await res.json()) as SuccessEnvelope;
           // Refresh the view (completeness map + provenance/history) but keep local values
           // authoritative so the user's in-progress typing is never clobbered.
-          if (mountedRef.current) setView(body.data);
+          if (mountedRef.current) {
+            setView(body.data);
+            setLastSavedAt(Date.now());
+          }
           setStatus(slotKey, 'saved');
           onSavedRef.current?.();
         })
@@ -163,10 +178,12 @@ export function useFormAnswers(options: UseFormAnswersOptions): UseFormAnswersRe
       const timers = timersRef.current;
       const existing = timers.get(slotKey);
       if (existing) clearTimeout(existing);
+      else if (mountedRef.current) setPendingCount((c) => c + 1); // newly pending
       timers.set(
         slotKey,
         setTimeout(() => {
           timers.delete(slotKey);
+          if (mountedRef.current) setPendingCount((c) => Math.max(0, c - 1));
           save(slotKey);
         }, DEBOUNCE_MS)
       );
@@ -189,6 +206,7 @@ export function useFormAnswers(options: UseFormAnswersOptions): UseFormAnswersRe
       if (!existing) return; // nothing pending
       clearTimeout(existing);
       timers.delete(slotKey);
+      if (mountedRef.current) setPendingCount((c) => Math.max(0, c - 1));
       save(slotKey);
     },
     [save]
@@ -209,6 +227,9 @@ export function useFormAnswers(options: UseFormAnswersOptions): UseFormAnswersRe
         if (!mountedRef.current) return;
         setView(body.data);
         setValues(seedValues(body.data));
+        // A fresh server sync re-seeds local values, so prior per-slot save statuses no longer
+        // describe what's on screen — clear them so a stale error/saved pill doesn't linger.
+        setStatuses({});
       })
       .catch(() => {
         if (mountedRef.current) setError(true);
@@ -225,7 +246,29 @@ export function useFormAnswers(options: UseFormAnswersOptions): UseFormAnswersRe
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refresh, enabled]);
 
-  return { view, loading, error, values, statuses, setValue, flush, refresh };
+  // Roll the per-slot statuses + pending debounces into one overall state for the form's
+  // persistent save indicator. Error wins (a real unsaved change), then any in-flight or
+  // queued save, then saved; idle only before the respondent has touched anything.
+  const saveState: SaveStatus = useMemo(() => {
+    const list = Object.values(statuses);
+    if (list.includes('error')) return 'error';
+    if (pendingCount > 0 || list.includes('saving')) return 'saving';
+    if (list.includes('saved')) return 'saved';
+    return 'idle';
+  }, [statuses, pendingCount]);
+
+  return {
+    view,
+    loading,
+    error,
+    values,
+    statuses,
+    saveState,
+    lastSavedAt,
+    setValue,
+    flush,
+    refresh,
+  };
 }
 
 /** Flatten a view's sections to a single ordered slot list (form rendering order). */

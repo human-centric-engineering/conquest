@@ -181,6 +181,53 @@ describe('useFormAnswers', () => {
     expect(result.current.statuses.role).toBe('error');
   });
 
+  it('reports an aggregate saveState that is "saving" during the debounce window', async () => {
+    const { result } = renderHook(() =>
+      useFormAnswers({ sessionId: 'sess-1', initialView: view() })
+    );
+    expect(result.current.saveState).toBe('idle');
+    // A queued-but-unsent edit must already read as "saving" — the indicator never claims
+    // "saved" while a change is still pending.
+    act(() => result.current.setValue('role', 'Engineer'));
+    expect(result.current.saveState).toBe('saving');
+    await act(async () => {
+      vi.advanceTimersByTime(400);
+    });
+    expect(result.current.saveState).toBe('saved');
+    expect(result.current.lastSavedAt).not.toBeNull();
+  });
+
+  it('aggregate saveState surfaces "error" and outranks a saved slot', async () => {
+    fetchMock.mockResolvedValue({ ok: false, json: () => Promise.resolve({}) });
+    const { result } = renderHook(() =>
+      useFormAnswers({ sessionId: 'sess-1', initialView: view() })
+    );
+    act(() => result.current.setValue('role', 'Eng'));
+    await act(async () => {
+      vi.advanceTimersByTime(400);
+    });
+    expect(result.current.saveState).toBe('error');
+  });
+
+  it('refresh clears stale per-slot statuses after a re-seed', async () => {
+    fetchMock.mockResolvedValue({ ok: false, json: () => Promise.resolve({}) });
+    const { result } = renderHook(() =>
+      useFormAnswers({ sessionId: 'sess-1', initialView: view() })
+    );
+    act(() => result.current.setValue('role', 'Eng'));
+    await act(async () => {
+      vi.advanceTimersByTime(400);
+    });
+    expect(result.current.saveState).toBe('error');
+    // A fresh server sync should drop the stale error pill rather than leave it lingering.
+    fetchMock.mockResolvedValue({ ok: true, json: () => Promise.resolve({ data: view() }) });
+    await act(async () => {
+      result.current.refresh();
+    });
+    expect(result.current.statuses).toEqual({});
+    expect(result.current.saveState).toBe('idle');
+  });
+
   it('flush is a no-op when nothing is pending for the slot', () => {
     const { result } = renderHook(() =>
       useFormAnswers({ sessionId: 'sess-1', initialView: view() })
