@@ -30,6 +30,7 @@ import {
   APP_QUESTIONNAIRES_ROUND_CONTEXT_FLAG,
   APP_QUESTIONNAIRES_LEARNING_MODE_FLAG,
   APP_QUESTIONNAIRES_ROUND_PHASES_FLAG,
+  APP_QUESTIONNAIRES_ADVISOR_FLAG,
   APP_QUESTIONNAIRES_FLAG,
 } from '@/lib/app/questionnaire/constants';
 import { isFeatureEnabled } from '@/lib/feature-flags';
@@ -64,6 +65,7 @@ export {
   APP_QUESTIONNAIRES_ROUND_CONTEXT_FLAG,
   APP_QUESTIONNAIRES_LEARNING_MODE_FLAG,
   APP_QUESTIONNAIRES_ROUND_PHASES_FLAG,
+  APP_QUESTIONNAIRES_ADVISOR_FLAG,
 };
 
 /**
@@ -940,6 +942,57 @@ export function withCohortReportEnabled<C>(
 ): (request: NextRequest, context: C) => Promise<Response> {
   return async (request, context) => {
     const blocked = await ensureCohortReportEnabled();
+    if (blocked) return blocked;
+    return handler(request, context);
+  };
+}
+
+/**
+ * Whether the **Config Advisor** may run — the admin-triggered AI panel on the version Settings tab
+ * that evaluates the whole questionnaire config and proposes tweaks. Requires BOTH the master app
+ * flag and the advisor sub-flag — each run is two reasoning LLM calls, so it's opt-in on top of an
+ * already-enabled app (the same shape as {@link isGenerativeAuthoringEnabled}). The advisor stream
+ * route consults this and 404s when it's `false`, so a disabled sub-feature looks like a missing
+ * route rather than a 401; the Settings-tab panel reads it to decide whether to render.
+ *
+ * Server-only (resolves both flags from the database).
+ */
+export async function isAdvisorEnabled(): Promise<boolean> {
+  const [app, advisor] = await Promise.all([
+    isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_ADVISOR_FLAG),
+  ]);
+  return app && advisor;
+}
+
+/**
+ * Flag gate for the advisor route — 404 when either the master flag or the advisor sub-flag is off,
+ * `null` when both are on. The {@link ensureQuestionnairesEnabled} analogue for the advisor surface;
+ * call it first, before any auth or handler work.
+ *
+ * Server-only (resolves both flags from the database).
+ */
+export async function ensureAdvisorEnabled(): Promise<Response | null> {
+  if (await isAdvisorEnabled()) {
+    return null;
+  }
+  return errorResponse('Not found', { code: 'NOT_FOUND', status: 404 });
+}
+
+/**
+ * Wrap the advisor route handler so the advisor gate runs **before** anything else (auth, handler
+ * work) — the order a disabled sub-feature needs to look like a missing route rather than a 401.
+ * The {@link withGenerativeAuthoringEnabled} analogue for the advisor surface.
+ *
+ * ```ts
+ * export const POST = withAdvisorEnabled(handleAdvisorStream);
+ * ```
+ */
+export function withAdvisorEnabled<C>(
+  handler: (request: NextRequest, context: C) => Promise<Response>
+): (request: NextRequest, context: C) => Promise<Response> {
+  return async (request, context) => {
+    const blocked = await ensureAdvisorEnabled();
     if (blocked) return blocked;
     return handler(request, context);
   };

@@ -379,6 +379,9 @@ export const API = {
       /** Version run-time configuration (PATCH partial config — F3.1). */
       versionConfig: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/config`,
+      /** Config Advisor — admin-triggered SSE review of the whole config (POST → narrative + suggestions). */
+      advisorStream: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/advisor/stream`,
       /** Deterministic scoring schema (GET read + builder picker · PUT save — F14.4). */
       scoringSchema: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/scoring-schema`,

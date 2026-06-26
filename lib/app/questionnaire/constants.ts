@@ -948,6 +948,26 @@ export const RESPONDENT_REPORT_ASSISTANT_AGENT_SLUG = 'app-respondent-report-ass
  */
 export const QUESTIONNAIRE_COMPOSER_AGENT_SLUG = 'app-questionnaire-composer';
 
+/**
+ * Sub-flag gating the **Config Advisor** — the admin-triggered AI panel on the version Settings
+ * tab that reads the whole questionnaire (structure, goal/audience, run-time config, data slots,
+ * scoring), then streams a narrative of the respondent experience + the current lifecycle state and
+ * proposes one-click config tweaks. DB-backed, seeded disabled by `056-advisor-flag.ts`. Opt-in on
+ * top of {@link APP_QUESTIONNAIRES_FLAG}; both must be on. Each run is two reasoning LLM calls
+ * (narrative + structured suggestions), so it dark-launches independently. When off, the advisor
+ * route 404s and the Settings-tab panel is hidden.
+ */
+export const APP_QUESTIONNAIRES_ADVISOR_FLAG = 'APP_QUESTIONNAIRES_ADVISOR_ENABLED';
+
+/**
+ * Slug of the seeded Config Advisor `AiAgent`. A distinct agent from the composer/extractor:
+ * the advisor evaluates an existing configuration rather than authoring structure, and carries its
+ * own budget + persona. Ships with empty `model`/`provider` so it resolves dynamically via
+ * `agent-resolver.ts`; the advisor route loads it by slug. App-prefixed to avoid collision with
+ * core agents. Seeded by `057-advisor-agent.ts`.
+ */
+export const QUESTIONNAIRE_ADVISOR_AGENT_SLUG = 'app-questionnaire-advisor';
+
 /** Slug of the compose-from-brief capability. One source of truth shared by the
  * `BaseCapability` subclass, its `AiCapability` seed row, and the compose routes. */
 export const COMPOSE_QUESTIONNAIRE_CAPABILITY_SLUG = 'app_compose_questionnaire';

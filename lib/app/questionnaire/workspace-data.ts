@@ -31,6 +31,7 @@ import {
   APP_QUESTIONNAIRES_COHORTS_FLAG,
   APP_QUESTIONNAIRES_COHORT_REPORT_FLAG,
   APP_QUESTIONNAIRES_INTRO_SCREEN_FLAG,
+  APP_QUESTIONNAIRES_ADVISOR_FLAG,
 } from '@/lib/app/questionnaire/constants';
 import type { DataSlotView } from '@/lib/app/questionnaire/data-slots';
 import type {
@@ -222,6 +223,8 @@ export interface QuestionnaireWorkspaceFlags {
   cohortReport: boolean;
   /** Respondent intro / splash screen — the Intro card in the config editor. */
   introScreen: boolean;
+  /** Config Advisor panel on the Settings tab — admin-triggered AI config review. */
+  advisor: boolean;
 }
 
 /**
@@ -245,6 +248,7 @@ export const resolveQuestionnaireWorkspaceFlags = cache(
       cohorts,
       cohortReport,
       introScreen,
+      advisor,
     ] = await Promise.all([
       isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
       isFeatureEnabled(APP_QUESTIONNAIRES_DATA_SLOTS_FLAG),
@@ -256,6 +260,7 @@ export const resolveQuestionnaireWorkspaceFlags = cache(
       isFeatureEnabled(APP_QUESTIONNAIRES_COHORTS_FLAG),
       isFeatureEnabled(APP_QUESTIONNAIRES_COHORT_REPORT_FLAG),
       isFeatureEnabled(APP_QUESTIONNAIRES_INTRO_SCREEN_FLAG),
+      isFeatureEnabled(APP_QUESTIONNAIRES_ADVISOR_FLAG),
     ]);
     return {
       master,
@@ -270,6 +275,7 @@ export const resolveQuestionnaireWorkspaceFlags = cache(
       // Cohort report (incl. the Scoring tab) is round-scoped, so it also requires the cohorts flag.
       cohortReport: master && cohorts && cohortReport,
       introScreen: master && introScreen,
+      advisor: master && advisor,
     };
   }
 );
