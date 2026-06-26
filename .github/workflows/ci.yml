@@ -109,7 +109,7 @@ jobs:
       # Per-job cache scoped to the artifact this job produces. (Sharing one key
       # across fan-out jobs would let the first finisher overwrite the rest.)
       - name: Cache tsc incremental info
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: tsconfig.tsbuildinfo
           key: tsc-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ github.sha }}
@@ -119,17 +119,15 @@ jobs:
       - run: npm ci
       - run: npm run type-check
 
-  # Runs on EVERY PR, including docs-only ones — because `format:check` is
-  # repo-wide (Prettier formats Markdown too). If this job were gated to code
-  # changes, a docs-only PR could land an unformatted `.md` that the NEXT code
-  # PR's whole-repo `format:check` then fails on — attributed to whoever opened
-  # that unrelated PR. ESLint has no docs to check, so its step stays gated to
-  # code changes for economy; format always runs. (One job, not two, so the
-  # single `npm ci` is shared rather than paid twice per code PR.)
   lint:
     name: Lint & format
     runs-on: ubuntu-latest
     needs: config
+    # No job-level code gate: `format:check` is repo-wide (Prettier checks
+    # Markdown too), so it must run on docs-only PRs as well — otherwise an
+    # unformatted .md lands on main unchecked and fails the next code PR's
+    # whole-repo format:check (issue #314). ESLint is gated at the step level
+    # below, so docs-only PRs skip the pointless lint and stay cheap.
     env:
       DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/sunrise_ci'
     steps:
@@ -142,7 +140,7 @@ jobs:
       # so a fresh checkout's reset mtimes don't invalidate them — but the cache
       # files still have to survive between runs, which is what this does.
       - name: Cache eslint / prettier results
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             .next/cache/eslint
@@ -174,7 +172,7 @@ jobs:
           node-version: '20'
           cache: 'npm'
       - name: Cache Next.js build cache
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: .next/cache
           key: next-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ github.sha }}
