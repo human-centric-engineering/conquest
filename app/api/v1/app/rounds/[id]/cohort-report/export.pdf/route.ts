@@ -24,6 +24,7 @@ import { resolveTheme } from '@/lib/app/questionnaire/theming';
 import {
   buildCohortDataset,
   getCohortReportRevisionContent,
+  roundScope,
 } from '@/lib/app/questionnaire/cohort-report';
 import { assertRoundBundlesVersion } from '@/app/api/v1/app/rounds/_lib/context';
 import { renderCohortReportPdf } from '@/app/api/v1/app/rounds/[id]/cohort-report/_lib/render-cohort-report-pdf';
@@ -83,12 +84,13 @@ const handleExportPdf = withAdminAuth<Params>(
         });
       }
 
-      const revisionData = await getCohortReportRevisionContent(roundId, resolveWhich(revision));
+      const scope = roundScope(roundId, versionId, round.name);
+      const revisionData = await getCohortReportRevisionContent(scope, resolveWhich(revision));
       if (!revisionData) {
         return errorResponse('No cohort report to export', { code: 'NO_REPORT', status: 404 });
       }
 
-      const dataset = await buildCohortDataset({ roundId, roundName: round.name, versionId });
+      const dataset = await buildCohortDataset(scope);
       const theme = resolveTheme(round.cohort?.demoClient ?? null);
 
       const pdf = await renderCohortReportPdf({

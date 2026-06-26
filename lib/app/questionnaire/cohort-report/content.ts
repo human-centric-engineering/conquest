@@ -183,7 +183,7 @@ function summariseQuestion(q: QuestionDistribution): string {
 export function buildCohortDatasetDigest(dataset: CohortDataset): string {
   const lines: string[] = [];
   lines.push(
-    `Round "${dataset.roundName}": ${dataset.totalSessions} respondents (${dataset.completedSessions} completed).` +
+    `${dataset.roundName}: ${dataset.totalSessions} respondents (${dataset.completedSessions} completed).` +
       (dataset.anonymous ? ' Anonymous mode — no demographic breakdowns available.' : '')
   );
   if (dataset.suppressed) {

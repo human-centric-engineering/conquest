@@ -21,6 +21,7 @@ import { withCohortReportEnabled } from '@/lib/app/questionnaire/feature-flag';
 import {
   buildCohortReportView,
   setCohortReportPublish,
+  roundScope,
 } from '@/lib/app/questionnaire/cohort-report';
 
 type Params = { id: string };
@@ -85,7 +86,7 @@ const handlePublish = withAdminAuth<Params>(async (request, session, { params })
   });
   log.info('Cohort report published', { roundId, revisionNumber });
   return successResponse(
-    await buildCohortReportView({ roundId, roundName: round.name, versionId: body.versionId })
+    await buildCohortReportView({ scope: roundScope(roundId, body.versionId, round.name) })
   );
 });
 
@@ -110,7 +111,7 @@ const handleUnpublish = withAdminAuth<Params>(async (request, session, { params 
     clientIp,
   });
   return successResponse(
-    await buildCohortReportView({ roundId, roundName: round.name, versionId: body.versionId })
+    await buildCohortReportView({ scope: roundScope(roundId, body.versionId, round.name) })
   );
 });
 

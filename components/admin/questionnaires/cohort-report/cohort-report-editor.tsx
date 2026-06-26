@@ -17,7 +17,6 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { RichTextEditor } from '@/components/admin/questionnaires/cohort-report/rich-text-editor';
 import { apiClient, APIClientError } from '@/lib/api/client';
-import { API } from '@/lib/api/endpoints';
 import type {
   CohortReportContent,
   CohortReportSection,
@@ -26,8 +25,12 @@ import type {
 } from '@/lib/app/questionnaire/cohort-report';
 
 export interface CohortReportEditorProps {
-  roundId: string;
-  versionId: string;
+  /** PATCH endpoint that saves the working-head content (appends an `admin` revision). */
+  patchUrl: string;
+  /** Merged into the PATCH body — round: `{ versionId }`; version: `{}`. */
+  body: Record<string, string>;
+  /** Per-section AI-assist endpoint. Omitted ⇒ AI assist is hidden (owners without a refine route). */
+  refineUrl?: string;
   content: CohortReportContent;
   onSaved: (view: CohortReportView) => void;
   onCancel: () => void;
@@ -40,8 +43,9 @@ function toHtmlSection(s: CohortReportSection): EditSection {
 }
 
 export function CohortReportEditor({
-  roundId,
-  versionId,
+  patchUrl,
+  body,
+  refineUrl,
   content,
   onSaved,
   onCancel,
@@ -86,15 +90,15 @@ export function CohortReportEditor({
   }
 
   async function aiAssist(i: number) {
+    if (!refineUrl) return;
     const instruction = window.prompt('How should the AI revise this section?');
     if (!instruction?.trim()) return;
     setAssisting(i);
     setError(null);
     try {
-      const refined = await apiClient.post<RefinedSection>(
-        API.APP.ROUNDS.cohortReportRefine(roundId),
-        { body: { heading: sections[i].heading, body: sections[i].body, instruction } }
-      );
+      const refined = await apiClient.post<RefinedSection>(refineUrl, {
+        body: { heading: sections[i].heading, body: sections[i].body, instruction },
+      });
       patchSection(i, { heading: refined.heading, body: refined.body, format: 'html' });
     } catch (err) {
       setError(err instanceof APIClientError ? err.message : 'AI assist failed.');
@@ -125,8 +129,8 @@ export function CohortReportEditor({
         .filter(Boolean),
     };
     try {
-      const view = await apiClient.patch<CohortReportView>(API.APP.ROUNDS.cohortReport(roundId), {
-        body: { versionId, content: payload },
+      const view = await apiClient.patch<CohortReportView>(patchUrl, {
+        body: { ...body, content: payload },
       });
       onSaved(view);
     } catch (err) {
@@ -187,19 +191,21 @@ export function CohortReportEditor({
               >
                 <ArrowDown className="h-4 w-4" />
               </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => void aiAssist(i)}
-                aria-label="AI assist"
-                disabled={assisting !== null}
-              >
-                {assisting === i ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Sparkles className="h-4 w-4" />
-                )}
-              </Button>
+              {refineUrl && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => void aiAssist(i)}
+                  aria-label="AI assist"
+                  disabled={assisting !== null}
+                >
+                  {assisting === i ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-4 w-4" />
+                  )}
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 size="icon"

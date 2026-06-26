@@ -22,7 +22,7 @@ import { prisma } from '@/lib/db/client';
 import { z } from 'zod';
 
 import { withCohortReportEnabled } from '@/lib/app/questionnaire/feature-flag';
-import { buildCohortDataset } from '@/lib/app/questionnaire/cohort-report';
+import { buildCohortDataset, roundScope } from '@/lib/app/questionnaire/cohort-report';
 import { assertRoundBundlesVersion } from '@/app/api/v1/app/rounds/_lib/context';
 
 type Params = { id: string };
@@ -52,7 +52,7 @@ const handleGet = withAdminAuth<Params>(async (request, _session, { params }) =>
     });
   }
 
-  const dataset = await buildCohortDataset({ roundId, roundName: round.name, versionId });
+  const dataset = await buildCohortDataset(roundScope(roundId, versionId, round.name));
   log.info('Cohort report dataset computed', {
     roundId,
     versionId,

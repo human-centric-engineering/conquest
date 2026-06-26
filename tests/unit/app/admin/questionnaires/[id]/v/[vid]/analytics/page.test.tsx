@@ -58,6 +58,9 @@ vi.mock('@/lib/app/questionnaire/feature-flag', () => flagMock);
 
 const workspaceDataMock = vi.hoisted(() => ({
   getVersionGraphCached: vi.fn<() => Promise<VersionGraphView | null>>(),
+  // The analytics page resolves workspace flags to gate the version-wide-report teaser
+  // (`flags.cohortReport`). Default to off so the teaser is hidden in these tests.
+  resolveQuestionnaireWorkspaceFlags: vi.fn(async () => ({ cohortReport: false })),
 }));
 vi.mock('@/lib/app/questionnaire/workspace-data', () => workspaceDataMock);
 
@@ -265,11 +268,15 @@ beforeEach(() => {
   roundsReadMock.listRoundsForVersion.mockResolvedValue({ rounds: [], hasOpenEnded: false });
   workspaceDataMock.getVersionGraphCached.mockResolvedValue(makeGraph());
 
-  // By default all three fetches succeed with real data objects.
+  // By default all four fetches succeed. serverFetch embeds the URL in the response so
+  // parseApiResponse can branch on it — this avoids call-order dependence in the happy path.
   apiMock.serverFetch.mockImplementation(async (url: string) => ({ ok: true, _url: url }));
-  apiMock.parseApiResponse.mockImplementation(async (_res: unknown, _url?: string) => {
-    // Distinguish the three endpoints by URL via the hoisted mock's call tracking.
-    // In tests that need per-endpoint control, use mockResolvedValueOnce in call order.
+  apiMock.parseApiResponse.mockImplementation(async (res: { ok: boolean; _url?: string }) => {
+    const url = (res as { _url?: string })._url ?? '';
+    if (url.includes('/distributions')) return { success: true, data: makeDistributions() };
+    if (url.includes('/funnel')) return { success: true, data: makeFunnel() };
+    if (url.includes('/cost')) return { success: true, data: makeCost() };
+    if (url.includes('/safeguarding')) return { success: true, data: makeSafeguarding() };
     return { success: true, data: makeDistributions() };
   });
 });
@@ -288,17 +295,8 @@ describe('AnalyticsTab', () => {
   });
 
   describe('happy path — child component props', () => {
-    beforeEach(() => {
-      // Arrange: provide one successful response per parallel fetch. The source runs four
-      // fetches in a single Promise.all (distributions, funnel, cost, safeguarding), so all
-      // four must be modelled — omitting safeguarding lets the 4th call fall through to the
-      // default impl and silently return a distributions-shaped object.
-      apiMock.parseApiResponse
-        .mockResolvedValueOnce({ success: true, data: makeDistributions() })
-        .mockResolvedValueOnce({ success: true, data: makeFunnel() })
-        .mockResolvedValueOnce({ success: true, data: makeCost() })
-        .mockResolvedValueOnce({ success: true, data: makeSafeguarding() });
-    });
+    // No extra setup needed — the global beforeEach wires parseApiResponse to return
+    // the correct fixture per endpoint URL, so call order in Promise.all is irrelevant.
 
     it('renders the ExportButtons with the correct questionnaireId and versionId', async () => {
       // Act
@@ -436,50 +434,57 @@ describe('AnalyticsTab', () => {
 
   describe('graceful degradation on failed sub-fetches', () => {
     it('renders with has-distributions=false and logs when distributions fetch returns !ok', async () => {
-      // Arrange: first serverFetch call (distributions) is !ok; funnel + cost succeed
-      apiMock.serverFetch.mockResolvedValueOnce({ ok: false }).mockResolvedValue({ ok: true });
-      apiMock.parseApiResponse
-        .mockResolvedValueOnce({ success: true, data: makeFunnel() })
-        .mockResolvedValueOnce({ success: true, data: makeCost() });
+      // Arrange: distributions endpoint returns !ok; funnel, cost, and safeguarding succeed.
+      // Keyed on URL so the order of the Promise.all does not affect which fixture each slot gets.
+      apiMock.serverFetch.mockImplementation(async (url: string) =>
+        url.includes('/distributions') ? { ok: false } : { ok: true, _url: url }
+      );
 
       // Act
       render(await renderPage());
 
-      // Assert: the page passed null for distributions to the child
+      // Assert: the page short-circuits on !ok and passes null for distributions.
       const view = screen.getByTestId('analytics-view');
       expect(view).toHaveAttribute('data-has-distributions', 'false');
+      // The other three endpoints succeeded — their slots are non-null.
+      expect(view).toHaveAttribute('data-has-funnel', 'true');
+      expect(view).toHaveAttribute('data-has-cost', 'true');
     });
 
     it('renders with has-funnel=false when funnel parseApiResponse returns success:false', async () => {
-      // Arrange: all fetches ok but funnel body.success=false
-      apiMock.serverFetch.mockResolvedValue({ ok: true });
-      apiMock.parseApiResponse
-        .mockResolvedValueOnce({ success: true, data: makeDistributions() })
-        .mockResolvedValueOnce({ success: false, error: {} })
-        .mockResolvedValueOnce({ success: true, data: makeCost() });
+      // Arrange: all fetches return ok, but the funnel body carries success:false.
+      // parseApiResponse is keyed on URL so call order is irrelevant.
+      apiMock.parseApiResponse.mockImplementation(async (res: { ok: boolean; _url?: string }) => {
+        const url = (res as { _url?: string })._url ?? '';
+        if (url.includes('/funnel'))
+          return { success: false, error: { code: 'SERVER_ERROR', message: '' } };
+        if (url.includes('/distributions')) return { success: true, data: makeDistributions() };
+        if (url.includes('/cost')) return { success: true, data: makeCost() };
+        if (url.includes('/safeguarding')) return { success: true, data: makeSafeguarding() };
+        return { success: true, data: makeDistributions() };
+      });
 
       // Act
       render(await renderPage());
 
-      // Assert
+      // Assert: the page passes null for funnel when body.success is false.
       const view = screen.getByTestId('analytics-view');
       expect(view).toHaveAttribute('data-has-funnel', 'false');
     });
 
     it('renders with has-cost=false and logs when cost fetch throws', async () => {
-      // Arrange: first two succeed; cost throws
-      apiMock.serverFetch
-        .mockResolvedValueOnce({ ok: true })
-        .mockResolvedValueOnce({ ok: true })
-        .mockRejectedValueOnce(new Error('network down'));
-      apiMock.parseApiResponse
-        .mockResolvedValueOnce({ success: true, data: makeDistributions() })
-        .mockResolvedValueOnce({ success: true, data: makeFunnel() });
+      // Arrange: cost endpoint throws; distributions, funnel, and safeguarding succeed.
+      // Keyed on URL so it does not matter which position cost occupies in Promise.all.
+      apiMock.serverFetch.mockImplementation(async (url: string) => {
+        if (url.includes('/cost')) throw new Error('network down');
+        return { ok: true, _url: url };
+      });
+      // parseApiResponse uses the global URL-keyed implementation for the three that succeed.
 
       // Act
       render(await renderPage());
 
-      // Assert: cost is null, the error was logged
+      // Assert: cost is null, the specific error message is logged.
       const view = screen.getByTestId('analytics-view');
       expect(view).toHaveAttribute('data-has-cost', 'false');
       expect(loggerMock.logger.error).toHaveBeenCalledWith(
@@ -488,20 +493,36 @@ describe('AnalyticsTab', () => {
       );
     });
 
-    it('renders with all three null and logs errors when all fetches throw', async () => {
-      // Arrange
+    it('renders with all four null and logs a distinct error per endpoint when all fetches throw', async () => {
+      // Arrange: every serverFetch rejects.
       apiMock.serverFetch.mockRejectedValue(new Error('network down'));
 
       // Act
       render(await renderPage());
 
-      // Assert: all null, error logged once per parallel fetch (distributions, funnel, cost,
-      // safeguarding).
+      // Assert: all data props are null.
       const view = screen.getByTestId('analytics-view');
       expect(view).toHaveAttribute('data-has-distributions', 'false');
       expect(view).toHaveAttribute('data-has-funnel', 'false');
       expect(view).toHaveAttribute('data-has-cost', 'false');
-      expect(loggerMock.logger.error).toHaveBeenCalledTimes(4);
+      // Each endpoint's catch block logs its own distinct message — assert each one so
+      // a rename or removal is caught regardless of how many endpoints there are.
+      expect(loggerMock.logger.error).toHaveBeenCalledWith(
+        'analytics tab: distributions fetch failed',
+        expect.any(Error)
+      );
+      expect(loggerMock.logger.error).toHaveBeenCalledWith(
+        'analytics tab: funnel fetch failed',
+        expect.any(Error)
+      );
+      expect(loggerMock.logger.error).toHaveBeenCalledWith(
+        'analytics tab: cost fetch failed',
+        expect.any(Error)
+      );
+      expect(loggerMock.logger.error).toHaveBeenCalledWith(
+        'analytics tab: safeguarding fetch failed',
+        expect.any(Error)
+      );
     });
 
     it('does not call parseApiResponse for a fetch that returns !ok', async () => {

@@ -32,6 +32,9 @@ belong to `:id`, else `404` (never confirm a cross-questionnaire session). Same 
 | ------------------------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
 | `GET …/questionnaires/:id/sessions/:sessionId/transcript`     | `withQuestionnairesEnabled` | Read the conversation + viewer metadata (`isPreview`, `status`, `publicRef`, redacted identity). Reuses `loadTranscript`. |
 | `POST …/questionnaires/:id/sessions/:sessionId/preview-token` | `withLiveSessionsEnabled`   | Mint a continue token for a preview session (the only continue path).                                                     |
+| `GET …/questionnaires/:id/sessions/:sessionId/export.pdf`     | `withQuestionnairesEnabled` | Download the session's answers/results PDF (embeds the AI report when ready). The F7.4 admin export.                      |
+| `GET …/questionnaires/:id/sessions/:sessionId/transcript.pdf` | `withQuestionnairesEnabled` | Download the verbatim conversation as a branded PDF. Admin twin of the F7.6 respondent transcript export.                 |
+| `GET …/questionnaires/:id/sessions/:sessionId/transcript.txt` | `withQuestionnairesEnabled` | Download the verbatim conversation as plain text. Admin twin of the F7.6 respondent transcript export.                    |
 | `GET …/questionnaires/sessions/by-ref/:ref`                   | `withQuestionnairesEnabled` | Resolve a support reference → its session's viewer location (static sibling of the `[id]` segment).                       |
 
 The read seams live in `app/api/v1/app/questionnaire-sessions/_lib/admin-session-view.ts`
@@ -54,5 +57,25 @@ identity.
 `SessionWorkspace` / `QuestionnaireChat` gained an additive `readOnly` prop; in read-only mode the
 panel/lifecycle/form hooks are made inert (`enabled: false`) since the viewing admin holds no
 respondent credential, so the viewer fires **zero** respondent-scoped fetches.
+
+## Per-session downloads
+
+The viewer header carries a `SessionDownloads`
+(`components/admin/questionnaires/sessions/session-downloads.tsx`) toolbar that gives an admin the
+**same two takeaways a respondent gets** on the completion screen, for any session (active / paused /
+completed):
+
+- **Download report (PDF)** → the F7.4 admin `export.pdf` route.
+- **Transcript** (Themed PDF / Plain text) → the admin `transcript.pdf` / `transcript.txt` routes
+  above.
+
+Downloads go through the questionnaire-scoped admin routes, so the admin **session cookie** authorises
+them (`credentials: 'same-origin'`) — no `X-Session-Token` (that's the respondent surface). The blob is
+saved under the server's `Content-Disposition` filename, the same pattern as the analytics
+`ExportButtons`. The transcript routes reuse the F7.6 builders/renderer verbatim
+(`loadTranscriptExport` → `assembleTranscriptExportModel` → `renderTranscriptPdf` /
+`buildTranscriptText`), with `withAdminAuth` + the questionnaire-ownership 404 replacing the
+respondent route's `resolveTurnAccess`. Anonymous-mode redaction is unchanged (it lives in the model
+builder), so an anonymous session's admin downloads carry no respondent identity.
 
 No migration — `isPreview`, `publicRef`, `anonymousMode`, and the turn rows all predate this.

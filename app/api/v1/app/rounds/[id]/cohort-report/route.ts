@@ -28,6 +28,7 @@ import {
   appendCohortReportRevision,
   validateCohortReportContent,
   isUsableCohortReportContent,
+  roundScope,
 } from '@/lib/app/questionnaire/cohort-report';
 import { assertRoundBundlesVersion } from '@/app/api/v1/app/rounds/_lib/context';
 
@@ -59,7 +60,7 @@ const handleGet = withAdminAuth<Params>(async (request, _session, { params }) =>
     });
   }
 
-  const view = await buildCohortReportView({ roundId, roundName: round.name, versionId });
+  const view = await buildCohortReportView({ scope: roundScope(roundId, versionId, round.name) });
   log.info('Cohort report view loaded', { roundId, versionId, exists: view.exists });
   return successResponse(view);
 });
@@ -121,9 +122,7 @@ const handlePatch = withAdminAuth<Params>(async (request, session, { params }) =
   });
 
   const view = await buildCohortReportView({
-    roundId,
-    roundName: round.name,
-    versionId: body.versionId,
+    scope: roundScope(roundId, body.versionId, round.name),
   });
   log.info('Cohort report edited', { roundId, versionId: body.versionId, revisionNumber });
   return successResponse(view);

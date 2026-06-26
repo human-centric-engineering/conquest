@@ -55,16 +55,17 @@ import type {
   CohortDataSlotByDimension,
 } from '@/lib/app/questionnaire/cohort-report/types';
 import { SUBGROUP_DIMENSION_KEY } from '@/lib/app/questionnaire/cohort-report/types';
+import {
+  scopeRoundId,
+  scopeSessionWhere,
+  type ReportScope,
+} from '@/lib/app/questionnaire/cohort-report/scope';
 
 /** Max equal-width buckets for a numeric segmentation dimension (e.g. age groups). */
 const MAX_NUMERIC_SEGMENTS = 6;
 
-/** Parameters for {@link buildCohortDataset}: a round + the version whose sessions to analyse. */
-export interface BuildCohortDatasetParams {
-  roundId: string;
-  roundName: string;
-  versionId: string;
-}
+/** Parameters for {@link buildCohortDataset}: the report scope (a round, or version-wide). */
+export type BuildCohortDatasetParams = ReportScope;
 
 /** A session enriched with the columns segmentation needs (profile values + subgroup). */
 interface SegmentableSession extends SessionForDistribution {
@@ -339,8 +340,8 @@ function buildSegment(
  * answers); everything else is in-memory grouping. K-anonymity is applied per segment by the shared
  * {@link assembleQuestionDistributions}.
  */
-export async function buildCohortDataset(params: BuildCohortDatasetParams): Promise<CohortDataset> {
-  const { roundId, roundName, versionId } = params;
+export async function buildCohortDataset(scope: BuildCohortDatasetParams): Promise<CohortDataset> {
+  const versionId = scope.versionId;
 
   // 1. The version's questions, in display order (same projection the F8.1 distributions use).
   const slots = await prisma.appQuestionSlot.findMany({
@@ -361,9 +362,9 @@ export async function buildCohortDataset(params: BuildCohortDatasetParams): Prom
       ? (config.profileFields as unknown as ProfileFieldConfig[])
       : [];
 
-  // 2. The round's non-preview sessions for this version, with profile snapshot + subgroup.
+  // 2. The in-scope non-preview sessions for this version, with profile snapshot + subgroup.
   const sessionRows = await prisma.appQuestionnaireSession.findMany({
-    where: { versionId, roundId, isPreview: false },
+    where: scopeSessionWhere(scope),
     select: {
       id: true,
       status: true,
@@ -493,8 +494,8 @@ export async function buildCohortDataset(params: BuildCohortDatasetParams): Prom
   const scoring = scoringEnabled ? await buildScoring(versionId, sessions, groupings) : undefined;
 
   return {
-    roundId,
-    roundName,
+    roundId: scopeRoundId(scope),
+    roundName: scope.label,
     versionId,
     totalSessions: overall.totalSessions,
     completedSessions: overall.completedSessions,

@@ -13,6 +13,11 @@ import {
   validateCohortReportContent,
   type CohortReportContent,
 } from '@/lib/app/questionnaire/cohort-report/content';
+import {
+  scopeOwnerCreate,
+  scopeOwnerWhere,
+  type ReportScope,
+} from '@/lib/app/questionnaire/cohort-report/scope';
 import type { Prisma } from '@prisma/client';
 
 /** One revision's metadata for the history list (client-safe; no content). */
@@ -24,17 +29,16 @@ export interface CohortReportRevisionSummary {
   createdAt: string;
 }
 
-/** Ensure the 1:1 report header exists for a round; returns its id. Idempotent. */
+/** Ensure the 1:1 report header exists for a scope (round or version); returns its id. Idempotent. */
 export async function ensureCohortReport(params: {
-  roundId: string;
-  versionId: string;
+  scope: ReportScope;
   title: string;
   userId: string;
 }): Promise<string> {
-  const { roundId, versionId, title, userId } = params;
+  const { scope, title, userId } = params;
   const report = await prisma.appCohortReport.upsert({
-    where: { roundId },
-    create: { roundId, versionId, title, status: 'queued', createdBy: userId },
+    where: scopeOwnerWhere(scope),
+    create: { ...scopeOwnerCreate(scope), title, status: 'queued', createdBy: userId },
     update: {}, // never clobber an existing header (status/version/title) on re-trigger
     select: { id: true },
   });
@@ -172,15 +176,16 @@ export async function setCohortReportPublish(params: {
 }
 
 /**
- * Read one revision's content for a round, resolving `'head'` (highest), `'published'` (the pinned
- * one, falling back to head), or a specific number. Returns null when there's no matching revision.
+ * Read one revision's content for a scope (round or version), resolving `'head'` (highest),
+ * `'published'` (the pinned one, falling back to head), or a specific number. Returns null when
+ * there's no matching revision.
  */
 export async function getCohortReportRevisionContent(
-  roundId: string,
+  scope: ReportScope,
   which: number | 'head' | 'published'
 ): Promise<{ content: CohortReportContent; revisionNumber: number; title: string } | null> {
   const report = await prisma.appCohortReport.findUnique({
-    where: { roundId },
+    where: scopeOwnerWhere(scope),
     select: { id: true, title: true, publishedRevisionNumber: true },
   });
   if (!report) return null;

@@ -938,8 +938,16 @@ model AppRespondentReport {
 /// `User.id` (UG-1, no FK) — config/audit attribution, not personal data that must cascade.
 model AppCohortReport {
   id                      String    @id @default(cuid())
-  roundId                 String    @unique
-  versionId               String // the version the round delivered, pinned at creation; plain String (UG-1)
+  // Owner is polymorphic (scopeKind): a round (round-scoped cohort report) or a version
+  // (version-wide cross-round synthesis). Exactly one of the two nullable-unique owner keys is set
+  // per row. Postgres allows multiple NULLs in a unique index, so `roundId @unique` still enforces
+  // one report per round while leaving room for version-scope rows (roundId NULL) and keeps the
+  // round FK/cascade relation intact; `versionOwnerId @unique` does the same for one report per
+  // version. `versionId` (the analysed/pinned version) is set on EVERY row.
+  scopeKind               String    @default("round") // 'round' | 'version'
+  roundId                 String?   @unique // round-scope owner key + FK; NULL for version-scope rows
+  versionOwnerId          String?   @unique // version-scope owner key (= versionId); NULL for round-scope rows (UG-1, no FK)
+  versionId               String // the version analysed; for round scope the round's pinned version; plain String (UG-1)
   title                   String
   status                  String    @default("queued") // COHORT_REPORT_STATUSES (types.ts): queued | processing | ready | failed
   publishStatus           String    @default("draft") // COHORT_REPORT_PUBLISH_STATUSES: draft | published
@@ -953,10 +961,11 @@ model AppCohortReport {
   createdAt               DateTime  @default(now())
   updatedAt               DateTime  @updatedAt
 
-  round     AppQuestionnaireRound     @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  round     AppQuestionnaireRound?    @relation(fields: [roundId], references: [id], onDelete: Cascade)
   revisions AppCohortReportRevision[]
 
   @@index([status, lockedAt])
+  @@index([versionId])
   @@map("app_cohort_report")
 }
 

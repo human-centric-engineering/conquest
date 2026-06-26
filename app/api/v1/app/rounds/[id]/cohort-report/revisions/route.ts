@@ -22,6 +22,7 @@ import {
   buildCohortReportView,
   listCohortReportRevisions,
   restoreCohortReportRevision,
+  roundScope,
 } from '@/lib/app/questionnaire/cohort-report';
 
 type Params = { id: string };
@@ -81,7 +82,7 @@ const handleRestore = withAdminAuth<Params>(async (request, session, { params })
     newRevision,
   });
   return successResponse(
-    await buildCohortReportView({ roundId, roundName: name, versionId: body.versionId })
+    await buildCohortReportView({ scope: roundScope(roundId, body.versionId, name) })
   );
 });
 

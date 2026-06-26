@@ -32,6 +32,7 @@ import {
   ensureCohortReport,
   appendCohortReportRevision,
   generateCohortReport,
+  roundScope,
 } from '@/lib/app/questionnaire/cohort-report';
 import { assertRoundBundlesVersion } from '@/app/api/v1/app/rounds/_lib/context';
 import { cohortReportGenerateLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
@@ -80,22 +81,17 @@ const handleGenerate = withAdminAuth<Params>(async (request, session, { params }
   }
 
   // Build the dataset once; reuse for generation + the returned view.
-  const dataset = await buildCohortDataset({ roundId, roundName: round.name, versionId });
+  const scope = roundScope(roundId, versionId, round.name);
+  const dataset = await buildCohortDataset(scope);
   const reportId = await ensureCohortReport({
-    roundId,
-    versionId,
+    scope,
     title: `${round.name} — cohort report`,
     userId: adminId,
   });
 
   let revisionNumber: number;
   try {
-    const { content, costUsd } = await generateCohortReport({
-      roundId,
-      roundName: round.name,
-      versionId,
-      dataset,
-    });
+    const { content, costUsd } = await generateCohortReport({ scope, dataset });
     revisionNumber = await appendCohortReportRevision({
       reportId,
       content,
@@ -131,7 +127,7 @@ const handleGenerate = withAdminAuth<Params>(async (request, session, { params }
     });
   }
 
-  const view = await buildCohortReportView({ roundId, roundName: round.name, versionId, dataset });
+  const view = await buildCohortReportView({ scope, dataset });
   log.info('Cohort report generated', { roundId, versionId, revisionNumber });
   return successResponse(view);
 });
