@@ -6,6 +6,7 @@ import { AdminSidebar } from '@/components/admin/admin-sidebar';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { BreadcrumbProvider } from '@/components/admin/breadcrumb-context';
 import { InFlightExecutionBanner } from '@/components/admin/orchestration/in-flight-execution-banner';
+import { BRAND } from '@/lib/brand';
 
 // Display serif for the ConQuest wordmark (Questionnaires surface). Exposed as
 // a CSS variable only — nothing else reads it, so the admin body font is
@@ -18,10 +19,10 @@ const display = Fraunces({
 
 export const metadata: Metadata = {
   title: {
-    template: '%s - Admin - Sunrise',
-    default: 'Admin - Sunrise',
+    template: `%s - Admin - ${BRAND.name}`,
+    default: `Admin - ${BRAND.name}`,
   },
-  description: 'Admin dashboard for Sunrise',
+  description: `Admin dashboard for ${BRAND.name}`,
 };
 
 /**

@@ -16,6 +16,92 @@ release process.
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-06-25
+
+> **Alpha release.** Third tagged Sunrise release. **MINOR bump** — adds new
+> public surface (the `transcribeStream` streaming speech-to-text provider seam
+> with the `TranscribeChunk` / `TranscribeAudio` types, optional
+> provider-enforced structured output on `runStructuredCompletion`, and the
+> `AiAgent.runtimePromptManaged` / `runtimePromptNote` honesty flag) on top of
+> the Anthropic structured-output hardening and the agent export/import bundle
+> fidelity fix below. Ships in `0.x` per
+> [`VERSIONING.md`](./VERSIONING.md#0x-alpha-semantics--loose-by-design) — forks
+> adopting this release should expect real merge work between any two `0.x`
+> releases.
+
+### Added
+
+- `AiAgent.runtimePromptManaged` (Boolean, default `false`) and
+  `AiAgent.runtimePromptNote` (nullable String) — an advisory, behaviour-neutral
+  honesty flag for agents dispatched for their provider/model binding only,
+  whose system prompt is assembled in application code per call (the capability
+  pattern) rather than read from the stored `persona` / `systemInstructions` /
+  `guardrails` / `brandVoiceInstructions` fields. When set, the admin agent
+  form's Instructions tab shows a non-dismissible callout and re-labels the
+  "Effective prompt preview" as **not** what the LLM receives, so an operator
+  isn't misled into tuning inert instruction fields. App-populated; round-trips
+  through the agent create/GET/PATCH API and is captured in version snapshots.
+  The runtime never reads it — no execution-path change. (#304)
+- `runStructuredCompletion` (`lib/orchestration/evaluations/parse-structured.ts`)
+  accepts optional `responseSchema` / `responseSchemaName` / `responseSchemaStrict`
+  on `StructuredCompletionOptions`. When `responseSchema` is supplied it is
+  forwarded as a `json_schema` `responseFormat` on both the first attempt and
+  the temp-0 retry, so supporting providers enforce the output shape
+  (OpenAI-compatible `response_format`; Anthropic forced-tool extraction)
+  instead of relying on the prompt's prose alone. Purely additive — callers
+  that don't opt in are unchanged, and providers without support ignore the
+  field (the `parse` + retry path remains the cross-provider safety net). (#307)
+- Streaming speech-to-text provider seam: optional `transcribeStream?()` on the
+  `LlmProvider` interface (the streaming analogue of `transcribe()`), a new
+  `TranscribeChunk` union (`partial` / `final` / `done` with `audioSeconds`) and
+  `TranscribeAudio` type, and a `streamTranscription()` / `batchTranscribeAsStream()`
+  helper (`lib/orchestration/llm/transcribe-stream.ts`) that prefers native
+  streaming, falls back to adapting a batch `transcribe()` into a single
+  `final` + `done` stream, and raises `ProviderError` `not_supported` when the
+  provider can transcribe by neither path. Billed by `audioSeconds`, identical
+  to the batch path. Platform seam only — the client transport and live
+  `MicButton` mic layer remain a follow-up (the transport spike); the batch
+  `transcribe()` path is unchanged and stays the default. (#308)
+
+### Fixed
+
+- Anthropic structured-output (forced-tool extraction) robustness on the
+  `json_schema` `responseFormat` path: (1) the extraction tool name derived
+  from `responseFormat.name` is now slugified + length-capped to satisfy
+  Anthropic's `^[a-zA-Z0-9_-]{1,64}$` tool-name rule (a name with spaces or
+  over the cap previously 400'd on Anthropic only); (2) a `max_tokens`
+  truncation during extraction now raises the actionable `truncated_no_output`
+  error instead of degrading into a malformed-JSON parse failure (the partial
+  tool input was non-empty content, so the prior empty-output guard missed it);
+  (3) a non-object-rooted schema is now rejected with a clear `invalid_schema`
+  error rather than being silently coerced to `object` and sent as an
+  incoherent `input_schema`. Behaviour change: callers passing a non-object
+  root schema to Anthropic now get a local error (previously a provider-side
+  failure). (#335)
+- Agent export/import bundle now round-trips the full agent configuration.
+  Previously the bundle silently dropped many `AiAgent` fields on export/import
+  (`kind`, `persona`, `guardrails`, `personaMode`/`voiceMode`/`guardrailsMode`,
+  `knowledgeAccessMode`/`knowledgeRetrievalMode`/`knowledgeTriggerKeywords`,
+  `enableVoiceInput`/`enableImageInput`/`enableDocumentInput`,
+  `runtimePromptManaged`/`runtimePromptNote`) and never wrote `maxCostPerTurnUsd`
+  on import. The bundle now also carries the linked **profile** and granted
+  **knowledge tags** by slug and re-links them on import; a referenced profile
+  or tag missing in the target environment fails the import with an actionable
+  message (rather than silently dropping the agent's identity / knowledge
+  scoping). Agent→document grants are intentionally still not carried —
+  documents lack a stable cross-environment key (tracked in #338). Older bundles
+  remain importable (all new fields are optional/defaulted). (#332)
+
+## [0.1.0] — 2026-06-24
+
+> **Alpha release.** Second tagged Sunrise release. **MINOR bump** — adds new
+> public surface (the `registerAppDriftProbe` drift-probe seam, the
+> `User.accountType` field, and the `NEXT_PUBLIC_APP_NAME` brand seam) on top of
+> the auth-bootstrap hardening and the orchestration fixes below. Ships in `0.x`
+> per [`VERSIONING.md`](./VERSIONING.md#0x-alpha-semantics--loose-by-design) —
+> forks adopting this release should expect real merge work between any two `0.x`
+> releases; the strict SemVer contract activates at `1.0.0`.
+
 ### Added
 
 - **`MicButton` `extraHeaders` prop** (`components/admin/orchestration/chat/mic-button.tsx`).
@@ -54,6 +140,15 @@ release process.
   credential-less `admin@example.com` / `test@example.com` artifacts (preserving
   real users), re-points orphaned config ownership to the SERVICE owner, and
   marks the bootstrap complete on established instances.
+- **`NEXT_PUBLIC_APP_NAME` brand seam** (issue #305) — a single optional env var
+  renames the app's display name across page-title metadata (root + route-group
+  layouts and the auth pages) and the email templates, with no file edits.
+  Consumed via the new `lib/brand.ts` (`BRAND.name`), which reads
+  `process.env.NEXT_PUBLIC_APP_NAME` directly so it is safe on both server and
+  client; registered in `lib/env.ts` and `.env.example`. Defaults to `"Sunrise"`
+  — unset leaves every surface byte-for-byte unchanged. Marketing-page body copy
+  is intentionally out of scope (a separate content concern); `SUNRISE_VERSION`
+  and internal platform identifiers deliberately do not use this seam.
 
 ### Changed
 
@@ -73,6 +168,14 @@ release process.
 
 ### Fixed
 
+- **`PATCH /api/v1/admin/orchestration/settings` now accepts DB-managed model
+  ids in `defaultModels`** (issue #302, Bug A). The handler hydrates the
+  in-memory model registry from the `AiProviderModel` matrix before validating,
+  so a discovery-added model (e.g. a date-stamped `gpt-5.5-pro-2026-04-23` that
+  exists only in the DB, not the static registry) that the settings form offers
+  in its dropdown is no longer rejected on save with `VALIDATION_ERROR` (400).
+  Mirrors the other model-id paths (workflow execute, cost estimation) that
+  already hydrate first.
 - **`AiConversation` inbound unique key no longer triggers a phantom
   `ALTER INDEX ... RENAME` on every `prisma migrate dev`** (issue #283). The
   `@@unique([agentId, channel, fromAddress])` now pins its DB name with
@@ -81,6 +184,25 @@ release process.
   a spurious rename into every fork's generated migration. The Client-API
   compound key (`name:`) is unchanged, and existing deployed databases diff
   clean (no migration required).
+- **Model discovery no longer mis-tiers date-stamped frontier models** (issue
+  #302, Bug B). The name heuristics in `lib/orchestration/llm/model-heuristics.ts`
+  now strip a trailing date stamp (`gpt-5.5-pro-2026-04-23`,
+  `claude-3-5-sonnet-20241022`) before classifying, and recognise the flagship
+  suffixes `pro` / `ultra` / `max` as frontier signals alongside `opus` and the
+  o-series. A frontier "pro" model surfaced by discovery is now suggested as the
+  `thinking` tier (→ `frontier` display) instead of falling through to
+  `infrastructure` (→ `budget`). New export `stripModelDateStamp` from the same
+  module. Operator review/override of a suggested tier is unchanged.
+- **Knowledge document parsers no longer crash in a production build** (issues
+  #315, #320). HTML and PDF ingestion threw only in the bundled production server
+  (`next build && next start`) — invisible under `npm run dev` — so **any**
+  production deployment (not just Vercel, where it first surfaced) returned a 500
+  when ingesting those formats. Two independent bundling causes: jsdom ≥27's ESM
+  `@exodus/bytes` fails to load under Next's production `require` path (pinned to
+  `jsdom@^26`, with a Dependabot ignore for ≥27), and `pdf-parse` expects canvas
+  globals (`DOMMatrix` et al.) that aren't present in the server bundle (now
+  polyfilled). Parsers are also lazy-imported so a fork that doesn't ingest those
+  formats never loads the browser-coupled deps.
 
 ### Security
 
