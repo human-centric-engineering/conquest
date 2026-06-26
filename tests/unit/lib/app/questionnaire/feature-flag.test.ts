@@ -20,20 +20,24 @@ import {
   APP_QUESTIONNAIRES_COHORTS_FLAG,
   APP_QUESTIONNAIRES_ROUND_CONTEXT_FLAG,
   APP_QUESTIONNAIRES_LEARNING_MODE_FLAG,
+  APP_QUESTIONNAIRES_ADVISOR_FLAG,
   ensureQuestionnairesEnabled,
   ensureLiveSessionsEnabled,
   ensureVoiceInputEnabled,
   ensureTurnEvaluationEnabled,
   ensureRoundContextEnabled,
   ensureLearningModeEnabled,
+  ensureAdvisorEnabled,
   withQuestionnairesEnabled,
   withLiveSessionsEnabled,
   withVoiceInputEnabled,
   withTurnEvaluationEnabled,
   withRoundContextEnabled,
   withLearningModeEnabled,
+  withAdvisorEnabled,
   isRoundContextEnabled,
   isLearningModeEnabled,
+  isAdvisorEnabled,
   isQuestionnairesEnabled,
   isAdaptiveSelectionEnabled,
   isAnswerExtractionEnabled,
@@ -89,6 +93,7 @@ const ALL_FLAGS = [
   APP_QUESTIONNAIRES_COHORTS_FLAG,
   APP_QUESTIONNAIRES_ROUND_CONTEXT_FLAG,
   APP_QUESTIONNAIRES_LEARNING_MODE_FLAG,
+  APP_QUESTIONNAIRES_ADVISOR_FLAG,
 ] as const;
 
 /** A map with every flag on (the baseline each truth-table test perturbs from). */
@@ -136,6 +141,8 @@ describe('questionnaire feature flag — flag names are stable', () => {
     expect(APP_QUESTIONNAIRES_COHORTS_FLAG).toBe('APP_QUESTIONNAIRES_COHORTS_ENABLED');
     expect(APP_QUESTIONNAIRES_ROUND_CONTEXT_FLAG).toBe('APP_QUESTIONNAIRES_ROUND_CONTEXT_ENABLED');
     expect(APP_QUESTIONNAIRES_LEARNING_MODE_FLAG).toBe('APP_QUESTIONNAIRES_LEARNING_MODE_ENABLED');
+    // Config Advisor — a rename here would silently un-gate (or dark-launch) the advisor surface.
+    expect(APP_QUESTIONNAIRES_ADVISOR_FLAG).toBe('APP_QUESTIONNAIRES_ADVISOR_ENABLED');
   });
 });
 
@@ -279,6 +286,13 @@ const SUB_FLAG_RESOLVERS: ReadonlyArray<{
       APP_QUESTIONNAIRES_LEARNING_MODE_FLAG,
     ],
   },
+  {
+    // Master-only child (the advisor runs at authoring time, before any session) — like generative
+    // authoring, it's the AND of master + its own paid sub-flag.
+    name: 'isAdvisorEnabled',
+    fn: isAdvisorEnabled,
+    requires: [APP_QUESTIONNAIRES_FLAG, APP_QUESTIONNAIRES_ADVISOR_FLAG],
+  },
 ];
 
 describe('sub-flag resolvers — truth tables', () => {
@@ -339,6 +353,7 @@ describe('sub-flag independence — one flag off suppresses only its own surface
     },
     { flag: APP_QUESTIONNAIRES_ROUND_CONTEXT_FLAG, resolver: isRoundContextEnabled },
     { flag: APP_QUESTIONNAIRES_LEARNING_MODE_FLAG, resolver: isLearningModeEnabled },
+    { flag: APP_QUESTIONNAIRES_ADVISOR_FLAG, resolver: isAdvisorEnabled },
   ];
 
   for (const { flag, resolver } of INDEPENDENT_PAIRS) {
@@ -537,6 +552,30 @@ describe('route gates — ensure* return a 404 envelope when off, null when on',
       await expect404(await ensureVoiceInputEnabled());
     });
   });
+
+  describe('ensureAdvisorEnabled', () => {
+    it('returns null when master + advisor are on', async () => {
+      setFlags({
+        [APP_QUESTIONNAIRES_FLAG]: true,
+        [APP_QUESTIONNAIRES_ADVISOR_FLAG]: true,
+      });
+      await expect(ensureAdvisorEnabled()).resolves.toBeNull();
+    });
+    it('404s when the advisor sub-flag is off even though master is on', async () => {
+      setFlags({
+        [APP_QUESTIONNAIRES_FLAG]: true,
+        [APP_QUESTIONNAIRES_ADVISOR_FLAG]: false,
+      });
+      await expect404(await ensureAdvisorEnabled());
+    });
+    it('404s when master is off even though the advisor sub-flag is on', async () => {
+      setFlags({
+        [APP_QUESTIONNAIRES_FLAG]: false,
+        [APP_QUESTIONNAIRES_ADVISOR_FLAG]: true,
+      });
+      await expect404(await ensureAdvisorEnabled());
+    });
+  });
 });
 
 /**
@@ -610,6 +649,12 @@ describe('with* gate wrappers — run the flag gate before the handler', () => {
         APP_QUESTIONNAIRES_LEARNING_MODE_FLAG,
       ],
       blockFlag: APP_QUESTIONNAIRES_LEARNING_MODE_FLAG,
+    },
+    {
+      name: 'withAdvisorEnabled',
+      wrap: withAdvisorEnabled,
+      enableFlags: [APP_QUESTIONNAIRES_FLAG, APP_QUESTIONNAIRES_ADVISOR_FLAG],
+      blockFlag: APP_QUESTIONNAIRES_ADVISOR_FLAG,
     },
   ];
 

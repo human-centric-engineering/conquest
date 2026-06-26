@@ -270,3 +270,19 @@ export const cohortReportGenerateLimiter = createRateLimiter({
   interval: COHORT_REPORT_GENERATE_RATE_LIMIT_INTERVAL_MS,
   maxRequests: COHORT_REPORT_GENERATE_RATE_LIMIT_MAX,
 });
+
+/**
+ * Config Advisor sub-cap. Each run is two reasoning-model calls (a streamed narrative + a structured
+ * analysis), so it's in the same paid class as the design-evaluation panel / compose. Capped at
+ * 20/min per admin, keyed on the admin user id who owns the spend, so a hammered "Run advisor"
+ * button can't run up the bill while still leaving ample room to iterate (run → tweak → re-run).
+ */
+export const ADVISOR_RATE_LIMIT_MAX = 20;
+
+/** Sliding-window length for {@link advisorLimiter}, in milliseconds. */
+export const ADVISOR_RATE_LIMIT_INTERVAL_MS = 60_000;
+
+export const advisorLimiter = createRateLimiter({
+  interval: ADVISOR_RATE_LIMIT_INTERVAL_MS,
+  maxRequests: ADVISOR_RATE_LIMIT_MAX,
+});

@@ -8,6 +8,7 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 
 import { DemoClientAssign } from '@/components/admin/demo-clients/demo-client-assign';
+import { AdvisorPanel } from '@/components/admin/questionnaires/advisor/advisor-panel';
 import { CloneForClientDialog } from '@/components/admin/questionnaires/clone-for-client-dialog';
 import { RenameQuestionnaire } from '@/components/admin/questionnaires/rename-questionnaire';
 import { VersionSettingsPanel } from '@/components/admin/questionnaires/version-settings-panel';
@@ -75,6 +76,10 @@ export default async function SettingsTab({ params }: PageProps) {
         </div>
         <RenameQuestionnaire questionnaireId={id} currentTitle={detail.title} />
       </section>
+
+      {/* Config Advisor (admin-triggered AI review of the whole config). Sits above the editor so the
+          advice is read before tweaking; applying a suggestion PATCHes the same config endpoint. */}
+      {graph && flags.advisor && <AdvisorPanel questionnaireId={id} graph={graph} />}
 
       {/* Version-scoped run-time config (F3.1 + F9.7). Editing a launched version forks a new
           draft (the panel surfaces the notice). Goal & audience are edited on the Structure tab. */}

@@ -65,6 +65,7 @@ function flags(over: Partial<QuestionnaireWorkspaceFlags> = {}): QuestionnaireWo
     respondentReport: true,
     cohortReport: true,
     introScreen: false,
+    advisor: false,
     ...over,
   };
 }
