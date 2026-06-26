@@ -12,7 +12,7 @@
  */
 
 import { prisma } from '@/lib/db/client';
-import { hashInvitationToken } from '@/lib/app/questionnaire/invitations';
+import { hashInvitationToken } from '@/lib/app/questionnaire/invitations/token';
 import { parseProfileFields } from '@/lib/app/questionnaire/profile/profile-values';
 import { findResumableSession } from '@/lib/app/questionnaire/chat/resumable-session';
 import type { ProfileFieldConfig } from '@/lib/app/questionnaire/types';

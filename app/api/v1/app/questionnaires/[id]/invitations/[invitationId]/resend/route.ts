@@ -23,7 +23,8 @@ import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { inviteLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 
 import { ensureQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
-import { isInvitationResendable, mintInvitationToken } from '@/lib/app/questionnaire/invitations';
+import { isInvitationResendable } from '@/lib/app/questionnaire/invitations';
+import { mintInvitationToken } from '@/lib/app/questionnaire/invitations/token';
 import {
   loadScopedInvitation,
   toInvitationView,

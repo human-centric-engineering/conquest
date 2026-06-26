@@ -21,7 +21,7 @@
 import { prisma } from '@/lib/db/client';
 import type { Prisma } from '@prisma/client';
 import { generateSessionRef } from '@/lib/app/questionnaire/session-ref';
-import { hashInvitationToken } from '@/lib/app/questionnaire/invitations';
+import { hashInvitationToken } from '@/lib/app/questionnaire/invitations/token';
 import { isInvitationTransitionAllowed } from '@/lib/app/questionnaire/invitations/status';
 import { narrowToEnum } from '@/lib/app/questionnaire/types';
 import {
