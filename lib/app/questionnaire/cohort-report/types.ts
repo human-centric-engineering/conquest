@@ -154,14 +154,17 @@ export interface CohortScoring {
 }
 
 /**
- * The full cross-respondent analytical substrate for one round + version. Built by
- * `buildCohortDataset`; consumed by charts, the analysis/narrative agents, and the admin UI.
+ * The full cross-respondent analytical substrate for one report scope (a round, or a version-wide
+ * cross-round set). Built by `buildCohortDataset`; consumed by charts, the analysis/narrative
+ * agents, and the admin UI.
  */
 export interface CohortDataset {
-  roundId: string;
+  /** Owning round id, or null for a version-wide report (all rounds + open-ended sessions). */
+  roundId: string | null;
+  /** Display label for the scope — the round name, or e.g. "Version-wide (all rounds)". */
   roundName: string;
   versionId: string;
-  /** Non-preview sessions in the round for this version — the overall denominator. */
+  /** Non-preview sessions in scope for this version — the overall denominator. */
   totalSessions: number;
   /** Of those, how many reached `completed`. */
   completedSessions: number;

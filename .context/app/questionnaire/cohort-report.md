@@ -21,6 +21,43 @@ Resolved by `isCohortReportEnabled()` and the `ensureCohortReportEnabled()` / `w
 route gates in `lib/app/questionnaire/feature-flag.ts`. Per-version, a further `config.cohortReport.enabled`
 toggle (the admin opt-in) ANDs on top once the editing surface ships (F14.5).
 
+## Report scope — round **or** version-wide
+
+A report's owner is **polymorphic** (`scope.ts` → `ReportScope = { kind: 'round' } | { kind: 'version' }`):
+
+- **round** — one round's submissions (the original cohort report). Session filter `{ versionId, roundId }`.
+- **version** — _all_ of a version's completed sessions, across **every round AND open-ended
+  (non-round) sessions** — the version-wide cross-round synthesis. Session filter `{ versionId }`.
+
+Both share the entire pipeline (dataset → digest → agent → revisions → publish → PDF → search); the
+only differences — the session `where`, the display label, the round-only context lookups, and the
+header upsert key — are encoded once in `scope.ts` (`scopeSessionWhere`, `scopeOwnerWhere`,
+`scopeOwnerCreate`, `scopeRoundId`). The dataset/generator/persist/view layers take a `ReportScope`
+and stay owner-agnostic; round routes pass `roundScope(...)`, version routes pass `versionScope(...)`.
+
+`AppCohortReport` carries `scopeKind` plus two **nullable-unique** owner keys: `roundId` (round 1:1 +
+FK/cascade, NULL for version rows) and `versionOwnerId` (= versionId, NULL for round rows). Postgres
+multi-NULL unique indexes give one-report-per-round AND one-per-version without a partial index.
+Migration: `20260626120000_app_cohort_report_polymorphic_owner` (no backfill — `scopeKind` defaults to
+`round`, so existing rows classify themselves).
+
+- **Round** routes: `app/api/v1/app/rounds/[id]/cohort-report/**` (gated by round bundling a version).
+- **Version** routes: `app/api/v1/app/questionnaires/[id]/versions/[vid]/cohort-report/**` (gated by
+  `loadVersionReportScope` + the same per-version `config.cohortReport.enabled` opt-in). Surfaced as the
+  **Report** tab in the version workspace; the Analytics tab links to it.
+
+## Streamed generation (SSE)
+
+Generation streams its phases instead of blocking on one 90 s call. `streamGenerateCohortReport`
+(`generate.ts`) is an async generator that `yield`s a `ReportGenProgressEvent` per phase
+(`started → dataset_built{sessionCount,segmentCount} → material_built → context_loaded →
+synthesizing`) and returns `{ content, costUsd }`; `generateCohortReport` is a thin drain-wrapper over
+it (kept for non-streaming callers/tests). `streamReportRun` (`stream-run.ts`) wraps it for a route:
+forwards each phase, then on the terminal step appends the AI revision + emits `done` (or marks the
+header `failed` + emits `error`). The `…/cohort-report/generate/stream` routes (round + version) return
+`sseResponse(streamReportRun(...))`; the admin panel consumes it and renders a live phase line. The
+synchronous `…/generate` routes remain for back-compat.
+
 ## Config — `CohortReportSettings`
 
 Stored as the lazy JSON column `AppQuestionnaireConfig.cohortReport` (mirrors `respondentReport`),

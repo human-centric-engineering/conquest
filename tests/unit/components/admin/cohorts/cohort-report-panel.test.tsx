@@ -16,12 +16,29 @@ vi.mock('@/lib/api/client', () => ({
 
 import { apiClient } from '@/lib/api/client';
 import { CohortReportPanel } from '@/components/admin/cohorts/cohort-report-panel';
+import type { ReportApi } from '@/components/admin/cohorts/report-api';
 import type { CohortReportView } from '@/lib/app/questionnaire/cohort-report';
 
 type Mock = ReturnType<typeof vi.fn>;
 
+/** Minimal ReportApi for tests — only viewUrl matters for the load path. */
+function fakeApi(overrides: Partial<ReportApi> = {}): ReportApi {
+  return {
+    viewUrl: '/api/v1/app/rounds/r1/cohort-report?versionId=v1',
+    datasetUrl: '/api/v1/app/rounds/r1/cohort-report/dataset?versionId=v1',
+    generateStreamUrl: '/api/v1/app/rounds/r1/cohort-report/generate/stream',
+    revisionsUrl: '/api/v1/app/rounds/r1/cohort-report/revisions',
+    publishUrl: '/api/v1/app/rounds/r1/cohort-report/publish',
+    pdfUrl: '/api/v1/app/rounds/r1/cohort-report/pdf?versionId=v1',
+    patchUrl: '/api/v1/app/rounds/r1/cohort-report',
+    body: { versionId: 'v1' },
+    ...overrides,
+  };
+}
+
 function view(overrides: Partial<CohortReportView> = {}): CohortReportView {
   return {
+    scopeKind: 'round',
     roundId: 'r1',
     versionId: 'v1',
     exists: true,
@@ -78,13 +95,19 @@ beforeEach(() => {
 
 describe('CohortReportPanel', () => {
   it('shows an empty state when the round has no bundled versions', () => {
-    render(<CohortReportPanel roundId="r1" versions={[]} />);
+    render(<CohortReportPanel api={fakeApi()} versions={[]} />);
     expect(screen.getByText(/attach a questionnaire/i)).toBeInTheDocument();
   });
 
   it('renders the report body when a view loads', async () => {
     (apiClient.get as Mock).mockResolvedValue(view());
-    render(<CohortReportPanel roundId="r1" versions={[{ versionId: 'v1', title: 'Pulse' }]} />);
+    render(
+      <CohortReportPanel
+        api={fakeApi()}
+        versions={[{ versionId: 'v1', title: 'Pulse' }]}
+        versionId="v1"
+      />
+    );
 
     await waitFor(() => expect(screen.getByTestId('cohort-report-body')).toBeInTheDocument());
     expect(screen.getByText('Overall engagement is strong.')).toBeInTheDocument();
@@ -99,7 +122,13 @@ describe('CohortReportPanel', () => {
 
   it('offers "Generate report" when none exists yet', async () => {
     (apiClient.get as Mock).mockResolvedValue(view({ exists: false, content: null, status: null }));
-    render(<CohortReportPanel roundId="r1" versions={[{ versionId: 'v1', title: 'Pulse' }]} />);
+    render(
+      <CohortReportPanel
+        api={fakeApi()}
+        versions={[{ versionId: 'v1', title: 'Pulse' }]}
+        versionId="v1"
+      />
+    );
     await waitFor(() =>
       expect(screen.getByRole('button', { name: /generate report/i })).toBeInTheDocument()
     );

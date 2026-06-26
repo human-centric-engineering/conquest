@@ -37,6 +37,12 @@ import {
   type CohortReportContent,
 } from '@/lib/app/questionnaire/cohort-report/content';
 import type { CohortDataset } from '@/lib/app/questionnaire/cohort-report/types';
+import {
+  scopeRoundId,
+  scopeSessionWhere,
+  type ReportScope,
+} from '@/lib/app/questionnaire/cohort-report/scope';
+import type { ReportGenProgressEvent } from '@/lib/app/questionnaire/cohort-report/report-events';
 
 /** Result of one cohort-report generation run. */
 export interface GeneratedCohortReport {
@@ -160,18 +166,23 @@ function buildMessages(opts: {
 }
 
 /**
- * Generate the cohort-report content for a round + version. Builds the dataset itself (or accepts a
- * pre-built one), runs the seeded agent, validates + sanitises the output. Throws on unrecoverable
- * problems (missing agent/provider, unusable output after retry) — the caller maps a throw to a
- * `failed` report row / error response.
+ * Generate the report content for a scope (a round, or a version-wide cross-round set), STREAMING a
+ * progress event at each phase boundary. Builds the dataset itself (or accepts a pre-built one), runs
+ * the seeded agent, validates + sanitises the output, and RETURNS the generated content + cost.
+ * Round-only context (round briefing, cohort background, client KB) is loaded only for a round scope.
+ *
+ * Throws on unrecoverable problems (missing agent/provider, unusable output after retry) — the caller
+ * maps a throw to a `failed` report row / error response.
  */
-export async function generateCohortReport(params: {
-  roundId: string;
-  roundName: string;
-  versionId: string;
+export async function* streamGenerateCohortReport(params: {
+  scope: ReportScope;
   dataset?: CohortDataset;
-}): Promise<GeneratedCohortReport> {
-  const { roundId, roundName, versionId } = params;
+}): AsyncGenerator<ReportGenProgressEvent, GeneratedCohortReport> {
+  const { scope } = params;
+  const versionId = scope.versionId;
+  const roundId = scopeRoundId(scope);
+
+  yield { type: 'started' };
 
   // 1. Config (generation knobs + context toggles).
   const config = await prisma.appQuestionnaireConfig.findUnique({
@@ -181,16 +192,21 @@ export async function generateCohortReport(params: {
   const settings = narrowCohortReportSettings(config?.cohortReport);
 
   // 2. The analytical substrate.
-  const dataset = params.dataset ?? (await buildCohortDataset({ roundId, roundName, versionId }));
+  const dataset = params.dataset ?? (await buildCohortDataset(scope));
   const digest = buildCohortDatasetDigest(dataset);
   const catalog = buildChartCatalogText(dataset);
+  yield {
+    type: 'dataset_built',
+    sessionCount: dataset.totalSessions,
+    segmentCount: dataset.segmentation.length,
+  };
 
   // 2b. Data-slot thematic material — the raw respondent positions, the substance of the analysis.
   //     Only when the cohort is above the k-anonymity floor (the loader gates per-slot too).
   let dataSlotMaterial = '';
   if (!dataset.suppressed) {
     const sessionRows = await prisma.appQuestionnaireSession.findMany({
-      where: { versionId, roundId, isPreview: false },
+      where: scopeSessionWhere(scope),
       select: { id: true },
     });
     dataSlotMaterial = await buildDataSlotThemeMaterial({
@@ -198,46 +214,51 @@ export async function generateCohortReport(params: {
       sessionIds: sessionRows.map((s) => s.id),
     });
   }
+  yield { type: 'material_built' };
 
-  // 3. Optional context: round briefing, cohort background, client KB.
+  // 3. Optional context: round briefing, cohort background, client KB. Round scope only — a
+  //    version-wide report spans many rounds/cohorts, so there is no single briefing to inject.
   let roundContext = '';
   let cohortContext = '';
   let knowledge = '';
-  const round = await prisma.appQuestionnaireRound.findUnique({
-    where: { id: roundId },
-    select: {
-      cohort: { select: { introBackground: true, demoClientId: true } },
-      contextEntries: { where: { versionId }, select: { title: true, content: true } },
-    },
-  });
-  if (settings.generation.useRoundContext && round?.contextEntries.length) {
-    roundContext = round.contextEntries
-      .map((e) => `${e.title}: ${e.content}`)
-      .join('\n')
-      .slice(0, 4000);
-  }
-  if (settings.generation.useCohortContext && round?.cohort?.introBackground) {
-    cohortContext = round.cohort.introBackground.slice(0, 4000);
-  }
-  const demoClientId = round?.cohort?.demoClientId ?? null;
-  if (settings.generation.useClientKnowledge && demoClientId) {
-    const documentIds = await resolveClientKnowledgeDocumentIds(demoClientId);
-    if (documentIds.length > 0) {
-      try {
-        const results = await searchKnowledge(
-          digest.slice(0, 2000),
-          { documentIds },
-          KB_SNIPPET_LIMIT
-        );
-        knowledge = results.map((r, i) => `[${i + 1}] ${r.chunk.content}`).join('\n\n');
-      } catch (err) {
-        logger.warn('cohort report: KB search failed; continuing ungrounded', {
-          roundId,
-          error: errorMessage(err),
-        });
+  if (roundId) {
+    const round = await prisma.appQuestionnaireRound.findUnique({
+      where: { id: roundId },
+      select: {
+        cohort: { select: { introBackground: true, demoClientId: true } },
+        contextEntries: { where: { versionId }, select: { title: true, content: true } },
+      },
+    });
+    if (settings.generation.useRoundContext && round?.contextEntries.length) {
+      roundContext = round.contextEntries
+        .map((e) => `${e.title}: ${e.content}`)
+        .join('\n')
+        .slice(0, 4000);
+    }
+    if (settings.generation.useCohortContext && round?.cohort?.introBackground) {
+      cohortContext = round.cohort.introBackground.slice(0, 4000);
+    }
+    const demoClientId = round?.cohort?.demoClientId ?? null;
+    if (settings.generation.useClientKnowledge && demoClientId) {
+      const documentIds = await resolveClientKnowledgeDocumentIds(demoClientId);
+      if (documentIds.length > 0) {
+        try {
+          const results = await searchKnowledge(
+            digest.slice(0, 2000),
+            { documentIds },
+            KB_SNIPPET_LIMIT
+          );
+          knowledge = results.map((r, i) => `[${i + 1}] ${r.chunk.content}`).join('\n\n');
+        } catch (err) {
+          logger.warn('cohort report: KB search failed; continuing ungrounded', {
+            roundId,
+            error: errorMessage(err),
+          });
+        }
       }
     }
   }
+  yield { type: 'context_loaded' };
 
   // 4. Resolve the agent + provider.
   const agent = await prisma.aiAgent.findUnique({
@@ -267,6 +288,7 @@ export async function generateCohortReport(params: {
     knowledge,
     dataSlotMaterial,
   });
+  yield { type: 'synthesizing' };
   const result = await runStructuredCompletion<CohortReportContent>({
     provider,
     model,
@@ -299,4 +321,19 @@ export async function generateCohortReport(params: {
   };
 
   return { content, costUsd: result.costUsd };
+}
+
+/**
+ * Non-streaming convenience wrapper: drain {@link streamGenerateCohortReport} and return its final
+ * result. Used by the synchronous generate routes and tests; the streaming routes consume the
+ * generator directly to forward phase events over SSE.
+ */
+export async function generateCohortReport(params: {
+  scope: ReportScope;
+  dataset?: CohortDataset;
+}): Promise<GeneratedCohortReport> {
+  const gen = streamGenerateCohortReport(params);
+  let step = await gen.next();
+  while (!step.done) step = await gen.next();
+  return step.value;
 }

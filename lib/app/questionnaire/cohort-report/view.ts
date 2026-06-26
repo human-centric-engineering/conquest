@@ -25,10 +25,18 @@ import {
   type CohortReportContent,
 } from '@/lib/app/questionnaire/cohort-report/content';
 import type { CohortDataset } from '@/lib/app/questionnaire/cohort-report/types';
+import {
+  scopeOwnerWhere,
+  scopeRoundId,
+  type ReportScope,
+} from '@/lib/app/questionnaire/cohort-report/scope';
 
 /** The client-safe cohort-report read shape. */
 export interface CohortReportView {
-  roundId: string;
+  /** 'round' (one round's submissions) or 'version' (version-wide cross-round synthesis). */
+  scopeKind: 'round' | 'version';
+  /** Owning round id, or null for a version-wide report. */
+  roundId: string | null;
   versionId: string;
   /** False when no report has been generated for this round yet (UI shows "Generate"). */
   exists: boolean;
@@ -53,20 +61,19 @@ export interface CohortReportView {
   dataset: CohortDataset;
 }
 
-/** Build the read view for a round + version. Always computes the dataset (it's the live preview). */
+/** Build the read view for a scope (round or version). Always computes the dataset (live preview). */
 export async function buildCohortReportView(params: {
-  roundId: string;
-  roundName: string;
-  versionId: string;
+  scope: ReportScope;
   /** A pre-built dataset to reuse (e.g. the generate route already built it); otherwise computed. */
   dataset?: CohortDataset;
 }): Promise<CohortReportView> {
-  const { roundId, roundName, versionId } = params;
+  const { scope } = params;
+  const versionId = scope.versionId;
 
-  const dataset = params.dataset ?? (await buildCohortDataset({ roundId, roundName, versionId }));
+  const dataset = params.dataset ?? (await buildCohortDataset(scope));
 
   const report = await prisma.appCohortReport.findUnique({
-    where: { roundId },
+    where: scopeOwnerWhere(scope),
     select: {
       title: true,
       status: true,
@@ -86,7 +93,8 @@ export async function buildCohortReportView(params: {
 
   if (!report) {
     return {
-      roundId,
+      scopeKind: scope.kind,
+      roundId: scopeRoundId(scope),
       versionId,
       exists: false,
       title: null,
@@ -106,7 +114,8 @@ export async function buildCohortReportView(params: {
 
   const head = report.revisions[0] ?? null;
   return {
-    roundId,
+    scopeKind: scope.kind,
+    roundId: scopeRoundId(scope),
     versionId,
     exists: true,
     title: report.title,

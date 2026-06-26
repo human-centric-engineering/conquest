@@ -59,7 +59,9 @@ const handleSearch = withAdminAuth(async (request) => {
     orderBy: { generatedAt: 'desc' },
     take: 200,
     select: {
+      scopeKind: true,
       roundId: true,
+      versionId: true,
       title: true,
       publishedRevisionNumber: true,
       round: { select: { name: true, cohort: { select: { name: true, demoClientId: true } } } },
@@ -72,11 +74,14 @@ const handleSearch = withAdminAuth(async (request) => {
 
   const needle = q.toLowerCase();
   const results: Array<{
-    roundId: string;
+    /** 'round' or 'version' — version-wide reports carry no round/cohort. */
+    scopeKind: string;
+    roundId: string | null;
+    versionId: string;
     title: string;
-    roundName: string;
-    cohortName: string;
-    demoClientId: string;
+    roundName: string | null;
+    cohortName: string | null;
+    demoClientId: string | null;
     snippet: string;
   }> = [];
 
@@ -88,11 +93,14 @@ const handleSearch = withAdminAuth(async (request) => {
     const text = `${report.title}\n${searchableText(published.content)}`;
     if (!text.toLowerCase().includes(needle)) continue;
     results.push({
+      scopeKind: report.scopeKind,
       roundId: report.roundId,
+      versionId: report.versionId,
       title: report.title,
-      roundName: report.round.name,
-      cohortName: report.round.cohort.name,
-      demoClientId: report.round.cohort.demoClientId,
+      // Round/cohort metadata is present only for round-scoped reports.
+      roundName: report.round?.name ?? null,
+      cohortName: report.round?.cohort?.name ?? null,
+      demoClientId: report.round?.cohort?.demoClientId ?? null,
       snippet: snippetAround(text, q),
     });
     if (results.length >= MAX_RESULTS) break;

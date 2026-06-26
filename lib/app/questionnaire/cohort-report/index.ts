@@ -10,6 +10,24 @@
 
 export { narrowCohortReportSettings } from '@/lib/app/questionnaire/cohort-report/settings';
 export {
+  roundScope,
+  versionScope,
+  scopeRoundId,
+  scopeVersionId,
+  scopeLabel,
+  scopeSessionWhere,
+  scopeOwnerWhere,
+  scopeOwnerCreate,
+  type ReportScope,
+} from '@/lib/app/questionnaire/cohort-report/scope';
+export type {
+  ReportGenPhase,
+  ReportGenEvent,
+  ReportGenProgressEvent,
+  ReportGenDoneEvent,
+  ReportGenErrorEvent,
+} from '@/lib/app/questionnaire/cohort-report/report-events';
+export {
   buildCohortDataset,
   type BuildCohortDatasetParams,
 } from '@/lib/app/questionnaire/cohort-report/dataset';
@@ -37,8 +55,13 @@ export {
 } from '@/lib/app/questionnaire/cohort-report/content';
 export {
   generateCohortReport,
+  streamGenerateCohortReport,
   type GeneratedCohortReport,
 } from '@/lib/app/questionnaire/cohort-report/generate';
+export {
+  streamReportRun,
+  type StreamReportRunParams,
+} from '@/lib/app/questionnaire/cohort-report/stream-run';
 export {
   refineCohortReportSection,
   type RefinedSection,

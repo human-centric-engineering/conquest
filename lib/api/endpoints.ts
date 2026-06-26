@@ -497,6 +497,27 @@ export const API = {
       /** Safeguarding summary — flagged/serious sensitive-disclosure session counts (GET). */
       versionAnalyticsSafeguarding: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/analytics/safeguarding`,
+      /** Version-wide cohort report read view (GET → CohortReportView) / edit (PATCH `{ content }`). */
+      versionCohortReport: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/cohort-report`,
+      /** Version-wide cohort report analytical dataset (GET → CohortDataset). */
+      versionCohortReportDataset: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/cohort-report/dataset`,
+      /** Generate the version-wide cohort report (POST → refreshed CohortReportView). */
+      versionCohortReportGenerate: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/cohort-report/generate`,
+      /** Streamed generation over SSE (POST → text/event-stream phase + done/error events). */
+      versionCohortReportGenerateStream: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/cohort-report/generate/stream`,
+      /** Revision history (GET) + restore (POST `{ revisionNumber }`). */
+      versionCohortReportRevisions: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/cohort-report/revisions`,
+      /** Publish (POST `{ revisionNumber? }`) / unpublish (DELETE `{}`). */
+      versionCohortReportPublish: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/cohort-report/publish`,
+      /** Themed PDF (GET `?revision=head|published|<n>`). */
+      versionCohortReportPdf: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/cohort-report/export.pdf`,
       /** Per-invitation diagnostics rollup — telemetry + error tallies for a version (GET). */
       versionDiagnostics: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/diagnostics`,
@@ -523,9 +544,15 @@ export const API = {
       /** Admin download of one session's results as a branded PDF (GET — F7.4). */
       sessionExportPdf: (id: string, sessionId: string): string =>
         `/api/v1/app/questionnaires/${id}/sessions/${sessionId}/export.pdf`,
-      /** Admin read of one session's conversation for the session viewer (GET). */
+      /** Admin read of one session's conversation for the session viewer (GET — JSON feed). */
       sessionTranscript: (id: string, sessionId: string): string =>
         `/api/v1/app/questionnaires/${id}/sessions/${sessionId}/transcript`,
+      /** Admin download of one session's chat transcript as a branded PDF (GET). */
+      sessionTranscriptPdf: (id: string, sessionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/sessions/${sessionId}/transcript.pdf`,
+      /** Admin download of one session's chat transcript as plain text (GET). */
+      sessionTranscriptText: (id: string, sessionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/sessions/${sessionId}/transcript.txt`,
       /** Mint a continue token for a PREVIEW session so an admin can resume it (POST). */
       sessionPreviewToken: (id: string, sessionId: string): string =>
         `/api/v1/app/questionnaires/${id}/sessions/${sessionId}/preview-token`,

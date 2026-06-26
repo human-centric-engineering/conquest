@@ -44,6 +44,7 @@ export const QUESTIONNAIRE_WORKSPACE_TABS: readonly WorkspaceTab[] = [
     flag: 'respondentReport',
   },
   { id: 'scoring', label: 'Scoring', segment: 'scoring', flag: 'cohortReport' },
+  { id: 'cohort-report', label: 'Report', segment: 'cohort-report', flag: 'cohortReport' },
   { id: 'analytics', label: 'Analytics', segment: 'analytics' },
   // Diagnostics surfaces per-invitation telemetry + the error log — meaningless without live
   // respondent sessions, so it shares the `liveSessions` gate (error CAPTURE is always-on regardless).

@@ -30,7 +30,7 @@ import {
 import { RoundContextPanel } from '@/components/admin/cohorts/round-context-panel';
 import { RoundLearningPanel } from '@/components/admin/cohorts/round-learning-panel';
 import { RoundPhasesPanel } from '@/components/admin/cohorts/round-phases-panel';
-import { CohortReportPanel } from '@/components/admin/cohorts/cohort-report-panel';
+import { RoundCohortReportPanel } from '@/components/admin/cohorts/round-cohort-report-panel';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
@@ -261,7 +261,7 @@ export default async function RoundDetailPage({ params }: PageProps) {
             demographics — and generate a narrative report with charts, recommendations and actions.
             Review and (soon) edit it here; privacy thresholds hide any group that is too small.
           </SectionHeading>
-          <CohortReportPanel
+          <RoundCohortReportPanel
             roundId={round.id}
             versions={briefable.map((b) => ({ versionId: b.versionId, title: b.title }))}
           />

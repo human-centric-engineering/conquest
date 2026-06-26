@@ -45,6 +45,8 @@ interface RawTheme {
 export interface LoadedTranscriptExport {
   /** Access fields for `resolveTurnAccess` (respondent owner OR anonymous token). */
   session: { id: string; respondentUserId: string | null };
+  /** Owning questionnaire — the admin routes 404 when it doesn't match the URL's `:id`. */
+  questionnaireId: string;
   questionnaireTitle: string;
   versionNumber: number;
   goal: string | null;
@@ -87,6 +89,7 @@ export async function loadTranscriptExport(
           config: { select: { anonymousMode: true } },
           questionnaire: {
             select: {
+              id: true,
               title: true,
               demoClient: {
                 select: { ctaColor: true, accentColor: true, logoUrl: true, welcomeCopy: true },
@@ -132,6 +135,7 @@ export async function loadTranscriptExport(
 
   return {
     session: { id: row.id, respondentUserId: row.respondentUserId },
+    questionnaireId: row.version.questionnaire.id,
     questionnaireTitle: row.version.questionnaire.title,
     versionNumber: row.version.versionNumber,
     goal: row.version.goal,

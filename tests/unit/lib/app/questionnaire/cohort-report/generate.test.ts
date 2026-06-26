@@ -15,8 +15,6 @@ vi.mock('@/lib/db/client', () => ({
     appQuestionnaireRound: { findUnique: vi.fn() },
     aiAgent: { findUnique: vi.fn() },
     appQuestionnaireSession: { findMany: vi.fn() },
-    appDataSlot: { findMany: vi.fn() },
-    appDataSlotFill: { findMany: vi.fn() },
   },
 }));
 vi.mock('@/lib/logging', () => ({ logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() } }));
@@ -35,6 +33,7 @@ import { getProvider } from '@/lib/orchestration/llm/provider-manager';
 import { searchKnowledge } from '@/lib/orchestration/knowledge/search';
 import { resolveClientKnowledgeDocumentIds } from '@/lib/app/questionnaire/report/client-knowledge';
 import { generateCohortReport } from '@/lib/app/questionnaire/cohort-report/generate';
+import { roundScope } from '@/lib/app/questionnaire/cohort-report/scope';
 import type { CohortDataset } from '@/lib/app/questionnaire/cohort-report/types';
 
 type Mock = ReturnType<typeof vi.fn>;
@@ -86,13 +85,11 @@ const VALID_RESPONSE = {
   actions: ['Share the results'],
 };
 
-const params = { roundId: 'r1', roundName: 'Q1 Pulse', versionId: 'v1', dataset };
+const params = { scope: roundScope('r1', 'v1', 'Q1 Pulse'), dataset };
 
 beforeEach(() => {
   vi.clearAllMocks();
   (prisma.appQuestionnaireSession.findMany as Mock).mockResolvedValue([]);
-  (prisma.appDataSlot.findMany as Mock).mockResolvedValue([]);
-  (prisma.appDataSlotFill.findMany as Mock).mockResolvedValue([]);
   (prisma.appQuestionnaireConfig.findUnique as Mock).mockResolvedValue({
     cohortReport: { enabled: true, generation: { useClientKnowledge: false } },
   });
@@ -129,7 +126,7 @@ describe('generateCohortReport', () => {
     expect(result.content.summary).toContain('<p>');
     expect(result.content.sections).toHaveLength(1);
     expect(result.content.sections[0].format).toBe('html');
-    expect(typeof result.costUsd).toBe('number');
+    expect(result.costUsd).toBeGreaterThanOrEqual(0);
 
     const messages = chat.mock.calls[0][0] as Array<{ role: string; content: string }>;
     const user = messages.find((m) => m.role === 'user');
@@ -157,7 +154,7 @@ describe('generateCohortReport', () => {
 
     await generateCohortReport(params);
 
-    expect(searchKnowledge).toHaveBeenCalled();
+    expect(searchKnowledge).toHaveBeenCalledWith(expect.any(String), { documentIds: ['doc-1'] }, 8);
     const system = (chat.mock.calls[0][0] as Array<{ role: string; content: string }>).find(
       (m) => m.role === 'system'
     );
@@ -167,5 +164,43 @@ describe('generateCohortReport', () => {
   it('throws when the cohort-report agent is not seeded', async () => {
     (prisma.aiAgent.findUnique as Mock).mockResolvedValue(null);
     await expect(generateCohortReport(params)).rejects.toThrow(/not seeded/);
+  });
+
+  it('resolves with content when KB search fails (the catch block swallows the error and generation continues ungrounded)', async () => {
+    // Arrange: KB is enabled, doc ids resolve, but the KB search itself throws.
+    (prisma.appQuestionnaireConfig.findUnique as Mock).mockResolvedValue({
+      cohortReport: { enabled: true, generation: { useClientKnowledge: true } },
+    });
+    (prisma.appQuestionnaireRound.findUnique as Mock).mockResolvedValue({
+      cohort: { introBackground: null, demoClientId: 'client-1' },
+      contextEntries: [],
+    });
+    (resolveClientKnowledgeDocumentIds as Mock).mockResolvedValue(['doc-1']);
+    (searchKnowledge as Mock).mockRejectedValue(new Error('KB service unavailable'));
+    const { provider } = fakeProvider(VALID_RESPONSE);
+    (getProvider as Mock).mockResolvedValue(provider);
+
+    // The KB catch block logs a warning and generation continues without grounding.
+    const result = await generateCohortReport(params);
+
+    // The report was generated even though the KB call failed.
+    expect(result.content.summary).toContain('Engagement is high.');
+    expect(result.content.sections).toHaveLength(1);
+  });
+
+  it('rejects with "not valid JSON after retry" when the provider returns malformed JSON on both attempts', async () => {
+    // Arrange: chat always returns non-JSON so both the initial call and retry fail.
+    const chat = vi.fn().mockResolvedValue({
+      content: 'not json',
+      usage: { inputTokens: 100, outputTokens: 10 },
+      model: 'test-model',
+      finishReason: 'stop',
+    });
+    (getProvider as Mock).mockResolvedValue({ chat });
+
+    // The onFinalFailure callback is reached and its Error is thrown.
+    await expect(generateCohortReport(params)).rejects.toThrow(/not valid JSON after retry/);
+    // The provider was called twice — once for the initial attempt, once for the retry.
+    expect(chat).toHaveBeenCalledTimes(2);
   });
 });

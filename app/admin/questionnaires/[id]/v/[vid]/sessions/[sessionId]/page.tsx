@@ -20,6 +20,7 @@ import { notFound } from 'next/navigation';
 import { ArrowLeft } from 'lucide-react';
 
 import { SessionWorkspace } from '@/components/app/questionnaire/session-workspace';
+import { SessionDownloads } from '@/components/admin/questionnaires/sessions/session-downloads';
 import { Badge } from '@/components/ui/badge';
 import { loadAdminSessionView } from '@/app/api/v1/app/questionnaire-sessions/_lib/admin-session-view';
 import { loadTranscript } from '@/app/api/v1/app/questionnaire-sessions/_lib/transcript';
@@ -84,6 +85,7 @@ export default async function SessionViewerPage({ params }: PageProps) {
             You can continue this preview conversation.
           </span>
         )}
+        <SessionDownloads questionnaireId={id} sessionId={sessionId} className="ml-auto" />
       </div>
 
       <div className="min-h-0 flex-1">
