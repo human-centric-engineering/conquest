@@ -69,6 +69,7 @@ model AppQuestionnaireVersion {
   dataSlots       AppDataSlot[]
   dataSlotDraft   AppDataSlotDraft?
   scoringSchema   AppScoringSchema?
+  errors          AppQuestionnaireError[]
 
   @@unique([questionnaireId, versionNumber])
   @@index([questionnaireId])
@@ -669,16 +670,16 @@ model AppQuestionnaireRound {
 /// `createdBy` is a plain String (UG-1). `@@unique([roundId, subgroupId])`: one phase per subgroup
 /// per round.
 model AppRoundPhase {
-  id         String   @id @default(cuid())
+  id         String    @id @default(cuid())
   roundId    String
   subgroupId String
   opensAt    DateTime? // phase window start; null = inherit the round's lower bound
   closesAt   DateTime? // phase window end; null = inherit the round's upper bound
-  endMode    String   @default("hard") // ROUND_PHASE_END_MODES (rounds/types.ts): hard | relaxed
-  ordinal    Int      @default(0) // author-controlled display order within the round
+  endMode    String    @default("hard") // ROUND_PHASE_END_MODES (rounds/types.ts): hard | relaxed
+  ordinal    Int       @default(0) // author-controlled display order within the round
   createdBy  String? // admin User.id; plain String, no FK (UG-1)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
   round    AppQuestionnaireRound @relation(fields: [roundId], references: [id], onDelete: Cascade)
   subgroup AppCohortSubgroup     @relation(fields: [subgroupId], references: [id], onDelete: Cascade)
@@ -936,21 +937,21 @@ model AppRespondentReport {
 /// Round-internal config: `onDelete: Cascade` from the round. `createdBy` is a plain String admin
 /// `User.id` (UG-1, no FK) — config/audit attribution, not personal data that must cascade.
 model AppCohortReport {
-  id            String    @id @default(cuid())
-  roundId       String    @unique
-  versionId     String // the version the round delivered, pinned at creation; plain String (UG-1)
-  title         String
-  status        String    @default("queued") // COHORT_REPORT_STATUSES (types.ts): queued | processing | ready | failed
-  publishStatus String    @default("draft") // COHORT_REPORT_PUBLISH_STATUSES: draft | published
+  id                      String    @id @default(cuid())
+  roundId                 String    @unique
+  versionId               String // the version the round delivered, pinned at creation; plain String (UG-1)
+  title                   String
+  status                  String    @default("queued") // COHORT_REPORT_STATUSES (types.ts): queued | processing | ready | failed
+  publishStatus           String    @default("draft") // COHORT_REPORT_PUBLISH_STATUSES: draft | published
   publishedRevisionNumber Int? // the AppCohortReportRevision.revisionNumber pinned as published; null when draft
-  costUsd       Float? // cumulative generation cost actual; null until first generation
-  error         String? // failure message when status = failed
-  lockedBy      String? // worker host holding the lease; null when idle
-  lockedAt      DateTime? // lease acquired-at; stale after the worker threshold (claimable again)
-  generatedAt   DateTime? // when content was last (re)generated (status → ready)
-  createdBy     String? // admin User.id who created/triggered it; plain String, no FK (UG-1)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  costUsd                 Float? // cumulative generation cost actual; null until first generation
+  error                   String? // failure message when status = failed
+  lockedBy                String? // worker host holding the lease; null when idle
+  lockedAt                DateTime? // lease acquired-at; stale after the worker threshold (claimable again)
+  generatedAt             DateTime? // when content was last (re)generated (status → ready)
+  createdBy               String? // admin User.id who created/triggered it; plain String, no FK (UG-1)
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
 
   round     AppQuestionnaireRound     @relation(fields: [roundId], references: [id], onDelete: Cascade)
   revisions AppCohortReportRevision[]
@@ -1263,6 +1264,14 @@ model AppQuestionnaireTurn {
   // posture as the rest of the turn row.
   inspectorCalls        Json     @default("[]")
   costUsd               Float? // summed per-turn LLM spend; null until set
+  // Per-turn telemetry rollup (Diagnostics). `inspectorCalls` above stays the per-call source of
+  // truth; these three are denormalized so the Diagnostics surface aggregates across many sessions
+  // without parsing the JSON blob in SQL. `durationMs` is the end-to-end wall-clock of the turn
+  // (route entry → persist), which is NOT derivable from the per-call latencies; the token counts
+  // are the summed `inspectorCalls` tokensIn/tokensOut. All null for pre-column turns.
+  durationMs            Int? // end-to-end turn wall-clock (ms)
+  promptTokens          Int? // summed input/prompt tokens across this turn's calls
+  completionTokens      Int? // summed output/completion tokens across this turn's calls
   // Client-minted key for the send attempt that produced this turn (one per logical attempt, reused
   // across that attempt's retries). The retry path (F7.x) re-sends the SAME key, so a turn the server
   // already persisted — when the connection dropped after persist but before the client saw the
@@ -1278,6 +1287,39 @@ model AppQuestionnaireTurn {
   @@index([sessionId])
   @@index([sessionId, ordinal])
   @@map("app_questionnaire_turn")
+}
+
+/// A persisted diagnostic record for a failure (or notable refusal) somewhere on the
+/// invitation → session → turn path (Diagnostics). The respondent surface is deliberately
+/// fail-soft — failures were previously only `logger.error(...)`'d and lost — so this table is
+/// the queryable "what went wrong for this invitee" trail the admin Diagnostics surface reads.
+///
+/// Privacy: this row holds the error `code`/`stage`/`message`/`stack` + redacted `metadata` only.
+/// It MUST NOT carry raw respondent text (the failing `userMessage`); the deep-dive raw
+/// prompt/response comes from the turn's already-persisted `inspectorCalls`, not from here. The
+/// `versionId` FK cascades so error rows are swept when the version is deleted; `sessionId` /
+/// `invitationId` are plain identity pointers (no FK), matching the schema's UG-1 convention.
+model AppQuestionnaireError {
+  id           String   @id @default(cuid())
+  versionId    String // always resolvable; drives the version-scoped Diagnostics query
+  sessionId    String? // null for pre-session failures (e.g. session creation)
+  invitationId String? // denormalized so the per-invitation rollup is a cheap groupBy; null for walk-up/public
+  turnOrdinal  Int? // the turn index when scope = turn/persist/pipeline; null otherwise
+  scope        String // turn | session_create | invitation_send | round_gate | cost_cap | persist | pipeline | unknown
+  stage        String? // finer locus: extract | respond | persist | context_build | email | ...
+  severity     String   @default("error") // error | warning (a refusal that still ran cleanly, e.g. cost_cap) | info
+  code         String? // thrown Error.name or an API code (COST_CAP_REACHED, ROUND_NOT_OPEN, ...)
+  message      String   @db.Text
+  stack        String?  @db.Text
+  metadata     Json? // redacted/truncated context only — NEVER raw respondent text
+  createdAt    DateTime @default(now())
+
+  version AppQuestionnaireVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@index([versionId, createdAt])
+  @@index([invitationId])
+  @@index([sessionId])
+  @@map("app_questionnaire_error")
 }
 
 /// One persisted design-time evaluation run over a version's authored structure (F5.2).

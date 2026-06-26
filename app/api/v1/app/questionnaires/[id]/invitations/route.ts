@@ -29,6 +29,7 @@ import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { inviteLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 
 import { ensureQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
+import { recordQuestionnaireError } from '@/lib/app/questionnaire/diagnostics';
 import {
   APP_INVITATION_STATUSES,
   createInvitationsSchema,
@@ -178,6 +179,19 @@ const handleCreate = withAdminAuth<{ id: string }>(async (request, session, { pa
         outcome: 'failed',
         invitationId: created.id,
         reason: emailResult.error ?? 'Email failed to send',
+      });
+      // Diagnostics: a failed invitation delivery is the canonical "why didn't this invitee ever
+      // start?" signal. Record it against the version + invitation so it surfaces on the Diagnostics
+      // tab. The recipient email is mild PII but is the invitation's own column (not respondent
+      // conversation content), and is the key fact for debugging delivery — so it's stored in metadata.
+      void recordQuestionnaireError({
+        versionId: target.versionId,
+        invitationId: created.id,
+        scope: 'invitation_send',
+        stage: 'email',
+        severity: 'warning',
+        error: emailResult.error ?? 'Email failed to send',
+        metadata: { email: recipient.email },
       });
     }
   }

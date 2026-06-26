@@ -494,6 +494,12 @@ export const API = {
       /** Safeguarding summary — flagged/serious sensitive-disclosure session counts (GET). */
       versionAnalyticsSafeguarding: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/analytics/safeguarding`,
+      /** Per-invitation diagnostics rollup — telemetry + error tallies for a version (GET). */
+      versionDiagnostics: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/diagnostics`,
+      /** One invitation's diagnostics drill-down — lifecycle, per-turn telemetry, errors (GET). */
+      invitationDiagnostics: (id: string, versionId: string, invitationId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/diagnostics/${invitationId}`,
       /** Completed-session results export, CSV or JSON via `?format=` (GET — F8.2). */
       versionExport: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/export`,

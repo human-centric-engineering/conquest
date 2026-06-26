@@ -25,6 +25,7 @@ import { validateRequestBody } from '@/lib/api/validation';
 import { createRateLimitResponse } from '@/lib/security/rate-limit';
 
 import { withLiveSessionsEnabled } from '@/lib/app/questionnaire/feature-flag';
+import { recordQuestionnaireError } from '@/lib/app/questionnaire/diagnostics';
 import { sessionStartLimiter } from '@/app/api/v1/app/questionnaire-sessions/_lib/rate-limit';
 import {
   createSessionForVersion,
@@ -63,21 +64,49 @@ const handleCreateSession = withAuth(async (request, session) => {
   if (!limit.success) return createRateLimitResponse(limit);
 
   const body = await validateRequestBody(request, bodySchema);
+  const mode = 'invitationToken' in body ? 'invitation' : 'version';
 
-  const result =
-    'invitationToken' in body
-      ? await createSessionFromInvitation(
-          body.invitationToken,
-          respondentUserId,
-          body.profileValues
-        )
-      : await createSessionForVersion(body.versionId, respondentUserId);
+  let result: Awaited<ReturnType<typeof createSessionFromInvitation>>;
+  try {
+    result =
+      'invitationToken' in body
+        ? await createSessionFromInvitation(
+            body.invitationToken,
+            respondentUserId,
+            body.profileValues
+          )
+        : await createSessionForVersion(body.versionId, respondentUserId);
+  } catch (err) {
+    // Diagnostics: an unexpected throw while creating the session (e.g. the create transaction
+    // failed). The version is known only on the version-direct path; an invitation-path throw is
+    // unattributable and self-drops in the helper. Re-throw so the guard still returns a 500.
+    void recordQuestionnaireError({
+      versionId: 'versionId' in body ? body.versionId : undefined,
+      scope: 'session_create',
+      stage: mode === 'invitation' ? 'from_invitation' : 'for_version',
+      error: err,
+    });
+    throw err;
+  }
 
   if (!result.ok) {
     log.info('Session create rejected', {
       code: result.code,
-      mode: 'invitationToken' in body ? 'invitation' : 'version',
+      mode,
       userId: respondentUserId,
+    });
+    // Diagnostics: record an attributable rejection (delivery/lifecycle insight — e.g. an invitee
+    // hitting an expired/not-yet-launched questionnaire). `versionId` is set on invitation-path
+    // failures once the invitation resolves; fall back to the version-direct body. Unattributable
+    // rejections (bad token) carry no version and self-drop. Recorded as a `warning` — a clean refusal.
+    void recordQuestionnaireError({
+      versionId: result.versionId ?? ('versionId' in body ? body.versionId : undefined),
+      invitationId: result.invitationId,
+      scope: 'session_create',
+      severity: 'warning',
+      code: result.code,
+      error: result.message,
+      metadata: { status: result.status, mode },
     });
     return errorResponse(result.message, { code: result.code, status: result.status });
   }

@@ -23,6 +23,11 @@ const createMock = vi.hoisted(() => ({
 }));
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/create', () => createMock);
 
+// Diagnostics capture (F8.5) — stubbed so the route's best-effort error recording is observable
+// without touching the DB. The seam itself is unit-tested in diagnostics/record-error.test.ts.
+const diagnosticsMock = vi.hoisted(() => ({ recordQuestionnaireError: vi.fn() }));
+vi.mock('@/lib/app/questionnaire/diagnostics', () => diagnosticsMock);
+
 import { POST } from '@/app/api/v1/app/questionnaire-sessions/route';
 import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
@@ -186,5 +191,40 @@ describe('typed failure → HTTP mapping', () => {
     const body = await res.json();
     expect(body.success).toBe(false);
     expect(body.error.code).toBe('INVITATION_NOT_FOUND');
+  });
+});
+
+describe('diagnostics capture (F8.5)', () => {
+  it('records an attributable session_create warning on a typed rejection', async () => {
+    createMock.createSessionFromInvitation.mockResolvedValue({
+      ok: false,
+      status: 409,
+      code: 'VERSION_NOT_LAUNCHED',
+      message: 'This questionnaire is not currently open',
+      versionId: 'v-9',
+      invitationId: 'inv-1',
+    });
+    const res = await POST(req({ invitationToken: 'tok_abcdefghij' }), undefined);
+    expect(res.status).toBe(409);
+    expect(diagnosticsMock.recordQuestionnaireError).toHaveBeenCalledTimes(1);
+    expect(diagnosticsMock.recordQuestionnaireError.mock.calls[0][0]).toMatchObject({
+      versionId: 'v-9',
+      invitationId: 'inv-1',
+      scope: 'session_create',
+      severity: 'warning',
+      code: 'VERSION_NOT_LAUNCHED',
+    });
+  });
+
+  it('records a session_create error and rethrows (→ 500) when create throws', async () => {
+    createMock.createSessionForVersion.mockRejectedValue(new Error('db down'));
+    const res = await POST(req({ versionId: 'v1' }), undefined);
+    expect(res.status).toBe(500);
+    expect(diagnosticsMock.recordQuestionnaireError).toHaveBeenCalledTimes(1);
+    expect(diagnosticsMock.recordQuestionnaireError.mock.calls[0][0]).toMatchObject({
+      versionId: 'v1',
+      scope: 'session_create',
+      stage: 'for_version',
+    });
   });
 });

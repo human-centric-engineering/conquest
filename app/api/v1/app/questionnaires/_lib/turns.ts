@@ -77,6 +77,14 @@ export interface TurnWriteInput {
   /** Summed per-turn LLM spend in USD; `null` until cost-summing is wired. */
   costUsd: number | null;
   /**
+   * Per-turn telemetry rollup (Diagnostics). `durationMs` is the end-to-end wall-clock of the
+   * turn (route entry → persist), which the per-call latencies can't reconstruct; the token
+   * counts are the summed `inspectorCalls` tokensIn/tokensOut. Omitted ⇒ stored `null`.
+   */
+  durationMs?: number | null;
+  promptTokens?: number | null;
+  completionTokens?: number | null;
+  /**
    * The send attempt's idempotency key (F7.x retry). Stamped on the row so a retry re-sending the
    * same key is deduped (replayed) rather than re-run. Omitted for a send that carries no key
    * (pre-feature turns); NULLs stay distinct under the `@@unique([sessionId, idempotencyKey])`.
@@ -157,6 +165,9 @@ async function writeTurn(input: TurnWriteInput): Promise<string> {
           ? { inspectorCalls: jsonInput(input.inspectorCalls) }
           : {}),
         costUsd: input.costUsd,
+        ...(input.durationMs != null ? { durationMs: input.durationMs } : {}),
+        ...(input.promptTokens != null ? { promptTokens: input.promptTokens } : {}),
+        ...(input.completionTokens != null ? { completionTokens: input.completionTokens } : {}),
         ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
       },
       select: { id: true },

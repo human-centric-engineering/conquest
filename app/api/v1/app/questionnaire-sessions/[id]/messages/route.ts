@@ -24,7 +24,7 @@ import type { NextRequest } from 'next/server';
 import { sseResponse } from '@/lib/api/sse';
 import { errorResponse } from '@/lib/api/responses';
 import { getRouteLogger } from '@/lib/api/context';
-import { handleAPIError } from '@/lib/api/errors';
+import { handleAPIError, APIError } from '@/lib/api/errors';
 import { validateRequestBody } from '@/lib/api/validation';
 import { chatAttachmentsArraySchema } from '@/lib/validations/orchestration';
 import { createRateLimitResponse } from '@/lib/security/rate-limit';
@@ -53,6 +53,8 @@ import { loadRoundPeerDigest } from '@/lib/app/questionnaire/learning/digest';
 import { recordLearningApplied } from '@/lib/app/questionnaire/learning/events';
 import { buildReasoningTrace, type ReasoningStep } from '@/lib/app/questionnaire/reasoning';
 import type { AgentCallTrace } from '@/lib/app/questionnaire/inspector';
+import { totalInspectorTokensIn, totalInspectorTokensOut } from '@/lib/app/questionnaire/inspector';
+import { recordQuestionnaireError } from '@/lib/app/questionnaire/diagnostics';
 import type { SessionWarning } from '@/lib/app/questionnaire/chat/types';
 import { classifyCostCap } from '@/lib/app/questionnaire/session';
 import { ABUSE_ABANDON_REASON, TONE_DIMENSION_KEYS } from '@/lib/app/questionnaire/types';
@@ -124,9 +126,13 @@ async function handleMessage(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ): Promise<Response> {
+  // Diagnostics: end-to-end turn wall-clock starts the moment the request lands, so the persisted
+  // `durationMs` reflects the full time the respondent waited for this turn's reply.
+  const turnStartedAt = Date.now();
+  // Hoisted so the top-level catch can attribute an unexpected fault to this session.
+  const { id: sessionId } = await context.params;
   try {
     const log = await getRouteLogger(request);
-    const { id: sessionId } = await context.params;
 
     const loaded = await buildTurnContext(sessionId);
     if (!loaded) return errorResponse('Session not found', { code: 'NOT_FOUND', status: 404 });
@@ -162,6 +168,17 @@ async function handleMessage(
           await pauseSession(sessionId, { reason: 'round_closed' });
         }
         log.info('Live turn refused: round access', { sessionId, code: verdict.code });
+        // Diagnostics: a round-gate refusal isn't a fault — record it as an `info` boundary so the
+        // timeline explains why an in-flight respondent was stopped (window closed / member removed).
+        void recordQuestionnaireError({
+          versionId: loaded.session.versionId,
+          sessionId,
+          scope: 'round_gate',
+          severity: 'info',
+          code: verdict.code,
+          error: verdict.message,
+          metadata: { roundId: loaded.session.roundId, status: verdict.status },
+        });
         return errorResponse(verdict.message, { code: verdict.code, status: verdict.status });
       }
     }
@@ -202,6 +219,17 @@ async function handleMessage(
           });
         }
         log.info('Live turn refused: cost cap reached', { sessionId, spentUsd, capUsd });
+        // Diagnostics: a hard cost-cap stop is a clean refusal (the session paused as designed), so
+        // record it as a `warning` rather than an `error` — it explains why the session went quiet.
+        void recordQuestionnaireError({
+          versionId: loaded.session.versionId,
+          sessionId,
+          scope: 'cost_cap',
+          severity: 'warning',
+          code: 'COST_CAP_REACHED',
+          error: 'Session cost budget exhausted',
+          metadata: { spentUsd, capUsd },
+        });
         return errorResponse('Session cost budget exhausted', {
           code: 'COST_CAP_REACHED',
           status: 402,
@@ -558,6 +586,10 @@ async function handleMessage(
     const dataSlotAttempts = loaded.base.dataSlotAttempts ?? {};
     const maxDataSlotAttempts = loaded.base.config.maxDataSlotAttempts;
 
+    // Diagnostics: hoisted so the streaming generator (where TS loses `loaded`'s narrowing) can
+    // attribute any captured error to this version without re-reading the session.
+    const turnVersionId = loaded.session.versionId;
+
     log.info('Live turn started', { sessionId, versionId: loaded.session.versionId, userId });
 
     async function* drive(): AsyncGenerator<
@@ -601,9 +633,41 @@ async function handleMessage(
 
       // Data Slots feature: data-slot mode runs the parallel orchestrator (targets data slots,
       // fills questions in the background); otherwise the question-mode pipeline.
-      const result = dataSlotMode
-        ? await runDataSlotTurn(state, invokers)
-        : await runTurn(state, invokers);
+      const runPipeline = () =>
+        dataSlotMode ? runDataSlotTurn(state, invokers) : runTurn(state, invokers);
+      let result: Awaited<ReturnType<typeof runPipeline>>;
+      try {
+        result = await runPipeline();
+      } catch (err) {
+        // Diagnostics: the deterministic orchestrator threw — the one path that otherwise leaves a
+        // respondent with a dead stream and no record. Persist the error, then emit a graceful
+        // `error` frame (respondent-safe text) + a terminal `done` so the surface unlocks for a
+        // retry rather than hanging.
+        log.error('Live turn pipeline failed', {
+          sessionId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        void recordQuestionnaireError({
+          versionId: turnVersionId,
+          sessionId,
+          turnOrdinal: state.selectionRound,
+          scope: 'pipeline',
+          stage: dataSlotMode ? 'data_slot_turn' : 'run_turn',
+          error: err,
+          metadata: { dataSlotMode, kickoff: body.kickoff ?? false },
+        });
+        yield {
+          type: 'error',
+          code: 'TURN_FAILED',
+          message: 'Something went wrong while processing your message. Please try again.',
+        };
+        yield {
+          type: 'done',
+          tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+          costUsd: 0,
+        };
+        return;
+      }
 
       // Side-band frames the core determined (contradiction / seriousness / support / fail-soft
       // notices). Enrich each warning with its underlying rationale — the seriousness judge's reason,
@@ -808,6 +872,13 @@ async function handleMessage(
       }
       const costUsd = result.costUsd + extraCostUsd;
 
+      // Diagnostics telemetry rollup for this turn: end-to-end wall-clock since the request landed,
+      // plus the token totals summed from the inspector calls captured during the run. Denormalized
+      // onto the turn row so the Diagnostics surface aggregates without parsing the call blob.
+      const durationMs = Date.now() - turnStartedAt;
+      const promptTokens = totalInspectorTokensIn(inspectorCalls);
+      const completionTokens = totalInspectorTokensOut(inspectorCalls);
+
       // Persist after the reply is composed — a write failure is logged, not retro-failed
       // onto an already-streamed response (the cost rows are logged by the capabilities).
       try {
@@ -816,6 +887,9 @@ async function handleMessage(
           userMessage,
           agentResponse,
           targetedQuestionId: persistedTargetedId,
+          durationMs,
+          promptTokens,
+          completionTokens,
           toolCalls: result.toolCalls,
           ...(turnWarnings.length > 0 ? { warnings: turnWarnings } : {}),
           // Persist the reasoning trace only when the version opted into persistence — otherwise it
@@ -849,6 +923,16 @@ async function handleMessage(
         log.error('Turn persistence failed (response already streamed)', {
           sessionId,
           error: err instanceof Error ? err.message : String(err),
+        });
+        // Diagnostics: the reply streamed but the turn (answers + telemetry) didn't persist — a
+        // silent data-loss path worth surfacing. Record it so the gap is visible after the fact.
+        void recordQuestionnaireError({
+          versionId: turnVersionId,
+          sessionId,
+          turnOrdinal: state.selectionRound,
+          scope: 'persist',
+          stage: 'persist_turn',
+          error: err,
         });
       }
 
@@ -884,6 +968,14 @@ async function handleMessage(
             sessionId,
             error: err instanceof Error ? err.message : String(err),
           });
+          void recordQuestionnaireError({
+            versionId: turnVersionId,
+            sessionId,
+            turnOrdinal: state.selectionRound,
+            scope: 'turn',
+            stage: 'abuse_gate',
+            error: err,
+          });
         }
       }
 
@@ -916,6 +1008,14 @@ async function handleMessage(
             sessionId,
             error: err instanceof Error ? err.message : String(err),
           });
+          void recordQuestionnaireError({
+            versionId: turnVersionId,
+            sessionId,
+            turnOrdinal: state.selectionRound,
+            scope: 'turn',
+            stage: 'sensitivity',
+            error: err,
+          });
         }
       }
 
@@ -936,6 +1036,19 @@ async function handleMessage(
 
     return sseResponse(drive(), { signal: request.signal });
   } catch (err) {
+    // Diagnostics: record only genuine faults (5xx). Expected client errors — validation (400),
+    // access (401/403), wrong status (409), cost cap (402) — are not faults and would be noise;
+    // the cost-cap/round-gate refusals already record their own (warning/info) rows above. The
+    // helper resolves this session's version (and invitation) from `sessionId`.
+    const status = err instanceof APIError ? err.status : 500;
+    if (status >= 500) {
+      void recordQuestionnaireError({
+        sessionId,
+        scope: 'turn',
+        stage: 'route',
+        error: err,
+      });
+    }
     return handleAPIError(err);
   }
 }

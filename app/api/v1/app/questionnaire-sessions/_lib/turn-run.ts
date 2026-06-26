@@ -55,6 +55,11 @@ export async function persistTurn(opts: {
    *  session so it can be re-evaluated later by `publicRef`. Empty/omitted for a turn with none. */
   inspectorCalls?: AgentCallTrace[];
   costUsd: number;
+  /** Diagnostics telemetry rollup for this turn — end-to-end wall-clock + summed token counts.
+   *  Omitted ⇒ persisted as null (pre-feature turns). */
+  durationMs?: number | null;
+  promptTokens?: number | null;
+  completionTokens?: number | null;
   upserts: AnswerSlotIntent[];
   refinements: RefinementDecision[];
   keyToSlotId: Map<string, string>;
@@ -186,6 +191,9 @@ export async function persistTurn(opts: {
     sideEffectAnswerIds,
     sideEffectDataSlotIds,
     costUsd: opts.costUsd > 0 ? opts.costUsd : null,
+    ...(opts.durationMs != null ? { durationMs: opts.durationMs } : {}),
+    ...(opts.promptTokens != null ? { promptTokens: opts.promptTokens } : {}),
+    ...(opts.completionTokens != null ? { completionTokens: opts.completionTokens } : {}),
     ...(opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : {}),
   });
 }

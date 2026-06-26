@@ -1101,6 +1101,10 @@ describe('API Endpoints', () => {
       expect(Q.versionNextQuestion('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/next-question`);
       expect(Q.versionEmbedQuestions('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/embed-questions`);
       expect(Q.versionExport('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/export`);
+      expect(Q.versionDiagnostics('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/diagnostics`);
+      expect(Q.invitationDiagnostics('qn1', 'v1', 'inv1')).toBe(
+        `${base}/qn1/versions/v1/diagnostics/inv1`
+      );
     });
 
     it('builds section/question/tag paths', () => {

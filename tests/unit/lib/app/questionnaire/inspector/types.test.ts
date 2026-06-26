@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   totalInspectorCostUsd,
   totalInspectorLatencyMs,
+  totalInspectorTokensIn,
+  totalInspectorTokensOut,
   type AgentCallTrace,
 } from '@/lib/app/questionnaire/inspector/types';
 
@@ -57,5 +59,37 @@ describe('totalInspectorLatencyMs', () => {
 
   it('returns 0 for no calls', () => {
     expect(totalInspectorLatencyMs([])).toBe(0);
+  });
+});
+
+describe('totalInspectorTokensIn', () => {
+  it('sums per-call input tokens, treating missing/non-finite as 0', () => {
+    const calls = [
+      trace({ tokensIn: 100 }),
+      trace({ tokensIn: 40 }),
+      trace({}), // tokensIn undefined → 0
+      trace({ tokensIn: Number.NaN }), // non-finite → 0
+    ];
+    expect(totalInspectorTokensIn(calls)).toBe(140);
+  });
+
+  it('returns 0 for no calls', () => {
+    expect(totalInspectorTokensIn([])).toBe(0);
+  });
+});
+
+describe('totalInspectorTokensOut', () => {
+  it('sums per-call output tokens, treating missing/non-finite as 0', () => {
+    const calls = [
+      trace({ tokensOut: 20 }),
+      trace({ tokensOut: 5 }),
+      trace({}), // tokensOut undefined → 0
+      trace({ tokensOut: Number.POSITIVE_INFINITY }), // non-finite → 0
+    ];
+    expect(totalInspectorTokensOut(calls)).toBe(25);
+  });
+
+  it('returns 0 for no calls', () => {
+    expect(totalInspectorTokensOut([])).toBe(0);
   });
 });

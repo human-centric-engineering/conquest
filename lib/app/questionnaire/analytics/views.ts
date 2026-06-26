@@ -18,6 +18,7 @@
 
 import type { QuestionType, AnswerProvenance, SessionStatus } from '@/lib/app/questionnaire/types';
 import type { TagView } from '@/lib/app/questionnaire/views';
+import type { AgentCallTrace } from '@/lib/app/questionnaire/inspector/types';
 
 /** The resolved analytics window, echoed back so the UI can label what it shows. */
 export interface AnalyticsRange {
@@ -219,4 +220,138 @@ export interface QuestionnaireCostResult {
    * trend) is always returned — it carries no per-respondent identity.
    */
   topSessionsSuppressed: boolean;
+}
+
+/* ── Diagnostics (per-invitation telemetry + errors) ───────────────────────
+ *
+ * The Diagnostics surface answers "what happened — and what went wrong — for this invitee?".
+ * Unlike the aggregate analytics above, it is an admin DEBUG tool keyed on the invitation, so it
+ * deliberately does NOT apply low-N (k-anonymity) suppression — an admin debugging a 2-person pilot
+ * still needs the per-invitee view, and they already know whom they invited. It DOES honour the
+ * version's `anonymousMode` opt-in: when on, `identitySuppressed` is true and the email/name are
+ * withheld (the UI falls back to the invitation short-id), while the operational telemetry + errors
+ * still show. */
+
+/** Aggregate telemetry + error tallies for a version over the window. */
+export interface DiagnosticsTotals {
+  /** Non-preview sessions in scope. */
+  sessions: number;
+  /** Recorded turns across those sessions in the window. */
+  turns: number;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  costUsd: number;
+  /** Mean / 95th-percentile end-to-end turn wall-clock (ms); null when no turn recorded a duration. */
+  avgTurnMs: number | null;
+  p95TurnMs: number | null;
+  /** Total diagnostics rows recorded for the version in the window. */
+  errorCount: number;
+  /** Split of `errorCount` by severity. */
+  errorsBySeverity: { error: number; warning: number; info: number };
+}
+
+/** One row of the per-invitation Diagnostics table (plus a synthetic "no invitation" group). */
+export interface InvitationDiagnosticsRow {
+  /** The invitation id, or `null` for the synthetic walk-up / public "(no invitation)" group. */
+  invitationId: string | null;
+  /** Withheld (null) under `anonymousMode` or for the no-invitation group. */
+  email: string | null;
+  name: string | null;
+  /** Invitation lifecycle status (pending → sent → opened → registered → started → completed; or
+   *  revoked). Null for the no-invitation group. */
+  status: string | null;
+  /** Lifecycle timestamps, ISO-8601 or null. */
+  sentAt: string | null;
+  openedAt: string | null;
+  registeredAt: string | null;
+  /** Sessions this invitation produced (usually one). */
+  sessionCount: number;
+  /** Distinct session statuses across those sessions. */
+  sessionStatuses: SessionStatus[];
+  turns: number;
+  promptTokens: number;
+  completionTokens: number;
+  costUsd: number;
+  avgTurnMs: number | null;
+  errorCount: number;
+  /** Most recent turn or error timestamp for this invitation, ISO-8601 or null. */
+  lastActivityAt: string | null;
+}
+
+export interface VersionDiagnosticsResult {
+  versionId: string;
+  range: AnalyticsRange;
+  totals: DiagnosticsTotals;
+  invitations: InvitationDiagnosticsRow[];
+  /** True when `anonymousMode` is on: identity (email/name) is withheld from every row. */
+  identitySuppressed: boolean;
+}
+
+/* ── Diagnostics drill-down (one invitation) ──────────────────────────────── */
+
+/** One persisted turn's telemetry for the drill-down timeline. */
+export interface DiagnosticsTurnRow {
+  ordinal: number;
+  createdAt: string;
+  durationMs: number | null;
+  promptTokens: number | null;
+  completionTokens: number | null;
+  costUsd: number | null;
+  /** Capability dispatches this turn made (`{ slug, success, code?, latencyMs? }`). */
+  toolCalls: unknown;
+  /** Side-band notices (`{ code, message }`). */
+  warnings: unknown;
+  /** The deep-dive: every LLM/embedding call this turn made, with raw prompt/response. */
+  inspectorCalls: AgentCallTrace[];
+}
+
+/** One captured diagnostics error/refusal for the drill-down log. */
+export interface DiagnosticsErrorRow {
+  id: string;
+  createdAt: string;
+  scope: string;
+  stage: string | null;
+  severity: string;
+  code: string | null;
+  message: string;
+  stack: string | null;
+  turnOrdinal: number | null;
+  metadata: unknown;
+}
+
+/** One session under an invitation, with its full turn timeline. */
+export interface DiagnosticsSessionDetail {
+  sessionId: string;
+  publicRef: string | null;
+  status: SessionStatus;
+  isPreview: boolean;
+  createdAt: string;
+  turns: DiagnosticsTurnRow[];
+}
+
+export interface InvitationDiagnosticsResult {
+  versionId: string;
+  invitationId: string | null;
+  /** Withheld (null) under `anonymousMode`. The no-invitation group resolves to null. */
+  email: string | null;
+  name: string | null;
+  status: string | null;
+  /** Lifecycle timestamps, ISO-8601 or null. */
+  sentAt: string | null;
+  openedAt: string | null;
+  registeredAt: string | null;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  sessions: DiagnosticsSessionDetail[];
+  errors: DiagnosticsErrorRow[];
+  totals: {
+    turns: number;
+    promptTokens: number;
+    completionTokens: number;
+    costUsd: number;
+    avgTurnMs: number | null;
+    errorCount: number;
+  };
+  identitySuppressed: boolean;
 }

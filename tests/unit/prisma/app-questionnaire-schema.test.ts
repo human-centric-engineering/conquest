@@ -567,6 +567,36 @@ describe('questionnaire datamodel (Prisma.dmmf)', () => {
     expect(turns.kind).toBe('object');
     expect(turns.type).toBe('AppQuestionnaireTurn');
   });
+
+  it('AppQuestionnaireTurn carries the Diagnostics telemetry columns', () => {
+    const model = getModel('AppQuestionnaireTurn');
+    expect(getField(model, 'durationMs').type).toBe('Int');
+    expect(getField(model, 'promptTokens').type).toBe('Int');
+    expect(getField(model, 'completionTokens').type).toBe('Int');
+  });
+
+  it('AppQuestionnaireError maps app_questionnaire_error with a cascading version FK', () => {
+    const model = getModel('AppQuestionnaireError');
+    expect(model.dbName).toBe('app_questionnaire_error');
+    expect(getField(model, 'versionId').type).toBe('String');
+    expect(getField(model, 'scope').type).toBe('String');
+    expect(getField(model, 'severity').type).toBe('String');
+    expect(getField(model, 'message').type).toBe('String');
+    expect(getField(model, 'metadata').type).toBe('Json');
+    // sessionId / invitationId are plain identity pointers (no FK) — UG-1 house style.
+    expect(getField(model, 'sessionId').kind).toBe('scalar');
+    expect(getField(model, 'invitationId').kind).toBe('scalar');
+    // The version relation cascades so error rows are swept when the version is deleted.
+    const version = getField(model, 'version');
+    expect(version.kind).toBe('object');
+    expect(version.type).toBe('AppQuestionnaireVersion');
+  });
+
+  it('AppQuestionnaireVersion carries the Diagnostics errors reverse relation', () => {
+    const errors = getField(getModel('AppQuestionnaireVersion'), 'errors');
+    expect(errors.kind).toBe('object');
+    expect(errors.type).toBe('AppQuestionnaireError');
+  });
 });
 
 describe('app_questionnaire_init migration SQL', () => {
