@@ -18,6 +18,7 @@ import { embedChatLimiter, createRateLimitResponse, imageLimiter } from '@/lib/s
 import { resolveEmbedToken, isOriginAllowed } from '@/lib/embed/auth';
 import { streamChat } from '@/lib/orchestration/chat';
 import { logger } from '@/lib/logging';
+import { getRequestContext } from '@/lib/logging/context';
 import { cuidSchema } from '@/lib/validations/common';
 import { chatAttachmentsArraySchema } from '@/lib/validations/orchestration';
 import { validateImageMagicBytes, validatePdfMagicBytes } from '@/lib/storage/image';
@@ -74,6 +75,16 @@ export async function POST(request: NextRequest): Promise<Response> {
   }
 
   const clientIp = getClientIP(request);
+
+  // Request-scoped logger so every embed log line — including the
+  // mid-stream errors inside `streamChat` — shares a correlation key
+  // plus the user-agent that characterises the anonymous caller.
+  // The embed path has no session, so we use `getRequestContext` (which
+  // reads request/header metadata only) rather than `getRouteLogger`,
+  // which would do a wasted auth-session lookup.
+  const requestContext = await getRequestContext(request);
+  const { requestId } = requestContext;
+  const log = logger.withContext(requestContext);
 
   // Rate limit per token + IP
   const rateKey = `${token}:${clientIp}`;
@@ -136,8 +147,9 @@ export async function POST(request: NextRequest): Promise<Response> {
         const buffer = Buffer.from(attachment.data, 'base64');
         const validation = validateImageMagicBytes(buffer);
         if (!validation.valid || validation.detectedType !== attachment.mediaType) {
-          logger.warn('Embed image attachment magic-byte validation failed', {
+          log.warn('Embed image attachment magic-byte validation failed', {
             agentSlug: ctx.agentSlug,
+            userId: ctx.userId,
             declaredMediaType: attachment.mediaType,
             detectedMediaType: validation.detectedType,
             error: validation.error,
@@ -157,8 +169,9 @@ export async function POST(request: NextRequest): Promise<Response> {
       } else if (attachment.mediaType === 'application/pdf') {
         const buffer = Buffer.from(attachment.data, 'base64');
         if (!validatePdfMagicBytes(buffer)) {
-          logger.warn('Embed PDF attachment magic-byte validation failed', {
+          log.warn('Embed PDF attachment magic-byte validation failed', {
             agentSlug: ctx.agentSlug,
+            userId: ctx.userId,
           });
           return NextResponse.json(
             {
@@ -175,7 +188,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     }
   }
 
-  logger.info('Embed chat stream started', {
+  log.info('Embed chat stream started', {
     agentSlug: ctx.agentSlug,
     userId: ctx.userId,
     conversationId: body.conversationId,
@@ -188,6 +201,13 @@ export async function POST(request: NextRequest): Promise<Response> {
     userId: ctx.userId,
     conversationId: body.conversationId,
     attachments: body.attachments,
+    requestId,
+    // Reliable only for same-origin embeds, where the first-party
+    // SameSite=Lax `sunrise_vid` cookie accompanies the request. On a
+    // cross-site embed the cookie isn't sent, so this is either empty or a
+    // fresh per-request id that does not correlate across requests — the
+    // durable cross-request key there is the `embed_<hash>` userId above.
+    visitorId: requestContext.visitorId,
     signal: request.signal,
   });
 

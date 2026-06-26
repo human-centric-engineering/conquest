@@ -16,6 +16,65 @@ release process.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-06-26
+
+> **Alpha release.** Fourth tagged Sunrise release. **MINOR bump** — adds new
+> public surface (the `<BrandMark>` header/footer brand slot, the public-nav /
+> footer override seam — `publicNavItems` / `footerNavItems` / `footerLegalItems`
+> with the `PublicNavItem` type and `DEFAULT_*` lists — and the email-template
+> resolver `resolveEmailTemplate` with the `EmailKind` / `EmailPropsMap` /
+> `EmailOverrides` contract) on top of the anonymous-visitor observability seam
+> (`visitorId` log context, `getVisitorId()`, the `LogContext.visitorId` /
+> `ChatRequest.visitorId` fields, and the `LOG_VISITOR_ID` / `LOG_HTTP_ACCESS`
+> env flags). Ships in `0.x` per
+> [`VERSIONING.md`](./VERSIONING.md#0x-alpha-semantics--loose-by-design) — forks
+> adopting this release should expect real merge work between any two `0.x`
+> releases.
+
+### Added
+
+- **Fork-readiness seams — header/footer brand, public nav, and auth emails.**
+  Three near-universal fork customizations no longer require editing
+  Sunrise-core files in place (which conflicts on every upstream sync); each is
+  now a **fork-owned scaffold** the platform auto-resolves against, with a
+  platform default. New public surface: the `<BrandMark>` slot
+  (`components/brand/brand-mark.tsx`) — the header/footer brand is a render
+  concern (image/wordmark/text), so the seam is a component; `AppHeader` renders
+  it where it previously hardcoded `'Sunrise'`, and `logoText` becomes an
+  optional caller override with no default. The public-nav override
+  (`lib/app/public-nav.ts`) exports `publicNavItems` / `footerNavItems` /
+  `footerLegalItems` (`PublicNavItem[] | null`, default `null` = platform
+  default; a non-null array **replaces** it wholesale), with the shared
+  `PublicNavItem` type and `DEFAULT_PUBLIC_NAV` / `DEFAULT_FOOTER_NAV` /
+  `DEFAULT_FOOTER_LEGAL` in `lib/public-nav/types.ts`; the footer's **Cookie
+  Preferences** consent control is always rendered regardless of the legal
+  override. The email resolver (`lib/email/registry.ts`) adds
+  `resolveEmailTemplate(kind, props)`, the `EmailKind` union, the typed
+  per-kind `EmailPropsMap` props contract, and `EmailOverrides`; forks register
+  per-kind overrides in `lib/app/emails.ts` and platform call sites
+  (`lib/auth/config.ts`, `app/api/v1/users/invite/route.ts`) resolve through it.
+  Changing an email kind's props is a versioned public-surface change. Vanilla
+  Sunrise output is unchanged when no override is set. See
+  [`CUSTOMIZATION.md`](./CUSTOMIZATION.md) §2 and §4. [#347]
+- **Anonymous visitor observability — durable signed `visitorId` in server logs.**
+  The proxy now issues a durable, HMAC-signed `sunrise_vid` cookie (HttpOnly,
+  SameSite=Lax, Secure in production, 180-day TTL) and folds a `visitorId` into
+  the log context alongside `requestId`, so an anonymous visitor's journey
+  (page load → contact form → chat) can be correlated across requests for error
+  reproduction — where the per-request `requestId` cannot. New public surface:
+  the `LogContext.visitorId` field; `getVisitorId()` and the `visitorId` field
+  on `getRequestContext()` / `getFullContext()` in `lib/logging/context.ts`; the
+  `ChatRequest.visitorId` field threaded through `streamChat()`; the
+  `lib/logging/visitor-id.ts` signing module; and two env flags — `LOG_VISITOR_ID`
+  (default **on**, set `false` to disable) and `LOG_HTTP_ACCESS` (default **off**,
+  opt-in per-request proxy access log). The signing key is derived from
+  `BETTER_AUTH_SECRET` via HKDF with domain separation; the cookie is
+  tamper-verified and the proxy strips any spoofed inbound `x-visitor-id`
+  header. The `visitorId` is pseudonymous and covered by log-retention windows,
+  not the `eraseUser()` cascade. See
+  [`.context/logging/visitor-tracing.md`](./.context/logging/visitor-tracing.md)
+  and [`.context/privacy/visitor-id.md`](./.context/privacy/visitor-id.md). [#341]
+
 ## [0.2.0] — 2026-06-25
 
 > **Alpha release.** Third tagged Sunrise release. **MINOR bump** — adds new
