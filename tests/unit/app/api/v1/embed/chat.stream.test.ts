@@ -49,8 +49,29 @@ vi.mock('@/lib/api/sse', () => ({
   sseResponse: vi.fn(() => new Response('stream', { status: 200 })),
 }));
 
-vi.mock('@/lib/logging', () => ({
-  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+vi.mock('@/lib/logging', () => {
+  const scoped = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+  return {
+    logger: {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+      withContext: vi.fn(() => scoped),
+    },
+  };
+});
+
+vi.mock('@/lib/logging/context', () => ({
+  getRequestContext: vi.fn(() =>
+    Promise.resolve({
+      requestId: 'req-test-123',
+      visitorId: 'vid-test-123',
+      method: 'POST',
+      url: 'https://mysite.com/api/v1/embed/chat/stream',
+      userAgent: 'test-agent/1.0',
+    })
+  ),
 }));
 
 // ─── Imports after mocks ─────────────────────────────────────────────────────
@@ -58,6 +79,7 @@ vi.mock('@/lib/logging', () => ({
 import { resolveEmbedToken, isOriginAllowed } from '@/lib/embed/auth';
 import { streamChat } from '@/lib/orchestration/chat';
 import { embedChatLimiter, imageLimiter } from '@/lib/security/rate-limit';
+import { logger } from '@/lib/logging';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -231,6 +253,32 @@ describe('POST /api/v1/embed/chat/stream', () => {
           userId: VALID_CONTEXT.userId,
           conversationId: validCuid,
         })
+      );
+    });
+
+    it('threads requestId into streamChat so embed log lines correlate', async () => {
+      await POST(
+        makePostRequest(
+          { message: 'Hello bot' },
+          { 'x-embed-token': VALID_TOKEN, origin: 'https://mysite.com' }
+        )
+      );
+
+      expect(vi.mocked(streamChat)).toHaveBeenCalledWith(
+        expect.objectContaining({ requestId: 'req-test-123', visitorId: 'vid-test-123' })
+      );
+    });
+
+    it('scopes the embed logger with requestId + userAgent for anonymous traceability', async () => {
+      await POST(
+        makePostRequest(
+          { message: 'Hello bot' },
+          { 'x-embed-token': VALID_TOKEN, origin: 'https://mysite.com' }
+        )
+      );
+
+      expect(vi.mocked(logger.withContext)).toHaveBeenCalledWith(
+        expect.objectContaining({ requestId: 'req-test-123', userAgent: 'test-agent/1.0' })
       );
     });
 

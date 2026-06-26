@@ -12,36 +12,11 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { Home, Info, Mail, MessagesSquare, Tag } from 'lucide-react';
+import { publicNavItems } from '@/lib/app/public-nav';
+import { DEFAULT_PUBLIC_NAV } from '@/lib/public-nav/types';
 
-const navItems = [
-  {
-    href: '/',
-    label: 'Home',
-    icon: Home,
-    exact: true,
-  },
-  {
-    href: '/about',
-    label: 'About',
-    icon: Info,
-  },
-  {
-    href: '/about-conquest',
-    label: 'About ConQuest',
-    icon: MessagesSquare,
-  },
-  {
-    href: '/pricing',
-    label: 'Pricing',
-    icon: Tag,
-  },
-  {
-    href: '/contact',
-    label: 'Contact',
-    icon: Mail,
-  },
-];
+// Fork override (a non-null array) replaces the platform default wholesale.
+const navItems = publicNavItems ?? DEFAULT_PUBLIC_NAV;
 
 export function PublicNav() {
   const pathname = usePathname();
@@ -49,9 +24,14 @@ export function PublicNav() {
   return (
     <nav className="flex items-center gap-1">
       {navItems.map((item) => {
-        const isActive = item.exact
-          ? pathname === item.href
-          : pathname === item.href || pathname.startsWith(`${item.href}/`);
+        // Exact items (and the root `/`, which every path is a prefix of) match
+        // only on equality; everything else prefix-matches so `/about/team`
+        // highlights "About". A fork sets `exact` to keep a parent link like
+        // `/docs` from highlighting on `/docs/intro`.
+        const isActive =
+          item.exact || item.href === '/'
+            ? pathname === item.href
+            : pathname === item.href || pathname.startsWith(`${item.href}/`);
         const Icon = item.icon;
 
         return (
@@ -66,7 +46,7 @@ export function PublicNav() {
             )}
             aria-current={isActive ? 'page' : undefined}
           >
-            <Icon className="h-4 w-4" />
+            {Icon && <Icon className="h-4 w-4" />}
             <span className="hidden sm:inline">{item.label}</span>
           </Link>
         );
