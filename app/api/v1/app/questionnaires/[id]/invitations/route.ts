@@ -33,10 +33,10 @@ import { recordQuestionnaireError } from '@/lib/app/questionnaire/diagnostics';
 import {
   APP_INVITATION_STATUSES,
   createInvitationsSchema,
-  mintInvitationToken,
   type AppInvitationStatus,
   type InvitationSendResult,
 } from '@/lib/app/questionnaire/invitations';
+import { mintInvitationToken } from '@/lib/app/questionnaire/invitations/token';
 import {
   parseInviteeFields,
   validateInviteeProfile,

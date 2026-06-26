@@ -10,7 +10,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-import { hashInvitationToken } from '@/lib/app/questionnaire/invitations';
+import { hashInvitationToken } from '@/lib/app/questionnaire/invitations/token';
 
 // ─── Mocks (hoisted) ──────────────────────────────────────────────────────────
 

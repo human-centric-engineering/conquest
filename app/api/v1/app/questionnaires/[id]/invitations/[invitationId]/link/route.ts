@@ -24,7 +24,7 @@ import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { inviteLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 
 import { ensureQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
-import { mintInvitationToken } from '@/lib/app/questionnaire/invitations';
+import { mintInvitationToken } from '@/lib/app/questionnaire/invitations/token';
 import { loadScopedInvitation } from '@/app/api/v1/app/questionnaires/[id]/invitations/_lib/read';
 import { buildFrictionlessInviteUrl } from '@/app/api/v1/app/questionnaires/[id]/invitations/_lib/send';
 

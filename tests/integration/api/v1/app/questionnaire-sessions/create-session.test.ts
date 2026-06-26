@@ -39,7 +39,7 @@ import {
   createSessionFromInvitation,
   createSessionFromInviteToken,
 } from '@/app/api/v1/app/questionnaire-sessions/_lib/create';
-import { hashInvitationToken } from '@/lib/app/questionnaire/invitations';
+import { hashInvitationToken } from '@/lib/app/questionnaire/invitations/token';
 
 type Mock = ReturnType<typeof vi.fn>;
 const USER = 'user-1';

@@ -11,7 +11,8 @@
 
 import { prisma } from '@/lib/db/client';
 import { errorResponse } from '@/lib/api/responses';
-import { hashInvitationToken, type AppInvitationStatus } from '@/lib/app/questionnaire/invitations';
+import { type AppInvitationStatus } from '@/lib/app/questionnaire/invitations';
+import { hashInvitationToken } from '@/lib/app/questionnaire/invitations/token';
 
 export interface ResolvedInvitation {
   id: string;
