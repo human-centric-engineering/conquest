@@ -74,7 +74,17 @@ export type CreateSessionResult =
       /** True when an existing non-terminal session was returned (no new row minted). */
       resumed: boolean;
     }
-  | { ok: false; status: number; code: string; message: string };
+  | {
+      ok: false;
+      status: number;
+      code: string;
+      message: string;
+      /** Diagnostics attribution — set once the invitation (hence its version) is resolved, so a
+       *  rejection can be recorded against the right version/invitee. Absent for an unresolvable
+       *  token (INVITATION_NOT_FOUND), which isn't attributable to any version. */
+      versionId?: string;
+      invitationId?: string;
+    };
 
 /**
  * Validate a respondent's profile submission against a version's configured fields,
@@ -156,8 +166,16 @@ export async function createSessionFromInvitation(
   }
   // The invitation must be bound to the calling user (accept binds userId). Don't reveal
   // whether the token exists for someone else — a generic 403.
+  // Diagnostics attribution — carried on every failure now that the invitation is resolved.
+  const attribution = { versionId: invitation.versionId, invitationId: invitation.id };
   if (invitation.userId !== respondentUserId) {
-    return { ok: false, status: 403, code: 'FORBIDDEN', message: 'This invitation is not yours' };
+    return {
+      ok: false,
+      status: 403,
+      code: 'FORBIDDEN',
+      message: 'This invitation is not yours',
+      ...attribution,
+    };
   }
   if (invitation.status !== 'registered' && invitation.status !== 'started') {
     return {
@@ -165,6 +183,7 @@ export async function createSessionFromInvitation(
       status: 409,
       code: 'INVITATION_NOT_STARTABLE',
       message: `An invitation in "${invitation.status}" cannot start a session`,
+      ...attribution,
     };
   }
   if (invitation.version.status !== 'launched') {
@@ -173,6 +192,7 @@ export async function createSessionFromInvitation(
       status: 409,
       code: 'VERSION_NOT_LAUNCHED',
       message: 'This questionnaire is not currently open',
+      ...attribution,
     };
   }
 
@@ -184,7 +204,7 @@ export async function createSessionFromInvitation(
     invitation.version.config?.profileFields,
     profileValues
   );
-  if (!capture.ok) return capture;
+  if (!capture.ok) return { ...capture, ...attribution };
 
   // Cohorts & Rounds: a round-bound invitation carries its round context. Gate the start
   // (window + active membership) before any write; the context comes from the trusted
@@ -197,7 +217,7 @@ export async function createSessionFromInvitation(
       versionId: invitation.versionId,
       onMissingRound: 'deny',
     });
-    if (!verdict.ok) return verdict;
+    if (!verdict.ok) return { ...verdict, ...attribution };
   }
 
   const existing = await findResumableSession(

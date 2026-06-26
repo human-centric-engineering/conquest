@@ -8,6 +8,8 @@ export type {
 export {
   totalInspectorCostUsd,
   totalInspectorLatencyMs,
+  totalInspectorTokensIn,
+  totalInspectorTokensOut,
 } from '@/lib/app/questionnaire/inspector/types';
 export {
   formatInspectorCall,

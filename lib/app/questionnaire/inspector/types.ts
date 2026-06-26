@@ -68,3 +68,19 @@ export function totalInspectorCostUsd(calls: AgentCallTrace[]): number {
 export function totalInspectorLatencyMs(calls: AgentCallTrace[]): number {
   return calls.reduce((sum, c) => sum + (Number.isFinite(c.latencyMs) ? c.latencyMs : 0), 0);
 }
+
+/** Sum a turn's input/prompt tokens across the calls that expose them. */
+export function totalInspectorTokensIn(calls: AgentCallTrace[]): number {
+  return calls.reduce(
+    (sum, c) => sum + (Number.isFinite(c.tokensIn) ? (c.tokensIn as number) : 0),
+    0
+  );
+}
+
+/** Sum a turn's output/completion tokens across the calls that expose them. */
+export function totalInspectorTokensOut(calls: AgentCallTrace[]): number {
+  return calls.reduce(
+    (sum, c) => sum + (Number.isFinite(c.tokensOut) ? (c.tokensOut as number) : 0),
+    0
+  );
+}

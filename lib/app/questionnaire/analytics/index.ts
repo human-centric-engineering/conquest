@@ -28,6 +28,10 @@ export {
 export { getCompletionFunnel } from '@/lib/app/questionnaire/analytics/funnel';
 export { getQuestionnaireCostBreakdown } from '@/lib/app/questionnaire/analytics/cost';
 export { getSafeguardingSummary } from '@/lib/app/questionnaire/analytics/safeguarding';
+export {
+  getVersionDiagnostics,
+  getInvitationDiagnostics,
+} from '@/lib/app/questionnaire/analytics/diagnostics';
 
 export {
   K_ANONYMITY_THRESHOLD,
@@ -51,4 +55,11 @@ export type {
   SessionCostRow,
   QuestionnaireCostResult,
   SafeguardingSummary,
+  DiagnosticsTotals,
+  InvitationDiagnosticsRow,
+  VersionDiagnosticsResult,
+  DiagnosticsTurnRow,
+  DiagnosticsErrorRow,
+  DiagnosticsSessionDetail,
+  InvitationDiagnosticsResult,
 } from '@/lib/app/questionnaire/analytics/views';
