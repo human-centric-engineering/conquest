@@ -1,60 +1,71 @@
 'use client';
 
 /**
- * Horizontal tab bar for the questionnaire workspace.
+ * Two-tier lifecycle sub-navigation for the questionnaire workspace.
  *
- * Receives the already-flag-filtered tab list from the server layout and renders
- * it as a sub-navigation strip under the workspace header. Active-state detection
- * mirrors the admin sidebar's `isItemActive` (exact match for the Overview tab so
- * it isn't lit on every sub-route; prefix match for the rest).
+ * Receives the already-flag-filtered lifecycle groups from the server layout and
+ * renders them through the shared {@link GroupedSubNav}: a top row of phases
+ * (Overview · Build · Distribute · Results · Settings) and, for the active phase,
+ * a second row of its child tabs. Phases that hold nothing actionable for the
+ * current status (a draft has no respondents or results) are dimmed, not hidden —
+ * `dimmedWorkspacePhases` decides which. hrefs are built here via the pure
+ * `workspaceTabHref` helper; the group link points at its first child.
  */
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-
-import { workspaceTabHref, type WorkspaceTab } from '@/lib/app/questionnaire/workspace-nav';
-import { cn } from '@/lib/utils';
+import { GroupedSubNav, type SubNavGroup } from '@/components/admin/grouped-sub-nav';
+import {
+  dimmedWorkspacePhases,
+  workspaceTabHref,
+  type ResolvedWorkspaceGroup,
+  type WorkspacePhase,
+} from '@/lib/app/questionnaire/workspace-nav';
+import type { AppQuestionnaireStatus } from '@/lib/app/questionnaire/types';
 
 interface QuestionnaireSubNavProps {
   questionnaireId: string;
   versionId: string;
-  tabs: readonly WorkspaceTab[];
+  groups: readonly ResolvedWorkspaceGroup[];
+  status: AppQuestionnaireStatus;
 }
 
-function isTabActive(href: string, pathname: string, exact?: boolean): boolean {
-  return exact ? pathname === href : pathname === href || pathname.startsWith(`${href}/`);
+/**
+ * Why a dimmed lifecycle phase is dimmed — shown as the group's tooltip. Status-aware:
+ * an archived questionnaire dims Distribute because it's closed (it *was* launched), so the
+ * draft "launch first" copy would be wrong. Only phases that actually dim are reachable here.
+ */
+function dimHint(phase: WorkspacePhase, status: AppQuestionnaireStatus): string {
+  if (status === 'archived') {
+    return 'This questionnaire is archived — no new respondents can be invited';
+  }
+  // Draft: Distribute + Results are dimmed because nothing is there yet.
+  return phase === 'distribute'
+    ? 'Available once the questionnaire is launched'
+    : 'Results appear once respondents complete the questionnaire';
 }
 
 export function QuestionnaireSubNav({
   questionnaireId,
   versionId,
-  tabs,
+  groups,
+  status,
 }: QuestionnaireSubNavProps) {
-  const pathname = usePathname();
+  const dimmed = new Set(dimmedWorkspacePhases(status));
 
-  return (
-    <nav
-      aria-label="Questionnaire sections"
-      className="-mb-px flex items-center gap-1 overflow-x-auto"
-    >
-      {tabs.map((tab) => {
-        const href = workspaceTabHref(questionnaireId, versionId, tab);
-        const active = isTabActive(href, pathname, tab.exact);
-        return (
-          <Link
-            key={tab.id}
-            href={href}
-            aria-current={active ? 'page' : undefined}
-            className={cn(
-              'border-b-2 px-3 py-2 text-sm whitespace-nowrap transition-colors',
-              active
-                ? 'text-foreground border-[color:var(--cq-accent)] font-medium'
-                : 'text-muted-foreground hover:text-foreground border-transparent'
-            )}
-          >
-            {tab.label}
-          </Link>
-        );
-      })}
-    </nav>
-  );
+  const navGroups: SubNavGroup[] = groups.map((group) => {
+    const tabs = group.tabs.map((tab) => ({
+      id: tab.id,
+      label: tab.label,
+      href: workspaceTabHref(questionnaireId, versionId, tab),
+      ...(tab.exact ? { exact: true } : {}),
+    }));
+    const isDimmed = group.phase !== undefined && dimmed.has(group.phase);
+    return {
+      id: group.id,
+      label: group.label,
+      href: tabs[0].href,
+      tabs,
+      ...(isDimmed ? { dimmed: true, dimmedHint: dimHint(group.phase!, status) } : {}),
+    };
+  });
+
+  return <GroupedSubNav groups={navGroups} ariaLabel="Questionnaire sections" />;
 }

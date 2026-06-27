@@ -53,6 +53,7 @@ import {
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { FieldHelp } from '@/components/ui/field-help';
 import { cn } from '@/lib/utils';
+import { SectionRail } from '@/components/admin/section-rail';
 import { CostEstimateCard } from '@/components/admin/questionnaires/cost-estimate-card';
 import { AdaptiveEmbeddingStep } from '@/components/admin/questionnaires/adaptive-embedding-step';
 import { IntroBackgroundField } from '@/components/admin/questionnaires/intro-background-field';
@@ -214,12 +215,15 @@ function boundedNumber(
  * children. Grouping + ordering (most-used first) is what makes the long config scannable.
  */
 function SettingsGroup({
+  id,
   icon: Icon,
   accent,
   title,
   description,
   children,
 }: {
+  /** Anchor id + scroll-spy target — picked up by the `SectionRail`. */
+  id: string;
   icon: LucideIcon;
   /** Tailwind classes tinting the icon chip — one hue per group, for at-a-glance scanning. */
   accent: string;
@@ -228,7 +232,12 @@ function SettingsGroup({
   children: React.ReactNode;
 }) {
   return (
-    <Card className="overflow-hidden shadow-sm">
+    <Card
+      id={id}
+      data-section-rail
+      data-section-label={title}
+      className="scroll-mt-24 overflow-hidden shadow-sm"
+    >
       <CardHeader className="bg-muted/30 flex-row items-start gap-3 space-y-0 border-b p-4">
         <span
           className={cn(
@@ -649,966 +658,999 @@ export function ConfigEditor({
         </div>
       )}
 
-      {/* ── 1. Questions & completion — the core run loop: how questions are chosen and when a
+      {/* Two-column on wide screens: a sticky scroll-spy rail (wayfinding only — nothing moves)
+          beside the single settings scroll. The rail discovers its items from the
+          `[data-section-rail]` cards inside `#settings-sections`. Content is pinned to column 2
+          so the layout doesn't shift when the rail mounts (the rail renders null pre-hydration). */}
+      <div className="lg:grid lg:grid-cols-[180px_minmax(0,1fr)] lg:items-start lg:gap-6">
+        <SectionRail
+          targetId="settings-sections"
+          ariaLabel="Settings sections"
+          className="top-24 hidden self-start lg:sticky lg:block"
+        />
+
+        <div id="settings-sections" className="min-w-0 space-y-4 lg:col-start-2">
+          {/* ── 1. Questions & completion — the core run loop: how questions are chosen and when a
              session is allowed to finish. Most-used knobs, so they lead. ── */}
-      <SettingsGroup
-        icon={ListChecks}
-        accent="bg-blue-500/10 text-blue-600 dark:text-blue-400"
-        title="Questions & completion"
-        description="How the agent chooses the next question and when a session is allowed to finish."
-      >
-        <div className="space-y-1.5 sm:max-w-sm">
-          <Label className="text-sm font-medium">
-            Selection strategy{' '}
-            <FieldHelp title="Selection strategy">
-              How the agent picks the next question — in order, by question weight, or adaptively
-              chosen from the conversation so far.
-            </FieldHelp>
-          </Label>
-          <Select
-            value={selectionStrategy}
-            onValueChange={(v) => setSelectionStrategy(v as SelectionStrategy)}
-            disabled={busy}
+          <SettingsGroup
+            icon={ListChecks}
+            accent="bg-blue-500/10 text-blue-600 dark:text-blue-400"
+            id="questions"
+            title="Questions & completion"
+            description="How the agent chooses the next question and when a session is allowed to finish."
           >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {SELECTION_STRATEGY_ORDER.filter(
-                // Hide adaptive when its sub-flag is off — unless it's the saved
-                // value, so the Select still shows a label rather than blank.
-                (s) =>
-                  s !== 'adaptive' || adaptiveEnabled || config.selectionStrategy === 'adaptive'
-              ).map((s) => (
-                <SelectItem key={s} value={s}>
-                  {SELECTION_STRATEGY_LABELS[s]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {/* Adaptive ranks questions by embedding similarity, so it needs the slots embedded
-              first. Surface the explicit generate step + coverage as soon as the admin picks
-              adaptive (driven by the live selection, not just the saved value). */}
-          {selectionStrategy === 'adaptive' && (
-            <AdaptiveEmbeddingStep
-              questionnaireId={questionnaireId}
-              versionId={versionId}
-              busy={busy}
-            />
-          )}
-        </div>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-1.5">
-            <Label className="text-sm font-medium">
-              Min questions answered{' '}
-              <FieldHelp title="Minimum questions answered">
-                A session can&apos;t complete until at least this many questions have been answered.
-                0 means no minimum.
-              </FieldHelp>
-            </Label>
-            <Input
-              type="number"
-              min={0}
-              value={minQuestionsAnswered}
-              onChange={(e) => setMinQuestionsAnswered(e.target.value)}
-              disabled={busy}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-sm font-medium">
-              Coverage threshold{' '}
-              <FieldHelp title="Coverage threshold">
-                Fraction of (weighted) questions that must be covered to consider the session
-                complete. 1 = all questions; 0.8 = 80%.
-              </FieldHelp>
-            </Label>
-            <Input
-              type="number"
-              min={0}
-              max={1}
-              step={0.05}
-              value={coverageThreshold}
-              onChange={(e) => setCoverageThreshold(e.target.value)}
-              disabled={busy}
-            />
-          </div>
-        </div>
-        <div className="space-y-1.5 sm:max-w-xs">
-          <Label className="text-sm font-medium">
-            Data-slot attempts{' '}
-            <FieldHelp title="Data-slot attempts">
-              How many times the agent probes one data slot (topic) before it records its best guess
-              and moves on — so a respondent never gets stuck being asked the same thing.{' '}
-              <code className="text-xs">2</code> = ask once, then one sharper re-ask. This is the
-              ceiling on how hard a <em>shaky</em> answer is deepened: a terse, vague, or
-              only-inferred answer (low confidence) is the kind the agent circles back on, and a
-              higher value lets it probe such answers further at the cost of a longer conversation.
-              The best guess is shown as &ldquo;provisional · may revisit&rdquo; and can still be
-              refined later. Only applies in data-slot mode.
-            </FieldHelp>
-          </Label>
-          <Input
-            type="number"
-            min={1}
-            max={10}
-            value={maxDataSlotAttempts}
-            onChange={(e) => setMaxDataSlotAttempts(e.target.value)}
-            disabled={busy}
-          />
-        </div>
-      </SettingsGroup>
-
-      {/* ── 2. Respondent experience — how a person actually completes it (format, input, what
-             they see, whether they're identified). ── */}
-      <SettingsGroup
-        icon={MessageSquareText}
-        accent="bg-violet-500/10 text-violet-600 dark:text-violet-400"
-        title="Respondent experience"
-        description="How a respondent completes the questionnaire — format, input, and what they see alongside the chat."
-      >
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-1.5">
-            <Label className="text-sm font-medium">
-              Presentation mode{' '}
-              <FieldHelp title="Presentation mode">
-                How the respondent completes this questionnaire. Chat is the streaming conversation.
-                Form presents the questions as a raw, sectioned form with the right input per type
-                (likert, choices, yes/no, text…). Both offers a chat ↔ form toggle so the respondent
-                can navigate sections, see what&apos;s already answered, and edit answers the agent
-                inferred — a useful escape hatch when the chat struggles. Form mode is
-                question-based: for questionnaires using data slots, editing a question reconciles
-                into the chat on the next turn.
-              </FieldHelp>
-            </Label>
-            <Select
-              value={presentationMode}
-              onValueChange={(v) => setPresentationMode(v as PresentationMode)}
-              disabled={busy}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {PRESENTATION_MODES.map((m) => (
-                  <SelectItem key={m} value={m}>
-                    {PRESENTATION_MODE_LABELS[m]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-sm font-medium">
-              Answer panel scope{' '}
-              <FieldHelp title="Answer panel scope">
-                How much of the questionnaire the live answer panel shows the respondent beside the
-                chat. Full progress lists every question grouped by section with an answered-count;
-                answered only shows just the answers captured so far.
-              </FieldHelp>
-            </Label>
-            <Select
-              value={answerSlotPanelScope}
-              onValueChange={(v) => setAnswerSlotPanelScope(v as AnswerSlotPanelScope)}
-              disabled={busy}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {ANSWER_SLOT_PANEL_SCOPES.map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {ANSWER_SLOT_PANEL_SCOPE_LABELS[s]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Switch
-            checked={inlineCorrectionEnabled}
-            onCheckedChange={setInlineCorrectionEnabled}
-            disabled={busy}
-          />
-          <Label className="text-sm font-medium">
-            Inline answer correction{' '}
-            <FieldHelp title="Inline answer correction">
-              Let respondents fix an answer the latest turn just captured with a small inline editor
-              — beneath the most-recent message in the chat and on the answer-panel rows — instead
-              of re-explaining in a new message. Corrections save directly (the same path as the
-              form view), so they don&apos;t spend a turn or trip a contradiction notice. On by
-              default.
-            </FieldHelp>
-          </Label>
-        </div>
-        <div className="flex items-center gap-2">
-          <Switch checked={voiceEnabled} onCheckedChange={setVoiceEnabled} disabled={busy} />
-          <Label className="text-sm font-medium">
-            Voice input{' '}
-            <FieldHelp title="Voice input">
-              Let respondents answer by voice as well as text — shows a mic button in the composer
-              and tells them they can talk through their answers. When off, the mic is hidden and
-              the agent never suggests it. Also requires the platform voice-input flag.
-            </FieldHelp>
-          </Label>
-        </div>
-        <div className="flex items-center gap-2">
-          <Switch
-            checked={attachmentsEnabled}
-            onCheckedChange={setAttachmentsEnabled}
-            disabled={busy}
-          />
-          <Label className="text-sm font-medium">
-            Attachments{' '}
-            <FieldHelp title="Attachments">
-              Let respondents attach files (images, documents) to their answers — shows a paperclip
-              button in the composer. When off, the button is hidden and any attachments sent anyway
-              are ignored. Also requires the platform attachment-input flag.
-            </FieldHelp>
-          </Label>
-        </div>
-        <div className="flex items-center gap-2">
-          <Switch checked={anonymousMode} onCheckedChange={setAnonymousMode} disabled={busy} />
-          <Label className="text-sm font-medium">
-            Anonymous mode{' '}
-            <FieldHelp title="Anonymous mode">
-              Don&apos;t collect identifying profile fields at session start — responses aren&apos;t
-              tied to a named individual. This is the <em>identity</em> axis and is independent of{' '}
-              <em>Access</em> (who may start): an anonymous questionnaire can still be
-              invitation-only, and a named one can still be public. When anonymous, invitees are
-              tracked only as started/completed — never linked to their answers.
-            </FieldHelp>
-          </Label>
-        </div>
-      </SettingsGroup>
-
-      {/* ── 2a-intro. Respondent intro / splash — an admin opt-in cover screen shown before the
-             questionnaire starts. Hidden entirely when the platform intro-screen flag is off (the
-             toggle would be inert). The "how it works / what you'll get" copy is derived at runtime
-             from the presentation mode + respondent-report settings — only the background and button
-             label are authored here. ── */}
-      {introScreenEnabled && (
-        <SettingsGroup
-          icon={PanelTop}
-          accent="bg-sky-500/10 text-sky-600 dark:text-sky-400"
-          title="Intro screen"
-          description="An optional cover screen shown before the questionnaire starts — it introduces the process and what the respondent gets at the end (both adapt automatically to the settings above), plus an admin-authored background section."
-        >
-          <div className="flex items-center gap-2">
-            <Switch
-              checked={intro.enabled}
-              onCheckedChange={(enabled) => setIntro((i) => ({ ...i, enabled }))}
-              disabled={busy}
-            />
-            <Label className="text-sm font-medium">
-              Show the intro screen{' '}
-              <FieldHelp title="Intro screen">
-                When on, respondents see a short welcome screen before the questionnaire begins,
-                explaining how it works (this adapts to the presentation mode) and what they&apos;ll
-                receive at the end (this adapts to the Respondent Report settings). They press a
-                button to start — no question is asked until they do. Off by default, so existing
-                questionnaires are unchanged. Also requires the platform intro-screen flag.
-              </FieldHelp>
-            </Label>
-          </div>
-          {intro.enabled && (
-            <div className="border-border/60 ml-1 space-y-4 border-l pl-4">
-              <div className="space-y-1.5">
-                <Label className="text-sm font-medium">
-                  Background{' '}
-                  <FieldHelp title="About this questionnaire">
-                    An optional section shown on the intro screen, in your own words — what this
-                    questionnaire is about, who&apos;s running it, its purpose, and how the results
-                    will be used. Markdown is supported (headings, bold, lists, links). Leave blank
-                    to show just the standard guidance. A cohort can override this with its own
-                    text.
-                  </FieldHelp>
-                </Label>
-                <IntroBackgroundField
-                  value={intro.background}
-                  onChange={(v) => setIntro((i) => ({ ...i, background: v }))}
-                  disabled={busy}
-                  placeholder="Tell respondents what this questionnaire is about, who's running it, and how results are used — or upload a document / generate it with AI."
-                />
-              </div>
-              <div className="space-y-1.5 sm:max-w-xs">
-                <Label className="text-sm font-medium">
-                  Button label{' '}
-                  <FieldHelp title="Button label">
-                    The text on the button that starts the questionnaire. Leave blank for a sensible
-                    default that matches the presentation mode (e.g. “Start the conversation”).
-                  </FieldHelp>
-                </Label>
-                <Input
-                  value={intro.buttonLabel}
-                  onChange={(e) => setIntro((i) => ({ ...i, buttonLabel: e.target.value }))}
-                  maxLength={INTRO_BUTTON_LABEL_MAX_LENGTH}
-                  placeholder="Start the conversation"
-                  disabled={busy}
-                />
-              </div>
-            </div>
-          )}
-        </SettingsGroup>
-      )}
-
-      {/* ── 2b. Reasoning stream — the live "watch it think" demo feature. Sits with the respondent
-             experience (it's a respondent-facing surface) but in its own group so the marquee toggle
-             and its placement/persistence options are discoverable. ── */}
-      <SettingsGroup
-        icon={Brain}
-        accent="bg-indigo-500/10 text-indigo-600 dark:text-indigo-400"
-        title="Reasoning stream"
-        description="Show a per-turn “watch it think” trace in the chat — answers captured, contradictions spotted, and why the next question was chosen. Also requires the platform reasoning-stream flag."
-      >
-        <div className="flex items-center gap-2">
-          <Switch
-            checked={reasoningStreamEnabled}
-            onCheckedChange={setReasoningStreamEnabled}
-            disabled={busy}
-          />
-          <Label className="text-sm font-medium">
-            Show the reasoning stream{' '}
-            <FieldHelp title="Reasoning stream">
-              When on, the respondent sees the agent&apos;s per-turn reasoning as it works — answers
-              it captured (and how confident it is), any contradictions it noticed, and why
-              it&apos;s asking the next question. It&apos;s derived from work the conversation
-              already does, so it adds no extra cost or latency. A great demo moment; turn it off
-              for a plainer experience. Also requires the platform reasoning-stream flag to be on.
-            </FieldHelp>
-          </Label>
-        </div>
-        {reasoningStreamEnabled && (
-          <div className="border-border/60 ml-1 space-y-4 border-l pl-4">
             <div className="space-y-1.5 sm:max-w-sm">
               <Label className="text-sm font-medium">
-                Placement{' '}
-                <FieldHelp title="Reasoning stream placement">
-                  How the reasoning reveals on each turn. <strong>Animated</strong> opens the newest
-                  turn&apos;s reasoning automatically, holds it for two seconds, then animates it
-                  closed to a small “reasoning” chip — and the next question only starts typing once
-                  it has tucked away, so the respondent reads the reasoning first. Eye-catching for
-                  a live demo. <strong>Inline</strong> is quieter: the chip stays closed until the
-                  respondent clicks to expand it.
+                Selection strategy{' '}
+                <FieldHelp title="Selection strategy">
+                  How the agent picks the next question — in order, by question weight, or
+                  adaptively chosen from the conversation so far.
                 </FieldHelp>
               </Label>
               <Select
-                value={reasoningStreamPlacement}
-                onValueChange={(v) => setReasoningStreamPlacement(v as ReasoningPlacement)}
+                value={selectionStrategy}
+                onValueChange={(v) => setSelectionStrategy(v as SelectionStrategy)}
                 disabled={busy}
               >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {REASONING_PLACEMENTS.map((p) => (
-                    <SelectItem key={p} value={p}>
-                      {REASONING_PLACEMENT_LABELS[p]}
+                  {SELECTION_STRATEGY_ORDER.filter(
+                    // Hide adaptive when its sub-flag is off — unless it's the saved
+                    // value, so the Select still shows a label rather than blank.
+                    (s) =>
+                      s !== 'adaptive' || adaptiveEnabled || config.selectionStrategy === 'adaptive'
+                  ).map((s) => (
+                    <SelectItem key={s} value={s}>
+                      {SELECTION_STRATEGY_LABELS[s]}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-            </div>
-            {/* Animated-only timing: the dwell scales with how many reasoning steps the turn has. */}
-            {reasoningStreamPlacement === 'overlay' && (
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-1.5">
-                  <Label className="text-sm font-medium">
-                    Reasoning dwell (ms){' '}
-                    <FieldHelp title="Reasoning dwell">
-                      How long the reasoning summary stays open before it tucks away, for a trace of
-                      up to two steps. The next question starts typing only after it closes. Default
-                      2000 (2s).
-                    </FieldHelp>
-                  </Label>
-                  <Input
-                    type="number"
-                    min={0}
-                    max={10000}
-                    step={100}
-                    aria-label="Reasoning dwell in milliseconds"
-                    value={reasoningStreamDwellMs}
-                    onChange={(e) => setReasoningStreamDwellMs(e.target.value)}
-                    disabled={busy}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-sm font-medium">
-                    Extra per item (ms){' '}
-                    <FieldHelp title="Extra dwell per reasoning step">
-                      Added to the dwell for each reasoning step beyond the second, so a longer
-                      summary stays open long enough to read. Total ={' '}
-                      <code>dwell + max(0, steps − 2) × this</code>. Default 750.
-                    </FieldHelp>
-                  </Label>
-                  <Input
-                    type="number"
-                    min={0}
-                    max={5000}
-                    step={10}
-                    aria-label="Extra dwell per reasoning step in milliseconds"
-                    value={reasoningStreamPerItemMs}
-                    onChange={(e) => setReasoningStreamPerItemMs(e.target.value)}
-                    disabled={busy}
-                  />
-                </div>
-              </div>
-            )}
-            <div className="flex items-center gap-2">
-              <Switch
-                checked={reasoningStreamPersist}
-                onCheckedChange={setReasoningStreamPersist}
-                disabled={busy}
-              />
-              <Label className="text-sm font-medium">
-                Keep the reasoning on each turn{' '}
-                <FieldHelp title="Persist the reasoning trace">
-                  When on, each turn&apos;s reasoning is saved so it replays if the respondent
-                  resumes the session or scrolls back — and is available to you afterwards. When
-                  off, it shows only on the turn as it happens; resumed or earlier turns show
-                  nothing.
-                </FieldHelp>
-              </Label>
-            </div>
-          </div>
-        )}
-      </SettingsGroup>
-
-      {/* ── 2b-ii. Preview tools (admin only) — debugging surfaces that appear ONLY when an admin is
-             previewing as a respondent, never to a real respondent. Server-enforced via the preview
-             session marker, so this toggle can't leak telemetry to live sessions. ── */}
-      <SettingsGroup
-        icon={ScanSearch}
-        accent="bg-[var(--cq-accent-muted)] text-[color:var(--cq-accent)]"
-        title="Preview tools — admin only"
-        description="Debugging surfaces shown only when you preview as a respondent. Never visible to real respondents."
-      >
-        <div className="flex items-center gap-2">
-          <Switch
-            checked={previewInspectorEnabled}
-            onCheckedChange={setPreviewInspectorEnabled}
-            disabled={busy}
-          />
-          <Label className="text-sm font-medium">
-            Turn inspector{' '}
-            <FieldHelp title="Preview turn inspector (admin only)">
-              When on, the &ldquo;Preview as respondent&rdquo; screen gains a collapsible{' '}
-              <strong>Inspector</strong> drawer. For each turn it shows the sequence of agent calls
-              the conversation made, and for each call the model used, response time, estimated
-              cost, token counts, and the raw prompt and response. It appears <strong>only</strong>{' '}
-              in a preview session — a real respondent never sees it and the data is never sent to
-              them. Useful for understanding and debugging how the conversation is being driven.
-            </FieldHelp>
-          </Label>
-        </div>
-      </SettingsGroup>
-
-      {/* ── 2c. Interviewer tone & persona — how the conversational interviewer responds. Each
-             dimension is independent (toggle + 1–5 slider); persona casts the agent. Off by default
-             and gated by the platform tone flag, so it's inert until both are switched on. ── */}
-      <SettingsGroup
-        icon={SlidersHorizontal}
-        accent="bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400"
-        title="Interviewer tone & persona"
-        description="Shape how the conversational interviewer responds to answers — empathy, mirroring, formality, mimicry, verbosity and more. Each is off until you enable it; also requires the platform tone flag."
-      >
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <Switch
-              checked={tone.persona.enabled}
-              onCheckedChange={(v) => setTonePersona({ enabled: v })}
-              disabled={busy}
-            />
-            <Label className="text-sm font-medium">
-              Persona{' '}
-              <FieldHelp title="Persona">
-                Cast the interviewer in a role and it will speak from that perspective — for example
-                “You are an experienced, supportive career coach” or “You are a concise management
-                consultant.” Free text; keep it a sentence or two. The tone sliders below still
-                apply on top of the persona.
-              </FieldHelp>
-            </Label>
-          </div>
-          {tone.persona.enabled && (
-            <div className="border-border/60 ml-1 border-l pl-4">
-              <Textarea
-                value={tone.persona.text}
-                onChange={(e) => setTonePersona({ text: e.target.value })}
-                maxLength={TONE_PERSONA_MAX_LENGTH}
-                rows={2}
-                disabled={busy}
-                placeholder="e.g. You are an experienced, supportive career coach."
-                className="max-w-md"
-              />
-            </div>
-          )}
-        </div>
-
-        {TONE_DIMENSION_META.map((meta) => (
-          <ToneDimensionRow
-            key={meta.key}
-            meta={meta}
-            value={tone[meta.key]}
-            busy={busy}
-            onToggle={(enabled) => setToneDimension(meta.key, { enabled })}
-            onLevel={(level) => setToneDimension(meta.key, { level })}
-          />
-        ))}
-      </SettingsGroup>
-
-      {/* ── 3. Access & invitations — who may start, and the invitee detail fields captured. ── */}
-      <SettingsGroup
-        icon={Mail}
-        accent="bg-amber-500/10 text-amber-600 dark:text-amber-400"
-        title="Access & invitations"
-        description="Who may start this questionnaire, and which invitee details the Invitations tab captures. Independent of Anonymous mode (the identity axis)."
-      >
-        <div className="space-y-1.5">
-          <Label className="text-sm font-medium">
-            Access mode{' '}
-            <FieldHelp title="Access mode">
-              Who may start a session. Invitation only: a per-invitee link is required. Public link:
-              anyone with the URL can answer. Both: either works. This is the <em>access</em> axis —
-              separate from Anonymous mode (whether identity is collected).
-            </FieldHelp>
-          </Label>
-          <Select
-            value={accessMode}
-            onValueChange={(v) => setAccessMode(v as AccessMode)}
-            disabled={busy}
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {ACCESS_MODES.map((m) => (
-                <SelectItem key={m} value={m}>
-                  {ACCESS_MODE_LABELS[m]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {/* The collective no-login link — only meaningful when a direct (no-invitation)
-              start is allowed. Follows the live selection so it appears/disappears as you change
-              the mode. Per-invitee links live on the Invitations tab. */}
-          {accessMode !== 'invitation_only' && (
-            <div className="pt-1">
-              <PublicRespondentLink versionId={versionId} isLaunched={isVersionLaunched} />
-            </div>
-          )}
-        </div>
-
-        <div className="space-y-2">
-          <Label className="text-sm font-medium">
-            Invitee details{' '}
-            <FieldHelp title="Invitee details">
-              Which fields the Invitations tab captures per person (and which are required). Email
-              is always collected. Shown fields appear as columns in the import/verify grid;
-              required fields must be filled before sending.
-            </FieldHelp>
-          </Label>
-          <ul className="divide-border/60 divide-y rounded-md border">
-            {inviteeFields.map((field) => {
-              const locked = field.key === 'email';
-              return (
-                <li key={field.key} className="flex items-center gap-3 px-3 py-2 text-sm">
-                  <span className="min-w-28 flex-1 font-medium">
-                    {INVITEE_FIELD_LABELS[field.key]}
-                    {locked ? (
-                      <span className="text-muted-foreground ml-1 text-xs">(always on)</span>
-                    ) : null}
-                  </span>
-                  <span className="flex items-center gap-1.5">
-                    <Switch
-                      aria-label={`${INVITEE_FIELD_LABELS[field.key]} shown`}
-                      checked={locked ? true : field.shown}
-                      disabled={busy || locked}
-                      onCheckedChange={(shown) =>
-                        setInviteeFields((prev) =>
-                          prev.map((f) =>
-                            f.key === field.key
-                              ? { ...f, shown, required: shown ? f.required : false }
-                              : f
-                          )
-                        )
-                      }
-                    />
-                    <span className="text-muted-foreground text-xs">Shown</span>
-                  </span>
-                  <span className="flex items-center gap-1.5">
-                    <Switch
-                      aria-label={`${INVITEE_FIELD_LABELS[field.key]} required`}
-                      checked={locked ? true : field.required}
-                      disabled={busy || locked || !field.shown}
-                      onCheckedChange={(required) =>
-                        setInviteeFields((prev) =>
-                          prev.map((f) => (f.key === field.key ? { ...f, required } : f))
-                        )
-                      }
-                    />
-                    <span className="text-muted-foreground text-xs">Required</span>
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      </SettingsGroup>
-
-      {/* ── 4. Answer quality & safeguarding — protective / data-integrity features: sensitive
-             disclosures, the seriousness gate, and contradiction detection. ── */}
-      <SettingsGroup
-        icon={ShieldCheck}
-        accent="bg-rose-500/10 text-rose-600 dark:text-rose-400"
-        title="Answer quality & safeguarding"
-        description="Protective and data-integrity features: handling sensitive disclosures, ending abusive sessions, and catching contradictions. Each also requires its platform flag."
-      >
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <Switch
-              checked={sensitivityAwareness}
-              onCheckedChange={setSensitivityAwareness}
-              disabled={busy}
-            />
-            <Label className="text-sm font-medium">
-              Sensitivity awareness{' '}
-              <FieldHelp title="Sensitivity awareness">
-                When on, the agent notices a sensitive or contentious disclosure (e.g. abuse,
-                distress, a safeguarding concern), remembers it, and treads carefully in how it
-                phrases every later question. Best-effort awareness, not a guaranteed safeguarding
-                net. Requires the platform sensitivity-awareness flag to be on.
-              </FieldHelp>
-            </Label>
-          </div>
-          {sensitivityAwareness && (
-            <div className="border-border/60 ml-1 space-y-3 border-l pl-4">
-              <div className="space-y-1.5">
-                <Label className="text-sm font-medium">
-                  Support message{' '}
-                  <FieldHelp title="Support message">
-                    Shown once, gently, when a serious disclosure is detected — verbatim, so it
-                    can&apos;t be reworded by the agent. Leave blank to use a standard support
-                    message; or write your own, e.g. &ldquo;If anything here has been difficult,
-                    support is available — you can reach our team or a helpline at any time.&rdquo;
-                  </FieldHelp>
-                </Label>
-                <Textarea
-                  rows={2}
-                  value={supportMessage}
-                  onChange={(e) => setSupportMessage(e.target.value)}
-                  placeholder="If anything here has been difficult, support is available…"
-                  disabled={busy}
+              {/* Adaptive ranks questions by embedding similarity, so it needs the slots embedded
+              first. Surface the explicit generate step + coverage as soon as the admin picks
+              adaptive (driven by the live selection, not just the saved value). */}
+              {selectionStrategy === 'adaptive' && (
+                <AdaptiveEmbeddingStep
+                  questionnaireId={questionnaireId}
+                  versionId={versionId}
+                  busy={busy}
                 />
-              </div>
-              <div className="space-y-1.5 sm:max-w-md">
-                <Label className="text-sm font-medium">
-                  Support resource URL{' '}
-                  <FieldHelp title="Support resource URL">
-                    Optional link appended to the support message (e.g. a helpline or wellbeing
-                    page). Must be a valid URL.
-                  </FieldHelp>
-                </Label>
-                <Input
-                  type="url"
-                  value={supportResourceUrl}
-                  onChange={(e) => setSupportResourceUrl(e.target.value)}
-                  placeholder="https://…"
-                  disabled={busy}
-                />
-              </div>
+              )}
             </div>
-          )}
-        </div>
-
-        <div className="space-y-1.5 sm:max-w-xs">
-          <Label className="text-sm font-medium">
-            Abuse threshold{' '}
-            <FieldHelp title="Abuse threshold">
-              How many non-genuine answers (preposterous, abusive, or off-topic) a respondent may
-              give before the session is automatically ended. Earlier strikes get escalating
-              warnings and the answer is set aside; the Nth ends the session. Colloquial or lazy
-              answers are tolerated. Set to <code className="text-xs">0</code> to turn the gate off.
-              Requires the platform seriousness-gate flag to be on.
-            </FieldHelp>
-          </Label>
-          <Input
-            type="number"
-            min={0}
-            max={50}
-            value={abuseThreshold}
-            onChange={(e) => setAbuseThreshold(e.target.value)}
-            disabled={busy}
-          />
-        </div>
-
-        <div className="space-y-4">
-          <div className="space-y-1.5 sm:max-w-sm">
-            <Label className="text-sm font-medium">
-              Contradiction detection{' '}
-              <FieldHelp title="Contradiction detection">
-                Whether the agent watches for answers that contradict earlier ones — off, flag them,
-                or probe with a follow-up.
-              </FieldHelp>
-            </Label>
-            <Select
-              value={contradictionMode}
-              onValueChange={(v) => setContradictionMode(v as ContradictionMode)}
-              disabled={busy}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {CONTRADICTION_MODES.map((m) => (
-                  <SelectItem key={m} value={m}>
-                    {CONTRADICTION_MODE_LABELS[m]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          {!contradictionOff && (
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label className="text-sm font-medium">
-                  Look-back window (N){' '}
-                  <FieldHelp title="Look-back window">
-                    How many prior answers to check each new answer against. Must be at least 1 when
-                    detection is on.
+                  Min questions answered{' '}
+                  <FieldHelp title="Minimum questions answered">
+                    A session can&apos;t complete until at least this many questions have been
+                    answered. 0 means no minimum.
                   </FieldHelp>
                 </Label>
                 <Input
                   type="number"
-                  min={1}
-                  value={contradictionWindowN}
-                  onChange={(e) => setContradictionWindowN(e.target.value)}
+                  min={0}
+                  value={minQuestionsAnswered}
+                  onChange={(e) => setMinQuestionsAnswered(e.target.value)}
                   disabled={busy}
                 />
               </div>
               <div className="space-y-1.5">
                 <Label className="text-sm font-medium">
-                  Detection cadence (every N turns){' '}
-                  <FieldHelp title="Detection cadence">
-                    How often to run contradiction detection during the conversation — every N
-                    respondent turns. 1 runs it every turn (most thorough); a higher value trades
-                    some immediacy for lower per-turn cost. The completion sweep always runs
-                    regardless.
+                  Coverage threshold{' '}
+                  <FieldHelp title="Coverage threshold">
+                    Fraction of (weighted) questions that must be covered to consider the session
+                    complete. 1 = all questions; 0.8 = 80%.
+                  </FieldHelp>
+                </Label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={coverageThreshold}
+                  onChange={(e) => setCoverageThreshold(e.target.value)}
+                  disabled={busy}
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5 sm:max-w-xs">
+              <Label className="text-sm font-medium">
+                Data-slot attempts{' '}
+                <FieldHelp title="Data-slot attempts">
+                  How many times the agent probes one data slot (topic) before it records its best
+                  guess and moves on — so a respondent never gets stuck being asked the same thing.{' '}
+                  <code className="text-xs">2</code> = ask once, then one sharper re-ask. This is
+                  the ceiling on how hard a <em>shaky</em> answer is deepened: a terse, vague, or
+                  only-inferred answer (low confidence) is the kind the agent circles back on, and a
+                  higher value lets it probe such answers further at the cost of a longer
+                  conversation. The best guess is shown as &ldquo;provisional · may revisit&rdquo;
+                  and can still be refined later. Only applies in data-slot mode.
+                </FieldHelp>
+              </Label>
+              <Input
+                type="number"
+                min={1}
+                max={10}
+                value={maxDataSlotAttempts}
+                onChange={(e) => setMaxDataSlotAttempts(e.target.value)}
+                disabled={busy}
+              />
+            </div>
+          </SettingsGroup>
+
+          {/* ── 2. Respondent experience — how a person actually completes it (format, input, what
+             they see, whether they're identified). ── */}
+          <SettingsGroup
+            icon={MessageSquareText}
+            accent="bg-violet-500/10 text-violet-600 dark:text-violet-400"
+            id="experience"
+            title="Respondent experience"
+            description="How a respondent completes the questionnaire — format, input, and what they see alongside the chat."
+          >
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label className="text-sm font-medium">
+                  Presentation mode{' '}
+                  <FieldHelp title="Presentation mode">
+                    How the respondent completes this questionnaire. Chat is the streaming
+                    conversation. Form presents the questions as a raw, sectioned form with the
+                    right input per type (likert, choices, yes/no, text…). Both offers a chat ↔ form
+                    toggle so the respondent can navigate sections, see what&apos;s already
+                    answered, and edit answers the agent inferred — a useful escape hatch when the
+                    chat struggles. Form mode is question-based: for questionnaires using data
+                    slots, editing a question reconciles into the chat on the next turn.
+                  </FieldHelp>
+                </Label>
+                <Select
+                  value={presentationMode}
+                  onValueChange={(v) => setPresentationMode(v as PresentationMode)}
+                  disabled={busy}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PRESENTATION_MODES.map((m) => (
+                      <SelectItem key={m} value={m}>
+                        {PRESENTATION_MODE_LABELS[m]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-sm font-medium">
+                  Answer panel scope{' '}
+                  <FieldHelp title="Answer panel scope">
+                    How much of the questionnaire the live answer panel shows the respondent beside
+                    the chat. Full progress lists every question grouped by section with an
+                    answered-count; answered only shows just the answers captured so far.
+                  </FieldHelp>
+                </Label>
+                <Select
+                  value={answerSlotPanelScope}
+                  onValueChange={(v) => setAnswerSlotPanelScope(v as AnswerSlotPanelScope)}
+                  disabled={busy}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ANSWER_SLOT_PANEL_SCOPES.map((s) => (
+                      <SelectItem key={s} value={s}>
+                        {ANSWER_SLOT_PANEL_SCOPE_LABELS[s]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={inlineCorrectionEnabled}
+                onCheckedChange={setInlineCorrectionEnabled}
+                disabled={busy}
+              />
+              <Label className="text-sm font-medium">
+                Inline answer correction{' '}
+                <FieldHelp title="Inline answer correction">
+                  Let respondents fix an answer the latest turn just captured with a small inline
+                  editor — beneath the most-recent message in the chat and on the answer-panel rows
+                  — instead of re-explaining in a new message. Corrections save directly (the same
+                  path as the form view), so they don&apos;t spend a turn or trip a contradiction
+                  notice. On by default.
+                </FieldHelp>
+              </Label>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch checked={voiceEnabled} onCheckedChange={setVoiceEnabled} disabled={busy} />
+              <Label className="text-sm font-medium">
+                Voice input{' '}
+                <FieldHelp title="Voice input">
+                  Let respondents answer by voice as well as text — shows a mic button in the
+                  composer and tells them they can talk through their answers. When off, the mic is
+                  hidden and the agent never suggests it. Also requires the platform voice-input
+                  flag.
+                </FieldHelp>
+              </Label>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={attachmentsEnabled}
+                onCheckedChange={setAttachmentsEnabled}
+                disabled={busy}
+              />
+              <Label className="text-sm font-medium">
+                Attachments{' '}
+                <FieldHelp title="Attachments">
+                  Let respondents attach files (images, documents) to their answers — shows a
+                  paperclip button in the composer. When off, the button is hidden and any
+                  attachments sent anyway are ignored. Also requires the platform attachment-input
+                  flag.
+                </FieldHelp>
+              </Label>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch checked={anonymousMode} onCheckedChange={setAnonymousMode} disabled={busy} />
+              <Label className="text-sm font-medium">
+                Anonymous mode{' '}
+                <FieldHelp title="Anonymous mode">
+                  Don&apos;t collect identifying profile fields at session start — responses
+                  aren&apos;t tied to a named individual. This is the <em>identity</em> axis and is
+                  independent of <em>Access</em> (who may start): an anonymous questionnaire can
+                  still be invitation-only, and a named one can still be public. When anonymous,
+                  invitees are tracked only as started/completed — never linked to their answers.
+                </FieldHelp>
+              </Label>
+            </div>
+          </SettingsGroup>
+
+          {/* ── 2a-intro. Respondent intro / splash — an admin opt-in cover screen shown before the
+             questionnaire starts. Hidden entirely when the platform intro-screen flag is off (the
+             toggle would be inert). The "how it works / what you'll get" copy is derived at runtime
+             from the presentation mode + respondent-report settings — only the background and button
+             label are authored here. ── */}
+          {introScreenEnabled && (
+            <SettingsGroup
+              icon={PanelTop}
+              accent="bg-sky-500/10 text-sky-600 dark:text-sky-400"
+              id="intro"
+              title="Intro screen"
+              description="An optional cover screen shown before the questionnaire starts — it introduces the process and what the respondent gets at the end (both adapt automatically to the settings above), plus an admin-authored background section."
+            >
+              <div className="flex items-center gap-2">
+                <Switch
+                  checked={intro.enabled}
+                  onCheckedChange={(enabled) => setIntro((i) => ({ ...i, enabled }))}
+                  disabled={busy}
+                />
+                <Label className="text-sm font-medium">
+                  Show the intro screen{' '}
+                  <FieldHelp title="Intro screen">
+                    When on, respondents see a short welcome screen before the questionnaire begins,
+                    explaining how it works (this adapts to the presentation mode) and what
+                    they&apos;ll receive at the end (this adapts to the Respondent Report settings).
+                    They press a button to start — no question is asked until they do. Off by
+                    default, so existing questionnaires are unchanged. Also requires the platform
+                    intro-screen flag.
+                  </FieldHelp>
+                </Label>
+              </div>
+              {intro.enabled && (
+                <div className="border-border/60 ml-1 space-y-4 border-l pl-4">
+                  <div className="space-y-1.5">
+                    <Label className="text-sm font-medium">
+                      Background{' '}
+                      <FieldHelp title="About this questionnaire">
+                        An optional section shown on the intro screen, in your own words — what this
+                        questionnaire is about, who&apos;s running it, its purpose, and how the
+                        results will be used. Markdown is supported (headings, bold, lists, links).
+                        Leave blank to show just the standard guidance. A cohort can override this
+                        with its own text.
+                      </FieldHelp>
+                    </Label>
+                    <IntroBackgroundField
+                      value={intro.background}
+                      onChange={(v) => setIntro((i) => ({ ...i, background: v }))}
+                      disabled={busy}
+                      placeholder="Tell respondents what this questionnaire is about, who's running it, and how results are used — or upload a document / generate it with AI."
+                    />
+                  </div>
+                  <div className="space-y-1.5 sm:max-w-xs">
+                    <Label className="text-sm font-medium">
+                      Button label{' '}
+                      <FieldHelp title="Button label">
+                        The text on the button that starts the questionnaire. Leave blank for a
+                        sensible default that matches the presentation mode (e.g. “Start the
+                        conversation”).
+                      </FieldHelp>
+                    </Label>
+                    <Input
+                      value={intro.buttonLabel}
+                      onChange={(e) => setIntro((i) => ({ ...i, buttonLabel: e.target.value }))}
+                      maxLength={INTRO_BUTTON_LABEL_MAX_LENGTH}
+                      placeholder="Start the conversation"
+                      disabled={busy}
+                    />
+                  </div>
+                </div>
+              )}
+            </SettingsGroup>
+          )}
+
+          {/* ── 2b. Reasoning stream — the live "watch it think" demo feature. Sits with the respondent
+             experience (it's a respondent-facing surface) but in its own group so the marquee toggle
+             and its placement/persistence options are discoverable. ── */}
+          <SettingsGroup
+            icon={Brain}
+            accent="bg-indigo-500/10 text-indigo-600 dark:text-indigo-400"
+            id="reasoning"
+            title="Reasoning stream"
+            description="Show a per-turn “watch it think” trace in the chat — answers captured, contradictions spotted, and why the next question was chosen. Also requires the platform reasoning-stream flag."
+          >
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={reasoningStreamEnabled}
+                onCheckedChange={setReasoningStreamEnabled}
+                disabled={busy}
+              />
+              <Label className="text-sm font-medium">
+                Show the reasoning stream{' '}
+                <FieldHelp title="Reasoning stream">
+                  When on, the respondent sees the agent&apos;s per-turn reasoning as it works —
+                  answers it captured (and how confident it is), any contradictions it noticed, and
+                  why it&apos;s asking the next question. It&apos;s derived from work the
+                  conversation already does, so it adds no extra cost or latency. A great demo
+                  moment; turn it off for a plainer experience. Also requires the platform
+                  reasoning-stream flag to be on.
+                </FieldHelp>
+              </Label>
+            </div>
+            {reasoningStreamEnabled && (
+              <div className="border-border/60 ml-1 space-y-4 border-l pl-4">
+                <div className="space-y-1.5 sm:max-w-sm">
+                  <Label className="text-sm font-medium">
+                    Placement{' '}
+                    <FieldHelp title="Reasoning stream placement">
+                      How the reasoning reveals on each turn. <strong>Animated</strong> opens the
+                      newest turn&apos;s reasoning automatically, holds it for two seconds, then
+                      animates it closed to a small “reasoning” chip — and the next question only
+                      starts typing once it has tucked away, so the respondent reads the reasoning
+                      first. Eye-catching for a live demo. <strong>Inline</strong> is quieter: the
+                      chip stays closed until the respondent clicks to expand it.
+                    </FieldHelp>
+                  </Label>
+                  <Select
+                    value={reasoningStreamPlacement}
+                    onValueChange={(v) => setReasoningStreamPlacement(v as ReasoningPlacement)}
+                    disabled={busy}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {REASONING_PLACEMENTS.map((p) => (
+                        <SelectItem key={p} value={p}>
+                          {REASONING_PLACEMENT_LABELS[p]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {/* Animated-only timing: the dwell scales with how many reasoning steps the turn has. */}
+                {reasoningStreamPlacement === 'overlay' && (
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label className="text-sm font-medium">
+                        Reasoning dwell (ms){' '}
+                        <FieldHelp title="Reasoning dwell">
+                          How long the reasoning summary stays open before it tucks away, for a
+                          trace of up to two steps. The next question starts typing only after it
+                          closes. Default 2000 (2s).
+                        </FieldHelp>
+                      </Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={10000}
+                        step={100}
+                        aria-label="Reasoning dwell in milliseconds"
+                        value={reasoningStreamDwellMs}
+                        onChange={(e) => setReasoningStreamDwellMs(e.target.value)}
+                        disabled={busy}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-sm font-medium">
+                        Extra per item (ms){' '}
+                        <FieldHelp title="Extra dwell per reasoning step">
+                          Added to the dwell for each reasoning step beyond the second, so a longer
+                          summary stays open long enough to read. Total ={' '}
+                          <code>dwell + max(0, steps − 2) × this</code>. Default 750.
+                        </FieldHelp>
+                      </Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={5000}
+                        step={10}
+                        aria-label="Extra dwell per reasoning step in milliseconds"
+                        value={reasoningStreamPerItemMs}
+                        onChange={(e) => setReasoningStreamPerItemMs(e.target.value)}
+                        disabled={busy}
+                      />
+                    </div>
+                  </div>
+                )}
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={reasoningStreamPersist}
+                    onCheckedChange={setReasoningStreamPersist}
+                    disabled={busy}
+                  />
+                  <Label className="text-sm font-medium">
+                    Keep the reasoning on each turn{' '}
+                    <FieldHelp title="Persist the reasoning trace">
+                      When on, each turn&apos;s reasoning is saved so it replays if the respondent
+                      resumes the session or scrolls back — and is available to you afterwards. When
+                      off, it shows only on the turn as it happens; resumed or earlier turns show
+                      nothing.
+                    </FieldHelp>
+                  </Label>
+                </div>
+              </div>
+            )}
+          </SettingsGroup>
+
+          {/* ── 2b-ii. Preview tools (admin only) — debugging surfaces that appear ONLY when an admin is
+             previewing as a respondent, never to a real respondent. Server-enforced via the preview
+             session marker, so this toggle can't leak telemetry to live sessions. ── */}
+          <SettingsGroup
+            icon={ScanSearch}
+            accent="bg-[var(--cq-accent-muted)] text-[color:var(--cq-accent)]"
+            id="preview-tools"
+            title="Preview tools — admin only"
+            description="Debugging surfaces shown only when you preview as a respondent. Never visible to real respondents."
+          >
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={previewInspectorEnabled}
+                onCheckedChange={setPreviewInspectorEnabled}
+                disabled={busy}
+              />
+              <Label className="text-sm font-medium">
+                Turn inspector{' '}
+                <FieldHelp title="Preview turn inspector (admin only)">
+                  When on, the &ldquo;Preview as respondent&rdquo; screen gains a collapsible{' '}
+                  <strong>Inspector</strong> drawer. For each turn it shows the sequence of agent
+                  calls the conversation made, and for each call the model used, response time,
+                  estimated cost, token counts, and the raw prompt and response. It appears{' '}
+                  <strong>only</strong> in a preview session — a real respondent never sees it and
+                  the data is never sent to them. Useful for understanding and debugging how the
+                  conversation is being driven.
+                </FieldHelp>
+              </Label>
+            </div>
+          </SettingsGroup>
+
+          {/* ── 2c. Interviewer tone & persona — how the conversational interviewer responds. Each
+             dimension is independent (toggle + 1–5 slider); persona casts the agent. Off by default
+             and gated by the platform tone flag, so it's inert until both are switched on. ── */}
+          <SettingsGroup
+            icon={SlidersHorizontal}
+            accent="bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400"
+            id="tone"
+            title="Interviewer tone & persona"
+            description="Shape how the conversational interviewer responds to answers — empathy, mirroring, formality, mimicry, verbosity and more. Each is off until you enable it; also requires the platform tone flag."
+          >
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <Switch
+                  checked={tone.persona.enabled}
+                  onCheckedChange={(v) => setTonePersona({ enabled: v })}
+                  disabled={busy}
+                />
+                <Label className="text-sm font-medium">
+                  Persona{' '}
+                  <FieldHelp title="Persona">
+                    Cast the interviewer in a role and it will speak from that perspective — for
+                    example “You are an experienced, supportive career coach” or “You are a concise
+                    management consultant.” Free text; keep it a sentence or two. The tone sliders
+                    below still apply on top of the persona.
+                  </FieldHelp>
+                </Label>
+              </div>
+              {tone.persona.enabled && (
+                <div className="border-border/60 ml-1 border-l pl-4">
+                  <Textarea
+                    value={tone.persona.text}
+                    onChange={(e) => setTonePersona({ text: e.target.value })}
+                    maxLength={TONE_PERSONA_MAX_LENGTH}
+                    rows={2}
+                    disabled={busy}
+                    placeholder="e.g. You are an experienced, supportive career coach."
+                    className="max-w-md"
+                  />
+                </div>
+              )}
+            </div>
+
+            {TONE_DIMENSION_META.map((meta) => (
+              <ToneDimensionRow
+                key={meta.key}
+                meta={meta}
+                value={tone[meta.key]}
+                busy={busy}
+                onToggle={(enabled) => setToneDimension(meta.key, { enabled })}
+                onLevel={(level) => setToneDimension(meta.key, { level })}
+              />
+            ))}
+          </SettingsGroup>
+
+          {/* ── 3. Access & invitations — who may start, and the invitee detail fields captured. ── */}
+          <SettingsGroup
+            icon={Mail}
+            accent="bg-amber-500/10 text-amber-600 dark:text-amber-400"
+            id="access"
+            title="Access & invitations"
+            description="Who may start this questionnaire, and which invitee details the Invitations tab captures. Independent of Anonymous mode (the identity axis)."
+          >
+            <div className="space-y-1.5">
+              <Label className="text-sm font-medium">
+                Access mode{' '}
+                <FieldHelp title="Access mode">
+                  Who may start a session. Invitation only: a per-invitee link is required. Public
+                  link: anyone with the URL can answer. Both: either works. This is the{' '}
+                  <em>access</em> axis — separate from Anonymous mode (whether identity is
+                  collected).
+                </FieldHelp>
+              </Label>
+              <Select
+                value={accessMode}
+                onValueChange={(v) => setAccessMode(v as AccessMode)}
+                disabled={busy}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ACCESS_MODES.map((m) => (
+                    <SelectItem key={m} value={m}>
+                      {ACCESS_MODE_LABELS[m]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {/* The collective no-login link — only meaningful when a direct (no-invitation)
+              start is allowed. Follows the live selection so it appears/disappears as you change
+              the mode. Per-invitee links live on the Invitations tab. */}
+              {accessMode !== 'invitation_only' && (
+                <div className="pt-1">
+                  <PublicRespondentLink versionId={versionId} isLaunched={isVersionLaunched} />
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">
+                Invitee details{' '}
+                <FieldHelp title="Invitee details">
+                  Which fields the Invitations tab captures per person (and which are required).
+                  Email is always collected. Shown fields appear as columns in the import/verify
+                  grid; required fields must be filled before sending.
+                </FieldHelp>
+              </Label>
+              <ul className="divide-border/60 divide-y rounded-md border">
+                {inviteeFields.map((field) => {
+                  const locked = field.key === 'email';
+                  return (
+                    <li key={field.key} className="flex items-center gap-3 px-3 py-2 text-sm">
+                      <span className="min-w-28 flex-1 font-medium">
+                        {INVITEE_FIELD_LABELS[field.key]}
+                        {locked ? (
+                          <span className="text-muted-foreground ml-1 text-xs">(always on)</span>
+                        ) : null}
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        <Switch
+                          aria-label={`${INVITEE_FIELD_LABELS[field.key]} shown`}
+                          checked={locked ? true : field.shown}
+                          disabled={busy || locked}
+                          onCheckedChange={(shown) =>
+                            setInviteeFields((prev) =>
+                              prev.map((f) =>
+                                f.key === field.key
+                                  ? { ...f, shown, required: shown ? f.required : false }
+                                  : f
+                              )
+                            )
+                          }
+                        />
+                        <span className="text-muted-foreground text-xs">Shown</span>
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        <Switch
+                          aria-label={`${INVITEE_FIELD_LABELS[field.key]} required`}
+                          checked={locked ? true : field.required}
+                          disabled={busy || locked || !field.shown}
+                          onCheckedChange={(required) =>
+                            setInviteeFields((prev) =>
+                              prev.map((f) => (f.key === field.key ? { ...f, required } : f))
+                            )
+                          }
+                        />
+                        <span className="text-muted-foreground text-xs">Required</span>
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          </SettingsGroup>
+
+          {/* ── 4. Answer quality & safeguarding — protective / data-integrity features: sensitive
+             disclosures, the seriousness gate, and contradiction detection. ── */}
+          <SettingsGroup
+            icon={ShieldCheck}
+            accent="bg-rose-500/10 text-rose-600 dark:text-rose-400"
+            id="safeguarding"
+            title="Answer quality & safeguarding"
+            description="Protective and data-integrity features: handling sensitive disclosures, ending abusive sessions, and catching contradictions. Each also requires its platform flag."
+          >
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Switch
+                  checked={sensitivityAwareness}
+                  onCheckedChange={setSensitivityAwareness}
+                  disabled={busy}
+                />
+                <Label className="text-sm font-medium">
+                  Sensitivity awareness{' '}
+                  <FieldHelp title="Sensitivity awareness">
+                    When on, the agent notices a sensitive or contentious disclosure (e.g. abuse,
+                    distress, a safeguarding concern), remembers it, and treads carefully in how it
+                    phrases every later question. Best-effort awareness, not a guaranteed
+                    safeguarding net. Requires the platform sensitivity-awareness flag to be on.
+                  </FieldHelp>
+                </Label>
+              </div>
+              {sensitivityAwareness && (
+                <div className="border-border/60 ml-1 space-y-3 border-l pl-4">
+                  <div className="space-y-1.5">
+                    <Label className="text-sm font-medium">
+                      Support message{' '}
+                      <FieldHelp title="Support message">
+                        Shown once, gently, when a serious disclosure is detected — verbatim, so it
+                        can&apos;t be reworded by the agent. Leave blank to use a standard support
+                        message; or write your own, e.g. &ldquo;If anything here has been difficult,
+                        support is available — you can reach our team or a helpline at any
+                        time.&rdquo;
+                      </FieldHelp>
+                    </Label>
+                    <Textarea
+                      rows={2}
+                      value={supportMessage}
+                      onChange={(e) => setSupportMessage(e.target.value)}
+                      placeholder="If anything here has been difficult, support is available…"
+                      disabled={busy}
+                    />
+                  </div>
+                  <div className="space-y-1.5 sm:max-w-md">
+                    <Label className="text-sm font-medium">
+                      Support resource URL{' '}
+                      <FieldHelp title="Support resource URL">
+                        Optional link appended to the support message (e.g. a helpline or wellbeing
+                        page). Must be a valid URL.
+                      </FieldHelp>
+                    </Label>
+                    <Input
+                      type="url"
+                      value={supportResourceUrl}
+                      onChange={(e) => setSupportResourceUrl(e.target.value)}
+                      placeholder="https://…"
+                      disabled={busy}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-1.5 sm:max-w-xs">
+              <Label className="text-sm font-medium">
+                Abuse threshold{' '}
+                <FieldHelp title="Abuse threshold">
+                  How many non-genuine answers (preposterous, abusive, or off-topic) a respondent
+                  may give before the session is automatically ended. Earlier strikes get escalating
+                  warnings and the answer is set aside; the Nth ends the session. Colloquial or lazy
+                  answers are tolerated. Set to <code className="text-xs">0</code> to turn the gate
+                  off. Requires the platform seriousness-gate flag to be on.
+                </FieldHelp>
+              </Label>
+              <Input
+                type="number"
+                min={0}
+                max={50}
+                value={abuseThreshold}
+                onChange={(e) => setAbuseThreshold(e.target.value)}
+                disabled={busy}
+              />
+            </div>
+
+            <div className="space-y-4">
+              <div className="space-y-1.5 sm:max-w-sm">
+                <Label className="text-sm font-medium">
+                  Contradiction detection{' '}
+                  <FieldHelp title="Contradiction detection">
+                    Whether the agent watches for answers that contradict earlier ones — off, flag
+                    them, or probe with a follow-up.
+                  </FieldHelp>
+                </Label>
+                <Select
+                  value={contradictionMode}
+                  onValueChange={(v) => setContradictionMode(v as ContradictionMode)}
+                  disabled={busy}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CONTRADICTION_MODES.map((m) => (
+                      <SelectItem key={m} value={m}>
+                        {CONTRADICTION_MODE_LABELS[m]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {!contradictionOff && (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label className="text-sm font-medium">
+                      Look-back window (N){' '}
+                      <FieldHelp title="Look-back window">
+                        How many prior answers to check each new answer against. Must be at least 1
+                        when detection is on.
+                      </FieldHelp>
+                    </Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={contradictionWindowN}
+                      onChange={(e) => setContradictionWindowN(e.target.value)}
+                      disabled={busy}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-sm font-medium">
+                      Detection cadence (every N turns){' '}
+                      <FieldHelp title="Detection cadence">
+                        How often to run contradiction detection during the conversation — every N
+                        respondent turns. 1 runs it every turn (most thorough); a higher value
+                        trades some immediacy for lower per-turn cost. The completion sweep always
+                        runs regardless.
+                      </FieldHelp>
+                    </Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={contradictionEveryNTurns}
+                      onChange={(e) => setContradictionEveryNTurns(e.target.value)}
+                      disabled={busy}
+                    />
+                  </div>
+                </div>
+              )}
+              <div className="space-y-1.5 sm:max-w-sm">
+                <Label className="text-sm font-medium">
+                  Answer fit resolver{' '}
+                  <FieldHelp title="Answer fit resolver">
+                    A second, focused pass that maps a free-form answer onto a choice or scale
+                    option the first pass couldn&apos;t place — e.g. &ldquo;Marketing&rdquo; to the
+                    &ldquo;Other&rdquo; option, or &ldquo;10 years&rdquo; to the &ldquo;3+
+                    years&rdquo; band. <strong>Fallback</strong> runs it only when a clearly-given
+                    answer didn&apos;t map (no extra cost otherwise). <strong>Always</strong> also
+                    tries to fill any still-open choice/scale question each turn (more thorough, one
+                    extra model call per answered turn). <strong>Off</strong> disables it.
+                  </FieldHelp>
+                </Label>
+                <Select
+                  value={answerFitMode}
+                  onValueChange={(v) => setAnswerFitMode(v as AnswerFitMode)}
+                  disabled={busy}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ANSWER_FIT_MODES.map((m) => (
+                      <SelectItem key={m} value={m}>
+                        {ANSWER_FIT_MODE_LABELS[m]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center gap-2 sm:col-span-2">
+                <Switch
+                  checked={extractionPrefilter}
+                  onCheckedChange={setExtractionPrefilter}
+                  disabled={busy}
+                />
+                <Label className="text-sm font-medium">
+                  Extraction pre-filter{' '}
+                  <FieldHelp title="Extraction pre-filter">
+                    Each turn, narrows the candidate slots the answer extractor reads to the active
+                    slot, already-filled slots, same-theme slots, mapped questions, and the most
+                    similar to what the respondent just said — cutting per-turn prompt cost on big
+                    questionnaires. Spends one embedding call per turn and is fail-soft (any
+                    embedding error falls back to the full candidate set).{' '}
+                    <strong>Recommended for large surveys</strong> (roughly 50+ data slots / 70+
+                    questions); leave off for smaller ones, where sending the full set is cheap and
+                    maximises capture accuracy. Off by default.
+                  </FieldHelp>
+                </Label>
+              </div>
+            </div>
+          </SettingsGroup>
+
+          {/* ── 4. Budget & limits — cost control and hard caps, with the pre-launch estimate. ── */}
+          <SettingsGroup
+            icon={Gauge}
+            accent="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+            id="budget"
+            title="Budget & limits"
+            description="Cost control and hard caps on a single session, with a pre-launch spend estimate."
+          >
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label className="text-sm font-medium">
+                  Cost budget (USD / session){' '}
+                  <FieldHelp title="Cost budget">
+                    Optional per-session spend cap in US dollars. Leave blank for no cap.
+                    (Enforcement lands with the turn engine; the estimate below shows projected
+                    spend against this cap.)
+                  </FieldHelp>
+                </Label>
+                <Input
+                  type="number"
+                  min={0}
+                  step={0.01}
+                  placeholder="No cap"
+                  value={costBudgetUsd}
+                  onChange={(e) => setCostBudgetUsd(e.target.value)}
+                  disabled={busy}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-sm font-medium">
+                  Max questions / session{' '}
+                  <FieldHelp title="Per-session question cap">
+                    Hard limit on how many questions a single session will ask. Leave blank for no
+                    cap.
                   </FieldHelp>
                 </Label>
                 <Input
                   type="number"
                   min={1}
-                  value={contradictionEveryNTurns}
-                  onChange={(e) => setContradictionEveryNTurns(e.target.value)}
+                  placeholder="No cap"
+                  value={maxQuestionsPerSession}
+                  onChange={(e) => setMaxQuestionsPerSession(e.target.value)}
                   disabled={busy}
                 />
               </div>
             </div>
-          )}
-          <div className="space-y-1.5 sm:max-w-sm">
-            <Label className="text-sm font-medium">
-              Answer fit resolver{' '}
-              <FieldHelp title="Answer fit resolver">
-                A second, focused pass that maps a free-form answer onto a choice or scale option
-                the first pass couldn&apos;t place — e.g. &ldquo;Marketing&rdquo; to the
-                &ldquo;Other&rdquo; option, or &ldquo;10 years&rdquo; to the &ldquo;3+ years&rdquo;
-                band. <strong>Fallback</strong> runs it only when a clearly-given answer didn&apos;t
-                map (no extra cost otherwise). <strong>Always</strong> also tries to fill any
-                still-open choice/scale question each turn (more thorough, one extra model call per
-                answered turn). <strong>Off</strong> disables it.
-              </FieldHelp>
-            </Label>
-            <Select
-              value={answerFitMode}
-              onValueChange={(v) => setAnswerFitMode(v as AnswerFitMode)}
-              disabled={busy}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {ANSWER_FIT_MODES.map((m) => (
-                  <SelectItem key={m} value={m}>
-                    {ANSWER_FIT_MODE_LABELS[m]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="flex items-center gap-2 sm:col-span-2">
-            <Switch
-              checked={extractionPrefilter}
-              onCheckedChange={setExtractionPrefilter}
-              disabled={busy}
-            />
-            <Label className="text-sm font-medium">
-              Extraction pre-filter{' '}
-              <FieldHelp title="Extraction pre-filter">
-                Each turn, narrows the candidate slots the answer extractor reads to the active
-                slot, already-filled slots, same-theme slots, mapped questions, and the most similar
-                to what the respondent just said — cutting per-turn prompt cost on big
-                questionnaires. Spends one embedding call per turn and is fail-soft (any embedding
-                error falls back to the full candidate set).{' '}
-                <strong>Recommended for large surveys</strong> (roughly 50+ data slots / 70+
-                questions); leave off for smaller ones, where sending the full set is cheap and
-                maximises capture accuracy. Off by default.
-              </FieldHelp>
-            </Label>
-          </div>
-        </div>
-      </SettingsGroup>
-
-      {/* ── 4. Budget & limits — cost control and hard caps, with the pre-launch estimate. ── */}
-      <SettingsGroup
-        icon={Gauge}
-        accent="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-        title="Budget & limits"
-        description="Cost control and hard caps on a single session, with a pre-launch spend estimate."
-      >
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-1.5">
-            <Label className="text-sm font-medium">
-              Cost budget (USD / session){' '}
-              <FieldHelp title="Cost budget">
-                Optional per-session spend cap in US dollars. Leave blank for no cap. (Enforcement
-                lands with the turn engine; the estimate below shows projected spend against this
-                cap.)
-              </FieldHelp>
-            </Label>
-            <Input
-              type="number"
-              min={0}
-              step={0.01}
-              placeholder="No cap"
-              value={costBudgetUsd}
-              onChange={(e) => setCostBudgetUsd(e.target.value)}
-              disabled={busy}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-sm font-medium">
-              Max questions / session{' '}
-              <FieldHelp title="Per-session question cap">
-                Hard limit on how many questions a single session will ask. Leave blank for no cap.
-              </FieldHelp>
-            </Label>
-            <Input
-              type="number"
-              min={1}
-              placeholder="No cap"
-              value={maxQuestionsPerSession}
-              onChange={(e) => setMaxQuestionsPerSession(e.target.value)}
-              disabled={busy}
-            />
-          </div>
-        </div>
-        {/* Pre-launch cost estimate (F3.3) — reads persisted config, so it re-fetches
+            {/* Pre-launch cost estimate (F3.3) — reads persisted config, so it re-fetches
             when the saved cap/floor change. Compares against the live (possibly
             unsaved) budget input. */}
-        <CostEstimateCard
-          questionnaireId={questionnaireId}
-          versionId={versionId}
-          reloadKey={`${config.saved}:${config.maxQuestionsPerSession}:${config.minQuestionsAnswered}:${questionCount}`}
-          costBudgetUsd={capOrNull(costBudgetUsd, false)}
-        />
-      </SettingsGroup>
+            <CostEstimateCard
+              questionnaireId={questionnaireId}
+              versionId={versionId}
+              reloadKey={`${config.saved}:${config.maxQuestionsPerSession}:${config.minQuestionsAnswered}:${questionCount}`}
+              costBudgetUsd={capOrNull(costBudgetUsd, false)}
+            />
+          </SettingsGroup>
 
-      {/* ── 5. Session-start profile fields — what to collect before the questionnaire begins.
+          {/* ── 5. Session-start profile fields — what to collect before the questionnaire begins.
              Last: optional, set-up-once metadata rather than run-time behaviour. ── */}
-      <SettingsGroup
-        icon={ClipboardList}
-        accent="bg-slate-500/10 text-slate-600 dark:text-slate-300"
-        title="Session-start profile fields"
-        description="Fields collected from the respondent before the questionnaire begins. Optional — leave empty to start straight into the conversation."
-      >
-        {profileFields.length === 0 ? (
-          <p className="text-muted-foreground text-sm italic">No profile fields.</p>
-        ) : (
-          <div className="space-y-3">
-            {profileFields.map((field, index) => (
-              <div key={index} className="bg-muted/20 space-y-2 rounded-md border p-3">
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <div className="space-y-1">
-                    <Label className="text-xs">Key</Label>
-                    <Input
-                      value={field.key}
-                      placeholder="e.g. organisation"
-                      onChange={(e) => updateField(index, { key: e.target.value })}
-                      disabled={busy}
-                    />
+          <SettingsGroup
+            icon={ClipboardList}
+            accent="bg-slate-500/10 text-slate-600 dark:text-slate-300"
+            id="profile-fields"
+            title="Session-start profile fields"
+            description="Fields collected from the respondent before the questionnaire begins. Optional — leave empty to start straight into the conversation."
+          >
+            {profileFields.length === 0 ? (
+              <p className="text-muted-foreground text-sm italic">No profile fields.</p>
+            ) : (
+              <div className="space-y-3">
+                {profileFields.map((field, index) => (
+                  <div key={index} className="bg-muted/20 space-y-2 rounded-md border p-3">
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <div className="space-y-1">
+                        <Label className="text-xs">Key</Label>
+                        <Input
+                          value={field.key}
+                          placeholder="e.g. organisation"
+                          onChange={(e) => updateField(index, { key: e.target.value })}
+                          disabled={busy}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Label</Label>
+                        <Input
+                          value={field.label}
+                          placeholder="e.g. Organisation"
+                          onChange={(e) => updateField(index, { label: e.target.value })}
+                          disabled={busy}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Type</Label>
+                        <Select
+                          value={field.type}
+                          onValueChange={(v) => updateField(index, { type: v as ProfileFieldType })}
+                          disabled={busy}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {PROFILE_FIELD_TYPES.map((t) => (
+                              <SelectItem key={t} value={t}>
+                                {PROFILE_FIELD_TYPE_LABELS[t]}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="flex items-center gap-2 pt-5">
+                        <Switch
+                          checked={field.required}
+                          onCheckedChange={(checked) => updateField(index, { required: checked })}
+                          disabled={busy}
+                        />
+                        <Label className="text-xs">Required</Label>
+                      </div>
+                    </div>
+                    {field.type === 'select' && (
+                      <div className="space-y-1">
+                        <Label className="text-xs">
+                          Options{' '}
+                          <FieldHelp title="Select options">
+                            Comma-separated list of choices the respondent picks from.
+                          </FieldHelp>
+                        </Label>
+                        <Input
+                          value={field.optionsText}
+                          placeholder="e.g. Engineering, Sales, Support"
+                          onChange={(e) => updateField(index, { optionsText: e.target.value })}
+                          disabled={busy}
+                        />
+                      </div>
+                    )}
+                    <div className="flex justify-end">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => removeField(index)}
+                        disabled={busy}
+                      >
+                        <X className="mr-1 h-3 w-3" /> Remove
+                      </Button>
+                    </div>
                   </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">Label</Label>
-                    <Input
-                      value={field.label}
-                      placeholder="e.g. Organisation"
-                      onChange={(e) => updateField(index, { label: e.target.value })}
-                      disabled={busy}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">Type</Label>
-                    <Select
-                      value={field.type}
-                      onValueChange={(v) => updateField(index, { type: v as ProfileFieldType })}
-                      disabled={busy}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {PROFILE_FIELD_TYPES.map((t) => (
-                          <SelectItem key={t} value={t}>
-                            {PROFILE_FIELD_TYPE_LABELS[t]}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex items-center gap-2 pt-5">
-                    <Switch
-                      checked={field.required}
-                      onCheckedChange={(checked) => updateField(index, { required: checked })}
-                      disabled={busy}
-                    />
-                    <Label className="text-xs">Required</Label>
-                  </div>
-                </div>
-                {field.type === 'select' && (
-                  <div className="space-y-1">
-                    <Label className="text-xs">
-                      Options{' '}
-                      <FieldHelp title="Select options">
-                        Comma-separated list of choices the respondent picks from.
-                      </FieldHelp>
-                    </Label>
-                    <Input
-                      value={field.optionsText}
-                      placeholder="e.g. Engineering, Sales, Support"
-                      onChange={(e) => updateField(index, { optionsText: e.target.value })}
-                      disabled={busy}
-                    />
-                  </div>
-                )}
-                <div className="flex justify-end">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => removeField(index)}
-                    disabled={busy}
-                  >
-                    <X className="mr-1 h-3 w-3" /> Remove
-                  </Button>
-                </div>
+                ))}
               </div>
-            ))}
-          </div>
-        )}
-        <Button type="button" variant="outline" size="sm" onClick={addField} disabled={busy}>
-          <Plus className="mr-1 h-4 w-4" /> Add profile field
-        </Button>
-      </SettingsGroup>
+            )}
+            <Button type="button" variant="outline" size="sm" onClick={addField} disabled={busy}>
+              <Plus className="mr-1 h-4 w-4" /> Add profile field
+            </Button>
+          </SettingsGroup>
+        </div>
+      </div>
 
       {/* Save footer — one mutation sends the whole config; sticks to the bottom of the panel so
           the action is reachable without scrolling back up through five groups. */}

@@ -135,6 +135,18 @@ const clickSave = () =>
 const bodyOf = (specs: MutationSpec[]) => specs[0][2] as Record<string, unknown>;
 
 /**
+ * Scope queries to the settings content. The scroll-spy rail lists the same section
+ * labels as sibling jump-links outside this container, so unscoped getByText is
+ * ambiguous. Throws a clear error (not a cryptic `within(null)` TypeError) if the
+ * container id ever changes.
+ */
+function settingsContent() {
+  const el = document.getElementById('settings-sections');
+  if (!el) throw new Error("config-editor test: '#settings-sections' container not in DOM");
+  return within(el);
+}
+
+/**
  * Find the switch <button> that is a sibling of (or very close to) a label with
  * matching text. The component renders `<Switch> <Label>text</Label>` inside a
  * `flex items-center gap-2` container, so we walk up to the common parent and find
@@ -163,14 +175,17 @@ describe('ConfigEditor', () => {
 
   it('renders every settings group heading', () => {
     setup();
-    expect(screen.getByText('Questions & completion')).toBeInTheDocument();
-    expect(screen.getByText('Respondent experience')).toBeInTheDocument();
-    expect(screen.getByText('Reasoning stream')).toBeInTheDocument();
-    expect(screen.getByText('Interviewer tone & persona')).toBeInTheDocument();
-    expect(screen.getByText('Access & invitations')).toBeInTheDocument();
-    expect(screen.getByText('Answer quality & safeguarding')).toBeInTheDocument();
-    expect(screen.getByText('Budget & limits')).toBeInTheDocument();
-    expect(screen.getByText('Session-start profile fields')).toBeInTheDocument();
+    // Scope to the settings content; the scroll-spy rail lists the same labels as
+    // sibling jump-links outside this container, so an unscoped getByText is ambiguous.
+    const content = settingsContent();
+    expect(content.getByText('Questions & completion')).toBeInTheDocument();
+    expect(content.getByText('Respondent experience')).toBeInTheDocument();
+    expect(content.getByText('Reasoning stream')).toBeInTheDocument();
+    expect(content.getByText('Interviewer tone & persona')).toBeInTheDocument();
+    expect(content.getByText('Access & invitations')).toBeInTheDocument();
+    expect(content.getByText('Answer quality & safeguarding')).toBeInTheDocument();
+    expect(content.getByText('Budget & limits')).toBeInTheDocument();
+    expect(content.getByText('Session-start profile fields')).toBeInTheDocument();
   });
 
   // ── "Not yet saved" warning ──────────────────────────────────────────────────
@@ -661,7 +676,7 @@ describe('ConfigEditor', () => {
     // and the invitee field rows (6 rows × 2 = 12 switches). Profile field Required switch
     // comes after those. Use label text proximity inside the profile section.
     // Strategy: all profile-field switches are below the "Session-start profile fields" heading.
-    const sectionHeading = screen.getByText('Session-start profile fields');
+    const sectionHeading = settingsContent().getByText('Session-start profile fields');
     const section = sectionHeading.closest('[class*="overflow-hidden"]') as HTMLElement;
     const requiredSwitch = within(section).getByRole('switch');
     fireEvent.click(requiredSwitch);

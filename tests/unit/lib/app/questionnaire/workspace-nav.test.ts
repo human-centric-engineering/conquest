@@ -9,9 +9,12 @@ import { describe, it, expect } from 'vitest';
 
 import {
   QUESTIONNAIRE_WORKSPACE_TABS,
+  QUESTIONNAIRE_WORKSPACE_GROUPS,
   workspaceVersionBase,
   workspaceTabHref,
   visibleWorkspaceTabs,
+  visibleWorkspaceGroups,
+  dimmedWorkspacePhases,
 } from '@/lib/app/questionnaire/workspace-nav';
 import type { QuestionnaireWorkspaceFlags } from '@/lib/app/questionnaire/workspace-data';
 
@@ -146,5 +149,91 @@ describe('visibleWorkspaceTabs', () => {
       expect(idx).toBeGreaterThan(prevIdx);
       prevIdx = idx;
     }
+  });
+});
+
+// ─── Lifecycle grouping ─────────────────────────────────────────────────────
+
+describe('QUESTIONNAIRE_WORKSPACE_GROUPS', () => {
+  it('partitions every workspace tab into exactly one group', () => {
+    const grouped = QUESTIONNAIRE_WORKSPACE_GROUPS.flatMap((g) => g.tabIds);
+    const tabIds = QUESTIONNAIRE_WORKSPACE_TABS.map((t) => t.id);
+
+    // No duplicates across groups.
+    expect(new Set(grouped).size).toBe(grouped.length);
+    // Exact same set of ids (every tab grouped, no phantom ids).
+    expect([...grouped].sort()).toEqual([...tabIds].sort());
+  });
+
+  it('only references tab ids that exist in QUESTIONNAIRE_WORKSPACE_TABS', () => {
+    const known = new Set(QUESTIONNAIRE_WORKSPACE_TABS.map((t) => t.id));
+    for (const group of QUESTIONNAIRE_WORKSPACE_GROUPS) {
+      for (const id of group.tabIds) {
+        expect(known.has(id), `group "${group.id}" references unknown tab "${id}"`).toBe(true);
+      }
+    }
+  });
+
+  it('leads with Overview and ends with Settings', () => {
+    expect(QUESTIONNAIRE_WORKSPACE_GROUPS[0]?.id).toBe('overview');
+    expect(QUESTIONNAIRE_WORKSPACE_GROUPS.at(-1)?.id).toBe('settings');
+  });
+});
+
+describe('visibleWorkspaceGroups', () => {
+  it('returns all five groups when every flag is on', () => {
+    const groups = visibleWorkspaceGroups(makeFlags());
+    expect(groups.map((g) => g.id)).toEqual([
+      'overview',
+      'build',
+      'distribute',
+      'results',
+      'settings',
+    ]);
+  });
+
+  it('reduces a group to only its always-visible tabs when flag-gated tabs are off', () => {
+    // Every group owns at least one flag-free tab (Results has Analytics), so a group is
+    // never fully emptied by flags — the `tabs.length === 0` drop guard stays defensive.
+    // Here Results collapses to just Analytics once the two report tabs are gated off.
+    const groups = visibleWorkspaceGroups(
+      makeFlags({ cohortReport: false, respondentReport: false })
+    );
+    const results = groups.find((g) => g.id === 'results');
+    expect(results?.tabs.map((t) => t.id)).toEqual(['analytics']);
+  });
+
+  it('keeps only the flag-visible tabs within a group, in registry order', () => {
+    const groups = visibleWorkspaceGroups(makeFlags({ dataSlots: false }));
+    const build = groups.find((g) => g.id === 'build');
+    expect(build?.tabs.map((t) => t.id)).toEqual([
+      'structure',
+      'evaluations',
+      'extraction-changes',
+    ]);
+  });
+
+  it('carries the lifecycle phase through for build/distribute/results only', () => {
+    const groups = visibleWorkspaceGroups(makeFlags());
+    const phaseById = Object.fromEntries(groups.map((g) => [g.id, g.phase]));
+    expect(phaseById.overview).toBeUndefined();
+    expect(phaseById.settings).toBeUndefined();
+    expect(phaseById.build).toBe('build');
+    expect(phaseById.distribute).toBe('distribute');
+    expect(phaseById.results).toBe('results');
+  });
+});
+
+describe('dimmedWorkspacePhases', () => {
+  it('dims distribute + results for a draft', () => {
+    expect(dimmedWorkspacePhases('draft')).toEqual(['distribute', 'results']);
+  });
+
+  it('dims distribute for an archived questionnaire', () => {
+    expect(dimmedWorkspacePhases('archived')).toEqual(['distribute']);
+  });
+
+  it('dims nothing for a launched questionnaire', () => {
+    expect(dimmedWorkspacePhases('launched')).toEqual([]);
   });
 });

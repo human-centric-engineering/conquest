@@ -16,6 +16,7 @@ import { notFound } from 'next/navigation';
 import { ChevronLeft, Sparkles } from 'lucide-react';
 
 import { CqStatTiles, type CqStat } from '@/components/admin/cq-stat-tiles';
+import { SectionRail } from '@/components/admin/section-rail';
 import { RoundHeaderActions } from '@/components/admin/cohorts/round-header-actions';
 import {
   RoundStatusBadge,
@@ -192,90 +193,135 @@ export default async function RoundDetailPage({ params }: PageProps) {
 
       <CqStatTiles stats={statTiles} />
 
-      <section className="space-y-3 rounded-xl border px-4 py-4">
-        <SectionHeading title="Bundled questionnaires">
-          Every member completes each questionnaire bundled here. Attach one from this
-          client&rsquo;s questionnaires, or detach to remove it from the round.
-        </SectionHeading>
-        <RoundQuestionnairesPanel
-          roundId={round.id}
-          questionnaires={round.questionnaires}
-          attachable={attachable}
+      {/* Two-column on wide screens: a sticky scroll-spy rail (wayfinding only) beside the
+          single scroll. The rail discovers its items from the `[data-section-rail]` panels
+          inside `#round-sections`, so flag-gated sections appear exactly when they render.
+          Content is pinned to column 2 so the layout doesn't shift when the rail mounts. */}
+      <div className="lg:grid lg:grid-cols-[180px_minmax(0,1fr)] lg:items-start lg:gap-6">
+        <SectionRail
+          targetId="round-sections"
+          ariaLabel="Round sections"
+          className="top-24 hidden self-start lg:sticky lg:block"
         />
-      </section>
+        <div id="round-sections" className="min-w-0 space-y-6 lg:col-start-2">
+          <section
+            id="bundled"
+            data-section-rail
+            data-section-label="Bundled questionnaires"
+            className="scroll-mt-24 space-y-3 rounded-xl border px-4 py-4"
+          >
+            <SectionHeading title="Bundled questionnaires">
+              Every member completes each questionnaire bundled here. Attach one from this
+              client&rsquo;s questionnaires, or detach to remove it from the round.
+            </SectionHeading>
+            <RoundQuestionnairesPanel
+              roundId={round.id}
+              questionnaires={round.questionnaires}
+              attachable={attachable}
+            />
+          </section>
 
-      {phasesOn && (
-        <section className="space-y-3 rounded-xl border px-4 py-4">
-          <SectionHeading title="Phases">
-            Stagger access by subgroup so one group can go before the rest — for example, a
-            leadership team in week one, everyone else from week two. Each phase&rsquo;s window must
-            sit inside the round window; members with no phase use the round&rsquo;s own window.
-          </SectionHeading>
-          <RoundPhasesPanel
-            roundId={round.id}
-            roundOpensAt={round.opensAt}
-            roundClosesAt={round.closesAt}
-            phases={round.phases}
-            subgroups={subgroups ?? []}
-          />
-        </section>
-      )}
+          {phasesOn && (
+            <section
+              id="phases"
+              data-section-rail
+              data-section-label="Phases"
+              className="scroll-mt-24 space-y-3 rounded-xl border px-4 py-4"
+            >
+              <SectionHeading title="Phases">
+                Stagger access by subgroup so one group can go before the rest — for example, a
+                leadership team in week one, everyone else from week two. Each phase&rsquo;s window
+                must sit inside the round window; members with no phase use the round&rsquo;s own
+                window.
+              </SectionHeading>
+              <RoundPhasesPanel
+                roundId={round.id}
+                roundOpensAt={round.opensAt}
+                roundClosesAt={round.closesAt}
+                phases={round.phases}
+                subgroups={subgroups ?? []}
+              />
+            </section>
+          )}
 
-      {roundContextOn && (
-        <section className="space-y-3 rounded-xl border px-4 py-4">
-          <SectionHeading title="Additional context">
-            Brief the interviewer with facts, figures, and background for this round&rsquo;s
-            questions — attach a note to one question or keep it general. The interviewer draws on
-            these quietly; it never reads them aloud.
-          </SectionHeading>
-          <RoundContextPanel
-            roundId={round.id}
-            contextEnabled={round.contextEnabled}
-            entries={contextEntries}
-            briefable={briefable}
-          />
-        </section>
-      )}
+          {roundContextOn && (
+            <section
+              id="context"
+              data-section-rail
+              data-section-label="Additional context"
+              className="scroll-mt-24 space-y-3 rounded-xl border px-4 py-4"
+            >
+              <SectionHeading title="Additional context">
+                Brief the interviewer with facts, figures, and background for this round&rsquo;s
+                questions — attach a note to one question or keep it general. The interviewer draws
+                on these quietly; it never reads them aloud.
+              </SectionHeading>
+              <RoundContextPanel
+                roundId={round.id}
+                contextEnabled={round.contextEnabled}
+                entries={contextEntries}
+                briefable={briefable}
+              />
+            </section>
+          )}
 
-      {learningOn && (
-        <section className="space-y-3 rounded-xl border px-4 py-4">
-          <SectionHeading title="Learning mode">
-            Let the interviewer draw on what earlier respondents in this round have said to enrich
-            later conversations. Powerful for depth &mdash; but it introduces bias, so it stays off
-            until you opt in.
-          </SectionHeading>
-          <RoundLearningPanel
-            roundId={round.id}
-            learningEnabled={round.learningEnabled}
-            learningConfig={round.learningConfig}
-            digest={learningDigest}
-            briefable={briefable}
-          />
-        </section>
-      )}
+          {learningOn && (
+            <section
+              id="learning"
+              data-section-rail
+              data-section-label="Learning mode"
+              className="scroll-mt-24 space-y-3 rounded-xl border px-4 py-4"
+            >
+              <SectionHeading title="Learning mode">
+                Let the interviewer draw on what earlier respondents in this round have said to
+                enrich later conversations. Powerful for depth &mdash; but it introduces bias, so it
+                stays off until you opt in.
+              </SectionHeading>
+              <RoundLearningPanel
+                roundId={round.id}
+                learningEnabled={round.learningEnabled}
+                learningConfig={round.learningConfig}
+                digest={learningDigest}
+                briefable={briefable}
+              />
+            </section>
+          )}
 
-      {cohortReportOn && (
-        <section className="space-y-3 rounded-xl border px-4 py-4">
-          <SectionHeading title="Cohort report">
-            Analyse this round across all respondents — segmented by the questionnaire&rsquo;s own
-            demographics — and generate a narrative report with charts, recommendations and actions.
-            Review and (soon) edit it here; privacy thresholds hide any group that is too small.
-          </SectionHeading>
-          <RoundCohortReportPanel
-            roundId={round.id}
-            versions={briefable.map((b) => ({ versionId: b.versionId, title: b.title }))}
-          />
-        </section>
-      )}
+          {cohortReportOn && (
+            <section
+              id="cohort-report"
+              data-section-rail
+              data-section-label="Cohort report"
+              className="scroll-mt-24 space-y-3 rounded-xl border px-4 py-4"
+            >
+              <SectionHeading title="Cohort report">
+                Analyse this round across all respondents — segmented by the questionnaire&rsquo;s
+                own demographics — and generate a narrative report with charts, recommendations and
+                actions. Review and (soon) edit it here; privacy thresholds hide any group that is
+                too small.
+              </SectionHeading>
+              <RoundCohortReportPanel
+                roundId={round.id}
+                versions={briefable.map((b) => ({ versionId: b.versionId, title: b.title }))}
+              />
+            </section>
+          )}
 
-      <section className="space-y-3 rounded-xl border px-4 py-4">
-        <SectionHeading title="Member invitations">
-          Generate a secure, round-bound link per active cohort member. The link carries the round
-          membership, so each respondent&rsquo;s session is enforced against this round&rsquo;s
-          window and their membership.
-        </SectionHeading>
-        <RoundInvitesPanel roundId={round.id} questionnaireCount={round.questionnaireCount} />
-      </section>
+          <section
+            id="invitations"
+            data-section-rail
+            data-section-label="Member invitations"
+            className="scroll-mt-24 space-y-3 rounded-xl border px-4 py-4"
+          >
+            <SectionHeading title="Member invitations">
+              Generate a secure, round-bound link per active cohort member. The link carries the
+              round membership, so each respondent&rsquo;s session is enforced against this
+              round&rsquo;s window and their membership.
+            </SectionHeading>
+            <RoundInvitesPanel roundId={round.id} questionnaireCount={round.questionnaireCount} />
+          </section>
+        </div>
+      </div>
     </div>
   );
 }
