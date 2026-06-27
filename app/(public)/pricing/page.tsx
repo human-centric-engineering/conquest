@@ -27,7 +27,7 @@ import {
   Hammer,
   Sprout,
 } from 'lucide-react';
-import shared from '@/app/(public)/about-conquest/about-conquest.module.css';
+import shared from '@/components/app/marketing/conquest-marketing.module.css';
 import styles from '@/app/(public)/pricing/pricing.module.css';
 
 const display = Fraunces({
@@ -438,10 +438,11 @@ const faqs = [
 /**
  * Pricing
  *
- * Public marketing page for ConQuest pricing. Self-contained bespoke design,
- * sibling to /about-conquest: it reuses that page's CSS module for the shared
- * palette, type and layout primitives, and adds pricing-specific components
- * (tier cards, included strip, dark glass cards, hero art) via pricing.module.css.
+ * Public marketing page for ConQuest pricing. Self-contained bespoke design; it
+ * reuses the shared ConQuest marketing CSS module
+ * (components/app/marketing/conquest-marketing.module.css) for the shared palette,
+ * type and layout primitives, and adds pricing-specific components (tier cards,
+ * included strip, dark glass cards, hero art) via pricing.module.css.
  */
 export default function PricingPage() {
   return (

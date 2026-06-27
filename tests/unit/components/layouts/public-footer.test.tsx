@@ -31,6 +31,14 @@ afterEach(() => {
 describe('PublicFooter', () => {
   it('renders the platform default nav, legal links, and copyright', async () => {
     vi.resetModules();
+    // ConQuest populates the real seam (`lib/app/public-nav.ts`), so mock it back
+    // to null here to exercise the platform component's `?? DEFAULT_*` fallback —
+    // the behaviour this test is about, independent of the fork's nav content.
+    vi.doMock('@/lib/app/public-nav', () => ({
+      publicNavItems: null,
+      footerNavItems: null,
+      footerLegalItems: null,
+    }));
     const { PublicFooter } = await import('@/components/layouts/public-footer');
     render(React.createElement(PublicFooter));
 
