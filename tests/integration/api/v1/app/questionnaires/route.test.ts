@@ -37,6 +37,10 @@ vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '203.0.113.7') })
 
 vi.mock('@/lib/orchestration/knowledge/parsers', () => ({ parseDocument: vi.fn() }));
 
+// Spreadsheets take the app-tier flattener, not parseDocument; mock it so the
+// `.xlsx` branch is exercised without a real workbook.
+vi.mock('@/lib/app/questionnaire/ingestion/xlsx-flatten', () => ({ flattenWorkbook: vi.fn() }));
+
 vi.mock('@/lib/orchestration/capabilities/dispatcher', () => ({
   capabilityDispatcher: { dispatch: vi.fn() },
 }));
@@ -71,6 +75,7 @@ import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
 import { parseDocument } from '@/lib/orchestration/knowledge/parsers';
+import { flattenWorkbook } from '@/lib/app/questionnaire/ingestion/xlsx-flatten';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { persistIngestion } from '@/app/api/v1/app/questionnaires/_lib/persist';
@@ -169,6 +174,10 @@ beforeEach(() => {
     fallbackProviders: [],
   });
   (parseDocument as Mock).mockResolvedValue({ ...PARSED_DOC });
+  (flattenWorkbook as Mock).mockResolvedValue({
+    ...PARSED_DOC,
+    metadata: { format: 'xlsx', sheetCount: '2', fileName: 'workbook.xlsx' },
+  });
   (capabilityDispatcher.dispatch as Mock).mockResolvedValue({
     success: true,
     data: structuredClone(COHERENT_EXTRACTION),
@@ -333,6 +342,24 @@ describe('POST /api/v1/app/questionnaires — admin metadata', () => {
     );
   });
 
+  it('forwards admin instructions to the extractor as adminProvidedInstructions', async () => {
+    const res = await POST(
+      makeRequest('form.md', '# Form', 'text/markdown', {
+        instructions: "Questions are in the Activities tab. Replace 'HPE' with 'our org'.",
+      })
+    );
+
+    expect(res.status).toBe(201);
+    expect(capabilityDispatcher.dispatch).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        adminProvidedInstructions:
+          "Questions are in the Activities tab. Replace 'HPE' with 'our org'.",
+      }),
+      expect.any(Object)
+    );
+  });
+
   it('returns 400 for invalid audience metadata', async () => {
     const res = await POST(
       makeRequest('form.md', '# Form', 'text/markdown', { 'audience.expertiseLevel': 'wizard' })
@@ -351,6 +378,38 @@ describe('POST /api/v1/app/questionnaires — admin metadata', () => {
     expect(persistIngestion).toHaveBeenCalledWith(
       expect.objectContaining({ documentTitle: 'Acme onboarding survey' })
     );
+  });
+});
+
+// ─── Spreadsheet (.xlsx) ingestion ──────────────────────────────────────────────
+
+describe('POST /api/v1/app/questionnaires — spreadsheet ingestion', () => {
+  const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+  it('routes .xlsx uploads through the flattener, not the document parser', async () => {
+    const res = await POST(makeRequest('workbook.xlsx', 'binary-bytes', XLSX_MIME));
+
+    expect(res.status).toBe(201);
+    expect(flattenWorkbook as Mock).toHaveBeenCalledWith(expect.any(Buffer), 'workbook.xlsx');
+    expect(parseDocument as Mock).not.toHaveBeenCalled();
+    // The flattened text still reaches the extractor like any other document.
+    expect(capabilityDispatcher.dispatch).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ documentText: PARSED_DOC.fullText, fileName: 'workbook.xlsx' }),
+      expect.any(Object)
+    );
+  });
+
+  it('maps a flattener throw to 422 PARSE_FAILED (same envelope as other formats)', async () => {
+    (flattenWorkbook as Mock).mockRejectedValue(new Error('not a workbook'));
+
+    const res = await POST(makeRequest('broken.xlsx', 'not-a-workbook', XLSX_MIME));
+
+    expect(res.status).toBe(422);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('PARSE_FAILED');
+    expect(capabilityDispatcher.dispatch).not.toHaveBeenCalled();
   });
 });
 
@@ -541,6 +600,10 @@ describe('POST /api/v1/app/questionnaires — dedup, config, rate-limit', () => 
     expect(body.error?.code).not.toBe('DUPLICATE_DOCUMENT');
     expect(capabilityDispatcher.dispatch).toHaveBeenCalled();
     expect(persistIngestion).toHaveBeenCalledTimes(1);
+    // The dedup pre-check was removed wholesale: the route never even consults
+    // the source-document table. Pinning this proves the absence of the guard
+    // (not merely that an armed duplicate was ignored).
+    expect(prisma.appQuestionnaireSourceDocument.findFirst).not.toHaveBeenCalled();
   });
 
   it('returns 503 EXTRACTOR_NOT_CONFIGURED when the extractor agent is not seeded', async () => {

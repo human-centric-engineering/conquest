@@ -13,15 +13,16 @@
 document. Admin-only. Synchronous: the request blocks through parse → LLM
 extraction → transactional write, then returns the new ids.
 
-| Field              | In       | Notes                                                                           |
-| ------------------ | -------- | ------------------------------------------------------------------------------- |
-| `file`             | required | `.pdf` / `.docx` / `.md` / `.txt`. Extension is the source of truth.            |
-| `title`            | optional | Questionnaire name. Present ⇒ wins over the document-derived title (≤200 char). |
-| `demoClientId`     | optional | DEMO-ONLY (F2.5.1) — attribute the new questionnaire to this demo client.       |
-| `goal`             | optional | Admin-set goal. Present ⇒ the extractor must **not** infer it.                  |
-| `audience.<field>` | optional | Dotted keys (`audience.role`, `audience.expertiseLevel`, …). Per-field.         |
-| `requiredMode`     | optional | `all` (default) or `source` — how imported questions are marked required.       |
-| `extractTables`    | optional | PDF only — truthy string turns on table extraction.                             |
+| Field              | In       | Notes                                                                              |
+| ------------------ | -------- | ---------------------------------------------------------------------------------- |
+| `file`             | required | `.pdf` / `.docx` / `.md` / `.txt` / `.xlsx`. Extension is the source of truth.     |
+| `title`            | optional | Questionnaire name. Present ⇒ wins over the document-derived title (≤200 char).    |
+| `demoClientId`     | optional | DEMO-ONLY (F2.5.1) — attribute the new questionnaire to this demo client.          |
+| `goal`             | optional | Admin-set goal. Present ⇒ the extractor must **not** infer it.                     |
+| `instructions`     | optional | Free-text steering for the extractor (≤4 000 char). **Guidance, not suppression.** |
+| `audience.<field>` | optional | Dotted keys (`audience.role`, `audience.expertiseLevel`, …). Per-field.            |
+| `requiredMode`     | optional | `all` (default) or `source` — how imported questions are marked required.          |
+| `extractTables`    | optional | PDF only — truthy string turns on table extraction.                                |
 
 Empty / whitespace-only `title`, `goal`, and `audience.*` form values are treated
 as **absent** (an un-filled field, not an intentional override). A `title` over the
@@ -87,9 +88,12 @@ pre-existing` (P2-ready; a fresh ingest never produces `pre-existing`).
    exact bytes were already ingested. This is the **global** new-ingest dedup;
    re-ingest-into-an-existing-draft is **F2.4**, which scopes its dedup to the
    target version and short-circuits to a `200` no-op ([`reingest.md`](./reingest.md)).
-9. **Parse** — `parseDocument(buffer, fileName, { extractTables })` directly (not
-   the knowledge KB's `previewDocument`/`confirmPreview`, which chunk + embed into
-   RAG). `422 PARSE_FAILED` on a parser throw.
+9. **Parse** — for `.xlsx`, the app-tier `flattenWorkbook(buffer, fileName)`
+   (`lib/app/questionnaire/ingestion/xlsx-flatten.ts`); for every other format,
+   `parseDocument(buffer, fileName, { extractTables })` directly (not the knowledge
+   KB's `previewDocument`/`confirmPreview`, which chunk + embed into RAG). Either
+   path yields the same `ParsedDocument` shape. `422 PARSE_FAILED` on a throw. See
+   [Spreadsheet ingestion](#spreadsheet-ingestion-xlsx).
 10. **Scanned / empty detection** — `422 SCANNED_DOCUMENT` for a PDF whose pages all
     report `hasText: false` (or no extractable text); `422 EMPTY_DOCUMENT` otherwise.
 11. **Dispatch** — load the seeded extractor agent, then
@@ -156,6 +160,61 @@ See [`extraction-changes.md`](./extraction-changes.md) for how the returned
 `changes[]` become the revertible editorial log, and the F1.1 tracker
 ([`../planning/features/f1.1.md`](../planning/features/f1.1.md), "PR 3") for the
 capability's design rationale.
+
+### Admin instructions (`instructions`)
+
+A free-text box on the upload + re-ingest dialogs, carried verbatim to the
+extractor as `adminProvidedInstructions`. Unlike `goal`/`audience` it does **not**
+suppress inference — it is steering the model applies while extracting. Two
+canonical uses: telling the agent where the questions live in an unusual layout
+("the questions are in the Activities tab, grouped by Subsection"), and
+genericising brand terms ("replace every mention of 'HPE' with 'our
+organisation'").
+
+`buildExtractionPrompt` injects it inside a fenced `ADMIN INSTRUCTIONS` block
+that explicitly states it cannot change the required output format — so a pasted
+instruction can't break the JSON contract. The rewrite is **cosmetic**: it
+changes the produced question/section text, but the original wording is retained
+in each change's `sourceQuote` (the audit trail) and in the persisted
+`AppQuestionnaireSourceDocument.extractedText` (the raw parse). It is length-capped
+at 4 000 chars (`MAX_INSTRUCTIONS_LENGTH`); over-cap is a `400`. The value is
+redacted from durable capability provenance, same as the other admin fields.
+
+## Spreadsheet ingestion (`.xlsx`)
+
+A questionnaire is often authored as a multi-tab workbook — questions on one tab,
+section/scoring/metadata on others, wired together by id columns. ConQuest accepts
+these without a bespoke per-schema parser: the **only** deterministic step is a
+faithful flatten; **all** structural intelligence stays in the extractor agent, so
+arbitrarily-organised workbooks are handled by the model, not by hard-coded
+assumptions about this or any one layout.
+
+**Flattener** (`lib/app/questionnaire/ingestion/xlsx-flatten.ts`, app-tier,
+`exceljs`). `flattenWorkbook()` renders each tab as a `## Sheet: <name>` block
+containing a GitHub-flavoured Markdown table — first used row as headers, **every**
+used column preserved (id / foreign-key / type / flag columns included, since
+those are what let the agent join tabs). It makes no decision about what is a
+question. Cells are normalised for table safety (newlines collapsed, `|` escaped,
+giant cells capped). A `MAX_FLATTENED_CHARS` budget (~600 k chars) bounds the text
+fed to the single extraction call; exhausting it truncates and emits a warning
+naming the cut tabs — never a silent drop. Lives app-tier (not the shared KB
+parser router) to keep the questionnaire-tuned output out of Sunrise platform code
+and avoid a fork.
+
+**Extraction** then runs exactly as for any other document. The prompt builder
+detects a spreadsheet by extension (`.xlsx` / `.xls` / `.csv`) and prepends
+tabular **heuristics** (not rules): tabs relate through shared id columns; one tab
+usually holds the questions while others are supporting data; id/order/weighting
+columns are structure not questions; an internal on/off flag column may be mostly
+off and is not, by itself, a signal to drop rows; a `type` column is a strong
+answer-type hint. The admin `instructions` field overrides any of these per
+document.
+
+`.xlsx` is wired into both the upload (`UploadQuestionnaireDialog`) and re-ingest
+(`ReingestDialog`) flows; the latter inherits the flatten + instructions path for
+free through the shared `parseAndGuardUpload` / `extractFromDocument` helpers
+(`_lib/extract-pipeline.ts`). Legacy `.xls` is **not** supported (exceljs reads the
+modern OOXML format only) — re-save as `.xlsx`.
 
 ## Persistence (`_lib/persist.ts`)
 

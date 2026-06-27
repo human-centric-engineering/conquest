@@ -51,7 +51,7 @@ import {
 import type { AttributedDemoClient } from '@/lib/app/questionnaire/demo-clients';
 
 /** Allowed upload extensions — mirrors the server's `ALLOWED_EXTENSIONS`. */
-const ACCEPT = '.pdf,.docx,.md,.txt';
+const ACCEPT = '.pdf,.docx,.md,.txt,.xlsx';
 
 /**
  * Sentinel for "let the extractor infer" on the enum selects. Radix Select forbids
@@ -107,6 +107,7 @@ export function UploadQuestionnaireDialog({
   const nameId = useId();
   const demoClientFieldId = useId();
   const goalId = useId();
+  const instructionsId = useId();
   const descriptionId = useId();
   const roleId = useId();
   const expertiseId = useId();
@@ -127,6 +128,7 @@ export function UploadQuestionnaireDialog({
   const [name, setName] = useState('');
   const [demoClientId, setDemoClientId] = useState<string>(NO_CLIENT);
   const [goal, setGoal] = useState('');
+  const [instructions, setInstructions] = useState('');
   const [description, setDescription] = useState('');
   const [role, setRole] = useState('');
   const [expertiseLevel, setExpertiseLevel] = useState<string>(INFER);
@@ -143,6 +145,7 @@ export function UploadQuestionnaireDialog({
     setName('');
     setDemoClientId(NO_CLIENT);
     setGoal('');
+    setInstructions('');
     setDescription('');
     setRole('');
     setExpertiseLevel(INFER);
@@ -181,6 +184,7 @@ export function UploadQuestionnaireDialog({
       setIfPresent('title', name);
       if (demoClientId !== NO_CLIENT) body.set('demoClientId', demoClientId);
       setIfPresent('goal', goal);
+      setIfPresent('instructions', instructions);
       setIfPresent('audience.description', description);
       setIfPresent('audience.role', role);
       if (expertiseLevel !== INFER) body.set('audience.expertiseLevel', expertiseLevel);
@@ -244,9 +248,11 @@ export function UploadQuestionnaireDialog({
             <Label htmlFor={fileInputId}>
               Source document{' '}
               <FieldHelp title="Source document">
-                A <code>.pdf</code>, <code>.docx</code>, <code>.md</code>, or <code>.txt</code> file
-                (max 25 MB). The extractor reads it and builds the questionnaire’s sections and
-                questions. Re-uploading an identical document is rejected as a duplicate.
+                A <code>.pdf</code>, <code>.docx</code>, <code>.md</code>, <code>.txt</code>, or
+                <code>.xlsx</code> file (max 25 MB). The extractor reads it and builds the
+                questionnaire’s sections and questions. For a multi-tab spreadsheet the agent works
+                out which tab holds the questions and how the tabs relate — use the instructions
+                field below to steer it if needed.
               </FieldHelp>
             </Label>
             <Input
@@ -318,6 +324,27 @@ export function UploadQuestionnaireDialog({
               disabled={busy}
               rows={2}
               placeholder="Leave blank to use the inferred goal"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor={instructionsId}>
+              Extraction instructions{' '}
+              <FieldHelp title="Extraction instructions">
+                Optional free-text guidance for the extractor agent — applied as it reads the
+                document, not a strict filter. Useful for spreadsheets and bespoke layouts, e.g.
+                “the questions are in the Activities tab, grouped by Subsection” or “replace every
+                mention of ‘HPE’ with a generic term like ‘our organisation’”. Unlike Goal/Audience,
+                this doesn’t suppress inference — it steers it.
+              </FieldHelp>
+            </Label>
+            <Textarea
+              id={instructionsId}
+              value={instructions}
+              onChange={(e) => setInstructions(e.target.value)}
+              disabled={busy}
+              rows={3}
+              placeholder="e.g. Questions are in the Activities tab. Replace 'HPE' with 'our organisation'."
             />
           </div>
 

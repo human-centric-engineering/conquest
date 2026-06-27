@@ -39,7 +39,7 @@ import { API } from '@/lib/api/endpoints';
 import { parseApiResponse } from '@/lib/api/parse-response';
 
 /** Allowed upload extensions — mirrors the server's `ALLOWED_EXTENSIONS`. */
-const ACCEPT = '.pdf,.docx,.md,.txt';
+const ACCEPT = '.pdf,.docx,.md,.txt,.xlsx';
 
 interface ReingestResult {
   sectionCount: number;
@@ -58,11 +58,13 @@ export function ReingestDialog({ questionnaireId, versionId, versionNumber }: Re
   const router = useRouter();
   const fileInputId = useId();
   const goalId = useId();
+  const instructionsId = useId();
   const tablesId = useId();
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [open, setOpen] = useState(false);
   const [goal, setGoal] = useState('');
+  const [instructions, setInstructions] = useState('');
   const [extractTables, setExtractTables] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -70,6 +72,7 @@ export function ReingestDialog({ questionnaireId, versionId, versionNumber }: Re
 
   function reset() {
     setGoal('');
+    setInstructions('');
     setExtractTables(false);
     setError(null);
     setResult(null);
@@ -94,6 +97,8 @@ export function ReingestDialog({ questionnaireId, versionId, versionNumber }: Re
       body.set('file', file);
       const trimmedGoal = goal.trim();
       if (trimmedGoal.length > 0) body.set('goal', trimmedGoal);
+      const trimmedInstructions = instructions.trim();
+      if (trimmedInstructions.length > 0) body.set('instructions', trimmedInstructions);
       if (extractTables) body.set('extractTables', 'true');
 
       // Multipart — do NOT set Content-Type; the browser adds the boundary.
@@ -172,9 +177,9 @@ export function ReingestDialog({ questionnaireId, versionId, versionNumber }: Re
               <Label htmlFor={fileInputId}>
                 Replacement document{' '}
                 <FieldHelp title="Replacement document">
-                  A <code>.pdf</code>, <code>.docx</code>, <code>.md</code>, or <code>.txt</code>{' '}
-                  file (max 25 MB). The extractor re-reads it from scratch and rebuilds this draft’s
-                  sections and questions.
+                  A <code>.pdf</code>, <code>.docx</code>, <code>.md</code>, <code>.txt</code>, or{' '}
+                  <code>.xlsx</code> file (max 25 MB). The extractor re-reads it from scratch and
+                  rebuilds this draft’s sections and questions.
                 </FieldHelp>
               </Label>
               <Input
@@ -203,6 +208,25 @@ export function ReingestDialog({ questionnaireId, versionId, versionNumber }: Re
                 disabled={busy}
                 rows={2}
                 placeholder="Leave blank to use the inferred goal"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor={instructionsId}>
+                Extraction instructions{' '}
+                <FieldHelp title="Extraction instructions">
+                  Optional free-text guidance for the extractor agent — e.g. “the questions are in
+                  the Activities tab” or “replace ‘HPE’ with ‘our organisation’”. Steers extraction;
+                  doesn’t suppress inference.
+                </FieldHelp>
+              </Label>
+              <Textarea
+                id={instructionsId}
+                value={instructions}
+                onChange={(e) => setInstructions(e.target.value)}
+                disabled={busy}
+                rows={3}
+                placeholder="e.g. Questions are in the Activities tab. Replace 'HPE' with 'our organisation'."
               />
             </div>
 

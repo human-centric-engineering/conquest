@@ -21,13 +21,18 @@ import {
   type AudienceShape,
 } from '@/lib/app/questionnaire/types';
 import { MAX_QUESTIONNAIRE_TITLE_LENGTH } from '@/lib/app/questionnaire/title';
+import { MAX_INSTRUCTIONS_LENGTH } from '@/lib/app/questionnaire/constants';
 
 /**
  * Extension allowlist — the source of truth for accepted formats (the caller's
  * MIME type is advisory only, mirroring the knowledge documents route). Narrower
  * than the knowledge KB's list: a questionnaire is a document, not a corpus.
  */
-export const ALLOWED_EXTENSIONS = ['.pdf', '.docx', '.md', '.txt'] as const;
+export const ALLOWED_EXTENSIONS = ['.pdf', '.docx', '.md', '.txt', '.xlsx'] as const;
+
+// Re-exported from the lib-tier source of truth so existing importers of this
+// path keep working while the capability's Zod cap references the same constant.
+export { MAX_INSTRUCTIONS_LENGTH };
 
 export function getExtension(name: string): string {
   const dot = name.lastIndexOf('.');
@@ -53,6 +58,13 @@ export interface AdminMetadata {
   title?: string;
   goal?: string;
   audience?: Partial<AudienceShape>;
+  /**
+   * Free-text steering for the extractor agent. Unlike goal/audience this does
+   * not suppress inference — it is guidance the model applies when extracting
+   * (e.g. "questions are in the Activities tab", "replace 'HPE' with a generic
+   * term"). Carried verbatim into the extraction prompt.
+   */
+  instructions?: string;
   /** DEMO-ONLY (F2.5.1): attribute the new questionnaire to this demo client on create. */
   demoClientId?: string;
 }
@@ -108,6 +120,19 @@ export function parseAdminMetadata(formData: FormData): AdminMetadata {
 
   const goal = readTrimmed(formData, 'goal');
   if (goal !== undefined) meta.goal = goal;
+
+  // Optional free-text extractor steering. Over the MAX_INSTRUCTIONS_LENGTH
+  // character cap is a clean 400 (ValidationError), never a silent truncation,
+  // so it can't crowd the document out of the prompt.
+  const instructions = readTrimmed(formData, 'instructions');
+  if (instructions !== undefined) {
+    if (instructions.length > MAX_INSTRUCTIONS_LENGTH) {
+      throw new ValidationError('Invalid extraction instructions', {
+        instructions: [`Must be at most ${MAX_INSTRUCTIONS_LENGTH} characters`],
+      });
+    }
+    meta.instructions = instructions;
+  }
 
   // DEMO-ONLY (F2.5.1): optional attribution. Existence is checked in the route
   // against the DB (a clean 404), mirroring the PATCH attribution guard — here we

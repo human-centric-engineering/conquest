@@ -24,6 +24,7 @@ import { enforceContentLengthCap } from '@/lib/api/multipart-guard';
 import type { getRouteLogger } from '@/lib/api/context';
 import { prisma } from '@/lib/db/client';
 import { parseDocument } from '@/lib/orchestration/knowledge/parsers';
+import { flattenWorkbook } from '@/lib/app/questionnaire/ingestion/xlsx-flatten';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
 import { registerBuiltInCapabilities } from '@/lib/orchestration/capabilities';
 
@@ -197,10 +198,17 @@ export async function extractFromDocument(
 ): Promise<PipelineResult<ExtractedDocument>> {
   const { file, buffer, adminMeta, extractTables } = upload;
   const { adminId, log } = ctx;
+  const fileExt = getExtension(file.name);
 
   let parsed: Awaited<ReturnType<typeof parseDocument>>;
   try {
-    parsed = await parseDocument(buffer, file.name, { extractTables });
+    // Spreadsheets take an app-tier flattener (faithful tab/column → Markdown)
+    // rather than the shared KB parser router, which has no `.xlsx` branch. The
+    // flattener makes no question/structure decisions — the extractor agent does.
+    parsed =
+      fileExt === '.xlsx'
+        ? await flattenWorkbook(buffer, file.name)
+        : await parseDocument(buffer, file.name, { extractTables });
   } catch (err) {
     log.warn('Questionnaire parse failed', {
       fileName: file.name,
@@ -218,7 +226,7 @@ export async function extractFromDocument(
 
   // Scanned / empty detection. A scanned PDF yields no extractable text — distinct
   // from a genuinely empty file so the admin knows OCR is the missing step.
-  const ext = getExtension(file.name);
+  const ext = fileExt;
   const hasNoText = parsed.fullText.trim().length === 0;
   const pdfAllPagesBlank =
     ext === '.pdf' &&
@@ -279,6 +287,9 @@ export async function extractFromDocument(
       ...(file.type ? { mediaType: file.type } : {}),
       ...(adminMeta.goal !== undefined ? { adminProvidedGoal: adminMeta.goal } : {}),
       ...(adminMeta.audience !== undefined ? { adminProvidedAudience: adminMeta.audience } : {}),
+      ...(adminMeta.instructions !== undefined
+        ? { adminProvidedInstructions: adminMeta.instructions }
+        : {}),
     },
     {
       userId: adminId,
