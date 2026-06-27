@@ -58,7 +58,7 @@ export default async function DemoClientDetailLayout({ params, children }: Layou
       {/* Sticky header — identity only. The everyday branding edits live on the Branding
           tab; the destructive demo-ops on the Management tab. The Active/Inactive badge is
           the one piece of state worth surfacing from every tab. */}
-      <header className="bg-background sticky top-0 z-30 -mx-6 space-y-3 border-b px-6 pt-3 pb-0">
+      <header className="bg-background sticky top-0 z-30 -mx-6 space-y-3 px-6 pt-3 pb-0">
         <div>
           <Link
             href="/admin/demo-clients"

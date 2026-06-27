@@ -31,7 +31,7 @@ import {
   getVersionGraphCached,
   resolveQuestionnaireWorkspaceFlags,
 } from '@/lib/app/questionnaire/workspace-data';
-import { visibleWorkspaceTabs } from '@/lib/app/questionnaire/workspace-nav';
+import { visibleWorkspaceGroups } from '@/lib/app/questionnaire/workspace-nav';
 import { isPreviewAvailable } from '@/lib/app/questionnaire/launch/readiness';
 
 export const metadata: Metadata = {
@@ -59,7 +59,7 @@ export default async function QuestionnaireWorkspaceLayout({ params, children }:
   const selected = detail.versions.find((ver) => ver.id === vid);
   if (!selected) notFound();
 
-  const tabs = visibleWorkspaceTabs(flags);
+  const groups = visibleWorkspaceGroups(flags);
 
   // "Preview as respondent" lives in the header so it's reachable from every tab (not just Overview).
   // Same availability rule as the Overview section + the server boot — shared `isPreviewAvailable`.
@@ -104,7 +104,7 @@ export default async function QuestionnaireWorkspaceLayout({ params, children }:
         <span>{detail.title}</span>
       </nav>
 
-      <header className="bg-background sticky top-0 z-30 -mx-6 space-y-3 border-b px-6 pt-3 pb-0">
+      <header className="bg-background sticky top-0 z-30 -mx-6 space-y-3 px-6 pt-3 pb-0">
         <div>
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-2xl font-semibold">{detail.title}</h1>
@@ -133,7 +133,12 @@ export default async function QuestionnaireWorkspaceLayout({ params, children }:
             </p>
           )}
         </div>
-        <QuestionnaireSubNav questionnaireId={id} versionId={selected.id} tabs={tabs} />
+        <QuestionnaireSubNav
+          questionnaireId={id}
+          versionId={selected.id}
+          groups={groups}
+          status={selected.status}
+        />
       </header>
 
       {children}

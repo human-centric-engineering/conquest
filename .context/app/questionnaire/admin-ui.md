@@ -88,6 +88,20 @@ must render the version selector and highlight the active version against `[vid]
   and feature flags **once** via `lib/app/questionnaire/workspace-data.ts` and
   `notFound()`s when the master flag is off, the questionnaire is missing, or `[vid]`
   isn't a real version. Switching version preserves the active tab segment.
+- **Two-tier lifecycle nav.** The thirteen tabs are grouped by the questionnaire's
+  life-stage so nothing scrolls off-screen: a top row of **Overview · Build ·
+  Distribute · Results · Settings**, and — for the active group — a second row of its
+  child tabs. The grouping is a partition of the flat registry:
+  - **Build** → Structure · Data slots · Evaluations · Extraction log
+  - **Distribute** → Invitations · Sessions · Diagnostics
+  - **Results** → Analytics · Respondent report · Scoring · Report
+  - **Overview** / **Settings** are single-tab groups (no second row).
+
+  A top-tier group link points at its first visible child. The nav is **lifecycle-aware**:
+  on a `draft` the Distribute + Results groups are dimmed (nothing there yet); on
+  `archived`, Distribute is dimmed; on `launched`, none are. Dimming is emphasis only —
+  the groups stay clickable. `dimmedWorkspacePhases(status)` decides which.
+
 - **`workspace-data.ts`** wraps the detail / graph / data-slot-count fetchers in
   React `cache()` so the layout and the active tab share one HTTP call per render
   (`serverFetch` is `no-store`). `resolveQuestionnaireWorkspaceFlags()` resolves all
@@ -96,7 +110,16 @@ must render the version selector and highlight the active version against `[vid]
 - **`workspace-nav.ts`** is the declarative tab registry; `visibleWorkspaceTabs(flags)`
   filters by flag (Data slots / Evaluations hidden when their sub-flag is off — the
   master flag is already enforced by the layout). Each moved tab keeps its own
-  `notFound()` flag gate as defense-in-depth.
+  `notFound()` flag gate as defense-in-depth. The lifecycle grouping lives alongside it:
+  `QUESTIONNAIRE_WORKSPACE_GROUPS` (the partition) and `visibleWorkspaceGroups(flags)`
+  (groups projected to their flag-visible tabs, empty groups dropped) — the flat tab
+  list stays the single source of truth for hrefs/flags/order. A unit test asserts every
+  tab id belongs to exactly one group, so a new tab can't silently fall out of the nav.
+- **`components/admin/grouped-sub-nav.tsx`** is the shared presentational two-tier strip
+  (`GroupedSubNav`), used by both `QuestionnaireSubNav` and the demo-client
+  `DemoClientSubNav`. Given one group it renders a flat single row (demo clients, 4–6
+  tabs); given many it renders the two-tier layout. Callers pre-compute hrefs and decide
+  which groups are dimmed.
 - **Legacy routes** (`[id]`, `[id]/{analytics,data-slots,extraction-changes,evaluations,invitations}`)
   are thin **redirectors** that resolve `?v=` (or the newest version) and forward to
   the path-segment URL, so old bookmarks and the editor's fork-redirect keep working.

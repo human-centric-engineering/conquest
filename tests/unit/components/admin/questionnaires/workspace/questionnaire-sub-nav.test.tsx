@@ -1,19 +1,20 @@
 /**
  * QuestionnaireSubNav Component Tests
  *
- * Horizontal tab bar for the questionnaire workspace. A 'use client' component
- * that consumes `usePathname()` to decide which tab is active and builds hrefs
- * via the real `workspaceTabHref` helper (not mocked — it's pure logic).
+ * Two-tier lifecycle tab bar for the questionnaire workspace. A 'use client'
+ * component that consumes `usePathname()` to decide which group/tab is active and
+ * builds hrefs via the real `workspaceTabHref` helper (not mocked — pure logic).
  *
  * Test Coverage:
- * - Renders a link for each tab in the supplied list
- * - Marks the matching tab as active (aria-current="page") when pathname matches
- * - No other tab carries aria-current when one is active
- * - Exact-match tab (Overview) is only active when pathname equals its href, not
- *   when pathname merely starts with it
- * - Prefix-match tab is active when pathname starts with its href
- * - Hidden tabs (not in the supplied list) are absent from the DOM
- * - Tab hrefs are constructed correctly for the given id / versionId
+ * - Top tier renders one link per lifecycle group (Overview · Build · Distribute ·
+ *   Results · Settings)
+ * - The group link points at its first child tab
+ * - The second tier appears only for the ACTIVE group, and only when it has >1 tab
+ * - Children of non-active groups are absent from the DOM
+ * - Active-state (aria-current) tracks both the active group and its active child
+ * - Exact-match Overview group is active only on the version base, not sub-routes
+ * - Feature flags collapse / hide group children
+ * - Lifecycle dimming: a draft de-emphasizes Distribute + Results; launched dims none
  *
  * @see components/admin/questionnaires/workspace/questionnaire-sub-nav.tsx
  */
@@ -22,7 +23,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
 // ─── next/navigation mock ─────────────────────────────────────────────────────
-// Capture via vi.hoisted so the return value can be overridden per-test.
 
 const { mockUsePathname } = vi.hoisted(() => ({
   mockUsePathname: vi.fn<() => string>(),
@@ -37,16 +37,18 @@ vi.mock('next/navigation', () => ({
 import { QuestionnaireSubNav } from '@/components/admin/questionnaires/workspace/questionnaire-sub-nav';
 import {
   QUESTIONNAIRE_WORKSPACE_TABS,
-  visibleWorkspaceTabs,
+  visibleWorkspaceGroups,
   workspaceTabHref,
   workspaceVersionBase,
 } from '@/lib/app/questionnaire/workspace-nav';
+import type { AppQuestionnaireStatus } from '@/lib/app/questionnaire/types';
 import type { QuestionnaireWorkspaceFlags } from '@/lib/app/questionnaire/workspace-data';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const QID = 'qn-abc';
 const VID = 'ver-xyz';
+const GROUP_LABELS = ['Overview', 'Build', 'Distribute', 'Results', 'Settings'];
 
 /** Flags that enable every tab. */
 const allFlagsOn: QuestionnaireWorkspaceFlags = {
@@ -62,27 +64,27 @@ const allFlagsOn: QuestionnaireWorkspaceFlags = {
   advisor: true,
 };
 
-/** Flags that disable optional tabs (dataSlots, designEval, respondentReport hidden). */
-const flagsAllOff: QuestionnaireWorkspaceFlags = {
-  master: true,
-  dataSlots: false,
-  designEval: false,
-  liveSessions: false,
-  adaptive: false,
-  adaptiveDataSlots: false,
-  respondentReport: false,
-  cohortReport: false,
-  introScreen: false,
-  advisor: false,
-};
+/** Cohort report (Scoring + Report) off; everything else on. */
+const cohortReportOff: QuestionnaireWorkspaceFlags = { ...allFlagsOn, cohortReport: false };
 
-function renderNav(pathname: string, flags = allFlagsOn) {
+const tabHref = (id: string) =>
+  workspaceTabHref(QID, VID, QUESTIONNAIRE_WORKSPACE_TABS.find((t) => t.id === id)!);
+
+function renderNav(
+  pathname: string,
+  opts: { flags?: QuestionnaireWorkspaceFlags; status?: AppQuestionnaireStatus } = {}
+) {
   mockUsePathname.mockReturnValue(pathname);
-  const tabs = visibleWorkspaceTabs(flags);
-  return render(<QuestionnaireSubNav questionnaireId={QID} versionId={VID} tabs={tabs} />);
+  const groups = visibleWorkspaceGroups(opts.flags ?? allFlagsOn);
+  return render(
+    <QuestionnaireSubNav
+      questionnaireId={QID}
+      versionId={VID}
+      groups={groups}
+      status={opts.status ?? 'launched'}
+    />
+  );
 }
-
-// ─── Setup ────────────────────────────────────────────────────────────────────
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -91,168 +93,132 @@ beforeEach(() => {
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe('QuestionnaireSubNav', () => {
-  describe('link rendering', () => {
-    it('renders a link for every tab supplied', () => {
-      // Arrange: use the Overview href so one tab is active (avoids no-active noise)
-      const overviewHref = workspaceVersionBase(QID, VID);
-      renderNav(overviewHref);
-
-      const tabs = visibleWorkspaceTabs(allFlagsOn);
-
-      // Assert: one link per tab — verifies the map produced the right count
-      const links = screen.getAllByRole('link');
-      expect(links).toHaveLength(tabs.length);
-    });
-
-    it('renders each tab with the correct accessible label (tab.label)', () => {
-      // Arrange
-      const overviewHref = workspaceVersionBase(QID, VID);
-      renderNav(overviewHref);
-
-      // Assert: each visible tab label appears as link text
-      const visibleTabs = visibleWorkspaceTabs(allFlagsOn);
-      for (const tab of visibleTabs) {
-        expect(screen.getByRole('link', { name: tab.label })).toBeInTheDocument();
+  describe('top tier (lifecycle groups)', () => {
+    it('renders one link per lifecycle group', () => {
+      renderNav(workspaceVersionBase(QID, VID));
+      for (const label of GROUP_LABELS) {
+        expect(screen.getByRole('link', { name: label })).toBeInTheDocument();
       }
     });
 
-    it('builds the correct href for each tab using the real workspaceTabHref helper', () => {
-      // Arrange
-      const overviewHref = workspaceVersionBase(QID, VID);
-      renderNav(overviewHref);
-
-      // Assert: each link's href matches the expected workspace URL produced by
-      // the real helper — verifies the component wires up ids correctly
-      const visibleTabs = visibleWorkspaceTabs(allFlagsOn);
-      for (const tab of visibleTabs) {
-        const expectedHref = workspaceTabHref(QID, VID, tab);
-        const link = screen.getByRole('link', { name: tab.label });
-        // next/link renders an <a> whose href is the absolute URL in happy-dom
-        expect(link).toHaveAttribute('href', expectedHref);
-      }
+    it('points each group link at its first child tab', () => {
+      renderNav(workspaceVersionBase(QID, VID));
+      // Build's first child is Structure; Results' first child is Analytics.
+      expect(screen.getByRole('link', { name: 'Build' })).toHaveAttribute(
+        'href',
+        tabHref('structure')
+      );
+      expect(screen.getByRole('link', { name: 'Results' })).toHaveAttribute(
+        'href',
+        tabHref('analytics')
+      );
+      expect(screen.getByRole('link', { name: 'Distribute' })).toHaveAttribute(
+        'href',
+        tabHref('invitations')
+      );
     });
   });
 
-  describe('active tab (aria-current)', () => {
-    it('marks the matching tab as aria-current="page" when pathname equals its href', () => {
-      // Arrange: navigate to the Structure tab
-      const structureTab = QUESTIONNAIRE_WORKSPACE_TABS.find((t) => t.id === 'structure')!;
-      const structureHref = workspaceTabHref(QID, VID, structureTab);
-      renderNav(structureHref);
-
-      // Assert: the Structure link carries aria-current
-      const structureLink = screen.getByRole('link', { name: 'Structure' });
-      expect(structureLink).toHaveAttribute('aria-current', 'page');
+  describe('second tier (active group children)', () => {
+    it('does NOT render a second tier for a single-tab group (Overview)', () => {
+      renderNav(workspaceVersionBase(QID, VID));
+      // Overview is the active group but has only itself → no child row, so no
+      // Build/Distribute children leak into the DOM.
+      expect(screen.queryByRole('link', { name: 'Structure' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: 'Invitations' })).not.toBeInTheDocument();
     });
 
-    it('does not set aria-current on any other tab when one tab is active', () => {
-      // Arrange: navigate to the Invitations tab
-      const invitationsTab = QUESTIONNAIRE_WORKSPACE_TABS.find((t) => t.id === 'invitations')!;
-      const invitationsHref = workspaceTabHref(QID, VID, invitationsTab);
-      renderNav(invitationsHref);
-
-      // Assert: only the Invitations link is active; all others are not
-      const allLinks = screen.getAllByRole('link');
-      const activeLinks = allLinks.filter((l) => l.getAttribute('aria-current') === 'page');
-      expect(activeLinks).toHaveLength(1);
-      expect(activeLinks[0]).toHaveAttribute('href', invitationsHref);
-    });
-
-    it('marks the Overview tab active when pathname is exactly the version base', () => {
-      // Arrange: Overview href is the bare version base (segment = '')
-      const overviewHref = workspaceVersionBase(QID, VID);
-      renderNav(overviewHref);
-
-      // Assert
-      const overviewLink = screen.getByRole('link', { name: 'Overview' });
-      expect(overviewLink).toHaveAttribute('aria-current', 'page');
-    });
-
-    it('does NOT mark Overview active when pathname is a sub-path of the version base', () => {
-      // Arrange: pathname = version_base/structure — Overview has exact=true so
-      // it must not light up on sub-routes
-      const subPath = `${workspaceVersionBase(QID, VID)}/structure`;
-      renderNav(subPath);
-
-      // Assert: Overview is not active
-      const overviewLink = screen.getByRole('link', { name: 'Overview' });
-      expect(overviewLink).not.toHaveAttribute('aria-current');
-    });
-
-    it('marks a prefix-match tab active when pathname starts with its href', () => {
-      // Arrange: navigate to a deeper sub-path under analytics
-      const analyticsTab = QUESTIONNAIRE_WORKSPACE_TABS.find((t) => t.id === 'analytics')!;
-      const analyticsHref = workspaceTabHref(QID, VID, analyticsTab);
-      const deepPath = `${analyticsHref}/some-chart`;
-      renderNav(deepPath);
-
-      // Assert: Analytics link is active via prefix match
-      const analyticsLink = screen.getByRole('link', { name: 'Analytics' });
-      expect(analyticsLink).toHaveAttribute('aria-current', 'page');
-    });
-
-    it('does not mark any tab active when pathname does not match any tab href', () => {
-      // Arrange: completely unrelated path
-      renderNav('/admin/questionnaires');
-
-      // Assert: no link carries aria-current
-      const allLinks = screen.getAllByRole('link');
-      for (const link of allLinks) {
-        expect(link).not.toHaveAttribute('aria-current');
+    it("renders the active group's children when it has more than one tab", () => {
+      renderNav(tabHref('structure'));
+      // Build is active → its children appear in the second tier.
+      for (const label of ['Structure', 'Data slots', 'Evaluations', 'Extraction log']) {
+        expect(screen.getByRole('link', { name: label })).toBeInTheDocument();
       }
+    });
+
+    it('does not render children of non-active groups', () => {
+      renderNav(tabHref('structure'));
+      // Distribute / Results children must be absent while Build is active.
+      expect(screen.queryByRole('link', { name: 'Invitations' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: 'Analytics' })).not.toBeInTheDocument();
     });
   });
 
-  describe('flag-driven tab visibility', () => {
-    it('hides the Data Slots tab when the dataSlots flag is off', () => {
-      // Arrange: use flags with dataSlots disabled
-      const overviewHref = workspaceVersionBase(QID, VID);
-      renderNav(overviewHref, flagsAllOff);
-
-      // Assert: no "Data slots" link in the DOM
-      expect(screen.queryByRole('link', { name: 'Data slots' })).not.toBeInTheDocument();
+  describe('active state (aria-current)', () => {
+    it('marks the Overview group active on the exact version base', () => {
+      renderNav(workspaceVersionBase(QID, VID));
+      expect(screen.getByRole('link', { name: 'Overview' })).toHaveAttribute(
+        'aria-current',
+        'page'
+      );
     });
 
-    it('hides the Evaluations tab when the designEval flag is off', () => {
-      // Arrange
-      const overviewHref = workspaceVersionBase(QID, VID);
-      renderNav(overviewHref, flagsAllOff);
-
-      // Assert: no "Evaluations" link in the DOM
-      expect(screen.queryByRole('link', { name: 'Evaluations' })).not.toBeInTheDocument();
+    it('does NOT mark Overview active on a sub-route (exact match)', () => {
+      renderNav(tabHref('structure'));
+      expect(screen.getByRole('link', { name: 'Overview' })).not.toHaveAttribute('aria-current');
     });
 
-    it('shows the Data Slots and Evaluations tabs when their flags are on', () => {
-      // Arrange: all flags enabled
-      const overviewHref = workspaceVersionBase(QID, VID);
-      renderNav(overviewHref, allFlagsOn);
-
-      // Assert: both optional tabs are rendered
-      expect(screen.getByRole('link', { name: 'Data slots' })).toBeInTheDocument();
-      expect(screen.getByRole('link', { name: 'Evaluations' })).toBeInTheDocument();
+    it('marks both the active group and its active child', () => {
+      renderNav(tabHref('structure'));
+      expect(screen.getByRole('link', { name: 'Build' })).toHaveAttribute('aria-current', 'page');
+      expect(screen.getByRole('link', { name: 'Structure' })).toHaveAttribute(
+        'aria-current',
+        'page'
+      );
     });
 
-    it('renders tabs that have no flag guard regardless of flag state', () => {
-      // Tabs like Invitations, Structure, Analytics, Changes, Settings have no
-      // flag field — they must always appear when the component is rendered.
-      const overviewHref = workspaceVersionBase(QID, VID);
-      renderNav(overviewHref, flagsAllOff);
+    it('resolves the active group by prefix match on a deep sub-path', () => {
+      renderNav(`${tabHref('analytics')}/some-chart`);
+      expect(screen.getByRole('link', { name: 'Results' })).toHaveAttribute('aria-current', 'page');
+      expect(screen.getByRole('link', { name: 'Analytics' })).toHaveAttribute(
+        'aria-current',
+        'page'
+      );
+    });
+  });
 
-      // Assert: always-present tabs are still rendered with flags off
-      expect(screen.getByRole('link', { name: 'Structure' })).toBeInTheDocument();
-      expect(screen.getByRole('link', { name: 'Invitations' })).toBeInTheDocument();
+  describe('feature-flag visibility', () => {
+    it('drops Scoring + Report from the Results group when cohortReport is off', () => {
+      renderNav(tabHref('analytics'), { flags: cohortReportOff });
+      // Results is active; Analytics + Respondent report remain, Scoring/Report gone.
       expect(screen.getByRole('link', { name: 'Analytics' })).toBeInTheDocument();
-      expect(screen.getByRole('link', { name: 'Extraction log' })).toBeInTheDocument();
-      expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'Respondent report' })).toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: 'Scoring' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: 'Report' })).not.toBeInTheDocument();
+    });
+
+    it('still renders all five groups with cohortReport off (Results survives)', () => {
+      renderNav(workspaceVersionBase(QID, VID), { flags: cohortReportOff });
+      for (const label of GROUP_LABELS) {
+        expect(screen.getByRole('link', { name: label })).toBeInTheDocument();
+      }
+    });
+  });
+
+  describe('lifecycle dimming', () => {
+    it('dims Distribute + Results on a draft', () => {
+      renderNav(workspaceVersionBase(QID, VID), { status: 'draft' });
+      expect(screen.getByRole('link', { name: 'Distribute' })).toHaveClass('opacity-50');
+      expect(screen.getByRole('link', { name: 'Results' })).toHaveClass('opacity-50');
+      // Build / Overview / Settings are never dimmed.
+      expect(screen.getByRole('link', { name: 'Build' })).not.toHaveClass('opacity-50');
+    });
+
+    it('exposes a tooltip on a dimmed group explaining why', () => {
+      renderNav(workspaceVersionBase(QID, VID), { status: 'draft' });
+      expect(screen.getByRole('link', { name: 'Distribute' })).toHaveAttribute('title');
+    });
+
+    it('dims nothing on a launched questionnaire', () => {
+      renderNav(workspaceVersionBase(QID, VID), { status: 'launched' });
+      expect(screen.getByRole('link', { name: 'Distribute' })).not.toHaveClass('opacity-50');
+      expect(screen.getByRole('link', { name: 'Results' })).not.toHaveClass('opacity-50');
     });
   });
 
   describe('nav landmark', () => {
     it('renders a nav element with an accessible label', () => {
-      // Arrange
       renderNav(workspaceVersionBase(QID, VID));
-
-      // Assert: nav landmark is present with its aria-label
       expect(
         screen.getByRole('navigation', { name: /questionnaire sections/i })
       ).toBeInTheDocument();
