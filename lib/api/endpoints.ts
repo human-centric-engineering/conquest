@@ -352,6 +352,10 @@ export const API = {
       ROOT: '/api/v1/app/questionnaires',
       /** Read-only prompt library — every agent + the real prompt(s) it sends (GET). */
       prompts: '/api/v1/app/questionnaires/prompts',
+      /** Agent settings evaluation — current vs advisory model/temperature/cost per agent (GET). */
+      agentSettings: '/api/v1/app/questionnaires/agent-settings',
+      /** Explain one agent's settings with AI — narrative + optional suggestion (POST JSON). */
+      agentSettingsExplain: '/api/v1/app/questionnaires/agent-settings/explain',
       /** Compose a questionnaire from a plain-English brief (POST JSON — generative authoring). */
       compose: '/api/v1/app/questionnaires/compose',
       /** Streaming compose — watch the structure build via SSE (POST JSON). */

@@ -286,3 +286,19 @@ export const advisorLimiter = createRateLimiter({
   interval: ADVISOR_RATE_LIMIT_INTERVAL_MS,
   maxRequests: ADVISOR_RATE_LIMIT_MAX,
 });
+
+/**
+ * Agent Settings "Explain with AI" sub-cap. Each call is one reasoning-model
+ * structured completion explaining a single agent's settings, so it's the same
+ * paid class as the advisor. Capped at 20/min per admin, keyed on the admin user
+ * id who owns the spend.
+ */
+export const SETTINGS_ADVISOR_RATE_LIMIT_MAX = 20;
+
+/** Sliding-window length for {@link settingsAdvisorLimiter}, in milliseconds. */
+export const SETTINGS_ADVISOR_RATE_LIMIT_INTERVAL_MS = 60_000;
+
+export const settingsAdvisorLimiter = createRateLimiter({
+  interval: SETTINGS_ADVISOR_RATE_LIMIT_INTERVAL_MS,
+  maxRequests: SETTINGS_ADVISOR_RATE_LIMIT_MAX,
+});
