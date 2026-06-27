@@ -111,7 +111,7 @@ describe('UploadQuestionnaireDialog', () => {
 
   it('opens the dialog from the trigger and shows the file input with accepted types', async () => {
     await openDialog();
-    expect(fileInput()).toHaveAttribute('accept', '.pdf,.docx,.md,.txt');
+    expect(fileInput()).toHaveAttribute('accept', '.pdf,.docx,.md,.txt,.xlsx');
   });
 
   it('POSTs multipart FormData to the ingest endpoint and navigates to the new detail page', async () => {
@@ -299,6 +299,10 @@ describe('UploadQuestionnaireDialog', () => {
       screen.getByPlaceholderText('Leave blank to use the inferred goal'),
       'Assess readiness'
     );
+    await user.type(
+      screen.getByRole('textbox', { name: /extraction instructions/i }),
+      "Questions are in the Activities tab. Replace 'HPE' with 'our org'."
+    );
     await user.type(screen.getByRole('textbox', { name: /description/i }), 'New hires');
     await user.type(screen.getByRole('textbox', { name: /role/i }), 'employee');
     await user.type(screen.getByRole('textbox', { name: /locale/i }), 'en-GB');
@@ -318,6 +322,9 @@ describe('UploadQuestionnaireDialog', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     const fd = postedFormData(fetchMock);
     expect(fd.get('goal')).toBe('Assess readiness');
+    expect(fd.get('instructions')).toBe(
+      "Questions are in the Activities tab. Replace 'HPE' with 'our org'."
+    );
     expect(fd.get('audience.description')).toBe('New hires');
     expect(fd.get('audience.role')).toBe('employee');
     expect(fd.get('audience.locale')).toBe('en-GB');

@@ -46,6 +46,7 @@ import {
 import {
   EXTRACT_QUESTIONNAIRE_STRUCTURE_CAPABILITY_SLUG,
   EXTRACT_QUESTIONNAIRE_STRUCTURE_FUNCTION_DEFINITION,
+  MAX_INSTRUCTIONS_LENGTH,
 } from '@/lib/app/questionnaire/constants';
 import type { AudienceShape } from '@/lib/app/questionnaire/types';
 import {
@@ -101,6 +102,12 @@ const argsSchema = z.object({
   adminProvidedGoal: z.string().optional(),
   /** Admin-set audience fields — suppressed per field (admin-wins-per-field). */
   adminProvidedAudience: audienceShapeSchema.optional(),
+  /**
+   * Free-text extractor steering (does NOT suppress inference): e.g. which tab
+   * holds the questions, or a term to genericise. Same cap as the route boundary
+   * (shared constant) so the two validations can't drift.
+   */
+  adminProvidedInstructions: z.string().max(MAX_INSTRUCTIONS_LENGTH).optional(),
 });
 
 export type ExtractQuestionnaireStructureArgs = z.infer<typeof argsSchema>;
@@ -190,6 +197,9 @@ export class AppExtractQuestionnaireStructureCapability extends BaseCapability<
       ...(args.adminProvidedAudience !== undefined
         ? { adminProvidedAudience: redactedString('adminProvidedAudience') }
         : {}),
+      ...(args.adminProvidedInstructions !== undefined
+        ? { adminProvidedInstructions: redactedString('adminProvidedInstructions') }
+        : {}),
     };
 
     let preview: string;
@@ -261,6 +271,9 @@ export class AppExtractQuestionnaireStructureCapability extends BaseCapability<
       fileName: args.fileName,
       ...(args.mediaType !== undefined ? { mediaType: args.mediaType } : {}),
       ...(adminSupplied !== undefined ? { adminSupplied } : {}),
+      ...(args.adminProvidedInstructions !== undefined
+        ? { adminInstructions: args.adminProvidedInstructions }
+        : {}),
     });
 
     // 3. Structured call (parse → retry-once-at-temp-0 → cost-sum). No silent

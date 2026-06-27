@@ -18,6 +18,16 @@ import type { CapabilityFunctionDefinition } from '@/lib/orchestration/capabilit
 export const APP_QUESTIONNAIRES_FLAG = 'APP_QUESTIONNAIRES_ENABLED';
 
 /**
+ * Upper bound (characters) on the admin-supplied free-text extraction
+ * instructions attached to an upload/re-ingest. The single source of truth,
+ * shared by the multipart boundary parser (`upload-input.ts`, which throws a 400
+ * over-cap) and the extractor capability's Zod `argsSchema` — kept here so the
+ * two caps can never drift. Generous enough for a paragraph or two of steering,
+ * bounded so a pasted essay can't crowd the document out of the prompt.
+ */
+export const MAX_INSTRUCTIONS_LENGTH = 4_000;
+
+/**
  * Sub-flag gating the F4.1 **adaptive** selection strategy (LLM + pgvector).
  * Disabled by default: adaptive spends on embeddings + an LLM call per turn, so
  * an operator opts in deliberately. When off, the config editor hides the
@@ -117,6 +127,11 @@ export const EXTRACT_QUESTIONNAIRE_STRUCTURE_FUNCTION_DEFINITION: CapabilityFunc
         description:
           'Audience fields the admin set on upload. Inference is suppressed per supplied field.',
         additionalProperties: true,
+      },
+      adminProvidedInstructions: {
+        type: 'string',
+        description:
+          'Free-text steering for the extraction (which tab holds the questions, a term to genericise, etc.). Guidance only — does NOT suppress goal/audience inference.',
       },
     },
     required: ['documentText', 'fileName'],

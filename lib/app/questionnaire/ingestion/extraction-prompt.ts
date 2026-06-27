@@ -28,7 +28,68 @@ export interface BuildExtractionPromptInput {
   mediaType?: string;
   /** Fields the admin already set — the model must NOT infer these. */
   adminSupplied?: AdminSuppliedMetadata;
+  /**
+   * Free-text steering the admin attached to this upload. Guidance the model
+   * applies while extracting (e.g. "questions are in the Activities tab",
+   * "replace 'HPE' with a generic term") — it does not change the output
+   * contract. Injected inside a clearly-delimited block, with fence delimiters
+   * neutralised so the text can't break out of it.
+   */
+  adminInstructions?: string;
 }
+
+/**
+ * File extensions whose parsed text is a flattened spreadsheet (tab-per-table).
+ * Deliberately a SUPERSET of the questionnaire upload allowlist (which today is
+ * `.xlsx` only): the guidance is harmless prose if a format is never accepted,
+ * and listing the obvious tabular formats means adding `.csv`/`.xls` to the
+ * allowlist later won't silently ship them without spreadsheet guidance. NOTE:
+ * the upload pipeline only routes `.xlsx` through `flattenWorkbook`; adding
+ * another format here also requires a flatten/parse branch in `extract-pipeline.ts`.
+ */
+const SPREADSHEET_EXTENSIONS = ['.xlsx', '.xls', '.csv'];
+
+/**
+ * Neutralise Markdown fence delimiters in admin-supplied text so a pasted (or
+ * malicious) `--- END ADMIN INSTRUCTIONS ---` / document fence can't close the
+ * surrounding block early and smuggle a peer instruction or a fake document into
+ * the prompt. Any line whose first non-space characters are 3+ hyphens has them
+ * swapped for an em-dash — inert prose, never a fence.
+ */
+function neutralizeFences(text: string): string {
+  return text.replace(/^[ \t]*-{3,}/gm, '—');
+}
+
+/** True when the upload is a spreadsheet, by file-name extension (case-insensitive). */
+function isSpreadsheet(fileName: string): boolean {
+  const lower = fileName.toLowerCase();
+  return SPREADSHEET_EXTENSIONS.some((ext) => lower.endsWith(ext));
+}
+
+/**
+ * Heuristics (NOT rules) the model applies when the document is a flattened
+ * spreadsheet. A workbook is often relational rather than linear: one tab holds
+ * the questions, others hold the section/scoring/metadata they reference. These
+ * lines tell the model how to read that — it still decides what is actually a
+ * question, and the admin's instructions override any guess.
+ */
+const SPREADSHEET_GUIDANCE = `This document is a faithful dump of a spreadsheet: each \
+"## Sheet: <name>" block is one tab, rendered as a Markdown table with its first row as \
+headers. Read it as structured data, not prose:
+- Tabs usually relate to each other through shared ID / code columns (a value in one tab's \
+column reappears as a reference column in another). Follow those links to attach each \
+question to the right section/group.
+- Typically ONE tab holds the actual questions (often the longest column of sentence-like \
+text) while other tabs hold supporting data: section names, descriptions, scoring, or \
+campaign metadata. Use the supporting tabs to name and group sections — do not emit their \
+rows as questions.
+- ID, code, order, and weighting columns are structure, not question text. Never turn them \
+into questions.
+- A column that looks like an internal on/off flag (e.g. "Include", "Active") may be mostly \
+off across the sheet; do not silently drop rows because of it unless the admin instructions \
+or an unambiguous signal says to.
+- A "type" column (e.g. likertscale, comment) is a strong hint for each question's answer \
+type — map it onto the allowed types.`;
 
 /**
  * Dotted paths of the metadata fields an admin supplied, e.g. `['goal',
@@ -162,11 +223,23 @@ export function buildExtractionPrompt(input: BuildExtractionPromptInput): LlmMes
     .filter(Boolean)
     .join('\n');
 
+  // Spreadsheet reading heuristics — only when the upload is a flattened workbook.
+  const spreadsheetBlock = isSpreadsheet(input.fileName) ? `\n\n${SPREADSHEET_GUIDANCE}` : '';
+
+  // Admin steering — fenced so the model treats it as trusted instructions from
+  // the operator, distinct from the document content it must extract. It guides
+  // extraction but cannot override the required output shape.
+  const instructions = input.adminInstructions?.trim();
+  const adminBlock =
+    instructions && instructions.length > 0
+      ? `\n\n--- BEGIN ADMIN INSTRUCTIONS (apply these; they do not change the required output format) ---\n${neutralizeFences(instructions)}\n--- END ADMIN INSTRUCTIONS ---`
+      : '';
+
   return [
     { role: 'system', content: SYSTEM_RULES },
     {
       role: 'user',
-      content: `${header}\n\n--- BEGIN QUESTIONNAIRE DOCUMENT ---\n${input.documentText}\n--- END QUESTIONNAIRE DOCUMENT ---`,
+      content: `${header}${spreadsheetBlock}${adminBlock}\n\n--- BEGIN QUESTIONNAIRE DOCUMENT ---\n${input.documentText}\n--- END QUESTIONNAIRE DOCUMENT ---`,
     },
   ];
 }

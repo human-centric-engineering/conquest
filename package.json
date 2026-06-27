@@ -112,6 +112,7 @@
     "echarts": "^6.1.0",
     "echarts-for-react": "^3.0.6",
     "epub2": "^3.0.2",
+    "exceljs": "^4.4.0",
     "gpt-tokenizer": "^3.4.0",
     "jmespath": "^0.16.0",
     "jsdom": "^26.1.0",

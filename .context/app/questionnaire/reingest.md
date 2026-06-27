@@ -18,8 +18,12 @@ the structure-refresh counterpart to F1.1's create-from-scratch ingest.
 
 `POST /api/v1/app/questionnaires/:id/versions/:vid/reingest` — multipart upload,
 admin-only. Synchronous (parse → LLM extraction → transactional replace). Same
-form fields as the F1.1 ingest (`file`, `goal`, `audience.<field>`,
-`extractTables`).
+form fields as the F1.1 ingest (`file`, `goal`, `instructions`,
+`audience.<field>`, `extractTables`). `file` accepts `.xlsx` (flattened to
+Markdown by `flattenWorkbook`, same as ingest) and `instructions` carries
+free-text extractor steering — both inherited for free through the shared
+`parseAndGuardUpload` / `extractFromDocument` helpers. See
+[`ingestion.md`](./ingestion.md#spreadsheet-ingestion-xlsx).
 
 ### Pipeline (order is load-bearing)
 
