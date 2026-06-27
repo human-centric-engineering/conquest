@@ -163,14 +163,17 @@ describe('ConfigEditor', () => {
 
   it('renders every settings group heading', () => {
     setup();
-    expect(screen.getByText('Questions & completion')).toBeInTheDocument();
-    expect(screen.getByText('Respondent experience')).toBeInTheDocument();
-    expect(screen.getByText('Reasoning stream')).toBeInTheDocument();
-    expect(screen.getByText('Interviewer tone & persona')).toBeInTheDocument();
-    expect(screen.getByText('Access & invitations')).toBeInTheDocument();
-    expect(screen.getByText('Answer quality & safeguarding')).toBeInTheDocument();
-    expect(screen.getByText('Budget & limits')).toBeInTheDocument();
-    expect(screen.getByText('Session-start profile fields')).toBeInTheDocument();
+    // Scope to the settings content; the scroll-spy rail lists the same labels as
+    // sibling jump-links outside this container, so an unscoped getByText is ambiguous.
+    const content = within(document.getElementById('settings-sections')!);
+    expect(content.getByText('Questions & completion')).toBeInTheDocument();
+    expect(content.getByText('Respondent experience')).toBeInTheDocument();
+    expect(content.getByText('Reasoning stream')).toBeInTheDocument();
+    expect(content.getByText('Interviewer tone & persona')).toBeInTheDocument();
+    expect(content.getByText('Access & invitations')).toBeInTheDocument();
+    expect(content.getByText('Answer quality & safeguarding')).toBeInTheDocument();
+    expect(content.getByText('Budget & limits')).toBeInTheDocument();
+    expect(content.getByText('Session-start profile fields')).toBeInTheDocument();
   });
 
   // ── "Not yet saved" warning ──────────────────────────────────────────────────
@@ -661,7 +664,9 @@ describe('ConfigEditor', () => {
     // and the invitee field rows (6 rows × 2 = 12 switches). Profile field Required switch
     // comes after those. Use label text proximity inside the profile section.
     // Strategy: all profile-field switches are below the "Session-start profile fields" heading.
-    const sectionHeading = screen.getByText('Session-start profile fields');
+    const sectionHeading = within(document.getElementById('settings-sections')!).getByText(
+      'Session-start profile fields'
+    );
     const section = sectionHeading.closest('[class*="overflow-hidden"]') as HTMLElement;
     const requiredSwitch = within(section).getByRole('switch');
     fireEvent.click(requiredSwitch);

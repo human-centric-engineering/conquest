@@ -205,6 +205,18 @@ dynamic add/remove profile-fields list with a conditional comma-separated option
 input for `select` fields. Saving a config on a launched version forks a draft and
 redirects, handled by the shared `run` exactly as the other editor sections do.
 
+The panel is a single long scroll of ~10 labelled `SettingsGroup` cards (Questions
+& completion · Respondent experience · Intro screen · Reasoning stream · Preview
+tools · Interviewer tone · Access & invitations · Answer quality & safeguarding ·
+Budget & limits · Session-start profile fields). On wide screens a **sticky
+scroll-spy rail** (`components/admin/settings-section-rail.tsx`) sits beside it for
+wayfinding — nothing moves, the single scroll and Cmd-F still work. The rail
+**discovers its items from the DOM**: each `SettingsGroup` renders a Card with
+`id` + `data-settings-section` + `data-section-label`, and the rail lists every such
+card inside `#settings-sections`, so flag-gated sections (e.g. Intro screen) appear
+in the rail exactly when they render, with no duplicated visibility logic. The rail
+is generic and reusable for any long settings panel.
+
 ## Who consumes it
 
 F3.1 stores the settings; later phases read them. `costBudgetUsd` is **stored
