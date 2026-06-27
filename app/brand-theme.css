@@ -95,6 +95,17 @@
   font-family: var(--font-display-cq), Georgia, 'Times New Roman', serif;
 }
 
+/* Single source for the neutral white-label canvas background (mode-aware), shared
+ * by the respondent `--color-background` token and the <main> :has backdrop below —
+ * re-toning the canvas is now a one-line change, and the :has rule needs no separate
+ * dark variant. */
+:root {
+  --cq-respondent-canvas: #ffffff;
+}
+.dark {
+  --cq-respondent-canvas: #0a0a0a;
+}
+
 /* ==== Respondent (neutral white-label canvas) — light ====
  * Re-declares every token consumer set on <html> back to a clean neutral, so the
  * ConQuest brand stops at the chrome and the questionnaire's own `--app-*` brand is
@@ -112,7 +123,7 @@
   --color-border: #e4e4e7;
   --color-input: #e4e4e7;
   --color-ring: #a1a1aa;
-  --color-background: #ffffff;
+  --color-background: var(--cq-respondent-canvas);
   --color-foreground: #18181b;
   --color-card: #ffffff;
   --color-card-foreground: #18181b;
@@ -133,7 +144,7 @@
   --color-border: #27272a;
   --color-input: #27272a;
   --color-ring: #52525b;
-  --color-background: #0a0a0a;
+  --color-background: var(--cq-respondent-canvas);
   --color-foreground: #fafafa;
   --color-card: #18181b;
   --color-card-foreground: #fafafa;
@@ -159,11 +170,9 @@
  * cards), so the surrounding <main> — an ANCESTOR of the pin — still shows the
  * ConQuest cream by inheritance and can't be reset that way. Paint <main> neutral
  * when it HOSTS a respondent surface (`:has`), so the white-label area reads as one
- * clean zone distinct from the ConQuest header / footer. Values match the respondent
- * `--color-background`; the header/footer sit outside <main> and stay ConQuest. */
+ * clean zone distinct from the ConQuest header / footer. Shares `--cq-respondent-canvas`
+ * with the respondent token above; the header/footer sit outside <main> and stay
+ * ConQuest. */
 main:has([data-surface='respondent']) {
-  background-color: #ffffff;
-}
-.dark main:has([data-surface='respondent']) {
-  background-color: #0a0a0a;
+  background-color: var(--cq-respondent-canvas);
 }

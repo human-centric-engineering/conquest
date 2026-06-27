@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import { Fraunces, Hanken_Grotesk } from 'next/font/google';
 import Link from 'next/link';
 import {
   ArrowRight,
@@ -29,17 +28,6 @@ import {
 } from 'lucide-react';
 import shared from '@/components/app/marketing/conquest-marketing.module.css';
 import styles from '@/app/(public)/pricing/pricing.module.css';
-
-const display = Fraunces({
-  subsets: ['latin'],
-  variable: '--font-display',
-  display: 'swap',
-});
-const sans = Hanken_Grotesk({
-  subsets: ['latin'],
-  variable: '--font-sans-cq',
-  display: 'swap',
-});
 
 const metaDescription =
   'ConQuest pricing: self-serve SaaS subscriptions to turn questionnaires into conversations, plus bespoke implementations that build deep analysis, narration, charting and reporting around the ConQuest core.';
@@ -446,7 +434,7 @@ const faqs = [
  */
 export default function PricingPage() {
   return (
-    <div className={`${display.variable} ${sans.variable} ${shared.page}`}>
+    <div className={shared.page}>
       {/* ---------------- Hero ---------------- */}
       <header className={shared.hero}>
         <div className={`${shared.brandLockup} ${shared.rise}`}>

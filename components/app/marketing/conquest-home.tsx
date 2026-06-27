@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import { Fraunces, Hanken_Grotesk } from 'next/font/google';
 import Link from 'next/link';
 import {
   ArrowRight,
@@ -41,17 +40,6 @@ import {
   Network,
 } from 'lucide-react';
 import styles from '@/components/app/marketing/conquest-marketing.module.css';
-
-const display = Fraunces({
-  subsets: ['latin'],
-  variable: '--font-display',
-  display: 'swap',
-});
-const sans = Hanken_Grotesk({
-  subsets: ['latin'],
-  variable: '--font-sans-cq',
-  display: 'swap',
-});
 
 const metaDescription =
   'ConQuest turns any questionnaire, survey or assessment into a natural conversation: the structure of a form with the depth of a conversation. Higher completion, richer data, less bias.';
@@ -371,7 +359,7 @@ const faqs = [
  */
 export default function ConquestHome() {
   return (
-    <div className={`${display.variable} ${sans.variable} ${styles.page}`}>
+    <div className={styles.page}>
       {/* ---------------- Hero ---------------- */}
       <header className={styles.hero}>
         <div className={`${styles.brandLockup} ${styles.rise}`}>

@@ -147,7 +147,7 @@ export default function ContactPage() {
                   Our Pro Support package includes dedicated email support, priority bug fixes, and
                   architecture review sessions.
                 </p>
-                <Link href="/#pricing" className="text-primary text-sm font-medium hover:underline">
+                <Link href="/pricing" className="text-primary text-sm font-medium hover:underline">
                   View Support Options
                 </Link>
               </CardContent>
