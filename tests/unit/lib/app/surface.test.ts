@@ -1,0 +1,30 @@
+import { describe, it, expect } from 'vitest';
+
+import { classifySurface } from '@/lib/app/surface';
+
+/**
+ * `classifySurface` is the single predicate shared by proxy.ts (server, sets
+ * `x-surface`) and SurfaceSync (client, keeps `<html data-surface>` synced). It
+ * must agree with itself across both, so the behaviour is pinned here.
+ */
+describe('classifySurface', () => {
+  it('classifies /admin and its descendants as admin', () => {
+    expect(classifySurface('/admin')).toBe('admin');
+    expect(classifySurface('/admin/')).toBe('admin');
+    expect(classifySurface('/admin/questionnaires')).toBe('admin');
+    expect(classifySurface('/admin/questionnaires/123/v/456/settings')).toBe('admin');
+  });
+
+  it('classifies everything else as consumer', () => {
+    expect(classifySurface('/')).toBe('consumer');
+    expect(classifySurface('/login')).toBe('consumer');
+    expect(classifySurface('/dashboard')).toBe('consumer');
+    expect(classifySurface('/q/abc123')).toBe('consumer');
+    expect(classifySurface('/questionnaires/sess_1')).toBe('consumer');
+  });
+
+  it('does NOT match a /admin-prefixed sibling (e.g. /administrators)', () => {
+    expect(classifySurface('/administrators')).toBe('consumer');
+    expect(classifySurface('/admin-tools')).toBe('consumer');
+  });
+});

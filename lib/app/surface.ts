@@ -14,5 +14,7 @@
 export type Surface = 'admin' | 'consumer';
 
 export function classifySurface(pathname: string): Surface {
-  return pathname.startsWith('/admin') ? 'admin' : 'consumer';
+  // Exact `/admin` or a `/admin/` descendant — not a `/admin`-prefixed sibling
+  // like `/administrators`, which is consumer.
+  return pathname === '/admin' || pathname.startsWith('/admin/') ? 'admin' : 'consumer';
 }
