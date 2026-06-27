@@ -1,0 +1,99 @@
+/* app/brand-theme.css
+ *
+ * Fork-owned ConQuest consumer palette. Scoped to consumer surfaces only; admin
+ * (`[data-surface='admin']`, set per-request in proxy.ts) keeps the Sunrise
+ * defaults straight from app/globals.css, including future upstream palette
+ * tweaks. Imported once in app/layout.tsx AFTER globals.css.
+ *
+ * Mechanism: proxy.ts classifies each request and sets `x-surface`; the root
+ * layout puts it on <html data-surface>. Because the marker is on <html>, every
+ * body-portaled Radix overlay (dialog / dropdown / popover / toast) inherits the
+ * tokens too — that's the whole reason it lives at the root and not on the
+ * route-group wrappers.
+ *
+ * Two scopes share the colour tokens:
+ *   - `consumer`    — marketing, account, auth (marker on <html>).
+ *   - `respondent`  — the questionnaire chat, which PINS this on its own wrapper
+ *                     so it renders identically live (/q) and in admin preview,
+ *                     and so per-questionnaire `--app-*` branding layers on top.
+ *                     (See components/.../chat — increment 2.)
+ *
+ * Only redeclare the tokens we actually change; omit the rest (e.g. destructive)
+ * to inherit the Sunrise default. Selectors are intentionally UNLAYERED, so they
+ * beat globals.css's `@theme` (:root) / `@layer base` (.dark) by layer order.
+ *
+ * Dark mode — note the two selector FORMS, they are not interchangeable:
+ *   - consumer:   `[data-surface='consumer'].dark`  — `.dark` is on the SAME
+ *                 element (<html>), so it's a compound selector.
+ *   - respondent: `.dark [data-surface='respondent']` — the pin is a DESCENDANT
+ *                 of <html>.dark, so it's a descendant selector.
+ *   Drop either dark block and that surface renders light-on-light in dark mode.
+ *
+ * Palette: the established ConQuest identity from the about-conquest / pricing
+ * pages, where the CTA FLIPS with the surface — on cream it's a deep-navy button
+ * ("See the plans"), on navy it's a gold button ("Explore custom builds"). Shadcn
+ * ties buttons, links AND icon chips all to `--color-primary`, so we flip that one
+ * token by mode: primary = deep navy (#0a1a3a) in light, GOLD (#ffc73a) in dark.
+ * Result: accents read navy on cream and gold on navy, matching the reference.
+ * The bright ConQuest blue (#2f6bff) is the focus-ring / eyebrow accent. Gold
+ * always pairs with ink text, never white (gold + white fails contrast). Dark
+ * mode is built on deep navy, not a warm neutral.
+ */
+
+/* ---- Consumer / respondent brand — light ---- */
+[data-surface='consumer'],
+[data-surface='respondent'] {
+  --color-primary: #0a1a3a; /* deep ConQuest navy — the light-surface CTA ("See the plans") */
+  --color-primary-foreground: #fbf6ec; /* cream text on navy */
+  --color-secondary: #f4ecdb; /* cream-2 — neutral; gold is a deliberate accent, not a blanket token */
+  --color-secondary-foreground: #16213d;
+  --color-accent: #f4ecdb; /* cream-2 — subtle hover surface */
+  --color-accent-foreground: #16213d;
+  --color-muted: #f4ecdb;
+  --color-muted-foreground: #586079;
+  --color-border: #e7dccd; /* warm hairline */
+  --color-input: #e7dccd;
+  --color-ring: #2f6bff; /* bright ConQuest blue — focus accent */
+  --color-background: #fbf6ec; /* cream */
+  --color-foreground: #16213d; /* ink */
+  --color-card: #fffcf5; /* paper */
+  --color-card-foreground: #16213d;
+  --color-popover: #fffcf5;
+  --color-popover-foreground: #16213d;
+  /* --color-destructive / -foreground: left as Sunrise default (red) */
+}
+
+/* ---- Consumer / respondent brand — dark (see selector-form note above) ---- */
+[data-surface='consumer'].dark,
+.dark [data-surface='respondent'] {
+  --color-primary: #ffc73a; /* gold — the dark-surface CTA ("Explore custom builds") */
+  --color-primary-foreground: #0a1a3a; /* deep navy text on gold */
+  --color-secondary: #112650; /* ink-700 — elevated navy, neutral secondary */
+  --color-secondary-foreground: #f2eede;
+  --color-accent: #112650; /* ink-700 — elevated navy surface */
+  --color-accent-foreground: #f2eede;
+  --color-muted: #112650;
+  --color-muted-foreground: #aab4cd; /* t-cream-muted */
+  --color-border: #1f2f52;
+  --color-input: #1f2f52;
+  --color-ring: #5b8bff; /* blue-bright — focus accent on navy */
+  --color-background: #0a1a3a; /* deep navy — dark mode built on the brand blue, not brown */
+  --color-foreground: #f2eede; /* cream */
+  --color-card: #112650; /* ink-700 */
+  --color-card-foreground: #f2eede;
+  --color-popover: #112650;
+  --color-popover-foreground: #f2eede;
+}
+
+/* ---- Typography reskin — consumer surfaces only ----
+ * The fonts are loaded once in app/layout.tsx (Fraunces → --font-display-cq,
+ * Hanken Grotesk → --font-sans-cq) and exposed app-wide, but APPLIED only here:
+ * admin keeps its platform sans, and `respondent` is intentionally excluded so a
+ * white-labelled questionnaire isn't forced into ConQuest's editorial serif.
+ * Body runs on Hanken; the display-scale headings (h1–h3) carry Fraunces. */
+[data-surface='consumer'] {
+  font-family: var(--font-sans-cq), ui-sans-serif, system-ui, sans-serif;
+}
+[data-surface='consumer'] :is(h1, h2, h3) {
+  font-family: var(--font-display-cq), Georgia, 'Times New Roman', serif;
+}

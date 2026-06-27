@@ -2,13 +2,33 @@ import type { Metadata } from 'next';
 import { Suspense } from 'react';
 import { headers } from 'next/headers';
 import '@/app/globals.css';
+import '@/app/brand-theme.css'; // fork-owned consumer palette; must cascade after globals
+import { Fraunces, Hanken_Grotesk } from 'next/font/google';
 import { ThemeProvider } from '@/hooks/use-theme';
 import { ErrorHandlingProvider } from '@/app/error-handling-provider';
 import { ConsentProvider } from '@/lib/consent';
 import { CookieBanner } from '@/components/cookie-consent';
 import { AnalyticsProvider } from '@/lib/analytics';
 import { AnalyticsScripts, UserIdentifier, PageTracker } from '@/components/analytics';
+import { SurfaceSync } from '@/components/surface-sync';
 import { BRAND } from '@/lib/brand';
+
+// ConQuest brand fonts, loaded once and exposed app-wide as CSS variables. They
+// are APPLIED only on consumer surfaces (see app/brand-theme.css); admin keeps
+// its default sans, and the respondent surface stays neutral so per-questionnaire
+// branding isn't overridden by the editorial serif. Variable names match the
+// wordmark + marketing pages, so the ConQuest lockup renders in Fraunces
+// everywhere now, not just where a page happened to load the font inline.
+const displayFont = Fraunces({
+  subsets: ['latin'],
+  variable: '--font-display-cq',
+  display: 'swap',
+});
+const bodyFont = Hanken_Grotesk({
+  subsets: ['latin'],
+  variable: '--font-sans-cq',
+  display: 'swap',
+});
 
 export const metadata: Metadata = {
   title: `${BRAND.name} - Next.js Starter`,
@@ -32,9 +52,18 @@ export default async function RootLayout({
 }>) {
   const headersList = await headers();
   const nonce = headersList.get('x-nonce') ?? undefined;
+  // Rendering surface, classified per-request in proxy.ts. Drives the fork's
+  // brand-theme.css: `consumer` gets the ConQuest palette, `admin` stays on the
+  // Sunrise defaults. On <html>, so body-portaled overlays inherit it too.
+  const surface = headersList.get('x-surface') ?? 'consumer';
 
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html
+      lang="en"
+      data-surface={surface}
+      className={`${displayFont.variable} ${bodyFont.variable}`}
+      suppressHydrationWarning
+    >
       <head>
         <script
           nonce={nonce}
@@ -59,6 +88,7 @@ export default async function RootLayout({
         />
       </head>
       <body suppressHydrationWarning>
+        <SurfaceSync />
         <ErrorHandlingProvider>
           <ConsentProvider>
             <AnalyticsProvider>
