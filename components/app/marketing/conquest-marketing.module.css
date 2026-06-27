@@ -54,6 +54,60 @@
   text-rendering: optimizeLegibility;
 }
 
+/*
+ * Dark mode. The theme toggle puts `.dark` on <html> (same element as
+ * data-surface='consumer'), matching app/brand-theme.css. We re-map the palette
+ * tokens — every class below resolves through these custom properties, so the
+ * whole page (and the pricing page, which reuses `.page`) flips from one block.
+ *
+ * Depth model mirrors light mode, inverted: the always-dark "ink" sections push
+ * BELOW the page (near-black navy) to stay dramatic, the page sits at the brand's
+ * canonical dark bg (so it meets the consumer header/footer seamlessly), and
+ * "paper" cards rise ABOVE it as elevated navy. Marigold + cobalt are brand
+ * constants and carry over; cobalt is brightened a step for contrast on navy.
+ */
+:global(html.dark) .page {
+  /* Ink — pushed deeper than the page so the dark bands stay dramatic */
+  --ink: #060f24;
+  --ink-700: #0e1f44;
+  --ink-600: #16315f;
+  --ink-glass: rgba(255, 255, 255, 0.05);
+
+  /* Cobalt accent — brightened a step for contrast on navy */
+  --blue: #5b8bff;
+  --blue-bright: #84a8ff;
+
+  /* Marigold — brand constant, unchanged */
+  --yellow: #ffc73a;
+  --yellow-strong: #ffb300;
+  --yellow-soft: #ffe7a3;
+
+  /* Paper → elevated navy surfaces (cards lift above the page) */
+  --cream: #0a1a3a; /* page base — matches the consumer chrome dark bg */
+  --cream-2: #0c2049; /* subtle band elevation for the cream2 gradient */
+  --paper: #13294f; /* cards */
+
+  /* Text — flipped to cream on navy */
+  --t-ink: #f2eede;
+  --t-muted: #a3adc6;
+  --t-cream: #f2eede;
+  --t-cream-muted: #aab4cd;
+
+  /* Lines flip to light hairlines; shadows deepen to read on dark */
+  --line: rgba(255, 255, 255, 0.1);
+  --line-ink: rgba(255, 255, 255, 0.12);
+  --shadow: 0 24px 60px -28px rgba(0, 0, 0, 0.6);
+  --shadow-sm: 0 10px 30px -18px rgba(0, 0, 0, 0.55);
+
+  background: var(--cream);
+  color: var(--t-ink);
+}
+
+/* The grain reads as light noise on dark — lift it a touch for the same texture */
+:global(html.dark) .page::after {
+  opacity: 0.05;
+}
+
 /* Subtle film grain across the whole page */
 .page::after {
   content: '';
@@ -541,6 +595,10 @@
 .chipYellow {
   background: rgba(255, 179, 0, 0.16);
   color: #a8730a;
+}
+/* Dark amber is illegible on navy — use a light marigold glyph instead */
+:global(html.dark) .chipYellow {
+  color: #ffce5a;
 }
 .cardTitle {
   font-family: var(--font-display-cq), Georgia, serif;
