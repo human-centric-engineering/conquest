@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import { Fraunces, Hanken_Grotesk } from 'next/font/google';
 import Link from 'next/link';
 import {
   ArrowRight,
@@ -40,24 +39,15 @@ import {
   Gauge,
   Network,
 } from 'lucide-react';
-import styles from '@/app/(public)/about-conquest/about-conquest.module.css';
-
-const display = Fraunces({
-  subsets: ['latin'],
-  variable: '--font-display',
-  display: 'swap',
-});
-const sans = Hanken_Grotesk({
-  subsets: ['latin'],
-  variable: '--font-sans-cq',
-  display: 'swap',
-});
+import styles from '@/components/app/marketing/conquest-marketing.module.css';
 
 const metaDescription =
   'ConQuest turns any questionnaire, survey or assessment into a natural conversation: the structure of a form with the depth of a conversation. Higher completion, richer data, less bias.';
 
 export const metadata: Metadata = {
-  title: 'About ConQuest',
+  // Homepage title — `absolute` so it isn't suffixed by the layout's
+  // `%s - ConQuest` template.
+  title: { absolute: 'ConQuest — The structure of a form. The depth of a conversation.' },
   description: metaDescription,
   openGraph: {
     title: 'ConQuest: The structure of a form. The depth of a conversation.',
@@ -367,9 +357,9 @@ const faqs = [
  * Self-contained bespoke design (own palette + Fraunces/Hanken type), kept
  * deliberately separate from the inherited Sunrise /about page.
  */
-export default function AboutConquestPage() {
+export default function ConquestHome() {
   return (
-    <div className={`${display.variable} ${sans.variable} ${styles.page}`}>
+    <div className={styles.page}>
       {/* ---------------- Hero ---------------- */}
       <header className={styles.hero}>
         <div className={`${styles.brandLockup} ${styles.rise}`}>

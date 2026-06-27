@@ -1,0 +1,178 @@
+/* app/brand-theme.css
+ *
+ * Fork-owned theming for non-admin surfaces. Admin (`[data-surface='admin']`,
+ * set per-request in proxy.ts) keeps the Sunrise defaults straight from
+ * app/globals.css, including future upstream tweaks. Imported once in
+ * app/layout.tsx AFTER globals.css. Selectors are intentionally UNLAYERED, so
+ * they beat globals.css's `@theme` (:root) / `@layer base` (.dark) by layer order.
+ *
+ * Mechanism: proxy.ts classifies each request and sets `x-surface`; the root
+ * layout puts it on `<html data-surface>`. Because the marker is on `<html>`,
+ * body-portaled Radix overlays (dialog / dropdown / popover / toast) and the
+ * cookie modal inherit it too — the reason it lives at the root.
+ *
+ * TWO surfaces, DIFFERENT roles:
+ *   - `consumer`   — marketing, account, auth, and the questionnaire page CHROME
+ *                    (ConQuest header / footer / cookie modal). The ConQuest brand:
+ *                    cream + ink, navy/gold CTA, Fraunces display.
+ *   - `respondent` — the CENTRAL questionnaire area (chat + answers), pinned on the
+ *                    BrandThemeProvider wrapper (components/.../chat). A NEUTRAL
+ *                    white-label canvas: the ConQuest brand deliberately stops here
+ *                    so each questionnaire's own `--app-*` brand (CTA / accent /
+ *                    surface band / logo) is the ONLY identity inside. Renders the
+ *                    same live (/q) and logged-in (/questionnaires). Demo brands set
+ *                    accents on this canvas, not a full palette/fonts — the neutral
+ *                    base is the point.
+ *
+ * Only redeclare the tokens we change; omit the rest (e.g. destructive) to inherit.
+ *
+ * Dark mode — note the two selector FORMS, they are not interchangeable:
+ *   - consumer:   `[data-surface='consumer'].dark`  — `.dark` is on the SAME
+ *                 element (<html>), so it's a compound selector.
+ *   - respondent: `.dark [data-surface='respondent']` — the pin is a DESCENDANT
+ *                 of <html>.dark, so it's a descendant selector. It also re-declares
+ *                 every token consumer set on <html>, since those inherit DOWN into
+ *                 the respondent subtree and must be reset to the neutral canvas.
+ *
+ * Consumer palette: the about-conquest / pricing identity, where the CTA FLIPS with
+ * the surface — deep-navy on cream ("See the plans"), gold on navy ("Explore custom
+ * builds"). Shadcn ties buttons, links AND icon chips to `--color-primary`, so we
+ * flip that one token by mode: primary = deep navy (#0a1a3a) light, GOLD (#ffc73a)
+ * dark. Bright blue (#2f6bff) is the focus-ring accent. Gold always pairs with ink,
+ * never white (gold + white fails contrast).
+ */
+
+/* ==== Consumer (ConQuest brand) — light ==== */
+[data-surface='consumer'] {
+  --color-primary: #0a1a3a; /* deep ConQuest navy — the light-surface CTA ("See the plans") */
+  --color-primary-foreground: #fbf6ec; /* cream text on navy */
+  --color-secondary: #f4ecdb; /* cream-2 — neutral; gold is a deliberate accent, not a blanket token */
+  --color-secondary-foreground: #16213d;
+  --color-accent: #f4ecdb; /* cream-2 — subtle hover surface */
+  --color-accent-foreground: #16213d;
+  --color-muted: #f4ecdb;
+  --color-muted-foreground: #586079;
+  --color-border: #e7dccd; /* warm hairline */
+  --color-input: #e7dccd;
+  --color-ring: #2f6bff; /* bright ConQuest blue — focus accent */
+  --color-background: #fbf6ec; /* cream */
+  --color-foreground: #16213d; /* ink */
+  --color-card: #fffcf5; /* paper */
+  --color-card-foreground: #16213d;
+  --color-popover: #fffcf5;
+  --color-popover-foreground: #16213d;
+  /* --color-destructive / -foreground: left as Sunrise default (red) */
+}
+
+/* ==== Consumer (ConQuest brand) — dark (compound: .dark is on <html>) ==== */
+[data-surface='consumer'].dark {
+  --color-primary: #ffc73a; /* gold — the dark-surface CTA ("Explore custom builds") */
+  --color-primary-foreground: #0a1a3a; /* deep navy text on gold */
+  --color-secondary: #112650; /* ink-700 — elevated navy, neutral secondary */
+  --color-secondary-foreground: #f2eede;
+  --color-accent: #112650; /* ink-700 — elevated navy surface */
+  --color-accent-foreground: #f2eede;
+  --color-muted: #112650;
+  --color-muted-foreground: #aab4cd; /* t-cream-muted */
+  --color-border: #1f2f52;
+  --color-input: #1f2f52;
+  --color-ring: #5b8bff; /* blue-bright — focus accent on navy */
+  --color-background: #0a1a3a; /* deep navy — dark mode built on the brand blue, not brown */
+  --color-foreground: #f2eede; /* cream */
+  --color-card: #112650; /* ink-700 */
+  --color-card-foreground: #f2eede;
+  --color-popover: #112650;
+  --color-popover-foreground: #f2eede;
+}
+
+/* ==== Consumer typography ====
+ * Fonts loaded once in app/layout.tsx (Fraunces → --font-display-cq, Hanken
+ * Grotesk → --font-sans-cq) and exposed app-wide, applied only here. */
+[data-surface='consumer'] {
+  font-family: var(--font-sans-cq), ui-sans-serif, system-ui, sans-serif;
+}
+[data-surface='consumer'] :is(h1, h2, h3) {
+  font-family: var(--font-display-cq), Georgia, 'Times New Roman', serif;
+}
+
+/* Single source for the neutral white-label canvas background (mode-aware), shared
+ * by the respondent `--color-background` token and the <main> :has backdrop below —
+ * re-toning the canvas is now a one-line change, and the :has rule needs no separate
+ * dark variant. */
+:root {
+  --cq-respondent-canvas: #ffffff;
+}
+.dark {
+  --cq-respondent-canvas: #0a0a0a;
+}
+
+/* ==== Respondent (neutral white-label canvas) — light ====
+ * Re-declares every token consumer set on <html> back to a clean neutral, so the
+ * ConQuest brand stops at the chrome and the questionnaire's own `--app-*` brand is
+ * the only colour inside. `--color-primary` is a neutral placeholder; the chat reads
+ * `var(--app-accent-color, var(--color-primary))`, so the demo brand drives accents. */
+[data-surface='respondent'] {
+  --color-primary: #18181b; /* neutral; --app-accent-color overrides where it matters */
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #f4f4f5;
+  --color-secondary-foreground: #18181b;
+  --color-accent: #f4f4f5;
+  --color-accent-foreground: #18181b;
+  --color-muted: #f4f4f5;
+  --color-muted-foreground: #71717a;
+  --color-border: #e4e4e7;
+  --color-input: #e4e4e7;
+  --color-ring: #a1a1aa;
+  --color-background: var(--cq-respondent-canvas);
+  --color-foreground: #18181b;
+  --color-card: #ffffff;
+  --color-card-foreground: #18181b;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #18181b;
+}
+
+/* ==== Respondent (neutral white-label canvas) — dark (descendant of <html>.dark) ==== */
+.dark [data-surface='respondent'] {
+  --color-primary: #fafafa;
+  --color-primary-foreground: #18181b;
+  --color-secondary: #27272a;
+  --color-secondary-foreground: #fafafa;
+  --color-accent: #27272a;
+  --color-accent-foreground: #fafafa;
+  --color-muted: #18181b;
+  --color-muted-foreground: #a1a1aa;
+  --color-border: #27272a;
+  --color-input: #27272a;
+  --color-ring: #52525b;
+  --color-background: var(--cq-respondent-canvas);
+  --color-foreground: #fafafa;
+  --color-card: #18181b;
+  --color-card-foreground: #fafafa;
+  --color-popover: #18181b;
+  --color-popover-foreground: #fafafa;
+}
+
+/* ==== Respondent typography reset ====
+ * Neutralise the inherited consumer Hanken body + Fraunces headings so the central
+ * area reads as a clean white-label canvas, not ConQuest's editorial type. */
+[data-surface='respondent'],
+[data-surface='respondent'] :is(h1, h2, h3, h4, h5, h6) {
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
+}
+
+/* ==== Respondent backdrop ====
+ * The respondent pin only re-tokenises its own subtree (the BrandThemeProvider
+ * cards), so the surrounding <main> — an ANCESTOR of the pin — still shows the
+ * ConQuest cream by inheritance and can't be reset that way. Paint <main> neutral
+ * when it HOSTS a respondent surface (`:has`), so the white-label area reads as one
+ * clean zone distinct from the ConQuest header / footer. Shares `--cq-respondent-canvas`
+ * with the respondent token above; the header/footer sit outside <main> and stay
+ * ConQuest. */
+main:has([data-surface='respondent']) {
+  background-color: var(--cq-respondent-canvas);
+}

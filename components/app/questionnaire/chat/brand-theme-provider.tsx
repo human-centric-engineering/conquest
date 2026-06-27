@@ -54,7 +54,13 @@ export function BrandThemeProvider({ theme, className, children }: BrandThemePro
   const showBand = hasSurface || Boolean(theme.logoUrl);
 
   return (
-    <div style={style} className={cn('flex h-full flex-col', className)}>
+    // `data-surface="respondent"` re-scopes the central questionnaire area to a
+    // NEUTRAL canvas (see app/brand-theme.css): the consumer ConQuest brand
+    // (cream / Fraunces) stops here, so the demo client's own `--app-*` brand is
+    // the only identity inside, while the surrounding header / footer / cookie
+    // modal stay ConQuest. Renders identically live (/q) and logged-in
+    // (/questionnaires) since both wrap their chat in this provider.
+    <div data-surface="respondent" style={style} className={cn('flex h-full flex-col', className)}>
       {showBand && (
         <div
           className={cn(

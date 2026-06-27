@@ -1,11 +1,12 @@
 /*
  * Pricing: bespoke marketing page styles.
  *
- * Sibling to the About ConQuest page. The page wrapper reuses
- * about-conquest.module.css (`.page`) for the shared palette, type system and
- * layout primitives (section, eyebrow, h2, lead, buttons, split panels, feat
- * grid, faq, finalCta). The CSS custom properties defined on `.page` cascade
- * into every class below, so all colours here resolve to the same tokens.
+ * The page wrapper reuses the shared ConQuest marketing module
+ * (components/app/marketing/conquest-marketing.module.css, `.page`) for the
+ * shared palette, type system and layout primitives (section, eyebrow, h2, lead,
+ * buttons, split panels, feat grid, faq, finalCta). The CSS custom properties
+ * defined on `.page` cascade into every class below, so all colours here resolve
+ * to the same tokens.
  *
  * This module only carries the genuinely new pieces: pricing tier cards, the
  * "included in every plan" strip, dark glass cards for the on-ink sections, and
@@ -49,7 +50,7 @@
   animation: pulse 2s infinite;
 }
 .coreTitle {
-  font-family: var(--font-display), Georgia, serif;
+  font-family: var(--font-display-cq), Georgia, serif;
   font-weight: 600;
   font-size: 24px;
   letter-spacing: -0.015em;
@@ -170,7 +171,7 @@
 .tierName {
   position: relative;
   z-index: 1;
-  font-family: var(--font-display), Georgia, serif;
+  font-family: var(--font-display-cq), Georgia, serif;
   font-weight: 600;
   font-size: 22px;
   letter-spacing: -0.01em;
@@ -198,7 +199,7 @@
   align-items: baseline;
   gap: 5px;
   margin: 22px 0 2px;
-  font-family: var(--font-display), Georgia, serif;
+  font-family: var(--font-display-cq), Georgia, serif;
 }
 .tierCurrency {
   font-size: 22px;
@@ -316,7 +317,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  font-family: var(--font-display), Georgia, serif;
+  font-family: var(--font-display-cq), Georgia, serif;
   font-weight: 600;
   font-size: 20px;
   letter-spacing: -0.01em;
@@ -394,7 +395,7 @@
   height: 22px;
 }
 .darkTitle {
-  font-family: var(--font-display), Georgia, serif;
+  font-family: var(--font-display-cq), Georgia, serif;
   font-weight: 600;
   font-size: 20px;
   letter-spacing: -0.01em;
@@ -492,7 +493,7 @@
   height: 21px;
 }
 .clusterTitle {
-  font-family: var(--font-display), Georgia, serif;
+  font-family: var(--font-display-cq), Georgia, serif;
   font-weight: 600;
   font-size: 19px;
   letter-spacing: -0.01em;

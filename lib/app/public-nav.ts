@@ -25,31 +25,27 @@
  *
  * Full guide: CUSTOMIZATION.md §4 · lib/public-nav/types.ts
  */
-import { Home, Info, Mail, MessagesSquare, Tag } from 'lucide-react';
+import { Home, Mail, Tag } from 'lucide-react';
 
 import type { PublicNavItem } from '@/lib/public-nav/types';
 
 /**
- * Header nav. Replaces the Sunrise default (Home / About / Contact) wholesale
- * with the ConQuest marketing set — adds the "About ConQuest" explainer and
- * "Pricing". `/` is exact; the rest prefix-match.
+ * Header nav. Replaces the Sunrise default wholesale with the ConQuest marketing
+ * set — Home / Pricing / Contact for now (the ConQuest pitch is the homepage, and
+ * Sunrise's default "About" is dropped). `/` is exact; the rest prefix-match.
  */
 export const publicNavItems: PublicNavItem[] | null = [
   { href: '/', label: 'Home', icon: Home, exact: true },
-  { href: '/about', label: 'About', icon: Info },
-  { href: '/about-conquest', label: 'About ConQuest', icon: MessagesSquare },
   { href: '/pricing', label: 'Pricing', icon: Tag },
   { href: '/contact', label: 'Contact', icon: Mail },
 ];
 
 /**
- * Footer link cluster. Mirrors the header minus the "About ConQuest" explainer,
- * and adds "Pricing" (which the platform default omits). The footer ignores
- * `icon`, so these are link-only.
+ * Footer link cluster. Mirrors the header (the footer ignores `icon`, so these
+ * are link-only).
  */
 export const footerNavItems: PublicNavItem[] | null = [
   { href: '/', label: 'Home' },
-  { href: '/about', label: 'About' },
   { href: '/pricing', label: 'Pricing' },
   { href: '/contact', label: 'Contact' },
 ];
