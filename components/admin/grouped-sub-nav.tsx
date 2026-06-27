@@ -96,21 +96,27 @@ function TopTierLink({
 export function GroupedSubNav({ groups, ariaLabel }: GroupedSubNavProps) {
   const pathname = usePathname();
 
+  // Nothing to render (e.g. every group filtered away) — emit nothing, not an empty bar.
+  if (groups.length === 0) return null;
+
   // Flat shape: a single group renders its tabs as one underline row — visually
   // identical to the original single-tier bar, no redundant top tier.
   if (groups.length === 1) {
     const only = groups[0];
     return (
       <nav aria-label={ariaLabel} className="flex items-center gap-1 overflow-x-auto border-b">
-        {only.tabs.map((tab) => (
-          <TopTierLink
-            key={tab.id}
-            href={tab.href}
-            label={tab.label}
-            active={isTabActive(tab.href, pathname, tab.exact)}
-            ariaCurrent={isTabActive(tab.href, pathname, tab.exact)}
-          />
-        ))}
+        {only.tabs.map((tab) => {
+          const active = isTabActive(tab.href, pathname, tab.exact);
+          return (
+            <TopTierLink
+              key={tab.id}
+              href={tab.href}
+              label={tab.label}
+              active={active}
+              ariaCurrent={active}
+            />
+          );
+        })}
       </nav>
     );
   }

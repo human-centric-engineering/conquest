@@ -53,7 +53,7 @@ import {
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { FieldHelp } from '@/components/ui/field-help';
 import { cn } from '@/lib/utils';
-import { SettingsSectionRail } from '@/components/admin/settings-section-rail';
+import { SectionRail } from '@/components/admin/section-rail';
 import { CostEstimateCard } from '@/components/admin/questionnaires/cost-estimate-card';
 import { AdaptiveEmbeddingStep } from '@/components/admin/questionnaires/adaptive-embedding-step';
 import { IntroBackgroundField } from '@/components/admin/questionnaires/intro-background-field';
@@ -222,7 +222,7 @@ function SettingsGroup({
   description,
   children,
 }: {
-  /** Anchor id + scroll-spy target — picked up by the `SettingsSectionRail`. */
+  /** Anchor id + scroll-spy target — picked up by the `SectionRail`. */
   id: string;
   icon: LucideIcon;
   /** Tailwind classes tinting the icon chip — one hue per group, for at-a-glance scanning. */
@@ -234,7 +234,7 @@ function SettingsGroup({
   return (
     <Card
       id={id}
-      data-settings-section
+      data-section-rail
       data-section-label={title}
       className="scroll-mt-24 overflow-hidden shadow-sm"
     >
@@ -660,14 +660,16 @@ export function ConfigEditor({
 
       {/* Two-column on wide screens: a sticky scroll-spy rail (wayfinding only — nothing moves)
           beside the single settings scroll. The rail discovers its items from the
-          `[data-settings-section]` cards inside `#settings-sections`. */}
+          `[data-section-rail]` cards inside `#settings-sections`. Content is pinned to column 2
+          so the layout doesn't shift when the rail mounts (the rail renders null pre-hydration). */}
       <div className="lg:grid lg:grid-cols-[180px_minmax(0,1fr)] lg:items-start lg:gap-6">
-        <SettingsSectionRail
+        <SectionRail
           targetId="settings-sections"
+          ariaLabel="Settings sections"
           className="top-24 hidden self-start lg:sticky lg:block"
         />
 
-        <div id="settings-sections" className="min-w-0 space-y-4">
+        <div id="settings-sections" className="min-w-0 space-y-4 lg:col-start-2">
           {/* ── 1. Questions & completion — the core run loop: how questions are chosen and when a
              session is allowed to finish. Most-used knobs, so they lead. ── */}
           <SettingsGroup

@@ -16,7 +16,7 @@ import { notFound } from 'next/navigation';
 import { ChevronLeft, Sparkles } from 'lucide-react';
 
 import { CqStatTiles, type CqStat } from '@/components/admin/cq-stat-tiles';
-import { SettingsSectionRail } from '@/components/admin/settings-section-rail';
+import { SectionRail } from '@/components/admin/section-rail';
 import { RoundHeaderActions } from '@/components/admin/cohorts/round-header-actions';
 import {
   RoundStatusBadge,
@@ -194,17 +194,19 @@ export default async function RoundDetailPage({ params }: PageProps) {
       <CqStatTiles stats={statTiles} />
 
       {/* Two-column on wide screens: a sticky scroll-spy rail (wayfinding only) beside the
-          single scroll. The rail discovers its items from the `[data-settings-section]`
-          panels inside `#round-sections`, so flag-gated sections appear exactly when they render. */}
+          single scroll. The rail discovers its items from the `[data-section-rail]` panels
+          inside `#round-sections`, so flag-gated sections appear exactly when they render.
+          Content is pinned to column 2 so the layout doesn't shift when the rail mounts. */}
       <div className="lg:grid lg:grid-cols-[180px_minmax(0,1fr)] lg:items-start lg:gap-6">
-        <SettingsSectionRail
+        <SectionRail
           targetId="round-sections"
+          ariaLabel="Round sections"
           className="top-24 hidden self-start lg:sticky lg:block"
         />
-        <div id="round-sections" className="min-w-0 space-y-6">
+        <div id="round-sections" className="min-w-0 space-y-6 lg:col-start-2">
           <section
             id="bundled"
-            data-settings-section
+            data-section-rail
             data-section-label="Bundled questionnaires"
             className="scroll-mt-24 space-y-3 rounded-xl border px-4 py-4"
           >
@@ -222,7 +224,7 @@ export default async function RoundDetailPage({ params }: PageProps) {
           {phasesOn && (
             <section
               id="phases"
-              data-settings-section
+              data-section-rail
               data-section-label="Phases"
               className="scroll-mt-24 space-y-3 rounded-xl border px-4 py-4"
             >
@@ -245,7 +247,7 @@ export default async function RoundDetailPage({ params }: PageProps) {
           {roundContextOn && (
             <section
               id="context"
-              data-settings-section
+              data-section-rail
               data-section-label="Additional context"
               className="scroll-mt-24 space-y-3 rounded-xl border px-4 py-4"
             >
@@ -266,7 +268,7 @@ export default async function RoundDetailPage({ params }: PageProps) {
           {learningOn && (
             <section
               id="learning"
-              data-settings-section
+              data-section-rail
               data-section-label="Learning mode"
               className="scroll-mt-24 space-y-3 rounded-xl border px-4 py-4"
             >
@@ -288,7 +290,7 @@ export default async function RoundDetailPage({ params }: PageProps) {
           {cohortReportOn && (
             <section
               id="cohort-report"
-              data-settings-section
+              data-section-rail
               data-section-label="Cohort report"
               className="scroll-mt-24 space-y-3 rounded-xl border px-4 py-4"
             >
@@ -307,7 +309,7 @@ export default async function RoundDetailPage({ params }: PageProps) {
 
           <section
             id="invitations"
-            data-settings-section
+            data-section-rail
             data-section-label="Member invitations"
             className="scroll-mt-24 space-y-3 rounded-xl border px-4 py-4"
           >

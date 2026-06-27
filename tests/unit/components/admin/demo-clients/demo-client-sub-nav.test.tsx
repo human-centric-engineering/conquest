@@ -37,6 +37,7 @@ import {
   DEMO_CLIENT_TABS,
   demoClientBase,
   demoClientTabHref,
+  demoClientTabs,
 } from '@/lib/app/questionnaire/demo-clients/nav';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -67,6 +68,18 @@ describe('DemoClientSubNav', () => {
         const link = screen.getByRole('link', { name: tab.label });
         expect(link).toHaveAttribute('href', demoClientTabHref(CID, tab));
       }
+    });
+
+    it('appends Cohorts + Rounds (Management last) when cohortsEnabled', () => {
+      mockUsePathname.mockReturnValue(demoClientBase(CID));
+      render(<DemoClientSubNav clientId={CID} cohortsEnabled />);
+      const links = screen.getAllByRole('link');
+      // 6 tabs with the flag on vs the 4 base tabs.
+      expect(links).toHaveLength(demoClientTabs({ cohortsEnabled: true }).length);
+      expect(screen.getByRole('link', { name: 'Cohorts' })).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'Rounds' })).toBeInTheDocument();
+      // Management stays last — the destructive demo-ops tab is kept at the end.
+      expect(links[links.length - 1]).toHaveTextContent('Management');
     });
   });
 

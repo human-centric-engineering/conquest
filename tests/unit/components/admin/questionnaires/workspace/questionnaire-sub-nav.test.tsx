@@ -206,13 +206,28 @@ describe('QuestionnaireSubNav', () => {
 
     it('exposes a tooltip on a dimmed group explaining why', () => {
       renderNav(workspaceVersionBase(QID, VID), { status: 'draft' });
-      expect(screen.getByRole('link', { name: 'Distribute' })).toHaveAttribute('title');
+      // Assert the exact copy — a presence-only check passes on a typo'd or wrong hint.
+      expect(screen.getByRole('link', { name: 'Distribute' })).toHaveAttribute(
+        'title',
+        'Available once the questionnaire is launched'
+      );
     });
 
     it('dims nothing on a launched questionnaire', () => {
       renderNav(workspaceVersionBase(QID, VID), { status: 'launched' });
       expect(screen.getByRole('link', { name: 'Distribute' })).not.toHaveClass('opacity-50');
       expect(screen.getByRole('link', { name: 'Results' })).not.toHaveClass('opacity-50');
+    });
+
+    it('uses an archive-specific tooltip on an archived questionnaire', () => {
+      renderNav(workspaceVersionBase(QID, VID), { status: 'archived' });
+      const distribute = screen.getByRole('link', { name: 'Distribute' });
+      expect(distribute).toHaveClass('opacity-50');
+      // Archived was already launched — the draft "launch first" copy would be wrong.
+      expect(distribute).toHaveAttribute(
+        'title',
+        'This questionnaire is archived — no new respondents can be invited'
+      );
     });
   });
 

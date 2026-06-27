@@ -1,26 +1,27 @@
 /**
- * SettingsSectionRail Component Tests
+ * SectionRail Component Tests
  *
- * Sticky scroll-spy rail for long settings panels. Discovers sections from the
- * DOM (`[data-settings-section]` cards with an id + data-section-label inside the
+ * Sticky scroll-spy rail for long, single-scroll panels. Discovers sections from
+ * the DOM (`[data-section-rail]` cards with an id + data-section-label inside the
  * target container), renders a jump link per section, and tracks the active one
  * via IntersectionObserver. A 'use client' component.
  *
  * IntersectionObserver and scrollIntoView aren't implemented in happy-dom, so we
  * stub them — capturing the IO callback lets us drive the scroll-spy directly.
  *
- * @see components/admin/settings-section-rail.tsx
+ * @see components/admin/section-rail.tsx
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, act } from '@testing-library/react';
 
-import { SettingsSectionRail } from '@/components/admin/settings-section-rail';
+import { SectionRail } from '@/components/admin/section-rail';
 
 type IOCallback = (entries: Array<{ isIntersecting: boolean; target: { id: string } }>) => void;
 
 let ioCallback: IOCallback | null;
 const scrollIntoView = vi.fn();
+const originalScrollIntoView = window.HTMLElement.prototype.scrollIntoView;
 
 beforeEach(() => {
   ioCallback = null;
@@ -40,17 +41,23 @@ beforeEach(() => {
   );
 });
 
+afterEach(() => {
+  // Restore the prototype + globals so stubs don't leak into other test files.
+  window.HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+  vi.unstubAllGlobals();
+});
+
 function Fixture({ sections }: { sections: { id: string; label: string }[] }) {
   return (
     <div>
       <div id="settings-sections">
         {sections.map((s) => (
-          <div key={s.id} id={s.id} data-settings-section data-section-label={s.label}>
+          <div key={s.id} id={s.id} data-section-rail data-section-label={s.label}>
             {s.label}
           </div>
         ))}
       </div>
-      <SettingsSectionRail targetId="settings-sections" />
+      <SectionRail targetId="settings-sections" ariaLabel="Settings sections" />
     </div>
   );
 }
@@ -61,7 +68,7 @@ const THREE = [
   { id: 'budget', label: 'Budget & limits' },
 ];
 
-describe('SettingsSectionRail', () => {
+describe('SectionRail', () => {
   it('discovers a jump link per section, labelled from data-section-label', () => {
     render(<Fixture sections={THREE} />);
     for (const s of THREE) {
@@ -79,8 +86,12 @@ describe('SettingsSectionRail', () => {
 
   it('jumps to a section on click and prevents the default hash navigation', () => {
     render(<Fixture sections={THREE} />);
-    screen.getByRole('link', { name: 'Budget & limits' }).click();
-    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    // Dispatch a cancelable click so we can assert preventDefault actually fired
+    // (a bare .click() can't report defaultPrevented).
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true });
+    screen.getByRole('link', { name: 'Budget & limits' }).dispatchEvent(event);
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
+    expect(event.defaultPrevented).toBe(true);
   });
 
   it('marks the topmost in-view section active via scroll-spy', () => {

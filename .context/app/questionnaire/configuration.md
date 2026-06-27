@@ -209,10 +209,10 @@ The panel is a single long scroll of ~10 labelled `SettingsGroup` cards (Questio
 & completion · Respondent experience · Intro screen · Reasoning stream · Preview
 tools · Interviewer tone · Access & invitations · Answer quality & safeguarding ·
 Budget & limits · Session-start profile fields). On wide screens a **sticky
-scroll-spy rail** (`components/admin/settings-section-rail.tsx`) sits beside it for
+scroll-spy rail** (`components/admin/section-rail.tsx`) sits beside it for
 wayfinding — nothing moves, the single scroll and Cmd-F still work. The rail
 **discovers its items from the DOM**: each `SettingsGroup` renders a Card with
-`id` + `data-settings-section` + `data-section-label`, and the rail lists every such
+`id` + `data-section-rail` + `data-section-label`, and the rail lists every such
 card inside `#settings-sections`, so flag-gated sections (e.g. Intro screen) appear
 in the rail exactly when they render, with no duplicated visibility logic. The rail
 is generic and reusable for any long settings panel.

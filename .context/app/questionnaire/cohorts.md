@@ -159,9 +159,9 @@ Two flag-gated tabs are appended to the [demo-client detail](./demo-clients.md) 
 
 The **round detail** page is a long, flag-gated single scroll (Bundled questionnaires · Phases ·
 Additional context · Learning mode · Cohort report · Member invitations). On wide screens a sticky
-scroll-spy rail (`components/admin/settings-section-rail.tsx`, shared with the questionnaire
+scroll-spy rail (`components/admin/section-rail.tsx`, shared with the questionnaire
 [settings panel](./configuration.md#ui)) sits beside it for wayfinding — each `<section>` carries
-`id` + `data-settings-section` + `data-section-label`, and the rail lists those inside
+`id` + `data-section-rail` + `data-section-label`, and the rail lists those inside
 `#round-sections`, so sections appear in the rail exactly when their flag renders them. The
 demo-client tab bar itself stays a flat single tier — only 4–6 tabs, no secondary nav needed.
 

@@ -192,14 +192,14 @@ describe('visibleWorkspaceGroups', () => {
     ]);
   });
 
-  it('drops a group when feature flags remove all its tabs', () => {
-    // liveSessions off removes Sessions + Diagnostics, but Invitations stays, so
-    // Distribute survives; turn it into a stronger assertion via Results instead.
+  it('reduces a group to only its always-visible tabs when flag-gated tabs are off', () => {
+    // Every group owns at least one flag-free tab (Results has Analytics), so a group is
+    // never fully emptied by flags — the `tabs.length === 0` drop guard stays defensive.
+    // Here Results collapses to just Analytics once the two report tabs are gated off.
     const groups = visibleWorkspaceGroups(
       makeFlags({ cohortReport: false, respondentReport: false })
     );
     const results = groups.find((g) => g.id === 'results');
-    // Only Analytics remains under Results (no respondent/cohort report tabs).
     expect(results?.tabs.map((t) => t.id)).toEqual(['analytics']);
   });
 

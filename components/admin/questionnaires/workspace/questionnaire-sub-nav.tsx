@@ -27,12 +27,20 @@ interface QuestionnaireSubNavProps {
   status: AppQuestionnaireStatus;
 }
 
-/** Why a lifecycle phase is dimmed — shown as the group's tooltip. */
-const DIM_HINT: Record<WorkspacePhase, string> = {
-  build: '',
-  distribute: 'Available once the questionnaire is launched',
-  results: 'Results appear once respondents complete the questionnaire',
-};
+/**
+ * Why a dimmed lifecycle phase is dimmed — shown as the group's tooltip. Status-aware:
+ * an archived questionnaire dims Distribute because it's closed (it *was* launched), so the
+ * draft "launch first" copy would be wrong. Only phases that actually dim are reachable here.
+ */
+function dimHint(phase: WorkspacePhase, status: AppQuestionnaireStatus): string {
+  if (status === 'archived') {
+    return 'This questionnaire is archived — no new respondents can be invited';
+  }
+  // Draft: Distribute + Results are dimmed because nothing is there yet.
+  return phase === 'distribute'
+    ? 'Available once the questionnaire is launched'
+    : 'Results appear once respondents complete the questionnaire';
+}
 
 export function QuestionnaireSubNav({
   questionnaireId,
@@ -55,7 +63,7 @@ export function QuestionnaireSubNav({
       label: group.label,
       href: tabs[0].href,
       tabs,
-      ...(isDimmed ? { dimmed: true, dimmedHint: DIM_HINT[group.phase!] } : {}),
+      ...(isDimmed ? { dimmed: true, dimmedHint: dimHint(group.phase!, status) } : {}),
     };
   });
 

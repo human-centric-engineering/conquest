@@ -7,12 +7,14 @@
  * Non-destructive wayfinding: the panel keeps its single vertical scroll (so
  * Cmd-F still finds everything), and this rail sits alongside it listing each
  * section with click-to-jump and a scroll-spy active highlight. It **discovers
- * sections from the DOM** — every `[data-settings-section]` (with an `id` and a
+ * sections from the DOM** — every `[data-section-rail]` (with an `id` and a
  * `data-section-label`) inside the `targetId` container — so the rail mirrors
  * exactly what rendered, including flag-gated sections, with no duplicated
  * visibility logic and no label drift from the section headings.
  *
- * Renders nothing until there are at least two sections to move between.
+ * Renders nothing until there are at least two sections to move between. Because
+ * it can render nothing, a grid caller must pin its content to the content column
+ * (e.g. `lg:col-start-2`) so the layout doesn't shift when the rail mounts.
  */
 import { useEffect, useState } from 'react';
 
@@ -23,13 +25,15 @@ interface RailItem {
   label: string;
 }
 
-interface SettingsSectionRailProps {
-  /** id of the container element whose `[data-settings-section]` children form the rail. */
+interface SectionRailProps {
+  /** id of the container element whose `[data-section-rail]` children form the rail. */
   targetId: string;
+  /** Accessible label for the rail's <nav> — name the surface (e.g. "Settings sections"). */
+  ariaLabel: string;
   className?: string;
 }
 
-export function SettingsSectionRail({ targetId, className }: SettingsSectionRailProps) {
+export function SectionRail({ targetId, ariaLabel, className }: SectionRailProps) {
   const [items, setItems] = useState<RailItem[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
 
@@ -40,7 +44,7 @@ export function SettingsSectionRail({ targetId, className }: SettingsSectionRail
     if (!container) return;
 
     const read = () => {
-      const found = Array.from(container.querySelectorAll<HTMLElement>('[data-settings-section]'))
+      const found = Array.from(container.querySelectorAll<HTMLElement>('[data-section-rail]'))
         .filter((el) => el.id)
         .map((el) => ({ id: el.id, label: el.dataset.sectionLabel ?? el.id }));
       setItems((prev) =>
@@ -90,7 +94,7 @@ export function SettingsSectionRail({ targetId, className }: SettingsSectionRail
   };
 
   return (
-    <nav aria-label="Settings sections" className={className}>
+    <nav aria-label={ariaLabel} className={className}>
       <ul className="space-y-0.5">
         {items.map((item) => {
           const active = item.id === activeId;
