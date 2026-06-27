@@ -1,7 +1,8 @@
 'use client';
 
 /**
- * Sticky scroll-spy rail for a long, single-scroll settings panel.
+ * Sticky scroll-spy rail for a long, single-scroll panel of stacked sections
+ * (the questionnaire settings panel, the round-detail page, …).
  *
  * Non-destructive wayfinding: the panel keeps its single vertical scroll (so
  * Cmd-F still finds everything), and this rail sits alongside it listing each
