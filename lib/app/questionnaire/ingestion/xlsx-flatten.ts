@@ -59,7 +59,9 @@ function cellToText(cell: ExcelJS.Cell): string {
   // space keeps adjacent words separated. `<br>` would inject markup the model
   // might echo, so plain space is safer.
   text = text.replace(/\r\n|\r|\n|\t/g, ' ').trim();
-  // Escape the table delimiter so a cell containing `|` can't break the column grid.
+  // Escape backslashes first, then table delimiters, so input like `\|` remains
+  // faithfully represented and cannot interfere with Markdown table structure.
+  text = text.replace(/\\/g, '\\\\');
   text = text.replace(/\|/g, '\\|');
   if (text.length > MAX_CELL_CHARS) text = `${text.slice(0, MAX_CELL_CHARS - 1)}…`;
   return text;
