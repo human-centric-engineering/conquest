@@ -23,7 +23,11 @@ import { X } from 'lucide-react';
 
 import { Dialog, DialogOverlay, DialogPortal } from '@/components/ui/dialog';
 import { AnswerSlotPanel } from '@/components/app/questionnaire/panel/answer-slot-panel';
-import type { AnswerPanelView, PanelSlotView } from '@/lib/app/questionnaire/panel/types';
+import type {
+  AnswerPanelView,
+  DataSlotPanelSlot,
+  PanelSlotView,
+} from '@/lib/app/questionnaire/panel/types';
 import type { PanelCorrection } from '@/lib/app/questionnaire/panel/correction-targets';
 
 export interface AnswerReviewDrawerProps {
@@ -35,6 +39,8 @@ export interface AnswerReviewDrawerProps {
   /** Forwarded to {@link AnswerSlotPanel}; matches `handleRevisit`'s `(slot) => void`. */
   onRevisit: (slot: PanelSlotView) => void;
   canRevisit: boolean;
+  /** Data-slot "Incorrect?" probe-deeper handler, forwarded to {@link AnswerSlotPanel}. */
+  onRefine?: (slot: DataSlotPanelSlot) => void;
   newlyFilledKeys: readonly string[];
   /** Inline correction bundle (Variant B), forwarded to {@link AnswerSlotPanel}. */
   correction?: PanelCorrection;
@@ -47,6 +53,7 @@ export function AnswerReviewDrawer({
   loading,
   onRevisit,
   canRevisit,
+  onRefine,
   newlyFilledKeys,
   correction,
 }: AnswerReviewDrawerProps) {
@@ -76,6 +83,7 @@ export function AnswerReviewDrawer({
             loading={loading}
             onRevisit={onRevisit}
             canRevisit={canRevisit}
+            onRefine={onRefine}
             newlyFilledKeys={newlyFilledKeys}
             correction={correction}
             // The minimap is the scroll affordance; suppress the native bar (touch needs none).

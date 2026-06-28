@@ -481,6 +481,53 @@ describe('AnswerSlotPanel', () => {
     expect(screen.queryByRole('button', { name: 'Revisit' })).not.toBeInTheDocument();
   });
 
+  // --- Data-slot "Incorrect?" probe-deeper affordance ---
+
+  function dataSlotPanelView(slot: DataSlotPanelSlot): AnswerPanelView {
+    return view({
+      dataSlotGroups: [{ theme: 'Strategy', slots: [slot] }],
+      progressPercent: 20,
+    });
+  }
+
+  it('offers "Incorrect?" on a filled data slot and calls onRefine with the slot on click', () => {
+    const onRefine = vi.fn();
+    render(
+      <AnswerSlotPanel view={dataSlotPanelView(filledDataSlot())} onRefine={onRefine} canRevisit />
+    );
+    const button = screen.getByRole('button', { name: /flag this reading as not quite right/i });
+    expect(button).toHaveTextContent('Incorrect?');
+    fireEvent.click(button);
+    expect(onRefine).toHaveBeenCalledWith(expect.objectContaining({ key: 'strategy' }));
+  });
+
+  it('hides "Incorrect?" while a turn cannot be sent (canRevisit false)', () => {
+    render(
+      <AnswerSlotPanel
+        view={dataSlotPanelView(filledDataSlot())}
+        onRefine={vi.fn()}
+        canRevisit={false}
+      />
+    );
+    expect(screen.queryByText('Incorrect?')).not.toBeInTheDocument();
+  });
+
+  it('hides "Incorrect?" on an unfilled data slot (nothing to refine yet)', () => {
+    render(
+      <AnswerSlotPanel
+        view={dataSlotPanelView(filledDataSlot({ filled: false, paraphrase: null }))}
+        onRefine={vi.fn()}
+        canRevisit
+      />
+    );
+    expect(screen.queryByText('Incorrect?')).not.toBeInTheDocument();
+  });
+
+  it('hides "Incorrect?" when onRefine is not provided', () => {
+    render(<AnswerSlotPanel view={dataSlotPanelView(filledDataSlot())} canRevisit />);
+    expect(screen.queryByText('Incorrect?')).not.toBeInTheDocument();
+  });
+
   // --- Inline correction (Variant B): the per-row "Edit answer" gesture ---
 
   it('hides "Edit answer" when no correction bundle is supplied', () => {

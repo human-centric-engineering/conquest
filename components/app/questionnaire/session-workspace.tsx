@@ -48,7 +48,11 @@ import type {
   QuestionnaireTurn,
 } from '@/lib/app/questionnaire/chat/types';
 import type { TurnInspectorData } from '@/lib/app/questionnaire/inspector';
-import type { AnswerPanelView, PanelSlotView } from '@/lib/app/questionnaire/panel/types';
+import type {
+  AnswerPanelView,
+  DataSlotPanelSlot,
+  PanelSlotView,
+} from '@/lib/app/questionnaire/panel/types';
 import type { PresentationMode, ReasoningPlacement } from '@/lib/app/questionnaire/types';
 import type { SessionStatusView } from '@/lib/app/questionnaire/session/status-view';
 
@@ -272,6 +276,21 @@ export function SessionWorkspace({
     [stream]
   );
 
+  // Data-slot "Incorrect?" affordance: the respondent flags a captured reading as off, and we steer
+  // the agent (via a normal turn) to probe deeper into that one slot rather than move on. We send the
+  // slot's current reading so the agent knows exactly what to re-open.
+  const handleRefine = useCallback(
+    (slot: DataSlotPanelSlot) => {
+      if (!stream.canSend) return;
+      const current = slot.paraphrase ? ` Right now you have it as: “${slot.paraphrase}”.` : '';
+      void stream.sendMessage(
+        `I don't think “${slot.name}” is quite right.${current} Could you ask me a more detailed ` +
+          `question so we can get it correct?`
+      );
+    },
+    [stream]
+  );
+
   // "both" mode toggle. Switching TO the form re-seeds it from the server so chat-inferred
   // answers appear; switching TO chat refetches the panel so it reflects the form's edits.
   const showFormView = useCallback(() => {
@@ -417,6 +436,7 @@ export function SessionWorkspace({
         loading={panel.loading}
         onRevisit={handleRevisit}
         canRevisit={stream.canSend}
+        onRefine={handleRefine}
         newlyFilledKeys={newlyFilledKeys}
         correction={correction}
         className="hidden lg:flex"
@@ -479,6 +499,11 @@ export function SessionWorkspace({
         // Revisiting sends the respondent back to chat to re-answer, so dismiss the sheet.
         onRevisit={(slot) => {
           handleRevisit(slot);
+          setReviewOpen(false);
+        }}
+        // Refining likewise sends a turn — close the sheet so the respondent sees the agent's probe.
+        onRefine={(slot) => {
+          handleRefine(slot);
           setReviewOpen(false);
         }}
       />
