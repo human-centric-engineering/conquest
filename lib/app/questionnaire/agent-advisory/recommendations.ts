@@ -44,6 +44,7 @@ import {
   QUESTIONNAIRE_EXTRACTOR_AGENT_SLUG,
   QUESTIONNAIRE_COMPOSER_AGENT_SLUG,
   QUESTIONNAIRE_ADVISOR_AGENT_SLUG,
+  QUESTIONNAIRE_EDIT_AGENT_SLUG,
   QUESTIONNAIRE_DATA_SLOTS_AGENT_SLUG,
   RESPONDENT_REPORT_AGENT_SLUG,
   RESPONDENT_REPORT_ASSISTANT_AGENT_SLUG,
@@ -178,6 +179,18 @@ export const AGENT_RECOMMENDATIONS: readonly AgentRecommendation[] = [
     recommendedReasoningEffort: 'high',
     overrideModel: null,
     rationale: 'Holistic cross-field reasoning over the config — high effort pays off.',
+  },
+  {
+    slug: QUESTIONNAIRE_EDIT_AGENT_SLUG,
+    label: 'Structure Edit Agent',
+    role: 'Turns a plain-English instruction into structural edits',
+    taskTier: 'reasoning',
+    recommendedTemperature: 0.2,
+    recommendedMaxTokens: 4096,
+    recommendedReasoningEffort: 'medium',
+    overrideModel: null,
+    rationale:
+      'Translates a free-text instruction into a deterministic edit-op plan — the edits execute in code, so the model only needs faithful interpretation: low temperature, medium effort. Not a per-turn agent, so frontier reasoning is affordable.',
   },
   {
     slug: QUESTIONNAIRE_DATA_SLOTS_AGENT_SLUG,

@@ -31,6 +31,7 @@ import {
   APP_QUESTIONNAIRES_LEARNING_MODE_FLAG,
   APP_QUESTIONNAIRES_ROUND_PHASES_FLAG,
   APP_QUESTIONNAIRES_ADVISOR_FLAG,
+  APP_QUESTIONNAIRES_EDIT_AGENT_FLAG,
   APP_QUESTIONNAIRES_FLAG,
 } from '@/lib/app/questionnaire/constants';
 import { isFeatureEnabled } from '@/lib/feature-flags';
@@ -66,6 +67,7 @@ export {
   APP_QUESTIONNAIRES_LEARNING_MODE_FLAG,
   APP_QUESTIONNAIRES_ROUND_PHASES_FLAG,
   APP_QUESTIONNAIRES_ADVISOR_FLAG,
+  APP_QUESTIONNAIRES_EDIT_AGENT_FLAG,
 };
 
 /**
@@ -290,6 +292,52 @@ export function withGenerativeAuthoringEnabled<C>(
 ): (request: NextRequest, context: C) => Promise<Response> {
   return async (request, context) => {
     const blocked = await ensureGenerativeAuthoringEnabled();
+    if (blocked) return blocked;
+    return handler(request, context);
+  };
+}
+
+/**
+ * Whether the **Structure Edit Agent** surface may run. Requires BOTH the master app flag and the
+ * edit-agent sub-flag — each plan run is a reasoning LLM call (instruction → structured edit-ops),
+ * so it dark-launches independently of the rest of the Structure editor. The plan/apply routes
+ * consult this and 404 when it's `false`, so a disabled sub-feature looks like a missing route
+ * rather than a 401.
+ *
+ * Server-only (resolves both flags from the database).
+ */
+export async function isEditAgentEnabled(): Promise<boolean> {
+  const [app, editAgent] = await Promise.all([
+    isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_EDIT_AGENT_FLAG),
+  ]);
+  return app && editAgent;
+}
+
+/**
+ * Flag gate for the Structure Edit Agent routes. Returns a `404` {@link Response} when either the
+ * master app flag or the edit-agent sub-flag is off, or `null` when both are on. Mirrors
+ * {@link ensureGenerativeAuthoringEnabled}.
+ *
+ * Server-only (resolves both flags from the database).
+ */
+export async function ensureEditAgentEnabled(): Promise<Response | null> {
+  if (await isEditAgentEnabled()) {
+    return null;
+  }
+  return errorResponse('Not found', { code: 'NOT_FOUND', status: 404 });
+}
+
+/**
+ * Wrap a route handler so the edit-agent gate runs **before** anything else (auth, handler work) —
+ * the order a disabled sub-feature needs to look like a missing route rather than a 401. Mirrors
+ * {@link withGenerativeAuthoringEnabled}.
+ */
+export function withEditAgentEnabled<C>(
+  handler: (request: NextRequest, context: C) => Promise<Response>
+): (request: NextRequest, context: C) => Promise<Response> {
+  return async (request, context) => {
+    const blocked = await ensureEditAgentEnabled();
     if (blocked) return blocked;
     return handler(request, context);
   };

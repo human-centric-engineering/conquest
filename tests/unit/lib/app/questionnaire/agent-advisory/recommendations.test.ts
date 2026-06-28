@@ -21,8 +21,8 @@ const TIERS = ['reasoning', 'chat', 'routing'] as const;
 const EFFORTS = ['minimal', 'low', 'medium', 'high'] as const;
 
 describe('AGENT_RECOMMENDATIONS', () => {
-  it('covers the expected 14 questionnaire agents with unique slugs', () => {
-    expect(AGENT_RECOMMENDATIONS).toHaveLength(14);
+  it('covers the expected 15 questionnaire agents with unique slugs', () => {
+    expect(AGENT_RECOMMENDATIONS).toHaveLength(15);
     const slugs = AGENT_RECOMMENDATIONS.map((r) => r.slug);
     expect(new Set(slugs).size).toBe(slugs.length);
   });

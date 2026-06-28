@@ -32,6 +32,7 @@ import {
   APP_QUESTIONNAIRES_COHORT_REPORT_FLAG,
   APP_QUESTIONNAIRES_INTRO_SCREEN_FLAG,
   APP_QUESTIONNAIRES_ADVISOR_FLAG,
+  APP_QUESTIONNAIRES_EDIT_AGENT_FLAG,
 } from '@/lib/app/questionnaire/constants';
 import type { DataSlotView } from '@/lib/app/questionnaire/data-slots';
 import type {
@@ -225,6 +226,8 @@ export interface QuestionnaireWorkspaceFlags {
   introScreen: boolean;
   /** Config Advisor panel on the Settings tab — admin-triggered AI config review. */
   advisor: boolean;
+  /** Structure Edit Agent panel on the Structure editor — instruction-driven whole-doc edits. */
+  editAgent: boolean;
 }
 
 /**
@@ -249,6 +252,7 @@ export const resolveQuestionnaireWorkspaceFlags = cache(
       cohortReport,
       introScreen,
       advisor,
+      editAgent,
     ] = await Promise.all([
       isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
       isFeatureEnabled(APP_QUESTIONNAIRES_DATA_SLOTS_FLAG),
@@ -261,6 +265,7 @@ export const resolveQuestionnaireWorkspaceFlags = cache(
       isFeatureEnabled(APP_QUESTIONNAIRES_COHORT_REPORT_FLAG),
       isFeatureEnabled(APP_QUESTIONNAIRES_INTRO_SCREEN_FLAG),
       isFeatureEnabled(APP_QUESTIONNAIRES_ADVISOR_FLAG),
+      isFeatureEnabled(APP_QUESTIONNAIRES_EDIT_AGENT_FLAG),
     ]);
     return {
       master,
@@ -276,6 +281,7 @@ export const resolveQuestionnaireWorkspaceFlags = cache(
       cohortReport: master && cohorts && cohortReport,
       introScreen: master && introScreen,
       advisor: master && advisor,
+      editAgent: master && editAgent,
     };
   }
 );

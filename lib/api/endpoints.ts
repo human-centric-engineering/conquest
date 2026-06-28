@@ -367,6 +367,12 @@ export const API = {
       /** Conversational refine of a draft version's structure (POST JSON). */
       composeRefine: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/compose/refine`,
+      /** Structure Edit Agent — preview an instruction's changes without writing (POST JSON). */
+      editAgentPlan: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/edit-agent/plan`,
+      /** Structure Edit Agent — apply a previewed plan to a draft version (POST JSON). */
+      editAgentApply: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/edit-agent/apply`,
       /** Extract plain text from an uploaded document for the intro background (POST multipart). */
       introBackgroundParse: '/api/v1/app/questionnaires/intro-background/parse',
       /** Generate / refine the intro background markdown with AI (POST JSON). */

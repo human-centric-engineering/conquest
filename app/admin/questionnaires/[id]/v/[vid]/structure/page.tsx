@@ -137,6 +137,7 @@ export default async function StructureTab({ params, searchParams }: PageProps) 
             seed={seed}
             hasDataSlots={hasDataSlots}
             designEvalEnabled={flags.designEval}
+            editAgentEnabled={flags.editAgent}
           />
         ) : (
           <VersionGraph graph={graph} />

@@ -43,6 +43,7 @@ import type { AppQuestionnaireStatus } from '@/lib/app/questionnaire/types';
 import type { VersionGraphView } from '@/lib/app/questionnaire/views';
 
 import { GoalAudienceEditor } from '@/components/admin/questionnaires/goal-audience-editor';
+import { EditAgentPanel } from '@/components/admin/questionnaires/edit-agent-panel';
 import { SectionEditor } from '@/components/admin/questionnaires/section-editor';
 import { TagVocabularyEditor } from '@/components/admin/questionnaires/tag-vocabulary-editor';
 import { SaveStatus, type SaveState } from '@/components/admin/questionnaires/save-status';
@@ -76,6 +77,7 @@ export function VersionEditor({
   seed = null,
   hasDataSlots = false,
   designEvalEnabled = false,
+  editAgentEnabled = false,
 }: {
   questionnaireId: string;
   version: VersionGraphView;
@@ -85,6 +87,8 @@ export function VersionEditor({
   hasDataSlots?: boolean;
   /** When on, the goal/audience editor explains how the structure review scores against these fields. */
   designEvalEnabled?: boolean;
+  /** When on, the "Edit with AI" panel (instruction-driven whole-doc edits) is shown. */
+  editAgentEnabled?: boolean;
 }) {
   const router = useRouter();
   const versionId = version.id;
@@ -150,6 +154,16 @@ export function VersionEditor({
         setBusy(false);
         return false;
       });
+  };
+
+  // After the edit agent applies a change, mirror `run`'s success path: flag a pending save and
+  // refetch the SSR graph; the [version] effect clears `busy` and confirms "saved" when it lands.
+  const onAgentApplied = () => {
+    setBusy(true);
+    setError(null);
+    setSaveState('saving');
+    pendingSaveRef.current = true;
+    router.refresh();
   };
 
   const setStatus = (to: AppQuestionnaireStatus) => {
@@ -283,6 +297,17 @@ export function VersionEditor({
         <div className="border-destructive/40 bg-destructive/10 text-destructive rounded-md border p-3 text-sm">
           {error}
         </div>
+      )}
+
+      {/* Edit with AI — instruction-driven whole-doc edits (preview, then apply). Flag-gated. */}
+      {editAgentEnabled && (
+        <EditAgentPanel
+          questionnaireId={questionnaireId}
+          versionId={versionId}
+          status={version.status}
+          busy={busy}
+          onApplied={onAgentApplied}
+        />
       )}
 
       {/* A suggested question deep-linked from the design-evaluation review queue, pre-filled for

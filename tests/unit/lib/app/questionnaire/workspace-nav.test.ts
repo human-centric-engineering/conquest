@@ -32,6 +32,7 @@ function makeFlags(over: Partial<QuestionnaireWorkspaceFlags> = {}): Questionnai
     cohortReport: true,
     introScreen: false,
     advisor: true,
+    editAgent: true,
     ...over,
   };
 }
