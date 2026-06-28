@@ -49,7 +49,7 @@ import {
  * comparison is sufficient and deterministic. Order-insensitive for arrays so a
  * multi_choice re-stated in a different order counts as a no-op.
  */
-function valuesEqual(a: unknown, b: unknown): boolean {
+export function valuesEqual(a: unknown, b: unknown): boolean {
   if (Array.isArray(a) && Array.isArray(b)) {
     const arrA = a as unknown[];
     const arrB = b as unknown[];
@@ -161,6 +161,10 @@ export function applyRefinement(
     // Carry the turn the prior value was captured on when the caller supplied it
     // (the real turn loop, F4.6); absent on the hand-driven path.
     ...(existing.turnIndex !== undefined ? { turnIndex: existing.turnIndex } : {}),
+    // Record the confidence trajectory so the trail shows the score evolving across turns,
+    // not just the value. Prior score only when it was scored; new score is the decision's.
+    ...(existing.confidence !== undefined ? { previousConfidence: existing.confidence } : {}),
+    newConfidence: decision.confidence,
   };
 
   return {

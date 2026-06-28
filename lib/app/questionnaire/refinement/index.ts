@@ -42,7 +42,15 @@ export {
   normalizeRefinementDecisions,
   applyRefinement,
   summarizeRefinements,
+  valuesEqual,
 } from '@/lib/app/questionnaire/refinement/refinement-logic';
+
+export {
+  accrueConfidence,
+  corroboratedProvenance,
+  CONFIDENCE_CEILING,
+  CORROBORATION_STEP,
+} from '@/lib/app/questionnaire/refinement/confidence-accrual';
 
 /**
  * The answer-provenance vocabulary, re-exported for the parity test that asserts

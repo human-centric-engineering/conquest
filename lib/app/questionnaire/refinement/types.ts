@@ -125,6 +125,12 @@ export interface RefinementHistoryEntry {
   rationale: string;
   source: RefinementSource;
   turnIndex?: number;
+  /** The pre-change confidence, when the prior value carried a score — so the trail shows the
+   *  confidence trajectory across turns, not just the value. Optional/omitted when unscored. */
+  previousConfidence?: number | null;
+  /** The confidence written with `newValue` (the decision's certainty). Optional for entries
+   *  predating this field. */
+  newConfidence?: number | null;
 }
 
 /**

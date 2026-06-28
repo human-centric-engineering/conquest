@@ -83,7 +83,7 @@ beforeEach(() => {
   (seamMock.loadAnswerSlot as Mock).mockResolvedValue(null);
   // Default: no respondent-edited slots (P-presentation protection; overridden per-test).
   (seamMock.loadRespondentEditedSlotIds as Mock).mockResolvedValue(new Set<string>());
-  (dataSlotMock.upsertDataSlotFill as Mock).mockResolvedValue('ds-fill-1');
+  (dataSlotMock.upsertDataSlotFill as Mock).mockResolvedValue({ id: 'ds-fill-1', changed: true });
   // Default: the chat-mode gap-filler finds nothing to reconcile (its own behaviour is covered by
   // reconcile-chat-data-slot-fills.test.ts). Overridden in the wiring test below.
   (dataSlotMock.reconcileChatDataSlotFills as Mock).mockResolvedValue([]);
@@ -118,6 +118,80 @@ describe('persistTurn', () => {
     );
     expect(seamMock.recordTurn).toHaveBeenCalledWith(
       expect.objectContaining({ sideEffectAnswerIds: ['ans-q1', 'ans-q2'], costUsd: 0.005 })
+    );
+  });
+
+  it('STRENGTHENS confidence when a turn re-states an answer with the same value', async () => {
+    // Existing inferred answer at 0.45; this turn re-states the SAME value at 0.5 → corroboration.
+    (seamMock.loadAnswerSlot as Mock).mockResolvedValue(
+      loaded('ans-q1', { value: 'marketing', provenance: 'inferred', confidence: 0.45 })
+    );
+    (seamMock.upsertAnswerSlot as Mock).mockResolvedValue('ans-q1');
+
+    await persistTurn({
+      sessionId: 'sess-1',
+      userMessage: 'm',
+      agentResponse: 'r',
+      targetedQuestionId: null,
+      toolCalls: [],
+      costUsd: 0,
+      upserts: [
+        {
+          slotKey: 'role',
+          questionType: 'free_text',
+          value: 'marketing',
+          confidence: 0.5,
+          provenance: 'inferred',
+          rationale: 'again',
+          isActiveQuestion: true,
+        },
+      ],
+      refinements: [],
+      keyToSlotId: new Map([['role', 'slot-q1']]),
+    });
+
+    // accrueConfidence(0.45, 0.5) = 0.5 + 0.34*(0.95-0.5) = 0.653; provenance stays inferred.
+    expect(seamMock.upsertAnswerSlot).toHaveBeenCalledWith(
+      'sess-1',
+      'slot-q1',
+      expect.objectContaining({ value: 'marketing', confidence: 0.653, provenance: 'inferred' })
+    );
+  });
+
+  it('OVERWRITES (no accrual) when a turn changes the value', async () => {
+    // Existing answer 'marketing' at 0.9; this turn asserts a DIFFERENT value → not corroboration.
+    (seamMock.loadAnswerSlot as Mock).mockResolvedValue(
+      loaded('ans-q1', { value: 'marketing', provenance: 'direct', confidence: 0.9 })
+    );
+    (seamMock.upsertAnswerSlot as Mock).mockResolvedValue('ans-q1');
+
+    await persistTurn({
+      sessionId: 'sess-1',
+      userMessage: 'm',
+      agentResponse: 'r',
+      targetedQuestionId: null,
+      toolCalls: [],
+      costUsd: 0,
+      upserts: [
+        {
+          slotKey: 'role',
+          questionType: 'free_text',
+          value: 'sales',
+          confidence: 0.5,
+          provenance: 'inferred',
+          rationale: 'changed',
+          isActiveQuestion: true,
+        },
+      ],
+      refinements: [],
+      keyToSlotId: new Map([['role', 'slot-q1']]),
+    });
+
+    // Changed value → this turn's raw score is written as-is (0.5), not strengthened.
+    expect(seamMock.upsertAnswerSlot).toHaveBeenCalledWith(
+      'sess-1',
+      'slot-q1',
+      expect.objectContaining({ value: 'sales', confidence: 0.5, provenance: 'inferred' })
     );
   });
 
@@ -320,6 +394,44 @@ describe('persistTurn', () => {
     );
     expect(seamMock.recordTurn).toHaveBeenCalledWith(
       expect.objectContaining({ sideEffectDataSlotIds: ['ds-fill-1'], targetedDataSlotId: 'ds-1' })
+    );
+  });
+
+  it('does not stamp a re-emitted fill whose value did not materially change', async () => {
+    // The extractor re-emits every slot each turn; an unchanged re-write returns changed=false and
+    // must NOT land on sideEffectDataSlotIds — otherwise every touched slot flashes as "recently
+    // updated" even when nothing tangible changed.
+    (dataSlotMock.upsertDataSlotFill as Mock).mockResolvedValue({
+      id: 'ds-fill-1',
+      changed: false,
+    });
+
+    await persistTurn({
+      sessionId: 'sess-1',
+      userMessage: 'm',
+      agentResponse: 'r',
+      targetedQuestionId: null,
+      toolCalls: [],
+      costUsd: 0,
+      upserts: [],
+      refinements: [],
+      keyToSlotId: new Map(),
+      dataSlotFills: [
+        {
+          dataSlotKey: 'goal',
+          value: 'grow',
+          paraphrase: 'Grow the team (reworded)',
+          confidence: 0.9,
+          provenance: 'direct',
+        },
+      ],
+      dataSlotKeyToId: new Map([['goal', 'ds-1']]),
+    });
+
+    // The fill is still written (the row updates), but it is not back-stamped.
+    expect(dataSlotMock.upsertDataSlotFill).toHaveBeenCalledTimes(1);
+    expect(seamMock.recordTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ sideEffectDataSlotIds: [] })
     );
   });
 
