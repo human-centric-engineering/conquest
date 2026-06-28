@@ -424,6 +424,9 @@ export function ConfigEditor({
     String(config.minQuestionsAnswered)
   );
   const [coverageThreshold, setCoverageThreshold] = useState(String(config.coverageThreshold));
+  const [answerConfidenceFloor, setAnswerConfidenceFloor] = useState(
+    String(config.answerConfidenceFloor)
+  );
   const [costBudgetUsd, setCostBudgetUsd] = useState(
     config.costBudgetUsd === null ? '' : String(config.costBudgetUsd)
   );
@@ -494,6 +497,7 @@ export function ConfigEditor({
     setSelectionStrategy(config.selectionStrategy);
     setMinQuestionsAnswered(String(config.minQuestionsAnswered));
     setCoverageThreshold(String(config.coverageThreshold));
+    setAnswerConfidenceFloor(String(config.answerConfidenceFloor));
     setCostBudgetUsd(config.costBudgetUsd === null ? '' : String(config.costBudgetUsd));
     setMaxQuestionsPerSession(
       config.maxQuestionsPerSession === null ? '' : String(config.maxQuestionsPerSession)
@@ -563,6 +567,12 @@ export function ConfigEditor({
         ),
         // Clamp to [0,1]; blank falls back to the stored value, never silently 0.
         coverageThreshold: boundedNumber(coverageThreshold, 0, 1, config.coverageThreshold),
+        answerConfidenceFloor: boundedNumber(
+          answerConfidenceFloor,
+          0,
+          1,
+          config.answerConfidenceFloor
+        ),
         costBudgetUsd: capOrNull(costBudgetUsd, false),
         maxQuestionsPerSession: capOrNull(maxQuestionsPerSession, true),
         voiceEnabled,
@@ -751,6 +761,32 @@ export function ConfigEditor({
                   step={0.05}
                   value={coverageThreshold}
                   onChange={(e) => setCoverageThreshold(e.target.value)}
+                  disabled={busy}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-sm font-medium">
+                  Answer confidence floor{' '}
+                  <FieldHelp title="Answer confidence floor">
+                    How sure the agent must be before a background-filled answer counts as
+                    confirmed. To take the hassle out of form-filling, the agent fills questions
+                    opportunistically — on a good hunch from what the respondent said — and marks
+                    those guesses <em>tentative</em>. A tentative answer below this confidence does
+                    NOT count toward completion or satisfy a required question until the respondent
+                    corroborates it (each confirmation strengthens it). Lower = accept guesses
+                    sooner (faster, less checking); higher = insist on firmer confirmation before
+                    the form is &ldquo;done&rdquo;. <code className="text-xs">0.5</code> gates the
+                    agent&rsquo;s opportunistic guesses without holding back genuine answers; raise
+                    toward <code className="text-xs">0.65</code>+ to demand firmer confirmation.
+                  </FieldHelp>
+                </Label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={answerConfidenceFloor}
+                  onChange={(e) => setAnswerConfidenceFloor(e.target.value)}
                   disabled={busy}
                 />
               </div>
