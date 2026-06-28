@@ -205,6 +205,7 @@ export const updateConfigSchema = z
     selectionStrategy: z.enum(SELECTION_STRATEGIES).optional(),
     minQuestionsAnswered: z.number().int().nonnegative().optional(),
     coverageThreshold: z.number().min(0).max(1).optional(),
+    answerConfidenceFloor: z.number().min(0).max(1).optional(),
     costBudgetUsd: z.number().positive().nullable().optional(),
     maxQuestionsPerSession: z.number().int().positive().nullable().optional(),
     voiceEnabled: z.boolean().optional(),

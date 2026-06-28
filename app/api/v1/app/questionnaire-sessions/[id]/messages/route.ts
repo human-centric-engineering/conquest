@@ -562,6 +562,9 @@ async function handleMessage(
       sensitivityAware: body.kickoff ? false : sensitivityAware,
       // Answer-fit resolver: per-questionnaire mode for the focused free-form → choice/likert pass.
       answerFitMode: loaded.base.config.answerFitMode,
+      // Confirmation floor: the configured line below which an opportunistic fill stays tentative —
+      // governs when the refresh pass stops strengthening a corroborated mapped answer.
+      answerConfidenceFloor: loaded.base.config.answerConfidenceFloor,
       // Data Slots feature: feed the data slots so the SAME extraction call fills them too (narrowed
       // by the pre-filter when active).
       ...(dataSlotMode ? { dataSlotCandidates: extractionDataCandidates } : {}),

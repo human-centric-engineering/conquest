@@ -99,6 +99,7 @@ function state(over: Partial<TurnState> = {}): TurnState {
       selectionStrategy: 'sequential',
       minQuestionsAnswered: 0,
       coverageThreshold: 1,
+      answerConfidenceFloor: 0.5,
       costBudgetUsd: null,
       maxQuestionsPerSession: null,
       voiceEnabled: false,

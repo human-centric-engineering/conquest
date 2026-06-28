@@ -57,11 +57,23 @@ const pct = (n: number): string => `${Math.round(n * 100)}%`;
  *  4. Otherwise → `not_ready`, listing the specific unmet criteria.
  */
 export function assessCompletion(ctx: CompletionContext): CompletionAssessment {
-  const answered = answeredCount(ctx);
-  const coverage = coverageRatio(ctx);
   const { maxQuestionsPerSession: cap, coverageThreshold, minQuestionsAnswered } = ctx.config;
 
-  const requiredUnansweredKeys = unansweredQuestions(ctx)
+  // Confirmation floor (opportunistic fill): a tentative answer scored BELOW the floor is a guess
+  // the agent hasn't yet had corroborated — it must not count toward coverage / the min, nor unblock
+  // a required question, until a confirmation raises it. Unscored answers (`null`) are authoritative
+  // (respondent edits / non-opportunistic captures), so they always count. With the floor at 0 this
+  // is a no-op, preserving the prior "filled is enough" behaviour.
+  const floor = ctx.config.answerConfidenceFloor;
+  const gated: CompletionContext =
+    floor > 0
+      ? { ...ctx, answered: ctx.answered.filter((a) => (a.confidence ?? 1) >= floor) }
+      : ctx;
+
+  const answered = answeredCount(gated);
+  const coverage = coverageRatio(gated);
+
+  const requiredUnansweredKeys = unansweredQuestions(gated)
     .filter((q) => q.required)
     .map((q) => q.key);
 

@@ -52,12 +52,13 @@ export const OPPORTUNISTIC_FILL_FLOOR = 0.5;
 export const OPPORTUNISTIC_CONFIDENCE_CAP = 0.45;
 
 /**
- * Confidence at/above which an answer counts as confirmed and is left alone by the refresh path —
- * below it, an opportunistic (inferred) answer is still "to be confirmed" and a corroborating turn
- * strengthens it. The "Fairly sure" band floor (`panel/confidence.ts`). Phase 4 makes the
- * completion equivalent of this configurable per questionnaire.
+ * Default confidence at/above which an answer counts as confirmed and is left alone by the refresh
+ * path — below it, an opportunistic (inferred) answer is still "to be confirmed" and a corroborating
+ * turn strengthens it. 0.5 gates the opportunistic guesses (capped at 0.45) without holding back a
+ * genuine, real answer. The per-questionnaire `answerConfidenceFloor` config overrides this (it also
+ * gates completion); this constant is the fallback when none is threaded through.
  */
-export const ANSWER_CONFIRM_FLOOR = 0.65;
+export const ANSWER_CONFIRM_FLOOR = 0.5;
 
 /** Question types the answer-fit resolver can map a free-form position onto. */
 const FIT_TYPES = new Set(['single_choice', 'multi_choice', 'likert']);

@@ -23,6 +23,57 @@ describe('assessCompletion', () => {
     expect(a.capReached).toBe(false);
   });
 
+  it('does not count a below-floor (tentative) answer toward coverage', () => {
+    const c = cctx({
+      questions: [q({ id: 'a' }), q({ id: 'b' })],
+      answered: [
+        { questionId: 'a', confidence: null }, // authoritative → counts
+        { questionId: 'b', confidence: 0.45 }, // opportunistic guess below the 0.5 floor → ignored
+      ],
+      config: { coverageThreshold: 1, minQuestionsAnswered: 0, answerConfidenceFloor: 0.5 },
+    });
+    const a = assessCompletion(c);
+    expect(a.kind).toBe('not_ready');
+    expect(a.unmet).toContain('coverage_below_threshold');
+    expect(a.answeredCount).toBe(1); // only the confirmed answer counts
+  });
+
+  it('counts the same answer once it is corroborated above the floor', () => {
+    const c = cctx({
+      questions: [q({ id: 'a' }), q({ id: 'b' })],
+      answered: [
+        { questionId: 'a', confidence: null },
+        { questionId: 'b', confidence: 0.62 }, // strengthened past the floor → now counts
+      ],
+      config: { coverageThreshold: 1, minQuestionsAnswered: 2, answerConfidenceFloor: 0.5 },
+    });
+    const a = assessCompletion(c);
+    expect(a.kind).toBe('offer');
+    expect(a.answeredCount).toBe(2);
+  });
+
+  it('does not let a below-floor answer satisfy a required question', () => {
+    const c = cctx({
+      questions: [q({ id: 'req', key: 'req', required: true })],
+      answered: [{ questionId: 'req', confidence: 0.4 }], // tentative guess on a required slot
+      config: { coverageThreshold: 0, minQuestionsAnswered: 0, answerConfidenceFloor: 0.5 },
+    });
+    const a = assessCompletion(c);
+    expect(a.kind).toBe('blocked_on_required');
+    expect(a.requiredUnansweredKeys).toEqual(['req']);
+  });
+
+  it('floor of 0 disables gating (a low-confidence answer still counts)', () => {
+    const c = cctx({
+      questions: [q({ id: 'a' })],
+      answered: [{ questionId: 'a', confidence: 0.1 }],
+      config: { coverageThreshold: 1, minQuestionsAnswered: 1, answerConfidenceFloor: 0 },
+    });
+    const a = assessCompletion(c);
+    expect(a.kind).toBe('offer');
+    expect(a.answeredCount).toBe(1);
+  });
+
   it('is not_ready with coverage_below_threshold when coverage is short', () => {
     const c = cctx({
       questions: [q({ id: 'a', weight: 1 }), q({ id: 'b', weight: 1 })],

@@ -102,6 +102,7 @@ function makeGraph(over: Partial<VersionGraphView> = {}): VersionGraphView {
       selectionStrategy: 'sequential',
       minQuestionsAnswered: 0,
       coverageThreshold: 1,
+      answerConfidenceFloor: 0.5,
       costBudgetUsd: null,
       maxQuestionsPerSession: null,
       voiceEnabled: false,

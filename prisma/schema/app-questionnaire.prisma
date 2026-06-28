@@ -172,6 +172,10 @@ model AppQuestionnaireConfig {
   // Completion thresholds: when a session may be considered done.
   minQuestionsAnswered Int   @default(0) // require at least this many answered
   coverageThreshold    Float @default(1.0) // 0–1 fraction of (weighted) questions covered
+  // Confirmation floor (opportunistic fill): an answer below this confidence is "tentative" — it
+  // does NOT count toward completion coverage or satisfy a required question until corroborated
+  // above it. Governs how cautious the background form-fill loop is (lower = accept guesses sooner).
+  answerConfidenceFloor Float @default(0.5) // 0–1; gates opportunistic guesses (cap 0.45), not real answers
 
   // Budget & caps (F3.3/F6.3 consume these; F3.1 only stores them).
   costBudgetUsd          Float? // per-session USD cap; null = no cap

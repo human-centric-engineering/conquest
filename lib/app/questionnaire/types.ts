@@ -689,6 +689,12 @@ export type QuestionnaireConfigShape = {
   selectionStrategy: SelectionStrategy;
   minQuestionsAnswered: number;
   coverageThreshold: number;
+  /**
+   * Confirmation floor for opportunistic fills (0–1). An answer below this confidence is
+   * "tentative" — it does not count toward completion coverage or satisfy a required question
+   * until corroborated above it. Lower = the background form-fill accepts guesses sooner.
+   */
+  answerConfidenceFloor: number;
   costBudgetUsd: number | null;
   maxQuestionsPerSession: number | null;
   voiceEnabled: boolean;
@@ -860,6 +866,7 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   selectionStrategy: 'adaptive',
   minQuestionsAnswered: 0,
   coverageThreshold: 1,
+  answerConfidenceFloor: 0.5,
   costBudgetUsd: null,
   maxQuestionsPerSession: null,
   voiceEnabled: false,

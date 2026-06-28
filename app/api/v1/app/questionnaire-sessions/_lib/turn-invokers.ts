@@ -188,6 +188,11 @@ export async function buildTurnInvokers(opts: {
    */
   answerFitMode?: AnswerFitMode;
   /**
+   * Confirmation floor (per-questionnaire config) — threaded to the extractor so the opportunistic
+   * refresh pass knows when a corroborated mapped answer has been strengthened enough to leave alone.
+   */
+  answerConfidenceFloor?: number;
+  /**
    * Anonymous (no-login) session. The adaptive SELECTORS drive the selection agent through
    * `streamChat`, which persists an `AiConversation` keyed to a real `user` — but an anonymous turn's
    * `userId` is the synthetic `anon:<sessionId>` (no `user` row), so the insert FK-violates and the
@@ -208,6 +213,7 @@ export async function buildTurnInvokers(opts: {
     dataSlotCandidates,
     sensitivityAware,
     answerFitMode,
+    answerConfidenceFloor,
     anonymous,
     recordInspectorCall,
   } = opts;
@@ -291,6 +297,7 @@ export async function buildTurnInvokers(opts: {
         ...(sensitivityAware ? { sensitivityAware: true } : {}),
         // Answer-fit resolver: let the extractor run the focused follow-up pass when enabled.
         ...(answerFitMode && answerFitMode !== 'off' ? { answerFitMode } : {}),
+        ...(answerConfidenceFloor !== undefined ? { answerConfidenceFloor } : {}),
         sessionId: state.sessionId,
       };
       const dispatch = await capabilityDispatcher.dispatch(

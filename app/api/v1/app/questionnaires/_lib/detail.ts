@@ -91,6 +91,7 @@ export const CONFIG_SELECT = {
   selectionStrategy: true,
   minQuestionsAnswered: true,
   coverageThreshold: true,
+  answerConfidenceFloor: true,
   costBudgetUsd: true,
   maxQuestionsPerSession: true,
   voiceEnabled: true,
@@ -128,6 +129,7 @@ type ConfigRow = {
   selectionStrategy: string;
   minQuestionsAnswered: number;
   coverageThreshold: number;
+  answerConfidenceFloor: number;
   costBudgetUsd: number | null;
   maxQuestionsPerSession: number | null;
   voiceEnabled: boolean;
@@ -228,6 +230,7 @@ export function toConfigView(row: ConfigRow | null): ConfigView {
     selectionStrategy: asSelectionStrategy(row.selectionStrategy),
     minQuestionsAnswered: row.minQuestionsAnswered,
     coverageThreshold: row.coverageThreshold,
+    answerConfidenceFloor: row.answerConfidenceFloor,
     costBudgetUsd: row.costBudgetUsd,
     maxQuestionsPerSession: row.maxQuestionsPerSession,
     voiceEnabled: row.voiceEnabled,

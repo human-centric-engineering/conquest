@@ -147,6 +147,7 @@ function makeConfigView(overrides: Partial<ConfigView> = {}): ConfigView {
     selectionStrategy: 'sequential',
     minQuestionsAnswered: 3,
     coverageThreshold: 0.7,
+    answerConfidenceFloor: 0.5,
     costBudgetUsd: null,
     maxQuestionsPerSession: null,
     voiceEnabled: false,

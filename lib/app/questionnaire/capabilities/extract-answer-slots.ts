@@ -176,6 +176,11 @@ const argsSchema = z
         })
       )
       .optional(),
+    /**
+     * Confirmation floor (per-questionnaire config) — the refresh pass strengthens a tentative
+     * mapped answer only while it sits below this. Absent ⇒ the {@link ANSWER_CONFIRM_FLOOR} default.
+     */
+    answerConfidenceFloor: z.number().min(0).max(1).optional(),
     /** Recent transcript, oldest first. */
     recentMessages: z.array(z.string()).max(50).optional(),
     /** Files attached to this turn (images/documents) — read alongside the message. */
@@ -786,7 +791,7 @@ export class AppExtractAnswerSlotsCapability extends BaseCapability<
           dataSlotCandidates: args.dataSlotCandidates ?? [],
           answered: extractionContext.answered,
           handledKeys,
-          confirmFloor: ANSWER_CONFIRM_FLOOR,
+          confirmFloor: args.answerConfidenceFloor ?? ANSWER_CONFIRM_FLOOR,
         })
       );
       opportunisticIntents.push(...refreshIntents);
