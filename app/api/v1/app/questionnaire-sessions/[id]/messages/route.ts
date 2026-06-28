@@ -424,6 +424,12 @@ async function handleMessage(
       (toneConfig.persona.enabled || TONE_DIMENSION_KEYS.some((key) => toneConfig[key].enabled));
     const tonePhraserInput = toneActive ? { tone: toneConfig } : {};
 
+    // Interviewer strategy (questioning approach): per-questionnaire, gated only on its own `enabled`
+    // (no platform flag — off by default). When on, the phraser receives the settings plus the live
+    // progress signals the funnel arc reads (coverage so far + whether the respondent's been terse).
+    const strategyConfig = loaded.base.config.interviewerStrategy;
+    const strategyActive = strategyConfig.enabled;
+
     // Attachments only flow when the platform sub-flag is on (dark-launch) AND this questionnaire
     // opted in via config: with either off, a client that sends attachments anyway gets a
     // text-only turn — the paid multimodal path stays shut. This server gate mirrors the composer
@@ -452,6 +458,20 @@ async function handleMessage(
       ...(attachments ? { attachments } : {}),
       ...(costPressure ? { costPressure } : {}),
     };
+
+    // Interviewer strategy phraser input — computed once per turn (state/userMessage are turn
+    // constants) and spread into whichever phrasing call site fires. Coverage is a simple
+    // answered/total ratio (enough to phase the funnel); `respondentTerse` flags a short latest
+    // reply, which biases the funnel toward targeted sooner. Empty object when the strategy is off.
+    const strategyPhraserInput = strategyActive
+      ? {
+          interviewerStrategy: strategyConfig,
+          coverage:
+            state.questions.length > 0 ? state.answered.length / state.questions.length : null,
+          respondentTerse:
+            userMessage.trim().length > 0 && userMessage.trim().split(/\s+/).length < 12,
+        }
+      : {};
 
     // Data Slots feature: the current fill per data slot id, so the extractor sees what's already
     // recorded (to update/correct it across turns), keyed for the candidate build below.
@@ -806,6 +826,7 @@ async function handleMessage(
             ...(isFinalAttempt ? { isFinalAttempt: true } : {}),
             ...sensitivityPhraserInput,
             ...tonePhraserInput,
+            ...strategyPhraserInput,
           },
           userId,
           sessionId,
@@ -862,6 +883,7 @@ async function handleMessage(
             ...(qPeer ? { peerContext: [qPeer.insight] } : {}),
             ...sensitivityPhraserInput,
             ...tonePhraserInput,
+            ...strategyPhraserInput,
           },
           userId,
           sessionId,

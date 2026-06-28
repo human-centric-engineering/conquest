@@ -257,6 +257,12 @@ model AppQuestionnaireConfig {
   // Fed into the phraser system prompt by buildToneInstructions (lib/.../chat/tone.ts). (types.ts)
   tone Json @default("{}")
 
+  // Interviewer strategy (questioning approach): { enabled, approach: funnel|open|targeted, probeDepth,
+  // reflect, batchRelated }. When enabled, OVERRIDES the default open-invitation questioning prompt with
+  // the chosen openness arc + additive tactics. Off by default. Rendered into the phraser system prompt by
+  // buildInterviewerStrategyInstructions (lib/.../chat/interviewer-strategy.ts). (types.ts)
+  interviewerStrategy Json @default("{}")
+
   // Respondent Report (report kind `respondent`): RespondentReportSettings — the per-respondent
   // report delivered after completion (mode, raw-content includes, AI generation knobs, delivery).
   // Off by default; only takes effect when the platform flag

@@ -27,6 +27,7 @@ import {
   COHORT_REPORT_INSTRUCTIONS_MAX_LENGTH,
   COHORT_REPORT_LENGTHS,
   CONTRADICTION_MODES,
+  INTERVIEWER_APPROACHES,
   INTRO_BACKGROUND_MAX_LENGTH,
   INTRO_BUTTON_LABEL_MAX_LENGTH,
   INVITEE_FIELD_KEYS,
@@ -108,6 +109,20 @@ const tonePersonaSchema = z.object({
  * partial) by the editor; every dimension + persona present so a save can clear a toggle. Keys
  * mirror `TONE_DIMENSION_KEYS` + `persona`; `strict()` rejects unknown keys.
  */
+/**
+ * Interviewer strategy (questioning approach). Sent whole by the editor; `strict()` rejects unknown
+ * keys. `approach` is one of {@link INTERVIEWER_APPROACHES}; the tactics are plain booleans.
+ */
+const interviewerStrategySchema = z
+  .object({
+    enabled: z.boolean(),
+    approach: z.enum(INTERVIEWER_APPROACHES),
+    probeDepth: z.boolean(),
+    reflect: z.boolean(),
+    batchRelated: z.boolean(),
+  })
+  .strict();
+
 const toneSettingsSchema = z
   .object({
     empathy: toneDimensionSchema,
@@ -262,6 +277,7 @@ export const updateConfigSchema = z
     // Interviewer tone & persona (F-tone). Sent whole when present; gated additionally by the
     // platform flag APP_QUESTIONNAIRES_TONE_ENABLED.
     tone: toneSettingsSchema.optional(),
+    interviewerStrategy: interviewerStrategySchema.optional(),
     // Respondent Report. Sent whole when present; gated additionally by the platform flag
     // APP_QUESTIONNAIRES_RESPONDENT_REPORT_ENABLED.
     respondentReport: respondentReportSettingsSchema.optional(),

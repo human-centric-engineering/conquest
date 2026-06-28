@@ -30,8 +30,10 @@ import {
   type QuestionType,
   type SensitivitySeverity,
   type ToneSettings,
+  type InterviewerStrategySettings,
 } from '@/lib/app/questionnaire/types';
 import { buildToneInstructions } from '@/lib/app/questionnaire/chat/tone';
+import { buildInterviewerStrategyInstructions } from '@/lib/app/questionnaire/chat/interviewer-strategy';
 import { joinSections, section } from '@/lib/app/questionnaire/prompt/format';
 import { QUESTIONNAIRE_INTERVIEWER_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
 
@@ -136,6 +138,21 @@ export interface QuestionComposeInput {
    * `tone.mimicry.enabled` additionally governs whether the default "match their tone" line is kept.
    */
   tone?: ToneSettings;
+  /**
+   * Interviewer strategy (questioning approach). When enabled it OVERRIDES the default
+   * open-invitation guidance with the configured approach + tactics. Absent/disabled = default.
+   */
+  interviewerStrategy?: InterviewerStrategySettings;
+  /**
+   * Fraction of the questionnaire covered so far (0–1), for the funnel arc's open→targeted phase.
+   * Absent ⇒ the funnel falls back to {@link questionsAsked}.
+   */
+  coverage?: number | null;
+  /**
+   * The respondent has been giving short/terse answers — the funnel arc gets specific sooner.
+   * Derived by the route from recent respondent messages.
+   */
+  respondentTerse?: boolean;
 }
 
 /** What {@link streamQuestionMessage} returns once the stream completes. */
@@ -202,6 +219,14 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
   // Tone & persona (F-tone): the admin-configured voice, rendered to imperative clauses. Empty
   // string when nothing is enabled (or no tone configured) — then the default voice is unchanged.
   const toneInstructions = input.tone ? buildToneInstructions(input.tone) : '';
+
+  // Interviewer strategy (questioning approach): when enabled, overrides the default open-invitation
+  // guidance with the configured approach (funnel/open/targeted) + tactics. Empty when disabled.
+  const strategyInstructions = buildInterviewerStrategyInstructions(input.interviewerStrategy, {
+    coverage: input.coverage,
+    questionsAsked: input.questionsAsked,
+    respondentTerse: input.respondentTerse,
+  });
 
   // Length is calibrated by how far into the conversation we are: the first few questions stay
   // very tight (effortless to answer), and later ones may be a touch warmer — but never long.
@@ -301,6 +326,10 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
       )
     ),
     section('this_turn', turnGuidance),
+    // Interviewer strategy (when enabled): a more specific override of the default questioning
+    // approach in `rules`/`this_turn` above — placed after them so it governs (later sections win,
+    // same as tone). Collapses to '' when disabled, leaving the default voice untouched.
+    section('interviewer_strategy', strategyInstructions),
     section(
       'context',
       joinSections(

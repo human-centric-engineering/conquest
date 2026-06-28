@@ -22,6 +22,7 @@ import { useEffect, useState } from 'react';
 import {
   Brain,
   ClipboardList,
+  Compass,
   Gauge,
   ListChecks,
   Mail,
@@ -36,7 +37,6 @@ import {
 import type { LucideIcon } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
-import { ConfigImportExport } from '@/components/admin/questionnaires/config-import-export';
 import { SaveButton } from '@/components/admin/questionnaires/save-button';
 import { Input } from '@/components/ui/input';
 import { PublicRespondentLink } from '@/components/admin/questionnaires/public-respondent-link';
@@ -87,6 +87,10 @@ import {
   type ToneDimension,
   type ToneDimensionKey,
   type ToneSettings,
+  INTERVIEWER_APPROACHES,
+  INTERVIEWER_APPROACH_LABELS,
+  type InterviewerApproach,
+  type InterviewerStrategySettings,
 } from '@/lib/app/questionnaire/types';
 import type { ConfigView } from '@/lib/app/questionnaire/views';
 import type { RunMutation } from '@/components/admin/questionnaires/version-editor-types';
@@ -490,6 +494,10 @@ export function ConfigEditor({
   // Interviewer tone & persona (F-tone): the whole block edited as one object. Helpers below patch
   // a single dimension / the persona immutably.
   const [tone, setTone] = useState<ToneSettings>(config.tone);
+  // Interviewer strategy (questioning approach) — edited as one object, patched by `setStrategy`.
+  const [interviewerStrategy, setInterviewerStrategy] = useState<InterviewerStrategySettings>(
+    config.interviewerStrategy
+  );
   // Respondent intro / splash (admin opt-in): the whole block edited as one object.
   const [intro, setIntro] = useState<IntroSettings>(config.intro);
 
@@ -529,6 +537,7 @@ export function ConfigEditor({
     setPreviewInspectorEnabled(config.previewInspectorEnabled);
     setProfileFields(config.profileFields.map(toRow));
     setTone(config.tone);
+    setInterviewerStrategy(config.interviewerStrategy);
     setIntro(config.intro);
   }, [config]);
 
@@ -539,6 +548,8 @@ export function ConfigEditor({
     setTone((t) => ({ ...t, [key]: { ...t[key], ...patch } }));
   const setTonePersona = (patch: Partial<ToneSettings['persona']>) =>
     setTone((t) => ({ ...t, persona: { ...t.persona, ...patch } }));
+  const setStrategy = (patch: Partial<InterviewerStrategySettings>) =>
+    setInterviewerStrategy((s) => ({ ...s, ...patch }));
 
   const updateField = (index: number, patch: Partial<ProfileFieldRow>) =>
     setProfileFields((prev) => prev.map((f, i) => (i === index ? { ...f, ...patch } : f)));
@@ -643,6 +654,8 @@ export function ConfigEditor({
         // Interviewer tone & persona (F-tone). Sent whole; trim the persona text. Requires the
         // platform tone flag to take effect.
         tone: { ...tone, persona: { ...tone.persona, text: tone.persona.text.trim() } },
+        // Interviewer strategy (questioning approach). Sent whole; off ⇒ default prompts unchanged.
+        interviewerStrategy,
         // Respondent intro / splash. Sent whole; trim the background + button label. Requires the
         // platform intro-screen flag AND `enabled` to surface to a respondent.
         intro: {
@@ -662,16 +675,6 @@ export function ConfigEditor({
 
   return (
     <section className="space-y-4">
-      {/* Import / export the whole config as a portable JSON file. Sits above the groups so it's
-          discoverable, and runs through the same `run` mutation as Save (fork-on-launch + resync). */}
-      <ConfigImportExport
-        questionnaireId={questionnaireId}
-        versionId={versionId}
-        config={config}
-        run={run}
-        busy={busy}
-      />
-
       {!config.saved && (
         <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
           <span className="font-medium">Not yet saved.</span>
@@ -1234,6 +1237,113 @@ export function ConfigEditor({
                 onLevel={(level) => setToneDimension(meta.key, { level })}
               />
             ))}
+          </SettingsGroup>
+
+          {/* ── Interviewer strategy — overrides the default questioning approach when enabled. ── */}
+          <SettingsGroup
+            icon={Compass}
+            accent="bg-sky-500/10 text-sky-600 dark:text-sky-400"
+            id="interviewer-strategy"
+            title="Interviewer strategy"
+            description="How the agent asks — its questioning approach. Off uses the default open, conversational style; on overrides it with the approach and tactics you choose."
+          >
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={interviewerStrategy.enabled}
+                onCheckedChange={(enabled) => setStrategy({ enabled })}
+                disabled={busy}
+              />
+              <Label className="text-sm font-medium">
+                Override the default questioning approach{' '}
+                <FieldHelp title="Interviewer strategy">
+                  When on, the chosen approach and tactics replace the default open-invitation
+                  prompt that governs how the interviewer asks questions. When off, nothing changes.
+                </FieldHelp>
+              </Label>
+            </div>
+
+            {interviewerStrategy.enabled && (
+              <div className="border-border/60 ml-1 space-y-4 border-l pl-4">
+                <div className="space-y-1.5 sm:max-w-xs">
+                  <Label className="text-sm font-medium">
+                    Approach{' '}
+                    <FieldHelp title="Approach">
+                      The openness arc for the whole session. <strong>Funnel</strong> opens broad to
+                      let people ramble and fill several answers at once, then narrows to targeted
+                      questions to close gaps near the end — and goes targeted sooner if the
+                      respondent is terse. <strong>Open throughout</strong> stays broad and
+                      exploratory the whole way (best for rich, qualitative discovery).{' '}
+                      <strong>Targeted/efficient</strong> asks one specific thing at a time for the
+                      fastest completion (best for factual questionnaires).
+                    </FieldHelp>
+                  </Label>
+                  <Select
+                    value={interviewerStrategy.approach}
+                    onValueChange={(v) => setStrategy({ approach: v as InterviewerApproach })}
+                    disabled={busy}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {INTERVIEWER_APPROACHES.map((a) => (
+                        <SelectItem key={a} value={a}>
+                          {INTERVIEWER_APPROACH_LABELS[a]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      checked={interviewerStrategy.probeDepth}
+                      onCheckedChange={(probeDepth) => setStrategy({ probeDepth })}
+                      disabled={busy}
+                    />
+                    <Label className="text-sm font-medium">
+                      Probe for depth{' '}
+                      <FieldHelp title="Probe for depth">
+                        On a shallow or low-confidence answer, the interviewer asks one brief
+                        follow-up (&ldquo;What makes you say that?&rdquo;) before moving on. Deepens
+                        qualitative answers at the cost of a few more turns.
+                      </FieldHelp>
+                    </Label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      checked={interviewerStrategy.reflect}
+                      onCheckedChange={(reflect) => setStrategy({ reflect })}
+                      disabled={busy}
+                    />
+                    <Label className="text-sm font-medium">
+                      Reflect &amp; confirm{' '}
+                      <FieldHelp title="Reflect & confirm">
+                        The interviewer briefly plays back what it understood before the next
+                        question, so the respondent can confirm or correct it. Builds trust and
+                        strengthens answer confidence through corroboration.
+                      </FieldHelp>
+                    </Label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      checked={interviewerStrategy.batchRelated}
+                      onCheckedChange={(batchRelated) => setStrategy({ batchRelated })}
+                      disabled={busy}
+                    />
+                    <Label className="text-sm font-medium">
+                      Batch related questions{' '}
+                      <FieldHelp title="Batch related questions">
+                        When a few remaining gaps are closely related, the interviewer may invite
+                        them together in one natural question rather than strictly one at a time.
+                        Faster and more conversational; slightly harder to extract cleanly.
+                      </FieldHelp>
+                    </Label>
+                  </div>
+                </div>
+              </div>
+            )}
           </SettingsGroup>
 
           {/* ── 3. Access & invitations — who may start, and the invitee detail fields captured. ── */}

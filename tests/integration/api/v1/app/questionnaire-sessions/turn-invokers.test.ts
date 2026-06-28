@@ -64,6 +64,7 @@ import {
   DEFAULT_COHORT_REPORT_SETTINGS,
   DEFAULT_INTRO_SETTINGS,
   DEFAULT_TONE_SETTINGS,
+  DEFAULT_INTERVIEWER_STRATEGY,
 } from '@/lib/app/questionnaire/types';
 import type { TurnState } from '@/lib/app/questionnaire/orchestrator';
 import type { CapabilitySlotView } from '@/app/api/v1/app/questionnaires/_lib/turn-context';
@@ -100,6 +101,7 @@ function state(over: Partial<TurnState> = {}): TurnState {
       minQuestionsAnswered: 0,
       coverageThreshold: 1,
       answerConfidenceFloor: 0.5,
+      interviewerStrategy: DEFAULT_INTERVIEWER_STRATEGY,
       costBudgetUsd: null,
       maxQuestionsPerSession: null,
       voiceEnabled: false,

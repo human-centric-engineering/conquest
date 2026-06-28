@@ -459,6 +459,51 @@ export const DEFAULT_TONE_SETTINGS: ToneSettings = {
 };
 
 /**
+ * Interviewer strategy (questioning approach). When `enabled`, these OVERRIDE the default
+ * questioning-approach prompt: a session-level openness `approach` (one of {@link
+ * INTERVIEWER_APPROACHES}) plus additive tactics that combine with it. Disabled = today's default
+ * voice unchanged. Stored as a Json config block (like {@link ToneSettings}); rendered into the
+ * asking prompt by `buildInterviewerStrategyInstructions`.
+ *
+ * - `funnel` — open/general first to let people ramble and fill many slots at once, then narrow to
+ *   targeted as coverage builds; goes targeted sooner when the respondent is terse, and re-opens as
+ *   the form fills.
+ * - `open` — broad and exploratory throughout, loosely guided by remaining gaps.
+ * - `targeted` — one specific, concrete question at a time; efficient.
+ */
+export const INTERVIEWER_APPROACHES = ['funnel', 'open', 'targeted'] as const;
+export type InterviewerApproach = (typeof INTERVIEWER_APPROACHES)[number];
+
+/** Human labels — single source for the admin select + any display. */
+export const INTERVIEWER_APPROACH_LABELS: Record<InterviewerApproach, string> = {
+  funnel: 'Funnel (open → targeted)',
+  open: 'Open throughout',
+  targeted: 'Targeted / efficient',
+};
+
+export type InterviewerStrategySettings = {
+  /** Off ⇒ the default questioning-approach prompt is used unchanged. */
+  enabled: boolean;
+  /** The session-level openness arc. */
+  approach: InterviewerApproach;
+  /** Tactic: dig into a shallow / low-confidence answer with one follow-up before moving on. */
+  probeDepth: boolean;
+  /** Tactic: briefly reflect the captured point back before the next question (also corroborates). */
+  reflect: boolean;
+  /** Tactic: invite a few closely-related gaps together rather than strictly one at a time. */
+  batchRelated: boolean;
+};
+
+/** Disabled — today's default questioning approach, no override. */
+export const DEFAULT_INTERVIEWER_STRATEGY: InterviewerStrategySettings = {
+  enabled: false,
+  approach: 'funnel',
+  probeDepth: false,
+  reflect: false,
+  batchRelated: false,
+};
+
+/**
  * Respondent Report (report kind `respondent`) — the per-respondent report delivered after a
  * respondent completes the questionnaire. The first of two report kinds; the later cross-respondent
  * Cohort Report (`cohort`) gets its own config when built.
@@ -815,6 +860,8 @@ export type QuestionnaireConfigShape = {
    * `APP_QUESTIONNAIRES_TONE_ENABLED` is on. Threaded to the phraser via `buildToneInstructions`.
    */
   tone: ToneSettings;
+  /** Interviewer questioning approach (off ⇒ default prompts). See {@link InterviewerStrategySettings}. */
+  interviewerStrategy: InterviewerStrategySettings;
   /**
    * Respondent Report — the per-respondent report delivered after completion. See
    * {@link RespondentReportSettings}. Off by default; only takes effect when the platform flag
@@ -896,6 +943,7 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   // Admin-only debugging surface — off by default; an operator turns it on per version.
   previewInspectorEnabled: false,
   tone: DEFAULT_TONE_SETTINGS,
+  interviewerStrategy: DEFAULT_INTERVIEWER_STRATEGY,
   respondentReport: DEFAULT_RESPONDENT_REPORT_SETTINGS,
   cohortReport: DEFAULT_COHORT_REPORT_SETTINGS,
   intro: DEFAULT_INTRO_SETTINGS,

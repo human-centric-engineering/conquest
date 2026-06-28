@@ -24,6 +24,7 @@ import {
   DEFAULT_COHORT_REPORT_SETTINGS,
   DEFAULT_INTRO_SETTINGS,
   DEFAULT_TONE_SETTINGS,
+  DEFAULT_INTERVIEWER_STRATEGY,
 } from '@/lib/app/questionnaire/types';
 import type {
   QuestionDistributionsResult,
@@ -161,6 +162,7 @@ function makeGraph(over: Partial<VersionGraphView> = {}): VersionGraphView {
       minQuestionsAnswered: 0,
       coverageThreshold: 1,
       answerConfidenceFloor: 0.5,
+      interviewerStrategy: DEFAULT_INTERVIEWER_STRATEGY,
       costBudgetUsd: null,
       maxQuestionsPerSession: null,
       voiceEnabled: false,
