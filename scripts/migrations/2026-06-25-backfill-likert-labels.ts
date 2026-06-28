@@ -4,6 +4,7 @@ dotenv.config({ path: '.env' });
 
 import { z } from 'zod';
 
+import { env } from '@/lib/env';
 import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
 import { resolveAgentProviderAndModel } from '@/lib/orchestration/llm/agent-resolver';
@@ -34,6 +35,12 @@ import {
  * left unlabelled (and never blocks launch). With no provider configured (or `--generic`), every
  * question takes that deterministic fallback.
  *
+ * `--relabel` widens the net to scales that ARE already labelled, re-deriving each from the
+ * question's wording — the way to fix scales mislabelled by an earlier, agree/disagree-biased
+ * prompt (e.g. a "to what extent…" question wrongly carrying "Strongly disagree → Strongly agree").
+ * To protect work already in place, a re-label NEVER overwrites an existing label set with the
+ * deterministic generic ramp: if the LLM can't produce a fresh set, the existing labels are kept.
+ *
  * Usage
  * -----
  *   tsx --env-file=.env.local scripts/migrations/2026-06-25-backfill-likert-labels.ts [flags]
@@ -43,6 +50,10 @@ import {
  * -----
  *   --dry-run                 List the questions that would change; write nothing.
  *   --generic                 Skip the LLM; apply the deterministic generic labels to every scale.
+ *   --relabel                 Also re-derive scales that are already labelled (LLM only — never
+ *                             downgrades an existing label set to the generic ramp). DEVELOPMENT
+ *                             ONLY — refused when NODE_ENV is not "development", since it can
+ *                             overwrite admin-tuned labels.
  *   --version=<id>            Limit to a single version id.
  *   --questionnaire=<id>      Limit to all versions of one questionnaire.
  *
@@ -52,15 +63,17 @@ import {
 interface Flags {
   dryRun: boolean;
   generic: boolean;
+  relabel: boolean;
   versionId?: string;
   questionnaireId?: string;
 }
 
 function parseFlags(argv: string[]): Flags {
-  const flags: Flags = { dryRun: false, generic: false };
+  const flags: Flags = { dryRun: false, generic: false, relabel: false };
   for (const arg of argv) {
     if (arg === '--dry-run') flags.dryRun = true;
     else if (arg === '--generic') flags.generic = true;
+    else if (arg === '--relabel') flags.relabel = true;
     else if (arg.startsWith('--version=')) flags.versionId = arg.slice('--version='.length);
     else if (arg.startsWith('--questionnaire='))
       flags.questionnaireId = arg.slice('--questionnaire='.length);
@@ -101,6 +114,11 @@ interface Target {
   bounds: { min: number; max: number };
   /** Pre-resolved labels (e.g. from a `choices` array) — applied directly, skipping the LLM. */
   presetLabels?: string[];
+  /**
+   * True when the scale already had complete labels and we're re-deriving them (`--relabel`). Guards
+   * the apply loop from downgrading a good label set to the generic ramp when the LLM is unavailable.
+   */
+  hadLabels?: boolean;
 }
 
 async function findTargets(flags: Flags): Promise<Target[]> {
@@ -118,11 +136,19 @@ async function findTargets(flags: Flags): Promise<Target[]> {
 
   const targets: Target[] = [];
   for (const s of slots) {
-    if (hasCompleteLikertLabels(s.typeConfig)) continue; // already labelled — idempotent skip
+    const labelled = hasCompleteLikertLabels(s.typeConfig);
+    // Idempotent skip — unless `--relabel`, which re-derives already-labelled scales too.
+    if (labelled && !flags.relabel) continue;
 
     const bounds = readBounds(s.typeConfig);
     if (bounds) {
-      targets.push({ id: s.id, prompt: s.prompt, typeConfig: s.typeConfig, bounds });
+      targets.push({
+        id: s.id,
+        prompt: s.prompt,
+        typeConfig: s.typeConfig,
+        bounds,
+        hadLabels: labelled,
+      });
       continue;
     }
 
@@ -229,6 +255,18 @@ async function apply(
 async function main(): Promise<void> {
   const flags = parseFlags(process.argv.slice(2));
 
+  // `--relabel` REWRITES scales that are already labelled, so it can clobber labels an admin tuned
+  // by hand. Confine it to local development — never staging/production. The plain backfill (filling
+  // genuinely unlabelled scales) is a safe one-off and stays allowed everywhere.
+  if (flags.relabel && env.NODE_ENV !== 'development') {
+    logger.error('❌ --relabel is refused outside development', {
+      nodeEnv: env.NODE_ENV,
+      reason:
+        'relabel overwrites existing labels (possibly admin-edited); run it only against a local dev database',
+    });
+    process.exit(1);
+  }
+
   logger.info('🏷️  Backfilling likert scale labels', {
     dryRun: flags.dryRun,
     generic: flags.generic,
@@ -241,14 +279,22 @@ async function main(): Promise<void> {
 
   const targets = await findTargets(flags);
   if (targets.length === 0) {
-    logger.info('✅ Nothing to backfill — every likert scale is already labelled.');
+    logger.info(
+      flags.relabel
+        ? '✅ Nothing to relabel — no likert scales matched the scope.'
+        : '✅ Nothing to backfill — every likert scale is already labelled.'
+    );
     return;
   }
-  logger.info(`Found ${targets.length} unlabelled likert question(s).`);
+  const relabelCount = targets.filter((t) => t.hadLabels).length;
+  logger.info(
+    `Found ${targets.length} likert question(s) to process` +
+      (flags.relabel ? ` (${relabelCount} already labelled, re-deriving).` : '.')
+  );
 
   if (flags.dryRun) {
     for (const t of targets) {
-      logger.info('  • would label', {
+      logger.info(t.hadLabels ? '  • would re-label' : '  • would label', {
         slotId: t.id,
         prompt: t.prompt,
         scale: `${t.bounds.min}–${t.bounds.max}`,
@@ -259,22 +305,27 @@ async function main(): Promise<void> {
   }
 
   const llm = flags.generic ? null : await resolveProvider();
-  const summary = { labelled: 0, numeric: 0, failed: 0 };
+  const summary = { labelled: 0, numeric: 0, kept: 0, failed: 0 };
   const bySource = { llm: 0, choices: 0, generic: 0 };
 
   for (const t of targets) {
     try {
       const { decision, source } = await decide(t, llm);
+      // Re-label safety: never replace an existing label set with the deterministic generic ramp.
+      if (t.hadLabels && source === 'generic') {
+        summary.kept += 1;
+        logger.warn('  ⏭️  kept existing labels (no fresh LLM result)', { slotId: t.id });
+        continue;
+      }
       const outcome = await apply(t, decision);
       summary[outcome] += 1;
       bySource[source] += 1;
-      logger.info(
-        `  ✅ ${outcome === 'numeric' ? 'reclassified → numeric' : 'labelled'} (${source})`,
-        {
-          slotId: t.id,
-          ...(outcome === 'labelled' && !decision.numeric ? { labels: decision.labels } : {}),
-        }
-      );
+      const verb =
+        outcome === 'numeric' ? 'reclassified → numeric' : t.hadLabels ? 're-labelled' : 'labelled';
+      logger.info(`  ✅ ${verb} (${source})`, {
+        slotId: t.id,
+        ...(outcome === 'labelled' && !decision.numeric ? { labels: decision.labels } : {}),
+      });
     } catch (err) {
       summary.failed += 1;
       logger.error('  ❌ failed', {

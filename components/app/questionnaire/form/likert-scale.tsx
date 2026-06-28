@@ -48,7 +48,10 @@ export function LikertScale({
   if (points.length === 0) return null;
 
   return (
-    <div className="space-y-1">
+    // `w-fit` shrinks the control to the button row's width so the endpoint labels below align to
+    // the scale itself (left label under the first point, right label under the last) instead of
+    // spreading across the whole question column. `max-w-full` lets the row wrap on narrow screens.
+    <div className="w-fit max-w-full space-y-1.5">
       <div role="radiogroup" aria-label={ariaLabel} className="flex flex-wrap gap-1.5">
         {points.map((n) => {
           const selected = n === value;
@@ -81,7 +84,9 @@ export function LikertScale({
         })}
       </div>
       {(minLabel || maxLabel) && (
-        <div className="text-muted-foreground flex justify-between text-xs">
+        // gap-6 keeps the two poles from colliding when the scale is narrow (a 2-point range);
+        // justify-between pins each to its end of the now button-width row.
+        <div className="text-muted-foreground flex justify-between gap-6 px-0.5 text-xs">
           <span>{minLabel ?? ''}</span>
           <span>{maxLabel ?? ''}</span>
         </div>

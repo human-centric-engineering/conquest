@@ -62,10 +62,15 @@ export function buildLikertLabelMessages(question: {
 instead of bare numbers. You are given one question and its integer scale bounds.
 
 Decide ONE of:
-- If each point carries a qualitative meaning (agreement, satisfaction, likelihood, frequency, …), \
-return {"numeric": false, "labels": [<one short label per point, ordered from min to max>]}. The \
-"labels" array MUST have exactly ${pointCount} entries (max − min + 1) and read naturally from the \
-low end to the high end, fitting the question's wording.
+- If each point carries a qualitative meaning, return {"numeric": false, "labels": [<one short \
+label per point, ordered from min to max>]}. The "labels" array MUST have exactly ${pointCount} \
+entries (max − min + 1) and read naturally as an answer to THIS question — pick the family that \
+fits its wording, do NOT default to agree/disagree: agreement ("…it is true that…") → "Strongly \
+disagree → Strongly agree"; extent/degree ("to what extent…", "how much…") → "Not at all → To a \
+very great extent"; frequency ("how often…") → "Never → Always"; satisfaction → "Very dissatisfied \
+→ Very satisfied"; quality ("how would you rate…") → "Very poor → Excellent"; likelihood → "Very \
+unlikely → Very likely"; importance → "Not at all important → Extremely important". Interpolate \
+evenly across the ${pointCount} points.
 - If the scale is a purely numeric rating with no qualitative meaning (e.g. a count, an age, a \
 score out of N, "rate 0–10"), return {"numeric": true} and omit "labels".
 
