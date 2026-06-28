@@ -441,6 +441,10 @@ describe('optional-field branches (the false sides of the arg spreads)', () => {
     expect((dispatcherMock.dispatch as Mock).mock.calls[0][1].answered[0]).toEqual({
       slotKey: 'role',
       confidence: null,
+      // Enriched for the confirmation-refresh path (value/provenance/type travel with each answer).
+      value: 'marketing',
+      provenance: 'direct',
+      questionType: 'free_text',
     });
 
     await inv.detectContradictions(minimal());

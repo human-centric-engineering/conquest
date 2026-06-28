@@ -64,6 +64,16 @@ export interface ExtractionAnsweredView {
   slotKey: string;
   /** Extraction confidence 0–1, or `null` when not scored. */
   confidence: number | null;
+  /**
+   * The currently-recorded value. Optional/back-compat: only the live turn loop populates it, and
+   * it powers the confirmation-refresh path (re-emit the SAME value to strengthen a tentative answer
+   * when its theme is corroborated). Absent ⇒ that path can't run for this entry.
+   */
+  value?: unknown;
+  /** How the current value was arrived at — refresh only strengthens `inferred` (opportunistic) ones. */
+  provenance?: AnswerProvenance;
+  /** The slot's question type — carried so a refresh intent can be re-emitted without a slot lookup. */
+  questionType?: QuestionType;
 }
 
 /**

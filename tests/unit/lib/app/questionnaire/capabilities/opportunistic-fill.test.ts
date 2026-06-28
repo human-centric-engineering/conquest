@@ -15,12 +15,16 @@ import {
   selectOpportunisticTargets,
   buildFreeTextOpportunisticIntents,
   capOpportunisticConfidence,
+  selectRefreshTargets,
+  buildRefreshIntents,
   OPPORTUNISTIC_CONFIDENCE_CAP,
+  ANSWER_CONFIRM_FLOOR,
 } from '@/lib/app/questionnaire/capabilities/opportunistic-fill';
 import type {
   AnswerSlotIntent,
   DataSlotCandidateView,
   DataSlotFillIntent,
+  ExtractionAnsweredView,
   ExtractionSlotView,
 } from '@/lib/app/questionnaire/extraction/types';
 
@@ -181,5 +185,113 @@ describe('capOpportunisticConfidence', () => {
       },
     ]);
     expect(capped[0].confidence).toBe(0.3);
+  });
+});
+
+const answered = (over: Partial<ExtractionAnsweredView>): ExtractionAnsweredView => ({
+  slotKey: 'talent_3',
+  confidence: 0.45,
+  value: 2,
+  provenance: 'inferred',
+  questionType: 'likert',
+  ...over,
+});
+
+describe('selectRefreshTargets', () => {
+  it('strengthens a tentative inferred answer when its parent fill rose this turn', () => {
+    // prior fill confidence 0.45 (current) → new fill 0.62: corroborated, so refresh talent_3.
+    const targets = selectRefreshTargets({
+      dataSlotFills: [fill('enablement', { confidence: 0.62 })],
+      dataSlotCandidates: [
+        {
+          ...dataSlot('enablement', ['talent_3']),
+          current: { value: null, paraphrase: null, confidence: 0.45 },
+        },
+      ],
+      answered: [answered({ confidence: 0.45 })],
+      handledKeys: new Set(),
+      confirmFloor: ANSWER_CONFIRM_FLOOR,
+    });
+    expect(targets).toHaveLength(1);
+    expect(targets[0]).toMatchObject({ slotKey: 'talent_3', value: 2, confidence: 0.62 });
+  });
+
+  it('does NOT refresh when the fill did not strengthen vs its prior confidence', () => {
+    const targets = selectRefreshTargets({
+      dataSlotFills: [fill('enablement', { confidence: 0.45 })], // same as prior → no corroboration
+      dataSlotCandidates: [
+        {
+          ...dataSlot('enablement', ['talent_3']),
+          current: { value: null, paraphrase: null, confidence: 0.45 },
+        },
+      ],
+      answered: [answered({ confidence: 0.45 })],
+      handledKeys: new Set(),
+      confirmFloor: ANSWER_CONFIRM_FLOOR,
+    });
+    expect(targets).toHaveLength(0);
+  });
+
+  it('leaves an already-confirmed answer (>= floor) untouched', () => {
+    const targets = selectRefreshTargets({
+      dataSlotFills: [fill('enablement', { confidence: 0.9 })],
+      dataSlotCandidates: [
+        {
+          ...dataSlot('enablement', ['talent_3']),
+          current: { value: null, paraphrase: null, confidence: 0.6 },
+        },
+      ],
+      answered: [answered({ confidence: 0.8 })], // already above the confirm floor
+      handledKeys: new Set(),
+      confirmFloor: ANSWER_CONFIRM_FLOOR,
+    });
+    expect(targets).toHaveLength(0);
+  });
+
+  it('never refreshes a respondent/refined answer (provenance not inferred)', () => {
+    const targets = selectRefreshTargets({
+      dataSlotFills: [fill('enablement', { confidence: 0.7 })],
+      dataSlotCandidates: [
+        {
+          ...dataSlot('enablement', ['talent_3']),
+          current: { value: null, paraphrase: null, confidence: 0.4 },
+        },
+      ],
+      answered: [answered({ confidence: 0.4, provenance: 'direct' })],
+      handledKeys: new Set(),
+      confirmFloor: ANSWER_CONFIRM_FLOOR,
+    });
+    expect(targets).toHaveLength(0);
+  });
+
+  it('skips a question already handled this turn', () => {
+    const targets = selectRefreshTargets({
+      dataSlotFills: [fill('enablement', { confidence: 0.7 })],
+      dataSlotCandidates: [
+        {
+          ...dataSlot('enablement', ['talent_3']),
+          current: { value: null, paraphrase: null, confidence: 0.4 },
+        },
+      ],
+      answered: [answered({ confidence: 0.4 })],
+      handledKeys: new Set(['talent_3']),
+      confirmFloor: ANSWER_CONFIRM_FLOOR,
+    });
+    expect(targets).toHaveLength(0);
+  });
+});
+
+describe('buildRefreshIntents', () => {
+  it('re-emits the same value at the strengthened confidence, provenance inferred', () => {
+    const intents = buildRefreshIntents([
+      { slotKey: 'talent_3', value: 2, questionType: 'likert', confidence: 0.62 },
+    ]);
+    expect(intents[0]).toMatchObject({
+      slotKey: 'talent_3',
+      value: 2,
+      confidence: 0.62,
+      provenance: 'inferred',
+      isActiveQuestion: false,
+    });
   });
 });

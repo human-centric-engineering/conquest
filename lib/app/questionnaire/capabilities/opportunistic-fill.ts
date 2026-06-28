@@ -32,6 +32,7 @@ import type {
   AnswerSlotIntent,
   DataSlotCandidateView,
   DataSlotFillIntent,
+  ExtractionAnsweredView,
   ExtractionSlotView,
 } from '@/lib/app/questionnaire/extraction/types';
 
@@ -49,6 +50,14 @@ export const OPPORTUNISTIC_FILL_FLOOR = 0.5;
  * accrual guard.
  */
 export const OPPORTUNISTIC_CONFIDENCE_CAP = 0.45;
+
+/**
+ * Confidence at/above which an answer counts as confirmed and is left alone by the refresh path —
+ * below it, an opportunistic (inferred) answer is still "to be confirmed" and a corroborating turn
+ * strengthens it. The "Fairly sure" band floor (`panel/confidence.ts`). Phase 4 makes the
+ * completion equivalent of this configurable per questionnaire.
+ */
+export const ANSWER_CONFIRM_FLOOR = 0.65;
 
 /** Question types the answer-fit resolver can map a free-form position onto. */
 const FIT_TYPES = new Set(['single_choice', 'multi_choice', 'likert']);
@@ -149,5 +158,83 @@ export function capOpportunisticConfidence(intents: AnswerSlotIntent[]): AnswerS
     ...intent,
     confidence: Math.min(intent.confidence, OPPORTUNISTIC_CONFIDENCE_CAP),
     provenance: 'inferred' as const,
+  }));
+}
+
+/** A still-tentative mapped answer to strengthen because its theme was corroborated this turn. */
+export interface RefreshTarget {
+  slotKey: string;
+  value: unknown;
+  questionType: AnswerSlotIntent['questionType'];
+  /** The strengthened parent-fill confidence to write — the Phase 1 accrual guard only ever raises. */
+  confidence: number;
+}
+
+/**
+ * Pick the tentative mapped answers to STRENGTHEN this turn — the confirmation half of the loop.
+ *
+ * An opportunistic fill lands below the confirm floor (a guess). When a later turn corroborates the
+ * theme, its data-slot fill's confidence climbs (the extractor already does this for data slots).
+ * This re-emits each below-floor, `inferred` mapped answer of a fill that STRENGTHENED this turn,
+ * at the fill's new confidence — re-stating the SAME value, so the Phase 1 accrual guard raises the
+ * answer's score (never lowers it) and it crosses into "confirmed" after a confirmation or two.
+ *
+ * Strictly gated so confidence can't drift up on its own: only fills whose confidence rose vs their
+ * prior recorded value (`current.confidence`) qualify — a flat re-emit of an unchanged fill is
+ * ignored. Already-confident answers (≥ floor) and respondent/refined answers (provenance ≠
+ * inferred) are left untouched. Questions handled this turn (seed/extraction) are excluded.
+ */
+export function selectRefreshTargets(opts: {
+  dataSlotFills: DataSlotFillIntent[];
+  dataSlotCandidates: DataSlotCandidateView[];
+  answered: ExtractionAnsweredView[];
+  /** Keys already handled this turn (extraction intents, fit, opportunistic seed) — never refreshed. */
+  handledKeys: Set<string>;
+  confirmFloor: number;
+}): RefreshTarget[] {
+  const answeredByKey = new Map(opts.answered.map((a) => [a.slotKey, a]));
+  const dataSlotByKey = new Map(opts.dataSlotCandidates.map((c) => [c.key, c]));
+  const out = new Map<string, RefreshTarget>();
+
+  for (const fill of opts.dataSlotFills) {
+    if ((fill.confidence ?? 0) < OPPORTUNISTIC_FILL_FLOOR) continue;
+    const cand = dataSlotByKey.get(fill.dataSlotKey);
+    const prior = cand?.current?.confidence;
+    // Genuine corroboration only: the fill must have STRENGTHENED vs its prior recorded confidence.
+    if (typeof prior !== 'number' || fill.confidence <= prior) continue;
+    for (const questionKey of cand?.mappedQuestionKeys ?? []) {
+      if (opts.handledKeys.has(questionKey)) continue;
+      const answer = answeredByKey.get(questionKey);
+      if (!answer || answer.value === undefined) continue; // not already answered → a seed case, not refresh
+      if (answer.provenance !== 'inferred') continue; // only strengthen opportunistic/inferred answers
+      if ((answer.confidence ?? 1) >= opts.confirmFloor) continue; // already confirmed — leave it
+      if (!out.has(questionKey)) {
+        out.set(questionKey, {
+          slotKey: questionKey,
+          value: answer.value,
+          questionType: answer.questionType ?? 'free_text',
+          confidence: fill.confidence,
+        });
+      }
+    }
+  }
+
+  return [...out.values()];
+}
+
+/**
+ * Build the refresh intents — same value, the strengthened confidence, provenance `inferred`. Re-
+ * emitting the SAME value routes through the Phase 1 corroboration path in the turn upsert (which
+ * only raises the score), so this never fabricates a change, only firms up a tentative answer.
+ */
+export function buildRefreshIntents(targets: RefreshTarget[]): AnswerSlotIntent[] {
+  return targets.map((target) => ({
+    slotKey: target.slotKey,
+    questionType: target.questionType,
+    value: target.value,
+    confidence: target.confidence,
+    provenance: 'inferred' as const,
+    rationale: 'Corroborated by your latest message — strengthening this answer.',
+    isActiveQuestion: false,
   }));
 }

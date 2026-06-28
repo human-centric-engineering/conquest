@@ -54,7 +54,11 @@ import {
   EXTRACT_ANSWER_SLOTS_CAPABILITY_SLUG,
   EXTRACT_ANSWER_SLOTS_FUNCTION_DEFINITION,
 } from '@/lib/app/questionnaire/constants';
-import { ANSWER_FIT_MODES, QUESTION_TYPES } from '@/lib/app/questionnaire/types';
+import {
+  ANSWER_FIT_MODES,
+  ANSWER_PROVENANCES,
+  QUESTION_TYPES,
+} from '@/lib/app/questionnaire/types';
 import {
   validateAnswerExtraction,
   type AnswerExtraction,
@@ -68,6 +72,9 @@ import {
   selectOpportunisticTargets,
   buildFreeTextOpportunisticIntents,
   capOpportunisticConfidence,
+  selectRefreshTargets,
+  buildRefreshIntents,
+  ANSWER_CONFIRM_FLOOR,
 } from '@/lib/app/questionnaire/capabilities/opportunistic-fill';
 import type {
   AnswerSlotIntent,
@@ -158,7 +165,15 @@ const argsSchema = z
     /** Already-answered state, so the extractor doesn't re-ask. */
     answered: z
       .array(
-        z.object({ slotKey: z.string().min(1), confidence: z.number().min(0).max(1).nullable() })
+        z.object({
+          slotKey: z.string().min(1),
+          confidence: z.number().min(0).max(1).nullable(),
+          // Optional enrichment for the confirmation-refresh path (strengthen a tentative answer
+          // when its theme is corroborated). `value` is free-form (Json-shaped).
+          value: z.unknown().optional(),
+          provenance: z.enum(ANSWER_PROVENANCES).optional(),
+          questionType: z.enum(QUESTION_TYPES).optional(),
+        })
       )
       .optional(),
     /** Recent transcript, oldest first. */
@@ -731,16 +746,18 @@ export class AppExtractAnswerSlotsCapability extends BaseCapability<
     let opportunisticIntents: AnswerSlotIntent[] = [];
     let opportunisticCostUsd = 0;
     if ((args.dataSlotCandidates?.length ?? 0) > 0 && dataSlotFills.length > 0) {
-      const answeredKeys = new Set<string>([
+      const answeredThisTurn = new Set<string>([
         ...intents.map((i) => i.slotKey),
         ...fitIntents.map((i) => i.slotKey),
-        ...extractionContext.answered.map((a) => a.slotKey),
       ]);
+      const priorAnswered = new Set(extractionContext.answered.map((a) => a.slotKey));
+
+      // SEED: unanswered mapped questions of a confident fill (Phase 2).
       const targets = selectOpportunisticTargets({
         dataSlotFills,
         dataSlotCandidates: args.dataSlotCandidates ?? [],
         candidateSlots: extractionContext.candidateSlots,
-        answeredKeys,
+        answeredKeys: new Set<string>([...answeredThisTurn, ...priorAnswered]),
       });
       opportunisticIntents = buildFreeTextOpportunisticIntents(targets.freeText);
       if (targets.typed.length > 0) {
@@ -755,17 +772,34 @@ export class AppExtractAnswerSlotsCapability extends BaseCapability<
         opportunisticCostUsd += fit.costUsd;
         opportunisticIntents.push(...capOpportunisticConfidence(fit.intents));
       }
+
+      // REFRESH (Phase 3): strengthen still-tentative mapped answers whose theme was corroborated
+      // this turn (their data-slot fill's confidence rose). Re-emits the SAME value at the new
+      // confidence; the turn-upsert accrual guard only raises it. Skips anything handled above.
+      const handledKeys = new Set<string>([
+        ...answeredThisTurn,
+        ...opportunisticIntents.map((i) => i.slotKey),
+      ]);
+      const refreshIntents = buildRefreshIntents(
+        selectRefreshTargets({
+          dataSlotFills,
+          dataSlotCandidates: args.dataSlotCandidates ?? [],
+          answered: extractionContext.answered,
+          handledKeys,
+          confirmFloor: ANSWER_CONFIRM_FLOOR,
+        })
+      );
+      opportunisticIntents.push(...refreshIntents);
+
       if (opportunisticIntents.length > 0) {
-        logger.info(
-          'extract_answer_slots: opportunistic down-propagation seeded mapped questions',
-          {
-            agentId: context.agentId,
-            sessionId: extractionContext.sessionId,
-            freeTextTargets: targets.freeText.length,
-            typedTargets: targets.typed.length,
-            seeded: opportunisticIntents.length,
-          }
-        );
+        logger.info('extract_answer_slots: opportunistic down-propagation', {
+          agentId: context.agentId,
+          sessionId: extractionContext.sessionId,
+          freeTextTargets: targets.freeText.length,
+          typedTargets: targets.typed.length,
+          refreshed: refreshIntents.length,
+          total: opportunisticIntents.length,
+        });
       }
     }
 

@@ -251,6 +251,9 @@ export async function buildTurnInvokers(opts: {
   const candidateSlots = slots.map(toCapabilitySlot);
   // The EXTRACTOR sees the narrowed set when the route supplied one (the pre-filter), else the full set.
   const extractionCandidates = (extractionCandidateSlots ?? slots).map(toCapabilitySlot);
+  // slotKey → question type, so the extractor's `answered` view can carry each answer's type (the
+  // confirmation-refresh path re-emits an answer and needs its type without a slot lookup).
+  const slotTypeByKey = new Map(slots.map((s) => [s.key, s.type]));
 
   return {
     async extractAnswers(state): Promise<ExtractOutcome> {
@@ -272,6 +275,11 @@ export async function buildTurnInvokers(opts: {
         answered: state.existingAnswers.map((a) => ({
           slotKey: a.slotKey,
           confidence: a.confidence ?? null,
+          // Carry value/provenance/type so the extractor can strengthen a tentative inferred answer
+          // when its theme is corroborated (the confirmation-refresh path) without re-deriving it.
+          value: a.value,
+          provenance: a.provenance,
+          ...(slotTypeByKey.has(a.slotKey) ? { questionType: slotTypeByKey.get(a.slotKey)! } : {}),
         })),
         ...(state.recentMessages.length > 0 ? { recentMessages: state.recentMessages } : {}),
         ...(state.attachments && state.attachments.length > 0
