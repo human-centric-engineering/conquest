@@ -34,4 +34,38 @@ describe('ConquestWordmark', () => {
     render(<ConquestWordmark showSubtitle />);
     expect(screen.getByText(/conversational questionnaires/i)).toBeInTheDocument();
   });
+
+  describe('pre-release stage pill', () => {
+    it('renders no stage pill by default (stable build)', () => {
+      // Default stage is the live release stage, which is `stable`/null in the test env.
+      render(<ConquestWordmark />);
+      expect(screen.queryByText(/alpha|beta/i)).not.toBeInTheDocument();
+      // Accessible name stays the plain brand when there's no stage.
+      expect(screen.getByLabelText('ConQuest')).toBeInTheDocument();
+    });
+
+    it('renders an ALPHA pill and stage-qualified label when stage="alpha"', () => {
+      render(<ConquestWordmark stage="alpha" />);
+      expect(screen.getByText('alpha')).toBeInTheDocument();
+      // The pill is decorative; the stage is conveyed once via the lockup's accessible name.
+      expect(screen.getByLabelText('ConQuest (alpha)')).toBeInTheDocument();
+    });
+
+    it('renders a BETA pill when stage="beta"', () => {
+      render(<ConquestWordmark stage="beta" />);
+      expect(screen.getByText('beta')).toBeInTheDocument();
+      expect(screen.getByLabelText('ConQuest (beta)')).toBeInTheDocument();
+    });
+
+    it('renders no pill when stage is explicitly stable', () => {
+      render(<ConquestWordmark stage="stable" />);
+      expect(screen.queryByText(/alpha|beta|stable/i)).not.toBeInTheDocument();
+      expect(screen.getByLabelText('ConQuest')).toBeInTheDocument();
+    });
+
+    it('renders no pill when stage is null', () => {
+      render(<ConquestWordmark stage={null} />);
+      expect(screen.getByLabelText('ConQuest')).toBeInTheDocument();
+    });
+  });
 });
