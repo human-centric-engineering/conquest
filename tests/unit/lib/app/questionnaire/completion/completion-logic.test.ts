@@ -74,6 +74,21 @@ describe('assessCompletion', () => {
     expect(a.answeredCount).toBe(1);
   });
 
+  it('counts an answer whose confidence equals the floor (inclusive >= boundary)', () => {
+    // The filter is `(a.confidence ?? 1) >= floor` — equality must pass, not be excluded.
+    // A required question answered at exactly the floor must count as confirmed, satisfying
+    // the required gate and contributing to coverage so the session can offer.
+    const c = cctx({
+      questions: [q({ id: 'req', key: 'req', required: true })],
+      answered: [{ questionId: 'req', confidence: 0.5 }], // exactly at the floor
+      config: { coverageThreshold: 1, minQuestionsAnswered: 1, answerConfidenceFloor: 0.5 },
+    });
+    const a = assessCompletion(c);
+    expect(a.kind).toBe('offer');
+    expect(a.requiredUnansweredKeys).toEqual([]);
+    expect(a.answeredCount).toBe(1);
+  });
+
   it('is not_ready with coverage_below_threshold when coverage is short', () => {
     const c = cctx({
       questions: [q({ id: 'a', weight: 1 }), q({ id: 'b', weight: 1 })],

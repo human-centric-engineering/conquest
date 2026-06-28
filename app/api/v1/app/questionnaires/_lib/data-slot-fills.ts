@@ -10,7 +10,8 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
 import { jsonInput } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
-import type { AnswerProvenance } from '@/lib/app/questionnaire/types';
+import { narrowToEnum, QUESTION_TYPES, type AnswerProvenance } from '@/lib/app/questionnaire/types';
+import { formatSlotAnswer } from '@/lib/app/questionnaire/panel/format-slot-answer';
 import type { DataSlotFillHistoryEntry } from '@/lib/app/questionnaire/panel/types';
 
 /**
@@ -170,28 +171,6 @@ export async function clearDataSlotFill(
 }
 
 /**
- * Deterministic, panel-facing restatement of one answered value (no LLM). Shared by the form-mode
- * reconciler (`form-answers.ts`) and the chat-mode gap-filler ({@link reconcileChatDataSlotFills}).
- */
-export function formatFillValue(value: unknown): string {
-  if (value === null || value === undefined) return '';
-  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
-  if (Array.isArray(value))
-    return value
-      .map((v) => formatFillValue(v))
-      .filter(Boolean)
-      .join(', ');
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'bigint') {
-    return String(value).trim();
-  }
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return '';
-  }
-}
-
-/**
  * Chat-mode data-slot reconciliation (gap-filler).
  *
  * The extractor emits per-question answers AND per-data-slot fills in ONE call, and the prompt asks
@@ -247,9 +226,11 @@ export async function reconcileChatDataSlotFills(opts: {
 
   for (const dataSlotId of dataSlotIds) {
     // All questions this slot maps to (a slot can cover several), and the session's CURRENT answers.
+    // `type` + `typeConfig` come along so the formatted value renders each answer's human-readable
+    // label (a likert "1" → "Not at all") rather than a bare, meaningless number.
     const mapped = await client.appDataSlotQuestion.findMany({
       where: { dataSlotId },
-      select: { questionSlot: { select: { id: true, key: true } } },
+      select: { questionSlot: { select: { id: true, key: true, type: true, typeConfig: true } } },
     });
     const mappedIds = mapped.map((m) => m.questionSlot.id);
     const answers = await client.appAnswerSlot.findMany({
@@ -259,10 +240,14 @@ export async function reconcileChatDataSlotFills(opts: {
     const byQid = new Map(answers.map((a) => [a.questionSlotId, a]));
 
     const answered = mapped
-      .map((m) => ({ key: m.questionSlot.key, answer: byQid.get(m.questionSlot.id) }))
+      .map((m) => ({
+        key: m.questionSlot.key,
+        type: narrowToEnum(m.questionSlot.type, QUESTION_TYPES, 'free_text'),
+        typeConfig: m.questionSlot.typeConfig,
+        answer: byQid.get(m.questionSlot.id),
+      }))
       .filter(
-        (m): m is { key: string; answer: NonNullable<(typeof m)['answer']> } =>
-          m.answer !== undefined
+        (m): m is typeof m & { answer: NonNullable<(typeof m)['answer']> } => m.answer !== undefined
       );
 
     // We only reached here because a mapped question was answered this turn, so this is ~always ≥1.
@@ -270,14 +255,16 @@ export async function reconcileChatDataSlotFills(opts: {
     if (answered.length === 0) continue;
 
     // Structured, diffable value (keyed by question) drives the fill's change-history; the paraphrase
-    // leads with each answer's natural-language rationale, falling back to the formatted value.
+    // leads with each answer's natural-language rationale, falling back to the label-aware formatted
+    // value (a likert/choice answer reads as its words, not a bare number).
     const value = Object.fromEntries(answered.map((a) => [a.key, a.answer.value]));
     const paraphrase = answered
       .map((a) => {
-        const formatted = formatFillValue(a.answer.value);
+        const formatted = formatSlotAnswer(a.type, a.typeConfig, a.answer.value);
+        const meaningful = formatted && formatted !== '—' ? formatted : '';
         const rationale = (a.answer.rationale ?? '').trim();
-        if (formatted && rationale) return `${formatted} — ${rationale}`;
-        return rationale || formatted;
+        if (meaningful && rationale) return `${meaningful} — ${rationale}`;
+        return rationale || meaningful;
       })
       .filter(Boolean)
       .join('; ');

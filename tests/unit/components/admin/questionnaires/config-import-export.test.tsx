@@ -18,7 +18,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 import type { ConfigView } from '@/lib/app/questionnaire/views';
-import type { MutationSpec } from '@/components/admin/questionnaires/version-editor-types';
+import type {
+  MutationSpec,
+  RunMutation,
+} from '@/components/admin/questionnaires/version-editor-types';
 import { DEFAULT_QUESTIONNAIRE_CONFIG } from '@/lib/app/questionnaire/types';
 import { CONFIG_EXPORT_KIND } from '@/lib/app/questionnaire/authoring';
 
@@ -50,7 +53,7 @@ function setup(over: { run?: ReturnType<typeof vi.fn>; busy?: boolean } = {}) {
       questionnaireId="q1"
       versionId="v1"
       config={CONFIG}
-      run={run}
+      run={run as RunMutation}
       busy={over.busy ?? false}
     />
   );

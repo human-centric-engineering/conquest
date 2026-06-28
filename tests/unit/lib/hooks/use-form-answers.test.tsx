@@ -10,7 +10,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 
-import { useFormAnswers } from '@/lib/hooks/use-form-answers';
+import { useFormAnswers, flattenFormSlots } from '@/lib/hooks/use-form-answers';
 import type { AnswerPanelView } from '@/lib/app/questionnaire/panel/types';
 
 function view(): AnswerPanelView {
@@ -303,5 +303,70 @@ describe('useFormAnswers', () => {
       vi.advanceTimersByTime(400);
     });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('calls onSaved once after a successful save completes', async () => {
+    const onSaved = vi.fn();
+    const { result } = renderHook(() =>
+      useFormAnswers({ sessionId: 'sess-1', initialView: view(), onSaved })
+    );
+    act(() => result.current.setValue('role', 'Engineer'));
+    await act(async () => {
+      vi.advanceTimersByTime(400);
+    });
+    // onSaved is invoked inside the PUT .then handler — after the fetch resolves.
+    expect(onSaved).toHaveBeenCalledTimes(1);
+  });
+
+  it('PUTs a clear when the value is set to null', async () => {
+    const { result } = renderHook(() =>
+      useFormAnswers({ sessionId: 'sess-1', initialView: view() })
+    );
+    act(() => result.current.setValue('role', null));
+    await act(async () => {
+      vi.advanceTimersByTime(400);
+    });
+    expect(lastPutBody()).toEqual({ answers: [{ questionKey: 'role', clear: true }] });
+  });
+
+  it('PUTs a clear when the value is set to an empty array', async () => {
+    const { result } = renderHook(() =>
+      useFormAnswers({ sessionId: 'sess-1', initialView: view() })
+    );
+    act(() => result.current.setValue('role', []));
+    await act(async () => {
+      vi.advanceTimersByTime(400);
+    });
+    expect(lastPutBody()).toEqual({ answers: [{ questionKey: 'role', clear: true }] });
+  });
+});
+
+describe('flattenFormSlots', () => {
+  it('returns [] when view is null', () => {
+    expect(flattenFormSlots(null)).toEqual([]);
+  });
+
+  it('returns all slots from a single-section view in order', () => {
+    const v = view();
+    const flat = flattenFormSlots(v);
+    expect(flat).toHaveLength(1);
+    expect(flat[0].slotKey).toBe('role');
+  });
+
+  it('flattens slots from multiple sections into a single ordered list', () => {
+    const slotA = view().sections[0].slots[0]; // 'role'
+    const slotB = { ...slotA, slotKey: 'team' };
+    const multiSection: AnswerPanelView = {
+      ...view(),
+      sections: [
+        { sectionId: 's1', title: 'About', slots: [slotA] },
+        { sectionId: 's2', title: 'Team', slots: [slotB] },
+      ],
+      totalCount: 2,
+    };
+    const flat = flattenFormSlots(multiSection);
+    expect(flat).toHaveLength(2);
+    expect(flat[0].slotKey).toBe('role');
+    expect(flat[1].slotKey).toBe('team');
   });
 });

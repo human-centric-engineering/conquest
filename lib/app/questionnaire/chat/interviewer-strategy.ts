@@ -56,6 +56,12 @@ export interface InterviewerStrategyContext {
   questionsAsked: number;
   /** The respondent has been giving short/terse answers — bias the funnel toward targeted sooner. */
   respondentTerse?: boolean;
+  /**
+   * The broad area/theme the selected question belongs to (e.g. a data slot's theme). The OPEN
+   * phase broadens to THIS area instead of the one specific question, so a wide answer can fill
+   * several neighbours at once. Absent ⇒ the clause says "this general area".
+   */
+  topicArea?: string | null;
 }
 
 /** Resolve the funnel phase from coverage (preferred) or the selection round, then apply the terse bias. */
@@ -85,33 +91,51 @@ export function funnelPhase(ctx: InterviewerStrategyContext): FunnelPhase {
   return phase;
 }
 
-const OPEN_CLAUSE =
-  'QUESTIONING APPROACH — be highly OPEN and general. Lead with broad, exploratory invitations ' +
-  '("Tell me about…", "Share your thoughts on…", "What\'s been on your mind about…") that let the ' +
-  'respondent talk freely and at length; a single rambling answer can cover several topics at once. ' +
-  'Stay loosely guided by what is still unanswered, but encourage tangents and follow their lead ' +
-  'rather than marching through specifics.';
+/** "the broad area of X" when the theme is known, else a generic fallback. */
+function areaPhrase(ctx: InterviewerStrategyContext): string {
+  const area = ctx.topicArea?.trim();
+  return area ? `the broad area of ${area}` : 'this general area';
+}
 
-const TARGETED_CLAUSE =
-  'QUESTIONING APPROACH — be TARGETED and efficient. Ask ONE specific, concrete question at a time, ' +
-  'aimed squarely at a remaining gap. Keep preamble minimal and move briskly; favour a direct, ' +
-  'answerable ask over a broad invitation to ramble.';
+/**
+ * The OPEN clause deliberately BROADENS the scope past the single selected question — the phraser is
+ * otherwise told to "ask the ONE question provided", so without this explicit override it just
+ * rewords that specific question openly instead of asking a genuinely general opener.
+ */
+function openClause(ctx: InterviewerStrategyContext): string {
+  return (
+    'QUESTIONING APPROACH — be highly OPEN and general right now. Treat the specific question below ' +
+    `as ONLY a hint to the AREA to explore — do NOT ask it narrowly. Instead, ask ONE broad, ` +
+    `exploratory question that invites the respondent to talk freely about ${areaPhrase(ctx)} ` +
+    '("Tell me about…", "Share your thoughts on…", "Walk me through…"), so a single expansive answer ' +
+    'can cover several related points at once. This OVERRIDES the "ask the one question provided" and ' +
+    '"one thing at a time" guidance above — a wide, easy invitation matters more than the exact ' +
+    'underlying question. Keep probing openly while they are forthcoming.'
+  );
+}
 
-const FUNNEL_PHASE_CLAUSE: Record<FunnelPhase, string> = {
-  open:
-    'QUESTIONING APPROACH — you are EARLY in a funnel interview, so be highly OPEN and general. ' +
-    'Lead with broad invitations ("Tell me about…", "Share your thoughts on…") so the respondent ' +
-    'talks freely — one expansive answer can fill several topics at once. Keep probing openly while ' +
-    'they are forthcoming; do not pin them to narrow specifics yet.',
-  mixed:
-    'QUESTIONING APPROACH — you are MID-WAY through a funnel interview. Keep questions fairly open ' +
-    'and conversational, but begin steering toward the specific areas still missing — open enough ' +
-    'to invite detail, pointed enough to fill the gaps.',
-  targeted:
-    'QUESTIONING APPROACH — you are LATE in a funnel interview, closing out. Switch to TARGETED, ' +
-    'specific questions that efficiently fill the remaining gaps, one concrete thing at a time. You ' +
-    'may still drop in the occasional open invitation where a gap needs richer detail.',
-};
+function targetedClause(): string {
+  return (
+    'QUESTIONING APPROACH — be TARGETED and efficient. Ask ONE specific, concrete question at a ' +
+    'time, aimed squarely at a remaining gap. Keep preamble minimal and move briskly; favour a ' +
+    'direct, answerable ask over a broad invitation to ramble.'
+  );
+}
+
+function mixedClause(ctx: InterviewerStrategyContext): string {
+  return (
+    `QUESTIONING APPROACH — keep questions fairly open and conversational, inviting detail about ` +
+    `${areaPhrase(ctx)}, but begin steering toward the specific points still missing — open enough ` +
+    'to invite elaboration, pointed enough to fill the gaps.'
+  );
+}
+
+function funnelClause(ctx: InterviewerStrategyContext): string {
+  const phase = funnelPhase(ctx);
+  if (phase === 'open') return openClause(ctx);
+  if (phase === 'mixed') return mixedClause(ctx);
+  return targetedClause();
+}
 
 /**
  * Render the enabled interviewer strategy into prompt text that OVERRIDES the default
@@ -124,9 +148,9 @@ export function buildInterviewerStrategyInstructions(
   if (!settings?.enabled) return '';
 
   const clauses: string[] = [];
-  if (settings.approach === 'funnel') clauses.push(FUNNEL_PHASE_CLAUSE[funnelPhase(ctx)]);
-  else if (settings.approach === 'open') clauses.push(OPEN_CLAUSE);
-  else clauses.push(TARGETED_CLAUSE);
+  if (settings.approach === 'funnel') clauses.push(funnelClause(ctx));
+  else if (settings.approach === 'open') clauses.push(openClause(ctx));
+  else clauses.push(targetedClause());
 
   // Additive tactics — combine with any approach.
   if (settings.probeDepth) {

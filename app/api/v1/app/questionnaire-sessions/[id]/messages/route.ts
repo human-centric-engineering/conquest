@@ -827,6 +827,8 @@ async function handleMessage(
             ...sensitivityPhraserInput,
             ...tonePhraserInput,
             ...strategyPhraserInput,
+            // Open approach/phase broadens to the slot's THEME instead of this one specific slot.
+            ...(strategyActive && r.theme ? { topicArea: r.theme } : {}),
           },
           userId,
           sessionId,

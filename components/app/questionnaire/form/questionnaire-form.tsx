@@ -130,16 +130,13 @@ export function QuestionnaireForm({
   const isInferred = (slotKey: string): boolean =>
     inferredKeys.has(slotKey) && !editedKeys.has(slotKey);
 
-  // Whether to show the capture-confidence chip. A free-text answer is ALWAYS the agent's paraphrase
-  // of what the respondent said (F9.18 living comments), so it carries a meaningful confidence even
-  // when stated directly — show it on every answered free-text slot. Structured answers (likert /
-  // choice / numeric …) only show it when the agent inferred/synthesised them. Drops on a local
-  // edit (it's the respondent's own from then on) and when there's no score to show.
-  const showsConfidence = (slot: PanelSlotView): boolean => {
-    if (editedKeys.has(slot.slotKey) || slot.confidence === null) return false;
-    if (slot.type === 'free_text') return slot.answered;
-    return inferredKeys.has(slot.slotKey);
-  };
+  // Show the capture-confidence chip on EVERY answered question that carries a score, whatever its
+  // provenance — the respondent stated it (`direct`), the agent inferred/synthesised it, or it was
+  // refined. Each captured answer has a confidence (chat extraction → 0–1; a form selection → 1.0),
+  // and a confidence rating belongs on each. Renders nothing only when there's genuinely no score
+  // (legacy/preview rows). Deliberately NOT gated on local edits: the rating stays on the answer.
+  const showsConfidence = (slot: PanelSlotView): boolean =>
+    slot.answered && slot.confidence !== null;
   const isRecentlyFilled = (slotKey: string): boolean => recentlyFilledKeys.has(slotKey);
 
   if (loading && !view) {
@@ -230,12 +227,11 @@ export function QuestionnaireForm({
                   </div>
 
                   {/* Confidence lane — how sure the agent is about the answer it captured (a
-                      Tentative guess vs a Confident, corroborated one). Shows on agent-filled
-                      structured answers and on every free-text answer (always a paraphrase), and
-                      drops once the respondent edits it. The "inferred" ⓘ explainer sits beside the
-                      chip (same provenance affordance); the transient save hint shares the lane.
-                      Right-aligned + top-padded on `sm+` so the chips line up with each question's
-                      first line; inline under the prompt on narrow screens. */}
+                      Tentative guess vs a Confident, corroborated one). Shown on every answered,
+                      scored question regardless of how it was captured. The "inferred" ⓘ explainer
+                      sits beside the chip (only for agent-inferred answers); the transient save hint
+                      shares the lane. Right-aligned + top-padded on `sm+` so the chips line up with
+                      each question's first line; inline under the prompt on narrow screens. */}
                   <div className="flex flex-row flex-wrap items-center gap-x-2 gap-y-1 sm:flex-col sm:items-end sm:pt-0.5">
                     <div className="flex items-center gap-1">
                       {showsConfidence(slot) && (

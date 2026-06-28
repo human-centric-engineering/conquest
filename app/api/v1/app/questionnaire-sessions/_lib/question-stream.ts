@@ -153,6 +153,11 @@ export interface QuestionComposeInput {
    * Derived by the route from recent respondent messages.
    */
   respondentTerse?: boolean;
+  /**
+   * The broad area/theme the selected target belongs to (e.g. a data slot's theme). In an OPEN
+   * approach/phase the strategy broadens to this area rather than the one specific question.
+   */
+  topicArea?: string | null;
 }
 
 /** What {@link streamQuestionMessage} returns once the stream completes. */
@@ -226,6 +231,7 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
     coverage: input.coverage,
     questionsAsked: input.questionsAsked,
     respondentTerse: input.respondentTerse,
+    topicArea: input.topicArea,
   });
 
   // Length is calibrated by how far into the conversation we are: the first few questions stay

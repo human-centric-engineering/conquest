@@ -120,6 +120,24 @@ describe('selectOpportunisticTargets', () => {
     });
     expect(targets.typed.map((s) => s.key)).toEqual(['shared']);
   });
+
+  it('dedupes free_text targets across fills — first contributing fill wins the paraphrase', () => {
+    // Two confident fills both map to the same free_text question. The seenFreeText guard
+    // means only the first fill is recorded; the second is discarded.
+    const targets = selectOpportunisticTargets({
+      dataSlotFills: [
+        fill('a', { paraphrase: 'First fill paraphrase.' }),
+        fill('b', { paraphrase: 'Second fill paraphrase.' }),
+      ],
+      dataSlotCandidates: [dataSlot('a', ['comments']), dataSlot('b', ['comments'])],
+      candidateSlots: [slot('comments', 'free_text')],
+      answeredKeys: new Set(),
+    });
+    expect(targets.freeText).toHaveLength(1);
+    expect(targets.freeText[0].slot.key).toBe('comments');
+    // The first fill's paraphrase wins — the second is dropped.
+    expect(targets.freeText[0].fill.paraphrase).toBe('First fill paraphrase.');
+  });
 });
 
 describe('buildFreeTextOpportunisticIntents', () => {
@@ -275,6 +293,19 @@ describe('selectRefreshTargets', () => {
       ],
       answered: [answered({ confidence: 0.4 })],
       handledKeys: new Set(['talent_3']),
+      confirmFloor: ANSWER_CONFIRM_FLOOR,
+    });
+    expect(targets).toHaveLength(0);
+  });
+
+  it('returns [] when the data-slot candidate has no prior recorded confidence (current absent)', () => {
+    // cand.current is undefined → prior is undefined → typeof prior !== 'number' → the
+    // strengthen-check skips immediately; even a high new-fill confidence cannot trigger a refresh.
+    const targets = selectRefreshTargets({
+      dataSlotFills: [fill('enablement', { confidence: 0.9 })],
+      dataSlotCandidates: [dataSlot('enablement', ['talent_3'])], // no `current` → prior is undefined
+      answered: [answered({ confidence: 0.45 })],
+      handledKeys: new Set(),
       confirmFloor: ANSWER_CONFIRM_FLOOR,
     });
     expect(targets).toHaveLength(0);

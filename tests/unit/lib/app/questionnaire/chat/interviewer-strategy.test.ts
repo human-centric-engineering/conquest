@@ -85,28 +85,49 @@ describe('buildInterviewerStrategyInstructions', () => {
     ).toBe('');
   });
 
-  it('funnel early → open clause; late → targeted clause', () => {
+  it('funnel early → open/broadening clause; late → targeted clause', () => {
     const early = buildInterviewerStrategyInstructions(
       { ...DEFAULT_INTERVIEWER_STRATEGY, enabled: true, approach: 'funnel' },
       { coverage: 0.1, questionsAsked: 0 }
     );
-    expect(early).toMatch(/EARLY in a funnel/i);
-    expect(early).toMatch(/open/i);
+    expect(early).toMatch(/highly OPEN and general/i);
+    // The open clause must BROADEN past the single question (the bug fix), not just reword it.
+    expect(early).toMatch(/OVERRIDES the "ask the one question provided"/i);
 
     const late = buildInterviewerStrategyInstructions(
       { ...DEFAULT_INTERVIEWER_STRATEGY, enabled: true, approach: 'funnel' },
       { coverage: 0.9, questionsAsked: 20 }
     );
-    expect(late).toMatch(/LATE in a funnel/i);
-    expect(late).toMatch(/TARGETED/i);
+    expect(late).toMatch(/TARGETED and efficient/i);
+    expect(late).not.toMatch(/OVERRIDES the "ask the one question provided"/i);
   });
 
-  it('open approach emits the open clause regardless of progress', () => {
+  it('funnel mid-coverage → mixed-phase clause; open and targeted clauses absent', () => {
+    // Coverage 0.5 is between FUNNEL_OPEN_BELOW (0.4) and FUNNEL_TARGETED_ABOVE (0.75) → 'mixed'.
+    const out = buildInterviewerStrategyInstructions(
+      { ...DEFAULT_INTERVIEWER_STRATEGY, enabled: true, approach: 'funnel' },
+      { coverage: 0.5, questionsAsked: 0 }
+    );
+    expect(out).toMatch(/keep questions fairly open and conversational/);
+    expect(out).not.toMatch(/highly OPEN and general/i);
+    expect(out).not.toMatch(/TARGETED and efficient/i);
+  });
+
+  it('open approach emits the open broadening clause regardless of progress', () => {
     const out = buildInterviewerStrategyInstructions(
       { ...DEFAULT_INTERVIEWER_STRATEGY, enabled: true, approach: 'open' },
       { coverage: 0.95, questionsAsked: 50 }
     );
     expect(out).toMatch(/highly OPEN and general/i);
+    expect(out).toMatch(/hint to the AREA/i);
+  });
+
+  it('names the topic area in the open clause when provided', () => {
+    const out = buildInterviewerStrategyInstructions(
+      { ...DEFAULT_INTERVIEWER_STRATEGY, enabled: true, approach: 'open' },
+      { coverage: 0.1, questionsAsked: 0, topicArea: 'business execution' }
+    );
+    expect(out).toMatch(/the broad area of business execution/i);
   });
 
   it('targeted approach emits the targeted clause', () => {
@@ -131,5 +152,22 @@ describe('buildInterviewerStrategyInstructions', () => {
     expect(out).toMatch(/PROBE FOR DEPTH/);
     expect(out).not.toMatch(/REFLECT AND CONFIRM/);
     expect(out).toMatch(/BATCH RELATED/);
+  });
+
+  it('reflect: true emits the REFLECT AND CONFIRM clause', () => {
+    // Positive assertion: the existing test only verified reflect:false excludes the clause;
+    // this confirms enabling it causes the clause to appear.
+    const out = buildInterviewerStrategyInstructions(
+      {
+        enabled: true,
+        approach: 'open',
+        probeDepth: false,
+        reflect: true,
+        batchRelated: false,
+      },
+      ctx
+    );
+    expect(out).toMatch(/REFLECT AND CONFIRM/);
+    expect(out).toMatch(/play back the gist/);
   });
 });

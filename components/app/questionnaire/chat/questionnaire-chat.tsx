@@ -639,12 +639,12 @@ export function QuestionnaireChat({
                 className="mb-2"
               />
             )}
-            {/* Explicit wait cue while the composer is held closed — the disabled box alone is a
-                silent dead end, especially when the reply is mid-reveal (no in-transcript "thinking"
-                indicator shows then). `role="status"` (inside ThinkingIndicator) announces the
-                changing label to assistive tech. */}
+            {/* Explicit wait cue while the composer is held closed. Shown visually in the disabled
+                input's placeholder (below); this copy is visually hidden (`sr-only`) but stays in
+                the a11y tree so its `role="status"` still announces the change to assistive tech (a
+                placeholder isn't announced). Hiding it removes the duplicated on-screen line. */}
             {!composerReady && (
-              <div className="mb-2">
+              <div className="sr-only">
                 <ThinkingIndicator message={composerHint} />
               </div>
             )}

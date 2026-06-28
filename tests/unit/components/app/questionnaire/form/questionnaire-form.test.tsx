@@ -157,34 +157,9 @@ describe('QuestionnaireForm', () => {
     expect(screen.getByText(/confident/i)).toBeInTheDocument();
   });
 
-  it('drops the free-text confidence band once the respondent edits it', () => {
-    const v = view();
-    v.sections[0].slots[0] = slot({
-      slotKey: 'role',
-      prompt: 'Your role?',
-      type: 'free_text',
-      answered: true,
-      value: 'I lead the sales enablement team',
-      provenance: 'direct',
-      confidence: 0.9,
-    });
-    render(
-      <QuestionnaireForm
-        view={v}
-        loading={false}
-        values={{ role: 'My own words now' }}
-        editedKeys={new Set(['role'])}
-        statuses={{}}
-        onChange={noop}
-        onFlush={noop}
-      />
-    );
-    expect(screen.queryByText(/confident/i)).not.toBeInTheDocument();
-  });
-
-  it('does not show a confidence band on a directly-stated structured (numeric) answer', () => {
-    // Structured answers only carry the chip when the agent inferred/synthesised them — a directly
-    // stated likert/numeric value reads as the respondent's own, so no chip.
+  it('shows the confidence band on a directly-stated structured (numeric) answer', () => {
+    // Every answered, scored question carries the band regardless of provenance — a directly stated
+    // likert/numeric value still shows how sure the capture was.
     const v = view();
     v.sections[0].slots[1] = slot({
       slotKey: 'team',
@@ -205,22 +180,24 @@ describe('QuestionnaireForm', () => {
         onFlush={noop}
       />
     );
-    expect(screen.queryByText(/confident/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/confident/i)).toBeInTheDocument();
   });
 
-  it('drops the confidence band once the respondent edits the field', () => {
+  it('keeps the confidence band on an answer the respondent has edited (rating stays on it)', () => {
+    // The band belongs to the answer, not to "is it still the agent's" — so it persists after an
+    // edit. (Only the "inferred" marker drops on edit; see the test below.)
     render(
       <QuestionnaireForm
         view={view()}
         loading={false}
         values={{ team: 8 }}
-        editedKeys={new Set(['team'])} // respondent's own edit → no longer the agent's answer
+        editedKeys={new Set(['team'])}
         statuses={{}}
         onChange={noop}
         onFlush={noop}
       />
     );
-    expect(screen.queryByText(/tentative/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/tentative/i)).toBeInTheDocument();
   });
 
   it('drops the inferred marker once the respondent edits the field', () => {
