@@ -55,6 +55,8 @@ export interface PanelSlotInput {
 export interface PanelAnswerInput {
   slotKey: string;
   value: unknown;
+  /** Free-text living paraphrase (panel-facing); null/absent for typed answers / respondent-typed forms. */
+  paraphrase?: string | null;
   provenance: string;
   confidence: number | null;
   rationale: string | null;
@@ -114,6 +116,7 @@ export function buildAnswerPanelView(input: PanelBuilderInput): AnswerPanelView 
         required: slot.required,
         answered,
         value: answered ? answer.value : null,
+        paraphrase: answered ? (answer.paraphrase ?? null) : null,
         provenance: answered ? asProvenance(answer.provenance) : null,
         confidence: answered ? answer.confidence : null,
         rationale: answered ? answer.rationale : null,

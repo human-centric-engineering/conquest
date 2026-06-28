@@ -172,6 +172,10 @@ model AppQuestionnaireConfig {
   // Completion thresholds: when a session may be considered done.
   minQuestionsAnswered Int   @default(0) // require at least this many answered
   coverageThreshold    Float @default(1.0) // 0–1 fraction of (weighted) questions covered
+  // Confirmation floor (opportunistic fill): an answer below this confidence is "tentative" — it
+  // does NOT count toward completion coverage or satisfy a required question until corroborated
+  // above it. Governs how cautious the background form-fill loop is (lower = accept guesses sooner).
+  answerConfidenceFloor Float @default(0.5) // 0–1; gates opportunistic guesses (cap 0.45), not real answers
 
   // Budget & caps (F3.3/F6.3 consume these; F3.1 only stores them).
   costBudgetUsd          Float? // per-session USD cap; null = no cap
@@ -215,15 +219,15 @@ model AppQuestionnaireConfig {
   // Presentation mode (P-presentation): how the respondent completes the session.
   // chat = streaming conversation (incl. data slots); form = raw sectioned form with the
   // right input per question type; both = offer both and let the respondent toggle. Default
-  // chat so existing launched versions are unchanged. (PRESENTATION_MODES — types.ts)
-  presentationMode String @default("chat") // chat | form | both
+  // both so new versions offer chat and form out of the box. (PRESENTATION_MODES — types.ts)
+  presentationMode String @default("both") // chat | form | both
 
   // Inline answer correction (Variant B): let respondents "fix" an answer the latest turn captured
   // directly via a small inline editor (in the chat beneath the most-recent turn and on the answer
   // panel row) rather than by sending a fresh chat turn. Corrections route through the form-edit path
   // (PUT …/answers), so they never run the turn pipeline — no contradiction re-check fires on a fix.
-  // On by default; respondent-facing UX with no platform flag (the admin toggles it per version).
-  inlineCorrectionEnabled Boolean @default(true)
+  // Off by default; respondent-facing UX with no platform flag (the admin toggles it per version).
+  inlineCorrectionEnabled Boolean @default(false)
 
   // Session-start profile fields (ProfileFieldConfig[] — types.ts).
   profileFields Json @default("[]")
@@ -252,6 +256,12 @@ model AppQuestionnaireConfig {
   // by default; only takes effect when the platform flag APP_QUESTIONNAIRES_TONE_ENABLED is on.
   // Fed into the phraser system prompt by buildToneInstructions (lib/.../chat/tone.ts). (types.ts)
   tone Json @default("{}")
+
+  // Interviewer strategy (questioning approach): { enabled, approach: funnel|open|targeted, probeDepth,
+  // reflect, batchRelated }. When enabled, OVERRIDES the default open-invitation questioning prompt with
+  // the chosen openness arc + additive tactics. Off by default. Rendered into the phraser system prompt by
+  // buildInterviewerStrategyInstructions (lib/.../chat/interviewer-strategy.ts). (types.ts)
+  interviewerStrategy Json @default("{}")
 
   // Respondent Report (report kind `respondent`): RespondentReportSettings — the per-respondent
   // report delivered after completion (mode, raw-content includes, AI generation knobs, delivery).
@@ -1057,6 +1067,11 @@ model AppAnswerSlot {
   sessionId         String
   questionSlotId    String
   value             Json
+  // Free-text comment fields: a living, panel-facing PARAPHRASE of the respondent's account
+  // (with significant verbatim in quotes), updated as the conversation builds — distinct from
+  // `value`, which stays the raw direct answer (also preserved in the turn transcript). Null for
+  // non-free-text answers and for respondent-typed form answers (those render `value` verbatim).
+  paraphrase        String?
   confidence        Float? // 0–1; null when not scored
   provenanceLabel   String   @default("direct") // ANSWER_PROVENANCES (types.ts)
   provenanceItems   Json? // Sunrise ProvenanceItem[]; reserved, not populated by F4.4

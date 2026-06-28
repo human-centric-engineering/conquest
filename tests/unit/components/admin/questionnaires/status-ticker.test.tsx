@@ -12,7 +12,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, act } from '@testing-library/react';
 
-import { StatusTicker } from '@/components/admin/questionnaires/status-ticker';
+import {
+  StatusTicker,
+  estimateExtractionMs,
+} from '@/components/admin/questionnaires/status-ticker';
 
 const TYPE_INTERVAL_MS = 40;
 const CURSOR = '▍';
@@ -93,5 +96,98 @@ describe('StatusTicker', () => {
       vi.advanceTimersByTime(60_000);
     });
     expect(typedText()).toBe(`Bye${CURSOR}`);
+  });
+
+  function elapsedText(): string {
+    return screen.getByTestId('elapsed').textContent ?? '';
+  }
+
+  it('shows an mm:ss elapsed counter that ticks once a second', () => {
+    render(<StatusTicker messages={['X']} />);
+
+    expect(elapsedText()).toBe('00:00');
+
+    act(() => {
+      vi.advanceTimersByTime(5_000);
+    });
+    expect(elapsedText()).toBe('00:05');
+
+    // Crosses the minute boundary — minutes and seconds both pad to two digits.
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(elapsedText()).toBe('01:05');
+  });
+
+  describe('adaptive pacing (estimatedMs)', () => {
+    it('distributes deterministic holds weighted toward the middle message', () => {
+      // 4 messages, estimate 8000ms. Paced indices 0..2 with triangular weights
+      // 1:2:1 (sum 4) → holds 2000 / 4000 / 2000ms. Single-char messages keep the
+      // typing time at one 40ms tick per message.
+      render(<StatusTicker messages={['A', 'B', 'C', 'D']} estimatedMs={8_000} />);
+
+      typeChars(1);
+      expect(typedText()).toBe(`A${CURSOR}`);
+
+      // Index 0 holds 2000ms — not the random 3–10s window.
+      act(() => {
+        vi.advanceTimersByTime(1_999);
+      });
+      expect(typedText()).toBe(`A${CURSOR}`);
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      typeChars(1);
+      expect(typedText()).toBe(`B${CURSOR}`);
+
+      // Index 1 is the heaviest hold (4000ms) — the middle dwells longest.
+      act(() => {
+        vi.advanceTimersByTime(3_999);
+      });
+      expect(typedText()).toBe(`B${CURSOR}`);
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      typeChars(1);
+      expect(typedText()).toBe(`C${CURSOR}`);
+    });
+
+    it('holds the final message indefinitely even when the estimate is exceeded', () => {
+      render(<StatusTicker messages={['A', 'B']} estimatedMs={4_000} />);
+
+      typeChars(1); // 'A'
+      act(() => {
+        vi.advanceTimersByTime(4_000);
+      });
+      typeChars(1); // 'B' — the last message
+      expect(typedText()).toBe(`B${CURSOR}`);
+
+      // Long past the estimate, it sits on the last message rather than looping.
+      act(() => {
+        vi.advanceTimersByTime(120_000);
+      });
+      expect(typedText()).toBe(`B${CURSOR}`);
+    });
+  });
+});
+
+describe('estimateExtractionMs', () => {
+  it('floors a tiny upload at the minimum estimate', () => {
+    expect(estimateExtractionMs(0, 'tiny.txt')).toBe(15_000);
+  });
+
+  it('scales with file size', () => {
+    // 1 MiB plain text: base 15000 + 9000/MB → 24000ms.
+    expect(estimateExtractionMs(1024 * 1024, 'doc.txt')).toBe(24_000);
+  });
+
+  it('applies a per-format slowness factor (case-insensitive)', () => {
+    expect(estimateExtractionMs(0, 'scan.PDF')).toBe(21_000); // 15000 * 1.4
+    expect(estimateExtractionMs(0, 'book.xlsx')).toBe(22_500); // 15000 * 1.5
+    expect(estimateExtractionMs(0, 'brief.docx')).toBe(18_000); // 15000 * 1.2
+  });
+
+  it('clamps a huge upload to the maximum estimate', () => {
+    expect(estimateExtractionMs(500 * 1024 * 1024, 'huge.pdf')).toBe(180_000);
   });
 });

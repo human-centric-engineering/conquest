@@ -54,7 +54,11 @@ import {
   EXTRACT_ANSWER_SLOTS_CAPABILITY_SLUG,
   EXTRACT_ANSWER_SLOTS_FUNCTION_DEFINITION,
 } from '@/lib/app/questionnaire/constants';
-import { ANSWER_FIT_MODES, QUESTION_TYPES } from '@/lib/app/questionnaire/types';
+import {
+  ANSWER_FIT_MODES,
+  ANSWER_PROVENANCES,
+  QUESTION_TYPES,
+} from '@/lib/app/questionnaire/types';
 import {
   validateAnswerExtraction,
   type AnswerExtraction,
@@ -64,6 +68,14 @@ import {
   buildAnswerExtractionRetryMessage,
 } from '@/lib/app/questionnaire/extraction/extraction-prompt';
 import { normalizeAnswerIntents } from '@/lib/app/questionnaire/extraction/answer-intents';
+import {
+  selectOpportunisticTargets,
+  buildFreeTextOpportunisticIntents,
+  capOpportunisticConfidence,
+  selectRefreshTargets,
+  buildRefreshIntents,
+  ANSWER_CONFIRM_FLOOR,
+} from '@/lib/app/questionnaire/capabilities/opportunistic-fill';
 import type {
   AnswerSlotIntent,
   DataSlotCandidateView,
@@ -108,6 +120,8 @@ const candidateSlotSchema = z.object({
   required: z.boolean().optional(),
   id: z.string().optional(),
   sectionId: z.string().optional(),
+  /** Free-text comment fields: the slot's current living paraphrase, so the extractor builds on it. */
+  currentParaphrase: z.string().nullable().optional(),
 });
 
 /** A data-slot candidate (Data Slots feature) the extractor also fills, addressed by key. */
@@ -151,9 +165,22 @@ const argsSchema = z
     /** Already-answered state, so the extractor doesn't re-ask. */
     answered: z
       .array(
-        z.object({ slotKey: z.string().min(1), confidence: z.number().min(0).max(1).nullable() })
+        z.object({
+          slotKey: z.string().min(1),
+          confidence: z.number().min(0).max(1).nullable(),
+          // Optional enrichment for the confirmation-refresh path (strengthen a tentative answer
+          // when its theme is corroborated). `value` is free-form (Json-shaped).
+          value: z.unknown().optional(),
+          provenance: z.enum(ANSWER_PROVENANCES).optional(),
+          questionType: z.enum(QUESTION_TYPES).optional(),
+        })
       )
       .optional(),
+    /**
+     * Confirmation floor (per-questionnaire config) — the refresh pass strengthens a tentative
+     * mapped answer only while it sits below this. Absent ⇒ the {@link ANSWER_CONFIRM_FLOOR} default.
+     */
+    answerConfidenceFloor: z.number().min(0).max(1).optional(),
     /** Recent transcript, oldest first. */
     recentMessages: z.array(z.string()).max(50).optional(),
     /** Files attached to this turn (images/documents) — read alongside the message. */
@@ -277,6 +304,7 @@ function toExtractionContext(args: ExtractAnswerSlotsArgs): ExtractionContext {
     ...(s.id !== undefined ? { id: s.id } : {}),
     ...(s.sectionId !== undefined ? { sectionId: s.sectionId } : {}),
     ...(s.guidelines !== undefined ? { guidelines: s.guidelines } : {}),
+    ...(s.currentParaphrase != null ? { currentParaphrase: s.currentParaphrase } : {}),
   }));
 
   return {
@@ -714,11 +742,77 @@ export class AppExtractAnswerSlotsCapability extends BaseCapability<
       });
     }
 
+    // 5c. Opportunistic down-propagation (Data Slots feature). A confident data-slot fill means we
+    //     understood the respondent's position on that theme — so seed its STILL-unanswered mapped
+    //     questions, capped at a Tentative confidence, instead of leaving the underlying form blank
+    //     (the `53ZF` gap). Free-text seeds deterministically from the paraphrase; choice/likert go
+    //     through the same answer-fit resolver. Each seeded answer is a guess the agent will confirm
+    //     (Phase 4) before it counts — and confirmation strengthens it via the accrual guard.
+    let opportunisticIntents: AnswerSlotIntent[] = [];
+    let opportunisticCostUsd = 0;
+    if ((args.dataSlotCandidates?.length ?? 0) > 0 && dataSlotFills.length > 0) {
+      const answeredThisTurn = new Set<string>([
+        ...intents.map((i) => i.slotKey),
+        ...fitIntents.map((i) => i.slotKey),
+      ]);
+      const priorAnswered = new Set(extractionContext.answered.map((a) => a.slotKey));
+
+      // SEED: unanswered mapped questions of a confident fill (Phase 2).
+      const targets = selectOpportunisticTargets({
+        dataSlotFills,
+        dataSlotCandidates: args.dataSlotCandidates ?? [],
+        candidateSlots: extractionContext.candidateSlots,
+        answeredKeys: new Set<string>([...answeredThisTurn, ...priorAnswered]),
+      });
+      opportunisticIntents = buildFreeTextOpportunisticIntents(targets.freeText);
+      if (targets.typed.length > 0) {
+        const fit = await this.resolveAnswerFit({
+          provider,
+          model,
+          providerSlug,
+          context,
+          extractionContext,
+          fitCandidates: targets.typed,
+        });
+        opportunisticCostUsd += fit.costUsd;
+        opportunisticIntents.push(...capOpportunisticConfidence(fit.intents));
+      }
+
+      // REFRESH (Phase 3): strengthen still-tentative mapped answers whose theme was corroborated
+      // this turn (their data-slot fill's confidence rose). Re-emits the SAME value at the new
+      // confidence; the turn-upsert accrual guard only raises it. Skips anything handled above.
+      const handledKeys = new Set<string>([
+        ...answeredThisTurn,
+        ...opportunisticIntents.map((i) => i.slotKey),
+      ]);
+      const refreshIntents = buildRefreshIntents(
+        selectRefreshTargets({
+          dataSlotFills,
+          dataSlotCandidates: args.dataSlotCandidates ?? [],
+          answered: extractionContext.answered,
+          handledKeys,
+          confirmFloor: args.answerConfidenceFloor ?? ANSWER_CONFIRM_FLOOR,
+        })
+      );
+      opportunisticIntents.push(...refreshIntents);
+
+      if (opportunisticIntents.length > 0) {
+        logger.info('extract_answer_slots: opportunistic down-propagation', {
+          agentId: context.agentId,
+          sessionId: extractionContext.sessionId,
+          freeTextTargets: targets.freeText.length,
+          typedTargets: targets.typed.length,
+          refreshed: refreshIntents.length,
+          total: opportunisticIntents.length,
+        });
+      }
+    }
+
     return this.success({
-      intents: [...intents, ...fitIntents],
+      intents: [...intents, ...fitIntents, ...opportunisticIntents],
       dataSlotFills,
       droppedCount: dropped.length,
-      costUsd: completion.costUsd + fitCostUsd,
+      costUsd: completion.costUsd + fitCostUsd + opportunisticCostUsd,
       // Inspector (admin preview): surface the answer-fit pass as its own trace when it ran.
       ...(fitCall ? { answerFitCall: fitCall } : {}),
       // Stage 1 of the seriousness gate — pass the model's suspicion flag through (when set).

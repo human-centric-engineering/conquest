@@ -15,7 +15,12 @@ import type {
 import type { RefinementDecision } from '@/lib/app/questionnaire/refinement/types';
 import type { PendingContradiction } from '@/lib/app/questionnaire/contradiction/types';
 import { prisma } from '@/lib/db/client';
-import { applyRefinement } from '@/lib/app/questionnaire/refinement';
+import {
+  applyRefinement,
+  accrueConfidence,
+  corroboratedProvenance,
+  valuesEqual,
+} from '@/lib/app/questionnaire/refinement';
 import type { ToolCallRecord } from '@/lib/app/questionnaire/orchestrator';
 import type { SessionWarning } from '@/lib/app/questionnaire/chat/types';
 import type { ReasoningStep } from '@/lib/app/questionnaire/reasoning';
@@ -92,11 +97,27 @@ export async function persistTurn(opts: {
     const slotId = opts.keyToSlotId.get(intent.slotKey);
     if (!slotId) continue;
     if (respondentEdited.has(slotId)) continue; // respondent's own answer wins
+
+    // Confidence accrual: when this turn re-states an answer we already hold with the SAME
+    // value, that's corroboration — strengthen the score (never lower it) and upgrade
+    // provenance to `direct` if it's now stated outright, rather than overwriting with this
+    // turn's raw extractor score. A CHANGED value isn't corroboration; it falls through to a
+    // plain overwrite here (the extractor emits genuine evolutions via the refinement path).
+    let confidence: number | null = intent.confidence ?? null;
+    let provenance = intent.provenance;
+    const existing = await loadAnswerSlot(opts.sessionId, slotId);
+    if (existing && valuesEqual(existing.existing.value, intent.value)) {
+      confidence = accrueConfidence(existing.existing.confidence, intent.confidence);
+      provenance = corroboratedProvenance(existing.existing.provenance, intent.provenance);
+    }
+
     const id = await upsertAnswerSlot(opts.sessionId, slotId, {
       value: intent.value,
-      provenance: intent.provenance,
+      provenance,
       rationale: intent.rationale,
-      confidence: intent.confidence,
+      confidence,
+      // Free-text living paraphrase (panel-facing); undefined for typed answers leaves it untouched.
+      ...(intent.paraphrase !== undefined ? { paraphrase: intent.paraphrase } : {}),
     });
     sideEffectAnswerIds.push(id);
     answeredQuestionSlotIds.push(slotId);
@@ -136,7 +157,7 @@ export async function persistTurn(opts: {
     for (const fill of opts.dataSlotFills) {
       const dataSlotId = opts.dataSlotKeyToId.get(fill.dataSlotKey);
       if (!dataSlotId) continue;
-      const id = await upsertDataSlotFill(opts.sessionId, dataSlotId, {
+      const { id, changed } = await upsertDataSlotFill(opts.sessionId, dataSlotId, {
         value: fill.value,
         paraphrase: fill.paraphrase,
         confidence: fill.confidence,
@@ -144,7 +165,10 @@ export async function persistTurn(opts: {
         ...(fill.rationale !== undefined ? { rationale: fill.rationale } : {}),
         ...(fill.provisional !== undefined ? { provisional: fill.provisional } : {}),
       });
-      sideEffectDataSlotIds.push(id);
+      // Only stamp `lastUpdatedTurnId` (which drives the "recently updated" flash) when the fill
+      // materially changed. The extractor re-emits every slot each turn as a superset re-write, so
+      // stamping unconditionally made every touched slot flash even when nothing tangible changed.
+      if (changed) sideEffectDataSlotIds.push(id);
     }
   }
 

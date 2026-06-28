@@ -28,8 +28,9 @@ export interface SlotMiniMapProps {
   windowTopPct: number;
   windowHeightPct: number;
   /**
-   * Bars the most recent fill-turn captured — ringed and gently breathing (`cq-livedot`) so they
-   * stay marked until a newer turn fills something.
+   * Bars the most recent fill-turn captured — ringed, with a brief one-shot pulse (`cq-livedot-once`)
+   * that settles to a static ring, so they stay marked until a newer turn fills something without
+   * breathing indefinitely.
    */
   recentlyFilledKeys?: ReadonlySet<string>;
   /** Scrub the list to a fraction [0,1] of the content. `smooth` for a discrete tap, not a drag. */
@@ -109,7 +110,7 @@ export function SlotMiniMap({
             'absolute inset-x-0.5 rounded-[2px]',
             bar.filled ? confidenceBandSolidBg(bar.band) : 'bg-muted-foreground/15',
             // Previous-turn bars stay ringed and gently breathe until a newer turn fills something.
-            recentlyFilledKeys?.has(bar.key) && 'ring-primary cq-livedot ring-1'
+            recentlyFilledKeys?.has(bar.key) && 'ring-primary cq-livedot-once ring-1'
           )}
         />
       ))}

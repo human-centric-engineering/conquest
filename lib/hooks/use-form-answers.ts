@@ -52,6 +52,13 @@ export interface UseFormAnswersReturn {
   error: boolean;
   /** Current input values keyed by slotKey (undefined = unanswered). */
   values: Record<string, unknown>;
+  /**
+   * Slot keys the respondent has edited locally since the last server seed. Distinct from `values`,
+   * which is *seeded* with every existing answer (incl. agent-inferred ones) so the inputs render —
+   * so "has a value" can't mean "the respondent typed it". This is the signal the form uses to drop
+   * the agent's "inferred"/confidence markers the moment the respondent makes the answer their own.
+   */
+  editedKeys: Set<string>;
   /** Per-slot save status keyed by slotKey. */
   statuses: Record<string, SaveStatus>;
   /**
@@ -104,6 +111,8 @@ export function useFormAnswers(options: UseFormAnswersOptions): UseFormAnswersRe
     seedValues(initialView ?? null)
   );
   const [statuses, setStatuses] = useState<Record<string, SaveStatus>>({});
+  // Slots the respondent has actually edited since the last seed (see `editedKeys` in the return).
+  const [editedKeys, setEditedKeys] = useState<Set<string>>(() => new Set());
   // Count of slots with a scheduled-but-not-yet-fired debounce. Folded into `saveState` so the
   // indicator reads "saving" during the debounce window, not just once the PUT is in flight.
   const [pendingCount, setPendingCount] = useState(0);
@@ -194,6 +203,9 @@ export function useFormAnswers(options: UseFormAnswersOptions): UseFormAnswersRe
   const setValue = useCallback(
     (slotKey: string, value: unknown) => {
       setValues((prev) => ({ ...prev, [slotKey]: value }));
+      // Mark this slot as the respondent's own from now on, so the agent's inferred/confidence
+      // markers drop immediately (optimistically) rather than waiting for the save round-trip.
+      setEditedKeys((prev) => (prev.has(slotKey) ? prev : new Set(prev).add(slotKey)));
       scheduleSave(slotKey);
     },
     [scheduleSave]
@@ -227,9 +239,11 @@ export function useFormAnswers(options: UseFormAnswersOptions): UseFormAnswersRe
         if (!mountedRef.current) return;
         setView(body.data);
         setValues(seedValues(body.data));
-        // A fresh server sync re-seeds local values, so prior per-slot save statuses no longer
-        // describe what's on screen — clear them so a stale error/saved pill doesn't linger.
+        // A fresh server sync re-seeds local values, so prior per-slot save statuses and the local
+        // "edited" set no longer describe what's on screen — clear them. The re-seeded view's
+        // provenance is now authoritative for which answers are still the agent's.
         setStatuses({});
+        setEditedKeys(new Set());
       })
       .catch(() => {
         if (mountedRef.current) setError(true);
@@ -262,6 +276,7 @@ export function useFormAnswers(options: UseFormAnswersOptions): UseFormAnswersRe
     loading,
     error,
     values,
+    editedKeys,
     statuses,
     saveState,
     lastSavedAt,

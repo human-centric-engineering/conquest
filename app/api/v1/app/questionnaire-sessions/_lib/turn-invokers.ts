@@ -96,6 +96,8 @@ function toCapabilitySlot(slot: CapabilitySlotView): Record<string, unknown> {
     required: slot.required,
     ...(slot.typeConfig !== undefined ? { typeConfig: slot.typeConfig } : {}),
     ...(slot.guidelines !== undefined ? { guidelines: slot.guidelines } : {}),
+    // Free-text comment fields: the slot's current living paraphrase, so the extractor builds on it.
+    ...(slot.currentParaphrase != null ? { currentParaphrase: slot.currentParaphrase } : {}),
   };
 }
 
@@ -186,6 +188,11 @@ export async function buildTurnInvokers(opts: {
    */
   answerFitMode?: AnswerFitMode;
   /**
+   * Confirmation floor (per-questionnaire config) — threaded to the extractor so the opportunistic
+   * refresh pass knows when a corroborated mapped answer has been strengthened enough to leave alone.
+   */
+  answerConfidenceFloor?: number;
+  /**
    * Anonymous (no-login) session. The adaptive SELECTORS drive the selection agent through
    * `streamChat`, which persists an `AiConversation` keyed to a real `user` — but an anonymous turn's
    * `userId` is the synthetic `anon:<sessionId>` (no `user` row), so the insert FK-violates and the
@@ -206,6 +213,7 @@ export async function buildTurnInvokers(opts: {
     dataSlotCandidates,
     sensitivityAware,
     answerFitMode,
+    answerConfidenceFloor,
     anonymous,
     recordInspectorCall,
   } = opts;
@@ -249,6 +257,9 @@ export async function buildTurnInvokers(opts: {
   const candidateSlots = slots.map(toCapabilitySlot);
   // The EXTRACTOR sees the narrowed set when the route supplied one (the pre-filter), else the full set.
   const extractionCandidates = (extractionCandidateSlots ?? slots).map(toCapabilitySlot);
+  // slotKey → question type, so the extractor's `answered` view can carry each answer's type (the
+  // confirmation-refresh path re-emits an answer and needs its type without a slot lookup).
+  const slotTypeByKey = new Map(slots.map((s) => [s.key, s.type]));
 
   return {
     async extractAnswers(state): Promise<ExtractOutcome> {
@@ -270,6 +281,11 @@ export async function buildTurnInvokers(opts: {
         answered: state.existingAnswers.map((a) => ({
           slotKey: a.slotKey,
           confidence: a.confidence ?? null,
+          // Carry value/provenance/type so the extractor can strengthen a tentative inferred answer
+          // when its theme is corroborated (the confirmation-refresh path) without re-deriving it.
+          value: a.value,
+          provenance: a.provenance,
+          ...(slotTypeByKey.has(a.slotKey) ? { questionType: slotTypeByKey.get(a.slotKey)! } : {}),
         })),
         ...(state.recentMessages.length > 0 ? { recentMessages: state.recentMessages } : {}),
         ...(state.attachments && state.attachments.length > 0
@@ -281,6 +297,7 @@ export async function buildTurnInvokers(opts: {
         ...(sensitivityAware ? { sensitivityAware: true } : {}),
         // Answer-fit resolver: let the extractor run the focused follow-up pass when enabled.
         ...(answerFitMode && answerFitMode !== 'off' ? { answerFitMode } : {}),
+        ...(answerConfidenceFloor !== undefined ? { answerConfidenceFloor } : {}),
         sessionId: state.sessionId,
       };
       const dispatch = await capabilityDispatcher.dispatch(

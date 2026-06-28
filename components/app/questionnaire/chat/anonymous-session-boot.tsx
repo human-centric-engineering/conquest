@@ -264,11 +264,11 @@ export function AnonymousSessionBoot({
   anonymous = false,
   preview = false,
   inviteToken,
-  presentationMode = 'chat',
+  presentationMode = 'both',
   reasoningPlacement,
   reasoningDwellMs,
   reasoningPerItemMs,
-  inlineCorrectionEnabled = true,
+  inlineCorrectionEnabled = false,
   introScreenEnabled = false,
 }: AnonymousSessionBootProps) {
   const [state, setState] = useState<BootState>({ phase: 'creating' });

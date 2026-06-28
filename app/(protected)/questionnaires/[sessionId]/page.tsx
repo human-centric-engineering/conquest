@@ -85,9 +85,9 @@ export default async function QuestionnaireSessionPage({
 
   const anonymous = row.config?.anonymousMode ?? false;
   const presentationMode = narrowToEnum(
-    row.config?.presentationMode ?? 'chat',
+    row.config?.presentationMode ?? 'both',
     PRESENTATION_MODES,
-    'chat'
+    'both'
   );
   const wantsForm = presentationMode === 'form' || presentationMode === 'both';
   // Voice and attachments each need BOTH the platform flag (capability dark-launch) AND the
@@ -171,8 +171,8 @@ export default async function QuestionnaireSessionPage({
           reasoningPlacement={reasoningPlacement}
           reasoningDwellMs={row.config?.reasoningStreamDwellMs}
           reasoningPerItemMs={row.config?.reasoningStreamPerItemMs}
-          // Inline answer correction (Variant B): respondent-facing UX, default on; no platform flag.
-          inlineCorrectionEnabled={row.config?.inlineCorrectionEnabled ?? true}
+          // Inline answer correction (Variant B): respondent-facing UX, default off; no platform flag.
+          inlineCorrectionEnabled={row.config?.inlineCorrectionEnabled ?? false}
         />
       </BrandThemeProvider>
     </div>

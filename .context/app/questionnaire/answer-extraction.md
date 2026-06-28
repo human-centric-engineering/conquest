@@ -1,5 +1,13 @@
 # Answer extraction (F4.2)
 
+> **Free-text paraphrase (F9.18).** A `free_text` answer carries a living **`paraphrase`** (the
+> respondent's account, reported in neutral speech with only NOTABLE wording kept in quotes) on
+> `AppAnswerSlot.paraphrase`, distinct from the raw `value`; the panel shows the paraphrase, never the
+> verbatim dump. The extractor emits it in the SAME call (no extra cost) and builds on the slot's
+> `currentParaphrase` across turns. Each free-text question is classified `isolated` vs `section` at
+> document-extraction time (`typeConfig.commentAggregation`, `readCommentAggregation`, default
+> `isolated`); a `section` field also synthesises from its section's data slots. See `features/f9.18.md`.
+
 How a respondent's message becomes typed **answer values** for one or more
 question slots. The complement to selection (F4.1): selection decides _which
 question to ask_; extraction reads the reply and records _what was answered_ —

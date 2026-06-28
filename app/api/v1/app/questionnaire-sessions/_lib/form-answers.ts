@@ -25,13 +25,34 @@
 import { Prisma } from '@prisma/client';
 
 import { prisma } from '@/lib/db/client';
-import { ANSWER_PROVENANCES, narrowToEnum, type QuestionType } from '@/lib/app/questionnaire/types';
+import {
+  ANSWER_PROVENANCES,
+  narrowToEnum,
+  QUESTION_TYPES,
+  type QuestionType,
+} from '@/lib/app/questionnaire/types';
 import type { RefinementHistoryEntry } from '@/lib/app/questionnaire/refinement/types';
 import {
   upsertDataSlotFill,
   clearDataSlotFill,
-  formatFillValue,
 } from '@/app/api/v1/app/questionnaires/_lib/data-slot-fills';
+import { formatSlotAnswer } from '@/lib/app/questionnaire/panel/format-slot-answer';
+
+/**
+ * Question types whose answer reads meaningfully on its own — free-text prose and the labels of a
+ * choice. A likert point, a number, a yes/no, or a date is meaningless in a slot summary without its
+ * question ("Not at all" tells a reader nothing), so those are left OUT of the human paraphrase (the
+ * structured value is still kept whole in the fill's diffable `value`). The data-slot summary is for
+ * conveying meaning, so it shows only what does.
+ */
+const STANDALONE_MEANINGFUL_TYPES: ReadonlySet<QuestionType> = new Set([
+  'free_text',
+  'single_choice',
+  'multi_choice',
+]);
+
+/** Shown when a slot's form answers carry no standalone meaning (all bare scale points / numbers). */
+const FORM_DIRECT_PARAPHRASE = 'Form questions were answered directly.';
 
 /** Minimal session shape the PUT route needs: access fields + status + version. */
 export interface SessionForFormWrite {
@@ -229,9 +250,11 @@ export async function reconcileDataSlotFills(
 
   for (const dataSlotId of dataSlotIds) {
     // All questions this slot maps to (a slot can cover several), and the session's answers to them.
+    // `type` + `typeConfig` come along so the paraphrase renders each answer's human-readable label
+    // (a likert "1" → "Not at all", a choice key → its option label) rather than a bare value.
     const mapped = await client.appDataSlotQuestion.findMany({
       where: { dataSlotId },
-      select: { questionSlot: { select: { id: true, key: true } } },
+      select: { questionSlot: { select: { id: true, key: true, type: true, typeConfig: true } } },
     });
     const mappedIds = mapped.map((m) => m.questionSlot.id);
     const answers = await client.appAnswerSlot.findMany({
@@ -242,20 +265,28 @@ export async function reconcileDataSlotFills(
 
     const answered = mapped
       .filter((m) => valueByQid.has(m.questionSlot.id))
-      .map((m) => ({ key: m.questionSlot.key, value: valueByQid.get(m.questionSlot.id) }));
+      .map((m) => ({
+        key: m.questionSlot.key,
+        type: narrowToEnum(m.questionSlot.type, QUESTION_TYPES, 'free_text'),
+        typeConfig: m.questionSlot.typeConfig,
+        value: valueByQid.get(m.questionSlot.id),
+      }));
 
     if (answered.length === 0) {
       await clearDataSlotFill(sessionId, dataSlotId, client);
       continue;
     }
 
-    // Structured, diffable value (keyed by question) drives the fill's change-history; the
-    // paraphrase is the joined human restatement the panel shows.
+    // Structured, diffable value (keyed by question) drives the fill's change-history. The
+    // paraphrase is the human summary the panel shows, so it's built only from answers that read on
+    // their own (free-text + choice labels); bare scale points / numbers are excluded as meaningless
+    // out of context. When nothing meaningful remains, say so plainly rather than dumping values.
     const value = Object.fromEntries(answered.map((a) => [a.key, a.value]));
-    const paraphrase = answered
-      .map((a) => formatFillValue(a.value))
-      .filter(Boolean)
-      .join('; ');
+    const semanticParts = answered
+      .filter((a) => STANDALONE_MEANINGFUL_TYPES.has(a.type))
+      .map((a) => formatSlotAnswer(a.type, a.typeConfig, a.value))
+      .filter((s) => s && s !== '—');
+    const paraphrase = semanticParts.length > 0 ? semanticParts.join('; ') : FORM_DIRECT_PARAPHRASE;
 
     await upsertDataSlotFill(
       sessionId,

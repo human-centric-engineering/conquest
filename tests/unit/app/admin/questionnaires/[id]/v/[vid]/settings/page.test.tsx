@@ -28,6 +28,7 @@ import {
   DEFAULT_COHORT_REPORT_SETTINGS,
   DEFAULT_INTRO_SETTINGS,
   DEFAULT_TONE_SETTINGS,
+  DEFAULT_INTERVIEWER_STRATEGY,
 } from '@/lib/app/questionnaire/types';
 import type { AttributedDemoClient, DemoClientView } from '@/lib/app/questionnaire/demo-clients';
 import type { QuestionnaireWorkspaceFlags } from '@/lib/app/questionnaire/workspace-data';
@@ -186,6 +187,8 @@ function makeGraph(over: Partial<VersionGraphView> = {}): VersionGraphView {
       selectionStrategy: 'sequential',
       minQuestionsAnswered: 0,
       coverageThreshold: 1,
+      answerConfidenceFloor: 0.5,
+      interviewerStrategy: DEFAULT_INTERVIEWER_STRATEGY,
       costBudgetUsd: null,
       maxQuestionsPerSession: null,
       voiceEnabled: false,

@@ -50,6 +50,7 @@ function view(): AnswerPanelView {
             answered: true,
             value: 5,
             provenance: 'inferred',
+            confidence: 0.45,
           }),
         ],
       },
@@ -97,12 +98,115 @@ describe('QuestionnaireForm', () => {
     expect(screen.getByLabelText('Inferred answer — edit if needed')).toBeInTheDocument();
   });
 
-  it('drops the inferred marker once the respondent has a local value', () => {
+  it('surfaces the confidence band on an agent-filled field', () => {
+    render(
+      <QuestionnaireForm
+        view={view()}
+        loading={false}
+        values={{}}
+        statuses={{}}
+        onChange={noop}
+        onFlush={noop}
+      />
+    );
+    // The inferred 'team' answer (confidence 0.45) shows a "Tentative" chip so the respondent
+    // knows it's a guess to glance at; the un-inferred 'role' field shows no chip.
+    expect(screen.getByText(/tentative/i)).toBeInTheDocument();
+  });
+
+  it('keeps the confidence band when the inferred answer is only seeded, not edited', () => {
+    // Regression: the form seeds `values` with EVERY existing answer so the inputs render. A
+    // seeded inferred answer (here `team`) must still show its confidence — the marker drops on a
+    // respondent EDIT (`editedKeys`), not merely on the value being present.
+    render(
+      <QuestionnaireForm
+        view={view()}
+        loading={false}
+        values={{ team: 7 }} // seeded from the server on form load (not a respondent edit)
+        statuses={{}}
+        onChange={noop}
+        onFlush={noop}
+      />
+    );
+    expect(screen.getByText(/tentative/i)).toBeInTheDocument();
+  });
+
+  it('shows the confidence band on a directly-stated free-text answer (always a paraphrase)', () => {
+    // Free-text answers are the agent's paraphrase of what the respondent said, so they carry a
+    // meaningful capture confidence even at provenance 'direct' — the chip must surface.
+    const v = view();
+    v.sections[0].slots[0] = slot({
+      slotKey: 'role',
+      prompt: 'Your role?',
+      type: 'free_text',
+      answered: true,
+      value: 'I lead the sales enablement team',
+      provenance: 'direct',
+      confidence: 0.9,
+    });
+    render(
+      <QuestionnaireForm
+        view={v}
+        loading={false}
+        values={{ role: 'I lead the sales enablement team' }}
+        statuses={{}}
+        onChange={noop}
+        onFlush={noop}
+      />
+    );
+    expect(screen.getByText(/confident/i)).toBeInTheDocument();
+  });
+
+  it('shows the confidence band on a directly-stated structured (numeric) answer', () => {
+    // Every answered, scored question carries the band regardless of provenance — a directly stated
+    // likert/numeric value still shows how sure the capture was.
+    const v = view();
+    v.sections[0].slots[1] = slot({
+      slotKey: 'team',
+      prompt: 'Team size?',
+      type: 'numeric',
+      answered: true,
+      value: 5,
+      provenance: 'direct',
+      confidence: 0.9,
+    });
+    render(
+      <QuestionnaireForm
+        view={v}
+        loading={false}
+        values={{ team: 5 }}
+        statuses={{}}
+        onChange={noop}
+        onFlush={noop}
+      />
+    );
+    expect(screen.getByText(/confident/i)).toBeInTheDocument();
+  });
+
+  it('keeps the confidence band on an answer the respondent has edited (rating stays on it)', () => {
+    // The band belongs to the answer, not to "is it still the agent's" — so it persists after an
+    // edit. (Only the "inferred" marker drops on edit; see the test below.)
+    render(
+      <QuestionnaireForm
+        view={view()}
+        loading={false}
+        values={{ team: 8 }}
+        editedKeys={new Set(['team'])}
+        statuses={{}}
+        onChange={noop}
+        onFlush={noop}
+      />
+    );
+    expect(screen.getByText(/tentative/i)).toBeInTheDocument();
+  });
+
+  it('drops the inferred marker once the respondent edits the field', () => {
     render(
       <QuestionnaireForm
         view={view()}
         loading={false}
         values={{ team: 7 }}
+        editedKeys={new Set(['team'])}
         statuses={{}}
         onChange={noop}
         onFlush={noop}
@@ -125,7 +229,8 @@ describe('QuestionnaireForm', () => {
         onFlush={noop}
       />
     );
-    expect(screen.getByText('Team size?').closest('li')?.className).toContain('cq-fill-glow');
+    // One-shot wash (settles to a resting tint), not the infinite `cq-fill-glow` breathe.
+    expect(screen.getByText('Team size?').closest('li')?.className).toContain('cq-fill-glow-once');
     expect(screen.getByText('Your role?').closest('li')?.className).not.toContain('cq-fill-glow');
   });
 

@@ -64,6 +64,7 @@ import {
   DEFAULT_COHORT_REPORT_SETTINGS,
   DEFAULT_INTRO_SETTINGS,
   DEFAULT_TONE_SETTINGS,
+  DEFAULT_INTERVIEWER_STRATEGY,
 } from '@/lib/app/questionnaire/types';
 import type { TurnState } from '@/lib/app/questionnaire/orchestrator';
 import type { CapabilitySlotView } from '@/app/api/v1/app/questionnaires/_lib/turn-context';
@@ -99,6 +100,8 @@ function state(over: Partial<TurnState> = {}): TurnState {
       selectionStrategy: 'sequential',
       minQuestionsAnswered: 0,
       coverageThreshold: 1,
+      answerConfidenceFloor: 0.5,
+      interviewerStrategy: DEFAULT_INTERVIEWER_STRATEGY,
       costBudgetUsd: null,
       maxQuestionsPerSession: null,
       voiceEnabled: false,
@@ -441,6 +444,10 @@ describe('optional-field branches (the false sides of the arg spreads)', () => {
     expect((dispatcherMock.dispatch as Mock).mock.calls[0][1].answered[0]).toEqual({
       slotKey: 'role',
       confidence: null,
+      // Enriched for the confirmation-refresh path (value/provenance/type travel with each answer).
+      value: 'marketing',
+      provenance: 'direct',
+      questionType: 'free_text',
     });
 
     await inv.detectContradictions(minimal());

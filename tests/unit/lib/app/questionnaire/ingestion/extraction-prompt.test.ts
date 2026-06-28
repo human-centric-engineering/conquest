@@ -103,6 +103,13 @@ describe('buildExtractionPrompt — vocabulary from the single source of truth',
     expect(system).toMatch(/every editorial decision/i);
     expect(system).toMatch(/verbatim[\s\S]*NO change/i);
   });
+
+  it('tells the model to match likert labels to the question framing, not default to agreement', () => {
+    // The fix: likert labels must fit the stem ("to what extent…" → an extent ramp), so the
+    // prompt must both warn against the agree/disagree default AND name the extent family.
+    expect(system).toMatch(/do NOT default to agree\/disagree/i);
+    expect(system).toMatch(/to what extent[\s\S]*great extent/i);
+  });
 });
 
 describe('buildExtractionPrompt — inference suppression instruction', () => {

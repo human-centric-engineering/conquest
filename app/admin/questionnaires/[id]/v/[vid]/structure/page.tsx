@@ -13,6 +13,7 @@ import { notFound } from 'next/navigation';
 import { VersionGraph } from '@/components/admin/questionnaires/version-graph';
 import { VersionEditor } from '@/components/admin/questionnaires/version-editor';
 import { ReingestDialog } from '@/components/admin/questionnaires/reingest-dialog';
+import { DefinitionExportMenu } from '@/components/admin/questionnaires/definition-export-menu';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ACCESS_MODE_LABELS } from '@/lib/app/questionnaire/types';
@@ -105,6 +106,8 @@ export default async function StructureTab({ params, searchParams }: PageProps) 
           )}
         </div>
         <div className="flex items-center gap-2">
+          {/* Export the definition + download the blank instrument (read-only; any status). */}
+          {graph && <DefinitionExportMenu questionnaireId={id} versionId={selected.id} />}
           {/* Re-ingest is a draft editorial operation (F2.4) — only offered on drafts. */}
           {selected.status === 'draft' && (
             <ReingestDialog

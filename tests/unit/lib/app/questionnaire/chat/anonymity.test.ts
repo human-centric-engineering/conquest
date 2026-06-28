@@ -133,23 +133,23 @@ describe('resolvePresentationModeForVersion', () => {
     expect(await resolvePresentationModeForVersion('ver-abc')).toBe('both');
   });
 
-  it('defaults to chat when the config row is absent', async () => {
+  it('defaults to both when the config row is absent', async () => {
     vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
       config: null,
     } as never);
-    expect(await resolvePresentationModeForVersion('ver-abc')).toBe('chat');
+    expect(await resolvePresentationModeForVersion('ver-abc')).toBe('both');
   });
 
-  it('defaults to chat when the version is absent', async () => {
+  it('defaults to both when the version is absent', async () => {
     vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue(null);
-    expect(await resolvePresentationModeForVersion('ver-missing')).toBe('chat');
+    expect(await resolvePresentationModeForVersion('ver-missing')).toBe('both');
   });
 
-  it('narrows an unrecognised stored value to chat', async () => {
+  it('narrows an unrecognised stored value to both', async () => {
     vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
       config: { presentationMode: 'telepathy' },
     } as never);
-    expect(await resolvePresentationModeForVersion('ver-abc')).toBe('chat');
+    expect(await resolvePresentationModeForVersion('ver-abc')).toBe('both');
   });
 
   it('selects only the presentationMode field for the given version', async () => {
@@ -176,7 +176,7 @@ describe('resolveInlineCorrectionForVersion', () => {
     expect(await resolveInlineCorrectionForVersion('ver-abc')).toBe(false);
   });
 
-  it('defaults to ON when the config row is absent', async () => {
+  it('defaults to OFF when the config row is absent', async () => {
     vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
       config: null,
     } as never);
@@ -185,7 +185,7 @@ describe('resolveInlineCorrectionForVersion', () => {
     );
   });
 
-  it('defaults to ON when the version is absent', async () => {
+  it('defaults to OFF when the version is absent', async () => {
     vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue(null);
     expect(await resolveInlineCorrectionForVersion('ver-missing')).toBe(
       DEFAULT_QUESTIONNAIRE_CONFIG.inlineCorrectionEnabled

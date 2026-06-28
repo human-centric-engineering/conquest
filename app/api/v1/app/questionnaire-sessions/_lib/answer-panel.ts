@@ -146,6 +146,7 @@ export async function loadAnswerPanelState(
       answers: {
         select: {
           value: true,
+          paraphrase: true,
           confidence: true,
           provenanceLabel: true,
           rationale: true,
@@ -191,6 +192,7 @@ export async function loadAnswerPanelState(
   const answers: PanelAnswerInput[] = row.answers.map((a) => ({
     slotKey: a.questionSlot.key,
     value: a.value,
+    paraphrase: a.paraphrase ?? null,
     provenance: a.provenanceLabel,
     confidence: a.confidence,
     rationale: a.rationale,
@@ -225,13 +227,13 @@ export async function loadAnswerPanelState(
     // question's prompt + version order, and whether the panel may itemise the mapped questions
     // (only in `both` mode — see `showSlotQuestions`). `orderIndex` keeps a slot's question list in
     // the questionnaire's own order rather than the M:N join's insertion order.
-    const presentationMode = row.version.config?.presentationMode ?? 'chat';
+    const presentationMode = row.version.config?.presentationMode ?? 'both';
     const showSlotQuestions = presentationMode === 'both';
     // Inline correction (Variant B) also needs the mapped questions itemised — with their editable
     // type/config/value — so a data-slot "fix" can edit the underlying questions. The breadth-list
     // DISPLAY still gates on `showSlotQuestions`; this only governs whether `coverage.questions` is
     // populated (so plain chat-only-without-correction keeps shipping nothing).
-    const inlineCorrectionEnabled = row.version.config?.inlineCorrectionEnabled ?? true;
+    const inlineCorrectionEnabled = row.version.config?.inlineCorrectionEnabled ?? false;
     const itemiseQuestions = showSlotQuestions || inlineCorrectionEnabled;
     const orderedQuestions = row.version.sections.flatMap((s) => s.questions);
     const promptByKey = new Map(orderedQuestions.map((q) => [q.key, q.prompt]));

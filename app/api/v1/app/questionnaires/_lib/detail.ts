@@ -41,6 +41,7 @@ import {
 } from '@/lib/app/questionnaire/types';
 import { parseInviteeFields } from '@/lib/app/questionnaire/invitations/invitee-fields';
 import { narrowToneSettings } from '@/lib/app/questionnaire/chat/tone';
+import { narrowInterviewerStrategy } from '@/lib/app/questionnaire/chat/interviewer-strategy';
 import { narrowRespondentReportSettings } from '@/lib/app/questionnaire/report/settings';
 import { narrowCohortReportSettings } from '@/lib/app/questionnaire/cohort-report/settings';
 import { narrowIntroSettings } from '@/lib/app/questionnaire/intro/settings';
@@ -91,6 +92,7 @@ export const CONFIG_SELECT = {
   selectionStrategy: true,
   minQuestionsAnswered: true,
   coverageThreshold: true,
+  answerConfidenceFloor: true,
   costBudgetUsd: true,
   maxQuestionsPerSession: true,
   voiceEnabled: true,
@@ -119,6 +121,7 @@ export const CONFIG_SELECT = {
   reasoningStreamPersist: true,
   previewInspectorEnabled: true,
   tone: true,
+  interviewerStrategy: true,
   respondentReport: true,
   cohortReport: true,
   intro: true,
@@ -128,6 +131,7 @@ type ConfigRow = {
   selectionStrategy: string;
   minQuestionsAnswered: number;
   coverageThreshold: number;
+  answerConfidenceFloor: number;
   costBudgetUsd: number | null;
   maxQuestionsPerSession: number | null;
   voiceEnabled: boolean;
@@ -156,6 +160,7 @@ type ConfigRow = {
   reasoningStreamPersist: boolean;
   previewInspectorEnabled: boolean;
   tone: Prisma.JsonValue;
+  interviewerStrategy: Prisma.JsonValue;
   respondentReport: Prisma.JsonValue;
   cohortReport: Prisma.JsonValue;
   intro: Prisma.JsonValue;
@@ -228,6 +233,7 @@ export function toConfigView(row: ConfigRow | null): ConfigView {
     selectionStrategy: asSelectionStrategy(row.selectionStrategy),
     minQuestionsAnswered: row.minQuestionsAnswered,
     coverageThreshold: row.coverageThreshold,
+    answerConfidenceFloor: row.answerConfidenceFloor,
     costBudgetUsd: row.costBudgetUsd,
     maxQuestionsPerSession: row.maxQuestionsPerSession,
     voiceEnabled: row.voiceEnabled,
@@ -256,6 +262,7 @@ export function toConfigView(row: ConfigRow | null): ConfigView {
     reasoningStreamPersist: row.reasoningStreamPersist,
     previewInspectorEnabled: row.previewInspectorEnabled,
     tone: narrowToneSettings(row.tone),
+    interviewerStrategy: narrowInterviewerStrategy(row.interviewerStrategy),
     respondentReport: narrowRespondentReportSettings(row.respondentReport),
     cohortReport: narrowCohortReportSettings(row.cohortReport),
     intro: narrowIntroSettings(row.intro),

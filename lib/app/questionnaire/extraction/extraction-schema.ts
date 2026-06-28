@@ -43,6 +43,13 @@ const extractedAnswerSchema = z.object({
   rationale: z.string(),
   /** The message span the value came from — required-by-convention for `direct`. */
   sourceQuote: z.string().optional(),
+  /**
+   * Free-text only: a living, panel-facing PARAPHRASE of the respondent's account (their words
+   * reported as their account, with notable/impactful wording kept in quotes), integrating prior
+   * context so it builds up across turns. Omitted for typed (choice/numeric/…) answers, whose
+   * `value` is already the canonical form.
+   */
+  paraphrase: z.string().optional(),
 });
 
 /**

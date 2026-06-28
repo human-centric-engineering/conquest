@@ -71,9 +71,15 @@ field entirely rather than sending null. "prompt" and "suggestedType" are REQUIR
 /** Shared scale rule: likert points must be labelled; numeric ratings stay numeric. */
 const SCALE_RULE = `For a "likert" question, ALWAYS set "suggestedTypeConfig" to integer "min" and \
 "max" plus a "labels" array with one short human-readable label per point (ordered min→max, length \
-exactly max − min + 1) — e.g. {"min":1,"max":5,"labels":["Strongly disagree","Disagree","Neutral","Agree","Strongly agree"]}. \
-These labels are shown in the final report instead of a bare number. Use "likert" only when each point \
-has a qualitative meaning; for a purely numeric rating (e.g. "rate 0–10", a count) use "numeric", which needs no labels.`;
+exactly max − min + 1). The labels MUST read naturally as an answer to THIS question's wording — \
+choose the family that fits the stem, do NOT default to agree/disagree: agreement → "Strongly \
+disagree → Strongly agree"; extent/degree ("to what extent…", "how much…") → "Not at all → To a \
+very great extent"; frequency ("how often…") → "Never → Always"; satisfaction → "Very dissatisfied \
+→ Very satisfied"; quality ("how would you rate…") → "Very poor → Excellent"; likelihood → "Very \
+unlikely → Very likely"; importance → "Not at all important → Extremely important". Interpolate \
+evenly for the in-between points. These labels are shown in the final report instead of a bare \
+number. Use "likert" only when each point has a qualitative meaning; for a purely numeric rating \
+(e.g. "rate 0–10", a count) use "numeric", which needs no labels.`;
 
 // ---------------------------------------------------------------------------
 // Phase 1 — outline (sections + inferred goal/audience)

@@ -116,6 +116,34 @@ export const QUESTION_TYPE_LABELS: Record<QuestionType, string> = {
   boolean: 'Boolean',
 };
 
+/**
+ * How a `free_text` comment field's living paraphrase is built (stored in the slot's
+ * `typeConfig.commentAggregation`; classified by the extractor/composer, admin-overridable):
+ *  - `isolated`  → paraphrase only this question's own answer + tangential chat mentions of it.
+ *  - `section`   → ALSO synthesise from the section's data-slot understanding, so a "comments to
+ *                  support your scores" field tracks the whole section as those slots fill.
+ * Either way the paraphrase is living (re-evaluated each turn) and never a verbatim dump.
+ */
+export const FREE_TEXT_COMMENT_AGGREGATIONS = ['isolated', 'section'] as const;
+export type FreeTextCommentAggregation = (typeof FREE_TEXT_COMMENT_AGGREGATIONS)[number];
+
+export const FREE_TEXT_COMMENT_AGGREGATION_LABELS: Record<FreeTextCommentAggregation, string> = {
+  isolated: 'Isolated',
+  section: 'Section summary',
+};
+
+/**
+ * Read the comment-aggregation mode from a free_text slot's `typeConfig` (an open JSON record).
+ * Defaults to `isolated` when absent or malformed — the safe, narrow behaviour.
+ */
+export function readCommentAggregation(typeConfig: unknown): FreeTextCommentAggregation {
+  if (typeConfig && typeof typeConfig === 'object' && !Array.isArray(typeConfig)) {
+    const raw = (typeConfig as Record<string, unknown>).commentAggregation;
+    if (raw === 'section') return 'section';
+  }
+  return 'isolated';
+}
+
 export const AUDIENCE_EXPERTISE_LEVELS = ['novice', 'intermediate', 'expert'] as const;
 export type AudienceExpertiseLevel = (typeof AUDIENCE_EXPERTISE_LEVELS)[number];
 
@@ -431,6 +459,51 @@ export const DEFAULT_TONE_SETTINGS: ToneSettings = {
 };
 
 /**
+ * Interviewer strategy (questioning approach). When `enabled`, these OVERRIDE the default
+ * questioning-approach prompt: a session-level openness `approach` (one of {@link
+ * INTERVIEWER_APPROACHES}) plus additive tactics that combine with it. Disabled = today's default
+ * voice unchanged. Stored as a Json config block (like {@link ToneSettings}); rendered into the
+ * asking prompt by `buildInterviewerStrategyInstructions`.
+ *
+ * - `funnel` — open/general first to let people ramble and fill many slots at once, then narrow to
+ *   targeted as coverage builds; goes targeted sooner when the respondent is terse, and re-opens as
+ *   the form fills.
+ * - `open` — broad and exploratory throughout, loosely guided by remaining gaps.
+ * - `targeted` — one specific, concrete question at a time; efficient.
+ */
+export const INTERVIEWER_APPROACHES = ['funnel', 'open', 'targeted'] as const;
+export type InterviewerApproach = (typeof INTERVIEWER_APPROACHES)[number];
+
+/** Human labels — single source for the admin select + any display. */
+export const INTERVIEWER_APPROACH_LABELS: Record<InterviewerApproach, string> = {
+  funnel: 'Funnel (open → targeted)',
+  open: 'Open throughout',
+  targeted: 'Targeted / efficient',
+};
+
+export type InterviewerStrategySettings = {
+  /** Off ⇒ the default questioning-approach prompt is used unchanged. */
+  enabled: boolean;
+  /** The session-level openness arc. */
+  approach: InterviewerApproach;
+  /** Tactic: dig into a shallow / low-confidence answer with one follow-up before moving on. */
+  probeDepth: boolean;
+  /** Tactic: briefly reflect the captured point back before the next question (also corroborates). */
+  reflect: boolean;
+  /** Tactic: invite a few closely-related gaps together rather than strictly one at a time. */
+  batchRelated: boolean;
+};
+
+/** Disabled — today's default questioning approach, no override. */
+export const DEFAULT_INTERVIEWER_STRATEGY: InterviewerStrategySettings = {
+  enabled: false,
+  approach: 'funnel',
+  probeDepth: false,
+  reflect: false,
+  batchRelated: false,
+};
+
+/**
  * Respondent Report (report kind `respondent`) — the per-respondent report delivered after a
  * respondent completes the questionnaire. The first of two report kinds; the later cross-respondent
  * Cohort Report (`cohort`) gets its own config when built.
@@ -661,6 +734,12 @@ export type QuestionnaireConfigShape = {
   selectionStrategy: SelectionStrategy;
   minQuestionsAnswered: number;
   coverageThreshold: number;
+  /**
+   * Confirmation floor for opportunistic fills (0–1). An answer below this confidence is
+   * "tentative" — it does not count toward completion coverage or satisfy a required question
+   * until corroborated above it. Lower = the background form-fill accepts guesses sooner.
+   */
+  answerConfidenceFloor: number;
   costBudgetUsd: number | null;
   maxQuestionsPerSession: number | null;
   voiceEnabled: boolean;
@@ -737,7 +816,7 @@ export type QuestionnaireConfigShape = {
    * turn captured through a small inline editor — beneath the most-recent turn in the chat and on
    * the answer-panel row — instead of sending a fresh chat turn. Corrections route through the
    * form-edit path (`PUT …/answers`), so they bypass the turn pipeline and never trigger a
-   * same-slot contradiction re-check. On by default; respondent-facing UX with no platform flag.
+   * same-slot contradiction re-check. Off by default; respondent-facing UX with no platform flag.
    */
   inlineCorrectionEnabled: boolean;
   /**
@@ -781,6 +860,8 @@ export type QuestionnaireConfigShape = {
    * `APP_QUESTIONNAIRES_TONE_ENABLED` is on. Threaded to the phraser via `buildToneInstructions`.
    */
   tone: ToneSettings;
+  /** Interviewer questioning approach (off ⇒ default prompts). See {@link InterviewerStrategySettings}. */
+  interviewerStrategy: InterviewerStrategySettings;
   /**
    * Respondent Report — the per-respondent report delivered after completion. See
    * {@link RespondentReportSettings}. Off by default; only takes effect when the platform flag
@@ -832,6 +913,7 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   selectionStrategy: 'adaptive',
   minQuestionsAnswered: 0,
   coverageThreshold: 1,
+  answerConfidenceFloor: 0.5,
   costBudgetUsd: null,
   maxQuestionsPerSession: null,
   voiceEnabled: false,
@@ -851,8 +933,8 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   supportResourceUrl: '',
   profileFields: [],
   answerSlotPanelScope: 'full_progress',
-  presentationMode: 'chat',
-  inlineCorrectionEnabled: true,
+  presentationMode: 'both',
+  inlineCorrectionEnabled: false,
   reasoningStreamEnabled: true,
   reasoningStreamPlacement: 'overlay',
   reasoningStreamDwellMs: 2000,
@@ -861,6 +943,7 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   // Admin-only debugging surface — off by default; an operator turns it on per version.
   previewInspectorEnabled: false,
   tone: DEFAULT_TONE_SETTINGS,
+  interviewerStrategy: DEFAULT_INTERVIEWER_STRATEGY,
   respondentReport: DEFAULT_RESPONDENT_REPORT_SETTINGS,
   cohortReport: DEFAULT_COHORT_REPORT_SETTINGS,
   intro: DEFAULT_INTRO_SETTINGS,

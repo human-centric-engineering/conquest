@@ -34,7 +34,11 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { FieldHelp } from '@/components/ui/field-help';
-import { StatusTicker, REINGEST_MESSAGES } from '@/components/admin/questionnaires/status-ticker';
+import {
+  StatusTicker,
+  REINGEST_MESSAGES,
+  estimateExtractionMs,
+} from '@/components/admin/questionnaires/status-ticker';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse } from '@/lib/api/parse-response';
 
@@ -67,6 +71,7 @@ export function ReingestDialog({ questionnaireId, versionId, versionNumber }: Re
   const [instructions, setInstructions] = useState('');
   const [extractTables, setExtractTables] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [estimatedMs, setEstimatedMs] = useState<number | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ReingestResult | null>(null);
 
@@ -77,6 +82,7 @@ export function ReingestDialog({ questionnaireId, versionId, versionNumber }: Re
     setError(null);
     setResult(null);
     setBusy(false);
+    setEstimatedMs(undefined);
     if (fileRef.current) fileRef.current.value = '';
   }
 
@@ -88,6 +94,7 @@ export function ReingestDialog({ questionnaireId, versionId, versionNumber }: Re
       return;
     }
 
+    setEstimatedMs(estimateExtractionMs(file.size, file.name));
     setBusy(true);
     setError(null);
     setResult(null);
@@ -189,6 +196,7 @@ export function ReingestDialog({ questionnaireId, versionId, versionNumber }: Re
                 accept={ACCEPT}
                 disabled={busy}
                 required
+                className="text-muted-foreground file:border-input file:bg-muted file:text-foreground hover:file:bg-accent cursor-pointer file:mr-3 file:cursor-pointer file:rounded file:border file:px-2.5 file:py-0.5"
               />
             </div>
 
@@ -226,7 +234,7 @@ export function ReingestDialog({ questionnaireId, versionId, versionNumber }: Re
                 onChange={(e) => setInstructions(e.target.value)}
                 disabled={busy}
                 rows={3}
-                placeholder="e.g. Questions are in the Activities tab. Replace 'HPE' with 'our organisation'."
+                placeholder="e.g. Skip the cover page and table of contents. Treat each numbered heading as a section. Replace the client's name with 'our organisation'."
               />
             </div>
 
@@ -246,7 +254,7 @@ export function ReingestDialog({ questionnaireId, versionId, versionNumber }: Re
               </FieldHelp>
             </div>
 
-            {busy && <StatusTicker messages={REINGEST_MESSAGES} />}
+            {busy && <StatusTicker messages={REINGEST_MESSAGES} estimatedMs={estimatedMs} />}
             {error && <p className="text-destructive text-sm">{error}</p>}
 
             <DialogFooter>

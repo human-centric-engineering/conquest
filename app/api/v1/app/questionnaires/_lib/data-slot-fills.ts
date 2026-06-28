@@ -10,7 +10,8 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
 import { jsonInput } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
-import type { AnswerProvenance } from '@/lib/app/questionnaire/types';
+import { narrowToEnum, QUESTION_TYPES, type AnswerProvenance } from '@/lib/app/questionnaire/types';
+import { formatSlotAnswer } from '@/lib/app/questionnaire/panel/format-slot-answer';
 import type { DataSlotFillHistoryEntry } from '@/lib/app/questionnaire/panel/types';
 
 /**
@@ -41,19 +42,61 @@ function asHistory(value: unknown): DataSlotFillHistoryEntry[] {
 }
 
 /**
+ * A canonical string for change-detection: object keys sorted recursively and string leaves trimmed.
+ * The extractor re-emits a slot's fill every turn as a "superset" of the prior value (see the
+ * extraction prompt's RE-SCAN rule), so a re-emit that only reorders keys or adds/strips whitespace
+ * must NOT read as a changed value — otherwise it appends a spurious "How this answer evolved"
+ * revision and re-flashes the slot as recently-updated when nothing tangible changed. Arrays stay
+ * order-sensitive — element order can carry meaning (e.g. a ranked list) — and types are not coerced
+ * (`5` ≠ `"5"`), so genuine changes are still detected.
+ */
+function canonicalValueKey(value: unknown): string {
+  const normalize = (v: unknown): unknown => {
+    if (typeof v === 'string') return v.trim();
+    if (Array.isArray(v)) return v.map(normalize);
+    if (v !== null && typeof v === 'object') {
+      const obj = v as Record<string, unknown>;
+      return Object.keys(obj)
+        .sort()
+        .reduce<Record<string, unknown>>((acc, k) => {
+          acc[k] = normalize(obj[k]);
+          return acc;
+        }, {});
+    }
+    return v;
+  };
+  return JSON.stringify(normalize(value));
+}
+
+/**
+ * The outcome of an {@link upsertDataSlotFill}. `changed` is true on first capture and whenever the
+ * write MATERIALLY altered the slot — the captured `value` (compared canonically) or its
+ * `provisional` state. A pure re-statement (reworded paraphrase/rationale, key reorder) or a soft
+ * confidence nudge from corroboration leaves `changed` false, so the caller can skip stamping
+ * `lastUpdatedTurnId` and avoid re-flashing the slot. The fill row is still updated either way.
+ */
+export interface UpsertDataSlotFillResult {
+  id: string;
+  changed: boolean;
+}
+
+/**
  * Upsert a session's fill for one data slot — create on first capture, update when a later turn
  * adds to or CORRECTS it (the extractor improves a slot across turns). When the captured `value`
  * actually changes (e.g. "male" → "female"), the prior value/paraphrase/confidence is appended to
  * `refinementHistory` so the panel can show how the answer evolved — the data-slot analogue of the
  * answer-slot refinement trail, but driven by the upsert (data slots have no separate refine pass).
- * Returns the row id (back-stamped with `lastUpdatedTurnId` by `recordTurn`).
+ * Returns the row id plus a `changed` flag (see {@link UpsertDataSlotFillResult}) so the caller only
+ * back-stamps `lastUpdatedTurnId` — which drives the panel's "recently updated" flash — for fills
+ * that materially changed this turn, not every re-emit.
  */
 export async function upsertDataSlotFill(
   sessionId: string,
   dataSlotId: string,
   fill: DataSlotFillInput,
   client: DbClient = prisma
-): Promise<string> {
+): Promise<UpsertDataSlotFillResult> {
+  const provisional = fill.provisional ?? false;
   const writeBase = {
     value: jsonInput(fill.value),
     paraphrase: fill.paraphrase,
@@ -61,7 +104,7 @@ export async function upsertDataSlotFill(
     provenanceLabel: fill.provenance,
     rationale: fill.rationale ?? null,
     // Move-on: a later confident fill writes `false`, promoting a parked slot back to a real answer.
-    provisional: fill.provisional ?? false,
+    provisional,
   };
 
   const existing = await client.appDataSlotFill.findUnique({
@@ -72,6 +115,7 @@ export async function upsertDataSlotFill(
       paraphrase: true,
       confidence: true,
       rationale: true,
+      provisional: true,
       refinementHistory: true,
     },
   });
@@ -81,13 +125,20 @@ export async function upsertDataSlotFill(
       data: { sessionId, dataSlotId, ...writeBase },
       select: { id: true },
     });
-    return row.id;
+    return { id: row.id, changed: true };
   }
 
-  // Append a history entry only when the captured position actually changed — a reworded
-  // paraphrase of the same value shouldn't pollute the trail.
+  // What MATERIALLY changed: the captured position (value, compared canonically so a reworded /
+  // reordered re-emit of the same data doesn't count) or its provisional state. A soft confidence
+  // nudge or a reworded paraphrase alone is not a material change — it neither appends a history
+  // revision nor re-flashes the slot.
+  const valueChanged = canonicalValueKey(existing.value) !== canonicalValueKey(fill.value);
+  const provisionalChanged = existing.provisional !== provisional;
+  const changed = valueChanged || provisionalChanged;
+
+  // Append a history entry only when the captured value actually changed — a reworded paraphrase of
+  // the same value (or a bare provisional flip) shouldn't pollute the "how this answer evolved" trail.
   const history = asHistory(existing.refinementHistory);
-  const valueChanged = JSON.stringify(existing.value) !== JSON.stringify(fill.value);
   if (valueChanged) {
     history.push({
       previousValue: existing.value,
@@ -103,7 +154,7 @@ export async function upsertDataSlotFill(
     data: { ...writeBase, refinementHistory: jsonInput(history) },
     select: { id: true },
   });
-  return existing.id;
+  return { id: existing.id, changed };
 }
 
 /**
@@ -117,28 +168,6 @@ export async function clearDataSlotFill(
   client: DbClient = prisma
 ): Promise<void> {
   await client.appDataSlotFill.deleteMany({ where: { sessionId, dataSlotId } });
-}
-
-/**
- * Deterministic, panel-facing restatement of one answered value (no LLM). Shared by the form-mode
- * reconciler (`form-answers.ts`) and the chat-mode gap-filler ({@link reconcileChatDataSlotFills}).
- */
-export function formatFillValue(value: unknown): string {
-  if (value === null || value === undefined) return '';
-  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
-  if (Array.isArray(value))
-    return value
-      .map((v) => formatFillValue(v))
-      .filter(Boolean)
-      .join(', ');
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'bigint') {
-    return String(value).trim();
-  }
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return '';
-  }
 }
 
 /**
@@ -197,9 +226,11 @@ export async function reconcileChatDataSlotFills(opts: {
 
   for (const dataSlotId of dataSlotIds) {
     // All questions this slot maps to (a slot can cover several), and the session's CURRENT answers.
+    // `type` + `typeConfig` come along so the formatted value renders each answer's human-readable
+    // label (a likert "1" → "Not at all") rather than a bare, meaningless number.
     const mapped = await client.appDataSlotQuestion.findMany({
       where: { dataSlotId },
-      select: { questionSlot: { select: { id: true, key: true } } },
+      select: { questionSlot: { select: { id: true, key: true, type: true, typeConfig: true } } },
     });
     const mappedIds = mapped.map((m) => m.questionSlot.id);
     const answers = await client.appAnswerSlot.findMany({
@@ -209,10 +240,14 @@ export async function reconcileChatDataSlotFills(opts: {
     const byQid = new Map(answers.map((a) => [a.questionSlotId, a]));
 
     const answered = mapped
-      .map((m) => ({ key: m.questionSlot.key, answer: byQid.get(m.questionSlot.id) }))
+      .map((m) => ({
+        key: m.questionSlot.key,
+        type: narrowToEnum(m.questionSlot.type, QUESTION_TYPES, 'free_text'),
+        typeConfig: m.questionSlot.typeConfig,
+        answer: byQid.get(m.questionSlot.id),
+      }))
       .filter(
-        (m): m is { key: string; answer: NonNullable<(typeof m)['answer']> } =>
-          m.answer !== undefined
+        (m): m is typeof m & { answer: NonNullable<(typeof m)['answer']> } => m.answer !== undefined
       );
 
     // We only reached here because a mapped question was answered this turn, so this is ~always ≥1.
@@ -220,20 +255,24 @@ export async function reconcileChatDataSlotFills(opts: {
     if (answered.length === 0) continue;
 
     // Structured, diffable value (keyed by question) drives the fill's change-history; the paraphrase
-    // leads with each answer's natural-language rationale, falling back to the formatted value.
+    // leads with each answer's natural-language rationale, falling back to the label-aware formatted
+    // value (a likert/choice answer reads as its words, not a bare number).
     const value = Object.fromEntries(answered.map((a) => [a.key, a.answer.value]));
     const paraphrase = answered
       .map((a) => {
-        const formatted = formatFillValue(a.answer.value);
+        const formatted = formatSlotAnswer(a.type, a.typeConfig, a.answer.value);
+        const meaningful = formatted && formatted !== '—' ? formatted : '';
         const rationale = (a.answer.rationale ?? '').trim();
-        if (formatted && rationale) return `${formatted} — ${rationale}`;
-        return rationale || formatted;
+        if (meaningful && rationale) return `${meaningful} — ${rationale}`;
+        return rationale || meaningful;
       })
       .filter(Boolean)
       .join('; ');
     const confidence = Math.max(...answered.map((a) => a.answer.confidence ?? 0.5));
 
-    const id = await upsertDataSlotFill(
+    // Gap-fill only reaches slots with no existing fill, so this is always a fresh create
+    // (`changed === true`); we keep the id to stamp + flash it as genuinely newly captured.
+    const { id } = await upsertDataSlotFill(
       opts.sessionId,
       dataSlotId,
       {

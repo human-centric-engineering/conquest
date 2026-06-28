@@ -50,6 +50,12 @@ export interface ExtractionSlotView {
   guidelines?: string;
   /** Whether an answer is mandatory; surfaced to the LLM as priority context. */
   required: boolean;
+  /**
+   * Free-text comment fields: the slot's CURRENT living paraphrase this session (when any), so the
+   * extractor integrates new tangential mentions into it rather than starting over — the paraphrase
+   * builds up across turns. Absent until the slot has a paraphrase, and for non-free-text slots.
+   */
+  currentParaphrase?: string | null;
 }
 
 /** One answer already captured this session — so the extractor doesn't re-ask. */
@@ -58,6 +64,16 @@ export interface ExtractionAnsweredView {
   slotKey: string;
   /** Extraction confidence 0–1, or `null` when not scored. */
   confidence: number | null;
+  /**
+   * The currently-recorded value. Optional/back-compat: only the live turn loop populates it, and
+   * it powers the confirmation-refresh path (re-emit the SAME value to strengthen a tentative answer
+   * when its theme is corroborated). Absent ⇒ that path can't run for this entry.
+   */
+  value?: unknown;
+  /** How the current value was arrived at — refresh only strengthens `inferred` (opportunistic) ones. */
+  provenance?: AnswerProvenance;
+  /** The slot's question type — carried so a refresh intent can be re-emitted without a slot lookup. */
+  questionType?: QuestionType;
 }
 
 /**
@@ -216,6 +232,11 @@ export interface AnswerSlotIntent {
   isActiveQuestion: boolean;
   /** The span of the message the value came from — present for `direct`. */
   sourceQuote?: string;
+  /**
+   * Free-text only: the living, panel-facing paraphrase of the respondent's account (significant
+   * verbatim in quotes), persisted to `AppAnswerSlot.paraphrase`. Absent for typed answers.
+   */
+  paraphrase?: string | null;
 }
 
 /** A raw extracted answer dropped by the normaliser, with why — for logging. */

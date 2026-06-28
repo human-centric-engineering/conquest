@@ -62,6 +62,12 @@ function toIntent(
   if (provenance === 'direct' && hasQuote) {
     intent.sourceQuote = answer.sourceQuote;
   }
+  // Free-text only: carry the living paraphrase (the panel-facing restatement). Typed answers
+  // (choice/numeric/…) have a canonical `value` and never paraphrase.
+  if (slot.type === 'free_text') {
+    const paraphrase = typeof answer.paraphrase === 'string' ? answer.paraphrase.trim() : '';
+    if (paraphrase.length > 0) intent.paraphrase = paraphrase;
+  }
   return intent;
 }
 

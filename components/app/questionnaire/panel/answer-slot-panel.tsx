@@ -231,15 +231,16 @@ function DataSlotRow({
       className={cn(
         'rounded-md border px-3 py-2 transition-shadow duration-500 outline-none motion-reduce:transition-none',
         highlighted && 'ring-primary/60 ring-2',
-        // Previous-turn highlight: a gentle, lasting accent wash (kept until a newer turn fills).
-        recentlyFilled && 'cq-fill-glow'
+        // Previous-turn highlight: a brief one-shot wash that settles to a resting accent tint (kept
+        // until a newer turn fills), rather than breathing indefinitely.
+        recentlyFilled && 'cq-fill-glow-once'
       )}
     >
       <div className="flex items-start gap-2">
         <ConfidenceIndicator
           confidence={slot.confidence}
           solid
-          className={cn('mt-1', recentlyFilled && 'cq-livedot')}
+          className={cn('mt-1', recentlyFilled && 'cq-livedot-once')}
         />
         <div className="min-w-0 flex-1">
           {/* Name row carries the "Edited" pill in the top-right corner (above the answer text). The
