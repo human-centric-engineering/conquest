@@ -91,8 +91,9 @@ export function SectionNavigator({
                       className={cn(
                         'h-2 w-2 rounded-full',
                         !ans && 'border-muted-foreground/40 border border-dashed',
-                        // Filled by the latest turn — gently breathes until a newer turn fills.
-                        recent && 'cq-livedot'
+                        // Filled by the latest turn — a brief one-shot pulse that settles (no
+                        // indefinite breathing); the dot stays marked until a newer turn fills.
+                        recent && 'cq-livedot-once'
                       )}
                       style={
                         ans

@@ -89,7 +89,8 @@ describe('SectionNavigator', () => {
       />
     );
     const dots = Array.from(container.querySelectorAll<HTMLElement>('span.rounded-full'));
-    const pulsing = dots.filter((d) => d.className.includes('cq-livedot'));
+    // One-shot pulse (settles), not the infinite `cq-livedot` breathe.
+    const pulsing = dots.filter((d) => d.className.includes('cq-livedot-once'));
     expect(pulsing).toHaveLength(1); // only slot 'b' was filled this turn
   });
 

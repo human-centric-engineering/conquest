@@ -114,12 +114,107 @@ describe('QuestionnaireForm', () => {
     expect(screen.getByText(/tentative/i)).toBeInTheDocument();
   });
 
+  it('keeps the confidence band when the inferred answer is only seeded, not edited', () => {
+    // Regression: the form seeds `values` with EVERY existing answer so the inputs render. A
+    // seeded inferred answer (here `team`) must still show its confidence — the marker drops on a
+    // respondent EDIT (`editedKeys`), not merely on the value being present.
+    render(
+      <QuestionnaireForm
+        view={view()}
+        loading={false}
+        values={{ team: 7 }} // seeded from the server on form load (not a respondent edit)
+        statuses={{}}
+        onChange={noop}
+        onFlush={noop}
+      />
+    );
+    expect(screen.getByText(/tentative/i)).toBeInTheDocument();
+  });
+
+  it('shows the confidence band on a directly-stated free-text answer (always a paraphrase)', () => {
+    // Free-text answers are the agent's paraphrase of what the respondent said, so they carry a
+    // meaningful capture confidence even at provenance 'direct' — the chip must surface.
+    const v = view();
+    v.sections[0].slots[0] = slot({
+      slotKey: 'role',
+      prompt: 'Your role?',
+      type: 'free_text',
+      answered: true,
+      value: 'I lead the sales enablement team',
+      provenance: 'direct',
+      confidence: 0.9,
+    });
+    render(
+      <QuestionnaireForm
+        view={v}
+        loading={false}
+        values={{ role: 'I lead the sales enablement team' }}
+        statuses={{}}
+        onChange={noop}
+        onFlush={noop}
+      />
+    );
+    expect(screen.getByText(/confident/i)).toBeInTheDocument();
+  });
+
+  it('drops the free-text confidence band once the respondent edits it', () => {
+    const v = view();
+    v.sections[0].slots[0] = slot({
+      slotKey: 'role',
+      prompt: 'Your role?',
+      type: 'free_text',
+      answered: true,
+      value: 'I lead the sales enablement team',
+      provenance: 'direct',
+      confidence: 0.9,
+    });
+    render(
+      <QuestionnaireForm
+        view={v}
+        loading={false}
+        values={{ role: 'My own words now' }}
+        editedKeys={new Set(['role'])}
+        statuses={{}}
+        onChange={noop}
+        onFlush={noop}
+      />
+    );
+    expect(screen.queryByText(/confident/i)).not.toBeInTheDocument();
+  });
+
+  it('does not show a confidence band on a directly-stated structured (numeric) answer', () => {
+    // Structured answers only carry the chip when the agent inferred/synthesised them — a directly
+    // stated likert/numeric value reads as the respondent's own, so no chip.
+    const v = view();
+    v.sections[0].slots[1] = slot({
+      slotKey: 'team',
+      prompt: 'Team size?',
+      type: 'numeric',
+      answered: true,
+      value: 5,
+      provenance: 'direct',
+      confidence: 0.9,
+    });
+    render(
+      <QuestionnaireForm
+        view={v}
+        loading={false}
+        values={{ team: 5 }}
+        statuses={{}}
+        onChange={noop}
+        onFlush={noop}
+      />
+    );
+    expect(screen.queryByText(/confident/i)).not.toBeInTheDocument();
+  });
+
   it('drops the confidence band once the respondent edits the field', () => {
     render(
       <QuestionnaireForm
         view={view()}
         loading={false}
-        values={{ team: 8 }} // respondent's own value → no longer the agent's answer
+        values={{ team: 8 }}
+        editedKeys={new Set(['team'])} // respondent's own edit → no longer the agent's answer
         statuses={{}}
         onChange={noop}
         onFlush={noop}
@@ -128,12 +223,13 @@ describe('QuestionnaireForm', () => {
     expect(screen.queryByText(/tentative/i)).not.toBeInTheDocument();
   });
 
-  it('drops the inferred marker once the respondent has a local value', () => {
+  it('drops the inferred marker once the respondent edits the field', () => {
     render(
       <QuestionnaireForm
         view={view()}
         loading={false}
         values={{ team: 7 }}
+        editedKeys={new Set(['team'])}
         statuses={{}}
         onChange={noop}
         onFlush={noop}

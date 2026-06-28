@@ -63,7 +63,8 @@ describe('SlotMiniMap', () => {
       />
     );
     expect(bar('goal').className).toContain('ring-primary');
-    expect(bar('goal').className).toContain('cq-livedot');
+    // One-shot pulse (settles to a static ring), not the infinite `cq-livedot` breathe.
+    expect(bar('goal').className).toContain('cq-livedot-once');
     expect(bar('age').className).not.toContain('ring-primary');
     expect(bar('age').className).not.toContain('cq-livedot');
   });

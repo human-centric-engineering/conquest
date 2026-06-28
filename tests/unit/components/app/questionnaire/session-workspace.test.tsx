@@ -167,7 +167,9 @@ function setup(
   });
   panelHook.mockReturnValue({ view: null, loading: false, error: false, refetch, ...panelOver });
   lifecycleHook.mockReturnValue(lifecycleReturn(lifecycleOver));
-  render(<SessionWorkspace sessionId="s1" />);
+  // Pin chat mode so these mode-agnostic tests render a single surface; the default is now
+  // 'both' (which renders chat + form together). Mode-specific tests override per render.
+  render(<SessionWorkspace sessionId="s1" presentationMode="chat" />);
 }
 
 function formReturn(over: Record<string, unknown> = {}) {

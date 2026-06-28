@@ -101,7 +101,7 @@ export interface SessionWorkspaceProps {
   /**
    * Inline answer correction (Variant B): show the "fix this answer" gesture beneath the most-recent
    * chat turn and on the answer-panel rows, letting the respondent correct a just-captured answer
-   * without sending a fresh turn. Per-questionnaire toggle (default on); the page resolves it from the
+   * without sending a fresh turn. Per-questionnaire toggle (default off); the page resolves it from the
    * version config. Never shown in the read-only admin viewer.
    */
   inlineCorrectionEnabled?: boolean;
@@ -126,12 +126,12 @@ export function SessionWorkspace({
   voiceInputEnabled = false,
   attachmentInputEnabled = false,
   autoStart = false,
-  presentationMode = 'chat',
+  presentationMode = 'both',
   initialFormView,
   reasoningPlacement,
   reasoningDwellMs,
   reasoningPerItemMs,
-  inlineCorrectionEnabled = true,
+  inlineCorrectionEnabled = false,
   readOnly = false,
 }: SessionWorkspaceProps) {
   const showChat = presentationMode === 'chat' || presentationMode === 'both';
@@ -433,6 +433,7 @@ export function SessionWorkspace({
         view={form.view}
         loading={form.loading}
         values={form.values}
+        editedKeys={form.editedKeys}
         statuses={form.statuses}
         saveState={form.saveState}
         lastSavedAt={form.lastSavedAt}

@@ -89,7 +89,7 @@ export async function resolvePresentationModeForVersion(
     where: { id: versionId },
     select: { config: { select: { presentationMode: true } } },
   });
-  return narrowToEnum(version?.config?.presentationMode ?? 'chat', PRESENTATION_MODES, 'chat');
+  return narrowToEnum(version?.config?.presentationMode ?? 'both', PRESENTATION_MODES, 'both');
 }
 
 /**

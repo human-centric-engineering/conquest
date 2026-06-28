@@ -67,7 +67,7 @@ export async function resolveSessionIntro(sessionId: string): Promise<ResolvedSe
   const presentationMode: PresentationMode = narrowToEnum(
     config?.presentationMode ?? '',
     PRESENTATION_MODES,
-    'chat'
+    'both'
   );
 
   // Only resolve the (possibly cohort-overridden) background when the splash will actually render —

@@ -186,6 +186,14 @@ previousConfidence / previousRationale` plus a `changedAt` ISO stamp. The read s
 onto `DataSlotPanelSlot.history` (oldest-first; `rationale`/`changedAt` are `null` on steps recorded
 before per-change capture existed).
 
+A step is pushed **only when the captured `value` actually changed**, compared **canonically**
+(`canonicalValueKey` — object keys sorted recursively, string leaves trimmed; arrays stay
+order-sensitive, types are not coerced). This matters because the extractor re-emits **every** slot
+each turn as a "superset" re-write (see the extraction prompt's RE-SCAN rule), so a re-emit that only
+rewords the paraphrase/rationale, reorders keys, or nudges confidence must **not** append a spurious
+revision. A reworded paraphrase of the same value, or a soft confidence bump from corroboration,
+updates the row in place without a new history step.
+
 The row surfaces this as a quiet **"N Edit(s)" pill** rather than the old inline strikethrough list,
 which crowded the row. Opening it (`SlotHistoryDialog`) reveals the full evolution as a **newest-first
 timeline** — the current reading on top, then each prior step with its paraphrase, confidence, the
@@ -217,21 +225,26 @@ address this (question mode is unchanged):
   **own** container (`scrollTo`, never the window), respects reduced motion
   (`usePrefersReducedMotion`), and moves focus + an `aria-live` announcement so keyboard/SR users
   follow the jump.
-- **Previous-turn highlight** — the slots the **most recent fill-turn** captured gently **pulse** in
-  every surface, and keep pulsing (they don't settle) until a newer turn fills something, so they stay
-  identifiable after being viewed. "Most recent fill-turn" = the slots whose `answeredAtTurnIndex`
-  equals the maximum, via `recentlyFilledByLatestTurn` (`newly-filled.ts`) — deliberately **decoupled**
-  from the diff-based `newlyFilledKeys` (which drives the one-shot stepper and clears on a no-fill
-  turn). Animations are the project's existing keyframes:
-  - **Data-slot list rows** → `cq-fill-glow` (a soft accent background that pulses in/out, non-dimming).
-  - **Minimap bars** → `ring-primary` + `cq-livedot` (a gentle opacity/scale breathe that keeps the
-    confidence colour).
+- **Previous-turn highlight** — the slots the **most recent fill-turn** captured briefly **pulse** in
+  every surface, then **settle** to a static marker (a ring / resting tint) that stays until a newer
+  turn fills something, so they remain identifiable after being viewed **without flashing
+  indefinitely**. "Most recent fill-turn" = the slots whose `answeredAtTurnIndex` equals the maximum,
+  via `recentlyFilledByLatestTurn` (`newly-filled.ts`) — deliberately **decoupled** from the
+  diff-based `newlyFilledKeys` (which drives the one-shot stepper and clears on a no-fill turn).
+  Animations are **one-shot** variants (a few cycles, then settle) so the minimap — which doubles as
+  the scroll affordance — doesn't breathe forever:
+  - **Data-slot list rows** → `cq-fill-glow-once` (a soft accent background that pulses a few times,
+    then rests on the muted tint; non-dimming).
+  - **Minimap bars** → `ring-primary` + `cq-livedot-once` (a brief opacity/scale pulse that keeps the
+    confidence colour, then settles to a static ring).
   - **Form view** (`SectionNavigator` + `QuestionnaireForm`) — the navigator dots for those questions
-    → `cq-livedot`; the filled answer block → `cq-fill-glow`. The form computes its own recently-filled
-    set from `view.sections[].slots[].answeredAtTurnIndex` (no workspace plumbing).
+    → `cq-livedot-once`; the filled answer block → `cq-fill-glow-once`. The form computes its own
+    recently-filled set from `view.sections[].slots[].answeredAtTurnIndex` (no workspace plumbing).
 
-  All three keyframes carry a `prefers-reduced-motion` fallback (`cq-fill-glow` keeps a resting tint;
-  `cq-livedot` falls back to full opacity), defined in `app/globals.css`.
+  The infinite `cq-livedot` / `cq-fill-glow` still exist for true _live_ indicators (e.g. the cohort
+  live dot); the `-once` variants are the recently-filled emphasis. All carry a
+  `prefers-reduced-motion` fallback (`cq-fill-glow*` keeps a resting tint; `cq-livedot*` falls back to
+  full opacity), defined in `app/globals.css`.
 
 **How "newly filled" is known** (`newly-filled.ts`): the messages stream never tells the client a
 turn ordinal, so `SessionWorkspace` keeps the previous `AnswerPanelView` and **diffs** it against
@@ -241,6 +254,15 @@ first (SSR/seed) view seeds the baseline silently and never auto-scrolls. The or
 `AnswerSlotPanel`'s `newlyFilledKeys`; each slot row carries a stable `panelSlotDomId(key)` anchor.
 For this, `DataSlotPanelSlot` now also carries `answeredAtTurnIndex` (resolved in the read seam from
 the fill's `lastUpdatedTurnId`, like question slots).
+
+**`lastUpdatedTurnId` is stamped only for fills that materially changed this turn.** Because the
+extractor re-emits every slot each turn, stamping every upserted fill made `answeredAtTurnIndex`
+advance for the whole set, so `recentlyFilledByLatestTurn` flashed **everything** even on a turn that
+revealed nothing tangible. `upsertDataSlotFill` now returns `{ id, changed }` (`changed` = created, or
+the canonical value or `provisional` state changed); `persistTurn` (`_lib/turn-run.ts`) adds the id to
+`sideEffectDataSlotIds` — the set `recordTurn` back-stamps — **only when `changed`**. The fill row
+still updates either way (new paraphrase/confidence land); it just doesn't re-flash. The gap-filler's
+ids are always included (it only ever creates fresh fills).
 
 ## Not here
 

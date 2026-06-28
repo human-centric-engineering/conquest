@@ -3,21 +3,31 @@
 /**
  * SessionDownloads — the admin's per-session takeaways on the session viewer (P8).
  *
- * Gives an admin the same two downloads a respondent gets on the completion screen, for any
+ * Gives an admin the same takeaways a respondent gets on the completion screen, for any
  * session they're viewing:
  *  - **Download report (PDF)** — the answers/results export (embeds the AI report when ready),
  *    via the F7.4 admin route.
- *  - **Transcript** — the verbatim conversation as a branded PDF or plain text.
+ *  - **Transcript** — the verbatim conversation as a branded PDF, plain text, or copied
+ *    straight to the clipboard.
  *
- * All three hit admin-guarded routes nested under the questionnaire, so the admin session
- * cookie authorises them (`credentials: 'same-origin'`) — no `X-Session-Token` (that's the
- * respondent surface). Blob download honouring the server's `Content-Disposition` filename,
- * the same pattern as the analytics {@link ExportButtons}. Anonymous-mode redaction is applied
+ * All hit admin-guarded routes nested under the questionnaire, so the admin session cookie
+ * authorises them (`credentials: 'same-origin'`) — no `X-Session-Token` (that's the respondent
+ * surface). The file downloads honour the server's `Content-Disposition` filename, the same
+ * pattern as the analytics {@link ExportButtons}; "Copy" reuses the plain-text route but writes
+ * the body to the clipboard with a brief confirmation. Anonymous-mode redaction is applied
  * server-side, so an anonymous session's files carry no respondent identity.
  */
 
-import { useCallback, useRef, useState } from 'react';
-import { ChevronDown, Download, FileText, FileType2, Loader2 } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  Check,
+  ChevronDown,
+  ClipboardCopy,
+  Download,
+  FileText,
+  FileType2,
+  Loader2,
+} from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -35,8 +45,10 @@ export interface SessionDownloadsProps {
   className?: string;
 }
 
-/** Which download is in flight — drives the per-control busy state. */
-type DownloadKind = 'report' | 'transcript-pdf' | 'transcript-txt';
+/** Which action is in flight — drives the per-control busy state. */
+type DownloadKind = 'report' | 'transcript-pdf' | 'transcript-txt' | 'transcript-copy';
+/** How long the "Copied" confirmation stays before reverting to the idle label. */
+const COPIED_FEEDBACK_MS = 2_000;
 
 /** Extract a `filename="…"` from a `Content-Disposition` header, or null when absent. */
 function filenameFromDisposition(disposition: string | null): string | null {
@@ -47,15 +59,24 @@ function filenameFromDisposition(disposition: string | null): string | null {
 
 export function SessionDownloads({ questionnaireId, sessionId, className }: SessionDownloadsProps) {
   const [busy, setBusy] = useState<DownloadKind | null>(null);
-  const [error, setError] = useState(false);
+  // The action that last failed (drives the inline message), or null when fine.
+  const [error, setError] = useState<DownloadKind | null>(null);
+  const [copied, setCopied] = useState(false);
   // Guard against a double-trigger kicking off two concurrent renders.
   const inFlightRef = useRef(false);
+
+  // Auto-clear the "Copied" confirmation after a short beat.
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), COPIED_FEEDBACK_MS);
+    return () => clearTimeout(timer);
+  }, [copied]);
 
   const download = useCallback((kind: DownloadKind, url: string, fallbackName: string) => {
     if (inFlightRef.current) return;
     inFlightRef.current = true;
     setBusy(kind);
-    setError(false);
+    setError(null);
 
     void fetch(url, { method: 'GET', credentials: 'same-origin' })
       .then(async (res) => {
@@ -72,12 +93,37 @@ export function SessionDownloads({ questionnaireId, sessionId, className }: Sess
         anchor.remove();
         URL.revokeObjectURL(objectUrl);
       })
-      .catch(() => setError(true))
+      .catch(() => setError(kind))
       .finally(() => {
         inFlightRef.current = false;
         setBusy(null);
       });
   }, []);
+
+  const copyTranscript = useCallback(() => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
+    setBusy('transcript-copy');
+    setError(null);
+    setCopied(false);
+
+    void fetch(API.APP.QUESTIONNAIRES.sessionTranscriptText(questionnaireId, sessionId), {
+      method: 'GET',
+      credentials: 'same-origin',
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const text = await res.text();
+        if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
+        await navigator.clipboard.writeText(text);
+        setCopied(true);
+      })
+      .catch(() => setError('transcript-copy'))
+      .finally(() => {
+        inFlightRef.current = false;
+        setBusy(null);
+      });
+  }, [questionnaireId, sessionId]);
 
   const downloading = busy !== null;
 
@@ -107,16 +153,24 @@ export function SessionDownloads({ questionnaireId, sessionId, className }: Sess
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button type="button" variant="outline" size="sm" disabled={downloading}>
-            {busy === 'transcript-pdf' || busy === 'transcript-txt' ? (
+            {busy === 'transcript-pdf' ||
+            busy === 'transcript-txt' ||
+            busy === 'transcript-copy' ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+            ) : copied ? (
+              <Check className="h-3.5 w-3.5" aria-hidden="true" />
             ) : (
               <Download className="h-3.5 w-3.5" aria-hidden="true" />
             )}
-            Transcript
+            {copied ? 'Copied' : 'Transcript'}
             <ChevronDown className="h-3.5 w-3.5 opacity-60" aria-hidden="true" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-44">
+          <DropdownMenuItem onSelect={() => copyTranscript()}>
+            <ClipboardCopy className="h-4 w-4" aria-hidden="true" />
+            Copy to clipboard
+          </DropdownMenuItem>
           <DropdownMenuItem
             onSelect={() =>
               download(
@@ -146,7 +200,9 @@ export function SessionDownloads({ questionnaireId, sessionId, className }: Sess
 
       {error && (
         <span role="alert" className="text-destructive text-xs">
-          Couldn&rsquo;t download. Try again.
+          {error === 'transcript-copy'
+            ? 'Couldn’t copy. Try again.'
+            : 'Couldn’t download. Try again.'}
         </span>
       )}
     </span>

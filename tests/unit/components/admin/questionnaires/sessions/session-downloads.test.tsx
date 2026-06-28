@@ -34,6 +34,15 @@ function fileResponse(name: string): Response {
   } as unknown as Response;
 }
 
+function textResponse(body: string): Response {
+  return {
+    ok: true,
+    status: 200,
+    headers: { get: () => null },
+    text: async () => body,
+  } as unknown as Response;
+}
+
 async function openTranscriptMenu(user: ReturnType<typeof userEvent.setup>): Promise<void> {
   await user.click(screen.getByRole('button', { name: /^transcript$/i }));
 }
@@ -127,5 +136,43 @@ describe('SessionDownloads', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/couldn.?t download/i);
     expect(lastClick).toBeNull();
+  });
+
+  it('copies the transcript to the clipboard via the admin transcript.txt route, with cookie auth', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(textResponse('You: hi\nAgent: hello'));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    // Define clipboard AFTER setup so userEvent's own clipboard install doesn't clobber it.
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+
+    render(<SessionDownloads questionnaireId="qn-1" sessionId="sess-1" />);
+    await openTranscriptMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /copy to clipboard/i }));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('You: hi\nAgent: hello'));
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      '/api/v1/app/questionnaires/qn-1/sessions/sess-1/transcript.txt'
+    );
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ credentials: 'same-origin' });
+    expect((fetchMock.mock.calls[0][1] as RequestInit).headers).toBeUndefined();
+    // No file download for copy, and the trigger confirms success.
+    expect(lastClick).toBeNull();
+    expect(await screen.findByRole('button', { name: /copied/i })).toBeInTheDocument();
+  });
+
+  it('shows a copy-specific error when the clipboard write fails', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(textResponse('transcript body')));
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: vi.fn().mockRejectedValue(new Error('denied')) },
+      configurable: true,
+    });
+
+    render(<SessionDownloads questionnaireId="qn-1" sessionId="sess-1" />);
+    await openTranscriptMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /copy to clipboard/i }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/couldn.?t copy/i);
   });
 });

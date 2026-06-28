@@ -3,8 +3,9 @@
  *
  * Anti-green-bar: asserts each menu option hits the matching transcript route, that the
  * anonymous `X-Session-Token` header is sent only when a token is supplied, that the blob
- * is saved under the server's `Content-Disposition` filename, and that a failed request
- * surfaces an inline error without downloading.
+ * is saved under the server's `Content-Disposition` filename, that "Copy to clipboard"
+ * writes the fetched text via the Clipboard API and flashes a confirmation, and that a
+ * failed request surfaces an action-specific inline error without downloading.
  *
  * @see components/app/questionnaire/lifecycle/transcript-download.tsx
  */
@@ -20,6 +21,15 @@ interface ClickCapture {
   download: string;
 }
 let lastClick: ClickCapture | null = null;
+
+function textResponse(body: string): Response {
+  return {
+    ok: true,
+    status: 200,
+    headers: { get: () => null },
+    text: async () => body,
+  } as unknown as Response;
+}
 
 function pdfResponse(name = 'transcript-onboarding-survey-v2.pdf'): Response {
   return {
@@ -127,5 +137,45 @@ describe('TranscriptDownload', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/couldn.?t download/i);
     expect(lastClick).toBeNull();
+  });
+
+  it('copies the plain-text transcript to the clipboard and flashes a confirmation', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(textResponse('You: hi\nAgent: hello'));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    // Define clipboard AFTER setup so userEvent's own clipboard install doesn't clobber it.
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+
+    render(<TranscriptDownload sessionId="sess-1" accessToken="tok.sig" />);
+    await openMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /copy to clipboard/i }));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('You: hi\nAgent: hello'));
+    // Reuses the plain-text route and forwards the anonymous token.
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      '/api/v1/app/questionnaire-sessions/sess-1/transcript.txt'
+    );
+    expect((fetchMock.mock.calls[0][1]?.headers as Record<string, string>)['X-Session-Token']).toBe(
+      'tok.sig'
+    );
+    // No file download for copy, and the trigger confirms success.
+    expect(lastClick).toBeNull();
+    expect(await screen.findByRole('button', { name: /copied/i })).toBeInTheDocument();
+  });
+
+  it('shows a copy-specific error when the clipboard write fails', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(textResponse('transcript body')));
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: vi.fn().mockRejectedValue(new Error('denied')) },
+      configurable: true,
+    });
+
+    render(<TranscriptDownload sessionId="sess-1" />);
+    await openMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /copy to clipboard/i }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/couldn.?t copy/i);
   });
 });

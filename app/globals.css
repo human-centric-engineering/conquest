@@ -155,6 +155,14 @@
   .cq-livedot {
     animation: cq-livedot 1.8s ease-in-out infinite;
   }
+  /* One-shot "just filled" pulse — draws the eye for a few cycles, then SETTLES to the resting full
+     state (the keyframe's 100% is opacity 1 / scale 1). Used for the questionnaire panel's
+     recently-filled markers (minimap bars, nav dots) so they don't breathe indefinitely; a static
+     ring still marks them. Distinct from `.cq-livedot`, which stays infinite for true live
+     indicators (e.g. the cohort live dot). */
+  .cq-livedot-once {
+    animation: cq-livedot 1.8s ease-in-out 3;
+  }
 
   /* Gentle "recently filled" wash for a row / field container — a soft accent background that
      pulses in and out. Non-dimming (animates background-color, not content opacity) and leaves
@@ -172,11 +180,20 @@
     background-color: var(--cq-accent-muted);
     animation: cq-fill-glow 2s ease-in-out infinite;
   }
+  /* One-shot variant of the wash — pulses a few times then SETTLES to the resting tint (the
+     keyframe's 100% matches the base `--cq-accent-muted`), so a recently-filled row stays softly
+     marked without flashing forever. */
+  .cq-fill-glow-once {
+    background-color: var(--cq-accent-muted);
+    animation: cq-fill-glow 2s ease-in-out 3;
+  }
 
   @media (prefers-reduced-motion: reduce) {
     .cq-pulse,
     .cq-livedot,
-    .cq-fill-glow {
+    .cq-livedot-once,
+    .cq-fill-glow,
+    .cq-fill-glow-once {
       animation: none;
     }
   }

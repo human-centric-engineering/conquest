@@ -41,19 +41,61 @@ function asHistory(value: unknown): DataSlotFillHistoryEntry[] {
 }
 
 /**
+ * A canonical string for change-detection: object keys sorted recursively and string leaves trimmed.
+ * The extractor re-emits a slot's fill every turn as a "superset" of the prior value (see the
+ * extraction prompt's RE-SCAN rule), so a re-emit that only reorders keys or adds/strips whitespace
+ * must NOT read as a changed value — otherwise it appends a spurious "How this answer evolved"
+ * revision and re-flashes the slot as recently-updated when nothing tangible changed. Arrays stay
+ * order-sensitive — element order can carry meaning (e.g. a ranked list) — and types are not coerced
+ * (`5` ≠ `"5"`), so genuine changes are still detected.
+ */
+function canonicalValueKey(value: unknown): string {
+  const normalize = (v: unknown): unknown => {
+    if (typeof v === 'string') return v.trim();
+    if (Array.isArray(v)) return v.map(normalize);
+    if (v !== null && typeof v === 'object') {
+      const obj = v as Record<string, unknown>;
+      return Object.keys(obj)
+        .sort()
+        .reduce<Record<string, unknown>>((acc, k) => {
+          acc[k] = normalize(obj[k]);
+          return acc;
+        }, {});
+    }
+    return v;
+  };
+  return JSON.stringify(normalize(value));
+}
+
+/**
+ * The outcome of an {@link upsertDataSlotFill}. `changed` is true on first capture and whenever the
+ * write MATERIALLY altered the slot — the captured `value` (compared canonically) or its
+ * `provisional` state. A pure re-statement (reworded paraphrase/rationale, key reorder) or a soft
+ * confidence nudge from corroboration leaves `changed` false, so the caller can skip stamping
+ * `lastUpdatedTurnId` and avoid re-flashing the slot. The fill row is still updated either way.
+ */
+export interface UpsertDataSlotFillResult {
+  id: string;
+  changed: boolean;
+}
+
+/**
  * Upsert a session's fill for one data slot — create on first capture, update when a later turn
  * adds to or CORRECTS it (the extractor improves a slot across turns). When the captured `value`
  * actually changes (e.g. "male" → "female"), the prior value/paraphrase/confidence is appended to
  * `refinementHistory` so the panel can show how the answer evolved — the data-slot analogue of the
  * answer-slot refinement trail, but driven by the upsert (data slots have no separate refine pass).
- * Returns the row id (back-stamped with `lastUpdatedTurnId` by `recordTurn`).
+ * Returns the row id plus a `changed` flag (see {@link UpsertDataSlotFillResult}) so the caller only
+ * back-stamps `lastUpdatedTurnId` — which drives the panel's "recently updated" flash — for fills
+ * that materially changed this turn, not every re-emit.
  */
 export async function upsertDataSlotFill(
   sessionId: string,
   dataSlotId: string,
   fill: DataSlotFillInput,
   client: DbClient = prisma
-): Promise<string> {
+): Promise<UpsertDataSlotFillResult> {
+  const provisional = fill.provisional ?? false;
   const writeBase = {
     value: jsonInput(fill.value),
     paraphrase: fill.paraphrase,
@@ -61,7 +103,7 @@ export async function upsertDataSlotFill(
     provenanceLabel: fill.provenance,
     rationale: fill.rationale ?? null,
     // Move-on: a later confident fill writes `false`, promoting a parked slot back to a real answer.
-    provisional: fill.provisional ?? false,
+    provisional,
   };
 
   const existing = await client.appDataSlotFill.findUnique({
@@ -72,6 +114,7 @@ export async function upsertDataSlotFill(
       paraphrase: true,
       confidence: true,
       rationale: true,
+      provisional: true,
       refinementHistory: true,
     },
   });
@@ -81,13 +124,20 @@ export async function upsertDataSlotFill(
       data: { sessionId, dataSlotId, ...writeBase },
       select: { id: true },
     });
-    return row.id;
+    return { id: row.id, changed: true };
   }
 
-  // Append a history entry only when the captured position actually changed — a reworded
-  // paraphrase of the same value shouldn't pollute the trail.
+  // What MATERIALLY changed: the captured position (value, compared canonically so a reworded /
+  // reordered re-emit of the same data doesn't count) or its provisional state. A soft confidence
+  // nudge or a reworded paraphrase alone is not a material change — it neither appends a history
+  // revision nor re-flashes the slot.
+  const valueChanged = canonicalValueKey(existing.value) !== canonicalValueKey(fill.value);
+  const provisionalChanged = existing.provisional !== provisional;
+  const changed = valueChanged || provisionalChanged;
+
+  // Append a history entry only when the captured value actually changed — a reworded paraphrase of
+  // the same value (or a bare provisional flip) shouldn't pollute the "how this answer evolved" trail.
   const history = asHistory(existing.refinementHistory);
-  const valueChanged = JSON.stringify(existing.value) !== JSON.stringify(fill.value);
   if (valueChanged) {
     history.push({
       previousValue: existing.value,
@@ -103,7 +153,7 @@ export async function upsertDataSlotFill(
     data: { ...writeBase, refinementHistory: jsonInput(history) },
     select: { id: true },
   });
-  return existing.id;
+  return { id: existing.id, changed };
 }
 
 /**
@@ -233,7 +283,9 @@ export async function reconcileChatDataSlotFills(opts: {
       .join('; ');
     const confidence = Math.max(...answered.map((a) => a.answer.confidence ?? 0.5));
 
-    const id = await upsertDataSlotFill(
+    // Gap-fill only reaches slots with no existing fill, so this is always a fresh create
+    // (`changed === true`); we keep the id to stamp + flash it as genuinely newly captured.
+    const { id } = await upsertDataSlotFill(
       opts.sessionId,
       dataSlotId,
       {

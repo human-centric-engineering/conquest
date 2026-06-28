@@ -87,6 +87,17 @@ describe('useFormAnswers', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('tracks edited slots so seeded answers are not mistaken for respondent edits', () => {
+    const { result } = renderHook(() =>
+      useFormAnswers({ sessionId: 'sess-1', initialView: view() })
+    );
+    // Seeded from the view, but untouched → no edits recorded (so inferred markers stay visible).
+    expect(result.current.editedKeys.has('role')).toBe(false);
+    act(() => result.current.setValue('role', 'Engineer'));
+    // Now it's the respondent's own → recorded as edited.
+    expect(result.current.editedKeys.has('role')).toBe(true);
+  });
+
   it('PUTs a value after the debounce window', async () => {
     const { result } = renderHook(() =>
       useFormAnswers({ sessionId: 'sess-1', initialView: view() })

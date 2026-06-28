@@ -573,8 +573,9 @@ describe('AnswerSlotPanel', () => {
   it('pulses the most-recent-turn slot rows (and leaves earlier rows unpulsed)', () => {
     // slot-1 + slot-4 belong to the later fill-turn; the rest to an earlier one.
     render(<AnswerSlotPanel view={dataSlotView(12, ['slot-1', 'slot-4'])} />);
-    expect(document.getElementById('panel-slot-slot-1')!.className).toContain('cq-fill-glow');
-    expect(document.getElementById('panel-slot-slot-4')!.className).toContain('cq-fill-glow');
+    // One-shot wash (settles to a resting tint), not the infinite `cq-fill-glow` breathe.
+    expect(document.getElementById('panel-slot-slot-1')!.className).toContain('cq-fill-glow-once');
+    expect(document.getElementById('panel-slot-slot-4')!.className).toContain('cq-fill-glow-once');
     expect(document.getElementById('panel-slot-slot-2')!.className).not.toContain('cq-fill-glow');
   });
 

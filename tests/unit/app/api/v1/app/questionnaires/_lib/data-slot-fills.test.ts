@@ -4,7 +4,9 @@
  * Mocks prisma at the module boundary. Verifies first-capture CREATE, the field mapping from
  * DataSlotFillInput → the DB write shape, that the row id (not the input data) is returned, and
  * the UPDATE-with-history behaviour: a changed value appends a `refinementHistory` entry capturing
- * the prior state, while an unchanged value leaves the trail alone.
+ * the prior state, while an unchanged value leaves the trail alone. Also covers the `changed` flag
+ * the caller uses to gate the "recently updated" flash — true on create / material value or
+ * provisional change, false for a reworded re-emit, a key-reorder, or a soft confidence nudge.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -49,9 +51,9 @@ beforeEach(() => {
 });
 
 describe('upsertDataSlotFill — first capture (CREATE)', () => {
-  it('creates the row with the FK fields + write payload and returns the new id', async () => {
-    const id = await upsertDataSlotFill(SESSION_ID, SLOT_ID, FILL);
-    expect(id).toBe('created-1');
+  it('creates the row with the FK fields + write payload and returns the new id (changed)', async () => {
+    const res = await upsertDataSlotFill(SESSION_ID, SLOT_ID, FILL);
+    expect(res).toEqual({ id: 'created-1', changed: true });
     expect(prismaMock.appDataSlotFill.update).not.toHaveBeenCalled();
 
     const call = (prismaMock.appDataSlotFill.create as Mock).mock.calls[0]?.[0];
@@ -103,24 +105,74 @@ describe('upsertDataSlotFill — first capture (CREATE)', () => {
 });
 
 describe('upsertDataSlotFill — update + history', () => {
-  it('updates without a new history entry when the value is unchanged', async () => {
+  it('updates without a new history entry or flash when only the paraphrase is reworded', async () => {
     prismaMock.appDataSlotFill.findUnique.mockResolvedValue({
       id: 'existing-1',
       value: FILL.value, // same captured position
       paraphrase: 'Things went well',
       confidence: 0.92,
+      provisional: false,
       refinementHistory: [],
     });
 
-    const id = await upsertDataSlotFill(SESSION_ID, SLOT_ID, {
+    const res = await upsertDataSlotFill(SESSION_ID, SLOT_ID, {
       ...FILL,
       paraphrase: 'Things went well (reworded)',
     });
 
-    expect(id).toBe('existing-1');
+    // Same value + provisional → not a material change, so the caller won't re-flash the slot.
+    expect(res).toEqual({ id: 'existing-1', changed: false });
     expect(prismaMock.appDataSlotFill.create).not.toHaveBeenCalled();
     const call = (prismaMock.appDataSlotFill.update as Mock).mock.calls[0]?.[0];
     expect(call?.where).toEqual({ id: 'existing-1' });
+    expect(call?.data?.refinementHistory).toEqual([]);
+  });
+
+  it('reports changed=false when the value only reorders object keys', async () => {
+    prismaMock.appDataSlotFill.findUnique.mockResolvedValue({
+      id: 'existing-1',
+      value: { age: 25, gender: 'male' },
+      paraphrase: 'A 25-year-old male.',
+      confidence: 0.9,
+      provisional: false,
+      refinementHistory: [],
+    });
+
+    // Same data, keys re-emitted in a different order — must not read as a change.
+    const res = await upsertDataSlotFill(SESSION_ID, SLOT_ID, {
+      value: { gender: 'male', age: 25 },
+      paraphrase: 'A 25-year-old male.',
+      confidence: 0.9,
+      provenance: 'direct',
+    });
+
+    expect(res.changed).toBe(false);
+    const call = (prismaMock.appDataSlotFill.update as Mock).mock.calls[0]?.[0];
+    expect(call?.data?.refinementHistory).toEqual([]);
+  });
+
+  it('reports changed=false for a soft confidence nudge with the same value', async () => {
+    prismaMock.appDataSlotFill.findUnique.mockResolvedValue({
+      id: 'existing-1',
+      value: 'extremely unlikely',
+      paraphrase: 'Extremely unlikely to recommend.',
+      confidence: 0.9,
+      provisional: false,
+      refinementHistory: [],
+    });
+
+    // Corroboration raises confidence but the captured position is unchanged.
+    const res = await upsertDataSlotFill(SESSION_ID, SLOT_ID, {
+      value: 'extremely unlikely',
+      paraphrase: 'Extremely unlikely to recommend.',
+      confidence: 0.95,
+      provenance: 'direct',
+    });
+
+    expect(res.changed).toBe(false);
+    const call = (prismaMock.appDataSlotFill.update as Mock).mock.calls[0]?.[0];
+    // The higher confidence still lands on the row — we just don't flash for it.
+    expect(call?.data?.confidence).toBe(0.95);
     expect(call?.data?.refinementHistory).toEqual([]);
   });
 
@@ -131,16 +183,18 @@ describe('upsertDataSlotFill — update + history', () => {
       paraphrase: 'A 25-year-old male.',
       confidence: 0.9,
       rationale: 'First reading from their intro.',
+      provisional: false,
       refinementHistory: [],
     });
 
-    await upsertDataSlotFill(SESSION_ID, SLOT_ID, {
+    const res = await upsertDataSlotFill(SESSION_ID, SLOT_ID, {
       value: { age: 25, gender: 'female' },
       paraphrase: 'A 25-year-old female.',
       confidence: 0.95,
       provenance: 'direct',
     });
 
+    expect(res.changed).toBe(true);
     const call = (prismaMock.appDataSlotFill.update as Mock).mock.calls[0]?.[0];
     expect(call?.data?.refinementHistory).toHaveLength(1);
     expect(call?.data?.refinementHistory[0]).toMatchObject({
@@ -184,18 +238,45 @@ describe('upsertDataSlotFill — update + history', () => {
       value: 'tentative',
       paraphrase: 'A tentative reading.',
       confidence: 0.2,
+      provisional: true,
       refinementHistory: [],
     });
 
     // A real answer arrives (provisional omitted → defaults false) — the row's provisional clears.
-    await upsertDataSlotFill(SESSION_ID, SLOT_ID, {
+    const res = await upsertDataSlotFill(SESSION_ID, SLOT_ID, {
       value: 'clear answer',
       paraphrase: 'A clear answer.',
       confidence: 0.95,
       provenance: 'direct',
     });
 
+    expect(res.changed).toBe(true);
     const call = (prismaMock.appDataSlotFill.update as Mock).mock.calls[0]?.[0];
     expect(call?.data?.provisional).toBe(false);
+  });
+
+  it('reports changed=true when only the provisional state flips (same value)', async () => {
+    prismaMock.appDataSlotFill.findUnique.mockResolvedValue({
+      id: 'existing-1',
+      value: 'parked guess',
+      paraphrase: 'A parked guess.',
+      confidence: 0.3,
+      provisional: true,
+      refinementHistory: [],
+    });
+
+    // Same captured value, but promoted from provisional → real: a material state change.
+    const res = await upsertDataSlotFill(SESSION_ID, SLOT_ID, {
+      value: 'parked guess',
+      paraphrase: 'A parked guess.',
+      confidence: 0.3,
+      provenance: 'inferred',
+      provisional: false,
+    });
+
+    expect(res.changed).toBe(true);
+    // Same value → no history revision; only the provisional flip drove `changed`.
+    const call = (prismaMock.appDataSlotFill.update as Mock).mock.calls[0]?.[0];
+    expect(call?.data?.refinementHistory).toEqual([]);
   });
 });
