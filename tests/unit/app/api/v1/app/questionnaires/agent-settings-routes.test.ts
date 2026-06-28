@@ -85,7 +85,17 @@ function postReq(body: unknown): NextRequest {
 
 describe('GET /agent-settings', () => {
   it('returns the evaluation envelope', async () => {
-    const evaluation = { generatedAt: 'now', taskTiers: [], infraDefaults: [], agents: [] };
+    // Two agents — one optimal, one not — so the handler's `isOptimal` filter
+    // predicate actually runs when it logs the optimal count.
+    const evaluation = {
+      generatedAt: 'now',
+      taskTiers: [],
+      infraDefaults: [],
+      agents: [
+        { slug: 'a', isOptimal: true },
+        { slug: 'b', isOptimal: false },
+      ],
+    };
     (evaluateAgentSettings as Mock).mockResolvedValue(evaluation);
 
     const res = await GET(

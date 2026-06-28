@@ -272,6 +272,26 @@ describe('AgentSettingsPanel', () => {
     );
   });
 
+  it('skips an already-optimal agent during "Apply all"', async () => {
+    const e = evaluation();
+    // Inverse of the above: tier stays non-optimal (patched), agent is optimal (skipped).
+    e.agents[0] = { ...e.agents[0], isOptimal: true };
+    render(<AgentSettingsPanel initialEvaluation={e} />);
+    fireEvent.click(screen.getByRole('button', { name: /apply all \(1\)/i }));
+
+    await waitFor(() => expect(apiClient.patch).toHaveBeenCalledTimes(1));
+    // Only the non-optimal tier default is PATCHed.
+    expect(apiClient.patch).toHaveBeenCalledWith(
+      API.ADMIN.ORCHESTRATION.SETTINGS,
+      expect.anything()
+    );
+    // The optimal agent must NOT be PATCHed.
+    expect(apiClient.patch).not.toHaveBeenCalledWith(
+      API.ADMIN.ORCHESTRATION.agentById('a-ext'),
+      expect.anything()
+    );
+  });
+
   it('surfaces an error when applying an AI suggestion fails', async () => {
     (apiClient.post as Mock).mockResolvedValue({
       narrative: 'try nano',

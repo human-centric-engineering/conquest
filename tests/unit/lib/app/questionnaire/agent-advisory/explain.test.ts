@@ -24,6 +24,7 @@ vi.mock('@/lib/orchestration/llm/cost-tracker', () => ({
 }));
 vi.mock('@/lib/orchestration/evaluations/parse-structured', () => ({
   runStructuredCompletion: vi.fn(),
+  tryParseJson: vi.fn(),
 }));
 
 import { CostOperation } from '@/types/orchestration';
@@ -32,7 +33,10 @@ import { prisma } from '@/lib/db/client';
 import { resolveAgentProviderAndModel } from '@/lib/orchestration/llm/agent-resolver';
 import { getProvider } from '@/lib/orchestration/llm/provider-manager';
 import { logCost } from '@/lib/orchestration/llm/cost-tracker';
-import { runStructuredCompletion } from '@/lib/orchestration/evaluations/parse-structured';
+import {
+  runStructuredCompletion,
+  tryParseJson,
+} from '@/lib/orchestration/evaluations/parse-structured';
 import { explainAgentSettings } from '@/lib/app/questionnaire/agent-advisory/explain';
 
 type Mock = ReturnType<typeof vi.fn>;
@@ -154,5 +158,28 @@ describe('explainAgentSettings', () => {
     (logCost as Mock).mockRejectedValue(new Error('cost log down'));
     const res = await explainAgentSettings('app-questionnaire-selector');
     expect(res.ok).toBe(true);
+  });
+
+  it('wires parse to tryParseJson and onFinalFailure to a schema error', async () => {
+    // beforeEach already stubs a successful completion; grab the options the
+    // handler passed in so we can exercise the parse/onFinalFailure callbacks.
+    (tryParseJson as Mock).mockReturnValue({ narrative: 'parsed', suggestion: null });
+
+    await explainAgentSettings('app-questionnaire-selector');
+
+    const opts = (runStructuredCompletion as Mock).mock.calls[0][0] as {
+      parse: (raw: string) => unknown;
+      onFinalFailure: () => Error;
+    };
+
+    // The parse callback delegates raw model output to tryParseJson + validator.
+    const parsed = opts.parse('{"narrative":"x"}');
+    expect(tryParseJson).toHaveBeenCalledWith('{"narrative":"x"}', expect.any(Function));
+    expect(parsed).toEqual({ narrative: 'parsed', suggestion: null });
+
+    // The onFinalFailure callback surfaces a schema-validation error.
+    const err = opts.onFinalFailure();
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toMatch(/schema/i);
   });
 });

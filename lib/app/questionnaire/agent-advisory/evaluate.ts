@@ -169,8 +169,10 @@ export async function evaluateAgentSettings(
   });
   const costMap = new Map<string, ModelCostRef>();
   for (const row of modelRows) {
-    // Last write wins on duplicate modelId (e.g. Azure/OpenAI gpt-4o) — fine for
-    // a display estimate; our default ids are unique anyway.
+    // Last write wins on duplicate modelId (e.g. Azure/OpenAI both expose
+    // gpt-4o, which is also the chat-tier default). Fine for a display estimate:
+    // duplicate rows for the same modelId carry the same blended cost, so the
+    // chosen row's figure is stable.
     costMap.set(row.modelId, {
       modelId: row.modelId,
       name: row.name,

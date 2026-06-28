@@ -146,6 +146,36 @@ describe('AgentSettingCard', () => {
     });
   });
 
+  it('includes non-null temperature and maxTokens in the applied suggestion patch', async () => {
+    (apiClient.post as Mock).mockResolvedValue({
+      narrative: 'Tune the sampling.',
+      suggestion: {
+        model: null,
+        temperature: 0.7,
+        maxTokens: 4096,
+        reasoningEffort: null,
+        rationale: 'Looser sampling, more headroom.',
+      },
+    });
+    const onApplyPatch = vi.fn();
+    render(
+      <AgentSettingCard
+        agent={agent()}
+        applying={false}
+        saved={false}
+        onApply={vi.fn()}
+        onApplyPatch={onApplyPatch}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /ai advisory/i }));
+    await waitFor(() => expect(screen.getByText('Tune the sampling.')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: /apply ai suggestion/i }));
+    // Only the non-null fields are included; model/reasoningEffort are omitted.
+    expect(onApplyPatch).toHaveBeenCalledWith({ temperature: 0.7, maxTokens: 4096 });
+  });
+
   it('renders a pricier (positive) delta and the tier-default-unset caveat', () => {
     render(
       <AgentSettingCard

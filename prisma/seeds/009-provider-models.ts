@@ -198,7 +198,9 @@ const unit: SeedUnit = {
       // OpenAI — GPT-5.x ladder (current as of 2026-06). ConQuest defaults
       // to OpenAI, so these power the seeded task defaults (see
       // 020-orchestration-default-models): reasoning → gpt-5.4,
-      // chat → gpt-5.4-mini, routing → gpt-4.1-nano.
+      // routing → gpt-4.1-nano. The chat tier deliberately defaults to the
+      // conversational gpt-4o (NOT a gpt-5 reasoning model) so per-turn
+      // temperature is honoured — see 020 and agent-advisory/recommendations.
       //
       // The whole gpt-5 family rejects `max_tokens` and any non-default
       // temperature → `paramProfile: 'openai-reasoning'` (the provider
@@ -272,7 +274,7 @@ const unit: SeedUnit = {
         modelId: 'gpt-5.4-mini',
         name: 'GPT-5.4 Mini',
         description:
-          'Cost-efficient GPT-5.4 variant. ConQuest default for the `chat` task tier — the per-turn hot path (answer extraction, contradiction detection, conversational phrasing). Strong extraction quality at a fraction of flagship cost.',
+          'Cost-efficient GPT-5.4 variant (reasoning family — ignores `temperature`). Best as a per-agent override for non-conversational hot-path work such as answer extraction. Not the chat-tier default: the per-turn conversational path uses gpt-4o so phrasing temperature is honoured.',
         capabilities: ['chat', 'vision', 'documents'],
         tierRole: 'worker',
         reasoningDepth: 'high',
