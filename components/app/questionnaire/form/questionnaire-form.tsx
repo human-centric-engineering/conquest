@@ -28,12 +28,19 @@ import { recentlyFilledByLatestTurn } from '@/lib/app/questionnaire/panel/newly-
 // respondent form's persistent indicator reads identically to the admin structure editor's.
 import { SaveStatus as SaveStatusIndicator } from '@/components/admin/questionnaires/save-status';
 import type { SaveStatus } from '@/lib/hooks/use-form-answers';
-import type { AnswerPanelView } from '@/lib/app/questionnaire/panel/types';
+import type { AnswerPanelView, PanelSlotView } from '@/lib/app/questionnaire/panel/types';
 
 export interface QuestionnaireFormProps {
   view: AnswerPanelView | null;
   loading: boolean;
   values: Record<string, unknown>;
+  /**
+   * Slot keys the respondent has edited locally. Drives the "inferred"/confidence markers: an
+   * answer stays the agent's (and shows its confidence) until the respondent edits it. Separate
+   * from `values`, which is seeded with every existing answer so the inputs render. Defaults to
+   * empty (no local edits yet).
+   */
+  editedKeys?: ReadonlySet<string>;
   statuses: Record<string, SaveStatus>;
   /** Aggregate autosave state for the persistent header indicator. Defaults to `idle`. */
   saveState?: SaveStatus;
@@ -45,6 +52,9 @@ export interface QuestionnaireFormProps {
   disabled?: boolean;
   className?: string;
 }
+
+/** Stable empty default for `editedKeys` so an omitted prop doesn't churn identity each render. */
+const EMPTY_EDITED: ReadonlySet<string> = new Set();
 
 /** A value the form treats as "no answer" for completeness purposes. */
 function isEmptyValue(value: unknown): boolean {
@@ -65,6 +75,7 @@ export function QuestionnaireForm({
   view,
   loading,
   values,
+  editedKeys = EMPTY_EDITED,
   statuses,
   saveState = 'idle',
   lastSavedAt = null,
@@ -113,9 +124,22 @@ export function QuestionnaireForm({
     if (slotKey in values) return !isEmptyValue(values[slotKey]);
     return false;
   };
-  // Once the respondent has a local value, it's their own — no longer "inferred".
+  // Still the agent's answer (show the "inferred" badge) until the respondent edits it. Gated on
+  // `editedKeys`, NOT `slotKey in values`: `values` is seeded with every existing answer so the
+  // inputs render, so "has a value" can't distinguish an agent fill from a respondent edit.
   const isInferred = (slotKey: string): boolean =>
-    inferredKeys.has(slotKey) && !(slotKey in values);
+    inferredKeys.has(slotKey) && !editedKeys.has(slotKey);
+
+  // Whether to show the capture-confidence chip. A free-text answer is ALWAYS the agent's paraphrase
+  // of what the respondent said (F9.18 living comments), so it carries a meaningful confidence even
+  // when stated directly — show it on every answered free-text slot. Structured answers (likert /
+  // choice / numeric …) only show it when the agent inferred/synthesised them. Drops on a local
+  // edit (it's the respondent's own from then on) and when there's no score to show.
+  const showsConfidence = (slot: PanelSlotView): boolean => {
+    if (editedKeys.has(slot.slotKey) || slot.confidence === null) return false;
+    if (slot.type === 'free_text') return slot.answered;
+    return inferredKeys.has(slot.slotKey);
+  };
   const isRecentlyFilled = (slotKey: string): boolean => recentlyFilledKeys.has(slotKey);
 
   if (loading && !view) {
@@ -138,7 +162,7 @@ export function QuestionnaireForm({
   const section = sections[Math.min(wiz.stepIndex, sections.length - 1)];
 
   return (
-    <div className={cn('grid min-h-0 gap-4 lg:grid-cols-[16rem_1fr]', className)}>
+    <div className={cn('grid min-h-0 gap-4 lg:grid-cols-[16rem_minmax(0,1fr)]', className)}>
       {/* Completeness map */}
       <aside className="hidden min-h-0 overflow-y-auto lg:block">
         <div className="mb-2 flex items-center gap-2">
@@ -157,10 +181,14 @@ export function QuestionnaireForm({
         />
       </aside>
 
-      {/* Active section */}
-      <div className="flex min-h-0 flex-col">
+      {/* Active section. `min-w-0` lets this grid track shrink below its content's intrinsic width
+          (likert buttons + the fixed confidence lane) instead of forcing the page to scroll. */}
+      <div className="flex min-h-0 min-w-0 flex-col">
         <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-          <div className="flex items-center justify-between gap-3">
+          {/* Sticky section header — stays pinned while the questions scroll beneath it, so the
+              respondent always sees which section they're in (and the autosave state). The frosted
+              backdrop lets content slide under it without a hard cut. */}
+          <div className="bg-background/85 sticky top-0 z-10 flex items-center justify-between gap-3 border-b pt-0.5 pb-3 backdrop-blur-sm">
             <h2 className="text-foreground text-lg font-semibold">
               {section.title || `Section ${wiz.stepIndex + 1}`}
             </h2>
@@ -174,16 +202,45 @@ export function QuestionnaireForm({
                 <li
                   key={slot.slotKey}
                   className={cn(
-                    'space-y-2',
+                    // Two-lane layout: the question (prompt + control) on the left, the agent's
+                    // capture confidence in its own fixed right-hand column so chips align in a
+                    // tidy lane instead of trailing each prompt. Collapses to one column below `sm`.
+                    'grid grid-cols-1 items-start gap-x-5 gap-y-2 sm:grid-cols-[minmax(0,1fr)_8rem]',
                     // Filled by the latest turn — a brief one-shot wash that settles to a resting
-                    // tint on the whole answer block (no indefinite breathing).
-                    isRecentlyFilled(slot.slotKey) && 'cq-fill-glow-once rounded-md px-3 py-2'
+                    // tint on the whole answer block (no indefinite breathing). `-mx-3` cancels the
+                    // `px-3` so the tint gets breathing room without shifting the content right —
+                    // keeping this question's text/inputs aligned with its unfilled siblings.
+                    isRecentlyFilled(slot.slotKey) && 'cq-fill-glow-once -mx-3 rounded-md px-3 py-2'
                   )}
                 >
-                  <div className="flex items-start justify-between gap-2">
+                  {/* Question — prompt + control. `min-w-0` so the control can shrink within the
+                      lane rather than pushing the row wider than the viewport. */}
+                  <div className="min-w-0 space-y-2">
                     <label className="text-foreground text-sm font-medium">
                       {slot.prompt}
                       {slot.required && <span className="text-destructive ml-0.5">*</span>}
+                    </label>
+                    <QuestionField
+                      slot={slot}
+                      value={values[slot.slotKey]}
+                      onChange={(v) => onChange(slot.slotKey, v)}
+                      onBlur={() => onFlush(slot.slotKey)}
+                      disabled={disabled}
+                    />
+                  </div>
+
+                  {/* Confidence lane — how sure the agent is about the answer it captured (a
+                      Tentative guess vs a Confident, corroborated one). Shows on agent-filled
+                      structured answers and on every free-text answer (always a paraphrase), and
+                      drops once the respondent edits it. The "inferred" ⓘ explainer sits beside the
+                      chip (same provenance affordance); the transient save hint shares the lane.
+                      Right-aligned + top-padded on `sm+` so the chips line up with each question's
+                      first line; inline under the prompt on narrow screens. */}
+                  <div className="flex flex-row flex-wrap items-center gap-x-2 gap-y-1 sm:flex-col sm:items-end sm:pt-0.5">
+                    <div className="flex items-center gap-1">
+                      {showsConfidence(slot) && (
+                        <ConfidenceScore confidence={slot.confidence ?? null} />
+                      )}
                       {isInferred(slot.slotKey) && (
                         <FieldHelp
                           title="Inferred from your conversation"
@@ -193,21 +250,11 @@ export function QuestionnaireForm({
                           here if it&apos;s not quite right.
                         </FieldHelp>
                       )}
-                      {/* Surface how sure the agent is about an answer it filled in for the
-                          respondent — a Tentative guess vs a Confident, corroborated one — so they
-                          know which to glance at. Only while it's still the agent's answer (drops
-                          once they edit it themselves, exactly like the inferred marker). */}
-                      {isInferred(slot.slotKey) && (
-                        <ConfidenceScore
-                          confidence={slot.confidence ?? null}
-                          className="ml-2 align-middle"
-                        />
-                      )}
-                    </label>
+                    </div>
                     {status !== 'idle' && (
                       <span
                         className={cn(
-                          'shrink-0 text-xs',
+                          'text-xs',
                           status === 'error' ? 'text-destructive' : 'text-muted-foreground'
                         )}
                       >
@@ -215,13 +262,6 @@ export function QuestionnaireForm({
                       </span>
                     )}
                   </div>
-                  <QuestionField
-                    slot={slot}
-                    value={values[slot.slotKey]}
-                    onChange={(v) => onChange(slot.slotKey, v)}
-                    onBlur={() => onFlush(slot.slotKey)}
-                    disabled={disabled}
-                  />
                 </li>
               );
             })}
