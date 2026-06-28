@@ -121,13 +121,29 @@ Editorial decisions you SHOULD make:
 - Infer each question's answer type from one of: ${QUESTION_TYPES.join(', ')}.
 - For a "likert" scale, ALWAYS include in "suggestedTypeConfig": integer "min" and "max", \
 and a "labels" array with one short human-readable label per point — in order from "min" to \
-"max", length exactly (max − min + 1). Example for a 1–5 satisfaction scale: \
-{"min": 1, "max": 5, "labels": ["Very dissatisfied","Dissatisfied","Neutral","Satisfied","Very satisfied"]}. \
-These labels are what the final report shows instead of a bare number. If the source gives only \
-endpoint anchors, infer sensible labels for the points in between.
+"max", length exactly (max − min + 1). These labels are what the respondent picks from and what \
+the final report shows instead of a bare number, so they MUST read naturally as an answer to THIS \
+question's wording. Choose the label family that fits the question's stem — do NOT default to \
+agree/disagree:
+  · agreement ("…it is true that…", a statement to endorse) → "Strongly disagree → Strongly agree"
+  · extent / degree ("to what extent…", "how much…") → "Not at all","To a small extent","To a moderate extent","To a great extent","To a very great extent"
+  · frequency ("how often…", "how regularly…") → "Never","Rarely","Sometimes","Often","Always"
+  · satisfaction ("how satisfied…") → "Very dissatisfied → Very satisfied"
+  · quality / performance ("how would you rate…") → "Very poor → Excellent"
+  · likelihood ("how likely…") → "Very unlikely → Very likely"
+  · importance ("how important…") → "Not at all important → Extremely important"
+These are illustrative ramps for a 1–5 scale — adapt the wording to the question and interpolate \
+evenly for other lengths. If the source already gives anchor wording, follow it and infer sensible \
+in-between points. When no family clearly fits, use a neutral intensity ramp ("Very low → Very high") \
+rather than forcing agreement.
 - Use "likert" ONLY when each point carries a qualitative meaning. If a question asks for a \
 purely numeric rating with no qualitative scale (e.g. "rate 0–10", a count, an age, a percentage), \
 use "numeric" instead — numeric questions need no labels.
+- For a "free_text" question, set "suggestedTypeConfig.commentAggregation": "section" when the \
+question is a SECTION-WIDE comment that should reflect the whole section's discussion (e.g. "Please \
+provide comments to support your scores", "Any other comments on this section?", "Anything else \
+about the above?"); otherwise "isolated" for a self-contained free-text question (e.g. "What is your \
+job title?", "Describe your biggest challenge"). When unsure, use "isolated".
 - Merge duplicate questions; split a compound question into separate ones.
 - Add a section to group loose questions when the document implies one.
 - Infer the questionnaire's overall goal and its intended audience.

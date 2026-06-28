@@ -108,6 +108,8 @@ const candidateSlotSchema = z.object({
   required: z.boolean().optional(),
   id: z.string().optional(),
   sectionId: z.string().optional(),
+  /** Free-text comment fields: the slot's current living paraphrase, so the extractor builds on it. */
+  currentParaphrase: z.string().nullable().optional(),
 });
 
 /** A data-slot candidate (Data Slots feature) the extractor also fills, addressed by key. */
@@ -277,6 +279,7 @@ function toExtractionContext(args: ExtractAnswerSlotsArgs): ExtractionContext {
     ...(s.id !== undefined ? { id: s.id } : {}),
     ...(s.sectionId !== undefined ? { sectionId: s.sectionId } : {}),
     ...(s.guidelines !== undefined ? { guidelines: s.guidelines } : {}),
+    ...(s.currentParaphrase != null ? { currentParaphrase: s.currentParaphrase } : {}),
   }));
 
   return {

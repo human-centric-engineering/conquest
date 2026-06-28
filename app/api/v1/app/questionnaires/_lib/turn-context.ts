@@ -71,6 +71,9 @@ export interface CapabilitySlotView {
   required: boolean;
   typeConfig?: unknown;
   guidelines?: string;
+  /** Free-text comment fields: the slot's current living paraphrase this session (when captured),
+   *  so the extractor accumulates new mentions into it rather than starting over. */
+  currentParaphrase?: string | null;
 }
 
 /** The structural half of a turn — everything but the per-turn `userMessage` + `flags`. */
@@ -217,6 +220,8 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
           confidence: true,
           provenanceLabel: true,
           rationale: true,
+          // Free-text living paraphrase — surfaced on the candidate slot so the extractor builds on it.
+          paraphrase: true,
           questionSlot: { select: { id: true, key: true } },
         },
       },
@@ -251,6 +256,15 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
   });
   if (!session) return null;
 
+  // Free-text living paraphrase per slot id (when captured) — surfaced on the candidate slot view
+  // so the extractor accumulates new mentions into it across turns.
+  const paraphraseBySlotId = new Map<string, string>();
+  for (const a of session.answers) {
+    if (typeof a.paraphrase === 'string' && a.paraphrase.trim().length > 0) {
+      paraphraseBySlotId.set(a.questionSlot.id, a.paraphrase);
+    }
+  }
+
   const questions: QuestionView[] = [];
   const slots: CapabilitySlotView[] = [];
   for (const section of session.version.sections) {
@@ -278,6 +292,9 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
         required: slot.required,
         ...(slot.typeConfig !== null ? { typeConfig: slot.typeConfig } : {}),
         ...(slot.guidelines !== null ? { guidelines: slot.guidelines } : {}),
+        ...(paraphraseBySlotId.has(slot.id)
+          ? { currentParaphrase: paraphraseBySlotId.get(slot.id) }
+          : {}),
       });
     }
   }

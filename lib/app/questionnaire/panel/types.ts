@@ -48,8 +48,12 @@ export interface PanelSlotView {
   required: boolean;
   /** True once an answer has been captured for this slot in the session. */
   answered: boolean;
-  /** Captured value (null when pending). */
+  /** Captured value (null when pending). For free-text this stays the raw answer; the panel shows
+   *  {@link paraphrase} instead when present. */
   value: unknown;
+  /** Free-text living paraphrase (panel-facing restatement, significant verbatim in quotes), or
+   *  null/absent for typed answers and respondent-typed form answers (which render `value` verbatim). */
+  paraphrase?: string | null;
   provenance: AnswerProvenance | null;
   /** 0–1; null when unscored (or pending). */
   confidence: number | null;

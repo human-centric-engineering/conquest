@@ -47,6 +47,12 @@ export interface SeedAnswerInput {
   rationale?: string;
   confidence?: number | null;
   refinementHistory?: RefinementHistoryEntry[];
+  /**
+   * Free-text living paraphrase (panel-facing). `undefined` ⇒ leave the column untouched (so a
+   * non-free-text or refinement write can't null out a previously-captured paraphrase); `null` ⇒
+   * explicitly clear it; a string overwrites it (the extractor re-emits the accumulated paraphrase).
+   */
+  paraphrase?: string | null;
 }
 
 /**
@@ -122,6 +128,9 @@ export async function upsertAnswerSlot(
     provenanceLabel: answer.provenance,
     rationale: answer.rationale ?? null,
     confidence: answer.confidence ?? null,
+    // Only touch `paraphrase` when the caller provided it (free-text extraction) — an omitted
+    // value leaves a prior paraphrase intact across refinement / re-seed writes.
+    ...(answer.paraphrase !== undefined ? { paraphrase: answer.paraphrase } : {}),
   };
   const row = await prisma.appAnswerSlot.upsert({
     where: { sessionId_questionSlotId: { sessionId, questionSlotId } },

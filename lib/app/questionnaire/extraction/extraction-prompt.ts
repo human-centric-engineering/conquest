@@ -11,7 +11,10 @@
 
 import type { ContentPart, LlmMessage } from '@/lib/orchestration/llm/types';
 import { joinSections, section } from '@/lib/app/questionnaire/prompt/format';
-import { EXTRACTOR_EMITTED_PROVENANCES } from '@/lib/app/questionnaire/types';
+import {
+  EXTRACTOR_EMITTED_PROVENANCES,
+  readCommentAggregation,
+} from '@/lib/app/questionnaire/types';
 import type {
   DataSlotCandidateView,
   ExtractionAttachment,
@@ -66,6 +69,17 @@ self-evident, open the rationale with its basis ("Stated directly with an exampl
 tangentially from their comment about …"; "A terse 'it's fine' with nothing more, so …"). Keep it \
 gender-neutral.
 - "sourceQuote": the span of the respondent's message the value came from. REQUIRED for "direct".
+- "paraphrase": FREE_TEXT answers ONLY (omit it entirely for typed answers). A concise restatement \
+of the respondent's ACCOUNT for this question — what they said or describe — in neutral reported \
+speech ("They say…", "They describe…"), NOT a verbatim copy of their message. PARAPHRASE the bulk \
+of it; keep ONLY genuinely NOTABLE or IMPACTFUL wording as short quotes inside the paraphrase (e.g. \
+they call the playbook "just a document" they "don't use") — do not quote whole sentences or mundane \
+phrasing. Report it as THEIR account and HEDGE anything you inferred rather than they stated. The \
+"value" still carries their raw answer; the paraphrase is the panel-facing summary. This is a LIVING \
+summary: when the candidate line shows a "current summary", INTEGRATE this turn's new or tangential \
+mentions INTO it (keep prior substance, weave in the new) rather than replacing it — it builds up \
+over the conversation. For a field marked "comment: SECTION SUMMARY", also fold in the respondent's \
+related points from across this section, not just this one question.
 
 Rules:
 - Only extract answers the message actually supports. If the message answers nothing (a question, \
@@ -335,6 +349,18 @@ function describeSlot(slot: ExtractionSlotView): string {
   if (options.length > 0) lines.push(`  options: ${options.join(', ')}`);
   const scale = likertScale(slot.typeConfig);
   if (scale) lines.push(`  scale: ${scale}`);
+  // Free-text comment fields: tell the model how to build the living paraphrase, and show the
+  // current one so it accumulates new mentions rather than starting over.
+  if (slot.type === 'free_text') {
+    const mode = readCommentAggregation(slot.typeConfig);
+    lines.push(
+      mode === 'section'
+        ? '  comment: SECTION SUMMARY — its paraphrase also folds in the respondent’s related points across this section'
+        : '  comment: isolated — paraphrase only this question’s account'
+    );
+    const current = typeof slot.currentParaphrase === 'string' ? slot.currentParaphrase.trim() : '';
+    if (current) lines.push(`  current summary: ${current}`);
+  }
   return lines.join('\n');
 }
 

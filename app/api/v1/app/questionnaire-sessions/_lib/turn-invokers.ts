@@ -96,6 +96,8 @@ function toCapabilitySlot(slot: CapabilitySlotView): Record<string, unknown> {
     required: slot.required,
     ...(slot.typeConfig !== undefined ? { typeConfig: slot.typeConfig } : {}),
     ...(slot.guidelines !== undefined ? { guidelines: slot.guidelines } : {}),
+    // Free-text comment fields: the slot's current living paraphrase, so the extractor builds on it.
+    ...(slot.currentParaphrase != null ? { currentParaphrase: slot.currentParaphrase } : {}),
   };
 }
 

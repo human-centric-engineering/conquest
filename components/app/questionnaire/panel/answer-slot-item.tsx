@@ -79,8 +79,12 @@ export function AnswerSlotItem({
           <span className="text-foreground block text-sm leading-snug">{slot.prompt}</span>
           {slot.answered ? (
             <>
+              {/* Free-text shows its living paraphrase (the respondent's account, significant
+                  wording in quotes) when one was captured; everything else shows the typed value. */}
               <span className="text-muted-foreground mt-0.5 block truncate text-sm">
-                {formatSlotAnswer(slot.type, slot.typeConfig, slot.value)}
+                {slot.type === 'free_text' && slot.paraphrase
+                  ? slot.paraphrase
+                  : formatSlotAnswer(slot.type, slot.typeConfig, slot.value)}
               </span>
               {/* The confidence as label + raw % ("Fairly sure · 62%") — shown to respondents so
                   the nuanced 30–100% range is visible at a glance, not just a band word. */}

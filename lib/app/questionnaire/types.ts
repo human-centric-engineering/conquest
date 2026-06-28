@@ -116,6 +116,34 @@ export const QUESTION_TYPE_LABELS: Record<QuestionType, string> = {
   boolean: 'Boolean',
 };
 
+/**
+ * How a `free_text` comment field's living paraphrase is built (stored in the slot's
+ * `typeConfig.commentAggregation`; classified by the extractor/composer, admin-overridable):
+ *  - `isolated`  → paraphrase only this question's own answer + tangential chat mentions of it.
+ *  - `section`   → ALSO synthesise from the section's data-slot understanding, so a "comments to
+ *                  support your scores" field tracks the whole section as those slots fill.
+ * Either way the paraphrase is living (re-evaluated each turn) and never a verbatim dump.
+ */
+export const FREE_TEXT_COMMENT_AGGREGATIONS = ['isolated', 'section'] as const;
+export type FreeTextCommentAggregation = (typeof FREE_TEXT_COMMENT_AGGREGATIONS)[number];
+
+export const FREE_TEXT_COMMENT_AGGREGATION_LABELS: Record<FreeTextCommentAggregation, string> = {
+  isolated: 'Isolated',
+  section: 'Section summary',
+};
+
+/**
+ * Read the comment-aggregation mode from a free_text slot's `typeConfig` (an open JSON record).
+ * Defaults to `isolated` when absent or malformed — the safe, narrow behaviour.
+ */
+export function readCommentAggregation(typeConfig: unknown): FreeTextCommentAggregation {
+  if (typeConfig && typeof typeConfig === 'object' && !Array.isArray(typeConfig)) {
+    const raw = (typeConfig as Record<string, unknown>).commentAggregation;
+    if (raw === 'section') return 'section';
+  }
+  return 'isolated';
+}
+
 export const AUDIENCE_EXPERTISE_LEVELS = ['novice', 'intermediate', 'expert'] as const;
 export type AudienceExpertiseLevel = (typeof AUDIENCE_EXPERTISE_LEVELS)[number];
 
@@ -737,7 +765,7 @@ export type QuestionnaireConfigShape = {
    * turn captured through a small inline editor — beneath the most-recent turn in the chat and on
    * the answer-panel row — instead of sending a fresh chat turn. Corrections route through the
    * form-edit path (`PUT …/answers`), so they bypass the turn pipeline and never trigger a
-   * same-slot contradiction re-check. On by default; respondent-facing UX with no platform flag.
+   * same-slot contradiction re-check. Off by default; respondent-facing UX with no platform flag.
    */
   inlineCorrectionEnabled: boolean;
   /**
@@ -851,8 +879,8 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   supportResourceUrl: '',
   profileFields: [],
   answerSlotPanelScope: 'full_progress',
-  presentationMode: 'chat',
-  inlineCorrectionEnabled: true,
+  presentationMode: 'both',
+  inlineCorrectionEnabled: false,
   reasoningStreamEnabled: true,
   reasoningStreamPlacement: 'overlay',
   reasoningStreamDwellMs: 2000,
