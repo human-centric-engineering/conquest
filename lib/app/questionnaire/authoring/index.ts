@@ -55,3 +55,16 @@ export {
   type SettingsExport,
   type SettingsImport,
 } from '@/lib/app/questionnaire/authoring/config-export';
+export {
+  DEFINITION_EXPORT_KIND,
+  DEFINITION_EXPORT_SCHEMA_VERSION,
+  buildDefinitionExport,
+  parseDefinitionImport,
+  definitionImportSchema,
+  type DefinitionExport,
+  type DefinitionImport,
+  type DefinitionTag,
+  type DefinitionQuestion,
+  type DefinitionSection,
+  type DefinitionDataSlot,
+} from '@/lib/app/questionnaire/authoring/definition-export';

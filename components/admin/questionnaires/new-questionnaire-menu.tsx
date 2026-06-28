@@ -19,7 +19,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ChevronDown, Plus, Sparkles, Upload } from 'lucide-react';
+import { ChevronDown, FileUp, Plus, Sparkles, Upload } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -30,6 +30,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { UploadQuestionnaireDialog } from '@/components/admin/questionnaires/upload-questionnaire-dialog';
+import { ImportDefinitionDialog } from '@/components/admin/questionnaires/import-definition-dialog';
 import type { AttributedDemoClient } from '@/lib/app/questionnaire/demo-clients';
 
 export interface NewQuestionnaireMenuProps {
@@ -44,6 +45,7 @@ export function NewQuestionnaireMenu({
 }: NewQuestionnaireMenuProps) {
   const router = useRouter();
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
 
   return (
     <>
@@ -61,7 +63,7 @@ export function NewQuestionnaireMenu({
             <div className="flex flex-col">
               <span>Upload document</span>
               <span className="text-muted-foreground text-xs">
-                Extract structure from a PDF, DOCX, MD, or TXT
+                Extract structure from a PDF, DOCX, XLSX, MD, or TXT
               </span>
             </div>
           </DropdownMenuItem>
@@ -79,6 +81,16 @@ export function NewQuestionnaireMenu({
               </DropdownMenuItem>
             </>
           )}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={() => setImportOpen(true)}>
+            <FileUp className="mr-2 h-4 w-4" />
+            <div className="flex flex-col">
+              <span>Import definition</span>
+              <span className="text-muted-foreground text-xs">
+                Create from an exported questionnaire definition (JSON)
+              </span>
+            </div>
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
 
@@ -89,6 +101,9 @@ export function NewQuestionnaireMenu({
         onOpenChange={setUploadOpen}
         showTrigger={false}
       />
+
+      {/* Controlled — opened by the "Import definition" item. */}
+      <ImportDefinitionDialog open={importOpen} onOpenChange={setImportOpen} />
     </>
   );
 }

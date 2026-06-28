@@ -350,6 +350,8 @@ export const API = {
     QUESTIONNAIRES: {
       /** List + ingest (GET list, POST multipart ingest). */
       ROOT: '/api/v1/app/questionnaires',
+      /** Import a definition export as a brand-new questionnaire (POST JSON — F14.9). */
+      definitionImport: '/api/v1/app/questionnaires/import',
       /** Read-only prompt library — every agent + the real prompt(s) it sends (GET). */
       prompts: '/api/v1/app/questionnaires/prompts',
       /** Agent settings evaluation — current vs advisory model/temperature/cost per agent (GET). */
@@ -531,6 +533,12 @@ export const API = {
       /** Completed-session results export, CSV or JSON via `?format=` (GET — F8.2). */
       versionExport: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/export`,
+      /** Full design-time definition export — structure + config + data slots + scoring (GET JSON — F14.9). */
+      versionDefinition: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/definition`,
+      /** Blank-instrument download via `?format=pdf|text|csv` (GET — F14.9). */
+      versionInstrument: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/instrument`,
       /** Invitations for a questionnaire (GET list, POST send single/bulk — F3.2). */
       invitations: (id: string): string => `/api/v1/app/questionnaires/${id}/invitations`,
       /** Single invitation (PATCH revoke — F3.2). */
