@@ -15,6 +15,9 @@ import {
   dataSlotsAssignLimiter,
   DATA_SLOTS_ASSIGN_RATE_LIMIT_MAX,
   DATA_SLOTS_ASSIGN_RATE_LIMIT_INTERVAL_MS,
+  settingsAdvisorLimiter,
+  SETTINGS_ADVISOR_RATE_LIMIT_MAX,
+  SETTINGS_ADVISOR_RATE_LIMIT_INTERVAL_MS,
 } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
 
 describe('ingestLimiter', () => {
@@ -54,5 +57,22 @@ describe('dataSlotsAssignLimiter', () => {
     }
     expect(dataSlotsAssignLimiter.check(a).success).toBe(false); // a exhausted
     expect(dataSlotsAssignLimiter.check(b).success).toBe(true); // b independent
+  });
+});
+
+describe('settingsAdvisorLimiter', () => {
+  it('exposes the documented 20/min cap', () => {
+    expect(SETTINGS_ADVISOR_RATE_LIMIT_MAX).toBe(20);
+    expect(SETTINGS_ADVISOR_RATE_LIMIT_INTERVAL_MS).toBe(60_000);
+  });
+
+  it('admits the cap then throttles, keyed per admin', () => {
+    const a = `advisor-a-${Math.random()}`;
+    const b = `advisor-b-${Math.random()}`;
+    for (let i = 0; i < SETTINGS_ADVISOR_RATE_LIMIT_MAX; i++) {
+      expect(settingsAdvisorLimiter.check(a).success).toBe(true);
+    }
+    expect(settingsAdvisorLimiter.check(a).success).toBe(false); // a exhausted
+    expect(settingsAdvisorLimiter.check(b).success).toBe(true); // b independent
   });
 });

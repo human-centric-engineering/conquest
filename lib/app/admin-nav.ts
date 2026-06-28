@@ -14,7 +14,13 @@
  * Full guide + example: CUSTOMIZATION.md §4 · lib/admin-nav/registry.ts
  */
 import { createElement } from 'react';
-import { Building2, ClipboardList, Gauge, MessageSquareText } from 'lucide-react';
+import {
+  Building2,
+  ClipboardList,
+  Gauge,
+  MessageSquareText,
+  SlidersHorizontal,
+} from 'lucide-react';
 
 import { QuestionnairesNavBrand } from '@/components/app/questionnaire/questionnaires-nav-brand';
 import { registerNavSection } from '@/lib/admin-nav/registry';
@@ -43,6 +49,12 @@ export function initAppNav(): void {
         label: 'Prompt library',
         icon: MessageSquareText,
         description: 'Read the exact prompts each questionnaire agent sends',
+      },
+      {
+        href: '/admin/questionnaires/agent-settings',
+        label: 'Agent settings',
+        icon: SlidersHorizontal,
+        description: 'Review and tune agent models, temperatures and cost trade-offs',
       },
       {
         href: '/admin/questionnaires/turn-evaluations',

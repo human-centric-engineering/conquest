@@ -194,6 +194,136 @@ const unit: SeedUnit = {
         costPerMillionTokens: 2.75, // ($1.10 in + $4.40 out) / 2
       },
 
+      // ------------------------------------------------------------------
+      // OpenAI — GPT-5.x ladder (current as of 2026-06). ConQuest defaults
+      // to OpenAI, so these power the seeded task defaults (see
+      // 020-orchestration-default-models): reasoning → gpt-5.4,
+      // routing → gpt-4.1-nano. The chat tier deliberately defaults to the
+      // conversational gpt-4o (NOT a gpt-5 reasoning model) so per-turn
+      // temperature is honoured — see 020 and agent-advisory/recommendations.
+      //
+      // The whole gpt-5 family rejects `max_tokens` and any non-default
+      // temperature → `paramProfile: 'openai-reasoning'` (the provider
+      // switches to `max_completion_tokens` and omits temperature). The
+      // Agent Settings Evaluation surface flags any agent that sets a
+      // non-default temperature while resolving to one of these models,
+      // since the temperature is a no-op there.
+      //
+      // Model ids are bare floating aliases (matches this file's
+      // convention). Minor versions are DISTINCT ids that do NOT
+      // auto-upgrade — bump them deliberately on future syncs and
+      // re-verify cost against https://developers.openai.com/api/docs/pricing.
+      // ------------------------------------------------------------------
+      {
+        slug: 'openai-gpt-5-5',
+        providerSlug: 'openai',
+        modelId: 'gpt-5.5',
+        name: 'GPT-5.5',
+        description:
+          'OpenAI top reasoning flagship. Highest quality for the hardest one-off tasks (document extraction, cohort reports). Premium price — use only where quality is visible, not on per-turn loops.',
+        capabilities: ['chat', 'vision', 'documents'],
+        tierRole: 'thinking',
+        reasoningDepth: 'very_high',
+        latency: 'medium',
+        costEfficiency: 'medium',
+        contextLength: 'very_high',
+        toolUse: 'strong',
+        bestRole: 'Highest-stakes reasoning / generation',
+        paramProfile: 'openai-reasoning',
+        costPerMillionTokens: 17.5, // ($5 in + $30 out) / 2
+      },
+      {
+        slug: 'openai-gpt-5-4',
+        providerSlug: 'openai',
+        modelId: 'gpt-5.4',
+        name: 'GPT-5.4',
+        description:
+          'Balanced reasoning flagship at half the price of GPT-5.5. ConQuest default for the `reasoning` task tier (extraction, turn evaluation, respondent/cohort reports, config advisor).',
+        capabilities: ['chat', 'vision', 'documents'],
+        tierRole: 'thinking',
+        reasoningDepth: 'very_high',
+        latency: 'medium',
+        costEfficiency: 'medium',
+        contextLength: 'very_high',
+        toolUse: 'strong',
+        bestRole: 'Default reasoning / generation',
+        paramProfile: 'openai-reasoning',
+        costPerMillionTokens: 8.75, // ($2.50 in + $15 out) / 2
+      },
+      {
+        slug: 'openai-gpt-5-1',
+        providerSlug: 'openai',
+        modelId: 'gpt-5.1',
+        name: 'GPT-5.1',
+        description:
+          'Coding/agentic flagship with configurable reasoning effort. Strong alternative for the chat tier when you want frontier quality with a dialable effort knob.',
+        capabilities: ['chat', 'vision', 'documents'],
+        tierRole: 'worker',
+        reasoningDepth: 'very_high',
+        latency: 'medium',
+        costEfficiency: 'medium',
+        contextLength: 'very_high',
+        toolUse: 'strong',
+        bestRole: 'Agentic worker with effort control',
+        paramProfile: 'openai-reasoning',
+        costPerMillionTokens: 8.75, // approx; verify against pricing page
+      },
+      {
+        slug: 'openai-gpt-5-4-mini',
+        providerSlug: 'openai',
+        modelId: 'gpt-5.4-mini',
+        name: 'GPT-5.4 Mini',
+        description:
+          'Cost-efficient GPT-5.4 variant (reasoning family — ignores `temperature`). Best as a per-agent override for non-conversational hot-path work such as answer extraction. Not the chat-tier default: the per-turn conversational path uses gpt-4o so phrasing temperature is honoured.',
+        capabilities: ['chat', 'vision', 'documents'],
+        tierRole: 'worker',
+        reasoningDepth: 'high',
+        latency: 'fast',
+        costEfficiency: 'high',
+        contextLength: 'high',
+        toolUse: 'strong',
+        bestRole: 'Per-turn chat / extraction hot path',
+        paramProfile: 'openai-reasoning',
+        costPerMillionTokens: 2.625, // ($0.75 in + $4.50 out) / 2
+      },
+      {
+        slug: 'openai-gpt-5-4-nano',
+        providerSlug: 'openai',
+        modelId: 'gpt-5.4-nano',
+        name: 'GPT-5.4 Nano',
+        description:
+          'Smallest GPT-5.4 variant. Ideal as a per-agent override for trivial hot-path agents (question selection, interviewer phrasing, completion offer) where quality is indistinguishable from the mini.',
+        capabilities: ['chat'],
+        tierRole: 'infrastructure',
+        reasoningDepth: 'medium',
+        latency: 'very_fast',
+        costEfficiency: 'very_high',
+        contextLength: 'high',
+        toolUse: 'moderate',
+        bestRole: 'Trivial high-volume agents',
+        paramProfile: 'openai-reasoning',
+        costPerMillionTokens: 0.725, // ($0.20 in + $1.25 out) / 2
+      },
+      {
+        slug: 'openai-gpt-4-1-nano',
+        providerSlug: 'openai',
+        modelId: 'gpt-4.1-nano',
+        name: 'GPT-4.1 Nano',
+        description:
+          'Cheapest OpenAI text model and honours `temperature` (legacy param profile). ConQuest default for the `routing` task tier (conversation summarisation) and a good temperature-sensitive override.',
+        capabilities: ['chat'],
+        tierRole: 'infrastructure',
+        reasoningDepth: 'medium',
+        latency: 'very_fast',
+        costEfficiency: 'very_high',
+        contextLength: 'high',
+        toolUse: 'moderate',
+        bestRole: 'Routing / summarisation',
+        // No explicit paramProfile → deriveParamProfile() classifies it as
+        // 'openai-legacy', so it accepts `temperature` and `max_tokens`.
+        costPerMillionTokens: 0.25, // ($0.10 in + $0.40 out) / 2
+      },
+
       // OpenAI — Audio (Whisper) — unlocks the streaming-chat mic input.
       // The audio capability is resolved at runtime by
       // lib/orchestration/llm/provider-manager.ts → getAudioProvider(),
@@ -213,6 +343,24 @@ const unit: SeedUnit = {
         contextLength: 'n_a',
         toolUse: 'none',
         bestRole: 'Speech-to-text transcription',
+      },
+      {
+        slug: 'openai-gpt-4o-transcribe',
+        providerSlug: 'openai',
+        modelId: 'gpt-4o-transcribe',
+        name: 'GPT-4o Transcribe',
+        description:
+          'OpenAI speech-to-text built on GPT-4o. More accurate per dollar than Whisper for the streaming-chat mic. Resolved by getAudioProvider() when capabilities ⊇ ["audio"]. ConQuest default for the `audio` task tier; whisper-1 remains the fallback.',
+        capabilities: ['audio'],
+        tierRole: 'infrastructure',
+        reasoningDepth: 'none',
+        latency: 'fast',
+        costEfficiency: 'high',
+        contextLength: 'n_a',
+        toolUse: 'none',
+        bestRole: 'Speech-to-text transcription (GPT-4o)',
+        // Audio models are priced per-minute/per-audio-token, not per text
+        // token — leave costPerMillionTokens unset (matches whisper-1).
       },
 
       // OpenAI — Embedding models

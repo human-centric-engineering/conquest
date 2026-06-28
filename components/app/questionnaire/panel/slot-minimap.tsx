@@ -114,14 +114,19 @@ export function SlotMiniMap({
         />
       ))}
       {/* The viewport window — what's currently visible, and the draggable thumb now that the
-          minimap stands in for the native scrollbar. A shaded grey fill (translucent, so the
-          confidence bars read through it) plus a centred grip make it an obvious grab target. */}
+          minimap stands in for the native scrollbar. At rest it's just an outline so it stays quiet;
+          hovering the scroll region (the `group/scroll` parent) fills it with a translucent grey
+          (the confidence bars read through it) and reveals a centred grip, making it an obvious
+          grab target. */}
       <div
         data-testid="slot-minimap-window"
         style={{ top: `${windowTopPct}%`, height: `${windowHeightPct}%` }}
-        className="border-foreground/25 bg-muted-foreground/25 pointer-events-none absolute inset-x-0 flex items-center justify-center overflow-hidden rounded-sm border shadow-sm"
+        className="border-foreground/25 group-hover/scroll:bg-muted-foreground/25 pointer-events-none absolute inset-x-0 flex items-center justify-center overflow-hidden rounded-sm border shadow-sm transition-colors"
       >
-        <span aria-hidden="true" className="flex flex-col items-center gap-[3px]">
+        <span
+          aria-hidden="true"
+          className="flex flex-col items-center gap-[3px] opacity-0 transition-opacity group-hover/scroll:opacity-100"
+        >
           <span className="bg-foreground/40 h-px w-2 rounded-full" />
           <span className="bg-foreground/40 h-px w-2 rounded-full" />
           <span className="bg-foreground/40 h-px w-2 rounded-full" />
