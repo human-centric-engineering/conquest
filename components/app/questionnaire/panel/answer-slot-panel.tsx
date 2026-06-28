@@ -567,7 +567,7 @@ export function AnswerSlotPanel({
           <p className="sr-only" role="status" aria-live="polite">
             {announce}
           </p>
-          <div className="relative min-h-0 flex-1">
+          <div className="group/scroll relative min-h-0 flex-1">
             <div
               ref={scrollRef}
               onScroll={(e) => {
