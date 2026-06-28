@@ -217,6 +217,28 @@ card inside `#settings-sections`, so flag-gated sections (e.g. Intro screen) app
 in the rail exactly when they render, with no duplicated visibility logic. The rail
 is generic and reusable for any long settings panel.
 
+### Import / export all settings
+
+`components/admin/questionnaires/config-import-export.tsx` — an **Import / export
+settings** toolbar pinned to the top of the panel. **Export** serialises the
+resolved `ConfigView` into a portable JSON envelope (`{ kind, schemaVersion,
+exportedAt, config }`) and downloads it client-side — no new endpoint. **Import**
+reads such a file and PATCHes the whole parsed config back through the **same**
+config endpoint the Save button uses, so fork-on-launch, the error banner, and the
+refetch/resync all behave identically to a normal save; a confirm dialog previews
+the settings count first because importing overwrites every field (including unsaved
+edits).
+
+The envelope helpers live in `lib/app/questionnaire/authoring/config-export.ts`
+(pure — no Prisma/Next/DOM): `buildSettingsExport` / `extractConfig` (drops the
+read-only `saved` flag) and `parseSettingsImport` (validates the JSON + `kind`
+discriminator, strips unknown/metadata keys, requires ≥1 recognised setting). The
+key list is derived from `DEFAULT_QUESTIONNAIRE_CONFIG`, so a new config field is
+exported the moment it gains a default — it can never drift. Value-level validation
+stays server-side in `updateConfigSchema`; the client only shapes + sanity-checks
+the file. `respondentReport` / `cohortReport` (edited on their own surfaces) are
+carried too, so the export is a complete round-trip of the version's config.
+
 ## Who consumes it
 
 F3.1 stores the settings; later phases read them. `costBudgetUsd` is **stored

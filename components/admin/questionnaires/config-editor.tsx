@@ -36,6 +36,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import { ConfigImportExport } from '@/components/admin/questionnaires/config-import-export';
 import { SaveButton } from '@/components/admin/questionnaires/save-button';
 import { Input } from '@/components/ui/input';
 import { PublicRespondentLink } from '@/components/admin/questionnaires/public-respondent-link';
@@ -661,6 +662,16 @@ export function ConfigEditor({
 
   return (
     <section className="space-y-4">
+      {/* Import / export the whole config as a portable JSON file. Sits above the groups so it's
+          discoverable, and runs through the same `run` mutation as Save (fork-on-launch + resync). */}
+      <ConfigImportExport
+        questionnaireId={questionnaireId}
+        versionId={versionId}
+        config={config}
+        run={run}
+        busy={busy}
+      />
+
       {!config.saved && (
         <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
           <span className="font-medium">Not yet saved.</span>
