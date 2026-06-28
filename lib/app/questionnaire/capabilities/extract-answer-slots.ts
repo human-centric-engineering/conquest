@@ -64,6 +64,11 @@ import {
   buildAnswerExtractionRetryMessage,
 } from '@/lib/app/questionnaire/extraction/extraction-prompt';
 import { normalizeAnswerIntents } from '@/lib/app/questionnaire/extraction/answer-intents';
+import {
+  selectOpportunisticTargets,
+  buildFreeTextOpportunisticIntents,
+  capOpportunisticConfidence,
+} from '@/lib/app/questionnaire/capabilities/opportunistic-fill';
 import type {
   AnswerSlotIntent,
   DataSlotCandidateView,
@@ -717,11 +722,58 @@ export class AppExtractAnswerSlotsCapability extends BaseCapability<
       });
     }
 
+    // 5c. Opportunistic down-propagation (Data Slots feature). A confident data-slot fill means we
+    //     understood the respondent's position on that theme — so seed its STILL-unanswered mapped
+    //     questions, capped at a Tentative confidence, instead of leaving the underlying form blank
+    //     (the `53ZF` gap). Free-text seeds deterministically from the paraphrase; choice/likert go
+    //     through the same answer-fit resolver. Each seeded answer is a guess the agent will confirm
+    //     (Phase 4) before it counts — and confirmation strengthens it via the accrual guard.
+    let opportunisticIntents: AnswerSlotIntent[] = [];
+    let opportunisticCostUsd = 0;
+    if ((args.dataSlotCandidates?.length ?? 0) > 0 && dataSlotFills.length > 0) {
+      const answeredKeys = new Set<string>([
+        ...intents.map((i) => i.slotKey),
+        ...fitIntents.map((i) => i.slotKey),
+        ...extractionContext.answered.map((a) => a.slotKey),
+      ]);
+      const targets = selectOpportunisticTargets({
+        dataSlotFills,
+        dataSlotCandidates: args.dataSlotCandidates ?? [],
+        candidateSlots: extractionContext.candidateSlots,
+        answeredKeys,
+      });
+      opportunisticIntents = buildFreeTextOpportunisticIntents(targets.freeText);
+      if (targets.typed.length > 0) {
+        const fit = await this.resolveAnswerFit({
+          provider,
+          model,
+          providerSlug,
+          context,
+          extractionContext,
+          fitCandidates: targets.typed,
+        });
+        opportunisticCostUsd += fit.costUsd;
+        opportunisticIntents.push(...capOpportunisticConfidence(fit.intents));
+      }
+      if (opportunisticIntents.length > 0) {
+        logger.info(
+          'extract_answer_slots: opportunistic down-propagation seeded mapped questions',
+          {
+            agentId: context.agentId,
+            sessionId: extractionContext.sessionId,
+            freeTextTargets: targets.freeText.length,
+            typedTargets: targets.typed.length,
+            seeded: opportunisticIntents.length,
+          }
+        );
+      }
+    }
+
     return this.success({
-      intents: [...intents, ...fitIntents],
+      intents: [...intents, ...fitIntents, ...opportunisticIntents],
       dataSlotFills,
       droppedCount: dropped.length,
-      costUsd: completion.costUsd + fitCostUsd,
+      costUsd: completion.costUsd + fitCostUsd + opportunisticCostUsd,
       // Inspector (admin preview): surface the answer-fit pass as its own trace when it ran.
       ...(fitCall ? { answerFitCall: fitCall } : {}),
       // Stage 1 of the seriousness gate — pass the model's suspicion flag through (when set).
