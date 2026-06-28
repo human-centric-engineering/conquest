@@ -22,6 +22,7 @@ import { FieldHelp } from '@/components/ui/field-help';
 import { useWizard } from '@/lib/hooks/use-wizard';
 import { QuestionField } from '@/components/app/questionnaire/form/question-field';
 import { SectionNavigator } from '@/components/app/questionnaire/form/section-navigator';
+import { ConfidenceScore } from '@/components/app/questionnaire/panel/confidence-score';
 import { recentlyFilledByLatestTurn } from '@/lib/app/questionnaire/panel/newly-filled';
 // Reuse the authoring editors' autosave pill (idle/saving/saved/error + last-saved clock) so the
 // respondent form's persistent indicator reads identically to the admin structure editor's.
@@ -174,8 +175,9 @@ export function QuestionnaireForm({
                   key={slot.slotKey}
                   className={cn(
                     'space-y-2',
-                    // Filled by the latest turn — a gentle lasting wash on the whole answer block.
-                    isRecentlyFilled(slot.slotKey) && 'cq-fill-glow rounded-md px-3 py-2'
+                    // Filled by the latest turn — a brief one-shot wash that settles to a resting
+                    // tint on the whole answer block (no indefinite breathing).
+                    isRecentlyFilled(slot.slotKey) && 'cq-fill-glow-once rounded-md px-3 py-2'
                   )}
                 >
                   <div className="flex items-start justify-between gap-2">
@@ -190,6 +192,16 @@ export function QuestionnaireForm({
                           The agent inferred this answer from what you said in the chat. Edit it
                           here if it&apos;s not quite right.
                         </FieldHelp>
+                      )}
+                      {/* Surface how sure the agent is about an answer it filled in for the
+                          respondent — a Tentative guess vs a Confident, corroborated one — so they
+                          know which to glance at. Only while it's still the agent's answer (drops
+                          once they edit it themselves, exactly like the inferred marker). */}
+                      {isInferred(slot.slotKey) && (
+                        <ConfidenceScore
+                          confidence={slot.confidence ?? null}
+                          className="ml-2 align-middle"
+                        />
                       )}
                     </label>
                     {status !== 'idle' && (

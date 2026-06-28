@@ -50,6 +50,7 @@ function view(): AnswerPanelView {
             answered: true,
             value: 5,
             provenance: 'inferred',
+            confidence: 0.45,
           }),
         ],
       },
@@ -97,6 +98,36 @@ describe('QuestionnaireForm', () => {
     expect(screen.getByLabelText('Inferred answer — edit if needed')).toBeInTheDocument();
   });
 
+  it('surfaces the confidence band on an agent-filled field', () => {
+    render(
+      <QuestionnaireForm
+        view={view()}
+        loading={false}
+        values={{}}
+        statuses={{}}
+        onChange={noop}
+        onFlush={noop}
+      />
+    );
+    // The inferred 'team' answer (confidence 0.45) shows a "Tentative" chip so the respondent
+    // knows it's a guess to glance at; the un-inferred 'role' field shows no chip.
+    expect(screen.getByText(/tentative/i)).toBeInTheDocument();
+  });
+
+  it('drops the confidence band once the respondent edits the field', () => {
+    render(
+      <QuestionnaireForm
+        view={view()}
+        loading={false}
+        values={{ team: 8 }} // respondent's own value → no longer the agent's answer
+        statuses={{}}
+        onChange={noop}
+        onFlush={noop}
+      />
+    );
+    expect(screen.queryByText(/tentative/i)).not.toBeInTheDocument();
+  });
+
   it('drops the inferred marker once the respondent has a local value', () => {
     render(
       <QuestionnaireForm
@@ -125,7 +156,8 @@ describe('QuestionnaireForm', () => {
         onFlush={noop}
       />
     );
-    expect(screen.getByText('Team size?').closest('li')?.className).toContain('cq-fill-glow');
+    // One-shot wash (settles to a resting tint), not the infinite `cq-fill-glow` breathe.
+    expect(screen.getByText('Team size?').closest('li')?.className).toContain('cq-fill-glow-once');
     expect(screen.getByText('Your role?').closest('li')?.className).not.toContain('cq-fill-glow');
   });
 
