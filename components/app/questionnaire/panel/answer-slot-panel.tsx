@@ -24,7 +24,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { HelpCircle } from 'lucide-react';
+import { Flag, HelpCircle } from 'lucide-react';
 
 import {
   Dialog,
@@ -36,6 +36,7 @@ import {
 } from '@/components/ui/dialog';
 
 import { cn } from '@/lib/utils';
+import { Tip } from '@/components/ui/tooltip';
 import { usePrefersReducedMotion } from '@/lib/hooks/use-prefers-reduced-motion';
 import { AnswerSlotItem } from '@/components/app/questionnaire/panel/answer-slot-item';
 import { ConfidenceIndicator } from '@/components/app/questionnaire/panel/confidence-indicator';
@@ -80,6 +81,12 @@ export interface AnswerSlotPanelProps {
   onRevisit?: (slot: PanelSlotView) => void;
   /** Whether a revisit can be sent right now (false while streaming / blocked). */
   canRevisit?: boolean;
+  /**
+   * Data-slot mode: "Incorrect?" hover affordance on a filled slot. Clicking asks the agent to probe
+   * deeper into that slot to get the reading right. Omit to hide it; gated at send-time on
+   * {@link canRevisit} (the shared "can send now" flag), so it's only offered when a turn can be sent.
+   */
+  onRefine?: (slot: DataSlotPanelSlot) => void;
   /**
    * Data-slot mode: keys the latest turn filled, in panel display order (from the workspace's
    * snapshot diff). The panel scrolls to the first and steps through the rest. Omit / empty when no
@@ -198,6 +205,8 @@ function DataSlotRow({
   collapseSignal,
   outOfView,
   correction,
+  onRefine,
+  canRefine,
 }: {
   slot: DataSlotPanelSlot;
   highlighted: boolean;
@@ -214,6 +223,10 @@ function DataSlotRow({
   outOfView: boolean;
   /** Inline correction bundle (Variant B); when present + the slot has mapped questions, show "Edit". */
   correction?: PanelCorrection;
+  /** Probe deeper into this slot (the "Incorrect?" hover affordance). Omit to hide it. */
+  onRefine?: () => void;
+  /** Whether a refine turn can be sent right now (false while streaming / blocked). */
+  canRefine: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   // A data-slot fix edits the underlying mapped questions; reconciliation then recomputes the reading.
@@ -229,7 +242,7 @@ function DataSlotRow({
       data-slot-key={slot.key}
       tabIndex={-1}
       className={cn(
-        'rounded-md border px-3 py-2 transition-shadow duration-500 outline-none motion-reduce:transition-none',
+        'group/slot rounded-md border px-3 py-2 transition-shadow duration-500 outline-none motion-reduce:transition-none',
         highlighted && 'ring-primary/60 ring-2',
         // Previous-turn highlight: a brief one-shot wash that settles to a resting accent tint (kept
         // until a newer turn fills), rather than breathing indefinitely.
@@ -245,7 +258,9 @@ function DataSlotRow({
         <div className="min-w-0 flex-1">
           {/* Name row carries the "Edited" pill in the top-right corner (above the answer text). The
               pill renders nothing unless the slot changed at least once; opens the full evolution
-              (replaces the old inline strikethrough "Earlier:" list). */}
+              (replaces the old inline strikethrough "Earlier:" list). The "Incorrect?" refine
+              affordance deliberately lives on the confidence line below — not here — so it never
+              competes with the name + "Edited" pill for the title's width. */}
           <div className="flex items-start gap-2">
             <p className="min-w-0 flex-1 text-sm font-medium">{slot.name}</p>
             {canEdit && !editing && (
@@ -281,6 +296,26 @@ function DataSlotRow({
                 className="mt-1"
                 collapseSignal={collapseSignal}
                 outOfView={outOfView}
+                // "Incorrect?" — the refine affordance sits at the END of the confidence line, after
+                // "Why?", reading as a quiet challenge to the reading ("Confident · 100% … Why? …
+                // Incorrect?"). Revealed on row hover/focus, and the wrap row lets it drop to its own
+                // line rather than crowd the title. Clicking asks the agent to probe deeper into this
+                // slot; offered only on a filled slot when a turn can be sent right now (canRefine).
+                trailing={
+                  onRefine && canRefine && slot.filled ? (
+                    <Tip label="Click to refine" side="top">
+                      <button
+                        type="button"
+                        onClick={onRefine}
+                        aria-label={`Refine “${slot.name}” — flag this reading as not quite right`}
+                        className="text-muted-foreground/70 hover:text-destructive focus-visible:text-destructive inline-flex shrink-0 items-center gap-1 text-[11px] font-medium opacity-0 transition group-focus-within/slot:opacity-100 group-hover/slot:opacity-100 focus-visible:opacity-100"
+                      >
+                        <Flag className="h-3 w-3" aria-hidden="true" />
+                        Incorrect?
+                      </button>
+                    </Tip>
+                  ) : null
+                }
               >
                 <ConfidenceScore confidence={slot.confidence} />
                 {slot.provenance === 'inferred' || slot.provenance === 'synthesised' ? (
@@ -339,6 +374,7 @@ export function AnswerSlotPanel({
   loading = false,
   onRevisit,
   canRevisit = false,
+  onRefine,
   newlyFilledKeys,
   hideNativeScrollbar = false,
   correction,
@@ -611,6 +647,8 @@ export function AnswerSlotPanel({
                               collapseSignal={collapseSignal}
                               outOfView={outOfViewKeys.has(slot.key)}
                               correction={correction}
+                              onRefine={onRefine ? () => onRefine(slot) : undefined}
+                              canRefine={canRevisit}
                             />
                           ))}
                         </ul>

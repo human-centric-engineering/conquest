@@ -88,6 +88,18 @@ side. Two consequences:
 - **Revisit:** because the chat and panel share one stream, the panel's confirm-gated
   "Revisit" button calls `stream.sendMessage("I'd like to revisit my answer to: …")`,
   re-asking the question through the same turn loop. Disabled while `!stream.canSend`.
+- **"Incorrect?" (data-slot mode):** each **filled** `DataSlotRow` carries a quiet refine
+  affordance — a small flag-icon "Incorrect?" button (tooltip _"Click to refine"_) revealed on
+  `group-hover/slot` / `group-focus-within/slot`. It lives **at the end of the confidence line**
+  (inside the `NoticeWhy` wrap cluster, after the score / "Inferred" / "Why?"), reading as a quiet
+  challenge to the confidence beside it — deliberately **not** in the title row, where it would
+  fight the name + "Edited" pill for width and squash the title; the `flex-wrap` cluster lets it
+  drop to its own line instead. Clicking calls `SessionWorkspace.handleRefine`, which sends a
+  steering turn (`stream.sendMessage("I don't think “<name>” is quite right. Right now you have it
+as: “…”. Could you ask me a more detailed question …")`) so the agent **probes deeper into that
+  one slot** instead of moving on. Threaded as `AnswerSlotPanel`'s `onRefine` prop (and through the
+  mobile `AnswerReviewDrawer`, which closes on use); only rendered when a turn can be sent
+  (`canRevisit` / `stream.canSend`).
 
 `QuestionnaireChat` was refactored to **receive the stream as a `stream` prop** (the
 hook call moved up to `SessionWorkspace`); its rendering is otherwise unchanged and it

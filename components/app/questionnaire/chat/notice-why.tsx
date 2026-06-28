@@ -25,12 +25,15 @@ import { cn } from '@/lib/utils';
 export function NoticeWhy({
   detail,
   children,
+  trailing,
   className,
   collapseSignal,
   outOfView,
 }: {
   detail?: string;
   children?: ReactNode;
+  /** Optional content rendered on the same row *after* the "Why?" trigger (e.g. the refine action). */
+  trailing?: ReactNode;
   className?: string;
   /**
    * When this number changes, the disclosure closes itself. The answer panel bumps it on refetch so an
@@ -57,8 +60,8 @@ export function NoticeWhy({
     if (outOfView) setOpen(false);
   }, [outOfView]);
   const hasDetail = Boolean(detail && detail.trim().length > 0);
-  // Nothing to render when there's neither a rationale to disclose nor a cluster to host.
-  if (!hasDetail && !children) return null;
+  // Nothing to render when there's neither a rationale to disclose nor a cluster (children/trailing) to host.
+  if (!hasDetail && !children && !trailing) return null;
 
   const trigger = hasDetail ? (
     <button
@@ -77,10 +80,11 @@ export function NoticeWhy({
 
   return (
     <div className={cn('mt-1.5', className)}>
-      {children ? (
+      {children || trailing ? (
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
           {children}
           {trigger}
+          {trailing}
         </div>
       ) : (
         trigger
