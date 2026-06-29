@@ -524,6 +524,9 @@ export function SessionWorkspace({
     showIntro && intro ? (
       <QuestionnaireSplash
         intro={intro}
+        // "Continue" only once a real answer exists — a merely-opened/resumed session at 0% still
+        // reads "Begin" (the workspace's `started` flag governs the kickoff, not this label).
+        inProgress={(lifecycle.view?.completion.answeredCount ?? 0) > 0}
         onProceed={() => goToView(views.find((v) => v !== 'intro') ?? 'chat')}
       />
     ) : null;
