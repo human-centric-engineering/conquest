@@ -272,6 +272,85 @@ describe('SessionWorkspace', () => {
     expect(kickoff).toHaveBeenCalledTimes(2);
   });
 
+  // ── Intro carousel surface (deferred kickoff) ────────────────────────────────
+  describe('intro surface', () => {
+    const intro = {
+      enabled: true,
+      questionnaireTitle: 'Team Health Check',
+      background: '',
+      copy: {
+        howItWorks: { heading: 'How it works', body: 'This is a conversation, not a form.' },
+        whatYouGet: null,
+        goodToKnow: [],
+        buttonLabel: 'Begin your conversation',
+      },
+    };
+
+    it('lands on the Intro surface and DEFERS the kickoff while it shows', () => {
+      streamHook.mockReturnValue({
+        canSend: true,
+        status: 'idle',
+        sendMessage,
+        kickoff,
+        applyStatus,
+      });
+      render(<SessionWorkspace sessionId="s1" presentationMode="both" autoStart intro={intro} />);
+
+      // Intro is the active tab, and the opening turn has NOT been spent yet.
+      expect(screen.getByRole('tab', { name: 'Intro' })).toHaveAttribute('aria-selected', 'true');
+      expect(screen.getByRole('tab', { name: 'Chat' })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: 'Form' })).toBeInTheDocument();
+      expect(kickoff).not.toHaveBeenCalled();
+    });
+
+    it('fires the kickoff once the respondent leaves the intro', () => {
+      streamHook.mockReturnValue({
+        canSend: true,
+        status: 'idle',
+        sendMessage,
+        kickoff,
+        applyStatus,
+      });
+      render(<SessionWorkspace sessionId="s1" presentationMode="both" autoStart intro={intro} />);
+      expect(kickoff).not.toHaveBeenCalled();
+
+      // Sliding to Chat marks the session started, releasing the deferred opening turn.
+      fireEvent.click(screen.getByRole('tab', { name: 'Chat' }));
+      expect(kickoff).toHaveBeenCalledTimes(1);
+    });
+
+    it('on a resume (autoStart off) keeps the Intro tab but lands on the conversation, no kickoff', () => {
+      streamHook.mockReturnValue({
+        canSend: true,
+        status: 'idle',
+        sendMessage,
+        kickoff,
+        applyStatus,
+      });
+      render(<SessionWorkspace sessionId="s1" presentationMode="both" intro={intro} />);
+      // The recap is still reachable (slide-back), but we open on chat and never fire the opening turn.
+      expect(screen.getByRole('tab', { name: 'Intro' })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: 'Chat' })).toHaveAttribute('aria-selected', 'true');
+      expect(kickoff).not.toHaveBeenCalled();
+    });
+
+    it('weaves an Intro toggle into a chat-only session (no form) and defers the kickoff', () => {
+      streamHook.mockReturnValue({
+        canSend: true,
+        status: 'idle',
+        sendMessage,
+        kickoff,
+        applyStatus,
+      });
+      render(<SessionWorkspace sessionId="s1" presentationMode="chat" autoStart intro={intro} />);
+      // chat-only normally has no toggle; the intro adds an Intro↔Chat one.
+      expect(screen.getByRole('tab', { name: 'Intro' })).toHaveAttribute('aria-selected', 'true');
+      expect(screen.getByRole('tab', { name: 'Chat' })).toBeInTheDocument();
+      expect(screen.queryByRole('tab', { name: 'Form' })).not.toBeInTheDocument();
+      expect(kickoff).not.toHaveBeenCalled();
+    });
+  });
+
   it('threads the session id and access token into all three hooks', () => {
     streamHook.mockReturnValue({ canSend: true, status: 'idle', sendMessage, applyStatus });
     panelHook.mockReturnValue({ view: null, loading: false, error: false, refetch });
