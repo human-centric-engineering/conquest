@@ -8,6 +8,9 @@
  *   - the run-time config row (F3.1, 1:1 with the version) when one exists,
  *   - the section → question-slot graph (ordinals verbatim; per-version-unique `key`s
  *     carried 1:1, so uniqueness holds by construction),
+ *   - the question-slot and data-slot pgvector `embedding`s (F4.1 adaptive selection),
+ *     copied via raw SQL keyed on `key` — the typed `createMany` can't carry an
+ *     `Unsupported(...)` column, so without this the copy would land adaptive-blind,
  *   - the tag vocabulary (F2.2) with each assignment re-linked to the copied slot.
  *
  * Returns the old→new id maps so a caller can retarget anything that references the
@@ -24,6 +27,8 @@
 import { executeTransaction } from '@/lib/db/utils';
 import { CONFIG_SELECT } from '@/app/api/v1/app/questionnaires/_lib/detail';
 import { jsonInput } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
+import { copySlotEmbeddings } from '@/app/api/v1/app/questionnaires/_lib/slot-embeddings';
+import { copyDataSlotEmbeddings } from '@/app/api/v1/app/questionnaires/_lib/data-slot-embeddings';
 
 /** The transaction client `executeTransaction` hands its callback (mirrors persist.ts). */
 type CopyTx = Parameters<Parameters<typeof executeTransaction>[0]>[0];
@@ -174,6 +179,13 @@ export async function copyVersionGraph(
     }
   }
 
+  // Carry the question-slot embeddings (F4.1 adaptive selection) over to the copy.
+  // The slot text is copied verbatim above, so the vectors are still valid — and
+  // the `embedding` column is Prisma-Unsupported, so the typed `createMany` could
+  // not include it. Copying here (vs. forcing a re-embed) keeps the new draft
+  // adaptive-ready without an extra embed cost.
+  await copySlotEmbeddings(tx, sourceVersionId, targetVersionId);
+
   // Map original question ids to their copies via the per-version-unique `key`
   // (createMany returns no ids; key is the stable join).
   const newIdByKey = new Map(
@@ -249,6 +261,10 @@ export async function copyVersionGraph(
   if (newDataSlotQuestions.length > 0) {
     await tx.appDataSlotQuestion.createMany({ data: newDataSlotQuestions });
   }
+
+  // Carry the data-slot embeddings over too (same rationale as the question slots:
+  // verbatim text → still-valid vectors, on a Prisma-Unsupported column).
+  await copyDataSlotEmbeddings(tx, sourceVersionId, targetVersionId);
 
   return { sectionIdMap, questionIdMap, tagIdMap, dataSlotIdMap };
 }

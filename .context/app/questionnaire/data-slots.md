@@ -260,6 +260,13 @@ question slots) and asks the seeded **selector agent** which to pursue next.
   `_lib/data-slot-embeddings.ts` (`embedVersionDataSlots`, `rankDataSlotsByVector`,
   `dataSlotEmbeddingCoverage`, `ensureVersionDataSlotsEmbedded`); HNSW index added by raw SQL in the
   migration. Same drift-warning discipline as the question-slot column.
+  - **Carried on version copy.** A fork (editing a launched version) or clone-for-client copies the
+    embeddings into the new version verbatim — the slot text is unchanged, so the vectors stay valid.
+    `copyVersionGraph` calls `copySlotEmbeddings` / `copyDataSlotEmbeddings` (a raw `UPDATE … FROM`
+    keyed on the per-version-unique `key`, inside the same transaction), because the typed
+    `create`/`createMany` it uses for the rest of the graph **cannot** write the `Unsupported(...)`
+    `embedding` column. Without this, a fork landed adaptive-blind (all embeddings NULL) and had to
+    be re-embedded before adaptive selection worked again.
 - **Candidate set (preserves the theme rhythm).** The pre-filter narrows the unfilled pool to the
   top-K by similarity, but **always keeps a couple of same-theme slots** so the topic-local "linger"
   is still available, and **biases away from a just-parked theme** when bridging. The selector agent

@@ -31,6 +31,46 @@ function toVectorLiteral(embedding: number[]): string {
   return `[${embedding.join(',')}]`;
 }
 
+/**
+ * Minimal raw-SQL executor — satisfied by the module `prisma` and by the
+ * transaction client `executeTransaction` hands its callback. Lets
+ * {@link copyDataSlotEmbeddings} run inside a caller's transaction without
+ * coupling this module to the full Prisma client type.
+ */
+interface RawSqlExecutor {
+  $executeRawUnsafe(query: string, ...values: unknown[]): Promise<number>;
+}
+
+/**
+ * Copy data-slot embeddings from one version to another, matching slots by their
+ * per-version-unique `key`. The data-slot analogue of `copySlotEmbeddings`: the
+ * version-graph copy (fork / clone-for-client) carries each slot's name +
+ * description verbatim, so its embedding is still valid — copying the vectors
+ * avoids a needless re-embed and keeps the new draft's adaptive data-slot
+ * selection working instead of falling back to the deterministic pick.
+ *
+ * The `embedding` column is Prisma-Unsupported, so this is a raw `UPDATE … FROM`
+ * (Prisma's typed copy path cannot touch it). Runs inside the caller's
+ * transaction so it commits atomically with the graph copy.
+ */
+export async function copyDataSlotEmbeddings(
+  exec: RawSqlExecutor,
+  sourceVersionId: string,
+  targetVersionId: string
+): Promise<void> {
+  await exec.$executeRawUnsafe(
+    `UPDATE "app_data_slot" AS tgt
+        SET "embedding" = src."embedding"
+       FROM "app_data_slot" AS src
+      WHERE tgt."versionId" = $1
+        AND src."versionId" = $2
+        AND tgt."key" = src."key"
+        AND src."embedding" IS NOT NULL`,
+    targetVersionId,
+    sourceVersionId
+  );
+}
+
 export interface EmbedVersionDataSlotsResult {
   /** Data slots embedded this run. */
   embedded: number;

@@ -19,6 +19,7 @@ const prismaMock = vi.hoisted(() => ({
 vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
 
 import {
+  copySlotEmbeddings,
   embedVersionSlots,
   ensureVersionSlotsEmbedded,
   findDuplicateSlotIds,
@@ -107,6 +108,32 @@ describe('embedVersionSlots', () => {
     prismaMock.$queryRawUnsafe.mockResolvedValue([{ id: 'b' }, { id: 'c' }]);
     (embedBatch as unknown as Mock).mockResolvedValue({ embeddings: [[0.1]] });
     await expect(embedVersionSlots('v1')).rejects.toThrow(/does not match/);
+  });
+});
+
+describe('copySlotEmbeddings', () => {
+  it('copies vectors source→target in one UPDATE … FROM keyed on key', async () => {
+    await copySlotEmbeddings(prismaMock, 'src-ver', 'tgt-ver');
+
+    expect(prismaMock.$executeRawUnsafe).toHaveBeenCalledTimes(1);
+    const [sql, ...params] = (prismaMock.$executeRawUnsafe as Mock).mock.calls[0];
+    // A single set-based copy, not a per-row loop.
+    expect(sql).toContain('UPDATE "app_question_slot"');
+    expect(sql).toContain('FROM "app_question_slot"');
+    expect(sql).toContain('tgt."key" = src."key"');
+    // Only source rows that actually have a vector are carried.
+    expect(sql).toContain('src."embedding" IS NOT NULL');
+    // $1 = target version, $2 = source version (the UPDATE writes the target).
+    expect(params).toEqual(['tgt-ver', 'src-ver']);
+  });
+
+  it('runs against the supplied executor (a transaction client), not module prisma', async () => {
+    // The fork/clone copy passes its tx client so the embedding copy commits
+    // atomically with the graph copy — verify the helper uses what it's given.
+    const tx = { $executeRawUnsafe: vi.fn().mockResolvedValue(3) };
+    await copySlotEmbeddings(tx, 'src-ver', 'tgt-ver');
+    expect(tx.$executeRawUnsafe).toHaveBeenCalledTimes(1);
+    expect(prismaMock.$executeRawUnsafe).not.toHaveBeenCalled();
   });
 });
 
