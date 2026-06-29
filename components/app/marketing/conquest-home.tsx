@@ -39,6 +39,7 @@ import {
   Gauge,
   Network,
 } from 'lucide-react';
+import { Wordmark } from '@/components/app/marketing/wordmark';
 import styles from '@/components/app/marketing/conquest-marketing.module.css';
 
 const metaDescription =
@@ -60,16 +61,6 @@ export const metadata: Metadata = {
     description: metaDescription,
   },
 };
-
-/** Reusable ConQuest wordmark: white "Con" + yellow "Quest" on dark, ink + gold on light. */
-function Wordmark() {
-  return (
-    <span className={styles.brand}>
-      <span className={styles.brandCon}>Con</span>
-      <span className={styles.brandQ}>Quest</span>
-    </span>
-  );
-}
 
 const failures = [
   {

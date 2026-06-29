@@ -26,6 +26,7 @@ import {
   Hammer,
   Sprout,
 } from 'lucide-react';
+import { Wordmark } from '@/components/app/marketing/wordmark';
 import shared from '@/components/app/marketing/conquest-marketing.module.css';
 import styles from '@/app/(public)/pricing/pricing.module.css';
 
@@ -46,16 +47,6 @@ export const metadata: Metadata = {
     description: metaDescription,
   },
 };
-
-/** Reusable ConQuest wordmark: white "Con" + yellow "Quest" on dark, ink + gold on light. */
-function Wordmark() {
-  return (
-    <span className={shared.brand}>
-      <span className={shared.brandCon}>Con</span>
-      <span className={shared.brandQ}>Quest</span>
-    </span>
-  );
-}
 
 const coreTags = [
   { icon: BarChart3, label: 'Deep analysis' },
