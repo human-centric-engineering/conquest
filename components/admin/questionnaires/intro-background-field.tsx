@@ -18,6 +18,7 @@ import { apiClient, APIClientError } from '@/lib/api/client';
 import { parseApiResponse } from '@/lib/api/parse-response';
 import { API } from '@/lib/api/endpoints';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { AutoTextarea } from '@/components/ui/auto-textarea';
@@ -31,6 +32,13 @@ export interface IntroBackgroundFieldProps {
   id?: string;
   rows?: number;
   placeholder?: string;
+  /**
+   * The questionnaire + version this field edits. When both are supplied, the Generate popover offers
+   * a "use the questionnaire goal and questions" tickbox that grounds the draft in that version's
+   * structure. Omit them (e.g. the cohort override, which isn't tied to one version) to hide it.
+   */
+  questionnaireId?: string;
+  versionId?: string;
 }
 
 const ACCEPT = '.pdf,.docx,.md,.txt';
@@ -42,6 +50,8 @@ export function IntroBackgroundField({
   id,
   rows = 6,
   placeholder,
+  questionnaireId,
+  versionId,
 }: IntroBackgroundFieldProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState<null | 'upload' | 'generate' | 'refine'>(null);
@@ -50,9 +60,25 @@ export function IntroBackgroundField({
   const [instruction, setInstruction] = useState('');
   const [generateOpen, setGenerateOpen] = useState(false);
   const [refineOpen, setRefineOpen] = useState(false);
+  // Grounding is only offered when the parent knows which version to read; default on when offered.
+  const canGround = Boolean(questionnaireId && versionId);
+  const [useQuestionnaireContext, setUseQuestionnaireContext] = useState(true);
   const generatedId = useId();
   const fieldId = id ?? generatedId;
+  const groundCheckboxId = `${fieldId}-ground`;
   const anyBusy = busy !== null || disabled;
+
+  /** The generate payload, folding in the version pair only when grounding is offered and ticked. */
+  const generatePayload = (): {
+    mode: 'generate';
+    brief: string;
+    questionnaireId?: string;
+    versionId?: string;
+  } => ({
+    mode: 'generate',
+    brief: brief.trim(),
+    ...(canGround && useQuestionnaireContext ? { questionnaireId, versionId } : {}),
+  });
 
   const onFilePicked = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -80,7 +106,7 @@ export function IntroBackgroundField({
 
   const runAuthor = async (
     payload:
-      | { mode: 'generate'; brief: string }
+      | { mode: 'generate'; brief: string; questionnaireId?: string; versionId?: string }
       | { mode: 'refine'; currentText: string; instruction: string },
     which: 'generate' | 'refine'
   ) => {
@@ -167,19 +193,32 @@ export function IntroBackgroundField({
               onKeyDown={(e) => {
                 if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && brief.trim() && !anyBusy) {
                   e.preventDefault();
-                  void runAuthor({ mode: 'generate', brief: brief.trim() }, 'generate');
+                  void runAuthor(generatePayload(), 'generate');
                 }
               }}
               placeholder="e.g. Acme is running this with its engineering teams to understand collaboration. Results shape how we support teams; responses are anonymous."
               className="min-h-24 text-sm"
               disabled={anyBusy}
             />
+            {canGround && (
+              <label
+                htmlFor={groundCheckboxId}
+                className="text-muted-foreground flex cursor-pointer items-start gap-2 text-xs"
+              >
+                <Checkbox
+                  id={groundCheckboxId}
+                  checked={useQuestionnaireContext}
+                  onCheckedChange={setUseQuestionnaireContext}
+                  disabled={anyBusy}
+                  className="mt-0.5"
+                />
+                <span>Use the questionnaire goal and questions to help generate the intro</span>
+              </label>
+            )}
             <div className="flex items-center justify-end gap-2">
               <Button
                 size="sm"
-                onClick={() =>
-                  void runAuthor({ mode: 'generate', brief: brief.trim() }, 'generate')
-                }
+                onClick={() => void runAuthor(generatePayload(), 'generate')}
                 disabled={anyBusy || !brief.trim()}
               >
                 {busy === 'generate' ? (

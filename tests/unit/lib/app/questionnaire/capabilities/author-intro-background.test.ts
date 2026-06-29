@@ -84,6 +84,26 @@ describe('generate', () => {
     const userMsg = messages.find((m) => m.role === 'user')!;
     expect(userMsg.content).toContain('Acme team survey about collaboration');
   });
+
+  it('folds questionnaireContext into the generate prompt when supplied', async () => {
+    const cap = new AppAuthorIntroBackgroundCapability();
+    await cap.execute(
+      {
+        mode: 'generate',
+        brief: 'Acme team survey',
+        questionnaireContext: 'Goal of this questionnaire:\nUnderstand collaboration',
+      },
+      CONTEXT
+    );
+
+    const messages = (runStructuredCompletion as Mock).mock.calls[0][0].messages as {
+      role: string;
+      content: string;
+    }[];
+    const userMsg = messages.find((m) => m.role === 'user')!;
+    expect(userMsg.content).toContain('Acme team survey');
+    expect(userMsg.content).toContain('Understand collaboration');
+  });
 });
 
 describe('refine', () => {
@@ -178,6 +198,23 @@ describe('redactProvenance', () => {
     expect(parsed.success).toBe(true);
     expect(parsed.data.length).toBe('some text'.length);
     expect(resultPreview).not.toContain('some text');
+  });
+
+  it('redacts questionnaireContext when present', () => {
+    const cap = new AppAuthorIntroBackgroundCapability();
+    const args = {
+      mode: 'generate' as const,
+      brief: 'a brief',
+      questionnaireContext: 'Goal: secret internal strategy',
+    };
+    const result = { success: true as const, data: { background: 'text' } };
+
+    const { args: safeArgs } = cap.redactProvenance(args, result);
+
+    expect((safeArgs as Record<string, unknown>).questionnaireContext).not.toBe(
+      'Goal: secret internal strategy'
+    );
+    expect((safeArgs as Record<string, unknown>).questionnaireContext).toBeDefined();
   });
 
   it('redacts currentText and instruction for a refine invocation on success', () => {

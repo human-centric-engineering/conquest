@@ -1098,6 +1098,11 @@ export const AUTHOR_INTRO_BACKGROUND_FUNCTION_DEFINITION: CapabilityFunctionDefi
         type: 'string',
         description: "The admin's plain-English instruction for how to rewrite the text (refine).",
       },
+      questionnaireContext: {
+        type: 'string',
+        description:
+          "Optional pre-formatted summary of the questionnaire's goal + questions, used to ground a generated intro in the subject matter (generate). Injected by the route, not the LLM.",
+      },
     },
     required: ['mode'],
   },

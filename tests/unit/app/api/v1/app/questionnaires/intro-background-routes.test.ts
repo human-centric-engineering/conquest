@@ -34,6 +34,9 @@ vi.mock('@/lib/orchestration/capabilities/dispatcher', () => ({
 }));
 vi.mock('@/lib/orchestration/capabilities', () => ({ registerBuiltInCapabilities: vi.fn() }));
 vi.mock('@/lib/orchestration/knowledge/parsers', () => ({ parseDocument: vi.fn() }));
+vi.mock('@/app/api/v1/app/questionnaires/intro-background/_lib/generation-context', () => ({
+  loadIntroGenerationContext: vi.fn(),
+}));
 
 type AnyRouteHandler = (...args: unknown[]) => Promise<Response>;
 const { POST: authorPost } =
@@ -49,6 +52,7 @@ import { composeLimiter, ingestLimiter } from '@/app/api/v1/app/questionnaires/_
 import { loadComposerAgent } from '@/app/api/v1/app/questionnaires/_lib/compose-pipeline';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
 import { parseDocument } from '@/lib/orchestration/knowledge/parsers';
+import { loadIntroGenerationContext } from '@/app/api/v1/app/questionnaires/intro-background/_lib/generation-context';
 
 type Mock = ReturnType<typeof vi.fn>;
 const ADMIN = { user: { id: 'admin-1' } };
@@ -81,6 +85,7 @@ beforeEach(() => {
     data: { background: 'Generated intro.' },
   });
   (parseDocument as Mock).mockResolvedValue({ fullText: 'Extracted document text.' });
+  (loadIntroGenerationContext as Mock).mockResolvedValue(null);
 });
 
 describe('author route', () => {
@@ -140,6 +145,42 @@ describe('author route', () => {
     expect(args).toMatchObject({ mode: 'generate', brief: 'Acme survey' });
     expect(ctx.agentId).toBe('agent-1');
     expect(ctx.entityContext.composerAgent.model).toBe('claude');
+  });
+
+  it('does not load grounding context when no version pair is sent', async () => {
+    await authorPost(jsonReq({ mode: 'generate', brief: 'Acme survey' }), ADMIN);
+    expect(loadIntroGenerationContext).not.toHaveBeenCalled();
+    const [, args] = (capabilityDispatcher.dispatch as Mock).mock.calls[0];
+    expect(args).not.toHaveProperty('questionnaireContext');
+  });
+
+  it('grounds the generate call in the version goal + questions when the pair is sent', async () => {
+    (loadIntroGenerationContext as Mock).mockResolvedValue('Goal: x\n\nQuestions:\n- a');
+    await authorPost(
+      jsonReq({ mode: 'generate', brief: 'Acme survey', questionnaireId: 'q-1', versionId: 'v-1' }),
+      ADMIN
+    );
+    expect(loadIntroGenerationContext).toHaveBeenCalledWith('q-1', 'v-1');
+    const [, args] = (capabilityDispatcher.dispatch as Mock).mock.calls[0];
+    // The ids are stripped; only the formatted context string reaches the capability.
+    expect(args).toMatchObject({
+      mode: 'generate',
+      brief: 'Acme survey',
+      questionnaireContext: 'Goal: x\n\nQuestions:\n- a',
+    });
+    expect(args).not.toHaveProperty('questionnaireId');
+    expect(args).not.toHaveProperty('versionId');
+  });
+
+  it('omits questionnaireContext when the version pair resolves to no context', async () => {
+    (loadIntroGenerationContext as Mock).mockResolvedValue(null);
+    await authorPost(
+      jsonReq({ mode: 'generate', brief: 'Acme survey', questionnaireId: 'q-1', versionId: 'v-1' }),
+      ADMIN
+    );
+    expect(loadIntroGenerationContext).toHaveBeenCalledWith('q-1', 'v-1');
+    const [, args] = (capabilityDispatcher.dispatch as Mock).mock.calls[0];
+    expect(args).not.toHaveProperty('questionnaireContext');
   });
 });
 

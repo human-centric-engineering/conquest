@@ -132,6 +132,51 @@ describe('IntroBackgroundField', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Grounding tickbox — "use the questionnaire goal and questions"
+  // -------------------------------------------------------------------------
+
+  it('hides the grounding tickbox when no questionnaire/version is supplied', async () => {
+    render(<IntroBackgroundField value="" onChange={vi.fn()} />);
+    await userEvent.click(screen.getByRole('button', { name: /generate with ai/i }));
+    expect(screen.queryByText(/use the questionnaire goal and questions/i)).not.toBeInTheDocument();
+  });
+
+  it('sends the version pair on generate when the tickbox is shown and left checked', async () => {
+    apiPost.mockResolvedValue({ background: 'Grounded intro.' });
+    const onChange = vi.fn();
+    render(
+      <IntroBackgroundField value="" onChange={onChange} questionnaireId="q-1" versionId="v-1" />
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: /generate with ai/i }));
+    // The tickbox is rendered and checked by default.
+    expect(screen.getByRole('checkbox')).toBeChecked();
+    await userEvent.type(screen.getByPlaceholderText(/acme is running this/i), 'Acme survey');
+    await userEvent.click(screen.getByRole('button', { name: /^generate$/i }));
+
+    expect(apiPost).toHaveBeenCalledWith(expect.stringContaining('/intro-background/author'), {
+      body: { mode: 'generate', brief: 'Acme survey', questionnaireId: 'q-1', versionId: 'v-1' },
+    });
+    expect(onChange).toHaveBeenCalledWith('Grounded intro.');
+  });
+
+  it('omits the version pair when the tickbox is unchecked', async () => {
+    apiPost.mockResolvedValue({ background: 'Brief-only intro.' });
+    render(
+      <IntroBackgroundField value="" onChange={vi.fn()} questionnaireId="q-1" versionId="v-1" />
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: /generate with ai/i }));
+    await userEvent.click(screen.getByRole('checkbox')); // untick
+    await userEvent.type(screen.getByPlaceholderText(/acme is running this/i), 'Acme survey');
+    await userEvent.click(screen.getByRole('button', { name: /^generate$/i }));
+
+    expect(apiPost).toHaveBeenCalledWith(expect.stringContaining('/intro-background/author'), {
+      body: { mode: 'generate', brief: 'Acme survey' },
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Refine flow (Finding 1)
   // -------------------------------------------------------------------------
 

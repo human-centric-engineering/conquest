@@ -29,10 +29,24 @@ export const authorIntroBackgroundSchema = z
     brief: z.string().trim().min(1).max(4000).optional(),
     currentText: z.string().trim().min(1).max(INTRO_BACKGROUND_MAX_LENGTH).optional(),
     instruction: z.string().trim().min(1).max(2000).optional(),
+    /**
+     * When present (generate only), the route loads this version's goal + questions and grounds the
+     * draft in them — the admin's "use the questionnaire goal and questions" opt-in. Sent together or
+     * not at all; the field's own context (questionnaire + version ids) determines the pair.
+     */
+    questionnaireId: z.string().trim().min(1).max(100).optional(),
+    versionId: z.string().trim().min(1).max(100).optional(),
   })
   .superRefine((v, ctx) => {
     if (v.mode === 'generate' && !v.brief) {
       ctx.addIssue({ code: 'custom', message: 'A brief is required to generate', path: ['brief'] });
+    }
+    if ((v.questionnaireId === undefined) !== (v.versionId === undefined)) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'questionnaireId and versionId must be sent together',
+        path: ['versionId'],
+      });
     }
     if (v.mode === 'refine' && !v.currentText) {
       ctx.addIssue({
