@@ -732,7 +732,7 @@ export default function ConquestHome() {
                 where it goes. Leave your details and you’ll be first through the door.
               </p>
               <div className={`${styles.ctaRow} ${styles.earlyAccessCta}`}>
-                <Link href="/contact" className={`${styles.btn} ${styles.btnPrimary}`}>
+                <Link href="/waitlist?from=home" className={`${styles.btn} ${styles.btnPrimary}`}>
                   Join the waitlist <ArrowRight />
                 </Link>
               </div>
@@ -784,8 +784,8 @@ export default function ConquestHome() {
             <Link href="/contact" className={`${styles.btn} ${styles.btnPrimary}`}>
               Request a demo <ArrowRight />
             </Link>
-            <Link href="/signup" className={`${styles.btn} ${styles.btnGhost}`}>
-              Get started
+            <Link href="/waitlist?from=home" className={`${styles.btn} ${styles.btnGhost}`}>
+              Join the waitlist
             </Link>
           </div>
         </div>

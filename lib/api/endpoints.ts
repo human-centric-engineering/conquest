@@ -343,6 +343,8 @@ export const API = {
     HEALTH: '/api/health',
     CONTACT: '/api/v1/contact',
     CSP_REPORT: '/api/csp-report',
+    /** ConQuest pre-launch waitlist sign-up (public, unauthenticated). */
+    WAITLIST: '/api/v1/app/waitlist',
   },
 
   /** App (ConQuest questionnaire) endpoints — flag-gated, admin-only. */
