@@ -24,9 +24,7 @@ import { executeTransaction } from '@/lib/db/utils';
 
 import { jsonInput } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
 import { copyVersionGraph } from '@/app/api/v1/app/questionnaires/_lib/copy-version-graph';
-
-/** Upper bound on a questionnaire title — matches the rename / import cap. */
-const QUESTIONNAIRE_TITLE_MAX = 200;
+import { MAX_QUESTIONNAIRE_TITLE_LENGTH } from '@/lib/app/questionnaire/title';
 
 export interface DuplicateQuestionnaireInput {
   /** The source questionnaire to copy the current version from. */
@@ -85,7 +83,10 @@ export async function duplicateQuestionnaire(
   }
 
   const suffix = input.nameSuffix?.trim() || 'Copy';
-  const newTitle = `${sourceQuestionnaire.title} — ${suffix}`.slice(0, QUESTIONNAIRE_TITLE_MAX);
+  const newTitle = `${sourceQuestionnaire.title} — ${suffix}`.slice(
+    0,
+    MAX_QUESTIONNAIRE_TITLE_LENGTH
+  );
 
   const result = await executeTransaction(async (tx) => {
     const newQuestionnaire = await tx.appQuestionnaire.create({

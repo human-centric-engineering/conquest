@@ -134,6 +134,14 @@ export interface SessionWorkspaceProps {
   intro?: ResolvedSessionIntro | null;
 }
 
+// Static label/icon lookup for the carousel toggle — module-scoped so it isn't
+// reallocated on every render (the workspace re-renders on each streaming token).
+const VIEW_META: Record<WorkspaceView, { label: string; Icon: typeof BookOpen }> = {
+  intro: { label: 'Intro', Icon: BookOpen },
+  chat: { label: 'Chat', Icon: MessageSquare },
+  form: { label: 'Form', Icon: ListChecks },
+};
+
 export function SessionWorkspace({
   sessionId,
   accessToken,
@@ -412,11 +420,6 @@ export function SessionWorkspace({
 
   // The carousel toggle's segments, derived from the present surfaces (left→right). Shown whenever
   // there's more than one surface to move between — chat↔form, or intro alongside either.
-  const VIEW_META: Record<WorkspaceView, { label: string; Icon: typeof BookOpen }> = {
-    intro: { label: 'Intro', Icon: BookOpen },
-    chat: { label: 'Chat', Icon: MessageSquare },
-    form: { label: 'Form', Icon: ListChecks },
-  };
   const toggleItems: ToggleItem[] = views.map((id) => ({ id, ...VIEW_META[id] }));
   const showToggle = views.length > 1;
 

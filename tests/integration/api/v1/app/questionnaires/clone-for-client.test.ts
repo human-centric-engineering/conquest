@@ -44,6 +44,7 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/copy-version-graph', () => ({
     sectionIdMap: new Map(),
     questionIdMap: new Map(),
     tagIdMap: new Map(),
+    dataSlotIdMap: new Map(),
   })),
 }));
 

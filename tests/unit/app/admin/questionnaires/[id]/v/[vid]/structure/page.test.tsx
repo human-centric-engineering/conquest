@@ -38,6 +38,7 @@ const { mockNotFound } = vi.hoisted(() => ({
 vi.mock('next/navigation', () => ({
   notFound: mockNotFound,
   redirect: vi.fn(),
+  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
 }));
 
 // ─── Workspace-data mock ──────────────────────────────────────────────────────

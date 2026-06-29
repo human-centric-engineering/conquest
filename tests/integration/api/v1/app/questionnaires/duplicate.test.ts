@@ -39,10 +39,13 @@ vi.mock('@/lib/db/utils', () => ({
   executeTransaction: vi.fn(async (cb: (tx: typeof txMock) => unknown) => cb(txMock)),
 }));
 vi.mock('@/app/api/v1/app/questionnaires/_lib/copy-version-graph', () => ({
+  // Mirrors the real CopiedGraphMaps shape (all four id maps) so the stub can't
+  // drift behind the interface even though the service discards the return value.
   copyVersionGraph: vi.fn(async () => ({
     sectionIdMap: new Map(),
     questionIdMap: new Map(),
     tagIdMap: new Map(),
+    dataSlotIdMap: new Map(),
   })),
 }));
 
@@ -123,13 +126,21 @@ describe('POST …/duplicate — resolution', () => {
     (prisma.appQuestionnaire.findUnique as Mock).mockResolvedValue(null);
     const res = await POST(req({}), ctx('qn-x'));
     expect(res.status).toBe(404);
-    expect((await res.json()).error.code).toBe('NOT_FOUND');
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('NOT_FOUND');
   });
 
   it('404s when the questionnaire has no version to duplicate', async () => {
     (prisma.appQuestionnaireVersion.findFirst as Mock).mockResolvedValue(null);
     const res = await POST(req({}), ctx('qn-1'));
     expect(res.status).toBe(404);
+    // Full error envelope — a future refactor returning success:true with an error
+    // block would slip past a status-only check.
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('NOT_FOUND');
+    expect(body.error.message).toMatch(/no version/i);
   });
 
   it('prefers the launched version over a later draft', async () => {
@@ -138,6 +149,24 @@ describe('POST …/duplicate — resolution', () => {
       where: { questionnaireId: 'qn-1', status: 'launched' },
     });
     expect(copyVersionGraph).toHaveBeenCalledWith(expect.anything(), 'ver-launched', 'ver-new');
+  });
+
+  it('falls back to the highest-numbered version when none is launched', async () => {
+    // No launched version → the service's `launched ?? latest` fallback fires and the
+    // second findFirst (no status filter) resolves the draft that gets copied.
+    const DRAFT = { ...VERSION, id: 'ver-draft' };
+    (prisma.appQuestionnaireVersion.findFirst as Mock)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(DRAFT);
+
+    const res = await POST(req({}), ctx('qn-1'));
+
+    expect(res.status).toBe(201);
+    // The launched probe carried the status filter; the fallback probe did not.
+    const calls = (prisma.appQuestionnaireVersion.findFirst as Mock).mock.calls;
+    expect(calls[0][0]).toMatchObject({ where: { questionnaireId: 'qn-1', status: 'launched' } });
+    expect(calls[1][0].where).toEqual({ questionnaireId: 'qn-1' });
+    expect(copyVersionGraph).toHaveBeenCalledWith(expect.anything(), 'ver-draft', 'ver-new');
   });
 });
 
@@ -155,7 +184,8 @@ describe('POST …/duplicate — happy path', () => {
     expect(data).toMatchObject({ title: 'Customer NPS — Copy', status: 'draft' });
     expect(data).not.toHaveProperty('demoClientId');
 
-    // Fresh v1, goal/audience copied from the source version.
+    // Fresh v1, all of goal/audience/provenance copied from the source version
+    // (asserting every copied field so none can silently stop carrying over).
     expect(txMock.appQuestionnaireVersion.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -163,6 +193,9 @@ describe('POST …/duplicate — happy path', () => {
           versionNumber: 1,
           status: 'draft',
           goal: 'Understand satisfaction',
+          audience: VERSION.audience,
+          goalProvenance: 'inferred',
+          audienceProvenance: VERSION.audienceProvenance,
         }),
       })
     );
@@ -183,5 +216,39 @@ describe('POST …/duplicate — happy path', () => {
   it('uses a custom name suffix when supplied', async () => {
     await POST(req({ nameSuffix: 'Pilot' }), ctx('qn-1'));
     expect(txMock.appQuestionnaire.create.mock.calls[0][0].data.title).toBe('Customer NPS — Pilot');
+  });
+
+  it('copies the source-document provenance row when one exists', async () => {
+    // Best-effort provenance carry: a present source doc is re-created against the new
+    // version (raw bytes were never persisted, so only the parsed metadata/text copies).
+    txMock.appQuestionnaireSourceDocument.findFirst.mockResolvedValue({
+      fileName: 'survey.pdf',
+      fileHash: 'sha256:abc',
+      byteSize: 2048,
+      mimeType: 'application/pdf',
+      pageCount: 3,
+      warnings: ['truncated'],
+      extractedText: 'Q1. ...',
+    });
+
+    const res = await POST(req({}), ctx('qn-1'));
+
+    expect(res.status).toBe(201);
+    expect(txMock.appQuestionnaireSourceDocument.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          versionId: 'ver-new',
+          fileName: 'survey.pdf',
+          fileHash: 'sha256:abc',
+          pageCount: 3,
+        }),
+      })
+    );
+  });
+
+  it('skips source-document provenance when the source has none', async () => {
+    // Default beforeEach already returns null; assert the create is genuinely skipped.
+    await POST(req({}), ctx('qn-1'));
+    expect(txMock.appQuestionnaireSourceDocument.create).not.toHaveBeenCalled();
   });
 });

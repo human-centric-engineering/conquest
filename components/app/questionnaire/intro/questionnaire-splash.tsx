@@ -141,12 +141,12 @@ export function QuestionnaireSplash({
                   About this questionnaire
                 </h2>
                 <div
-                  className="relative overflow-hidden rounded-2xl border py-4 pr-5 pl-6"
+                  className="relative overflow-hidden rounded-2xl border py-5 pr-6 pl-7"
                   style={{ borderColor: ACCENT_HAIRLINE, backgroundColor: ACCENT_SOFT }}
                 >
                   <span
                     aria-hidden
-                    className="absolute inset-y-3 left-0 w-[3px] rounded-full"
+                    className="absolute inset-y-4 left-2.5 w-[3px] rounded-full"
                     style={{ background: CTA_FILL }}
                   />
                   <div className="prose prose-sm dark:prose-invert text-foreground/90 prose-p:leading-relaxed max-w-none">

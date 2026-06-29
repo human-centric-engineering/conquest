@@ -10,8 +10,9 @@
  * @see components/admin/questionnaires/questionnaires-table.tsx
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({
@@ -23,6 +24,27 @@ vi.mock('next/navigation', () => ({
     prefetch: vi.fn(),
   }),
 }));
+
+// The row-actions menu's Duplicate item drives the shared duplicate hook. Mock it so
+// state (isDuplicating / error) and the duplicate() call are controllable per test —
+// every test in this file renders the table, so a default is reset in beforeEach.
+const mockDuplicate = vi.fn();
+const mockUseDuplicate = vi.fn();
+vi.mock('@/components/admin/questionnaires/use-duplicate-questionnaire', () => ({
+  useDuplicateQuestionnaire: () => mockUseDuplicate(),
+}));
+
+beforeEach(() => {
+  // Clear accumulated call history on every mock (incl. mockUseDuplicate itself), then
+  // re-arm the default state — otherwise the hook factory's call log persists across tests.
+  vi.clearAllMocks();
+  mockUseDuplicate.mockReturnValue({
+    duplicate: mockDuplicate,
+    isDuplicating: false,
+    error: null,
+    clearError: vi.fn(),
+  });
+});
 
 import { QuestionnairesTable } from '@/components/admin/questionnaires/questionnaires-table';
 import type { QuestionnaireListItem } from '@/lib/app/questionnaire/views';
@@ -102,5 +124,65 @@ describe('QuestionnairesTable demo-client column', () => {
 
     // The owner cell falls back to a muted em-dash rather than rendering blank.
     expect(screen.getByText('—')).toBeInTheDocument();
+  });
+});
+
+describe('QuestionnairesTable row actions (Duplicate)', () => {
+  it('renders a per-row actions trigger labelled with the questionnaire title', () => {
+    render(
+      <QuestionnairesTable
+        initialItems={[item({ title: 'Onboarding survey' })]}
+        initialMeta={{ ...META, total: 1 }}
+      />
+    );
+
+    expect(
+      screen.getByRole('button', { name: /actions for onboarding survey/i })
+    ).toBeInTheDocument();
+  });
+
+  it('calls duplicate() with the row id when the Duplicate item is selected', async () => {
+    const user = userEvent.setup();
+    render(
+      <QuestionnairesTable
+        initialItems={[item({ id: 'qn-42', title: 'Onboarding survey' })]}
+        initialMeta={{ ...META, total: 1 }}
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: /actions for onboarding survey/i }));
+    const duplicateItem = await screen.findByRole('menuitem', { name: /duplicate/i });
+    await user.click(duplicateItem);
+
+    expect(mockDuplicate).toHaveBeenCalledExactlyOnceWith('qn-42');
+  });
+
+  it('disables every row-actions trigger while a duplicate is in flight', () => {
+    mockUseDuplicate.mockReturnValue({
+      duplicate: mockDuplicate,
+      isDuplicating: true,
+      error: null,
+      clearError: vi.fn(),
+    });
+    render(
+      <QuestionnairesTable
+        initialItems={[item({ title: 'Onboarding survey' })]}
+        initialMeta={{ ...META, total: 1 }}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: /actions for onboarding survey/i })).toBeDisabled();
+  });
+
+  it('surfaces a duplicate error from the hook', () => {
+    mockUseDuplicate.mockReturnValue({
+      duplicate: mockDuplicate,
+      isDuplicating: false,
+      error: 'Could not duplicate the questionnaire.',
+      clearError: vi.fn(),
+    });
+    render(<QuestionnairesTable initialItems={[item()]} initialMeta={{ ...META, total: 1 }} />);
+
+    expect(screen.getByText(/could not duplicate the questionnaire/i)).toBeInTheDocument();
   });
 });
