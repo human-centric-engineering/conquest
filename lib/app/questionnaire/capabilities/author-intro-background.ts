@@ -55,6 +55,12 @@ const argsSchema = z
     brief: z.string().min(1).optional(),
     currentText: z.string().min(1).optional(),
     instruction: z.string().min(1).optional(),
+    /**
+     * Pre-formatted summary of the questionnaire's goal + questions (generate only). Injected by the
+     * author route when the admin opts to ground the intro in the questionnaire; the capability is
+     * Prisma-free, so it never loads this itself.
+     */
+    questionnaireContext: z.string().min(1).optional(),
   })
   .superRefine((v, ctx) => {
     if (v.mode === 'generate' && !v.brief) {
@@ -128,6 +134,9 @@ export class AppAuthorIntroBackgroundCapability extends BaseCapability<
       ...(args.brief !== undefined ? { brief: redactedString('brief') } : {}),
       ...(args.currentText !== undefined ? { currentText: redactedString('currentText') } : {}),
       ...(args.instruction !== undefined ? { instruction: redactedString('instruction') } : {}),
+      ...(args.questionnaireContext !== undefined
+        ? { questionnaireContext: redactedString('questionnaireContext') }
+        : {}),
     };
     let preview: string;
     if (result.success && result.data) {
@@ -176,7 +185,7 @@ export class AppAuthorIntroBackgroundCapability extends BaseCapability<
 
     const messages =
       args.mode === 'generate'
-        ? buildGenerateIntroBackgroundPrompt(args.brief ?? '')
+        ? buildGenerateIntroBackgroundPrompt(args.brief ?? '', args.questionnaireContext)
         : buildRefineIntroBackgroundPrompt(args.currentText ?? '', args.instruction ?? '');
 
     let completion: StructuredCompletionResult<{ background: string }>;

@@ -70,4 +70,17 @@ describe('QuestionnaireSplash', () => {
     await userEvent.click(button);
     expect(onProceed).toHaveBeenCalledTimes(1);
   });
+
+  it('labels the CTA "Continue" only once the respondent has made progress', () => {
+    // Default (no progress) keeps the begin label even though the workspace may be "started".
+    const { rerender } = render(<QuestionnaireSplash intro={intro()} onProceed={vi.fn()} />);
+    expect(screen.getByRole('button', { name: /start the conversation/i })).toBeInTheDocument();
+
+    // With progress (≥1 answer), it switches to Continue.
+    rerender(<QuestionnaireSplash intro={intro()} inProgress onProceed={vi.fn()} />);
+    expect(screen.getByRole('button', { name: /continue/i })).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /start the conversation/i })
+    ).not.toBeInTheDocument();
+  });
 });

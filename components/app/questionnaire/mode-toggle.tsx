@@ -1,55 +1,77 @@
 'use client';
 
 /**
- * ModeToggle — the compact chat ↔ form switch for "both" presentation mode (P-presentation).
+ * ModeToggle — the compact segmented switch for the workspace's surfaces (P-presentation).
  *
  * A small segmented pill with a sliding accent indicator, sized to sit inline on the session
- * lifecycle strip (no dedicated row). The slide telegraphs the carousel transition the
- * workspace runs between the two surfaces; it's always visible so the respondent knows the
- * form escape-hatch is one tap away. Honours `prefers-reduced-motion`.
+ * lifecycle strip (no dedicated row). The slide telegraphs the carousel transition the workspace
+ * runs between surfaces; it's always visible so the respondent knows every surface — the form
+ * escape-hatch, and (when present) the Intro recap — is one tap away. Honours
+ * `prefers-reduced-motion`.
+ *
+ * Generic over its `items`: two segments for plain chat ↔ form, three when an Intro recap rides
+ * alongside. The indicator width and offset are computed from the item count, so any 2–3 segment
+ * set lands pixel-aligned without bespoke classes.
  */
 
-import { MessageSquare, ListChecks } from 'lucide-react';
+import { MessageSquare, ListChecks, type LucideIcon } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 
 export type SessionView = 'chat' | 'form';
 
-const ITEMS: { id: SessionView; label: string; Icon: typeof MessageSquare }[] = [
+export interface ToggleItem {
+  /** Stable id reported to `onChange` and matched against `value`. */
+  id: string;
+  label: string;
+  Icon: LucideIcon;
+}
+
+const DEFAULT_ITEMS: ToggleItem[] = [
   { id: 'chat', label: 'Chat', Icon: MessageSquare },
   { id: 'form', label: 'Form', Icon: ListChecks },
 ];
 
 export interface ModeToggleProps {
-  value: SessionView;
-  onChange: (view: SessionView) => void;
+  value: string;
+  onChange: (view: string) => void;
+  /** The segments, left→right. Defaults to chat ↔ form. */
+  items?: ToggleItem[];
   className?: string;
 }
 
-export function ModeToggle({ value, onChange, className }: ModeToggleProps) {
+export function ModeToggle({ value, onChange, items = DEFAULT_ITEMS, className }: ModeToggleProps) {
+  const count = items.length;
+  // Clamp so an unknown value parks the indicator under the first segment rather than off-track.
+  const activeIndex = Math.max(
+    0,
+    items.findIndex((item) => item.id === value)
+  );
+
   return (
     <div
       role="tablist"
       aria-label="How to answer"
       className={cn(
-        'bg-muted/70 relative inline-grid grid-cols-2 rounded-full border p-1 backdrop-blur',
+        'bg-muted/70 relative inline-grid rounded-full border p-1 backdrop-blur',
         className
       )}
+      style={{ gridTemplateColumns: `repeat(${count}, minmax(0, 1fr))` }}
     >
-      {/* Sliding accent indicator. p-1 = 4px, so width 50%-4px starting at left-1 lands exactly
-          under each segment when translated by its own width. */}
+      {/* Sliding accent indicator. p-1 = 4px each side (0.5rem total), so a segment is
+          (100% - 0.5rem)/count wide; translating by its own width per index lands it exactly
+          under each segment from the left-1 origin. (count=2 → the legacy 50%-4px geometry.) */}
       <span
         aria-hidden="true"
-        className={cn(
-          'absolute inset-y-1 left-1 w-[calc(50%-4px)] rounded-full shadow-sm transition-transform duration-300 ease-out motion-reduce:transition-none',
-          value === 'form' && 'translate-x-full'
-        )}
+        className="absolute inset-y-1 left-1 rounded-full shadow-sm transition-transform duration-300 ease-out motion-reduce:transition-none"
         style={{
+          width: `calc((100% - 0.5rem) / ${count})`,
+          transform: `translateX(${activeIndex * 100}%)`,
           background:
             'var(--app-cta-gradient, var(--app-cta-color, var(--cq-accent, var(--color-primary))))',
         }}
       />
-      {ITEMS.map(({ id, label, Icon }) => {
+      {items.map(({ id, label, Icon }) => {
         const active = id === value;
         return (
           <button

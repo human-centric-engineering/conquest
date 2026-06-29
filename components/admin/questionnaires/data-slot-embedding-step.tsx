@@ -18,15 +18,18 @@ import { EmbeddingCoverageStep } from '@/components/admin/questionnaires/embeddi
 export function DataSlotEmbeddingStep({
   questionnaireId,
   versionId,
+  busy = false,
 }: {
   questionnaireId: string;
   versionId: string;
+  /** True while a sibling config mutation is in flight — disables the generate button to avoid overlap. */
+  busy?: boolean;
 }) {
   return (
     <EmbeddingCoverageStep
       questionnaireId={questionnaireId}
       versionId={versionId}
-      busy={false}
+      busy={busy}
       endpoint={API.APP.QUESTIONNAIRES.versionEmbedDataSlots}
       title="Adaptive data-slot selection needs embeddings"
       nounPlural="data slots"

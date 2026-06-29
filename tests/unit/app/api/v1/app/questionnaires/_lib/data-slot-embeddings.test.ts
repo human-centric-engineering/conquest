@@ -19,6 +19,7 @@ const prismaMock = vi.hoisted(() => ({
 vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
 
 import {
+  copyDataSlotEmbeddings,
   dataSlotEmbeddingCoverage,
   embedVersionDataSlots,
   ensureVersionDataSlotsEmbedded,
@@ -120,6 +121,28 @@ describe('embedVersionDataSlots', () => {
 
     // The embedding text should be just the name, not "Revenue\n\n".
     expect(embedBatch).toHaveBeenCalledWith(['Revenue'], undefined, 'document');
+  });
+});
+
+describe('copyDataSlotEmbeddings', () => {
+  it('copies vectors source→target in one UPDATE … FROM keyed on key', async () => {
+    await copyDataSlotEmbeddings(prismaMock, 'src-ver', 'tgt-ver');
+
+    expect(prismaMock.$executeRawUnsafe).toHaveBeenCalledTimes(1);
+    const [sql, ...params] = (prismaMock.$executeRawUnsafe as Mock).mock.calls[0];
+    expect(sql).toContain('UPDATE "app_data_slot"');
+    expect(sql).toContain('FROM "app_data_slot"');
+    expect(sql).toContain('tgt."key" = src."key"');
+    expect(sql).toContain('src."embedding" IS NOT NULL');
+    // $1 = target version, $2 = source version.
+    expect(params).toEqual(['tgt-ver', 'src-ver']);
+  });
+
+  it('runs against the supplied executor (a transaction client), not module prisma', async () => {
+    const tx = { $executeRawUnsafe: vi.fn().mockResolvedValue(2) };
+    await copyDataSlotEmbeddings(tx, 'src-ver', 'tgt-ver');
+    expect(tx.$executeRawUnsafe).toHaveBeenCalledTimes(1);
+    expect(prismaMock.$executeRawUnsafe).not.toHaveBeenCalled();
   });
 });
 

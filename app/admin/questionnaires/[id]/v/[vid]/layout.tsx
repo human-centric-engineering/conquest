@@ -19,6 +19,8 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
 import { BreadcrumbLabel } from '@/components/admin/breadcrumb-context';
+import { DuplicateQuestionnaireButton } from '@/components/admin/questionnaires/workspace/duplicate-questionnaire-button';
+import { EditableTitle } from '@/components/admin/questionnaires/workspace/editable-title';
 import { QuestionnaireSubNav } from '@/components/admin/questionnaires/workspace/questionnaire-sub-nav';
 import { VersionSelector } from '@/components/admin/questionnaires/workspace/version-selector';
 import { PreviewRespondentButton } from '@/components/admin/questionnaires/workspace/preview-respondent-button';
@@ -107,12 +109,13 @@ export default async function QuestionnaireWorkspaceLayout({ params, children }:
       <header className="bg-background sticky top-0 z-30 -mx-6 space-y-3 px-6 pt-3 pb-0">
         <div>
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-2xl font-semibold">{detail.title}</h1>
+            <EditableTitle questionnaireId={id} title={detail.title} />
             {viewingLive && <Badge variant={liveBadge.variant}>{liveBadge.label}</Badge>}
             <div className="ml-auto flex items-center gap-2">
               {/* Quick "view a session by reference" — present wherever sessions can exist. */}
               {flags.liveSessions && <SessionRefLookup compact />}
               {previewAvailable && <PreviewRespondentButton versionId={selected.id} />}
+              <DuplicateQuestionnaireButton questionnaireId={id} />
               <VersionSelector
                 questionnaireId={id}
                 versionId={selected.id}

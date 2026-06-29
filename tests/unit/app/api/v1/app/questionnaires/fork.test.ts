@@ -69,6 +69,9 @@ const tx = {
   appQuestionnaireConfig: {
     create: vi.fn(async () => ({ id: 'newcfg-1' })),
   },
+  // copyVersionGraph carries the pgvector embeddings via raw UPDATE … FROM (the
+  // `embedding` column is Prisma-Unsupported), inside the same transaction.
+  $executeRawUnsafe: vi.fn(async () => 0),
 };
 
 function scoped(overrides: Partial<ScopedVersion> = {}): ScopedVersion {
@@ -202,6 +205,23 @@ describe('forkVersionIfLaunched — fork', () => {
       unknown
     >;
     expect(second).not.toHaveProperty('description');
+  });
+
+  it('carries the question-slot and data-slot embeddings over to the fork', async () => {
+    // Regression: a fork used to land adaptive-blind because the typed copy can't
+    // touch the Prisma-Unsupported `embedding` column. The graph copy now issues a
+    // raw UPDATE … FROM for each slot table, keyed on the per-version-unique `key`.
+    await forkVersionIfLaunched(scoped());
+
+    const tables = (tx.$executeRawUnsafe as Mock).mock.calls.map((c) => c[0] as string);
+    const questionCopy = tables.find((sql) => sql.includes('"app_question_slot"'));
+    const dataCopy = tables.find((sql) => sql.includes('"app_data_slot"'));
+    expect(questionCopy).toMatch(/tgt\."key" = src\."key"/);
+    expect(dataCopy).toMatch(/tgt\."key" = src\."key"/);
+    // Both write the new draft (v2) from the source version (v1): $1=target, $2=source.
+    for (const call of (tx.$executeRawUnsafe as Mock).mock.calls) {
+      expect(call.slice(1)).toEqual(['v2', 'v1']);
+    }
   });
 
   it('deep-copies questions preserving ordinal, key, type, and typeConfig', async () => {

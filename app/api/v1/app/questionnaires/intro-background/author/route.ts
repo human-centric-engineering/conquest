@@ -27,6 +27,7 @@ import type { AuthorIntroBackgroundData } from '@/lib/app/questionnaire/capabili
 import { composeLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
 import { loadComposerAgent } from '@/app/api/v1/app/questionnaires/_lib/compose-pipeline';
 import { authorIntroBackgroundSchema } from '@/app/api/v1/app/questionnaires/intro-background/_lib/input';
+import { loadIntroGenerationContext } from '@/app/api/v1/app/questionnaires/intro-background/_lib/generation-context';
 
 /** Map a capability dispatch error code to an HTTP status (mirrors the compose pipeline). */
 function dispatchErrorStatus(code: string | undefined): number {
@@ -80,11 +81,21 @@ const handleAuthor = withAdminAuth(async (request: NextRequest, session) => {
   if (!agentResult.ok) return agentResult.response;
   const agent = agentResult.value;
 
+  // Ground a generated intro in the questionnaire's goal + questions when the admin opted in (the
+  // field sends the version pair). A mismatched/empty version yields null → generate from the brief
+  // alone. The ids stay out of the capability args — it only ever sees the formatted context string.
+  const { questionnaireId, versionId, ...authorArgs } = body.data;
+  let questionnaireContext: string | undefined;
+  if (body.data.mode === 'generate' && questionnaireId && versionId) {
+    questionnaireContext =
+      (await loadIntroGenerationContext(questionnaireId, versionId)) ?? undefined;
+  }
+
   registerBuiltInCapabilities();
 
   const dispatch = await capabilityDispatcher.dispatch(
     AUTHOR_INTRO_BACKGROUND_CAPABILITY_SLUG,
-    body.data,
+    { ...authorArgs, ...(questionnaireContext ? { questionnaireContext } : {}) },
     {
       userId: adminId,
       agentId: agent.id,
@@ -118,6 +129,7 @@ const handleAuthor = withAdminAuth(async (request: NextRequest, session) => {
     adminId,
     mode: body.data.mode,
     chars: data.background.length,
+    grounded: questionnaireContext !== undefined,
     clientIp,
   });
   return successResponse({ background: data.background });

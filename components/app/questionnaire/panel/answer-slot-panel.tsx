@@ -62,6 +62,21 @@ import { InlineAnswerEditor } from '@/components/app/questionnaire/panel/inline-
 /** How long a scrolled-to slot keeps its highlight ring (ms). */
 const HIGHLIGHT_MS = 1500;
 
+// Brand-tint tokens, shared with the intro splash so the captured-context panel reads as a sibling
+// surface (white-labelled via the page's `BrandThemeProvider` vars). A faint accent wash over the
+// card paper, a hairline header band, and the CTA gradient for the top ribbon.
+const ACCENT = 'var(--app-accent-color, var(--color-primary))';
+const ACCENT_CARD =
+  'color-mix(in srgb, var(--app-accent-color, var(--color-primary)) 2.5%, var(--color-card))';
+const ACCENT_HEADER =
+  'color-mix(in srgb, var(--app-accent-color, var(--color-primary)) 5%, var(--color-card))';
+// Slot cards sit on the faint panel wash as crisp, near-neutral paper so the surface doesn't read as
+// one flat pink field — just a whisper of accent to keep them tied to the brand.
+const ACCENT_SLOT =
+  'color-mix(in srgb, var(--app-accent-color, var(--color-primary)) 1.5%, var(--color-card))';
+const CTA_FILL =
+  'var(--app-cta-gradient, var(--app-cta-color, var(--cq-accent, var(--color-primary))))';
+
 /**
  * What the captured-context panel is *for* — shown in full on the first turn (when nothing is
  * captured yet) and tucked behind a "How this works" disclosure thereafter. Names the mechanic the
@@ -141,17 +156,28 @@ function ProgressHeading({ view }: { view: AnswerPanelView }) {
       avgConfidence !== null ? `${completion} · avg confidence ${avgConfidence}%` : completion;
   }
   return (
-    <div className="border-b px-4 py-3">
+    <div
+      className="border-b px-4 py-3"
+      style={{
+        backgroundColor: ACCENT_HEADER,
+        borderColor: 'color-mix(in srgb, var(--color-border) 70%, transparent)',
+      }}
+    >
       {/* Title row: the heading on the left, with the "How this works" explainer tucked into a compact
           top-right modal link so it never costs vertical space in the header. */}
       <div className="flex items-start justify-between gap-2">
-        <h2 className="text-sm font-semibold">
+        <h2 className="flex items-center gap-2 text-sm font-semibold">
+          <span
+            aria-hidden
+            className="h-1.5 w-1.5 shrink-0 rounded-full"
+            style={{ backgroundColor: ACCENT }}
+          />
           {dataSlotMode ? 'Capturing your context' : 'Your answers'}
         </h2>
         {dataSlotMode ? <HowThisWorksDialog /> : null}
       </div>
       {(!dataSlotMode || capturedCount > 0) && (
-        <p className="text-muted-foreground mt-0.5 text-xs tabular-nums">{summary}</p>
+        <p className="text-muted-foreground mt-0.5 pl-3.5 text-xs tabular-nums">{summary}</p>
       )}
     </div>
   );
@@ -248,6 +274,8 @@ function DataSlotRow({
         // until a newer turn fills), rather than breathing indefinitely.
         recentlyFilled && 'cq-fill-glow-once'
       )}
+      // Skip the resting wash on recently-filled rows so `cq-fill-glow-once` keeps its lingering mark.
+      style={recentlyFilled ? undefined : { backgroundColor: ACCENT_SLOT }}
     >
       <div className="flex items-start gap-2">
         <ConfidenceIndicator
@@ -591,8 +619,14 @@ export function AnswerSlotPanel({
   return (
     <aside
       aria-label="Your answers"
-      className={cn('bg-card flex h-full min-h-0 flex-col rounded-xl border', className)}
+      className={cn(
+        'relative flex h-full min-h-0 flex-col overflow-hidden rounded-xl border',
+        className
+      )}
+      style={{ backgroundColor: ACCENT_CARD }}
     >
+      {/* Brand accent ribbon — ties the panel to the intro splash card. */}
+      <span aria-hidden className="block h-1 w-full shrink-0" style={{ background: CTA_FILL }} />
       {view === null ? (
         <div className="text-muted-foreground flex flex-1 items-center justify-center p-6 text-sm">
           {loading ? 'Loading your answers…' : 'No answers yet.'}

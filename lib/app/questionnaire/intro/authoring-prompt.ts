@@ -26,14 +26,26 @@ Rules:
 
 Return ONLY a JSON object of the form {"background": "<markdown string>"} with no other text.`;
 
-/** Generate a fresh intro background from a plain-English brief. */
-export function buildGenerateIntroBackgroundPrompt(brief: string): LlmMessage[] {
+/**
+ * Generate a fresh intro background from a plain-English brief.
+ *
+ * `questionnaireContext` (optional) is a pre-formatted summary of the questionnaire's goal and the
+ * questions it asks — supplied when the admin ticks "use the questionnaire goal and questions". It
+ * grounds the intro in what the questionnaire actually covers without the admin re-typing it; the
+ * brief still leads (it carries the who/why the structure can't), and the rules below forbid copying
+ * the questions out verbatim.
+ */
+export function buildGenerateIntroBackgroundPrompt(
+  brief: string,
+  questionnaireContext?: string
+): LlmMessage[] {
+  const context = questionnaireContext?.trim();
+  const userContent = context
+    ? `Write the intro background from this brief:\n\n${brief}\n\nFor grounding, here is what this questionnaire actually covers — use it to make the intro accurate and specific about the subject matter, but do NOT list the questions verbatim or turn the intro into instructions:\n\n${context}`
+    : `Write the intro background from this brief:\n\n${brief}`;
   return [
     { role: 'system', content: SHARED_RULES },
-    {
-      role: 'user',
-      content: `Write the intro background from this brief:\n\n${brief}`,
-    },
+    { role: 'user', content: userContent },
   ];
 }
 

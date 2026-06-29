@@ -47,6 +47,30 @@ describe('authorIntroBackgroundSchema', () => {
       false
     );
   });
+
+  it('accepts a generate request with a questionnaire + version pair', () => {
+    const r = authorIntroBackgroundSchema.safeParse({
+      mode: 'generate',
+      brief: 'x',
+      questionnaireId: 'q-1',
+      versionId: 'v-1',
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it('rejects when only one of questionnaireId / versionId is sent', () => {
+    expect(
+      authorIntroBackgroundSchema.safeParse({
+        mode: 'generate',
+        brief: 'x',
+        questionnaireId: 'q-1',
+      }).success
+    ).toBe(false);
+    expect(
+      authorIntroBackgroundSchema.safeParse({ mode: 'generate', brief: 'x', versionId: 'v-1' })
+        .success
+    ).toBe(false);
+  });
 });
 
 function uploadRequest(file: File | null): Request {

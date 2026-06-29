@@ -21,8 +21,8 @@
  * prop-drilling.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { ClipboardList } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { BookOpen, ClipboardList, ListChecks, MessageSquare } from 'lucide-react';
 
 import { useQuestionnaireSessionStream } from '@/lib/hooks/use-questionnaire-session-stream';
 import { useAnswerPanel } from '@/lib/hooks/use-answer-panel';
@@ -38,7 +38,8 @@ import {
   diffNewlyFilledQuestions,
 } from '@/lib/app/questionnaire/panel/newly-filled';
 import { buildCorrectionTargets } from '@/lib/app/questionnaire/panel/correction-targets';
-import { ModeToggle } from '@/components/app/questionnaire/mode-toggle';
+import { ModeToggle, type ToggleItem } from '@/components/app/questionnaire/mode-toggle';
+import { QuestionnaireSplash } from '@/components/app/questionnaire/intro/questionnaire-splash';
 import { SessionLifecycleBar } from '@/components/app/questionnaire/lifecycle/session-lifecycle-bar';
 import { CompletionOffer } from '@/components/app/questionnaire/lifecycle/completion-offer';
 import { SessionComplete } from '@/components/app/questionnaire/lifecycle/session-complete';
@@ -55,6 +56,10 @@ import type {
 } from '@/lib/app/questionnaire/panel/types';
 import type { PresentationMode, ReasoningPlacement } from '@/lib/app/questionnaire/types';
 import type { SessionStatusView } from '@/lib/app/questionnaire/session/status-view';
+import type { ResolvedSessionIntro } from '@/lib/app/questionnaire/intro/resolve';
+
+/** Which surface the carousel is showing. `intro` only exists on a fresh, intro-enabled session. */
+type WorkspaceView = 'intro' | 'chat' | 'form';
 
 export interface SessionWorkspaceProps {
   sessionId: string;
@@ -117,7 +122,25 @@ export interface SessionWorkspaceProps {
    * `accessToken` instead, getting the full interactive workspace.
    */
   readOnly?: boolean;
+  /**
+   * Resolved respondent intro (F-intro). When enabled, the splash rides the carousel as an `intro`
+   * view rather than a separate pre-gate — the respondent slides between it and the conversation via
+   * the toggle, and can return to re-read it any time. On a FRESH session (`autoStart`) the workspace
+   * opens on the intro and defers the LLM kickoff until they first leave it, so — exactly as with the
+   * old pre-gate — no turn is spent before they begin. On a RESUME the conversation is already on
+   * screen, so it opens there with the intro one tap away. A disabled intro or the read-only viewer
+   * omit the surface entirely.
+   */
+  intro?: ResolvedSessionIntro | null;
 }
+
+// Static label/icon lookup for the carousel toggle — module-scoped so it isn't
+// reallocated on every render (the workspace re-renders on each streaming token).
+const VIEW_META: Record<WorkspaceView, { label: string; Icon: typeof BookOpen }> = {
+  intro: { label: 'Intro', Icon: BookOpen },
+  chat: { label: 'Chat', Icon: MessageSquare },
+  form: { label: 'Form', Icon: ListChecks },
+};
 
 export function SessionWorkspace({
   sessionId,
@@ -137,13 +160,37 @@ export function SessionWorkspace({
   reasoningPerItemMs,
   inlineCorrectionEnabled = false,
   readOnly = false,
+  intro = null,
 }: SessionWorkspaceProps) {
   const showChat = presentationMode === 'chat' || presentationMode === 'both';
   const showForm = presentationMode === 'form' || presentationMode === 'both';
-  // "both" mode toggles between surfaces; single-mode pins the view.
-  const [activeView, setActiveView] = useState<'chat' | 'form'>(
-    presentationMode === 'form' ? 'form' : 'chat'
+  // The intro recap rides the carousel whenever the version enables it — on a fresh session AND on a
+  // resume, so a returning respondent can still slide back to re-read it. (`autoStart` only governs
+  // whether we LAND on it and defer the kickoff; see below.) Never in the read-only admin viewer.
+  const showIntro = Boolean(intro?.enabled && !readOnly);
+  // A fresh, intro-enabled session opens ON the intro and holds the opening turn until the
+  // respondent leaves it. A resume drops straight into the conversation with the intro a tap away.
+  const openOnIntro = showIntro && autoStart;
+
+  // The carousel surfaces, left→right, present-only. At least one of chat/form always exists
+  // (presentationMode is chat | form | both), so this is never empty.
+  const views = useMemo<WorkspaceView[]>(() => {
+    const list: WorkspaceView[] = [];
+    if (showIntro) list.push('intro');
+    if (showChat) list.push('chat');
+    if (showForm) list.push('form');
+    return list;
+  }, [showIntro, showChat, showForm]);
+
+  // Active surface. A fresh intro session opens on the intro; everything else opens on the primary
+  // surface (a resume keeps the intro reachable via the toggle, but lands on the conversation).
+  const [activeView, setActiveView] = useState<WorkspaceView>(
+    openOnIntro ? 'intro' : presentationMode === 'form' ? 'form' : 'chat'
   );
+  // Has the respondent left the intro at least once? Gates the LLM kickoff so no turn is spent while
+  // they're still reading. Initialises `true` whenever we don't open on the intro (resume, or no
+  // intro at all), preserving the "open immediately" behaviour for every non-fresh-intro path.
+  const [started, setStarted] = useState(!openOnIntro);
   // Data-slot mode: the slot keys the latest turn filled, fed to the panel so it can scroll to them
   // and step through. Computed by diffing the previous panel snapshot against each new one (the
   // stream never tells the client a turn ordinal, so a diff is the reliable signal). `prevPanelRef`
@@ -217,11 +264,12 @@ export function SessionWorkspace({
   const turnCount = stream.turns?.length ?? 0;
   useEffect(() => {
     if (!autoStart) return;
+    if (!started) return; // intro present and not yet left — hold the opening turn
     if (!showChat) return; // form-only mode never opens a chat turn
     if (streamStatus !== 'idle') return;
     if (turnCount > 1) return;
     void kickoff();
-  }, [autoStart, showChat, kickoff, streamStatus, turnCount]);
+  }, [autoStart, started, showChat, kickoff, streamStatus, turnCount]);
 
   // Keep the settle targets current without touching refs during render. The stream calls
   // `onTurnSettled` (and thus reads these) only after a turn settles — well after this effect.
@@ -291,16 +339,18 @@ export function SessionWorkspace({
     [stream]
   );
 
-  // "both" mode toggle. Switching TO the form re-seeds it from the server so chat-inferred
-  // answers appear; switching TO chat refetches the panel so it reflects the form's edits.
-  const showFormView = useCallback(() => {
-    setActiveView('form');
-    form.refresh();
-  }, [form]);
-  const showChatView = useCallback(() => {
-    setActiveView('chat');
-    panel.refetch();
-  }, [panel]);
+  // Carousel navigation. Leaving the intro (to either surface) marks the session started, which
+  // releases the deferred kickoff. Switching TO the form re-seeds it so chat-inferred answers appear;
+  // switching TO chat refetches the panel so it reflects the form's edits.
+  const goToView = useCallback(
+    (view: WorkspaceView) => {
+      setActiveView(view);
+      if (view !== 'intro') setStarted(true);
+      if (view === 'form') form.refresh();
+      else if (view === 'chat') panel.refetch();
+    },
+    [form, panel]
+  );
 
   // Read-only viewer (admin): just the transcript, no chrome. Rendered after all hooks so the
   // panel/lifecycle/form hooks (inert via `enabled: false`) still obey the rules of hooks. A
@@ -368,17 +418,23 @@ export function SessionWorkspace({
       : `${panel.view.answeredCount} of ${panel.view.totalCount}`
     : null;
 
-  // Right-cluster controls: the "both"-mode surface toggle and the mobile answer-review trigger.
-  // Kept `undefined` when neither applies so the lifecycle strip still collapses to nothing on a
-  // plain form-only session (the bar renders the strip whenever `trailing` is present).
-  const showReviewTrigger = showChat; // the answer panel only rides the chat surface
+  // The carousel toggle's segments, derived from the present surfaces (left→right). Shown whenever
+  // there's more than one surface to move between — chat↔form, or intro alongside either.
+  const toggleItems: ToggleItem[] = views.map((id) => ({ id, ...VIEW_META[id] }));
+  const showToggle = views.length > 1;
+
+  // Right-cluster controls: the surface toggle and the mobile answer-review trigger. Kept
+  // `undefined` when neither applies so the lifecycle strip still collapses to nothing on a plain
+  // form-only session (the bar renders the strip whenever `trailing` is present).
+  const showReviewTrigger = showChat && activeView !== 'intro'; // the answer panel only rides the chat surface
   const trailingControls =
-    presentationMode === 'both' || showReviewTrigger ? (
+    showToggle || showReviewTrigger ? (
       <>
-        {presentationMode === 'both' && (
+        {showToggle && (
           <ModeToggle
             value={activeView}
-            onChange={(v) => (v === 'form' ? showFormView() : showChatView())}
+            items={toggleItems}
+            onChange={(v) => goToView(v as WorkspaceView)}
           />
         )}
         {showReviewTrigger && (
@@ -465,6 +521,19 @@ export function SessionWorkspace({
     </div>
   );
 
+  // The intro recap as a carousel surface. Proceeding slides to the first real surface (chat, or
+  // form in a form-only session), which marks the session started and releases the kickoff.
+  const introSurface =
+    showIntro && intro ? (
+      <QuestionnaireSplash
+        intro={intro}
+        // "Continue" only once a real answer exists — a merely-opened/resumed session at 0% still
+        // reads "Begin" (the workspace's `started` flag governs the kickoff, not this label).
+        inProgress={(lifecycle.view?.completion.answeredCount ?? 0) > 0}
+        onProceed={() => goToView(views.find((v) => v !== 'intro') ?? 'chat')}
+      />
+    ) : null;
+
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
       {/* The chat ↔ form toggle rides the lifecycle strip (no dedicated row) and is always
@@ -508,30 +577,35 @@ export function SessionWorkspace({
         }}
       />
 
-      {presentationMode === 'both' ? (
-        // Carousel: both surfaces live in one track that slides between them on toggle.
-        <div className="relative min-h-0 flex-1 overflow-hidden">
-          <div
-            className="flex h-full w-[200%] transition-transform duration-300 ease-out motion-reduce:transition-none"
-            style={{ transform: activeView === 'form' ? 'translateX(-50%)' : 'translateX(0)' }}
-          >
-            <div
-              role="tabpanel"
-              aria-label="Chat"
-              className="h-full min-h-0 w-1/2 shrink-0 overflow-hidden"
-              inert={activeView !== 'chat'}
-            >
-              {chatSurface}
-            </div>
-            <div
-              role="tabpanel"
-              aria-label="Form"
-              className="h-full min-h-0 w-1/2 shrink-0 overflow-hidden"
-              inert={activeView !== 'form'}
-            >
-              {formSurface}
-            </div>
-          </div>
+      {views.length > 1 ? (
+        // Carousel: each surface is an absolutely-positioned cell pinned to the clipped frame
+        // (`absolute inset-0` → exactly one frame wide, no flex/percentage width maths to misfire),
+        // slid horizontally by its distance from the active surface. The active cell sits at 0; the
+        // rest are parked one (or more) frame-widths to the left/right and clipped away. Sliding the
+        // toggle re-computes every offset, so the whole set animates as one track.
+        //
+        // `overflow-clip`, NOT `overflow-hidden`: `hidden` leaves the frame programmatically
+        // scrollable, so when an off-screen cell's content grabs focus or calls `scrollIntoView`
+        // (the chat composer autofocus, the message auto-scroll), the browser scrolls the frame
+        // sideways to "reveal" it and drags the whole carousel off-screen. `clip` clips identically
+        // but establishes no scroll container, so nothing can shift it.
+        <div className="relative min-h-0 flex-1 overflow-clip">
+          {views.map((view) => {
+            const activeIndex = Math.max(0, views.indexOf(activeView));
+            const offset = (views.indexOf(view) - activeIndex) * 100;
+            return (
+              <div
+                key={view}
+                role="tabpanel"
+                aria-label={VIEW_META[view].label}
+                className="absolute inset-0 overflow-clip transition-transform duration-300 ease-out motion-reduce:transition-none"
+                style={{ transform: `translateX(${offset}%)` }}
+                inert={activeView !== view}
+              >
+                {view === 'intro' ? introSurface : view === 'form' ? formSurface : chatSurface}
+              </div>
+            );
+          })}
         </div>
       ) : (
         <div className="min-h-0 flex-1">{showForm ? formSurface : chatSurface}</div>
