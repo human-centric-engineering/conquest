@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Image from 'next/image';
 import Link from 'next/link';
 import {
   ArrowRight,
@@ -32,7 +33,6 @@ import {
   Target,
   Plug,
   Check,
-  Quote,
   Telescope,
   LineChart,
   MessagesSquare,
@@ -664,41 +664,78 @@ export default function ConquestHome() {
         </div>
       </section>
 
-      {/* ---------------- Social proof ---------------- */}
+      {/* ---------------- Founding cohort / early access ---------------- */}
+      {/*
+        Replaces the (placeholder) social-proof block. With no customers or data
+        yet, the most authentic credibility we own is the founders, so this band
+        leads with the human/ethos element and carries the early-access CTA.
+        When real logos / testimonials / stats exist they can return here (or
+        just below). Headshots, names, roles and the mission line are PLACEHOLDER
+        — swap the initials avatars for <Image> and confirm copy before launch.
+        The waitlist CTA points at /contact until the dedicated waitlist capture
+        is built.
+      */}
       <section className={`${styles.section} ${styles.ink}`}>
         <div className={styles.inner}>
-          <p className={styles.proofNote}>Trusted by teams who’d rather understand than tally</p>
-          <div className={styles.logoRow}>
-            {['Your logo', 'Your logo', 'Your logo', 'Your logo', 'Your logo'].map((l, i) => (
-              <div key={i} className={styles.logo}>
-                {l}
+          <div
+            className={`${styles.sectionHead} ${styles.reveal}`}
+            style={{ textAlign: 'center', marginInline: 'auto' }}
+          >
+            <span
+              className={`${styles.eyebrow} ${styles.eyebrowLight}`}
+              style={{ justifyContent: 'center' }}
+            >
+              Founding cohort
+            </span>
+            <h2 className={styles.h2}>We’re building ConQuest with our first customers.</h2>
+          </div>
+
+          <div className={`${styles.founders} ${styles.reveal}`}>
+            <div className={styles.founderRow}>
+              <div className={styles.founder}>
+                <Image
+                  src="/marketing/founders/simon.jpg"
+                  alt="Simon Holmes"
+                  width={92}
+                  height={92}
+                  className={styles.founderAvatar}
+                />
+                <div className={styles.founderName}>Simon Holmes</div>
+                <div className={styles.founderRole}>Co-founder</div>
               </div>
-            ))}
-          </div>
-
-          <div className={styles.quoteCard}>
-            <Quote className={styles.quoteMark} />
-            <p className={styles.quoteText}>
-              We replaced a 40-question survey with a single conversation. Completion went up, and
-              for the first time we understood <span>why</span> behind the numbers.
-            </p>
-            <p className={styles.quoteAttr}>
-              <b>[ Name, Role ]</b>, [ Organisation ]
-            </p>
-          </div>
-
-          <div className={styles.stats}>
-            <div className={styles.stat}>
-              <div className={styles.statNum}>[ xx% ]</div>
-              <div className={styles.statLabel}>higher completion rate</div>
+              <div className={styles.founder}>
+                <Image
+                  src="/marketing/founders/john.jpg"
+                  alt="John Durrant"
+                  width={92}
+                  height={92}
+                  className={styles.founderAvatar}
+                />
+                <div className={styles.founderName}>John Durrant</div>
+                <div className={styles.founderRole}>Co-founder</div>
+              </div>
             </div>
-            <div className={styles.stat}>
-              <div className={styles.statNum}>[ x.x× ]</div>
-              <div className={styles.statLabel}>more context per response</div>
-            </div>
-            <div className={styles.stat}>
-              <div className={styles.statNum}>[ xx% ]</div>
-              <div className={styles.statLabel}>faster to actionable insight</div>
+
+            <blockquote className={styles.founderQuote}>
+              “We’ve sat through too many surveys that flatten people into a checkbox. We started{' '}
+              <Wordmark /> to give everyone the questionnaire a brilliant interviewer would run, and
+              to show that software can genuinely <span>listen</span>.”
+            </blockquote>
+            <p className={styles.founderQuoteAttr}>
+              <b>Simon &amp; John</b>, founders at Human-Centric Engineering
+            </p>
+
+            <div className={styles.earlyAccess}>
+              <p className={styles.earlyAccessText}>
+                The self-serve platform isn’t out yet. We’re taking on a small founding cohort to
+                shape <Wordmark /> on real questionnaires, and the people who join now help decide
+                where it goes. Leave your details and you’ll be first through the door.
+              </p>
+              <div className={`${styles.ctaRow} ${styles.earlyAccessCta}`}>
+                <Link href="/contact" className={`${styles.btn} ${styles.btnPrimary}`}>
+                  Join the waitlist <ArrowRight />
+                </Link>
+              </div>
             </div>
           </div>
         </div>
