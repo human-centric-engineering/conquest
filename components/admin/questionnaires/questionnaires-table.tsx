@@ -16,10 +16,17 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ChevronLeft, ChevronRight, Loader2, Search } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Copy, Loader2, MoreHorizontal, Search } from 'lucide-react';
 
 import { UploadQuestionnaireDialog } from '@/components/admin/questionnaires/upload-questionnaire-dialog';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -28,6 +35,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { useDuplicateQuestionnaire } from '@/components/admin/questionnaires/use-duplicate-questionnaire';
 import {
   Table,
   TableBody,
@@ -79,6 +87,7 @@ export function QuestionnairesTable({
   const [isLoading, setIsLoading] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const { duplicate, isDuplicating, error: duplicateError } = useDuplicateQuestionnaire();
 
   useEffect(() => {
     return () => {
@@ -173,9 +182,9 @@ export function QuestionnairesTable({
         {isLoading && <Loader2 className="text-muted-foreground h-4 w-4 animate-spin" />}
       </div>
 
-      {listError && (
+      {(listError || duplicateError) && (
         <div className="border-destructive/40 bg-destructive/10 text-destructive rounded-md border px-3 py-2 text-sm">
-          {listError}
+          {listError ?? duplicateError}
         </div>
       )}
 
@@ -191,12 +200,15 @@ export function QuestionnairesTable({
               <TableHead className="text-right">Questions</TableHead>
               {showDataSlots && <TableHead className="text-right">Data slots</TableHead>}
               <TableHead className="text-right">Last activity</TableHead>
+              <TableHead className="w-10">
+                <span className="sr-only">Actions</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {items.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={showDataSlots ? 8 : 7} className="py-10 text-center">
+                <TableCell colSpan={showDataSlots ? 9 : 8} className="py-10 text-center">
                   <div className="flex flex-col items-center gap-3">
                     <p className="text-muted-foreground">
                       No questionnaires yet. Upload a document to create your first one.
@@ -237,6 +249,32 @@ export function QuestionnairesTable({
                     )}
                     <TableCell className="text-muted-foreground text-right">
                       {formatDate(item.updatedAt)}
+                    </TableCell>
+                    {/* Row actions — stop propagation so opening the menu / acting doesn't
+                        trigger the row's navigate-to-detail click. */}
+                    <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            disabled={isDuplicating}
+                            aria-label={`Actions for ${item.title}`}
+                          >
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            onSelect={() => void duplicate(item.id)}
+                            disabled={isDuplicating}
+                          >
+                            <Copy className="mr-2 h-4 w-4" />
+                            Duplicate
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </TableCell>
                   </TableRow>
                 );

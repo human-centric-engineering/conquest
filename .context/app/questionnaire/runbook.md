@@ -98,11 +98,22 @@ For bespoke content, build it by hand. First the client:
 
 ### 2.1 Load content — clone first, upload if net-new
 
-**Clone (fastest)** — reuse an existing template for this client:
+**Duplicate (fastest)** — make a plain copy of any questionnaire and all its settings:
 
-- On a template questionnaire's detail page (`/admin/questionnaires/[id]`), use **Clone for
-  client** → pick the demo client. Copies the structure, config, and tags into a fresh draft.
-  API: `POST /api/v1/app/questionnaires/[id]/clone-for-client`.
+- A **Duplicate** action copies the current version — structure, tags, config, data slots, and
+  scoring (no respondent data) — into a fresh draft titled "… — Copy" and drops you on it.
+  Reachable three ways: the **⋯ menu** on each row of `/admin/questionnaires`, the **Duplicate**
+  button in the workspace header (every tab), and **Export / download → Duplicate this
+  questionnaire** on the Structure tab. API: `POST /api/v1/app/questionnaires/[id]/duplicate`.
+- **Clone for client** (DEMO-ONLY) is the same copy plus demo-client attribution — on the
+  **Settings** tab, pick the demo client. API: `POST /api/v1/app/questionnaires/[id]/clone-for-client`.
+
+**Import a definition** — recreate a questionnaire exported elsewhere:
+
+- **New questionnaire → Import definition** (or **Export / download → Import definition** on the
+  Structure tab) uploads a previously-exported definition JSON and creates a new draft with full
+  fidelity (structure, settings, data slots, scoring; embeddings regenerated). The inverse is
+  **Export / download → Export definition (JSON)**. API: `POST /api/v1/app/questionnaires/import`.
 
 **Upload + extract (net-new content)** — the platform's headline capability:
 
@@ -199,6 +210,8 @@ in the **Notes** column and fold the correction back into this doc.
 |     | Flags on           | `/admin/questionnaires` loads (no 404)                                  |       |
 |     | Seeded fast path   | `LOAD_DEMO_CONTENT=1 npm run db:seed` → Northwind client + launched q'n |       |
 |     | Manual client      | create a demo client with branding; preview renders                     |       |
+|     | Duplicate          | Duplicate (row ⋯ / header / export menu) copies into a "— Copy" draft   |       |
+|     | Import definition  | Import a previously-exported definition JSON → new draft, full fidelity |       |
 |     | Clone              | Clone-for-client copies structure into a draft                          |       |
 |     | Upload             | upload a `.docx`/`.pdf`; extraction produces sections + questions       |       |
 |     | Configure + launch | set config, launch passes the gate                                      |       |

@@ -380,6 +380,8 @@ export const API = {
       /** Re-ingest a replacement source doc into a draft version (POST multipart). */
       versionReingest: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/reingest`,
+      /** Duplicate the questionnaire's current version into a new draft questionnaire (POST JSON). */
+      duplicate: (id: string): string => `/api/v1/app/questionnaires/${id}/duplicate`,
       /** Clone the questionnaire's current version into a new questionnaire for a demo client (POST — DEMO-ONLY). */
       cloneForClient: (id: string): string => `/api/v1/app/questionnaires/${id}/clone-for-client`,
       /** Version run-time configuration (PATCH partial config — F3.1). */

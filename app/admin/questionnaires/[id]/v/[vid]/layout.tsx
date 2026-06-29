@@ -19,6 +19,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
 import { BreadcrumbLabel } from '@/components/admin/breadcrumb-context';
+import { DuplicateQuestionnaireButton } from '@/components/admin/questionnaires/workspace/duplicate-questionnaire-button';
 import { EditableTitle } from '@/components/admin/questionnaires/workspace/editable-title';
 import { QuestionnaireSubNav } from '@/components/admin/questionnaires/workspace/questionnaire-sub-nav';
 import { VersionSelector } from '@/components/admin/questionnaires/workspace/version-selector';
@@ -114,6 +115,7 @@ export default async function QuestionnaireWorkspaceLayout({ params, children }:
               {/* Quick "view a session by reference" — present wherever sessions can exist. */}
               {flags.liveSessions && <SessionRefLookup compact />}
               {previewAvailable && <PreviewRespondentButton versionId={selected.id} />}
+              <DuplicateQuestionnaireButton questionnaireId={id} />
               <VersionSelector
                 questionnaireId={id}
                 versionId={selected.id}
