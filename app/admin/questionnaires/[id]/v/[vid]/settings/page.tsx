@@ -88,6 +88,7 @@ export default async function SettingsTab({ params }: PageProps) {
           questionnaireId={id}
           graph={graph}
           adaptiveEnabled={flags.adaptive}
+          adaptiveDataSlotsEnabled={flags.adaptiveDataSlots}
           introScreenEnabled={flags.introScreen}
         />
       )}

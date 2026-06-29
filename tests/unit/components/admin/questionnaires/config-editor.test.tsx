@@ -828,6 +828,41 @@ describe('ConfigEditor', () => {
     expect(screen.getByRole('option', { name: /adaptive/i })).toBeInTheDocument();
   });
 
+  // ── data-slot embeddings step gated on the adaptive-data-slots flag ───────────
+
+  it('shows the data-slot embeddings step when adaptiveDataSlotsEnabled is true', () => {
+    render(
+      <ConfigEditorUnderTest
+        questionnaireId="qn-1"
+        versionId="ver-1"
+        config={makeConfig()}
+        questionCount={5}
+        adaptiveEnabled
+        adaptiveDataSlotsEnabled
+        run={vi.fn(() => Promise.resolve(true))}
+        busy={false}
+      />
+    );
+    // The shared EmbeddingCoverageStep renders its title synchronously (before the
+    // coverage fetch resolves), so the data-slot variant's heading is the proof it mounted.
+    expect(screen.getByText(/data-slot selection needs embeddings/i)).toBeInTheDocument();
+  });
+
+  it('hides the data-slot embeddings step when adaptiveDataSlotsEnabled is false (default)', () => {
+    render(
+      <ConfigEditorUnderTest
+        questionnaireId="qn-1"
+        versionId="ver-1"
+        config={makeConfig()}
+        questionCount={5}
+        adaptiveEnabled
+        run={vi.fn(() => Promise.resolve(true))}
+        busy={false}
+      />
+    );
+    expect(screen.queryByText(/data-slot selection needs embeddings/i)).not.toBeInTheDocument();
+  });
+
   // ── busy disables controls ────────────────────────────────────────────────────
 
   it('disables all controls when busy is true', () => {

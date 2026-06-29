@@ -30,6 +30,8 @@ export interface VersionSettingsPanelProps {
   graph: VersionGraphView;
   /** Adaptive selection sub-flag state, threaded to the strategy picker. */
   adaptiveEnabled: boolean;
+  /** Adaptive data-slot selection state, threaded to the data-slot embeddings step. */
+  adaptiveDataSlotsEnabled: boolean;
   /** Respondent intro / splash sub-flag state, threaded to the Intro card. */
   introScreenEnabled: boolean;
 }
@@ -38,6 +40,7 @@ export function VersionSettingsPanel({
   questionnaireId,
   graph,
   adaptiveEnabled,
+  adaptiveDataSlotsEnabled,
   introScreenEnabled,
 }: VersionSettingsPanelProps) {
   const router = useRouter();
@@ -105,6 +108,7 @@ export function VersionSettingsPanel({
           config={graph.config}
           questionCount={questionCount}
           adaptiveEnabled={adaptiveEnabled}
+          adaptiveDataSlotsEnabled={adaptiveDataSlotsEnabled}
           introScreenEnabled={introScreenEnabled}
           isVersionLaunched={graph.status === 'launched'}
           run={run}

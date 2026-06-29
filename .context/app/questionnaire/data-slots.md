@@ -293,7 +293,11 @@ question slots) and asks the seeded **selector agent** which to pursue next.
   and lazily ensures the slots are embedded the first time such a session runs (cheap no-op once
   embedded; fail-soft).
 - **Admin surfaces.** The **Data slots tab** shows an explicit "Generate embeddings" step + coverage
-  when the feature is on (`GET/POST …/versions/:vid/embed-data-slots`). The **Review & Launch**
+  when the feature is on (`GET/POST …/versions/:vid/embed-data-slots`). The **Settings tab** surfaces
+  the same `DataSlotEmbeddingStep` in the "Questions & completion" group beside the data-slot config
+  (gated on the `adaptiveDataSlots` workspace flag, threaded settings page → `VersionSettingsPanel` →
+  `ConfigEditor`) — the data-slot analogue of the question-embeddings step under Selection strategy,
+  so an admin can re-embed after editing slot wording without leaving Settings. The **Review & Launch**
   checklist adds a "Data slots embedded for adaptive selection" check — required when the feature is
   on AND the version has data slots, **launch-only** (the preview gate opts out; the lazy backstop
   covers rehearsal). Mirrors the question-slot embedding operability.

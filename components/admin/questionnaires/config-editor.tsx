@@ -58,6 +58,7 @@ import { cn } from '@/lib/utils';
 import { SectionRail } from '@/components/admin/section-rail';
 import { CostEstimateCard } from '@/components/admin/questionnaires/cost-estimate-card';
 import { AdaptiveEmbeddingStep } from '@/components/admin/questionnaires/adaptive-embedding-step';
+import { DataSlotEmbeddingStep } from '@/components/admin/questionnaires/data-slot-embedding-step';
 import { IntroBackgroundField } from '@/components/admin/questionnaires/intro-background-field';
 import { API } from '@/lib/api/endpoints';
 import {
@@ -393,6 +394,7 @@ export function ConfigEditor({
   config,
   questionCount,
   adaptiveEnabled = true,
+  adaptiveDataSlotsEnabled = false,
   introScreenEnabled = false,
   isVersionLaunched = false,
   run,
@@ -409,6 +411,13 @@ export function ConfigEditor({
    * still renders a label). Defaults to `true` for non-questionnaire mounts.
    */
   adaptiveEnabled?: boolean;
+  /**
+   * Whether adaptive data-slot selection is on (master AND data-slots AND live-sessions AND the
+   * sub-flag). When `true`, the Data-slot embeddings step is surfaced beside the data-slot config so
+   * an admin can generate/refresh them without leaving Settings — mirroring the question-embeddings
+   * step under Selection strategy. Defaults to `false` for non-questionnaire mounts.
+   */
+  adaptiveDataSlotsEnabled?: boolean;
   /**
    * Whether the respondent intro / splash sub-flag is on. When `false` the Intro screen card is
    * hidden (the per-version toggle would be inert). Defaults to `false` for non-questionnaire mounts.
@@ -839,6 +848,17 @@ export function ConfigEditor({
                 disabled={busy}
               />
             </div>
+            {/* Adaptive data-slot selection ranks unfilled slots by embedding similarity, so it needs
+            the data slots embedded — the data-slot analogue of the question-embeddings step under
+            Selection strategy. Shown only when the adaptive data-slot feature is on; the step itself
+            handles the no-slots-yet empty state. */}
+            {adaptiveDataSlotsEnabled && (
+              <DataSlotEmbeddingStep
+                questionnaireId={questionnaireId}
+                versionId={versionId}
+                busy={busy}
+              />
+            )}
           </SettingsGroup>
 
           {/* ── 2. Respondent experience — how a person actually completes it (format, input, what
@@ -1016,6 +1036,8 @@ export function ConfigEditor({
                       value={intro.background}
                       onChange={(v) => setIntro((i) => ({ ...i, background: v }))}
                       disabled={busy}
+                      questionnaireId={questionnaireId}
+                      versionId={versionId}
                       placeholder="Tell respondents what this questionnaire is about, who's running it, and how results are used — or upload a document / generate it with AI."
                     />
                   </div>

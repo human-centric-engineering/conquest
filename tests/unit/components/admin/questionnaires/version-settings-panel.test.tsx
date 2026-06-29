@@ -26,16 +26,19 @@ vi.mock('@/components/admin/questionnaires/config-editor', () => ({
   ConfigEditor: ({
     run,
     adaptiveEnabled,
+    adaptiveDataSlotsEnabled,
     questionCount,
   }: {
     run: (s: () => unknown) => void;
     adaptiveEnabled: boolean;
+    adaptiveDataSlotsEnabled: boolean;
     questionCount: number;
   }) => (
     <button
       type="button"
       data-testid="cfg"
       data-adaptive={String(adaptiveEnabled)}
+      data-adaptive-data-slots={String(adaptiveDataSlotsEnabled)}
       data-qcount={String(questionCount)}
       onClick={() => run(() => ['PATCH', '/cfg', {}])}
     >
@@ -83,6 +86,7 @@ describe('VersionSettingsPanel', () => {
         questionnaireId="qn-1"
         graph={graph({ id: 'ver-9' })}
         adaptiveEnabled
+        adaptiveDataSlotsEnabled={false}
         introScreenEnabled={false}
       />
     );
@@ -97,6 +101,7 @@ describe('VersionSettingsPanel', () => {
         questionnaireId="qn-1"
         graph={graph()}
         adaptiveEnabled={false}
+        adaptiveDataSlotsEnabled={false}
         introScreenEnabled={false}
       />
     );
@@ -109,6 +114,7 @@ describe('VersionSettingsPanel', () => {
         questionnaireId="qn-1"
         graph={graph()}
         adaptiveEnabled={false}
+        adaptiveDataSlotsEnabled={false}
         introScreenEnabled={false}
       />
     );
@@ -130,6 +136,7 @@ describe('VersionSettingsPanel', () => {
         questionnaireId="qn-1"
         graph={graph()}
         adaptiveEnabled={false}
+        adaptiveDataSlotsEnabled={false}
         introScreenEnabled={false}
       />
     );
@@ -147,6 +154,7 @@ describe('VersionSettingsPanel', () => {
         questionnaireId="qn-1"
         graph={graph()}
         adaptiveEnabled={false}
+        adaptiveDataSlotsEnabled={false}
         introScreenEnabled={false}
       />
     );
