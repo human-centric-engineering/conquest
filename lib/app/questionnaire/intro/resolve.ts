@@ -29,6 +29,8 @@ export interface ResolvedSessionIntro {
   questionnaireTitle: string;
   /** The effective background markdown (cohort override replaces version-level); `''` when none. */
   background: string;
+  /** Optional YouTube/Vimeo link (raw; resolved to a safe embed at render); `''` when none. */
+  videoUrl: string;
   /** Derived copy (how it works / what you'll get / good to know / button label). */
   copy: IntroCopy;
 }
@@ -80,6 +82,8 @@ export async function resolveSessionIntro(sessionId: string): Promise<ResolvedSe
     enabled: intro.enabled,
     questionnaireTitle: session.version.questionnaire.title,
     background,
+    // Not cohort-overridable (unlike background) — one video per version.
+    videoUrl: intro.videoUrl,
     copy: buildIntroCopy({
       presentationMode,
       report,

@@ -400,3 +400,40 @@ describe('updateConfigSchema — respondentReport (Respondent Report)', () => {
     ).toBe(false);
   });
 });
+
+describe('updateConfigSchema — intro video link', () => {
+  const baseIntro = { enabled: true, background: '', buttonLabel: '' };
+
+  it('accepts a recognised YouTube or Vimeo link', () => {
+    for (const videoUrl of ['https://youtu.be/dQw4w9WgXcQ', 'https://vimeo.com/123456789']) {
+      expect(updateConfigSchema.safeParse({ intro: { ...baseIntro, videoUrl } }).success).toBe(
+        true
+      );
+    }
+  });
+
+  it('accepts an empty or omitted video link (no video)', () => {
+    expect(updateConfigSchema.safeParse({ intro: { ...baseIntro, videoUrl: '' } }).success).toBe(
+      true
+    );
+    expect(updateConfigSchema.safeParse({ intro: baseIntro }).success).toBe(true);
+  });
+
+  it('rejects an unrecognised / non-video URL, flagged on intro.videoUrl', () => {
+    const result = updateConfigSchema.safeParse({
+      intro: { ...baseIntro, videoUrl: 'https://example.com/not-a-video' },
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.path).toEqual(['intro', 'videoUrl']);
+    }
+  });
+
+  it('rejects an over-long video link', () => {
+    expect(
+      updateConfigSchema.safeParse({
+        intro: { ...baseIntro, videoUrl: `https://youtu.be/${'x'.repeat(600)}` },
+      }).success
+    ).toBe(false);
+  });
+});

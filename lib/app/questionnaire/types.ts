@@ -701,6 +701,8 @@ export const DEFAULT_COHORT_REPORT_SETTINGS: CohortReportSettings = {
 export const INTRO_BACKGROUND_MAX_LENGTH = 8000;
 /** Max length of the admin-authored proceed-button label on the intro screen (Zod bound). */
 export const INTRO_BUTTON_LABEL_MAX_LENGTH = 60;
+/** Max length of the optional intro video link (Zod bound; a YouTube/Vimeo URL is well under this). */
+export const INTRO_VIDEO_URL_MAX_LENGTH = 500;
 
 /**
  * Respondent intro / splash screen — an admin opt-in screen shown BEFORE the questionnaire starts.
@@ -716,6 +718,8 @@ export type IntroSettings = {
   enabled: boolean;
   background: string;
   buttonLabel: string;
+  /** Optional YouTube/Vimeo link; resolved to a safe embed at render (`resolveIntroVideo`). */
+  videoUrl: string;
 };
 
 /** Intro off, no background, default per-mode button — today's behaviour (straight into the chat). */
@@ -723,6 +727,7 @@ export const DEFAULT_INTRO_SETTINGS: IntroSettings = {
   enabled: false,
   background: '',
   buttonLabel: '',
+  videoUrl: '',
 };
 
 /**

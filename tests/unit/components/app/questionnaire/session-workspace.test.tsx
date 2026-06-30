@@ -295,6 +295,7 @@ describe('SessionWorkspace', () => {
       enabled: true,
       questionnaireTitle: 'Team Health Check',
       background: '',
+      videoUrl: '',
       copy: {
         howItWorks: { heading: 'How it works', body: 'This is a conversation, not a form.' },
         whatYouGet: null,

@@ -224,7 +224,7 @@ function makeConfigView(overrides: Partial<ConfigView> = {}): ConfigView {
         scoringEnabled: false,
       },
     },
-    intro: { enabled: false, background: '', buttonLabel: '' },
+    intro: { enabled: false, background: '', buttonLabel: '', videoUrl: '' },
     ...overrides,
   };
 }

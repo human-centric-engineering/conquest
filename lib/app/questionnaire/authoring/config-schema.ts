@@ -30,6 +30,7 @@ import {
   INTERVIEWER_APPROACHES,
   INTRO_BACKGROUND_MAX_LENGTH,
   INTRO_BUTTON_LABEL_MAX_LENGTH,
+  INTRO_VIDEO_URL_MAX_LENGTH,
   INVITEE_FIELD_KEYS,
   PRESENTATION_MODES,
   PROFILE_FIELD_TYPES,
@@ -42,6 +43,7 @@ import {
   TONE_LEVEL_MIN,
   TONE_PERSONA_MAX_LENGTH,
 } from '@/lib/app/questionnaire/types';
+import { resolveIntroVideo } from '@/lib/app/questionnaire/intro/video';
 
 /** One invitee-field visibility entry (email's forced shown+required is applied server-side). */
 const inviteeFieldConfigSchema = z.object({
@@ -207,6 +209,8 @@ const introSettingsSchema = z
     enabled: z.boolean(),
     background: z.string().trim().max(INTRO_BACKGROUND_MAX_LENGTH),
     buttonLabel: z.string().trim().max(INTRO_BUTTON_LABEL_MAX_LENGTH),
+    // Optional YouTube/Vimeo link; the recognised-host check is in updateConfigSchema's superRefine.
+    videoUrl: z.string().trim().max(INTRO_VIDEO_URL_MAX_LENGTH).optional(),
   })
   .strict();
 
@@ -324,6 +328,18 @@ export const updateConfigSchema = z
           code: 'custom',
           message: 'Support resource URL must be a valid URL',
           path: ['supportResourceUrl'],
+        });
+      }
+    }
+
+    // An intro video link, when provided non-empty, must resolve to a recognised YouTube/Vimeo
+    // embed (empty = no video). Rejecting here keeps every stored value a value the splash can embed.
+    if (cfg.intro?.videoUrl) {
+      if (!resolveIntroVideo(cfg.intro.videoUrl)) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Enter a valid YouTube or Vimeo video link',
+          path: ['intro', 'videoUrl'],
         });
       }
     }

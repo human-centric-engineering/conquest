@@ -31,6 +31,7 @@ the live settings (never drifts).
 | `intro.enabled`     | `AppQuestionnaireConfig.intro` (JSON)         | The per-version toggle.                                    |
 | `intro.background`  | `AppQuestionnaireConfig.intro` (JSON)         | Admin markdown — "about this questionnaire". May be blank. |
 | `intro.buttonLabel` | `AppQuestionnaireConfig.intro` (JSON)         | Proceed-button text; `''` = a per-mode default.            |
+| `intro.videoUrl`    | `AppQuestionnaireConfig.intro` (JSON)         | Optional YouTube/Vimeo link; `''` = no video. Not cohort-overridable. See [Intro video](#intro-video). |
 | `introBackground`   | `AppCohort.introBackground` (nullable column) | Cohort override of the background (see below).             |
 
 `IntroSettings` + `DEFAULT_INTRO_SETTINGS` live in `lib/app/questionnaire/types.ts`; the stored JSON
@@ -59,6 +60,34 @@ fallback shape as theme resolution (`chat/theme.ts`). Only the background is ove
 how-it-works / what-you'll-get copy is intrinsic to the version's settings. See
 [`cohorts.md`](./cohorts.md).
 
+## Intro video
+
+`intro.videoUrl` is an optional YouTube/Vimeo link the admin pastes on the Settings tab; the splash
+embeds it in the LEFT "about" column (above the background card), grouped with the about text. One
+video per version — unlike `background`, it is **not** cohort-overridable.
+
+The security property lives in `resolveIntroVideo` (`lib/app/questionnaire/intro/video.ts`, pure):
+the admin's raw link is parsed to a video id and the iframe `src` is **built** as a trusted
+`https://www.youtube-nocookie.com/embed/<id>` or `https://player.vimeo.com/video/<id>` — never the
+raw input. So the only sources the iframe can ever load are those two hosts; an unrecognised link,
+a non-`http(s)` scheme (`javascript:`/`data:`), or a malformed id all resolve to `null` and no
+iframe renders. This runs at **two seams** that must agree:
+
+- **Write** — `introSettingsSchema`'s `superRefine` (`authoring/config-schema.ts`) rejects a
+  non-empty link that doesn't resolve, with the error on `intro.videoUrl`, so every stored value is
+  embeddable.
+- **Render** — `IntroVideo` (`components/app/questionnaire/intro/intro-video.tsx`) resolves the
+  stored link again and returns `null` (renders nothing) when it doesn't — defence in depth against a
+  value that bypassed the write path (seed / direct DB write).
+
+Supported forms: YouTube `watch?v=`, `youtu.be/`, `/embed/`, `/shorts/`, `/live/`, `m.youtube.com`;
+Vimeo `vimeo.com/<id>`, unlisted `vimeo.com/<id>/<hash>` (carried through as `?h=`),
+`vimeo.com/channels/.../<id>`, `player.vimeo.com/video/<id>`.
+
+> **Testing note:** a component that renders this live `<iframe>` runs under **jsdom**
+> (`// @vitest-environment jsdom` docblock), not the project-default happy-dom — jsdom ignores the
+> iframe `src`, while happy-dom tries to navigate it (real network + noisy aborts).
+
 ## Runtime wiring
 
 `SessionEntry` (`components/app/questionnaire/intro/session-entry.tsx`) gates `SessionWorkspace`
@@ -80,8 +109,8 @@ renders the background markdown with the same `react-markdown` + `prose` treatme
 ## Admin surface
 
 - **Settings tab → Intro screen card** (`config-editor.tsx`, gated on the `introScreen` workspace
-  flag): enable toggle, the background editor (see below), and the button-label input. Saved whole in
-  the config PATCH (like the tone block).
+  flag): enable toggle, the background editor (see below), the intro-video link input, and the
+  button-label input. Saved whole in the config PATCH (like the tone block).
 - **Cohort form** (`cohort-form.tsx`): the same background editor as the "Intro background override"
   (wired into react-hook-form via `watch`/`setValue`).
 
@@ -112,6 +141,8 @@ per-admin LLM/upload sub-cap (the compose / ingest limiters).
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------- |
 | Settings type/default   | `lib/app/questionnaire/types.ts` (`IntroSettings`)                                                                    |
 | Narrow / copy / resolve | `lib/app/questionnaire/intro/{settings,copy,resolve}.ts`                                                              |
+| Intro video resolver    | `lib/app/questionnaire/intro/video.ts` (`resolveIntroVideo`)                                                          |
+| Intro video embed UI    | `components/app/questionnaire/intro/intro-video.tsx`                                                                  |
 | Authoring prompts       | `lib/app/questionnaire/intro/authoring-prompt.ts`                                                                     |
 | Authoring capability    | `lib/app/questionnaire/capabilities/author-intro-background.ts`                                                       |
 | Read endpoint           | `app/api/v1/app/questionnaire-sessions/[id]/intro/route.ts`                                                           |
