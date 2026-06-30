@@ -7,8 +7,16 @@
  * handling, question→tag and data-slot→question link resolution, config row creation,
  * and scoring schema attribution — without a database.
  *
+ * Writes are BATCHED to keep the transaction inside the interactive-transaction budget
+ * under production DB latency (the per-row variant timed out on prod, P2028): tags,
+ * sections, questions, and data slots each go through one `createManyAndReturn`, and the
+ * link tables through one `createMany`. The fake `tx` therefore returns rows keyed by the
+ * same unique field (normalisedLabel / ordinal / key) the persister maps them back by, and
+ * the fakes return rows in a DELIBERATELY SHUFFLED order to prove the persister matches by
+ * key, not by array position.
+ *
  * Pattern mirrors `persist.test.ts`: `executeTransaction` is mocked at the top,
- * and a module-level `tx` object with sequential-id factories drives assertions.
+ * and a module-level `tx` object with key-derived id factories drives assertions.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -28,26 +36,56 @@ import {
 } from '@/lib/app/questionnaire/authoring';
 
 type Mock = ReturnType<typeof vi.fn>;
+type Row = Record<string, unknown>;
+
+/** Reverse a copy of the returned rows so tests can't accidentally rely on input order. */
+function shuffled<T>(rows: T[]): T[] {
+  return [...rows].reverse();
+}
 
 // ─── Fake transaction client ──────────────────────────────────────────────────
-
-let tagSeq = 0;
-let sectionSeq = 0;
-let questionSeq = 0;
-let slotSeq = 0;
+//
+// Batched creators derive a stable id from the row's unique key and return rows shuffled,
+// forcing the persister to resolve ids by key/ordinal/normalisedLabel rather than position.
 
 const tx = {
   appQuestionnaire: { create: vi.fn(async () => ({ id: 'qn-1' })) },
   appQuestionnaireVersion: { create: vi.fn(async () => ({ id: 'ver-1' })) },
-  appQuestionTag: { create: vi.fn(async () => ({ id: `tag-${++tagSeq}` })) },
-  appQuestionnaireSection: { create: vi.fn(async () => ({ id: `sec-${++sectionSeq}` })) },
-  appQuestionSlot: { create: vi.fn(async () => ({ id: `q-${++questionSeq}` })) },
+  appQuestionTag: {
+    createManyAndReturn: vi.fn(async ({ data }: { data: Row[] }) =>
+      shuffled(
+        data.map((row) => ({
+          id: `tag-${String(row.normalizedLabel)}`,
+          normalizedLabel: row.normalizedLabel,
+        }))
+      )
+    ),
+  },
+  appQuestionnaireSection: {
+    createManyAndReturn: vi.fn(async ({ data }: { data: Row[] }) =>
+      shuffled(data.map((row) => ({ id: `sec-${String(row.ordinal)}`, ordinal: row.ordinal })))
+    ),
+  },
+  appQuestionSlot: {
+    createManyAndReturn: vi.fn(async ({ data }: { data: Row[] }) =>
+      shuffled(data.map((row) => ({ id: `q-${String(row.key)}`, key: row.key })))
+    ),
+  },
   appQuestionSlotTag: { createMany: vi.fn(async () => ({ count: 0 })) },
   appQuestionnaireConfig: { create: vi.fn(async () => ({ id: 'cfg-1' })) },
-  appDataSlot: { create: vi.fn(async () => ({ id: `slot-${++slotSeq}` })) },
+  appDataSlot: {
+    createManyAndReturn: vi.fn(async ({ data }: { data: Row[] }) =>
+      shuffled(data.map((row) => ({ id: `slot-${String(row.key)}`, key: row.key })))
+    ),
+  },
   appDataSlotQuestion: { createMany: vi.fn(async () => ({ count: 0 })) },
   appScoringSchema: { create: vi.fn(async () => ({ id: 'schema-1' })) },
 };
+
+/** The single `data` array passed to a batched creator's first call. */
+function batchData(creator: Mock): Row[] {
+  return creator.mock.calls[0][0].data as Row[];
+}
 
 // ─── Test envelope builder ────────────────────────────────────────────────────
 
@@ -98,10 +136,6 @@ function input(overrides: Partial<ImportDefinitionInput> = {}): ImportDefinition
 
 beforeEach(() => {
   vi.clearAllMocks();
-  tagSeq = 0;
-  sectionSeq = 0;
-  questionSeq = 0;
-  slotSeq = 0;
   // Run the transaction callback against the fake tx client.
   (executeTransaction as unknown as Mock).mockImplementation((cb: (t: typeof tx) => unknown) =>
     cb(tx)
@@ -111,6 +145,18 @@ beforeEach(() => {
 // ─── persistDefinitionImport ─────────────────────────────────────────────────
 
 describe('persistDefinitionImport', () => {
+  it('runs inside a transaction with extended timeout headroom over the 5s default', async () => {
+    await persistDefinitionImport(input());
+
+    // The per-row variant timed out on prod (P2028); the persister now asks for more than the
+    // 5000ms interactive-transaction default so a large import has headroom under prod latency.
+    const options = (executeTransaction as unknown as Mock).mock.calls[0][1] as
+      | { timeout?: number; maxWait?: number }
+      | undefined;
+    expect(options?.timeout).toBeGreaterThan(5000);
+    expect(options?.maxWait).toBeGreaterThan(2000);
+  });
+
   it('creates a draft questionnaire and v1 draft version, wiring the FK from the DB response', async () => {
     const result = await persistDefinitionImport(input());
 
@@ -205,7 +251,9 @@ describe('persistDefinitionImport', () => {
     });
     const result = await persistDefinitionImport(input({ envelope }));
 
-    expect(tx.appQuestionTag.create).toHaveBeenCalledTimes(2);
+    // One batched write of two deduped rows (not three).
+    expect(tx.appQuestionTag.createManyAndReturn).toHaveBeenCalledTimes(1);
+    expect(batchData(tx.appQuestionTag.createManyAndReturn as Mock)).toHaveLength(2);
     expect(result.tagCount).toBe(2);
   });
 
@@ -216,13 +264,16 @@ describe('persistDefinitionImport', () => {
     });
     await persistDefinitionImport(input({ envelope }));
 
-    const tagData = (tx.appQuestionTag.create as Mock).mock.calls[0][0].data as Record<
-      string,
-      unknown
-    >;
+    const tagRow = batchData(tx.appQuestionTag.createManyAndReturn as Mock)[0];
     // The persister conditionally spreads color; null must not produce a key.
-    expect(tagData.label).toBe('Plain Tag');
-    expect(tagData).not.toHaveProperty('color');
+    expect(tagRow.label).toBe('Plain Tag');
+    expect(tagRow).not.toHaveProperty('color');
+  });
+
+  it('does not write tags when the envelope has none', async () => {
+    await persistDefinitionImport(input({ envelope: makeEnvelope({ tags: [] }) }));
+
+    expect(tx.appQuestionTag.createManyAndReturn).not.toHaveBeenCalled();
   });
 
   it('creates sections and questions with full field fidelity, wiring sectionIds correctly', async () => {
@@ -270,15 +321,18 @@ describe('persistDefinitionImport', () => {
     });
     const result = await persistDefinitionImport(input({ envelope }));
 
-    expect(tx.appQuestionnaireSection.create).toHaveBeenCalledTimes(2);
+    // Both sections in one batch.
+    expect(tx.appQuestionnaireSection.createManyAndReturn).toHaveBeenCalledTimes(1);
+    expect(batchData(tx.appQuestionnaireSection.createManyAndReturn as Mock)).toHaveLength(2);
 
-    // First question wired to first section id and carries optional guidelines/rationale.
-    expect(tx.appQuestionSlot.create).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({
-        data: expect.objectContaining({
+    // Both questions in one batch; each wired to its section id (resolved by ordinal, not
+    // array position — the section fake returns rows shuffled) and carrying its optional fields.
+    const questionRows = batchData(tx.appQuestionSlot.createManyAndReturn as Mock);
+    expect(questionRows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
           versionId: 'ver-1',
-          sectionId: 'sec-1', // resolved from first section create response
+          sectionId: 'sec-0', // resolved from the section whose ordinal is 0
           key: 'full_name',
           prompt: 'Full name?',
           type: 'free_text',
@@ -287,24 +341,66 @@ describe('persistDefinitionImport', () => {
           guidelines: 'Use legal name',
           rationale: 'For records',
         }),
-      })
-    );
-
-    // Second question goes to the second section and carries typeConfig.
-    expect(tx.appQuestionSlot.create).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        data: expect.objectContaining({
-          sectionId: 'sec-2',
+        expect.objectContaining({
+          sectionId: 'sec-1', // resolved from the section whose ordinal is 1
           key: 'years_exp',
           type: 'numeric',
           required: false,
           typeConfig: { min: 0, max: 50 },
         }),
-      })
+      ])
     );
 
     expect(result).toMatchObject({ sectionCount: 2, questionCount: 2 });
+  });
+
+  it('assigns globally increasing question ordinals across sections', async () => {
+    const envelope = makeEnvelope({
+      sections: [
+        {
+          ordinal: 0,
+          title: 'S1',
+          description: null,
+          questions: [
+            {
+              ordinal: 0,
+              key: 'a',
+              prompt: 'A?',
+              guidelines: null,
+              rationale: null,
+              type: 'free_text',
+              required: true,
+              weight: 1,
+              tagLabels: [],
+            },
+          ],
+        },
+        {
+          ordinal: 1,
+          title: 'S2',
+          description: null,
+          questions: [
+            {
+              ordinal: 0,
+              key: 'b',
+              prompt: 'B?',
+              guidelines: null,
+              rationale: null,
+              type: 'free_text',
+              required: true,
+              weight: 1,
+              tagLabels: [],
+            },
+          ],
+        },
+      ],
+    });
+    await persistDefinitionImport(input({ envelope }));
+
+    const rows = batchData(tx.appQuestionSlot.createManyAndReturn as Mock);
+    const byKey = Object.fromEntries(rows.map((r) => [r.key, r.ordinal]));
+    // The second section's question continues the global counter (1), not restart at 0.
+    expect(byKey).toEqual({ a: 0, b: 1 });
   });
 
   it('deduplicates colliding question keys and data-slot refs resolve through the original key', async () => {
@@ -360,21 +456,16 @@ describe('persistDefinitionImport', () => {
     await persistDefinitionImport(input({ envelope }));
 
     // First question stored with original key; second gets a deduplicated suffix.
-    expect(tx.appQuestionSlot.create).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({ data: expect.objectContaining({ key: 'score' }) })
-    );
-    expect(tx.appQuestionSlot.create).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({ data: expect.objectContaining({ key: 'score_2' }) })
-    );
+    const keys = batchData(tx.appQuestionSlot.createManyAndReturn as Mock).map((r) => r.key);
+    expect(keys).toEqual(['score', 'score_2']);
 
-    // Data-slot mapping resolves 'score' through the original-key map. Both questions
-    // wrote q.key='score', so the map ends with 'score' → 'q-2' (last write wins).
-    // The link is created, proving the data slot found the question via the original key.
+    // Data-slot mapping resolves 'score' through the original-key map. Both questions wrote
+    // q.key='score'; the deduped keys map back to the same original, last write wins → q-score_2.
     expect(tx.appDataSlotQuestion.createMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: [expect.objectContaining({ dataSlotId: 'slot-1', questionSlotId: 'q-2' })],
+        data: [
+          expect.objectContaining({ dataSlotId: 'slot-score_slot', questionSlotId: 'q-score_2' }),
+        ],
       })
     );
   });
@@ -406,16 +497,63 @@ describe('persistDefinitionImport', () => {
     });
     await persistDefinitionImport(input({ envelope }));
 
-    // Exactly one link: 'Background' → tag-1. 'NonExistent' produced no entry.
+    // Exactly one link: 'Background' → tag-background. 'NonExistent' produced no entry.
     expect(tx.appQuestionSlotTag.createMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: [{ questionSlotId: 'q-1', tagId: 'tag-1' }],
+        data: [{ questionSlotId: 'q-bio', tagId: 'tag-background' }],
       })
     );
-    const linkData = (tx.appQuestionSlotTag.createMany as Mock).mock.calls[0][0].data as Array<
-      Record<string, unknown>
-    >;
-    expect(linkData).toHaveLength(1);
+    expect(batchData(tx.appQuestionSlotTag.createMany as Mock)).toHaveLength(1);
+  });
+
+  it('batches question→tag links across every question into a single createMany', async () => {
+    const envelope = makeEnvelope({
+      tags: [
+        { label: 'Alpha', color: null },
+        { label: 'Beta', color: null },
+      ],
+      sections: [
+        {
+          ordinal: 0,
+          title: 'S',
+          description: null,
+          questions: [
+            {
+              ordinal: 0,
+              key: 'q1',
+              prompt: 'Q1?',
+              guidelines: null,
+              rationale: null,
+              type: 'free_text',
+              required: true,
+              weight: 1,
+              tagLabels: ['Alpha'],
+            },
+            {
+              ordinal: 1,
+              key: 'q2',
+              prompt: 'Q2?',
+              guidelines: null,
+              rationale: null,
+              type: 'free_text',
+              required: true,
+              weight: 1,
+              tagLabels: ['Beta'],
+            },
+          ],
+        },
+      ],
+    });
+    await persistDefinitionImport(input({ envelope }));
+
+    // One call, both links — not one createMany per question.
+    expect(tx.appQuestionSlotTag.createMany).toHaveBeenCalledTimes(1);
+    expect(batchData(tx.appQuestionSlotTag.createMany as Mock)).toEqual(
+      expect.arrayContaining([
+        { questionSlotId: 'q-q1', tagId: 'tag-alpha' },
+        { questionSlotId: 'q-q2', tagId: 'tag-beta' },
+      ])
+    );
   });
 
   it('does not call createMany for question tags when no tag labels resolve', async () => {
@@ -510,19 +648,17 @@ describe('persistDefinitionImport', () => {
     });
     const result = await persistDefinitionImport(input({ envelope }));
 
-    expect(tx.appDataSlot.create).toHaveBeenCalledTimes(1);
+    expect(tx.appDataSlot.createManyAndReturn).toHaveBeenCalledTimes(1);
+    expect(batchData(tx.appDataSlot.createManyAndReturn as Mock)).toHaveLength(1);
     expect(result.dataSlotCount).toBe(1);
 
-    // 'experience' → 'q-1'; 'ghost_key' produced no mapping.
+    // 'experience' → q-experience; 'ghost_key' produced no mapping.
     expect(tx.appDataSlotQuestion.createMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: [{ dataSlotId: 'slot-1', questionSlotId: 'q-1' }],
+        data: [{ dataSlotId: 'slot-exp_slot', questionSlotId: 'q-experience' }],
       })
     );
-    const mappings = (tx.appDataSlotQuestion.createMany as Mock).mock.calls[0][0].data as Array<
-      Record<string, unknown>
-    >;
-    expect(mappings).toHaveLength(1);
+    expect(batchData(tx.appDataSlotQuestion.createMany as Mock)).toHaveLength(1);
   });
 
   it('does not call createMany for data-slot questions when all question keys are unknown', async () => {
@@ -542,6 +678,8 @@ describe('persistDefinitionImport', () => {
     });
     await persistDefinitionImport(input({ envelope }));
 
+    // The slot itself is still written; only the (empty) link batch is skipped.
+    expect(tx.appDataSlot.createManyAndReturn).toHaveBeenCalledTimes(1);
     expect(tx.appDataSlotQuestion.createMany).not.toHaveBeenCalled();
   });
 

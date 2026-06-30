@@ -974,8 +974,9 @@ describe('resolveQuestionnaireWorkspaceFlags', () => {
       expect(mockIsFeatureEnabled).toHaveBeenCalledWith('APP_QUESTIONNAIRES_COHORTS_ENABLED');
       expect(mockIsFeatureEnabled).toHaveBeenCalledWith('APP_QUESTIONNAIRES_COHORT_REPORT_ENABLED');
       expect(mockIsFeatureEnabled).toHaveBeenCalledWith('APP_QUESTIONNAIRES_ADVISOR_ENABLED');
-      // Also verify exactly 11 calls — prevents accidental re-resolution of the master flag
-      expect(mockIsFeatureEnabled).toHaveBeenCalledTimes(11);
+      expect(mockIsFeatureEnabled).toHaveBeenCalledWith('APP_QUESTIONNAIRES_EDIT_AGENT_ENABLED');
+      // Also verify exactly 12 calls — prevents accidental re-resolution of the master flag
+      expect(mockIsFeatureEnabled).toHaveBeenCalledTimes(12);
     });
   });
 
@@ -1046,6 +1047,7 @@ describe('resolveQuestionnaireWorkspaceFlags', () => {
           'cohortReport',
           'dataSlots',
           'designEval',
+          'editAgent',
           'introScreen',
           'liveSessions',
           'master',

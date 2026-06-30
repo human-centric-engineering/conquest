@@ -66,6 +66,7 @@ function flags(over: Partial<QuestionnaireWorkspaceFlags> = {}): QuestionnaireWo
     cohortReport: true,
     introScreen: false,
     advisor: false,
+    editAgent: false,
     ...over,
   };
 }

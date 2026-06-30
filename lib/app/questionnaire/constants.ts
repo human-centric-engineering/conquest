@@ -983,6 +983,27 @@ export const APP_QUESTIONNAIRES_ADVISOR_FLAG = 'APP_QUESTIONNAIRES_ADVISOR_ENABL
  */
 export const QUESTIONNAIRE_ADVISOR_AGENT_SLUG = 'app-questionnaire-advisor';
 
+/**
+ * Sub-flag gating the **Structure Edit Agent** — the admin-triggered AI panel on the version
+ * Structure editor that takes a plain-English instruction for the WHOLE questionnaire ("renumber
+ * the sections", "CAPS every section title", "remove required from all free-text fields") and
+ * applies it across every matching section/question. DB-backed, seeded disabled by
+ * `059-edit-agent-flag.ts`. Opt-in on top of {@link APP_QUESTIONNAIRES_FLAG}; both must be on. Each
+ * plan run is one reasoning LLM call (instruction → structured edit-ops), so it dark-launches
+ * independently. When off, the plan/apply routes 404 and the editor panel is hidden.
+ */
+export const APP_QUESTIONNAIRES_EDIT_AGENT_FLAG = 'APP_QUESTIONNAIRES_EDIT_AGENT_ENABLED';
+
+/**
+ * Slug of the seeded Structure Edit Agent `AiAgent`. A distinct agent from the composer/advisor:
+ * it interprets a free-text instruction into a list of deterministic structural edit operations
+ * over an existing draft (it does not author prose or evaluate config), and carries its own budget
+ * + persona. Ships with empty `model`/`provider` so it resolves dynamically via `agent-resolver.ts`;
+ * the plan route loads it by slug. App-prefixed to avoid collision with core agents. Seeded by
+ * `060-edit-agent.ts`, surfaced in Agent Settings via `AGENT_RECOMMENDATIONS`.
+ */
+export const QUESTIONNAIRE_EDIT_AGENT_SLUG = 'app-questionnaire-structure-editor';
+
 /** Slug of the compose-from-brief capability. One source of truth shared by the
  * `BaseCapability` subclass, its `AiCapability` seed row, and the compose routes. */
 export const COMPOSE_QUESTIONNAIRE_CAPABILITY_SLUG = 'app_compose_questionnaire';

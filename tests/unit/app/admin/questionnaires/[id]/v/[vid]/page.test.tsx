@@ -145,6 +145,7 @@ function makeFlags(over: Partial<QuestionnaireWorkspaceFlags> = {}): Questionnai
     cohortReport: false,
     introScreen: false,
     advisor: false,
+    editAgent: false,
     ...over,
   };
 }

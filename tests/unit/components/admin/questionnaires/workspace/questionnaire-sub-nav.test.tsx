@@ -62,6 +62,7 @@ const allFlagsOn: QuestionnaireWorkspaceFlags = {
   cohortReport: true,
   introScreen: true,
   advisor: true,
+  editAgent: true,
 };
 
 /** Cohort report (Scoring + Report) off; everything else on. */
