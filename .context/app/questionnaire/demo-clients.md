@@ -15,8 +15,11 @@ A **demo client** lets a questionnaire be attributed to a prospect, so the sales
 surface is theirs ("this is the Acme Bank demo"). F2.5.1 ships the **foundation**:
 the identity table, the `AppQuestionnaire` foreign key, the admin CRUD, and the
 attribution control on a questionnaire. Attribution can be set **at upload time**
-(the `demoClientId` field on the ingest form) or changed later via the settings-tab
-picker; either way it surfaces as an owner column on the questionnaires list.
+(the `demoClientId` field on the ingest form), **at definition-import time** (the
+demo-client picker on the "Import definition" dialog — sent as a `?demoClientId=`
+query param since the body is the definition file itself), or changed later via the
+settings-tab picker; either way it surfaces as an owner column on the questionnaires
+list.
 
 | It **is**                                           | It is **not**                                        |
 | --------------------------------------------------- | ---------------------------------------------------- |
@@ -117,6 +120,7 @@ auth), `withAdminAuth` (401/403), and audited. Registry: `API.APP.DEMO_CLIENTS`.
 | `POST /api/v1/app/demo-clients/:id/reset-sessions` | Reset session graph (F6.4)                                                         | `400 CONFIRM_SLUG_MISMATCH`, `409 ANONYMOUS_MODE_PROTECTED` |
 | `GET /api/v1/app/demo-clients/:id/knowledge`       | The client's private knowledge corpus (F10.1) — grounds its Respondent Reports     | `404`                                                       |
 | `PATCH /api/v1/app/questionnaires/:id`             | Attribute / detach (`demoClientId`); also renames with `{ title }` (not demo-only) | `404`, `404 DEMO_CLIENT_NOT_FOUND`                          |
+| `POST /api/v1/app/questionnaires/import`           | Import a definition file; optional `?demoClientId=` attributes the new draft       | `404 DEMO_CLIENT_NOT_FOUND`, `400 VALIDATION_ERROR`         |
 
 **Slug is derive-with-override:** omit it on create and the server derives a
 kebab-case slug from the name (`slugifyDemoClient`); supply it to override. A

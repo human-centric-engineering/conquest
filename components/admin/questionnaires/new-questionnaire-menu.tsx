@@ -103,7 +103,11 @@ export function NewQuestionnaireMenu({
       />
 
       {/* Controlled — opened by the "Import definition" item. */}
-      <ImportDefinitionDialog open={importOpen} onOpenChange={setImportOpen} />
+      <ImportDefinitionDialog
+        demoClientOptions={demoClientOptions}
+        open={importOpen}
+        onOpenChange={setImportOpen}
+      />
     </>
   );
 }

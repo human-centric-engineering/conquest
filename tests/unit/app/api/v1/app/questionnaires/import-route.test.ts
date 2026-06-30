@@ -34,6 +34,14 @@ vi.mock('@/lib/security/ip', () => ({
   getClientIP: vi.fn(() => '203.0.113.1'),
 }));
 
+vi.mock('@/lib/db/client', () => ({
+  prisma: {
+    appDemoClient: {
+      findUnique: vi.fn(),
+    },
+  },
+}));
+
 vi.mock('@/lib/security/rate-limit', () => ({
   createRateLimitResponse: vi.fn(() => new Response('rate limited', { status: 429 })),
 }));
@@ -82,6 +90,7 @@ const { POST } = (await import('@/app/api/v1/app/questionnaires/import/route')) 
 };
 
 import { parseDefinitionImport } from '@/lib/app/questionnaire/authoring';
+import { prisma } from '@/lib/db/client';
 import { persistDefinitionImport } from '@/app/api/v1/app/questionnaires/_lib/import-definition';
 import { embedVersionSlots } from '@/app/api/v1/app/questionnaires/_lib/slot-embeddings';
 import { embedVersionDataSlots } from '@/app/api/v1/app/questionnaires/_lib/data-slot-embeddings';
@@ -107,8 +116,14 @@ const PERSIST_RESULT = {
 
 const PARSED_ENVELOPE = { questionnaire: { title: 'Health Survey' }, version: {} };
 
-function makeRequest(body = '{"questionnaire":{"title":"Health Survey"},"version":{}}') {
-  return new NextRequest('http://localhost/api/v1/app/questionnaires/import', {
+function makeRequest(
+  body = '{"questionnaire":{"title":"Health Survey"},"version":{}}',
+  demoClientId?: string
+) {
+  const url = demoClientId
+    ? `http://localhost/api/v1/app/questionnaires/import?demoClientId=${encodeURIComponent(demoClientId)}`
+    : 'http://localhost/api/v1/app/questionnaires/import';
+  return new NextRequest(url, {
     method: 'POST',
     body,
     headers: { 'content-type': 'application/json' },
@@ -135,6 +150,9 @@ beforeEach(() => {
   // Embeddings succeed by default (no throws)
   (embedVersionSlots as Mock).mockResolvedValue(undefined);
   (embedVersionDataSlots as Mock).mockResolvedValue(undefined);
+
+  // Demo-client lookup resolves to an existing client by default
+  (prisma.appDemoClient.findUnique as Mock).mockResolvedValue({ id: 'client-1' });
 });
 
 // ─── Feature-flag gate (withQuestionnairesEnabled mock wiring) ────────────────
@@ -325,6 +343,69 @@ describe('POST /api/v1/app/questionnaires/import — happy path', () => {
         }),
       })
     );
+  });
+});
+
+// ─── Demo-client attribution (F2.5.1) ─────────────────────────────────────────
+
+describe('POST /api/v1/app/questionnaires/import — demo-client attribution', () => {
+  it('does not look up a client and omits demoClientId when no query param is given', async () => {
+    const req = makeRequest();
+    await POST(req, ADMIN_SESSION);
+
+    expect(prisma.appDemoClient.findUnique).not.toHaveBeenCalled();
+    // The persist call carries only the envelope + adminId — no demoClientId key.
+    expect(persistDefinitionImport).toHaveBeenCalledWith({
+      envelope: PARSED_ENVELOPE,
+      adminId: 'admin-1',
+    });
+  });
+
+  it('pre-checks the client and threads demoClientId to the persister when valid', async () => {
+    (prisma.appDemoClient.findUnique as Mock).mockResolvedValue({ id: 'client-42' });
+
+    const req = makeRequest(undefined, 'client-42');
+    const res = await POST(req, ADMIN_SESSION);
+
+    expect(res.status).toBe(201);
+    expect(prisma.appDemoClient.findUnique).toHaveBeenCalledWith({
+      where: { id: 'client-42' },
+      select: { id: true },
+    });
+    expect(persistDefinitionImport).toHaveBeenCalledWith({
+      envelope: PARSED_ENVELOPE,
+      adminId: 'admin-1',
+      demoClientId: 'client-42',
+    });
+  });
+
+  it('records the attributed demoClientId in the admin audit metadata', async () => {
+    (prisma.appDemoClient.findUnique as Mock).mockResolvedValue({ id: 'client-42' });
+
+    const req = makeRequest(undefined, 'client-42');
+    await POST(req, ADMIN_SESSION);
+
+    expect(logAdminAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ demoClientId: 'client-42' }),
+      })
+    );
+  });
+
+  it('returns 404 DEMO_CLIENT_NOT_FOUND when the client does not exist, before persisting', async () => {
+    (prisma.appDemoClient.findUnique as Mock).mockResolvedValue(null);
+
+    const req = makeRequest(undefined, 'ghost-client');
+    const res = await POST(req, ADMIN_SESSION);
+    const body = (await res.json()) as { success: boolean; error: { code: string } };
+
+    expect(res.status).toBe(404);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('DEMO_CLIENT_NOT_FOUND');
+
+    // Nothing was persisted and no embeddings were regenerated.
+    expect(persistDefinitionImport).not.toHaveBeenCalled();
+    expect(embedVersionSlots).not.toHaveBeenCalled();
   });
 });
 
