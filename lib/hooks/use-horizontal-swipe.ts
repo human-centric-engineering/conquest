@@ -31,7 +31,7 @@ const EDGE_MAX_RATIO = 0.12; // hard cap on the rubber-band at an edge
 const WHEEL_IDLE_MS = 200; // fallback: a wheel burst that just stops is "done" after this gap
 const WHEEL_RELEASE_FRACTION = 0.35; // a delta this far below the burst's peak means the finger lifted
 const WHEEL_RELEASE_FLOOR = 6; // …and is also this small in absolute terms (px) — i.e. momentum nearly spent
-const WHEEL_NEW_GESTURE_GAP_MS = 80; // a pause longer than this between wheel events starts a fresh swipe
+const WHEEL_NEW_GESTURE_GAP_MS = 60; // a pause longer than this between wheel events starts a fresh swipe
 const FALLBACK_WIDTH = 320; // before the frame is measured
 
 export interface HorizontalSwipeState {
@@ -115,7 +115,15 @@ export function useHorizontalSwipe(options: UseHorizontalSwipeOptions): Horizont
 
   const onTouchStart = useCallback((e: React.TouchEvent) => {
     if (e.touches.length !== 1) {
-      start.current = null; // multi-touch (pinch/zoom) is never a swipe
+      // Multi-touch (pinch/zoom) is never a swipe. If it lands mid-drag, spring the partially-dragged
+      // track back to rest: `onTouchEnd` bails on the now-null `start`, so it would otherwise never
+      // call `settle` and the surface would freeze at the drag offset.
+      start.current = null;
+      if (horizontal.current) {
+        horizontal.current = false;
+        setAnimating(true);
+        setDragPx(0);
+      }
       return;
     }
     const t = e.touches[0];
@@ -176,6 +184,15 @@ export function useHorizontalSwipe(options: UseHorizontalSwipeOptions): Horizont
   const wheelCoasting = useRef(false);
   const wheelLastTime = useRef(0);
   const wheelIdle = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clear any pending end-of-burst timer on unmount: a swipe interrupted by a route change must not
+  // let the idle callback fire after teardown, where `settle` would invoke the consumer's stale
+  // `onCommit*` (→ refetch/refresh) against an unmounted tree.
+  useEffect(() => {
+    return () => {
+      if (wheelIdle.current) clearTimeout(wheelIdle.current);
+    };
+  }, []);
 
   const finishWheel = useCallback(
     (force: boolean) => {
