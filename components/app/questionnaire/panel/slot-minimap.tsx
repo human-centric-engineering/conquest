@@ -108,7 +108,10 @@ export function SlotMiniMap({
           style={{ top: `${bar.topPct}%`, height: `${bar.heightPct}%` }}
           className={cn(
             'absolute inset-x-0.5 rounded-[2px]',
-            bar.filled ? confidenceBandSolidBg(bar.band) : 'bg-muted-foreground/15',
+            // Colour by confidence band, not by the official "filled" threshold: a scored-but-unfilled
+            // slot (a low-confidence parked fill) carries a band and reads as its colour (e.g. red for
+            // "Unsure"), matching its row dot. Only a truly unscored slot falls to the faint sliver.
+            bar.band !== 'unscored' ? confidenceBandSolidBg(bar.band) : 'bg-muted-foreground/15',
             // Previous-turn bars stay ringed and gently breathe until a newer turn fills something.
             recentlyFilledKeys?.has(bar.key) && 'ring-primary cq-livedot-once ring-1'
           )}

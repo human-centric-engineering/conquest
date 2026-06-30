@@ -43,6 +43,22 @@ describe('SlotMiniMap', () => {
     expect(bar('plans').className).toContain('bg-muted-foreground/15');
   });
 
+  it('colours a scored bar by its band even when unfilled (low-confidence parked fill reads red)', () => {
+    const parked: MiniMapBar[] = [
+      { key: 'unsure', topPct: 0, heightPct: 20, filled: false, band: 'low' },
+    ];
+    render(
+      <SlotMiniMap
+        bars={parked}
+        windowTopPct={0}
+        windowHeightPct={50}
+        onScrubToFraction={vi.fn()}
+      />
+    );
+    expect(bar('unsure').className).toContain('red');
+    expect(bar('unsure').className).not.toContain('bg-muted-foreground/15');
+  });
+
   it('draws the viewport window at the given position', () => {
     render(
       <SlotMiniMap bars={bars} windowTopPct={30} windowHeightPct={25} onScrubToFraction={vi.fn()} />

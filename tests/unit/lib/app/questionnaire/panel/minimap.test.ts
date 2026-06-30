@@ -47,7 +47,7 @@ describe('computeMiniMapModel', () => {
     expect(m.windowHeightPct).toBe(25);
   });
 
-  it('assigns a confidence band to filled bars and unscored to unfilled ones', () => {
+  it('bands every scored bar by its confidence and reserves unscored for fill-less rows', () => {
     const m = computeMiniMapModel({
       contentHeight: 1000,
       viewportHeight: 300,
@@ -55,11 +55,15 @@ describe('computeMiniMapModel', () => {
       rows: [
         row({ key: 'hi', filled: true, confidence: 0.95 }),
         row({ key: 'lo', filled: true, confidence: 0.3 }),
+        // A low-confidence parked fill: below the official "filled" threshold, but it has a score, so
+        // the bar must still read as its band (red/low) rather than collapse to a grey unscored sliver.
+        row({ key: 'parked', filled: false, confidence: 0.4 }),
         row({ key: 'empty', filled: false, confidence: null }),
       ],
     });
     expect(m.bars.find((b) => b.key === 'hi')).toMatchObject({ filled: true, band: 'high' });
     expect(m.bars.find((b) => b.key === 'lo')).toMatchObject({ filled: true, band: 'low' });
+    expect(m.bars.find((b) => b.key === 'parked')).toMatchObject({ filled: false, band: 'low' });
     expect(m.bars.find((b) => b.key === 'empty')).toMatchObject({
       filled: false,
       band: 'unscored',
