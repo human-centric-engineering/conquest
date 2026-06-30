@@ -148,6 +148,9 @@ function makeConfigView(overrides: Partial<ConfigView> = {}): ConfigView {
     minQuestionsAnswered: 3,
     coverageThreshold: 0.7,
     answerConfidenceFloor: 0.5,
+    allowEarlyFinish: false,
+    earlyFinishMinCoverage: 0.5,
+    earlyFinishMinQuestions: 0,
     interviewerStrategy: {
       enabled: false,
       approach: 'funnel',

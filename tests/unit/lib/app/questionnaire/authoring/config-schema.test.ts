@@ -99,6 +99,32 @@ describe('updateConfigSchema', () => {
     expect(updateConfigSchema.safeParse({ costBudgetUsd: 0 }).success).toBe(false);
   });
 
+  describe('early finish', () => {
+    it('accepts the toggle and bounded minimums', () => {
+      expect(
+        updateConfigSchema.safeParse({
+          allowEarlyFinish: true,
+          earlyFinishMinCoverage: 0.5,
+          earlyFinishMinQuestions: 3,
+        }).success
+      ).toBe(true);
+    });
+
+    it('rejects a coverage minimum outside 0–1', () => {
+      expect(updateConfigSchema.safeParse({ earlyFinishMinCoverage: 1.5 }).success).toBe(false);
+      expect(updateConfigSchema.safeParse({ earlyFinishMinCoverage: -0.1 }).success).toBe(false);
+    });
+
+    it('rejects a negative or non-integer questions minimum', () => {
+      expect(updateConfigSchema.safeParse({ earlyFinishMinQuestions: -1 }).success).toBe(false);
+      expect(updateConfigSchema.safeParse({ earlyFinishMinQuestions: 2.5 }).success).toBe(false);
+    });
+
+    it('rejects a non-boolean toggle', () => {
+      expect(updateConfigSchema.safeParse({ allowEarlyFinish: 'yes' }).success).toBe(false);
+    });
+  });
+
   describe('contradiction mode / N coherence', () => {
     it('rejects a non-off mode with N = 0', () => {
       const res = updateConfigSchema.safeParse({

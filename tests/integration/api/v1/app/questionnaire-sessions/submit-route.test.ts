@@ -36,8 +36,13 @@ type Mock = ReturnType<typeof vi.fn>;
 const USER = 'cmjbv4i3x00003wsloputgwul';
 const URL = 'http://localhost:3000/api/v1/app/questionnaire-sessions/sess-1/submit';
 
-function req(headers: Record<string, string> = {}): NextRequest {
-  return { url: URL, headers: new Headers(headers) } as unknown as NextRequest;
+function req(headers: Record<string, string> = {}, body?: unknown): NextRequest {
+  // The route reads the body with `request.text()` (optional — empty = standard submit).
+  return {
+    url: URL,
+    headers: new Headers(headers),
+    text: () => Promise.resolve(body === undefined ? '' : JSON.stringify(body)),
+  } as unknown as NextRequest;
 }
 const ctx = { params: Promise.resolve({ id: 'sess-1' }) };
 
@@ -47,9 +52,23 @@ function setAuth(s: ReturnType<typeof mockAuthenticatedUser> | null): void {
 
 /** A loaded turn context. `offerable` = thresholds trivially met → assessCompletion 'offer'. */
 function loadedContext(
-  opts: { status?: string; respondentUserId?: string | null; offerable?: boolean } = {}
+  opts: {
+    status?: string;
+    respondentUserId?: string | null;
+    offerable?: boolean;
+    /** Turn on the early-finish escape hatch (both bars 0 → available from the start). */
+    earlyFinish?: boolean;
+    /** Make q1 a required, unanswered slot (so the agent's own gate is blocked_on_required). */
+    requiredOpen?: boolean;
+  } = {}
 ) {
-  const { status = 'active', respondentUserId = USER, offerable = true } = opts;
+  const {
+    status = 'active',
+    respondentUserId = USER,
+    offerable = true,
+    earlyFinish = false,
+    requiredOpen = false,
+  } = opts;
   return {
     session: { id: 'sess-1', status, versionId: 'v1', respondentUserId },
     base: {
@@ -61,6 +80,10 @@ function loadedContext(
         minQuestionsAnswered: 0,
         maxQuestionsPerSession: null,
         costBudgetUsd: null,
+        // Early finish: both minimums 0 → unlocked from the start when the toggle is on.
+        allowEarlyFinish: earlyFinish,
+        earlyFinishMinCoverage: 0,
+        earlyFinishMinQuestions: 0,
       },
       questions: [
         {
@@ -70,13 +93,13 @@ function loadedContext(
           sectionOrdinal: 0,
           ordinal: 0,
           weight: 1,
-          required: false,
+          required: requiredOpen,
           type: 'free_text' as const,
           tagIds: [],
           prompt: 'What is your role?',
         },
       ],
-      answered: offerable ? [{ questionId: 'q1', confidence: 0.9 }] : [],
+      answered: offerable && !requiredOpen ? [{ questionId: 'q1', confidence: 0.9 }] : [],
       existingAnswers: [],
       recentMessages: [],
       selectionRound: 1,
@@ -171,6 +194,53 @@ describe('eligibility', () => {
     expect(res.status).toBe(409);
     expect((await res.json()).error.code).toBe('SUBMIT_NOT_READY');
     expect(sessionsMock.markSessionCompleted).not.toHaveBeenCalled();
+  });
+});
+
+describe('early finish (escape hatch)', () => {
+  it('200s and completes with the early-finish reason when below thresholds but unlocked', async () => {
+    // Not offerable (full coverage demanded, none answered) — a standard submit would 409.
+    ctxMock.buildTurnContext.mockResolvedValue(loadedContext({ offerable: false, earlyFinish: true }));
+    const res = await POST(req({}, { early: true }), ctx);
+    expect(res.status).toBe(200);
+    expect(sessionsMock.markSessionCompleted).toHaveBeenCalledWith('sess-1', {
+      reason: 'respondent_early_finish',
+    });
+  });
+
+  it('bypasses the required-question gate', async () => {
+    // A required slot is open (assessCompletion → blocked_on_required), but early finish is unlocked.
+    ctxMock.buildTurnContext.mockResolvedValue(
+      loadedContext({ offerable: false, earlyFinish: true, requiredOpen: true })
+    );
+    const res = await POST(req({}, { early: true }), ctx);
+    expect(res.status).toBe(200);
+    expect(sessionsMock.markSessionCompleted).toHaveBeenCalledWith('sess-1', {
+      reason: 'respondent_early_finish',
+    });
+  });
+
+  it('409s SUBMIT_NOT_READY when early=true but the feature is off', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(loadedContext({ offerable: false, earlyFinish: false }));
+    const res = await POST(req({}, { early: true }), ctx);
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.code).toBe('SUBMIT_NOT_READY');
+    expect(sessionsMock.markSessionCompleted).not.toHaveBeenCalled();
+  });
+
+  it('400s on a malformed body', async () => {
+    const res = await POST(req({}, { early: 'yes' }), ctx);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe('VALIDATION_ERROR');
+    expect(sessionsMock.markSessionCompleted).not.toHaveBeenCalled();
+  });
+
+  it('still completes a standard submit (no body) with the standard reason', async () => {
+    const res = await POST(req(), ctx);
+    expect(res.status).toBe(200);
+    expect(sessionsMock.markSessionCompleted).toHaveBeenCalledWith('sess-1', {
+      reason: 'respondent_submit',
+    });
   });
 });
 

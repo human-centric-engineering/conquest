@@ -86,13 +86,23 @@ export interface CompletionAssessment {
   requiredUnansweredKeys: string[];
   /** Whether the per-session cap (`maxQuestionsPerSession`) forced the offer. */
   capReached: boolean;
+  /**
+   * Whether the respondent may *voluntarily* finish now (the F-early-finish escape hatch),
+   * independent of `kind`. Computed from the early-finish config (`allowEarlyFinish` +
+   * the OR of `earlyFinishMinCoverage` / `earlyFinishMinQuestions`); deliberately does NOT
+   * consult the required-question gate — early finish bypasses it. `false` when the feature
+   * is off or no bar is met yet. Distinct from `kind === 'offer'`, which is the agent's own
+   * threshold-met offer; both can be true at once.
+   */
+  earlyFinishAvailable: boolean;
 }
 
 /**
- * What the respondent does with an offer: `accept` (submit) or `hold` (keep going).
- * The engine maps the respondent's reply onto one of these before resolving.
+ * What the respondent does with an offer: `accept` (submit), `hold` (keep going), or
+ * `finish_early` (voluntarily end via the escape hatch, bypassing the required gate).
+ * The engine/route maps the respondent's action onto one of these before resolving.
  */
-export const COMPLETION_ACTIONS = ['accept', 'hold'] as const;
+export const COMPLETION_ACTIONS = ['accept', 'hold', 'finish_early'] as const;
 export type CompletionAction = (typeof COMPLETION_ACTIONS)[number];
 
 /**

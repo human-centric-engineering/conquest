@@ -221,6 +221,11 @@ export const updateConfigSchema = z
     minQuestionsAnswered: z.number().int().nonnegative().optional(),
     coverageThreshold: z.number().min(0).max(1).optional(),
     answerConfidenceFloor: z.number().min(0).max(1).optional(),
+    // Respondent-controlled early finish (escape hatch — bypasses the required gate). The two
+    // minimums are OR'd; 0 = not a criterion on that axis. Config-only, no platform flag.
+    allowEarlyFinish: z.boolean().optional(),
+    earlyFinishMinCoverage: z.number().min(0).max(1).optional(),
+    earlyFinishMinQuestions: z.number().int().nonnegative().optional(),
     costBudgetUsd: z.number().positive().nullable().optional(),
     maxQuestionsPerSession: z.number().int().positive().nullable().optional(),
     voiceEnabled: z.boolean().optional(),

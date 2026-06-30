@@ -24,6 +24,7 @@
  */
 
 import type { NextRequest } from 'next/server';
+import { z } from 'zod';
 
 import { successResponse, errorResponse } from '@/lib/api/responses';
 import { getRouteLogger } from '@/lib/api/context';
@@ -43,6 +44,13 @@ import { markSessionCompleted } from '@/app/api/v1/app/questionnaires/_lib/sessi
 import { enqueueRespondentReport } from '@/lib/app/questionnaire/report/enqueue';
 import { refreshRoundLearningDigest } from '@/lib/app/questionnaire/learning/digest';
 
+/**
+ * Optional submit body. Absent (the standard "accept the agent's offer" submit) ⇒ `early: false`.
+ * `{ early: true }` is the respondent-controlled early-finish escape hatch (bypasses the gate when
+ * `assessCompletion` reports `earlyFinishAvailable`). `strict()` rejects stray keys.
+ */
+const submitBodySchema = z.object({ early: z.boolean().optional() }).strict();
+
 async function handleSubmit(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
@@ -50,6 +58,26 @@ async function handleSubmit(
   try {
     const log = await getRouteLogger(request);
     const { id: sessionId } = await context.params;
+
+    // Body is optional — the standard submit sends none; only early finish sends `{ early: true }`.
+    let early = false;
+    const rawBody = await request.text();
+    if (rawBody.trim().length > 0) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(rawBody);
+      } catch {
+        return errorResponse('Invalid JSON in request body', {
+          code: 'VALIDATION_ERROR',
+          status: 400,
+        });
+      }
+      const result = submitBodySchema.safeParse(parsed);
+      if (!result.success) {
+        return errorResponse('Invalid request body', { code: 'VALIDATION_ERROR', status: 400 });
+      }
+      early = result.data.early ?? false;
+    }
 
     const loaded = await buildTurnContext(sessionId);
     if (!loaded) return errorResponse('Session not found', { code: 'NOT_FOUND', status: 404 });
@@ -79,18 +107,25 @@ async function handleSubmit(
       config: loaded.base.config,
       sessionId: loaded.base.sessionId,
     });
-    const resolution = resolveCompletion('accept', assessment, {
+    const resolution = resolveCompletion(early ? 'finish_early' : 'accept', assessment, {
       run: false,
       contradictionCount: 0,
     });
     if (resolution.kind !== 'submit') {
-      log.info('Submit refused — session not ready', { sessionId, completion: assessment.kind });
+      log.info('Submit refused — session not ready', {
+        sessionId,
+        completion: assessment.kind,
+        early,
+        earlyFinishAvailable: assessment.earlyFinishAvailable,
+      });
       return errorResponse(resolution.rationale, { code: 'SUBMIT_NOT_READY', status: 409 });
     }
 
     try {
-      const status = await markSessionCompleted(sessionId, { reason: 'respondent_submit' });
-      log.info('Respondent session submitted', { sessionId, status });
+      const status = await markSessionCompleted(sessionId, {
+        reason: early ? 'respondent_early_finish' : 'respondent_submit',
+      });
+      log.info('Respondent session submitted', { sessionId, status, early });
       // Queue the respondent report when the version is configured for an AI mode (raw_plus_insights
       // or narrative).
       // Best-effort — a queue failure must never fail the submission the respondent just made.

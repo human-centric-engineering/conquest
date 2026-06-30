@@ -251,6 +251,7 @@ function makeStatus(
         answeredCount: 0,
         requiredUnansweredKeys: [],
         capReached: false,
+        earlyFinishAvailable: false,
       },
       cost,
       anonymous: false,

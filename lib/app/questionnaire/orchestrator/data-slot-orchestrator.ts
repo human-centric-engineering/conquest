@@ -56,6 +56,7 @@ import type {
   DataSlotFillIntent,
 } from '@/lib/app/questionnaire/extraction/types';
 import type { CompletionAssessment } from '@/lib/app/questionnaire/completion/types';
+import { isEarlyFinishAvailable } from '@/lib/app/questionnaire/completion/completion-logic';
 
 import type {
   CapabilityInvokers,
@@ -340,6 +341,8 @@ export async function runDataSlotTurn(
             answeredCount: answeredAtAbandon.size,
             requiredUnansweredKeys: [],
             capReached: false,
+            // Abandoned by the gate — the escape hatch is moot on a terminal turn.
+            earlyFinishAvailable: false,
             unmet: ['coverage_below_threshold'],
             rationale: 'Session abandoned by the seriousness gate.',
           },
@@ -450,12 +453,15 @@ export async function runDataSlotTurn(
   const allQuestionsAnswered = remainingQuestions.length === 0 && effective.questions.length > 0;
 
   // The progress/assessment the route persists + the panel reads (question coverage).
+  const dataSlotCoverage =
+    effective.questions.length === 0 ? 1 : answeredIds.size / effective.questions.length;
   const assessment: CompletionAssessment = {
     kind: allQuestionsAnswered ? 'offer' : 'not_ready',
-    coverage: effective.questions.length === 0 ? 1 : answeredIds.size / effective.questions.length,
+    coverage: dataSlotCoverage,
     answeredCount: answeredIds.size,
     requiredUnansweredKeys: [],
     capReached: false,
+    earlyFinishAvailable: isEarlyFinishAvailable(state.config, dataSlotCoverage, answeredIds.size),
     unmet: allQuestionsAnswered ? [] : ['coverage_below_threshold'],
     rationale: allQuestionsAnswered
       ? 'All questions answered; ready to submit.'

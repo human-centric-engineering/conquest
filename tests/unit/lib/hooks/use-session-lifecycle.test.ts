@@ -28,6 +28,7 @@ function view(over: Partial<SessionStatusView> = {}): SessionStatusView {
       answeredCount: 4,
       requiredUnansweredKeys: [],
       capReached: false,
+      earlyFinishAvailable: false,
     },
     cost: null,
     anonymous: false,
