@@ -203,6 +203,31 @@ describe('importOrchestrationConfig', () => {
     expect(result.agents.updated).toBe(0);
   });
 
+  it('does not leak the dropped `knowledgeCategories` column into create on a fresh target (#353)', async () => {
+    // The CREATE branch spreads the parsed agent into `tx.aiAgent.create`.
+    // `knowledgeCategories` is kept on the wire (back-compat) but was dropped from
+    // the AiAgent model, so a real Prisma client rejects it as an unknown arg and
+    // rolls back the whole import. This mock faithfully reproduces that rejection;
+    // the default no-op create mock used elsewhere is exactly why CI missed the bug.
+    mockTx.aiAgent.findUnique.mockResolvedValue(null);
+    mockTx.aiAgent.create.mockImplementation((args: { data?: Record<string, unknown> }) => {
+      if (args?.data && 'knowledgeCategories' in args.data) {
+        throw new Error('Unknown argument `knowledgeCategories`.');
+      }
+      return Promise.resolve({});
+    });
+
+    const payload = { ...minPayload, data: { ...minPayload.data, agents: [makeAgent()] } };
+
+    // Before the fix this rejects with the unknown-arg error.
+    const result = await importOrchestrationConfig(payload, 'user-1');
+
+    expect(result.agents.created).toBe(1);
+    expect(mockTx.aiAgent.create).toHaveBeenCalledOnce();
+    const createData = mockTx.aiAgent.create.mock.calls[0][0].data as Record<string, unknown>;
+    expect(createData).not.toHaveProperty('knowledgeCategories');
+  });
+
   it('updates existing agent when record already exists → agents.updated = 1', async () => {
     mockTx.aiAgent.findUnique.mockResolvedValue({ id: 'existing-id', slug: 'support-bot' });
     mockTx.aiAgent.update.mockResolvedValue({});
@@ -630,6 +655,92 @@ describe('importOrchestrationConfig — knowledge grants', () => {
       data: [{ agentId: 'agent-3', documentId: 'doc-1' }],
       skipDuplicates: true,
     });
+  });
+
+  it('resolves document grants by slug (v3) and calls createMany', async () => {
+    mockTx.aiAgent.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: 'agent-3a' });
+    mockTx.aiAgent.create.mockResolvedValue({ id: 'agent-3a' });
+    mockTx.aiKnowledgeDocument.findMany.mockResolvedValue([
+      { id: 'doc-9', slug: 'handbook-abc12345' },
+    ]);
+
+    const payload = {
+      ...minPayload,
+      schemaVersion: 3 as const,
+      data: {
+        ...minPayload.data,
+        agents: [makeAgent({ grantedTagSlugs: [], grantedDocumentSlugs: ['handbook-abc12345'] })],
+      },
+    };
+    await importOrchestrationConfig(payload, 'user-1');
+
+    // Lookup is by slug, not fileHash.
+    expect(mockTx.aiKnowledgeDocument.findMany).toHaveBeenCalledWith({
+      where: { slug: { in: ['handbook-abc12345'] } },
+      select: { id: true, slug: true },
+    });
+    expect(mockTx.aiAgentKnowledgeDocument.createMany).toHaveBeenCalledWith({
+      data: [{ agentId: 'agent-3a', documentId: 'doc-9' }],
+      skipDuplicates: true,
+    });
+  });
+
+  it('prefers slug over fileHash when a v3 bundle carries both', async () => {
+    mockTx.aiAgent.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: 'agent-3b' });
+    mockTx.aiAgent.create.mockResolvedValue({ id: 'agent-3b' });
+    mockTx.aiKnowledgeDocument.findMany.mockResolvedValue([
+      { id: 'doc-by-slug', slug: 'handbook-abc12345' },
+    ]);
+
+    const payload = {
+      ...minPayload,
+      schemaVersion: 3 as const,
+      data: {
+        ...minPayload.data,
+        agents: [
+          makeAgent({
+            grantedTagSlugs: [],
+            grantedDocumentSlugs: ['handbook-abc12345'],
+            grantedDocumentHashes: ['ignoredhash'],
+          }),
+        ],
+      },
+    };
+    await importOrchestrationConfig(payload, 'user-1');
+
+    // Only the slug lookup runs — the hash fallback is skipped when slugs exist.
+    expect(mockTx.aiKnowledgeDocument.findMany).toHaveBeenCalledTimes(1);
+    expect(mockTx.aiKnowledgeDocument.findMany).toHaveBeenCalledWith({
+      where: { slug: { in: ['handbook-abc12345'] } },
+      select: { id: true, slug: true },
+    });
+    expect(mockTx.aiAgentKnowledgeDocument.createMany).toHaveBeenCalledWith({
+      data: [{ agentId: 'agent-3b', documentId: 'doc-by-slug' }],
+      skipDuplicates: true,
+    });
+  });
+
+  it('emits a warning for a missing document slug and skips that grant (warn-skip, not fail)', async () => {
+    mockTx.aiAgent.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: 'agent-3c' });
+    mockTx.aiAgent.create.mockResolvedValue({ id: 'agent-3c' });
+    mockTx.aiKnowledgeDocument.findMany.mockResolvedValue([]); // slug not present
+
+    const payload = {
+      ...minPayload,
+      schemaVersion: 3 as const,
+      data: {
+        ...minPayload.data,
+        agents: [makeAgent({ grantedTagSlugs: [], grantedDocumentSlugs: ['gone-deadbeef'] })],
+      },
+    };
+    const result = await importOrchestrationConfig(payload, 'user-1');
+
+    expect(mockTx.aiAgentKnowledgeDocument.createMany).not.toHaveBeenCalled();
+    expect(result.warnings).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/missing knowledge document slug.*gone-deadbeef/i),
+      ])
+    );
   });
 
   it('emits a warning for missing document hashes and skips the missing doc grant', async () => {

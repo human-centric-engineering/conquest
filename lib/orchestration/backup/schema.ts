@@ -7,7 +7,7 @@
 
 import { z } from 'zod';
 
-const agentBackupSchema = z.object({
+export const agentBackupSchema = z.object({
   name: z.string(),
   slug: z.string(),
   description: z.string(),
@@ -58,14 +58,38 @@ const agentBackupSchema = z.object({
   knowledgeTriggerKeywords: z.array(z.string()).optional().default([]),
   grantedTagSlugs: z.array(z.string()).optional().default([]),
   /**
-   * Document grants are keyed by `AiKnowledgeDocument.fileHash` — content-derived
-   * and stable across deployments. The importer looks up by hash; missing
-   * documents are silently dropped (with a warning), preserving the rest of
-   * the agent's grants.
+   * v3: document grants keyed by `AiKnowledgeDocument.slug` — the intentional,
+   * stable cross-environment key (#338), consistent with the agent bundle and
+   * with tags/profiles/capabilities. The importer looks up by slug; missing
+   * documents are silently dropped (with a warning), preserving the rest of the
+   * agent's grants (the backup importer is deliberately lenient — see the
+   * capability/webhook paths).
    */
-  grantedDocumentHashes: z.array(z.string()).optional().default([]),
+  grantedDocumentSlugs: z.array(z.string()).optional().default([]),
+  /**
+   * v2 legacy: document grants keyed by `AiKnowledgeDocument.fileHash`
+   * (content-derived). Kept optional (no default — v3 exports omit it entirely)
+   * so v2 backups still import: the importer falls back to hash lookup only when
+   * `grantedDocumentSlugs` is absent.
+   */
+  grantedDocumentHashes: z.array(z.string()).optional(),
   topicBoundaries: z.array(z.string()),
   brandVoiceInstructions: z.string().nullable(),
+  // Discriminator + profile-inheritance + attachment + runtime-prompt fields.
+  // All added after the initial backup schema; older bundles omit them, so each
+  // is optional with the same default the agent create path applies — a v1/v2
+  // bundle round-trips unchanged, a new bundle preserves the full config.
+  kind: z.enum(['chat', 'judge']).optional().default('chat'),
+  persona: z.string().nullable().optional().default(null),
+  guardrails: z.string().nullable().optional().default(null),
+  personaMode: z.enum(['override', 'append']).optional().default('override'),
+  voiceMode: z.enum(['override', 'append']).optional().default('override'),
+  guardrailsMode: z.enum(['override', 'append']).optional().default('override'),
+  enableVoiceInput: z.boolean().optional().default(false),
+  enableImageInput: z.boolean().optional().default(false),
+  enableDocumentInput: z.boolean().optional().default(false),
+  runtimePromptManaged: z.boolean().optional().default(false),
+  runtimePromptNote: z.string().nullable().optional().default(null),
   rateLimitRpm: z.number().nullable().optional().default(null),
   inputGuardMode: z.string().nullable().optional().default(null),
   outputGuardMode: z.string().nullable().optional().default(null),
@@ -147,13 +171,16 @@ const settingsBackupSchema = z.object({
 
 // Schema version history:
 //   v1 — original.
-//   v2 — adds AiAgent.knowledgeAccessMode + grantedTagSlugs/grantedDocumentSlugs,
+//   v2 — adds AiAgent.knowledgeAccessMode + grantedTagSlugs/grantedDocumentHashes,
 //        plus a top-level knowledgeTags array carrying the managed taxonomy.
 //        v1 imports are accepted unchanged: the importer fills the new fields
 //        with safe defaults (full access, no grants) and best-effort backfills
 //        grants from the legacy knowledgeCategories array via slug lookup.
+//   v3 — document grants move from grantedDocumentHashes (fileHash) to
+//        grantedDocumentSlugs (AiKnowledgeDocument.slug — #338). v2 bundles still
+//        import: the importer falls back to hash lookup when slugs are absent.
 export const backupSchema = z.object({
-  schemaVersion: z.union([z.literal(1), z.literal(2)]),
+  schemaVersion: z.union([z.literal(1), z.literal(2), z.literal(3)]),
   exportedAt: z.string(),
   data: z.object({
     agents: z.array(agentBackupSchema),

@@ -16,6 +16,161 @@ release process.
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-06-30
+
+> **Alpha release.** Fifth tagged Sunrise release. **MINOR bump** — adds new
+> public surface: the per-surface theming seam (`data-surface` + the fork-owned
+> `classifySurface` / `DEFAULT_SURFACE` policy in `lib/app/surface.ts`,
+> `<SurfaceSync>`, and the empty `app/brand-theme.css`), the agent field registry
+> (`AGENT_FIELDS` + the `AgentFieldDescriptor` type and selectors, with the
+> fork-owned `lib/app/agent-fields.ts` seam), the knowledge-document
+> cross-environment export key (`AiKnowledgeDocument.slug` + the bundle/backup
+> `knowledgeDocumentSlugs` grant round-trip), point-in-time agent versioning with
+> system-agent restore, and the legal-name brand seam (`BRAND.legalName` /
+> `NEXT_PUBLIC_LEGAL_NAME`) — plus fixes to backup import on a fresh target and the
+> email-subject branding. Ships in `0.x` per
+> [`VERSIONING.md`](./VERSIONING.md#0x-alpha-semantics--loose-by-design) — forks
+> adopting this release should expect real merge work between any two `0.x`
+> releases. Note: existing pre-`0.x` agent version rows are reinterpreted under
+> the new point-in-time model (see the Changed entry).
+
+### Added
+
+- **Legal-name brand seam (`BRAND.legalName` / `NEXT_PUBLIC_LEGAL_NAME`).** The
+  public footer copyright now attributes to a fork's legal entity rather than its
+  product name. `lib/brand.ts` gains `legalName`, defaulting to
+  `NEXT_PUBLIC_LEGAL_NAME` → `NEXT_PUBLIC_APP_NAME` → `"Sunrise"`, so a fork that
+  only renames the app is byte-for-byte unchanged; set `NEXT_PUBLIC_LEGAL_NAME`
+  (registered in `lib/env.ts`) when the copyright holder differs from the product
+  (e.g. product "ConQuest" © "All Too Human Ltd"). Deliberately broader than
+  "copyright holder" so it can later drive other legal surfaces (Terms/Privacy
+  boilerplate, email footers). See `CUSTOMIZATION.md` §2. (#363)
+
+- **Per-surface theming seam (`data-surface`) + fork-owned `app/brand-theme.css`.**
+  A fork can now repaint one rendering surface (e.g. its consumer-facing pages)
+  with its own palette/typography while leaving others (e.g. `/admin`) on the
+  Sunrise defaults — without editing `app/globals.css` or any platform layout.
+  `proxy.ts` classifies each request via the fork-owned `classifySurface(pathname)`
+  policy seam (`lib/app/surface.ts`, exporting the `Surface` type) and forwards an
+  `x-surface` request header; the root layout renders `<html data-surface>`; the
+  new `<SurfaceSync>` client component (`components/surface-sync.tsx`) keeps that
+  attribute correct across App Router navigation. The fork's per-surface CSS-variable
+  overrides live in `app/brand-theme.css`, which **ships empty** — vanilla Sunrise
+  is visually unchanged until a fork fills it. Documented (including the six
+  design constraints — `<html>`-level marker for portals, the client re-sync, the
+  subtree pin, the two dark-mode selector forms, the `:has()` backdrop, and
+  unlayered overrides) in
+  [`.context/ui/surface-theming.md`](.context/ui/surface-theming.md).
+- **Agent field registry + fork-owned `lib/app/agent-fields.ts` seam.** A single
+  declarative descriptor per `AiAgent` config field
+  (`lib/orchestration/agents/agent-field-registry.ts`, exporting `AGENT_FIELDS`,
+  the `AgentFieldDescriptor` type, and the `versionedFieldNames` /
+  `snapshotFieldNames` / `fieldLabels` / `fieldToTab` / `fieldOrder` selectors)
+  replaces the ~15 disconnected hand-maintained field lists that previously had
+  to be kept in lockstep. The scalar set is exhaustiveness-checked against
+  Prisma's generated `AiAgentScalarFieldEnum`, so adding a column without a
+  descriptor is a compile error rather than a silent runtime gap. Forks add
+  their own agent fields in the empty fork-owned scaffold `lib/app/agent-fields.ts`
+  (`appAgentFields`) without editing a platform list. The registry is the source
+  of truth (derived) for the versioning, snapshot, diff, restore, PATCH, and
+  clone surfaces; parity tests keep the create/update validation schemas and the
+  export bundle / full-backup schemas in lockstep with it, so adding a field to
+  one without the other is a loud test failure. Documented in
+  [`.context/orchestration/agent-fields.md`](.context/orchestration/agent-fields.md).
+- **`AiKnowledgeDocument.slug` — stable cross-environment export key** (`@unique`,
+  added by migration `20260629120000_add_knowledge_document_slug` with a
+  deterministic backfill). Mirrors `KnowledgeTag.slug`: the slug is
+  `slugify(name) + '-' + first8(fileHash)` (helper
+  `lib/orchestration/knowledge/document-slug.ts` — `buildDocumentSlugBase`,
+  `generateUniqueDocumentSlug`), so the same document keys identically in any
+  environment. This is the prerequisite that lets **agent→document grants
+  round-trip** through export/import and backup/restore (#338). `slugify` is now
+  exported from `lib/orchestration/knowledge/chunker.ts`. Documented in
+  [`.context/orchestration/knowledge.md`](.context/orchestration/knowledge.md).
+- **Newly-exported validation surfaces** (`lib/validations/orchestration.ts`):
+  `createAgentObjectSchema` / `updateAgentObjectSchema` (the agent create/PATCH
+  field shapes without their cross-field refinement, so other call sites — e.g.
+  version restore — can reuse the same per-field validators) and
+  `bundledAgentSchema`; plus `agentBackupSchema` from
+  `lib/orchestration/backup/schema.ts`. Exported to anchor the registry parity
+  tests.
+
+### Changed
+
+- **Agent version snapshots are now point-in-time** (`AiAgentVersion.snapshot`
+  holds the config _as of_ that version, the post-save state — previously it held
+  the pre-update state). "Restore to vN" now reproduces the agent exactly as it
+  was at vN, so version labels match their content and the newest row equals the
+  live agent. Every agent now gets an explicit **`v1` ("Initial configuration")**
+  at create and clone, a new seed unit (`020-agent-initial-versions`) backfills
+  one for pre-existing agents, and the first edit of a legacy agent with no rows
+  backfills its pre-edit state as `v1` — so a single later edit is always
+  recoverable. New shared helper `lib/orchestration/agents/agent-versioning.ts`
+  (`buildAgentSnapshot`, `nextAgentVersionNumber`, `INITIAL_VERSION_SUMMARY`).
+  _Existing pre-`0.x` version rows are reinterpreted under the new model; during
+  `0.x` alpha this is acceptable (forks expect migration work between releases)._
+- **System agents are now version-restorable.** `POST /agents/:id/versions/:versionId/restore`
+  no longer returns 403 for `isSystem` agents; it applies the snapshot while
+  skipping the read-only fields (`slug`, `systemInstructions`, `isActive`),
+  mirroring the PATCH route's guards. (Resolves the open question in #330.)
+- **Agent→document grants now round-trip through export/import and backup** (#338).
+  The agent bundle (`bundledAgentSchema`) carries a new `knowledgeDocumentSlugs`
+  array; `POST /agents/export` emits it and `POST /agents/import` reconnects it by
+  `AiKnowledgeDocument.slug`, **failing the whole import** with an actionable
+  message when a referenced document is absent (matching the existing
+  profile/tag behaviour). The full backup schema bumps to **`schemaVersion: 3`**:
+  document grants move from `grantedDocumentHashes` (`fileHash`) to
+  `grantedDocumentSlugs` (`slug`); v2 bundles still import (the importer falls back
+  to `fileHash` lookup when no slugs are present, and document misses there remain
+  warn-skip, consistent with the backup importer's leniency).
+
+### Fixed
+
+- **Backup import to a fresh environment no longer crashes on `knowledgeCategories`.**
+  The full-config backup importer's agent CREATE branch spread the parsed agent
+  into `prisma.aiAgent.create`, leaking the wire-only `knowledgeCategories` field
+  (kept for old-bundle back-compat) whose column was dropped in Phase 6. Prisma
+  rejected the unknown argument and rolled back the entire import — exactly the
+  primary disaster-recovery / new-environment restore path (the UPDATE/overwrite
+  path was unaffected). The field is now stripped before the spread, and a
+  regression test exercises the CREATE path against a create that rejects unknown
+  arguments (the prior tests mocked it away). (#353)
+
+- **Agent version restore now reconnects knowledge grants and `knowledgeAccessMode`.**
+  Restore previously left an agent's tag/document grants and access mode at their
+  current values (the grants were captured in the snapshot but never reapplied,
+  and `knowledgeAccessMode` was deliberately skipped to avoid pairing it with
+  stale grants — see #333). Restore now reapplies the snapshot's grants (dropping
+  any tag/document deleted since, so a stale id can't FK-fail the restore) and
+  mode together, then invalidates the access-resolver cache so the next chat turn
+  sees the restored scope.
+
+- **Email subject lines now honor the `BRAND.name` seam.** Five transactional
+  email subjects (contact-form notification, welcome on signup, welcome after
+  verification, user invitation, admin webhook test) hardcoded the literal
+  `"Sunrise"` while their bodies already used `BRAND.name` — so a fork setting
+  `NEXT_PUBLIC_APP_NAME` got branded bodies but stale subjects (and a
+  subject/body mismatch on the invitation). All five now interpolate
+  `BRAND.name`. Vanilla Sunrise is unchanged (the name defaults to `"Sunrise"`).
+- **Full-config backup no longer silently drops agent fields.** The
+  backup/restore agent schema, exporter, and importer had drifted from the
+  `AiAgent` model and omitted `kind`, `reasoningEffort`, `persona`, `guardrails`,
+  the three inheritance `*Mode` fields, the three attachment toggles, and the two
+  runtime-prompt fields — so exporting and re-importing a config reset a `judge`
+  agent to `chat` and lost persona/guardrails/toggles. All are now serialized and
+  restored (additive, optional-with-default schema fields, so older bundles still
+  import unchanged). A registry parity test now fails if any config field is
+  missing from the bundle or backup schema.
+- **Agent version history no longer silently loses fields.** `persona`,
+  `guardrails`, `personaMode`, `voiceMode`, and `guardrailsMode` were treated as
+  versioned (editing them logged a "changed" version) but were never written to
+  the snapshot, so the change was unrecoverable; `reasoningEffort` and
+  `maxCostPerTurnUsd` were captured but invisible in the diff viewer. All are now
+  snapshotted, diffed, and restored. Version **restore** likewise applies the
+  full versioned field set (previously its hand-maintained apply-list dropped
+  persona/guardrails/modes and the knowledge/runtime-prompt fields) and validates
+  the stored snapshot against the same per-field rules a PATCH uses.
+
 ## [0.3.0] — 2026-06-26
 
 > **Alpha release.** Fourth tagged Sunrise release. **MINOR bump** — adds new

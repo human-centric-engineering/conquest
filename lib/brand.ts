@@ -17,7 +17,18 @@
  * Scope: the brand *name* only. Marketing-page body copy is a separate concern
  * (see `CUSTOMIZATION.md`), and `SUNRISE_VERSION` / internal platform
  * identifiers deliberately do NOT use this seam.
+ *
+ * `legalName` is the copyright holder / registered legal entity — frequently
+ * NOT the product (e.g. product "ConQuest" © "All Too Human Ltd"). It defaults
+ * to the product name, so a fork that only sets `NEXT_PUBLIC_APP_NAME` keeps
+ * today's output; set `NEXT_PUBLIC_LEGAL_NAME` to attribute legal surfaces (the
+ * footer copyright today, Terms/Privacy boilerplate later) to the company.
  */
+// Resolve the product name once so the `.trim()` and `'Sunrise'` default live in
+// a single place; `legalName` falls back to it rather than re-deriving it.
+const productName = process.env.NEXT_PUBLIC_APP_NAME?.trim() || 'Sunrise';
+
 export const BRAND = {
-  name: process.env.NEXT_PUBLIC_APP_NAME?.trim() || 'Sunrise',
+  name: productName,
+  legalName: process.env.NEXT_PUBLIC_LEGAL_NAME?.trim() || productName,
 } as const;

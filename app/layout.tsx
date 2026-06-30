@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { Suspense } from 'react';
 import { headers } from 'next/headers';
 import '@/app/globals.css';
-import '@/app/brand-theme.css'; // fork-owned consumer palette; must cascade after globals
+import '@/app/brand-theme.css'; // fork-owned per-surface palette; must cascade after globals
 import { Fraunces, Hanken_Grotesk } from 'next/font/google';
 import { ThemeProvider } from '@/hooks/use-theme';
 import { ErrorHandlingProvider } from '@/app/error-handling-provider';
@@ -11,6 +11,7 @@ import { CookieBanner } from '@/components/cookie-consent';
 import { AnalyticsProvider } from '@/lib/analytics';
 import { AnalyticsScripts, UserIdentifier, PageTracker } from '@/components/analytics';
 import { SurfaceSync } from '@/components/surface-sync';
+import { DEFAULT_SURFACE } from '@/lib/app/surface';
 import { BRAND } from '@/lib/brand';
 
 // ConQuest brand fonts, loaded once and exposed app-wide as CSS variables. They
@@ -52,10 +53,11 @@ export default async function RootLayout({
 }>) {
   const headersList = await headers();
   const nonce = headersList.get('x-nonce') ?? undefined;
-  // Rendering surface, classified per-request in proxy.ts. Drives the fork's
-  // brand-theme.css: `consumer` gets the ConQuest palette, `admin` stays on the
-  // Sunrise defaults. On <html>, so body-portaled overlays inherit it too.
-  const surface = headersList.get('x-surface') ?? 'consumer';
+  // Rendering surface, classified per-request in proxy.ts. Drives the fork-owned
+  // app/brand-theme.css: `consumer` gets the ConQuest palette, `admin` stays on
+  // the Sunrise defaults. On <html> so body-portaled overlays inherit it; kept
+  // current across client nav by <SurfaceSync> below.
+  const surface = headersList.get('x-surface') ?? DEFAULT_SURFACE;
 
   return (
     <html

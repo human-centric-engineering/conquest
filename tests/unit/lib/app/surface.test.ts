@@ -13,12 +13,16 @@ describe('classifySurface', () => {
     expect(classifySurface('/admin/')).toBe('admin');
     expect(classifySurface('/admin/questionnaires')).toBe('admin');
     expect(classifySurface('/admin/questionnaires/123/v/456/settings')).toBe('admin');
+    expect(classifySurface('/admin/users')).toBe('admin');
+    expect(classifySurface('/admin/orchestration/agents/123/edit')).toBe('admin');
   });
 
   it('classifies everything else as consumer', () => {
     expect(classifySurface('/')).toBe('consumer');
     expect(classifySurface('/login')).toBe('consumer');
+    expect(classifySurface('/signup')).toBe('consumer');
     expect(classifySurface('/dashboard')).toBe('consumer');
+    expect(classifySurface('/settings')).toBe('consumer');
     expect(classifySurface('/q/abc123')).toBe('consumer');
     expect(classifySurface('/questionnaires/sess_1')).toBe('consumer');
   });

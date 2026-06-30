@@ -20,6 +20,12 @@ import { NotFoundError, ValidationError, ConflictError } from '@/lib/api/errors'
 import { getRouteLogger } from '@/lib/api/context';
 import { getClientIP } from '@/lib/security/ip';
 import { cloneAgentBodySchema } from '@/lib/validations/orchestration';
+import { cloneCopiedScalarFields } from '@/lib/orchestration/agents/agent-field-registry';
+import {
+  INITIAL_VERSION_SUMMARY,
+  asSnapshotJson,
+  buildAgentSnapshot,
+} from '@/lib/orchestration/agents/agent-versioning';
 import { cuidSchema } from '@/lib/validations/common';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
@@ -78,52 +84,22 @@ export const POST = withAdminAuth<{ id: string }>(async (request, session, { par
 
     try {
       newAgent = await prisma.$transaction(async (tx) => {
+        // Fields the clone sets explicitly: fresh name/slug, reset active flag
+        // and history, new owner. Every other scalar is copied from the source
+        // via the registry, so a new agent field is cloned automatically.
+        const cloneData: Record<string, unknown> = {
+          name,
+          slug,
+          isActive: false,
+          systemInstructionsHistory: [],
+          createdBy: session.user.id,
+        };
+        const sourceRecord = source as unknown as Record<string, unknown>;
+        for (const { name: field, json } of cloneCopiedScalarFields()) {
+          cloneData[field] = json ? (sourceRecord[field] ?? Prisma.JsonNull) : sourceRecord[field];
+        }
         const agent = await tx.aiAgent.create({
-          data: {
-            name,
-            slug,
-            kind: source.kind,
-            description: source.description,
-            systemInstructions: source.systemInstructions,
-            systemInstructionsHistory: [],
-            model: source.model,
-            provider: source.provider,
-            providerConfig: (source.providerConfig ?? Prisma.JsonNull) as Prisma.InputJsonValue,
-            temperature: source.temperature,
-            maxTokens: source.maxTokens,
-            reasoningEffort: source.reasoningEffort,
-            monthlyBudgetUsd: source.monthlyBudgetUsd,
-            maxCostPerTurnUsd: source.maxCostPerTurnUsd,
-            fallbackProviders: source.fallbackProviders,
-            metadata: (source.metadata ?? Prisma.JsonNull) as Prisma.InputJsonValue,
-            isActive: false,
-            inputGuardMode: source.inputGuardMode,
-            outputGuardMode: source.outputGuardMode,
-            citationGuardMode: source.citationGuardMode,
-            maxHistoryTokens: source.maxHistoryTokens,
-            maxHistoryMessages: source.maxHistoryMessages,
-            retentionDays: source.retentionDays,
-            visibility: source.visibility,
-            rateLimitRpm: source.rateLimitRpm,
-            knowledgeAccessMode: source.knowledgeAccessMode,
-            knowledgeRetrievalMode: source.knowledgeRetrievalMode,
-            knowledgeTriggerKeywords: source.knowledgeTriggerKeywords,
-            topicBoundaries: source.topicBoundaries,
-            profileId: source.profileId,
-            persona: source.persona,
-            guardrails: source.guardrails,
-            personaMode: source.personaMode,
-            voiceMode: source.voiceMode,
-            guardrailsMode: source.guardrailsMode,
-            brandVoiceInstructions: source.brandVoiceInstructions,
-            enableVoiceInput: source.enableVoiceInput,
-            enableImageInput: source.enableImageInput,
-            enableDocumentInput: source.enableDocumentInput,
-            runtimePromptManaged: source.runtimePromptManaged,
-            runtimePromptNote: source.runtimePromptNote,
-            widgetConfig: (source.widgetConfig ?? Prisma.JsonNull) as Prisma.InputJsonValue,
-            createdBy: session.user.id,
-          },
+          data: cloneData as Prisma.AiAgentUncheckedCreateInput,
         });
 
         if (source.capabilities.length > 0) {
@@ -153,6 +129,24 @@ export const POST = withAdminAuth<{ id: string }>(async (request, session, { par
             skipDuplicates: true,
           });
         }
+
+        // Point-in-time versioning: capture the clone's starting config as its
+        // own v1 ("Initial configuration"), incl. the carried-over grants, so it
+        // has a restorable original like any freshly-created agent.
+        await tx.aiAgentVersion.create({
+          data: {
+            agentId: agent.id,
+            version: 1,
+            snapshot: asSnapshotJson(
+              buildAgentSnapshot(agent, {
+                grantedTagIds: sourceTagIds,
+                grantedDocumentIds: sourceDocumentIds,
+              })
+            ),
+            changeSummary: INITIAL_VERSION_SUMMARY,
+            createdBy: session.user.id,
+          },
+        });
 
         return agent;
       });

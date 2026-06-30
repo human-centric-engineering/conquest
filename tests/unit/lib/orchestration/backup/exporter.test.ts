@@ -47,9 +47,25 @@ const agentRow = {
   metadata: null,
   knowledgeCategories: [],
   knowledgeAccessMode: 'full',
+  knowledgeRetrievalMode: 'keywords',
   topicBoundaries: [],
   brandVoiceInstructions: null,
   widgetConfig: null,
+  // Discriminator + inheritance + attachment + runtime-prompt fields — these
+  // were silently dropped from config backups before; distinctive values here
+  // assert they now round-trip rather than reverting to defaults.
+  kind: 'judge',
+  reasoningEffort: 'high',
+  persona: 'A terse support persona',
+  guardrails: 'Never disclose internal pricing',
+  personaMode: 'append',
+  voiceMode: 'append',
+  guardrailsMode: 'append',
+  enableVoiceInput: true,
+  enableImageInput: true,
+  enableDocumentInput: true,
+  runtimePromptManaged: true,
+  runtimePromptNote: 'Prompt assembled in app code',
   // Include shape from the new exporter query — no grants for the default fixture.
   grantedTags: [],
   grantedDocuments: [],
@@ -115,7 +131,7 @@ describe('exportOrchestrationConfig', () => {
     vi.resetAllMocks();
   });
 
-  it('returns payload with schemaVersion: 2', async () => {
+  it('returns payload with schemaVersion: 3', async () => {
     mockFindMany
       .mockResolvedValueOnce([]) // agents
       .mockResolvedValueOnce([]) // capabilities
@@ -126,7 +142,7 @@ describe('exportOrchestrationConfig', () => {
 
     const payload = await exportOrchestrationConfig();
 
-    expect(payload.schemaVersion).toBe(2);
+    expect(payload.schemaVersion).toBe(3);
   });
 
   it('returns payload with exportedAt as an ISO string', async () => {
@@ -160,8 +176,22 @@ describe('exportOrchestrationConfig', () => {
     const payload = await exportOrchestrationConfig();
 
     expect(payload.data.agents).toHaveLength(1);
-    expect(payload.data.agents[0].name).toBe('Support Bot');
-    expect(payload.data.agents[0].slug).toBe('support-bot');
+    const exported = payload.data.agents[0];
+    expect(exported.name).toBe('Support Bot');
+    expect(exported.slug).toBe('support-bot');
+    // Fields that a config backup previously dropped — assert they survive.
+    expect(exported.kind).toBe('judge');
+    expect(exported.reasoningEffort).toBe('high');
+    expect(exported.persona).toBe('A terse support persona');
+    expect(exported.guardrails).toBe('Never disclose internal pricing');
+    expect(exported.personaMode).toBe('append');
+    expect(exported.voiceMode).toBe('append');
+    expect(exported.guardrailsMode).toBe('append');
+    expect(exported.enableVoiceInput).toBe(true);
+    expect(exported.enableImageInput).toBe(true);
+    expect(exported.enableDocumentInput).toBe(true);
+    expect(exported.runtimePromptManaged).toBe(true);
+    expect(exported.runtimePromptNote).toBe('Prompt assembled in app code');
   });
 
   it('queries agents with where: { isSystem: false }', async () => {
@@ -225,6 +255,22 @@ describe('exportOrchestrationConfig', () => {
     expect(payload.data.webhooks).toHaveLength(1);
     expect(payload.data.webhooks[0]).not.toHaveProperty('secret');
     expect(payload.data.webhooks[0].url).toBe('https://example.com/hook');
+  });
+
+  it('narrows an email-channel webhook to the "email" literal', async () => {
+    mockFindMany
+      .mockResolvedValueOnce([]) // agents
+      .mockResolvedValueOnce([]) // capabilities
+      .mockResolvedValueOnce([]) // workflows
+      .mockResolvedValueOnce([
+        { ...webhookRow, channel: 'email', emailAddress: 'ops@example.com' },
+      ]);
+    mockFindMany.mockResolvedValueOnce([]); // knowledgeTags
+    mockFindUnique.mockResolvedValue(null);
+
+    const payload = await exportOrchestrationConfig();
+
+    expect(payload.data.webhooks[0].channel).toBe('email');
   });
 
   it('returns all four data collections in the correct positions', async () => {
@@ -320,6 +366,39 @@ describe('exportOrchestrationConfig', () => {
     expect(payload.data.agents[0].knowledgeAccessMode).toBe('full');
   });
 
+  it('narrows the discriminator/inheritance/reasoning enums on the fallback side', async () => {
+    // The default fixture exercises judge/append/high/keywords; this row covers
+    // the other branch of each narrowing: chat, override, an unrecognised
+    // reasoningEffort coerced to null, and an unrecognised retrieval mode coerced
+    // to 'model'.
+    const fallbackAgentRow = {
+      ...agentRow,
+      kind: 'chat',
+      personaMode: 'override',
+      voiceMode: 'override',
+      guardrailsMode: 'override',
+      reasoningEffort: 'not-a-real-effort',
+      knowledgeRetrievalMode: 'not-a-real-mode',
+    };
+    mockFindMany
+      .mockResolvedValueOnce([fallbackAgentRow]) // agents
+      .mockResolvedValueOnce([]) // capabilities
+      .mockResolvedValueOnce([]) // workflows
+      .mockResolvedValueOnce([]); // webhooks
+    mockFindMany.mockResolvedValueOnce([]); // knowledgeTags
+    mockFindUnique.mockResolvedValue(null);
+
+    const payload = await exportOrchestrationConfig();
+
+    const exported = payload.data.agents[0];
+    expect(exported.kind).toBe('chat');
+    expect(exported.personaMode).toBe('override');
+    expect(exported.voiceMode).toBe('override');
+    expect(exported.guardrailsMode).toBe('override');
+    expect(exported.reasoningEffort).toBeNull();
+    expect(exported.knowledgeRetrievalMode).toBe('model');
+  });
+
   it('flattens grantedTags into grantedTagSlugs array', async () => {
     const agentWithGrants = {
       ...agentRow,
@@ -339,13 +418,13 @@ describe('exportOrchestrationConfig', () => {
     expect(payload.data.agents[0].grantedTagSlugs).toEqual(['billing', 'support']);
   });
 
-  it('flattens grantedDocuments into grantedDocumentHashes array', async () => {
+  it('flattens grantedDocuments into grantedDocumentSlugs array (v3 — by slug)', async () => {
     const agentWithDocs = {
       ...agentRow,
       grantedTags: [],
       grantedDocuments: [
-        { document: { fileHash: 'abc123' } },
-        { document: { fileHash: 'def456' } },
+        { document: { slug: 'doc-one-abc123ab' } },
+        { document: { slug: 'doc-two-def456cd' } },
       ],
     };
     mockFindMany
@@ -358,7 +437,12 @@ describe('exportOrchestrationConfig', () => {
 
     const payload = await exportOrchestrationConfig();
 
-    expect(payload.data.agents[0].grantedDocumentHashes).toEqual(['abc123', 'def456']);
+    expect(payload.data.agents[0].grantedDocumentSlugs).toEqual([
+      'doc-one-abc123ab',
+      'doc-two-def456cd',
+    ]);
+    // v3 no longer emits the legacy fileHash-keyed field.
+    expect(payload.data.agents[0].grantedDocumentHashes).toBeUndefined();
   });
 
   it('always emits empty knowledgeCategories array (legacy field kept on wire)', async () => {
