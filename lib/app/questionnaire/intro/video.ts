@@ -72,11 +72,21 @@ function resolveVimeo(url: URL): IntroVideo | null {
     // /video/<id>
     if (segs[0] === 'video') id = segs[1] ?? null;
   } else if (host === 'vimeo.com') {
-    // /<id> or /<id>/<hash> (unlisted) or /channels/<name>/<id>
-    const numeric = segs.find((s) => VIMEO_ID.test(s));
-    id = numeric ?? null;
-    if (id) {
-      const after = segs[segs.indexOf(id) + 1];
+    // The video id is the LAST numeric segment — handles /<id>, /<id>/<hash> (unlisted),
+    // /channels/<name>/<id>, /album/<id>/video/<id>, and numeric channel/album ids. (Using the
+    // FIRST numeric segment grabbed the album/channel id from those paths and embedded the wrong
+    // video.) The optional unlisted hash is the segment immediately after the id — present only in
+    // the bare /<id>/<hash> form; in /album/<id>/video/<id> the id is last, so there's none.
+    let idIndex = -1;
+    for (let i = segs.length - 1; i >= 0; i--) {
+      if (VIMEO_ID.test(segs[i])) {
+        idIndex = i;
+        break;
+      }
+    }
+    if (idIndex !== -1) {
+      id = segs[idIndex];
+      const after = segs[idIndex + 1];
       if (after && VIMEO_HASH.test(after)) hash = after;
     }
   } else {

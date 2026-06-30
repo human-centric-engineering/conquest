@@ -87,14 +87,23 @@ describe('BrandThemeProvider', () => {
       expect(screen.getByText('Round 3 · Spring Cohort')).toBeInTheDocument();
     });
 
-    it('renders the live schedule status + date window for an open round', () => {
+    it('renders the live schedule status + the formatted date window for an open round', () => {
+      // Fixed window with a far-future close → stable "Open" (no countdown) AND a deterministic,
+      // assertable date range, so this guards that the band wires schedule.dateRange into the DOM —
+      // not just the status label.
       render(
-        <BrandThemeProvider theme={BASE} header={openHeader()}>
+        <BrandThemeProvider
+          theme={BASE}
+          header={openHeader({
+            opensAt: new Date('2026-04-01T00:00:00Z'),
+            closesAt: new Date('2099-12-31T00:00:00Z'),
+          })}
+        >
           <span>child</span>
         </BrandThemeProvider>
       );
-      // Inside the window, far from the close → "Open" (with or without a countdown tail).
       expect(screen.getByText(/^Open/)).toBeInTheDocument();
+      expect(screen.getByText('1 Apr 2026 – 31 Dec 2099')).toBeInTheDocument();
     });
 
     it('omits the schedule cluster for an open-ended session (round = null)', () => {

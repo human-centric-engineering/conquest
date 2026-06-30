@@ -219,7 +219,11 @@ describe('assessCompletion — early finish (escape hatch)', () => {
   });
 
   it('gates on the coverage bar alone (questions bar 0 is not a criterion)', () => {
-    const base = { allowEarlyFinish: true, earlyFinishMinCoverage: 0.5, earlyFinishMinQuestions: 0 };
+    const base = {
+      allowEarlyFinish: true,
+      earlyFinishMinCoverage: 0.5,
+      earlyFinishMinQuestions: 0,
+    };
     const below = assessCompletion(
       cctx({ questions: fourQ, answered: [{ questionId: 'a', confidence: null }], config: base })
     );
@@ -259,7 +263,12 @@ describe('assessCompletion — early finish (escape hatch)', () => {
   it('bypasses the required-question gate (available even while blocked_on_required)', () => {
     const a = assessCompletion(
       cctx({
-        questions: [q({ id: 'a' }), q({ id: 'b' }), q({ id: 'c' }), q({ id: 'req', required: true })],
+        questions: [
+          q({ id: 'a' }),
+          q({ id: 'b' }),
+          q({ id: 'c' }),
+          q({ id: 'req', required: true }),
+        ],
         answered: twoAnswered,
         config: { allowEarlyFinish: true, earlyFinishMinCoverage: 0, earlyFinishMinQuestions: 2 },
       })

@@ -200,7 +200,9 @@ describe('eligibility', () => {
 describe('early finish (escape hatch)', () => {
   it('200s and completes with the early-finish reason when below thresholds but unlocked', async () => {
     // Not offerable (full coverage demanded, none answered) — a standard submit would 409.
-    ctxMock.buildTurnContext.mockResolvedValue(loadedContext({ offerable: false, earlyFinish: true }));
+    ctxMock.buildTurnContext.mockResolvedValue(
+      loadedContext({ offerable: false, earlyFinish: true })
+    );
     const res = await POST(req({}, { early: true }), ctx);
     expect(res.status).toBe(200);
     expect(sessionsMock.markSessionCompleted).toHaveBeenCalledWith('sess-1', {
@@ -221,7 +223,9 @@ describe('early finish (escape hatch)', () => {
   });
 
   it('409s SUBMIT_NOT_READY when early=true but the feature is off', async () => {
-    ctxMock.buildTurnContext.mockResolvedValue(loadedContext({ offerable: false, earlyFinish: false }));
+    ctxMock.buildTurnContext.mockResolvedValue(
+      loadedContext({ offerable: false, earlyFinish: false })
+    );
     const res = await POST(req({}, { early: true }), ctx);
     expect(res.status).toBe(409);
     expect((await res.json()).error.code).toBe('SUBMIT_NOT_READY');

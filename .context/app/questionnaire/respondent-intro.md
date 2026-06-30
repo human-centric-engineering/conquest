@@ -26,13 +26,13 @@ When any gate is off, the respondent goes straight into the questionnaire exactl
 Only three fields are authored; the rest of the copy is **derived at runtime** so it always matches
 the live settings (never drifts).
 
-| Field               | Where                                         | Notes                                                      |
-| ------------------- | --------------------------------------------- | ---------------------------------------------------------- |
-| `intro.enabled`     | `AppQuestionnaireConfig.intro` (JSON)         | The per-version toggle.                                    |
-| `intro.background`  | `AppQuestionnaireConfig.intro` (JSON)         | Admin markdown — "about this questionnaire". May be blank. |
-| `intro.buttonLabel` | `AppQuestionnaireConfig.intro` (JSON)         | Proceed-button text; `''` = a per-mode default.            |
+| Field               | Where                                         | Notes                                                                                                  |
+| ------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `intro.enabled`     | `AppQuestionnaireConfig.intro` (JSON)         | The per-version toggle.                                                                                |
+| `intro.background`  | `AppQuestionnaireConfig.intro` (JSON)         | Admin markdown — "about this questionnaire". May be blank.                                             |
+| `intro.buttonLabel` | `AppQuestionnaireConfig.intro` (JSON)         | Proceed-button text; `''` = a per-mode default.                                                        |
 | `intro.videoUrl`    | `AppQuestionnaireConfig.intro` (JSON)         | Optional YouTube/Vimeo link; `''` = no video. Not cohort-overridable. See [Intro video](#intro-video). |
-| `introBackground`   | `AppCohort.introBackground` (nullable column) | Cohort override of the background (see below).             |
+| `introBackground`   | `AppCohort.introBackground` (nullable column) | Cohort override of the background (see below).                                                         |
 
 `IntroSettings` + `DEFAULT_INTRO_SETTINGS` live in `lib/app/questionnaire/types.ts`; the stored JSON
 is defensively narrowed by `narrowIntroSettings` (`lib/app/questionnaire/intro/settings.ts`), the
@@ -79,6 +79,11 @@ iframe renders. This runs at **two seams** that must agree:
 - **Render** — `IntroVideo` (`components/app/questionnaire/intro/intro-video.tsx`) resolves the
   stored link again and returns `null` (renders nothing) when it doesn't — defence in depth against a
   value that bypassed the write path (seed / direct DB write).
+
+The iframe also needs the embed hosts in the page CSP: `frame-src` allow-lists exactly
+`https://www.youtube-nocookie.com` and `https://player.vimeo.com` (the only two hosts the resolver
+can produce) via `VIDEO_EMBED_FRAME_SRC` in `lib/security/headers.ts`. Without that the browser
+blocks the frame ("This content is blocked. Contact the site owner to fix the issue.").
 
 Supported forms: YouTube `watch?v=`, `youtu.be/`, `/embed/`, `/shorts/`, `/live/`, `m.youtube.com`;
 Vimeo `vimeo.com/<id>`, unlisted `vimeo.com/<id>/<hash>` (carried through as `?h=`),

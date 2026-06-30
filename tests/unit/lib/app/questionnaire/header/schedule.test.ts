@@ -45,6 +45,13 @@ describe('formatDateRange', () => {
   it('is empty when neither bound is set', () => {
     expect(formatDateRange(null, null)).toBe('');
   });
+
+  it('formats in UTC — an instant just past midnight UTC renders on the UTC calendar day', () => {
+    // 01:30 UTC on 1 Jul. Without `timeZone: 'UTC'` this would render "30 Jun" on any negative-offset
+    // (Americas) runner; the assertion pins the UTC-calendar-day behaviour the band depends on.
+    expect(formatDateRange(null, new Date('2026-07-01T01:30:00Z'))).toBe('Until 1 Jul 2026');
+    expect(formatDateRange(new Date('2026-07-01T01:30:00Z'), null)).toBe('From 1 Jul 2026');
+  });
 });
 
 describe('buildScheduleView', () => {
@@ -94,6 +101,19 @@ describe('buildScheduleView', () => {
     ).toBe('Closes today');
   });
 
+  it('counts CALENDAR days (UTC), not a rolling 24h delta, across a midnight boundary', () => {
+    const closesAt = new Date('2026-06-16T06:00:00Z'); // closes 16 Jun, early morning
+    // "now" is the evening BEFORE — only 10h away, but the next calendar day. A rolling-24h floor
+    // would mislabel this "Closes today"; the UTC calendar-day count must read "tomorrow".
+    expect(
+      buildScheduleView(round({ closesAt }), new Date('2026-06-15T20:00:00Z'))?.statusLabel
+    ).toBe('Closes tomorrow');
+    // Same close, but "now" is just after midnight on the close date → same calendar day → today.
+    expect(
+      buildScheduleView(round({ closesAt }), new Date('2026-06-16T01:00:00Z'))?.statusLabel
+    ).toBe('Closes today');
+  });
+
   it('is Upcoming before the window opens', () => {
     const view = buildScheduleView(
       round({
@@ -120,6 +140,19 @@ describe('buildScheduleView', () => {
     expect(view?.status).toBe('closed');
     expect(view?.statusLabel).toBe('Closed');
     expect(view?.dateRange).toBe('1 Jan – 31 Mar 2026');
+  });
+
+  it('does NOT present a draft round (status !== open) as Open, even inside the date window', () => {
+    const view = buildScheduleView(
+      round({
+        status: 'draft',
+        opensAt: new Date('2026-04-01T00:00:00Z'), // past — would otherwise read "Open"
+        closesAt: new Date('2026-08-01T00:00:00Z'),
+      }),
+      NOW
+    );
+    expect(view?.status).toBe('upcoming');
+    expect(view?.status).not.toBe('open');
   });
 
   it('is Closed when the round status is closed, even inside the date window', () => {

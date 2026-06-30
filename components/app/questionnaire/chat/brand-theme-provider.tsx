@@ -144,7 +144,7 @@ export function BrandThemeProvider({
                     hasLogo ? 'justify-end' : 'justify-start'
                   )}
                 >
-                  {round?.name && <span className="truncate">{round.name}</span>}
+                  {round?.name && <span className="min-w-0 truncate">{round.name}</span>}
                   {round?.name && schedule && (
                     <span aria-hidden className="opacity-50">
                       ·

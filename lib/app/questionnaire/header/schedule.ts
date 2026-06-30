@@ -32,13 +32,22 @@ export interface ScheduleView {
   dateRange: string;
 }
 
-/** Whole days remaining from `now` until `when` (floor: 0 = closes later today, 1 = tomorrow). */
+/**
+ * Whole CALENDAR days from `now`'s date to `when`'s date: 0 = same day, 1 = tomorrow. Compared in
+ * UTC (matching {@link formatDay}) so "Closes today/tomorrow/in N days" always agrees with the
+ * displayed date and is deterministic regardless of the server's timezone — a rolling 24h delta
+ * would mislabel a close 11h away tonight as "today" when it's actually tomorrow's date.
+ */
 function daysUntil(when: Date, now: Date): number {
-  return Math.floor((when.getTime() - now.getTime()) / MS_PER_DAY);
+  const dayStart = (d: Date) => Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  return Math.round((dayStart(when) - dayStart(now)) / MS_PER_DAY);
 }
 
+// Format in UTC so a stored instant near midnight renders on the same calendar day everywhere (no
+// off-by-one between deploy timezones) and stays consistent with the day-countdown above.
 function formatDay(date: Date, withYear: boolean): string {
   return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'UTC',
     day: 'numeric',
     month: 'short',
     ...(withYear ? { year: 'numeric' } : {}),
@@ -79,9 +88,11 @@ export function buildScheduleView(round: BandRound, now: Date): ScheduleView | n
     return { status: 'closed', statusLabel: 'Closed', dateRange };
   }
 
-  // Upcoming: the window hasn't opened yet.
-  if (opensAt && now.getTime() < opensAt.getTime()) {
-    return { status: 'upcoming', statusLabel: `Opens ${formatDay(opensAt, false)}`, dateRange };
+  // Upcoming: the window hasn't opened yet, OR the round isn't live yet (e.g. status 'draft') — never
+  // present a not-yet-open round to a respondent as a green "Open".
+  if ((opensAt && now.getTime() < opensAt.getTime()) || round.status !== 'open') {
+    const label = opensAt ? `Opens ${formatDay(opensAt, false)}` : 'Opening soon';
+    return { status: 'upcoming', statusLabel: label, dateRange };
   }
 
   // Open. With a close date we surface urgency: "closing soon" near the end, otherwise a

@@ -51,6 +51,11 @@ vi.mock('@/lib/app/questionnaire/chat/theme', () => ({
   resolveThemeForVersion: vi.fn(),
 }));
 
+// Banner header resolver (title for the brand band) — stubbed so it makes no real Prisma call.
+vi.mock('@/lib/app/questionnaire/header/resolve', () => ({
+  resolveVersionHeader: vi.fn(),
+}));
+
 vi.mock('@/lib/app/questionnaire/chat/anonymity', () => ({
   resolveAnonymousForVersion: vi.fn(),
   resolvePresentationModeForVersion: vi.fn(),

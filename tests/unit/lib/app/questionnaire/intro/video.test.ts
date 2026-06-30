@@ -54,6 +54,17 @@ describe('resolveIntroVideo — Vimeo', () => {
       'https://player.vimeo.com/video/123456789'
     );
   });
+
+  it('takes the LAST numeric segment for album / showcase / numeric-channel paths', () => {
+    // /album/<albumId>/video/<videoId> — must embed the video, not the album, with no bogus hash.
+    expect(resolveIntroVideo('https://vimeo.com/album/123456/video/789012')?.embedUrl).toBe(
+      'https://player.vimeo.com/video/789012'
+    );
+    // numeric channel id followed by the video id.
+    expect(resolveIntroVideo('https://vimeo.com/channels/123456/789012')?.embedUrl).toBe(
+      'https://player.vimeo.com/video/789012'
+    );
+  });
 });
 
 describe('resolveIntroVideo — rejects everything else', () => {

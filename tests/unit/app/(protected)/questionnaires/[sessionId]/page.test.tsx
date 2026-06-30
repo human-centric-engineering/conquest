@@ -86,6 +86,11 @@ vi.mock('@/lib/app/questionnaire/chat/theme', () => ({
   resolveThemeForSession: vi.fn(),
 }));
 
+// Banner header resolver (title + round for the brand band) — stubbed so it makes no real Prisma call.
+vi.mock('@/lib/app/questionnaire/header/resolve', () => ({
+  resolveSessionHeader: vi.fn(),
+}));
+
 /**
  * Stub SessionWorkspace (chat + answer panel) — exposes all props via data-*
  * attributes so tests can assert on what the page passes without rendering the
