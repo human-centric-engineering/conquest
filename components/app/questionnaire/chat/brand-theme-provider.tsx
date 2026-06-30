@@ -7,13 +7,15 @@
  * `--app-logo-bg`, `--app-logo-url`) onto a wrapper so the chat component's accent/CTA colours
  * pick up the brand with no prop drilling.
  *
- * The band is a three-zone header — Brand · Title · Schedule:
- *  - Brand: the client logo (escaped `--app-logo-url` background, never a raw `<img src>`),
+ * The band is a two-anchor header — the logo and the title anchor opposite ends, so the band reads
+ * as deliberate whether or not there's schedule metadata:
+ *  - Brand (left): the client logo (escaped `--app-logo-url` background, never a raw `<img src>`),
  *    optionally on the resolved `--app-logo-bg` backdrop chip.
- *  - Title: the questionnaire title, with the round name as a small eyebrow above it. Takes the
- *    slack (`flex-1`) and truncates — this is the real estate the logo used to leave empty.
- *  - Schedule: a status pill (live Open / Closing soon / Opens / Closed dot) over the round's
- *    date window. Omitted for open-ended sessions; hidden on narrow screens (title takes priority).
+ *  - Context (right): the questionnaire title, right-aligned opposite the logo (the empty middle is
+ *    intentional negative space), with an optional muted line beneath it carrying the round name +
+ *    a live status pill (Open / Closing soon / Opens / Closed) + the date window. The meta line is
+ *    omitted for open-ended sessions and hidden on narrow screens. With NO logo the title instead
+ *    leads from the left. `flex-1 min-w-0` truncates a long title cleanly.
  *
  * On a coloured surface the band paints `--app-surface-color` and uses `--app-on-surface` for
  * contrast-correct text; with no surface it sits on the neutral respondent canvas with a hairline
@@ -51,7 +53,7 @@ const STATUS_DOT: Record<ScheduleStatus, string> = {
 /**
  * The logo itself (escaped `url()` background, left-aligned). When a backdrop is resolved it's
  * wrapped in a padded panel of that colour — a logo chip that reads on any surface. Sized down a
- * step on mobile so the title + schedule have room.
+ * step on mobile so the right-anchored title has room.
  */
 function LogoMark({ hasBackdrop }: { hasBackdrop: boolean }) {
   const logo = (
@@ -100,7 +102,7 @@ export function BrandThemeProvider({
       {showBand && (
         <header
           className={cn(
-            'flex shrink-0 items-center gap-3 px-4 py-3 sm:gap-5 sm:px-6',
+            'flex shrink-0 items-center gap-4 px-4 py-3 sm:gap-6 sm:px-6',
             // No surface → sit on the neutral canvas with a hairline rule to separate the band.
             !hasSurface && 'border-b border-current/10'
           )}
@@ -111,43 +113,61 @@ export function BrandThemeProvider({
           }
         >
           {hasLogo && <LogoMark hasBackdrop={hasBackdrop} />}
-          {hasLogo && title && (
-            <span aria-hidden className="hidden h-8 w-px shrink-0 bg-current/15 sm:block" />
-          )}
 
-          {/* Title zone — absorbs the slack, truncates. Empty (just a spacer) for a logo-only band. */}
-          <div className="flex min-w-0 flex-1 flex-col">
-            {round?.name && (
-              <span className="truncate text-[11px] font-semibold tracking-[0.08em] uppercase opacity-60">
-                {round.name}
-              </span>
-            )}
-            {title && (
-              <p
-                className={cn(
-                  'truncate leading-tight font-semibold',
-                  hasLogo ? 'text-sm sm:text-base' : 'text-base sm:text-lg'
-                )}
-              >
-                {title}
-              </p>
-            )}
-          </div>
+          {/* Two-anchor header. With a logo, the title anchors hard RIGHT opposite it — the empty
+              middle is deliberate negative space, not waste. With no logo the title leads from the
+              LEFT instead. `flex-1 min-w-0` lets a long title truncate cleanly against the logo. */}
+          {(title || round?.name || schedule) && (
+            <div
+              className={cn(
+                'flex min-w-0 flex-1 flex-col gap-0.5',
+                hasLogo ? 'items-end text-right' : 'items-start text-left'
+              )}
+            >
+              {title && (
+                <p
+                  className={cn(
+                    'max-w-full truncate leading-tight font-semibold',
+                    hasLogo ? 'text-base sm:text-lg' : 'text-lg sm:text-xl'
+                  )}
+                >
+                  {title}
+                </p>
+              )}
 
-          {/* Schedule zone — hidden on narrow screens so the title keeps priority. */}
-          {schedule && (
-            <div className="hidden shrink-0 flex-col items-end leading-tight sm:flex">
-              <span className="flex items-center gap-1.5 text-[11px] font-semibold tracking-wide uppercase opacity-70">
-                <span
-                  aria-hidden
-                  className={cn('h-1.5 w-1.5 rounded-full', STATUS_DOT[schedule.status])}
-                />
-                {schedule.statusLabel}
-              </span>
-              {schedule.dateRange && (
-                <span className="text-xs font-medium tabular-nums opacity-90">
-                  {schedule.dateRange}
-                </span>
+              {/* Round / status / dates — one muted line beneath the title; hidden on narrow screens
+                  so the title keeps priority. */}
+              {(round?.name || schedule) && (
+                <div
+                  className={cn(
+                    'hidden max-w-full items-center gap-2 text-xs font-medium opacity-75 sm:flex',
+                    hasLogo ? 'justify-end' : 'justify-start'
+                  )}
+                >
+                  {round?.name && <span className="truncate">{round.name}</span>}
+                  {round?.name && schedule && (
+                    <span aria-hidden className="opacity-50">
+                      ·
+                    </span>
+                  )}
+                  {schedule && (
+                    <span className="flex shrink-0 items-center gap-1.5">
+                      <span
+                        aria-hidden
+                        className={cn('h-1.5 w-1.5 rounded-full', STATUS_DOT[schedule.status])}
+                      />
+                      {schedule.statusLabel}
+                    </span>
+                  )}
+                  {schedule?.dateRange && (
+                    <span aria-hidden className="opacity-50">
+                      ·
+                    </span>
+                  )}
+                  {schedule?.dateRange && (
+                    <span className="shrink-0 tabular-nums">{schedule.dateRange}</span>
+                  )}
+                </div>
               )}
             </div>
           )}
