@@ -87,7 +87,7 @@ const tiers = [
       </>,
       'Text responses',
       'Automatic questionnaire ingestion',
-      'Structured slot extraction',
+      'Structured context extraction',
       'Completion analytics',
     ],
   },

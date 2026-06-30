@@ -112,8 +112,8 @@ const steps = [
     body: (
       <>
         Upload any existing questionnaire, survey, assessment or audit, in PDF, Word or text.{' '}
-        <Wordmark /> reads it and maps every field into structured data slots, showing its reasoning
-        for you to review.
+        <Wordmark /> reads it and maps every field into structured context areas, showing its
+        reasoning for you to review.
       </>
     ),
   },
@@ -127,7 +127,7 @@ const steps = [
     icon: Database,
     kicker: 'You get structured answers',
     title: 'Understand',
-    body: 'Behind the scenes every answer is inferred and filled into the right slot, with confidence scores, context and provenance. The rigour of a questionnaire, the richness of a transcript.',
+    body: 'Behind the scenes every answer is inferred and filled into the right context area, with confidence scores, context and provenance. The rigour of a questionnaire, the richness of a transcript.',
   },
 ];
 
@@ -186,7 +186,7 @@ const features = [
   {
     icon: MessageSquare,
     title: 'Conversational data collection',
-    body: 'Fields become data slots, and conversational agents gather exactly what each one needs through dialogue. Nothing required is missed; nothing is asked twice.',
+    body: 'Fields become context areas, and conversational agents gather exactly what each one needs through dialogue. Nothing required is missed; nothing is asked twice.',
   },
   {
     icon: Mic,

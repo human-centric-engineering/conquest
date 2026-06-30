@@ -602,19 +602,19 @@ describe('AnswerSlotPanel', () => {
       <AnswerSlotPanel view={dataSlotView(12)} newlyFilledKeys={['slot-0', 'slot-3', 'slot-7']} />
     );
     // Footer lands on the first newly-filled slot: two more to go.
-    expect(screen.getByText(/2 more answers recorded/)).toBeInTheDocument();
-    fireEvent.click(screen.getByText(/2 more answers recorded/));
+    expect(screen.getByText(/2 more context areas captured/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText(/2 more context areas captured/));
     // Singular copy for the last hop.
-    expect(screen.getByText('1 more slot was answered')).toBeInTheDocument();
-    fireEvent.click(screen.getByText('1 more slot was answered'));
+    expect(screen.getByText('1 more context area was captured')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('1 more context area was captured'));
     // No footer on the final slot.
-    expect(screen.queryByText(/more answers recorded/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/more slot was answered/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/more context areas captured/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/more context area was captured/)).not.toBeInTheDocument();
   });
 
   it('shows no stepper footer when no slots were filled this turn', () => {
     render(<AnswerSlotPanel view={dataSlotView(12)} newlyFilledKeys={[]} />);
-    expect(screen.queryByText(/more answers recorded/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/more context areas captured/)).not.toBeInTheDocument();
   });
 
   it('pulses the most-recent-turn slot rows (and leaves earlier rows unpulsed)', () => {
@@ -862,7 +862,7 @@ describe('AnswerSlotPanel', () => {
       );
       expect(document.getElementById('panel-slot-slot-2')!.className).toContain('ring-2');
       // Stepping advances the scroll + highlight to the next newly-filled slot.
-      fireEvent.click(screen.getByText(/1 more slot was answered/));
+      fireEvent.click(screen.getByText(/1 more context area was captured/));
       expect(document.getElementById('panel-slot-slot-9')!.className).toContain('ring-2');
     });
 
