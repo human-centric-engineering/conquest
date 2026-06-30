@@ -230,7 +230,7 @@ export function QuestionnaireSplash({
         {/* FOOTER — the CTA, pinned outside both scroll regions so it's always visible. A soft
             top wash lifts it off the body; the proceed button right-aligns under the panel on lg. */}
         <footer
-          className="relative shrink-0 border-t px-7 py-4 sm:px-10"
+          className="relative shrink-0 border-t px-7 py-2.5 sm:px-10"
           style={{
             borderColor: 'color-mix(in srgb, var(--color-border) 70%, transparent)',
             backgroundColor: ACCENT_PANEL,
@@ -248,7 +248,7 @@ export function QuestionnaireSplash({
             <button
               type="button"
               onClick={onProceed}
-              className="group focus-visible:ring-ring relative inline-flex w-full items-center justify-center gap-2 overflow-hidden rounded-xl px-6 py-3.5 text-sm font-semibold text-white shadow-[0_8px_24px_-12px_rgba(0,0,0,0.5)] transition-[transform,box-shadow] duration-200 hover:-translate-y-0.5 hover:shadow-[0_14px_32px_-14px_rgba(0,0,0,0.55)] focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none active:translate-y-0 active:scale-[0.99] motion-reduce:transform-none motion-reduce:transition-none sm:w-auto sm:text-base"
+              className="group focus-visible:ring-ring relative inline-flex w-full items-center justify-center gap-2 overflow-hidden rounded-xl px-5 py-2.5 text-sm font-semibold text-white shadow-[0_8px_24px_-12px_rgba(0,0,0,0.5)] transition-[transform,box-shadow] duration-200 hover:-translate-y-0.5 hover:shadow-[0_14px_32px_-14px_rgba(0,0,0,0.55)] focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none active:translate-y-0 active:scale-[0.99] motion-reduce:transform-none motion-reduce:transition-none sm:w-auto"
               style={{ background: CTA_FILL }}
             >
               <span
