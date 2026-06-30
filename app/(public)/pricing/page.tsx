@@ -443,9 +443,9 @@ export default function PricingPage() {
               className={`${shared.heroTitle} ${shared.rise}`}
               style={{ animationDelay: '0.08s' }}
             >
-              Build it bespoke&nbsp;now.
+              Subscribe to the&nbsp;platform.
               <br />
-              Or <em>subscribe&nbsp;soon.</em>
+              Or <em>build your&nbsp;own.</em>
             </h1>
             <p className={`${shared.heroSub} ${shared.rise}`} style={{ animationDelay: '0.16s' }}>
               Two ways to work with <Wordmark />. Today, we build a bespoke product around the core:
@@ -630,6 +630,14 @@ export default function PricingPage() {
             ))}
           </div>
 
+          <p className={`${styles.priceFoot} ${shared.reveal}`}>
+            Don’t want to wait? A bespoke build is available today.{' '}
+            <Link href="#custom" style={{ color: 'var(--blue)', fontWeight: 600 }}>
+              See what a custom implementation can do
+            </Link>
+            .
+          </p>
+
           <div className={`${styles.included} ${shared.reveal}`}>
             <div className={styles.includedHead}>
               <ShieldCheck /> In every plan
@@ -744,6 +752,18 @@ export default function PricingPage() {
                 </div>
               );
             })}
+          </div>
+
+          <div
+            className={`${shared.ctaRow} ${shared.reveal}`}
+            style={{ justifyContent: 'center', marginTop: 'clamp(44px, 5vw, 60px)' }}
+          >
+            <Link href="/contact" className={`${shared.btn} ${shared.btnPrimary}`}>
+              Request a demo <ArrowRight />
+            </Link>
+            <Link href="/#how" className={`${shared.btn} ${shared.btnGhost}`}>
+              See how it works
+            </Link>
           </div>
         </div>
       </section>
