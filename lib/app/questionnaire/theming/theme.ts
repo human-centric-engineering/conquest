@@ -116,6 +116,31 @@ export function resolveTheme(theme: DemoClientTheme | null): ResolvedTheme {
 }
 
 /**
+ * The most readable text colour to lay over a solid background — near-white on dark
+ * surfaces, near-black on light ones. Picks whichever of white/`#1a1a1a` has the higher
+ * WCAG contrast against the surface (relative-luminance based). Returns null when the hex
+ * can't be parsed, so the caller omits the variable and the UI falls back to its token.
+ *
+ * Used to pick `--app-on-surface` for the brand band, whose background is the (arbitrary,
+ * possibly dark) client `surfaceColor` — the neutral `text-foreground` token would be
+ * near-black and vanish on a dark brand band.
+ */
+export function readableTextColor(hex: string): string | null {
+  const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return null;
+  const c = m[1];
+  const full = c.length === 3 ? c.replace(/./g, (ch) => ch + ch) : c;
+  const channel = (i: number) => parseInt(full.slice(i, i + 2), 16) / 255;
+  const linear = (v: number) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+  const luminance =
+    0.2126 * linear(channel(0)) + 0.7152 * linear(channel(2)) + 0.0722 * linear(channel(4));
+  // Contrast of white vs near-black against this luminance; brighter background → dark text.
+  const contrastWhite = 1.05 / (luminance + 0.05);
+  const contrastBlack = (luminance + 0.05) / 0.05;
+  return contrastWhite >= contrastBlack ? '#ffffff' : '#1a1a1a';
+}
+
+/**
  * Project a resolved theme into CSS custom properties for the F7.1 user UI to spread
  * onto a container's `style`. The logo variable is emitted only when a logo is set
  * (an absent `--app-logo-url` lets the UI fall back rather than render `url(null)`).
@@ -140,6 +165,10 @@ export function themeToCssVariables(theme: ResolvedTheme): Record<string, string
   };
   if (theme.surfaceColor) {
     vars['--app-surface-color'] = theme.surfaceColor;
+    // The readable text colour for content laid on the band (title / dates), chosen for
+    // contrast against the surface so it stays legible on dark and light brand colours alike.
+    const onSurface = readableTextColor(theme.surfaceColor);
+    if (onSurface) vars['--app-on-surface'] = onSurface;
   }
   if (theme.logoBackgroundColor) {
     vars['--app-logo-bg'] = theme.logoBackgroundColor;

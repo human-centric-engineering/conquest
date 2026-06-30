@@ -11,6 +11,7 @@ import {
   DEFAULT_INTRO_SETTINGS,
   INTRO_BACKGROUND_MAX_LENGTH,
   INTRO_BUTTON_LABEL_MAX_LENGTH,
+  INTRO_VIDEO_URL_MAX_LENGTH,
   type IntroSettings,
 } from '@/lib/app/questionnaire/types';
 import { isRecord } from '@/lib/utils';
@@ -34,5 +35,6 @@ export function narrowIntroSettings(value: unknown): IntroSettings {
     enabled: asBool(obj.enabled, d.enabled),
     background: asText(obj.background, INTRO_BACKGROUND_MAX_LENGTH, d.background),
     buttonLabel: asText(obj.buttonLabel, INTRO_BUTTON_LABEL_MAX_LENGTH, d.buttonLabel),
+    videoUrl: asText(obj.videoUrl, INTRO_VIDEO_URL_MAX_LENGTH, d.videoUrl),
   };
 }

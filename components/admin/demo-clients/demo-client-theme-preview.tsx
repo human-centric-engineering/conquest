@@ -101,6 +101,9 @@ function LogoThumb({
  */
 function ChromePreview({ resolved }: { resolved: ResolvedTheme }) {
   const vars = themeToCssVariables(resolved) as CSSProperties;
+  // Text laid on the band uses the contrast-correct on-surface colour the session band uses;
+  // with no surface the band sits on the neutral canvas and reads the foreground token.
+  const onBand = resolved.surfaceColor ? 'var(--app-on-surface)' : 'var(--color-foreground)';
   return (
     <div
       style={vars}
@@ -108,21 +111,20 @@ function ChromePreview({ resolved }: { resolved: ResolvedTheme }) {
       aria-label="Session preview"
       role="img"
     >
-      {/* Surface header band — falls back to a muted strip when no surface is set. */}
+      {/* Surface header band — Brand · Title · Schedule, mirroring the respondent band.
+          Falls back to a muted strip when no surface is set; sample title/dates are illustrative. */}
       <div
-        className="flex items-center px-3 py-2.5"
-        style={{ backgroundColor: resolved.surfaceColor ?? 'var(--color-muted)' }}
+        className="flex items-center gap-2.5 px-3 py-2.5"
+        style={{ backgroundColor: resolved.surfaceColor ?? 'var(--color-muted)', color: onBand }}
       >
-        {resolved.logoUrl ? (
+        {resolved.logoUrl && (
           <LogoThumb logoUrl={resolved.logoUrl} backdrop={resolved.logoBackgroundColor} />
-        ) : (
-          <span
-            className="text-xs font-medium"
-            style={{ color: resolved.surfaceColor ? '#fff' : 'var(--color-foreground)' }}
-          >
-            Question session
-          </span>
         )}
+        <span className="min-w-0 flex-1 truncate text-xs font-semibold">Question session</span>
+        <span className="flex shrink-0 items-center gap-1 text-[10px] font-medium opacity-80">
+          <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+          <span className="tabular-nums">1–30 Jun</span>
+        </span>
       </div>
 
       {/* Body: a sample assistant line + a user bubble tinted with the accent. */}

@@ -188,6 +188,99 @@ describe('assessCompletion', () => {
   });
 });
 
+describe('assessCompletion — early finish (escape hatch)', () => {
+  // Four equal-weight questions, two answered → 50% coverage, answeredCount 2.
+  const fourQ = [q({ id: 'a' }), q({ id: 'b' }), q({ id: 'c' }), q({ id: 'd' })];
+  const twoAnswered = [
+    { questionId: 'a', confidence: null },
+    { questionId: 'b', confidence: null },
+  ];
+
+  it('is unavailable when the feature is off, however much is covered', () => {
+    const a = assessCompletion(
+      cctx({
+        questions: fourQ,
+        answered: twoAnswered,
+        config: { allowEarlyFinish: false, earlyFinishMinCoverage: 0, earlyFinishMinQuestions: 0 },
+      })
+    );
+    expect(a.earlyFinishAvailable).toBe(false);
+  });
+
+  it('is available from the start when both minimums are 0', () => {
+    const a = assessCompletion(
+      cctx({
+        questions: fourQ,
+        answered: [],
+        config: { allowEarlyFinish: true, earlyFinishMinCoverage: 0, earlyFinishMinQuestions: 0 },
+      })
+    );
+    expect(a.earlyFinishAvailable).toBe(true);
+  });
+
+  it('gates on the coverage bar alone (questions bar 0 is not a criterion)', () => {
+    const base = {
+      allowEarlyFinish: true,
+      earlyFinishMinCoverage: 0.5,
+      earlyFinishMinQuestions: 0,
+    };
+    const below = assessCompletion(
+      cctx({ questions: fourQ, answered: [{ questionId: 'a', confidence: null }], config: base })
+    );
+    expect(below.coverage).toBeCloseTo(0.25);
+    expect(below.earlyFinishAvailable).toBe(false);
+
+    const met = assessCompletion(cctx({ questions: fourQ, answered: twoAnswered, config: base }));
+    expect(met.coverage).toBeCloseTo(0.5);
+    expect(met.earlyFinishAvailable).toBe(true);
+  });
+
+  it('gates on the questions bar alone (coverage bar 0 is not a criterion)', () => {
+    const base = { allowEarlyFinish: true, earlyFinishMinCoverage: 0, earlyFinishMinQuestions: 2 };
+    const below = assessCompletion(
+      cctx({ questions: fourQ, answered: [{ questionId: 'a', confidence: null }], config: base })
+    );
+    expect(below.earlyFinishAvailable).toBe(false);
+
+    const met = assessCompletion(cctx({ questions: fourQ, answered: twoAnswered, config: base }));
+    expect(met.answeredCount).toBe(2);
+    expect(met.earlyFinishAvailable).toBe(true);
+  });
+
+  it('ORs the two bars — meeting EITHER unlocks', () => {
+    // Coverage bar 0.9 is unmet at 50%, but the questions bar (2) is met → available.
+    const a = assessCompletion(
+      cctx({
+        questions: fourQ,
+        answered: twoAnswered,
+        config: { allowEarlyFinish: true, earlyFinishMinCoverage: 0.9, earlyFinishMinQuestions: 2 },
+      })
+    );
+    expect(a.coverage).toBeCloseTo(0.5);
+    expect(a.earlyFinishAvailable).toBe(true);
+  });
+
+  it('bypasses the required-question gate (available even while blocked_on_required)', () => {
+    const a = assessCompletion(
+      cctx({
+        questions: [
+          q({ id: 'a' }),
+          q({ id: 'b' }),
+          q({ id: 'c' }),
+          q({ id: 'req', required: true }),
+        ],
+        answered: twoAnswered,
+        config: { allowEarlyFinish: true, earlyFinishMinCoverage: 0, earlyFinishMinQuestions: 2 },
+      })
+    );
+    // The required slot is still open, so the agent's own gate blocks its offer…
+    expect(a.kind).toBe('blocked_on_required');
+    expect(a.requiredUnansweredKeys).toContain('req');
+    // …but the respondent's escape hatch is independent and unlocked.
+    expect(a.earlyFinishAvailable).toBe(true);
+  });
+});
+
 describe('resolveCompletion', () => {
   const offer: CompletionAssessment = {
     kind: 'offer',
@@ -197,6 +290,7 @@ describe('resolveCompletion', () => {
     answeredCount: 3,
     requiredUnansweredKeys: [],
     capReached: false,
+    earlyFinishAvailable: false,
   };
   const blocked: CompletionAssessment = {
     ...offer,
@@ -229,6 +323,33 @@ describe('resolveCompletion', () => {
 
   it('refuses to submit on accept when the assessment is not an offer', () => {
     const r = resolveCompletion('accept', blocked, { run: false, contradictionCount: 0 });
+    expect(r.kind).toBe('continue');
+  });
+
+  it('submits on finish_early when the escape hatch is available — even while blocked', () => {
+    const r = resolveCompletion(
+      'finish_early',
+      { ...blocked, earlyFinishAvailable: true },
+      { run: false, contradictionCount: 0 }
+    );
+    expect(r.kind).toBe('submit');
+  });
+
+  it('does not run the sweep on finish_early (submits over contradictions)', () => {
+    const r = resolveCompletion(
+      'finish_early',
+      { ...offer, earlyFinishAvailable: true },
+      { run: true, contradictionCount: 5 }
+    );
+    expect(r.kind).toBe('submit');
+  });
+
+  it('continues on finish_early when the escape hatch is not available', () => {
+    const r = resolveCompletion(
+      'finish_early',
+      { ...offer, earlyFinishAvailable: false },
+      { run: false, contradictionCount: 0 }
+    );
     expect(r.kind).toBe('continue');
   });
 });

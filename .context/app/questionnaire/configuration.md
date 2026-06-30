@@ -27,6 +27,9 @@ single JSON column for the profile fields:
 | Question selection strategy           | `selectionStrategy`        | String (enum)          | `'adaptive'`        |
 | Completion: min questions             | `minQuestionsAnswered`     | Int                    | `0`                 |
 | Completion: coverage threshold        | `coverageThreshold`        | Float (0–1)            | `1.0`               |
+| Early finish: allow                   | `allowEarlyFinish`         | Boolean                | `false`             |
+| Early finish: min coverage            | `earlyFinishMinCoverage`   | Float (0–1; 0 = off)   | `0.5`               |
+| Early finish: min questions           | `earlyFinishMinQuestions`  | Int (0 = off)          | `0`                 |
 | Cost budget (USD / session)           | `costBudgetUsd`            | Float? (null = no cap) | `null`              |
 | Per-session question cap              | `maxQuestionsPerSession`   | Int? (null = no cap)   | `null`              |
 | Voice input                           | `voiceEnabled`             | Boolean                | `false`             |
@@ -249,9 +252,10 @@ sequential, random, weighted, adaptive — see [selection strategies](selection-
 the per-turn replies those questions draw are turned into typed slot values by
 F4.2 ([answer extraction](answer-extraction.md)); contradiction mode/N feeds F4.3;
 the completion thresholds (`minQuestionsAnswered`, `coverageThreshold`) and
-`maxQuestionsPerSession` feed F4.5's offer-to-submit gate
-([completion logic](completion-logic.md)); voice feeds F6.2; profile-field
-collection at session start lands in P4.
+`maxQuestionsPerSession` feed F4.5's offer-to-submit gate, while the early-finish
+fields (`allowEarlyFinish`, `earlyFinishMinCoverage`, `earlyFinishMinQuestions`) feed the
+respondent's parallel escape hatch ([completion logic](completion-logic.md)); voice feeds
+F6.2; profile-field collection at session start lands in P4.
 
 ## Not in F3.1
 

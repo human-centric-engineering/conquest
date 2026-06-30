@@ -40,6 +40,7 @@ function assessment(over: Partial<CompletionAssessment> = {}): CompletionAssessm
     answeredCount: 0,
     requiredUnansweredKeys: [],
     capReached: false,
+    earlyFinishAvailable: false,
     unmet: ['coverage_below_threshold'],
     rationale: 'not ready',
     ...over,

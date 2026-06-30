@@ -44,6 +44,16 @@ export interface CSPConfig {
 }
 
 /**
+ * Trusted video-embed iframe hosts (ConQuest intro-video feature).
+ *
+ * The intro-video resolver (`lib/app/questionnaire/intro/video.ts`) only ever produces iframe
+ * `src`s on these exact hosts, built from a validated id — never the admin's raw input. So
+ * allow-listing them in `frame-src` is precisely as broad as the feature itself: no other host
+ * can be framed, and a hostile stored value still resolves to `null` (no iframe) upstream.
+ */
+const VIDEO_EMBED_FRAME_SRC = ['https://www.youtube-nocookie.com', 'https://player.vimeo.com'];
+
+/**
  * Development CSP - permissive for HMR and Fast Refresh
  *
  * Allows:
@@ -61,7 +71,7 @@ const DEVELOPMENT_CSP: CSPConfig = {
   'font-src': ["'self'", 'data:'],
   'connect-src': ["'self'", 'webpack://*', 'ws://localhost:*', 'wss://localhost:*'],
   'worker-src': ["'self'", 'blob:'],
-  'frame-src': ["'self'"],
+  'frame-src': ["'self'", ...VIDEO_EMBED_FRAME_SRC],
   'frame-ancestors': ["'none'"],
   'form-action': ["'self'"],
   'base-uri': ["'self'"],
@@ -91,7 +101,7 @@ const PRODUCTION_CSP: CSPConfig = {
   // calls to external URLs are intentionally blocked here to prevent data exfiltration.
   'connect-src': ["'self'"],
   'worker-src': ["'self'", 'blob:'],
-  'frame-src': ["'self'"],
+  'frame-src': ["'self'", ...VIDEO_EMBED_FRAME_SRC],
   'frame-ancestors': ["'none'"],
   'form-action': ["'self'"],
   'base-uri': ["'self'"],

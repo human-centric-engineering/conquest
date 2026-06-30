@@ -36,6 +36,7 @@ import {
 
 import { cn } from '@/lib/utils';
 import type { ResolvedSessionIntro } from '@/lib/app/questionnaire/intro/resolve';
+import { IntroVideo } from '@/components/app/questionnaire/intro/intro-video';
 
 const ACCENT = 'var(--app-accent-color, var(--color-primary))';
 const ACCENT_SOFT =
@@ -71,7 +72,7 @@ export function QuestionnaireSplash({
   onProceed,
   className,
 }: QuestionnaireSplashProps) {
-  const { copy, background, questionnaireTitle } = intro;
+  const { copy, background, questionnaireTitle, videoUrl } = intro;
   const hasBackground = background.trim().length > 0;
 
   // Ordered, present-only guidance sections (report off → no "what you'll get").
@@ -134,6 +135,9 @@ export function QuestionnaireSplash({
                 {questionnaireTitle}
               </h1>
             </header>
+
+            {/* Optional intro video — grouped with the about text; self-hides when unset/unresolvable. */}
+            <IntroVideo url={videoUrl} />
 
             {hasBackground ? (
               <div className="flex flex-col gap-2.5">

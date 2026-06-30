@@ -88,6 +88,16 @@ vi.mock('@/components/app/questionnaire/lifecycle/completion-offer', () => ({
     </div>
   ),
 }));
+// Early-finish-control stub surfaces the Finish handler as a button (same reason).
+vi.mock('@/components/app/questionnaire/lifecycle/early-finish-control', () => ({
+  EarlyFinishControl: ({ onFinish }: { onFinish: () => void }) => (
+    <div data-testid="early-finish-control">
+      <button type="button" onClick={onFinish}>
+        early-finish
+      </button>
+    </div>
+  ),
+}));
 vi.mock('@/components/app/questionnaire/lifecycle/session-complete', () => ({
   SessionComplete: () => <div data-testid="session-complete" />,
 }));
@@ -142,12 +152,14 @@ function lifecycleReturn(over: Record<string, unknown> = {}) {
     busy: false,
     actionError: null,
     canSubmit: false,
+    canFinishEarly: false,
     canPause: false,
     canResume: false,
     refetch: lifecycleRefetch,
     pause: vi.fn(),
     resume: vi.fn(),
     submit: vi.fn(),
+    finishEarly: vi.fn(),
     ...over,
   };
 }
@@ -283,6 +295,7 @@ describe('SessionWorkspace', () => {
       enabled: true,
       questionnaireTitle: 'Team Health Check',
       background: '',
+      videoUrl: '',
       copy: {
         howItWorks: { heading: 'How it works', body: 'This is a conversation, not a form.' },
         whatYouGet: null,
@@ -395,6 +408,7 @@ describe('SessionWorkspace', () => {
         answeredCount: 3,
         requiredUnansweredKeys: [],
         capReached: false,
+        earlyFinishAvailable: false,
       },
       cost: null,
       anonymous: false,
@@ -518,6 +532,7 @@ describe('SessionWorkspace', () => {
             answeredCount: 6,
             requiredUnansweredKeys: [],
             capReached: false,
+            earlyFinishAvailable: false,
           },
           cost: null,
           anonymous: true,
@@ -552,6 +567,21 @@ describe('SessionWorkspace', () => {
   it('hides the completion offer when the session is not submittable', () => {
     setup({}, {}, { canSubmit: false });
     expect(screen.queryByTestId('completion-offer')).not.toBeInTheDocument();
+  });
+
+  it('shows the early-finish control and wires Finish when only the escape hatch is unlocked', () => {
+    const finishEarly = vi.fn();
+    setup({}, {}, { canSubmit: false, canFinishEarly: true, finishEarly });
+
+    expect(screen.queryByTestId('completion-offer')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('early-finish'));
+    expect(finishEarly).toHaveBeenCalledTimes(1);
+  });
+
+  it('prefers the full submit offer over the early-finish control when both are available', () => {
+    setup({}, {}, { canSubmit: true, canFinishEarly: true });
+    expect(screen.getByTestId('completion-offer')).toBeInTheDocument();
+    expect(screen.queryByTestId('early-finish-control')).not.toBeInTheDocument();
   });
 
   describe('read-only mode (admin viewer)', () => {

@@ -44,6 +44,33 @@ const COVERAGE_EPSILON = 1e-9;
 const pct = (n: number): string => `${Math.round(n * 100)}%`;
 
 /**
+ * The respondent-controlled early-finish escape hatch (F-early-finish). Orthogonal to the
+ * agent's own `offer` gate and — deliberately — to the required-question gate: a respondent
+ * who opts to finish early may do so with required questions still open.
+ *
+ * Unlock rule: `allowEarlyFinish` AND
+ *   - both minimums `0` ⇒ available from the start, else
+ *   - coverage ≥ `earlyFinishMinCoverage` (when that bar is set), OR
+ *   - answered ≥ `earlyFinishMinQuestions` (when that bar is set).
+ *
+ * A bar of `0` means "not a criterion on that axis" — it never contributes to the OR (so a
+ * single configured bar gates alone rather than being trivially satisfied by the zeroed one).
+ */
+export function isEarlyFinishAvailable(
+  config: CompletionContext['config'],
+  coverage: number,
+  answered: number
+): boolean {
+  if (!config.allowEarlyFinish) return false;
+  const minCoverage = config.earlyFinishMinCoverage;
+  const minQuestions = config.earlyFinishMinQuestions;
+  if (minCoverage <= 0 && minQuestions <= 0) return true;
+  const coverageMet = minCoverage > 0 && coverage + COVERAGE_EPSILON >= minCoverage;
+  const questionsMet = minQuestions > 0 && answered >= minQuestions;
+  return coverageMet || questionsMet;
+}
+
+/**
  * Assess whether the agent may offer to submit. Ordering matters:
  *
  *  1. **Cap** — `maxQuestionsPerSession` reached → `offer` (a capped session can
@@ -81,6 +108,7 @@ export function assessCompletion(ctx: CompletionContext): CompletionAssessment {
     coverage,
     answeredCount: answered,
     requiredUnansweredKeys,
+    earlyFinishAvailable: isEarlyFinishAvailable(ctx.config, coverage, answered),
   };
 
   // 1. Hard cap → offer regardless of coverage. The cap is an explicit "stop here".
@@ -136,6 +164,9 @@ export function assessCompletion(ctx: CompletionContext): CompletionAssessment {
  * Resolve a respondent action against the assessment + the completion-sweep result.
  *
  *  - `hold` → `continue` (keep asking), whatever the assessment.
+ *  - `finish_early` while `earlyFinishAvailable` → `submit` (the escape hatch): no sweep —
+ *    a deliberate bail-out, and contradictions already surface live during the chat. Bypasses
+ *    the required/threshold gate by design. Not available → `continue` (defends a forged client).
  *  - `accept` while the assessment isn't `offer` → `continue`: accept can't bypass the
  *    required/threshold gate (the route should not normally reach here, but the core
  *    defends against it rather than submitting an ineligible session).
@@ -151,6 +182,14 @@ export function resolveCompletion(
 ): CompletionResolution {
   if (action === 'hold') {
     return { kind: 'continue', rationale: 'Respondent chose to keep going.' };
+  }
+
+  // Respondent-controlled early finish: submit immediately when unlocked, bypassing the
+  // required/threshold gate and the sweep. Defends against an ineligible (stale/forged) request.
+  if (action === 'finish_early') {
+    return assessment.earlyFinishAvailable
+      ? { kind: 'submit', rationale: 'Respondent chose to finish early.' }
+      : { kind: 'continue', rationale: 'Early finish is not available for this session.' };
   }
 
   // accept, but the deterministic gate says we shouldn't have offered.

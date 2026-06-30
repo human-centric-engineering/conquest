@@ -15,6 +15,7 @@ import type { NextRequest } from 'next/server';
 import { successResponse, errorResponse } from '@/lib/api/responses';
 import { getRouteLogger } from '@/lib/api/context';
 import { withAdminAuth } from '@/lib/auth/guards';
+import { prisma } from '@/lib/db/client';
 import { getClientIP } from '@/lib/security/ip';
 import { createRateLimitResponse } from '@/lib/security/rate-limit';
 import { logger } from '@/lib/logging';
@@ -62,7 +63,27 @@ const handleImport = withAdminAuth(async (request: NextRequest, session) => {
     });
   }
 
-  const result = await persistDefinitionImport({ envelope, adminId });
+  // DEMO-ONLY (F2.5.1): optional attribution. The target client travels as a query param (the body
+  // is the definition file itself) and must exist — a cheap pre-check for a clean 404 rather than a
+  // foreign-key 500 at persist time. Mirrors the upload route's attribution guard.
+  let demoClientId: string | undefined;
+  const requestedClientId = new URL(request.url).searchParams.get('demoClientId')?.trim();
+  if (requestedClientId) {
+    const client = await prisma.appDemoClient.findUnique({
+      where: { id: requestedClientId },
+      select: { id: true },
+    });
+    if (!client) {
+      return errorResponse('Demo client not found', { code: 'DEMO_CLIENT_NOT_FOUND', status: 404 });
+    }
+    demoClientId = client.id;
+  }
+
+  const result = await persistDefinitionImport({
+    envelope,
+    adminId,
+    ...(demoClientId !== undefined ? { demoClientId } : {}),
+  });
 
   // Regenerate embeddings for the new version (best-effort — an unconfigured embedder must not fail
   // the import; question/data-slot vectors also self-heal lazily at runtime).
@@ -86,6 +107,7 @@ const handleImport = withAdminAuth(async (request: NextRequest, session) => {
       sectionCount: result.sectionCount,
       questionCount: result.questionCount,
       dataSlotCount: result.dataSlotCount,
+      demoClientId: demoClientId ?? null,
     },
     clientIp,
   });

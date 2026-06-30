@@ -64,6 +64,21 @@ describe('resolveSessionIntro', () => {
     expect(intro!.copy.howItWorks.body).toMatch(/conversation/i);
   });
 
+  it('threads the (non-cohort-overridable) intro video link through', async () => {
+    mockSession.mockResolvedValue(
+      sessionRow({
+        intro: {
+          enabled: true,
+          background: '',
+          buttonLabel: '',
+          videoUrl: 'https://youtu.be/dQw4w9WgXcQ',
+        },
+      }) as never
+    );
+    const intro = await resolveSessionIntro('s1');
+    expect(intro!.videoUrl).toBe('https://youtu.be/dQw4w9WgXcQ');
+  });
+
   it('uses the version background when the session has no cohort', async () => {
     mockSession.mockResolvedValue(sessionRow({ cohortMemberId: null }) as never);
     const intro = await resolveSessionIntro('s1');

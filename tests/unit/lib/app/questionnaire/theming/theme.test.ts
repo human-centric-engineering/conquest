@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 
 import {
   SUNRISE_THEME_DEFAULTS,
+  readableTextColor,
   resolveTheme,
   themeToCssVariables,
   type DemoClientTheme,
@@ -172,6 +173,52 @@ describe('themeToCssVariables', () => {
     );
     expect(branded['--app-surface-color']).toBe('#280039');
     expect(branded['--app-logo-bg']).toBe('#280039');
+  });
+
+  it('emits --app-on-surface (white on a dark surface) alongside --app-surface-color', () => {
+    const vars = themeToCssVariables(
+      resolveTheme({
+        ctaColor: null,
+        accentColor: null,
+        logoUrl: null,
+        welcomeCopy: null,
+        surfaceColor: '#16243f', // deep navy
+      })
+    );
+    expect(vars['--app-on-surface']).toBe('#ffffff');
+  });
+
+  it('picks dark on-surface text for a light surface, and omits the var with no surface', () => {
+    const light = themeToCssVariables(
+      resolveTheme({
+        ctaColor: null,
+        accentColor: null,
+        logoUrl: null,
+        welcomeCopy: null,
+        surfaceColor: '#f4f1ea', // pale cream
+      })
+    );
+    expect(light['--app-on-surface']).toBe('#1a1a1a');
+    expect(themeToCssVariables(resolveTheme(null))).not.toHaveProperty('--app-on-surface');
+  });
+});
+
+describe('readableTextColor', () => {
+  it('returns white for dark backgrounds and near-black for light ones', () => {
+    expect(readableTextColor('#000000')).toBe('#ffffff');
+    expect(readableTextColor('#16243f')).toBe('#ffffff');
+    expect(readableTextColor('#ffffff')).toBe('#1a1a1a');
+    expect(readableTextColor('#f4f1ea')).toBe('#1a1a1a');
+  });
+
+  it('accepts shorthand hex and a missing leading hash', () => {
+    expect(readableTextColor('#000')).toBe('#ffffff');
+    expect(readableTextColor('fff')).toBe('#1a1a1a');
+  });
+
+  it('returns null for an unparseable colour (caller omits the variable)', () => {
+    expect(readableTextColor('rebeccapurple')).toBeNull();
+    expect(readableTextColor('#12')).toBeNull();
   });
 
   it('wraps a present logo in a quoted url() for the CSS variable', () => {

@@ -193,6 +193,7 @@ const resolvedIntroSchema = z.object({
   enabled: z.boolean(),
   questionnaireTitle: z.string(),
   background: z.string(),
+  videoUrl: z.string(),
   copy: z.object({
     howItWorks: introSectionSchema,
     whatYouGet: introSectionSchema.nullable(),

@@ -68,6 +68,7 @@ import {
   ANSWER_SLOT_PANEL_SCOPES,
   CONTRADICTION_MODES,
   INTRO_BUTTON_LABEL_MAX_LENGTH,
+  INTRO_VIDEO_URL_MAX_LENGTH,
   INVITEE_FIELD_LABELS,
   PRESENTATION_MODES,
   PROFILE_FIELD_TYPES,
@@ -442,6 +443,13 @@ export function ConfigEditor({
   const [answerConfidenceFloor, setAnswerConfidenceFloor] = useState(
     String(config.answerConfidenceFloor)
   );
+  const [allowEarlyFinish, setAllowEarlyFinish] = useState(config.allowEarlyFinish);
+  const [earlyFinishMinCoverage, setEarlyFinishMinCoverage] = useState(
+    String(config.earlyFinishMinCoverage)
+  );
+  const [earlyFinishMinQuestions, setEarlyFinishMinQuestions] = useState(
+    String(config.earlyFinishMinQuestions)
+  );
   const [costBudgetUsd, setCostBudgetUsd] = useState(
     config.costBudgetUsd === null ? '' : String(config.costBudgetUsd)
   );
@@ -517,6 +525,9 @@ export function ConfigEditor({
     setMinQuestionsAnswered(String(config.minQuestionsAnswered));
     setCoverageThreshold(String(config.coverageThreshold));
     setAnswerConfidenceFloor(String(config.answerConfidenceFloor));
+    setAllowEarlyFinish(config.allowEarlyFinish);
+    setEarlyFinishMinCoverage(String(config.earlyFinishMinCoverage));
+    setEarlyFinishMinQuestions(String(config.earlyFinishMinQuestions));
     setCostBudgetUsd(config.costBudgetUsd === null ? '' : String(config.costBudgetUsd));
     setMaxQuestionsPerSession(
       config.maxQuestionsPerSession === null ? '' : String(config.maxQuestionsPerSession)
@@ -589,6 +600,20 @@ export function ConfigEditor({
         ),
         // Clamp to [0,1]; blank falls back to the stored value, never silently 0.
         coverageThreshold: boundedNumber(coverageThreshold, 0, 1, config.coverageThreshold),
+        allowEarlyFinish,
+        earlyFinishMinCoverage: boundedNumber(
+          earlyFinishMinCoverage,
+          0,
+          1,
+          config.earlyFinishMinCoverage
+        ),
+        earlyFinishMinQuestions: boundedNumber(
+          earlyFinishMinQuestions,
+          0,
+          Number.MAX_SAFE_INTEGER,
+          config.earlyFinishMinQuestions,
+          true
+        ),
         answerConfidenceFloor: boundedNumber(
           answerConfidenceFloor,
           0,
@@ -672,6 +697,7 @@ export function ConfigEditor({
           enabled: intro.enabled,
           background: intro.background.trim(),
           buttonLabel: intro.buttonLabel.trim(),
+          videoUrl: intro.videoUrl.trim(),
         },
         profileFields: profileFields.map((f) => ({
           key: f.key.trim(),
@@ -848,6 +874,68 @@ export function ConfigEditor({
                 disabled={busy}
               />
             </div>
+            {/* Respondent-controlled early finish — lets a person voluntarily end and get their report
+            once they've crossed a minimum bar, distinct from the agent's own completion thresholds
+            above. The two minimums are OR'd; either at 0 means "not a criterion". */}
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={allowEarlyFinish}
+                onCheckedChange={setAllowEarlyFinish}
+                disabled={busy}
+              />
+              <Label className="text-sm font-medium">
+                Let respondents finish early{' '}
+                <FieldHelp title="Let respondents finish early">
+                  Adds a calm &ldquo;Continue or finish up&rdquo; control to the respondent&rsquo;s
+                  screen once they&rsquo;ve answered enough. Choosing &ldquo;Finish up&rdquo; ends
+                  the session and prepares their report — even if the agent&rsquo;s own completion
+                  thresholds above aren&rsquo;t met, and{' '}
+                  <em>even if required questions are still open</em> (this is a deliberate escape
+                  hatch). The control unlocks once <em>either</em> minimum below is reached.
+                </FieldHelp>
+              </Label>
+            </div>
+            {allowEarlyFinish && (
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label className="text-sm font-medium">
+                    Finish-up min coverage{' '}
+                    <FieldHelp title="Finish-up minimum coverage">
+                      Weighted coverage the respondent must reach before the &ldquo;Finish up&rdquo;
+                      control appears. 0.5 = 50%; <code className="text-xs">0</code> = no coverage
+                      requirement on this axis. Combined with the question minimum as <em>OR</em> —
+                      crossing either unlocks. Both at 0 ⇒ available from the start.
+                    </FieldHelp>
+                  </Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={earlyFinishMinCoverage}
+                    onChange={(e) => setEarlyFinishMinCoverage(e.target.value)}
+                    disabled={busy}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-sm font-medium">
+                    Finish-up min questions{' '}
+                    <FieldHelp title="Finish-up minimum questions">
+                      Number of answered questions before the &ldquo;Finish up&rdquo; control
+                      appears. <code className="text-xs">0</code> = no question-count requirement on
+                      this axis. OR&rsquo;d with the coverage minimum.
+                    </FieldHelp>
+                  </Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={earlyFinishMinQuestions}
+                    onChange={(e) => setEarlyFinishMinQuestions(e.target.value)}
+                    disabled={busy}
+                  />
+                </div>
+              </div>
+            )}
             {/* Adaptive data-slot selection ranks unfilled slots by embedding similarity, so it needs
             the data slots embedded — the data-slot analogue of the question-embeddings step under
             Selection strategy. Shown only when the adaptive data-slot feature is on; the step itself
@@ -1039,6 +1127,27 @@ export function ConfigEditor({
                       questionnaireId={questionnaireId}
                       versionId={versionId}
                       placeholder="Tell respondents what this questionnaire is about, who's running it, and how results are used — or upload a document / generate it with AI."
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-sm font-medium">
+                      Intro video{' '}
+                      <FieldHelp title="Intro video">
+                        An optional YouTube or Vimeo link shown alongside the about text on the
+                        intro screen — a welcome from the team, or a short explainer. Paste the
+                        normal share link (e.g. <code>https://youtu.be/…</code> or{' '}
+                        <code>https://vimeo.com/…</code>); it&apos;s embedded as a privacy-enhanced
+                        player. Leave blank for no video.
+                      </FieldHelp>
+                    </Label>
+                    <Input
+                      type="url"
+                      inputMode="url"
+                      value={intro.videoUrl}
+                      onChange={(e) => setIntro((i) => ({ ...i, videoUrl: e.target.value }))}
+                      maxLength={INTRO_VIDEO_URL_MAX_LENGTH}
+                      placeholder="https://youtu.be/dQw4w9WgXcQ"
+                      disabled={busy}
                     />
                   </div>
                   <div className="space-y-1.5 sm:max-w-xs">

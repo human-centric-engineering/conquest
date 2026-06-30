@@ -5,7 +5,10 @@ import path from 'path';
 export default defineConfig({
   plugins: [react()],
   test: {
-    // Use happy-dom for fast DOM testing (alternative to jsdom)
+    // Use happy-dom for fast DOM testing (alternative to jsdom). A component that renders a live
+    // <iframe> (e.g. the intro video embed) should opt into jsdom per-file with a
+    // `// @vitest-environment jsdom` docblock — jsdom silently ignores iframe `src`, whereas
+    // happy-dom tries to navigate it (network + noise).
     environment: 'happy-dom',
 
     // Global test setup file

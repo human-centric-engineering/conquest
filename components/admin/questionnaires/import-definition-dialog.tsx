@@ -27,13 +27,25 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
 import { FieldHelp } from '@/components/ui/field-help';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse } from '@/lib/api/parse-response';
 import { parseDefinitionImport } from '@/lib/app/questionnaire/authoring';
+import type { AttributedDemoClient } from '@/lib/app/questionnaire/demo-clients';
 
 /** Max import file size — a definition is small; anything larger is almost certainly the wrong file. */
 const MAX_IMPORT_BYTES = 5 * 1024 * 1024; // 5 MB
+
+/** Sentinel for "no demo client" on the attribution select (Radix forbids empty values). */
+const NO_CLIENT = '__none__';
 
 interface ImportResult {
   questionnaireId: string;
@@ -57,12 +69,23 @@ interface Preview {
 export interface ImportDefinitionDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /**
+   * DEMO-ONLY (F2.5.1): active demo clients available to attribute the imported
+   * questionnaire to. Omitted/empty hides the attribution picker entirely (a fork
+   * that strips demo tenancy, or a deployment with no clients yet).
+   */
+  demoClientOptions?: AttributedDemoClient[];
 }
 
-export function ImportDefinitionDialog({ open, onOpenChange }: ImportDefinitionDialogProps) {
+export function ImportDefinitionDialog({
+  open,
+  onOpenChange,
+  demoClientOptions = [],
+}: ImportDefinitionDialogProps) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
+  const [demoClientId, setDemoClientId] = useState<string>(NO_CLIENT);
   const [error, setError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
 
@@ -70,6 +93,7 @@ export function ImportDefinitionDialog({ open, onOpenChange }: ImportDefinitionD
   useEffect(() => {
     if (!open) {
       setPreview(null);
+      setDemoClientId(NO_CLIENT);
       setError(null);
       setImporting(false);
     }
@@ -114,7 +138,12 @@ export function ImportDefinitionDialog({ open, onOpenChange }: ImportDefinitionD
     setImporting(true);
     setError(null);
     try {
-      const res = await fetch(API.APP.QUESTIONNAIRES.definitionImport, {
+      // The body is the definition file itself; attribution travels as a query param.
+      const url =
+        demoClientId === NO_CLIENT
+          ? API.APP.QUESTIONNAIRES.definitionImport
+          : `${API.APP.QUESTIONNAIRES.definitionImport}?demoClientId=${encodeURIComponent(demoClientId)}`;
+      const res = await fetch(url, {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
@@ -208,6 +237,33 @@ export function ImportDefinitionDialog({ open, onOpenChange }: ImportDefinitionD
             >
               Choose a different file
             </Button>
+          </div>
+        )}
+
+        {/* DEMO-ONLY (F2.5.1): optional attribution. Hidden when there are no active clients. */}
+        {demoClientOptions.length > 0 && (
+          <div className="space-y-1.5">
+            <Label htmlFor="import-demo-client">
+              Demo client{' '}
+              <FieldHelp title="Demo-client attribution">
+                Optional. Attribute the imported questionnaire to a demo client so its respondent
+                surface and invitations wear that brand. “None” is a generic demo. You can change
+                this later from the questionnaire’s Settings tab.
+              </FieldHelp>
+            </Label>
+            <Select value={demoClientId} onValueChange={setDemoClientId} disabled={importing}>
+              <SelectTrigger id="import-demo-client">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NO_CLIENT}>None (generic demo)</SelectItem>
+                {demoClientOptions.map((client) => (
+                  <SelectItem key={client.id} value={client.id}>
+                    {client.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         )}
 

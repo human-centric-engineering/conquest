@@ -14,6 +14,7 @@ import { SessionEntry } from '@/components/app/questionnaire/intro/session-entry
 import { BrandThemeProvider } from '@/components/app/questionnaire/chat/brand-theme-provider';
 import { buildWelcomeTurns } from '@/lib/app/questionnaire/chat/greeting';
 import { resolveThemeForSession } from '@/lib/app/questionnaire/chat/theme';
+import { resolveSessionHeader } from '@/lib/app/questionnaire/header/resolve';
 import { resolveSessionIntro } from '@/lib/app/questionnaire/intro/resolve';
 import { loadAnswerPanelState } from '@/app/api/v1/app/questionnaire-sessions/_lib/answer-panel';
 import { loadSessionStatus } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-status';
@@ -104,6 +105,7 @@ export default async function QuestionnaireSessionPage({
     attachmentPlatform,
     reasoningPlatform,
     theme,
+    bandHeader,
     panel,
     status,
     formPanel,
@@ -113,6 +115,7 @@ export default async function QuestionnaireSessionPage({
     isAttachmentInputEnabled(),
     isReasoningStreamEnabled(),
     resolveThemeForSession(sessionId),
+    resolveSessionHeader(sessionId),
     loadAnswerPanelState(sessionId),
     loadSessionStatus(sessionId),
     // Seed the full form structure for form/both modes (forForm = full structure, no data-slot
@@ -155,7 +158,7 @@ export default async function QuestionnaireSessionPage({
 
   return (
     <div className="mx-auto h-[calc(100vh-12rem)] max-w-6xl">
-      <BrandThemeProvider theme={theme}>
+      <BrandThemeProvider theme={theme} header={bandHeader}>
         <SessionEntry
           intro={intro}
           sessionId={sessionId}

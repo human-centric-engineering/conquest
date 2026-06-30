@@ -3,8 +3,9 @@
 Per-version control over **how** the live conversational interviewer responds to answers — not what
 it asks (that's the structure), but its _voice_. An admin sets nine independent tone sliders plus a
 free-text persona on the **Settings** tab; the live phraser folds the enabled ones into its system
-prompt at turn time. Everything is **off by default**, so an untouched questionnaire keeps today's
-voice, and the whole feature is dark-launched behind a platform flag.
+prompt at turn time. Everything is **off by default**, so an untouched questionnaire keeps the
+neutral baseline voice (see "Empathy owns emotional warmth" below), and the whole feature is
+dark-launched behind a platform flag.
 
 > Sits beside [presentation-mode](./presentation-mode.md), [reasoning-stream](./reasoning-stream.md)
 > and [sensitivity-awareness](./sensitivity-awareness.md) as a respondent-experience feature. Like
@@ -49,13 +50,20 @@ The voice lives entirely in the turn-time phraser, not in any seeded agent instr
 3. **Render** — `buildToneInstructions(tone)` (pure) turns the **enabled** dimensions into imperative
    clauses, spliced into `buildStreamingQuestionPrompt`'s system prompt. Persona leads the block.
 
-Two interactions with the existing default phrasing:
+Three interactions with the existing default phrasing:
 
 - **Mimicry owns tone-matching.** When `mimicry.enabled`, the hard-coded "Match the respondent's
   tone." line is dropped and the mimicry clause governs; otherwise that baseline line stays.
 - **Verbosity owns later-turn length.** When `verbosity.enabled`, the default "keep it concise" line
   is replaced by the verbosity clause — but the opening-question "keep it VERY short" floor is always
   kept, so the first asks stay effortless regardless.
+- **Empathy owns emotional warmth.** The hard-coded baseline (`role` + `rules` in
+  `question-stream.ts`) is **emotionally neutral**: the interviewer is curious and attentive but
+  must not perform feelings of its own (no "I'm really glad we have the chance to chat", "I'd love
+  to hear", etc.) — only genuine curiosity is welcome by default. Setting `empathy` high (level 4–5)
+  re-authorizes first-person warmth via its tone clause; because the `<tone>` section is rendered
+  after `<rules>`, the empathy clause governs over the neutral-register guard. Level 1–2 reinforces
+  the clinical/matter-of-fact end; level 3 (or disabled) leaves the neutral baseline untouched.
 
 `buildToneInstructions` returns `''` for the all-off default → zero added prompt/cost when nothing is
 configured.

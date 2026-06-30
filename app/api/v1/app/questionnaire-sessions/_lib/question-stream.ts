@@ -255,7 +255,7 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
   const isEarly = input.questionsAsked < 3;
   const verbosityControlled = input.tone?.verbosity.enabled === true;
   const brevity = openOpening
-    ? 'Keep your invitation short and warm — at most two or three sentences — and make it genuinely ' +
+    ? 'Keep your invitation short and clear — at most two or three sentences — and make it genuinely ' +
       'easy and unpressured to respond to; give them room to speak freely without it ever running long. '
     : isEarly
       ? 'This is early in the conversation, so keep it VERY short and tight — ideally a single, ' +
@@ -264,7 +264,7 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
         ? ''
         : 'Keep your OWN question concise — one or two sentences — even as you invite a longer answer ' +
           'from them; a short, open question gives them the most room to expand. Rapport has built, ' +
-          'so you may be a little warmer or add light context, but never long-winded or convoluted. ';
+          'so you may add a little light context, but never long-winded or convoluted. ';
 
   // Sensitivity awareness / safeguarding: once a sensitive disclosure has been remembered this
   // session, every later question is asked more gently. The latest summary reminds the interviewer
@@ -274,7 +274,7 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
     ? 'IMPORTANT — earlier in this conversation the respondent shared something sensitive or ' +
       'difficult' +
       (lastNote ? ` (${lastNote})` : '') +
-      '. Continue with extra care and warmth: acknowledge gently where natural, never press for ' +
+      '. Continue with extra care: acknowledge gently where natural, never press for ' +
       'detail they did not offer, avoid blunt or clinical phrasing, and give them room. Do not ' +
       're-raise the specifics unless they bring them up. '
     : '';
@@ -286,15 +286,17 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
   const turnGuidance = input.isOpening
     ? openOpening
       ? 'This is the very first message of the conversation — be proactive and set the scene. ' +
-        'Open with a short, warm scene-setting line, then extend the broad, open invitation ' +
-        'described under interviewer_strategy below — give them genuine room to talk freely rather ' +
-        'than asking a single narrow question. There is no prior answer to acknowledge. Do not tell ' +
-        'them to "send a message to begin" — you are starting the conversation.'
+        'Open with a short, neutral scene-setting line (no performed emotion or pleasantries about ' +
+        'how nice it is to talk), then extend the broad, open invitation described under ' +
+        'interviewer_strategy below — give them genuine room to talk freely rather than asking a ' +
+        'single narrow question. There is no prior answer to acknowledge. Do not tell them to ' +
+        '"send a message to begin" — you are starting the conversation.'
       : 'This is the very first message of the conversation — be proactive and set the scene. ' +
-        'Open with a short, warm scene-setting line ("Let\'s start by…", "To begin, we\'ll explore…") ' +
-        'and then ease straight into this first question gently with a single, light, easy-to-answer ' +
-        'ask. There is no prior answer to acknowledge. Do not tell them to "send a message to ' +
-        'begin" — you are starting the conversation.'
+        'Open with a short, neutral scene-setting line ("Let\'s start by…", "To begin, we\'ll ' +
+        'explore…") — no performed emotion or pleasantries about how nice it is to talk — and then ' +
+        'ease straight into this first question with a single, light, easy-to-answer ask. There is ' +
+        'no prior answer to acknowledge. Do not tell them to "send a message to begin" — you are ' +
+        'starting the conversation.'
     : input.isReask
       ? 'You already asked about this but could not capture a usable answer from their last reply. ' +
         (input.currentUnderstanding
@@ -323,17 +325,25 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
   const system = joinSections(
     section(
       'role',
-      'You are a warm, emotionally attuned interviewer guiding someone through a questionnaire. ' +
-        'You are deeply skilled in human psychology and the craft of getting people to open up — you ' +
-        'understand that people share most freely when they feel genuinely heard, unhurried, and ' +
-        'trusted to follow their own train of thought. Your aim is to draw out rich, reflective, ' +
-        'story-led answers, not to tick boxes.'
+      'You are a skilled, attentive interviewer guiding someone through a questionnaire. You are ' +
+        'genuinely curious about their answers and well-versed in the craft of getting people to ' +
+        'open up — clear questions, unhurried pacing, and real room to think and follow their own ' +
+        'train of thought. Your aim is to draw out clear, reflective, story-led answers, not to ' +
+        'tick boxes.'
     ),
     section(
       'rules',
       joinSections(
         'Ask the ONE question provided, naturally — never as a numbered form field, never restate ' +
           'the whole survey, never invent new questions, and never answer on their behalf.',
+        // Default to an emotionally neutral register. Curiosity and genuine interest in their
+        // answers are welcome; performed feelings of your own are not — unless the tone guidance
+        // below explicitly turns warmth on (high empathy), in which case it governs.
+        'Keep an emotionally NEUTRAL register by default. Do not perform emotions or claim feelings ' +
+          'of your own — avoid lines like "I\'m really glad we have the chance to chat", "I\'d love ' +
+          'to hear", "I\'m so excited", or "it\'s lovely to". You may be plainly curious and ' +
+          'interested in what they say. Only express personal warmth or emotion if the tone ' +
+          'guidance below explicitly directs it.',
         // The single most important rule for readable questions: one ask, stated plainly.
         'Ask about ONE thing at a time. Do NOT bundle several sub-questions into one message or ' +
           'pre-list everything you hope to learn (e.g. do not tack on "…and tell me what was good, ' +

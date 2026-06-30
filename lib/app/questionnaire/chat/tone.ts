@@ -76,8 +76,13 @@ const DIMENSION_PHRASES: Record<ToneDimensionKey, Record<number, string>> = {
     1: 'Keep your manner matter-of-fact and neutral; do not dwell on feelings.',
     2: 'Lean factual — acknowledge any feelings only lightly.',
     3: '',
-    4: 'Be noticeably empathetic — briefly acknowledge how they might feel before moving on.',
-    5: 'Lead with warmth and empathy: name and gently validate the emotion in what they share before continuing.',
+    4:
+      'Be noticeably empathetic — briefly acknowledge how they might feel before moving on, and a ' +
+      'little genuine personal warmth is welcome here.',
+    5:
+      'Lead with warmth and empathy: it is welcome here to express genuine personal warmth in the ' +
+      'first person (e.g. "I\'m glad we can talk about this") and to name and gently validate the ' +
+      'emotion in what they share before continuing.',
   },
   mirroring: {
     1: 'Do not paraphrase their answers back; simply acknowledge briefly and continue.',

@@ -26,6 +26,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { API } from '@/lib/api/endpoints';
 import {
   canSubmitSession,
+  canFinishEarly,
   type SessionStatusView,
 } from '@/lib/app/questionnaire/session/status-view';
 import type { QuestionnaireChatStatus } from '@/lib/app/questionnaire/chat/types';
@@ -56,6 +57,8 @@ export interface UseSessionLifecycleReturn {
   actionError: string | null;
   /** Whether the Submit affordance should show (active + offer). */
   canSubmit: boolean;
+  /** Whether the early-finish control should show (active + escape hatch unlocked). */
+  canFinishEarly: boolean;
   /** Whether a respondent Pause should show (signed-in + active). */
   canPause: boolean;
   /** Whether Resume should show (signed-in + respondent-paused, not budget-paused). */
@@ -64,6 +67,8 @@ export interface UseSessionLifecycleReturn {
   pause: () => Promise<void>;
   resume: () => Promise<void>;
   submit: () => Promise<void>;
+  /** Voluntarily end the session early (the escape hatch) — POSTs the submit route with `early`. */
+  finishEarly: () => Promise<void>;
 }
 
 interface SuccessEnvelope {
@@ -194,7 +199,16 @@ export function useSessionLifecycle(
     [runAction, sessionId, applyStatus]
   );
 
+  const finishEarly = useCallback(
+    () =>
+      runAction(API.APP.QUESTIONNAIRE_SESSIONS.submit(sessionId), { early: true }, () =>
+        applyStatus('completed')
+      ),
+    [runAction, sessionId, applyStatus]
+  );
+
   const canSubmit = view !== null && canSubmitSession(view);
+  const canFinishEarlyValue = view !== null && canFinishEarly(view);
   const canPause = !anonymous && view?.status === 'active';
   // A budget-paused session (cost hard) isn't respondent-resumable — resuming would hit the
   // hard cap again immediately. Only a respondent-initiated pause offers Resume.
@@ -206,11 +220,13 @@ export function useSessionLifecycle(
     busy,
     actionError,
     canSubmit,
+    canFinishEarly: canFinishEarlyValue,
     canPause,
     canResume,
     refetch,
     pause,
     resume,
     submit,
+    finishEarly,
   };
 }

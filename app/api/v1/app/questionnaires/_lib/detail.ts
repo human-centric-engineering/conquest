@@ -93,6 +93,9 @@ export const CONFIG_SELECT = {
   minQuestionsAnswered: true,
   coverageThreshold: true,
   answerConfidenceFloor: true,
+  allowEarlyFinish: true,
+  earlyFinishMinCoverage: true,
+  earlyFinishMinQuestions: true,
   costBudgetUsd: true,
   maxQuestionsPerSession: true,
   voiceEnabled: true,
@@ -132,6 +135,9 @@ type ConfigRow = {
   minQuestionsAnswered: number;
   coverageThreshold: number;
   answerConfidenceFloor: number;
+  allowEarlyFinish: boolean;
+  earlyFinishMinCoverage: number;
+  earlyFinishMinQuestions: number;
   costBudgetUsd: number | null;
   maxQuestionsPerSession: number | null;
   voiceEnabled: boolean;
@@ -234,6 +240,9 @@ export function toConfigView(row: ConfigRow | null): ConfigView {
     minQuestionsAnswered: row.minQuestionsAnswered,
     coverageThreshold: row.coverageThreshold,
     answerConfidenceFloor: row.answerConfidenceFloor,
+    allowEarlyFinish: row.allowEarlyFinish,
+    earlyFinishMinCoverage: row.earlyFinishMinCoverage,
+    earlyFinishMinQuestions: row.earlyFinishMinQuestions,
     costBudgetUsd: row.costBudgetUsd,
     maxQuestionsPerSession: row.maxQuestionsPerSession,
     voiceEnabled: row.voiceEnabled,

@@ -28,6 +28,7 @@ function intro(enabled: boolean): ResolvedSessionIntro {
     enabled,
     questionnaireTitle: 'Q',
     background: '',
+    videoUrl: '',
     copy: {
       howItWorks: { heading: 'How it works', body: 'body' },
       whatYouGet: null,

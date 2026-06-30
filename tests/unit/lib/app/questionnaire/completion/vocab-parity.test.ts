@@ -25,6 +25,6 @@ describe('completion vocabulary parity', () => {
   });
 
   it('pins the respondent actions', () => {
-    expect([...COMPLETION_ACTIONS]).toEqual(['accept', 'hold']);
+    expect([...COMPLETION_ACTIONS]).toEqual(['accept', 'hold', 'finish_early']);
   });
 });

@@ -38,6 +38,12 @@ export interface StatusCompletionView {
   requiredUnansweredKeys: string[];
   /** Whether the per-session question cap forced the offer. */
   capReached: boolean;
+  /**
+   * Whether the respondent may voluntarily finish now (the early-finish escape hatch), independent
+   * of `kind`. Drives the persistent Continue / Finish-up control. `false` when the feature is off
+   * or no configured bar is met yet.
+   */
+  earlyFinishAvailable: boolean;
 }
 
 /**
@@ -83,6 +89,7 @@ export function buildSessionStatusView(input: SessionStatusInput): SessionStatus
       answeredCount: input.assessment.answeredCount,
       requiredUnansweredKeys: input.assessment.requiredUnansweredKeys,
       capReached: input.assessment.capReached,
+      earlyFinishAvailable: input.assessment.earlyFinishAvailable,
     },
     cost: input.capped ? { tier: input.costTier } : null,
     anonymous: input.anonymous,
@@ -97,4 +104,14 @@ export function buildSessionStatusView(input: SessionStatusInput): SessionStatus
  */
 export function canSubmitSession(view: SessionStatusView): boolean {
   return view.status === 'active' && view.completion.kind === 'offer';
+}
+
+/**
+ * Whether the respondent may *voluntarily* finish early right now: an `active` session whose
+ * assessment unlocked the escape hatch. Orthogonal to {@link canSubmitSession} — both can be
+ * true at once (the UI prefers the full submit offer when so). Mirrors the submit route's
+ * early-finish gate so the control and the endpoint can't disagree.
+ */
+export function canFinishEarly(view: SessionStatusView): boolean {
+  return view.status === 'active' && view.completion.earlyFinishAvailable;
 }

@@ -27,6 +27,7 @@ function assessment(over: Partial<CompletionAssessment> = {}): CompletionAssessm
     answeredCount: 4,
     requiredUnansweredKeys: [],
     capReached: false,
+    earlyFinishAvailable: false,
     ...over,
   };
 }
@@ -67,6 +68,7 @@ describe('buildSessionStatusView', () => {
       answeredCount: 2,
       requiredUnansweredKeys: ['role'],
       capReached: false,
+      earlyFinishAvailable: false,
     });
   });
 
@@ -111,6 +113,13 @@ describe('canSubmitSession', () => {
 
   it.each(cases)('%s → %s', (_label, view, expected) => {
     expect(canSubmitSession(view)).toBe(expected);
+  });
+
+  it('projects earlyFinishAvailable through to the completion view', () => {
+    const view = buildSessionStatusView(
+      input({ assessment: assessment({ kind: 'not_ready', earlyFinishAvailable: true }) })
+    );
+    expect(view.completion.earlyFinishAvailable).toBe(true);
   });
 
   it('allows submit on a cap-reached offer even with a required key outstanding', () => {

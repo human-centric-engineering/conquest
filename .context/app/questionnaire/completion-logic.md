@@ -31,7 +31,8 @@ extractor/detector/refiner capability shape for the wording.
 `assessCompletion(ctx: CompletionContext): CompletionAssessment` returns one of
 `COMPLETION_KINDS = ['offer','not_ready','blocked_on_required']` (`completion/types.ts`),
 with the unmet criteria (`UNMET_CRITERIA`), the coverage, the answered count, the
-unanswered required keys, and a `capReached` flag.
+unanswered required keys, a `capReached` flag, and an `earlyFinishAvailable` flag (the
+respondent escape hatch — see below; orthogonal to `kind`).
 
 **Ordering** mirrors selection's `terminalDecision` so the two layers agree:
 
@@ -61,8 +62,8 @@ sketch): F4.5 maps onto the committed flat config fields (`minQuestionsAnswered`
 ## Accept / hold resolution
 
 `resolveCompletion(action, assessment, sweep): CompletionResolution`
-(`COMPLETION_ACTIONS = ['accept','hold']`) maps the respondent's reply plus the
-completion-sweep result onto one of:
+(`COMPLETION_ACTIONS = ['accept','hold','finish_early']`) maps the respondent's reply plus
+the completion-sweep result onto one of:
 
 - **`submit`** — accepted and clean: the sweep didn't run (mode off / detection
   disabled) or found nothing. The session should transition `active → completed`.
@@ -75,6 +76,43 @@ completion-sweep result onto one of:
 The sweep's _decision_ to run is pure (`shouldRunDetection`); its _execution_ (LLM
 dispatch) is impure and happens in the route, which passes the resulting
 `contradictionCount` back in so the resolver stays pure and unit-testable.
+
+## Respondent-controlled early finish (the escape hatch)
+
+The `offer` above is the **agent's** decision that the questionnaire is done enough. The
+early-finish feature is the **respondent's** parallel right to end whenever they like once
+they've crossed an admin-set minimum — even below the agent's thresholds, and **even with
+required questions still open** (a deliberate escape hatch, unlike `offer`).
+
+It is **config-only** (no platform flag), three fields on `AppQuestionnaireConfig`
+(`configuration.md`):
+
+- `allowEarlyFinish` (bool, default `false`) — turns the feature on.
+- `earlyFinishMinCoverage` (0–1, default `0.5`) — weighted-coverage bar.
+- `earlyFinishMinQuestions` (int ≥0, default `0`) — answered-count bar.
+
+`assessCompletion` computes `earlyFinishAvailable` independently of `kind` via the pure
+`isEarlyFinishAvailable(config, coverage, answered)` (exported from `completion-logic.ts`,
+also reused by the data-slot orchestrator's inline assessment so the two can't drift):
+
+> `allowEarlyFinish` AND — both bars `0` ⇒ available from the start; else coverage ≥
+> `earlyFinishMinCoverage` (when set) **OR** answered ≥ `earlyFinishMinQuestions` (when
+> set). A bar of `0` is "not a criterion on that axis", so it never trivially satisfies the
+> OR — a single configured bar gates alone.
+
+`resolveCompletion('finish_early', assessment, sweep)` → `submit` when
+`earlyFinishAvailable`, else `continue`. It **runs no sweep** (a deliberate bail; live
+contradiction detection already happened during the chat) and **ignores the
+required/threshold gate**.
+
+**Surfacing.** `buildSessionStatusView` projects `earlyFinishAvailable` into the
+respondent status (`GET …/status`); `canFinishEarly(view)` (active + available) mirrors the
+submit gate. The respondent UI shows a persistent **Continue / Finish up** control
+(`components/app/questionnaire/lifecycle/early-finish-control.tsx`) once unlocked — but the
+full `CompletionOffer` takes precedence when both are available. The submit route
+(`POST …/questionnaire-sessions/:id/submit`) accepts an optional `{ early?: boolean }` body;
+`early: true` resolves via `finish_early` and completes with reason
+`respondent_early_finish` (vs `respondent_submit`).
 
 ## The offer composer (capability, agent, sub-flag)
 

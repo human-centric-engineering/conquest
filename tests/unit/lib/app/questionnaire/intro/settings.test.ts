@@ -14,6 +14,7 @@ import {
   DEFAULT_INTRO_SETTINGS,
   INTRO_BACKGROUND_MAX_LENGTH,
   INTRO_BUTTON_LABEL_MAX_LENGTH,
+  INTRO_VIDEO_URL_MAX_LENGTH,
 } from '@/lib/app/questionnaire/types';
 
 describe('narrowIntroSettings', () => {
@@ -25,8 +26,23 @@ describe('narrowIntroSettings', () => {
   );
 
   it('passes a well-formed object through verbatim', () => {
-    const stored = { enabled: true, background: 'About us', buttonLabel: 'Begin' };
+    const stored = {
+      enabled: true,
+      background: 'About us',
+      buttonLabel: 'Begin',
+      videoUrl: 'https://youtu.be/dQw4w9WgXcQ',
+    };
     expect(narrowIntroSettings(stored)).toEqual(stored);
+  });
+
+  it('trims/caps videoUrl and defaults a non-string', () => {
+    expect(narrowIntroSettings({ videoUrl: '  https://youtu.be/x  ' }).videoUrl).toBe(
+      'https://youtu.be/x'
+    );
+    expect(
+      narrowIntroSettings({ videoUrl: 'h'.repeat(INTRO_VIDEO_URL_MAX_LENGTH + 50) }).videoUrl
+    ).toHaveLength(INTRO_VIDEO_URL_MAX_LENGTH);
+    expect(narrowIntroSettings({ videoUrl: 123 }).videoUrl).toBe(DEFAULT_INTRO_SETTINGS.videoUrl);
   });
 
   it('coerces a non-boolean enabled to the default', () => {

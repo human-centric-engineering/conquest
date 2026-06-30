@@ -701,6 +701,8 @@ export const DEFAULT_COHORT_REPORT_SETTINGS: CohortReportSettings = {
 export const INTRO_BACKGROUND_MAX_LENGTH = 8000;
 /** Max length of the admin-authored proceed-button label on the intro screen (Zod bound). */
 export const INTRO_BUTTON_LABEL_MAX_LENGTH = 60;
+/** Max length of the optional intro video link (Zod bound; a YouTube/Vimeo URL is well under this). */
+export const INTRO_VIDEO_URL_MAX_LENGTH = 500;
 
 /**
  * Respondent intro / splash screen — an admin opt-in screen shown BEFORE the questionnaire starts.
@@ -716,6 +718,8 @@ export type IntroSettings = {
   enabled: boolean;
   background: string;
   buttonLabel: string;
+  /** Optional YouTube/Vimeo link; resolved to a safe embed at render (`resolveIntroVideo`). */
+  videoUrl: string;
 };
 
 /** Intro off, no background, default per-mode button — today's behaviour (straight into the chat). */
@@ -723,6 +727,7 @@ export const DEFAULT_INTRO_SETTINGS: IntroSettings = {
   enabled: false,
   background: '',
   buttonLabel: '',
+  videoUrl: '',
 };
 
 /**
@@ -740,6 +745,24 @@ export type QuestionnaireConfigShape = {
    * until corroborated above it. Lower = the background form-fill accepts guesses sooner.
    */
   answerConfidenceFloor: number;
+  /**
+   * Respondent-controlled early finish: when on, the respondent may voluntarily end the session
+   * and get their report before the agent's own completion thresholds are met. A deliberate escape
+   * hatch — it BYPASSES the required-question gate (unlike the agent's `offer`). Off by default;
+   * config-only (no platform flag), like {@link inlineCorrectionEnabled}.
+   */
+  allowEarlyFinish: boolean;
+  /**
+   * Minimum weighted coverage (0–1) before the "Finish up" control unlocks. `0` = not a criterion
+   * on this axis. Combined with {@link earlyFinishMinQuestions} as OR: crossing EITHER configured
+   * bar unlocks. Both `0` ⇒ available from the start (once {@link allowEarlyFinish} is on).
+   */
+  earlyFinishMinCoverage: number;
+  /**
+   * Minimum number of answered slots before the "Finish up" control unlocks. `0` = not a criterion.
+   * See {@link earlyFinishMinCoverage} for the OR semantics.
+   */
+  earlyFinishMinQuestions: number;
   costBudgetUsd: number | null;
   maxQuestionsPerSession: number | null;
   voiceEnabled: boolean;
@@ -914,6 +937,9 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   minQuestionsAnswered: 0,
   coverageThreshold: 1,
   answerConfidenceFloor: 0.5,
+  allowEarlyFinish: false,
+  earlyFinishMinCoverage: 0.5,
+  earlyFinishMinQuestions: 0,
   costBudgetUsd: null,
   maxQuestionsPerSession: null,
   voiceEnabled: false,

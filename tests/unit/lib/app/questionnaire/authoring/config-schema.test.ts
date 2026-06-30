@@ -99,6 +99,32 @@ describe('updateConfigSchema', () => {
     expect(updateConfigSchema.safeParse({ costBudgetUsd: 0 }).success).toBe(false);
   });
 
+  describe('early finish', () => {
+    it('accepts the toggle and bounded minimums', () => {
+      expect(
+        updateConfigSchema.safeParse({
+          allowEarlyFinish: true,
+          earlyFinishMinCoverage: 0.5,
+          earlyFinishMinQuestions: 3,
+        }).success
+      ).toBe(true);
+    });
+
+    it('rejects a coverage minimum outside 0–1', () => {
+      expect(updateConfigSchema.safeParse({ earlyFinishMinCoverage: 1.5 }).success).toBe(false);
+      expect(updateConfigSchema.safeParse({ earlyFinishMinCoverage: -0.1 }).success).toBe(false);
+    });
+
+    it('rejects a negative or non-integer questions minimum', () => {
+      expect(updateConfigSchema.safeParse({ earlyFinishMinQuestions: -1 }).success).toBe(false);
+      expect(updateConfigSchema.safeParse({ earlyFinishMinQuestions: 2.5 }).success).toBe(false);
+    });
+
+    it('rejects a non-boolean toggle', () => {
+      expect(updateConfigSchema.safeParse({ allowEarlyFinish: 'yes' }).success).toBe(false);
+    });
+  });
+
   describe('contradiction mode / N coherence', () => {
     it('rejects a non-off mode with N = 0', () => {
       const res = updateConfigSchema.safeParse({
@@ -370,6 +396,43 @@ describe('updateConfigSchema — respondentReport (Respondent Report)', () => {
           ...fullReport,
           generation: { ...fullReport.generation, backgroundContext: 'x'.repeat(8001) },
         },
+      }).success
+    ).toBe(false);
+  });
+});
+
+describe('updateConfigSchema — intro video link', () => {
+  const baseIntro = { enabled: true, background: '', buttonLabel: '' };
+
+  it('accepts a recognised YouTube or Vimeo link', () => {
+    for (const videoUrl of ['https://youtu.be/dQw4w9WgXcQ', 'https://vimeo.com/123456789']) {
+      expect(updateConfigSchema.safeParse({ intro: { ...baseIntro, videoUrl } }).success).toBe(
+        true
+      );
+    }
+  });
+
+  it('accepts an empty or omitted video link (no video)', () => {
+    expect(updateConfigSchema.safeParse({ intro: { ...baseIntro, videoUrl: '' } }).success).toBe(
+      true
+    );
+    expect(updateConfigSchema.safeParse({ intro: baseIntro }).success).toBe(true);
+  });
+
+  it('rejects an unrecognised / non-video URL, flagged on intro.videoUrl', () => {
+    const result = updateConfigSchema.safeParse({
+      intro: { ...baseIntro, videoUrl: 'https://example.com/not-a-video' },
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.path).toEqual(['intro', 'videoUrl']);
+    }
+  });
+
+  it('rejects an over-long video link', () => {
+    expect(
+      updateConfigSchema.safeParse({
+        intro: { ...baseIntro, videoUrl: `https://youtu.be/${'x'.repeat(600)}` },
       }).success
     ).toBe(false);
   });

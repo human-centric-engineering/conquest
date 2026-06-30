@@ -44,6 +44,7 @@ import { ModeToggle, type ToggleItem } from '@/components/app/questionnaire/mode
 import { QuestionnaireSplash } from '@/components/app/questionnaire/intro/questionnaire-splash';
 import { SessionLifecycleBar } from '@/components/app/questionnaire/lifecycle/session-lifecycle-bar';
 import { CompletionOffer } from '@/components/app/questionnaire/lifecycle/completion-offer';
+import { EarlyFinishControl } from '@/components/app/questionnaire/lifecycle/early-finish-control';
 import { SessionComplete } from '@/components/app/questionnaire/lifecycle/session-complete';
 import { TranscriptDownload } from '@/components/app/questionnaire/lifecycle/transcript-download';
 import type {
@@ -531,12 +532,19 @@ export function SessionWorkspace({
       </>
     ) : undefined;
 
+  // Completion affordance, by precedence: the agent's full submit offer wins (the session is
+  // genuinely "done enough"); otherwise the respondent-controlled early-finish escape hatch shows
+  // once unlocked. Shared verbatim by the chat and form surfaces.
+  const completionAffordance = lifecycle.canSubmit ? (
+    <CompletionOffer onSubmit={() => void lifecycle.submit()} busy={lifecycle.busy} />
+  ) : lifecycle.canFinishEarly ? (
+    <EarlyFinishControl onFinish={() => void lifecycle.finishEarly()} busy={lifecycle.busy} />
+  ) : null;
+
   const chatSurface = (
     <div className="grid h-full min-h-0 gap-4 lg:grid-cols-[1fr_22rem] xl:grid-cols-[1fr_26rem]">
       <div className="flex min-h-0 flex-col gap-3">
-        {lifecycle.canSubmit && (
-          <CompletionOffer onSubmit={() => void lifecycle.submit()} busy={lifecycle.busy} />
-        )}
+        {completionAffordance}
         <QuestionnaireChat
           sessionId={sessionId}
           accessToken={accessToken}
@@ -569,9 +577,7 @@ export function SessionWorkspace({
 
   const formSurface = (
     <div className="flex h-full min-h-0 flex-col gap-3">
-      {lifecycle.canSubmit && (
-        <CompletionOffer onSubmit={() => void lifecycle.submit()} busy={lifecycle.busy} />
-      )}
+      {completionAffordance}
       <QuestionnaireForm
         view={form.view}
         loading={form.loading}
