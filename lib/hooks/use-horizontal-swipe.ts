@@ -31,8 +31,7 @@ const EDGE_MAX_RATIO = 0.12; // hard cap on the rubber-band at an edge
 const WHEEL_IDLE_MS = 200; // fallback: a wheel burst that just stops is "done" after this gap
 const WHEEL_RELEASE_FRACTION = 0.35; // a delta this far below the burst's peak means the finger lifted
 const WHEEL_RELEASE_FLOOR = 6; // …and is also this small in absolute terms (px) — i.e. momentum nearly spent
-const WHEEL_REENGAGE_RISE = 8; // a delta rising this much above the decaying tail = a fresh push
-const WHEEL_REENGAGE_FLOOR = 10; // …and at least this big, so momentum dust never counts as a new swipe
+const WHEEL_NEW_GESTURE_GAP_MS = 80; // a pause longer than this between wheel events starts a fresh swipe
 const FALLBACK_WIDTH = 320; // before the frame is measured
 
 export interface HorizontalSwipeState {
@@ -163,18 +162,19 @@ export function useHorizontalSwipe(options: UseHorizontalSwipeOptions): Horizont
 
   // ── Wheel — follow the burst, decide the moment the finger lifts ──────────────────────────
   // A trackpad swipe is one burst whose per-event delta spikes while the finger drives it, then
-  // decays monotonically as momentum coasts. We follow it live and decide as early as we can:
+  // decays as momentum coasts. We follow it live and decide as early as we can:
   //   • cross the hard 200px trip → commit instantly, mid-gesture;
   //   • otherwise watch for the delta to collapse below the burst's peak (the finger lifted) and
   //     decide THEN — commit if past the ratio, else spring back.
-  // After a decision we ignore the coasting tail so it can't trigger a second swipe — but ONLY the
-  // tail: because momentum only ever shrinks, a delta that rises back up is a genuine new push, so
-  // we re-engage immediately. (Relying on an idle timer alone deadlocks — a user who keeps swiping
-  // keeps the wheel busy, the timer never fires, and it stays stuck until they stop.)
+  // After a decision we `coast` — swallowing the rest of THIS burst (the still-driving tail of a hard
+  // push, then its momentum) so one physical swipe can only ever move one surface. The reliable
+  // "this is a different swipe" signal is timing, not magnitude: within one swipe the wheel streams
+  // continuously (~16ms between events), whereas a new swipe follows a lift-and-reposition pause. So
+  // a gap longer than WHEEL_NEW_GESTURE_GAP_MS — not a delta that happens to rise — is what starts fresh.
   const wheelAcc = useRef(0);
   const wheelPeak = useRef(0);
-  const wheelLastAbs = useRef(0);
   const wheelCoasting = useRef(false);
+  const wheelLastTime = useRef(0);
   const wheelIdle = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const finishWheel = useCallback(
@@ -194,29 +194,28 @@ export function useHorizontalSwipe(options: UseHorizontalSwipeOptions): Horizont
       if (Math.abs(deltaX) <= Math.abs(deltaY)) return false;
       const adx = Math.abs(deltaX);
 
-      // Refresh the end-of-burst fallback: when the wheel truly stops, fully reset for next time.
+      // A long-enough pause since the last event means the previous burst is over and this is a
+      // brand-new swipe — reset and act on it. This (not magnitude) is what frees a coasting burst.
+      const now = performance.now();
+      const gap = now - wheelLastTime.current;
+      wheelLastTime.current = now;
+      if (gap > WHEEL_NEW_GESTURE_GAP_MS) {
+        wheelCoasting.current = false;
+        wheelAcc.current = 0;
+        wheelPeak.current = 0;
+      }
+
+      // Refresh the end-of-burst fallback: when the wheel truly stops, settle a pending drag and reset.
       if (wheelIdle.current) clearTimeout(wheelIdle.current);
       wheelIdle.current = setTimeout(() => {
-        if (!wheelCoasting.current) finishWheel(false);
+        if (!wheelCoasting.current && wheelAcc.current !== 0) settle(wheelAcc.current);
         wheelCoasting.current = false;
         wheelAcc.current = 0;
         wheelPeak.current = 0;
-        wheelLastAbs.current = 0;
       }, WHEEL_IDLE_MS);
 
-      if (wheelCoasting.current) {
-        // We've already acted on this burst. Swallow the decaying tail — but a delta that rises back
-        // above it is a fresh swipe, so re-engage rather than wait for the wheel to fully stop.
-        const rising =
-          adx > wheelLastAbs.current + WHEEL_REENGAGE_RISE && adx > WHEEL_REENGAGE_FLOOR;
-        wheelLastAbs.current = adx;
-        if (!rising) return true;
-        wheelCoasting.current = false;
-        wheelAcc.current = 0;
-        wheelPeak.current = 0;
-      } else {
-        wheelLastAbs.current = adx;
-      }
+      // Already decided this burst — swallow its driving tail + momentum so it can't move a 2nd surface.
+      if (wheelCoasting.current) return true;
 
       wheelAcc.current += -deltaX; // → drag units (right-swipe deltaX is negative on natural scroll)
       wheelPeak.current = Math.max(wheelPeak.current, adx);
@@ -235,7 +234,7 @@ export function useHorizontalSwipe(options: UseHorizontalSwipeOptions): Horizont
       }
       return true; // consumed a horizontal gesture — caller suppresses native history nav
     },
-    [clamp, finishWheel]
+    [clamp, finishWheel, settle]
   );
 
   return { onTouchStart, onTouchMove, onTouchEnd, handleWheel, dragPx, animating };
