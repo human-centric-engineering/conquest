@@ -33,7 +33,10 @@ import {
   type InterviewerStrategySettings,
 } from '@/lib/app/questionnaire/types';
 import { buildToneInstructions } from '@/lib/app/questionnaire/chat/tone';
-import { buildInterviewerStrategyInstructions } from '@/lib/app/questionnaire/chat/interviewer-strategy';
+import {
+  buildInterviewerStrategyInstructions,
+  usesOpenOpening,
+} from '@/lib/app/questionnaire/chat/interviewer-strategy';
 import { joinSections, section } from '@/lib/app/questionnaire/prompt/format';
 import { QUESTIONNAIRE_INTERVIEWER_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
 
@@ -227,12 +230,22 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
 
   // Interviewer strategy (questioning approach): when enabled, overrides the default open-invitation
   // guidance with the configured approach (funnel/open/targeted) + tactics. Empty when disabled.
-  const strategyInstructions = buildInterviewerStrategyInstructions(input.interviewerStrategy, {
+  const strategyCtx = {
     coverage: input.coverage,
     questionsAsked: input.questionsAsked,
     respondentTerse: input.respondentTerse,
     topicArea: input.topicArea,
-  });
+  };
+  const strategyInstructions = buildInterviewerStrategyInstructions(
+    input.interviewerStrategy,
+    strategyCtx
+  );
+  // Open/funnel opening turns get a richer, permission-giving invitation (the openingClause), which
+  // needs more room than the default single-sentence floor — so we relax brevity for just those.
+  // NOT on a re-ask, though: a re-ask fires because the last answer was uncapturable, so it must stay
+  // specific (re-ask the item clearly). Letting the broad "don't ask the item" opening treatment win
+  // there would contradict the re-ask turn guidance in the same prompt.
+  const openOpening = usesOpenOpening(input.interviewerStrategy, strategyCtx) && !input.isReask;
 
   // Length is calibrated by how far into the conversation we are: the first few questions stay
   // very tight (effortless to answer), and later ones may be a touch warmer — but never long.
@@ -241,14 +254,17 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
   // brevity floor is always kept so the very first asks stay effortless.
   const isEarly = input.questionsAsked < 3;
   const verbosityControlled = input.tone?.verbosity.enabled === true;
-  const brevity = isEarly
-    ? 'This is early in the conversation, so keep it VERY short and tight — ideally a single, ' +
-      'simple, easy-to-answer sentence. The opening questions must feel effortless. '
-    : verbosityControlled
-      ? ''
-      : 'Keep your OWN question concise — one or two sentences — even as you invite a longer answer ' +
-        'from them; a short, open question gives them the most room to expand. Rapport has built, ' +
-        'so you may be a little warmer or add light context, but never long-winded or convoluted. ';
+  const brevity = openOpening
+    ? 'Keep your invitation short and warm — at most two or three sentences — and make it genuinely ' +
+      'easy and unpressured to respond to; give them room to speak freely without it ever running long. '
+    : isEarly
+      ? 'This is early in the conversation, so keep it VERY short and tight — ideally a single, ' +
+        'simple, easy-to-answer sentence. The opening questions must feel effortless. '
+      : verbosityControlled
+        ? ''
+        : 'Keep your OWN question concise — one or two sentences — even as you invite a longer answer ' +
+          'from them; a short, open question gives them the most room to expand. Rapport has built, ' +
+          'so you may be a little warmer or add light context, but never long-winded or convoluted. ';
 
   // Sensitivity awareness / safeguarding: once a sensitive disclosure has been remembered this
   // session, every later question is asked more gently. The latest summary reminds the interviewer
@@ -264,12 +280,21 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
     : '';
 
   // The turn-specific guidance (opening / re-ask / transition / deepen). One branch fires per turn.
+  // On an OPEN opening we must NOT tell the model to "ease into this first question with a single
+  // light ask" — that fights the broad, permission-giving invitation in <interviewer_strategy>, and
+  // being the most specific opening directive it tends to win. So defer to that invitation instead.
   const turnGuidance = input.isOpening
-    ? 'This is the very first message of the conversation — be proactive and set the scene. ' +
-      'Open with a short, warm scene-setting line ("Let\'s start by…", "To begin, we\'ll explore…") ' +
-      'and then ease straight into this first question gently with a single, light, easy-to-answer ' +
-      'ask. There is no prior answer to acknowledge. Do not tell them to "send a message to ' +
-      'begin" — you are starting the conversation.'
+    ? openOpening
+      ? 'This is the very first message of the conversation — be proactive and set the scene. ' +
+        'Open with a short, warm scene-setting line, then extend the broad, open invitation ' +
+        'described under interviewer_strategy below — give them genuine room to talk freely rather ' +
+        'than asking a single narrow question. There is no prior answer to acknowledge. Do not tell ' +
+        'them to "send a message to begin" — you are starting the conversation.'
+      : 'This is the very first message of the conversation — be proactive and set the scene. ' +
+        'Open with a short, warm scene-setting line ("Let\'s start by…", "To begin, we\'ll explore…") ' +
+        'and then ease straight into this first question gently with a single, light, easy-to-answer ' +
+        'ask. There is no prior answer to acknowledge. Do not tell them to "send a message to ' +
+        'begin" — you are starting the conversation.'
     : input.isReask
       ? 'You already asked about this but could not capture a usable answer from their last reply. ' +
         (input.currentUnderstanding
@@ -470,8 +495,20 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
           .join('\n')}`
       : '';
 
+  // On an OPEN opening the detailed prompt is the wrong thing to hand the model as "the question to
+  // ask" — it anchors hard on that one narrow topic. Demote it to background (the area to explore)
+  // and make the broad invitation the actual instruction, mirroring the <interviewer_strategy> clause.
+  const questionLine = openOpening
+    ? `This is the OPENING of the conversation. Do NOT ask the detailed item below — it only tells ` +
+      `you the AREA to explore${input.topicArea ? ` (${input.topicArea.trim()})` : ''}. Open with a ` +
+      `broad, welcoming invitation for them to talk freely about their overall experience of that ` +
+      `area (or wider — the questionnaire's subject as a whole), following the interviewer_strategy ` +
+      `guidance. The detailed wording is for YOUR awareness only — never read it out, name it, or ` +
+      `bold it:\n"${input.prompt}"`
+    : `The question to ask (type: ${QUESTION_TYPE_LABELS[input.type]}):\n"${input.prompt}"`;
+
   const user =
-    `The question to ask (type: ${QUESTION_TYPE_LABELS[input.type]}):\n"${input.prompt}"` +
+    questionLine +
     clarifyGuidance +
     (input.guidelines
       ? `\n\nAnswer guidance (for you, do not read aloud): ${input.guidelines}`

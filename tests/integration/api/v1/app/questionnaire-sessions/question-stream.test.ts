@@ -32,7 +32,11 @@ import {
   type QuestionComposeInput,
 } from '@/app/api/v1/app/questionnaire-sessions/_lib/question-stream';
 import { narrowToneSettings } from '@/lib/app/questionnaire/chat/tone';
-import { DEFAULT_TONE_SETTINGS, type ToneSettings } from '@/lib/app/questionnaire/types';
+import {
+  DEFAULT_TONE_SETTINGS,
+  DEFAULT_INTERVIEWER_STRATEGY,
+  type ToneSettings,
+} from '@/lib/app/questionnaire/types';
 
 type Mock = ReturnType<typeof vi.fn>;
 
@@ -494,6 +498,95 @@ describe('buildStreamingQuestionPrompt', () => {
       buildStreamingQuestionPrompt({ ...INPUT, questionsAsked: 0, tone })[0].content
     );
     expect(system).toMatch(/very short and tight/i);
+  });
+
+  it('relaxes the opening brevity floor for an open-strategy opening (2–3 sentences)', () => {
+    // The richer permission-giving opening invitation needs more room than the single-sentence
+    // floor — so for an open/funnel open opening the floor becomes "at most two or three sentences".
+    const interviewerStrategy = {
+      ...DEFAULT_INTERVIEWER_STRATEGY,
+      enabled: true,
+      approach: 'open' as const,
+    };
+    const system = text(
+      buildStreamingQuestionPrompt({ ...INPUT, questionsAsked: 0, interviewerStrategy })[0].content
+    );
+    expect(system).toMatch(/at most two or three sentences/i);
+    expect(system).not.toMatch(/very short and tight/i);
+  });
+
+  it('open-strategy opening demotes the detailed prompt to background in the user message', () => {
+    // The user turn must not present the detailed slot prompt as "the question to ask" — that
+    // anchors the model on the one narrow topic. On an open opening it becomes background only.
+    const interviewerStrategy = {
+      ...DEFAULT_INTERVIEWER_STRATEGY,
+      enabled: true,
+      approach: 'open' as const,
+    };
+    const userMsg = text(
+      buildStreamingQuestionPrompt({
+        ...INPUT,
+        isOpening: true,
+        questionsAsked: 0,
+        interviewerStrategy,
+        topicArea: 'Customer Value Selling',
+      })[1].content
+    );
+    expect(userMsg).toMatch(/do not ask the detailed item below/i);
+    expect(userMsg).toMatch(/for your awareness only/i);
+    expect(userMsg).toMatch(/Customer Value Selling/);
+    expect(userMsg).not.toMatch(/The question to ask \(type/i);
+  });
+
+  it('keeps the standard "question to ask" user message when no open strategy is active', () => {
+    const userMsg = text(
+      buildStreamingQuestionPrompt({ ...INPUT, isOpening: true, questionsAsked: 0 })[1].content
+    );
+    expect(userMsg).toMatch(/The question to ask \(type/i);
+    expect(userMsg).not.toMatch(/do not ask the detailed item below/i);
+  });
+
+  it('open-strategy opening defers the turn guidance to the broad invitation (no "ease into this first question")', () => {
+    // The isOpening turn guidance must not fight the broad <interviewer_strategy> opening — on an
+    // open opening it should point AT that invitation rather than telling the model to ask the one
+    // narrow question (which, being the most specific opening directive, otherwise wins).
+    const interviewerStrategy = {
+      ...DEFAULT_INTERVIEWER_STRATEGY,
+      enabled: true,
+      approach: 'open' as const,
+    };
+    const system = text(
+      buildStreamingQuestionPrompt({
+        ...INPUT,
+        isOpening: true,
+        questionsAsked: 0,
+        interviewerStrategy,
+      })[0].content
+    );
+    expect(system).toMatch(/extend the broad, open invitation/i);
+    expect(system).not.toMatch(/ease straight into this first question/i);
+  });
+
+  it('keeps the default "ease into this first question" opening when no open strategy is active', () => {
+    const system = text(
+      buildStreamingQuestionPrompt({ ...INPUT, isOpening: true, questionsAsked: 0 })[0].content
+    );
+    expect(system).toMatch(/ease straight into this first question/i);
+    expect(system).not.toMatch(/extend the broad, open invitation/i);
+  });
+
+  it('keeps the tight single-sentence floor for a targeted-strategy opening', () => {
+    // Only the open phase relaxes — a targeted opening keeps the effortless single-sentence floor.
+    const interviewerStrategy = {
+      ...DEFAULT_INTERVIEWER_STRATEGY,
+      enabled: true,
+      approach: 'targeted' as const,
+    };
+    const system = text(
+      buildStreamingQuestionPrompt({ ...INPUT, questionsAsked: 0, interviewerStrategy })[0].content
+    );
+    expect(system).toMatch(/very short and tight/i);
+    expect(system).not.toMatch(/at most two or three sentences/i);
   });
 
   it('frames the system prompt with XML sections and surfaces a visible <tone> block when a dimension is on', () => {
