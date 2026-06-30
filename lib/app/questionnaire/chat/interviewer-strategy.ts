@@ -38,6 +38,13 @@ export function narrowInterviewerStrategy(value: unknown): InterviewerStrategySe
   };
 }
 
+/**
+ * The "particularly open" window at the very start of a session: the first couple of asks get a
+ * richer, permission-giving, breadth-first invitation (and a relaxed brevity floor) instead of the
+ * ongoing broad clause. Beyond this, the open phase reverts to its standard broad invitation.
+ */
+const OPENING_WINDOW = 2;
+
 /** Where the conversation is in the funnel arc, derived from coverage (with progress as a fallback). */
 export type FunnelPhase = 'open' | 'mixed' | 'targeted';
 
@@ -100,9 +107,12 @@ function areaPhrase(ctx: InterviewerStrategyContext): string {
 /**
  * The OPEN clause deliberately BROADENS the scope past the single selected question — the phraser is
  * otherwise told to "ask the ONE question provided", so without this explicit override it just
- * rewords that specific question openly instead of asking a genuinely general opener.
+ * rewords that specific question openly instead of asking a genuinely general opener. The first
+ * couple of asks ({@link OPENING_WINDOW}) get the richer, permission-giving {@link openingClause};
+ * after that the ongoing broad invitation below carries the open phase.
  */
 function openClause(ctx: InterviewerStrategyContext): string {
+  if (ctx.questionsAsked < OPENING_WINDOW) return openingClause(ctx);
   return (
     'QUESTIONING APPROACH — be highly OPEN and general right now. Treat the specific question below ' +
     `as ONLY a hint to the AREA to explore — do NOT ask it narrowly. Instead, ask ONE broad, ` +
@@ -111,6 +121,49 @@ function openClause(ctx: InterviewerStrategyContext): string {
     'can cover several related points at once. This OVERRIDES the "ask the one question provided" and ' +
     '"one thing at a time" guidance above — a wide, easy invitation matters more than the exact ' +
     'underlying question. Keep probing openly while they are forthcoming.'
+  );
+}
+
+/**
+ * The OPENING clause — used for the first couple of asks ({@link OPENING_WINDOW}) in an open phase.
+ * Richer and more subtle than the ongoing broad clause: it invites the respondent to talk freely and
+ * broadly before any specific question, gives explicit permission to speak at length, welcomes
+ * experiences as much as opinions, and offers a MENU of framings the model varies between (no script,
+ * so different respondents get different openings). On the second ask it follows the respondent's
+ * lead — widening again if their first answer was thin, or probing deeper if it surfaced something
+ * that matters. The brevity floor is relaxed for these turns (see {@link usesOpenOpening}).
+ */
+function openingClause(ctx: InterviewerStrategyContext): string {
+  const second =
+    ctx.questionsAsked >= 1
+      ? ctx.respondentTerse
+        ? 'Their opening answer was brief, so gently widen again and invite more breadth rather ' +
+          'than narrowing yet. '
+        : 'If their opening answer raised something that clearly matters to them, FOLLOW that ' +
+          'thread and probe it more deeply now — let their answer lead — rather than resetting to a ' +
+          'fresh broad topic; only if it was thin should you widen again. '
+      : '';
+  return (
+    'QUESTIONING APPROACH — this is the OPENING of the conversation, so make your first couple of ' +
+    `asks especially open. Invite the respondent to talk freely and broadly about ${areaPhrase(ctx)} ` +
+    'in their own words — breadth before detail, experiences as much as opinions, and no leading ' +
+    'language. Make it genuinely easy and unpressured: signal there are no right or wrong answers, ' +
+    'they can take it in whatever direction feels most relevant, and they should feel free to take ' +
+    'their time and think aloud. You may briefly note that you complete the questionnaire quietly in ' +
+    "the background as they talk, so they needn't answer it directly — but do not make that the " +
+    'focus. CRUCIAL: the specific topic below is ONLY a pointer to the area — do NOT ask about it, ' +
+    `name it, or bold it. Stay at the level of ${areaPhrase(ctx)} as a whole, or go wider still to ` +
+    "their overall experience of the questionnaire's subject (see the goal); take the BROADEST " +
+    'sensible framing, never the one narrow topic. ' +
+    second +
+    'Choose ONE natural framing and make it your own — VARY it, do not recite a script. Framings to ' +
+    'draw on: broad & conversational ("I\'d like to invite you to talk about your experiences of…"); ' +
+    'story-first ("could you tell me about your overall experience of…?"); reflection-first ("what ' +
+    'comes to mind when you think about…?"); very open ("what\'s it really like to experience…?"); ' +
+    'blank page ("if you had a blank page to describe…, what would you write?"); appreciative & ' +
+    'critical ("what stands out most, both positively and negatively?"). This OVERRIDES the "ask the ' +
+    'one question provided" and "one thing at a time" guidance above — a wide, permission-giving ' +
+    'invitation matters more than the underlying question right now.'
   );
 }
 
@@ -177,4 +230,22 @@ export function buildInterviewerStrategyInstructions(
   }
 
   return clauses.join(' ');
+}
+
+/**
+ * Whether THIS turn is an "open opening" — the first couple of asks ({@link OPENING_WINDOW}) of a
+ * session whose resolved phase is open: the `open` approach (always open) or `funnel` while
+ * {@link funnelPhase} reads `open`. The single source of truth for "give this opening room": the
+ * phraser uses it to relax the brevity floor so the richer {@link openingClause} invitation fits.
+ * False when the strategy is disabled, the approach/phase isn't open, or we're past the window.
+ */
+export function usesOpenOpening(
+  settings: InterviewerStrategySettings | undefined,
+  ctx: InterviewerStrategyContext
+): boolean {
+  if (!settings?.enabled) return false;
+  if (ctx.questionsAsked >= OPENING_WINDOW) return false;
+  if (settings.approach === 'open') return true;
+  if (settings.approach === 'funnel') return funnelPhase(ctx) === 'open';
+  return false;
 }

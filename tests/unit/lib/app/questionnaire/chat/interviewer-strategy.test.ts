@@ -14,6 +14,7 @@ import {
   narrowInterviewerStrategy,
   funnelPhase,
   buildInterviewerStrategyInstructions,
+  usesOpenOpening,
 } from '@/lib/app/questionnaire/chat/interviewer-strategy';
 import { DEFAULT_INTERVIEWER_STRATEGY } from '@/lib/app/questionnaire/types';
 
@@ -85,14 +86,16 @@ describe('buildInterviewerStrategyInstructions', () => {
     ).toBe('');
   });
 
-  it('funnel early → open/broadening clause; late → targeted clause', () => {
-    const early = buildInterviewerStrategyInstructions(
+  it('funnel open phase, past the opening → ongoing broad clause; late → targeted clause', () => {
+    // Past the opening window (questionsAsked >= OPENING_WINDOW) the open phase reverts to the
+    // ongoing broad clause — coverage 0.1 keeps funnel in its open phase.
+    const ongoing = buildInterviewerStrategyInstructions(
       { ...DEFAULT_INTERVIEWER_STRATEGY, enabled: true, approach: 'funnel' },
-      { coverage: 0.1, questionsAsked: 0 }
+      { coverage: 0.1, questionsAsked: 2 }
     );
-    expect(early).toMatch(/highly OPEN and general/i);
+    expect(ongoing).toMatch(/highly OPEN and general/i);
     // The open clause must BROADEN past the single question (the bug fix), not just reword it.
-    expect(early).toMatch(/OVERRIDES the "ask the one question provided"/i);
+    expect(ongoing).toMatch(/OVERRIDES the "ask the one question provided"/i);
 
     const late = buildInterviewerStrategyInstructions(
       { ...DEFAULT_INTERVIEWER_STRATEGY, enabled: true, approach: 'funnel' },
@@ -169,5 +172,97 @@ describe('buildInterviewerStrategyInstructions', () => {
     );
     expect(out).toMatch(/REFLECT AND CONFIRM/);
     expect(out).toMatch(/play back the gist/);
+  });
+});
+
+describe('buildInterviewerStrategyInstructions — open opening', () => {
+  const open = { ...DEFAULT_INTERVIEWER_STRATEGY, enabled: true, approach: 'open' as const };
+
+  it('first ask (open) → rich permission-giving opening, NOT the ongoing broad clause', () => {
+    const out = buildInterviewerStrategyInstructions(open, { coverage: 0.1, questionsAsked: 0 });
+    // The opening clause, not the ongoing "highly OPEN and general" broad clause.
+    expect(out).toMatch(/this is the OPENING of the conversation/i);
+    expect(out).not.toMatch(/highly OPEN and general/i);
+    // Permission to speak freely + breadth-before-detail + framing menu + the override phrase.
+    expect(out).toMatch(/no right or wrong answers/i);
+    expect(out).toMatch(/breadth before detail/i);
+    expect(out).toMatch(/story-first/i);
+    expect(out).toMatch(/VARY it, do not recite a script/i);
+    expect(out).toMatch(/OVERRIDES the "ask the one question provided"/i);
+  });
+
+  it('names the topic area in the opening clause when provided', () => {
+    const out = buildInterviewerStrategyInstructions(open, {
+      coverage: 0.1,
+      questionsAsked: 0,
+      topicArea: 'business execution',
+    });
+    expect(out).toMatch(/the broad area of business execution/i);
+  });
+
+  it('second ask, substantial answer → follow the thread and probe deeper', () => {
+    const out = buildInterviewerStrategyInstructions(open, {
+      coverage: 0.1,
+      questionsAsked: 1,
+      respondentTerse: false,
+    });
+    expect(out).toMatch(/this is the OPENING of the conversation/i);
+    expect(out).toMatch(/FOLLOW that thread and probe it more deeply/i);
+    expect(out).not.toMatch(/gently widen again and invite more breadth/i);
+  });
+
+  it('second ask, terse answer → widen again rather than narrowing', () => {
+    const out = buildInterviewerStrategyInstructions(open, {
+      coverage: 0.1,
+      questionsAsked: 1,
+      respondentTerse: true,
+    });
+    expect(out).toMatch(/gently widen again and invite more breadth/i);
+    expect(out).not.toMatch(/FOLLOW that thread and probe it more deeply/i);
+  });
+
+  it('past the opening window → reverts to the ongoing broad clause', () => {
+    const out = buildInterviewerStrategyInstructions(open, { coverage: 0.1, questionsAsked: 2 });
+    expect(out).toMatch(/highly OPEN and general/i);
+    expect(out).not.toMatch(/this is the OPENING of the conversation/i);
+  });
+});
+
+describe('usesOpenOpening', () => {
+  const base = { ...DEFAULT_INTERVIEWER_STRATEGY, enabled: true };
+
+  it('is false when disabled or undefined', () => {
+    expect(usesOpenOpening(undefined, { questionsAsked: 0 })).toBe(false);
+    expect(
+      usesOpenOpening({ ...base, enabled: false, approach: 'open' }, { questionsAsked: 0 })
+    ).toBe(false);
+  });
+
+  it('open approach: true within the opening window, false past it', () => {
+    expect(usesOpenOpening({ ...base, approach: 'open' }, { questionsAsked: 0 })).toBe(true);
+    expect(usesOpenOpening({ ...base, approach: 'open' }, { questionsAsked: 1 })).toBe(true);
+    expect(usesOpenOpening({ ...base, approach: 'open' }, { questionsAsked: 2 })).toBe(false);
+  });
+
+  it('funnel approach: true only while the resolved phase is open and within the window', () => {
+    // Open phase (coverage < 0.4) within the window.
+    expect(
+      usesOpenOpening({ ...base, approach: 'funnel' }, { coverage: 0.1, questionsAsked: 0 })
+    ).toBe(true);
+    // Funnel pushed to mixed/targeted by coverage → not an open opening.
+    expect(
+      usesOpenOpening({ ...base, approach: 'funnel' }, { coverage: 0.9, questionsAsked: 0 })
+    ).toBe(false);
+    // A terse respondent bumps open→mixed, so it's no longer an open opening.
+    expect(
+      usesOpenOpening(
+        { ...base, approach: 'funnel' },
+        { coverage: 0.1, questionsAsked: 0, respondentTerse: true }
+      )
+    ).toBe(false);
+  });
+
+  it('targeted approach is never an open opening', () => {
+    expect(usesOpenOpening({ ...base, approach: 'targeted' }, { questionsAsked: 0 })).toBe(false);
   });
 });

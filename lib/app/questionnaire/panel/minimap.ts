@@ -37,7 +37,12 @@ export interface MiniMapBar {
   topPct: number;
   heightPct: number;
   filled: boolean;
-  /** Confidence band of a filled slot; `unscored` for an unfilled one. */
+  /**
+   * Confidence band derived from the slot's score, so the bar reads at the same hue as its row dot —
+   * `unscored` only when there is no score at all (`confidence === null`), NOT merely when the slot
+   * sits below the "filled" threshold. A low-confidence parked fill is therefore `low` (red), not
+   * `unscored`. Decoupled from {@link filled} on purpose: do not infer one from the other.
+   */
   band: ConfidenceBand;
 }
 
@@ -68,7 +73,12 @@ export function computeMiniMapModel(m: MiniMapMetrics): MiniMapModel {
     topPct: pct(r.top),
     heightPct: Math.max(pct(r.height), MIN_BAR_PCT),
     filled: r.filled,
-    band: r.filled ? confidenceBand(r.confidence) : 'unscored',
+    // Band tracks the captured confidence, NOT the official "filled" threshold (0.5). A low-confidence
+    // parked fill (e.g. 0.40) sits below that threshold but still carries a score, and the respondent
+    // already sees it as a red "Unsure" dot in the list — so the minimap bar must read red too, not a
+    // grey sliver. Only a slot with no fill at all (confidence null) stays `unscored`/grey, which
+    // `confidenceBand(null)` already returns.
+    band: confidenceBand(r.confidence),
   }));
   return {
     overflow,

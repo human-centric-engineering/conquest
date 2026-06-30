@@ -51,6 +51,38 @@ else targeted), falling back to the **selection round** when coverage is unknown
 steps the phase one notch toward targeted — broad invitations aren't paying off, so it gets specific
 sooner.
 
+## Opening framings (open phase)
+
+The first couple of asks (`OPENING_WINDOW = 2`) in an **open phase** — the `open` approach (always),
+or `funnel` while `funnelPhase()` reads `open` — get a richer, more subtle opener than the ongoing
+broad clause. The `openingClause` invites the respondent to talk freely and broadly **before** any
+specific question: breadth before detail, experiences as much as opinions, no leading language, and
+explicit permission to speak at length (no right/wrong answers, take their time, follow tangents). It
+mentions the questionnaire is completed quietly in the background — without making that the focus.
+
+Variety is **model-driven**: the clause offers a menu of framings (broad & conversational,
+story-first, reflection-first, very-open, blank-page, appreciative & critical) and tells the agent to
+pick one and make it its own rather than recite a script — so different respondents get different
+openings. The **second** ask follows the respondent's lead: if their first answer was terse it widens
+again; if it surfaced something that matters it probes that thread deeper (uses `respondentTerse` as
+a hint). Past the window, the open phase reverts to the ongoing broad invitation.
+
+`usesOpenOpening(settings, ctx)` is the **single source of truth** for "is this an open opening". The
+phraser (`question-stream.ts`) uses it in two places: (1) it **relaxes the brevity floor** — the
+opening may run two to three sentences instead of the usual single-sentence clamp, so the
+permission-giving invitation fits; and (2) it **swaps the `<this_turn>` opening guidance** so it
+defers to the broad invitation. That second point matters: the default opening guidance tells the
+model to "ease straight into this first question with a single, light ask", which — being the most
+specific opening directive — otherwise wins over the `<interviewer_strategy>` clause and produces a
+narrow first question. On an open opening it instead points the model AT the broad invitation.
+
+Two further anchors had to be defused so the model actually broadens (it otherwise latches onto the
+concrete inputs): the opening clause explicitly forbids asking/naming/bolding the specific topic and
+tells the model to take the broadest sensible framing (the whole area, or wider — the questionnaire's
+subject); and the phraser **reframes the user message** on an open opening so the detailed slot prompt
+is demoted to "for your awareness only — the AREA to explore" rather than presented as "the question
+to ask". Without that, the precise prompt in the user turn out-anchors the system guidance.
+
 ## Anti-patterns
 
 - **Don't** gate this on a platform flag — it's a per-questionnaire setting, off by default; `enabled`

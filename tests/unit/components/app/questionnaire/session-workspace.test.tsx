@@ -182,6 +182,11 @@ function formReturn(over: Record<string, unknown> = {}) {
     setValue: formSetValue,
     flush: vi.fn(),
     refresh: formRefresh,
+    // Mirror the rest of the real useFormAnswers shape the workspace threads into QuestionnaireForm
+    // (editedKeys / saveState / lastSavedAt) so the mock can't silently drift from the hook's API.
+    editedKeys: new Set<string>(),
+    saveState: 'idle' as const,
+    lastSavedAt: null,
     ...over,
   };
 }
@@ -689,6 +694,107 @@ describe('SessionWorkspace', () => {
       render(<SessionWorkspace sessionId="s1" presentationMode="both" />);
       expect(screen.getByRole('button', { name: /review answers/i })).toBeInTheDocument();
       expect(screen.getAllByRole('tab')).toHaveLength(2);
+    });
+  });
+
+  // Carousel navigation (F7.x): the surfaces slide between via the swipe/wheel gesture and arrow
+  // keys. `both` mode mounts two surfaces (Chat + Form) so there's something to move between; the
+  // active surface is reflected by the selected tab.
+  describe('carousel navigation (keyboard / wheel / touch)', () => {
+    const selected = (name: string) =>
+      screen.getByRole('tab', { name }).getAttribute('aria-selected');
+
+    it('steps to the next surface on ArrowRight and back on ArrowLeft', () => {
+      render(<SessionWorkspace sessionId="s1" presentationMode="both" />);
+      expect(selected('Chat')).toBe('true');
+
+      fireEvent.keyDown(document.body, { key: 'ArrowRight' });
+      expect(selected('Form')).toBe('true');
+      expect(selected('Chat')).toBe('false');
+
+      fireEvent.keyDown(document.body, { key: 'ArrowLeft' });
+      expect(selected('Chat')).toBe('true');
+    });
+
+    it('keeps the slide transition on settled surfaces so non-swipe navigation animates', () => {
+      // At rest (no active drag → dragPx 0) every surface carries the transition class, so a tab
+      // toggle or arrow-key move slides rather than snapping. Regression guard: gating the transition
+      // on `animating` alone dropped it for toggle/keyboard nav (which never call settle()).
+      render(<SessionWorkspace sessionId="s1" presentationMode="both" />);
+      for (const panel of screen.getAllByRole('tabpanel')) {
+        expect(panel.className).toContain('transition-transform');
+      }
+    });
+
+    it('rubber-bands at the ends — ArrowLeft on the first surface is a no-op', () => {
+      render(<SessionWorkspace sessionId="s1" presentationMode="both" />);
+      fireEvent.keyDown(document.body, { key: 'ArrowLeft' });
+      expect(selected('Chat')).toBe('true');
+    });
+
+    it('ignores arrow keys while typing in a field (the composer owns its caret)', () => {
+      render(<SessionWorkspace sessionId="s1" presentationMode="both" />);
+      const input = document.createElement('input');
+      document.body.appendChild(input);
+      // finally so a failed assertion can't leave a focused <input> on document.body, which would
+      // corrupt activeElement for the keyboard sibling tests that fire on document.body.
+      try {
+        input.focus();
+        fireEvent.keyDown(input, { key: 'ArrowRight' });
+        expect(selected('Chat')).toBe('true'); // unchanged — handed to the field
+      } finally {
+        input.remove();
+      }
+    });
+
+    it('ignores arrow keys with a modifier held (browser shortcuts still work)', () => {
+      render(<SessionWorkspace sessionId="s1" presentationMode="both" />);
+      fireEvent.keyDown(document.body, { key: 'ArrowRight', metaKey: true });
+      expect(selected('Chat')).toBe('true');
+    });
+
+    it('ignores non-arrow keys (only ←/→ navigate)', () => {
+      render(<SessionWorkspace sessionId="s1" presentationMode="both" />);
+      fireEvent.keyDown(document.body, { key: 'Enter' });
+      expect(selected('Chat')).toBe('true');
+    });
+
+    it('does not bind arrow navigation in a single-surface mode', () => {
+      render(<SessionWorkspace sessionId="s1" presentationMode="chat" />);
+      // Only one surface — nothing to navigate, and no tablist to flip.
+      fireEvent.keyDown(document.body, { key: 'ArrowRight' });
+      expect(screen.queryAllByRole('tab')).toHaveLength(0);
+    });
+
+    it('advances on a decisive horizontal wheel burst (trackpad swipe)', () => {
+      render(<SessionWorkspace sessionId="s1" presentationMode="both" />);
+      const carousel = screen.getAllByRole('tabpanel')[0].parentElement as HTMLElement;
+      // Horizontal-dominant burst past the instant-commit trip → forward one surface.
+      fireEvent.wheel(carousel, { deltaX: 250, deltaY: 0 });
+      expect(selected('Form')).toBe('true');
+    });
+
+    it('leaves a vertical-dominant wheel to native scroll (no surface change)', () => {
+      render(<SessionWorkspace sessionId="s1" presentationMode="both" />);
+      const carousel = screen.getAllByRole('tabpanel')[0].parentElement as HTMLElement;
+      fireEvent.wheel(carousel, { deltaX: 4, deltaY: 120 });
+      expect(selected('Chat')).toBe('true');
+    });
+
+    it('commits a horizontal touch drag past the threshold', () => {
+      render(<SessionWorkspace sessionId="s1" presentationMode="both" />);
+      const carousel = screen.getAllByRole('tabpanel')[0].parentElement as HTMLElement;
+      const t = (x: number) => ({
+        touches: [{ clientX: x, clientY: 200 }],
+        changedTouches: [{ clientX: x, clientY: 200 }],
+      });
+      // Width is unmeasured in jsdom (0 → 320 fallback), so a ~100px leftward drag clears the 20%
+      // commit threshold and advances to the next surface.
+      fireEvent.touchStart(carousel, t(300));
+      fireEvent.touchMove(carousel, t(280));
+      fireEvent.touchMove(carousel, t(180));
+      fireEvent.touchEnd(carousel, t(180));
+      expect(selected('Form')).toBe('true');
     });
   });
 });

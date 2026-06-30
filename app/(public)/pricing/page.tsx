@@ -76,7 +76,7 @@ const tiers = [
       'A monthly conversation allowance',
       'Text responses',
       'Automatic questionnaire ingestion',
-      'Structured slot extraction',
+      'Structured context extraction',
       'Completion analytics',
     ],
   },

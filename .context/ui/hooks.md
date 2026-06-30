@@ -114,7 +114,49 @@ const { copied, copy } = useCopyToClipboard();
 </Button>;
 ```
 
+## `useHorizontalSwipe(options)`
+
+**File:** `lib/hooks/use-horizontal-swipe.ts`
+
+Drives a horizontal carousel with a **live, follow-the-gesture** drag (not a fire-once
+swipe detector). Reports a continuous `dragPx` so the track moves _with_ the gesture and
+springs back below a commit threshold; commits a surface change when the gesture clears it.
+Covers both horizontal inputs: touch drag (1:1 finger tracking) and trackpad/Magic-Mouse
+horizontal wheel bursts (accumulated, with release detection).
+
+```ts
+interface HorizontalSwipeState {
+  onTouchStart: (e: React.TouchEvent) => void;
+  onTouchMove: (e: React.TouchEvent) => void;
+  onTouchEnd: (e: React.TouchEvent) => void;
+  /** Feed raw wheel deltas; returns true when it consumed a horizontal gesture (→ preventDefault). */
+  handleWheel: (deltaX: number, deltaY: number) => boolean;
+  dragPx: number; // live horizontal offset to add to the track; 0 at rest
+  animating: boolean; // true while settling, false while following the gesture
+}
+
+export function useHorizontalSwipe(options: {
+  onCommitNext?: () => void;
+  onCommitPrev?: () => void;
+  canPrev?: boolean; // gates the back direction; else rubber-bands
+  canNext?: boolean; // gates the forward direction; else rubber-bands
+  getWidth?: () => number; // frame width (px) for the commit threshold + clamping
+}): HorizontalSwipeState;
+```
+
+- **Commit threshold** is 20% of the frame width; a touch/wheel travel past it in an
+  allowed direction commits, otherwise the track springs back. A hard wheel burst past
+  200px commits instantly, mid-gesture.
+- **Axis lock:** a vertical-dominant touch or wheel is handed back to native scroll
+  (`handleWheel` returns `false` so the caller does _not_ `preventDefault`). Multi-touch
+  (pinch) is ignored.
+- **Edge resistance:** dragging toward an edge with no neighbour (`canPrev`/`canNext`
+  false) is damped to a short rubber-band so the carousel end feels like a wall.
+- **Stable handler identity:** the returned handlers don't change across renders (latest
+  props are read through a ref), so `handleWheel` can bind to a native listener once.
+  Keyboard navigation is the consumer's responsibility.
+
 ## See also
 
-- [Setup Wizard](../admin/setup-wizard.md) — composes both hooks together
+- [Setup Wizard](../admin/setup-wizard.md) — composes both wizard hooks together
 - [Contextual help](./contextual-help.md)

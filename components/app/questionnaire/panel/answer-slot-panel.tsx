@@ -211,7 +211,9 @@ function HowThisWorksDialog() {
 
 /** The "N more …" stepper footer copy — singular wording for the last hop. */
 function moreRecordedLabel(remaining: number): string {
-  return remaining === 1 ? '1 more slot was answered' : `${remaining} more answers recorded`;
+  return remaining === 1
+    ? '1 more context area was captured'
+    : `${remaining} more context areas captured`;
 }
 
 /**

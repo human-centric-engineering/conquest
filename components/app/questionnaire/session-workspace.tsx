@@ -24,6 +24,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BookOpen, ClipboardList, ListChecks, MessageSquare } from 'lucide-react';
 
+import { cn } from '@/lib/utils';
+import { useHorizontalSwipe } from '@/lib/hooks/use-horizontal-swipe';
 import { useQuestionnaireSessionStream } from '@/lib/hooks/use-questionnaire-session-stream';
 import { useAnswerPanel } from '@/lib/hooks/use-answer-panel';
 import { useFormAnswers } from '@/lib/hooks/use-form-answers';
@@ -352,6 +354,71 @@ export function SessionWorkspace({
     [form, panel]
   );
 
+  // Step one surface along the carousel (clamped at the ends), the shared move behind the toggle,
+  // the swipe gesture and the arrow keys. `delta` is +1 (toward the next surface) or -1 (previous).
+  const activeIndex = Math.max(0, views.indexOf(activeView));
+  const goRelative = useCallback(
+    (delta: number) => {
+      const next = views[views.indexOf(activeView) + delta];
+      if (next) goToView(next);
+    },
+    [views, activeView, goToView]
+  );
+
+  // Swipe/drag the carousel with a horizontal touch or trackpad gesture. The track follows the
+  // gesture live (a small nudge slides a little and springs back, signalling it's swipeable); a
+  // fuller gesture past the threshold changes surface. Forward (right→left) advances, back (left→
+  // right) steps back; the ends rubber-band. Vertical scrolls are left untouched.
+  const carouselRef = useRef<HTMLDivElement>(null);
+  const measureWidth = useCallback(() => carouselRef.current?.clientWidth ?? 0, []);
+  const swipe = useHorizontalSwipe({
+    onCommitNext: () => goRelative(1),
+    onCommitPrev: () => goRelative(-1),
+    canNext: activeIndex < views.length - 1,
+    canPrev: activeIndex > 0,
+    getWidth: measureWidth,
+  });
+
+  // Wheel (trackpad / Magic Mouse) is bound natively with `passive: false` so a consumed horizontal
+  // gesture can `preventDefault` — otherwise macOS hijacks the same two-finger swipe for browser
+  // back/forward navigation. Re-binds when the frame mounts (views.length crosses 1) or the handler
+  // identity changes (edge availability shifts).
+  const handleWheel = swipe.handleWheel;
+  const multiView = views.length > 1;
+  useEffect(() => {
+    const el = carouselRef.current;
+    if (!el || !multiView) return;
+    const onWheel = (e: WheelEvent) => {
+      if (handleWheel(e.deltaX, e.deltaY)) e.preventDefault();
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [handleWheel, multiView]);
+
+  // Keyboard parity with the swipe gesture: ←/→ step between surfaces. Ignored while typing (the
+  // chat composer / any field owns its own caret movement) and when a modifier is held (so browser
+  // shortcuts like ⌘← still work). Only active once there's more than one surface to move between.
+  useEffect(() => {
+    if (views.length < 2 || typeof window === 'undefined') return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      const el = e.target as HTMLElement | null;
+      if (
+        el?.isContentEditable ||
+        el?.tagName === 'INPUT' ||
+        el?.tagName === 'TEXTAREA' ||
+        el?.tagName === 'SELECT'
+      ) {
+        return;
+      }
+      e.preventDefault();
+      goRelative(e.key === 'ArrowRight' ? 1 : -1);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [views.length, goRelative]);
+
   // Read-only viewer (admin): just the transcript, no chrome. Rendered after all hooks so the
   // panel/lifecycle/form hooks (inert via `enabled: false`) still obey the rules of hooks. A
   // completed session is shown as its conversation here, not the respondent's completion screen.
@@ -589,17 +656,31 @@ export function SessionWorkspace({
         // (the chat composer autofocus, the message auto-scroll), the browser scrolls the frame
         // sideways to "reveal" it and drags the whole carousel off-screen. `clip` clips identically
         // but establishes no scroll container, so nothing can shift it.
-        <div className="relative min-h-0 flex-1 overflow-clip">
-          {views.map((view) => {
-            const activeIndex = Math.max(0, views.indexOf(activeView));
-            const offset = (views.indexOf(view) - activeIndex) * 100;
+        <div
+          ref={carouselRef}
+          className="relative min-h-0 flex-1 overflow-clip"
+          style={{ overscrollBehaviorX: 'contain' }}
+          onTouchStart={swipe.onTouchStart}
+          onTouchMove={swipe.onTouchMove}
+          onTouchEnd={swipe.onTouchEnd}
+        >
+          {views.map((view, i) => {
+            const offset = (i - activeIndex) * 100;
             return (
               <div
                 key={view}
                 role="tabpanel"
                 aria-label={VIEW_META[view].label}
-                className="absolute inset-0 overflow-clip transition-transform duration-300 ease-out motion-reduce:transition-none"
-                style={{ transform: `translateX(${offset}%)` }}
+                className={cn(
+                  'absolute inset-0 overflow-clip will-change-transform motion-reduce:transition-none',
+                  // Animate every settled move (toggle, arrow keys, gesture release) — i.e. whenever the
+                  // track is at rest (`dragPx === 0`) or actively springing back (`animating`). Only an
+                  // in-progress finger/wheel drag (non-zero `dragPx`, not yet settled) skips the
+                  // transition so the surface tracks the gesture 1:1.
+                  (swipe.animating || swipe.dragPx === 0) &&
+                    'transition-transform duration-300 ease-out'
+                )}
+                style={{ transform: `translateX(calc(${offset}% + ${swipe.dragPx}px))` }}
                 inert={activeView !== view}
               >
                 {view === 'intro' ? introSurface : view === 'form' ? formSurface : chatSurface}
