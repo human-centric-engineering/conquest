@@ -1,0 +1,198 @@
+/*
+ * Contact page — bespoke layer on top of the shared ConQuest marketing system
+ * (conquest-marketing.module.css). Mirrors how pricing.module.css extends the
+ * shared primitives: it reuses the palette tokens (inherited at runtime via the
+ * `.page` custom properties, so light/dark both work) and adds only the
+ * contact-specific layout — the centred hero intro, the form panel, the
+ * right-hand rail cards, and a few scoped overrides that harmonise the shared
+ * <ContactForm> (kept intact for validation / rate-limit / DB / admin email)
+ * with the marigold/ink palette.
+ */
+
+/* ---------- Hero intro (single centred column) ---------- */
+.heroIntro {
+  position: relative;
+  z-index: 1;
+  max-width: 760px;
+  margin-inline: auto;
+  text-align: center;
+}
+.heroIntro .heroSub {
+  margin-inline: auto;
+}
+
+/* ---------- Form + rail grid ---------- */
+.contactGrid {
+  display: grid;
+  grid-template-columns: 1.35fr 1fr;
+  gap: 22px;
+  align-items: start;
+}
+
+/* ---------- Form panel ---------- */
+.formCard {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 26px;
+  padding: clamp(28px, 3.5vw, 44px);
+  box-shadow: var(--shadow-sm);
+}
+.formKicker {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--blue);
+}
+.formTitle {
+  font-family: var(--font-display-cq), Georgia, serif;
+  font-weight: 600;
+  font-size: clamp(24px, 3vw, 30px);
+  letter-spacing: -0.015em;
+  margin: 10px 0 24px;
+  line-height: 1.1;
+}
+
+/*
+ * Harmonise the shared shadcn-based ContactForm with the page palette WITHOUT
+ * editing it (it's a platform seam). Every rule is scoped under .formCard so
+ * nothing leaks to the rest of the app. The honeypot label/input are also in
+ * here but rendered off-screen, so styling them is harmless.
+ */
+.formCard :global(label) {
+  color: var(--t-ink);
+  font-weight: 600;
+}
+.formCard :global(input),
+.formCard :global(textarea) {
+  border-radius: 12px;
+}
+/*
+ * Dark mode: the shadcn default input border is near-invisible against the
+ * elevated navy panel. Lift the border to a clearer hairline and give the field
+ * a faint fill so each input reads as a distinct affordance. Scoped to .formCard
+ * so the shared <ContactForm> stays untouched.
+ */
+:global(html.dark) .formCard :global(input),
+:global(html.dark) .formCard :global(textarea) {
+  border-color: rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.04);
+}
+:global(html.dark) .formCard :global(input:focus-visible),
+:global(html.dark) .formCard :global(textarea:focus-visible) {
+  border-color: var(--blue-bright);
+}
+.formCard :global(button[type='submit']) {
+  border-radius: 999px !important;
+  background: var(--yellow) !important;
+  color: var(--ink) !important;
+  font-weight: 600;
+  box-shadow: 0 14px 34px -12px rgba(255, 179, 0, 0.55);
+  transition:
+    background 0.18s ease,
+    transform 0.18s ease;
+}
+.formCard :global(button[type='submit']:hover:not(:disabled)) {
+  background: var(--yellow-strong) !important;
+  transform: translateY(-2px);
+}
+
+/* ---------- Right rail ---------- */
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.railCard {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  padding: 28px;
+  box-shadow: var(--shadow-sm);
+}
+.railIcon {
+  width: 44px;
+  height: 44px;
+  border-radius: 13px;
+  display: grid;
+  place-items: center;
+  background: var(--ink);
+  color: var(--yellow);
+  margin-bottom: 16px;
+}
+.railIcon svg {
+  width: 21px;
+  height: 21px;
+}
+.railTitle {
+  font-family: var(--font-display-cq), Georgia, serif;
+  font-weight: 600;
+  font-size: 21px;
+  letter-spacing: -0.01em;
+}
+.railLead {
+  margin-top: 8px;
+  font-size: 14.5px;
+  line-height: 1.55;
+  color: var(--t-muted);
+}
+
+/* "What happens next" — numbered steps */
+.next {
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.nextItem {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+.nextNum {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: rgba(47, 107, 255, 0.1);
+  color: var(--blue);
+  font-weight: 700;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.nextItem h4 {
+  font-size: 15.5px;
+  font-weight: 600;
+  margin: 3px 0 3px;
+}
+.nextItem p {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--t-muted);
+}
+
+/* "Who gets in touch" — chips */
+.tags {
+  margin-top: 20px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.tag {
+  font-size: 13.5px;
+  font-weight: 500;
+  padding: 7px 13px;
+  border-radius: 999px;
+  background: rgba(47, 107, 255, 0.08);
+  color: var(--t-ink);
+  border: 1px solid var(--line);
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 900px) {
+  .contactGrid {
+    grid-template-columns: 1fr;
+  }
+}

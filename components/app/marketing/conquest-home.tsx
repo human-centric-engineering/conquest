@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Image from 'next/image';
 import Link from 'next/link';
 import {
   ArrowRight,
@@ -32,22 +33,22 @@ import {
   Target,
   Plug,
   Check,
-  Quote,
   Telescope,
   LineChart,
   MessagesSquare,
   Gauge,
   Network,
 } from 'lucide-react';
+import { Wordmark } from '@/components/app/marketing/wordmark';
 import styles from '@/components/app/marketing/conquest-marketing.module.css';
 
 const metaDescription =
   'ConQuest turns any questionnaire, survey or assessment into a natural conversation: the structure of a form with the depth of a conversation. Higher completion, richer data, less bias.';
 
 export const metadata: Metadata = {
-  // Homepage title — `absolute` so it isn't suffixed by the layout's
+  // Homepage title, `absolute` so it isn't suffixed by the layout's
   // `%s - ConQuest` template.
-  title: { absolute: 'ConQuest — The structure of a form. The depth of a conversation.' },
+  title: { absolute: 'ConQuest: The structure of a form. The depth of a conversation.' },
   description: metaDescription,
   openGraph: {
     title: 'ConQuest: The structure of a form. The depth of a conversation.',
@@ -60,16 +61,6 @@ export const metadata: Metadata = {
     description: metaDescription,
   },
 };
-
-/** Reusable ConQuest wordmark: white "Con" + yellow "Quest" on dark, ink + gold on light. */
-function Wordmark() {
-  return (
-    <span className={styles.brand}>
-      <span className={styles.brandCon}>Con</span>
-      <span className={styles.brandQ}>Quest</span>
-    </span>
-  );
-}
 
 const failures = [
   {
@@ -250,7 +241,7 @@ const useCases = [
   {
     icon: Telescope,
     title: 'Discovery',
-    body: 'Customer and user discovery that gets past the script — the needs, jobs and frustrations people never think to put on a form.',
+    body: 'Customer and user discovery that gets past the script: the needs, jobs and frustrations people never think to put on a form.',
   },
   {
     icon: Star,
@@ -270,7 +261,7 @@ const useCases = [
   {
     icon: Gauge,
     title: 'Team sentiment',
-    body: 'Take the temperature of a team in their own words — honest, unhurried check-ins people actually finish.',
+    body: 'Take the temperature of a team in their own words. Honest, unhurried check-ins people actually finish.',
   },
   {
     icon: Network,
@@ -673,41 +664,77 @@ export default function ConquestHome() {
         </div>
       </section>
 
-      {/* ---------------- Social proof ---------------- */}
+      {/* ---------------- Founding cohort / early access ---------------- */}
+      {/*
+        Replaces the (placeholder) social-proof block. With no customers or data
+        yet, the most authentic credibility we own is the founders, so this band
+        leads with the human/ethos element and carries the early-access waitlist
+        CTA. When real logos / testimonials / stats exist they can return here
+        (or just below). The founder roles and mission line are a first pass;
+        confirm the copy before launch.
+      */}
       <section className={`${styles.section} ${styles.ink}`}>
         <div className={styles.inner}>
-          <p className={styles.proofNote}>Trusted by teams who’d rather understand than tally</p>
-          <div className={styles.logoRow}>
-            {['Your logo', 'Your logo', 'Your logo', 'Your logo', 'Your logo'].map((l, i) => (
-              <div key={i} className={styles.logo}>
-                {l}
+          <div
+            className={`${styles.sectionHead} ${styles.reveal}`}
+            style={{ textAlign: 'center', marginInline: 'auto' }}
+          >
+            <span
+              className={`${styles.eyebrow} ${styles.eyebrowLight}`}
+              style={{ justifyContent: 'center' }}
+            >
+              Founding cohort
+            </span>
+            <h2 className={styles.h2}>We’re building ConQuest with our first customers.</h2>
+          </div>
+
+          <div className={`${styles.founders} ${styles.reveal}`}>
+            <div className={styles.founderRow}>
+              <div className={styles.founder}>
+                <Image
+                  src="/marketing/founders/simon.jpg"
+                  alt="Simon Holmes"
+                  width={92}
+                  height={92}
+                  className={styles.founderAvatar}
+                />
+                <div className={styles.founderName}>Simon Holmes</div>
+                <div className={styles.founderRole}>Co-founder</div>
               </div>
-            ))}
-          </div>
-
-          <div className={styles.quoteCard}>
-            <Quote className={styles.quoteMark} />
-            <p className={styles.quoteText}>
-              We replaced a 40-question survey with a single conversation. Completion went up, and
-              for the first time we understood <span>why</span> behind the numbers.
-            </p>
-            <p className={styles.quoteAttr}>
-              <b>[ Name, Role ]</b>, [ Organisation ]
-            </p>
-          </div>
-
-          <div className={styles.stats}>
-            <div className={styles.stat}>
-              <div className={styles.statNum}>[ xx% ]</div>
-              <div className={styles.statLabel}>higher completion rate</div>
+              <div className={styles.founder}>
+                <Image
+                  src="/marketing/founders/john.jpg"
+                  alt="John Durrant"
+                  width={92}
+                  height={92}
+                  className={styles.founderAvatar}
+                />
+                <div className={styles.founderName}>John Durrant</div>
+                <div className={styles.founderRole}>Co-founder</div>
+              </div>
             </div>
-            <div className={styles.stat}>
-              <div className={styles.statNum}>[ x.x× ]</div>
-              <div className={styles.statLabel}>more context per response</div>
-            </div>
-            <div className={styles.stat}>
-              <div className={styles.statNum}>[ xx% ]</div>
-              <div className={styles.statLabel}>faster to actionable insight</div>
+
+            <blockquote className={styles.founderQuote}>
+              “We’ve seen too many surveys that flatten people into checkboxes. And we’ve seen the
+              rich information you can gather from conversations. So we started <Wordmark /> to turn
+              boring forms and questionnaires into engaging conversations.{' '}
+              <span>Forms you can talk to.</span>”
+            </blockquote>
+            <p className={styles.founderQuoteAttr}>
+              <b>Simon &amp; John</b>, founders at Human-Centric Engineering
+            </p>
+
+            <div className={styles.earlyAccess}>
+              <p className={styles.earlyAccessText}>
+                The self-serve platform isn’t out yet. We’re taking on a small founding cohort to
+                shape <Wordmark /> on real questionnaires, and the people who join now help decide
+                where it goes. Leave your details and you’ll be first through the door.
+              </p>
+              <div className={`${styles.ctaRow} ${styles.earlyAccessCta}`}>
+                <Link href="/waitlist?from=home" className={`${styles.btn} ${styles.btnPrimary}`}>
+                  Join the waitlist <ArrowRight />
+                </Link>
+              </div>
             </div>
           </div>
         </div>
@@ -756,8 +783,8 @@ export default function ConquestHome() {
             <Link href="/contact" className={`${styles.btn} ${styles.btnPrimary}`}>
               Request a demo <ArrowRight />
             </Link>
-            <Link href="/signup" className={`${styles.btn} ${styles.btnGhost}`}>
-              Get started
+            <Link href="/waitlist?from=home" className={`${styles.btn} ${styles.btnGhost}`}>
+              Join the waitlist
             </Link>
           </div>
         </div>

@@ -1,160 +1,178 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { Mail, Clock } from 'lucide-react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { ArrowRight, MessageCircle, Users } from 'lucide-react';
 import { ContactForm } from '@/components/forms/contact-form';
+import { Wordmark } from '@/components/app/marketing/wordmark';
+import shared from '@/components/app/marketing/conquest-marketing.module.css';
+import styles from '@/components/app/marketing/contact.module.css';
+
+const metaDescription =
+  'Get in touch with the ConQuest team. Whether you want to turn a questionnaire into a conversation, have a question about how it works, or just want to say hello. We read every message and a real person will reply.';
 
 export const metadata: Metadata = {
   title: 'Contact',
-  description:
-    'Get in touch with the Sunrise team. Questions, feedback, or just want to say hello? We would love to hear from you.',
+  description: metaDescription,
   openGraph: {
-    title: 'Contact - Sunrise',
-    description:
-      'Get in touch with the Sunrise team. Questions, feedback, or just want to say hello? We would love to hear from you.',
+    title: 'Contact ConQuest',
+    description: metaDescription,
+    type: 'website',
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Contact - Sunrise',
-    description:
-      'Get in touch with the Sunrise team. Questions, feedback, or just want to say hello? We would love to hear from you.',
+    title: 'Contact ConQuest',
+    description: metaDescription,
   },
 };
+
+const nextSteps = [
+  {
+    title: 'A real person reads it',
+    body: 'Every message lands with our team, not a ticketing bot. Nothing gets lost in a queue.',
+  },
+  {
+    title: 'We reply with something useful',
+    body: 'Usually within a couple of working days, with a real answer rather than a holding note.',
+  },
+  {
+    title: 'We move at your pace',
+    body: 'If it’s a fit, we’ll offer to show you ConQuest on a questionnaire you already run. No pressure, no hard sell.',
+  },
+];
+
+const audiences = [
+  'Teams running surveys',
+  'Researchers & analysts',
+  'A questionnaire to convert',
+  'People & culture teams',
+  'Coaches & educators',
+  'Just curious',
+];
 
 /**
  * Contact Page
  *
- * Two-column layout with contact form and additional contact information.
- *
- * Phase 3.5: Landing Page & Marketing
+ * ConQuest "get in touch" page, built on the shared bespoke marketing system
+ * (conquest-marketing.module.css) so it reads as the same site as the home and
+ * pricing pages. A centred ink hero introduces the page; a cream section pairs
+ * Sunrise's <ContactForm> (validation / rate-limit / DB write / admin email
+ * unchanged) with a right rail explaining what happens after you send.
  */
 export default function ContactPage() {
   return (
-    <div className="container mx-auto px-4 py-16 md:py-24">
-      <div className="mx-auto max-w-5xl">
-        {/* Page Header */}
-        <div className="mb-12 text-center">
-          <h1 className="mb-4 text-4xl font-bold tracking-tight">Get in Touch</h1>
-          <p className="text-muted-foreground mx-auto max-w-2xl text-lg">
-            Have a question about Sunrise? Want to discuss a custom implementation? Or just want to
-            say hello? We&apos;d love to hear from you.
+    <div className={shared.page}>
+      {/* ---------------- Hero ---------------- */}
+      <header className={shared.hero}>
+        <div className={`${shared.brandLockup} ${shared.rise}`}>
+          <Wordmark />
+        </div>
+        <p className={`${shared.brandTagline} ${shared.rise}`} style={{ animationDelay: '0.06s' }}>
+          Get in touch
+        </p>
+        <div className={`${styles.heroIntro} ${shared.rise}`} style={{ animationDelay: '0.08s' }}>
+          <h1 className={shared.heroTitle}>
+            Let’s start a&nbsp;<em>conversation.</em>
+          </h1>
+          <p className={`${shared.heroSub} ${styles.heroSub}`}>
+            Whether you’ve got a questionnaire you’d love to bring to life, a question about how{' '}
+            <Wordmark /> works, or you simply want to say hello. There’s a real person at the other
+            end, and we read every message.
           </p>
-        </div>
-
-        {/* Two-column layout */}
-        <div className="grid gap-8 lg:grid-cols-5">
-          {/* Contact Form - takes 3 columns */}
-          <div className="lg:col-span-3">
-            <Card>
-              <CardHeader>
-                <CardTitle>Send a Message</CardTitle>
-                <CardDescription>
-                  Fill out the form below and we&apos;ll get back to you as soon as possible.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ContactForm />
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Contact Info - takes 2 columns */}
-          <div className="space-y-6 lg:col-span-2">
-            {/* Email */}
-            <Card>
-              <CardHeader className="pb-3">
-                <div className="flex items-center gap-3">
-                  <div className="bg-primary/10 text-primary flex h-10 w-10 items-center justify-center rounded-lg">
-                    <Mail className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-base">Email</CardTitle>
-                    <CardDescription>For general inquiries</CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="pt-0">
-                <a href="mailto:hello@example.com" className="text-primary hover:underline">
-                  hello@example.com
-                </a>
-              </CardContent>
-            </Card>
-
-            {/* Response Time */}
-            <Card>
-              <CardHeader className="pb-3">
-                <div className="flex items-center gap-3">
-                  <div className="bg-primary/10 text-primary flex h-10 w-10 items-center justify-center rounded-lg">
-                    <Clock className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-base">Response Time</CardTitle>
-                    <CardDescription>When to expect a reply</CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="pt-0">
-                <p className="text-muted-foreground text-sm">
-                  We typically respond within 1-2 business days. For urgent matters, please mention
-                  &quot;URGENT&quot; in the subject line.
-                </p>
-              </CardContent>
-            </Card>
-
-            {/* GitHub */}
-            <Card>
-              <CardHeader className="pb-3">
-                <div className="flex items-center gap-3">
-                  <div className="bg-primary/10 text-primary flex h-10 w-10 items-center justify-center rounded-lg">
-                    {/* GitHub mark — lucide v1 removed brand icons, so inline the SVG */}
-                    <svg
-                      viewBox="0 0 24 24"
-                      fill="currentColor"
-                      aria-hidden="true"
-                      className="h-5 w-5"
-                    >
-                      <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.605-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0112 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.91 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222 0 1.606-.014 2.898-.014 3.293 0 .322.216.694.825.576C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12" />
-                    </svg>
-                  </div>
-                  <div>
-                    <CardTitle className="text-base">GitHub</CardTitle>
-                    <CardDescription>Issues and discussions</CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="pt-0">
-                <p className="text-muted-foreground mb-2 text-sm">
-                  For bug reports and feature requests, open an issue on GitHub.
-                </p>
-                <a
-                  href="https://github.com/human-centric-engineering/sunrise/issues"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary text-sm hover:underline"
-                >
-                  Open an Issue
-                </a>
-              </CardContent>
-            </Card>
-
-            {/* Support Options */}
-            <Card className="border-primary/50 bg-primary/5">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Need Priority Support?</CardTitle>
-              </CardHeader>
-              <CardContent className="pt-0">
-                <p className="text-muted-foreground mb-3 text-sm">
-                  Our Pro Support package includes dedicated email support, priority bug fixes, and
-                  architecture review sessions.
-                </p>
-                <Link href="/pricing" className="text-primary text-sm font-medium hover:underline">
-                  View Support Options
-                </Link>
-              </CardContent>
-            </Card>
+          <div className={shared.ctaRow} style={{ justifyContent: 'center' }}>
+            <a href="#message" className={`${shared.btn} ${shared.btnPrimary}`}>
+              Send a message <ArrowRight />
+            </a>
+            <Link href="/#how" className={`${shared.btn} ${shared.btnGhost}`}>
+              See how it works
+            </Link>
           </div>
         </div>
-      </div>
+      </header>
+
+      {/* ---------------- Form + rail ---------------- */}
+      <section id="message" className={`${shared.section} ${shared.cream2}`}>
+        <div className={shared.inner}>
+          <div className={`${shared.sectionHead} ${shared.reveal}`}>
+            <span className={shared.eyebrow}>Send a message</span>
+            <h2 className={shared.h2}>Tell us what’s on your mind.</h2>
+            <p className={shared.lead}>
+              The more you can tell us about what you’re trying to understand, the more useful our
+              first reply will be. No question too small.
+            </p>
+          </div>
+
+          <div className={styles.contactGrid}>
+            {/* Form */}
+            <div className={`${styles.formCard} ${shared.reveal}`}>
+              <p className={styles.formKicker}>Contact form</p>
+              <p className={styles.formTitle}>Drop us a line</p>
+              <ContactForm />
+            </div>
+
+            {/* Rail */}
+            <div className={styles.rail}>
+              <div className={`${styles.railCard} ${shared.reveal}`}>
+                <div className={styles.railIcon}>
+                  <MessageCircle />
+                </div>
+                <h3 className={styles.railTitle}>What happens next</h3>
+                <p className={styles.railLead}>
+                  No autoresponders, no black hole. Here’s what to expect after you hit send.
+                </p>
+                <div className={styles.next}>
+                  {nextSteps.map((s, i) => (
+                    <div key={s.title} className={styles.nextItem}>
+                      <span className={styles.nextNum}>{i + 1}</span>
+                      <div>
+                        <h4>{s.title}</h4>
+                        <p>{s.body}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className={`${styles.railCard} ${shared.reveal}`}>
+                <div className={styles.railIcon}>
+                  <Users />
+                </div>
+                <h3 className={styles.railTitle}>Who gets in touch</h3>
+                <p className={styles.railLead}>
+                  All sorts. If you’re trying to understand people better, you’re in the right
+                  place.
+                </p>
+                <div className={styles.tags}>
+                  {audiences.map((a) => (
+                    <span key={a} className={styles.tag}>
+                      {a}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ---------------- Closing CTA ---------------- */}
+      <section className={`${shared.section} ${shared.finalCta}`}>
+        <div className={shared.finalInner}>
+          <h2 className={shared.finalTitle}>
+            Rather explore <em>first?</em>
+          </h2>
+          <p className={shared.finalSub}>
+            Have a look around before you reach out. See how <Wordmark /> turns a form into a
+            conversation, and what it costs.
+          </p>
+          <div className={shared.ctaRow}>
+            <Link href="/#how" className={`${shared.btn} ${shared.btnPrimary}`}>
+              See how it works <ArrowRight />
+            </Link>
+            <Link href="/pricing" className={`${shared.btn} ${shared.btnGhost}`}>
+              View pricing
+            </Link>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }

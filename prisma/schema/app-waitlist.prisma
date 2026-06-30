@@ -1,0 +1,23 @@
+// ConQuest waitlist — pre-launch demand capture for the marketing site.
+//
+// Public, unauthenticated sign-ups from the "join the waitlist" CTAs (home,
+// pricing, /waitlist) while the self-serve platform is pre-release. ConQuest-
+// owned (App-prefixed) and kept in its own schema file so it doesn't touch the
+// Sunrise-tracked `app.prisma`.
+//
+// No User FK — these are prospects, not accounts — so the new-relation onDelete
+// rule doesn't apply. `email` is standalone PII triaged by an admin rather than
+// erased through eraseUser().
+model AppWaitlistSignup {
+  id        String   @id @default(cuid())
+  name      String
+  email     String
+  useCase   String?  @db.Text // optional "what you'd use ConQuest for"
+  source    String? // which CTA/page the sign-up came from (e.g. "home", "pricing")
+  createdAt DateTime @default(now())
+  read      Boolean  @default(false) // admin triage flag, mirrors ContactSubmission
+
+  @@index([read, createdAt])
+  @@index([email])
+  @@map("app_waitlist_signup")
+}

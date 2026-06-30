@@ -26,11 +26,12 @@ import {
   Hammer,
   Sprout,
 } from 'lucide-react';
+import { Wordmark } from '@/components/app/marketing/wordmark';
 import shared from '@/components/app/marketing/conquest-marketing.module.css';
 import styles from '@/app/(public)/pricing/pricing.module.css';
 
 const metaDescription =
-  'ConQuest pricing: self-serve SaaS subscriptions to turn questionnaires into conversations, plus bespoke implementations that build deep analysis, narration, charting and reporting around the ConQuest core.';
+  'ConQuest pricing: bespoke implementations that build deep analysis, narration, charting and reporting around the ConQuest core today, with a self-serve SaaS platform on the way. Join the waitlist to be first.';
 
 export const metadata: Metadata = {
   title: 'Pricing',
@@ -47,16 +48,6 @@ export const metadata: Metadata = {
   },
 };
 
-/** Reusable ConQuest wordmark: white "Con" + yellow "Quest" on dark, ink + gold on light. */
-function Wordmark() {
-  return (
-    <span className={shared.brand}>
-      <span className={shared.brandCon}>Con</span>
-      <span className={shared.brandQ}>Quest</span>
-    </span>
-  );
-}
-
 const coreTags = [
   { icon: BarChart3, label: 'Deep analysis' },
   { icon: FileText, label: 'Narrative reports' },
@@ -71,20 +62,18 @@ const tiers = [
     name: 'Explore',
     tagline:
       'Turn your first questionnaire into a conversation and see the difference on your own content.',
-    currency: '£',
-    amount: '[ XX ]',
-    unit: '/ mo',
-    billing: 'billed monthly · cancel anytime',
+    currency: '',
+    amount: 'Coming soon',
+    unit: '',
+    billing: 'Pricing confirmed at launch',
     featured: false,
-    cta: { label: 'Start exploring', href: '/signup' },
+    cta: { label: 'Join the waitlist', href: '/waitlist?from=pricing' },
     featuresLabel: "What's included",
     features: [
       <>
         <b>1</b> live questionnaire
       </>,
-      <>
-        Up to <b>[ XXX ]</b> conversations / mo
-      </>,
+      'A monthly conversation allowance',
       'Text responses',
       'Automatic questionnaire ingestion',
       'Structured slot extraction',
@@ -95,21 +84,17 @@ const tiers = [
     name: 'Professional',
     tagline:
       'For teams running questionnaires regularly, who want depth, voice and analysis as standard.',
-    currency: '£',
-    amount: '[ XXX ]',
-    unit: '/ mo',
-    billing: 'billed monthly · or save with annual',
+    currency: '',
+    amount: 'Coming soon',
+    unit: '',
+    billing: 'Pricing confirmed at launch',
     featured: true,
     badge: 'Most popular',
     cta: { label: 'Request a demo', href: '/contact' },
     featuresLabel: 'Everything in Explore, plus',
     features: [
-      <>
-        Up to <b>[ XX ]</b> live questionnaires
-      </>,
-      <>
-        <b>[ XX,XXX ]</b> conversations / mo
-      </>,
+      'Multiple live questionnaires',
+      'A higher monthly conversation volume',
       'Voice or text responses',
       'Adaptive follow-up & contradiction checks',
       'AI-powered analysis & themes',
@@ -126,7 +111,7 @@ const tiers = [
     unit: '',
     billing: 'tailored to volume & requirements',
     featured: false,
-    cta: { label: 'Talk to sales', href: '/contact' },
+    cta: { label: 'Talk to us', href: '/contact' },
     featuresLabel: 'Everything in Professional, plus',
     features: [
       'Unlimited questionnaires & high volume',
@@ -208,12 +193,12 @@ const includedEverywhere = [
 const paths = [
   {
     variant: 'light' as const,
-    kicker: 'Self-serve',
+    kicker: 'Self-serve · coming soon',
     title: 'SaaS subscription',
     lead: (
       <>
-        Sign up, bring a questionnaire and go live in an afternoon. The whole <Wordmark /> platform,
-        priced to scale with how much you run.
+        Bring a questionnaire and go live in an afternoon, once it launches. The whole <Wordmark />{' '}
+        platform, priced to scale with how much you run.
       </>
     ),
     points: [
@@ -222,16 +207,16 @@ const paths = [
       'Built-in analysis, themes and reporting are enough',
       'You’d rather a predictable monthly subscription',
     ],
-    cta: { label: 'See the plans', href: '#plans' },
+    cta: { label: 'See what’s coming', href: '#plans' },
   },
   {
     variant: 'ink' as const,
-    kicker: 'Bespoke',
+    kicker: 'Bespoke · available now',
     title: 'Custom implementation',
     lead: (
       <>
         We build around the <Wordmark /> core, shaped to your domain: your analysis methodology,
-        your narration, your charts, your reporting — your product.
+        your narration, your charts, your reporting, your product.
       </>
     ),
     points: [
@@ -387,16 +372,25 @@ const buildSteps = [
 
 const faqs = [
   {
-    q: 'What counts as a “conversation”?',
-    a: 'One respondent completing one questionnaire, however long the dialogue runs and whether they speak or type. You’re billed on completed conversations, not on messages or minutes.',
-  },
-  {
-    q: 'Can we start on a subscription and move to a custom build later?',
+    q: 'Is the self-serve platform available yet?',
     a: (
       <>
-        Absolutely, and most people do. Start self-serve to prove the value on real responses, then
-        let us build the deeper analysis, narration and reporting around it when you’re ready. Your
-        questionnaires and data come with you.
+        Not yet. Bespoke builds and guided demos are available today, and the self-serve platform is
+        on its way. Join the waitlist and you’ll be among the first to use it, and help shape it.
+      </>
+    ),
+  },
+  {
+    q: 'What counts as a “conversation”?',
+    a: 'One respondent completing one questionnaire, however long the dialogue runs and whether they speak or type. When the platform launches you’ll be billed on completed conversations, not on messages or minutes.',
+  },
+  {
+    q: 'Can we start now and move onto the platform later?',
+    a: (
+      <>
+        Yes, and most will. Start today with a bespoke build or a guided demo on your own content.
+        When the self-serve platform launches you can move onto it, and your questionnaires and data
+        come with you.
       </>
     ),
   },
@@ -418,8 +412,8 @@ const faqs = [
     ),
   },
   {
-    q: 'Do you offer annual billing or non-profit pricing?',
-    a: 'Yes. Annual plans come at a discount, and we offer reduced pricing for education, healthcare and non-profit organisations. Tell us about your work and we’ll find the right fit.',
+    q: 'Will you offer annual billing or non-profit pricing?',
+    a: 'That’s the plan. We expect annual plans to come at a discount, with reduced pricing for education, healthcare and non-profit organisations. Tell us about your work via the waitlist and we’ll factor it in.',
   },
 ];
 
@@ -454,9 +448,9 @@ export default function PricingPage() {
               Or <em>build your&nbsp;own.</em>
             </h1>
             <p className={`${shared.heroSub} ${shared.rise}`} style={{ animationDelay: '0.16s' }}>
-              Two ways to work with <Wordmark />. Go live this week on a self-serve plan, or let us
-              build a bespoke product around the core: deep analysis, robust narration, custom
-              charting and reporting, shaped entirely to your organisation.
+              Two ways to work with <Wordmark />. Today, we build a bespoke product around the core:
+              deep analysis, robust narration, custom charting and reporting, shaped entirely to
+              your organisation. A self-serve plan is on its way.
             </p>
             <div className={`${shared.ctaRow} ${shared.rise}`} style={{ animationDelay: '0.24s' }}>
               <a href="#plans" className={`${shared.btn} ${shared.btnPrimary}`}>
@@ -467,7 +461,7 @@ export default function PricingPage() {
               </Link>
             </div>
             <p className={`${shared.heroTrust} ${shared.rise}`} style={{ animationDelay: '0.32s' }}>
-              <b>Subscribe in minutes.</b> <span className={shared.dotSep} /> Build without limits.{' '}
+              <b>Bespoke builds today.</b> <span className={shared.dotSep} /> Self-serve soon.{' '}
               <span className={shared.dotSep} /> Own your data.
             </p>
           </div>
@@ -478,7 +472,7 @@ export default function PricingPage() {
               <div className={styles.coreCard}>
                 <span className={styles.coreBadge}>The ConQuest core</span>
                 <p className={styles.coreTitle}>One conversation engine</p>
-                <p className={styles.coreSub}>Subscribe to it, or build on top of it.</p>
+                <p className={styles.coreSub}>Build on it today, subscribe soon.</p>
                 <div className={styles.coreTags}>
                   {coreTags.map((t) => {
                     const Icon = t.icon;
@@ -503,12 +497,10 @@ export default function PricingPage() {
         <div className={shared.inner}>
           <div className={`${shared.sectionHead} ${shared.reveal}`}>
             <span className={shared.eyebrow}>Two ways in</span>
-            <h2 className={shared.h2}>
-              Subscribe to the platform, or build your own on top of it.
-            </h2>
+            <h2 className={shared.h2}>Build bespoke now, or subscribe to the platform soon.</h2>
             <p className={shared.lead}>
               The same conversation engine powers both. Pick the entry point that fits where you are
-              today — you can always go deeper later.
+              today. You can always go deeper later.
             </p>
           </div>
 
@@ -586,11 +578,12 @@ export default function PricingPage() {
       <section id="plans" className={shared.section}>
         <div className={shared.inner}>
           <div className={`${shared.sectionHead} ${shared.reveal}`}>
-            <span className={shared.eyebrow}>SaaS subscriptions</span>
+            <span className={shared.eyebrow}>SaaS subscriptions · coming soon</span>
             <h2 className={shared.h2}>Plans that scale with how much you ask.</h2>
             <p className={shared.lead}>
-              Every plan is the full conversational experience — the difference is volume, depth and
-              support. Prices shown are indicative; final pricing is confirmed for your usage.
+              Every plan is the full conversational experience. The difference is volume, depth and
+              support. We’re still setting prices, and founding users help shape them, so join the
+              waitlist and you’ll hear first.
             </p>
           </div>
 
@@ -637,6 +630,14 @@ export default function PricingPage() {
             ))}
           </div>
 
+          <p className={`${styles.priceFoot} ${shared.reveal}`}>
+            Don’t want to wait? A bespoke build is available today.{' '}
+            <Link href="#custom" style={{ color: 'var(--blue)', fontWeight: 600 }}>
+              See what a custom implementation can do
+            </Link>
+            .
+          </p>
+
           <div className={`${styles.included} ${shared.reveal}`}>
             <div className={styles.includedHead}>
               <ShieldCheck /> In every plan
@@ -652,11 +653,13 @@ export default function PricingPage() {
           </div>
 
           <p className={styles.priceFoot}>
-            Annual billing, education, healthcare and non-profit pricing available —{' '}
-            <Link href="/contact" style={{ color: 'var(--blue)', fontWeight: 600 }}>
-              ask us
-            </Link>
-            .
+            You bring your own AI provider, so you control the model, the cost and where data lives,
+            and the usage-driven part of the bill is yours rather than marked up by us. Education,
+            healthcare and non-profit pricing will be part of the mix at launch.{' '}
+            <Link href="/waitlist?from=pricing" style={{ color: 'var(--blue)', fontWeight: 600 }}>
+              Join the waitlist
+            </Link>{' '}
+            to help shape it.
           </p>
         </div>
       </section>
@@ -698,7 +701,7 @@ export default function PricingPage() {
             <h2 className={shared.h2}>The core is the start. The build is yours.</h2>
             <p className={shared.lead}>
               <Wordmark /> turns questions into understanding. A bespoke implementation takes that
-              understanding and builds an entire product around it — your methodology, your outputs,
+              understanding and builds an entire product around it: your methodology, your outputs,
               your brand. These are some of the directions teams take it.
             </p>
           </div>
@@ -750,6 +753,18 @@ export default function PricingPage() {
               );
             })}
           </div>
+
+          <div
+            className={`${shared.ctaRow} ${shared.reveal}`}
+            style={{ justifyContent: 'center', marginTop: 'clamp(44px, 5vw, 60px)' }}
+          >
+            <Link href="/contact" className={`${shared.btn} ${shared.btnPrimary}`}>
+              Request a demo <ArrowRight />
+            </Link>
+            <Link href="/#how" className={`${shared.btn} ${shared.btnGhost}`}>
+              See how it works
+            </Link>
+          </div>
         </div>
       </section>
 
@@ -789,15 +804,15 @@ export default function PricingPage() {
             Then <em>build past it.</em>
           </h2>
           <p className={shared.finalSub}>
-            Start with one questionnaire on a plan, or tell us what you’re trying to build. Either
-            way, <Wordmark /> grows with you.
+            Tell us what you’re trying to build, or join the waitlist for the self-serve platform.
+            Either way, <Wordmark /> grows with you.
           </p>
           <div className={shared.ctaRow}>
             <Link href="/contact" className={`${shared.btn} ${shared.btnPrimary}`}>
               Request a demo <ArrowRight />
             </Link>
-            <Link href="/signup" className={`${shared.btn} ${shared.btnGhost}`}>
-              Get started
+            <Link href="/waitlist?from=pricing" className={`${shared.btn} ${shared.btnGhost}`}>
+              Join the waitlist
             </Link>
           </div>
         </div>

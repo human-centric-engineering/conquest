@@ -1,0 +1,91 @@
+/*
+ * Waitlist page — bespoke layer on top of the shared ConQuest marketing system
+ * (conquest-marketing.module.css). Same approach as contact.module.css: reuse
+ * the palette tokens (inherited via the `.page` custom properties) and add only
+ * the waitlist-specific layout — a centred hero intro and a single centred form
+ * card — plus scoped overrides that harmonise the app-tier WaitlistForm
+ * (shadcn inputs/button) with the marigold/ink palette.
+ */
+
+/* ---------- Hero intro (single centred column) ---------- */
+.heroIntro {
+  position: relative;
+  z-index: 1;
+  max-width: 720px;
+  margin-inline: auto;
+  text-align: center;
+}
+.heroIntro .heroSub {
+  margin-inline: auto;
+}
+
+/* ---------- Form card ---------- */
+.formWrap {
+  max-width: 600px;
+  margin-inline: auto;
+}
+.formCard {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 26px;
+  padding: clamp(28px, 3.5vw, 44px);
+  box-shadow: var(--shadow-sm);
+}
+.formKicker {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--blue);
+}
+.formTitle {
+  font-family: var(--font-display-cq), Georgia, serif;
+  font-weight: 600;
+  font-size: clamp(24px, 3vw, 30px);
+  letter-spacing: -0.015em;
+  margin: 10px 0 24px;
+  line-height: 1.1;
+}
+.formNote {
+  margin: 20px 0 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--t-muted);
+  text-align: center;
+}
+
+/*
+ * Harmonise the shadcn-based WaitlistForm with the page palette. Scoped under
+ * .formCard so nothing leaks. (Same treatment as contact.module.css.)
+ */
+.formCard :global(label) {
+  color: var(--t-ink);
+  font-weight: 600;
+}
+.formCard :global(input),
+.formCard :global(textarea) {
+  border-radius: 12px;
+}
+:global(html.dark) .formCard :global(input),
+:global(html.dark) .formCard :global(textarea) {
+  border-color: rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.04);
+}
+:global(html.dark) .formCard :global(input:focus-visible),
+:global(html.dark) .formCard :global(textarea:focus-visible) {
+  border-color: var(--blue-bright);
+}
+.formCard :global(button[type='submit']) {
+  border-radius: 999px !important;
+  background: var(--yellow) !important;
+  color: var(--ink) !important;
+  font-weight: 600;
+  box-shadow: 0 14px 34px -12px rgba(255, 179, 0, 0.55);
+  transition:
+    background 0.18s ease,
+    transform 0.18s ease;
+}
+.formCard :global(button[type='submit']:hover:not(:disabled)) {
+  background: var(--yellow-strong) !important;
+  transform: translateY(-2px);
+}
