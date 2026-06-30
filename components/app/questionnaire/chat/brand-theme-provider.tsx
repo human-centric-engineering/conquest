@@ -34,7 +34,7 @@ function LogoMark({ onSurface, hasBackdrop }: { onSurface: boolean; hasBackdrop:
     <span
       role="img"
       aria-label="Brand logo"
-      className={cn('block h-8 w-40 bg-contain bg-no-repeat', onSurface ? 'bg-left' : 'bg-center')}
+      className={cn('block h-10 w-48 bg-contain bg-no-repeat', onSurface ? 'bg-left' : 'bg-center')}
       style={{ backgroundImage: 'var(--app-logo-url)' }}
     />
   );
@@ -65,7 +65,7 @@ export function BrandThemeProvider({ theme, className, children }: BrandThemePro
         <div
           className={cn(
             'flex shrink-0 items-center',
-            hasSurface ? 'justify-start px-4 py-3 sm:px-6' : 'justify-center py-3'
+            hasSurface ? 'justify-start px-4 py-2 sm:px-6' : 'justify-center py-2'
           )}
           style={hasSurface ? { backgroundColor: 'var(--app-surface-color)' } : undefined}
         >
