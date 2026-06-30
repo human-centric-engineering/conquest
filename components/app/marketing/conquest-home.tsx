@@ -46,9 +46,9 @@ const metaDescription =
   'ConQuest turns any questionnaire, survey or assessment into a natural conversation: the structure of a form with the depth of a conversation. Higher completion, richer data, less bias.';
 
 export const metadata: Metadata = {
-  // Homepage title — `absolute` so it isn't suffixed by the layout's
+  // Homepage title, `absolute` so it isn't suffixed by the layout's
   // `%s - ConQuest` template.
-  title: { absolute: 'ConQuest — The structure of a form. The depth of a conversation.' },
+  title: { absolute: 'ConQuest: The structure of a form. The depth of a conversation.' },
   description: metaDescription,
   openGraph: {
     title: 'ConQuest: The structure of a form. The depth of a conversation.',
@@ -241,7 +241,7 @@ const useCases = [
   {
     icon: Telescope,
     title: 'Discovery',
-    body: 'Customer and user discovery that gets past the script — the needs, jobs and frustrations people never think to put on a form.',
+    body: 'Customer and user discovery that gets past the script: the needs, jobs and frustrations people never think to put on a form.',
   },
   {
     icon: Star,
@@ -261,7 +261,7 @@ const useCases = [
   {
     icon: Gauge,
     title: 'Team sentiment',
-    body: 'Take the temperature of a team in their own words — honest, unhurried check-ins people actually finish.',
+    body: 'Take the temperature of a team in their own words. Honest, unhurried check-ins people actually finish.',
   },
   {
     icon: Network,
@@ -668,12 +668,10 @@ export default function ConquestHome() {
       {/*
         Replaces the (placeholder) social-proof block. With no customers or data
         yet, the most authentic credibility we own is the founders, so this band
-        leads with the human/ethos element and carries the early-access CTA.
-        When real logos / testimonials / stats exist they can return here (or
-        just below). Headshots, names, roles and the mission line are PLACEHOLDER
-        — swap the initials avatars for <Image> and confirm copy before launch.
-        The waitlist CTA points at /contact until the dedicated waitlist capture
-        is built.
+        leads with the human/ethos element and carries the early-access waitlist
+        CTA. When real logos / testimonials / stats exist they can return here
+        (or just below). The founder roles and mission line are a first pass;
+        confirm the copy before launch.
       */}
       <section className={`${styles.section} ${styles.ink}`}>
         <div className={styles.inner}>
