@@ -132,13 +132,35 @@ export async function importOrchestrationConfig(
             retentionDays: agent.retentionDays,
             providerConfig: (agent.providerConfig as Prisma.InputJsonValue) ?? Prisma.JsonNull,
             widgetConfig: (agent.widgetConfig as Prisma.InputJsonValue) ?? Prisma.JsonNull,
+            // Discriminator + inheritance + attachment + runtime-prompt fields.
+            // The schema defaults them for older bundles, so an overwrite always
+            // applies a coherent value rather than silently leaving the prior one.
+            kind: agent.kind,
+            persona: agent.persona,
+            guardrails: agent.guardrails,
+            personaMode: agent.personaMode,
+            voiceMode: agent.voiceMode,
+            guardrailsMode: agent.guardrailsMode,
+            enableVoiceInput: agent.enableVoiceInput,
+            enableImageInput: agent.enableImageInput,
+            enableDocumentInput: agent.enableDocumentInput,
+            runtimePromptManaged: agent.runtimePromptManaged,
+            runtimePromptNote: agent.runtimePromptNote,
           },
         });
         result.agents.updated++;
       } else {
+        // Strip every backup-only field that is NOT an `AiAgent` column before
+        // spreading into `create` — Prisma rejects unknown args. `knowledgeCategories`
+        // is kept on the wire for old-bundle back-compat (and the v1->v2 tag
+        // backfill above still reads it off `agent`), but the column was dropped
+        // in Phase 6, so it must not reach `create` (#353). The grant arrays are
+        // applied separately below.
         const {
           grantedTagSlugs: _ignoreTagSlugs,
+          grantedDocumentSlugs: _ignoreDocSlugs,
           grantedDocumentHashes: _ignoreDocHashes,
+          knowledgeCategories: _ignoreKnowledgeCategories,
           ...createAgent
         } = agent;
         await tx.aiAgent.create({
@@ -193,23 +215,44 @@ export async function importOrchestrationConfig(
         });
       }
 
-      // Document grants resolve via fileHash — content-derived, stable across envs.
-      const docHashes = agent.grantedDocumentHashes ?? [];
+      // Document grants resolve via slug (v3 — the stable cross-env key, #338).
+      // v2 backups carried `grantedDocumentHashes` instead; fall back to fileHash
+      // lookup only when no slugs are present, so older bundles still restore.
+      const docSlugs = agent.grantedDocumentSlugs ?? [];
       let resolvedDocIds: string[] = [];
-      if (docHashes.length > 0) {
+      if (docSlugs.length > 0) {
         const docs = await tx.aiKnowledgeDocument.findMany({
-          where: { fileHash: { in: docHashes } },
-          select: { id: true, fileHash: true },
+          where: { slug: { in: docSlugs } },
+          select: { id: true, slug: true },
         });
-        const presentHashes = new Set(docs.map((d) => d.fileHash));
-        for (const h of docHashes) {
-          if (!presentHashes.has(h)) {
+        const presentSlugs = new Set(docs.map((d) => d.slug));
+        for (const slug of docSlugs) {
+          if (!presentSlugs.has(slug)) {
             result.warnings.push(
-              `Agent '${agent.slug}' references missing knowledge document (fileHash ${h.slice(0, 12)}…); grant skipped`
+              `Agent '${agent.slug}' references missing knowledge document slug '${slug}'; grant skipped`
             );
           }
         }
         resolvedDocIds = docs.map((d) => d.id);
+      } else {
+        const docHashes = agent.grantedDocumentHashes ?? [];
+        if (docHashes.length > 0) {
+          const docs = await tx.aiKnowledgeDocument.findMany({
+            where: { fileHash: { in: docHashes } },
+            select: { id: true, fileHash: true },
+          });
+          const presentHashes = new Set(docs.map((d) => d.fileHash));
+          for (const h of docHashes) {
+            if (!presentHashes.has(h)) {
+              result.warnings.push(
+                `Agent '${agent.slug}' references missing knowledge document (fileHash ${h.slice(0, 12)}…); grant skipped`
+              );
+            }
+          }
+          // A single fileHash can match multiple documents (content dedup is
+          // advisory, not unique) — restrict to one grant per agent+document.
+          resolvedDocIds = [...new Set(docs.map((d) => d.id))];
+        }
       }
       await tx.aiAgentKnowledgeDocument.deleteMany({ where: { agentId: target.id } });
       if (resolvedDocIds.length > 0) {

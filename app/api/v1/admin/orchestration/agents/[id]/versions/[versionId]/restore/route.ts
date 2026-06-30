@@ -10,12 +10,12 @@
  * Authentication: Admin role required.
  */
 
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { withAdminAuth } from '@/lib/auth/guards';
 import { prisma } from '@/lib/db/client';
 import { successResponse } from '@/lib/api/responses';
-import { ForbiddenError, NotFoundError, ValidationError } from '@/lib/api/errors';
+import { NotFoundError, ValidationError } from '@/lib/api/errors';
 import { getClientIP } from '@/lib/security/ip';
 import { getRouteLogger } from '@/lib/api/context';
 import { cuidSchema } from '@/lib/validations/common';
@@ -23,42 +23,39 @@ import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { logger } from '@/lib/logging';
 import {
   systemInstructionsHistorySchema,
+  updateAgentObjectSchema,
   type SystemInstructionsHistoryEntry,
 } from '@/lib/validations/orchestration';
+import {
+  SYSTEM_AGENT_PROTECTED_FIELDS,
+  getAgentField,
+  versionedScalarFieldNames,
+} from '@/lib/orchestration/agents/agent-field-registry';
+import {
+  asSnapshotJson,
+  buildAgentSnapshot,
+  nextAgentVersionNumber,
+} from '@/lib/orchestration/agents/agent-versioning';
+import { invalidateAgentAccess } from '@/lib/orchestration/knowledge/resolveAgentDocumentAccess';
 
-const versionSnapshotSchema = z.object({
-  name: z.string().optional(),
-  slug: z.string().optional(),
-  description: z.string().optional(),
-  isActive: z.boolean().optional(),
-  systemInstructions: z.string().optional(),
-  model: z.string().optional(),
-  provider: z.string().optional(),
-  fallbackProviders: z.array(z.string()).optional(),
-  temperature: z.number().nullable().optional(),
-  maxTokens: z.number().int().nullable().optional(),
-  reasoningEffort: z.enum(['minimal', 'low', 'medium', 'high']).nullable().optional(),
-  topicBoundaries: z.array(z.string()).optional(),
-  brandVoiceInstructions: z.string().nullable().optional(),
+/**
+ * A version snapshot is validated against the same per-field rules a PATCH uses
+ * (`updateAgentObjectSchema`) — every versioned field is an optional field
+ * there, so enum/bound validation is preserved and a snapshot can never restore
+ * an invalid value into a plain `String` column. Unknown keys (e.g. the
+ * long-dropped `knowledgeCategories`) are stripped; absent fields are skipped on
+ * apply. Which fields are written back is the registry's job
+ * (`versionedScalarFieldNames()`), so restore covers the full versioned config
+ * by construction.
+ *
+ * `metadata` / `providerConfig` are relaxed to opaque optionals: they're
+ * arbitrary JSON the DB may hold as `null`, which the PATCH schema (built for
+ * user input) doesn't accept. A stored snapshot only needs them to round-trip —
+ * they were validated when first written — so we don't re-validate their shape.
+ */
+const versionSnapshotSchema = updateAgentObjectSchema.extend({
   metadata: z.unknown().optional(),
-  // `knowledgeCategories` was dropped in Phase 6. Older version snapshots
-  // may still include it; we accept and ignore the field rather than
-  // refusing to restore them.
-  knowledgeCategories: z.array(z.string()).optional(),
-  rateLimitRpm: z.number().int().nullable().optional(),
-  visibility: z.enum(['internal', 'public', 'invite_only']).optional(),
-  inputGuardMode: z.enum(['log_only', 'warn_and_continue', 'block']).nullable().optional(),
-  outputGuardMode: z.enum(['log_only', 'warn_and_continue', 'block']).nullable().optional(),
-  citationGuardMode: z.enum(['log_only', 'warn_and_continue', 'block']).nullable().optional(),
-  maxHistoryTokens: z.number().int().nullable().optional(),
-  maxHistoryMessages: z.number().int().nullable().optional(),
-  retentionDays: z.number().int().nullable().optional(),
   providerConfig: z.unknown().optional(),
-  monthlyBudgetUsd: z.number().nullable().optional(),
-  maxCostPerTurnUsd: z.number().nullable().optional(),
-  enableVoiceInput: z.boolean().optional(),
-  enableImageInput: z.boolean().optional(),
-  enableDocumentInput: z.boolean().optional(),
 });
 
 export const POST = withAdminAuth<{ id: string; versionId: string }>(
@@ -78,12 +75,14 @@ export const POST = withAdminAuth<{ id: string; versionId: string }>(
       throw new ValidationError('Invalid version id', { versionId: ['Must be a valid CUID'] });
     const versionId = parsedVersionId.data;
 
-    const agent = await prisma.aiAgent.findUnique({ where: { id } });
+    const agent = await prisma.aiAgent.findUnique({
+      where: { id },
+      include: {
+        grantedTags: { select: { tagId: true } },
+        grantedDocuments: { select: { documentId: true } },
+      },
+    });
     if (!agent) throw new NotFoundError(`Agent ${id} not found`);
-
-    if (agent.isSystem) {
-      throw new ForbiddenError('Cannot restore versions on system agents');
-    }
 
     const version = await prisma.aiAgentVersion.findFirst({
       where: { id: versionId, agentId: id },
@@ -97,11 +96,25 @@ export const POST = withAdminAuth<{ id: string; versionId: string }>(
       });
     }
     const snapshot = parsed.data;
+    const snapshotRecord = snapshot as Record<string, unknown>;
 
-    // If the snapshot restores systemInstructions, push the current value
-    // onto the history column (same pattern as the PATCH route).
-    const updateData: Prisma.AiAgentUncheckedUpdateInput = {};
+    // System agents are restorable, but the same fields the PATCH route guards
+    // as read-only stay untouched: a restore must not revert a system agent's
+    // slug, systemInstructions, or active state to an arbitrary snapshot — that
+    // would defeat the platform's read-only guarantees. Every other versioned
+    // field (model, guard modes, persona, knowledge config, grants) is restored.
+    // Non-system agents restore the full config.
+    const skip = agent.isSystem
+      ? new Set<string>(SYSTEM_AGENT_PROTECTED_FIELDS)
+      : new Set<string>();
+
+    const updateData: Record<string, unknown> = {};
+
+    // systemInstructions is restored with history tracking: push the current
+    // value onto the history column (same pattern as the PATCH route) before
+    // overwriting. Skipped entirely for system agents (protected, read-only).
     if (
+      !skip.has('systemInstructions') &&
       snapshot.systemInstructions !== undefined &&
       snapshot.systemInstructions !== agent.systemInstructions
     ) {
@@ -124,74 +137,122 @@ export const POST = withAdminAuth<{ id: string; versionId: string }>(
       });
       updateData.systemInstructions = snapshot.systemInstructions;
       updateData.systemInstructionsHistory = history;
-    } else if (snapshot.systemInstructions !== undefined) {
+    } else if (!skip.has('systemInstructions') && snapshot.systemInstructions !== undefined) {
       updateData.systemInstructions = snapshot.systemInstructions;
     }
 
-    if (snapshot.name !== undefined) updateData.name = snapshot.name;
-    if (snapshot.slug !== undefined) updateData.slug = snapshot.slug;
-    if (snapshot.description !== undefined) updateData.description = snapshot.description;
-    if (snapshot.isActive !== undefined) updateData.isActive = snapshot.isActive;
-    if (snapshot.model !== undefined) updateData.model = snapshot.model;
-    if (snapshot.provider !== undefined) updateData.provider = snapshot.provider;
-    if (snapshot.fallbackProviders !== undefined)
-      updateData.fallbackProviders = snapshot.fallbackProviders;
-    if (snapshot.temperature !== undefined && snapshot.temperature !== null)
-      updateData.temperature = snapshot.temperature;
-    if (snapshot.maxTokens !== undefined && snapshot.maxTokens !== null)
-      updateData.maxTokens = snapshot.maxTokens;
-    if (snapshot.reasoningEffort !== undefined)
-      updateData.reasoningEffort = snapshot.reasoningEffort;
-    if (snapshot.topicBoundaries !== undefined)
-      updateData.topicBoundaries = snapshot.topicBoundaries;
-    if (snapshot.brandVoiceInstructions !== undefined)
-      updateData.brandVoiceInstructions = snapshot.brandVoiceInstructions;
-    // `snapshot.knowledgeCategories` is accepted by the schema for backwards-
-    // compat with older versions but the underlying column was dropped in
-    // Phase 6 — nothing to write.
-    if (snapshot.rateLimitRpm !== undefined) updateData.rateLimitRpm = snapshot.rateLimitRpm;
-    if (snapshot.visibility !== undefined) updateData.visibility = snapshot.visibility;
-    if (snapshot.metadata !== undefined)
-      updateData.metadata = snapshot.metadata as Prisma.InputJsonValue;
-    if (snapshot.inputGuardMode !== undefined) updateData.inputGuardMode = snapshot.inputGuardMode;
-    if (snapshot.outputGuardMode !== undefined)
-      updateData.outputGuardMode = snapshot.outputGuardMode;
-    if (snapshot.citationGuardMode !== undefined)
-      updateData.citationGuardMode = snapshot.citationGuardMode;
-    if (snapshot.maxHistoryTokens !== undefined)
-      updateData.maxHistoryTokens = snapshot.maxHistoryTokens;
-    if (snapshot.maxHistoryMessages !== undefined)
-      updateData.maxHistoryMessages = snapshot.maxHistoryMessages;
-    if (snapshot.retentionDays !== undefined) updateData.retentionDays = snapshot.retentionDays;
-    if (snapshot.providerConfig !== undefined)
-      updateData.providerConfig = snapshot.providerConfig as Prisma.InputJsonValue;
-    if (snapshot.monthlyBudgetUsd !== undefined)
-      updateData.monthlyBudgetUsd = snapshot.monthlyBudgetUsd;
-    if (snapshot.maxCostPerTurnUsd !== undefined)
-      updateData.maxCostPerTurnUsd = snapshot.maxCostPerTurnUsd;
-    if (snapshot.enableVoiceInput !== undefined)
-      updateData.enableVoiceInput = snapshot.enableVoiceInput;
-    if (snapshot.enableImageInput !== undefined)
-      updateData.enableImageInput = snapshot.enableImageInput;
-    if (snapshot.enableDocumentInput !== undefined)
-      updateData.enableDocumentInput = snapshot.enableDocumentInput;
+    // Apply every other versioned scalar present in the snapshot. The set is
+    // registry-derived, so restore covers the full versioned config by
+    // construction. knowledgeAccessMode IS restored here now (alongside the
+    // grants below + the cache invalidation) — it was deferred in #333 because
+    // restore didn't yet reapply grants; #330 closes that.
+    for (const field of versionedScalarFieldNames()) {
+      if (field === 'systemInstructions') continue; // handled above (history-tracked)
+      if (skip.has(field)) continue; // protected system fields
+      const value = snapshotRecord[field];
+      if (value === undefined) continue;
+      // JSON columns (metadata/providerConfig) reject a literal null on write —
+      // coerce to Prisma.JsonNull, as the create/clone/import paths do.
+      updateData[field] = getAgentField(field)?.json && value === null ? Prisma.JsonNull : value;
+    }
 
-    // Wrap in a transaction to prevent race conditions on version numbering
+    // Resolve the knowledge grants this restore lands on. Snapshots capture
+    // grants by value; restore them so the agent's knowledge access matches the
+    // target version. Tags/documents deleted since the snapshot are dropped (a
+    // stale id would FK-fail the whole restore) and logged. A snapshot that
+    // predates grant versioning (no grant keys) leaves grants untouched.
+    const currentTagIds = (agent.grantedTags ?? []).map((g) => g.tagId);
+    const currentDocumentIds = (agent.grantedDocuments ?? []).map((g) => g.documentId);
+
+    const snapshotTagIds = Array.isArray(snapshotRecord.grantedTagIds)
+      ? snapshotRecord.grantedTagIds.filter((v): v is string => typeof v === 'string')
+      : undefined;
+    const snapshotDocumentIds = Array.isArray(snapshotRecord.grantedDocumentIds)
+      ? snapshotRecord.grantedDocumentIds.filter((v): v is string => typeof v === 'string')
+      : undefined;
+
+    let resolvedTagIds = currentTagIds;
+    if (snapshotTagIds !== undefined) {
+      const existing =
+        snapshotTagIds.length > 0
+          ? await prisma.knowledgeTag.findMany({
+              where: { id: { in: snapshotTagIds } },
+              select: { id: true },
+            })
+          : [];
+      const existingIds = new Set(existing.map((t) => t.id));
+      resolvedTagIds = snapshotTagIds.filter((tid) => existingIds.has(tid));
+      const dropped = snapshotTagIds.filter((tid) => !existingIds.has(tid));
+      if (dropped.length > 0) {
+        logger.warn('Restore: dropping tag grants for tags deleted since the snapshot', {
+          agentId: id,
+          versionId,
+          dropped,
+        });
+      }
+    }
+
+    let resolvedDocumentIds = currentDocumentIds;
+    if (snapshotDocumentIds !== undefined) {
+      const existing =
+        snapshotDocumentIds.length > 0
+          ? await prisma.aiKnowledgeDocument.findMany({
+              where: { id: { in: snapshotDocumentIds } },
+              select: { id: true },
+            })
+          : [];
+      const existingIds = new Set(existing.map((d) => d.id));
+      resolvedDocumentIds = snapshotDocumentIds.filter((did) => existingIds.has(did));
+      const dropped = snapshotDocumentIds.filter((did) => !existingIds.has(did));
+      if (dropped.length > 0) {
+        logger.warn('Restore: dropping document grants for documents deleted since the snapshot', {
+          agentId: id,
+          versionId,
+          dropped,
+        });
+      }
+    }
+
+    // Apply the restore + the post-restore version in one transaction. The new
+    // version snapshots the RESULTING (post-restore) config — point-in-time, so
+    // it equals the target version's config except for any protected system
+    // fields left at their current values. The pre-restore state is already the
+    // agent's newest version (newest-row-equals-live), so it needs no separate
+    // snapshot.
     const { updated, nextVersion } = await prisma.$transaction(async (tx) => {
       const txUpdated = await tx.aiAgent.update({ where: { id }, data: updateData });
 
-      const lastVersion = await tx.aiAgentVersion.findFirst({
-        where: { agentId: id },
-        orderBy: { version: 'desc' },
-        select: { version: true },
-      });
-      const txNextVersion = (lastVersion?.version ?? 0) + 1;
+      // Replace grants only when the snapshot carried them.
+      if (snapshotTagIds !== undefined) {
+        await tx.aiAgentKnowledgeTag.deleteMany({ where: { agentId: id } });
+        if (resolvedTagIds.length > 0) {
+          await tx.aiAgentKnowledgeTag.createMany({
+            data: resolvedTagIds.map((tagId) => ({ agentId: id, tagId })),
+            skipDuplicates: true,
+          });
+        }
+      }
+      if (snapshotDocumentIds !== undefined) {
+        await tx.aiAgentKnowledgeDocument.deleteMany({ where: { agentId: id } });
+        if (resolvedDocumentIds.length > 0) {
+          await tx.aiAgentKnowledgeDocument.createMany({
+            data: resolvedDocumentIds.map((documentId) => ({ agentId: id, documentId })),
+            skipDuplicates: true,
+          });
+        }
+      }
 
+      const txNextVersion = await nextAgentVersionNumber(tx, id);
       await tx.aiAgentVersion.create({
         data: {
           agentId: id,
           version: txNextVersion,
-          snapshot: version.snapshot as Prisma.InputJsonValue,
+          snapshot: asSnapshotJson(
+            buildAgentSnapshot(txUpdated, {
+              grantedTagIds: resolvedTagIds,
+              grantedDocumentIds: resolvedDocumentIds,
+            })
+          ),
           changeSummary: `Restored from version ${version.version}`,
           createdBy: session.user.id,
         },
@@ -199,6 +260,10 @@ export const POST = withAdminAuth<{ id: string; versionId: string }>(
 
       return { updated: txUpdated, nextVersion: txNextVersion };
     });
+
+    // The restore may have changed knowledgeAccessMode and/or the grants — evict
+    // the resolver cache so the next chat turn sees the restored access.
+    invalidateAgentAccess(id);
 
     log.info('Agent restored from version', {
       agentId: id,

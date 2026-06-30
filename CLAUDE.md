@@ -302,6 +302,7 @@ All commands default to branch diff mode but accept file/folder paths. The test-
 | Workflow Versioning      | `.context/orchestration/workflow-versioning.md`           | Publish/draft/rollback model, execution pinning, audit events                                                                 |
 | Cost Estimation          | `.context/orchestration/cost-estimation.md`               | Generic pre-run USD estimate service; empirical/heuristic modes; trigger-UI recipe                                            |
 | Step Provenance          | `.context/orchestration/provenance.md`                    | `output.sources` contract, engine capture, approval/trace UI pills, opt-in guard rule                                         |
+| Agent Field Registry     | `.context/orchestration/agent-fields.md`                  | Single source of truth for `AiAgent` config fields; how to add a field, derived vs parity-tested surfaces, fork seam          |
 | Patterns & Steps         | `.context/orchestration/patterns-and-steps.md`            | The 21 canonical patterns, step→pattern relationships, author guidance                                                        |
 | Orchestration Engine     | `.context/orchestration/engine.md`                        | Runtime executor, registry, events, strategies                                                                                |
 | Tracing (OTEL plug-in)   | `.context/orchestration/tracing.md`                       | Tracer interface, no-op default, OTEL adapter, span tree, attributes                                                          |
@@ -355,6 +356,7 @@ All commands default to branch diff mode but accept file/folder paths. The test-
 | Setup Wizard             | `.context/admin/setup-wizard.md`                          | 5-step guided setup flow, resume behavior                                                                                     |
 | Contextual Help          | `.context/ui/contextual-help.md`                          | `<FieldHelp>` directive for form fields                                                                                       |
 | UI Hooks                 | `.context/ui/hooks.md`                                    | `useLocalStorage`, `useWizard`                                                                                                |
+| Per-Surface Theming      | `.context/ui/surface-theming.md`                          | `data-surface` seam: proxy classification, `<SurfaceSync>`, fork-owned `brand-theme.css`, the six design constraints          |
 
 ## Troubleshooting
 

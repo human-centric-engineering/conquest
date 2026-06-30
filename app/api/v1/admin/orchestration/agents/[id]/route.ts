@@ -21,7 +21,7 @@ import { Prisma } from '@prisma/client';
 import { withAdminAuth } from '@/lib/auth/guards';
 import { prisma } from '@/lib/db/client';
 import { successResponse } from '@/lib/api/responses';
-import { ForbiddenError, NotFoundError, ValidationError } from '@/lib/api/errors';
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '@/lib/api/errors';
 import { validateRequestBody } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
 import { getClientIP } from '@/lib/security/ip';
@@ -30,6 +30,16 @@ import { emitHookEvent } from '@/lib/orchestration/hooks/registry';
 import { dispatchWebhookEvent } from '@/lib/orchestration/webhooks/dispatcher';
 import { logger } from '@/lib/logging';
 import { buildChangeSummary } from '@/lib/orchestration/agent-version-diff';
+import {
+  patchAssignableScalarFields,
+  versionedScalarFieldNames,
+} from '@/lib/orchestration/agents/agent-field-registry';
+import {
+  INITIAL_VERSION_SUMMARY,
+  asSnapshotJson,
+  buildAgentSnapshot,
+  nextAgentVersionNumber,
+} from '@/lib/orchestration/agents/agent-versioning';
 import { invalidateAgentAccess } from '@/lib/orchestration/knowledge/resolveAgentDocumentAccess';
 import { notifyMcpAgentsChanged } from '@/lib/orchestration/mcp/resource-update-hooks';
 import {
@@ -127,6 +137,12 @@ export const PATCH = withAdminAuth<{ id: string }>(async (request, session, { pa
 
   const body = await validateRequestBody(request, updateAgentSchema);
 
+  // System-agent read-only guards. These three fields are the
+  // SYSTEM_AGENT_PROTECTED_FIELDS set (lib/orchestration/agents/agent-field-registry.ts) —
+  // the version-restore route skips the same set. Keep both in step: a new
+  // protected field is added to the constant AND guarded here (the messages are
+  // field-specific, so the guards aren't a generic loop).
+
   // System agents cannot be deactivated via PATCH (equivalent to deletion).
   if (current.isSystem && body.isActive === false) {
     throw new ForbiddenError('System agents cannot be deactivated');
@@ -147,53 +163,16 @@ export const PATCH = withAdminAuth<{ id: string }>(async (request, session, { pa
   }
 
   // Build the update payload. Only include fields the caller actually sent.
+  // Plain scalar fields are assigned generically from the registry's
+  // patch-assignable set, so a new agent field is picked up here automatically.
+  // systemInstructions (history) and profileId (relation) are special-write
+  // fields, handled explicitly below.
   const data: Prisma.AiAgentUpdateInput = {};
-  if (body.name !== undefined) data.name = body.name;
-  if (body.slug !== undefined) data.slug = body.slug;
-  if (body.description !== undefined) data.description = body.description;
-  if (body.model !== undefined) data.model = body.model;
-  if (body.provider !== undefined) data.provider = body.provider;
-  if (body.providerConfig !== undefined) {
-    data.providerConfig = body.providerConfig as Prisma.InputJsonValue;
+  const bodyRecord = body as Record<string, unknown>;
+  const dataRecord = data as Record<string, unknown>;
+  for (const field of patchAssignableScalarFields()) {
+    if (bodyRecord[field] !== undefined) dataRecord[field] = bodyRecord[field];
   }
-  if (body.temperature !== undefined) data.temperature = body.temperature;
-  if (body.maxTokens !== undefined) data.maxTokens = body.maxTokens;
-  if (body.reasoningEffort !== undefined) data.reasoningEffort = body.reasoningEffort;
-  if (body.monthlyBudgetUsd !== undefined) data.monthlyBudgetUsd = body.monthlyBudgetUsd;
-  if (body.maxCostPerTurnUsd !== undefined) data.maxCostPerTurnUsd = body.maxCostPerTurnUsd;
-  if (body.metadata !== undefined) {
-    data.metadata = body.metadata;
-  }
-  if (body.isActive !== undefined) data.isActive = body.isActive;
-  if (body.knowledgeAccessMode !== undefined) data.knowledgeAccessMode = body.knowledgeAccessMode;
-  if (body.knowledgeRetrievalMode !== undefined)
-    data.knowledgeRetrievalMode = body.knowledgeRetrievalMode;
-  if (body.knowledgeTriggerKeywords !== undefined)
-    data.knowledgeTriggerKeywords = body.knowledgeTriggerKeywords;
-  if (body.topicBoundaries !== undefined) data.topicBoundaries = body.topicBoundaries;
-  if (body.brandVoiceInstructions !== undefined)
-    data.brandVoiceInstructions = body.brandVoiceInstructions;
-  if (body.rateLimitRpm !== undefined) data.rateLimitRpm = body.rateLimitRpm;
-  if (body.visibility !== undefined) data.visibility = body.visibility;
-  if (body.fallbackProviders !== undefined) data.fallbackProviders = body.fallbackProviders;
-  if (body.inputGuardMode !== undefined) data.inputGuardMode = body.inputGuardMode;
-  if (body.outputGuardMode !== undefined) data.outputGuardMode = body.outputGuardMode;
-  if (body.citationGuardMode !== undefined) data.citationGuardMode = body.citationGuardMode;
-  if (body.maxHistoryTokens !== undefined) data.maxHistoryTokens = body.maxHistoryTokens;
-  if (body.maxHistoryMessages !== undefined) data.maxHistoryMessages = body.maxHistoryMessages;
-  if (body.retentionDays !== undefined) data.retentionDays = body.retentionDays;
-  if (body.enableVoiceInput !== undefined) data.enableVoiceInput = body.enableVoiceInput;
-  if (body.enableImageInput !== undefined) data.enableImageInput = body.enableImageInput;
-  if (body.enableDocumentInput !== undefined) data.enableDocumentInput = body.enableDocumentInput;
-  if (body.runtimePromptManaged !== undefined)
-    data.runtimePromptManaged = body.runtimePromptManaged;
-  if (body.runtimePromptNote !== undefined) data.runtimePromptNote = body.runtimePromptNote;
-  // Agent-profile inheritance fields.
-  if (body.persona !== undefined) data.persona = body.persona;
-  if (body.guardrails !== undefined) data.guardrails = body.guardrails;
-  if (body.personaMode !== undefined) data.personaMode = body.personaMode;
-  if (body.voiceMode !== undefined) data.voiceMode = body.voiceMode;
-  if (body.guardrailsMode !== undefined) data.guardrailsMode = body.guardrailsMode;
   if (body.profileId !== undefined) {
     // Use the relation form so null cleanly detaches the agent. Setting
     // the scalar `profileId` directly works for non-null values but
@@ -227,56 +206,15 @@ export const PATCH = withAdminAuth<{ id: string }>(async (request, session, { pa
     data.systemInstructionsHistory = history;
   }
 
-  // Version-triggering fields — snapshot the current config before
-  // the update if any of these are changing. Every editable field on
-  // the admin form is included so the audit trail is complete:
-  // operators rely on the version list to recover from accidental
-  // changes (description rewrites, slug typos, active-flag flips), so
-  // omitting any field silently loses recovery surface.
-  const VERSIONED_FIELDS = [
-    'name',
-    'slug',
-    'description',
-    'isActive',
-    'systemInstructions',
-    'model',
-    'temperature',
-    'maxTokens',
-    'topicBoundaries',
-    'brandVoiceInstructions',
-    'provider',
-    'fallbackProviders',
-    'knowledgeAccessMode',
-    'knowledgeRetrievalMode',
-    'knowledgeTriggerKeywords',
-    'rateLimitRpm',
-    'visibility',
-    'inputGuardMode',
-    'outputGuardMode',
-    'citationGuardMode',
-    'maxHistoryTokens',
-    'maxHistoryMessages',
-    'retentionDays',
-    'providerConfig',
-    'monthlyBudgetUsd',
-    'maxCostPerTurnUsd',
-    'metadata',
-    'enableVoiceInput',
-    'enableImageInput',
-    'enableDocumentInput',
-    'runtimePromptManaged',
-    'runtimePromptNote',
-    'persona',
-    'guardrails',
-    'personaMode',
-    'voiceMode',
-    'guardrailsMode',
-    // profileId intentionally excluded from VERSIONED_FIELDS — `data` uses
-    // the Prisma relation form (`profile: { connect }` / `disconnect`), so
-    // the scalar key isn't in `data`. The profile linkage is a pointer
-    // rather than content; the inheritance change shows up implicitly
-    // through the persona/voice/guardrails effective values.
-  ] as const;
+  // Version-triggering fields — snapshot the current config before the update
+  // if any of these are changing. Derived from the agent field registry (the
+  // single source of truth), so the audit trail is complete by construction:
+  // every versioned scalar is included and a new field can't silently lose
+  // recovery surface. Grant relations are versioned too but detected separately
+  // below (they're join-row writes, not entries in `data`). `profileId` is a
+  // pointer, not content, so it's non-versioned in the registry — the
+  // inheritance change surfaces through the resolved persona/voice/guardrails.
+  const VERSIONED_FIELDS = versionedScalarFieldNames();
 
   // Only treat a versioned field as "changed" if the new value actually
   // differs from the stored value. Previously this filtered on
@@ -306,10 +244,9 @@ export const PATCH = withAdminAuth<{ id: string }>(async (request, session, { pa
     return newValue !== currentValue;
   };
 
+  const currentRecord = current as unknown as Record<string, unknown>;
   const changedVersionedFields = VERSIONED_FIELDS.filter(
-    (f) =>
-      data[f] !== undefined &&
-      isFieldChanged(data[f], (current as unknown as Record<string, unknown>)[f])
+    (f) => dataRecord[f] !== undefined && isFieldChanged(dataRecord[f], currentRecord[f])
   );
 
   // Grant changes don't go through the `data` object (they're join-row writes),
@@ -338,82 +275,54 @@ export const PATCH = withAdminAuth<{ id: string }>(async (request, session, { pa
   // unversioned fields.
   let bumpedToVersion: number | null = null;
 
+  const versionEvent = changedVersionedFields.length > 0 || grantsChanged;
+  const summaryFields = [
+    ...changedVersionedFields,
+    ...(tagGrantsChanged ? (['grantedTagIds'] as const) : []),
+    ...(docGrantsChanged ? (['grantedDocumentIds'] as const) : []),
+  ];
+
+  // The grant lists as they will be AFTER this PATCH — the body's lists when it
+  // sent them, otherwise unchanged. Drives the post-update snapshot below.
+  const newGrantedTagIds = body.grantedTagIds ?? currentGrantedTagIds;
+  const newGrantedDocumentIds = body.grantedDocumentIds ?? currentGrantedDocumentIds;
+
   try {
-    // Auto-create version snapshot if versioned fields changed.
-    // Both the snapshot and the update run inside a transaction so an
-    // update failure doesn't leave an orphaned version entry.
+    // Point-in-time versioning: a version row holds the config AS OF that
+    // version. When versioned fields/grants change we snapshot the POST-update
+    // state (not the pre-update state), so "restore to vN" reproduces the agent
+    // as it was at vN and the newest row always equals live. Snapshot + update
+    // run in one transaction so a failure can't orphan a version row.
     const agent = await prisma.$transaction(async (tx) => {
-      if (changedVersionedFields.length > 0 || grantsChanged) {
-        // Get next version number
-        const lastVersion = await tx.aiAgentVersion.findFirst({
-          where: { agentId: id },
-          orderBy: { version: 'desc' },
-          select: { version: true },
-        });
-        const nextVersion = (lastVersion?.version ?? 0) + 1;
-        bumpedToVersion = nextVersion;
-
-        // Snapshot the current (pre-update) agent config
-        const snapshot = {
-          name: current.name,
-          slug: current.slug,
-          description: current.description,
-          isActive: current.isActive,
-          systemInstructions: current.systemInstructions,
-          model: current.model,
-          provider: current.provider,
-          fallbackProviders: current.fallbackProviders,
-          temperature: current.temperature,
-          maxTokens: current.maxTokens,
-          reasoningEffort: current.reasoningEffort,
-          topicBoundaries: current.topicBoundaries,
-          brandVoiceInstructions: current.brandVoiceInstructions,
-          metadata: current.metadata,
-          knowledgeAccessMode: current.knowledgeAccessMode,
-          knowledgeRetrievalMode: current.knowledgeRetrievalMode,
-          knowledgeTriggerKeywords: current.knowledgeTriggerKeywords,
-          grantedTagIds: currentGrantedTagIds,
-          grantedDocumentIds: currentGrantedDocumentIds,
-          rateLimitRpm: current.rateLimitRpm,
-          visibility: current.visibility,
-          inputGuardMode: current.inputGuardMode,
-          outputGuardMode: current.outputGuardMode,
-          citationGuardMode: current.citationGuardMode,
-          maxHistoryTokens: current.maxHistoryTokens,
-          maxHistoryMessages: current.maxHistoryMessages,
-          retentionDays: current.retentionDays,
-          providerConfig: current.providerConfig,
-          monthlyBudgetUsd: current.monthlyBudgetUsd,
-          maxCostPerTurnUsd: current.maxCostPerTurnUsd,
-          enableVoiceInput: current.enableVoiceInput,
-          enableImageInput: current.enableImageInput,
-          enableDocumentInput: current.enableDocumentInput,
-          runtimePromptManaged: current.runtimePromptManaged,
-          runtimePromptNote: current.runtimePromptNote,
-        };
-
-        const summaryFields = [
-          ...changedVersionedFields,
-          ...(tagGrantsChanged ? (['grantedTagIds'] as const) : []),
-          ...(docGrantsChanged ? (['grantedDocumentIds'] as const) : []),
-        ];
-        const changeSummary = buildChangeSummary(summaryFields);
-
-        await tx.aiAgentVersion.create({
-          data: {
-            agentId: id,
-            version: nextVersion,
-            snapshot: snapshot,
-            changeSummary,
-            createdBy: session.user.id,
-          },
-        });
-
-        log.info('Agent version snapshot created', {
-          agentId: id,
-          version: nextVersion,
-          changes: summaryFields,
-        });
+      // Decide the version numbering up front with a single query.
+      // `nextAgentVersionNumber` returns 1 iff the agent has no version rows yet
+      // — a legacy agent created before create-time versioning. In that case we
+      // backfill its PRE-update state as v1 ("Initial configuration") so the
+      // original isn't lost when the post-update row lands, and the post-update
+      // row becomes v2. New agents already have v1 from create, so the next
+      // number is ≥ 2 and no backfill happens.
+      let postVersion = 0;
+      if (versionEvent) {
+        const firstNumber = await nextAgentVersionNumber(tx, id);
+        if (firstNumber === 1) {
+          await tx.aiAgentVersion.create({
+            data: {
+              agentId: id,
+              version: 1,
+              snapshot: asSnapshotJson(
+                buildAgentSnapshot(current, {
+                  grantedTagIds: currentGrantedTagIds,
+                  grantedDocumentIds: currentGrantedDocumentIds,
+                })
+              ),
+              changeSummary: INITIAL_VERSION_SUMMARY,
+              createdBy: session.user.id,
+            },
+          });
+          postVersion = 2;
+        } else {
+          postVersion = firstNumber;
+        }
       }
 
       // Replace tag grants if the body provided a new list.
@@ -437,7 +346,36 @@ export const PATCH = withAdminAuth<{ id: string }>(async (request, session, { pa
         }
       }
 
-      return tx.aiAgent.update({ where: { id }, data });
+      const updated = await tx.aiAgent.update({ where: { id }, data });
+
+      // Snapshot the post-update config (incl. the just-written grants) as the
+      // new version, numbered above (post-backfill in the legacy case).
+      if (versionEvent) {
+        bumpedToVersion = postVersion;
+
+        await tx.aiAgentVersion.create({
+          data: {
+            agentId: id,
+            version: postVersion,
+            snapshot: asSnapshotJson(
+              buildAgentSnapshot(updated, {
+                grantedTagIds: newGrantedTagIds,
+                grantedDocumentIds: newGrantedDocumentIds,
+              })
+            ),
+            changeSummary: buildChangeSummary(summaryFields),
+            createdBy: session.user.id,
+          },
+        });
+
+        log.info('Agent version snapshot created', {
+          agentId: id,
+          version: postVersion,
+          changes: summaryFields,
+        });
+      }
+
+      return updated;
     });
 
     // Evict the resolver cache so the next chat turn sees the new grants.
@@ -528,9 +466,20 @@ export const PATCH = withAdminAuth<{ id: string }>(async (request, session, { pa
     return successResponse(agent);
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-      throw new ValidationError(`Agent with slug '${body.slug}' already exists`, {
-        slug: ['Slug is already in use'],
-      });
+      // Disambiguate which unique constraint collided. A slug clash is a real
+      // user error; a collision on @@unique([agentId, version]) means two
+      // concurrent PATCHes raced for the same version number — surface that as a
+      // retryable conflict, not a misleading "slug already in use".
+      const target = err.meta?.target;
+      const onSlug = Array.isArray(target)
+        ? target.includes('slug')
+        : typeof target === 'string' && target.includes('slug');
+      if (onSlug) {
+        throw new ValidationError(`Agent with slug '${body.slug}' already exists`, {
+          slug: ['Slug is already in use'],
+        });
+      }
+      throw new ConflictError('Agent update conflicted with a concurrent change. Please retry.');
     }
     throw err;
   }

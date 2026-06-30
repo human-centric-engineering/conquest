@@ -246,10 +246,9 @@ export async function proxy(request: NextRequest): Promise<NextResponse | Respon
   requestHeaders.set('x-nonce', nonce);
 
   // Classify the rendering surface so the root layout can theme the first paint —
-  // and, because the attribute lands on <html>, every body-portaled overlay
-  // (Radix dialogs / dropdowns / toasts) inherits it too. Shared predicate with
-  // the client-side <SurfaceSync>, which keeps the attribute correct across
-  // navigations (the root <html> persists, so the header alone would go stale).
+  // it sets `<html data-surface>` from this header. Kept correct across client-side
+  // navigation by `<SurfaceSync>`, which re-derives it from the pathname (the root
+  // <html> doesn't re-render on App Router nav). See lib/app/surface.ts.
   requestHeaders.set('x-surface', classifySurface(pathname));
 
   // Forward the verified visitor id to server components. The proxy is the

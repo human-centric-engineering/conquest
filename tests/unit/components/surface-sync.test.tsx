@@ -28,6 +28,16 @@ describe('SurfaceSync', () => {
     expect(document.documentElement.dataset.surface).toBe('consumer');
   });
 
+  it('updates the attribute when the pathname changes (client-side nav)', () => {
+    vi.mocked(usePathname).mockReturnValue('/q/abc123');
+    const { rerender } = render(React.createElement(SurfaceSync));
+    expect(document.documentElement.dataset.surface).toBe('consumer');
+
+    vi.mocked(usePathname).mockReturnValue('/admin/questionnaires');
+    rerender(React.createElement(SurfaceSync));
+    expect(document.documentElement.dataset.surface).toBe('admin');
+  });
+
   it('renders nothing', () => {
     vi.mocked(usePathname).mockReturnValue('/');
     const { container } = render(React.createElement(SurfaceSync));
