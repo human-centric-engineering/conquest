@@ -1,3 +1,5 @@
+import { Prisma } from '@prisma/client';
+
 import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
 
@@ -56,18 +58,30 @@ export async function getDatabaseHealth(): Promise<{
  * Execute a database transaction
  * Wrapper for Prisma transactions with error handling
  *
+ * Pass `options` to override Prisma's interactive-transaction defaults (5000 ms `timeout`,
+ * 2000 ms `maxWait`) for unusually heavy callbacks — e.g. a bulk import whose many writes can
+ * exceed the default budget under production DB latency.
+ *
  * Example:
  * ```ts
  * await executeTransaction(async (tx) => {
  *   await tx.user.create({ data: { ... } })
  *   await tx.post.create({ data: { ... } })
  * })
+ *
+ * // heavy callback needing more headroom:
+ * await executeTransaction(work, { timeout: 20_000, maxWait: 10_000 })
  * ```
  */
 export async function executeTransaction<T>(
   callback: (
     tx: Omit<typeof prisma, '$connect' | '$disconnect' | '$on' | '$transaction' | '$extends'>
-  ) => Promise<T>
+  ) => Promise<T>,
+  options?: {
+    timeout?: number;
+    maxWait?: number;
+    isolationLevel?: Prisma.TransactionIsolationLevel;
+  }
 ): Promise<T> {
-  return await prisma.$transaction(callback);
+  return await prisma.$transaction(callback, options);
 }
