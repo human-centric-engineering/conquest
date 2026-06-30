@@ -114,6 +114,18 @@ describe('Security Headers', () => {
       expect(config['report-uri']).toBe('/api/csp-report');
     });
 
+    it('allows the trusted video-embed hosts in frame-src in both environments', () => {
+      // The intro-video iframe (youtube-nocookie / player.vimeo) is otherwise blocked by the
+      // default frame-src 'self'. These are the only two hosts the resolver can ever produce.
+      for (const env of ['development', 'production'] as const) {
+        vi.stubEnv('NODE_ENV', env);
+        const frameSrc = getCSPConfig()['frame-src'];
+        expect(frameSrc).toContain("'self'");
+        expect(frameSrc).toContain('https://www.youtube-nocookie.com');
+        expect(frameSrc).toContain('https://player.vimeo.com');
+      }
+    });
+
     it('should include nonce in script-src in production when nonce is provided', () => {
       vi.stubEnv('NODE_ENV', 'production');
       const testNonce = 'abc123nonce';
