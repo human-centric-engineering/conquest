@@ -10,6 +10,7 @@ export {
   type DemoClientTheme,
   type ResolvedTheme,
   SUNRISE_THEME_DEFAULTS,
+  readableTextColor,
   resolveTheme,
   themeToCssVariables,
 } from '@/lib/app/questionnaire/theming/theme';

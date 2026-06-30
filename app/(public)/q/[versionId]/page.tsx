@@ -14,6 +14,7 @@ import { AnonymousSessionBoot } from '@/components/app/questionnaire/chat/anonym
 import { BrandThemeProvider } from '@/components/app/questionnaire/chat/brand-theme-provider';
 import { ConquestWordmark } from '@/components/app/questionnaire/conquest-wordmark';
 import { resolveThemeForVersion } from '@/lib/app/questionnaire/chat/theme';
+import { resolveVersionHeader } from '@/lib/app/questionnaire/header/resolve';
 import {
   resolveAnonymousForVersion,
   resolveAttachmentsEnabledForVersion,
@@ -75,6 +76,7 @@ export default async function PublicQuestionnairePage({
     attachmentPlatform,
     reasoningPlatform,
     theme,
+    bandHeader,
     anonymous,
     presentationMode,
     voiceConfigured,
@@ -89,6 +91,7 @@ export default async function PublicQuestionnairePage({
     isAttachmentInputEnabled(),
     isReasoningStreamEnabled(),
     resolveThemeForVersion(versionId),
+    resolveVersionHeader(versionId),
     resolveAnonymousForVersion(versionId),
     resolvePresentationModeForVersion(versionId),
     resolveVoiceEnabledForVersion(versionId),
@@ -135,7 +138,7 @@ export default async function PublicQuestionnairePage({
         </header>
       )}
       <div className="min-h-0 flex-1">
-        <BrandThemeProvider theme={theme}>
+        <BrandThemeProvider theme={theme} header={bandHeader}>
           <AnonymousSessionBoot
             versionId={versionId}
             preview={preview}
