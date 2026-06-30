@@ -715,9 +715,10 @@ export default function ConquestHome() {
             </div>
 
             <blockquote className={styles.founderQuote}>
-              “We’ve sat through too many surveys that flatten people into a checkbox. We started{' '}
-              <Wordmark /> to give everyone the questionnaire a brilliant interviewer would run, and
-              to show that software can genuinely <span>listen</span>.”
+              “We’ve seen too many surveys that flatten people into checkboxes. And we’ve seen the
+              rich information you can gather from conversations. So we started <Wordmark /> to turn
+              boring forms and questionnaires into engaging conversations.{' '}
+              <span>Forms you can talk to.</span>”
             </blockquote>
             <p className={styles.founderQuoteAttr}>
               <b>Simon &amp; John</b>, founders at Human-Centric Engineering
