@@ -457,6 +457,35 @@ describe('buildStreamingQuestionPrompt', () => {
     expect(system).not.toMatch(/adopt this persona/i);
   });
 
+  it('uses a neutral, non-emotional register by default — no baked-in "warm, emotionally attuned" voice', () => {
+    const system = text(buildStreamingQuestionPrompt(INPUT)[0].content);
+    // The hardcoded persona must not perform emotion; the neutral-register guard must be present.
+    expect(system).not.toMatch(/warm, emotionally attuned/i);
+    expect(system).toMatch(/emotionally NEUTRAL register/i);
+    expect(system).toMatch(/do not perform emotions or claim feelings/i);
+    // Curiosity is still explicitly welcome.
+    expect(system).toMatch(/genuinely curious/i);
+  });
+
+  it('opens with a neutral scene-setting line by default (no performed warmth)', () => {
+    const system = text(
+      buildStreamingQuestionPrompt({ ...INPUT, isOpening: true, questionsAsked: 0 })[0].content
+    );
+    expect(system).toMatch(/short, neutral scene-setting line/i);
+    expect(system).not.toMatch(/short, warm scene-setting line/i);
+  });
+
+  it('re-authorizes first-person warmth only when empathy is set high (the opt-in)', () => {
+    const tone = freshTone();
+    tone.empathy = { enabled: true, level: 5 };
+    const system = text(buildStreamingQuestionPrompt({ ...INPUT, tone })[0].content);
+    // High empathy explicitly permits the first-person warmth the neutral baseline forbids, and —
+    // being a later <tone> section — it governs over the <rules> guard.
+    expect(system).toMatch(/express genuine personal warmth in the first person/i);
+    // The neutral guard is still printed in <rules>; the tone clause overrides it by ordering.
+    expect(system).toMatch(/emotionally NEUTRAL register/i);
+  });
+
   it('drops the default "match their tone" line and injects the mimicry clause when mimicry is enabled', () => {
     const tone = freshTone();
     tone.mimicry = { enabled: true, level: 5 };
