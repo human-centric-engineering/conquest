@@ -349,10 +349,12 @@ export function AnonymousSessionBoot({
       // so unlike the authenticated page this can't SSR-seed — hence the on-boot fetch.)
       const { turns, inspectorTurns } = await fetchTranscript(sessionId, accessToken);
       const resumed = turns.length > 0;
-      // Splash only fronts a FRESH session (resume drops straight back in), so the intro fetch is
-      // skipped on resume and when the platform flag is off — no wasted round-trip.
-      const intro =
-        introScreenEnabled && !resumed ? await fetchIntro(sessionId, accessToken) : null;
+      // The intro rides the workspace carousel as a tab, so it must be present on BOTH a fresh
+      // session AND a resume — a returning respondent can still slide back to re-read it. Resolve it
+      // whenever the platform flag is on (skipping only that round-trip when off); `autoStart` alone
+      // is resume-gated below, so a resumed session simply doesn't land on the intro. This mirrors
+      // the authenticated page, which passes `intro` unconditionally.
+      const intro = introScreenEnabled ? await fetchIntro(sessionId, accessToken) : null;
       setState({
         phase: 'ready',
         sessionId,

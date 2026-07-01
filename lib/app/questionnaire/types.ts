@@ -938,7 +938,7 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   coverageThreshold: 1,
   answerConfidenceFloor: 0.5,
   allowEarlyFinish: false,
-  earlyFinishMinCoverage: 0.5,
+  earlyFinishMinCoverage: 1,
   earlyFinishMinQuestions: 0,
   costBudgetUsd: null,
   maxQuestionsPerSession: null,

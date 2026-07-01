@@ -33,6 +33,7 @@ function view(): AnswerPanelView {
             provenance: null,
             confidence: null,
             rationale: null,
+            respondentEdited: false,
             answeredAtTurnIndex: null,
             refinementHistory: [],
           },

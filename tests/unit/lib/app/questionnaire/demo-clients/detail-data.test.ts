@@ -31,7 +31,9 @@ vi.mock('@/lib/logging', () => ({ logger: mockLogger }));
 // ─── Imports (after mocks) ────────────────────────────────────────────────────
 
 import type { DemoClientDetail, DemoClientView } from '@/lib/app/questionnaire/demo-clients';
+import type { QuestionnaireListItem } from '@/lib/app/questionnaire/views';
 import {
+  getAttributableQuestionnaires,
   getDemoClientDetailCached,
   getReassignTargets,
 } from '@/lib/app/questionnaire/demo-clients/detail-data';
@@ -144,6 +146,76 @@ describe('getReassignTargets', () => {
     expect(await getReassignTargets('current')).toEqual([]);
     expect(mockLogger.error).toHaveBeenCalledWith(
       'demo client detail: reassign targets fetch failed',
+      err
+    );
+  });
+});
+
+// ─── getAttributableQuestionnaires ────────────────────────────────────────────
+
+function makeListItem(over: Partial<QuestionnaireListItem> = {}): QuestionnaireListItem {
+  return {
+    id: 'q1',
+    title: 'Onboarding',
+    status: 'draft',
+    versionCount: 1,
+    latestVersion: null,
+    sectionCount: 0,
+    questionCount: 0,
+    dataSlotCount: 0,
+    demoClient: null,
+    createdAt: '',
+    updatedAt: '',
+    ...over,
+  };
+}
+
+describe('getAttributableQuestionnaires', () => {
+  it('returns only the generic (unattributed) questionnaires, mapped to {id, title, status}', async () => {
+    mockServerFetch.mockResolvedValueOnce(okResponse);
+    mockParseApiResponse.mockResolvedValueOnce({
+      success: true,
+      data: [
+        makeListItem({ id: 'free-1', title: 'Free one', status: 'launched', demoClient: null }),
+        makeListItem({
+          id: 'taken',
+          title: 'Taken',
+          demoClient: { id: 'c2', slug: 'x', name: 'X' },
+        }),
+        makeListItem({ id: 'free-2', title: 'Free two', status: 'draft', demoClient: null }),
+      ],
+    });
+
+    const result = await getAttributableQuestionnaires();
+
+    // attributed one filtered out; generics kept and trimmed to the row shape
+    expect(result).toEqual([
+      { id: 'free-1', title: 'Free one', status: 'launched' },
+      { id: 'free-2', title: 'Free two', status: 'draft' },
+    ]);
+    expect(mockServerFetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/v1/app/questionnaires')
+    );
+  });
+
+  it('degrades to an empty list when the response is !ok', async () => {
+    mockServerFetch.mockResolvedValueOnce(errorResponse);
+    expect(await getAttributableQuestionnaires()).toEqual([]);
+    expect(mockParseApiResponse).not.toHaveBeenCalled();
+  });
+
+  it('degrades to an empty list when the body reports success=false', async () => {
+    mockServerFetch.mockResolvedValueOnce(okResponse);
+    mockParseApiResponse.mockResolvedValueOnce({ success: false, error: { code: 'INTERNAL' } });
+    expect(await getAttributableQuestionnaires()).toEqual([]);
+  });
+
+  it('degrades to an empty list and logs when serverFetch throws', async () => {
+    const err = new Error('Boom');
+    mockServerFetch.mockRejectedValueOnce(err);
+    expect(await getAttributableQuestionnaires()).toEqual([]);
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      'demo client detail: attributable questionnaires fetch failed',
       err
     );
   });

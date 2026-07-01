@@ -17,21 +17,39 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Prisma } from '@prisma/client';
 
 vi.mock('@/lib/db/utils', () => ({ executeTransaction: vi.fn() }));
-// authoring-routes (imported transitively for jsonInput) touches prisma at load.
-vi.mock('@/lib/db/client', () => ({ prisma: { appQuestionSlot: { findFirst: vi.fn() } } }));
+// authoring-routes (imported transitively for jsonInput) touches prisma at load; the fork-confirm
+// prompt branch reads the version list via prisma.appQuestionnaireVersion.findMany.
+const prismaMock = vi.hoisted(() => ({
+  appQuestionSlot: { findFirst: vi.fn() },
+  appQuestionnaireVersion: { findMany: vi.fn() },
+}));
+vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
+// Fork confirmation reads the `x-fork-confirm` request header. Default (null) → no header → the
+// legacy "fork silently" path, so every pre-existing fork test is unchanged.
+const headerState = vi.hoisted(() => ({ value: null as string | null }));
+vi.mock('next/headers', () => ({
+  headers: vi.fn(
+    async () => new Headers(headerState.value ? { 'x-fork-confirm': headerState.value } : {})
+  ),
+}));
 vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({ logAdminAction: vi.fn() }));
-// The fork trigger reads the route-local (Prisma) blocker counter (F3.2). Stub it
-// to zero blockers so the fork decision here is driven solely by `status` — the
-// real count is covered by the status/invitations integration tests.
-vi.mock('@/app/api/v1/app/questionnaires/_lib/launch-blockers', () => ({
-  countLaunchBlockers: vi.fn(async () => ({ sessions: 0, invitations: 0 })),
-  hasLaunchBlockers: (b: { sessions: number; invitations: number }) =>
-    b.sessions > 0 || b.invitations > 0,
+// The fork trigger reads the route-local (Prisma) blocker counter (F3.2). Stub only the
+// Prisma-touching `countLaunchBlockers`; keep the REAL `hasLaunchBlockers` predicate (a pure
+// re-export) via importOriginal so the fork decision can't silently drift from production.
+const { mockCountLaunchBlockers } = vi.hoisted(() => ({ mockCountLaunchBlockers: vi.fn() }));
+vi.mock('@/app/api/v1/app/questionnaires/_lib/launch-blockers', async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import('@/app/api/v1/app/questionnaires/_lib/launch-blockers')
+  >()),
+  countLaunchBlockers: mockCountLaunchBlockers,
 }));
 
 import { executeTransaction } from '@/lib/db/utils';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
-import { forkVersionIfLaunched } from '@/app/api/v1/app/questionnaires/_lib/fork';
+import {
+  forkVersionIfLaunched,
+  ForkConfirmationRequiredError,
+} from '@/app/api/v1/app/questionnaires/_lib/fork';
 import type { ScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
 
 type Mock = ReturnType<typeof vi.fn>;
@@ -68,6 +86,11 @@ const tx = {
   },
   appQuestionnaireConfig: {
     create: vi.fn(async () => ({ id: 'newcfg-1' })),
+  },
+  // Present so the "never copies change records" test can assert the write is never ATTEMPTED
+  // (behaviour) rather than that the fixture lacks the property (mock structure).
+  appQuestionnaireExtractionChange: {
+    createMany: vi.fn(async () => ({ count: 0 })),
   },
   // copyVersionGraph carries the pgvector embeddings via raw UPDATE … FROM (the
   // `embedding` column is Prisma-Unsupported), inside the same transaction.
@@ -153,11 +176,75 @@ beforeEach(() => {
   vi.clearAllMocks();
   sectionSeq = 0;
   tagSeq = 0;
+  headerState.value = null; // default: legacy fork-through
+  mockCountLaunchBlockers.mockResolvedValue({ sessions: 0, invitations: 0 });
+  prismaMock.appQuestionnaireVersion.findMany.mockResolvedValue([]);
   (executeTransaction as unknown as Mock).mockImplementation((cb: (t: typeof tx) => unknown) =>
     cb(tx)
   );
   tx.appQuestionnaireVersion.findUniqueOrThrow.mockResolvedValue(sourceGraph());
   tx.appQuestionnaireVersion.findFirst.mockResolvedValue({ versionNumber: 3 });
+});
+
+describe('forkVersionIfLaunched — fork confirmation', () => {
+  it('throws ForkConfirmationRequiredError (no write) when a launched edit is unconfirmed (prompt)', async () => {
+    headerState.value = 'prompt';
+    prismaMock.appQuestionnaireVersion.findMany.mockResolvedValue([
+      { versionNumber: 2, status: 'launched' },
+      { versionNumber: 1, status: 'archived' },
+    ]);
+
+    const err = await forkVersionIfLaunched(scoped()).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(ForkConfirmationRequiredError);
+    expect((err as ForkConfirmationRequiredError).status).toBe(409);
+    expect((err as ForkConfirmationRequiredError).details).toEqual({
+      sourceVersionNumber: 2,
+      nextVersionNumber: 3, // max existing (2) + 1
+      versions: [
+        { versionNumber: 2, status: 'launched' },
+        { versionNumber: 1, status: 'archived' },
+      ],
+    });
+    // Nothing was written — the throw precedes the transaction.
+    expect(executeTransaction).not.toHaveBeenCalled();
+    expect(logAdminAction).not.toHaveBeenCalled();
+  });
+
+  it('forks normally when the launched edit is confirmed', async () => {
+    headerState.value = 'confirmed';
+
+    const result = await forkVersionIfLaunched(scoped(), { userId: 'admin-1' });
+
+    expect(result.forked).toBe(true);
+    expect(executeTransaction).toHaveBeenCalled();
+    expect(logAdminAction).toHaveBeenCalled();
+  });
+
+  it('forks silently (legacy) when no x-fork-confirm header is present', async () => {
+    const result = await forkVersionIfLaunched(scoped(), { userId: 'admin-1' });
+
+    expect(result.forked).toBe(true);
+    expect(executeTransaction).toHaveBeenCalled();
+  });
+
+  it('does not prompt for a draft edit even with the prompt header', async () => {
+    headerState.value = 'prompt';
+    const result = await forkVersionIfLaunched(scoped({ status: 'draft', versionNumber: 1 }));
+    expect(result).toEqual({ versionId: 'v1', forked: false, versionNumber: 1 });
+    expect(executeTransaction).not.toHaveBeenCalled();
+  });
+
+  it('forks a draft version pinned by launch blockers (real hasLaunchBlockers path)', async () => {
+    // A draft with a live blocker (invitation/session) must still fork — the OR arm of
+    // `status === 'launched' || hasLaunchBlockers(...)` the status-only tests never exercise.
+    mockCountLaunchBlockers.mockResolvedValue({ sessions: 0, invitations: 1 });
+    const result = await forkVersionIfLaunched(scoped({ status: 'draft', versionNumber: 1 }), {
+      userId: 'admin-1',
+    });
+    expect(result.forked).toBe(true);
+    expect(executeTransaction).toHaveBeenCalled();
+  });
 });
 
 describe('forkVersionIfLaunched — no fork', () => {
@@ -276,7 +363,7 @@ describe('forkVersionIfLaunched — fork', () => {
         clientIp: '203.0.113.7',
       })
     );
-    expect(tx).not.toHaveProperty('appQuestionnaireExtractionChange');
+    expect(tx.appQuestionnaireExtractionChange.createMany).not.toHaveBeenCalled();
   });
 
   it('copies the tag vocabulary, preserving label/normalizedLabel and omitting a null colour', async () => {

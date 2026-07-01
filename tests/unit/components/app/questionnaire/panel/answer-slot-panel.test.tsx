@@ -27,6 +27,7 @@ function answeredSlot(over: Partial<PanelSlotView> = {}): PanelSlotView {
     confidence: 0.9,
     rationale: 'Stated directly.',
     answeredAtTurnIndex: 1,
+    respondentEdited: false,
     refinementHistory: [],
     ...over,
   };
@@ -45,6 +46,7 @@ function pendingSlot(over: Partial<PanelSlotView> = {}): PanelSlotView {
     confidence: null,
     rationale: null,
     answeredAtTurnIndex: null,
+    respondentEdited: false,
     refinementHistory: [],
     ...over,
   };

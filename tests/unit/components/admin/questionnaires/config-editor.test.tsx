@@ -269,6 +269,21 @@ describe('ConfigEditor', () => {
     expect(bodyOf(specs).coverageThreshold).toBe(0.8);
   });
 
+  // ── early finish: coverage shown as a whole percent, stored as a 0–1 fraction ──
+  it('shows the early-finish coverage as a percent and saves it back as a fraction', () => {
+    // Default 1.0 renders as "100"; entering 50(%) must persist as 0.5.
+    const { specs } = setup({ allowEarlyFinish: true, earlyFinishMinCoverage: 1 });
+    const pctInput = screen
+      .getAllByRole('spinbutton')
+      .find((el) => (el as HTMLInputElement).value === '100') as HTMLElement;
+    expect(pctInput).toBeDefined();
+    fireEvent.change(pctInput, { target: { value: '50' } });
+    clickSave();
+    expect(bodyOf(specs).earlyFinishMinCoverage).toBe(0.5);
+    // The question bar defaults to 0 (off) and is sent as-is.
+    expect(bodyOf(specs).earlyFinishMinQuestions).toBe(0);
+  });
+
   // ── Voice / Attachments / Anonymous toggles ──────────────────────────────────
 
   it('reflects voiceEnabled in the Switch', () => {

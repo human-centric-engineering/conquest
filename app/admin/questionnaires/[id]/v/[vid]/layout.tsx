@@ -21,6 +21,7 @@ import { notFound } from 'next/navigation';
 import { BreadcrumbLabel } from '@/components/admin/breadcrumb-context';
 import { DuplicateQuestionnaireButton } from '@/components/admin/questionnaires/workspace/duplicate-questionnaire-button';
 import { EditableTitle } from '@/components/admin/questionnaires/workspace/editable-title';
+import { ForkConfirmProvider } from '@/components/admin/questionnaires/fork-confirm-provider';
 import { QuestionnaireSubNav } from '@/components/admin/questionnaires/workspace/questionnaire-sub-nav';
 import { VersionSelector } from '@/components/admin/questionnaires/workspace/version-selector';
 import { PreviewRespondentButton } from '@/components/admin/questionnaires/workspace/preview-respondent-button';
@@ -144,7 +145,9 @@ export default async function QuestionnaireWorkspaceLayout({ params, children }:
         />
       </header>
 
-      {children}
+      {/* One fork-confirmation dialog for the whole workspace: any tab's edit that would fork a
+          launched version routes through it (via authoringMutate) before writing. */}
+      <ForkConfirmProvider>{children}</ForkConfirmProvider>
     </div>
   );
 }

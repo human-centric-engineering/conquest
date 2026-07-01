@@ -17,8 +17,10 @@ import { cache } from 'react';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
+import type { QuestionnaireListItem } from '@/lib/app/questionnaire/views';
 import type {
   AttributedDemoClient,
+  AttributedQuestionnaireRow,
   DemoClientDetail,
   DemoClientView,
 } from '@/lib/app/questionnaire/demo-clients';
@@ -58,6 +60,32 @@ export async function getReassignTargets(currentId: string): Promise<AttributedD
       .map((c) => ({ id: c.id, slug: c.slug, name: c.name }));
   } catch (err) {
     logger.error('demo client detail: reassign targets fetch failed', err);
+    return [];
+  }
+}
+
+/**
+ * DEMO-ONLY (F2.5.1): questionnaires available to attribute to this client from the detail page —
+ * the *generic* (unattributed) ones. Reassigning a questionnaire already branded as another client
+ * stays in that client's row menu ("Reassign to"), so this list is deliberately the not-yet-branded
+ * set. Degrades to an empty list, which the picker renders as a disabled "nothing to attribute" hint.
+ */
+export async function getAttributableQuestionnaires(): Promise<AttributedQuestionnaireRow[]> {
+  try {
+    // The list endpoint has no server-side `demoClient` filter, so we fetch a page and filter
+    // client-side. Capped at the first 100 (demo tooling — a demo instance realistically has far
+    // fewer): if a deployment ever exceeds 100 questionnaires, generic ones beyond that page won't
+    // appear here and must be attributed from the questionnaire's own Settings tab. Widen the limit
+    // or add a `demoClient` query filter if that ceiling is ever hit.
+    const res = await serverFetch(`${API.APP.QUESTIONNAIRES.ROOT}?page=1&limit=100`);
+    if (!res.ok) return [];
+    const body = await parseApiResponse<QuestionnaireListItem[]>(res);
+    if (!body.success) return [];
+    return body.data
+      .filter((q) => q.demoClient === null)
+      .map((q) => ({ id: q.id, title: q.title, status: q.status }));
+  } catch (err) {
+    logger.error('demo client detail: attributable questionnaires fetch failed', err);
     return [];
   }
 }

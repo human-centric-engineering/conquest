@@ -28,7 +28,7 @@ single JSON column for the profile fields:
 | Completion: min questions             | `minQuestionsAnswered`     | Int                    | `0`                 |
 | Completion: coverage threshold        | `coverageThreshold`        | Float (0–1)            | `1.0`               |
 | Early finish: allow                   | `allowEarlyFinish`         | Boolean                | `false`             |
-| Early finish: min coverage            | `earlyFinishMinCoverage`   | Float (0–1; 0 = off)   | `0.5`               |
+| Early finish: min coverage            | `earlyFinishMinCoverage`   | Float (0–1; 0 = off)   | `1.0`               |
 | Early finish: min questions           | `earlyFinishMinQuestions`  | Int (0 = off)          | `0`                 |
 | Cost budget (USD / session)           | `costBudgetUsd`            | Float? (null = no cap) | `null`              |
 | Per-session question cap              | `maxQuestionsPerSession`   | Int? (null = no cap)   | `null`              |
@@ -207,6 +207,30 @@ goal/audience and section/question editors — **not** react-hook-form), a
 dynamic add/remove profile-fields list with a conditional comma-separated options
 input for `select` fields. Saving a config on a launched version forks a draft and
 redirects, handled by the shared `run` exactly as the other editor sections do.
+
+**Fork confirmation (all authoring surfaces).** Forking a launched version is a
+silent version increment that surprised admins — the change lands on a _new draft_,
+not the live version, so in-progress sessions (pinned to the launched version) never
+see it. The confirmation is enforced at the **server choke point** so it covers every
+edit that can fork (Structure, Settings, respondent report, reingest, data slots,
+tag/extraction edits, advisor-applied config — and any future one), not one surface:
+
+- **Server** — `forkVersionIfLaunched` (`_lib/fork.ts`) reads the request's
+  `x-fork-confirm` header. `confirmed` → fork; `prompt` (an interactive client that
+  hasn't confirmed) → throw `ForkConfirmationRequiredError` (409, code
+  `VERSION_FORK_CONFIRMATION_REQUIRED`) **before any write**, carrying
+  `{ sourceVersionNumber, nextVersionNumber, versions }`; header absent (`legacy`:
+  programmatic API clients, seeds/scripts, non-request contexts) → fork silently, so
+  existing callers and integration tests are unaffected.
+- **Client** — `authoringMutate` (the one helper every editor mutation uses) tags each
+  request `x-fork-confirm: prompt`; on the 409 it calls `requestForkConfirm(details)`
+  (the `fork-confirm-bridge` module) and either retries with `x-fork-confirm: confirmed`
+  or throws `ForkCancelledError`. `ForkConfirmProvider` — mounted once in the version
+  workspace layout — registers the handler and renders the single
+  `LaunchedEditConfirmDialog` (names v*current* → v*next*, lists existing versions with
+  statuses, notes live sessions stay on v*current* until v*next* launches). Runners
+  treat `ForkCancelledError` as a silent no-op (resync from the server, no error
+  banner). A **draft** edit never triggers the 409, so no dialog appears.
 
 The panel is a single long scroll of ~10 labelled `SettingsGroup` cards (Questions
 & completion · Respondent experience · Intro screen · Reasoning stream · Preview

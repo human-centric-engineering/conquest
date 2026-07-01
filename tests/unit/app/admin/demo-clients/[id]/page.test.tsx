@@ -24,6 +24,7 @@ vi.mock('next/navigation', () => ({ notFound: mockNotFound }));
 const detailDataMock = vi.hoisted(() => ({
   getDemoClientDetailCached: vi.fn<() => Promise<DemoClientDetail | null>>(),
   getReassignTargets: vi.fn<() => Promise<AttributedDemoClient[]>>(),
+  getAttributableQuestionnaires: vi.fn<() => Promise<unknown[]>>(),
 }));
 vi.mock('@/lib/app/questionnaire/demo-clients/detail-data', () => detailDataMock);
 
@@ -34,6 +35,11 @@ vi.mock('@/components/admin/demo-clients/attributed-questionnaires', () => ({
       data-count={props.questionnaires.length}
       data-targets={props.reassignTargets.length}
     />
+  ),
+}));
+vi.mock('@/components/admin/demo-clients/attribute-questionnaire-picker', () => ({
+  AttributeQuestionnairePicker: (props: { clientId: string; options: unknown[] }) => (
+    <div data-testid="picker" data-client={props.clientId} data-options={props.options.length} />
   ),
 }));
 vi.mock('@/components/admin/demo-clients/demo-client-theme-preview', () => ({
@@ -65,6 +71,7 @@ const ctx = { params: Promise.resolve({ id: 'client-1' }) };
 beforeEach(() => {
   vi.clearAllMocks();
   detailDataMock.getReassignTargets.mockResolvedValue([]);
+  detailDataMock.getAttributableQuestionnaires.mockResolvedValue([]);
 });
 
 describe('DemoClientOverviewTab', () => {
@@ -103,6 +110,20 @@ describe('DemoClientOverviewTab', () => {
       screen.getByText(/No questionnaires are branded as this client yet/i)
     ).toBeInTheDocument();
     expect(detailDataMock.getReassignTargets).not.toHaveBeenCalled();
+  });
+
+  it('renders the attribute picker with the available (generic) questionnaires', async () => {
+    detailDataMock.getDemoClientDetailCached.mockResolvedValue(makeDetail());
+    detailDataMock.getAttributableQuestionnaires.mockResolvedValue([
+      { id: 'q9', title: 'Spare', status: 'draft' },
+    ]);
+
+    render(await DemoClientOverviewTab({ params: ctx.params }));
+
+    const picker = screen.getByTestId('picker');
+    expect(picker.dataset.client).toBe('client-1');
+    expect(picker.dataset.options).toBe('1');
+    expect(detailDataMock.getAttributableQuestionnaires).toHaveBeenCalled();
   });
 
   it('forwards the saved client theme to the brand preview', async () => {

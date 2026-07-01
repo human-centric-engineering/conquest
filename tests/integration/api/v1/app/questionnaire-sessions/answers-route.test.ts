@@ -65,6 +65,7 @@ function view(over: Partial<AnswerPanelView> = {}): AnswerPanelView {
             confidence: 0.9,
             rationale: 'Stated directly.',
             answeredAtTurnIndex: 1,
+            respondentEdited: false,
             refinementHistory: [],
           },
           {
@@ -79,6 +80,7 @@ function view(over: Partial<AnswerPanelView> = {}): AnswerPanelView {
             confidence: null,
             rationale: null,
             answeredAtTurnIndex: null,
+            respondentEdited: false,
             refinementHistory: [],
           },
         ],
@@ -222,6 +224,7 @@ describe('scope projection', () => {
                   confidence: 0.9,
                   rationale: 'Stated directly.',
                   answeredAtTurnIndex: 1,
+                  respondentEdited: false,
                   refinementHistory: [],
                 },
               ],

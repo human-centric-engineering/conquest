@@ -47,7 +47,10 @@ import { EditAgentPanel } from '@/components/admin/questionnaires/edit-agent-pan
 import { SectionEditor } from '@/components/admin/questionnaires/section-editor';
 import { TagVocabularyEditor } from '@/components/admin/questionnaires/tag-vocabulary-editor';
 import { SaveStatus, type SaveState } from '@/components/admin/questionnaires/save-status';
-import { authoringMutate } from '@/components/admin/questionnaires/authoring-mutate';
+import {
+  authoringMutate,
+  ForkCancelledError,
+} from '@/components/admin/questionnaires/authoring-mutate';
 import { EvaluationSeedComposer } from '@/components/admin/questionnaires/evaluation-seed-composer';
 import type {
   EvaluationSeed,
@@ -147,6 +150,15 @@ export function VersionEditor({
         return true;
       })
       .catch((err: unknown) => {
+        // The admin declined the "create a new draft?" confirmation → nothing was written. Resync
+        // optimistic UI from the server (reverting the pending edit) with no error state.
+        if (err instanceof ForkCancelledError) {
+          pendingSaveRef.current = false;
+          setSaveState('idle');
+          router.refresh();
+          setBusy(false);
+          return false;
+        }
         setError(err instanceof Error ? err.message : 'Something went wrong');
         pendingSaveRef.current = false;
         setSaveState('error');

@@ -60,6 +60,12 @@ export interface PanelAnswerInput {
   provenance: string;
   confidence: number | null;
   rationale: string | null;
+  /**
+   * True when the respondent set/edited this answer themselves in form view (`AppAnswerSlot.
+   * respondentEdited`). Optional: only the live panel seam loads it; the export/report builders
+   * omit it (their surfaces don't render the interactive "captured" ⓘ) and it defaults to `false`.
+   */
+  respondentEdited?: boolean;
   /** 1-based turn that last captured this slot, or null when unmapped. */
   answeredAtTurnIndex: number | null;
   refinementHistory: PanelRefinementEntry[];
@@ -120,6 +126,7 @@ export function buildAnswerPanelView(input: PanelBuilderInput): AnswerPanelView 
         provenance: answered ? asProvenance(answer.provenance) : null,
         confidence: answered ? answer.confidence : null,
         rationale: answered ? answer.rationale : null,
+        respondentEdited: answered ? (answer.respondentEdited ?? false) : false,
         answeredAtTurnIndex: answered ? answer.answeredAtTurnIndex : null,
         refinementHistory: answered ? answer.refinementHistory : [],
       });

@@ -142,6 +142,7 @@ const SLOT: PanelSlotView = {
   confidence: 0.8,
   rationale: null,
   answeredAtTurnIndex: 2,
+  respondentEdited: false,
   refinementHistory: [],
 };
 

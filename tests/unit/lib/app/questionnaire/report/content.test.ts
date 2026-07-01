@@ -28,6 +28,7 @@ function slot(over: Partial<PanelSlotView> = {}): PanelSlotView {
     provenance: 'direct',
     confidence: null,
     rationale: null,
+    respondentEdited: false,
     answeredAtTurnIndex: null,
     refinementHistory: [],
     ...over,

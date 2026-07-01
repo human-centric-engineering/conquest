@@ -25,6 +25,7 @@ function slot(slotKey: string, prompt: string): PanelSlotView {
     confidence: null,
     rationale: null,
     answeredAtTurnIndex: null,
+    respondentEdited: false,
     refinementHistory: [],
   };
 }

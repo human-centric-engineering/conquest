@@ -218,6 +218,18 @@ function boundedNumber(
 }
 
 /**
+ * Coverage is stored as a 0–1 fraction but shown to admins as a whole percent (0–100) — a
+ * `0.05`-vs-`5%` mismatch was a real source of confusion. These two helpers convert at the UI
+ * boundary: `pctString` for the input's initial/resync value, `fractionFromPct` on save.
+ */
+const pctString = (fraction: number): string => String(Math.round(fraction * 100));
+
+/** Parse a whole-percent input back to a stored 0–1 fraction (blank/garbage → `fallbackFraction`). */
+function fractionFromPct(value: string, fallbackFraction: number): number {
+  return boundedNumber(value, 0, 100, fallbackFraction * 100) / 100;
+}
+
+/**
  * A titled, icon-led group of related settings — the unit of organisation on the Settings tab.
  * Purely presentational: a card with a tinted icon chip, a one-line description, and the fields as
  * children. Grouping + ordering (most-used first) is what makes the long config scannable.
@@ -444,8 +456,9 @@ export function ConfigEditor({
     String(config.answerConfidenceFloor)
   );
   const [allowEarlyFinish, setAllowEarlyFinish] = useState(config.allowEarlyFinish);
-  const [earlyFinishMinCoverage, setEarlyFinishMinCoverage] = useState(
-    String(config.earlyFinishMinCoverage)
+  // Shown as a whole percent (0–100); stored as a 0–1 fraction. See `pctString` / `fractionFromPct`.
+  const [earlyFinishMinCoveragePct, setEarlyFinishMinCoveragePct] = useState(
+    pctString(config.earlyFinishMinCoverage)
   );
   const [earlyFinishMinQuestions, setEarlyFinishMinQuestions] = useState(
     String(config.earlyFinishMinQuestions)
@@ -526,7 +539,7 @@ export function ConfigEditor({
     setCoverageThreshold(String(config.coverageThreshold));
     setAnswerConfidenceFloor(String(config.answerConfidenceFloor));
     setAllowEarlyFinish(config.allowEarlyFinish);
-    setEarlyFinishMinCoverage(String(config.earlyFinishMinCoverage));
+    setEarlyFinishMinCoveragePct(pctString(config.earlyFinishMinCoverage));
     setEarlyFinishMinQuestions(String(config.earlyFinishMinQuestions));
     setCostBudgetUsd(config.costBudgetUsd === null ? '' : String(config.costBudgetUsd));
     setMaxQuestionsPerSession(
@@ -601,10 +614,9 @@ export function ConfigEditor({
         // Clamp to [0,1]; blank falls back to the stored value, never silently 0.
         coverageThreshold: boundedNumber(coverageThreshold, 0, 1, config.coverageThreshold),
         allowEarlyFinish,
-        earlyFinishMinCoverage: boundedNumber(
-          earlyFinishMinCoverage,
-          0,
-          1,
+        // Percent input → stored 0–1 fraction.
+        earlyFinishMinCoverage: fractionFromPct(
+          earlyFinishMinCoveragePct,
           config.earlyFinishMinCoverage
         ),
         earlyFinishMinQuestions: boundedNumber(
@@ -896,43 +908,67 @@ export function ConfigEditor({
               </Label>
             </div>
             {allowEarlyFinish && (
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-1.5">
-                  <Label className="text-sm font-medium">
-                    Finish-up min coverage{' '}
-                    <FieldHelp title="Finish-up minimum coverage">
-                      Weighted coverage the respondent must reach before the &ldquo;Finish up&rdquo;
-                      control appears. 0.5 = 50%; <code className="text-xs">0</code> = no coverage
-                      requirement on this axis. Combined with the question minimum as <em>OR</em> —
-                      crossing either unlocks. Both at 0 ⇒ available from the start.
-                    </FieldHelp>
-                  </Label>
-                  <Input
-                    type="number"
-                    min={0}
-                    max={1}
-                    step={0.05}
-                    value={earlyFinishMinCoverage}
-                    onChange={(e) => setEarlyFinishMinCoverage(e.target.value)}
-                    disabled={busy}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-sm font-medium">
-                    Finish-up min questions{' '}
-                    <FieldHelp title="Finish-up minimum questions">
-                      Number of answered questions before the &ldquo;Finish up&rdquo; control
-                      appears. <code className="text-xs">0</code> = no question-count requirement on
-                      this axis. OR&rsquo;d with the coverage minimum.
-                    </FieldHelp>
-                  </Label>
-                  <Input
-                    type="number"
-                    min={0}
-                    value={earlyFinishMinQuestions}
-                    onChange={(e) => setEarlyFinishMinQuestions(e.target.value)}
-                    disabled={busy}
-                  />
+              <div className="space-y-3">
+                {/* The two bars are OR'd with no priority — whichever the respondent reaches first
+                    unlocks the control. Stated up-front because the priority wasn't obvious. */}
+                <p className="text-muted-foreground text-xs leading-relaxed">
+                  The button appears as soon as the respondent crosses <strong>either</strong> bar
+                  below — whichever comes first (they have equal priority). Set a bar to{' '}
+                  <code className="text-xs">0</code> / <code className="text-xs">Off</code> to
+                  ignore that axis. The default (100% coverage, questions off) shows the button only
+                  once they&rsquo;ve effectively completed the questionnaire; lower the coverage to
+                  let them finish sooner.
+                </p>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label className="text-sm font-medium">
+                      Finish-up min % complete{' '}
+                      <FieldHelp title="Finish-up minimum % complete">
+                        The weighted completion the respondent must reach before the &ldquo;Finish
+                        up&rdquo; control appears, as a percentage.{' '}
+                        <code className="text-xs">100</code> = only once effectively complete (the
+                        default); <code className="text-xs">50</code> = halfway;{' '}
+                        <code className="text-xs">0</code> = no coverage requirement on this axis.
+                        OR&rsquo;d with the question minimum — whichever the respondent reaches
+                        first unlocks. Both bars at 0 ⇒ available from the start.
+                      </FieldHelp>
+                    </Label>
+                    <div className="relative">
+                      <Input
+                        type="number"
+                        min={0}
+                        max={100}
+                        step={5}
+                        value={earlyFinishMinCoveragePct}
+                        onChange={(e) => setEarlyFinishMinCoveragePct(e.target.value)}
+                        disabled={busy}
+                        className="pr-8"
+                      />
+                      <span className="text-muted-foreground pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm">
+                        %
+                      </span>
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-sm font-medium">
+                      Finish-up min questions{' '}
+                      <FieldHelp title="Finish-up minimum questions">
+                        Number of answered questions before the &ldquo;Finish up&rdquo; control
+                        appears. <code className="text-xs">0</code> = <strong>Off</strong> — no
+                        question-count requirement on this axis (the default; the % bar gates
+                        instead). OR&rsquo;d with the coverage minimum — whichever comes first
+                        unlocks.
+                      </FieldHelp>
+                    </Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      placeholder="Off"
+                      value={earlyFinishMinQuestions}
+                      onChange={(e) => setEarlyFinishMinQuestions(e.target.value)}
+                      disabled={busy}
+                    />
+                  </div>
                 </div>
               </div>
             )}

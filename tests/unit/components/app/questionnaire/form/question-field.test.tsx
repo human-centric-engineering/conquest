@@ -31,6 +31,7 @@ function slot(
     confidence: null,
     rationale: null,
     answeredAtTurnIndex: null,
+    respondentEdited: false,
     refinementHistory: [],
     ...over,
   };

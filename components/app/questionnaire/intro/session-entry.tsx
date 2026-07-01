@@ -12,8 +12,9 @@
  *
  * This wrapper now just forwards the resolved intro alongside the workspace props, keeping the two
  * respondent surfaces (the authenticated page and the anonymous boot) on one shared entry point. A
- * resume, a disabled intro, or the read-only viewer pass a `null`/absent intro and the workspace
- * renders straight to the conversation.
+ * disabled intro or the read-only viewer pass a `null`/absent intro and the workspace renders
+ * straight to the conversation. A resume still passes the resolved intro (so the tab persists across
+ * a refresh) — only `autoStart` is resume-gated, so the workspace simply doesn't land on the intro.
  */
 
 import {
