@@ -117,6 +117,17 @@ report-uri /api/csp-report;
 
 The nonce is generated in `proxy.ts` per request and forwarded via the `x-nonce` request header. The base `PRODUCTION_CSP` config defines `script-src 'self'`; `getCSPConfig(nonce)` appends `'nonce-{nonce}'` at runtime.
 
+### Invariant: prod `script-src` never carries `'unsafe-eval'`
+
+Dev CSP allows `'unsafe-eval'` (Next HMR needs it); **production must not**. This means any client-bundle dependency that uses `eval` / `new Function` will trip a `script-src` CSP violation **in production only** (a `/api/csp-report` `blockedUri: eval` on the affected page). A regression test locks this (`tests/unit/lib/security/headers.test.ts` — "never emits unsafe-eval in the built production CSP string").
+
+**The fix is never to weaken CSP** — it's to keep the eval-using code out of the client bundle:
+
+- **Common source:** a client module transitively importing a Node-only lib (or Node core like `crypto`/`vm`) drags in Next's browserify fallback shims — `vm-browserify`'s `runInThisContext = eval(this.code)` is a frequent offender.
+- **Pin the offending chunk:** `ANALYZE=true npm run build` (wired via `@next/bundle-analyzer` in `next.config.js`), then inspect `.next/static/chunks` for the `eval`/`new Function` module and trace its importer. Grep a built chunk directly with `grep -l "eval(" .next/static/chunks/*.js`.
+- **Sever the boundary:** mark server-only runtime modules with `import 'server-only'` (e.g. `lib/app/questionnaire/ingestion/xlsx-flatten.ts` — `exceljs`'s browser build uses `new Function`; `app/api/v1/app/questionnaires/_lib/extract-pipeline.ts`). This converts a silent prod-only CSP break into a build-time error the moment a client graph pulls the module. Prefer deep imports over barrels on client surfaces so a barrel never re-exports server code into the client bundle.
+- **Never** add `'unsafe-eval'` back to `PRODUCTION_CSP`. The per-request nonce does not authorize `eval` — it only whitelists tagged inline scripts.
+
 ### CSP Usage
 
 ```typescript

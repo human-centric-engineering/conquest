@@ -23,6 +23,10 @@
  * single-column tables, which is harmless.
  */
 
+// Server-only tripwire: `exceljs`'s browser build uses `new Function`, which prod CSP (`script-src`
+// without `'unsafe-eval'`) blocks. If any client component ever transitively imports this module,
+// this turns a silent prod-only CSP break into a build-time error. See .context/security/overview.md.
+import 'server-only';
 import ExcelJS from 'exceljs';
 
 import type { ParsedDocument, ParsedSection } from '@/lib/orchestration/knowledge/parsers/types';
