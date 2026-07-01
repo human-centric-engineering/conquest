@@ -25,6 +25,28 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/sessions', () => sessionsMock);
 const tokenMock = vi.hoisted(() => ({ verifySessionToken: vi.fn() }));
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/session-access-token', () => tokenMock);
 
+// `after()` (next/server) schedules post-response work. In unit tests there is no request scope, so
+// stub it to a spy that captures — but does not auto-run — the callback (tests drive it explicitly).
+const afterMock = vi.hoisted(() => ({ after: vi.fn() }));
+vi.mock('next/server', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('next/server')>();
+  return { ...actual, after: afterMock.after };
+});
+
+const reportMock = vi.hoisted(() => ({
+  enqueueRespondentReport: vi.fn(),
+  processQueuedRespondentReports: vi.fn(),
+}));
+vi.mock('@/lib/app/questionnaire/report/enqueue', () => ({
+  enqueueRespondentReport: reportMock.enqueueRespondentReport,
+}));
+vi.mock('@/lib/app/questionnaire/report/worker', () => ({
+  processQueuedRespondentReports: reportMock.processQueuedRespondentReports,
+}));
+
+const digestMock = vi.hoisted(() => ({ refreshRoundLearningDigest: vi.fn() }));
+vi.mock('@/lib/app/questionnaire/learning/digest', () => digestMock);
+
 import { POST } from '@/app/api/v1/app/questionnaire-sessions/[id]/submit/route';
 import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
@@ -116,6 +138,13 @@ beforeEach(() => {
   setAuth(mockAuthenticatedUser());
   ctxMock.buildTurnContext.mockResolvedValue(loadedContext());
   sessionsMock.markSessionCompleted.mockResolvedValue('completed');
+  // Default: no report enqueued → the instant-start kick is not scheduled (individual tests opt in).
+  reportMock.enqueueRespondentReport.mockResolvedValue(false);
+  reportMock.processQueuedRespondentReports.mockResolvedValue({
+    claimed: 0,
+    succeeded: 0,
+    failed: 0,
+  });
 });
 
 describe('gate order', () => {
@@ -255,5 +284,37 @@ describe('transition race', () => {
     );
     const res = await POST(req(), ctx);
     expect(res.status).toBe(409);
+  });
+});
+
+describe('respondent report instant-start kick', () => {
+  it('schedules the report worker via after() when a report was enqueued', async () => {
+    reportMock.enqueueRespondentReport.mockResolvedValue(true);
+
+    const res = await POST(req(), ctx);
+    expect(res.status).toBe(200);
+    expect(reportMock.enqueueRespondentReport).toHaveBeenCalledWith('sess-1');
+    // after() was scheduled — and the callback drains the report queue when run.
+    expect(afterMock.after).toHaveBeenCalledTimes(1);
+    const cb = afterMock.after.mock.calls[0][0] as () => Promise<void>;
+    await cb();
+    expect(reportMock.processQueuedRespondentReports).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not schedule the kick when no report was enqueued', async () => {
+    reportMock.enqueueRespondentReport.mockResolvedValue(false);
+
+    const res = await POST(req(), ctx);
+    expect(res.status).toBe(200);
+    expect(afterMock.after).not.toHaveBeenCalled();
+  });
+
+  it('completes the submit even if enqueue throws', async () => {
+    reportMock.enqueueRespondentReport.mockRejectedValue(new Error('db down'));
+
+    const res = await POST(req(), ctx);
+    expect(res.status).toBe(200);
+    // A failed enqueue resolves to false → no kick scheduled, submit still succeeds.
+    expect(afterMock.after).not.toHaveBeenCalled();
   });
 });

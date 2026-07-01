@@ -140,6 +140,32 @@ The schedules result is concretely reported. Per-task background results are NOT
 
 **Dev-only in-process ticker.** `instrumentation.ts` arms a 60s `setInterval` that calls `runMaintenanceTick()` directly when `NODE_ENV === 'development'` (first fire ~3s after server startup, after the dev compile warm-up). This is dev-only because production deploys an external cron that is authoritative and survives serverless cold starts; the dev ticker just prevents the "I queued an eval run, why didn't it move?" friction. Opt out with `SUNRISE_DISABLE_DEV_TICK=1` when you want to test the manual flow. The HTTP route and the dev ticker share the same body (`lib/orchestration/maintenance/run-tick.ts`) so the overlap guard, watchdog, and task chain stay identical across both callers.
 
+### Serverless cron endpoint (Vercel) — `GET /api/v1/cron/maintenance`
+
+**The admin tick route above is wrong for serverless.** It returns `202` and runs the background chain (embeddings, retention, eval runs, **respondent reports**, …) as a detached `void Promise.allSettled(...)`. On a serverless platform (Vercel) the function is frozen/killed once the response is sent, so that detached chain is **not guaranteed to run to completion** — queued work never drains. There is also nothing to trigger it: `instrumentation.ts` is dev-only, and there is no persistent process to hold a `setInterval`.
+
+For serverless, use the dedicated cron endpoint instead:
+
+- **Auth:** a direct `CRON_SECRET` bearer check (NOT `withAdminAuth`, which is session/API-key based and a cron can't satisfy). Set `CRON_SECRET`; Vercel Cron auto-attaches `Authorization: Bearer $CRON_SECRET`. When `CRON_SECRET` is unset the endpoint returns `503` and runs nothing (fails closed).
+- **Awaited chain:** it calls `runMaintenanceTick({ awaitBackground: true })`, which `await`s the whole background chain before responding, so the work completes within the function invocation. `export const maxDuration = 300` gives it headroom for a batch of report/eval LLM calls.
+- **`runMaintenanceTick(opts?: { awaitBackground?: boolean })`** is the shared seam: `awaitBackground: true` awaits the chain (serverless cron); the default `false` keeps the dev ticker and the admin tick fire-and-forget on a persistent process. The overlap guard, watchdog, and monotonic token are identical across all callers.
+
+Configure the cron in `vercel.json` (repo root):
+
+```jsonc
+{
+  "crons": [{ "path": "/api/v1/cron/maintenance", "schedule": "* * * * *" }],
+  "functions": {
+    "app/api/v1/cron/maintenance/route.ts": { "maxDuration": 300 },
+    "app/api/v1/app/questionnaire-sessions/[id]/submit/route.ts": { "maxDuration": 60 },
+  },
+}
+```
+
+**Plan tier:** per-minute cron and `maxDuration > 60s` require **Vercel Pro**. On **Hobby**, Vercel cron is daily-only and `maxDuration` caps at 60s — point an external cron (GitHub Actions scheduled workflow / cron-job.org) at the same URL with the bearer header, and drop `maxDuration` to 60.
+
+**Instant-start kick.** The respondent-report path additionally kicks the worker straight after submit via `after()` (`next/server`) in `app/api/v1/app/questionnaire-sessions/[id]/submit/route.ts`, so a report begins generating within seconds instead of waiting for the next cron minute. The cron remains the backstop; the worker's lease (`lib/app/questionnaire/report/worker.ts`) makes the kick and the cron drain safe to overlap.
+
 **Operational note — log message change.** The previous synchronous tick wrote a single `Maintenance tick completed` log line containing all per-task results. With background execution, the per-task results are now written from the background chain's `.then()` as `Maintenance tick background tasks completed` once the chain settles. Any log-based dashboard or alert keyed on the old `Maintenance tick completed` string needs to be updated to match the new message before relying on it. The synchronous response itself only carries the `schedules` result and the `backgroundTasks` name list — see the response shape above.
 
 ### Webhook Trigger (API key auth required)

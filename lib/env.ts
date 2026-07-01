@@ -122,6 +122,16 @@ const serverEnvSchema = z.object({
     .string()
     .optional()
     .describe('GA4 API secret for server-side Measurement Protocol tracking'),
+
+  // Maintenance cron (serverless). Bearer secret the scheduled-cron endpoint checks before
+  // running the maintenance tick. On Vercel, set this and Vercel Cron auto-attaches it as
+  // `Authorization: Bearer $CRON_SECRET`. Optional so self-hosted / long-running deploys that
+  // drive the tick another way (admin API key, in-process ticker) are unaffected. When unset,
+  // the /api/v1/cron/maintenance endpoint refuses every request. See .context/orchestration/scheduling.md.
+  CRON_SECRET: z
+    .string()
+    .optional()
+    .describe('Bearer secret for the /api/v1/cron/maintenance scheduled endpoint (Vercel Cron).'),
 });
 
 // Client-side environment variables (NEXT_PUBLIC_* vars)
