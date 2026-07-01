@@ -127,74 +127,106 @@ export function SessionComplete({
   }, [sessionId, accessToken]);
 
   return (
-    <div className={cn('flex h-full min-h-0 items-center justify-center p-6', className)}>
+    // `m-auto` (not `items-center`) centres the card when it fits yet lets a too-tall card scroll
+    // from its top instead of clipping — the card itself is capped at `max-h-full` and scrolls within.
+    <div className={cn('flex h-full min-h-0 overflow-y-auto p-6', className)}>
       <div
         role="status"
         aria-live="polite"
         className={cn(
-          'bg-card flex flex-col items-center gap-4 rounded-2xl border px-8 py-10 text-center',
+          'bg-card m-auto flex max-h-full min-h-0 flex-col rounded-2xl border text-center',
           REVEAL,
-          showInsights ? 'max-w-2xl' : 'max-w-md'
+          showInsights ? 'w-full max-w-2xl' : 'max-w-md'
         )}
       >
-        <span
-          className="flex h-14 w-14 items-center justify-center rounded-full"
-          style={{
-            backgroundColor:
-              'color-mix(in srgb, var(--app-accent-color, var(--color-primary)) 14%, transparent)',
-            color: 'var(--app-accent-color, var(--color-primary))',
-          }}
+        {/* Celebratory header — pinned, so it stays the "moment" while a long report scrolls below. */}
+        <div
+          className={cn(
+            'flex shrink-0 flex-col items-center gap-4 px-8 pt-10',
+            showInsights ? 'border-b pb-6' : 'pb-4'
+          )}
         >
-          <CheckCircle2 className="h-7 w-7" aria-hidden="true" />
-        </span>
-        <div className="space-y-1.5">
-          <h1 className="text-foreground text-xl font-semibold text-balance">
-            Thank you — your responses are submitted
-          </h1>
-          <p className="text-muted-foreground text-sm text-balance">
-            {answeredCount !== null && answeredCount > 0
-              ? `We captured ${answeredCount} answer${answeredCount === 1 ? '' : 's'} from our conversation. There's nothing more you need to do.`
-              : "There's nothing more you need to do."}
-          </p>
+          <span
+            className="flex h-14 w-14 items-center justify-center rounded-full"
+            style={{
+              backgroundColor:
+                'color-mix(in srgb, var(--app-accent-color, var(--color-primary)) 14%, transparent)',
+              color: 'var(--app-accent-color, var(--color-primary))',
+            }}
+          >
+            <CheckCircle2 className="h-7 w-7" aria-hidden="true" />
+          </span>
+          <div className="space-y-1.5">
+            <h1 className="text-foreground text-xl font-semibold text-balance">
+              Thank you — your responses are submitted
+            </h1>
+            <p className="text-muted-foreground text-sm text-balance">
+              {answeredCount !== null && answeredCount > 0
+                ? `We captured ${answeredCount} answer${answeredCount === 1 ? '' : 's'} from our conversation. There's nothing more you need to do.`
+                : "There's nothing more you need to do."}
+            </p>
+          </div>
         </div>
 
         {showInsights && view?.insights && (
-          <ReportInsights
-            insights={view.insights}
-            snippets={sharedSnippets}
-            timedOut={timedOut}
-            onRetry={retry}
-          />
-        )}
-
-        <div className="flex flex-wrap items-center justify-center gap-2">
-          {showDownload && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleDownload}
-              disabled={downloading}
-            >
-              <Download className="h-4 w-4" aria-hidden="true" />
-              {downloading ? 'Preparing…' : 'Download PDF'}
-            </Button>
-          )}
-          {/* The conversation record is always available once submitted — a completed session
-              always has a transcript, independent of the responses-report config above. */}
-          <TranscriptDownload sessionId={sessionId} accessToken={accessToken} variant="outline" />
-        </div>
-        {error && (
-          <p className="text-destructive text-xs" role="alert">
-            Couldn&rsquo;t prepare your PDF. Please try again.
-          </p>
-        )}
-
-        {refRaw && (
-          <div className="mt-1 border-t pt-3">
-            <SessionRefChip refRaw={refRaw} />
+          // The one region that scrolls. `flex-auto` sizes it to its content when the card fits and
+          // lets it shrink-and-scroll once the card hits `max-h-full`; the mask softens both edges so
+          // clipped text reads as "more below/above" rather than an abrupt cut. Padded ≥ the mask
+          // width so resting text is never faded — only text scrolling under the edge is.
+          <div
+            className="min-h-0 flex-auto [scrollbar-width:thin] overflow-y-auto overscroll-contain px-8 py-4 text-left"
+            style={{
+              maskImage:
+                'linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%)',
+              WebkitMaskImage:
+                'linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%)',
+            }}
+          >
+            <ReportInsights
+              insights={view.insights}
+              snippets={sharedSnippets}
+              timedOut={timedOut}
+              onRetry={retry}
+            />
           </div>
         )}
+
+        {/* Actions + reference — pinned footer, so the primary download stays reachable past a long report. */}
+        <div
+          className={cn(
+            'flex shrink-0 flex-col items-center gap-4 px-8 pb-10',
+            showInsights ? 'border-t pt-6' : 'pt-0'
+          )}
+        >
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            {showDownload && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleDownload}
+                disabled={downloading}
+              >
+                <Download className="h-4 w-4" aria-hidden="true" />
+                {downloading ? 'Preparing…' : 'Download PDF'}
+              </Button>
+            )}
+            {/* The conversation record is always available once submitted — a completed session
+                always has a transcript, independent of the responses-report config above. */}
+            <TranscriptDownload sessionId={sessionId} accessToken={accessToken} variant="outline" />
+          </div>
+          {error && (
+            <p className="text-destructive text-xs" role="alert">
+              Couldn&rsquo;t prepare your PDF. Please try again.
+            </p>
+          )}
+
+          {refRaw && (
+            <div className="mt-1 border-t pt-3">
+              <SessionRefChip refRaw={refRaw} />
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -219,7 +251,7 @@ function ReportInsights({
 }) {
   if (insights.status === 'failed') {
     return (
-      <p className="text-muted-foreground text-sm" role="status">
+      <p className="text-muted-foreground text-sm text-balance" role="status">
         We couldn&rsquo;t prepare your personalised insights this time. Your responses were saved.
       </p>
     );
@@ -229,7 +261,7 @@ function ReportInsights({
     // Generation outran the poll window — offer a calm retry instead of an endless spinner.
     if (timedOut) {
       return (
-        <div className="flex w-full flex-col items-center gap-3 border-t pt-4 text-center">
+        <div className="flex w-full flex-col items-center gap-3 text-center">
           <p className="text-muted-foreground text-sm text-balance">
             Your personalised report is taking a little longer than usual. Your responses are safely
             saved — check again in a moment.
@@ -248,7 +280,7 @@ function ReportInsights({
   let step = 0;
   const delay = () => ({ animationDelay: `${step++ * 80}ms`, animationFillMode: 'both' as const });
   return (
-    <div className="w-full space-y-4 border-t pt-4 text-left">
+    <div className="w-full space-y-4 text-left">
       <p className={cn('text-foreground text-sm leading-relaxed', REVEAL)} style={delay()}>
         {summary}
       </p>
@@ -300,11 +332,11 @@ function PreparingReport({ snippets }: { snippets: SharedSnippet[] }) {
   );
 
   if (snippets.length === 0) {
-    return <div className="w-full border-t pt-4">{caption}</div>;
+    return <div className="w-full">{caption}</div>;
   }
 
   return (
-    <div className="flex w-full flex-col items-center gap-4 border-t pt-4">
+    <div className="flex w-full flex-col items-center gap-4">
       {caption}
       <div className="w-full">
         <p className="text-muted-foreground/70 mb-2 text-center text-[11px] font-medium tracking-wide uppercase">
