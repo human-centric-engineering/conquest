@@ -44,7 +44,8 @@ vi.mock('@/components/app/questionnaire/session-workspace', () => ({
     autoStart,
     initialTurns,
     initialInspectorTurns,
-  }: SessionWorkspaceProps) => (
+    intro,
+  }: SessionWorkspaceProps & { intro?: { enabled?: boolean } | null }) => (
     <div
       data-testid="questionnaire-chat"
       data-session-id={sessionId}
@@ -52,6 +53,7 @@ vi.mock('@/components/app/questionnaire/session-workspace', () => ({
       data-auto-start={String(autoStart ?? false)}
       data-turn-count={String(initialTurns?.length ?? 0)}
       data-inspector-count={String(initialInspectorTurns?.length ?? 0)}
+      data-intro-enabled={String(intro?.enabled ?? false)}
     />
   ),
 }));
@@ -142,6 +144,27 @@ function transcriptResponse(
   inspectorTurns?: unknown[]
 ) {
   return { success: true, data: { turns, ...(inspectorTurns ? { inspectorTurns } : {}) } };
+}
+
+/** A resolved-intro response body (`GET …/intro`) that passes `introResponseSchema`. */
+function introResponse(enabled: boolean) {
+  return {
+    success: true,
+    data: {
+      intro: {
+        enabled,
+        questionnaireTitle: 'Test Questionnaire',
+        background: '',
+        videoUrl: '',
+        copy: {
+          howItWorks: { heading: 'How it works', body: 'A short chat.' },
+          whatYouGet: null,
+          goodToKnow: [],
+          buttonLabel: 'Begin',
+        },
+      },
+    },
+  };
 }
 
 /** A minimal valid persisted inspector turn (passes `inspectorTurnSchema`). */
@@ -350,6 +373,61 @@ describe('AnonymousSessionBoot', () => {
         voiceInputEnabled: true,
         anonymous: true,
       });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Intro splash carousel — the intro rides the workspace as a tab, so it must
+  // survive a mid-session refresh (a resume), not just front a fresh session.
+  // -------------------------------------------------------------------------
+
+  describe('intro splash on resume', () => {
+    // With a valid stored token the boot fetches in order: transcript first (replay-vs-fresh), then
+    // — when the platform flag is on — the intro. So ordered once-mocks map cleanly to that sequence.
+
+    it('still resolves and forwards the intro on a resumed session so the tab persists across a refresh', async () => {
+      // A refresh mid-session finds a stored token whose transcript has turns (resume). The intro
+      // rides the carousel as a tab, so it must still be fetched and passed through — only the
+      // auto-open is suppressed. (Regression: the boot used to force intro=null on resume, dropping
+      // the splash tab entirely after a refresh.)
+      fakeStorage.setItem(STORAGE_KEY, storedSession('resume-sess', 'resume-tok', futureExpiry()));
+      fakeFetch
+        .mockResolvedValueOnce(
+          jsonResponse(transcriptResponse([{ role: 'assistant', content: 'Earlier question?' }]))
+        )
+        .mockResolvedValueOnce(jsonResponse(introResponse(true)));
+
+      render(<AnonymousSessionBoot versionId={VERSION_ID} introScreenEnabled />);
+      await waitFor(() => {
+        expect(screen.getByTestId('questionnaire-chat')).toBeInTheDocument();
+      });
+
+      const chat = screen.getByTestId('questionnaire-chat');
+      expect(chat).toHaveAttribute('data-intro-enabled', 'true');
+      // Resume still suppresses the kickoff — the prior conversation is already on screen.
+      expect(chat).toHaveAttribute('data-auto-start', 'false');
+    });
+
+    it('does NOT fetch the intro when the platform flag is off (no wasted round-trip)', async () => {
+      fakeStorage.setItem(STORAGE_KEY, storedSession('resume-sess', 'resume-tok', futureExpiry()));
+      fakeFetch.mockResolvedValueOnce(
+        jsonResponse(transcriptResponse([{ role: 'assistant', content: 'Earlier question?' }]))
+      );
+
+      // Default: introScreenEnabled prop omitted (false).
+      render(<AnonymousSessionBoot versionId={VERSION_ID} />);
+      await waitFor(() => {
+        expect(screen.getByTestId('questionnaire-chat')).toBeInTheDocument();
+      });
+
+      expect(screen.getByTestId('questionnaire-chat')).toHaveAttribute(
+        'data-intro-enabled',
+        'false'
+      );
+      const introCalls = fakeFetch.mock.calls.filter(
+        (c) => typeof c[0] === 'string' && c[0].includes('/intro')
+      );
+      expect(introCalls).toHaveLength(0);
     });
   });
 
