@@ -62,4 +62,30 @@ describe('ForkConfirmProvider', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
     await expect(pending).resolves.toBe(false);
   });
+
+  it('declines a second concurrent request instead of orphaning the first', async () => {
+    // Two forking edits land near-simultaneously; only one dialog can show. The second must
+    // resolve false immediately (not overwrite the first's resolver, which would hang it).
+    const first = requestForkConfirm(DETAILS);
+    await screen.findByText('Create a new draft version?');
+    const second = requestForkConfirm(DETAILS);
+    await expect(second).resolves.toBe(false);
+
+    // The first is still live and resolves normally on confirm.
+    fireEvent.click(screen.getByRole('button', { name: 'Create draft v3 & save' }));
+    await expect(first).resolves.toBe(true);
+  });
+
+  it('settles a pending confirmation as cancelled when the provider unmounts', async () => {
+    const { unmount } = render(
+      <ForkConfirmProvider>
+        <div>nav-away</div>
+      </ForkConfirmProvider>
+    );
+    const pending = requestForkConfirm(DETAILS);
+    await screen.findByText('Create a new draft version?');
+
+    unmount(); // e.g. navigating away with the dialog still open
+    await expect(pending).resolves.toBe(false);
+  });
 });

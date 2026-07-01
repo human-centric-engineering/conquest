@@ -31,11 +31,13 @@ vi.mock('@/components/admin/questionnaires/authoring-mutate', async (importOrigi
 vi.mock('@/components/admin/questionnaires/config-editor', () => ({
   ConfigEditor: ({
     run,
+    versionId,
     adaptiveEnabled,
     adaptiveDataSlotsEnabled,
     questionCount,
   }: {
     run: (s: () => unknown) => void;
+    versionId: string;
     adaptiveEnabled: boolean;
     adaptiveDataSlotsEnabled: boolean;
     questionCount: number;
@@ -43,6 +45,7 @@ vi.mock('@/components/admin/questionnaires/config-editor', () => ({
     <button
       type="button"
       data-testid="cfg"
+      data-version-id={versionId}
       data-adaptive={String(adaptiveEnabled)}
       data-adaptive-data-slots={String(adaptiveDataSlotsEnabled)}
       data-qcount={String(questionCount)}
@@ -109,6 +112,8 @@ describe('VersionSettingsPanel', () => {
       />
     );
     expect(screen.getByText('Configuration')).toBeInTheDocument();
+    // versionId is derived from graph.id and threaded to the editor.
+    expect(screen.getByTestId('cfg')).toHaveAttribute('data-version-id', 'ver-9');
     expect(screen.getByTestId('cfg')).toHaveAttribute('data-adaptive', 'true');
     expect(screen.getByTestId('cfg')).toHaveAttribute('data-qcount', '2');
   });
@@ -157,5 +162,13 @@ describe('VersionSettingsPanel', () => {
     renderPanel();
     fireEvent.click(screen.getByTestId('cfg'));
     await waitFor(() => expect(screen.getByText('nope')).toBeInTheDocument());
+  });
+
+  it('shows a generic message when the rejection is not an Error instance', async () => {
+    // Non-Error rejection → the `err instanceof Error` fallback branch.
+    mutateMock.authoringMutate.mockRejectedValue('boom');
+    renderPanel();
+    fireEvent.click(screen.getByTestId('cfg'));
+    await waitFor(() => expect(screen.getByText('Something went wrong')).toBeInTheDocument());
   });
 });

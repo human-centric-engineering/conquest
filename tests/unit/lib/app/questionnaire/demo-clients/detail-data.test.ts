@@ -204,6 +204,12 @@ describe('getAttributableQuestionnaires', () => {
     expect(mockParseApiResponse).not.toHaveBeenCalled();
   });
 
+  it('degrades to an empty list when the body reports success=false', async () => {
+    mockServerFetch.mockResolvedValueOnce(okResponse);
+    mockParseApiResponse.mockResolvedValueOnce({ success: false, error: { code: 'INTERNAL' } });
+    expect(await getAttributableQuestionnaires()).toEqual([]);
+  });
+
   it('degrades to an empty list and logs when serverFetch throws', async () => {
     const err = new Error('Boom');
     mockServerFetch.mockRejectedValueOnce(err);

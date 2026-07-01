@@ -12,7 +12,11 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const bridge = vi.hoisted(() => ({ requestForkConfirm: vi.fn() }));
+const bridge = vi.hoisted(() => ({
+  requestForkConfirm: vi.fn(),
+  // Pass-through by default (valid details); individual tests override to null for the skew case.
+  parseForkConfirmDetails: vi.fn((raw: unknown) => raw),
+}));
 vi.mock('@/components/admin/questionnaires/fork-confirm-bridge', () => bridge);
 
 import {
@@ -89,6 +93,19 @@ describe('authoringMutate', () => {
 
     await expect(authoringMutate('PATCH', '/cfg', {})).rejects.toBeInstanceOf(ForkCancelledError);
     expect(fetchMock).toHaveBeenCalledTimes(1); // no retry
+  });
+
+  it('surfaces the raw error (no prompt) when the 409 details are malformed', async () => {
+    // Deploy skew: server sent the fork code but details failed validation.
+    fetchMock.mockResolvedValueOnce(jsonResponse(FORK_409));
+    bridge.parseForkConfirmDetails.mockReturnValueOnce(null);
+
+    await expect(authoringMutate('PATCH', '/cfg', {})).rejects.toMatchObject({
+      name: 'AuthoringError',
+      code: 'VERSION_FORK_CONFIRMATION_REQUIRED',
+    });
+    expect(bridge.requestForkConfirm).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('throws AuthoringError (with code) on a non-fork failure', async () => {

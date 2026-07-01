@@ -72,6 +72,11 @@ export async function getReassignTargets(currentId: string): Promise<AttributedD
  */
 export async function getAttributableQuestionnaires(): Promise<AttributedQuestionnaireRow[]> {
   try {
+    // The list endpoint has no server-side `demoClient` filter, so we fetch a page and filter
+    // client-side. Capped at the first 100 (demo tooling — a demo instance realistically has far
+    // fewer): if a deployment ever exceeds 100 questionnaires, generic ones beyond that page won't
+    // appear here and must be attributed from the questionnaire's own Settings tab. Widen the limit
+    // or add a `demoClient` query filter if that ceiling is ever hit.
     const res = await serverFetch(`${API.APP.QUESTIONNAIRES.ROOT}?page=1&limit=100`);
     if (!res.ok) return [];
     const body = await parseApiResponse<QuestionnaireListItem[]>(res);

@@ -23,17 +23,30 @@ export function ForkConfirmProvider({ children }: { children: React.ReactNode })
   const [details, setDetails] = useState<ForkConfirmDetails | null>(null);
   const resolveRef = useRef<((confirmed: boolean) => void) | null>(null);
 
-  useEffect(
-    () =>
-      registerForkConfirmHandler(
-        (next) =>
-          new Promise<boolean>((resolve) => {
-            resolveRef.current = resolve;
-            setDetails(next);
-          })
-      ),
-    []
-  );
+  useEffect(() => {
+    const unregister = registerForkConfirmHandler(
+      (next) =>
+        new Promise<boolean>((resolve) => {
+          // Only one dialog can be shown at a time. If a second forking edit lands while a
+          // confirmation is already open (co-mounted runners saving near-simultaneously), decline
+          // the newcomer rather than overwrite the pending resolver — otherwise the first mutation's
+          // promise never settles and its runner's busy lock sticks forever.
+          if (resolveRef.current) {
+            resolve(false);
+            return;
+          }
+          resolveRef.current = resolve;
+          setDetails(next);
+        })
+    );
+    return () => {
+      unregister();
+      // Provider unmounting (e.g. navigation) with a dialog still open → settle the awaiting
+      // mutation as cancelled so it unwinds instead of hanging with busy locked.
+      resolveRef.current?.(false);
+      resolveRef.current = null;
+    };
+  }, []);
 
   const settle = (confirmed: boolean) => {
     setDetails(null);

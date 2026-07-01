@@ -91,4 +91,21 @@ describe('AttributeQuestionnairePicker', () => {
     await waitFor(() => expect(screen.getByText('Nope')).toBeInTheDocument());
     expect(mockRouterRefresh).not.toHaveBeenCalled();
   });
+
+  it('shows a generic fallback message when the failure is not an APIClientError', async () => {
+    // Non-APIClientError rejection → the generic-message branch, not the raw error text.
+    mockApiPatch.mockRejectedValue(new Error('raw network failure'));
+    const user = userEvent.setup();
+    render(<AttributeQuestionnairePicker clientId="client-7" options={OPTIONS} />);
+
+    await user.click(screen.getByRole('combobox'));
+    await user.click(await screen.findByRole('option', { name: 'Onboarding survey' }));
+    await user.click(screen.getByRole('button', { name: /attribute/i }));
+
+    await waitFor(() =>
+      expect(screen.getByText('Could not attribute the questionnaire.')).toBeInTheDocument()
+    );
+    expect(screen.queryByText('raw network failure')).not.toBeInTheDocument();
+    expect(mockRouterRefresh).not.toHaveBeenCalled();
+  });
 });

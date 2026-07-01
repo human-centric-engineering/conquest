@@ -10,7 +10,12 @@
  * so all of them get the confirmation for free, including any added later.
  */
 
-import type { AppQuestionnaireStatus } from '@/lib/app/questionnaire/types';
+import { z } from 'zod';
+
+import {
+  APP_QUESTIONNAIRE_STATUSES,
+  type AppQuestionnaireStatus,
+} from '@/lib/app/questionnaire/types';
 
 /** The lineage the confirm dialog names — supplied by the server's 409 details. */
 export interface ForkConfirmDetails {
@@ -20,6 +25,25 @@ export interface ForkConfirmDetails {
   nextVersionNumber: number;
   /** Every existing version, newest-first. */
   versions: { versionNumber: number; status: AppQuestionnaireStatus }[];
+}
+
+/**
+ * Validate the server's 409 `details` before trusting it — it's an API response body, so it goes
+ * through Zod rather than a cast (a deploy-skewed server that renamed a field would otherwise feed
+ * the dialog `undefined` version numbers silently). Returns null on any mismatch; the caller then
+ * surfaces the raw error instead of prompting with a broken dialog.
+ */
+const forkConfirmDetailsSchema = z.object({
+  sourceVersionNumber: z.number(),
+  nextVersionNumber: z.number(),
+  versions: z.array(
+    z.object({ versionNumber: z.number(), status: z.enum(APP_QUESTIONNAIRE_STATUSES) })
+  ),
+});
+
+export function parseForkConfirmDetails(raw: unknown): ForkConfirmDetails | null {
+  const result = forkConfirmDetailsSchema.safeParse(raw);
+  return result.success ? result.data : null;
 }
 
 type Handler = (details: ForkConfirmDetails) => Promise<boolean>;
