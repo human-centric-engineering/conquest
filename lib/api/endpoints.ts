@@ -45,6 +45,8 @@ export const API = {
   /** Admin endpoints */
   ADMIN: {
     STATS: '/api/v1/admin/stats',
+    /** Config-health report — missing critical env/config (presence only, admin). */
+    CONFIG_HEALTH: '/api/v1/admin/config-health',
     LOGS: '/api/v1/admin/logs',
     INVITATIONS: '/api/v1/admin/invitations',
     /** Delete invitation by email */

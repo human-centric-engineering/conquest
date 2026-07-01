@@ -159,6 +159,7 @@ ALLOWED_ORIGINS="https://app.example.com,capacitor://localhost"
 - **Used By:**
   - `app/api/v1/cron/maintenance/route.ts` — checks `Authorization: Bearer $CRON_SECRET`
 - **Behavior:** On Vercel, set this in the dashboard and Vercel Cron auto-attaches the bearer header (see `vercel.json`). On a persistent/self-hosted deploy that drives the tick another way (admin API-key POST, in-process ticker), it can be left unset.
+- **Surfaced when missing:** the admin config-health check flags an unset `CRON_SECRET` (critical, production-only) on the dashboard + a global banner — see [`.context/admin/config-health.md`](../admin/config-health.md).
 
 See [`.context/orchestration/scheduling.md`](../orchestration/scheduling.md) and [`deployment/platforms/vercel.md`](../deployment/platforms/vercel.md).
 
