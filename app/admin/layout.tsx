@@ -6,6 +6,7 @@ import { AdminSidebar } from '@/components/admin/admin-sidebar';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { BreadcrumbProvider } from '@/components/admin/breadcrumb-context';
 import { InFlightExecutionBanner } from '@/components/admin/orchestration/in-flight-execution-banner';
+import { ConfigHealthGlobalBanner } from '@/components/admin/config-health-global-banner';
 import { BRAND } from '@/lib/brand';
 
 // Display serif for the ConQuest wordmark (Questionnaires surface). Exposed as
@@ -55,6 +56,7 @@ export default async function AdminLayout({
         <AdminSidebar />
         <div className="flex flex-1 flex-col overflow-hidden">
           <AdminHeader />
+          <ConfigHealthGlobalBanner />
           <InFlightExecutionBanner />
           <main className="flex-1 overflow-y-auto overscroll-contain">
             <div className="p-6">{children}</div>
