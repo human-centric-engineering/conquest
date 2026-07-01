@@ -77,7 +77,15 @@ describe('POST …/:id/report/retry', () => {
     expect(prismaMock.appQuestionnaireSession.findUnique).not.toHaveBeenCalled();
   });
 
-  it('surfaces an access failure status', async () => {
+  it('404s when the session does not exist', async () => {
+    prismaMock.appQuestionnaireSession.findUnique.mockResolvedValue(null);
+    const res = await RETRY(req(), ctx);
+    expect(res.status).toBe(404);
+    expect(resolveTurnAccess).not.toHaveBeenCalled();
+    expect(retryMock.requestRespondentReportRetry).not.toHaveBeenCalled();
+  });
+
+  it('surfaces an access failure status + error envelope', async () => {
     (resolveTurnAccess as unknown as Mock).mockResolvedValue({
       ok: false,
       status: 403,
@@ -86,6 +94,9 @@ describe('POST …/:id/report/retry', () => {
     });
     const res = await RETRY(req(), ctx);
     expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('FORBIDDEN');
     expect(retryMock.requestRespondentReportRetry).not.toHaveBeenCalled();
   });
 
@@ -108,7 +119,27 @@ describe('POST …/:id/report/notify', () => {
     expect(prismaMock.appRespondentReport.updateMany).not.toHaveBeenCalled();
   });
 
-  it('surfaces an access failure status', async () => {
+  it('400s on a malformed (non-JSON) body', async () => {
+    // Raw invalid JSON → the JSON.parse catch branch (distinct from the Zod-validation 400 above).
+    const badReq = {
+      url: 'http://localhost/api/v1/app/questionnaire-sessions/s1/report/notify',
+      headers: new Headers(),
+      text: () => Promise.resolve('{ not valid json'),
+    } as unknown as NextRequest;
+    const res = await NOTIFY(badReq, ctx);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe('VALIDATION_ERROR');
+    expect(prismaMock.appRespondentReport.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('404s when the session does not exist', async () => {
+    prismaMock.appQuestionnaireSession.findUnique.mockResolvedValue(null);
+    const res = await NOTIFY(req({ email: 'you@example.com' }), ctx);
+    expect(res.status).toBe(404);
+    expect(prismaMock.appRespondentReport.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('surfaces an access failure status + error envelope', async () => {
     (resolveTurnAccess as unknown as Mock).mockResolvedValue({
       ok: false,
       status: 401,
@@ -117,6 +148,9 @@ describe('POST …/:id/report/notify', () => {
     });
     const res = await NOTIFY(req({ email: 'you@example.com' }), ctx);
     expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('SESSION_TOKEN_REQUIRED');
     expect(prismaMock.appRespondentReport.updateMany).not.toHaveBeenCalled();
   });
 

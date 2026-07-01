@@ -93,6 +93,16 @@ async function claimNextReport(workerId: string): Promise<ClaimedReport | null> 
 async function driveReport(claimed: ClaimedReport): Promise<boolean> {
   try {
     const { content, costUsd } = await generateRespondentReport(claimed.sessionId);
+    // Re-read notifyEmail: generation takes tens of seconds, during which the respondent may have
+    // just opted in (the notify route matches `processing` rows). Using the claim-time value would
+    // miss that late opt-in AND the ready-write below clears the column — so read the fresh value
+    // now and decide the send on it. (`?? claimed.notifyEmail` keeps a claim-time value if the
+    // re-read races/returns nothing.)
+    const fresh = await prisma.appRespondentReport.findUnique({
+      where: { id: claimed.id },
+      select: { notifyEmail: true },
+    });
+    const notifyEmail = fresh?.notifyEmail ?? claimed.notifyEmail;
     await prisma.appRespondentReport.updateMany({
       where: { id: claimed.id, status: 'processing' },
       data: {
@@ -110,9 +120,9 @@ async function driveReport(claimed: ClaimedReport): Promise<boolean> {
     });
     // Best-effort report-ready email — the report is already saved, so a send failure is logged,
     // never surfaced or retried.
-    if (claimed.notifyEmail) {
+    if (notifyEmail) {
       try {
-        await sendRespondentReportReadyEmail(claimed.sessionId, claimed.notifyEmail);
+        await sendRespondentReportReadyEmail(claimed.sessionId, notifyEmail);
       } catch (err) {
         logger.warn('respondent report: ready-email send failed', {
           reportId: claimed.id,

@@ -338,6 +338,12 @@ function NotifyWhenReady({
   const [done, setDone] = useState(alreadyRequested);
   const [error, setError] = useState(false);
 
+  // Sync when polling later reports a notify request (e.g. submitted from another tab) — the
+  // useState initializer only runs on mount, so without this the form would re-show after a poll.
+  useEffect(() => {
+    if (alreadyRequested) setDone(true);
+  }, [alreadyRequested]);
+
   if (done) {
     return (
       <p className="text-muted-foreground text-xs text-balance" role="status">

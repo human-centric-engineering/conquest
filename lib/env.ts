@@ -134,6 +134,10 @@ const serverEnvSchema = z.object({
   // the /api/v1/cron/maintenance endpoint refuses every request. See .context/orchestration/scheduling.md.
   CRON_SECRET: z
     .string()
+    .min(32, {
+      message:
+        'CRON_SECRET must be at least 32 characters (high-entropy). Generate with: openssl rand -base64 32',
+    })
     .optional()
     .describe('Bearer secret for the /api/v1/cron/maintenance scheduled endpoint (Vercel Cron).'),
 });

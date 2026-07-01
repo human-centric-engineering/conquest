@@ -407,6 +407,62 @@ describe('SessionComplete — respondent report', () => {
     expect(retrySpy).toHaveBeenCalledTimes(1);
   });
 
+  describe('email-me-when-ready (timed-out fallback)', () => {
+    const timedOutView = (notifyRequested = false) => ({
+      enabled: true,
+      mode: 'raw_plus_insights' as const,
+      onScreen: true,
+      download: true,
+      insights: {
+        status: 'processing' as const,
+        started: true,
+        content: null,
+        generatedAt: null,
+        error: null,
+        notifyRequested,
+      },
+    });
+
+    it('submits the entered email via notify() and swaps to a confirmation', async () => {
+      notifySpy.mockResolvedValueOnce(true);
+      mockView(timedOutView(), { timedOut: true });
+      render(<SessionComplete sessionId="s1" answeredCount={2} />);
+
+      await userEvent.type(
+        screen.getByLabelText(/Email address for your report/i),
+        'me@example.com'
+      );
+      await userEvent.click(screen.getByRole('button', { name: /Email me/i }));
+
+      expect(notifySpy).toHaveBeenCalledWith('me@example.com');
+      expect(
+        await screen.findByText(/We.ll email you when your report is ready/i)
+      ).toBeInTheDocument();
+    });
+
+    it('shows the confirmation directly when a notify was already requested', () => {
+      mockView(timedOutView(true), { timedOut: true });
+      render(<SessionComplete sessionId="s1" answeredCount={2} />);
+
+      expect(screen.getByText(/We.ll email you when your report is ready/i)).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Email me/i })).toBeNull();
+    });
+
+    it('surfaces an error when notify() fails', async () => {
+      notifySpy.mockResolvedValueOnce(false);
+      mockView(timedOutView(), { timedOut: true });
+      render(<SessionComplete sessionId="s1" answeredCount={2} />);
+
+      await userEvent.type(
+        screen.getByLabelText(/Email address for your report/i),
+        'me@example.com'
+      );
+      await userEvent.click(screen.getByRole('button', { name: /Email me/i }));
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(/Couldn.t save your email/i);
+    });
+  });
+
   it('hides the Download button when delivery.download is off', () => {
     mockView({
       enabled: true,

@@ -284,6 +284,9 @@ describe('transition race', () => {
     );
     const res = await POST(req(), ctx);
     expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('CONFLICT');
   });
 });
 
