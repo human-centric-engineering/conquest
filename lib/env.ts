@@ -34,6 +34,10 @@ const serverEnvSchema = z.object({
     message:
       'DATABASE_URL must be a valid PostgreSQL connection string (e.g., postgresql://user:password@localhost:5432/dbname)',
   }),
+  // Per-instance pg pool size (lib/db/client.ts). Optional. On serverless, leave unset — it
+  // defaults to 1 (each warm instance holds one connection behind a transaction pooler; many
+  // instances × a larger pool would exhaust Postgres). On a long-running server raise it (e.g. 10).
+  DATABASE_POOL_MAX: z.coerce.number().int().positive().optional(),
 
   // Authentication (better-auth)
   BETTER_AUTH_URL: z.string().url({

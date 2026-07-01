@@ -47,12 +47,14 @@ function clearGlobalCache(): void {
 async function importClientWithEnv(opts: {
   NODE_ENV: string;
   DATABASE_URL?: string;
+  DATABASE_POOL_MAX?: number;
   TENANCY_MODE?: string;
   preSeededGlobal?: { prisma?: unknown; pool?: unknown };
 }) {
   const {
     NODE_ENV,
     DATABASE_URL = 'postgresql://user:pass@localhost:5432/testdb',
+    DATABASE_POOL_MAX,
     TENANCY_MODE,
     preSeededGlobal,
   } = opts;
@@ -83,11 +85,17 @@ async function importClientWithEnv(opts: {
 
   // Only set TENANCY_MODE on the mock env when the test supplies it, so the
   // "undefined behaves like single" back-compat case is genuinely undefined.
-  const mockEnvValue: { DATABASE_URL: string; NODE_ENV: string; TENANCY_MODE?: string } = {
+  const mockEnvValue: {
+    DATABASE_URL: string;
+    NODE_ENV: string;
+    TENANCY_MODE?: string;
+    DATABASE_POOL_MAX?: number;
+  } = {
     DATABASE_URL,
     NODE_ENV,
   };
   if (TENANCY_MODE !== undefined) mockEnvValue.TENANCY_MODE = TENANCY_MODE;
+  if (DATABASE_POOL_MAX !== undefined) mockEnvValue.DATABASE_POOL_MAX = DATABASE_POOL_MAX;
 
   // Reset the module registry and re-register mocks (vi.doMock is not hoisted)
   vi.resetModules();
@@ -151,9 +159,29 @@ describe('lib/db/client', () => {
       });
 
       // Assert — Pool was constructed with the correct connectionString
-      expect(MockPool).toHaveBeenCalledWith({
-        connectionString: 'postgresql://testuser:testpass@db:5432/appdb',
+      expect(MockPool).toHaveBeenCalledWith(
+        expect.objectContaining({
+          connectionString: 'postgresql://testuser:testpass@db:5432/appdb',
+        })
+      );
+    });
+
+    it('defaults the pool to max 1 in production (serverless-safe behind a pooler)', async () => {
+      const { MockPool } = await importClientWithEnv({ NODE_ENV: 'production' });
+      expect(MockPool).toHaveBeenCalledWith(expect.objectContaining({ max: 1 }));
+    });
+
+    it('defaults the pool to max 10 in development', async () => {
+      const { MockPool } = await importClientWithEnv({ NODE_ENV: 'development' });
+      expect(MockPool).toHaveBeenCalledWith(expect.objectContaining({ max: 10 }));
+    });
+
+    it('honours DATABASE_POOL_MAX over the environment default', async () => {
+      const { MockPool } = await importClientWithEnv({
+        NODE_ENV: 'production',
+        DATABASE_POOL_MAX: 20,
       });
+      expect(MockPool).toHaveBeenCalledWith(expect.objectContaining({ max: 20 }));
     });
 
     it('should pass the Pool instance to PrismaPg adapter', async () => {

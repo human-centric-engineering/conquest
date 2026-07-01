@@ -68,8 +68,13 @@ STORAGE_PROVIDER=vercel-blob  # Options: s3, vercel-blob, local
 **Option B: External Database (Supabase, Neon, Railway)**
 
 1. Create database on your provider
-2. Copy connection string to `DATABASE_URL`
-3. Ensure SSL is enabled for production
+2. Copy the **pooled** connection string to `DATABASE_URL` (Neon `-pooler` host, Supabase transaction
+   pooler on `:6543` with `?pgbouncer=true`) — serverless fans out across many instances, so a direct
+   `:5432` connection exhausts the DB. `lib/db/client.ts` uses `max: 1` per instance in production
+   (override with `DATABASE_POOL_MAX`), which relies on a transaction pooler in front.
+3. Ensure SSL is enabled for production (`?sslmode=require`)
+
+See [`.context/environment/database-env.md`](../../environment/database-env.md#connection-pooling-serverless-vs-long-running) for the full pooling rationale.
 
 ### 4. Configure Migrations
 

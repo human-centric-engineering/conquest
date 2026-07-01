@@ -52,6 +52,32 @@ DATABASE_URL="postgresql://user:pass@prod-db.example.com:5432/sunrise?sslmode=re
 | Docker      | `db` (service name) | No  | `postgresql://postgres:pass@db:5432/sunrise`                         |
 | Production  | Cloud hostname      | Yes | `postgresql://user:pass@db.example.com:5432/sunrise?sslmode=require` |
 
+## Connection pooling (serverless vs long-running)
+
+`lib/db/client.ts` builds a `pg` `Pool` per process. The per-instance pool size is:
+
+```
+DATABASE_POOL_MAX ?? (production ? 1 : 10)
+```
+
+- **Serverless (Vercel):** each warm instance holds its own pool and many instances run at once, so
+  an unbounded `max` × N instances exhausts Postgres. The safe default is **`max: 1` per instance
+  behind a transaction pooler** — point `DATABASE_URL` at the **pooled** endpoint:
+  - Neon: the `-pooler` host (e.g. `ep-xxx-pooler.<region>.aws.neon.tech`, `?sslmode=require`)
+  - Supabase: the transaction pooler on port **6543** (`...pooler.supabase.com:6543?pgbouncer=true`)
+  - Vercel Postgres: `POSTGRES_PRISMA_URL` (already pooled, `?pgbouncer=true`)
+    A bare `:5432` direct connection with `max: 1` throttles throughput and still risks exhaustion —
+    use the pooled endpoint.
+- **Long-running server (Docker/Render/Railway):** one persistent process — raise the pool with
+  `DATABASE_POOL_MAX` (e.g. `10`) against a direct connection.
+
+### `DATABASE_POOL_MAX` (optional)
+
+- **Type:** positive integer
+- **Default:** `1` in production, `10` in development
+- **Used by:** `lib/db/client.ts` (`new Pool({ max })`)
+- Set it to override the per-instance pool size in either environment.
+
 ## Troubleshooting
 
 **Connection fails:**
