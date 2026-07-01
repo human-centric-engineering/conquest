@@ -1,10 +1,11 @@
 /**
  * VersionSettingsPanel — the Settings-tab surface wrapping the run-time config editor under one
- * fork-on-launch mutation runner. The child editor and the mutation helper are mocked; the
- * assertions pin the panel's OWN responsibilities: it renders the config editor with the derived
- * version id / question count / adaptive flag, runs edits through `authoringMutate` + `router
- * .refresh()`, and on a launched-version fork shows the notice + redirects to the new draft's
- * Settings tab. (Goal & audience moved to the Structure tab — see goal-audience-editor.test.tsx.)
+ * mutation runner. The child editor and the mutation helper are mocked; the assertions pin the
+ * panel's OWN responsibilities: it renders the config editor with the derived version id / question
+ * count / adaptive flag, runs edits through `authoringMutate` + `router.refresh()`, on a
+ * launched-version fork shows the notice + redirects to the new draft's Settings tab, and treats a
+ * declined fork confirmation (`ForkCancelledError`) as a silent no-op. (The fork confirmation itself
+ * is centralised in `authoringMutate` + `ForkConfirmProvider` — see their tests.)
  *
  * @see components/admin/questionnaires/version-settings-panel.tsx
  */
@@ -14,12 +15,17 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 import type { VersionGraphView } from '@/lib/app/questionnaire/views';
 import { DEFAULT_QUESTIONNAIRE_CONFIG } from '@/lib/app/questionnaire/types';
+import { ForkCancelledError } from '@/components/admin/questionnaires/authoring-mutate';
 
 const router = vi.hoisted(() => ({ replace: vi.fn(), refresh: vi.fn() }));
 vi.mock('next/navigation', () => ({ useRouter: () => router }));
 
+// Partial-mock: override only `authoringMutate`, keep the real ForkCancelledError / AuthoringError.
 const mutateMock = vi.hoisted(() => ({ authoringMutate: vi.fn() }));
-vi.mock('@/components/admin/questionnaires/authoring-mutate', () => mutateMock);
+vi.mock('@/components/admin/questionnaires/authoring-mutate', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/components/admin/questionnaires/authoring-mutate')>()),
+  authoringMutate: mutateMock.authoringMutate,
+}));
 
 // Config editor → a marker that exposes its injected `run` as a button + the props the panel derives.
 vi.mock('@/components/admin/questionnaires/config-editor', () => ({
@@ -74,6 +80,18 @@ function graph(over: Partial<VersionGraphView> = {}): VersionGraphView {
   };
 }
 
+function renderPanel(over: Partial<VersionGraphView> = {}) {
+  render(
+    <VersionSettingsPanel
+      questionnaireId="qn-1"
+      graph={graph(over)}
+      adaptiveEnabled={false}
+      adaptiveDataSlotsEnabled={false}
+      introScreenEnabled={false}
+    />
+  );
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mutateMock.authoringMutate.mockResolvedValue({ data: {}, meta: { forked: false } });
@@ -96,28 +114,12 @@ describe('VersionSettingsPanel', () => {
   });
 
   it('no longer renders the goal/audience editor (moved to the Structure tab)', () => {
-    render(
-      <VersionSettingsPanel
-        questionnaireId="qn-1"
-        graph={graph()}
-        adaptiveEnabled={false}
-        adaptiveDataSlotsEnabled={false}
-        introScreenEnabled={false}
-      />
-    );
+    renderPanel();
     expect(screen.queryByText('Goal & audience')).not.toBeInTheDocument();
   });
 
   it('runs an edit through authoringMutate and refreshes', async () => {
-    render(
-      <VersionSettingsPanel
-        questionnaireId="qn-1"
-        graph={graph()}
-        adaptiveEnabled={false}
-        adaptiveDataSlotsEnabled={false}
-        introScreenEnabled={false}
-      />
-    );
+    renderPanel();
     fireEvent.click(screen.getByTestId('cfg'));
     await waitFor(() =>
       expect(mutateMock.authoringMutate).toHaveBeenCalledWith('PATCH', '/cfg', {})
@@ -131,15 +133,7 @@ describe('VersionSettingsPanel', () => {
       data: {},
       meta: { forked: true, versionId: 'ver-2', versionNumber: 2 },
     });
-    render(
-      <VersionSettingsPanel
-        questionnaireId="qn-1"
-        graph={graph()}
-        adaptiveEnabled={false}
-        adaptiveDataSlotsEnabled={false}
-        introScreenEnabled={false}
-      />
-    );
+    renderPanel();
     fireEvent.click(screen.getByTestId('cfg'));
     await waitFor(() =>
       expect(router.replace).toHaveBeenCalledWith('/admin/questionnaires/qn-1/v/ver-2/settings')
@@ -147,17 +141,20 @@ describe('VersionSettingsPanel', () => {
     expect(screen.getByText(/new draft \(v2\)/)).toBeInTheDocument();
   });
 
+  it('treats a declined fork confirmation as a silent no-op — refresh, no error banner', async () => {
+    mutateMock.authoringMutate.mockRejectedValue(new ForkCancelledError());
+    renderPanel();
+    fireEvent.click(screen.getByTestId('cfg'));
+    await waitFor(() => expect(router.refresh).toHaveBeenCalled());
+    expect(
+      screen.queryByText('Edit cancelled — no new version was created.')
+    ).not.toBeInTheDocument();
+    expect(router.replace).not.toHaveBeenCalled();
+  });
+
   it('surfaces an error when the mutation fails', async () => {
     mutateMock.authoringMutate.mockRejectedValue(new Error('nope'));
-    render(
-      <VersionSettingsPanel
-        questionnaireId="qn-1"
-        graph={graph()}
-        adaptiveEnabled={false}
-        adaptiveDataSlotsEnabled={false}
-        introScreenEnabled={false}
-      />
-    );
+    renderPanel();
     fireEvent.click(screen.getByTestId('cfg'));
     await waitFor(() => expect(screen.getByText('nope')).toBeInTheDocument());
   });

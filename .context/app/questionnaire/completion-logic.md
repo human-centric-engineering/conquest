@@ -88,8 +88,15 @@ It is **config-only** (no platform flag), three fields on `AppQuestionnaireConfi
 (`configuration.md`):
 
 - `allowEarlyFinish` (bool, default `false`) — turns the feature on.
-- `earlyFinishMinCoverage` (0–1, default `0.5`) — weighted-coverage bar.
-- `earlyFinishMinQuestions` (int ≥0, default `0`) — answered-count bar.
+- `earlyFinishMinCoverage` (0–1, default `1.0`) — weighted-coverage bar. Stored as a fraction but
+  **edited as a whole percent** (0–100) in `config-editor.tsx` (`pctString` / `fractionFromPct`);
+  the default `1.0` (100%) surfaces the control only once the respondent has effectively completed
+  the questionnaire — admins lower it to let them finish sooner.
+- `earlyFinishMinQuestions` (int ≥0, default `0` = **off**) — answered-count bar; off by default so
+  the coverage bar gates alone.
+
+The two bars have **no priority** — the control unlocks on whichever the respondent reaches first
+(the editor states this inline; `0` on either axis = "off / not a criterion").
 
 `assessCompletion` computes `earlyFinishAvailable` independently of `kind` via the pure
 `isEarlyFinishAvailable(config, coverage, answered)` (exported from `completion-logic.ts`,

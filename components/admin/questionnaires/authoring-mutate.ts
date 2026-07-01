@@ -9,6 +9,13 @@
  */
 
 import { parseApiResponse } from '@/lib/api/parse-response';
+import {
+  requestForkConfirm,
+  type ForkConfirmDetails,
+} from '@/components/admin/questionnaires/fork-confirm-bridge';
+
+/** The server error code that means "editing this launched version will fork a new draft — confirm." */
+const VERSION_FORK_CONFIRMATION_REQUIRED = 'VERSION_FORK_CONFIRMATION_REQUIRED';
 
 /** The fork-outcome meta every authoring mutation returns. */
 export interface AuthoringMeta {
@@ -34,19 +41,49 @@ export class AuthoringError extends Error {
   }
 }
 
+/**
+ * Thrown when the admin declines the "create a new draft?" confirmation. Nothing was written.
+ * Runners should treat it as a benign no-op (resync from the server, no error banner).
+ */
+export class ForkCancelledError extends Error {
+  constructor() {
+    super('Edit cancelled — no new version was created.');
+    this.name = 'ForkCancelledError';
+  }
+}
+
+function mutateFetch(
+  method: 'POST' | 'PUT' | 'PATCH' | 'DELETE',
+  path: string,
+  body: unknown,
+  confirm: 'prompt' | 'confirmed'
+): Promise<Response> {
+  return fetch(path, {
+    method,
+    // `x-fork-confirm` opts this request into the fork-confirmation protocol: `prompt` asks the
+    // server to 409 rather than silently fork a launched version; `confirmed` is the post-dialog retry.
+    headers: { 'Content-Type': 'application/json', 'x-fork-confirm': confirm },
+    credentials: 'same-origin',
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+  });
+}
+
 export async function authoringMutate<T>(
   method: 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   path: string,
   body?: unknown
 ): Promise<AuthoringResult<T>> {
-  const res = await fetch(path, {
-    method,
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'same-origin',
-    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-  });
+  let parsed = await parseApiResponse<T>(await mutateFetch(method, path, body, 'prompt'));
 
-  const parsed = await parseApiResponse<T>(res);
+  // The edit would fork a launched version — confirm with the admin, then retry (or cancel).
+  if (!parsed.success && parsed.error.code === VERSION_FORK_CONFIRMATION_REQUIRED) {
+    const confirmed = await requestForkConfirm(
+      parsed.error.details as unknown as ForkConfirmDetails
+    );
+    if (!confirmed) throw new ForkCancelledError();
+    parsed = await parseApiResponse<T>(await mutateFetch(method, path, body, 'confirmed'));
+  }
+
   if (!parsed.success) {
     throw new AuthoringError(parsed.error.message, parsed.error.code, parsed.error.details);
   }

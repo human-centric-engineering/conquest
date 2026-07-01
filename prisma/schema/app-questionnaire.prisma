@@ -181,7 +181,7 @@ model AppQuestionnaireConfig {
   // report before the agent's own completion thresholds are met. Bypasses the required-question gate.
   // Config-only (no platform flag). minCoverage/minQuestions are OR'd; 0 = not a criterion on that axis.
   allowEarlyFinish        Boolean @default(false) // respondent may finish early (escape hatch)
-  earlyFinishMinCoverage  Float   @default(0.5) // 0–1 weighted coverage to unlock; 0 = not a criterion
+  earlyFinishMinCoverage  Float   @default(1.0) // 0–1 weighted coverage to unlock; 0 = not a criterion
   earlyFinishMinQuestions Int     @default(0) // answered slots to unlock; 0 = not a criterion
 
   // Budget & caps (F3.3/F6.3 consume these; F3.1 only stores them).

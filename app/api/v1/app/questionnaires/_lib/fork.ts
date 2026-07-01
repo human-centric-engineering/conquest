@@ -24,7 +24,11 @@
  *     lineage; the original keeps its ingest log.
  */
 
+import { headers } from 'next/headers';
+
 import { executeTransaction } from '@/lib/db/utils';
+import { prisma } from '@/lib/db/client';
+import { APIError } from '@/lib/api/errors';
 import {
   countLaunchBlockers,
   hasLaunchBlockers,
@@ -35,6 +39,53 @@ import {
   jsonInput,
   type ScopedVersion,
 } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
+
+/** Error code the client detects to raise the "create a new draft?" confirmation dialog. */
+export const VERSION_FORK_CONFIRMATION_REQUIRED = 'VERSION_FORK_CONFIRMATION_REQUIRED';
+
+/** Details carried on the 409 so the client dialog can name the lineage without a second fetch. */
+export interface ForkConfirmationDetails {
+  sourceVersionNumber: number;
+  nextVersionNumber: number;
+  versions: { versionNumber: number; status: string }[];
+}
+
+/**
+ * Thrown when an edit WOULD fork a launched version but the request hasn't confirmed it. A 409 the
+ * client turns into `LaunchedEditConfirmDialog`; on confirm it retries with `x-fork-confirm:
+ * confirmed`. Nothing is written on the unconfirmed attempt — the throw precedes every mutation.
+ */
+export class ForkConfirmationRequiredError extends APIError {
+  constructor(details: ForkConfirmationDetails) {
+    super(
+      'This version is launched — confirm creating a new draft before saving.',
+      VERSION_FORK_CONFIRMATION_REQUIRED,
+      409,
+      details as unknown as Record<string, unknown>
+    );
+    this.name = 'ForkConfirmationRequiredError';
+  }
+}
+
+/**
+ * How the current request wants a fork handled, from the `x-fork-confirm` header:
+ *   - `'confirmed'` — the admin already confirmed → fork.
+ *   - `'prompt'`    — an interactive client that CAN confirm but hasn't → throw the 409.
+ *   - `'legacy'`    — header absent (programmatic API clients, seeds/scripts, non-request
+ *                     contexts) → fork silently, preserving the pre-confirmation behaviour so
+ *                     existing callers and integration tests are unaffected.
+ */
+async function readForkConfirmState(): Promise<'confirmed' | 'prompt' | 'legacy'> {
+  try {
+    const value = (await headers()).get('x-fork-confirm');
+    if (value === 'confirmed') return 'confirmed';
+    if (value === 'prompt') return 'prompt';
+    return 'legacy';
+  } catch {
+    // No request scope (seeds/scripts/tests) — never block a non-interactive caller.
+    return 'legacy';
+  }
+}
 
 /** The version a mutation should write to, and whether a fork happened. */
 export interface ForkResult {
@@ -81,6 +132,22 @@ export async function forkVersionIfLaunched(
   const shouldFork = scoped.status === 'launched' || hasLaunchBlockers(blockers);
   if (!shouldFork) {
     return { versionId, forked: false, versionNumber: scoped.versionNumber };
+  }
+
+  // An interactive client must confirm the version increment before we fork — otherwise a setting
+  // change silently lands on a new draft the running session never sees. Throw BEFORE any write.
+  if ((await readForkConfirmState()) === 'prompt') {
+    const all = await prisma.appQuestionnaireVersion.findMany({
+      where: { questionnaireId },
+      select: { versionNumber: true, status: true },
+      orderBy: { versionNumber: 'desc' },
+    });
+    const nextVersionNumber = (all[0]?.versionNumber ?? scoped.versionNumber) + 1;
+    throw new ForkConfirmationRequiredError({
+      sourceVersionNumber: scoped.versionNumber,
+      nextVersionNumber,
+      versions: all,
+    });
   }
 
   const created = await executeTransaction(async (tx) => {

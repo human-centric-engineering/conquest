@@ -10,15 +10,19 @@
  *
  * Owns ONE mutation runner with the fork-on-launch discipline (same as `version-editor.tsx`):
  * editing a launched version forks a new draft, surfaces the notice, and redirects to that
- * draft's Settings tab. The fields live in the shared {@link ConfigEditor}; this panel wraps it
- * under one runner + fork notice.
+ * draft's Settings tab. The fork is confirmed with the admin first — centrally, via `authoringMutate`
+ * + the workspace `ForkConfirmProvider` — so a declined save (`ForkCancelledError`) writes nothing
+ * and shows no error. The fields live in the shared {@link ConfigEditor}.
  */
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { ConfigEditor } from '@/components/admin/questionnaires/config-editor';
-import { authoringMutate } from '@/components/admin/questionnaires/authoring-mutate';
+import {
+  authoringMutate,
+  ForkCancelledError,
+} from '@/components/admin/questionnaires/authoring-mutate';
 import type {
   MutationSpec,
   RunMutation,
@@ -72,6 +76,12 @@ export function VersionSettingsPanel({
         return true;
       })
       .catch((err: unknown) => {
+        // The admin declined the fork confirmation → nothing was written; resync, no error banner.
+        if (err instanceof ForkCancelledError) {
+          router.refresh();
+          setBusy(false);
+          return false;
+        }
         setError(err instanceof Error ? err.message : 'Something went wrong');
         router.refresh();
         setBusy(false);

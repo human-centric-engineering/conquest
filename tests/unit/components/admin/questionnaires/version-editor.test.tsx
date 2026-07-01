@@ -26,7 +26,9 @@ vi.mock('next/navigation', () => ({
 }));
 
 const { mockAuthoringMutate } = vi.hoisted(() => ({ mockAuthoringMutate: vi.fn() }));
-vi.mock('@/components/admin/questionnaires/authoring-mutate', () => ({
+vi.mock('@/components/admin/questionnaires/authoring-mutate', async (importOriginal) => ({
+  // Keep the real ForkCancelledError / AuthoringError (version-editor narrows on them); mock only the call.
+  ...(await importOriginal<typeof import('@/components/admin/questionnaires/authoring-mutate')>()),
   authoringMutate: mockAuthoringMutate,
 }));
 
