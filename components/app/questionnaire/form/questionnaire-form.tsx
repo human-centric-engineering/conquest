@@ -137,6 +137,17 @@ export function QuestionnaireForm({
   // (legacy/preview rows). Deliberately NOT gated on local edits: the rating stays on the answer.
   const showsConfidence = (slot: PanelSlotView): boolean =>
     slot.answered && slot.confidence !== null;
+  // Show the "captured from your conversation" ⓘ explainer on EVERY agent-captured answer — a plain
+  // `direct` capture as much as an `inferred`/`synthesised` one — so the affordance is consistent
+  // across the confidence lane instead of appearing on some captured answers and not others. The
+  // respondent didn't type any of these into the form; they were all read from the chat, and each
+  // deserves the same "edit if it's not quite right" escape hatch. Suppressed once the respondent
+  // owns the answer — either edited this session (`editedKeys`) or persisted from a prior form edit
+  // (`respondentEdited`). Piggybacks on `showsConfidence`: wherever the agent's chip shows, so does
+  // its explainer. A respondent-typed form answer (confidence 1.0, `respondentEdited`) shows the
+  // chip but no explainer — they know where it came from.
+  const isAgentCaptured = (slot: PanelSlotView): boolean =>
+    showsConfidence(slot) && !slot.respondentEdited && !editedKeys.has(slot.slotKey);
   const isRecentlyFilled = (slotKey: string): boolean => recentlyFilledKeys.has(slotKey);
 
   if (loading && !view) {
@@ -228,8 +239,9 @@ export function QuestionnaireForm({
 
                   {/* Confidence lane — how sure the agent is about the answer it captured (a
                       Tentative guess vs a Confident, corroborated one). Shown on every answered,
-                      scored question regardless of how it was captured. The "inferred" ⓘ explainer
-                      sits beside the chip (only for agent-inferred answers); the transient save hint
+                      scored question regardless of how it was captured. The "captured from your
+                      conversation" ⓘ explainer sits beside the chip on every agent-captured answer
+                      (carrying its rationale when the agent gave one); the transient save hint
                       shares the lane. Right-aligned + top-padded on `sm+` so the chips line up with
                       each question's first line; inline under the prompt on narrow screens. */}
                   <div className="flex flex-row flex-wrap items-center gap-x-2 gap-y-1 sm:flex-col sm:items-end sm:pt-0.5">
@@ -237,13 +249,22 @@ export function QuestionnaireForm({
                       {showsConfidence(slot) && (
                         <ConfidenceScore confidence={slot.confidence ?? null} />
                       )}
-                      {isInferred(slot.slotKey) && (
+                      {isAgentCaptured(slot) && (
                         <FieldHelp
-                          title="Inferred from your conversation"
-                          ariaLabel="Inferred answer — edit if needed"
+                          title="Captured from your conversation"
+                          ariaLabel="Captured answer — edit if needed"
                         >
-                          The agent inferred this answer from what you said in the chat. Edit it
-                          here if it&apos;s not quite right.
+                          {slot.rationale ? (
+                            <>
+                              <p>{slot.rationale}</p>
+                              <p>Edit it here if it&apos;s not quite right.</p>
+                            </>
+                          ) : (
+                            <>
+                              The agent captured this answer from what you said in the chat. Edit it
+                              here if it&apos;s not quite right.
+                            </>
+                          )}
                         </FieldHelp>
                       )}
                     </div>

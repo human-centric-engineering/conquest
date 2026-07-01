@@ -150,6 +150,7 @@ export async function loadAnswerPanelState(
           confidence: true,
           provenanceLabel: true,
           rationale: true,
+          respondentEdited: true,
           lastUpdatedTurnId: true,
           refinementHistory: true,
           questionSlot: { select: { key: true } },
@@ -196,6 +197,7 @@ export async function loadAnswerPanelState(
     provenance: a.provenanceLabel,
     confidence: a.confidence,
     rationale: a.rationale,
+    respondentEdited: a.respondentEdited,
     answeredAtTurnIndex:
       a.lastUpdatedTurnId != null ? (turnOrdinal.get(a.lastUpdatedTurnId) ?? null) : null,
     refinementHistory: asRefinementHistory(a.refinementHistory),

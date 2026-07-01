@@ -246,6 +246,7 @@ function qSlot(over: Partial<PanelSlotView> & { slotKey: string }): PanelSlotVie
     confidence: null,
     rationale: null,
     answeredAtTurnIndex: null,
+    respondentEdited: false,
     refinementHistory: [],
     ...over,
   };

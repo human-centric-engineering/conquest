@@ -105,6 +105,7 @@ const questionSlot = (prompt: string, value: unknown, answered = true): PanelSlo
   confidence: 0.9,
   rationale: null,
   answeredAtTurnIndex: 1,
+  respondentEdited: false,
   refinementHistory: [],
 });
 

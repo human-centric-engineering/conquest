@@ -58,6 +58,13 @@ export interface PanelSlotView {
   /** 0–1; null when unscored (or pending). */
   confidence: number | null;
   rationale: string | null;
+  /**
+   * True when the respondent set/edited this answer themselves in the form (as opposed to the agent
+   * capturing it from the conversation). Drives the form's "captured from your conversation" ⓘ
+   * explainer: shown for every agent-captured answer, suppressed once the respondent owns it.
+   * Defaults to `false` on surfaces that don't project it (export/report builders).
+   */
+  respondentEdited: boolean;
   /** 1-based turn that last captured/updated this slot, or null. */
   answeredAtTurnIndex: number | null;
   /** Refinement audit trail, oldest first; empty when never refined. */

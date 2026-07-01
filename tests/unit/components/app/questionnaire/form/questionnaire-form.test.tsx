@@ -25,6 +25,7 @@ function slot(
     provenance: null,
     confidence: null,
     rationale: null,
+    respondentEdited: false,
     answeredAtTurnIndex: null,
     refinementHistory: [],
     ...over,
@@ -83,7 +84,7 @@ describe('QuestionnaireForm', () => {
     expect(screen.getByText('Section 1 of 2')).toBeInTheDocument();
   });
 
-  it('marks an agent-inferred answer with the adjust affordance', () => {
+  it('marks an agent-captured answer with the adjust affordance', () => {
     render(
       <QuestionnaireForm
         view={view()}
@@ -95,7 +96,81 @@ describe('QuestionnaireForm', () => {
       />
     );
     // The inferred 'team' answer surfaces a FieldHelp (ⓘ) the respondent can act on.
-    expect(screen.getByLabelText('Inferred answer — edit if needed')).toBeInTheDocument();
+    expect(screen.getByLabelText('Captured answer — edit if needed')).toBeInTheDocument();
+  });
+
+  it('marks a directly-captured answer with the same affordance as an inferred one', () => {
+    // Consistency fix: the ⓘ explainer is gated on "was this captured from the conversation",
+    // NOT on provenance. A `direct` chat capture (the respondent stated it, but the agent still
+    // read it off the transcript rather than the respondent typing it into the form) gets the same
+    // "edit if it's not quite right" affordance as an `inferred`/`synthesised` one — otherwise the
+    // icon appears on some captured answers and not others for no reason the respondent can see.
+    const v = view();
+    v.sections[0].slots[0] = slot({
+      slotKey: 'role',
+      prompt: 'Your role?',
+      type: 'free_text',
+      answered: true,
+      value: 'I lead the sales enablement team',
+      provenance: 'direct',
+      confidence: 0.9,
+    });
+    render(
+      <QuestionnaireForm
+        view={v}
+        loading={false}
+        values={{ role: 'I lead the sales enablement team' }}
+        statuses={{}}
+        onChange={noop}
+        onFlush={noop}
+      />
+    );
+    // Both the direct 'role' and the inferred 'team' answer carry the explainer.
+    expect(screen.getAllByLabelText('Captured answer — edit if needed')).toHaveLength(2);
+  });
+
+  it('surfaces the agent rationale inside the explainer when present', () => {
+    const v = view();
+    v.sections[0].slots[1].rationale = 'You mentioned a team of five in the kickoff.';
+    render(
+      <QuestionnaireForm
+        view={v}
+        loading={false}
+        values={{}}
+        statuses={{}}
+        onChange={noop}
+        onFlush={noop}
+      />
+    );
+    fireEvent.click(screen.getByLabelText('Captured answer — edit if needed'));
+    expect(screen.getByText('You mentioned a team of five in the kickoff.')).toBeInTheDocument();
+  });
+
+  it('does not show the explainer on a respondent-typed form answer', () => {
+    // A form-typed answer (respondentEdited, confidence 1.0) still shows its confidence chip, but no
+    // "captured from your conversation" explainer — the respondent knows they typed it themselves.
+    const v = view();
+    v.sections[0].slots[1] = slot({
+      slotKey: 'team',
+      prompt: 'Team size?',
+      type: 'numeric',
+      answered: true,
+      value: 5,
+      provenance: 'direct',
+      confidence: 1,
+      respondentEdited: true,
+    });
+    render(
+      <QuestionnaireForm
+        view={v}
+        loading={false}
+        values={{ team: 5 }}
+        statuses={{}}
+        onChange={noop}
+        onFlush={noop}
+      />
+    );
+    expect(screen.queryByLabelText('Captured answer — edit if needed')).not.toBeInTheDocument();
   });
 
   it('surfaces the confidence band on an agent-filled field', () => {
@@ -200,7 +275,7 @@ describe('QuestionnaireForm', () => {
     expect(screen.getByText(/tentative/i)).toBeInTheDocument();
   });
 
-  it('drops the inferred marker once the respondent edits the field', () => {
+  it('drops the captured-answer marker once the respondent edits the field', () => {
     render(
       <QuestionnaireForm
         view={view()}
@@ -212,7 +287,7 @@ describe('QuestionnaireForm', () => {
         onFlush={noop}
       />
     );
-    expect(screen.queryByLabelText('Inferred answer — edit if needed')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Captured answer — edit if needed')).not.toBeInTheDocument();
   });
 
   it('gently pulses the answer block filled by the most recent turn', () => {
