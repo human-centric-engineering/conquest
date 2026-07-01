@@ -8,14 +8,25 @@
  * the streaming handler calls `invalidateContext` after any capability
  * execution that could have mutated the underlying entity.
  *
- * Phase 2c supports only `contextType = "pattern"` because that's the
- * only entity we have a clean loader for (`getPatternDetail`). Unknown
- * types log a warn and return a benign placeholder so the LLM sees
- * "no context" rather than hallucinating.
+ * Core supports only `contextType = "pattern"` as a built-in because
+ * that's the only entity we have a clean loader for (`getPatternDetail`).
+ * A fork can teach `buildContext` about additional types by registering
+ * a loader via `registerContextContributor(type, loader)` — the fork-owned
+ * `lib/app/context-contributors.ts` scaffold is auto-wired once before the
+ * first lookup. Types with neither a built-in case nor a registered
+ * contributor log a warn and return a benign placeholder (cached like any
+ * other "no data" result) so the LLM sees "no context" rather than
+ * hallucinating. A contributor that throws is caught and degraded to that
+ * placeholder — a fork's loader error must not fail the chat turn — and that
+ * errored-contributor placeholder alone is returned uncached, so a transient
+ * loader failure self-heals on the next turn. Errors from the fork's one-time
+ * init are likewise caught (contributors are simply disabled), never failing
+ * a turn.
  */
 
 import { logger } from '@/lib/logging';
 import { getPatternDetail } from '@/lib/orchestration/knowledge/search';
+import { initAppContextContributors } from '@/lib/app/context-contributors';
 
 const CONTEXT_CACHE_TTL_MS = 60 * 1000;
 const CONTEXT_CACHE_MAX_SIZE = 500;
@@ -32,6 +43,72 @@ function cacheKey(type: string, id: string): string {
 }
 
 /**
+ * A prompt-context loader keyed by `contextType`. Returns the raw body
+ * string to be framed as `LOCKED CONTEXT`; `buildContext` handles caching
+ * and framing. Registered via `registerContextContributor`.
+ */
+type ContextContributor = (id: string) => Promise<string>;
+
+const contributors = new Map<string, ContextContributor>();
+
+/** Whether the auto-wired app contributor init (`lib/app/context-contributors.ts`) has run. */
+let appInited = false;
+
+/**
+ * Register a prompt-context loader for a given `contextType`. Lets a fork
+ * inject its own `LOCKED CONTEXT` block per turn without editing the core
+ * `buildContext` switch. Idempotent by type: re-registering the same type
+ * replaces the prior loader (mirrors the capability registry's per-slug
+ * `register`). A built-in case (e.g. `"pattern"`) always takes precedence.
+ *
+ * This is the seam that lets a fork add context types without patching
+ * core. Call it at module-import time (e.g. from
+ * `lib/app/context-contributors.ts`), before the first dispatch.
+ *
+ * @see .context/orchestration/chat.md — the app-author guide
+ */
+export function registerContextContributor(type: string, loader: ContextContributor): void {
+  contributors.set(type, loader);
+}
+
+/**
+ * Run the fork's auto-wired contributor init exactly once, lazily, before
+ * the first lookup. Mirrors the run-once-lazily *invocation shape* of
+ * `initAppCapabilities()` in `registerBuiltInCapabilities` — the fork
+ * accumulates registrations at import time without a separate startup step.
+ * Error handling deliberately DIFFERS from that registry: this catches init
+ * throws rather than letting them propagate (see the inline comment).
+ */
+function ensureAppContributorsInited(): void {
+  if (appInited) return;
+  // Latch BEFORE running so a throwing init neither retries on every lookup nor
+  // propagates out of buildContext to fail the chat turn. An init failure is
+  // caught and degrades to "no app contributors" (built-in types and the
+  // placeholder path keep working), consistent with the loader-error contract
+  // in the file header. This deliberately diverges from the capability registry
+  // (which lets init throw): buildContext runs on the chat-turn hot path and
+  // must not fail the turn over a fork's one-time init bug.
+  appInited = true;
+  try {
+    initAppContextContributors();
+  } catch (err) {
+    logger.error(
+      'buildContext: initAppContextContributors threw — app context contributors disabled',
+      { error: err instanceof Error ? err.message : String(err) }
+    );
+  }
+}
+
+/**
+ * Test-only: drop all registered contributors and re-arm the one-shot app
+ * init so each test starts from a known state. Not exported from the barrel.
+ */
+export function __resetContextContributorsForTests(): void {
+  contributors.clear();
+  appInited = false;
+}
+
+/**
  * Load and frame context for the given entity, returning a string that
  * can be appended to the system prompt. Cached for 60 s per `(type, id)`.
  */
@@ -42,7 +119,13 @@ export async function buildContext(type: string, id: string): Promise<string> {
     return hit.value;
   }
 
+  ensureAppContributorsInited();
+
   let body: string;
+  // Everything caches for the TTL EXCEPT the errored-contributor placeholder:
+  // that one loader exists and may recover, so leaving it uncached lets a
+  // transient failure self-heal on the next turn (the catch below flips this).
+  let cacheable = true;
   switch (type) {
     case 'pattern': {
       const num = Number.parseInt(id, 10);
@@ -62,20 +145,48 @@ export async function buildContext(type: string, id: string): Promise<string> {
       break;
     }
     default: {
-      logger.warn('buildContext: unknown contextType', { type, id });
-      body = `No context loader for type '${type}'.`;
+      // No built-in case — fall back to a fork-registered contributor for
+      // this type before giving up. Keeps core domain-agnostic while
+      // letting a fork add context types without editing this switch.
+      const contributor = contributors.get(type);
+      if (contributor) {
+        try {
+          body = await contributor(id);
+        } catch (err) {
+          // A contributor that throws must not fail the whole chat turn.
+          // Degrade to the benign placeholder (uncached, so a transient
+          // loader error self-heals on the next turn).
+          logger.error('buildContext: context contributor threw', {
+            type,
+            id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          body = `No context loader for type '${type}'.`;
+          cacheable = false;
+        }
+      } else {
+        // Unknown type with no loader — a deterministic "no data" answer for
+        // client-controlled input. Cache it like the other placeholders so a
+        // client repeatedly sending a bad `contextType` doesn't re-warn every
+        // turn. (Contributors register at import time, so this can't "recover"
+        // mid-conversation; the errored-contributor path above is the one that
+        // needs to stay uncached.)
+        logger.warn('buildContext: unknown contextType', { type, id });
+        body = `No context loader for type '${type}'.`;
+      }
     }
   }
 
   const framed = formatLockedContext(type, id, body);
 
-  // Evict oldest entry if cache is at capacity
-  if (cache.size >= CONTEXT_CACHE_MAX_SIZE) {
-    const oldest = cache.keys().next().value;
-    if (oldest !== undefined) cache.delete(oldest);
+  if (cacheable) {
+    // Evict oldest entry if cache is at capacity
+    if (cache.size >= CONTEXT_CACHE_MAX_SIZE) {
+      const oldest = cache.keys().next().value;
+      if (oldest !== undefined) cache.delete(oldest);
+    }
+    cache.set(key, { value: framed, expiresAt: Date.now() + CONTEXT_CACHE_TTL_MS });
   }
-
-  cache.set(key, { value: framed, expiresAt: Date.now() + CONTEXT_CACHE_TTL_MS });
   return framed;
 }
 
