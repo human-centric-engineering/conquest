@@ -101,6 +101,15 @@ export interface QuestionComposeInput {
   /** True for the first question of the session (nothing to acknowledge yet). */
   isOpening: boolean;
   /**
+   * Seriousness / abuse gate: the respondent's last message was flagged non-serious (hostile,
+   * rude, a joke at the interviewer's expense, or otherwise not a real answer) and has been set
+   * aside. When true, the phraser parries it gracefully — acknowledge, deflect with light good
+   * humour, then steer straight back to the question — instead of the plain re-ask framing. The
+   * deterministic "keep it genuine" notice is surfaced separately by the orchestrator; this only
+   * governs the conversational message. Absent/false = a normal (captured or empty) turn.
+   */
+  heckled?: boolean;
+  /**
    * How many questions/slots have already been asked this session (the selection round, 0-based).
    * Calibrates length: early questions are kept very tight (a single, effortless sentence) and may
    * grow a little warmer/fuller once rapport has built — never convoluted at any point.
@@ -283,44 +292,58 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
   // On an OPEN opening we must NOT tell the model to "ease into this first question with a single
   // light ask" — that fights the broad, permission-giving invitation in <interviewer_strategy>, and
   // being the most specific opening directive it tends to win. So defer to that invitation instead.
-  const turnGuidance = input.isOpening
-    ? openOpening
-      ? 'This is the very first message of the conversation — be proactive and set the scene. ' +
-        'Open with a short, neutral scene-setting line (no performed emotion or pleasantries about ' +
-        'how nice it is to talk), then extend the broad, open invitation described under ' +
-        'interviewer_strategy below — give them genuine room to talk freely rather than asking a ' +
-        'single narrow question. There is no prior answer to acknowledge. Do not tell them to ' +
-        '"send a message to begin" — you are starting the conversation.'
-      : 'This is the very first message of the conversation — be proactive and set the scene. ' +
-        'Open with a short, neutral scene-setting line ("Let\'s start by…", "To begin, we\'ll ' +
-        'explore…") — no performed emotion or pleasantries about how nice it is to talk — and then ' +
-        'ease straight into this first question with a single, light, easy-to-answer ask. There is ' +
-        'no prior answer to acknowledge. Do not tell them to "send a message to begin" — you are ' +
-        'starting the conversation.'
-    : input.isReask
-      ? 'You already asked about this but could not capture a usable answer from their last reply. ' +
-        (input.currentUnderstanding
-          ? `So far you understand: "${input.currentUnderstanding}". Briefly NAME why you are ` +
-            'circling back — refer to what they touched on so the follow-up feels purposeful, not ' +
-            'repetitive ("Earlier you mentioned …, and I want to make sure I follow…"). Then, do ' +
-            'NOT repeat the same broad question — ask a SHARPER, narrower follow-up that targets ' +
-            'the specific piece still missing. '
-          : 'Gently say you want to make sure you get it right, then ask again clearly, more ' +
-            'specifically than before. ') +
-        (input.isFinalAttempt
-          ? "This is a last, light try on this topic — keep it pressure-free; if they still can't " +
-            "say, that's completely fine and you'll move on."
-          : '')
-      : input.isTransition
-        ? 'Briefly acknowledge what they just said, then bridge naturally into a NEW area and ' +
-          'ask about it — like a skilled interviewer changing subject without it feeling abrupt.'
-        : 'Briefly acknowledge what they just said, then ask the next question — stay in the ' +
-          'same subject area and let their answer lead naturally into it (deepen before moving on). ' +
-          'If their last answer was brief or surface-level, do not move on or pile on more ' +
-          'questions: gently invite them to say a little more about what they just shared, with ' +
-          'ONE light follow-up ("What made you say that?", "Can you give an example?") — and where ' +
-          'it is not obvious, briefly say why you are keen to hear more, so the nudge feels ' +
-          'purposeful rather than repetitive.';
+  // Heckle handling (seriousness gate): the last message was hostile, rude, or a joke at your
+  // expense rather than a real answer, and it has been set aside. Take this branch FIRST — a
+  // seasoned interviewer handles a heckler without losing the room. It overrides the opening /
+  // re-ask / deepen guidance because the priority this turn is to defuse and get back on track.
+  const turnGuidance = input.heckled
+    ? "The respondent's last message wasn't a real answer — it was hostile, rude, dismissive, or a " +
+      'joke at your expense (a heckle), and it has been set aside. Handle it like a seasoned ' +
+      'interviewer or a good comedian handling a heckler: stay completely unruffled and in good ' +
+      'humour. First, briefly ACKNOWLEDGE it — show you heard it and are unbothered. Then PARRY it ' +
+      'with a light, warm, mildly self-deprecating touch of wit that never punches back, never ' +
+      'scolds, never lectures, and never matches their hostility. Then get straight back on track ' +
+      'and re-ask the question sincerely. Keep the whole thing short and easy — one or two light ' +
+      'sentences of acknowledgement/parry, then the question. Do NOT moralise about being serious ' +
+      '(a separate notice already handles that) and do NOT sound wounded or passive-aggressive.'
+    : input.isOpening
+      ? openOpening
+        ? 'This is the very first message of the conversation — be proactive and set the scene. ' +
+          'Open with a short, neutral scene-setting line (no performed emotion or pleasantries about ' +
+          'how nice it is to talk), then extend the broad, open invitation described under ' +
+          'interviewer_strategy below — give them genuine room to talk freely rather than asking a ' +
+          'single narrow question. There is no prior answer to acknowledge. Do not tell them to ' +
+          '"send a message to begin" — you are starting the conversation.'
+        : 'This is the very first message of the conversation — be proactive and set the scene. ' +
+          'Open with a short, neutral scene-setting line ("Let\'s start by…", "To begin, we\'ll ' +
+          'explore…") — no performed emotion or pleasantries about how nice it is to talk — and then ' +
+          'ease straight into this first question with a single, light, easy-to-answer ask. There is ' +
+          'no prior answer to acknowledge. Do not tell them to "send a message to begin" — you are ' +
+          'starting the conversation.'
+      : input.isReask
+        ? 'You already asked about this but could not capture a usable answer from their last reply. ' +
+          (input.currentUnderstanding
+            ? `So far you understand: "${input.currentUnderstanding}". Briefly NAME why you are ` +
+              'circling back — refer to what they touched on so the follow-up feels purposeful, not ' +
+              'repetitive ("Earlier you mentioned …, and I want to make sure I follow…"). Then, do ' +
+              'NOT repeat the same broad question — ask a SHARPER, narrower follow-up that targets ' +
+              'the specific piece still missing. '
+            : 'Gently say you want to make sure you get it right, then ask again clearly, more ' +
+              'specifically than before. ') +
+          (input.isFinalAttempt
+            ? "This is a last, light try on this topic — keep it pressure-free; if they still can't " +
+              "say, that's completely fine and you'll move on."
+            : '')
+        : input.isTransition
+          ? 'Briefly acknowledge what they just said, then bridge naturally into a NEW area and ' +
+            'ask about it — like a skilled interviewer changing subject without it feeling abrupt.'
+          : 'Briefly acknowledge what they just said, then ask the next question — stay in the ' +
+            'same subject area and let their answer lead naturally into it (deepen before moving on). ' +
+            'If their last answer was brief or surface-level, do not move on or pile on more ' +
+            'questions: gently invite them to say a little more about what they just shared, with ' +
+            'ONE light follow-up ("What made you say that?", "Can you give an example?") — and where ' +
+            'it is not obvious, briefly say why you are keen to hear more, so the nudge feels ' +
+            'purposeful rather than repetitive.';
 
   const system = joinSections(
     section(
@@ -336,6 +359,13 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
       joinSections(
         'Ask the ONE question provided, naturally — never as a numbered form field, never restate ' +
           'the whole survey, never invent new questions, and never answer on their behalf.',
+        // Non-negotiable: the message is an interview turn, so it must always move things forward
+        // with a question. This holds even when acknowledging, deflecting, or transitioning — never
+        // sign off with a flat "let's move on" and no ask.
+        'ALWAYS end your message with a clear question — every single turn, no exceptions. Your reply ' +
+          'must contain the one thing you are asking, phrased as a question and ending in a question ' +
+          'mark. Never send a message that only acknowledges, reassures, or says you will move on ' +
+          'without actually asking something.',
         // Default to an emotionally neutral register. Curiosity and genuine interest in their
         // answers are welcome; performed feelings of your own are not — unless the tone guidance
         // below explicitly turns warmth on (high empathy), in which case it governs.

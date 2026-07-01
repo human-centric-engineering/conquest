@@ -303,6 +303,30 @@ describe('buildStreamingQuestionPrompt', () => {
     expect(system).toMatch(/could not capture a usable answer|re-ask/i);
   });
 
+  it('always instructs the interviewer to end with a question (never a flat "moving on")', () => {
+    const system = text(buildStreamingQuestionPrompt(INPUT)[0].content);
+    // The reply is an interview turn — it must always move forward with an actual question.
+    expect(system).toMatch(/ALWAYS end your message with a clear question/i);
+  });
+
+  it('switches to heckle-parry framing when heckled (acknowledge, deflect, re-ask)', () => {
+    const system = text(buildStreamingQuestionPrompt({ ...INPUT, heckled: true })[0].content);
+    // A hostile/joke turn is defused like a comedian handling a heckler, then the question returns.
+    expect(system).toMatch(/heckle/i);
+    expect(system).toMatch(/acknowledge/i);
+    expect(system).toMatch(/parry|deflect|humour/i);
+    expect(system).toMatch(/never (punch|scold|lecture|match)|unruffled/i);
+  });
+
+  it('the heckle branch overrides the opening / re-ask framing', () => {
+    // Even when the disregarded turn is also a re-ask, heckle handling takes priority.
+    const system = text(
+      buildStreamingQuestionPrompt({ ...INPUT, heckled: true, isReask: true })[0].content
+    );
+    expect(system).toMatch(/heckler/i);
+    expect(system).not.toMatch(/could not capture a usable answer/i);
+  });
+
   it('names WHY it is circling back on a re-ask with a current understanding (deepening probe)', () => {
     const system = text(
       buildStreamingQuestionPrompt({

@@ -819,6 +819,8 @@ async function handleMessage(
             isOpening: state.selectionRound === 0,
             questionsAsked: state.selectionRound,
             isTransition: r.isTransition,
+            // Seriousness gate: last message was a non-serious heckle (set aside) → phraser parries it.
+            ...(result.abuse?.flagged ? { heckled: true } : {}),
             ...(priorAnswers.length > 0 ? { priorAnswers } : {}),
             ...(dsBriefing.length > 0 ? { briefing: dsBriefing } : {}),
             ...(dsPeer ? { peerContext: [dsPeer.insight] } : {}),
@@ -880,6 +882,8 @@ async function handleMessage(
             isReask: targetedKey !== null && targetedKey === activeQuestionKey,
             isOpening: state.selectionRound === 0,
             questionsAsked: state.selectionRound,
+            // Seriousness gate: last message was a non-serious heckle (set aside) → phraser parries it.
+            ...(result.abuse?.flagged ? { heckled: true } : {}),
             ...(priorAnswers.length > 0 ? { priorAnswers } : {}),
             ...(qBriefing.length > 0 ? { briefing: qBriefing } : {}),
             ...(qPeer ? { peerContext: [qPeer.insight] } : {}),
