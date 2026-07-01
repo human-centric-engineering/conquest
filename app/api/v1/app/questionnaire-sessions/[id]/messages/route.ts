@@ -706,7 +706,7 @@ async function handleMessage(
           continue;
         }
         let detail: string | undefined;
-        if (ev.code === 'seriousness') {
+        if (ev.code === 'seriousness' || ev.code === 'seriousness_final') {
           detail = result.abuse?.reason;
         } else if (ev.code === 'contradiction') {
           const explanation = contradictionReasons[contradictionIdx++];

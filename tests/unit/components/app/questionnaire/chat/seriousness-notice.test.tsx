@@ -35,13 +35,38 @@ describe('SeriousnessNotice', () => {
     });
   });
 
-  describe('fixed heading', () => {
-    it('always renders the "Let\'s keep it genuine" heading', () => {
+  describe('heading', () => {
+    it('renders the "Let\'s keep it genuine" heading on a normal (amber) warning', () => {
       // Arrange / Act
       render(<SeriousnessNotice message="Any message." />);
 
-      // Assert: heading copy is static regardless of the message prop.
+      // Assert: default (non-final) heading.
       expect(screen.getByText("Let's keep it genuine")).toBeInTheDocument();
+    });
+
+    it('escalates to a red "Final warning" heading on the final strike', () => {
+      // Arrange / Act
+      render(<SeriousnessNotice message="Any message." final />);
+
+      // Assert: the last warning before abandonment reads "Final warning" and is tinted red.
+      const heading = screen.getByText('Final warning');
+      expect(heading).toBeInTheDocument();
+      expect(screen.queryByText("Let's keep it genuine")).toBeNull();
+      expect(heading.className).toMatch(/text-red-700/);
+      // The container itself switches to the red palette.
+      expect(screen.getByRole('status').className).toMatch(/border-red-400/);
+    });
+
+    it('renders the **bold** consequence in red on the final warning', () => {
+      // Arrange / Act
+      render(
+        <SeriousnessNotice message="Set aside. **One more and this will be aborted.**" final />
+      );
+
+      // Assert: the emphasised run is a red <strong>.
+      const strong = screen.getByText('One more and this will be aborted.');
+      expect(strong.tagName).toBe('STRONG');
+      expect(strong.className).toMatch(/text-red-700/);
     });
   });
 

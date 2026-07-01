@@ -45,6 +45,12 @@ export interface AbuseStrikeOutcome {
   abandon: boolean;
   /** Escalating warning copy to surface as a side-band notice (empty when abandoning). */
   noticeMessage: string;
+  /**
+   * True on the LAST warning before abandonment (the penultimate strike). The orchestrator emits a
+   * distinct `seriousness_final` warning code for it so the notice renders in a firmer red. False on
+   * earlier (amber) warnings and when abandoning.
+   */
+  final: boolean;
   /** The deterministic final agent message streamed when abandoning (absent otherwise). */
   abandonMessage?: string;
 }

@@ -350,8 +350,13 @@ export async function runDataSlotTurn(
         };
       }
       // Below threshold: surface the escalating notice; the conversation re-targets below because
-      // the fills were not merged (the data slot stays unfilled).
-      events.push({ type: 'warning', code: 'seriousness', message: strike.noticeMessage });
+      // the fills were not merged (the data slot stays unfilled). The last warning (`final`) uses a
+      // distinct code so the notice renders in a firmer red.
+      events.push({
+        type: 'warning',
+        code: strike.final ? 'seriousness_final' : 'seriousness',
+        message: strike.noticeMessage,
+      });
     }
   }
 

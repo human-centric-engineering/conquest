@@ -77,11 +77,15 @@ prior turn.
 
 - **Disregard** — clear the turn's `answerUpserts`; the answer is never merged or persisted.
 - **Strike** — `evaluateAbuseStrike(state.abuseStrikes, threshold)` (`seriousness/seriousness-logic.ts`).
-- **Below threshold** — emit a `warning` (`code: 'seriousness'`) with escalating copy (gentle →
-  firm); because the answer wasn't merged, selection **re-asks the same still-unanswered question**.
-  The **penultimate** warning (the last one before abort, `remaining === 1`) ends with a **bold**
-  last-chance sentence — `warningCopy` wraps it in `**…**` and `SeriousnessNotice` renders the
-  markers as `<strong>` (a tiny system-text-only inline renderer; the notice is otherwise plain).
+- **Below threshold** — emit a `warning` with escalating copy (gentle → firm); because the answer
+  wasn't merged, selection **re-asks the same still-unanswered question**.
+  The **penultimate** warning (the last one before abort, `remaining === 1`) is flagged
+  `final` by `evaluateAbuseStrike` and emitted under the **distinct code `seriousness_final`**
+  (earlier strikes use `seriousness`). It ends with a **bold** last-chance sentence — a blunt
+  "Final warning: one more inappropriate answer and this conversation will be aborted." — that
+  `warningCopy` wraps in `**…**`. `SeriousnessNotice` renders the markers as `<strong>` and, on the
+  `final` variant, escalates the whole notice from the amber nudge to a **red** palette with a
+  **"Final warning"** header (earlier warnings keep the amber "Let's keep it genuine" nudge).
   Rendered inline beneath the re-asked turn. The route persists the frame on the turn
   (`AppQuestionnaireTurn.warnings`), so the notice survives the next input and replays on resume
   (see `per-turn-orchestrator.md` § resume replay).
@@ -108,8 +112,8 @@ and every later turn 409s. `seriousnessGate` is forced off on a kickoff turn.
   `prisma/seeds/app-questionnaire/029-seriousness-gate-flag.ts`.
 - **Per-questionnaire** `AppQuestionnaireConfig.abuseThreshold` (Int, default **4**; **0 = off**) —
   non-genuine answers tolerated before abort. Edited in the config editor ("Abuse threshold").
-  Escalation at the default: strikes 1–2 warn gently, strike 3 is the firm bold last-chance warning,
-  the 4th aborts.
+  Escalation at the default: strikes 1–2 warn gently (amber), strike 3 is the firm bold last-chance
+  warning (red `seriousness_final` notice), the 4th aborts.
 - **Per-session** `AppQuestionnaireSession.abuseStrikes` (Int, default 0) — the strike counter.
 
 ## Analytics

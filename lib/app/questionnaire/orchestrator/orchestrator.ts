@@ -289,8 +289,13 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
         };
       }
       // Below threshold: surface the escalating notice; the pipeline re-asks the same
-      // (still-unanswered) question because the answer was not merged.
-      events.push({ type: 'warning', code: 'seriousness', message: strike.noticeMessage });
+      // (still-unanswered) question because the answer was not merged. The last warning (`final`)
+      // uses a distinct code so the notice renders in a firmer red.
+      events.push({
+        type: 'warning',
+        code: strike.final ? 'seriousness_final' : 'seriousness',
+        message: strike.noticeMessage,
+      });
     }
   }
 
