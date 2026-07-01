@@ -17,9 +17,10 @@ the identity table, the `AppQuestionnaire` foreign key, the admin CRUD, and the
 attribution control on a questionnaire. Attribution can be set **at upload time**
 (the `demoClientId` field on the ingest form), **at definition-import time** (the
 demo-client picker on the "Import definition" dialog — sent as a `?demoClientId=`
-query param since the body is the definition file itself), or changed later via the
-settings-tab picker; either way it surfaces as an owner column on the questionnaires
-list.
+query param since the body is the definition file itself), changed later via the
+settings-tab picker, or set in reverse from the demo client's **Overview** tab (the
+`<AttributeQuestionnairePicker>` — pick a generic questionnaire and brand it as that
+client); either way it surfaces as an owner column on the questionnaires list.
 
 | It **is**                                           | It is **not**                                        |
 | --------------------------------------------------- | ---------------------------------------------------- |
@@ -147,7 +148,13 @@ a typed-confirmation guard and an anonymous-mode refusal. See
   always-on — no per-tab flags):
   - **Overview** (`/:id`) — the **"Attributed questionnaires"** list (each row links to
     the questionnaire editor, with the make-generic / reassign menus that unblock the
-    delete guard) + the saved **brand preview**.
+    delete guard) + the saved **brand preview**. Above the list, the
+    **`<AttributeQuestionnairePicker>`** (reverse attribution) lets the admin brand a
+    _generic_ (unattributed) questionnaire as this client without opening its Settings
+    tab — options come from `getAttributableQuestionnaires()` (the full list filtered to
+    `demoClient === null`), and it PATCHes the same `…/questionnaires/:id { demoClientId }`
+    endpoint. Reassigning one already branded as _another_ client stays in that client's
+    row menu.
   - **Branding** (`/:id/branding`) — the `<DemoClientForm>` (identity fields + brand
     theming + live preview), intact.
   - **Knowledge** (`/:id/knowledge`) — the `<ClientKnowledgePanel>` (below).

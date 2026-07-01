@@ -11,9 +11,11 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 
+import { AttributeQuestionnairePicker } from '@/components/admin/demo-clients/attribute-questionnaire-picker';
 import { AttributedQuestionnaires } from '@/components/admin/demo-clients/attributed-questionnaires';
 import { DemoClientThemePreview } from '@/components/admin/demo-clients/demo-client-theme-preview';
 import {
+  getAttributableQuestionnaires,
   getDemoClientDetailCached,
   getReassignTargets,
 } from '@/lib/app/questionnaire/demo-clients/detail-data';
@@ -33,7 +35,10 @@ export default async function DemoClientOverviewTab({ params }: PageProps) {
   if (!client) notFound();
 
   const inUse = client.questionnaireCount > 0;
-  const reassignTargets = inUse ? await getReassignTargets(client.id) : [];
+  const [reassignTargets, attributable] = await Promise.all([
+    inUse ? getReassignTargets(client.id) : Promise.resolve([]),
+    getAttributableQuestionnaires(),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -45,11 +50,14 @@ export default async function DemoClientOverviewTab({ params }: PageProps) {
         <div className="space-y-1">
           <h2 className="text-sm font-medium">Attributed questionnaires</h2>
           <p className="text-muted-foreground text-xs">
-            Questionnaires branded as this client. Use the{' '}
+            Questionnaires branded as this client. Attribute one below, or use the{' '}
             <span className="text-foreground font-medium">⋯</span> menu on a row to make it generic
             or reassign it to another client.
           </p>
         </div>
+        {/* Reverse attribution: pick an available (generic) questionnaire and brand it as this
+            client here, without opening each questionnaire's Settings tab. */}
+        <AttributeQuestionnairePicker clientId={client.id} options={attributable} />
         {client.questionnaires.length > 0 ? (
           <AttributedQuestionnaires
             questionnaires={client.questionnaires}
@@ -57,8 +65,7 @@ export default async function DemoClientOverviewTab({ params }: PageProps) {
           />
         ) : (
           <p className="text-muted-foreground rounded-md border border-dashed px-4 py-6 text-center text-sm">
-            No questionnaires are branded as this client yet. Attribute one from a questionnaire’s
-            Settings tab.
+            No questionnaires are branded as this client yet.
           </p>
         )}
       </section>
