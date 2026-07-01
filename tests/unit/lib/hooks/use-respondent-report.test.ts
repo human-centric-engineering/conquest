@@ -203,13 +203,19 @@ describe('useRespondentReport', () => {
     await act(async () => void (await vi.advanceTimersByTimeAsync(3000)));
     expect(fetchMock).toHaveBeenCalledTimes(60);
 
-    // retry restarts a fresh polling run and clears the timed-out flag.
+    // retry POSTs the retry endpoint (re-queue + kick), then restarts a fresh polling run and clears
+    // the timed-out flag: +1 for the POST, +1 for the first GET of the new run = 62.
     await act(async () => {
       result.current.retry();
       await vi.advanceTimersByTimeAsync(0);
     });
     expect(result.current.timedOut).toBe(false);
-    expect(fetchMock).toHaveBeenCalledTimes(61);
+    expect(fetchMock).toHaveBeenCalledTimes(62);
+    // The extra call was the retry POST.
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/app/questionnaire-sessions/s1/report/retry',
+      expect.objectContaining({ method: 'POST' })
+    );
 
     vi.useRealTimers();
   });

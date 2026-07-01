@@ -136,6 +136,13 @@ All templates use React Email components (`Html`, `Head`, `Preview`, `Body`, etc
 - Admin notification of contact form submission
 - Props: `name`, `email`, `subject`, `message`, `submittedAt`
 
+**`emails/respondent-report-ready.tsx`** (ConQuest app)
+
+- Respondent notification that their personalised report finished generating (opt-in via the
+  completion screen). Sent best-effort by the report worker on status→ready; demo-client themed like
+  `questionnaire-invitation.tsx`. Not in the auth `EmailKind` registry — sent directly via `sendEmail`.
+- Props: `questionnaireTitle`, `reportUrl`, `theme?`
+
 ## User Creation Integration
 
 Sunrise supports two user creation patterns with different email behaviors:

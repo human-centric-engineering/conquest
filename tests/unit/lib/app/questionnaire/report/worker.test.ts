@@ -12,6 +12,7 @@ vi.mock('@/lib/db/client', () => ({
       findFirst: vi.fn(),
       updateMany: vi.fn(),
       findUnique: vi.fn(),
+      count: vi.fn(),
     },
   },
 }));
@@ -19,9 +20,13 @@ vi.mock('@/lib/logging', () => ({ logger: { info: vi.fn(), error: vi.fn(), warn:
 vi.mock('@/lib/app/questionnaire/report/generate', () => ({
   generateRespondentReport: vi.fn(),
 }));
+vi.mock('@/lib/app/questionnaire/report/notify-send', () => ({
+  sendRespondentReportReadyEmail: vi.fn(),
+}));
 
 import { prisma } from '@/lib/db/client';
 import { generateRespondentReport } from '@/lib/app/questionnaire/report/generate';
+import { sendRespondentReportReadyEmail } from '@/lib/app/questionnaire/report/notify-send';
 import { processQueuedRespondentReports } from '@/lib/app/questionnaire/report/worker';
 
 type Mock = ReturnType<typeof vi.fn>;
@@ -31,12 +36,15 @@ beforeEach(() => {
   // Default claim chain: one candidate, claim wins, hydrate it. Override per test.
   (prisma.appRespondentReport.findFirst as Mock).mockResolvedValueOnce({ id: 'r1' });
   (prisma.appRespondentReport.updateMany as Mock).mockResolvedValue({ count: 1 });
+  (prisma.appRespondentReport.count as Mock).mockResolvedValue(0);
   (prisma.appRespondentReport.findUnique as Mock).mockResolvedValue({
     id: 'r1',
     sessionId: 'sess-1',
+    notifyEmail: null,
   });
   // After the first drain iteration, no more candidates.
   (prisma.appRespondentReport.findFirst as Mock).mockResolvedValue(null);
+  (sendRespondentReportReadyEmail as Mock).mockResolvedValue({ success: true, status: 'sent' });
 });
 
 describe('processQueuedRespondentReports', () => {
@@ -97,5 +105,52 @@ describe('processQueuedRespondentReports', () => {
     const result = await processQueuedRespondentReports();
     expect(result).toEqual({ claimed: 0, succeeded: 0, failed: 0 });
     expect(generateRespondentReport).not.toHaveBeenCalled();
+  });
+
+  it('sends the report-ready email when the row has a notifyEmail, and clears it on the ready write', async () => {
+    (prisma.appRespondentReport.findUnique as Mock).mockResolvedValue({
+      id: 'r1',
+      sessionId: 'sess-1',
+      notifyEmail: 'you@example.com',
+    });
+    (generateRespondentReport as Mock).mockResolvedValue({
+      content: { summary: 'ok', sections: [], actions: [] },
+      costUsd: 0.01,
+    });
+
+    await processQueuedRespondentReports();
+
+    expect(sendRespondentReportReadyEmail).toHaveBeenCalledWith('sess-1', 'you@example.com');
+    // The ready write clears notifyEmail so a later re-drain never re-sends.
+    const readyWrite = (prisma.appRespondentReport.updateMany as Mock).mock.calls.find(
+      (c) => c[0]?.data?.status === 'ready'
+    );
+    expect(readyWrite?.[0].data).toMatchObject({ notifyEmail: null });
+  });
+
+  it('does not send an email when the row has no notifyEmail', async () => {
+    (generateRespondentReport as Mock).mockResolvedValue({
+      content: { summary: 'ok', sections: [], actions: [] },
+      costUsd: 0.01,
+    });
+
+    await processQueuedRespondentReports();
+    expect(sendRespondentReportReadyEmail).not.toHaveBeenCalled();
+  });
+
+  it('still marks the report ready when the email send throws (best-effort)', async () => {
+    (prisma.appRespondentReport.findUnique as Mock).mockResolvedValue({
+      id: 'r1',
+      sessionId: 'sess-1',
+      notifyEmail: 'you@example.com',
+    });
+    (generateRespondentReport as Mock).mockResolvedValue({
+      content: { summary: 'ok', sections: [], actions: [] },
+      costUsd: 0.01,
+    });
+    (sendRespondentReportReadyEmail as Mock).mockRejectedValue(new Error('smtp down'));
+
+    const result = await processQueuedRespondentReports();
+    expect(result).toEqual({ claimed: 1, succeeded: 1, failed: 0 });
   });
 });

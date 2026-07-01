@@ -29,6 +29,7 @@ import { CheckCircle2, Download, Loader2 } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { SessionRefChip } from '@/components/app/questionnaire/lifecycle/session-ref-chip';
 import { TranscriptDownload } from '@/components/app/questionnaire/lifecycle/transcript-download';
 import { formatAnswerValue } from '@/components/app/questionnaire/panel/format-answer-value';
@@ -78,7 +79,7 @@ export function SessionComplete({
 
   // Respondent report view (polls while insights generate). When no report is configured the view
   // is `enabled: false` and the screen keeps its default responses-PDF download (F7.4 behaviour).
-  const { view, loaded, timedOut, retry } = useRespondentReport(sessionId, accessToken);
+  const { view, loaded, timedOut, retry, notify } = useRespondentReport(sessionId, accessToken);
   const reportEnabled = view?.enabled ?? false;
   // Hold the download button until the view resolves so a `download: false` config never flashes a
   // clickable button in the gap before the first fetch settles. No report configured → default on.
@@ -187,6 +188,7 @@ export function SessionComplete({
               snippets={sharedSnippets}
               timedOut={timedOut}
               onRetry={retry}
+              onNotify={notify}
             />
           </div>
         )}
@@ -238,41 +240,56 @@ function ReportInsights({
   snippets,
   timedOut,
   onRetry,
+  onNotify,
 }: {
   insights: {
     status: 'queued' | 'processing' | 'ready' | 'failed';
+    started: boolean;
     content: RespondentReportContent | null;
     generatedAt: string | null;
     error: string | null;
+    notifyRequested: boolean;
   };
   snippets: SharedSnippet[];
   timedOut: boolean;
   onRetry: () => void;
+  onNotify: (email: string) => Promise<boolean>;
 }) {
   if (insights.status === 'failed') {
+    // A terminal failure — offer a single re-try (re-queues + kicks the worker) rather than
+    // stranding the respondent, and keep the calm tone.
     return (
-      <p className="text-muted-foreground text-sm text-balance" role="status">
-        We couldn&rsquo;t prepare your personalised insights this time. Your responses were saved.
-      </p>
+      <div className="flex w-full flex-col items-center gap-3 text-center">
+        <p className="text-muted-foreground text-sm text-balance" role="status">
+          We couldn&rsquo;t prepare your personalised insights this time. Your responses were saved.
+        </p>
+        <Button type="button" variant="outline" size="sm" onClick={onRetry}>
+          Try again
+        </Button>
+      </div>
     );
   }
 
   if (insights.status !== 'ready' || !insights.content) {
-    // Generation outran the poll window — offer a calm retry instead of an endless spinner.
+    // Generation outran the poll window — offer a calm retry + "email me when ready" instead of an
+    // endless spinner.
     if (timedOut) {
       return (
-        <div className="flex w-full flex-col items-center gap-3 text-center">
+        <div className="flex w-full flex-col items-center gap-4 text-center">
           <p className="text-muted-foreground text-sm text-balance">
             Your personalised report is taking a little longer than usual. Your responses are safely
-            saved — check again in a moment.
+            saved — check again in a moment, or leave your email and we&rsquo;ll send it when
+            it&rsquo;s ready.
           </p>
           <Button type="button" variant="outline" size="sm" onClick={onRetry}>
             Check again
           </Button>
+          <NotifyWhenReady onNotify={onNotify} alreadyRequested={insights.notifyRequested} />
         </div>
       );
     }
-    return <PreparingReport snippets={snippets} />;
+    // Distinguish "not started yet" (no row) from "generating" (row queued/processing).
+    return <PreparingReport snippets={snippets} starting={!insights.started} />;
   }
 
   const { summary, sections, actions } = insights.content;
@@ -305,12 +322,80 @@ function ReportInsights({
 }
 
 /**
+ * "Email me when it's ready" — shown in the timeout fallback. A calm single-field capture (no-login
+ * respondents have no account email), posting to the notify endpoint. Once accepted it swaps to a
+ * quiet confirmation. Best-effort: a rejected email shows an inline hint, never a blocking error.
+ */
+function NotifyWhenReady({
+  onNotify,
+  alreadyRequested,
+}: {
+  onNotify: (email: string) => Promise<boolean>;
+  alreadyRequested: boolean;
+}) {
+  const [email, setEmail] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [done, setDone] = useState(alreadyRequested);
+  const [error, setError] = useState(false);
+
+  if (done) {
+    return (
+      <p className="text-muted-foreground text-xs text-balance" role="status">
+        We&rsquo;ll email you when your report is ready.
+      </p>
+    );
+  }
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (submitting || email.trim() === '') return;
+    setSubmitting(true);
+    setError(false);
+    void onNotify(email.trim())
+      .then((ok) => (ok ? setDone(true) : setError(true)))
+      .catch(() => setError(true))
+      .finally(() => setSubmitting(false));
+  };
+
+  return (
+    <form onSubmit={submit} className="flex w-full max-w-xs flex-col items-center gap-2">
+      <div className="flex w-full items-center gap-2">
+        <Input
+          type="email"
+          required
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="you@example.com"
+          aria-label="Email address for your report"
+          className="h-9 text-sm"
+        />
+        <Button type="submit" variant="outline" size="sm" disabled={submitting}>
+          {submitting ? 'Saving…' : 'Email me'}
+        </Button>
+      </div>
+      {error && (
+        <p className="text-destructive text-xs" role="alert">
+          Couldn&rsquo;t save your email. Please try again.
+        </p>
+      )}
+    </form>
+  );
+}
+
+/**
  * The "preparing your report" state. Beyond the spinner caption, it gently cycles the positions the
  * respondent shared (their own words, echoed back) so the wait reads as personal rather than dead
  * air. Cross-fades one at a time when motion is allowed; under `prefers-reduced-motion` it shows a
  * short static list instead (no auto-advancing content).
  */
-function PreparingReport({ snippets }: { snippets: SharedSnippet[] }) {
+function PreparingReport({
+  snippets,
+  starting = false,
+}: {
+  snippets: SharedSnippet[];
+  /** No report row exists yet (just submitted) — read as "Starting…" rather than "Preparing…". */
+  starting?: boolean;
+}) {
   const reducedMotion = usePrefersReducedMotion();
   const [index, setIndex] = useState(0);
 
@@ -327,7 +412,7 @@ function PreparingReport({ snippets }: { snippets: SharedSnippet[] }) {
       aria-live="polite"
     >
       <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-      Preparing your personalised report…
+      {starting ? 'Starting your personalised report…' : 'Preparing your personalised report…'}
     </div>
   );
 

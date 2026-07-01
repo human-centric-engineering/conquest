@@ -24,12 +24,14 @@ import type { AnswerPanelView, PanelSlotView } from '@/lib/app/questionnaire/pan
 
 type Mock = ReturnType<typeof vi.fn>;
 const retrySpy = vi.fn();
+const notifySpy = vi.fn(() => Promise.resolve(true));
 const mockView = (view: unknown, extra?: { timedOut?: boolean }) =>
   (useRespondentReport as unknown as Mock).mockReturnValue({
     view,
     loaded: true,
     timedOut: extra?.timedOut ?? false,
     retry: retrySpy,
+    notify: notifySpy,
   });
 const setReducedMotion = (reduced: boolean) =>
   (usePrefersReducedMotion as unknown as Mock).mockReturnValue(reduced);
@@ -137,7 +139,14 @@ describe('SessionComplete — respondent report', () => {
       mode: 'raw_plus_insights',
       onScreen: true,
       download: true,
-      insights: { status: 'queued', content: null, generatedAt: null, error: null },
+      insights: {
+        status: 'queued',
+        started: true,
+        content: null,
+        generatedAt: null,
+        error: null,
+        notifyRequested: false,
+      },
     });
     render(<SessionComplete sessionId="s1" answeredCount={3} />);
     expect(screen.getByText(/Preparing your personalised report/i)).toBeInTheDocument();
@@ -196,7 +205,14 @@ describe('SessionComplete — respondent report', () => {
       mode: 'narrative',
       onScreen: true,
       download: true,
-      insights: { status: 'processing', content: null, generatedAt: null, error: null },
+      insights: {
+        status: 'processing',
+        started: true,
+        content: null,
+        generatedAt: null,
+        error: null,
+        notifyRequested: false,
+      },
     });
     render(<SessionComplete sessionId="s1" answeredCount={3} />);
     expect(screen.getByText(/Preparing your personalised report/i)).toBeInTheDocument();
@@ -208,7 +224,14 @@ describe('SessionComplete — respondent report', () => {
       mode: 'raw_plus_insights',
       onScreen: true,
       download: true,
-      insights: { status: 'failed', content: null, generatedAt: null, error: 'boom' },
+      insights: {
+        status: 'failed',
+        started: true,
+        content: null,
+        generatedAt: null,
+        error: 'boom',
+        notifyRequested: false,
+      },
     });
     render(<SessionComplete sessionId="s1" answeredCount={3} />);
     expect(screen.getByText(/couldn.t prepare your personalised insights/i)).toBeInTheDocument();
@@ -220,7 +243,14 @@ describe('SessionComplete — respondent report', () => {
       mode: 'raw_plus_insights',
       onScreen: true,
       download: true,
-      insights: { status: 'queued', content: null, generatedAt: null, error: null },
+      insights: {
+        status: 'queued',
+        started: true,
+        content: null,
+        generatedAt: null,
+        error: null,
+        notifyRequested: false,
+      },
     });
     render(<SessionComplete sessionId="s1" answeredCount={2} captured={dataSlotPanel()} />);
     expect(screen.getByText(/In the meantime, here.s what you shared/i)).toBeInTheDocument();
@@ -237,7 +267,14 @@ describe('SessionComplete — respondent report', () => {
         mode: 'raw_plus_insights',
         onScreen: true,
         download: true,
-        insights: { status: 'queued', content: null, generatedAt: null, error: null },
+        insights: {
+          status: 'queued',
+          started: true,
+          content: null,
+          generatedAt: null,
+          error: null,
+          notifyRequested: false,
+        },
       });
       render(
         <SessionComplete
@@ -264,7 +301,14 @@ describe('SessionComplete — respondent report', () => {
       mode: 'raw_plus_insights',
       onScreen: true,
       download: true,
-      insights: { status: 'queued', content: null, generatedAt: null, error: null },
+      insights: {
+        status: 'queued',
+        started: true,
+        content: null,
+        generatedAt: null,
+        error: null,
+        notifyRequested: false,
+      },
     });
     render(
       <SessionComplete
@@ -286,7 +330,14 @@ describe('SessionComplete — respondent report', () => {
       mode: 'raw_plus_insights',
       onScreen: true,
       download: true,
-      insights: { status: 'queued', content: null, generatedAt: null, error: null },
+      insights: {
+        status: 'queued',
+        started: true,
+        content: null,
+        generatedAt: null,
+        error: null,
+        notifyRequested: false,
+      },
     });
     render(
       <SessionComplete
@@ -313,7 +364,14 @@ describe('SessionComplete — respondent report', () => {
       mode: 'raw_plus_insights',
       onScreen: true,
       download: true,
-      insights: { status: 'queued', content: null, generatedAt: null, error: null },
+      insights: {
+        status: 'queued',
+        started: true,
+        content: null,
+        generatedAt: null,
+        error: null,
+        notifyRequested: false,
+      },
     });
     render(<SessionComplete sessionId="s1" answeredCount={null} />);
     expect(screen.getByText(/Preparing your personalised report/i)).toBeInTheDocument();
@@ -329,7 +387,14 @@ describe('SessionComplete — respondent report', () => {
         mode: 'raw_plus_insights',
         onScreen: true,
         download: true,
-        insights: { status: 'processing', content: null, generatedAt: null, error: null },
+        insights: {
+          status: 'processing',
+          started: true,
+          content: null,
+          generatedAt: null,
+          error: null,
+          notifyRequested: false,
+        },
       },
       { timedOut: true }
     );

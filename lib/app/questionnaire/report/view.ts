@@ -33,9 +33,17 @@ export interface RespondentReportClientView {
   /** Insights state for the AI modes (`raw_plus_insights`, `narrative`); `null` for raw / disabled. */
   insights: {
     status: RespondentReportStatus;
+    /**
+     * Whether a report row actually exists yet. `status` reads as `'queued'` both when a row is
+     * genuinely queued AND when no row exists yet (never enqueued / not yet claimed) — this flag
+     * disambiguates so the UI can distinguish "starting" (no row) from "preparing" (row queued).
+     */
+    started: boolean;
     content: RespondentReportContent | null;
     generatedAt: string | null;
     error: string | null;
+    /** Whether the respondent has opted in to an email when the report is ready. */
+    notifyRequested: boolean;
   } | null;
 }
 
@@ -52,7 +60,7 @@ export async function buildRespondentReportClientView(
     select: {
       version: { select: { config: { select: { respondentReport: true } } } },
       respondentReport: {
-        select: { status: true, content: true, generatedAt: true, error: true },
+        select: { status: true, content: true, generatedAt: true, error: true, notifyEmail: true },
       },
     },
   });
@@ -82,9 +90,11 @@ export async function buildRespondentReportClientView(
     insights: {
       // No row yet (submitted, worker hasn't claimed it) reads as still-queued.
       status: (row?.status as RespondentReportStatus | undefined) ?? 'queued',
+      started: row != null,
       content: row?.content ? validateRespondentReportContent(row.content) : null,
       generatedAt: row?.generatedAt ? row.generatedAt.toISOString() : null,
       error: row?.error ?? null,
+      notifyRequested: Boolean(row?.notifyEmail),
     },
   };
 }

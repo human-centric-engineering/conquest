@@ -630,6 +630,11 @@ export const API = {
         `/api/v1/app/questionnaire-sessions/${id}/transcript.txt`,
       /** Respondent report status + content — completion screen polls this (GET). */
       report: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/report`,
+      /** Re-queue + kick a stuck/failed respondent report ("Check again", POST). */
+      reportRetry: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/report/retry`,
+      /** Opt in to a report-ready email (POST `{ email }`). */
+      reportNotify: (id: string): string =>
+        `/api/v1/app/questionnaire-sessions/${id}/report/notify`,
     },
     /** Persisted turn-evaluation search surface (admin) — cross-session list + detail. */
     TURN_EVALUATIONS: {
