@@ -96,6 +96,27 @@ describe('buildRespondentReportClientView', () => {
     const view = await buildRespondentReportClientView('s1');
     expect(view?.insights?.status).toBe('queued');
     expect(view?.insights?.content).toBeNull();
+    // No row yet → not started, and no notify requested.
+    expect(view?.insights?.started).toBe(false);
+    expect(view?.insights?.notifyRequested).toBe(false);
+  });
+
+  it('marks started true (and notifyRequested) from an existing row', async () => {
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      session(
+        { enabled: true, mode: 'raw_plus_insights' },
+        {
+          status: 'processing',
+          content: null,
+          generatedAt: null,
+          error: null,
+          notifyEmail: 'you@example.com',
+        }
+      )
+    );
+    const view = await buildRespondentReportClientView('s1');
+    expect(view?.insights?.started).toBe(true);
+    expect(view?.insights?.notifyRequested).toBe(true);
   });
 
   it('returns the ready content + generatedAt from the report row', async () => {

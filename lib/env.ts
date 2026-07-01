@@ -34,6 +34,10 @@ const serverEnvSchema = z.object({
     message:
       'DATABASE_URL must be a valid PostgreSQL connection string (e.g., postgresql://user:password@localhost:5432/dbname)',
   }),
+  // Per-instance pg pool size (lib/db/client.ts). Optional. On serverless, leave unset — it
+  // defaults to 1 (each warm instance holds one connection behind a transaction pooler; many
+  // instances × a larger pool would exhaust Postgres). On a long-running server raise it (e.g. 10).
+  DATABASE_POOL_MAX: z.coerce.number().int().positive().optional(),
 
   // Authentication (better-auth)
   BETTER_AUTH_URL: z.string().url({
@@ -122,6 +126,20 @@ const serverEnvSchema = z.object({
     .string()
     .optional()
     .describe('GA4 API secret for server-side Measurement Protocol tracking'),
+
+  // Maintenance cron (serverless). Bearer secret the scheduled-cron endpoint checks before
+  // running the maintenance tick. On Vercel, set this and Vercel Cron auto-attaches it as
+  // `Authorization: Bearer $CRON_SECRET`. Optional so self-hosted / long-running deploys that
+  // drive the tick another way (admin API key, in-process ticker) are unaffected. When unset,
+  // the /api/v1/cron/maintenance endpoint refuses every request. See .context/orchestration/scheduling.md.
+  CRON_SECRET: z
+    .string()
+    .min(32, {
+      message:
+        'CRON_SECRET must be at least 32 characters (high-entropy). Generate with: openssl rand -base64 32',
+    })
+    .optional()
+    .describe('Bearer secret for the /api/v1/cron/maintenance scheduled endpoint (Vercel Cron).'),
 });
 
 // Client-side environment variables (NEXT_PUBLIC_* vars)

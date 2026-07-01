@@ -59,11 +59,11 @@ export function seriousnessGateActive(flagEnabled: boolean, threshold: number): 
 function warningCopy(remaining: number): string {
   if (remaining <= 1) {
     // Penultimate strike: the final sentence is wrapped in **bold** (the notice renders it) so the
-    // last-chance consequence stands out.
+    // last-chance consequence stands out, and the orchestrator flags it `final` so the notice turns
+    // red. The copy is a blunt last warning: one more infringement aborts the conversation.
     return (
-      "Your previous answer didn't seem serious, so I'll set it aside for now. " +
-      '**I’m sorry, but one more insincere or abusive answer will result in the ' +
-      'termination of this session.**'
+      "Your previous answer didn't seem serious, so I've set it aside. " +
+      '**Final warning: one more inappropriate answer and this conversation will be aborted.**'
     );
   }
   return (
@@ -83,12 +83,16 @@ export function evaluateAbuseStrike(priorStrikes: number, threshold: number): Ab
       newStrikeCount,
       abandon: true,
       noticeMessage: '',
+      final: false,
       abandonMessage: abuseAbortMessage(newStrikeCount),
     };
   }
+  const remaining = threshold - newStrikeCount;
   return {
     newStrikeCount,
     abandon: false,
-    noticeMessage: warningCopy(threshold - newStrikeCount),
+    noticeMessage: warningCopy(remaining),
+    // The last warning before abandonment (only one strike left) — surfaced in a firmer red notice.
+    final: remaining <= 1,
   };
 }

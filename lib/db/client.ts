@@ -46,8 +46,30 @@ const globalForPrisma = globalThis as unknown as {
   pool: Pool | undefined;
 };
 
+/**
+ * Per-instance pool size.
+ *
+ * On serverless (Vercel) each warm instance holds its own pool, and many instances run
+ * concurrently — an unbounded `max` (pg default 10) × N instances exhausts Postgres. The safe
+ * serverless default is `max: 1` per instance **behind a transaction pooler** (PgBouncer / Neon
+ * `-pooler` / Supabase `:6543` / Vercel `POSTGRES_PRISMA_URL`); the pooler multiplexes, so one
+ * client connection per instance is plenty. A long-running server (Docker/Render/Railway) has a
+ * single persistent process and wants a larger pool — raise it via `DATABASE_POOL_MAX`.
+ *
+ * `DATABASE_POOL_MAX` (optional env) overrides in both environments; otherwise prod defaults to 1
+ * (serverless-safe) and dev to 10 (the pg default, comfortable for local work).
+ */
+const poolMax = env.DATABASE_POOL_MAX ?? (env.NODE_ENV === 'production' ? 1 : 10);
+
 // Create connection pool (reuse across hot reloads in development)
-const pool = globalForPrisma.pool ?? new Pool({ connectionString: env.DATABASE_URL });
+const pool =
+  globalForPrisma.pool ??
+  new Pool({
+    connectionString: env.DATABASE_URL,
+    max: poolMax,
+    idleTimeoutMillis: 10_000,
+    connectionTimeoutMillis: 10_000,
+  });
 
 if (env.NODE_ENV !== 'production') globalForPrisma.pool = pool;
 

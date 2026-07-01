@@ -8,11 +8,15 @@
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within, cleanup } from '@testing-library/react';
 
 import { SeriousnessNotice } from '@/components/app/questionnaire/chat/seriousness-notice';
 
 afterEach(() => {
+  // Explicit cleanup guarantees the DOM is torn down between tests regardless of RTL's
+  // auto-cleanup registration order — under the full parallel suite that ordering can race and
+  // leave stale nodes, which made global `screen`/`document` queries here intermittently flaky.
+  cleanup();
   vi.restoreAllMocks();
 });
 
@@ -35,13 +39,39 @@ describe('SeriousnessNotice', () => {
     });
   });
 
-  describe('fixed heading', () => {
-    it('always renders the "Let\'s keep it genuine" heading', () => {
+  describe('heading', () => {
+    it('renders the "Let\'s keep it genuine" heading on a normal (amber) warning', () => {
       // Arrange / Act
       render(<SeriousnessNotice message="Any message." />);
 
-      // Assert: heading copy is static regardless of the message prop.
+      // Assert: default (non-final) heading.
       expect(screen.getByText("Let's keep it genuine")).toBeInTheDocument();
+    });
+
+    it('escalates to a red "Final warning" heading on the final strike', () => {
+      // Arrange / Act — scope queries to the render container so a stale prior render can't be matched.
+      const { container } = render(<SeriousnessNotice message="Any message." final />);
+      const scoped = within(container);
+
+      // Assert: the last warning before abandonment reads "Final warning" and is tinted red.
+      const heading = scoped.getByText('Final warning');
+      expect(heading).toBeInTheDocument();
+      expect(scoped.queryByText("Let's keep it genuine")).toBeNull();
+      expect(heading.className).toMatch(/text-red-700/);
+      // The container itself switches to the red palette.
+      expect(scoped.getByRole('status').className).toMatch(/border-red-400/);
+    });
+
+    it('renders the **bold** consequence in red on the final warning', () => {
+      // Arrange / Act
+      const { container } = render(
+        <SeriousnessNotice message="Set aside. **One more and this will be aborted.**" final />
+      );
+
+      // Assert: the emphasised run is a red <strong> (scoped to this render).
+      const strong = within(container).getByText('One more and this will be aborted.');
+      expect(strong.tagName).toBe('STRONG');
+      expect(strong.className).toMatch(/text-red-700/);
     });
   });
 
@@ -82,12 +112,12 @@ describe('SeriousnessNotice', () => {
 
   describe('ShieldAlert icon', () => {
     it('renders an element marked aria-hidden to exclude the icon from the a11y tree', () => {
-      // Arrange / Act
-      render(<SeriousnessNotice message="Please answer genuinely." />);
+      // Arrange / Act — scope to this render's container, not the global document.
+      const { container } = render(<SeriousnessNotice message="Please answer genuinely." />);
 
       // Assert: the SVG icon carries aria-hidden="true" so screen readers skip it.
       // Lucide renders the icon as an <svg>; aria-hidden makes it invisible to the tree.
-      const svgs = document.querySelectorAll('svg[aria-hidden="true"]');
+      const svgs = container.querySelectorAll('svg[aria-hidden="true"]');
       expect(svgs.length).toBeGreaterThan(0);
     });
   });

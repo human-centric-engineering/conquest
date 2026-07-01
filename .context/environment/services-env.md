@@ -151,6 +151,17 @@ ALLOWED_ORIGINS="https://app.example.com,capacitor://localhost"
 - ⚠️ **Use HTTPS origins in production**
 - ⚠️ **Be specific** - only add origins that need access
 
+### `CRON_SECRET`
+
+- **Purpose:** Bearer secret guarding the serverless maintenance-cron endpoint (`GET /api/v1/cron/maintenance`), which drains all background work (queued respondent reports, evaluation runs, scheduled workflows, retries, retention, embeddings).
+- **Required:** ❌ No — but **required on serverless (Vercel)**: without it the endpoint returns `503` and no background work runs.
+- **Type:** String (generate with `openssl rand -base64 32`)
+- **Used By:**
+  - `app/api/v1/cron/maintenance/route.ts` — checks `Authorization: Bearer $CRON_SECRET`
+- **Behavior:** On Vercel, set this in the dashboard and Vercel Cron auto-attaches the bearer header (see `vercel.json`). On a persistent/self-hosted deploy that drives the tick another way (admin API-key POST, in-process ticker), it can be left unset.
+
+See [`.context/orchestration/scheduling.md`](../orchestration/scheduling.md) and [`deployment/platforms/vercel.md`](../deployment/platforms/vercel.md).
+
 ## Cookie Consent
 
 ### `NEXT_PUBLIC_COOKIE_CONSENT_ENABLED`

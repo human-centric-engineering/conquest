@@ -30,7 +30,10 @@ DATABASE_URL=postgresql://user:password@host:5432/dbname
 BETTER_AUTH_SECRET=<generate with: openssl rand -base64 32>
 BETTER_AUTH_URL=https://your-project.vercel.app
 NEXT_PUBLIC_APP_URL=https://your-project.vercel.app
+CRON_SECRET=<generate with: openssl rand -base64 32>   # drives the maintenance cron (see Background jobs)
 ```
+
+> **`DATABASE_URL` must be a POOLED endpoint on serverless** (Neon `-pooler` host, Supabase `:6543` transaction pooler, or Vercel's `POSTGRES_PRISMA_URL`). A direct `:5432` connection exhausts under serverless fan-out. See [Database Setup](#3-database-setup).
 
 **Optional (for email):**
 
@@ -65,8 +68,13 @@ STORAGE_PROVIDER=vercel-blob  # Options: s3, vercel-blob, local
 **Option B: External Database (Supabase, Neon, Railway)**
 
 1. Create database on your provider
-2. Copy connection string to `DATABASE_URL`
-3. Ensure SSL is enabled for production
+2. Copy the **pooled** connection string to `DATABASE_URL` (Neon `-pooler` host, Supabase transaction
+   pooler on `:6543` with `?pgbouncer=true`) — serverless fans out across many instances, so a direct
+   `:5432` connection exhausts the DB. `lib/db/client.ts` uses `max: 1` per instance in production
+   (override with `DATABASE_POOL_MAX`), which relies on a transaction pooler in front.
+3. Ensure SSL is enabled for production (`?sslmode=require`)
+
+See [`.context/environment/database-env.md`](../../environment/database-env.md#connection-pooling-serverless-vs-long-running) for the full pooling rationale.
 
 ### 4. Configure Migrations
 
@@ -101,21 +109,30 @@ Vercel automatically builds and deploys.
 
 ### Function Configuration (vercel.json)
 
-Create `vercel.json` in your project root only if you need custom function configuration (e.g., longer timeouts). This file is **not included** in the starter template — Vercel auto-detects Next.js settings by default.
+ConQuest ships a `vercel.json` in the project root (Sunrise's own starter does not — Vercel auto-detects Next.js otherwise). It is required here for the **maintenance cron** (see below) and the report `maxDuration`.
 
 See [Vercel Project Configuration](https://vercel.com/docs/projects/project-configuration) for the full schema reference.
 
-**Example configuration for longer API timeouts:**
-
-```json
+```jsonc
 {
+  "crons": [{ "path": "/api/v1/cron/maintenance", "schedule": "* * * * *" }],
   "functions": {
-    "app/api/**/*.ts": {
-      "maxDuration": 30
-    }
-  }
+    "app/api/v1/cron/maintenance/route.ts": { "maxDuration": 300 },
+    "app/api/v1/app/questionnaire-sessions/[id]/submit/route.ts": { "maxDuration": 60 },
+  },
 }
 ```
+
+### Background jobs — maintenance cron (REQUIRED)
+
+Async work (queued respondent reports, evaluation runs, scheduled workflows, webhook/hook retries, retention, embedding backfill) is drained by a maintenance tick. On serverless there is **no persistent process** to run it (`instrumentation.ts`'s in-process ticker is dev-only) — so **without a cron, none of it ever runs** and, e.g., respondent reports stay stuck "taking a little longer than usual" forever.
+
+1. Set `CRON_SECRET` in the Vercel dashboard (Environment Variables). Vercel auto-attaches it as `Authorization: Bearer $CRON_SECRET` to cron requests; the endpoint fails closed (`503`) if it is unset.
+2. The `crons` block above calls `GET /api/v1/cron/maintenance` every minute. That endpoint runs the tick in **awaited** mode so the work completes within the invocation (unlike the admin tick, which returns 202 and would be frozen mid-chain on serverless).
+
+**Plan tier:** per-minute cron + `maxDuration > 60s` require **Vercel Pro**. On **Hobby**, cron is daily-only and `maxDuration` caps at 60s → drive it with an external cron instead (GitHub Actions scheduled workflow or cron-job.org) hitting the same URL with the bearer header, and lower the `maxDuration` values to 60.
+
+See [`.context/orchestration/scheduling.md`](../../orchestration/scheduling.md) for the tick internals.
 
 ### Preview Deployments
 

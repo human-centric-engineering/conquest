@@ -32,12 +32,16 @@ describe('evaluateAbuseStrike', () => {
   });
 
   it('firms up the warning on the last strike before the threshold', () => {
-    const gentle = evaluateAbuseStrike(0, 4).noticeMessage; // strike 1, 3 remaining
-    const firm = evaluateAbuseStrike(2, 4).noticeMessage; // strike 3, 1 remaining
-    expect(firm).not.toBe(gentle);
-    // The final warning names the consequence (termination) in a bold (**…**) sentence.
-    expect(firm.toLowerCase()).toContain('termination');
-    expect(firm).toContain('**');
+    const gentle = evaluateAbuseStrike(0, 4); // strike 1, 3 remaining
+    const firm = evaluateAbuseStrike(2, 4); // strike 3, 1 remaining
+    expect(firm.noticeMessage).not.toBe(gentle.noticeMessage);
+    // The final warning is flagged `final` (→ red notice) and names the consequence — one more
+    // infringement aborts the conversation — in a bold (**…**) sentence.
+    expect(gentle.final).toBe(false);
+    expect(firm.final).toBe(true);
+    expect(firm.noticeMessage.toLowerCase()).toContain('final warning');
+    expect(firm.noticeMessage.toLowerCase()).toContain('aborted');
+    expect(firm.noticeMessage).toContain('**');
   });
 
   it('aborts on the threshold strike, carrying the counted final message', () => {

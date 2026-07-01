@@ -930,6 +930,7 @@ model AppRespondentReport {
   content     Json? // RespondentReportContent (insights payload); null until ready
   costUsd     Float? // generation cost actual; null until ready
   error       String? // failure message when status = failed
+  notifyEmail String? // respondent opted in to be emailed when ready; null = no notify. Sent best-effort by the worker on status→ready, then cleared.
   lockedBy    String? // worker host holding the lease; null when idle
   lockedAt    DateTime? // lease acquired-at; stale after the worker threshold (claimable again)
   generatedAt DateTime? // when content was written (status → ready)

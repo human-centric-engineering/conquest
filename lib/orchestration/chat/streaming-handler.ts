@@ -777,18 +777,25 @@ export class StreamingChatHandler {
         }
       }
 
-      const contextBlock =
+      // These three reads are mutually independent (context block, per-user memories, capability
+      // definitions) — run them concurrently rather than serially so their DB/network round-trips
+      // overlap. `capabilityDefinitions` is only consumed further down (tool loop) but depends on
+      // nothing between here and there, so hoisting it into this batch is safe. On serverless, where
+      // each query pays the app→Postgres RTT, collapsing three serial round-trips into one is the
+      // bulk of the pre-token latency win.
+      const [contextBlock, memoryRows, capabilityDefinitions] = await Promise.all([
         request.contextType && request.contextId
-          ? await buildContext(request.contextType, request.contextId)
-          : null;
-
-      // Load per-user-per-agent memories for context injection
-      const memoryRows = await prisma.aiUserMemory.findMany({
-        where: { userId: request.userId, agentId: agent.id },
-        orderBy: { updatedAt: 'desc' },
-        take: 50,
-        select: { key: true, value: true },
-      });
+          ? buildContext(request.contextType, request.contextId)
+          : Promise.resolve(null),
+        // Load per-user-per-agent memories for context injection
+        prisma.aiUserMemory.findMany({
+          where: { userId: request.userId, agentId: agent.id },
+          orderBy: { updatedAt: 'desc' },
+          take: 50,
+          select: { key: true, value: true },
+        }),
+        getCapabilityDefinitions(agent.id),
+      ]);
 
       // Resolve the context window for token-aware truncation.
       // Agent-level maxHistoryTokens overrides the model's context window.
@@ -830,7 +837,7 @@ export class StreamingChatHandler {
       });
       let messages: LlmMessage[] = initialMessages;
 
-      const capabilityDefinitions = await getCapabilityDefinitions(agent.id);
+      // capabilityDefinitions was resolved above (hoisted into the parallel batch).
       const toolDefinitions: LlmToolDefinition[] = capabilityDefinitions.map((def) => ({
         name: def.name,
         description: def.description,

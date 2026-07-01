@@ -77,6 +77,10 @@ export default defineConfig({
       // Aliasing it to the manual mock stub allows RedisRateLimitStore to be
       // imported in unit tests without a real Redis connection.
       ioredis: path.resolve(__dirname, './tests/mocks/ioredis.ts'),
+      // `server-only` throws on import outside a React Server context (vitest has no `react-server`
+      // condition). Alias it to an empty stub so server-only modules can be unit-tested directly;
+      // the real build-time boundary guarantee is unaffected.
+      'server-only': path.resolve(__dirname, './tests/mocks/server-only.ts'),
       // Allow tests to import mock helpers via @mocks/ alias
       '@mocks': path.resolve(__dirname, './tests/mocks'),
     },

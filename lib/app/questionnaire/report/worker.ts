@@ -13,6 +13,7 @@
 import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
 import { generateRespondentReport } from '@/lib/app/questionnaire/report/generate';
+import { sendRespondentReportReadyEmail } from '@/lib/app/questionnaire/report/notify-send';
 
 /**
  * Prisma's `updateMany` data input for this model, derived from the client value so lib/app stays
@@ -25,6 +26,8 @@ type ReportUpdateData = Parameters<typeof prisma.appRespondentReport.updateMany>
 export const REPORT_LEASE_TTL_MS = 5 * 60 * 1000;
 /** Max reports drained per tick (each is one LLM call). */
 const MAX_PER_TICK = 5;
+/** Warn (ops signal) when this many reports are still waiting after a full-batch tick. */
+const BACKLOG_WARN_THRESHOLD = 20;
 /** Wall-clock budget per tick — stop claiming new work past this even if more is queued. */
 const TICK_BUDGET_MS = 45_000;
 /** Cap the stored failure message. */
@@ -55,10 +58,16 @@ function claimableWhere(orphanCutoff: Date) {
   };
 }
 
-/** Atomically claim the oldest claimable report. Returns its id + sessionId, or null. */
-async function claimNextReport(
-  workerId: string
-): Promise<{ id: string; sessionId: string } | null> {
+/** A claimed report row — enough to generate + (optionally) email on completion. */
+interface ClaimedReport {
+  id: string;
+  sessionId: string;
+  /** Respondent opted in to a report-ready email; null when they didn't. */
+  notifyEmail: string | null;
+}
+
+/** Atomically claim the oldest claimable report. Returns the claimed row, or null. */
+async function claimNextReport(workerId: string): Promise<ClaimedReport | null> {
   const orphanCutoff = new Date(Date.now() - REPORT_LEASE_TTL_MS);
 
   const candidate = await prisma.appRespondentReport.findFirst({
@@ -76,14 +85,24 @@ async function claimNextReport(
 
   return prisma.appRespondentReport.findUnique({
     where: { id: candidate.id },
-    select: { id: true, sessionId: true },
+    select: { id: true, sessionId: true, notifyEmail: true },
   });
 }
 
 /** Generate + persist one claimed report. Returns whether it succeeded. */
-async function driveReport(claimed: { id: string; sessionId: string }): Promise<boolean> {
+async function driveReport(claimed: ClaimedReport): Promise<boolean> {
   try {
     const { content, costUsd } = await generateRespondentReport(claimed.sessionId);
+    // Re-read notifyEmail: generation takes tens of seconds, during which the respondent may have
+    // just opted in (the notify route matches `processing` rows). Using the claim-time value would
+    // miss that late opt-in AND the ready-write below clears the column — so read the fresh value
+    // now and decide the send on it. (`?? claimed.notifyEmail` keeps a claim-time value if the
+    // re-read races/returns nothing.)
+    const fresh = await prisma.appRespondentReport.findUnique({
+      where: { id: claimed.id },
+      select: { notifyEmail: true },
+    });
+    const notifyEmail = fresh?.notifyEmail ?? claimed.notifyEmail;
     await prisma.appRespondentReport.updateMany({
       where: { id: claimed.id, status: 'processing' },
       data: {
@@ -94,8 +113,24 @@ async function driveReport(claimed: { id: string; sessionId: string }): Promise<
         error: null,
         lockedBy: null,
         lockedAt: null,
+        // Clear the notify request now it's been (or is about to be) satisfied — a later re-drain
+        // of this row must not re-send the email.
+        notifyEmail: null,
       } as unknown as ReportUpdateData,
     });
+    // Best-effort report-ready email — the report is already saved, so a send failure is logged,
+    // never surfaced or retried.
+    if (notifyEmail) {
+      try {
+        await sendRespondentReportReadyEmail(claimed.sessionId, notifyEmail);
+      } catch (err) {
+        logger.warn('respondent report: ready-email send failed', {
+          reportId: claimed.id,
+          sessionId: claimed.sessionId,
+          error: errorMessage(err),
+        });
+      }
+    }
     return true;
   } catch (err) {
     logger.error('respondent report generation failed', {
@@ -132,6 +167,17 @@ export async function processQueuedRespondentReports(): Promise<ReportWorkerResu
     const ok = await driveReport(claimed);
     if (ok) out.succeeded += 1;
     else out.failed += 1;
+  }
+
+  // Ops signal: if we filled the batch there may be a backlog. Count what's still waiting so a
+  // stuck/oversized queue is visible (e.g. the cron isn't firing, or generation is failing).
+  if (out.claimed >= MAX_PER_TICK) {
+    const backlog = await prisma.appRespondentReport.count({
+      where: { status: { in: ['queued', 'processing'] } },
+    });
+    if (backlog >= BACKLOG_WARN_THRESHOLD) {
+      logger.warn('respondent report backlog', { backlog, drainedThisTick: out.claimed });
+    }
   }
 
   return out;

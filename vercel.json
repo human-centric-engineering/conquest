@@ -1,0 +1,8 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "crons": [{ "path": "/api/v1/cron/maintenance", "schedule": "* * * * *" }],
+  "functions": {
+    "app/api/v1/cron/maintenance/route.ts": { "maxDuration": 300 },
+    "app/api/v1/app/questionnaire-sessions/[id]/submit/route.ts": { "maxDuration": 60 }
+  }
+}

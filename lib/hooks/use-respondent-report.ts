@@ -30,8 +30,18 @@ export interface UseRespondentReportResult {
    * stranded watching a spinner that will never resolve.
    */
   timedOut: boolean;
-  /** Restart polling from scratch (clears {@link timedOut}); wired to the fallback's "Check again". */
+  /**
+   * Re-trigger generation and restart polling from scratch (clears {@link timedOut}); wired to the
+   * fallback's "Check again". POSTs the retry endpoint first (re-queues a failed/orphaned report and
+   * kicks the worker), then polls again — so "Check again" actually makes progress rather than just
+   * re-reading a dead row.
+   */
   retry: () => void;
+  /**
+   * Opt in to a report-ready email. POSTs the notify endpoint; resolves `true` when the email was
+   * accepted (a report is still in flight to notify about).
+   */
+  notify: (email: string) => Promise<boolean>;
 }
 
 export function useRespondentReport(
@@ -44,7 +54,42 @@ export function useRespondentReport(
   // Bumped by `retry` to re-run the polling effect from a fresh attempt count.
   const [retryNonce, setRetryNonce] = useState(0);
 
-  const retry = useCallback(() => setRetryNonce((n) => n + 1), []);
+  const authHeaders = useCallback((): Record<string, string> => {
+    const headers: Record<string, string> = {};
+    if (accessToken) headers['X-Session-Token'] = accessToken;
+    return headers;
+  }, [accessToken]);
+
+  const retry = useCallback(() => {
+    // Best-effort re-trigger: re-queue a failed/orphaned report and kick the worker, then restart
+    // polling regardless of the POST's outcome (a transient failure still gets a fresh poll window).
+    void fetch(API.APP.QUESTIONNAIRE_SESSIONS.reportRetry(sessionId), {
+      method: 'POST',
+      credentials: 'include',
+      headers: authHeaders(),
+    })
+      .catch(() => {})
+      .finally(() => setRetryNonce((n) => n + 1));
+  }, [sessionId, authHeaders]);
+
+  const notify = useCallback(
+    async (email: string): Promise<boolean> => {
+      try {
+        const res = await fetch(API.APP.QUESTIONNAIRE_SESSIONS.reportNotify(sessionId), {
+          method: 'POST',
+          credentials: 'include',
+          headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email }),
+        });
+        if (!res.ok) return false;
+        const body = (await res.json()) as { success: boolean; data?: { notifying?: boolean } };
+        return Boolean(body.success && body.data?.notifying);
+      } catch {
+        return false;
+      }
+    },
+    [sessionId, authHeaders]
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -106,5 +151,5 @@ export function useRespondentReport(
     };
   }, [sessionId, accessToken, retryNonce]);
 
-  return { view, loaded, timedOut, retry };
+  return { view, loaded, timedOut, retry, notify };
 }

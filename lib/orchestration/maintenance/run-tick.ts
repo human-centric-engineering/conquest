@@ -71,11 +71,32 @@ export interface TickResult {
   startMs: number;
 }
 
+/** Options for {@link runMaintenanceTick}. */
+export interface RunMaintenanceTickOptions {
+  /**
+   * Await the background task chain (embeddings, retention, evaluation runs, respondent reports,
+   * …) before returning, instead of detaching it as fire-and-forget.
+   *
+   * REQUIRED on serverless (Vercel), where the function is frozen/killed once the HTTP response
+   * is sent — a detached `void Promise.allSettled(...)` chain is not guaranteed to run to
+   * completion, so queued reports / eval runs / retries never drain. The scheduled-cron endpoint
+   * passes `true`; the dev in-process ticker and the manual admin tick keep the default
+   * fire-and-forget behaviour (they run on a persistent process / return 202 fast).
+   *
+   * @default false
+   */
+  awaitBackground?: boolean;
+}
+
 /**
- * Run one maintenance tick. The schedules sweep is awaited; the rest of
- * the chain settles in the background under the overlap guard.
+ * Run one maintenance tick. The schedules sweep is always awaited. The rest of the chain either
+ * settles in the background under the overlap guard (default) or is awaited before returning when
+ * {@link RunMaintenanceTickOptions.awaitBackground} is set (serverless cron).
  */
-export async function runMaintenanceTick(): Promise<TickResult> {
+export async function runMaintenanceTick(
+  opts: RunMaintenanceTickOptions = {}
+): Promise<TickResult> {
+  const { awaitBackground = false } = opts;
   const startMs = Date.now();
   if (tickRunning) {
     logger.info('Maintenance tick skipped — previous tick still running');
@@ -101,7 +122,7 @@ export async function runMaintenanceTick(): Promise<TickResult> {
     tickRunning = false;
   }, BACKGROUND_TASK_MAX_MS);
 
-  void Promise.allSettled([
+  const chain = Promise.allSettled([
     processPendingRetries(),
     processPendingHookRetries(),
     processOrphanedExecutions(),
@@ -133,6 +154,14 @@ export async function runMaintenanceTick(): Promise<TickResult> {
         tickRunning = false;
       }
     });
+
+  // Serverless (Vercel): await the chain so it actually completes within the function invocation.
+  // Persistent-process callers (dev ticker, admin tick) detach it and return fast.
+  if (awaitBackground) {
+    await chain;
+  } else {
+    void chain;
+  }
 
   return { skipped: false, schedules, startMs };
 }

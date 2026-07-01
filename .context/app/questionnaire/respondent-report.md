@@ -101,9 +101,10 @@ attributed" notice instead of a link.
 ## Storage (AI modes)
 
 `AppRespondentReport` — one row per session (1:1, `onDelete: Cascade` so it follows the session and
-GDPR erasure). Status `queued → processing → ready | failed`, the generated `content`, `costUsd`, and
-worker lease columns (`lockedBy`/`lockedAt`) for the maintenance-tick generation worker (mirrors the
-evaluations batch worker). Raw-only mode never creates a row.
+GDPR erasure). Status `queued → processing → ready | failed`, the generated `content`, `costUsd`,
+`notifyEmail` (respondent opt-in for a report-ready email; cleared once sent), and worker lease
+columns (`lockedBy`/`lockedAt`) for the maintenance-tick generation worker (mirrors the evaluations
+batch worker). Raw-only mode never creates a row.
 
 ## Generation pipeline (AI modes, async)
 
@@ -116,7 +117,19 @@ evaluations batch worker). Raw-only mode never creates a row.
    the maintenance-tick background chain (`lib/orchestration/maintenance/run-tick.ts`, task
    `respondentReports`). It lease-claims queued/orphan-stale rows (single conditional UPDATE; 5-min
    lease TTL), drains up to 5 per tick within a 45s budget, and marks each `ready` (+ content + cost)
-   or `failed` (+ error), clearing the lease either way.
+   or `failed` (+ error), clearing the lease either way. On `ready`, if the row has a `notifyEmail` it
+   sends the report-ready email best-effort (`sendRespondentReportReadyEmail` → `emails/respondent-report-ready.tsx`)
+   and clears `notifyEmail`; a send failure is logged, never fails the report. A full-batch tick that
+   leaves a large backlog logs `respondent report backlog` as an ops signal.
+
+   **What drives the tick differs by environment — this is why prod stalled.** In dev an in-process
+   ticker fires every 60s; in prod (Vercel serverless) there is no persistent process, so the tick is
+   driven by the scheduled cron `GET /api/v1/cron/maintenance` (see
+   [`../../orchestration/scheduling.md`](../../orchestration/scheduling.md)) which runs the chain in
+   awaited mode. Additionally, the submit route kicks the worker via `after()` (`next/server`) right
+   after enqueue, so a report starts generating within seconds rather than at the next cron minute;
+   the lease makes the kick and the cron drain safe to overlap.
+
 3. **Generation** — `generateRespondentReport(sessionId)` (`lib/app/questionnaire/report/generate.ts`)
    loads the answers (`loadSessionExport` → `buildAnswerPanelView` → `buildAnswerTranscript`),
    optionally retrieves client-KB snippets (scoped via `resolveClientKnowledgeDocumentIds` →
@@ -136,14 +149,23 @@ budget cap; `visibility: 'internal'`.
   `X-Session-Token`). It returns the `RespondentReportClientView` built by
   `buildRespondentReportClientView` (`lib/app/questionnaire/report/view.ts`): `enabled` (config AND
   platform flag), `mode`, delivery toggles, and — for the AI modes (`raw_plus_insights`, `narrative`)
-  — the insights `{ status, content, generatedAt, error }` (a queued/processing status while the
-  worker runs; a missing row reads as `queued`).
+  — the insights `{ status, started, content, generatedAt, error, notifyRequested }`. `started`
+  disambiguates a genuine `queued` row from "no row yet" (both surface `status: 'queued'`), so the UI
+  can show "Starting…" vs "Preparing…"; `notifyRequested` reflects a stored `notifyEmail`.
+- **Retry + notify endpoints** — `POST …/:id/report/retry` (`reportRetry`) re-queues a `failed` /
+  orphaned-`processing` report (`requestRespondentReportRetry`, `lib/app/questionnaire/report/retry.ts`)
+  and kicks the worker via `after()` — this is what makes "Check again" actually make progress rather
+  than just re-reading a dead row. `POST …/:id/report/notify` (`reportNotify`, body `{ email }`) stores
+  `notifyEmail` on an in-flight row for the report-ready email. Both are access-gated like the GET.
 - **Completion screen** — `SessionComplete` calls `useRespondentReport`
   (`lib/hooks/use-respondent-report.ts`, 3s poll until terminal) and renders the generated content
-  inline (preparing → ready summary/sections/actions → calm failure fallback) when `onScreen` + an AI
-  mode; the Download PDF button is gated on `delivery.download` (and defaults on when no report is
-  configured, preserving the F7.4 responses export). The completion screen never lists raw answers, so
-  a narrative report already shows woven-only on screen.
+  inline (starting/preparing → ready summary/sections/actions → failure fallback with a **Try again**)
+  when `onScreen` + an AI mode. When generation outruns the poll window it shows the calm "taking
+  longer" fallback with **Check again** (POSTs `reportRetry`, then re-polls) and an **email-me-when-ready**
+  capture (POSTs `reportNotify` — anonymous respondents have no account email). The Download PDF button
+  is gated on `delivery.download` (and defaults on when no report is configured, preserving the F7.4
+  responses export). The completion screen never lists raw answers, so a narrative report already shows
+  woven-only on screen.
 - **PDF** — `SessionExportModel.insights` carries the ready content into the PDF and
   `SessionExportModel.narrativeOnly` selects the layout. The respondent `export.pdf` route loads the
   report via `buildRespondentReportClientView` (ready only):

@@ -67,4 +67,21 @@ const nextConfig = {
   },
 };
 
-module.exports = nextConfig;
+// Bundle analyzer (opt-in via `ANALYZE=true npm run build`). Used to pin which client chunk pulls
+// an `eval`/`new Function` dependency that prod CSP (`script-src` without `'unsafe-eval'`) blocks —
+// e.g. Next's `vm-browserify` fallback dragged in by a client module importing Node `crypto`/`vm`.
+// Guarded require so the config never breaks if the dev dependency isn't installed.
+// See .context/security/overview.md.
+let withBundleAnalyzer = (config) => config;
+if (process.env.ANALYZE === 'true') {
+  try {
+    withBundleAnalyzer = require('@next/bundle-analyzer')({ enabled: true });
+  } catch {
+    // eslint-disable-next-line no-console -- build-time config diagnostic, no logger available here
+    console.warn(
+      '[next.config] ANALYZE=true but @next/bundle-analyzer is not installed; skipping.'
+    );
+  }
+}
+
+module.exports = withBundleAnalyzer(nextConfig);

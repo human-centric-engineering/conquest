@@ -55,6 +55,31 @@ describe('runTurn — seriousness / abuse gate', () => {
     expect(result.response.kind).toBe('question');
   });
 
+  it('emits the distinct `seriousness_final` code on the last warning before abandonment', async () => {
+    const { invokers } = stubInvokers({
+      extract: { intents: [intent({ slotKey: 'a' })], suspectedNonGenuine: true },
+      serious: { verdict: { serious: false, reason: 'still not genuine' } },
+    });
+
+    const result = await runTurn(
+      state({
+        userMessage: 'garbage',
+        questions: Q,
+        config: { abuseThreshold: 4 },
+        abuseStrikes: 2, // the next strike is the 3rd → one left → final warning
+      }),
+      invokers
+    );
+
+    expect(result.abuse).toMatchObject({ newStrikeCount: 3, abandon: false });
+    // The final warning gets the firmer (red) code; earlier strikes stay `seriousness`.
+    expect(result.events.some((e) => e.type === 'warning' && e.code === 'seriousness_final')).toBe(
+      true
+    );
+    expect(result.events.some((e) => e.type === 'warning' && e.code === 'seriousness')).toBe(false);
+    expect(result.response.kind).toBe('question');
+  });
+
   it('abandons the session on the threshold strike', async () => {
     const { invokers } = stubInvokers({
       extract: { intents: [intent({ slotKey: 'a' })], suspectedNonGenuine: true },

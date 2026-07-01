@@ -15,6 +15,10 @@
  * ingest route's integration tests are the behaviour-preserving regression net.
  */
 
+// Server-only tripwire: this pipeline pulls in `node:crypto` and the `exceljs`-backed
+// `xlsx-flatten` (whose browser build uses `new Function`). Prod CSP forbids `'unsafe-eval'`, so a
+// client-bundle bleed here would break silently in prod only. Fail the build instead.
+import 'server-only';
 import { createHash } from 'node:crypto';
 import type { NextRequest } from 'next/server';
 

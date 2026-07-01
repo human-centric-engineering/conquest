@@ -4,6 +4,8 @@ Platform-agnostic runtime that runs a single chat turn against an agent — load
 
 The handler is the consumer of every prior orchestration slice: it calls `providerManager.getProvider`, `capabilityDispatcher.dispatch`, and `costTracker.logCost` around a persisted `AiConversation` + `AiMessage` record. **SSE framing happens in the API route layer** (Session 3.3), never here — the handler only yields plain events.
 
+**Pre-token latency.** Before the first token, `runInner` does several DB reads. The mutually-independent ones — the entity context block (`buildContext`), per-user memories (`aiUserMemory.findMany`), and capability definitions (`getCapabilityDefinitions`) — run concurrently in one `Promise.all`, so their round-trips overlap instead of stacking. This matters most on serverless, where the app→Postgres RTT is paid per query. The genuinely dependent reads stay sequential: cap settings → `loadOrCreateConversation` → `loadHistory` / message-count / user-message persist all chain on the conversation id and preserve ordering (history loaded before the new user message is persisted).
+
 ## Quick Start
 
 ```typescript

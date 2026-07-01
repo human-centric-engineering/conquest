@@ -125,8 +125,13 @@ function TurnNotices({ warnings }: { warnings?: SessionWarning[] }) {
       {warnings.map((warning, i) =>
         warning.code === 'contradiction' ? (
           <ContradictionNotice key={i} message={warning.message} detail={warning.detail} />
-        ) : warning.code === 'seriousness' ? (
-          <SeriousnessNotice key={i} message={warning.message} detail={warning.detail} />
+        ) : warning.code === 'seriousness' || warning.code === 'seriousness_final' ? (
+          <SeriousnessNotice
+            key={i}
+            message={warning.message}
+            detail={warning.detail}
+            final={warning.code === 'seriousness_final'}
+          />
         ) : warning.code === 'support' ? (
           <SupportNotice key={i} message={warning.message} />
         ) : (

@@ -114,6 +114,16 @@ describe('Security Headers', () => {
       expect(config['report-uri']).toBe('/api/csp-report');
     });
 
+    // Regression lock: the prod CSP must NEVER carry 'unsafe-eval' — the correct fix for an
+    // eval-using client dependency is to remove/server-scope it, never to weaken CSP. Asserted at the
+    // built-string level (with and without a nonce) so no future edit can slip it back in.
+    // See .context/security/overview.md.
+    it('never emits unsafe-eval in the built production CSP string', () => {
+      vi.stubEnv('NODE_ENV', 'production');
+      expect(getCSP()).not.toContain('unsafe-eval');
+      expect(getCSP('test-nonce')).not.toContain('unsafe-eval');
+    });
+
     it('allows the trusted video-embed hosts in frame-src in both environments', () => {
       // The intro-video iframe (youtube-nocookie / player.vimeo) is otherwise blocked by the
       // default frame-src 'self'. These are the only two hosts the resolver can ever produce.

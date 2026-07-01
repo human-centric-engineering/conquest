@@ -24,6 +24,7 @@
  */
 
 import type { NextRequest } from 'next/server';
+import { after } from 'next/server';
 import { z } from 'zod';
 
 import { successResponse, errorResponse } from '@/lib/api/responses';
@@ -42,7 +43,14 @@ import { resolveTurnAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/
 import { buildTurnContext } from '@/app/api/v1/app/questionnaires/_lib/turn-context';
 import { markSessionCompleted } from '@/app/api/v1/app/questionnaires/_lib/sessions';
 import { enqueueRespondentReport } from '@/lib/app/questionnaire/report/enqueue';
+import { processQueuedRespondentReports } from '@/lib/app/questionnaire/report/worker';
 import { refreshRoundLearningDigest } from '@/lib/app/questionnaire/learning/digest';
+
+/**
+ * Cap the post-response work scheduled via `after()`. On serverless this is bounded by the
+ * function's `maxDuration` (60s, set below); the value documents intent for readers.
+ */
+export const maxDuration = 60;
 
 /**
  * Optional submit body. Absent (the standard "accept the agent's offer" submit) ⇒ `early: false`.
@@ -127,31 +135,49 @@ async function handleSubmit(
       });
       log.info('Respondent session submitted', { sessionId, status, early });
       // Queue the respondent report when the version is configured for an AI mode (raw_plus_insights
-      // or narrative).
-      // Best-effort — a queue failure must never fail the submission the respondent just made.
-      await enqueueRespondentReport(sessionId).catch((err) => {
+      // or narrative). Best-effort — a queue failure must never fail the submission just made.
+      const enqueued = await enqueueRespondentReport(sessionId).catch((err) => {
         log.error('Failed to enqueue respondent report', {
           sessionId,
           error: err instanceof Error ? err.message : String(err),
         });
+        return false;
       });
+      // Instant start: kick the report worker AFTER the response so generation begins within
+      // seconds rather than waiting for the next maintenance-cron minute. `after()` (next/server)
+      // survives serverless (runs within the function's maxDuration) and on a persistent process
+      // alike — unlike a bare `void`, which Vercel freezes. The worker claims via a lease, so this
+      // kick and the scheduled cron drain can never double-process the same report. The cron
+      // remains the backstop if this kick is cut off mid-generation.
+      if (enqueued) {
+        after(async () => {
+          try {
+            await processQueuedRespondentReports();
+          } catch (err) {
+            log.error('Respondent report kick failed', {
+              sessionId,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        });
+      }
       // Learning Mode: rebuild this round's peer-theme digest so the NEXT respondent sees the
       // just-completed session folded in. Gated by the platform flag + the round having a roundId;
-      // the builder itself re-checks the per-round toggle + k-anonymity. FIRE-AND-FORGET — the
-      // rebuild makes an LLM call (up to DIGEST_TIMEOUT_MS), so awaiting it would block THIS
-      // respondent's submit confirmation behind work that only benefits the next respondent. We let
-      // it run after the response; a missed rebuild self-heals on the next completion (or a manual
-      // admin Rebuild). Fail-soft: errors are logged, never surfaced. (Long-running server runtime;
-      // not a per-request-killed serverless function.)
+      // the builder itself re-checks the per-round toggle + k-anonymity. Runs via `after()` so it
+      // never blocks THIS respondent's submit confirmation behind an LLM call that only benefits
+      // the next respondent, yet still completes on serverless (a bare `void` would be frozen).
+      // A missed rebuild self-heals on the next completion (or a manual admin Rebuild). Fail-soft.
       if (loaded.session.roundId && (await isLearningModeEnabled())) {
         const roundId = loaded.session.roundId;
-        void refreshRoundLearningDigest(roundId, loaded.session.versionId).catch((err) => {
-          log.error('Failed to refresh round learning digest', {
-            sessionId,
-            roundId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        });
+        after(() =>
+          refreshRoundLearningDigest(roundId, loaded.session.versionId).catch((err) => {
+            log.error('Failed to refresh round learning digest', {
+              sessionId,
+              roundId,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          })
+        );
       }
       return successResponse({ sessionId, status });
     } catch (err) {

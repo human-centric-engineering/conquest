@@ -24,12 +24,14 @@ import type { AnswerPanelView, PanelSlotView } from '@/lib/app/questionnaire/pan
 
 type Mock = ReturnType<typeof vi.fn>;
 const retrySpy = vi.fn();
+const notifySpy = vi.fn(() => Promise.resolve(true));
 const mockView = (view: unknown, extra?: { timedOut?: boolean }) =>
   (useRespondentReport as unknown as Mock).mockReturnValue({
     view,
     loaded: true,
     timedOut: extra?.timedOut ?? false,
     retry: retrySpy,
+    notify: notifySpy,
   });
 const setReducedMotion = (reduced: boolean) =>
   (usePrefersReducedMotion as unknown as Mock).mockReturnValue(reduced);
@@ -137,7 +139,14 @@ describe('SessionComplete — respondent report', () => {
       mode: 'raw_plus_insights',
       onScreen: true,
       download: true,
-      insights: { status: 'queued', content: null, generatedAt: null, error: null },
+      insights: {
+        status: 'queued',
+        started: true,
+        content: null,
+        generatedAt: null,
+        error: null,
+        notifyRequested: false,
+      },
     });
     render(<SessionComplete sessionId="s1" answeredCount={3} />);
     expect(screen.getByText(/Preparing your personalised report/i)).toBeInTheDocument();
@@ -196,7 +205,14 @@ describe('SessionComplete — respondent report', () => {
       mode: 'narrative',
       onScreen: true,
       download: true,
-      insights: { status: 'processing', content: null, generatedAt: null, error: null },
+      insights: {
+        status: 'processing',
+        started: true,
+        content: null,
+        generatedAt: null,
+        error: null,
+        notifyRequested: false,
+      },
     });
     render(<SessionComplete sessionId="s1" answeredCount={3} />);
     expect(screen.getByText(/Preparing your personalised report/i)).toBeInTheDocument();
@@ -208,7 +224,14 @@ describe('SessionComplete — respondent report', () => {
       mode: 'raw_plus_insights',
       onScreen: true,
       download: true,
-      insights: { status: 'failed', content: null, generatedAt: null, error: 'boom' },
+      insights: {
+        status: 'failed',
+        started: true,
+        content: null,
+        generatedAt: null,
+        error: 'boom',
+        notifyRequested: false,
+      },
     });
     render(<SessionComplete sessionId="s1" answeredCount={3} />);
     expect(screen.getByText(/couldn.t prepare your personalised insights/i)).toBeInTheDocument();
@@ -220,7 +243,14 @@ describe('SessionComplete — respondent report', () => {
       mode: 'raw_plus_insights',
       onScreen: true,
       download: true,
-      insights: { status: 'queued', content: null, generatedAt: null, error: null },
+      insights: {
+        status: 'queued',
+        started: true,
+        content: null,
+        generatedAt: null,
+        error: null,
+        notifyRequested: false,
+      },
     });
     render(<SessionComplete sessionId="s1" answeredCount={2} captured={dataSlotPanel()} />);
     expect(screen.getByText(/In the meantime, here.s what you shared/i)).toBeInTheDocument();
@@ -237,7 +267,14 @@ describe('SessionComplete — respondent report', () => {
         mode: 'raw_plus_insights',
         onScreen: true,
         download: true,
-        insights: { status: 'queued', content: null, generatedAt: null, error: null },
+        insights: {
+          status: 'queued',
+          started: true,
+          content: null,
+          generatedAt: null,
+          error: null,
+          notifyRequested: false,
+        },
       });
       render(
         <SessionComplete
@@ -264,7 +301,14 @@ describe('SessionComplete — respondent report', () => {
       mode: 'raw_plus_insights',
       onScreen: true,
       download: true,
-      insights: { status: 'queued', content: null, generatedAt: null, error: null },
+      insights: {
+        status: 'queued',
+        started: true,
+        content: null,
+        generatedAt: null,
+        error: null,
+        notifyRequested: false,
+      },
     });
     render(
       <SessionComplete
@@ -286,7 +330,14 @@ describe('SessionComplete — respondent report', () => {
       mode: 'raw_plus_insights',
       onScreen: true,
       download: true,
-      insights: { status: 'queued', content: null, generatedAt: null, error: null },
+      insights: {
+        status: 'queued',
+        started: true,
+        content: null,
+        generatedAt: null,
+        error: null,
+        notifyRequested: false,
+      },
     });
     render(
       <SessionComplete
@@ -313,7 +364,14 @@ describe('SessionComplete — respondent report', () => {
       mode: 'raw_plus_insights',
       onScreen: true,
       download: true,
-      insights: { status: 'queued', content: null, generatedAt: null, error: null },
+      insights: {
+        status: 'queued',
+        started: true,
+        content: null,
+        generatedAt: null,
+        error: null,
+        notifyRequested: false,
+      },
     });
     render(<SessionComplete sessionId="s1" answeredCount={null} />);
     expect(screen.getByText(/Preparing your personalised report/i)).toBeInTheDocument();
@@ -329,7 +387,14 @@ describe('SessionComplete — respondent report', () => {
         mode: 'raw_plus_insights',
         onScreen: true,
         download: true,
-        insights: { status: 'processing', content: null, generatedAt: null, error: null },
+        insights: {
+          status: 'processing',
+          started: true,
+          content: null,
+          generatedAt: null,
+          error: null,
+          notifyRequested: false,
+        },
       },
       { timedOut: true }
     );
@@ -340,6 +405,62 @@ describe('SessionComplete — respondent report', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /Check again/i }));
     expect(retrySpy).toHaveBeenCalledTimes(1);
+  });
+
+  describe('email-me-when-ready (timed-out fallback)', () => {
+    const timedOutView = (notifyRequested = false) => ({
+      enabled: true,
+      mode: 'raw_plus_insights' as const,
+      onScreen: true,
+      download: true,
+      insights: {
+        status: 'processing' as const,
+        started: true,
+        content: null,
+        generatedAt: null,
+        error: null,
+        notifyRequested,
+      },
+    });
+
+    it('submits the entered email via notify() and swaps to a confirmation', async () => {
+      notifySpy.mockResolvedValueOnce(true);
+      mockView(timedOutView(), { timedOut: true });
+      render(<SessionComplete sessionId="s1" answeredCount={2} />);
+
+      await userEvent.type(
+        screen.getByLabelText(/Email address for your report/i),
+        'me@example.com'
+      );
+      await userEvent.click(screen.getByRole('button', { name: /Email me/i }));
+
+      expect(notifySpy).toHaveBeenCalledWith('me@example.com');
+      expect(
+        await screen.findByText(/We.ll email you when your report is ready/i)
+      ).toBeInTheDocument();
+    });
+
+    it('shows the confirmation directly when a notify was already requested', () => {
+      mockView(timedOutView(true), { timedOut: true });
+      render(<SessionComplete sessionId="s1" answeredCount={2} />);
+
+      expect(screen.getByText(/We.ll email you when your report is ready/i)).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Email me/i })).toBeNull();
+    });
+
+    it('surfaces an error when notify() fails', async () => {
+      notifySpy.mockResolvedValueOnce(false);
+      mockView(timedOutView(), { timedOut: true });
+      render(<SessionComplete sessionId="s1" answeredCount={2} />);
+
+      await userEvent.type(
+        screen.getByLabelText(/Email address for your report/i),
+        'me@example.com'
+      );
+      await userEvent.click(screen.getByRole('button', { name: /Email me/i }));
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(/Couldn.t save your email/i);
+    });
   });
 
   it('hides the Download button when delivery.download is off', () => {
