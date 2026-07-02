@@ -30,6 +30,18 @@ describe('filterSweepFindings', () => {
     expect(out).toHaveLength(1);
   });
 
+  it('drops a below-floor (low-confidence) finding — a hedged guess never holds the submit', () => {
+    // A 0.6-confidence "could imply" finding is below the surfacing floor (0.7), so the final check
+    // does not raise it even though it is brand-new. (The exact false positive from BBG4-NZCN.)
+    const out = filterSweepFindings([finding({ slotKeys: ['a', 'b'], confidence: 0.6 })], []);
+    expect(out).toEqual([]);
+  });
+
+  it('keeps a finding exactly at the floor (0.7)', () => {
+    const out = filterSweepFindings([finding({ slotKeys: ['a', 'b'], confidence: 0.7 })], []);
+    expect(out).toHaveLength(1);
+  });
+
   it('suppresses a conflict already resolved mid-conversation', () => {
     const out = filterSweepFindings(
       [finding({ slotKeys: ['a', 'b'] })],

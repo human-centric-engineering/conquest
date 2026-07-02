@@ -18,7 +18,10 @@
  * DB-free and framework-free: the impure submit route runs the detector + persists; this only ranks.
  */
 
-import { contradictionKey } from '@/lib/app/questionnaire/contradiction/detection-logic';
+import {
+  contradictionKey,
+  isSurfaceableContradiction,
+} from '@/lib/app/questionnaire/contradiction/detection-logic';
 import type {
   ContradictionFinding,
   RaisedContradiction,
@@ -27,13 +30,16 @@ import type {
 /**
  * Given the sweep's raw findings and the session ledger, return the findings that should be raised as
  * the final check — genuinely new conflicts plus still-`unresolved` ones — dropping any conflict
- * already `resolved` / `kept` / `flagged` this session. Order is preserved (highest-confidence-first
- * as the detector/normaliser produced it).
+ * already `resolved` / `kept` / `flagged` this session, and any the detector isn't confident enough
+ * about to surface (the same floor the per-turn loop applies, so a hedged guess never holds a submit).
+ * Order is preserved (highest-confidence-first as the detector/normaliser produced it).
  */
 export function filterSweepFindings(
   findings: ContradictionFinding[],
   ledger: readonly RaisedContradiction[]
 ): ContradictionFinding[] {
   const dealtWith = new Set(ledger.filter((r) => r.resolution !== 'unresolved').map((r) => r.key));
-  return findings.filter((f) => !dealtWith.has(contradictionKey(f.slotKeys)));
+  return findings
+    .filter(isSurfaceableContradiction)
+    .filter((f) => !dealtWith.has(contradictionKey(f.slotKeys)));
 }

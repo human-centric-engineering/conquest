@@ -157,18 +157,33 @@ Under `probe` mode a detected contradiction is **never silently overwritten**. T
    the pending state is **cleared**, and **no fresh detection runs** (so the same conflict can't
    re-probe in a loop). The turn then proceeds to normal selection.
 
+### Surfacing floor (weak findings never reach the respondent)
+
+The detector is asked how sure it is (`confidence` 0–1). Below **`SURFACE_CONTRADICTION_CONFIDENCE`
+(0.7)** a finding is **not surfaced at all** — no probe, no notice, no submit-time hold — in either the
+per-turn phase (`isSurfaceableContradiction` filters `fresh`) or the completion sweep
+(`filterSweepFindings`). This is a **surfacing** gate, not a detection one: `normalizeContradictionFindings`
+still returns weak findings (the admin preview shows them); only the live respondent paths drop them.
+It exists because a weaker detector model will occasionally emit a hedged "could imply a different
+understanding" guess at ~0.6 confidence, and interrupting a respondent over a non-conflict does more
+harm than good. The prompt reinforces this: a **restatement of the same value/number** in different
+words is explicitly _not_ a contradiction, and the model is told not to report "could imply / might be"
+differences — only answers that **cannot both be true**.
+
 ### Graded, humble phrasing (how directly the conflict is raised)
 
-The reconciliation question is **calibrated to the detector's own certainty**, so the interviewer
-matches how a careful person would raise a suspicion. The finding always carries `confidence` (0–1)
-and `severity`; both the LLM-authored `suggestedProbe` and the deterministic fallback use them:
+Once a finding clears the floor, the reconciliation question is **calibrated to the detector's own
+certainty**, so the interviewer matches how a careful person would raise a suspicion. The finding
+carries `confidence` (0–1) and `severity`; both the LLM-authored `suggestedProbe` and the deterministic
+fallback use them:
 
-- **Clear and obvious** (high confidence — answers that plainly can't both be true) → put the tension
+- **Clear and obvious** (`≥ 0.8` confidence — answers that plainly can't both be true) → put the tension
   **directly and plainly** ("Earlier you said X, but just now it sounds like Y — which is right?").
-- **Subtle or ambiguous** (lower confidence — not certain it's a real conflict) →
-  raise it with **genuine humility**: a softener such as _"Forgive me if I've misunderstood…"_,
-  _"It seems that…"_, or _"I may be wrong, but…"_, framed as the interviewer's possible misreading
-  rather than the respondent's mistake, and easy to correct.
+- **Genuine but subtle** (`[0.7, 0.8)` confidence — a real conflict, but the wording is ambiguous or
+  it's a matter of degree) → raise it with **genuine humility**: a softener such as _"Forgive me if
+  I've misunderstood…"_, _"It seems that…"_, or _"I may be wrong, but…"_, framed as the interviewer's
+  possible misreading, and easy to correct. Humility governs **delivery** of a conflict the detector
+  does believe is real — it is never a licence to raise a doubt (that's what the floor is for).
 
 Either way the probe **always names the specific thing that seems to conflict** (the suspicion is
 never hidden), and never accuses or presumes which answer is correct. The **switch is confidence**

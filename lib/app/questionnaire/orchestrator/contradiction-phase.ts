@@ -24,6 +24,7 @@ import {
   buildContradictionNoticeMessage,
   buildContradictionProbe,
   contradictionKey,
+  isSurfaceableContradiction,
   shouldRunDetection,
   type ContradictionProbeLabels,
 } from '@/lib/app/questionnaire/contradiction';
@@ -295,12 +296,16 @@ export async function runContradictionPhase(
       ...(out.latencyMs !== undefined ? { latencyMs: out.latencyMs } : {}),
     })
   );
-  // "Don't nag": drop any finding already surfaced earlier this session (by canonical slot-key set),
-  // whether or not it was ever reconciled — no re-probe, no re-alert. Only the FRESH findings are
-  // surfaced and recorded below; a wholly-stale pass ends here (detection still ran, no user-facing
-  // notice). `base.contradictions` reflects what was actually surfaced this turn.
+  // Two filters before anything is surfaced:
+  //  1. Confidence floor — drop findings the detector isn't sure about (a hedged "could imply"). A
+  //     weak guess must never interrupt the respondent; it's kept in `out.findings` for audit only.
+  //  2. "Don't nag" — drop any conflict already surfaced this session (by canonical slot-key set),
+  //     whether or not it was ever reconciled. A wholly-stale/weak pass ends here (detection still ran,
+  //     no user-facing notice). `base.contradictions` reflects what was actually surfaced this turn.
   const raisedKeys = new Set(ledger.map((r) => r.key));
-  const fresh = out.findings.filter((f) => !raisedKeys.has(contradictionKey(f.slotKeys)));
+  const fresh = out.findings
+    .filter(isSurfaceableContradiction)
+    .filter((f) => !raisedKeys.has(contradictionKey(f.slotKeys)));
   base.contradictions = fresh;
   if (fresh.length === 0) return base;
 

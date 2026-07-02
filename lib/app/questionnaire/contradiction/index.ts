@@ -53,6 +53,8 @@ export {
   shouldRunDetection,
   summarizeFindings,
   contradictionKey,
+  isSurfaceableContradiction,
+  SURFACE_CONTRADICTION_CONFIDENCE,
 } from '@/lib/app/questionnaire/contradiction/detection-logic';
 
 export { filterSweepFindings } from '@/lib/app/questionnaire/contradiction/completion-sweep';

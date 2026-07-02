@@ -511,6 +511,61 @@ describe('runContradictionPhase — probe mode (deferred reconciliation)', () =>
     );
   });
 
+  it('does NOT surface a below-floor (low-confidence) finding — no probe, notice, or ledger entry', async () => {
+    // The BBG4-NZCN false positive: gpt-4o reported a 0.6-confidence "could imply a different
+    // understanding" non-conflict. Below the 0.7 surfacing floor it must be dropped — detection still
+    // ran, but nothing reaches the respondent and nothing is recorded.
+    const inv = stubInvokers({
+      detect: {
+        findings: [
+          finding({ slotKeys: ['a'], confidence: 0.6, explanation: 'could imply a difference' }),
+        ],
+      },
+    });
+    const s = state({
+      userMessage: '10 hours doing strategy',
+      questions: [q({ id: 'a', key: 'a' })],
+      config: { contradictionMode: 'probe' },
+      existingAnswers: TWO_ANSWERS,
+    });
+
+    const result = await runPhase(s, inv);
+
+    // Detection ran (tool call recorded)…
+    expect(slugs(result.toolCalls)).toContain(DETECT_CONTRADICTIONS_CAPABILITY_SLUG);
+    // …but nothing surfaced or was recorded.
+    expect(result.contradictions).toHaveLength(0);
+    expect(result.events).toHaveLength(0);
+    expect(result.probe).toBeUndefined();
+    expect(result.pendingContradiction).toBeUndefined();
+    expect(result.raisedContradictions).toBeUndefined();
+    expect(result.suppressWrites).toBe(false);
+  });
+
+  it('surfaces a finding at the floor (0.7) but not one just below it (0.69)', async () => {
+    const atFloor = await runPhase(
+      state({
+        userMessage: 'x',
+        questions: [q({ id: 'a', key: 'a' })],
+        config: { contradictionMode: 'probe' },
+        existingAnswers: TWO_ANSWERS,
+      }),
+      stubInvokers({ detect: { findings: [finding({ slotKeys: ['a'], confidence: 0.7 })] } })
+    );
+    expect(atFloor.probe).toBeDefined();
+
+    const belowFloor = await runPhase(
+      state({
+        userMessage: 'x',
+        questions: [q({ id: 'a', key: 'a' })],
+        config: { contradictionMode: 'probe' },
+        existingAnswers: TWO_ANSWERS,
+      }),
+      stubInvokers({ detect: { findings: [finding({ slotKeys: ['a'], confidence: 0.69 })] } })
+    );
+    expect(belowFloor.probe).toBeUndefined();
+  });
+
   it('emits a warning event but does not build a probe when findings[0] is missing (empty array guard)', async () => {
     // This is a theoretical edge-case: mode=probe, findings.length>0 passes the early return,
     // but findings[0] is undefined (shouldn't happen in practice, but guards against it).
