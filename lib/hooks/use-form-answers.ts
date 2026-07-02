@@ -151,35 +151,72 @@ export function useFormAnswers(options: UseFormAnswersOptions): UseFormAnswersRe
     if (mountedRef.current) setStatuses((prev) => ({ ...prev, [slotKey]: status }));
   }, []);
 
-  /** Persist one slot's current value (or clear it when empty). */
-  const save = useCallback(
-    (slotKey: string) => {
+  // Slots waiting to be persisted, and whether a PUT is already in flight. Saves are
+  // *serialized*: at most one PUT runs at a time, and every slot queued while it runs is
+  // coalesced into the next PUT. This is load-bearing for correctness, not just efficiency —
+  // each PUT returns the *whole* refreshed view, which `setView` installs wholesale. If we
+  // fired concurrent single-slot PUTs, a staler response landing last (real under network
+  // latency, invisible at ~0ms locally) would clobber a freshly-answered slot's "answered"
+  // state. Serializing guarantees the last response we apply reflects every committed write:
+  // a PUT's transaction has committed by the time its response returns, so the next PUT reads
+  // that write. See the module doc + the answers route.
+  const queueRef = useRef<Set<string>>(new Set());
+  const inFlightRef = useRef(false);
+  // `drainQueue` re-invokes itself (via ref, to dodge the useCallback self-reference) once a
+  // PUT settles, to flush anything queued while it was in flight.
+  const drainRef = useRef<() => void>(() => {});
+
+  const drainQueue = useCallback(() => {
+    if (inFlightRef.current) return;
+    const keys = Array.from(queueRef.current);
+    if (keys.length === 0) return;
+    queueRef.current.clear();
+    inFlightRef.current = true;
+    const answers = keys.map((slotKey) => {
       const value = latestRef.current[slotKey];
-      const entry = isEmpty(value)
+      return isEmpty(value)
         ? { questionKey: slotKey, clear: true }
         : { questionKey: slotKey, value };
-      setStatus(slotKey, 'saving');
-      void fetch(API.APP.QUESTIONNAIRE_SESSIONS.answers(sessionId), {
-        method: 'PUT',
-        credentials: 'include',
-        headers,
-        body: JSON.stringify({ answers: [entry] }),
+    });
+    void fetch(API.APP.QUESTIONNAIRE_SESSIONS.answers(sessionId), {
+      method: 'PUT',
+      credentials: 'include',
+      headers,
+      body: JSON.stringify({ answers }),
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const body = (await res.json()) as SuccessEnvelope;
+        // Refresh the view (completeness map + provenance/history) but keep local values
+        // authoritative so the user's in-progress typing is never clobbered.
+        if (mountedRef.current) {
+          setView(body.data);
+          setLastSavedAt(Date.now());
+        }
+        for (const k of keys) setStatus(k, 'saved');
+        onSavedRef.current?.();
       })
-        .then(async (res) => {
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const body = (await res.json()) as SuccessEnvelope;
-          // Refresh the view (completeness map + provenance/history) but keep local values
-          // authoritative so the user's in-progress typing is never clobbered.
-          if (mountedRef.current) {
-            setView(body.data);
-            setLastSavedAt(Date.now());
-          }
-          setStatus(slotKey, 'saved');
-          onSavedRef.current?.();
-        })
-        .catch(() => setStatus(slotKey, 'error'));
+      .catch(() => {
+        for (const k of keys) setStatus(k, 'error');
+      })
+      .finally(() => {
+        inFlightRef.current = false;
+        if (mountedRef.current) drainRef.current(); // flush edits queued during this PUT
+      });
+  }, [sessionId, headers, setStatus]);
+
+  useEffect(() => {
+    drainRef.current = drainQueue;
+  });
+
+  /** Queue one slot's current value (or clear) for the next serialized save. */
+  const save = useCallback(
+    (slotKey: string) => {
+      setStatus(slotKey, 'saving');
+      queueRef.current.add(slotKey);
+      drainQueue();
     },
-    [sessionId, headers, setStatus]
+    [drainQueue, setStatus]
   );
 
   const scheduleSave = useCallback(
