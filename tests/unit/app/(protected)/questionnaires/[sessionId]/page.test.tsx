@@ -89,6 +89,7 @@ vi.mock('@/lib/app/questionnaire/chat/theme', () => ({
 // Banner header resolver (title + round for the brand band) — stubbed so it makes no real Prisma call.
 vi.mock('@/lib/app/questionnaire/header/resolve', () => ({
   resolveSessionHeader: vi.fn(),
+  resolveOwnedSessionTitle: vi.fn(),
 }));
 
 /**
@@ -154,8 +155,9 @@ vi.mock('@/components/app/questionnaire/chat/brand-theme-provider', () => ({
 }));
 
 import QuestionnaireSessionPage, {
-  metadata,
+  generateMetadata,
 } from '@/app/(protected)/questionnaires/[sessionId]/page';
+import { resolveOwnedSessionTitle } from '@/lib/app/questionnaire/header/resolve';
 import { getServerSession } from '@/lib/auth/utils';
 import { clearInvalidSession } from '@/lib/auth/clear-session';
 import { prisma } from '@/lib/db/client';
@@ -305,9 +307,25 @@ describe('QuestionnaireSessionPage', () => {
   // -------------------------------------------------------------------------
 
   describe('metadata', () => {
-    it('has the correct title', () => {
-      // Assert: the page exports the right metadata — no rendering needed
-      expect(metadata.title).toBe('Questionnaire');
+    it('titles the tab after the questionnaire the signed-in user owns', async () => {
+      vi.mocked(resolveOwnedSessionTitle).mockResolvedValue('Merlin5 Alpha Demo');
+      const meta = await generateMetadata({ params: Promise.resolve({ sessionId: 's1' }) });
+      expect(meta.title).toBe('Merlin5 Alpha Demo');
+      expect(resolveOwnedSessionTitle).toHaveBeenCalledWith('s1', 'user_abc');
+    });
+
+    it('falls back to the generic title when the session is not owned / not found', async () => {
+      // resolveOwnedSessionTitle returns null for a non-owner or missing session — no title leak.
+      vi.mocked(resolveOwnedSessionTitle).mockResolvedValue(null);
+      const meta = await generateMetadata({ params: Promise.resolve({ sessionId: 'other' }) });
+      expect(meta.title).toBe('Questionnaire');
+    });
+
+    it('returns the generic title (no lookup) when unauthenticated', async () => {
+      vi.mocked(getServerSession).mockResolvedValue(null);
+      const meta = await generateMetadata({ params: Promise.resolve({ sessionId: 's1' }) });
+      expect(meta.title).toBe('Questionnaire');
+      expect(resolveOwnedSessionTitle).not.toHaveBeenCalled();
     });
   });
 

@@ -463,6 +463,65 @@ describe('SessionComplete — respondent report', () => {
     });
   });
 
+  describe('download filename', () => {
+    /** Drive a click on Download PDF with fetch/URL/anchor stubbed; return the anchor's download name. */
+    async function downloadNameFor(view: unknown): Promise<string> {
+      mockView(view);
+      const blob = new Blob(['%PDF-1.4'], { type: 'application/pdf' });
+      const fetchSpy = vi
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValue(new Response(blob, { status: 200 }));
+      const createURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock');
+      const revokeURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+      // Capture the anchor the handler creates so we can read its `download` attribute. Bind the
+      // original createElement first so the spy can still make non-anchor elements.
+      const originalCreate = document.createElement.bind(document);
+      const anchor = originalCreate('a');
+      const clickSpy = vi.spyOn(anchor, 'click').mockImplementation(() => {});
+      const createEl = vi
+        .spyOn(document, 'createElement')
+        .mockImplementation((tag: string) => (tag === 'a' ? anchor : originalCreate(tag)));
+
+      render(<SessionComplete sessionId="s1" answeredCount={3} />);
+      await userEvent.click(screen.getByRole('button', { name: /Download PDF/i }));
+
+      createEl.mockRestore();
+      fetchSpy.mockRestore();
+      createURL.mockRestore();
+      revokeURL.mockRestore();
+      clickSpy.mockRestore();
+      return anchor.download;
+    }
+
+    it('names the PDF after the questionnaire title (slugified)', async () => {
+      const name = await downloadNameFor({
+        enabled: true,
+        mode: 'narrative',
+        onScreen: false,
+        download: true,
+        questionnaireTitle: 'Merlin5 Alpha Demo',
+        insights: {
+          status: 'ready',
+          content: { summary: 'x', sections: [], actions: [] },
+          generatedAt: null,
+          error: null,
+        },
+      });
+      expect(name).toBe('merlin5-alpha-demo.pdf');
+    });
+
+    it('falls back to responses.pdf when there is no title', async () => {
+      const name = await downloadNameFor({
+        enabled: false,
+        mode: 'raw',
+        onScreen: true,
+        download: true,
+        insights: null,
+      });
+      expect(name).toBe('responses.pdf');
+    });
+  });
+
   it('hides the Download button when delivery.download is off', () => {
     mockView({
       enabled: true,

@@ -38,6 +38,7 @@ import {
   RESPONDENT_REPORT_BACKGROUND_MAX_LENGTH,
   RESPONDENT_REPORT_INSTRUCTIONS_MAX_LENGTH,
   RESPONDENT_REPORT_MODES,
+  RESPONDENT_REPORT_NARRATIVE_STYLES,
   SELECTION_STRATEGIES,
   TONE_LEVEL_MAX,
   TONE_LEVEL_MIN,
@@ -158,6 +159,7 @@ const respondentReportSettingsSchema = z
       .strict(),
     generation: z
       .object({
+        narrativeStyle: z.enum(RESPONDENT_REPORT_NARRATIVE_STYLES),
         instructions: z.string().trim().max(RESPONDENT_REPORT_INSTRUCTIONS_MAX_LENGTH),
         structure: z.string().trim().max(RESPONDENT_REPORT_INSTRUCTIONS_MAX_LENGTH),
         backgroundContext: z.string().trim().max(RESPONDENT_REPORT_BACKGROUND_MAX_LENGTH),

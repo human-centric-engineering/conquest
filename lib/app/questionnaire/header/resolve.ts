@@ -15,6 +15,8 @@
  * Server-only (reads Prisma). The `./schedule` derivation and `./types` contract stay pure.
  */
 
+import { cache } from 'react';
+
 import { prisma } from '@/lib/db/client';
 import type { BandHeader } from '@/lib/app/questionnaire/header/types';
 
@@ -22,8 +24,11 @@ import type { BandHeader } from '@/lib/app/questionnaire/header/types';
  * Resolve the banner header for an existing session. Returns null when the session id doesn't
  * resolve (caller maps that to "no band content"). A session with no `roundId` is open-ended:
  * `round` is null and the band shows just the title.
+ *
+ * `cache()`-wrapped: the run pages resolve the header in BOTH `generateMetadata` and the page body,
+ * and React dedupes same-arg calls within one request so the query runs once.
  */
-export async function resolveSessionHeader(sessionId: string): Promise<BandHeader | null> {
+export const resolveSessionHeader = cache(async (sessionId: string): Promise<BandHeader | null> => {
   const session = await prisma.appQuestionnaireSession.findUnique({
     where: { id: sessionId },
     select: {
@@ -54,17 +59,40 @@ export async function resolveSessionHeader(sessionId: string): Promise<BandHeade
         }
       : null,
   };
-}
+});
 
 /**
  * Resolve the banner header for a version (no-login surface, pre-session). Only the title is
  * available — there is no session yet, so no round. Returns null when the version doesn't resolve.
+ *
+ * `cache()`-wrapped for the same reason as {@link resolveSessionHeader}: the public run page resolves
+ * it in both `generateMetadata` and the page body.
  */
-export async function resolveVersionHeader(versionId: string): Promise<BandHeader | null> {
+export const resolveVersionHeader = cache(async (versionId: string): Promise<BandHeader | null> => {
   const version = await prisma.appQuestionnaireVersion.findUnique({
     where: { id: versionId },
     select: { questionnaire: { select: { title: true } } },
   });
   if (!version) return null;
   return { title: version.questionnaire.title, round: null };
-}
+});
+
+/**
+ * Resolve a session's questionnaire title **only when it belongs to `userId`** — for the
+ * authenticated run page's `generateMetadata`, which must not leak another user's questionnaire title
+ * into `<title>` (the page body 404s for non-owners without confirming existence; metadata must match
+ * that posture). Returns null when the session is missing OR owned by someone else. `cache()`-wrapped.
+ */
+export const resolveOwnedSessionTitle = cache(
+  async (sessionId: string, userId: string): Promise<string | null> => {
+    const session = await prisma.appQuestionnaireSession.findUnique({
+      where: { id: sessionId },
+      select: {
+        respondentUserId: true,
+        version: { select: { questionnaire: { select: { title: true } } } },
+      },
+    });
+    if (!session || session.respondentUserId !== userId) return null;
+    return session.version.questionnaire.title;
+  }
+);

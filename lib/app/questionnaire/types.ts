@@ -526,6 +526,19 @@ export const RESPONDENT_REPORT_MODES = ['raw', 'raw_plus_insights', 'narrative']
 export type RespondentReportMode = (typeof RESPONDENT_REPORT_MODES)[number];
 
 /**
+ * Narrative style presets for the AI report (`raw_plus_insights`, `narrative`). Shapes how the
+ * generated prose reads — orthogonal to the free-text `instructions` (tone/voice) and to `structure`
+ * (which sections). All styles obey the same paragraph discipline (short, blank-line-separated
+ * paragraphs, evidence-grounded); the preset tunes density and format:
+ *   - `flowing` — connected, analysed prose in short paragraphs (the established default).
+ *   - `concise` — tighter and more economical; shorter paragraphs, less scene-setting.
+ *   - `structured` — highly scannable: a brief framing per section, then short paragraphs and
+ *     bullet-style lists where enumerating factors/consequences/steps.
+ */
+export const RESPONDENT_REPORT_NARRATIVE_STYLES = ['flowing', 'concise', 'structured'] as const;
+export type RespondentReportNarrativeStyle = (typeof RESPONDENT_REPORT_NARRATIVE_STYLES)[number];
+
+/**
  * The AI modes: both stand up the report agent, generate async, and persist an `AppRespondentReport`
  * row. `raw` is excluded (deterministic, on-demand, no row). Use this wherever the code must decide
  * "does this mode generate insights?" so the two modes never drift apart.
@@ -561,6 +574,8 @@ export type RespondentReportSettings = {
     questionsAsPresented: boolean;
   };
   generation: {
+    /** Narrative style preset shaping how the generated prose reads (density/format). */
+    narrativeStyle: RespondentReportNarrativeStyle;
     /** Free-text style/voice instructions for the report agent. */
     instructions: string;
     /** Free-text desired structure/outline for the report. */
@@ -583,7 +598,13 @@ export const DEFAULT_RESPONDENT_REPORT_SETTINGS: RespondentReportSettings = {
   enabled: false,
   mode: 'raw',
   rawIncludes: { dataSlots: false, questionsAsPresented: true },
-  generation: { instructions: '', structure: '', backgroundContext: '', useClientKnowledge: false },
+  generation: {
+    narrativeStyle: 'flowing',
+    instructions: '',
+    structure: '',
+    backgroundContext: '',
+    useClientKnowledge: false,
+  },
   delivery: { onScreen: true, download: true },
 };
 

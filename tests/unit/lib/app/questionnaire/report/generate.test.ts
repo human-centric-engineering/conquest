@@ -334,6 +334,62 @@ describe('generateRespondentReport', () => {
     expect(system?.content).not.toContain('single woven report');
   });
 
+  it('instructs the model to stay grounded and avoid unsupported generalisations', async () => {
+    const { provider, chat } = fakeProvider(VALID_RESPONSE);
+    (getProvider as Mock).mockResolvedValue(provider);
+
+    await generateRespondentReport('sess-1');
+    const system = (chat.mock.calls[0][0] as Array<{ role: string; content: string }>).find(
+      (m) => m.role === 'system'
+    );
+    expect(system?.content).toContain('Ground every observation in a specific answer');
+    expect(system?.content).toMatch(/do not make broad or sweeping generalisations/i);
+    expect(system?.content).toMatch(/never invent facts/i);
+  });
+
+  it('instructs the model to write in short, blank-line-separated paragraphs', async () => {
+    const { provider, chat } = fakeProvider(VALID_RESPONSE);
+    (getProvider as Mock).mockResolvedValue(provider);
+
+    await generateRespondentReport('sess-1');
+    const system = (chat.mock.calls[0][0] as Array<{ role: string; content: string }>).find(
+      (m) => m.role === 'system'
+    );
+    expect(system?.content).toMatch(/readable paragraphs/i);
+    expect(system?.content).toMatch(/never emit one large block of text/i);
+    // The JSON-shape directive also spells out the blank-line paragraph separator.
+    expect(system?.content).toContain('separate paragraphs with a blank line');
+  });
+
+  // One case per style (not a single loop) so a failure in one style doesn't mask the others, and
+  // each relies on the shared beforeEach setup rather than re-typing the mocks inline.
+  it.each([
+    ['flowing', 'Style: flowing'],
+    ['concise', 'Style: concise'],
+    ['structured', 'Style: structured'],
+  ] as const)(
+    'applies the %s narrative-style preset to the system prompt',
+    async (style, marker) => {
+      (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+        sessionMeta({
+          respondentReport: {
+            enabled: true,
+            mode: 'narrative',
+            generation: { narrativeStyle: style },
+          },
+        })
+      );
+      const { provider, chat } = fakeProvider(VALID_RESPONSE);
+      (getProvider as Mock).mockResolvedValue(provider);
+
+      await generateRespondentReport('sess-1');
+      const system = (chat.mock.calls[0][0] as Array<{ role: string; content: string }>).find(
+        (m) => m.role === 'system'
+      );
+      expect(system?.content).toContain(marker);
+    }
+  );
+
   it('falls back to the audience role when there is no description', async () => {
     (loadSessionExport as Mock).mockResolvedValue({
       ...loadedExport(),

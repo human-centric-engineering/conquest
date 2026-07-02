@@ -13,7 +13,9 @@ import {
   RESPONDENT_REPORT_BACKGROUND_MAX_LENGTH,
   RESPONDENT_REPORT_INSTRUCTIONS_MAX_LENGTH,
   RESPONDENT_REPORT_MODES,
+  RESPONDENT_REPORT_NARRATIVE_STYLES,
   type RespondentReportMode,
+  type RespondentReportNarrativeStyle,
   type RespondentReportSettings,
 } from '@/lib/app/questionnaire/types';
 import { isRecord } from '@/lib/utils';
@@ -30,6 +32,13 @@ function asMode(value: unknown): RespondentReportMode {
   return typeof value === 'string' && (RESPONDENT_REPORT_MODES as readonly string[]).includes(value)
     ? (value as RespondentReportMode)
     : DEFAULT_RESPONDENT_REPORT_SETTINGS.mode;
+}
+
+function asNarrativeStyle(value: unknown): RespondentReportNarrativeStyle {
+  return typeof value === 'string' &&
+    (RESPONDENT_REPORT_NARRATIVE_STYLES as readonly string[]).includes(value)
+    ? (value as RespondentReportNarrativeStyle)
+    : DEFAULT_RESPONDENT_REPORT_SETTINGS.generation.narrativeStyle;
 }
 
 /**
@@ -54,6 +63,7 @@ export function narrowRespondentReportSettings(value: unknown): RespondentReport
       ),
     },
     generation: {
+      narrativeStyle: asNarrativeStyle(generation.narrativeStyle),
       instructions: asText(
         generation.instructions,
         RESPONDENT_REPORT_INSTRUCTIONS_MAX_LENGTH,

@@ -107,17 +107,28 @@ describe('gate order + auth', () => {
     (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
     const res = await configPATCH(req({ voiceEnabled: true }), ctx(PARAMS));
     expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('NOT_FOUND');
     expect(auth.api.getSession).not.toHaveBeenCalled();
   });
 
   it('401s when unauthenticated', async () => {
     setAuth(mockUnauthenticatedUser());
-    expect((await configPATCH(req({ voiceEnabled: true }), ctx(PARAMS))).status).toBe(401);
+    const res = await configPATCH(req({ voiceEnabled: true }), ctx(PARAMS));
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('UNAUTHORIZED');
   });
 
   it('403s for a non-admin', async () => {
     setAuth(mockAuthenticatedUser('USER'));
-    expect((await configPATCH(req({ voiceEnabled: true }), ctx(PARAMS))).status).toBe(403);
+    const res = await configPATCH(req({ voiceEnabled: true }), ctx(PARAMS));
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('FORBIDDEN');
   });
 });
 
@@ -126,6 +137,9 @@ describe('validation + scope', () => {
     prismaMock.appQuestionnaireVersion.findFirst.mockResolvedValue(null);
     const res = await configPATCH(req({ voiceEnabled: true }), ctx(PARAMS));
     expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('NOT_FOUND');
     expect(forkVersionIfLaunched).not.toHaveBeenCalled();
     expect(prismaMock.appQuestionnaireConfig.upsert).not.toHaveBeenCalled();
   });
@@ -133,11 +147,16 @@ describe('validation + scope', () => {
   it('400s on an empty body (at least one field required)', async () => {
     const res = await configPATCH(req({}), ctx(PARAMS));
     expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(typeof body.error.code).toBe('string');
     expect(prismaMock.appQuestionnaireConfig.upsert).not.toHaveBeenCalled();
   });
 
   it('400s when maxDataSlotAttempts is out of range (1–10)', async () => {
-    expect((await configPATCH(req({ maxDataSlotAttempts: 0 }), ctx(PARAMS))).status).toBe(400);
+    const low = await configPATCH(req({ maxDataSlotAttempts: 0 }), ctx(PARAMS));
+    expect(low.status).toBe(400);
+    expect((await low.json()).success).toBe(false);
     expect((await configPATCH(req({ maxDataSlotAttempts: 11 }), ctx(PARAMS))).status).toBe(400);
     expect(prismaMock.appQuestionnaireConfig.upsert).not.toHaveBeenCalled();
   });
@@ -148,6 +167,9 @@ describe('validation + scope', () => {
       ctx(PARAMS)
     );
     expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(typeof body.error.code).toBe('string');
     expect(prismaMock.appQuestionnaireConfig.upsert).not.toHaveBeenCalled();
   });
 });
@@ -250,6 +272,7 @@ describe('upsert + response', () => {
       mode: 'raw_plus_insights' as const,
       rawIncludes: { dataSlots: true, questionsAsPresented: true },
       generation: {
+        narrativeStyle: 'flowing' as const,
         instructions: 'Warm and concise.',
         structure: 'Summary, themes, next steps.',
         backgroundContext: 'Quarterly engagement pulse.',

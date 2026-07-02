@@ -335,6 +335,7 @@ describe('updateConfigSchema — respondentReport (Respondent Report)', () => {
     mode: 'raw_plus_insights' as const,
     rawIncludes: { dataSlots: true, questionsAsPresented: true },
     generation: {
+      narrativeStyle: 'flowing' as const,
       instructions: 'Warm, concise, second person.',
       structure: 'Summary, then three themes, then next steps.',
       backgroundContext: 'This client runs quarterly engagement pulses.',
@@ -345,6 +346,27 @@ describe('updateConfigSchema — respondentReport (Respondent Report)', () => {
 
   it('accepts a well-formed full report block', () => {
     expect(updateConfigSchema.safeParse({ respondentReport: fullReport }).success).toBe(true);
+  });
+
+  it('accepts each valid narrative style and rejects an unknown one', () => {
+    for (const narrativeStyle of ['flowing', 'concise', 'structured'] as const) {
+      expect(
+        updateConfigSchema.safeParse({
+          respondentReport: {
+            ...fullReport,
+            generation: { ...fullReport.generation, narrativeStyle },
+          },
+        }).success
+      ).toBe(true);
+    }
+    expect(
+      updateConfigSchema.safeParse({
+        respondentReport: {
+          ...fullReport,
+          generation: { ...fullReport.generation, narrativeStyle: 'poetic' },
+        },
+      }).success
+    ).toBe(false);
   });
 
   it('accepts the narrative mode', () => {

@@ -14,7 +14,10 @@ import { SessionEntry } from '@/components/app/questionnaire/intro/session-entry
 import { BrandThemeProvider } from '@/components/app/questionnaire/chat/brand-theme-provider';
 import { buildWelcomeTurns } from '@/lib/app/questionnaire/chat/greeting';
 import { resolveThemeForSession } from '@/lib/app/questionnaire/chat/theme';
-import { resolveSessionHeader } from '@/lib/app/questionnaire/header/resolve';
+import {
+  resolveSessionHeader,
+  resolveOwnedSessionTitle,
+} from '@/lib/app/questionnaire/header/resolve';
 import { resolveSessionIntro } from '@/lib/app/questionnaire/intro/resolve';
 import { loadAnswerPanelState } from '@/app/api/v1/app/questionnaire-sessions/_lib/answer-panel';
 import { loadSessionStatus } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-status';
@@ -51,10 +54,25 @@ function initialChatStatus(
   }
 }
 
-export const metadata: Metadata = {
-  title: 'Questionnaire',
-  description: 'Complete your questionnaire through a short conversation.',
-};
+/**
+ * Title the tab (and any browser-derived print/save filename) after the actual questionnaire, not a
+ * generic "Questionnaire" — a respondent who prints or saves the completion report then gets a file
+ * named for their questionnaire. Gated on ownership: the title resolves only for the session's own
+ * respondent, so metadata never leaks another user's questionnaire title (mirroring the page body's
+ * 404-without-confirming posture). Falls back to the generic title otherwise.
+ */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ sessionId: string }>;
+}): Promise<Metadata> {
+  const description = 'Complete your questionnaire through a short conversation.';
+  const session = await getServerSession();
+  if (!session) return { title: 'Questionnaire', description };
+  const { sessionId } = await params;
+  const title = await resolveOwnedSessionTitle(sessionId, session.user.id);
+  return { title: title ?? 'Questionnaire', description };
+}
 
 /**
  * Authenticated respondent chat surface (F7.1).

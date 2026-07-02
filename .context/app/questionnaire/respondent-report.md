@@ -42,8 +42,12 @@ renders `RespondentReportEditor` (`components/admin/questionnaires/report/respon
 
 - **Content** — enable toggle, mode selector, and the raw-content includes (questions-as-presented;
   data-slot values when the data-slots feature is on).
-- **Generation** (effective in the AI modes `raw_plus_insights` / `narrative`) — instructions, structure, and background-context
-  textareas, the `useClientKnowledge` toggle, and the embedded `ClientKnowledgePanel`.
+- **Generation** (effective in the AI modes `raw_plus_insights` / `narrative`) — a **narrative-style**
+  preset selector (`generation.narrativeStyle`: `flowing` | `concise` | `structured`, default `flowing`),
+  the instructions, structure, and background-context textareas, the `useClientKnowledge` toggle, and
+  the embedded `ClientKnowledgePanel`. The style preset shapes prose density/format and is orthogonal
+  to the free-text `instructions` (tone/voice); all styles obey the same paragraph + grounding rules
+  (below).
 - **Delivery** — on-screen / download toggles (email deferred).
 - **Appearance** — note that branding inherits the demo client's theme.
 
@@ -138,6 +142,18 @@ batch worker). Raw-only mode never creates a row.
    sum). Returns validated `RespondentReportContent` (`{ summary, sections[], actions[] }`) + USD cost.
    Blank generation config falls back to the agent's default persona — generic insights, no KB.
 
+   **Prose quality rules baked into the prompt** (`buildReportMessages`): every observation must be
+   grounded in a specific answer the respondent gave — no broad/sweeping generalisations the answers
+   don't support, and no trait/conclusion attributed to them unless their answers established it
+   (general context or illustrative examples are allowed, but must be framed as general and never
+   asserted as facts about this respondent). The model is also told to write in short,
+   blank-line-separated paragraphs (never one wall of text); the `narrativeStyle` preset layers
+   density/format guidance on top (`flowing` / `concise` / `structured`). The renderers split
+   `summary`/`body` on blank lines via `splitReportParagraphs`
+   (`lib/app/questionnaire/report/content.ts`) so paragraphs lay out with real spacing in both the PDF
+   (`SessionPdfDocument`) and the on-screen completion view. The seeded agent persona (045) carries the
+   same grounding + short-paragraph guidance as its default voice.
+
 The agent (`RESPONDENT_REPORT_AGENT_SLUG = 'app-respondent-report'`) is seeded disabled-of-impact by
 `045-respondent-report-agent.ts` with an empty provider/model (resolved at runtime) and a monthly
 budget cap; `visibility: 'internal'`.
@@ -176,3 +192,11 @@ budget cap; `visibility: 'internal'`.
     The **admin** session PDF (`questionnaires/:id/sessions/:sessionId/export.pdf`) embeds the same ready
     content but never sets `narrativeOnly`, so admins keep the full audit alongside the report. Anonymous
     respondents download via the session token; raw / not-yet-ready → answers only.
+  - **Download title** — the export reads as the questionnaire, not a generic "Questionnaire":
+    `SessionPdfDocument`'s `<Document title>` is the questionnaire's own title (browsers derive the
+    suggested save/print filename from it); the completion screen names the blob download after the
+    slugified title (`RespondentReportClientView.questionnaireTitle`, added to `view.ts`), since a blob
+    URL loses the server's `Content-Disposition`; and both run pages
+    (`(protected)/questionnaires/[sessionId]`, `(public)/q/[versionId]`) set their tab title via
+    `generateMetadata` from the resolved header (the public one gated behind the live-sessions flag so a
+    dark-launched surface can't leak a title).

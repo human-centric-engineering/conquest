@@ -17,9 +17,9 @@ import { buildRespondentReportClientView } from '@/lib/app/questionnaire/report/
 
 type Mock = ReturnType<typeof vi.fn>;
 
-function session(respondentReport: unknown, report?: unknown) {
+function session(respondentReport: unknown, report?: unknown, title = 'Pulse') {
   return {
-    version: { config: { respondentReport } },
+    version: { config: { respondentReport }, questionnaire: { title } },
     respondentReport: report ?? null,
   };
 }
@@ -157,6 +157,27 @@ describe('buildRespondentReportClientView', () => {
     expect(view?.insights?.status).toBe('failed');
     expect(view?.insights?.error).toBe('no provider');
     expect(view?.insights?.content).toBeNull();
+  });
+
+  it('carries the questionnaire title (so the completion screen can name the download)', async () => {
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      session({ enabled: true, mode: 'raw' }, null, 'Merlin5 Alpha Demo')
+    );
+    const view = await buildRespondentReportClientView('s1');
+    expect(view?.questionnaireTitle).toBe('Merlin5 Alpha Demo');
+  });
+
+  it('falls back to a generic title when the questionnaire title is absent', async () => {
+    // Defends the `?? 'questionnaire'` fallback so the download name never becomes "null.pdf".
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue({
+      version: {
+        config: { respondentReport: { enabled: true, mode: 'raw' } },
+        questionnaire: null,
+      },
+      respondentReport: null,
+    });
+    const view = await buildRespondentReportClientView('s1');
+    expect(view?.questionnaireTitle).toBe('questionnaire');
   });
 
   it('reflects the delivery toggles', async () => {

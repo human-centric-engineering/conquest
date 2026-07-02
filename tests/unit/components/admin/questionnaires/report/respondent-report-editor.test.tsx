@@ -2,9 +2,10 @@
  * RespondentReportEditor — component tests.
  *
  * Verifies the controlled state → save payload (the whole respondentReport block), the master
- * enable toggle, and the mode gating (Generation fields are disabled in raw mode). UI primitives are
- * mocked to plain elements so assertions don't fight Radix/jsdom; the ClientKnowledgePanel is stubbed
- * (it fetches on mount and is covered separately).
+ * enable toggle, the mode gating (Generation fields are disabled in raw mode), and the narrative-style
+ * selector. UI primitives (Tabs/Switch/Select/FieldHelp) are mocked to plain elements so assertions
+ * don't fight Radix/jsdom. The embedded `ReportConfigAssistant` is rendered live — it only calls the
+ * craft API on user interaction, so it stays inert in these save/gating tests.
  *
  * @see components/admin/questionnaires/report/respondent-report-editor.tsx
  */
@@ -49,6 +50,9 @@ vi.mock('@/components/ui/switch', () => ({
     />
   ),
 }));
+// The editor has two Selects (report mode + narrative style). Distinguish them by their value-space
+// so `getByTestId('mode-select')` stays unambiguous and the style select is separately addressable.
+// (Array inlined — a vi.mock factory is hoisted and can't close over an outer const.)
 vi.mock('@/components/ui/select', () => ({
   Select: ({
     value,
@@ -62,7 +66,9 @@ vi.mock('@/components/ui/select', () => ({
     disabled?: boolean;
   }) => (
     <select
-      data-testid="mode-select"
+      data-testid={
+        ['raw', 'raw_plus_insights', 'narrative'].includes(value) ? 'mode-select' : 'style-select'
+      }
       value={value}
       disabled={disabled}
       onChange={(e) => onValueChange(e.target.value)}
@@ -237,6 +243,27 @@ describe('RespondentReportEditor', () => {
     expect(rr.delivery).toEqual({ onScreen: false, download: false });
     expect(rr.generation.instructions).toBe('Be warm.');
     expect(rr.generation.useClientKnowledge).toBe(true);
+  });
+
+  it('offers the narrative-style presets and defaults to flowing', () => {
+    renderEditor({ mode: 'narrative' });
+    const style = screen.getByTestId<HTMLSelectElement>('style-select');
+    const values = Array.from(style.querySelectorAll('option')).map((o) => o.getAttribute('value'));
+    expect(values).toEqual(['flowing', 'concise', 'structured']);
+    expect(style.value).toBe('flowing');
+  });
+
+  it('reflects the chosen narrative style in the save payload', () => {
+    renderEditor({ mode: 'narrative' });
+    fireEvent.change(screen.getByTestId('style-select'), { target: { value: 'structured' } });
+    fireEvent.click(screen.getByRole('button', { name: /save configuration/i }));
+    const rr = (apiClient.patch as unknown as Mock).mock.calls[0][1].body.respondentReport;
+    expect(rr.generation.narrativeStyle).toBe('structured');
+  });
+
+  it('disables the narrative-style select in raw mode (no AI report)', () => {
+    renderEditor({ mode: 'raw' });
+    expect(screen.getByTestId('style-select')).toBeDisabled();
   });
 
   it('shows an error message when saving fails', async () => {
