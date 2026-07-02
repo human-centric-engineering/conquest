@@ -22,6 +22,7 @@
 import {
   answeredCount,
   coverageRatio,
+  gradedCoverage,
   unansweredQuestions,
 } from '@/lib/app/questionnaire/selection/context';
 import type {
@@ -100,12 +101,18 @@ export function assessCompletion(ctx: CompletionContext): CompletionAssessment {
   const answered = answeredCount(gated);
   const coverage = coverageRatio(gated);
 
+  // Progress-bar figure only: grades the FULL (ungated) answer set — tentative below-floor answers
+  // earn partial credit, confirmed ones full — so the bar shows momentum a strict gate can't. Never
+  // feeds a gate/threshold below. Collapses to `coverage` when the floor is 0.
+  const displayCoverage = gradedCoverage(ctx.questions, ctx.answered, floor);
+
   const requiredUnansweredKeys = unansweredQuestions(gated)
     .filter((q) => q.required)
     .map((q) => q.key);
 
   const base = {
     coverage,
+    displayCoverage,
     answeredCount: answered,
     requiredUnansweredKeys,
     earlyFinishAvailable: isEarlyFinishAvailable(ctx.config, coverage, answered),

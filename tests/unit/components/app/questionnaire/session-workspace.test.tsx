@@ -406,6 +406,7 @@ describe('SessionWorkspace', () => {
       completion: {
         kind: 'offer' as const,
         coverage: 0.9,
+        displayCoverage: 0.9,
         answeredCount: 3,
         requiredUnansweredKeys: [],
         capReached: false,
@@ -530,6 +531,7 @@ describe('SessionWorkspace', () => {
           completion: {
             kind: 'offer',
             coverage: 1,
+            displayCoverage: 1,
             answeredCount: 6,
             requiredUnansweredKeys: [],
             capReached: false,

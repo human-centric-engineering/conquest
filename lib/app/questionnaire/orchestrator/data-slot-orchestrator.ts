@@ -338,6 +338,10 @@ export async function runDataSlotTurn(
             kind: 'not_ready',
             coverage:
               state.questions.length === 0 ? 1 : answeredAtAbandon.size / state.questions.length,
+            // Terminal count-based path: no tentative grading to apply, so the display figure equals
+            // the gate figure. The live bar re-derives its own graded coverage via the status endpoint.
+            displayCoverage:
+              state.questions.length === 0 ? 1 : answeredAtAbandon.size / state.questions.length,
             answeredCount: answeredAtAbandon.size,
             requiredUnansweredKeys: [],
             capReached: false,
@@ -463,6 +467,9 @@ export async function runDataSlotTurn(
   const assessment: CompletionAssessment = {
     kind: allQuestionsAnswered ? 'offer' : 'not_ready',
     coverage: dataSlotCoverage,
+    // Count-based data-slot path: the live progress bar re-derives its own graded coverage via the
+    // status endpoint (`assessCompletion`), so this turn-response figure needs no tentative grading.
+    displayCoverage: dataSlotCoverage,
     answeredCount: answeredIds.size,
     requiredUnansweredKeys: [],
     capReached: false,

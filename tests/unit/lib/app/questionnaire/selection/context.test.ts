@@ -3,7 +3,9 @@ import {
   answeredCount,
   answeredQuestionIds,
   coverageRatio,
+  gradedCoverage,
   requiredFirstPool,
+  TENTATIVE_ANSWER_CREDIT,
   terminalDecision,
   unansweredQuestions,
   weightedCoverage,
@@ -133,6 +135,108 @@ describe('weightedCoverage', () => {
         new Set(['a', 'ghost'])
       )
     ).toBeCloseTo(0.5);
+  });
+});
+
+describe('gradedCoverage', () => {
+  // The progress-BAR figure: same weighting as weightedCoverage, but a below-floor ("tentative")
+  // answer earns partial credit instead of full. Never a gate input.
+  const questions = [
+    { id: 'a', weight: 1 },
+    { id: 'b', weight: 1 },
+  ];
+
+  it('gives a below-floor answer half credit and an at/above-floor answer full credit', () => {
+    // a is tentative (0.45 < floor 0.5) → 0.5 credit; b is confirmed (0.7 ≥ 0.5) → full.
+    const cov = gradedCoverage(
+      questions,
+      [
+        { questionId: 'a', confidence: 0.45 },
+        { questionId: 'b', confidence: 0.7 },
+      ],
+      0.5
+    );
+    // (1×0.5 + 1×1.0) / 2 = 0.75
+    expect(cov).toBeCloseTo(0.75);
+  });
+
+  it('reads non-zero when EVERY answer is tentative (the flat-0% fix)', () => {
+    // The reported bug: strict coverage gates both below-floor answers to 0; graded shows momentum.
+    const cov = gradedCoverage(
+      questions,
+      [
+        { questionId: 'a', confidence: 0.45 },
+        { questionId: 'b', confidence: 0.45 },
+      ],
+      0.5
+    );
+    expect(cov).toBeCloseTo(TENTATIVE_ANSWER_CREDIT); // (0.5 + 0.5) / 2
+  });
+
+  it('treats an unscored (null) answer as authoritative full credit', () => {
+    const cov = gradedCoverage(questions, [{ questionId: 'a', confidence: null }], 0.5);
+    expect(cov).toBeCloseTo(0.5); // full credit for a, b unanswered
+  });
+
+  it('collapses to weightedCoverage when the floor is 0 (nothing is below it)', () => {
+    const answered = [
+      { questionId: 'a', confidence: 0.1 },
+      { questionId: 'b', confidence: 0.45 },
+    ];
+    expect(gradedCoverage(questions, answered, 0)).toBeCloseTo(
+      weightedCoverage(questions, new Set(['a', 'b']))
+    );
+  });
+
+  it('respects question weight (a tentative answer to a heavy question still earns half OF that weight)', () => {
+    const cov = gradedCoverage(
+      [
+        { id: 'a', weight: 3 },
+        { id: 'b', weight: 1 },
+      ],
+      [{ questionId: 'a', confidence: 0.4 }],
+      0.5
+    );
+    // (3×0.5) / 4 = 0.375
+    expect(cov).toBeCloseTo(0.375);
+  });
+
+  it('keeps the best credit when a question has both a tentative and a confirmed row', () => {
+    const cov = gradedCoverage(
+      questions,
+      [
+        { questionId: 'a', confidence: 0.4 }, // tentative
+        { questionId: 'a', confidence: 0.9 }, // later corroboration
+      ],
+      0.5
+    );
+    // a resolves to full credit (0.9 ≥ floor); b unanswered → 1/2
+    expect(cov).toBeCloseTo(0.5);
+  });
+
+  it('returns 1 for a version with no questions, and grades the count fallback when all weights are zero', () => {
+    expect(gradedCoverage([], [], 0.5)).toBe(1);
+    const cov = gradedCoverage(
+      [
+        { id: 'a', weight: 0 },
+        { id: 'b', weight: 0 },
+      ],
+      [{ questionId: 'a', confidence: 0.45 }], // tentative, half credit, over 2 questions
+      0.5
+    );
+    expect(cov).toBeCloseTo(0.25);
+  });
+
+  it('ignores an answer to an unknown question', () => {
+    const cov = gradedCoverage(
+      questions,
+      [
+        { questionId: 'a', confidence: 0.9 },
+        { questionId: 'ghost', confidence: 0.9 },
+      ],
+      0.5
+    );
+    expect(cov).toBeCloseTo(0.5);
   });
 });
 

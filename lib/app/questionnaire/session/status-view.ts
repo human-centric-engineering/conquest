@@ -30,8 +30,14 @@ import type { SessionStatus } from '@/lib/app/questionnaire/types';
 export interface StatusCompletionView {
   /** Whether the agent may offer to submit, and if not, why not (offer / not_ready / blocked_on_required). */
   kind: CompletionKind;
-  /** Weighted coverage in [0, 1]. */
+  /** Weighted coverage in [0, 1] — the strict gate figure (below-floor tentative answers excluded). */
   coverage: number;
+  /**
+   * Graded coverage in [0, 1] for the progress bar: full credit for confirmed answers, half credit
+   * for below-floor tentative captures. Equals {@link coverage} when the confidence floor is 0.
+   * Display-only — the submit gate reads `kind`, never this.
+   */
+  displayCoverage: number;
   /** Distinct questions answered this session. */
   answeredCount: number;
   /** Keys of unanswered required questions (empty unless `kind === 'blocked_on_required'`). */
@@ -86,6 +92,7 @@ export function buildSessionStatusView(input: SessionStatusInput): SessionStatus
     completion: {
       kind: input.assessment.kind,
       coverage: input.assessment.coverage,
+      displayCoverage: input.assessment.displayCoverage,
       answeredCount: input.assessment.answeredCount,
       requiredUnansweredKeys: input.assessment.requiredUnansweredKeys,
       capReached: input.assessment.capReached,

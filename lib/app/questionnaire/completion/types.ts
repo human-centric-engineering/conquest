@@ -78,8 +78,16 @@ export interface CompletionAssessment {
   rationale: string;
   /** Which criteria are unmet — empty iff `kind === 'offer'`. */
   unmet: UnmetCriterion[];
-  /** Weighted coverage in [0, 1] at assessment time. */
+  /** Weighted coverage in [0, 1] at assessment time — the GATE figure (below-floor answers excluded). */
   coverage: number;
+  /**
+   * Graded coverage in [0, 1] for the progress DISPLAY only — never a gate input. Full credit for
+   * confirmed answers (confidence ≥ the completion floor, or unscored/authoritative),
+   * `TENTATIVE_ANSWER_CREDIT` (0.5) for below-floor tentative captures. Equals {@link coverage} when
+   * the floor is 0. The progress bar reads this so a session holding only tentative captures shows
+   * real momentum instead of a flat 0%.
+   */
+  displayCoverage: number;
   /** Distinct questions answered this session. */
   answeredCount: number;
   /** The keys of unanswered required questions — the gate's evidence. */

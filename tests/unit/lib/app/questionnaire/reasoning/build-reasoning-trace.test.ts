@@ -37,6 +37,7 @@ function assessment(over: Partial<CompletionAssessment> = {}): CompletionAssessm
   return {
     kind: 'not_ready',
     coverage: 0,
+    displayCoverage: 0,
     answeredCount: 0,
     requiredUnansweredKeys: [],
     capReached: false,

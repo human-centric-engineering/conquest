@@ -24,6 +24,7 @@ function assessment(over: Partial<CompletionAssessment> = {}): CompletionAssessm
     rationale: 'ready',
     unmet: [],
     coverage: 0.8,
+    displayCoverage: 0.8,
     answeredCount: 4,
     requiredUnansweredKeys: [],
     capReached: false,
@@ -56,6 +57,8 @@ describe('buildSessionStatusView', () => {
         assessment: assessment({
           kind: 'not_ready',
           coverage: 0.5,
+          // Distinct from coverage to prove the projection carries the graded figure independently.
+          displayCoverage: 0.65,
           answeredCount: 2,
           requiredUnansweredKeys: ['role'],
           capReached: false,
@@ -65,6 +68,7 @@ describe('buildSessionStatusView', () => {
     expect(view.completion).toEqual({
       kind: 'not_ready',
       coverage: 0.5,
+      displayCoverage: 0.65,
       answeredCount: 2,
       requiredUnansweredKeys: ['role'],
       capReached: false,
