@@ -129,8 +129,10 @@ Rough estimate: 2–3 weeks of one engineer for a production-ready implementatio
 1. Admin enables a capability as an MCP tool via the Tools page
 2. `McpExposedTool` row links to `AiCapability` with `isEnabled: true`
 3. `tools/list` joins both tables, serves only doubly-enabled tools
-4. `tools/call` dispatches through `capabilityDispatcher.dispatch()` using the `mcp-system` agent
+4. `tools/call` dispatches through `capabilityDispatcher.dispatch()` under the key's `scopedAgentId` when the key is bound to an agent, else the shared `mcp-system` agent — the same resolution the `resources/read` path uses, so cost/budget attribution and knowledge-base grant resolution (`resolveAgentDocumentAccess`) follow the scoped agent. It also threads the optional per-dispatch `scope` carrier (`CapabilityContext.scope`) through to `execute()`.
 5. Full 9-step pipeline applies: validation, rate limiting, execution, cost tracking
+
+> **Rate-limit bucket semantics under scoped keys.** The dispatcher rate limiter is keyed on `(capabilitySlug, agentId)`. Because step 4 resolves `agentId` from the key's `scopedAgentId`, each scoped key gets its **own** per-capability bucket, whereas all unscoped keys share the single `mcp-system` bucket per capability. So a capability's `rateLimit` acts as a **per-scoped-agent** cap for scoped traffic, not a single global MCP cap — `N` scoped keys permit up to `N ×` the configured limit in aggregate. This is intended (per-tenant fairness); size `rateLimit` accordingly for expensive tools.
 
 If `capabilityDispatcher.dispatch()` throws an unexpected exception (as opposed to returning `{ success: false }`), `callMcpTool` catches it and returns an MCP error content block (`isError: true`) with a generic message rather than escalating to a JSON-RPC protocol error.
 
