@@ -74,10 +74,11 @@ builds the prompt and (after the LLM call) normalises the findings.
 ```
 contradiction/
 ├── types.ts            ContradictionContext, ContradictionSlotView, AnsweredSlotView,
-│                       ContradictionFinding, CONTRADICTION_SEVERITIES, DetectionPhase
+│                       ContradictionFinding, RaisedContradiction, CONTRADICTION_SEVERITIES,
+│                       CONTRADICTION_RESOLUTIONS, DetectionPhase
 ├── detection-schema.ts contradictionDetectionSchema (+ z.toJSONSchema), validateContradictionDetection
 ├── detection-prompt.ts buildContradictionDetectionPrompt / …RetryMessage → LlmMessage[]
-└── detection-logic.ts  normalizeContradictionFindings(...) + shouldRunDetection(...)
+└── detection-logic.ts  normalizeContradictionFindings(...) + shouldRunDetection(...) + contradictionKey(...)
 ```
 
 - **`ContradictionContext`** — `{ slots, answers, mode, windowN, currentStatement?,
@@ -156,11 +157,89 @@ Under `probe` mode a detected contradiction is **never silently overwritten**. T
    the pending state is **cleared**, and **no fresh detection runs** (so the same conflict can't
    re-probe in a loop). The turn then proceeds to normal selection.
 
+### Graded, humble phrasing (how directly the conflict is raised)
+
+The reconciliation question is **calibrated to the detector's own certainty**, so the interviewer
+matches how a careful person would raise a suspicion. The finding always carries `confidence` (0–1)
+and `severity`; both the LLM-authored `suggestedProbe` and the deterministic fallback use them:
+
+- **Clear and obvious** (high confidence — answers that plainly can't both be true) → put the tension
+  **directly and plainly** ("Earlier you said X, but just now it sounds like Y — which is right?").
+- **Subtle or ambiguous** (lower confidence — not certain it's a real conflict) →
+  raise it with **genuine humility**: a softener such as _"Forgive me if I've misunderstood…"_,
+  _"It seems that…"_, or _"I may be wrong, but…"_, framed as the interviewer's possible misreading
+  rather than the respondent's mistake, and easy to correct.
+
+Either way the probe **always names the specific thing that seems to conflict** (the suspicion is
+never hidden), and never accuses or presumes which answer is correct. The **switch is confidence**
+(how sure the detector is it's a real conflict — the axis the user's "clear vs subtle" maps to); a low
+`severity` only nudges the model gentler still, it is not itself the direct/humble toggle. The detector
+prompt (`detection-prompt.ts`) instructs the model to apply this to `suggestedProbe`; when the model
+returns no probe, `buildContradictionProbe` picks a **direct** vs **humble** default by
+`CLEAR_CONTRADICTION_CONFIDENCE` (0.8) — the same confidence threshold (so code and prompt agree on the
+switch). The deterministic consequence line is unaffected — it stays exact regardless of tone.
+
 `flag` mode is unchanged: surface the explanation **and** refine immediately. `off` does nothing.
 
 The seriousness gate runs BEFORE this phase, so a contradicting answer must survive it to be probed —
 the judge prompt explicitly treats "contradicts an earlier answer" as genuine (see
 [seriousness-gate.md](./seriousness-gate.md#a-contradiction-is-not-a-sincerity-failure)).
+
+### Never re-raise the same conflict (the "don't nag" ledger)
+
+Detection is stateless — it re-reports a conflict every time it still sees one. Left alone, the same
+contradiction would be probed / alerted on turn after turn, which reads as the interviewer nagging.
+`AppQuestionnaireSession.raisedContradictions` fixes that: an **append-only ledger of contradictions
+already surfaced this session**, keyed by the canonical slot-key set (`contradictionKey` — so
+`[a,b] ≡ [b,a]`).
+
+- **Suppress.** In `runContradictionPhase`, every freshly-detected finding whose key is already in the
+  ledger is dropped **before** any notice or probe — no re-alert, no re-probe — **whether or not it was
+  ever reconciled**. Detection still runs (it's cheap and the tool-call is recorded); it just produces
+  no user-facing output for a stale conflict. A wholly-stale pass surfaces nothing.
+- **Record.** The phase **acts on every fresh conflict the turn surfaces** and records each one, so a
+  conflict is only ledgered once it has genuinely been raised (never noticed-then-silently-suppressed):
+  `probe` mode records each as `unresolved`; `flag` mode records each as `flagged`. When a single turn
+  turns up **more than one** fresh conflict they are handled **together** — see [Combining several
+  conflicts](#combining-several-conflicts-in-one-turn).
+- **Resolve.** On the resolution turn (a parked probe is confirmed/declined), each parked conflict's
+  ledger entry is stamped `resolved` (that conflict's slot was actually refined), `kept` (the original
+  stands), or `unresolved` (the refinement step was disabled, so reconciliation was never attempted —
+  an honest label). If no entry matches — a probe parked before the column existed — the entry is
+  appended defensively, so the conflict is still suppressed from then on.
+
+The ledger is **PII-free by design** — `RaisedContradiction = { key, slotKeys, resolution,
+raisedAtTurnIndex }`, never the explanation / statement / values (those live transiently on
+`pendingContradiction` and are cleared on resolution). The route loads it (parsed defensively per
+entry) into `TurnState.raisedContradictions` and persists the full updated list alongside
+`pendingContradiction` in one session update, so raise/resolve state moves atomically.
+
+### Combining several conflicts in one turn
+
+Usually a turn surfaces at most one new conflict. When detection returns **several fresh conflicts at
+once**, they are handled **together**, not dribbled out over turns:
+
+- **One notice box.** The blue "I noticed something" callout combines them — a short lead-in plus a
+  numbered line per conflict (`buildContradictionNoticeMessage`). The notice renders with
+  `whitespace-pre-line` so the breaks show.
+- **One combined probe** (probe mode). The interviewer asks a single reconciliation message that raises
+  each conflict as its own numbered point to clarify, closed by one consequence sentence naming every
+  affected topic. All conflicts are parked together in `PendingContradiction.findings`, and the next
+  turn reconciles them in one refiner pass (a **merged trigger** over the union of their slots). Each
+  conflict's ledger entry is stamped by its own outcome (the one whose slot was refined → `resolved`,
+  the rest → `kept`).
+- **One refiner pass** (flag mode). The merged trigger reconciles every fresh conflict at once.
+
+Every fresh conflict is recorded in the ledger (so none re-alerts), **and** every one is genuinely
+acted on this turn (so none is silently dropped) — the two guarantees the "don't nag, but do deal with
+new ones" requirement needs. A brand-new conflict on later turns (different slots) is still detected
+and handled normally; only a conflict already in the ledger is suppressed.
+
+Scope: this suppresses the **per-turn interviewer** loop only. The completion-sweep review gate
+(F4.5) runs its own detection over all answers and does **not** currently consult the ledger, so a
+conflict adjudicated mid-conversation (e.g. one the respondent explicitly declined to change) can
+re-surface as a submit-time hold. That boundary is a known limitation, not a guarantee — see the
+roadmap note if extending suppression to the sweep.
 
 ## The capability
 

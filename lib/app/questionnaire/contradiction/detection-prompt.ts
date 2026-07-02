@@ -29,8 +29,18 @@ import {
 function systemRules(mode: ContradictionContext['mode'], withCurrentStatement: boolean): string {
   const probeLine =
     mode === 'probe'
-      ? `\n- "suggestedProbe": ONE neutral follow-up question that lets the respondent reconcile the \
-conflicting answers. Ask, don't accuse; don't presume which answer is correct.`
+      ? `\n- "suggestedProbe": ONE follow-up question that lets the respondent reconcile the \
+conflicting answers. ALWAYS name the specific thing that seems to conflict, so they can see exactly \
+what you noticed. CALIBRATE how directly you raise it to your "confidence" for THIS finding (how sure \
+you are it is a real conflict), and lean gentler still when the "severity" is low:
+    - Clear and obvious (high confidence — the two answers plainly cannot both be true): put the \
+tension to them directly and plainly — e.g. "Earlier you said X, but just now it sounds like Y — \
+which is right?".
+    - Subtle, ambiguous, or you are not fully sure (lower confidence — you cannot be certain it is a \
+real conflict rather than a nuance): raise it with genuine humility. Open with a softener such as \
+"Forgive me if I've misunderstood…", "It seems that…", or "I may be wrong, but…", frame it as YOUR \
+possible misreading rather than their mistake, and make it easy for them to correct you.
+    Either way: ask, don't accuse; never presume which answer is the correct one.`
       : '';
 
   const slotKeysLine = withCurrentStatement

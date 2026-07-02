@@ -13,7 +13,10 @@ import type {
   DataSlotFillIntent,
 } from '@/lib/app/questionnaire/extraction/types';
 import type { RefinementDecision } from '@/lib/app/questionnaire/refinement/types';
-import type { PendingContradiction } from '@/lib/app/questionnaire/contradiction/types';
+import type {
+  PendingContradiction,
+  RaisedContradiction,
+} from '@/lib/app/questionnaire/contradiction/types';
 import { prisma } from '@/lib/db/client';
 import {
   applyRefinement,
@@ -77,6 +80,13 @@ export async function persistTurn(opts: {
    * untouched. Written before the turn is recorded so a mid-turn crash can't strand a stale probe.
    */
   pendingContradiction?: PendingContradiction | null;
+  /**
+   * "Don't nag" ledger: the FULL updated `AppQuestionnaireSession.raisedContradictions` list to write
+   * when this turn raised a fresh contradiction or resolved a pending one. `undefined` (the default)
+   * leaves the column untouched. Written alongside `pendingContradiction` so the raise/resolve state
+   * moves atomically.
+   */
+  raisedContradictions?: RaisedContradiction[];
   /** The send attempt's idempotency key (F7.x retry) — stamped on the turn for dedup-and-replay. */
   idempotencyKey?: string | null;
 }): Promise<string> {
@@ -184,16 +194,27 @@ export async function persistTurn(opts: {
   });
   sideEffectDataSlotIds.push(...reconciledDataSlotIds);
 
-  // Probe-confirm flow: park a raised probe or clear a resolved one on the session. `undefined` =
-  // leave untouched (the common case); `null` writes SQL NULL (DbNull) to clear.
-  if (opts.pendingContradiction !== undefined) {
+  // Probe-confirm flow + "don't nag" ledger: park a raised probe or clear a resolved one, and/or write
+  // the updated raised-contradiction ledger. Each is `undefined` = leave untouched (the common case);
+  // for the probe, `null` writes SQL NULL (DbNull) to clear. Both ride one update so raise/resolve
+  // state moves together.
+  if (opts.pendingContradiction !== undefined || opts.raisedContradictions !== undefined) {
     await prisma.appQuestionnaireSession.update({
       where: { id: opts.sessionId },
       data: {
-        pendingContradiction:
-          opts.pendingContradiction === null
-            ? Prisma.DbNull
-            : (opts.pendingContradiction as unknown as Prisma.InputJsonValue),
+        ...(opts.pendingContradiction !== undefined
+          ? {
+              pendingContradiction:
+                opts.pendingContradiction === null
+                  ? Prisma.DbNull
+                  : (opts.pendingContradiction as unknown as Prisma.InputJsonValue),
+            }
+          : {}),
+        ...(opts.raisedContradictions !== undefined
+          ? {
+              raisedContradictions: opts.raisedContradictions as unknown as Prisma.InputJsonValue,
+            }
+          : {}),
       },
     });
   }

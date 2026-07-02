@@ -74,6 +74,34 @@ describe('buildContradictionDetectionPrompt', () => {
     expect(flagSystem).not.toContain('suggestedProbe');
   });
 
+  it('tells the probe to calibrate directness to confidence/severity, with humility for subtle conflicts', () => {
+    const base = { answers: [answered({ slotKey: 'a' }), answered({ slotKey: 'b' })] };
+    const probeSystem = text(buildContradictionDetectionPrompt(ctx({ ...base, mode: 'probe' }))[0]);
+    // Always surface the specific tension.
+    expect(probeSystem).toContain('ALWAYS name the specific thing');
+    // The clear-vs-subtle calibration is anchored on the finding's own confidence + severity.
+    expect(probeSystem).toContain('CALIBRATE');
+    expect(probeSystem).toMatch(/confidence.*severity|severity.*confidence/s);
+    // Clear-cut → direct.
+    expect(probeSystem.toLowerCase()).toContain('directly');
+    // Subtle/ambiguous → the exact humility softeners the product wants.
+    expect(probeSystem).toContain("Forgive me if I've misunderstood");
+    expect(probeSystem).toContain('It seems that');
+    expect(probeSystem).toContain('I may be wrong');
+    // Never presume which side is right — the non-accusatory guarantee is kept.
+    expect(probeSystem.toLowerCase()).toContain('never presume which answer');
+  });
+
+  it('does not leak the humility softeners into flag mode (which carries no probe)', () => {
+    const flagSystem = text(
+      buildContradictionDetectionPrompt(
+        ctx({ answers: [answered({ slotKey: 'a' }), answered({ slotKey: 'b' })], mode: 'flag' })
+      )[0]
+    );
+    expect(flagSystem).not.toContain("Forgive me if I've misunderstood");
+    expect(flagSystem).not.toContain('CALIBRATE');
+  });
+
   it('includes the latest message and reversal instruction when currentStatement is set', () => {
     const context = ctx({
       answers: [answered({ slotKey: 'a' }), answered({ slotKey: 'b' })],

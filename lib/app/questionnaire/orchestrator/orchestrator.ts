@@ -447,6 +447,9 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
       ...(contradiction.pendingContradiction !== undefined
         ? { pendingContradiction: contradiction.pendingContradiction }
         : {}),
+      ...(contradiction.raisedContradictions !== undefined
+        ? { raisedContradictions: contradiction.raisedContradictions }
+        : {}),
     },
     events,
     toolCalls,

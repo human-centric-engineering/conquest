@@ -7,6 +7,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { Prisma } from '@prisma/client';
 
 const seamMock = vi.hoisted(() => ({
   upsertAnswerSlot: vi.fn(),
@@ -581,10 +582,13 @@ describe('persistTurn', () => {
         pendingContradiction: null,
       });
 
-      // The session must be updated to clear the contradiction probe.
-      expect(prismaMock.appQuestionnaireSession.update).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: 'sess-1' } })
-      );
+      // The session must be updated to clear the contradiction probe — specifically by writing SQL
+      // NULL (Prisma.DbNull), not JSON null, so the column reads as "nothing pending" (the branch the
+      // test name pins). Assert the data payload, not just the WHERE clause.
+      const arg = (prismaMock.appQuestionnaireSession.update as ReturnType<typeof vi.fn>).mock
+        .calls[0][0];
+      expect(arg.where).toEqual({ id: 'sess-1' });
+      expect(arg.data.pendingContradiction).toBe(Prisma.DbNull);
       // The turn is still recorded after the session update.
       expect(seamMock.recordTurn).toHaveBeenCalledTimes(1);
     });
@@ -628,10 +632,86 @@ describe('persistTurn', () => {
         upserts: [],
         refinements: [],
         keyToSlotId: new Map(),
-        // pendingContradiction intentionally omitted
+        // pendingContradiction + raisedContradictions intentionally omitted
       });
 
       expect(prismaMock.appQuestionnaireSession.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('raisedContradictions ledger', () => {
+    beforeEach(() => {
+      (prismaMock.appQuestionnaireSession.update as ReturnType<typeof vi.fn>).mockResolvedValue({});
+    });
+
+    it('writes the raised-contradiction ledger to the session when provided', async () => {
+      const ledger = [
+        {
+          key: 'role',
+          slotKeys: ['role'],
+          resolution: 'unresolved' as const,
+          raisedAtTurnIndex: 2,
+        },
+      ];
+
+      await persistTurn({
+        sessionId: 'sess-1',
+        userMessage: 'Actually I do sales.',
+        agentResponse: 'Which is it?',
+        targetedQuestionId: null,
+        toolCalls: [],
+        costUsd: 0,
+        upserts: [],
+        refinements: [],
+        keyToSlotId: new Map(),
+        raisedContradictions: ledger,
+      });
+
+      expect(prismaMock.appQuestionnaireSession.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'sess-1' },
+          data: expect.objectContaining({ raisedContradictions: ledger }),
+        })
+      );
+      expect(seamMock.recordTurn).toHaveBeenCalledTimes(1);
+    });
+
+    it('writes the probe AND the ledger in a single session update when both change', async () => {
+      const probe = {
+        slotKeys: ['role'],
+        explanation: 'Conflicting roles.',
+        statement: 'Actually I do sales.',
+        raisedAtTurnIndex: 2,
+      };
+      const ledger = [
+        {
+          key: 'role',
+          slotKeys: ['role'],
+          resolution: 'unresolved' as const,
+          raisedAtTurnIndex: 2,
+        },
+      ];
+
+      await persistTurn({
+        sessionId: 'sess-1',
+        userMessage: 'Actually I do sales.',
+        agentResponse: 'Which is it?',
+        targetedQuestionId: null,
+        toolCalls: [],
+        costUsd: 0,
+        upserts: [],
+        refinements: [],
+        keyToSlotId: new Map(),
+        pendingContradiction: probe,
+        raisedContradictions: ledger,
+      });
+
+      // Exactly one update carrying BOTH fields — raise/resolve state moves atomically.
+      expect(prismaMock.appQuestionnaireSession.update).toHaveBeenCalledTimes(1);
+      const arg = (prismaMock.appQuestionnaireSession.update as ReturnType<typeof vi.fn>).mock
+        .calls[0][0];
+      expect(arg.data.pendingContradiction).toEqual(probe);
+      expect(arg.data.raisedContradictions).toEqual(ledger);
     });
   });
 });

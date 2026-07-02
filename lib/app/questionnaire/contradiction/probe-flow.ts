@@ -20,9 +20,26 @@ import type {
   PendingContradiction,
 } from '@/lib/app/questionnaire/contradiction/types';
 
-/** Fallback reconciliation question when the detector returned a `probe`-mode finding with no probe. */
+/**
+ * Fallback reconciliation questions when the detector returned a `probe`-mode finding with no probe
+ * of its own. Two variants, chosen by the finding's confidence (see {@link CLEAR_CONTRADICTION_CONFIDENCE}):
+ * a plain, direct one for a clear-cut conflict, and a humbler, hedged one for a subtle/ambiguous one
+ * — the same clear-vs-subtle calibration the detector prompt asks the model to apply to its own probe.
+ */
+/** Direct fallback — used when the conflict is clear-cut (confidence at/above the threshold). */
 export const DEFAULT_RECONCILIATION_QUESTION =
   'A moment ago this seemed to point one way, and just now it sounded different — which best reflects how you really feel?';
+
+/** Humble fallback — used when the conflict is subtle/ambiguous (confidence below the threshold). */
+export const HUMBLE_RECONCILIATION_QUESTION =
+  "Forgive me if I've misunderstood — it seemed a moment ago this pointed one way, and just now I may be reading it differently. Which best reflects how you really feel?";
+
+/**
+ * At or above this detector confidence a missing-probe finding is treated as clear-cut (direct
+ * fallback); below it, as subtle/ambiguous (humble fallback). Mirrors the "clear and obvious vs
+ * subtle or ambiguous" split the detector prompt applies to the LLM-authored probe.
+ */
+export const CLEAR_CONTRADICTION_CONFIDENCE = 0.8;
 
 /**
  * Human labels for the conflicting slots, so the consequence sentence names what will change in the
@@ -57,41 +74,83 @@ function humanJoin(items: string[]): string {
   return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
 }
 
+/** The reconciliation question for one finding: its own probe, or a confidence-graded default. */
+function questionFor(finding: ContradictionFinding): string {
+  if (typeof finding.suggestedProbe === 'string' && finding.suggestedProbe.trim().length > 0) {
+    return finding.suggestedProbe.trim();
+  }
+  return finding.confidence >= CLEAR_CONTRADICTION_CONFIDENCE
+    ? DEFAULT_RECONCILIATION_QUESTION
+    : HUMBLE_RECONCILIATION_QUESTION;
+}
+
+/** De-duplicated union of every finding's slot keys (first-seen order). */
+function unionSlotKeys(findings: ContradictionFinding[]): string[] {
+  return [...new Set(findings.flatMap((f) => f.slotKeys))];
+}
+
 /**
- * Build the reconciliation message + the {@link PendingContradiction} to persist for one probe-mode
- * finding. The message is two short paragraphs: the reconciliation question, then a plain statement
- * of the consequence (confirming updates the earlier answer + the saved data). `dataMode` tweaks the
- * noun ("saved responses" vs "the saved data record") so the wording reads naturally in each surface.
+ * The informational "I noticed something" message for the blue notice. A single finding shows its
+ * explanation verbatim (unchanged). Several conflicts detected in ONE turn are combined into a single
+ * box — a short lead-in plus a numbered line per conflict — so the respondent sees one coherent notice
+ * rather than a stack of separate callouts. Rendered with `whitespace-pre-line`, so the `\n` breaks show.
+ */
+export function buildContradictionNoticeMessage(findings: ContradictionFinding[]): string {
+  if (findings.length <= 1) return findings[0]?.explanation ?? '';
+  const points = findings.map((f, i) => `${i + 1}. ${f.explanation}`).join('\n');
+  return `A few things you've said might not quite line up:\n\n${points}`;
+}
+
+/**
+ * Build the reconciliation message + the {@link PendingContradiction} to persist for the probe-mode
+ * conflict(s) raised THIS turn. Usually one finding: the message is two short paragraphs — the
+ * reconciliation question, then a plain statement of the consequence (confirming updates the earlier
+ * answer + the saved data). When a turn surfaces SEVERAL conflicts, they're combined into ONE probe
+ * that raises each as a numbered point to clarify, followed by a single consequence naming every
+ * affected topic — and every conflict is parked in {@link PendingContradiction.findings} so the next
+ * turn reconciles them all. `dataMode` tweaks the noun ("saved responses" vs "the saved data record").
  */
 export function buildContradictionProbe(input: {
-  finding: ContradictionFinding;
+  findings: ContradictionFinding[];
   statement: string;
   raisedAtTurnIndex: number;
   labels: ContradictionProbeLabels;
   dataMode: boolean;
 }): { text: string; pending: PendingContradiction } {
-  const { finding, statement, raisedAtTurnIndex, labels, dataMode } = input;
+  const { findings, statement, raisedAtTurnIndex, labels, dataMode } = input;
 
-  const question =
-    typeof finding.suggestedProbe === 'string' && finding.suggestedProbe.trim().length > 0
-      ? finding.suggestedProbe.trim()
-      : DEFAULT_RECONCILIATION_QUESTION;
-
-  const topics = affectedTopics(finding.slotKeys, labels);
+  const union = unionSlotKeys(findings);
+  const topics = affectedTopics(union, labels);
   const topicClause = topics.length > 0 ? ` about ${humanJoin(topics)}` : '';
   const dataNoun = dataMode ? 'the linked saved data' : 'your saved responses';
+  const answerNoun = findings.length > 1 ? 'earlier answers' : 'earlier answer';
   const consequence =
-    `Just so you know: if you confirm the newer view, I'll update your earlier answer${topicClause} ` +
+    `Just so you know: if you confirm the newer view, I'll update your ${answerNoun}${topicClause} ` +
     `(and ${dataNoun}) to match. If I've misread you, let me know and I'll leave it as it was.`;
 
-  const text = `${question}\n\n${consequence}`;
+  // One conflict → the question stands alone. Several → raise each as a numbered point to clarify.
+  const questionBlock =
+    findings.length <= 1
+      ? questionFor(findings[0])
+      : `I want to make sure I've understood a couple of things:\n\n` +
+        findings.map((f, i) => `${i + 1}. ${questionFor(f)}`).join('\n\n');
 
+  const text = `${questionBlock}\n\n${consequence}`;
+
+  const firstProbe = findings.find(
+    (f) => typeof f.suggestedProbe === 'string' && f.suggestedProbe.trim().length > 0
+  )?.suggestedProbe;
   const pending: PendingContradiction = {
-    slotKeys: finding.slotKeys,
-    explanation: finding.explanation,
-    ...(finding.suggestedProbe !== undefined ? { suggestedProbe: finding.suggestedProbe } : {}),
+    slotKeys: union,
+    explanation: findings.map((f) => f.explanation).join(' '),
+    ...(firstProbe !== undefined ? { suggestedProbe: firstProbe } : {}),
     statement,
     raisedAtTurnIndex,
+    findings: findings.map((f) => ({
+      slotKeys: f.slotKeys,
+      explanation: f.explanation,
+      ...(f.suggestedProbe !== undefined ? { suggestedProbe: f.suggestedProbe } : {}),
+    })),
   };
 
   return { text, pending };

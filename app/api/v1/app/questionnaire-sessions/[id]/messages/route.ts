@@ -693,26 +693,20 @@ async function handleMessage(
       }
 
       // Side-band frames the core determined (contradiction / seriousness / support / fail-soft
-      // notices). Enrich each warning with its underlying rationale — the seriousness judge's reason,
-      // or a contradiction's explanation when the message shown is the probe — so the surface can
-      // offer a "Why?" disclosure. The rationale is computed by the core but otherwise dropped here.
+      // notices). Enrich the seriousness warning with the judge's reason so the surface can offer a
+      // "Why?" disclosure. Contradiction notices carry their explanation AS the message (the phase
+      // already combines multiple conflicts into one box), so there is no separate detail to attach.
       // Streamed now AND captured into `turnWarnings` for inline replay on resume.
-      const contradictionReasons = result.contradictions.map((f) => f.explanation);
-      let contradictionIdx = 0;
       const turnWarnings: SessionWarning[] = [];
       for (const ev of result.events) {
         if (ev.type !== 'warning') {
           yield ev;
           continue;
         }
-        let detail: string | undefined;
-        if (ev.code === 'seriousness' || ev.code === 'seriousness_final') {
-          detail = result.abuse?.reason;
-        } else if (ev.code === 'contradiction') {
-          const explanation = contradictionReasons[contradictionIdx++];
-          // Skip when the explanation is already the message (flag mode shows it as the message).
-          if (explanation && explanation !== ev.message) detail = explanation;
-        }
+        const detail =
+          ev.code === 'seriousness' || ev.code === 'seriousness_final'
+            ? result.abuse?.reason
+            : undefined;
         const warning: SessionWarning = {
           code: ev.code,
           message: ev.message,
@@ -935,6 +929,10 @@ async function handleMessage(
           // Probe-confirm flow: park a raised probe / clear a resolved one (undefined = leave as-is).
           ...(result.sideEffects.pendingContradiction !== undefined
             ? { pendingContradiction: result.sideEffects.pendingContradiction }
+            : {}),
+          // "Don't nag" ledger: persist the updated raised-contradiction list (undefined = unchanged).
+          ...(result.sideEffects.raisedContradictions !== undefined
+            ? { raisedContradictions: result.sideEffects.raisedContradictions }
             : {}),
           keyToSlotId,
           // Retry dedup (F7.x): stamp this attempt's key so a later retry re-sending it replays

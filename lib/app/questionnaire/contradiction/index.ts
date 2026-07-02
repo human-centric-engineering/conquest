@@ -17,6 +17,9 @@ export {
   type DetectionDecision,
   type ContradictionFinding,
   type PendingContradiction,
+  CONTRADICTION_RESOLUTIONS,
+  type ContradictionResolution,
+  type RaisedContradiction,
   type DroppedFinding,
   type ContradictionDetectionResult,
   type FindingsSummary,
@@ -24,7 +27,10 @@ export {
 
 export {
   buildContradictionProbe,
+  buildContradictionNoticeMessage,
   DEFAULT_RECONCILIATION_QUESTION,
+  HUMBLE_RECONCILIATION_QUESTION,
+  CLEAR_CONTRADICTION_CONFIDENCE,
   type ContradictionProbeLabels,
 } from '@/lib/app/questionnaire/contradiction/probe-flow';
 
@@ -46,6 +52,7 @@ export {
   normalizeContradictionFindings,
   shouldRunDetection,
   summarizeFindings,
+  contradictionKey,
 } from '@/lib/app/questionnaire/contradiction/detection-logic';
 
 /**

@@ -47,8 +47,12 @@ function distinctKeys(keys: string[]): string[] {
   return [...new Set(keys)];
 }
 
-/** Canonical key for a contradiction: its slot-key *set*, so `[a,b]` ≡ `[b,a]`. */
-function findingKey(slotKeys: string[]): string {
+/**
+ * Canonical key for a contradiction: its slot-key *set*, so `[a,b]` ≡ `[b,a]`. Used both to dedupe
+ * symmetric findings here and, downstream, as the stable identity of a {@link RaisedContradiction} in
+ * the session ledger (so the same conflict is never re-raised once dealt with).
+ */
+export function contradictionKey(slotKeys: string[]): string {
   return [...slotKeys].sort().join('|');
 }
 
@@ -121,7 +125,7 @@ export function normalizeContradictionFindings(
   // Higher confidence wins; an exact tie keeps the first seen (stable).
   const best = new Map<string, ContradictionFinding>();
   for (const finding of candidates) {
-    const key = findingKey(finding.slotKeys);
+    const key = contradictionKey(finding.slotKeys);
     const incumbent = best.get(key);
     if (!incumbent) {
       best.set(key, finding);

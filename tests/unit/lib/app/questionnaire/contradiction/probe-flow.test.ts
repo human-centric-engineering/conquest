@@ -2,21 +2,26 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildContradictionProbe,
+  buildContradictionNoticeMessage,
   DEFAULT_RECONCILIATION_QUESTION,
+  HUMBLE_RECONCILIATION_QUESTION,
+  CLEAR_CONTRADICTION_CONFIDENCE,
 } from '@/lib/app/questionnaire/contradiction/probe-flow';
 
 import { contradiction } from '@/tests/unit/lib/app/questionnaire/contradiction/_fixtures';
 
 const labels = (entries: Array<[string, string]>) => ({ questionLabels: new Map(entries) });
 
-describe('buildContradictionProbe', () => {
+describe('buildContradictionProbe (single finding)', () => {
   it('uses the finding probe and states the consequence with the topic name', () => {
     const { text, pending } = buildContradictionProbe({
-      finding: contradiction({
-        slotKeys: ['satisfaction'],
-        explanation: 'hate vs love',
-        suggestedProbe: 'Which reflects how you feel?',
-      }),
+      findings: [
+        contradiction({
+          slotKeys: ['satisfaction'],
+          explanation: 'hate vs love',
+          suggestedProbe: 'Which reflects how you feel?',
+        }),
+      ],
       statement: 'I love my job',
       raisedAtTurnIndex: 2,
       labels: labels([['satisfaction', 'How satisfied are you with your role?']]),
@@ -28,19 +33,46 @@ describe('buildContradictionProbe', () => {
     expect(text.toLowerCase()).toContain('update your earlier answer');
     expect(text).toContain('How satisfied are you with your role?');
     expect(text).toContain('your saved responses'); // question-mode noun
-    // The pending record carries the finding + the triggering statement.
+    // The pending record carries the finding + the triggering statement, and the per-conflict list.
     expect(pending).toMatchObject({
       slotKeys: ['satisfaction'],
       explanation: 'hate vs love',
       suggestedProbe: 'Which reflects how you feel?',
       statement: 'I love my job',
       raisedAtTurnIndex: 2,
+      findings: [{ slotKeys: ['satisfaction'], explanation: 'hate vs love' }],
     });
   });
 
-  it('falls back to the default question when the finding has no probe', () => {
+  it('falls back to the direct default question for a clear-cut (high-confidence) finding with no probe', () => {
     const { text } = buildContradictionProbe({
-      finding: contradiction({ slotKeys: ['a'] }),
+      // fixture defaults confidence to 0.8 = CLEAR_CONTRADICTION_CONFIDENCE → direct default
+      findings: [contradiction({ slotKeys: ['a'] })],
+      statement: 's',
+      raisedAtTurnIndex: 0,
+      labels: labels([['a', 'Topic A']]),
+      dataMode: false,
+    });
+    expect(text).toContain(DEFAULT_RECONCILIATION_QUESTION);
+    expect(text).not.toContain(HUMBLE_RECONCILIATION_QUESTION);
+  });
+
+  it('falls back to the HUMBLE default question for a subtle (low-confidence) finding with no probe', () => {
+    const { text } = buildContradictionProbe({
+      findings: [contradiction({ slotKeys: ['a'], confidence: 0.5 })],
+      statement: 's',
+      raisedAtTurnIndex: 0,
+      labels: labels([['a', 'Topic A']]),
+      dataMode: false,
+    });
+    expect(text).toContain(HUMBLE_RECONCILIATION_QUESTION);
+    expect(text).toContain("Forgive me if I've misunderstood"); // the humility opener
+    expect(text).not.toContain(DEFAULT_RECONCILIATION_QUESTION);
+  });
+
+  it('treats confidence exactly at the threshold as clear-cut (direct default)', () => {
+    const { text } = buildContradictionProbe({
+      findings: [contradiction({ slotKeys: ['a'], confidence: CLEAR_CONTRADICTION_CONFIDENCE })],
       statement: 's',
       raisedAtTurnIndex: 0,
       labels: labels([['a', 'Topic A']]),
@@ -49,9 +81,29 @@ describe('buildContradictionProbe', () => {
     expect(text).toContain(DEFAULT_RECONCILIATION_QUESTION);
   });
 
+  it('prefers the detector-authored probe over either default regardless of confidence', () => {
+    const { text } = buildContradictionProbe({
+      // low confidence would pick the humble default, but an explicit probe always wins
+      findings: [
+        contradiction({
+          slotKeys: ['a'],
+          confidence: 0.4,
+          suggestedProbe: 'It seems these point different ways — which fits best?',
+        }),
+      ],
+      statement: 's',
+      raisedAtTurnIndex: 0,
+      labels: labels([['a', 'Topic A']]),
+      dataMode: false,
+    });
+    expect(text).toContain('It seems these point different ways — which fits best?');
+    expect(text).not.toContain(HUMBLE_RECONCILIATION_QUESTION);
+    expect(text).not.toContain(DEFAULT_RECONCILIATION_QUESTION);
+  });
+
   it('prefers the data-slot label and the data-mode noun in data-slot mode', () => {
     const { text } = buildContradictionProbe({
-      finding: contradiction({ slotKeys: ['satisfaction'] }),
+      findings: [contradiction({ slotKeys: ['satisfaction'] })],
       statement: 's',
       raisedAtTurnIndex: 0,
       labels: {
@@ -65,9 +117,9 @@ describe('buildContradictionProbe', () => {
     expect(text).toContain('the linked saved data'); // data-mode noun
   });
 
-  it('lists multiple conflicting topics, de-duplicated', () => {
+  it('lists multiple conflicting topics of a single finding, de-duplicated', () => {
     const { text } = buildContradictionProbe({
-      finding: contradiction({ slotKeys: ['a', 'b'] }),
+      findings: [contradiction({ slotKeys: ['a', 'b'] })],
       statement: 's',
       raisedAtTurnIndex: 0,
       labels: labels([
@@ -83,7 +135,7 @@ describe('buildContradictionProbe', () => {
     // affectedTopics filters out labels that trim to '' — when every slotKey trims to empty,
     // topics is [], humanJoin returns '', and the " about " clause is suppressed.
     const { text } = buildContradictionProbe({
-      finding: contradiction({ slotKeys: ['   '] }), // whitespace-only key → trimmed = ''
+      findings: [contradiction({ slotKeys: ['   '] })], // whitespace-only key → trimmed = ''
       statement: 's',
       raisedAtTurnIndex: 0,
       labels: labels([['   ', '   ']]), // label also trims to '' → skipped
@@ -98,7 +150,7 @@ describe('buildContradictionProbe', () => {
   it('falls back to the question label when dataSlotLabels map does not contain the key', () => {
     // dataSlotLabels exists but lacks the slot key → affectedTopics falls through to questionLabels.
     const { text } = buildContradictionProbe({
-      finding: contradiction({ slotKeys: ['mood'] }),
+      findings: [contradiction({ slotKeys: ['mood'] })],
       statement: 's',
       raisedAtTurnIndex: 0,
       labels: {
@@ -115,7 +167,7 @@ describe('buildContradictionProbe', () => {
   it('de-duplicates topics that resolve to the same trimmed, case-insensitive label', () => {
     // Two slot keys resolving to the same label (case-insensitive) must appear only once.
     const { text } = buildContradictionProbe({
-      finding: contradiction({ slotKeys: ['q1', 'q2'] }),
+      findings: [contradiction({ slotKeys: ['q1', 'q2'] })],
       statement: 's',
       raisedAtTurnIndex: 0,
       labels: labels([
@@ -133,7 +185,7 @@ describe('buildContradictionProbe', () => {
   it('formats three or more topics with Oxford-style "a, b and c" (no Oxford comma)', () => {
     // humanJoin: 3 items → "a, b and c"
     const { text } = buildContradictionProbe({
-      finding: contradiction({ slotKeys: ['q1', 'q2', 'q3'] }),
+      findings: [contradiction({ slotKeys: ['q1', 'q2', 'q3'] })],
       statement: 's',
       raisedAtTurnIndex: 0,
       labels: labels([
@@ -147,9 +199,9 @@ describe('buildContradictionProbe', () => {
   });
 
   it('omits suggestedProbe from the pending record when the finding has none', () => {
-    // The pending spread only includes suggestedProbe when finding.suggestedProbe !== undefined.
+    // The pending spread only includes suggestedProbe when a finding carries one.
     const { pending } = buildContradictionProbe({
-      finding: contradiction({ slotKeys: ['a'] }), // fixture has no suggestedProbe
+      findings: [contradiction({ slotKeys: ['a'] })], // fixture has no suggestedProbe
       statement: 's',
       raisedAtTurnIndex: 1,
       labels: labels([['a', 'Topic A']]),
@@ -163,7 +215,7 @@ describe('buildContradictionProbe', () => {
     // affectedTopics final fallback: if neither dataSlotLabels nor questionLabels has the key,
     // the key itself is used as the topic label.
     const { text } = buildContradictionProbe({
-      finding: contradiction({ slotKeys: ['raw_slot_key'] }),
+      findings: [contradiction({ slotKeys: ['raw_slot_key'] })],
       statement: 's',
       raisedAtTurnIndex: 0,
       labels: {
@@ -174,5 +226,59 @@ describe('buildContradictionProbe', () => {
     });
     // The key itself appears in the topic clause.
     expect(text).toContain('raw_slot_key');
+  });
+});
+
+describe('buildContradictionProbe (several conflicts in one turn)', () => {
+  it('raises each conflict as a numbered point, names every topic, and parks them all', () => {
+    const { text, pending } = buildContradictionProbe({
+      findings: [
+        contradiction({ slotKeys: ['a'], explanation: 'A1 vs A2', suggestedProbe: 'Which on A?' }),
+        contradiction({ slotKeys: ['b'], explanation: 'B1 vs B2', suggestedProbe: 'Which on B?' }),
+      ],
+      statement: 'both flipped',
+      raisedAtTurnIndex: 3,
+      labels: labels([
+        ['a', 'Satisfaction'],
+        ['b', 'Recommendation'],
+      ]),
+      dataMode: false,
+    });
+    // Both per-conflict probes appear, as numbered points.
+    expect(text).toContain('1. Which on A?');
+    expect(text).toContain('2. Which on B?');
+    // One consequence, naming every affected topic and using the plural noun.
+    expect(text).toContain('update your earlier answers about Satisfaction and Recommendation');
+    // Exactly one consequence sentence.
+    expect(text.match(/update your earlier answers/g)).toHaveLength(1);
+    // The pending parks the UNION for the merged refiner trigger, plus each conflict separately.
+    expect(pending.slotKeys).toEqual(['a', 'b']);
+    expect(pending.findings).toEqual([
+      { slotKeys: ['a'], explanation: 'A1 vs A2', suggestedProbe: 'Which on A?' },
+      { slotKeys: ['b'], explanation: 'B1 vs B2', suggestedProbe: 'Which on B?' },
+    ]);
+  });
+});
+
+describe('buildContradictionNoticeMessage', () => {
+  it('returns the lone explanation verbatim for a single finding', () => {
+    const msg = buildContradictionNoticeMessage([
+      contradiction({ slotKeys: ['a'], explanation: 'hate vs love' }),
+    ]);
+    expect(msg).toBe('hate vs love');
+  });
+
+  it('combines several explanations into one numbered notice box', () => {
+    const msg = buildContradictionNoticeMessage([
+      contradiction({ slotKeys: ['a'], explanation: 'A conflict' }),
+      contradiction({ slotKeys: ['b'], explanation: 'B conflict' }),
+    ]);
+    expect(msg).toContain('might not quite line up');
+    expect(msg).toContain('1. A conflict');
+    expect(msg).toContain('2. B conflict');
+  });
+
+  it('returns an empty string for no findings (defensive)', () => {
+    expect(buildContradictionNoticeMessage([])).toBe('');
   });
 });

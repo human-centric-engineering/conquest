@@ -547,7 +547,7 @@ describe('runContradictionPhase — probe mode (deferred reconciliation)', () =>
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('runContradictionPhase — flag mode (immediate refine)', () => {
-  it('emits a warning event per finding and refines immediately when refinement is on', async () => {
+  it('combines several conflicts into ONE notice and refines them together when refinement is on', async () => {
     const inv = stubInvokers({
       detect: {
         findings: [
@@ -566,23 +566,22 @@ describe('runContradictionPhase — flag mode (immediate refine)', () => {
 
     const result = await runPhase(s, inv);
 
-    // One event per finding (the explanation, not the probe question).
-    expect(result.events).toHaveLength(2);
-    expect(result.events[0]).toMatchObject({
-      type: 'warning',
-      code: 'contradiction',
-      message: 'A conflict',
-    });
-    expect(result.events[1]).toMatchObject({
-      type: 'warning',
-      code: 'contradiction',
-      message: 'B conflict',
-    });
-    // Refiner called once (for the first finding, historical behaviour).
+    // ONE combined notice box carrying both explanations (not one event per finding).
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0]).toMatchObject({ type: 'warning', code: 'contradiction' });
+    const message = (result.events[0] as { message: string }).message;
+    expect(message).toContain('A conflict');
+    expect(message).toContain('B conflict');
+    // Refiner called once — a merged trigger reconciles both conflicts in one pass.
     expect(inv.calls.refine).toHaveLength(1);
+    expect(inv.calls.refine[0]?.trigger.contradiction?.slotKeys).toEqual(['a', 'b']); // union
     expect(result.answerRefinements).toHaveLength(1);
     expect(result.costUsd).toBeGreaterThan(0);
-    // No probe — flag mode surfaces passively.
+    // Both conflicts recorded (so neither re-alerts), and no probe — flag mode surfaces passively.
+    expect(result.raisedContradictions).toEqual([
+      { key: 'a', slotKeys: ['a'], resolution: 'flagged', raisedAtTurnIndex: 0 },
+      { key: 'b', slotKeys: ['b'], resolution: 'flagged', raisedAtTurnIndex: 0 },
+    ]);
     expect(result.probe).toBeUndefined();
     expect(result.suppressWrites).toBe(false);
   });
@@ -727,5 +726,341 @@ describe('questionProbeLabels', () => {
   it('returns an empty map for an empty questions array', () => {
     const result = questionProbeLabels([]);
     expect(result.questionLabels.size).toBe(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// "Don't nag" — the raised-contradiction ledger
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('runContradictionPhase — raised-contradiction ledger (never re-raise)', () => {
+  /** A ledger entry for a conflict that was already surfaced this session. */
+  const raised = (
+    slotKeys: string[],
+    resolution: 'unresolved' | 'resolved' | 'kept' | 'flagged' = 'unresolved'
+  ) => ({ key: [...slotKeys].sort().join('|'), slotKeys, resolution, raisedAtTurnIndex: 0 });
+
+  it('suppresses a probe-mode finding already in the ledger — no probe, no alert, no refine', async () => {
+    const inv = stubInvokers({
+      detect: { findings: [finding({ slotKeys: ['a'], explanation: 'Said A then not-A.' })] },
+    });
+    const s = {
+      ...state({
+        userMessage: 'the opposite again',
+        questions: [q({ id: 'a', key: 'a' })],
+        config: { contradictionMode: 'probe' },
+        existingAnswers: TWO_ANSWERS,
+      }),
+      raisedContradictions: [raised(['a'])], // already raised earlier this session
+    };
+
+    const result = await runPhase(s, inv);
+
+    // Detection still ran (recorded), but nothing was surfaced.
+    expect(slugs(result.toolCalls)).toContain(DETECT_CONTRADICTIONS_CAPABILITY_SLUG);
+    expect(result.probe).toBeUndefined();
+    expect(result.events).toHaveLength(0);
+    expect(result.contradictions).toHaveLength(0);
+    expect(result.suppressWrites).toBe(false);
+    // Ledger unchanged → no persist side effect.
+    expect(result.raisedContradictions).toBeUndefined();
+    expect(inv.calls.refine).toHaveLength(0);
+  });
+
+  it('suppresses a flag-mode finding already in the ledger — no alert, no immediate refine', async () => {
+    const inv = stubInvokers({
+      detect: { findings: [finding({ slotKeys: ['a'], explanation: 'A conflict' })] },
+      refine: { decisions: [decision({ slotKey: 'a' })] },
+    });
+    const s = {
+      ...state({
+        userMessage: 'x',
+        questions: [q({ id: 'a', key: 'a' })],
+        config: { contradictionMode: 'flag' },
+        existingAnswers: TWO_ANSWERS,
+      }),
+      raisedContradictions: [raised(['a'], 'flagged')],
+    };
+
+    const result = await runPhase(s, inv);
+
+    expect(result.events).toHaveLength(0);
+    expect(result.contradictions).toHaveLength(0);
+    expect(inv.calls.refine).toHaveLength(0); // not re-refined
+    expect(result.raisedContradictions).toBeUndefined();
+  });
+
+  it('matches the ledger key regardless of slot-key order (a,b ≡ b,a)', async () => {
+    const inv = stubInvokers({
+      detect: { findings: [finding({ slotKeys: ['b', 'a'], explanation: 'conflict' })] },
+    });
+    const s = {
+      ...state({
+        userMessage: 'x',
+        questions: [q({ id: 'a', key: 'a' })],
+        config: { contradictionMode: 'probe' },
+        existingAnswers: TWO_ANSWERS,
+      }),
+      raisedContradictions: [raised(['a', 'b'])], // stored as key 'a|b'
+    };
+
+    const result = await runPhase(s, inv);
+
+    // ['b','a'] canonicalises to 'a|b' → suppressed.
+    expect(result.probe).toBeUndefined();
+    expect(result.events).toHaveLength(0);
+  });
+
+  it('records a fresh probe-mode finding as unresolved in the returned ledger', async () => {
+    const inv = stubInvokers({
+      detect: {
+        findings: [
+          finding({ slotKeys: ['a'], explanation: 'new', suggestedProbe: 'Which is right?' }),
+        ],
+      },
+    });
+    const s = state({
+      userMessage: 'contradicts',
+      questions: [q({ id: 'a', key: 'a' })],
+      config: { contradictionMode: 'probe' },
+      existingAnswers: TWO_ANSWERS,
+      selectionRound: 4,
+    });
+
+    const result = await runPhase(s, inv);
+
+    expect(result.probe).toBeDefined();
+    expect(result.raisedContradictions).toEqual([
+      { key: 'a', slotKeys: ['a'], resolution: 'unresolved', raisedAtTurnIndex: 4 },
+    ]);
+  });
+
+  it('records a fresh flag-mode finding as flagged in the returned ledger', async () => {
+    const inv = stubInvokers({
+      detect: { findings: [finding({ slotKeys: ['a'], explanation: 'new' })] },
+      refine: { decisions: [decision({ slotKey: 'a' })] },
+    });
+    const s = state({
+      userMessage: 'contradicts',
+      questions: [q({ id: 'a', key: 'a' })],
+      config: { contradictionMode: 'flag' },
+      existingAnswers: TWO_ANSWERS,
+      selectionRound: 2,
+    });
+
+    const result = await runPhase(s, inv);
+
+    expect(result.raisedContradictions).toEqual([
+      { key: 'a', slotKeys: ['a'], resolution: 'flagged', raisedAtTurnIndex: 2 },
+    ]);
+  });
+
+  it('surfaces only the FRESH finding when one of several is already raised, appending it to the ledger', async () => {
+    const inv = stubInvokers({
+      detect: {
+        findings: [
+          finding({ slotKeys: ['a'], explanation: 'old conflict' }), // already raised
+          finding({ slotKeys: ['c'], explanation: 'new conflict', suggestedProbe: 'C?' }), // fresh
+        ],
+      },
+    });
+    const s = {
+      ...state({
+        userMessage: 'x',
+        questions: [q({ id: 'a', key: 'a' })],
+        config: { contradictionMode: 'probe' },
+        existingAnswers: TWO_ANSWERS,
+        selectionRound: 3,
+      }),
+      raisedContradictions: [raised(['a'])],
+    };
+
+    const result = await runPhase(s, inv);
+
+    // Only the fresh finding is noticed + probed.
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0]).toMatchObject({ message: 'new conflict' });
+    expect(result.probe?.slotKeys).toEqual(['c']);
+    // The ledger keeps the old entry and appends the fresh one.
+    expect(result.raisedContradictions).toEqual([
+      { key: 'a', slotKeys: ['a'], resolution: 'unresolved', raisedAtTurnIndex: 0 },
+      { key: 'c', slotKeys: ['c'], resolution: 'unresolved', raisedAtTurnIndex: 3 },
+    ]);
+  });
+
+  it('combines several fresh conflicts into ONE probe and parks them all (probe mode)', async () => {
+    // Two distinct new conflicts land on one turn. They are raised together in one combined probe (each
+    // a point to clarify), and BOTH are recorded + parked so the next turn reconciles both.
+    const inv = stubInvokers({
+      detect: {
+        findings: [
+          finding({ slotKeys: ['a'], explanation: 'A conflict', suggestedProbe: 'A?' }),
+          finding({ slotKeys: ['b'], explanation: 'B conflict', suggestedProbe: 'B?' }),
+        ],
+      },
+    });
+    const s = state({
+      userMessage: 'x',
+      questions: [q({ id: 'a', key: 'a' })],
+      config: { contradictionMode: 'probe' },
+      existingAnswers: TWO_ANSWERS,
+      selectionRound: 1,
+    });
+
+    const result = await runPhase(s, inv);
+
+    // ONE combined notice; ONE probe raising both as points; the probe covers the union of slots.
+    expect(result.events).toHaveLength(1);
+    expect(result.probe?.text).toContain('1. A?');
+    expect(result.probe?.text).toContain('2. B?');
+    expect(result.probe?.slotKeys).toEqual(['a', 'b']);
+    // Both parked (so the resolution turn reconciles both) and both recorded (so neither re-alerts).
+    expect(result.pendingContradiction?.findings).toEqual([
+      { slotKeys: ['a'], explanation: 'A conflict', suggestedProbe: 'A?' },
+      { slotKeys: ['b'], explanation: 'B conflict', suggestedProbe: 'B?' },
+    ]);
+    expect(result.raisedContradictions).toEqual([
+      { key: 'a', slotKeys: ['a'], resolution: 'unresolved', raisedAtTurnIndex: 1 },
+      { key: 'b', slotKeys: ['b'], resolution: 'unresolved', raisedAtTurnIndex: 1 },
+    ]);
+  });
+
+  it('marks the ledger entry resolved on a confirmed resolution turn', async () => {
+    const inv = stubInvokers({ refine: { decisions: [decision({ slotKey: 'a' })] } });
+    const s = {
+      ...state({
+        userMessage: 'yes, the newer view',
+        questions: [q({ id: 'a', key: 'a' })],
+        config: { contradictionMode: 'probe' },
+        existingAnswers: TWO_ANSWERS,
+      }),
+      pendingContradiction: {
+        slotKeys: ['a'],
+        explanation: 'conflict',
+        statement: 'trigger',
+        raisedAtTurnIndex: 1,
+      },
+      raisedContradictions: [raised(['a'])], // was 'unresolved' when the probe was raised
+    };
+
+    const result = await runPhase(s, inv);
+
+    expect(result.pendingContradiction).toBeNull();
+    expect(result.raisedContradictions).toEqual([
+      { key: 'a', slotKeys: ['a'], resolution: 'resolved', raisedAtTurnIndex: 0 },
+    ]);
+  });
+
+  it('marks the ledger entry kept when the resolution turn produced no refinement', async () => {
+    const inv = stubInvokers({ refine: { decisions: [] } }); // respondent declined the change
+    const s = {
+      ...state({
+        userMessage: 'no, leave it',
+        questions: [q({ id: 'a', key: 'a' })],
+        config: { contradictionMode: 'probe' },
+        existingAnswers: TWO_ANSWERS,
+      }),
+      pendingContradiction: {
+        slotKeys: ['a'],
+        explanation: 'conflict',
+        statement: 'trigger',
+        raisedAtTurnIndex: 1,
+      },
+      raisedContradictions: [raised(['a'])],
+    };
+
+    const result = await runPhase(s, inv);
+
+    expect(result.raisedContradictions?.[0]).toMatchObject({ key: 'a', resolution: 'kept' });
+  });
+
+  it('marks the ledger entry unresolved (not kept) when refinement is disabled on the resolution turn', async () => {
+    // Refinement OFF → the refiner never runs, so we cannot claim the answer was 'kept' after weighing
+    // the confirmation. The honest label is 'unresolved' — raised, never reconciled. Still suppressed.
+    const inv = stubInvokers({ refine: { decisions: [decision({ slotKey: 'a' })] } });
+    const s = {
+      ...state({
+        userMessage: 'yes, change it',
+        questions: [q({ id: 'a', key: 'a' })],
+        config: { contradictionMode: 'probe' },
+        existingAnswers: TWO_ANSWERS,
+        flags: { refinement: false },
+      }),
+      pendingContradiction: {
+        slotKeys: ['a'],
+        explanation: 'conflict',
+        statement: 'trigger',
+        raisedAtTurnIndex: 1,
+      },
+      raisedContradictions: [raised(['a'])],
+    };
+
+    const result = await runPhase(s, inv);
+
+    // The refiner was never called (flag off)…
+    expect(inv.calls.refine).toHaveLength(0);
+    // …so the outcome is honest about never having reconciled, and pending is still cleared.
+    expect(result.pendingContradiction).toBeNull();
+    expect(result.raisedContradictions?.[0]).toMatchObject({ key: 'a', resolution: 'unresolved' });
+  });
+
+  it('appends a resolved entry defensively when the pending conflict predates the ledger', async () => {
+    // A probe parked before the ledger column existed → no matching entry. Resolution must still
+    // record it (so it is suppressed from here on), not silently drop it.
+    const inv = stubInvokers({ refine: { decisions: [decision({ slotKey: 'a' })] } });
+    const s = {
+      ...state({
+        userMessage: 'confirm',
+        questions: [q({ id: 'a', key: 'a' })],
+        config: { contradictionMode: 'probe' },
+        existingAnswers: TWO_ANSWERS,
+      }),
+      pendingContradiction: {
+        slotKeys: ['a'],
+        explanation: 'conflict',
+        statement: 'trigger',
+        raisedAtTurnIndex: 5,
+      },
+      // no raisedContradictions on the session (undefined → treated as [])
+    };
+
+    const result = await runPhase(s, inv);
+
+    expect(result.raisedContradictions).toEqual([
+      { key: 'a', slotKeys: ['a'], resolution: 'resolved', raisedAtTurnIndex: 5 },
+    ]);
+  });
+
+  it('resolves a MULTI-conflict pending per-conflict — refined→resolved, untouched→kept', async () => {
+    // A combined probe parked two conflicts (a and b). The confirmation turn refines only `a`.
+    // Each parked conflict is stamped by its own outcome: a→resolved, b→kept. Both suppressed hereafter.
+    const inv = stubInvokers({ refine: { decisions: [decision({ slotKey: 'a' })] } });
+    const s = {
+      ...state({
+        userMessage: 'yes to the first',
+        questions: [q({ id: 'a', key: 'a' })],
+        config: { contradictionMode: 'probe' },
+        existingAnswers: TWO_ANSWERS,
+      }),
+      pendingContradiction: {
+        slotKeys: ['a', 'b'], // union (the merged refiner trigger)
+        explanation: 'A conflict B conflict',
+        statement: 'trigger',
+        raisedAtTurnIndex: 1,
+        findings: [
+          { slotKeys: ['a'], explanation: 'A conflict' },
+          { slotKeys: ['b'], explanation: 'B conflict' },
+        ],
+      },
+      raisedContradictions: [raised(['a']), raised(['b'])], // both were 'unresolved' when parked
+    };
+
+    const result = await runPhase(s, inv);
+
+    expect(result.pendingContradiction).toBeNull();
+    expect(result.raisedContradictions).toEqual([
+      { key: 'a', slotKeys: ['a'], resolution: 'resolved', raisedAtTurnIndex: 0 },
+      { key: 'b', slotKeys: ['b'], resolution: 'kept', raisedAtTurnIndex: 0 },
+    ]);
   });
 });
