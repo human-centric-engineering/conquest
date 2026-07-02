@@ -110,6 +110,13 @@ export interface UseQuestionnaireSessionStreamReturn {
    * driven internally by `sendMessage`).
    */
   applyStatus: (status: QuestionnaireChatStatus) => void;
+  /**
+   * Append an assistant turn produced OUT OF BAND (not via the streaming send loop) — the seam the
+   * final completion sweep uses to drop a held reconciliation probe into the live transcript so the
+   * respondent can answer it in the chat. The turn is already persisted server-side (it replays on
+   * reload); this only makes it visible immediately.
+   */
+  appendAgentTurn: (content: string, warnings?: SessionWarning[]) => void;
 }
 
 interface ErrorEnvelope {
@@ -264,6 +271,18 @@ export function useQuestionnaireSessionStream(
     // Resuming (→ idle/active) clears a stale paused/blocking banner; a terminal status
     // (completed / not_active) keeps its own surface (confirmation / blocking panel).
     if (!BLOCKING_STATUSES.includes(next)) setError(null);
+  }, []);
+
+  // Append an assistant turn the surface produced OUT OF BAND — i.e. not through the streaming
+  // send loop. Used by the final completion sweep (F7.3): when a submit is HELD on a contradiction,
+  // the submit route records the reconciliation probe as a real turn server-side; this drops it into
+  // the live transcript immediately so the respondent sees it and can answer in the chat (the session
+  // stays active). It replays from the persisted turn on any later reload, same as any assistant turn.
+  const appendAgentTurn = useCallback((content: string, warnings?: SessionWarning[]) => {
+    setTurns((prev) => [
+      ...prev,
+      { role: 'assistant', content, ...(warnings && warnings.length > 0 ? { warnings } : {}) },
+    ]);
   }, []);
 
   // Shared streaming core for both a respondent send and the proactive kickoff. `userTurn`
@@ -482,5 +501,6 @@ export function useQuestionnaireSessionStream(
     dismissError,
     retry,
     applyStatus,
+    appendAgentTurn,
   };
 }

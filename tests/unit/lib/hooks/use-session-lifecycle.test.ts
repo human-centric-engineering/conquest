@@ -58,6 +58,24 @@ function errPost(message: string, status = 409): Response {
     json: async () => ({ success: false, error: { code: 'SUBMIT_NOT_READY', message } }),
   } as unknown as Response;
 }
+/** A submit that was HELD by the final sweep — active, with a reconciliation probe. */
+function heldPost(): Response {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({
+      success: true,
+      data: {
+        sessionId: SESSION_ID,
+        status: 'active',
+        held: true,
+        probe: { text: 'Earlier X, now Y — which is right?', slotKeys: ['role'] },
+        notice: 'That differs from an earlier answer.',
+        early: false,
+      },
+    }),
+  } as unknown as Response;
+}
 
 describe('useSessionLifecycle', () => {
   let fetchMock: ReturnType<typeof vi.fn>;
@@ -194,6 +212,54 @@ describe('useSessionLifecycle', () => {
       });
       const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
       expect(url).toBe(API.APP.QUESTIONNAIRE_SESSIONS.submit(SESSION_ID));
+      expect(applyStatus).toHaveBeenCalledWith('completed');
+    });
+
+    it('submit HELD by the final sweep calls onHeld and does NOT complete', async () => {
+      const onHeld = vi.fn();
+      fetchMock.mockResolvedValueOnce(heldPost()).mockResolvedValueOnce(okResponse(view()));
+      const { result } = renderHook(() =>
+        useSessionLifecycle({ sessionId: SESSION_ID, initialView: view(), applyStatus, onHeld })
+      );
+      await act(async () => {
+        await result.current.submit();
+      });
+      expect(onHeld).toHaveBeenCalledWith(
+        {
+          text: 'Earlier X, now Y — which is right?',
+          slotKeys: ['role'],
+          notice: 'That differs from an earlier answer.',
+        },
+        { early: false }
+      );
+      expect(applyStatus).not.toHaveBeenCalledWith('completed');
+    });
+
+    it('finishEarly HELD flags early:true to onHeld', async () => {
+      const onHeld = vi.fn();
+      fetchMock.mockResolvedValueOnce(heldPost()).mockResolvedValueOnce(okResponse(view()));
+      const { result } = renderHook(() =>
+        useSessionLifecycle({ sessionId: SESSION_ID, initialView: view(), applyStatus, onHeld })
+      );
+      await act(async () => {
+        await result.current.finishEarly();
+      });
+      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(JSON.parse(init.body as string)).toEqual({ early: true });
+      expect(onHeld).toHaveBeenCalledWith(expect.anything(), { early: true });
+    });
+
+    it('finishAnyway posts skipSweep and completes', async () => {
+      fetchMock.mockResolvedValueOnce(okPost()).mockResolvedValueOnce(okResponse(view()));
+      const { result } = renderHook(() =>
+        useSessionLifecycle({ sessionId: SESSION_ID, initialView: view(), applyStatus })
+      );
+      await act(async () => {
+        await result.current.finishAnyway(true);
+      });
+      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe(API.APP.QUESTIONNAIRE_SESSIONS.submit(SESSION_ID));
+      expect(JSON.parse(init.body as string)).toEqual({ early: true, skipSweep: true });
       expect(applyStatus).toHaveBeenCalledWith('completed');
     });
 

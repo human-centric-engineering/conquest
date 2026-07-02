@@ -152,7 +152,11 @@ export interface ContradictionFinding {
  * Persisted as `AppQuestionnaireSession.pendingContradiction` (JSON).
  */
 export interface PendingContradiction {
-  /** The conflicting question slot key(s) the probe is reconciling. */
+  /**
+   * The conflicting question slot key(s) the probe is reconciling. When a single turn probed MORE than
+   * one distinct conflict together (see {@link findings}), this is the UNION of their slot keys — the
+   * merged trigger the refiner reconciles in one pass, and the set the consequence sentence names.
+   */
   slotKeys: string[];
   /** Why the answers conflict — surfaced informationally (the blue notice), not as the question. */
   explanation: string;
@@ -161,6 +165,46 @@ export interface PendingContradiction {
   /** The respondent message that triggered the contradiction (the "new" side of the conflict). */
   statement: string;
   /** The zero-based selection round the probe was raised on (for ordering / audit). */
+  raisedAtTurnIndex: number;
+  /**
+   * The distinct conflicts parked together this turn — one entry per detected contradiction. Present
+   * when a single combined probe raised one OR MORE conflicts at once (the interviewer asks about them
+   * as separate points to clarify). Each carries its own slot-key set so the resolution turn can stamp
+   * EVERY affected {@link RaisedContradiction} ledger entry, not just the merged union in `slotKeys`.
+   * Absent on rows parked before this field existed → fall back to the single conflict in `slotKeys`.
+   */
+  findings?: Array<{ slotKeys: string[]; explanation: string; suggestedProbe?: string }>;
+}
+
+/**
+ * How a raised contradiction ended, for the session's {@link RaisedContradiction} ledger:
+ * - `unresolved` — a probe was raised (or a finding noticed) but the respondent never reconciled it
+ *   (they deflected, went quiet, or only one of several findings was probed this turn).
+ * - `resolved` — the respondent confirmed the newer view on the resolution turn and the earlier answer
+ *   was refined to match.
+ * - `kept` — the respondent declined the change on the resolution turn; the original answer stands.
+ * - `flagged` — surfaced passively under `flag` mode (and refined in place the same turn).
+ */
+export const CONTRADICTION_RESOLUTIONS = ['unresolved', 'resolved', 'kept', 'flagged'] as const;
+export type ContradictionResolution = (typeof CONTRADICTION_RESOLUTIONS)[number];
+
+/**
+ * A contradiction the interviewer has ALREADY surfaced this session — the "don't nag" ledger.
+ * Once a conflict (identified by its {@link contradictionKey} — the sorted slot-key set) has been
+ * raised, it is recorded here so the interviewer never re-probes or re-alerts on the same conflict on
+ * a later turn, whether or not the respondent actually reconciled it. Persisted append-only as
+ * `AppQuestionnaireSession.raisedContradictions` (JSON). Deliberately PII-free — it carries the slot
+ * identity + how it ended, never the explanation/statement/values (those live transiently on
+ * {@link PendingContradiction} and are cleared on resolution).
+ */
+export interface RaisedContradiction {
+  /** Canonical identity — the sorted slot-key set joined by `|` ({@link contradictionKey}). */
+  key: string;
+  /** The conflicting slot key(s) as raised (order preserved for readability; identity is `key`). */
+  slotKeys: string[];
+  /** How it ended — see {@link CONTRADICTION_RESOLUTIONS}. */
+  resolution: ContradictionResolution;
+  /** Zero-based selection round it was first raised on (for ordering / audit). */
   raisedAtTurnIndex: number;
 }
 

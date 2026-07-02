@@ -74,6 +74,60 @@ describe('buildContradictionDetectionPrompt', () => {
     expect(flagSystem).not.toContain('suggestedProbe');
   });
 
+  it('tells the probe to calibrate directness to confidence/severity, with humility for subtle conflicts', () => {
+    const base = { answers: [answered({ slotKey: 'a' }), answered({ slotKey: 'b' })] };
+    const probeSystem = text(buildContradictionDetectionPrompt(ctx({ ...base, mode: 'probe' }))[0]);
+    // Always surface the specific tension.
+    expect(probeSystem).toContain('ALWAYS name the specific thing');
+    // The clear-vs-subtle calibration is anchored on the finding's own confidence + severity.
+    expect(probeSystem).toContain('CALIBRATE');
+    expect(probeSystem).toMatch(/confidence.*severity|severity.*confidence/s);
+    // Clear-cut → direct.
+    expect(probeSystem.toLowerCase()).toContain('directly');
+    // Subtle/ambiguous → the exact humility softeners the product wants.
+    expect(probeSystem).toContain("Forgive me if I've misunderstood");
+    expect(probeSystem).toContain('It seems that');
+    expect(probeSystem).toContain('I may be wrong');
+    // Never presume which side is right — the non-accusatory guarantee is kept.
+    expect(probeSystem.toLowerCase()).toContain('never presume which answer');
+  });
+
+  it('spells out that a restatement / matching numbers / a "could imply" difference is NOT a contradiction', () => {
+    // Guards against the BBG4-NZCN false positive: "10 hours strategic planning" vs "10 hours doing
+    // strategy" (same value, different words) was reported as a possible conflict. The rules must make
+    // that explicitly not-a-contradiction, and forbid hedged "could imply" reports.
+    const system = text(
+      buildContradictionDetectionPrompt(ctx({ answers: [answered({ slotKey: 'a' })] }))[0]
+    );
+    expect(system).toContain('RESTATEMENT');
+    expect(system).toContain('Matching numbers never conflict');
+    expect(system).toContain('could imply');
+    expect(system).toContain('CANNOT BOTH BE TRUE');
+  });
+
+  it('makes humility govern DELIVERY only — never a licence to raise an uncertain conflict', () => {
+    const probeSystem = text(
+      buildContradictionDetectionPrompt(
+        ctx({ answers: [answered({ slotKey: 'a' }), answered({ slotKey: 'b' })], mode: 'probe' })
+      )[0]
+    );
+    // The humble branch is for a GENUINE but subtle conflict, and explicitly forbids raising a doubt.
+    expect(probeSystem).toContain('Humility is about DELIVERY');
+    expect(probeSystem).toContain("If you're not sure it's a real conflict, do NOT report it");
+    // The old wording that licensed reporting an uncertain conflict is gone.
+    expect(probeSystem).not.toContain('you cannot be certain it is a real conflict');
+  });
+
+  it('does not leak the humility softeners into flag mode (which carries no probe)', () => {
+    const flagSystem = text(
+      buildContradictionDetectionPrompt(
+        ctx({ answers: [answered({ slotKey: 'a' }), answered({ slotKey: 'b' })], mode: 'flag' })
+      )[0]
+    );
+    expect(flagSystem).not.toContain("Forgive me if I've misunderstood");
+    expect(flagSystem).not.toContain('CALIBRATE');
+  });
+
   it('includes the latest message and reversal instruction when currentStatement is set', () => {
     const context = ctx({
       answers: [answered({ slotKey: 'a' }), answered({ slotKey: 'b' })],

@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   normalizeContradictionFindings,
   shouldRunDetection,
+  isSurfaceableContradiction,
+  SURFACE_CONTRADICTION_CONFIDENCE,
 } from '@/lib/app/questionnaire/contradiction/detection-logic';
 
 import {
@@ -200,6 +202,28 @@ describe('normalizeContradictionFindings', () => {
     );
     expect(findings).toHaveLength(1);
     expect(findings[0]?.slotKeys).toEqual(['a', 'b', 'c']);
+  });
+});
+
+describe('isSurfaceableContradiction', () => {
+  it('is true at/above the floor and false below it', () => {
+    expect(isSurfaceableContradiction({ confidence: SURFACE_CONTRADICTION_CONFIDENCE })).toBe(true);
+    expect(isSurfaceableContradiction({ confidence: 0.9 })).toBe(true);
+    expect(
+      isSurfaceableContradiction({ confidence: SURFACE_CONTRADICTION_CONFIDENCE - 0.01 })
+    ).toBe(false);
+    expect(isSurfaceableContradiction({ confidence: 0.6 })).toBe(false);
+  });
+
+  it('does not filter in the normaliser — a below-floor finding is still returned for audit', () => {
+    // The floor is a SURFACING gate, not a detection gate: normalize keeps weak findings so the admin
+    // preview can show them; only the live respondent paths drop them.
+    const { findings } = normalizeContradictionFindings(
+      [contradiction({ slotKeys: ['a', 'b'], confidence: 0.3 })],
+      ctx({ answers: [answered({ slotKey: 'a' }), answered({ slotKey: 'b' })] })
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.confidence).toBe(0.3);
   });
 });
 

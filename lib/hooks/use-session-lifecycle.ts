@@ -40,6 +40,16 @@ export interface UseSessionLifecycleOptions {
   /** Push the authoritative status into the shared stream (from {@link SessionWorkspace}). */
   applyStatus: (status: QuestionnaireChatStatus) => void;
   /**
+   * Final completion sweep (F7.3): called when a submit / early-finish is HELD on a contradiction
+   * instead of completing. The workspace drops the reconciliation `probe` into the live chat (with its
+   * `notice` — the "I noticed something" box) so the respondent can answer it, and, for an early finish
+   * (`early: true`), opens the final-check modal. The session stays active — status is NOT `completed`.
+   */
+  onHeld?: (
+    probe: { text: string; slotKeys: string[]; notice?: string },
+    opts: { early: boolean }
+  ) => void;
+  /**
    * Whether the lifecycle is live. `false` makes the hook inert — no mount fetch, `refetch` a no-op
    * — for surfaces that don't drive lifecycle (e.g. the admin read-only session viewer, which has
    * no respondent credential). Defaults to `true`.
@@ -69,6 +79,12 @@ export interface UseSessionLifecycleReturn {
   submit: () => Promise<void>;
   /** Voluntarily end the session early (the escape hatch) — POSTs the submit route with `early`. */
   finishEarly: () => Promise<void>;
+  /**
+   * "Submit / get my report anyway" — complete despite a held final-check contradiction, bypassing
+   * the sweep (`skipSweep`). `early` mirrors the submit that was held so the completion reason + gate
+   * match. Wired to the final-check modal's escape hatch and the chat's "finish anyway" affordance.
+   */
+  finishAnyway: (early: boolean) => Promise<void>;
 }
 
 interface SuccessEnvelope {
@@ -83,7 +99,7 @@ const ACTION_FALLBACK = 'Something went wrong. Please try again.';
 export function useSessionLifecycle(
   options: UseSessionLifecycleOptions
 ): UseSessionLifecycleReturn {
-  const { sessionId, accessToken, initialView, applyStatus, enabled = true } = options;
+  const { sessionId, accessToken, initialView, applyStatus, onHeld, enabled = true } = options;
   const anonymous = Boolean(accessToken);
 
   const [view, setView] = useState<SessionStatusView | null>(initialView ?? null);
@@ -139,9 +155,9 @@ export function useSessionLifecycle(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refetch]);
 
-  /** POST a lifecycle/submit action; on success push status + refetch, else surface copy. */
+  /** POST a lifecycle/submit action; on success hand the parsed `data` to `onOk` + refetch, else copy. */
   const runAction = useCallback(
-    async (url: string, body: unknown, onOk: () => void): Promise<void> => {
+    async (url: string, body: unknown, onOk: (data: unknown) => void): Promise<void> => {
       if (busy) return;
       setBusy(true);
       setActionError(null);
@@ -162,8 +178,14 @@ export function useSessionLifecycle(
           if (mountedRef.current) setActionError(message ?? ACTION_FALLBACK);
           return;
         }
+        let data: unknown;
+        try {
+          data = ((await res.json()) as { data?: unknown }).data;
+        } catch {
+          // Non-JSON success body — leave `data` undefined; onOk handles it.
+        }
         if (mountedRef.current) {
-          onOk();
+          onOk(data);
           refetch();
         }
       } catch {
@@ -173,6 +195,31 @@ export function useSessionLifecycle(
       }
     },
     [busy, authHeaders, refetch]
+  );
+
+  /**
+   * Interpret a submit / early-finish result: a HELD response (the final sweep found a conflict) does
+   * NOT complete — it hands the probe to `onHeld` and leaves the session active; anything else completes.
+   */
+  const handleSubmitResult = useCallback(
+    (data: unknown, early: boolean) => {
+      const d = data as
+        | { held?: boolean; probe?: { text: string; slotKeys: string[] }; notice?: string }
+        | undefined;
+      if (d?.held && d.probe) {
+        onHeld?.(
+          {
+            text: d.probe.text,
+            slotKeys: d.probe.slotKeys,
+            ...(typeof d.notice === 'string' ? { notice: d.notice } : {}),
+          },
+          { early }
+        );
+        return;
+      }
+      applyStatus('completed');
+    },
+    [onHeld, applyStatus]
   );
 
   const pause = useCallback(
@@ -193,16 +240,26 @@ export function useSessionLifecycle(
 
   const submit = useCallback(
     () =>
-      runAction(API.APP.QUESTIONNAIRE_SESSIONS.submit(sessionId), undefined, () =>
-        applyStatus('completed')
+      runAction(API.APP.QUESTIONNAIRE_SESSIONS.submit(sessionId), undefined, (data) =>
+        handleSubmitResult(data, false)
       ),
-    [runAction, sessionId, applyStatus]
+    [runAction, sessionId, handleSubmitResult]
   );
 
   const finishEarly = useCallback(
     () =>
-      runAction(API.APP.QUESTIONNAIRE_SESSIONS.submit(sessionId), { early: true }, () =>
-        applyStatus('completed')
+      runAction(API.APP.QUESTIONNAIRE_SESSIONS.submit(sessionId), { early: true }, (data) =>
+        handleSubmitResult(data, true)
+      ),
+    [runAction, sessionId, handleSubmitResult]
+  );
+
+  const finishAnyway = useCallback(
+    (early: boolean) =>
+      runAction(
+        API.APP.QUESTIONNAIRE_SESSIONS.submit(sessionId),
+        { ...(early ? { early: true } : {}), skipSweep: true },
+        () => applyStatus('completed')
       ),
     [runAction, sessionId, applyStatus]
   );
@@ -228,5 +285,6 @@ export function useSessionLifecycle(
     resume,
     submit,
     finishEarly,
+    finishAnyway,
   };
 }

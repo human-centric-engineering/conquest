@@ -599,4 +599,65 @@ describe('buildTurnContext', () => {
 
     expect(loaded!.base.pendingContradiction).toBeNull();
   });
+
+  // -------------------------------------------------------------------------
+  // parseRaisedContradictions — defensive JSON parsing of the "don't nag" ledger
+  // -------------------------------------------------------------------------
+  // Exercised via buildTurnContext through the raisedContradictions field on the row.
+  // Each malformed entry is skipped individually; a non-array degrades to [].
+
+  it('parses a well-formed raisedContradictions ledger and threads it into base', async () => {
+    const raw = [
+      { key: 'a|b', slotKeys: ['a', 'b'], resolution: 'resolved', raisedAtTurnIndex: 2 },
+      { key: 'c', slotKeys: ['c'], resolution: 'unresolved', raisedAtTurnIndex: 4 },
+    ];
+    (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionGraph({ raisedContradictions: raw })
+    );
+
+    const loaded = await buildTurnContext('sess-1');
+
+    expect(loaded!.base.raisedContradictions).toEqual(raw);
+  });
+
+  it('degrades a non-array raisedContradictions to an empty ledger', async () => {
+    (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionGraph({ raisedContradictions: 'not-an-array' })
+    );
+
+    const loaded = await buildTurnContext('sess-1');
+
+    expect(loaded!.base.raisedContradictions).toEqual([]);
+  });
+
+  it('defaults to an empty ledger when the column is the JSON default (empty array)', async () => {
+    (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionGraph({ raisedContradictions: [] })
+    );
+
+    const loaded = await buildTurnContext('sess-1');
+
+    expect(loaded!.base.raisedContradictions).toEqual([]);
+  });
+
+  it('skips ledger entries that are malformed, keeping only the valid ones', async () => {
+    const raw = [
+      'not-a-record', // not an object → skipped
+      { key: '', slotKeys: ['a'], resolution: 'resolved', raisedAtTurnIndex: 1 }, // empty key → skipped
+      { key: 'a', slotKeys: 'a', resolution: 'resolved', raisedAtTurnIndex: 1 }, // slotKeys not array → skipped
+      { key: 'b', slotKeys: ['b', 2], resolution: 'resolved', raisedAtTurnIndex: 1 }, // non-string element → skipped
+      { key: 'c', slotKeys: ['c'], resolution: 'bogus', raisedAtTurnIndex: 1 }, // bad resolution → skipped
+      { key: 'd', slotKeys: ['d'], resolution: 'flagged', raisedAtTurnIndex: '1' }, // non-number index → skipped
+      { key: 'e', slotKeys: ['e'], resolution: 'kept', raisedAtTurnIndex: 5 }, // the one valid entry
+    ];
+    (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionGraph({ raisedContradictions: raw })
+    );
+
+    const loaded = await buildTurnContext('sess-1');
+
+    expect(loaded!.base.raisedContradictions).toEqual([
+      { key: 'e', slotKeys: ['e'], resolution: 'kept', raisedAtTurnIndex: 5 },
+    ]);
+  });
 });

@@ -74,10 +74,11 @@ builds the prompt and (after the LLM call) normalises the findings.
 ```
 contradiction/
 ├── types.ts            ContradictionContext, ContradictionSlotView, AnsweredSlotView,
-│                       ContradictionFinding, CONTRADICTION_SEVERITIES, DetectionPhase
+│                       ContradictionFinding, RaisedContradiction, CONTRADICTION_SEVERITIES,
+│                       CONTRADICTION_RESOLUTIONS, DetectionPhase
 ├── detection-schema.ts contradictionDetectionSchema (+ z.toJSONSchema), validateContradictionDetection
 ├── detection-prompt.ts buildContradictionDetectionPrompt / …RetryMessage → LlmMessage[]
-└── detection-logic.ts  normalizeContradictionFindings(...) + shouldRunDetection(...)
+└── detection-logic.ts  normalizeContradictionFindings(...) + shouldRunDetection(...) + contradictionKey(...)
 ```
 
 - **`ContradictionContext`** — `{ slots, answers, mode, windowN, currentStatement?,
@@ -156,11 +157,139 @@ Under `probe` mode a detected contradiction is **never silently overwritten**. T
    the pending state is **cleared**, and **no fresh detection runs** (so the same conflict can't
    re-probe in a loop). The turn then proceeds to normal selection.
 
+### Surfacing floor (weak findings never reach the respondent)
+
+The detector is asked how sure it is (`confidence` 0–1). Below **`SURFACE_CONTRADICTION_CONFIDENCE`
+(0.7)** a finding is **not surfaced at all** — no probe, no notice, no submit-time hold — in either the
+per-turn phase (`isSurfaceableContradiction` filters `fresh`) or the completion sweep
+(`filterSweepFindings`). This is a **surfacing** gate, not a detection one: `normalizeContradictionFindings`
+still returns weak findings (the admin preview shows them); only the live respondent paths drop them.
+It exists because a weaker detector model will occasionally emit a hedged "could imply a different
+understanding" guess at ~0.6 confidence, and interrupting a respondent over a non-conflict does more
+harm than good. The prompt reinforces this: a **restatement of the same value/number** in different
+words is explicitly _not_ a contradiction, and the model is told not to report "could imply / might be"
+differences — only answers that **cannot both be true**.
+
+### Graded, humble phrasing (how directly the conflict is raised)
+
+Once a finding clears the floor, the reconciliation question is **calibrated to the detector's own
+certainty**, so the interviewer matches how a careful person would raise a suspicion. The finding
+carries `confidence` (0–1) and `severity`; both the LLM-authored `suggestedProbe` and the deterministic
+fallback use them:
+
+- **Clear and obvious** (`≥ 0.8` confidence — answers that plainly can't both be true) → put the tension
+  **directly and plainly** ("Earlier you said X, but just now it sounds like Y — which is right?").
+- **Genuine but subtle** (`[0.7, 0.8)` confidence — a real conflict, but the wording is ambiguous or
+  it's a matter of degree) → raise it with **genuine humility**: a softener such as _"Forgive me if
+  I've misunderstood…"_, _"It seems that…"_, or _"I may be wrong, but…"_, framed as the interviewer's
+  possible misreading, and easy to correct. Humility governs **delivery** of a conflict the detector
+  does believe is real — it is never a licence to raise a doubt (that's what the floor is for).
+
+Either way the probe **always names the specific thing that seems to conflict** (the suspicion is
+never hidden), and never accuses or presumes which answer is correct. The **switch is confidence**
+(how sure the detector is it's a real conflict — the axis the user's "clear vs subtle" maps to); a low
+`severity` only nudges the model gentler still, it is not itself the direct/humble toggle. The detector
+prompt (`detection-prompt.ts`) instructs the model to apply this to `suggestedProbe`; when the model
+returns no probe, `buildContradictionProbe` picks a **direct** vs **humble** default by
+`CLEAR_CONTRADICTION_CONFIDENCE` (0.8) — the same confidence threshold (so code and prompt agree on the
+switch). The deterministic consequence line is unaffected — it stays exact regardless of tone.
+
 `flag` mode is unchanged: surface the explanation **and** refine immediately. `off` does nothing.
 
 The seriousness gate runs BEFORE this phase, so a contradicting answer must survive it to be probed —
 the judge prompt explicitly treats "contradicts an earlier answer" as genuine (see
 [seriousness-gate.md](./seriousness-gate.md#a-contradiction-is-not-a-sincerity-failure)).
+
+### Never re-raise the same conflict (the "don't nag" ledger)
+
+Detection is stateless — it re-reports a conflict every time it still sees one. Left alone, the same
+contradiction would be probed / alerted on turn after turn, which reads as the interviewer nagging.
+`AppQuestionnaireSession.raisedContradictions` fixes that: an **append-only ledger of contradictions
+already surfaced this session**, keyed by the canonical slot-key set (`contradictionKey` — so
+`[a,b] ≡ [b,a]`).
+
+- **Suppress.** In `runContradictionPhase`, every freshly-detected finding whose key is already in the
+  ledger is dropped **before** any notice or probe — no re-alert, no re-probe — **whether or not it was
+  ever reconciled**. Detection still runs (it's cheap and the tool-call is recorded); it just produces
+  no user-facing output for a stale conflict. A wholly-stale pass surfaces nothing.
+- **Record.** The phase **acts on every fresh conflict the turn surfaces** and records each one, so a
+  conflict is only ledgered once it has genuinely been raised (never noticed-then-silently-suppressed):
+  `probe` mode records each as `unresolved`; `flag` mode records each as `flagged`. When a single turn
+  turns up **more than one** fresh conflict they are handled **together** — see [Combining several
+  conflicts](#combining-several-conflicts-in-one-turn).
+- **Resolve.** On the resolution turn (a parked probe is confirmed/declined), each parked conflict's
+  ledger entry is stamped `resolved` (that conflict's slot was actually refined), `kept` (the sole
+  conflict, replied to without a change — a deliberate decline), or `unresolved`. A conflict stays
+  `unresolved` when refinement was disabled (never attempted) **or** when it was one of SEVERAL bundled
+  in a combined probe and this reply didn't refine its slot — a single message can't have addressed
+  every point, so an un-refined bundle member is left open for the final sweep to catch rather than
+  silently marked `kept`. If no entry matches — a probe parked before the column existed — the entry is
+  appended defensively, so the conflict is still suppressed from then on.
+
+The ledger is **PII-free by design** — `RaisedContradiction = { key, slotKeys, resolution,
+raisedAtTurnIndex }`, never the explanation / statement / values (those live transiently on
+`pendingContradiction` and are cleared on resolution). The route loads it (parsed defensively per
+entry) into `TurnState.raisedContradictions` and persists the full updated list alongside
+`pendingContradiction` in one session update, so raise/resolve state moves atomically.
+
+### Combining several conflicts in one turn
+
+Usually a turn surfaces at most one new conflict. When detection returns **several fresh conflicts at
+once**, they are handled **together**, not dribbled out over turns:
+
+- **One notice box.** The blue "I noticed something" callout combines them — a short lead-in plus a
+  numbered line per conflict (`buildContradictionNoticeMessage`). The notice renders with
+  `whitespace-pre-line` so the breaks show.
+- **One combined probe** (probe mode). The interviewer asks a single reconciliation message that raises
+  each conflict as its own numbered point to clarify, closed by one consequence sentence naming every
+  affected topic. All conflicts are parked together in `PendingContradiction.findings`, and the next
+  turn reconciles them in one refiner pass (a **merged trigger** over the union of their slots). Each
+  conflict's ledger entry is stamped by its own outcome (the one whose slot was refined → `resolved`,
+  the rest → `kept`).
+- **One refiner pass** (flag mode). The merged trigger reconciles every fresh conflict at once.
+
+Every fresh conflict is recorded in the ledger (so none re-alerts), **and** every one is genuinely
+acted on this turn (so none is silently dropped) — the two guarantees the "don't nag, but do deal with
+new ones" requirement needs. A brand-new conflict on later turns (different slots) is still detected
+and handled normally; only a conflict already in the ledger is suppressed.
+
+The same ledger is also consulted by the **submit-time completion sweep** (below), so a conflict dealt
+with mid-conversation never re-nags at the finish line.
+
+## Final completion sweep (submit-time)
+
+Both a normal submit and an early finish (`POST …/questionnaire-sessions/:id/submit`, `{ early }`) run
+one last contradiction pass **before the session completes and its respondent report is generated** — a
+report built on contradictory answers would mislead. This is distinct from the admin **preview** sweep
+(`…/versions/:vid/complete`, over body-supplied answers): the live sweep sources the session's stored
+answers.
+
+- **Gate.** Runs only when `contradictionMode ≠ off` AND the detection sub-flag is on, and never when
+  the respondent chose to finish anyway (`skipSweep`). Needs ≥2 answered slots (no `currentStatement`
+  at submit). The paid dispatch takes a per-flow sub-cap (`turnLimiter.check(access.rateKey)`, 60/min —
+  the same guard the per-turn messages route uses), so a held session can't be re-POSTed to hammer
+  detection. Fail-soft: a missing detector, oversized input, or dispatch error → treated as clean, so
+  a wrap-up is never blocked by infra (`runCompletionSweep`).
+- **Idempotent re-submit.** If a probe is already parked (a prior hold the respondent hasn't answered),
+  a plain re-submit **short-circuits**: it re-surfaces the SAME parked probe — no second sweep (no LLM),
+  no duplicate probe turn — so a resume-then-resubmit never spams the transcript or re-bills.
+- **Ledger-aware.** `filterSweepFindings` drops any conflict already `resolved` / `kept` / `flagged`
+  this session; it surfaces only **genuinely-new** conflicts (the sweep's real value — cross-slot ones
+  the per-turn pass never caught) **and still-`unresolved`** ones (raised, never reconciled — the final
+  check).
+- **Held, not blocked.** On a surviving conflict the session does **not** complete: a combined probe is
+  parked (reusing the multi-conflict builder), recorded as a turn (so it shows in the chat + replays),
+  each conflict recorded `unresolved`, and the route returns `{ held: true, probe }`. The respondent's
+  next chat message resolves it through the ordinary [resolution turn](#probe-confirm-flow-probe-mode)
+  — refining answers + data slots in the background — after which finishing again completes cleanly.
+- **Escape hatch.** `{ skipSweep: true }` ("finish / get my report anyway") bypasses the sweep and
+  completes, recording the conflict `unresolved` (auditable) and leaving the data as-is. Completing
+  clears any parked `pendingContradiction` so a completed session never carries a stale probe. The
+  respondent is never trapped.
+- **Surfaces.** Normal submit continues **in the chat** (the probe is the next message); an early
+  finish additionally opens a **final-check modal** over the exit action (`FinalCheckModal`), with
+  "Clarify in chat" and "Get my report anyway". Both are driven by the same `held` backend response
+  (`useSessionLifecycle` `onHeld` → `SessionWorkspace`).
 
 ## The capability
 

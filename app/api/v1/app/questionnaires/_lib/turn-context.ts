@@ -24,7 +24,12 @@ import {
   type SensitivitySeverity,
 } from '@/lib/app/questionnaire/types';
 import type { SensitivityNote } from '@/lib/app/questionnaire/sensitivity/types';
-import type { PendingContradiction } from '@/lib/app/questionnaire/contradiction/types';
+import {
+  CONTRADICTION_RESOLUTIONS,
+  type ContradictionResolution,
+  type PendingContradiction,
+  type RaisedContradiction,
+} from '@/lib/app/questionnaire/contradiction/types';
 import { isRecord } from '@/lib/utils';
 import { toConfigView, CONFIG_SELECT } from '@/app/api/v1/app/questionnaires/_lib/detail';
 import type { AnsweredView, QuestionView } from '@/lib/app/questionnaire/selection';
@@ -52,13 +57,63 @@ function parsePendingContradiction(raw: unknown): PendingContradiction | null {
   if (slotKeys.length === 0) return null;
   if (typeof raw.explanation !== 'string' || typeof raw.statement !== 'string') return null;
   if (typeof raw.raisedAtTurnIndex !== 'number') return null;
+  // A combined probe parks each conflict it covered under `findings` (one entry per contradiction), so
+  // the resolution turn can stamp every ledger entry. Parse defensively per-entry; drop malformed ones.
+  // Absent/empty (a single-conflict or pre-feature row) → the resolution falls back to `slotKeys`.
+  const findings: NonNullable<PendingContradiction['findings']> = [];
+  if (Array.isArray(raw.findings)) {
+    for (const f of raw.findings) {
+      if (!isRecord(f)) continue;
+      if (
+        !Array.isArray(f.slotKeys) ||
+        !f.slotKeys.every((k): k is string => typeof k === 'string') ||
+        f.slotKeys.length === 0
+      ) {
+        continue;
+      }
+      if (typeof f.explanation !== 'string') continue;
+      findings.push({
+        slotKeys: f.slotKeys,
+        explanation: f.explanation,
+        ...(typeof f.suggestedProbe === 'string' ? { suggestedProbe: f.suggestedProbe } : {}),
+      });
+    }
+  }
   return {
     slotKeys,
     explanation: raw.explanation,
     statement: raw.statement,
     raisedAtTurnIndex: raw.raisedAtTurnIndex,
     ...(typeof raw.suggestedProbe === 'string' ? { suggestedProbe: raw.suggestedProbe } : {}),
+    ...(findings.length > 0 ? { findings } : {}),
   };
+}
+
+/**
+ * Parse the persisted `raisedContradictions` JSON into a clean {@link RaisedContradiction}[] — the
+ * "don't nag" ledger. Defensive per-entry: malformed rows (manual edit / drift) are skipped, never
+ * crashing the turn; a non-array degrades to `[]` (the phase then treats nothing as already-raised).
+ */
+function parseRaisedContradictions(raw: unknown): RaisedContradiction[] {
+  if (!Array.isArray(raw)) return [];
+  const out: RaisedContradiction[] = [];
+  for (const entry of raw) {
+    if (!isRecord(entry)) continue;
+    const { key, slotKeys, resolution, raisedAtTurnIndex } = entry;
+    if (typeof key !== 'string' || key.length === 0) continue;
+    if (!Array.isArray(slotKeys) || !slotKeys.every((k): k is string => typeof k === 'string')) {
+      continue;
+    }
+    if (!(CONTRADICTION_RESOLUTIONS as readonly string[]).includes(resolution as string)) continue;
+    if (typeof raisedAtTurnIndex !== 'number') continue;
+    out.push({
+      key,
+      slotKeys,
+      resolution: resolution as ContradictionResolution,
+      raisedAtTurnIndex,
+    });
+  }
+  return out;
 }
 
 /** A slot projected into the richer shape the P4 capabilities read (incl. type config). */
@@ -166,6 +221,9 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
       // Probe-confirm contradiction flow: a `probe`-mode contradiction parked on a prior turn,
       // awaiting this turn's confirmation. Null = none pending.
       pendingContradiction: true,
+      // "Don't nag" ledger: contradictions already surfaced this session, so the phase never re-raises
+      // the same conflict (RaisedContradiction[]). Empty list on a session that has raised none.
+      raisedContradictions: true,
       version: {
         select: {
           // Version framing for the conversational question phraser (F6 interviewer).
@@ -399,6 +457,8 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
   // Probe-confirm flow: parse the parked contradiction defensively (it's persisted JSON). A malformed
   // row (manual edit, schema drift) reads as "none pending" rather than crashing the turn.
   const pendingContradiction = parsePendingContradiction(session.pendingContradiction);
+  // "Don't nag" ledger: contradictions already surfaced this session, so the phase never re-raises one.
+  const raisedContradictions = parseRaisedContradictions(session.raisedContradictions);
 
   const audience = toTurnAudience(session.version.audience);
   const meta: TurnMeta = {
@@ -437,6 +497,8 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
       sensitivityNotes,
       // Probe-confirm flow: the parked contradiction awaiting confirmation (null when none).
       pendingContradiction,
+      // "Don't nag" ledger: conflicts already surfaced this session (suppress re-raising).
+      raisedContradictions,
       // Monotonic per-turn counter (the engine contract selection-context.ts calls out):
       // the TRUE number of turns already taken (not the windowed `turns` array, whose length
       // saturates at RECENT_TURNS_WINDOW), so the `random` strategy's session+round seed keeps

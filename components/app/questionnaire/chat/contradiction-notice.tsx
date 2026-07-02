@@ -52,7 +52,8 @@ export function ContradictionNotice({ message, detail, className }: Contradictio
       />
       <div className="min-w-0">
         <p className="text-foreground text-xs font-medium">I noticed something</p>
-        <p className="text-muted-foreground mt-0.5">{message}</p>
+        {/* whitespace-pre-line so a combined multi-conflict notice renders its line breaks. */}
+        <p className="text-muted-foreground mt-0.5 whitespace-pre-line">{message}</p>
         <NoticeWhy detail={detail} />
       </div>
     </div>

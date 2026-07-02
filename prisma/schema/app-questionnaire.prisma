@@ -848,6 +848,12 @@ model AppQuestionnaireSession {
   // statement, raisedAtTurnIndex). The next turn resolves it (refiner applies the change on confirm,
   // or keeps the original) and clears this back to null. Null = no contradiction awaiting confirmation.
   pendingContradiction Json?
+  // "Don't nag" ledger: contradictions ALREADY surfaced this session (append-only RaisedContradiction[]
+  // — contradiction/types.ts: { key, slotKeys, resolution, raisedAtTurnIndex }). The per-turn
+  // contradiction phase suppresses any freshly-detected conflict whose canonical slot-key set is
+  // already here — no re-probe, no re-alert — whether or not it was ever reconciled. PII-free by design
+  // (identity + how it ended only; never the explanation/statement/values). Defaults to an empty list.
+  raisedContradictions Json     @default("[]")
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 

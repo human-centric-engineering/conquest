@@ -29,8 +29,20 @@ import {
 function systemRules(mode: ContradictionContext['mode'], withCurrentStatement: boolean): string {
   const probeLine =
     mode === 'probe'
-      ? `\n- "suggestedProbe": ONE neutral follow-up question that lets the respondent reconcile the \
-conflicting answers. Ask, don't accuse; don't presume which answer is correct.`
+      ? `\n- "suggestedProbe": ONE follow-up question that lets the respondent reconcile the \
+conflicting answers. ALWAYS name the specific thing that seems to conflict, so they can see exactly \
+what you noticed. CALIBRATE how directly you raise it to your "confidence" for THIS finding (how sure \
+you are it is a real conflict), and lean gentler still when the "severity" is low:
+    - Clear and obvious (high confidence — the two answers plainly cannot both be true): put the \
+tension to them directly and plainly — e.g. "Earlier you said X, but just now it sounds like Y — \
+which is right?".
+    - Genuine but subtle (a real conflict, but the wording is ambiguous or it's a matter of degree — \
+you DO believe the two answers are at odds, just less clear-cut): raise it with genuine humility. Open \
+with a softener such as "Forgive me if I've misunderstood…", "It seems that…", or "I may be wrong, \
+but…", frame it as YOUR possible misreading rather than their mistake, and make it easy for them to \
+correct you. (Humility is about DELIVERY — never a licence to raise something you don't actually think \
+is a contradiction. If you're not sure it's a real conflict, do NOT report it at all.)
+    Either way: ask, don't accuse; never presume which answer is the correct one.`
       : '';
 
   const slotKeysLine = withCurrentStatement
@@ -57,8 +69,14 @@ ${slotKeysLine}
 - "confidence": 0–1, how sure you are this is a real contradiction.${probeLine}
 
 Rules:
-- Report a contradiction ONLY when the answers are genuinely incompatible. Differences in detail, \
-emphasis, or wording are NOT contradictions. When in doubt, do not report it.
+- Report a contradiction ONLY when the answers CANNOT BOTH BE TRUE. Differences in detail, emphasis, \
+or wording are NOT contradictions. When in doubt, do not report it.
+- A RESTATEMENT of the same answer is NOT a contradiction. The same value, number, or fact repeated in \
+different words is consistent — e.g. "10 hours on strategic planning" and "10 hours doing strategy" are \
+the SAME answer (10 hours), never a conflict, however differently phrased. Matching numbers never \
+conflict with each other.
+- Do NOT report a "possible", "might be", or "could imply a different understanding" difference. If you \
+can only say the answers MIGHT differ, they do not contradict — return nothing for them.
 - Never invent a conflict to have something to say. If the answers are consistent, return an empty \
 "contradictions" array.
 - Only reference questions in the provided list, and only ones that have an answer.${latestMessageRule}

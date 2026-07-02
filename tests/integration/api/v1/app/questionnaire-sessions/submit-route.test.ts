@@ -47,6 +47,20 @@ vi.mock('@/lib/app/questionnaire/report/worker', () => ({
 const digestMock = vi.hoisted(() => ({ refreshRoundLearningDigest: vi.fn() }));
 vi.mock('@/lib/app/questionnaire/learning/digest', () => digestMock);
 
+// Final completion sweep: the detector run + turn recording + session update are all mocked so the
+// route's held/clean branching can be asserted without an LLM call or a DB.
+const sweepMock = vi.hoisted(() => ({ runCompletionSweep: vi.fn() }));
+vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/completion-sweep-run', () => sweepMock);
+const turnsMock = vi.hoisted(() => ({ recordTurn: vi.fn() }));
+vi.mock('@/app/api/v1/app/questionnaires/_lib/turns', () => turnsMock);
+const prismaMock = vi.hoisted(() => ({
+  prisma: { appQuestionnaireSession: { update: vi.fn() } },
+}));
+vi.mock('@/lib/db/client', () => prismaMock);
+// Per-flow sweep sub-cap: default to allow; one test forces a 429.
+const rlMock = vi.hoisted(() => ({ turnLimiter: { check: vi.fn() } }));
+vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/rate-limit', () => rlMock);
+
 import { POST } from '@/app/api/v1/app/questionnaire-sessions/[id]/submit/route';
 import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
@@ -145,6 +159,12 @@ beforeEach(() => {
     succeeded: 0,
     failed: 0,
   });
+  // Sweep defaults: no findings (clean). recordTurn + session update resolve. Individual tests
+  // opt into a held path by returning findings and/or a contradiction mode.
+  sweepMock.runCompletionSweep.mockResolvedValue({ findings: [], costUsd: 0 });
+  turnsMock.recordTurn.mockResolvedValue('turn-sweep');
+  prismaMock.prisma.appQuestionnaireSession.update.mockResolvedValue({});
+  rlMock.turnLimiter.check.mockReturnValue({ success: true });
 });
 
 describe('gate order', () => {
@@ -319,5 +339,243 @@ describe('respondent report instant-start kick', () => {
     expect(res.status).toBe(200);
     // A failed enqueue resolves to false → no kick scheduled, submit still succeeds.
     expect(afterMock.after).not.toHaveBeenCalled();
+  });
+});
+
+describe('final completion sweep', () => {
+  type Finding = {
+    slotKeys: string[];
+    explanation: string;
+    severity: 'low' | 'medium' | 'high';
+    confidence: number;
+  };
+  const mkFinding = (slotKeys: string[], explanation = 'A vs not-A'): Finding => ({
+    slotKeys,
+    explanation,
+    severity: 'medium',
+    confidence: 0.9,
+  });
+
+  /** An offer-eligible context with contradiction detection ON and an optional ledger. */
+  function sweepContext(ledger: unknown[] = []) {
+    const base = loadedContext();
+    return {
+      ...base,
+      base: {
+        ...base.base,
+        config: { ...base.base.config, contradictionMode: 'probe' as const },
+        raisedContradictions: ledger,
+      },
+    };
+  }
+
+  it('HOLDS the submit on a fresh conflict — parks a probe, records a turn, does not complete', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(sweepContext());
+    sweepMock.runCompletionSweep.mockResolvedValue({
+      findings: [mkFinding(['role'])],
+      costUsd: 0.02,
+    });
+
+    const res = await POST(req(), ctx);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.data.held).toBe(true);
+    expect(body.data.status).toBe('active');
+    expect(body.data.probe.slotKeys).toEqual(['role']);
+    // Not completed, no report enqueued while held.
+    expect(sessionsMock.markSessionCompleted).not.toHaveBeenCalled();
+    expect(reportMock.enqueueRespondentReport).not.toHaveBeenCalled();
+    // The probe + ledger were parked, and the probe recorded as a turn (so it shows + replays).
+    const update = prismaMock.prisma.appQuestionnaireSession.update.mock.calls[0]?.[0];
+    expect(update.where).toEqual({ id: 'sess-1' });
+    expect(update.data.pendingContradiction).toMatchObject({ slotKeys: ['role'] });
+    expect(update.data.raisedContradictions).toEqual([
+      expect.objectContaining({ key: 'role', slotKeys: ['role'], resolution: 'unresolved' }),
+    ]);
+    expect(turnsMock.recordTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('SUPPRESSES a conflict already dealt with (resolved) — completes normally', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(
+      sweepContext([
+        { key: 'role', slotKeys: ['role'], resolution: 'resolved', raisedAtTurnIndex: 0 },
+      ])
+    );
+    sweepMock.runCompletionSweep.mockResolvedValue({
+      findings: [mkFinding(['role'])],
+      costUsd: 0.02,
+    });
+
+    const res = await POST(req(), ctx);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.data.held).toBeUndefined();
+    expect(sessionsMock.markSessionCompleted).toHaveBeenCalledTimes(1);
+    expect(turnsMock.recordTurn).not.toHaveBeenCalled();
+  });
+
+  it('SURFACES a still-unresolved conflict as the final check (holds)', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(
+      sweepContext([
+        { key: 'role', slotKeys: ['role'], resolution: 'unresolved', raisedAtTurnIndex: 0 },
+      ])
+    );
+    sweepMock.runCompletionSweep.mockResolvedValue({
+      findings: [mkFinding(['role'])],
+      costUsd: 0.02,
+    });
+
+    const res = await POST(req(), ctx);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.data.held).toBe(true);
+    expect(sessionsMock.markSessionCompleted).not.toHaveBeenCalled();
+  });
+
+  it('completes cleanly when the sweep finds nothing (and enqueues the report)', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(sweepContext());
+    sweepMock.runCompletionSweep.mockResolvedValue({ findings: [], costUsd: 0 });
+    reportMock.enqueueRespondentReport.mockResolvedValue(true);
+
+    const res = await POST(req(), ctx);
+
+    expect(res.status).toBe(200);
+    expect(sweepMock.runCompletionSweep).toHaveBeenCalledTimes(1);
+    expect(sessionsMock.markSessionCompleted).toHaveBeenCalledTimes(1);
+    expect(reportMock.enqueueRespondentReport).toHaveBeenCalledWith('sess-1');
+  });
+
+  it('skipSweep bypasses the sweep entirely and completes (the "finish anyway" escape)', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(sweepContext());
+    sweepMock.runCompletionSweep.mockResolvedValue({
+      findings: [mkFinding(['role'])],
+      costUsd: 0.02,
+    }); // would hold, but skipped
+
+    const res = await POST(req({}, { skipSweep: true }), ctx);
+
+    expect(res.status).toBe(200);
+    expect(sweepMock.runCompletionSweep).not.toHaveBeenCalled();
+    expect(sessionsMock.markSessionCompleted).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not sweep when contradiction mode is off', async () => {
+    // Default loadedContext has contradictionMode 'off'.
+    ctxMock.buildTurnContext.mockResolvedValue(loadedContext());
+    sweepMock.runCompletionSweep.mockResolvedValue({
+      findings: [mkFinding(['role'])],
+      costUsd: 0.02,
+    });
+
+    const res = await POST(req(), ctx);
+
+    expect(res.status).toBe(200);
+    expect(sweepMock.runCompletionSweep).not.toHaveBeenCalled();
+    expect(sessionsMock.markSessionCompleted).toHaveBeenCalledTimes(1);
+  });
+
+  it('holds an EARLY finish too, echoing early:true', async () => {
+    const early = sweepContext();
+    early.base.config = { ...early.base.config, allowEarlyFinish: true };
+    ctxMock.buildTurnContext.mockResolvedValue(early);
+    sweepMock.runCompletionSweep.mockResolvedValue({
+      findings: [mkFinding(['role'])],
+      costUsd: 0.02,
+    });
+
+    const res = await POST(req({}, { early: true }), ctx);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.data.held).toBe(true);
+    expect(body.data.early).toBe(true);
+    expect(sessionsMock.markSessionCompleted).not.toHaveBeenCalled();
+  });
+
+  it('returns the notice text and stamps the sweep cost on the recorded turn', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(sweepContext());
+    sweepMock.runCompletionSweep.mockResolvedValue({
+      findings: [mkFinding(['role'], 'said junior then senior')],
+      costUsd: 0.0042,
+    });
+
+    const res = await POST(req(), ctx);
+    const body = await res.json();
+
+    // The held response carries the "I noticed something" notice text for the live transcript.
+    expect(typeof body.data.notice).toBe('string');
+    expect(body.data.notice).toContain('said junior then senior');
+    // The recorded probe turn is stamped with the real sweep spend (not null).
+    expect(turnsMock.recordTurn).toHaveBeenCalledWith(expect.objectContaining({ costUsd: 0.0042 }));
+  });
+
+  it('short-circuits on an already-parked probe — re-holds WITHOUT re-sweeping or re-recording', async () => {
+    // A prior hold left a pendingContradiction. A plain re-submit must NOT run the LLM sweep again nor
+    // append another probe turn — it re-surfaces the SAME parked probe (idempotent, no transcript spam).
+    const ctxWithPending = sweepContext();
+    ctxWithPending.base = {
+      ...ctxWithPending.base,
+      pendingContradiction: {
+        slotKeys: ['role'],
+        explanation: 'said junior then senior',
+        statement: '',
+        raisedAtTurnIndex: 1,
+        findings: [{ slotKeys: ['role'], explanation: 'said junior then senior' }],
+      },
+    } as typeof ctxWithPending.base;
+    ctxMock.buildTurnContext.mockResolvedValue(ctxWithPending);
+
+    const res = await POST(req(), ctx);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.data.held).toBe(true);
+    expect(body.data.probe.slotKeys).toEqual(['role']);
+    expect(sweepMock.runCompletionSweep).not.toHaveBeenCalled(); // no re-sweep
+    expect(turnsMock.recordTurn).not.toHaveBeenCalled(); // no duplicate probe turn
+    expect(sessionsMock.markSessionCompleted).not.toHaveBeenCalled();
+  });
+
+  it('rate-limits the sweep dispatch (429) via the per-flow sub-cap', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(sweepContext());
+    rlMock.turnLimiter.check.mockReturnValue({
+      success: false,
+      reset: Date.now() + 1000,
+      remaining: 0,
+    });
+
+    const res = await POST(req(), ctx);
+
+    expect(res.status).toBe(429);
+    expect(sweepMock.runCompletionSweep).not.toHaveBeenCalled();
+    expect(sessionsMock.markSessionCompleted).not.toHaveBeenCalled();
+  });
+
+  it('clears a stale parked probe when finishing anyway (skipSweep) completes the session', async () => {
+    const ctxWithPending = sweepContext();
+    ctxWithPending.base = {
+      ...ctxWithPending.base,
+      pendingContradiction: {
+        slotKeys: ['role'],
+        explanation: 'x',
+        statement: '',
+        raisedAtTurnIndex: 1,
+      },
+    } as typeof ctxWithPending.base;
+    ctxMock.buildTurnContext.mockResolvedValue(ctxWithPending);
+
+    const res = await POST(req({}, { skipSweep: true }), ctx);
+
+    expect(res.status).toBe(200);
+    expect(sessionsMock.markSessionCompleted).toHaveBeenCalledTimes(1);
+    // The parked probe is cleared (SQL NULL) so a completed session carries no stale contradiction.
+    const clearCall = prismaMock.prisma.appQuestionnaireSession.update.mock.calls.find(
+      (c) =>
+        (c[0] as { data?: { pendingContradiction?: unknown } }).data?.pendingContradiction != null
+    );
+    expect(clearCall).toBeDefined();
   });
 });

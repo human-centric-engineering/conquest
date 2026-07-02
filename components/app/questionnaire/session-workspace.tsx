@@ -45,6 +45,7 @@ import { QuestionnaireSplash } from '@/components/app/questionnaire/intro/questi
 import { SessionLifecycleBar } from '@/components/app/questionnaire/lifecycle/session-lifecycle-bar';
 import { CompletionOffer } from '@/components/app/questionnaire/lifecycle/completion-offer';
 import { EarlyFinishControl } from '@/components/app/questionnaire/lifecycle/early-finish-control';
+import { FinalCheckModal } from '@/components/app/questionnaire/lifecycle/final-check-modal';
 import { SessionComplete } from '@/components/app/questionnaire/lifecycle/session-complete';
 import { TranscriptDownload } from '@/components/app/questionnaire/lifecycle/transcript-download';
 import type {
@@ -213,9 +214,23 @@ export function SessionWorkspace({
   const panelRefetchRef = useRef<(() => void) | null>(null);
   const lifecycleRefetchRef = useRef<(() => void) | null>(null);
 
+  // Final completion sweep (F7.3): the held reconciliation probe, when a submit/early-finish is held
+  // on a contradiction. Its presence swaps the submit affordance to "finish anyway" (so a re-click is
+  // an escape, not a re-sweep loop). `early` records which submit path was held so "finish anyway"
+  // posts the matching flag. The final-check modal's open state is tracked SEPARATELY (below) — the two
+  // are orthogonal: dismissing the modal must not disturb `early`, or "finish anyway" would 409.
+  const [heldProbe, setHeldProbe] = useState<{ text: string; early: boolean } | null>(null);
+  // Whether the early-finish final-check modal is showing. Set on an early held submit; cleared on
+  // "clarify in chat" (which leaves `heldProbe` intact so the affordance stays "finish anyway").
+  const [finalCheckOpen, setFinalCheckOpen] = useState(false);
+
   const onTurnSettled = useCallback(() => {
     panelRefetchRef.current?.();
     lifecycleRefetchRef.current?.();
+    // A settled turn is the respondent answering the probe (or moving on) — the server resolves the
+    // parked contradiction, so drop the held state; the next submit re-sweeps cleanly.
+    setHeldProbe(null);
+    setFinalCheckOpen(false);
   }, []);
 
   const panel = useAnswerPanel({
@@ -234,11 +249,29 @@ export function SessionWorkspace({
     onTurnSettled,
   });
 
+  // A held submit records the probe as a turn server-side; drop it into the live transcript now so the
+  // respondent can answer it in the chat, and stash it to drive the affordance swap + the modal.
+  const { appendAgentTurn } = stream;
+  const onHeld = useCallback(
+    (probe: { text: string; slotKeys: string[]; notice?: string }, opts: { early: boolean }) => {
+      // Append with the SAME contradiction notice the server persisted on the turn, so the live
+      // transcript matches a post-reload replay (the "I noticed something" box, not bare probe text).
+      appendAgentTurn(
+        probe.text,
+        probe.notice ? [{ code: 'contradiction', message: probe.notice }] : undefined
+      );
+      setHeldProbe({ text: probe.text, early: opts.early });
+      if (opts.early) setFinalCheckOpen(true);
+    },
+    [appendAgentTurn]
+  );
+
   const lifecycle = useSessionLifecycle({
     sessionId,
     accessToken,
     initialView: initialStatusView,
     applyStatus: stream.applyStatus,
+    onHeld,
     enabled: !readOnly,
   });
 
@@ -535,10 +568,16 @@ export function SessionWorkspace({
   // Completion affordance, by precedence: the agent's full submit offer wins (the session is
   // genuinely "done enough"); otherwise the respondent-controlled early-finish escape hatch shows
   // once unlocked. Shared verbatim by the chat and form surfaces.
+  // While a final-check probe is held, re-clicking submit/finish is the "finish anyway" escape (skip
+  // the sweep) rather than a re-sweep that would just hold again on the same still-unresolved conflict.
+  const doSubmit = () =>
+    void (heldProbe ? lifecycle.finishAnyway(heldProbe.early) : lifecycle.submit());
+  const doFinishEarly = () =>
+    void (heldProbe ? lifecycle.finishAnyway(heldProbe.early) : lifecycle.finishEarly());
   const completionAffordance = lifecycle.canSubmit ? (
-    <CompletionOffer onSubmit={() => void lifecycle.submit()} busy={lifecycle.busy} />
+    <CompletionOffer onSubmit={doSubmit} busy={lifecycle.busy} />
   ) : lifecycle.canFinishEarly ? (
-    <EarlyFinishControl onFinish={() => void lifecycle.finishEarly()} busy={lifecycle.busy} />
+    <EarlyFinishControl onFinish={doFinishEarly} busy={lifecycle.busy} />
   ) : null;
 
   const chatSurface = (
@@ -609,6 +648,19 @@ export function SessionWorkspace({
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
+      {/* Final completion sweep (F7.3): the early-finish path surfaces the held probe in a modal over
+          the exit action. The normal (mid-conversation) path shows it in the chat instead (no modal),
+          so this only opens when the held submit was an early finish. Either way the probe is also a
+          chat turn; "Clarify in chat" closes the modal so they answer there. */}
+      <FinalCheckModal
+        open={finalCheckOpen}
+        probeText={heldProbe?.text ?? ''}
+        // Just close the modal — leave `heldProbe` (incl. `early`) intact so the still-visible finish
+        // affordance keeps working as "finish anyway" with the correct early flag.
+        onClarify={() => setFinalCheckOpen(false)}
+        onFinishAnyway={() => void lifecycle.finishAnyway(heldProbe?.early ?? true)}
+        busy={lifecycle.busy}
+      />
       {/* The chat ↔ form toggle rides the lifecycle strip (no dedicated row) and is always
           visible in "both" mode, so the form escape-hatch reads as ever-present. */}
       <SessionLifecycleBar

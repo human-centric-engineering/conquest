@@ -42,13 +42,34 @@ import {
 
 const SEVERITY_SET: ReadonlySet<string> = new Set(CONTRADICTION_SEVERITIES);
 
+/**
+ * Minimum detector `confidence` for a finding to be SURFACED to the respondent (a probe / notice / a
+ * submit-time hold). Below this the detector isn't sure the answers are genuinely at odds — a hedged
+ * "could imply a different understanding" guess — and interrupting the respondent over it does more
+ * harm than good, so it is silently dropped from the respondent-facing paths. It is NOT a detection
+ * gate: {@link normalizeContradictionFindings} still returns weak findings (the admin preview shows
+ * them); only the live surfacing paths (per-turn phase + completion sweep) apply this floor. Sits below
+ * `CLEAR_CONTRADICTION_CONFIDENCE` (0.8), so `[floor, 0.8)` surfaces humbly and `≥ 0.8` surfaces
+ * directly.
+ */
+export const SURFACE_CONTRADICTION_CONFIDENCE = 0.7;
+
+/** Whether a finding is confident enough to raise with the respondent — see the constant above. */
+export function isSurfaceableContradiction(finding: { confidence: number }): boolean {
+  return finding.confidence >= SURFACE_CONTRADICTION_CONFIDENCE;
+}
+
 /** Stable de-duplication of a key list, preserving first-seen order. */
 function distinctKeys(keys: string[]): string[] {
   return [...new Set(keys)];
 }
 
-/** Canonical key for a contradiction: its slot-key *set*, so `[a,b]` ≡ `[b,a]`. */
-function findingKey(slotKeys: string[]): string {
+/**
+ * Canonical key for a contradiction: its slot-key *set*, so `[a,b]` ≡ `[b,a]`. Used both to dedupe
+ * symmetric findings here and, downstream, as the stable identity of a {@link RaisedContradiction} in
+ * the session ledger (so the same conflict is never re-raised once dealt with).
+ */
+export function contradictionKey(slotKeys: string[]): string {
   return [...slotKeys].sort().join('|');
 }
 
@@ -121,7 +142,7 @@ export function normalizeContradictionFindings(
   // Higher confidence wins; an exact tie keeps the first seen (stable).
   const best = new Map<string, ContradictionFinding>();
   for (const finding of candidates) {
-    const key = findingKey(finding.slotKeys);
+    const key = contradictionKey(finding.slotKeys);
     const incumbent = best.get(key);
     if (!incumbent) {
       best.set(key, finding);

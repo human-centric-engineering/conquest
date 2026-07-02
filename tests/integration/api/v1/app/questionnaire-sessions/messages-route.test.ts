@@ -270,6 +270,10 @@ beforeEach(() => {
   sessionsMock.recordCostCapReached.mockResolvedValue(undefined);
   sessionsMock.pauseSession.mockResolvedValue('paused');
   sessionsMock.hasCostCapReachedEvent.mockResolvedValue(false);
+  // Restore a clean resolve each test: clearAllMocks() wipes call history but NOT a mockRejectedValue
+  // implementation, so a per-test rejection (e.g. the abuse-gate write-failure block) would otherwise
+  // bleed into later tests that call persistAbuseStrikes.
+  sessionsMock.persistAbuseStrikes.mockResolvedValue(undefined);
   // Reasoning trace: default to empty so the standard turn tests are unaffected.
   reasoningMock.buildReasoningTrace.mockReturnValue([]);
   // Retry dedup: default to "no prior turn under this key" so a standard send runs fresh.
@@ -1192,11 +1196,13 @@ describe('reasoning stream (F9.9)', () => {
   });
 });
 
-describe('contradiction detail enrichment', () => {
+describe('contradiction notice — explanation is the message (flag mode)', () => {
   /**
-   * Invokers that trigger a contradiction warning with both a suggestedProbe (the public
-   * message) and a separate explanation. The route must enrich the warning frame with the
-   * explanation as `detail` when it differs from the message.
+   * Invokers that trigger a flag-mode contradiction warning. The finding carries BOTH an
+   * `explanation` and a `suggestedProbe`. The contradiction phase always sets the notice
+   * `message` to `finding.explanation` (in both flag and probe mode — the probe question is asked
+   * as the interviewer turn, never as the notice), so the route surfaces the explanation as the
+   * warning message and adds NO `detail` (the enrichment fires only when detail ≠ message).
    */
   function contradictionInvokers() {
     return {
@@ -1236,6 +1242,9 @@ describe('contradiction detail enrichment', () => {
         verdict: { serious: true, reason: '' },
         costUsd: 0,
       })),
+      // Match the full CapabilityInvokers shape — a config change enabling sensitivity would
+      // otherwise hit `invokers.detectSensitivity is not a function`.
+      detectSensitivity: vi.fn(async () => ({ assessment: null, costUsd: 0 })),
     };
   }
 
@@ -1275,6 +1284,57 @@ describe('contradiction detail enrichment', () => {
     expect(data.message).toBe('Earlier said junior; now says senior');
     expect(data.message).not.toBe('Can you clarify your seniority level?');
     expect(data.detail).toBeUndefined();
+
+    // "Don't nag" ledger: a freshly-surfaced flag-mode conflict is recorded on the session so it is
+    // never re-alerted on a later turn. The route threads the phase's updated ledger to persistTurn.
+    expect(runMock.persistTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        raisedContradictions: [
+          expect.objectContaining({ key: 'q1', slotKeys: ['q1'], resolution: 'flagged' }),
+        ],
+      })
+    );
+  });
+
+  it('parks the probe and records the ledger (unresolved) when contradictionMode is probe', async () => {
+    // Probe mode DEFERS: the route asks a reconciliation question, suppresses this turn's writes, and
+    // persists BOTH the parked pendingContradiction and the ledger entry. This is the probe-mode
+    // persist path the flag-mode test above never exercises.
+    const baseCtx = loadedContext();
+    ctxMock.buildTurnContext.mockResolvedValue(
+      loadedContext({
+        activeQuestionKey: 'q1',
+        base: {
+          ...baseCtx.base,
+          existingAnswers: [
+            { slotKey: 'q1', value: 'junior', provenance: 'direct' as const, confidence: 0.7 },
+            { slotKey: 'role', value: 'engineer', provenance: 'direct' as const, confidence: 0.8 },
+          ],
+          config: {
+            ...baseCtx.base.config,
+            contradictionMode: 'probe',
+            contradictionEveryNTurns: 1,
+          },
+        },
+      })
+    );
+    invokersMock.buildTurnInvokers.mockResolvedValue(contradictionInvokers());
+
+    await drainSse(await POST(req({ message: 'senior manager' }), ctx));
+
+    const persistArg = runMock.persistTurn.mock.calls[0]?.[0] as {
+      pendingContradiction?: { slotKeys: string[] };
+      raisedContradictions?: Array<{ key: string; slotKeys: string[]; resolution: string }>;
+      upserts: unknown[];
+    };
+    // The parked probe is persisted (drives the next turn's resolution path)…
+    expect(persistArg.pendingContradiction).toEqual(expect.objectContaining({ slotKeys: ['q1'] }));
+    // …the ledger records it as unresolved (raised, awaiting the respondent's confirmation)…
+    expect(persistArg.raisedContradictions).toEqual([
+      expect.objectContaining({ key: 'q1', slotKeys: ['q1'], resolution: 'unresolved' }),
+    ]);
+    // …and this turn's answer write is suppressed (nothing recorded before confirmation).
+    expect(persistArg.upserts).toEqual([]);
   });
 });
 

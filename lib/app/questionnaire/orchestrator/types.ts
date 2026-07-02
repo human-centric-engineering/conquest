@@ -37,6 +37,7 @@ import type {
 import type {
   ContradictionFinding,
   PendingContradiction,
+  RaisedContradiction,
 } from '@/lib/app/questionnaire/contradiction/types';
 import type { RefinementDecision } from '@/lib/app/questionnaire/refinement/types';
 import type { CompletionAssessment } from '@/lib/app/questionnaire/completion/types';
@@ -200,6 +201,13 @@ export interface TurnState {
    * contradiction awaiting confirmation.
    */
   pendingContradiction?: PendingContradiction | null;
+  /**
+   * The "don't nag" ledger: contradictions already surfaced this session (by canonical slot-key set),
+   * loaded from `AppQuestionnaireSession.raisedContradictions`. The contradiction phase suppresses any
+   * detected finding whose key is already here — no re-probe, no re-alert — whether or not it was ever
+   * reconciled. Absent/empty on a session that has raised none.
+   */
+  raisedContradictions?: RaisedContradiction[];
   /**
    * Data Slots feature: present in data-slot mode. `dataSlots` is the version's data slots
    * (theme-ordered for topic-local targeting); `dataSlotAnswered` is the filled set; the
@@ -450,6 +458,12 @@ export interface TurnResult {
      * this turn, clear it. `undefined` (the default) = leave it untouched.
      */
     pendingContradiction?: PendingContradiction | null;
+    /**
+     * The updated "don't nag" ledger to persist to `AppQuestionnaireSession.raisedContradictions`,
+     * when this turn raised a new contradiction or resolved a pending one. `undefined` (the default) =
+     * the ledger is unchanged this turn, leave it as-is. Always the FULL list (overwrites the column).
+     */
+    raisedContradictions?: RaisedContradiction[];
   };
   /** Side-band frames to stream (warnings/status) — NOT the main content. */
   events: ChatEvent[];
