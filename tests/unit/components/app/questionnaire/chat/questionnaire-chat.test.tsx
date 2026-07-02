@@ -81,6 +81,7 @@ function makeReturn(
     dismissError,
     retry: vi.fn(),
     applyStatus: vi.fn(),
+    appendAgentTurn: vi.fn(),
     ...overrides,
   };
 }

@@ -235,11 +235,37 @@ acted on this turn (so none is silently dropped) — the two guarantees the "don
 new ones" requirement needs. A brand-new conflict on later turns (different slots) is still detected
 and handled normally; only a conflict already in the ledger is suppressed.
 
-Scope: this suppresses the **per-turn interviewer** loop only. The completion-sweep review gate
-(F4.5) runs its own detection over all answers and does **not** currently consult the ledger, so a
-conflict adjudicated mid-conversation (e.g. one the respondent explicitly declined to change) can
-re-surface as a submit-time hold. That boundary is a known limitation, not a guarantee — see the
-roadmap note if extending suppression to the sweep.
+The same ledger is also consulted by the **submit-time completion sweep** (below), so a conflict dealt
+with mid-conversation never re-nags at the finish line.
+
+## Final completion sweep (submit-time)
+
+Both a normal submit and an early finish (`POST …/questionnaire-sessions/:id/submit`, `{ early }`) run
+one last contradiction pass **before the session completes and its respondent report is generated** — a
+report built on contradictory answers would mislead. This is distinct from the admin **preview** sweep
+(`…/versions/:vid/complete`, over body-supplied answers): the live sweep sources the session's stored
+answers.
+
+- **Gate.** Runs only when `contradictionMode ≠ off` AND the detection sub-flag is on, and never when
+  the respondent chose to finish anyway (`skipSweep`). Needs ≥2 answered slots (no `currentStatement`
+  at submit). Fail-soft: a missing detector, oversized input, or dispatch error → treated as clean, so
+  a wrap-up is never blocked by infra (`runCompletionSweep`).
+- **Ledger-aware.** `filterSweepFindings` drops any conflict already `resolved` / `kept` / `flagged`
+  this session; it surfaces only **genuinely-new** conflicts (the sweep's real value — cross-slot ones
+  the per-turn pass never caught) **and still-`unresolved`** ones (raised, never reconciled — the final
+  check).
+- **Held, not blocked.** On a surviving conflict the session does **not** complete: a combined probe is
+  parked (reusing the multi-conflict builder), recorded as a turn (so it shows in the chat + replays),
+  each conflict recorded `unresolved`, and the route returns `{ held: true, probe }`. The respondent's
+  next chat message resolves it through the ordinary [resolution turn](#probe-confirm-flow-probe-mode)
+  — refining answers + data slots in the background — after which finishing again completes cleanly.
+- **Escape hatch.** `{ skipSweep: true }` ("finish / get my report anyway") bypasses the sweep and
+  completes, leaving the conflict `unresolved` (auditable) and the data as-is. The respondent is never
+  trapped.
+- **Surfaces.** Normal submit continues **in the chat** (the probe is the next message); an early
+  finish additionally opens a **final-check modal** over the exit action (`FinalCheckModal`), with
+  "Clarify in chat" and "Get my report anyway". Both are driven by the same `held` backend response
+  (`useSessionLifecycle` `onHeld` → `SessionWorkspace`).
 
 ## The capability
 

@@ -11,16 +11,21 @@
  * acceptance. Serves both respondent kinds (authenticated owner + no-login anonymous).
  *
  * The gate reuses the F4.5 pure resolver: it re-asserts the session is genuinely in an
- * `offer` state (a stale/forged client can't submit an ineligible session) and submits
- * with NO completion sweep — contradictions already surface live during the chat (F4.3),
- * so re-running that scan at submit would be redundant. A required question can't be
- * outstanding here: `assessCompletion` only returns `offer` once the required gate is
- * clear (the sole exception being a question-cap-reached session, the existing F4.5
- * "a capped session can always submit" behaviour, honoured as-is).
+ * `offer` state (a stale/forged client can't submit an ineligible session). A required
+ * question can't be outstanding here: `assessCompletion` only returns `offer` once the
+ * required gate is clear (the sole exception being a question-cap-reached session, the
+ * existing F4.5 "a capped session can always submit" behaviour, honoured as-is).
+ *
+ * Once eligible, a **final contradiction sweep** runs over all answers before the session
+ * completes (a report built on contradictory data would mislead — see contradiction-detection.md).
+ * A surviving conflict HOLDS the submit (`{ held: true, probe }`) instead of completing; the
+ * respondent reconciles it in the chat (or a final-check modal on the early-finish path) and finishes
+ * again, or bypasses via `{ skipSweep: true }`. The sweep consults the ledger so it never re-nags
+ * about a conflict already dealt with mid-conversation, and is fail-soft (any error → completes).
  *
  * Gate order: live-sessions flag (404 before auth) → load → access (401/403) → status
  * (idempotent on already-completed; 409 on paused/abandoned) → offer-eligibility (409) →
- * transition.
+ * final sweep (held or clean) → transition.
  */
 
 import type { NextRequest } from 'next/server';
