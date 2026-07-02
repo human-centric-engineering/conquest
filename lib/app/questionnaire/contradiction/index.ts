@@ -55,6 +55,8 @@ export {
   contradictionKey,
 } from '@/lib/app/questionnaire/contradiction/detection-logic';
 
+export { filterSweepFindings } from '@/lib/app/questionnaire/contradiction/completion-sweep';
+
 /**
  * The contradiction modes, re-exported for the parity test that asserts the
  * detector's vocabulary and the shared config enum stay in lock-step (mirrors
