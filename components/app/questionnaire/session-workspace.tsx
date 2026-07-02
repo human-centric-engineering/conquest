@@ -216,12 +216,13 @@ export function SessionWorkspace({
 
   // Final completion sweep (F7.3): the held reconciliation probe, when a submit/early-finish is held
   // on a contradiction. Its presence swaps the submit affordance to "finish anyway" (so a re-click is
-  // an escape, not a re-sweep loop) and — on the early-finish path — opens the final-check modal.
-  const [heldProbe, setHeldProbe] = useState<{
-    text: string;
-    slotKeys: string[];
-    early: boolean;
-  } | null>(null);
+  // an escape, not a re-sweep loop). `early` records which submit path was held so "finish anyway"
+  // posts the matching flag. The final-check modal's open state is tracked SEPARATELY (below) — the two
+  // are orthogonal: dismissing the modal must not disturb `early`, or "finish anyway" would 409.
+  const [heldProbe, setHeldProbe] = useState<{ text: string; early: boolean } | null>(null);
+  // Whether the early-finish final-check modal is showing. Set on an early held submit; cleared on
+  // "clarify in chat" (which leaves `heldProbe` intact so the affordance stays "finish anyway").
+  const [finalCheckOpen, setFinalCheckOpen] = useState(false);
 
   const onTurnSettled = useCallback(() => {
     panelRefetchRef.current?.();
@@ -229,6 +230,7 @@ export function SessionWorkspace({
     // A settled turn is the respondent answering the probe (or moving on) — the server resolves the
     // parked contradiction, so drop the held state; the next submit re-sweeps cleanly.
     setHeldProbe(null);
+    setFinalCheckOpen(false);
   }, []);
 
   const panel = useAnswerPanel({
@@ -251,9 +253,15 @@ export function SessionWorkspace({
   // respondent can answer it in the chat, and stash it to drive the affordance swap + the modal.
   const { appendAgentTurn } = stream;
   const onHeld = useCallback(
-    (probe: { text: string; slotKeys: string[] }, opts: { early: boolean }) => {
-      appendAgentTurn(probe.text);
-      setHeldProbe({ text: probe.text, slotKeys: probe.slotKeys, early: opts.early });
+    (probe: { text: string; slotKeys: string[]; notice?: string }, opts: { early: boolean }) => {
+      // Append with the SAME contradiction notice the server persisted on the turn, so the live
+      // transcript matches a post-reload replay (the "I noticed something" box, not bare probe text).
+      appendAgentTurn(
+        probe.text,
+        probe.notice ? [{ code: 'contradiction', message: probe.notice }] : undefined
+      );
+      setHeldProbe({ text: probe.text, early: opts.early });
+      if (opts.early) setFinalCheckOpen(true);
     },
     [appendAgentTurn]
   );
@@ -645,10 +653,12 @@ export function SessionWorkspace({
           so this only opens when the held submit was an early finish. Either way the probe is also a
           chat turn; "Clarify in chat" closes the modal so they answer there. */}
       <FinalCheckModal
-        open={heldProbe?.early === true}
+        open={finalCheckOpen}
         probeText={heldProbe?.text ?? ''}
-        onClarify={() => setHeldProbe((p) => (p ? { ...p, early: false } : null))}
-        onFinishAnyway={() => void lifecycle.finishAnyway(true)}
+        // Just close the modal — leave `heldProbe` (incl. `early`) intact so the still-visible finish
+        // affordance keeps working as "finish anyway" with the correct early flag.
+        onClarify={() => setFinalCheckOpen(false)}
+        onFinishAnyway={() => void lifecycle.finishAnyway(heldProbe?.early ?? true)}
         busy={lifecycle.busy}
       />
       {/* The chat ↔ form toggle rides the lifecycle strip (no dedicated row) and is always

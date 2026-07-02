@@ -43,14 +43,22 @@ export interface CompletionSweepInput {
   mode: ContradictionMode;
 }
 
+/** The sweep outcome — the (normalised) findings plus the LLM spend they cost (0 when it no-op'd). */
+export interface CompletionSweepResult {
+  findings: ContradictionFinding[];
+  costUsd: number;
+}
+
 /**
- * Run the completion sweep over the session's answers. Returns the (normalised) findings, or `[]`
- * fail-soft. The caller filters these against the ledger and decides whether to hold the submit.
+ * Run the completion sweep over the session's answers. Returns the (normalised) findings + spend, or
+ * `{ findings: [], costUsd: 0 }` fail-soft. The caller filters the findings against the ledger and
+ * decides whether to hold the submit.
  */
 export async function runCompletionSweep(
   input: CompletionSweepInput
-): Promise<ContradictionFinding[]> {
+): Promise<CompletionSweepResult> {
   const log = baseLogger;
+  const clean: CompletionSweepResult = { findings: [], costUsd: 0 };
 
   // The detector only reasons over answered slots; trim to those so the cap tracks the answer count,
   // not the questionnaire's size (mirrors the admin preview sweep).
@@ -58,7 +66,7 @@ export async function runCompletionSweep(
   const sweepSlots = input.slots.filter((s) => answeredKeys.has(s.key));
 
   // Need at least two answered slots to have anything to compare (no `currentStatement` at submit).
-  if (input.answers.length < 2 || sweepSlots.length < 2) return [];
+  if (input.answers.length < 2 || sweepSlots.length < 2) return clean;
 
   // Oversized input can't run — treat as clean rather than a doomed dispatch (mirrors the admin sweep).
   if (
@@ -70,7 +78,7 @@ export async function runCompletionSweep(
       slotCount: sweepSlots.length,
       answerCount: input.answers.length,
     });
-    return [];
+    return clean;
   }
 
   const agent = await prisma.aiAgent.findUnique({
@@ -81,7 +89,7 @@ export async function runCompletionSweep(
     log.error('Contradiction-detector agent not found; run db:seed', {
       slug: QUESTIONNAIRE_CONTRADICTION_DETECTOR_AGENT_SLUG,
     });
-    return [];
+    return clean;
   }
 
   // Flush capability handlers before dispatch — submit may be the first capability touch on a fresh
@@ -124,12 +132,13 @@ export async function runCompletionSweep(
   );
 
   if (dispatch.success && dispatch.data) {
-    return (dispatch.data as DetectContradictionsData).findings;
+    const data = dispatch.data as DetectContradictionsData;
+    return { findings: data.findings, costUsd: data.costUsd ?? 0 };
   }
   // Fail-soft: a failed sweep counts as clean so a wrap-up never 5xxs.
   log.warn('Completion sweep failed; treating as clean', {
     sessionId: input.sessionId,
     code: dispatch.error?.code,
   });
-  return [];
+  return clean;
 }

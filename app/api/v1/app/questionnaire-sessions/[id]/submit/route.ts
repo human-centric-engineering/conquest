@@ -47,17 +47,24 @@ import {
   resolveCompletion,
 } from '@/lib/app/questionnaire/completion/completion-logic';
 import { SessionTransitionError } from '@/lib/app/questionnaire/session';
+import { createRateLimitResponse } from '@/lib/security/rate-limit';
 import {
   buildContradictionProbe,
   buildContradictionNoticeMessage,
-  contradictionKey,
   filterSweepFindings,
 } from '@/lib/app/questionnaire/contradiction';
-import type { RaisedContradiction } from '@/lib/app/questionnaire/contradiction/types';
-import { questionProbeLabels } from '@/lib/app/questionnaire/orchestrator/contradiction-phase';
+import type {
+  ContradictionFinding,
+  PendingContradiction,
+} from '@/lib/app/questionnaire/contradiction/types';
+import {
+  questionProbeLabels,
+  raisedEntry,
+} from '@/lib/app/questionnaire/orchestrator/contradiction-phase';
 import { DETECT_CONTRADICTIONS_CAPABILITY_SLUG } from '@/lib/app/questionnaire/constants';
 import { prisma } from '@/lib/db/client';
 import { resolveTurnAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-access';
+import { turnLimiter } from '@/app/api/v1/app/questionnaire-sessions/_lib/rate-limit';
 import { runCompletionSweep } from '@/app/api/v1/app/questionnaire-sessions/_lib/completion-sweep-run';
 import { buildTurnContext } from '@/app/api/v1/app/questionnaires/_lib/turn-context';
 import { markSessionCompleted } from '@/app/api/v1/app/questionnaires/_lib/sessions';
@@ -88,6 +95,34 @@ const submitBodySchema = z
     skipSweep: z.boolean().optional(),
   })
   .strict();
+
+/**
+ * Reconstruct the conflict list from a parked {@link PendingContradiction} so the probe text can be
+ * rebuilt deterministically (for the short-circuit re-surface). Uses the per-conflict `findings` when
+ * present (a combined probe), else the single legacy conflict. Confidence/severity are placeholders —
+ * `buildContradictionProbe` only reads slotKeys/explanation/suggestedProbe.
+ */
+function pendingToFindings(pending: PendingContradiction): ContradictionFinding[] {
+  const list =
+    pending.findings && pending.findings.length > 0
+      ? pending.findings
+      : [
+          {
+            slotKeys: pending.slotKeys,
+            explanation: pending.explanation,
+            ...(pending.suggestedProbe !== undefined
+              ? { suggestedProbe: pending.suggestedProbe }
+              : {}),
+          },
+        ];
+  return list.map((f) => ({
+    slotKeys: f.slotKeys,
+    explanation: f.explanation,
+    severity: 'medium' as const,
+    confidence: 1,
+    ...(f.suggestedProbe !== undefined ? { suggestedProbe: f.suggestedProbe } : {}),
+  }));
+}
 
 async function handleSubmit(
   request: NextRequest,
@@ -162,84 +197,123 @@ async function handleSubmit(
       return errorResponse(resolution.rationale, { code: 'SUBMIT_NOT_READY', status: 409 });
     }
 
-    // Final contradiction sweep — the last chance to catch conflicting answers before the session
+    // Final contradiction check — the last chance to catch conflicting answers before the session
     // completes and its report is generated (a report built on contradictory data would mislead).
     // Runs for BOTH normal submit and early finish; skipped when the respondent chose to finish anyway
-    // (`skipSweep`), or when detection is off. Consults the ledger so it never re-nags about a conflict
-    // already dealt with mid-conversation — it surfaces only genuinely-new conflicts and still-
-    // unresolved ones (`filterSweepFindings`). On a hit we DON'T complete: we park a combined probe,
-    // record it as a turn (so it shows in the chat / a final-check modal and replays on resume), and
-    // return `held` so the client can offer "clarify" or "finish anyway". Fail-soft: any sweep error
-    // returns no findings, so the submit proceeds — an infra hiccup never blocks a wrap-up.
-    const mode = loaded.base.config.contradictionMode;
-    if (!skipSweep && mode !== 'off' && (await isContradictionDetectionEnabled())) {
-      const findings = await runCompletionSweep({
+    // (`skipSweep`). On a held conflict we DON'T complete: park a combined probe, record it as a turn
+    // (so it shows in the chat / a final-check modal and replays on resume), and return `held` so the
+    // client can offer "clarify" or "finish anyway".
+    const labels = questionProbeLabels(loaded.base.questions);
+    const heldResponse = (
+      findings: ContradictionFinding[],
+      probeText: string,
+      slotKeys: string[]
+    ) =>
+      successResponse({
         sessionId,
-        userId: access.userId,
-        slots: loaded.slots,
-        answers: loaded.base.existingAnswers,
-        mode,
+        status: 'active' as const,
+        held: true as const,
+        probe: { text: probeText, slotKeys },
+        // The notice message the client renders as the "I noticed something" box beneath the probe —
+        // returned so the live transcript matches the persisted turn's warning exactly (no reload gap).
+        notice: buildContradictionNoticeMessage(findings),
+        early,
       });
-      const survivors = filterSweepFindings(findings, loaded.base.raisedContradictions ?? []);
-      if (survivors.length > 0) {
-        const { text, pending } = buildContradictionProbe({
-          findings: survivors,
-          statement: '', // no triggering message at submit — the sweep compares stored answers
-          raisedAtTurnIndex: loaded.base.selectionRound,
-          labels: questionProbeLabels(loaded.base.questions),
+
+    if (!skipSweep) {
+      // Short-circuit: a probe is ALREADY parked (a prior hold, or a per-turn probe the respondent
+      // finished over). Re-surface THAT probe — no re-sweep (no LLM), no duplicate turn — so a
+      // resume-then-resubmit is idempotent rather than spamming the transcript and burning tokens.
+      const existingPending = loaded.base.pendingContradiction;
+      if (existingPending) {
+        const findings = pendingToFindings(existingPending);
+        const { text } = buildContradictionProbe({
+          findings,
+          statement: existingPending.statement,
+          raisedAtTurnIndex: existingPending.raisedAtTurnIndex,
+          labels,
           dataMode: false,
         });
-        // Record each surfaced conflict as `unresolved` (deduped against the existing ledger), so the
-        // per-turn pass doesn't re-probe it and a "finish anyway" leaves an honest audit trail.
-        const existing = loaded.base.raisedContradictions ?? [];
-        const existingKeys = new Set(existing.map((r) => r.key));
-        const fresh: RaisedContradiction[] = survivors
-          .map((f) => ({
-            key: contradictionKey(f.slotKeys),
-            slotKeys: f.slotKeys,
-            resolution: 'unresolved' as const,
-            raisedAtTurnIndex: loaded.base.selectionRound,
-          }))
-          .filter((e) => !existingKeys.has(e.key));
-        const ledger = [...existing, ...fresh];
-
-        // Park the probe + ledger BEFORE recording the turn, so a mid-write crash can't strand a
-        // recorded probe with no pending state to resolve it. The respondent's next chat message
-        // resolves it through the normal messages-endpoint resolution turn (refining answers + data
-        // slots in the background), after which a re-submit finds it dealt-with and completes.
-        await prisma.appQuestionnaireSession.update({
-          where: { id: sessionId },
-          data: {
-            pendingContradiction: pending as unknown as Prisma.InputJsonValue,
-            raisedContradictions: ledger as unknown as Prisma.InputJsonValue,
-          },
-        });
-        await recordTurn({
-          sessionId,
-          userMessage: '',
-          agentResponse: text,
-          targetedQuestionId: null,
-          toolCalls: [{ slug: DETECT_CONTRADICTIONS_CAPABILITY_SLUG, success: true }],
-          sideEffectAnswerIds: [],
-          warnings: [
-            { code: 'contradiction', message: buildContradictionNoticeMessage(survivors) },
-          ],
-          costUsd: null,
-        });
-
-        log.info('Submit held for final contradiction check', {
-          sessionId,
-          early,
-          conflicts: survivors.length,
-        });
-        return successResponse({
-          sessionId,
-          status: 'active' as const,
-          held: true as const,
-          probe: { text, slotKeys: pending.slotKeys },
-          early,
-        });
+        log.info('Submit re-held on an already-parked contradiction', { sessionId, early });
+        return heldResponse(findings, text, existingPending.slotKeys);
       }
+
+      const mode = loaded.base.config.contradictionMode;
+      if (mode !== 'off' && (await isContradictionDetectionEnabled())) {
+        // Per-flow sub-cap on the paid sweep — checked only on the path that actually dispatches the
+        // detector LLM (mirrors the messages route's per-turn guard), so a held session can't be
+        // re-POSTed to hammer detection.
+        const limit = turnLimiter.check(access.rateKey);
+        if (!limit.success) return createRateLimitResponse(limit);
+
+        const { findings, costUsd } = await runCompletionSweep({
+          sessionId,
+          userId: access.userId,
+          slots: loaded.slots,
+          answers: loaded.base.existingAnswers,
+          mode,
+        });
+        const survivors = filterSweepFindings(findings, loaded.base.raisedContradictions ?? []);
+        if (survivors.length > 0) {
+          const { text, pending } = buildContradictionProbe({
+            findings: survivors,
+            statement: '', // no triggering message at submit — the sweep compares stored answers
+            raisedAtTurnIndex: loaded.base.selectionRound,
+            labels,
+            dataMode: false,
+          });
+          // Record each surfaced conflict as `unresolved` (deduped against the existing ledger), so the
+          // per-turn pass doesn't re-probe it and a "finish anyway" leaves an honest audit trail.
+          const existing = loaded.base.raisedContradictions ?? [];
+          const existingKeys = new Set(existing.map((r) => r.key));
+          const ledger = [
+            ...existing,
+            ...survivors
+              .map((f) => raisedEntry(f, 'unresolved', loaded.base.selectionRound))
+              .filter((e) => !existingKeys.has(e.key)),
+          ];
+
+          // Park the probe + ledger BEFORE recording the turn, so a mid-write crash can't strand a
+          // recorded probe with no pending state to resolve it. The respondent's next chat message
+          // resolves it through the normal messages-endpoint resolution turn (refining answers + data
+          // slots in the background), after which a re-submit finds it dealt-with and completes.
+          await prisma.appQuestionnaireSession.update({
+            where: { id: sessionId },
+            data: {
+              pendingContradiction: pending as unknown as Prisma.InputJsonValue,
+              raisedContradictions: ledger as unknown as Prisma.InputJsonValue,
+            },
+          });
+          await recordTurn({
+            sessionId,
+            userMessage: '',
+            agentResponse: text,
+            targetedQuestionId: null,
+            toolCalls: [{ slug: DETECT_CONTRADICTIONS_CAPABILITY_SLUG, success: true }],
+            sideEffectAnswerIds: [],
+            warnings: [
+              { code: 'contradiction', message: buildContradictionNoticeMessage(survivors) },
+            ],
+            costUsd,
+          });
+
+          log.info('Submit held for final contradiction check', {
+            sessionId,
+            early,
+            conflicts: survivors.length,
+          });
+          return heldResponse(survivors, text, pending.slotKeys);
+        }
+      }
+    }
+
+    // Completing: clear any parked probe first — a "finish anyway" (skipSweep) reaches here with a
+    // pending contradiction still on the row, and a completed session must not carry a stale probe.
+    if (loaded.base.pendingContradiction) {
+      await prisma.appQuestionnaireSession.update({
+        where: { id: sessionId },
+        data: { pendingContradiction: Prisma.DbNull },
+      });
     }
 
     try {

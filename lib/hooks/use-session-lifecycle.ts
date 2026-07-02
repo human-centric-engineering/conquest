@@ -41,11 +41,14 @@ export interface UseSessionLifecycleOptions {
   applyStatus: (status: QuestionnaireChatStatus) => void;
   /**
    * Final completion sweep (F7.3): called when a submit / early-finish is HELD on a contradiction
-   * instead of completing. The workspace drops the reconciliation `probe` into the live chat (so the
-   * respondent can answer it) and, for an early finish (`early: true`), opens the final-check modal.
-   * The session stays active — status is NOT moved to `completed`.
+   * instead of completing. The workspace drops the reconciliation `probe` into the live chat (with its
+   * `notice` — the "I noticed something" box) so the respondent can answer it, and, for an early finish
+   * (`early: true`), opens the final-check modal. The session stays active — status is NOT `completed`.
    */
-  onHeld?: (probe: { text: string; slotKeys: string[] }, opts: { early: boolean }) => void;
+  onHeld?: (
+    probe: { text: string; slotKeys: string[]; notice?: string },
+    opts: { early: boolean }
+  ) => void;
   /**
    * Whether the lifecycle is live. `false` makes the hook inert — no mount fetch, `refetch` a no-op
    * — for surfaces that don't drive lifecycle (e.g. the admin read-only session viewer, which has
@@ -201,10 +204,17 @@ export function useSessionLifecycle(
   const handleSubmitResult = useCallback(
     (data: unknown, early: boolean) => {
       const d = data as
-        | { held?: boolean; probe?: { text: string; slotKeys: string[] } }
+        | { held?: boolean; probe?: { text: string; slotKeys: string[] }; notice?: string }
         | undefined;
       if (d?.held && d.probe) {
-        onHeld?.({ text: d.probe.text, slotKeys: d.probe.slotKeys }, { early });
+        onHeld?.(
+          {
+            text: d.probe.text,
+            slotKeys: d.probe.slotKeys,
+            ...(typeof d.notice === 'string' ? { notice: d.notice } : {}),
+          },
+          { early }
+        );
         return;
       }
       applyStatus('completed');

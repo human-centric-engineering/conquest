@@ -70,6 +70,7 @@ function heldPost(): Response {
         status: 'active',
         held: true,
         probe: { text: 'Earlier X, now Y — which is right?', slotKeys: ['role'] },
+        notice: 'That differs from an earlier answer.',
         early: false,
       },
     }),
@@ -224,7 +225,11 @@ describe('useSessionLifecycle', () => {
         await result.current.submit();
       });
       expect(onHeld).toHaveBeenCalledWith(
-        { text: 'Earlier X, now Y — which is right?', slotKeys: ['role'] },
+        {
+          text: 'Earlier X, now Y — which is right?',
+          slotKeys: ['role'],
+          notice: 'That differs from an earlier answer.',
+        },
         { early: false }
       );
       expect(applyStatus).not.toHaveBeenCalledWith('completed');

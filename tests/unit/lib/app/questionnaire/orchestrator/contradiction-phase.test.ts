@@ -1031,9 +1031,11 @@ describe('runContradictionPhase — raised-contradiction ledger (never re-raise)
     ]);
   });
 
-  it('resolves a MULTI-conflict pending per-conflict — refined→resolved, untouched→kept', async () => {
+  it('resolves a MULTI-conflict pending — refined→resolved, UNaddressed→unresolved (not kept)', async () => {
     // A combined probe parked two conflicts (a and b). The confirmation turn refines only `a`.
-    // Each parked conflict is stamped by its own outcome: a→resolved, b→kept. Both suppressed hereafter.
+    // `a` → resolved; `b` was NOT addressed by this single reply, so it stays `unresolved` (a bundle
+    // can't have been fully answered by one message) — the completion sweep must still catch b, not
+    // silently drop it as `kept`.
     const inv = stubInvokers({ refine: { decisions: [decision({ slotKey: 'a' })] } });
     const s = {
       ...state({
@@ -1060,7 +1062,7 @@ describe('runContradictionPhase — raised-contradiction ledger (never re-raise)
     expect(result.pendingContradiction).toBeNull();
     expect(result.raisedContradictions).toEqual([
       { key: 'a', slotKeys: ['a'], resolution: 'resolved', raisedAtTurnIndex: 0 },
-      { key: 'b', slotKeys: ['b'], resolution: 'kept', raisedAtTurnIndex: 0 },
+      { key: 'b', slotKeys: ['b'], resolution: 'unresolved', raisedAtTurnIndex: 0 },
     ]);
   });
 });

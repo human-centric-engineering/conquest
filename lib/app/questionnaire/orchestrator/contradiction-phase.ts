@@ -92,7 +92,7 @@ export interface ContradictionPhaseResult {
 }
 
 /** Build a ledger entry for a freshly-raised contradiction (identity = its canonical slot-key set). */
-function raisedEntry(
+export function raisedEntry(
   finding: ContradictionFinding,
   resolution: ContradictionResolution,
   raisedAtTurnIndex: number
@@ -114,10 +114,14 @@ function pendingConflicts(pending: PendingContradiction): Array<{ slotKeys: stri
 
 /**
  * Stamp the resolution outcome onto EVERY ledger entry the pending probe covered (a combined probe can
- * park several), returning the full updated ledger. Per-conflict outcome: `unresolved` when refinement
- * never ran; `resolved` when at least one of that conflict's slots was actually refined this turn;
- * `kept` otherwise. Defensive: a covered conflict with no matching ledger entry (parked before the
- * column existed) is appended, so it is still suppressed from here on.
+ * park several), returning the full updated ledger. Per-conflict outcome:
+ *   - `unresolved` — refinement never ran, OR this conflict's slots were NOT refined AND it was one of
+ *     SEVERAL bundled in a combined probe (a single reply can't have addressed every point, so an
+ *     un-refined one stays open — the completion sweep must still catch it, not silently drop it);
+ *   - `resolved` — at least one of that conflict's slots was actually refined this turn;
+ *   - `kept` — a SOLE conflict the respondent replied to without a change (they declined it).
+ * Defensive: a covered conflict with no matching ledger entry (parked before the column existed) is
+ * appended, so it is still suppressed from here on.
  */
 function resolvePendingInLedger(
   ledger: RaisedContradiction[],
@@ -125,13 +129,20 @@ function resolvePendingInLedger(
   refinedSlotKeys: ReadonlySet<string>,
   refinementRan: boolean
 ): RaisedContradiction[] {
+  const conflicts = pendingConflicts(pending);
+  const bundled = conflicts.length > 1;
   const outcome = new Map<string, ContradictionResolution>();
-  for (const conflict of pendingConflicts(pending)) {
+  for (const conflict of conflicts) {
+    const refined = conflict.slotKeys.some((k) => refinedSlotKeys.has(k));
     const resolution: ContradictionResolution = !refinementRan
       ? 'unresolved'
-      : conflict.slotKeys.some((k) => refinedSlotKeys.has(k))
+      : refined
         ? 'resolved'
-        : 'kept';
+        : // Un-refined: `kept` only when it was the SOLE conflict (a deliberate decline). In a bundle
+          // we can't tell "declined" from "didn't get to it", so leave it open for the final sweep.
+          bundled
+          ? 'unresolved'
+          : 'kept';
     outcome.set(contradictionKey(conflict.slotKeys), resolution);
   }
   const next = ledger.map((r) =>

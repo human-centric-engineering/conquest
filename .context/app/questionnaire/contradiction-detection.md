@@ -203,9 +203,12 @@ already surfaced this session**, keyed by the canonical slot-key set (`contradic
   turns up **more than one** fresh conflict they are handled **together** — see [Combining several
   conflicts](#combining-several-conflicts-in-one-turn).
 - **Resolve.** On the resolution turn (a parked probe is confirmed/declined), each parked conflict's
-  ledger entry is stamped `resolved` (that conflict's slot was actually refined), `kept` (the original
-  stands), or `unresolved` (the refinement step was disabled, so reconciliation was never attempted —
-  an honest label). If no entry matches — a probe parked before the column existed — the entry is
+  ledger entry is stamped `resolved` (that conflict's slot was actually refined), `kept` (the sole
+  conflict, replied to without a change — a deliberate decline), or `unresolved`. A conflict stays
+  `unresolved` when refinement was disabled (never attempted) **or** when it was one of SEVERAL bundled
+  in a combined probe and this reply didn't refine its slot — a single message can't have addressed
+  every point, so an un-refined bundle member is left open for the final sweep to catch rather than
+  silently marked `kept`. If no entry matches — a probe parked before the column existed — the entry is
   appended defensively, so the conflict is still suppressed from then on.
 
 The ledger is **PII-free by design** — `RaisedContradiction = { key, slotKeys, resolution,
@@ -248,8 +251,13 @@ answers.
 
 - **Gate.** Runs only when `contradictionMode ≠ off` AND the detection sub-flag is on, and never when
   the respondent chose to finish anyway (`skipSweep`). Needs ≥2 answered slots (no `currentStatement`
-  at submit). Fail-soft: a missing detector, oversized input, or dispatch error → treated as clean, so
+  at submit). The paid dispatch takes a per-flow sub-cap (`turnLimiter.check(access.rateKey)`, 60/min —
+  the same guard the per-turn messages route uses), so a held session can't be re-POSTed to hammer
+  detection. Fail-soft: a missing detector, oversized input, or dispatch error → treated as clean, so
   a wrap-up is never blocked by infra (`runCompletionSweep`).
+- **Idempotent re-submit.** If a probe is already parked (a prior hold the respondent hasn't answered),
+  a plain re-submit **short-circuits**: it re-surfaces the SAME parked probe — no second sweep (no LLM),
+  no duplicate probe turn — so a resume-then-resubmit never spams the transcript or re-bills.
 - **Ledger-aware.** `filterSweepFindings` drops any conflict already `resolved` / `kept` / `flagged`
   this session; it surfaces only **genuinely-new** conflicts (the sweep's real value — cross-slot ones
   the per-turn pass never caught) **and still-`unresolved`** ones (raised, never reconciled — the final
@@ -260,8 +268,9 @@ answers.
   next chat message resolves it through the ordinary [resolution turn](#probe-confirm-flow-probe-mode)
   — refining answers + data slots in the background — after which finishing again completes cleanly.
 - **Escape hatch.** `{ skipSweep: true }` ("finish / get my report anyway") bypasses the sweep and
-  completes, leaving the conflict `unresolved` (auditable) and the data as-is. The respondent is never
-  trapped.
+  completes, recording the conflict `unresolved` (auditable) and leaving the data as-is. Completing
+  clears any parked `pendingContradiction` so a completed session never carries a stale probe. The
+  respondent is never trapped.
 - **Surfaces.** Normal submit continues **in the chat** (the probe is the next message); an early
   finish additionally opens a **final-check modal** over the exit action (`FinalCheckModal`), with
   "Clarify in chat" and "Get my report anyway". Both are driven by the same `held` backend response

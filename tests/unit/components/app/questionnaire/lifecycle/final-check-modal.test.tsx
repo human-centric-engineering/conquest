@@ -54,6 +54,23 @@ describe('FinalCheckModal', () => {
     expect(onClarify).toHaveBeenCalledTimes(1);
   });
 
+  it('treats an outside dismiss (Esc) as "clarify" — closing never completes the session', async () => {
+    // The Dialog's onOpenChange(false) path (overlay click / Esc / ✕) routes to onClarify, the least
+    // destructive default — it steps back into the chat rather than finishing.
+    const onClarify = vi.fn();
+    render(
+      <FinalCheckModal
+        open
+        probeText={PROBE}
+        onClarify={onClarify}
+        onFinishAnyway={vi.fn()}
+        busy={false}
+      />
+    );
+    await userEvent.keyboard('{Escape}');
+    expect(onClarify).toHaveBeenCalledTimes(1);
+  });
+
   it('fires onFinishAnyway from the escape hatch', async () => {
     const onFinishAnyway = vi.fn();
     render(

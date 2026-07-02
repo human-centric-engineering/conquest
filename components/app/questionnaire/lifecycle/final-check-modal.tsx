@@ -55,7 +55,12 @@ export function FinalCheckModal({
   return (
     // Closing the dialog (overlay click / Esc / ✕) is treated as "clarify in chat" — the least
     // destructive default: it never completes the session, just steps back into the conversation.
-    <Dialog open={open} onOpenChange={(next) => (!next ? onClarify() : undefined)}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) onClarify();
+      }}
+    >
       <DialogContent>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
