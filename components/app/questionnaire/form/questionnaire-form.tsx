@@ -171,8 +171,11 @@ export function QuestionnaireForm({
 
   return (
     <div className={cn('grid min-h-0 gap-4 lg:grid-cols-[16rem_minmax(0,1fr)]', className)}>
-      {/* Completeness map */}
-      <aside className="hidden min-h-0 overflow-y-auto lg:block">
+      {/* Completeness map. `overflow-x-hidden` is deliberate alongside `overflow-y-auto`: with only
+          the y-axis pinned, CSS computes the visible x-axis as `auto` too, so on Windows (classic
+          scrollbars occupy ~17px, unlike macOS's 0px overlays) the vertical scrollbar narrows the
+          content box just enough to trip a spurious horizontal scrollbar. Pinning x to hidden stops it. */}
+      <aside className="hidden min-h-0 overflow-x-hidden overflow-y-auto lg:block">
         <div className="mb-2 flex items-center gap-2">
           <span className="text-foreground text-sm font-medium">Progress</span>
           <span className="text-muted-foreground text-xs tabular-nums">
@@ -192,7 +195,11 @@ export function QuestionnaireForm({
       {/* Active section. `min-w-0` lets this grid track shrink below its content's intrinsic width
           (likert buttons + the fixed confidence lane) instead of forcing the page to scroll. */}
       <div className="flex min-h-0 min-w-0 flex-col">
-        <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+        {/* `overflow-x-hidden` pins the horizontal axis so it can't be promoted to `auto` by the
+            `overflow-y-auto`; without it, Windows' ~17px classic scrollbar narrows this column enough
+            to overflow the question rows (and the transient `-mx-3` fill-glow bleed) and surface an
+            unwanted horizontal scrollbar the respondent sees as the page scrolling sideways. */}
+        <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto pr-1">
           {/* Sticky section header — stays pinned while the questions scroll beneath it, so the
               respondent always sees which section they're in (and the autosave state). The frosted
               backdrop lets content slide under it without a hard cut. */}
