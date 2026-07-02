@@ -361,27 +361,15 @@ describe('generateRespondentReport', () => {
     expect(system?.content).toContain('separate paragraphs with a blank line');
   });
 
-  it('applies the configured narrative-style preset to the system prompt', async () => {
-    for (const [style, marker] of [
-      ['flowing', 'Style: flowing'],
-      ['concise', 'Style: concise'],
-      ['structured', 'Style: structured'],
-    ] as const) {
-      vi.clearAllMocks();
-      (loadSessionExport as Mock).mockResolvedValue(loadedExport());
-      (prisma.aiAgent.findUnique as Mock).mockResolvedValue({
-        provider: 'openai',
-        model: 'test-model',
-        fallbackProviders: [],
-        systemInstructions: 'You are the report writer.',
-        temperature: 0.4,
-        maxTokens: 4096,
-      });
-      (resolveAgentProviderAndModel as Mock).mockResolvedValue({
-        providerSlug: 'openai',
-        model: 'test-model',
-        fallbacks: [],
-      });
+  // One case per style (not a single loop) so a failure in one style doesn't mask the others, and
+  // each relies on the shared beforeEach setup rather than re-typing the mocks inline.
+  it.each([
+    ['flowing', 'Style: flowing'],
+    ['concise', 'Style: concise'],
+    ['structured', 'Style: structured'],
+  ] as const)(
+    'applies the %s narrative-style preset to the system prompt',
+    async (style, marker) => {
       (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
         sessionMeta({
           respondentReport: {
@@ -400,7 +388,7 @@ describe('generateRespondentReport', () => {
       );
       expect(system?.content).toContain(marker);
     }
-  });
+  );
 
   it('falls back to the audience role when there is no description', async () => {
     (loadSessionExport as Mock).mockResolvedValue({

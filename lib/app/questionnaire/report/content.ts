@@ -90,6 +90,9 @@ function splitSentences(block: string): string[] {
  */
 export function splitReportParagraphs(text: string): string[] {
   const blocks = text
+    // Normalise CRLF/CR (Windows-authored answers the model may echo) to LF first, so a `\r\n\r\n`
+    // blank line is recognised as a paragraph break and no stray `\r` leaks into the rendered output.
+    .replace(/\r\n?/g, '\n')
     .split(/\n[ \t]*\n+/)
     .map((p) => p.trim())
     .filter((p) => p.length > 0);

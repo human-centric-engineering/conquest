@@ -7,20 +7,12 @@
  * request time and must never be cached. Sibling to the F7.4 `pdf-response.ts`.
  */
 
+import { slugify } from '@/lib/utils';
 import type { TranscriptExportModel } from '@/lib/app/questionnaire/export/transcript-types';
-
-/** Slugify a title for a filename: lower-case, alphanumerics → single hyphens. */
-function slugify(title: string): string {
-  const slug = title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-  return slug || 'questionnaire';
-}
 
 /** `transcript-<slug>-v<N>.<ext>` — the shared download filename. */
 function transcriptFilename(model: TranscriptExportModel, ext: 'pdf' | 'txt'): string {
-  return `transcript-${slugify(model.questionnaireTitle)}-v${model.versionNumber}.${ext}`;
+  return `transcript-${slugify(model.questionnaireTitle) || 'questionnaire'}-v${model.versionNumber}.${ext}`;
 }
 
 /** Build the download response for a rendered transcript PDF. */

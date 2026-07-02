@@ -279,6 +279,14 @@ describe('splitReportParagraphs', () => {
     expect(splitReportParagraphs('\n\nBody.\n\n')).toEqual(['Body.']);
   });
 
+  it('splits on CRLF blank lines and leaves no stray carriage returns', () => {
+    // Windows-authored answers the model echoes can carry CRLF — normalise to LF so the blank line
+    // is still a paragraph break and no \r leaks into the rendered output.
+    const result = splitReportParagraphs('Para one.\r\n\r\nPara two.');
+    expect(result).toEqual(['Para one.', 'Para two.']);
+    expect(result.some((p) => p.includes('\r'))).toBe(false);
+  });
+
   it('sub-splits a long single-block paragraph into groups of ~3 sentences (the wall-of-text fix)', () => {
     // The model returned one block with no blank lines — pass 2 breaks it up regardless.
     const wall = 'One point here. Two follows. Three continues. Four extends. Five closes.';
@@ -320,6 +328,13 @@ describe('splitReportParagraphs', () => {
     expect(result.every((p) => p.length <= 320)).toBe(true);
     // No sentence is lost or fragmented — rejoining reproduces the original.
     expect(result.join(' ')).toBe(`${s1} ${s2} ${s3}`);
+  });
+
+  it('keeps a long punctuation-free block whole (the "≥1 sentence per paragraph" guarantee)', () => {
+    // splitSentences yields a single "sentence" for punctuation-free text, so the greedy loop never
+    // closes on the first sentence regardless of length — the block stays one paragraph, never fragmented.
+    const noPunctuation = 'word '.repeat(120).trim(); // ~600 chars, no . ! ?
+    expect(splitReportParagraphs(noPunctuation)).toEqual([noPunctuation]);
   });
 
   it('combines both passes: blank-line paragraphs, each further capped by sentence count', () => {

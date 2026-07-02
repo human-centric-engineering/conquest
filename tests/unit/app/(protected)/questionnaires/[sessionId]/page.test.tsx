@@ -89,6 +89,7 @@ vi.mock('@/lib/app/questionnaire/chat/theme', () => ({
 // Banner header resolver (title + round for the brand band) — stubbed so it makes no real Prisma call.
 vi.mock('@/lib/app/questionnaire/header/resolve', () => ({
   resolveSessionHeader: vi.fn(),
+  resolveOwnedSessionTitle: vi.fn(),
 }));
 
 /**
@@ -156,7 +157,7 @@ vi.mock('@/components/app/questionnaire/chat/brand-theme-provider', () => ({
 import QuestionnaireSessionPage, {
   generateMetadata,
 } from '@/app/(protected)/questionnaires/[sessionId]/page';
-import { resolveSessionHeader } from '@/lib/app/questionnaire/header/resolve';
+import { resolveOwnedSessionTitle } from '@/lib/app/questionnaire/header/resolve';
 import { getServerSession } from '@/lib/auth/utils';
 import { clearInvalidSession } from '@/lib/auth/clear-session';
 import { prisma } from '@/lib/db/client';
@@ -306,19 +307,25 @@ describe('QuestionnaireSessionPage', () => {
   // -------------------------------------------------------------------------
 
   describe('metadata', () => {
-    it('titles the tab after the questionnaire so a print/save filename reads as it', async () => {
-      vi.mocked(resolveSessionHeader).mockResolvedValue({
-        title: 'Merlin5 Alpha Demo',
-        round: null,
-      });
+    it('titles the tab after the questionnaire the signed-in user owns', async () => {
+      vi.mocked(resolveOwnedSessionTitle).mockResolvedValue('Merlin5 Alpha Demo');
       const meta = await generateMetadata({ params: Promise.resolve({ sessionId: 's1' }) });
       expect(meta.title).toBe('Merlin5 Alpha Demo');
+      expect(resolveOwnedSessionTitle).toHaveBeenCalledWith('s1', 'user_abc');
     });
 
-    it('falls back to the generic title when the session does not resolve', async () => {
-      vi.mocked(resolveSessionHeader).mockResolvedValue(null);
-      const meta = await generateMetadata({ params: Promise.resolve({ sessionId: 'gone' }) });
+    it('falls back to the generic title when the session is not owned / not found', async () => {
+      // resolveOwnedSessionTitle returns null for a non-owner or missing session — no title leak.
+      vi.mocked(resolveOwnedSessionTitle).mockResolvedValue(null);
+      const meta = await generateMetadata({ params: Promise.resolve({ sessionId: 'other' }) });
       expect(meta.title).toBe('Questionnaire');
+    });
+
+    it('returns the generic title (no lookup) when unauthenticated', async () => {
+      vi.mocked(getServerSession).mockResolvedValue(null);
+      const meta = await generateMetadata({ params: Promise.resolve({ sessionId: 's1' }) });
+      expect(meta.title).toBe('Questionnaire');
+      expect(resolveOwnedSessionTitle).not.toHaveBeenCalled();
     });
   });
 

@@ -6,6 +6,13 @@
  * `%PDF` magic header, non-empty body). Exercises both the answered + unanswered and
  * the anonymous header paths so the document never throws on either shape.
  *
+ * These are structural (no-throw / valid-PDF) checks by design: react-pdf emits a binary
+ * buffer, and the repo deliberately mocks `pdf-parse` everywhere rather than run the
+ * environment-sensitive pdfjs text-extraction engine in unit tests. Content-level behaviour
+ * (e.g. paragraph splitting) is asserted at the pure-function layer — see
+ * `splitReportParagraphs` in `report/content.test.ts` — not by parsing the rendered PDF.
+ * test-review:accept assertion-quality — render tests intentionally assert structure (no-throw + %PDF), not extracted text; content is covered by pure-function tests.
+ *
  * @see app/api/v1/app/questionnaire-sessions/_lib/render-session-pdf.tsx
  */
 
@@ -100,7 +107,7 @@ describe('renderSessionPdf', () => {
     expect(startsWithPdfMagic(pdf)).toBe(true);
   }, 20000);
 
-  it('renders a multi-paragraph body + bullet block (paragraph splitting) without throwing', async () => {
+  it('renders a multi-paragraph body + bullet block without throwing', async () => {
     const pdf = await renderSessionPdf(
       model({
         narrativeOnly: true,

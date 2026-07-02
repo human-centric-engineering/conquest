@@ -27,7 +27,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, Download, Loader2 } from 'lucide-react';
 
-import { cn } from '@/lib/utils';
+import { cn, slugify } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { SessionRefChip } from '@/components/app/questionnaire/lifecycle/session-ref-chip';
@@ -52,11 +52,7 @@ const ACCENT = 'var(--app-accent-color, var(--color-primary))';
  * so we slugify here. Falls back to `responses` when the title is empty/untitled.
  */
 function downloadFilename(title: string | undefined): string {
-  const slug = (title ?? '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-  return `${slug || 'responses'}.pdf`;
+  return `${slugify(title ?? '') || 'responses'}.pdf`;
 }
 
 /** Restrained fade-and-rise, matched to the intro splash so the run's bookends feel of a piece. */
@@ -317,7 +313,9 @@ function ReportInsights({
     <div className="w-full space-y-4 text-left">
       <div className={cn('space-y-2', REVEAL)} style={delay()}>
         {splitReportParagraphs(summary).map((paragraph, i) => (
-          <p key={i} className="text-foreground text-sm leading-relaxed">
+          // `whitespace-pre-line`: a preserved multi-line block (e.g. a bullet run the model wrote as
+          // consecutive `- …` lines) keeps its newlines on screen, matching the PDF's <Text>.
+          <p key={i} className="text-foreground text-sm leading-relaxed whitespace-pre-line">
             {paragraph}
           </p>
         ))}
@@ -326,7 +324,10 @@ function ReportInsights({
         <div key={i} className={cn('space-y-1.5', REVEAL)} style={delay()}>
           <h2 className="text-foreground text-sm font-semibold">{section.heading}</h2>
           {splitReportParagraphs(section.body).map((paragraph, j) => (
-            <p key={j} className="text-muted-foreground text-sm leading-relaxed">
+            <p
+              key={j}
+              className="text-muted-foreground text-sm leading-relaxed whitespace-pre-line"
+            >
               {paragraph}
             </p>
           ))}

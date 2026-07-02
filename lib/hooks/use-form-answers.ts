@@ -172,6 +172,10 @@ export function useFormAnswers(options: UseFormAnswersOptions): UseFormAnswersRe
     if (keys.length === 0) return;
     queueRef.current.clear();
     inFlightRef.current = true;
+    // Mark every key in this batch 'saving' — covers the re-drain path (flushed from `.finally`),
+    // where keys were queued while a prior PUT was in flight and `save()` didn't re-run for them, so
+    // they'd otherwise show a stale 'saved' until this PUT lands.
+    for (const k of keys) setStatus(k, 'saving');
     const answers = keys.map((slotKey) => {
       const value = latestRef.current[slotKey];
       return isEmpty(value)

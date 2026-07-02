@@ -2,9 +2,10 @@
  * RespondentReportEditor — component tests.
  *
  * Verifies the controlled state → save payload (the whole respondentReport block), the master
- * enable toggle, and the mode gating (Generation fields are disabled in raw mode). UI primitives are
- * mocked to plain elements so assertions don't fight Radix/jsdom; the ClientKnowledgePanel is stubbed
- * (it fetches on mount and is covered separately).
+ * enable toggle, the mode gating (Generation fields are disabled in raw mode), and the narrative-style
+ * selector. UI primitives (Tabs/Switch/Select/FieldHelp) are mocked to plain elements so assertions
+ * don't fight Radix/jsdom. The embedded `ReportConfigAssistant` is rendered live — it only calls the
+ * craft API on user interaction, so it stays inert in these save/gating tests.
  *
  * @see components/admin/questionnaires/report/respondent-report-editor.tsx
  */
