@@ -51,10 +51,23 @@ function initialChatStatus(
   }
 }
 
-export const metadata: Metadata = {
-  title: 'Questionnaire',
-  description: 'Complete your questionnaire through a short conversation.',
-};
+/**
+ * Title the tab (and any browser-derived print/save filename) after the actual questionnaire, not a
+ * generic "Questionnaire" — a respondent who prints or saves the completion report then gets a file
+ * named for their questionnaire. Falls back to the generic title when the session doesn't resolve.
+ */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ sessionId: string }>;
+}): Promise<Metadata> {
+  const { sessionId } = await params;
+  const header = await resolveSessionHeader(sessionId);
+  return {
+    title: header?.title ?? 'Questionnaire',
+    description: 'Complete your questionnaire through a short conversation.',
+  };
+}
 
 /**
  * Authenticated respondent chat surface (F7.1).

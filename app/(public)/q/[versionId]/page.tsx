@@ -35,10 +35,22 @@ const display = Fraunces({
   display: 'swap',
 });
 
-export const metadata: Metadata = {
-  title: 'Questionnaire',
-  description: 'Complete a short conversational questionnaire — no account needed.',
-};
+/**
+ * Title the tab (and any browser-derived print/save filename) after the actual questionnaire, not a
+ * generic "Questionnaire". Gated by the same live-sessions flag as the page so a dark-launched
+ * surface never leaks a title; falls back to the generic title otherwise.
+ */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ versionId: string }>;
+}): Promise<Metadata> {
+  const description = 'Complete a short conversational questionnaire — no account needed.';
+  if (!(await isLiveSessionsEnabled())) return { title: 'Questionnaire', description };
+  const { versionId } = await params;
+  const header = await resolveVersionHeader(versionId);
+  return { title: header?.title ?? 'Questionnaire', description };
+}
 
 /**
  * No-login respondent chat surface (F7.1).

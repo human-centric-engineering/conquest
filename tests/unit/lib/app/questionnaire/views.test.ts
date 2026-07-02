@@ -202,6 +202,7 @@ function makeConfigView(overrides: Partial<ConfigView> = {}): ConfigView {
       mode: 'raw',
       rawIncludes: { dataSlots: false, questionsAsPresented: true },
       generation: {
+        narrativeStyle: 'flowing',
         instructions: '',
         structure: '',
         backgroundContext: '',

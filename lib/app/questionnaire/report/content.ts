@@ -49,6 +49,80 @@ export const REPORT_ACTION_MAX = 1000;
 export const REPORT_MAX_SECTIONS = 12;
 export const REPORT_MAX_ACTIONS = 12;
 
+/**
+ * Paragraph size bounds for the deterministic sub-split. A display paragraph is closed when it
+ * reaches {@link MAX_SENTENCES_PER_PARAGRAPH} sentences OR adding the next sentence would push it past
+ * {@link SOFT_CHAR_LIMIT} characters — whichever comes first (always ≥1 sentence per paragraph). The
+ * char budget is what makes long-sentence prose break into even ~3-line paragraphs rather than
+ * 5-line ones when three sentences happen to be very long.
+ */
+const MAX_SENTENCES_PER_PARAGRAPH = 3;
+const SOFT_CHAR_LIMIT = 280;
+
+/**
+ * Split a plain-prose block into sentences. Boundary = sentence-ending punctuation followed by
+ * whitespace and the start of a new sentence (a capital letter, digit, or opening quote). Decimals
+ * (`4.5`) and mid-sentence dots don't match (no capitalised follow-on); the odd abbreviation
+ * (`e.g.`) may over-split, which is a far smaller readability cost than a 15-line wall of text.
+ */
+function splitSentences(block: string): string[] {
+  return block
+    .split(/(?<=[.!?])\s+(?=["“'']?[A-Z0-9])/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+/**
+ * Split a report summary/body into display paragraphs so the renderers (PDF + on-screen) lay it out
+ * with real inter-paragraph spacing rather than one wall of text. Two passes:
+ *
+ *  1. Split on blank lines (one or more newlines with only whitespace between) — the agent is asked to
+ *     separate paragraphs this way. Single newlines are preserved *within* a block, so a run of bullet
+ *     lines the model wrote as consecutive `- …` lines stays one block with its line breaks intact.
+ *  2. Deterministically sub-split any remaining plain-prose block into paragraphs bounded by
+ *     {@link MAX_SENTENCES_PER_PARAGRAPH} sentences and {@link SOFT_CHAR_LIMIT} characters (greedy
+ *     grouping). This is the load-bearing fix: models frequently return one giant paragraph with no
+ *     blank lines, so pass 1 alone leaves a wall of text — pass 2 breaks it up regardless of what the
+ *     model did (and fixes already-stored reports, since it runs at render time). Blocks that contain
+ *     line breaks (bullet lists) are left whole, never sentence-split.
+ *
+ * A short body returns a single-element array (its whole text). Pure — shared by both renderers.
+ */
+export function splitReportParagraphs(text: string): string[] {
+  const blocks = text
+    .split(/\n[ \t]*\n+/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+
+  const out: string[] = [];
+  for (const block of blocks) {
+    // Preserve multi-line blocks (bullet runs, deliberate line breaks) exactly as authored.
+    if (/\n/.test(block)) {
+      out.push(block);
+      continue;
+    }
+    const sentences = splitSentences(block);
+    // Greedily group sentences into paragraphs bounded by sentence count AND character budget.
+    let current: string[] = [];
+    let currentLen = 0;
+    for (const sentence of sentences) {
+      const projected = currentLen + (current.length > 0 ? 1 : 0) + sentence.length;
+      if (
+        current.length > 0 &&
+        (current.length >= MAX_SENTENCES_PER_PARAGRAPH || projected > SOFT_CHAR_LIMIT)
+      ) {
+        out.push(current.join(' '));
+        current = [];
+        currentLen = 0;
+      }
+      current.push(sentence);
+      currentLen += (currentLen > 0 ? 1 : 0) + sentence.length;
+    }
+    if (current.length > 0) out.push(current.join(' '));
+  }
+  return out;
+}
+
 function trimTo(value: unknown, max: number): string | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();

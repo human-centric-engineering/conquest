@@ -37,7 +37,9 @@ import {
   isAiRespondentReportMode,
   RESPONDENT_REPORT_BACKGROUND_MAX_LENGTH,
   RESPONDENT_REPORT_INSTRUCTIONS_MAX_LENGTH,
+  RESPONDENT_REPORT_NARRATIVE_STYLES,
   type RespondentReportMode,
+  type RespondentReportNarrativeStyle,
   type RespondentReportSettings,
 } from '@/lib/app/questionnaire/types';
 
@@ -45,6 +47,12 @@ const MODE_LABELS: Record<RespondentReportMode, string> = {
   raw: 'Raw answers only',
   raw_plus_insights: 'Raw answers + AI insights',
   narrative: 'Narrative report',
+};
+
+const NARRATIVE_STYLE_LABELS: Record<RespondentReportNarrativeStyle, string> = {
+  flowing: 'Flowing prose',
+  concise: 'Concise',
+  structured: 'Structured (headings + bullets)',
 };
 
 export interface RespondentReportEditorProps {
@@ -230,6 +238,38 @@ export function RespondentReportEditor({
             onApply={patchGeneration}
             disabled={isSaving || !usesAgent}
           />
+
+          <div className="space-y-1.5">
+            <Label className="flex items-center gap-1">
+              Narrative style
+              <FieldHelp title="Narrative style">
+                Shapes how the AI report reads. <strong>Flowing prose</strong> is connected,
+                analysed paragraphs. <strong>Concise</strong> is tighter and shorter.{' '}
+                <strong>Structured</strong> is highly scannable — a brief framing per section, then
+                short paragraphs and bullet lists. All styles write in short, readable paragraphs
+                and stay grounded in the respondent&rsquo;s own answers. This is separate from the
+                free-text voice instructions below.
+              </FieldHelp>
+            </Label>
+            <Select
+              value={value.generation.narrativeStyle}
+              onValueChange={(v) =>
+                patchGeneration({ narrativeStyle: v as RespondentReportNarrativeStyle })
+              }
+              disabled={isSaving || !usesAgent}
+            >
+              <SelectTrigger className="max-w-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {RESPONDENT_REPORT_NARRATIVE_STYLES.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {NARRATIVE_STYLE_LABELS[s]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
           <div className="space-y-1.5">
             <Label htmlFor="rr-instructions" className="flex items-center gap-1">

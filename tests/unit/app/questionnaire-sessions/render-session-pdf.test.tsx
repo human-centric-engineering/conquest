@@ -100,6 +100,25 @@ describe('renderSessionPdf', () => {
     expect(startsWithPdfMagic(pdf)).toBe(true);
   }, 20000);
 
+  it('renders a multi-paragraph body + bullet block (paragraph splitting) without throwing', async () => {
+    const pdf = await renderSessionPdf(
+      model({
+        narrativeOnly: true,
+        insights: {
+          summary: 'Opening framing.\n\nA second paragraph that develops the point.',
+          sections: [
+            {
+              heading: 'What limits growth',
+              body: 'First paragraph grounded in an answer.\n\nIn practice:\n- one\n- two\n\nA closing paragraph.',
+            },
+          ],
+          actions: ['Do the first thing'],
+        },
+      })
+    );
+    expect(startsWithPdfMagic(pdf)).toBe(true);
+  }, 20000);
+
   it('threads narrativeOnly through the model (default false)', () => {
     expect(model().narrativeOnly).toBe(false);
     expect(model({ narrativeOnly: true }).narrativeOnly).toBe(true);

@@ -154,8 +154,9 @@ vi.mock('@/components/app/questionnaire/chat/brand-theme-provider', () => ({
 }));
 
 import QuestionnaireSessionPage, {
-  metadata,
+  generateMetadata,
 } from '@/app/(protected)/questionnaires/[sessionId]/page';
+import { resolveSessionHeader } from '@/lib/app/questionnaire/header/resolve';
 import { getServerSession } from '@/lib/auth/utils';
 import { clearInvalidSession } from '@/lib/auth/clear-session';
 import { prisma } from '@/lib/db/client';
@@ -305,9 +306,19 @@ describe('QuestionnaireSessionPage', () => {
   // -------------------------------------------------------------------------
 
   describe('metadata', () => {
-    it('has the correct title', () => {
-      // Assert: the page exports the right metadata — no rendering needed
-      expect(metadata.title).toBe('Questionnaire');
+    it('titles the tab after the questionnaire so a print/save filename reads as it', async () => {
+      vi.mocked(resolveSessionHeader).mockResolvedValue({
+        title: 'Merlin5 Alpha Demo',
+        round: null,
+      });
+      const meta = await generateMetadata({ params: Promise.resolve({ sessionId: 's1' }) });
+      expect(meta.title).toBe('Merlin5 Alpha Demo');
+    });
+
+    it('falls back to the generic title when the session does not resolve', async () => {
+      vi.mocked(resolveSessionHeader).mockResolvedValue(null);
+      const meta = await generateMetadata({ params: Promise.resolve({ sessionId: 'gone' }) });
+      expect(meta.title).toBe('Questionnaire');
     });
   });
 

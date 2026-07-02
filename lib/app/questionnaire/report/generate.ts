@@ -58,6 +58,47 @@ function summariseAudience(
   return audience.description?.trim() || audience.role?.trim() || null;
 }
 
+/**
+ * Grounding contract shared by both AI modes. This is the load-bearing rule for report quality: keep
+ * every claim tied to something the respondent actually said, and forbid the broad, unevidenced
+ * generalisations that make a report read as boilerplate rather than about *them*.
+ */
+const GROUNDING_RULES =
+  'Ground every observation in a specific answer the respondent actually gave — refer to what they ' +
+  'said. Do NOT make broad or sweeping generalisations their answers do not support, and do NOT ' +
+  'attribute a trait, situation, or conclusion to the respondent or their organisation unless their ' +
+  'own answers established it. Where their answers are thin on a topic, say less rather than ' +
+  'inferring. You may bring in general context or an illustrative example, but frame it explicitly ' +
+  'as general (e.g. "in many organisations…") — never state an unsupported example as a fact about ' +
+  'this respondent. Never invent facts.';
+
+/**
+ * Paragraph discipline applied to `summary` and every section `body`, regardless of style — the fix
+ * for reports that arrive as a single wall of text. Paragraphs are separated by a blank line so the
+ * renderers can lay them out with real spacing.
+ */
+const PARAGRAPH_RULES =
+  'Write in sensible, readable paragraphs. Break `summary` and every section `body` into several ' +
+  'short paragraphs (roughly 2–4 sentences each), separated by a blank line. Never emit one large ' +
+  'block of text. Start a new paragraph for each distinct point.';
+
+/** Style-preset guidance layered on top of the paragraph rules. */
+const NARRATIVE_STYLE_RULES: Record<
+  RespondentReportSettings['generation']['narrativeStyle'],
+  string
+> = {
+  flowing:
+    'Style: flowing. Write connected, analysed prose that develops each point, but keep the ' +
+    'paragraphs short and the reasoning tight.',
+  concise:
+    'Style: concise. Be economical — prefer short paragraphs of 2–3 sentences, cut filler and ' +
+    'hedging, and make every sentence earn its place. Favour brevity over exhaustiveness.',
+  structured:
+    'Style: structured and scannable. Open each section with a one- or two-sentence framing, then ' +
+    'use short paragraphs and, where you enumerate factors, consequences, or steps, a bullet-style ' +
+    'list — one point per line, each line starting with "- ". Keep prose between lists minimal.',
+};
+
 /** Assemble the report agent's system + user messages. */
 function buildReportMessages(opts: {
   agentInstructions: string;
@@ -74,14 +115,16 @@ function buildReportMessages(opts: {
   system.push(
     narrative
       ? 'You write a single woven report for the respondent who just completed this questionnaire. ' +
-          'Address the respondent directly (second person). Weave their actual answers into flowing, ' +
+          'Address the respondent directly (second person). Weave their actual answers into ' +
           'analysed prose — integrate the answers into the narrative rather than listing them ' +
-          'separately, and develop analysis, insights, and advice throughout. Ground every statement ' +
-          'in their actual answers — never invent facts.'
+          'separately, and develop analysis, insights, and advice throughout. ' +
+          GROUNDING_RULES
       : 'You write a personalised report for the respondent who just completed this questionnaire. ' +
-          'Address the respondent directly (second person). Ground every statement in their actual ' +
-          'answers — never invent facts.'
+          'Address the respondent directly (second person). ' +
+          GROUNDING_RULES
   );
+  system.push(PARAGRAPH_RULES);
+  system.push(NARRATIVE_STYLE_RULES[gen.narrativeStyle]);
   if (gen.instructions.trim()) system.push(`Style and voice guidance:\n${gen.instructions.trim()}`);
   if (gen.structure.trim()) system.push(`Desired structure:\n${gen.structure.trim()}`);
   if (gen.backgroundContext.trim())
@@ -94,12 +137,13 @@ function buildReportMessages(opts: {
     narrative
       ? 'Make it ACTIONABLE: the `actions` array must contain concrete next steps the respondent can ' +
           'take. Use `summary` as an opening framing, and each `sections[]` entry as a woven chapter ' +
-          '(heading + flowing body that integrates their answers with your analysis).'
+          '(heading + body that integrates their answers with your analysis).'
       : 'Make the insights ACTIONABLE: the `actions` array must contain concrete next steps the ' +
           'respondent can take.'
   );
   system.push(
-    'Respond with ONLY a JSON object of this exact shape (no prose, no code fence):\n' +
+    'Respond with ONLY a JSON object of this exact shape (no prose, no code fence). Within a string, ' +
+      'separate paragraphs with a blank line (\\n\\n):\n' +
       '{"summary": string, "sections": [{"heading": string, "body": string}], "actions": [string]}'
   );
 

@@ -37,10 +37,27 @@ import { API } from '@/lib/api/endpoints';
 import { useRespondentReport } from '@/lib/hooks/use-respondent-report';
 import { usePrefersReducedMotion } from '@/lib/hooks/use-prefers-reduced-motion';
 import { isAiRespondentReportMode } from '@/lib/app/questionnaire/types';
-import type { RespondentReportContent } from '@/lib/app/questionnaire/report/content';
+import {
+  splitReportParagraphs,
+  type RespondentReportContent,
+} from '@/lib/app/questionnaire/report/content';
 import type { AnswerPanelView } from '@/lib/app/questionnaire/panel/types';
 
 const ACCENT = 'var(--app-accent-color, var(--color-primary))';
+
+/**
+ * Build the PDF download filename from the questionnaire title so a saved file reads as the
+ * questionnaire (e.g. `merlin5-alpha-demo.pdf`), not a generic `responses.pdf`. A blob download must
+ * set `anchor.download` explicitly (the server's Content-Disposition is lost through the object URL),
+ * so we slugify here. Falls back to `responses` when the title is empty/untitled.
+ */
+function downloadFilename(title: string | undefined): string {
+  const slug = (title ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return `${slug || 'responses'}.pdf`;
+}
 
 /** Restrained fade-and-rise, matched to the intro splash so the run's bookends feel of a piece. */
 const REVEAL =
@@ -114,7 +131,7 @@ export function SessionComplete({
         const url = URL.createObjectURL(blob);
         const anchor = document.createElement('a');
         anchor.href = url;
-        anchor.download = 'responses.pdf';
+        anchor.download = downloadFilename(view?.questionnaireTitle);
         document.body.appendChild(anchor);
         anchor.click();
         anchor.remove();
@@ -125,7 +142,7 @@ export function SessionComplete({
         inFlightRef.current = false;
         setDownloading(false);
       });
-  }, [sessionId, accessToken]);
+  }, [sessionId, accessToken, view?.questionnaireTitle]);
 
   return (
     // `m-auto` (not `items-center`) centres the card when it fits yet lets a too-tall card scroll
@@ -298,13 +315,21 @@ function ReportInsights({
   const delay = () => ({ animationDelay: `${step++ * 80}ms`, animationFillMode: 'both' as const });
   return (
     <div className="w-full space-y-4 text-left">
-      <p className={cn('text-foreground text-sm leading-relaxed', REVEAL)} style={delay()}>
-        {summary}
-      </p>
+      <div className={cn('space-y-2', REVEAL)} style={delay()}>
+        {splitReportParagraphs(summary).map((paragraph, i) => (
+          <p key={i} className="text-foreground text-sm leading-relaxed">
+            {paragraph}
+          </p>
+        ))}
+      </div>
       {sections.map((section, i) => (
-        <div key={i} className={cn('space-y-1', REVEAL)} style={delay()}>
+        <div key={i} className={cn('space-y-1.5', REVEAL)} style={delay()}>
           <h2 className="text-foreground text-sm font-semibold">{section.heading}</h2>
-          <p className="text-muted-foreground text-sm leading-relaxed">{section.body}</p>
+          {splitReportParagraphs(section.body).map((paragraph, j) => (
+            <p key={j} className="text-muted-foreground text-sm leading-relaxed">
+              {paragraph}
+            </p>
+          ))}
         </div>
       ))}
       {actions.length > 0 && (

@@ -334,6 +334,74 @@ describe('generateRespondentReport', () => {
     expect(system?.content).not.toContain('single woven report');
   });
 
+  it('instructs the model to stay grounded and avoid unsupported generalisations', async () => {
+    const { provider, chat } = fakeProvider(VALID_RESPONSE);
+    (getProvider as Mock).mockResolvedValue(provider);
+
+    await generateRespondentReport('sess-1');
+    const system = (chat.mock.calls[0][0] as Array<{ role: string; content: string }>).find(
+      (m) => m.role === 'system'
+    );
+    expect(system?.content).toContain('Ground every observation in a specific answer');
+    expect(system?.content).toMatch(/do not make broad or sweeping generalisations/i);
+    expect(system?.content).toMatch(/never invent facts/i);
+  });
+
+  it('instructs the model to write in short, blank-line-separated paragraphs', async () => {
+    const { provider, chat } = fakeProvider(VALID_RESPONSE);
+    (getProvider as Mock).mockResolvedValue(provider);
+
+    await generateRespondentReport('sess-1');
+    const system = (chat.mock.calls[0][0] as Array<{ role: string; content: string }>).find(
+      (m) => m.role === 'system'
+    );
+    expect(system?.content).toMatch(/readable paragraphs/i);
+    expect(system?.content).toMatch(/never emit one large block of text/i);
+    // The JSON-shape directive also spells out the blank-line paragraph separator.
+    expect(system?.content).toContain('separate paragraphs with a blank line');
+  });
+
+  it('applies the configured narrative-style preset to the system prompt', async () => {
+    for (const [style, marker] of [
+      ['flowing', 'Style: flowing'],
+      ['concise', 'Style: concise'],
+      ['structured', 'Style: structured'],
+    ] as const) {
+      vi.clearAllMocks();
+      (loadSessionExport as Mock).mockResolvedValue(loadedExport());
+      (prisma.aiAgent.findUnique as Mock).mockResolvedValue({
+        provider: 'openai',
+        model: 'test-model',
+        fallbackProviders: [],
+        systemInstructions: 'You are the report writer.',
+        temperature: 0.4,
+        maxTokens: 4096,
+      });
+      (resolveAgentProviderAndModel as Mock).mockResolvedValue({
+        providerSlug: 'openai',
+        model: 'test-model',
+        fallbacks: [],
+      });
+      (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+        sessionMeta({
+          respondentReport: {
+            enabled: true,
+            mode: 'narrative',
+            generation: { narrativeStyle: style },
+          },
+        })
+      );
+      const { provider, chat } = fakeProvider(VALID_RESPONSE);
+      (getProvider as Mock).mockResolvedValue(provider);
+
+      await generateRespondentReport('sess-1');
+      const system = (chat.mock.calls[0][0] as Array<{ role: string; content: string }>).find(
+        (m) => m.role === 'system'
+      );
+      expect(system?.content).toContain(marker);
+    }
+  });
+
   it('falls back to the audience role when there is no description', async () => {
     (loadSessionExport as Mock).mockResolvedValue({
       ...loadedExport(),

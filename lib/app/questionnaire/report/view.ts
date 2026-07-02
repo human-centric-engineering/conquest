@@ -30,6 +30,8 @@ export interface RespondentReportClientView {
   mode: RespondentReportMode;
   onScreen: boolean;
   download: boolean;
+  /** The questionnaire's title — so the completion screen can name the PDF download after it. */
+  questionnaireTitle: string;
   /** Insights state for the AI modes (`raw_plus_insights`, `narrative`); `null` for raw / disabled. */
   insights: {
     status: RespondentReportStatus;
@@ -58,7 +60,12 @@ export async function buildRespondentReportClientView(
   const session = await prisma.appQuestionnaireSession.findUnique({
     where: { id: sessionId },
     select: {
-      version: { select: { config: { select: { respondentReport: true } } } },
+      version: {
+        select: {
+          config: { select: { respondentReport: true } },
+          questionnaire: { select: { title: true } },
+        },
+      },
       respondentReport: {
         select: { status: true, content: true, generatedAt: true, error: true, notifyEmail: true },
       },
@@ -78,6 +85,7 @@ export async function buildRespondentReportClientView(
     mode: settings.mode,
     onScreen: settings.delivery.onScreen,
     download: settings.delivery.download,
+    questionnaireTitle: session.version?.questionnaire?.title ?? 'questionnaire',
   };
 
   if (!enabled || !isAiRespondentReportMode(settings.mode)) {

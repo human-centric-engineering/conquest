@@ -18,6 +18,7 @@
 import { Document, Page, Text, View, Image, StyleSheet } from '@react-pdf/renderer';
 
 import { formatSlotAnswer } from '@/lib/app/questionnaire/panel/format-slot-answer';
+import { splitReportParagraphs } from '@/lib/app/questionnaire/report/content';
 import { formatSessionRef } from '@/lib/app/questionnaire/session-ref';
 import type { PanelSlotView } from '@/lib/app/questionnaire/panel/types';
 import type { SessionExportModel } from '@/lib/app/questionnaire/export/types';
@@ -78,17 +79,16 @@ const styles = StyleSheet.create({
     marginTop: 18,
     marginBottom: 8,
   },
-  insightsSummary: {
-    marginBottom: 8,
-    lineHeight: 1.4,
-  },
   insightsHeading: {
     fontFamily: 'Helvetica-Bold',
     marginTop: 8,
     marginBottom: 3,
   },
-  insightsBody: {
-    marginBottom: 4,
+  // One paragraph within the summary or a section body. Bottom margin gives visible separation
+  // between paragraphs so a multi-paragraph body reads as prose, not a single block. The last
+  // paragraph's margin is harmless (the next heading has its own top margin).
+  insightsParagraph: {
+    marginBottom: 6,
     lineHeight: 1.4,
   },
   insightsAction: {
@@ -217,6 +217,24 @@ function SlotBlock({ slot }: { slot: PanelSlotView }) {
 }
 
 /**
+ * Render a summary/body as its constituent paragraphs, each its own spaced `<Text>`, so a
+ * multi-paragraph body lays out as prose instead of one block. Single newlines inside a paragraph
+ * (e.g. a run of bullet lines) are preserved by `<Text>`. See {@link splitReportParagraphs}.
+ */
+function Paragraphs({ text }: { text: string }) {
+  const paragraphs = splitReportParagraphs(text);
+  return (
+    <>
+      {paragraphs.map((paragraph, i) => (
+        <Text key={i} style={styles.insightsParagraph}>
+          {paragraph}
+        </Text>
+      ))}
+    </>
+  );
+}
+
+/**
  * The AI report section. For mode 2 it sits above the raw answers (title "Your insights"); for the
  * woven `narrative` mode it is the whole deliverable (title "Your personalised report").
  */
@@ -230,11 +248,11 @@ function InsightsSection({
   return (
     <View>
       <Text style={styles.sectionTitle}>{title}</Text>
-      <Text style={styles.insightsSummary}>{insights.summary}</Text>
+      <Paragraphs text={insights.summary} />
       {insights.sections.map((section, i) => (
         <View key={i}>
           <Text style={styles.insightsHeading}>{section.heading}</Text>
-          <Text style={styles.insightsBody}>{section.body}</Text>
+          <Paragraphs text={section.body} />
         </View>
       ))}
       {insights.actions.length > 0 && (
@@ -263,7 +281,9 @@ export function SessionPdfDocument({ model }: SessionPdfDocumentProps) {
   const narrativeOnly = model.narrativeOnly === true;
 
   return (
-    <Document title={`${model.questionnaireTitle} — ${narrativeOnly ? 'report' : 'responses'}`}>
+    // The document Title is the questionnaire's own title — browsers derive the suggested save/print
+    // filename from it, so it must read as the questionnaire, not a generic "Questionnaire".
+    <Document title={model.questionnaireTitle}>
       <Page size="A4" style={styles.page}>
         <View style={[styles.header, { borderBottomColor: accent }]}>
           {model.theme.logoUrl && <Image src={model.theme.logoUrl} style={styles.logo} />}

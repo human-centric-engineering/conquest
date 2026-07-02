@@ -21,6 +21,7 @@ describe('narrowRespondentReportSettings', () => {
       mode: 'raw_plus_insights' as const,
       rawIncludes: { dataSlots: true, questionsAsPresented: false },
       generation: {
+        narrativeStyle: 'structured' as const,
         instructions: 'Be concise.',
         structure: 'Summary then actions.',
         backgroundContext: 'Quarterly pulse.',
@@ -29,6 +30,28 @@ describe('narrowRespondentReportSettings', () => {
       delivery: { onScreen: false, download: true },
     };
     expect(narrowRespondentReportSettings(full)).toEqual(full);
+  });
+
+  it('narrows the narrative style: defaults when missing/invalid, preserves valid values', () => {
+    // Missing → default (flowing).
+    expect(narrowRespondentReportSettings({}).generation.narrativeStyle).toBe('flowing');
+    // Unknown string → default.
+    expect(
+      narrowRespondentReportSettings({ generation: { narrativeStyle: 'poetic' } }).generation
+        .narrativeStyle
+    ).toBe('flowing');
+    // Non-string → default.
+    expect(
+      narrowRespondentReportSettings({ generation: { narrativeStyle: 7 } }).generation
+        .narrativeStyle
+    ).toBe('flowing');
+    // Each valid value is preserved.
+    for (const style of ['flowing', 'concise', 'structured'] as const) {
+      expect(
+        narrowRespondentReportSettings({ generation: { narrativeStyle: style } }).generation
+          .narrativeStyle
+      ).toBe(style);
+    }
   });
 
   it('fills missing sub-objects and keys from the defaults', () => {

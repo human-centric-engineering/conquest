@@ -110,7 +110,8 @@ vi.mock('@/components/app/questionnaire/chat/brand-theme-provider', () => ({
   BrandThemeProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-import PublicQuestionnairePage, { metadata } from '@/app/(public)/q/[versionId]/page';
+import PublicQuestionnairePage, { generateMetadata } from '@/app/(public)/q/[versionId]/page';
+import { resolveVersionHeader } from '@/lib/app/questionnaire/header/resolve';
 import {
   isAttachmentInputEnabled,
   isIntroScreenEnabled,
@@ -192,9 +193,21 @@ describe('PublicQuestionnairePage', () => {
   // -------------------------------------------------------------------------
 
   describe('metadata', () => {
-    it('has the correct title', () => {
-      // Assert: the page exports the right metadata — no rendering needed
-      expect(metadata.title).toBe('Questionnaire');
+    it('titles the tab after the questionnaire when live sessions are on', async () => {
+      vi.mocked(isLiveSessionsEnabled).mockResolvedValue(true);
+      vi.mocked(resolveVersionHeader).mockResolvedValue({
+        title: 'Merlin5 Alpha Demo',
+        round: null,
+      });
+      const meta = await generateMetadata({ params: Promise.resolve({ versionId: 'v1' }) });
+      expect(meta.title).toBe('Merlin5 Alpha Demo');
+    });
+
+    it('uses the generic title (no version lookup) when live sessions are off — no dark-launch leak', async () => {
+      vi.mocked(isLiveSessionsEnabled).mockResolvedValue(false);
+      const meta = await generateMetadata({ params: Promise.resolve({ versionId: 'v1' }) });
+      expect(meta.title).toBe('Questionnaire');
+      expect(resolveVersionHeader).not.toHaveBeenCalled();
     });
   });
 

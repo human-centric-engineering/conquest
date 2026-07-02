@@ -8,6 +8,7 @@ import { describe, it, expect } from 'vitest';
 
 import {
   buildAnswerTranscript,
+  splitReportParagraphs,
   validateRespondentReportContent,
   REPORT_SUMMARY_MAX,
   REPORT_MAX_SECTIONS,
@@ -235,5 +236,98 @@ describe('buildAnswerTranscript', () => {
     });
     expect(text).not.toContain('Goal:');
     expect(text).not.toContain('Audience:');
+  });
+});
+
+describe('splitReportParagraphs', () => {
+  it('splits on blank lines into trimmed paragraphs', () => {
+    const text = 'First paragraph.\n\nSecond paragraph.\n\n\nThird paragraph.';
+    expect(splitReportParagraphs(text)).toEqual([
+      'First paragraph.',
+      'Second paragraph.',
+      'Third paragraph.',
+    ]);
+  });
+
+  it('returns a single element when there are no blank-line breaks (one wall of text)', () => {
+    expect(splitReportParagraphs('One long block with no breaks.')).toEqual([
+      'One long block with no breaks.',
+    ]);
+  });
+
+  it('keeps a run of single-newline bullet lines together as one paragraph block', () => {
+    // Consecutive "- …" lines separated by single newlines are one enumerated block, not N paragraphs.
+    const bullets = 'In practice:\n- one\n- two\n- three';
+    expect(splitReportParagraphs(bullets)).toEqual(['In practice:\n- one\n- two\n- three']);
+  });
+
+  it('separates a bullet block from following prose across a blank line', () => {
+    const text = 'Framing line.\n\n- one\n- two\n\nClosing thought.';
+    expect(splitReportParagraphs(text)).toEqual([
+      'Framing line.',
+      '- one\n- two',
+      'Closing thought.',
+    ]);
+  });
+
+  it('tolerates blank lines that contain trailing whitespace', () => {
+    const text = 'A.\n   \nB.';
+    expect(splitReportParagraphs(text)).toEqual(['A.', 'B.']);
+  });
+
+  it('drops empty leading/trailing paragraphs', () => {
+    expect(splitReportParagraphs('\n\nBody.\n\n')).toEqual(['Body.']);
+  });
+
+  it('sub-splits a long single-block paragraph into groups of ~3 sentences (the wall-of-text fix)', () => {
+    // The model returned one block with no blank lines — pass 2 breaks it up regardless.
+    const wall = 'One point here. Two follows. Three continues. Four extends. Five closes.';
+    expect(splitReportParagraphs(wall)).toEqual([
+      'One point here. Two follows. Three continues.',
+      'Four extends. Five closes.',
+    ]);
+  });
+
+  it('leaves a paragraph of three or fewer sentences intact', () => {
+    const short = 'First sentence. Second sentence. Third sentence.';
+    expect(splitReportParagraphs(short)).toEqual([short]);
+  });
+
+  it('does not sentence-split a multi-line bullet block even when it has many sentences', () => {
+    const bullets = 'Consequences:\n- One thing. It matters.\n- Two thing. It also matters.';
+    expect(splitReportParagraphs(bullets)).toEqual([bullets]);
+  });
+
+  it('does not treat a decimal point as a sentence boundary', () => {
+    const text = 'You reported 4.5 hours. That is fine. Keep it up. Nothing more needed.';
+    // 4 sentences → split after the third; the decimal stays inside its sentence.
+    expect(splitReportParagraphs(text)).toEqual([
+      'You reported 4.5 hours. That is fine. Keep it up.',
+      'Nothing more needed.',
+    ]);
+  });
+
+  it('breaks a three-sentence block with very long sentences by the character budget', () => {
+    // Three long sentences (>280 chars total) → split even though the sentence count is at the cap,
+    // so long-sentence prose reads as ~3-line paragraphs, not one 5-line block.
+    const s1 =
+      'The clearest concern from your answers is the lack of a protected deep work block that you can rely on most days.';
+    const s2 =
+      'You said you do not currently have at least one protected sixty to ninety minute block, but you did not add detail on what gets in the way.';
+    const s3 = 'That makes it hard to judge how your time maps to your stated priorities.';
+    const result = splitReportParagraphs(`${s1} ${s2} ${s3}`);
+    expect(result.length).toBeGreaterThan(1);
+    expect(result.every((p) => p.length <= 320)).toBe(true);
+    // No sentence is lost or fragmented — rejoining reproduces the original.
+    expect(result.join(' ')).toBe(`${s1} ${s2} ${s3}`);
+  });
+
+  it('combines both passes: blank-line paragraphs, each further capped by sentence count', () => {
+    const text = 'Alpha one. Alpha two. Alpha three. Alpha four.\n\nBeta one. Beta two.';
+    expect(splitReportParagraphs(text)).toEqual([
+      'Alpha one. Alpha two. Alpha three.',
+      'Alpha four.',
+      'Beta one. Beta two.',
+    ]);
   });
 });
