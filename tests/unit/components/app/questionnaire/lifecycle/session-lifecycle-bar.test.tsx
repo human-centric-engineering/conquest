@@ -17,6 +17,7 @@ function view(over: Partial<SessionStatusView> = {}): SessionStatusView {
     completion: {
       kind: 'offer',
       coverage: 0.9,
+      displayCoverage: 0.9,
       answeredCount: 3,
       requiredUnansweredKeys: [],
       capReached: false,
@@ -57,6 +58,15 @@ describe('SessionLifecycleBar', () => {
     renderBar();
     const bar = screen.getByRole('progressbar', { name: /questionnaire progress/i });
     expect(bar).toHaveAttribute('aria-valuenow', '90');
+  });
+
+  it('drives the bar off the graded displayCoverage, not the strict gate coverage', () => {
+    // A session mid-capture: strict gate at 0% but graded display shows tentative momentum.
+    renderBar({
+      view: view({ completion: { ...view().completion, coverage: 0, displayCoverage: 0.4 } }),
+    });
+    const bar = screen.getByRole('progressbar', { name: /questionnaire progress/i });
+    expect(bar).toHaveAttribute('aria-valuenow', '40');
   });
 
   it('shows the anonymous indicator when the session is anonymous', () => {

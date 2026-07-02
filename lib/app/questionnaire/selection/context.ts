@@ -114,6 +114,73 @@ export function weightedCoverage(
   return Math.min(1, covered / total);
 }
 
+/**
+ * Fraction of a question's weight that a below-floor ("tentative") answer earns toward the
+ * DISPLAY coverage figure. A confirmed answer — confidence ≥ the completion floor, or unscored
+ * (authoritative respondent edit / non-opportunistic capture) — earns full credit (1.0); a
+ * tentative one earns this. Progress-bar-only nuance: the completion GATE
+ * ({@link answeredCount} / {@link coverageRatio}) never sees it, so tentative captures still
+ * cannot unlock submission or satisfy a required question. Default 0.5 — half credit — so a
+ * session mid-capture shows real momentum instead of a flat 0%.
+ */
+export const TENTATIVE_ANSWER_CREDIT = 0.5;
+
+/**
+ * Graded weighted coverage in [0, 1] for the progress DISPLAY only — never a gate input.
+ *
+ * Same weighting as {@link weightedCoverage}, but each distinct answered question contributes
+ * `weight × credit` rather than its full weight: an answer at or above `floor` (or unscored, i.e.
+ * authoritative) earns full credit (1.0); one below `floor` earns `tentativeCredit` (default
+ * {@link TENTATIVE_ANSWER_CREDIT}). Where a question carries several answer rows, its best credit
+ * wins (mirroring the distinct-question dedup {@link answeredCount} / {@link weightedCoverage} use).
+ *
+ * With `floor <= 0` every scored answer clears the bar, so this collapses to {@link weightedCoverage}
+ * — the graded bar and the strict gate agree, preserving the "floor off ⇒ prior behaviour" contract.
+ * Same fallbacks: an empty version is fully covered (1); when questions exist but no weight is usable,
+ * it falls back to a credited count ratio (Σ credit over answered ÷ question count).
+ */
+export function gradedCoverage(
+  questions: ReadonlyArray<{ id: string; weight: number }>,
+  answered: ReadonlyArray<{ questionId: string; confidence: number | null }>,
+  floor: number,
+  tentativeCredit: number = TENTATIVE_ANSWER_CREDIT
+): number {
+  // Full credit for a confirmed (≥ floor) or unscored/authoritative (null) answer; partial otherwise.
+  const creditFor = (confidence: number | null): number =>
+    confidence === null || confidence >= floor ? 1 : tentativeCredit;
+
+  // Best credit per DISTINCT question — a later corroborating row must never lower an earlier one.
+  const bestCredit = new Map<string, number>();
+  for (const a of answered) {
+    const c = creditFor(a.confidence);
+    const prev = bestCredit.get(a.questionId);
+    if (prev === undefined || c > prev) bestCredit.set(a.questionId, c);
+  }
+
+  let total = 0;
+  const weightById = new Map<string, number>();
+  for (const q of questions) {
+    const w = Number.isFinite(q.weight) && q.weight > 0 ? q.weight : 0;
+    weightById.set(q.id, w);
+    total += w;
+  }
+
+  if (total <= 0) {
+    if (questions.length === 0) return 1;
+    let credited = 0;
+    for (const [id, credit] of bestCredit) {
+      if (weightById.has(id)) credited += credit; // only real questions count toward the ratio
+    }
+    return Math.min(1, credited / questions.length);
+  }
+
+  let covered = 0;
+  for (const [id, credit] of bestCredit) {
+    covered += (weightById.get(id) ?? 0) * credit;
+  }
+  return Math.min(1, covered / total);
+}
+
 const pct = (n: number): string => `${Math.round(n * 100)}%`;
 
 /**

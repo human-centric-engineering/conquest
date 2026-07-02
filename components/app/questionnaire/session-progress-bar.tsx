@@ -3,10 +3,13 @@
 /**
  * SessionProgressBar — a slim weighted-coverage bar for the respondent surface (F7.3).
  *
- * Drives off the F4.5 completion assessment's weighted `coverage` (0–1), already projected
- * onto {@link SessionStatusView} and fetched by `useSessionLifecycle`. A quiet "we're
- * getting somewhere" momentum signal — rendered both in the lifecycle strip and (because
- * the answer panel is hidden below `lg`) in the chat header so narrow viewports keep it.
+ * Drives off the F4.5 completion assessment's graded `displayCoverage` (0–1) — full credit for
+ * confirmed answers, half for below-floor tentative captures — already projected onto
+ * {@link SessionStatusView} and fetched by `useSessionLifecycle`. Graded (not the strict gate
+ * `coverage`) so a session mid-capture reads real momentum instead of a flat 0%; the submit gate
+ * stays strict and reads `completion.kind`, never this. A quiet "we're getting somewhere" signal —
+ * rendered both in the lifecycle strip and (because the answer panel is hidden below `lg`) in the
+ * chat header so narrow viewports keep it.
  *
  * Quiet-signal discipline, like the answer panel's confidence dot: it shows progress, not
  * the underlying weights or thresholds. Brand colour comes from the page's

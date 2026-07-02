@@ -54,6 +54,32 @@ its own context without dragging in selection-only fields (`round`, `recentMessa
 preview routes reuse `buildSelectionContext` directly — no new context builder. The same
 `COVERAGE_EPSILON` guards the threshold comparison against float-sum drift.
 
+## Two coverage figures: strict gate vs. graded bar
+
+The assessment carries **two** coverage numbers, deliberately separate:
+
+- **`coverage`** — the strict **gate** figure. Before it runs the coverage helpers, `assessCompletion`
+  drops every answer scored **below `answerConfidenceFloor`** (default `0.5`); unscored (`null`)
+  answers are authoritative and always kept. So an opportunistic/tentative capture (an
+  [opportunistic fill](./opportunistic-fill.md) is seeded at ≤ `0.45`, one notch under the floor)
+  counts for **nothing** toward coverage, the min-answered gate, or a required question until a later
+  turn corroborates it above the floor. This is what `kind` / the Submit affordance keys off.
+- **`displayCoverage`** — the **progress-bar** figure only, never a gate input. Computed by
+  `gradedCoverage(questions, answered, floor)` over the **full, ungated** answer set: a confirmed
+  answer (confidence ≥ floor, or `null`) earns full weight; a below-floor tentative answer earns
+  `TENTATIVE_ANSWER_CREDIT` (`0.5` — half credit) of its weight. Where a question has several answer
+  rows its best credit wins.
+
+**Why two.** With only tentative captures, strict `coverage` is `0` — but the respondent has plainly
+made progress, so a flat `0% completed` bar reads as a bug (it looks like nothing landed even as the
+panel shows "context areas captured"). `displayCoverage` gives partial credit so the bar shows real
+momentum, while the gate stays strict so a session can't submit on unconfirmed guesses. The
+respondent `SessionProgressBar` reads `displayCoverage`; `canSubmitSession` reads `kind`. With the
+floor at `0` nothing is below it, so `displayCoverage === coverage` and the two collapse — preserving
+the "floor off ⇒ prior behaviour" contract. The **data-slot** submit path overrides only `kind` (all
+questions answered) and keeps both coverage figures from `assessCompletion`, so the bar behaves the
+same in either mode (`app/api/v1/app/questionnaire-sessions/_lib/session-status.ts`).
+
 There is no `completionConfig` blob and no `sweep_only` mode (the development plan's
 sketch): F4.5 maps onto the committed flat config fields (`minQuestionsAnswered`,
 `coverageThreshold`, `maxQuestionsPerSession`) and the existing

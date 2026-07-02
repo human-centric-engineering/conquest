@@ -17,11 +17,15 @@
  *  - **choice / likert** mapped questions are handed back to the capability to run through the
  *    answer-fit resolver (the same machinery that maps a free-form answer onto an option/scale).
  *
- * Either way the opportunistic answer is written at a capped, Tentative confidence
- * ({@link OPPORTUNISTIC_CONFIDENCE_CAP}) so it reads as a guess, not a firm answer — which (Phase 4)
- * keeps it below the completion floor and pulls the agent back to confirm it. Numeric/boolean/date
- * are out of scope: there's no honest free-form→value mapping for them here, so they wait for the
- * extractor (or a direct statement).
+ * The opportunistic answer is written at a capped confidence, provenance `inferred`, but the two
+ * paths cap differently. A free-text seed is a raw paraphrase copy with no per-question fit
+ * judgment, so it stays at the Tentative {@link OPPORTUNISTIC_CONFIDENCE_CAP} — a guess below the
+ * completion floor that pulls the agent back to confirm it. A choice/likert fill carries the
+ * answer-fit resolver's own mapping-clarity judgment, so it keeps that (up to
+ * {@link OPPORTUNISTIC_TYPED_CONFIDENCE_CAP}): a clearly-pinned answer reads "Fairly sure" and can
+ * cross the completion floor without a naggy re-ask, while a loose fit still lands low and is
+ * confirmed later. Numeric/boolean/date are out of scope: there's no honest free-form→value mapping
+ * for them here, so they wait for the extractor (or a direct statement).
  *
  * Pure + dependency-light — no Prisma/LLM imports — so it's unit-testable in isolation; the
  * capability owns the LLM fit call and the persistence flows through the normal turn-run upsert
@@ -44,12 +48,28 @@ import type {
 export const OPPORTUNISTIC_FILL_FLOOR = 0.5;
 
 /**
- * Confidence ceiling for an opportunistic fill. 0.45 is the floor of the "Tentative" band
- * (`panel/confidence.ts`), so a seeded answer reads as a guess and — once Phase 4 lands — sits
- * below the completion floor until confirmed. Confirmation then strengthens it via the Phase 1
- * accrual guard.
+ * Confidence ceiling for a FREE-TEXT opportunistic seed. 0.45 is the floor of the "Tentative" band
+ * (`panel/confidence.ts`), so a seeded answer reads as a guess and sits below the completion floor
+ * until confirmed. Confirmation then strengthens it via the accrual guard. A free-text seed is a raw
+ * copy of the fill's paraphrase down onto the mapped question — there is no per-question judgment of
+ * how well it fits, so the flat "to be confirmed" ceiling is right here (the typed path below is not
+ * flattened this way — see {@link OPPORTUNISTIC_TYPED_CONFIDENCE_CAP}).
  */
 export const OPPORTUNISTIC_CONFIDENCE_CAP = 0.45;
+
+/**
+ * Confidence ceiling for a TYPED (choice / likert) opportunistic fill. Unlike the free-text seed, a
+ * typed fill is routed through the answer-fit resolver, whose confidence IS an explicit judgment of
+ * how cleanly the respondent's position maps onto the option / scale point. We PRESERVE that
+ * judgment (clamping only the ceiling) rather than flattening every mapping to the same low "guess"
+ * score: a clearly-pinned likert ("I hate my job" → the bottom of a satisfaction scale) should read
+ * "Fairly sure", not "Tentative", even when it was derived tangentially and stated briefly — a
+ * closed answer is inferred from sentiment, never dictated verbatim, so brevity is not doubt. The
+ * ceiling sits below the "Confident" band (0.85): an inferred answer never claims full certainty on
+ * first hearing, but corroboration can lift it there via the accrual guard. A genuinely loose fit
+ * keeps its own lower score and stays below the completion floor to be confirmed.
+ */
+export const OPPORTUNISTIC_TYPED_CONFIDENCE_CAP = 0.75;
 
 /**
  * Default confidence at/above which an answer counts as confirmed and is left alone by the refresh
@@ -149,15 +169,19 @@ export function buildFreeTextOpportunisticIntents(
 }
 
 /**
- * Cap the answer-fit resolver's typed intents to the opportunistic ceiling and mark them
- * `inferred`. The resolver returns its own (possibly high) certainty about the option fit, but the
- * respondent never directly answered THIS question — we inferred it from a thematic statement — so
- * it must read as a guess and stay below the completion floor until confirmed.
+ * Cap the answer-fit resolver's typed (choice / likert) intents and mark them `inferred`. The
+ * resolver already judged how cleanly the respondent's thematic statement maps onto the option /
+ * scale point; we PRESERVE that judgment up to {@link OPPORTUNISTIC_TYPED_CONFIDENCE_CAP} rather than
+ * flattening every inferred mapping to the same low "guess" score. So a clearly-pinned answer reads
+ * "Fairly sure" and counts toward completion — no naggy re-ask of a likert the conversation already
+ * answered by sentiment — while a genuinely loose fit keeps its low score and stays below the floor
+ * to be confirmed. Provenance is always `inferred`: the respondent never stated the typed value
+ * outright, and the panel still shows the "Inferred" marker alongside the confidence.
  */
 export function capOpportunisticConfidence(intents: AnswerSlotIntent[]): AnswerSlotIntent[] {
   return intents.map((intent) => ({
     ...intent,
-    confidence: Math.min(intent.confidence, OPPORTUNISTIC_CONFIDENCE_CAP),
+    confidence: Math.min(intent.confidence, OPPORTUNISTIC_TYPED_CONFIDENCE_CAP),
     provenance: 'inferred' as const,
   }));
 }

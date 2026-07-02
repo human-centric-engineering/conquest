@@ -255,6 +255,7 @@ function makeStatus(
       completion: {
         kind: 'not_ready' as const,
         coverage: 0,
+        displayCoverage: 0,
         answeredCount: 0,
         requiredUnansweredKeys: [],
         capReached: false,

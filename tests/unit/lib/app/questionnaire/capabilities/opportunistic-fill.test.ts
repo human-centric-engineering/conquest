@@ -18,6 +18,7 @@ import {
   selectRefreshTargets,
   buildRefreshIntents,
   OPPORTUNISTIC_CONFIDENCE_CAP,
+  OPPORTUNISTIC_TYPED_CONFIDENCE_CAP,
   ANSWER_CONFIRM_FLOOR,
 } from '@/lib/app/questionnaire/capabilities/opportunistic-fill';
 import type {
@@ -163,6 +164,27 @@ describe('buildFreeTextOpportunisticIntents', () => {
     expect(intents[0].value).toBe('plain words');
   });
 
+  it('formats a boolean fallback value as Yes/No', () => {
+    const yes = buildFreeTextOpportunisticIntents([
+      { slot: slot('q', 'free_text'), fill: fill('d', { paraphrase: '', value: true }) },
+    ]);
+    const no = buildFreeTextOpportunisticIntents([
+      { slot: slot('q', 'free_text'), fill: fill('d', { paraphrase: '', value: false }) },
+    ]);
+    expect(yes[0].value).toBe('Yes');
+    expect(no[0].value).toBe('No');
+  });
+
+  it('formats an array fallback value as a comma-joined list (dropping empties)', () => {
+    const intents = buildFreeTextOpportunisticIntents([
+      {
+        slot: slot('q', 'free_text'),
+        fill: fill('d', { paraphrase: '', value: ['CRM', '', 'email'] }),
+      },
+    ]);
+    expect(intents[0].value).toBe('CRM, email');
+  });
+
   it('skips a target whose fill yields no usable text', () => {
     const intents = buildFreeTextOpportunisticIntents([
       { slot: slot('q', 'free_text'), fill: fill('d', { paraphrase: '   ', value: null }) },
@@ -172,7 +194,7 @@ describe('buildFreeTextOpportunisticIntents', () => {
 });
 
 describe('capOpportunisticConfidence', () => {
-  it('caps a confident fit intent down to the Tentative ceiling and marks it inferred', () => {
+  it('caps a confident fit down to the typed ceiling (preserving clarity) and marks it inferred', () => {
     const fit: AnswerSlotIntent[] = [
       {
         slotKey: 'talent_3',
@@ -185,9 +207,27 @@ describe('capOpportunisticConfidence', () => {
       },
     ];
     const capped = capOpportunisticConfidence(fit);
-    expect(capped[0].confidence).toBe(OPPORTUNISTIC_CONFIDENCE_CAP);
+    // A clearly-pinned likert reads "Fairly sure", not "Tentative" — the resolver's clarity is
+    // preserved up to the typed ceiling, not flattened to the free-text seed's 0.45.
+    expect(capped[0].confidence).toBe(OPPORTUNISTIC_TYPED_CONFIDENCE_CAP);
+    expect(OPPORTUNISTIC_TYPED_CONFIDENCE_CAP).toBeGreaterThan(OPPORTUNISTIC_CONFIDENCE_CAP);
     expect(capped[0].provenance).toBe('inferred');
     expect(capped[0].value).toBe(2); // value preserved
+  });
+
+  it('passes a mid-range fit through untouched (below the typed ceiling)', () => {
+    const capped = capOpportunisticConfidence([
+      {
+        slotKey: 'talent_3',
+        questionType: 'likert',
+        value: 3,
+        confidence: 0.6, // points at the right region but not unmistakable
+        provenance: 'inferred',
+        rationale: '',
+        isActiveQuestion: false,
+      },
+    ]);
+    expect(capped[0].confidence).toBe(0.6);
   });
 
   it('leaves an already-low confidence untouched (min, not overwrite)', () => {
@@ -296,6 +336,40 @@ describe('selectRefreshTargets', () => {
       confirmFloor: ANSWER_CONFIRM_FLOOR,
     });
     expect(targets).toHaveLength(0);
+  });
+
+  it('does not refresh a mapped question that has no answer yet (a seed case, not a refresh)', () => {
+    // The fill strengthened, but talent_3 was never answered → nothing to strengthen.
+    const targets = selectRefreshTargets({
+      dataSlotFills: [fill('enablement', { confidence: 0.7 })],
+      dataSlotCandidates: [
+        {
+          ...dataSlot('enablement', ['talent_3']),
+          current: { value: null, paraphrase: null, confidence: 0.4 },
+        },
+      ],
+      answered: [], // no answered entry for the mapped question
+      handledKeys: new Set(),
+      confirmFloor: ANSWER_CONFIRM_FLOOR,
+    });
+    expect(targets).toHaveLength(0);
+  });
+
+  it('defaults the refresh target type to free_text when the answer has no questionType', () => {
+    const targets = selectRefreshTargets({
+      dataSlotFills: [fill('enablement', { confidence: 0.62 })],
+      dataSlotCandidates: [
+        {
+          ...dataSlot('enablement', ['talent_3']),
+          current: { value: null, paraphrase: null, confidence: 0.45 },
+        },
+      ],
+      answered: [answered({ confidence: 0.45, questionType: undefined })],
+      handledKeys: new Set(),
+      confirmFloor: ANSWER_CONFIRM_FLOOR,
+    });
+    expect(targets).toHaveLength(1);
+    expect(targets[0].questionType).toBe('free_text');
   });
 
   it('returns [] when the data-slot candidate has no prior recorded confidence (current absent)', () => {

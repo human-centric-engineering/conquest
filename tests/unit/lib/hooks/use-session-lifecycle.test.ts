@@ -25,6 +25,7 @@ function view(over: Partial<SessionStatusView> = {}): SessionStatusView {
     completion: {
       kind: 'offer',
       coverage: 0.9,
+      displayCoverage: 0.9,
       answeredCount: 4,
       requiredUnansweredKeys: [],
       capReached: false,

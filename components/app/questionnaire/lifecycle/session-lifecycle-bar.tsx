@@ -80,7 +80,7 @@ export function SessionLifecycleBar({
 
   return (
     <div className={cn('flex flex-col gap-2', className)}>
-      {showProgress && <SessionProgressBar coverage={view.completion.coverage} />}
+      {showProgress && <SessionProgressBar coverage={view.completion.displayCoverage} />}
       {hasStrip && (
         <div className="text-muted-foreground flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
           {anonymous && (

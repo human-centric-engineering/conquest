@@ -38,6 +38,49 @@ describe('assessCompletion', () => {
     expect(a.answeredCount).toBe(1); // only the confirmed answer counts
   });
 
+  it('reports a graded displayCoverage that credits tentative answers the strict coverage excludes', () => {
+    const c = cctx({
+      questions: [q({ id: 'a' }), q({ id: 'b' })],
+      answered: [
+        { questionId: 'a', confidence: null }, // authoritative → full credit both figures
+        { questionId: 'b', confidence: 0.45 }, // tentative → excluded from coverage, half in displayCoverage
+      ],
+      config: { coverageThreshold: 1, minQuestionsAnswered: 0, answerConfidenceFloor: 0.5 },
+    });
+    const a = assessCompletion(c);
+    // Strict gate figure: only the authoritative answer counts → half.
+    expect(a.coverage).toBeCloseTo(0.5);
+    // Display figure: a full + b half → 0.75. The bar shows momentum the gate withholds.
+    expect(a.displayCoverage).toBeCloseTo(0.75);
+  });
+
+  it('displayCoverage is non-zero when only tentative answers exist (the flat-0% bug)', () => {
+    const c = cctx({
+      questions: [q({ id: 'a' }), q({ id: 'b' })],
+      answered: [
+        { questionId: 'a', confidence: 0.45 }, // both opportunistic seeds, below the floor
+        { questionId: 'b', confidence: 0.45 },
+      ],
+      config: { coverageThreshold: 1, minQuestionsAnswered: 0, answerConfidenceFloor: 0.5 },
+    });
+    const a = assessCompletion(c);
+    expect(a.coverage).toBe(0); // strict gate: nothing confirmed
+    expect(a.displayCoverage).toBeCloseTo(0.5); // graded bar: both half-credited
+  });
+
+  it('displayCoverage equals coverage when the confidence floor is 0', () => {
+    const c = cctx({
+      questions: [q({ id: 'a' }), q({ id: 'b' })],
+      answered: [
+        { questionId: 'a', confidence: 0.1 },
+        { questionId: 'b', confidence: 0.45 },
+      ],
+      config: { answerConfidenceFloor: 0 },
+    });
+    const a = assessCompletion(c);
+    expect(a.displayCoverage).toBeCloseTo(a.coverage);
+  });
+
   it('counts the same answer once it is corroborated above the floor', () => {
     const c = cctx({
       questions: [q({ id: 'a' }), q({ id: 'b' })],
@@ -287,6 +330,7 @@ describe('resolveCompletion', () => {
     unmet: [],
     rationale: 'ready',
     coverage: 1,
+    displayCoverage: 1,
     answeredCount: 3,
     requiredUnansweredKeys: [],
     capReached: false,

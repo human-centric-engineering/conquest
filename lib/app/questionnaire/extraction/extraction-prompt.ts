@@ -233,7 +233,10 @@ and can still be "direct". Set the mapped answer's "confidence" by how firmly th
 value: 0.85–0.95 when the position unmistakably fixes it (a blunt "I'd never recommend us" pins an NPS \
 near 0), 0.6–0.8 when it points at the right region, 0.4–0.55 when it only narrows the range, 0.3–0.4 \
 when it barely constrains the value — a firmly-pinned value is HIGH even though its provenance is \
-"inferred". APPROPRIATENESS GATE: emit a mapped \
+"inferred". Score it by how firmly the meaning fixes the value, NOTHING else: do NOT mark it down for \
+being brief, for arriving on a tangent, or for being inferred rather than stated — a clear, strong \
+statement that plainly pins a scale point is confident however tersely or indirectly it was put. \
+Reserve the low bands for a genuinely loose or ambiguous mapping, not for a clear one. APPROPRIATENESS GATE: emit a mapped \
 answer ONLY when the position genuinely fixes a value; if the slot is informed but the message does not \
 determine a particular question's answer (e.g. it asks for a specific number the message never implies), \
 OMIT that question rather than guess. Treat mapped answers like any other: re-evaluate them as evidence \
