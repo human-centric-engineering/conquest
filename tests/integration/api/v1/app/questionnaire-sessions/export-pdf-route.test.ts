@@ -164,13 +164,21 @@ describe('respondent report embedding', () => {
       mode: 'narrative',
       onScreen: true,
       download: true,
-      insights: { status: 'ready', content: readyContent, generatedAt: null, error: null },
+      insights: {
+        status: 'ready',
+        content: readyContent,
+        formatted: true,
+        generatedAt: null,
+        error: null,
+      },
     });
     const res = await GET(req(), ctx);
     expect(res.status).toBe(200);
+    // 4th arg is the formatter flag, threaded from the ready report so the PDF trusts its layout.
     expect(exportMock.buildSessionExportPdfModel).toHaveBeenCalledWith(
       expect.anything(),
       readyContent,
+      true,
       true
     );
   });
@@ -181,14 +189,47 @@ describe('respondent report embedding', () => {
       mode: 'raw_plus_insights',
       onScreen: true,
       download: true,
-      insights: { status: 'ready', content: readyContent, generatedAt: null, error: null },
+      insights: {
+        status: 'ready',
+        content: readyContent,
+        formatted: false,
+        generatedAt: null,
+        error: null,
+      },
     });
     const res = await GET(req(), ctx);
     expect(res.status).toBe(200);
     expect(exportMock.buildSessionExportPdfModel).toHaveBeenCalledWith(
       expect.anything(),
       readyContent,
+      false,
       false
+    );
+  });
+
+  it('trusts the formatter layout for a formatted mode-2 report (narrativeOnly false, formatted true)', async () => {
+    // The two booleans DIVERGE here (narrativeOnly=false, insightsFormatted=true) — the only case
+    // that can catch a 3rd/4th positional-argument swap in the route's call to buildSessionExportPdfModel.
+    reportViewMock.buildRespondentReportClientView.mockResolvedValue({
+      enabled: true,
+      mode: 'raw_plus_insights',
+      onScreen: true,
+      download: true,
+      insights: {
+        status: 'ready',
+        content: readyContent,
+        formatted: true,
+        generatedAt: null,
+        error: null,
+      },
+    });
+    const res = await GET(req(), ctx);
+    expect(res.status).toBe(200);
+    expect(exportMock.buildSessionExportPdfModel).toHaveBeenCalledWith(
+      expect.anything(),
+      readyContent,
+      false,
+      true
     );
   });
 
@@ -198,13 +239,24 @@ describe('respondent report embedding', () => {
       mode: 'narrative',
       onScreen: true,
       download: true,
-      insights: { status: 'processing', content: null, generatedAt: null, error: null },
+      insights: {
+        status: 'processing',
+        content: null,
+        // `formatted: true` in the (non-ready) row must NOT leak through — the route zeroes the flag
+        // unless the report is ready. Asserting `false` below proves the readiness gate, not a
+        // coincidental match with the mock value.
+        formatted: true,
+        generatedAt: null,
+        error: null,
+      },
     });
     const res = await GET(req(), ctx);
     expect(res.status).toBe(200);
+    // Not ready → no insights, no narrative layout, and formatter flag defaults false.
     expect(exportMock.buildSessionExportPdfModel).toHaveBeenCalledWith(
       expect.anything(),
       null,
+      false,
       false
     );
   });

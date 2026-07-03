@@ -345,4 +345,34 @@ describe('splitReportParagraphs', () => {
       'Beta one. Beta two.',
     ]);
   });
+
+  describe('trustParagraphs (formatter-produced prose)', () => {
+    it('honours authored blank-line breaks without re-chopping a long paragraph', () => {
+      // A deliberate 4-sentence paragraph the formatter chose to keep whole. Default mode would
+      // re-group it into ≤3-sentence chunks; trust mode leaves it exactly as authored.
+      const text = 'Alpha one. Alpha two. Alpha three. Alpha four.\n\nBeta one. Beta two.';
+      expect(splitReportParagraphs(text, { trustParagraphs: true })).toEqual([
+        'Alpha one. Alpha two. Alpha three. Alpha four.',
+        'Beta one. Beta two.',
+      ]);
+    });
+
+    it('does not sub-split a single wall-of-text block in trust mode', () => {
+      const wall = 'One. Two. Three. Four. Five. Six.';
+      // Default mode would chop this into groups of ~3 sentences; trust mode returns it whole.
+      expect(splitReportParagraphs(wall, { trustParagraphs: true })).toEqual([wall]);
+    });
+
+    it('still preserves multi-line bullet blocks verbatim in trust mode', () => {
+      const bullets = 'In practice:\n- one\n- two\n- three';
+      expect(splitReportParagraphs(bullets, { trustParagraphs: true })).toEqual([bullets]);
+    });
+
+    it('still normalises CRLF and drops empty paragraphs in trust mode', () => {
+      const result = splitReportParagraphs('Para one.\r\n\r\nPara two.\r\n\r\n', {
+        trustParagraphs: true,
+      });
+      expect(result).toEqual(['Para one.', 'Para two.']);
+    });
+  });
 });

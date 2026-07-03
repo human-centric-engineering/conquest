@@ -221,8 +221,8 @@ function SlotBlock({ slot }: { slot: PanelSlotView }) {
  * multi-paragraph body lays out as prose instead of one block. Single newlines inside a paragraph
  * (e.g. a run of bullet lines) are preserved by `<Text>`. See {@link splitReportParagraphs}.
  */
-function Paragraphs({ text }: { text: string }) {
-  const paragraphs = splitReportParagraphs(text);
+function Paragraphs({ text, trustParagraphs }: { text: string; trustParagraphs?: boolean }) {
+  const paragraphs = splitReportParagraphs(text, { trustParagraphs });
   return (
     <>
       {paragraphs.map((paragraph, i) => (
@@ -241,18 +241,21 @@ function Paragraphs({ text }: { text: string }) {
 function InsightsSection({
   insights,
   title,
+  formatted,
 }: {
   insights: NonNullable<SessionExportModel['insights']>;
   title: string;
+  /** True when the report was laid out by the Report Formatter — trust its paragraphs verbatim. */
+  formatted?: boolean;
 }) {
   return (
     <View>
       <Text style={styles.sectionTitle}>{title}</Text>
-      <Paragraphs text={insights.summary} />
+      <Paragraphs text={insights.summary} trustParagraphs={formatted} />
       {insights.sections.map((section, i) => (
         <View key={i}>
           <Text style={styles.insightsHeading}>{section.heading}</Text>
-          <Paragraphs text={section.body} />
+          <Paragraphs text={section.body} trustParagraphs={formatted} />
         </View>
       ))}
       {insights.actions.length > 0 && (
@@ -340,6 +343,7 @@ export function SessionPdfDocument({ model }: SessionPdfDocumentProps) {
           <InsightsSection
             insights={model.insights}
             title={narrativeOnly ? 'Your personalised report' : 'Your insights'}
+            formatted={model.insightsFormatted}
           />
         )}
 

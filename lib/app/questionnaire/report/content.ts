@@ -87,8 +87,16 @@ function splitSentences(block: string): string[] {
  *     line breaks (bullet lists) are left whole, never sentence-split.
  *
  * A short body returns a single-element array (its whole text). Pure — shared by both renderers.
+ *
+ * `trustParagraphs` (set for reports produced by the Report Formatter second pass) runs pass 1 only:
+ * the formatter has already laid the prose out at natural boundaries, so honour its blank-line breaks
+ * and bullet runs verbatim and skip the greedy sentence re-grouping that would otherwise re-chop a
+ * deliberate 4-sentence paragraph. Un-formatted / legacy content leaves it off and gets the full split.
  */
-export function splitReportParagraphs(text: string): string[] {
+export function splitReportParagraphs(
+  text: string,
+  opts: { trustParagraphs?: boolean } = {}
+): string[] {
   const blocks = text
     // Normalise CRLF/CR (Windows-authored answers the model may echo) to LF first, so a `\r\n\r\n`
     // blank line is recognised as a paragraph break and no stray `\r` leaks into the rendered output.
@@ -101,6 +109,11 @@ export function splitReportParagraphs(text: string): string[] {
   for (const block of blocks) {
     // Preserve multi-line blocks (bullet runs, deliberate line breaks) exactly as authored.
     if (/\n/.test(block)) {
+      out.push(block);
+      continue;
+    }
+    // Trusted (formatter-produced) prose: keep each authored paragraph whole, no sentence re-grouping.
+    if (opts.trustParagraphs) {
       out.push(block);
       continue;
     }

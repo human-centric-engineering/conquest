@@ -50,10 +50,13 @@ const handleAdminExportPdf = withAdminAuth<{ id: string; sessionId: string }>(
       // respondent received. Unlike the respondent route, the admin PDF keeps the full audit (raw
       // answers) alongside the report — it never sets `narrativeOnly`.
       const reportView = await buildRespondentReportClientView(sessionId);
-      const insights =
-        reportView?.insights?.status === 'ready' ? reportView.insights.content : null;
+      const ready = reportView?.insights?.status === 'ready' ? reportView.insights : null;
+      const insights = ready ? ready.content : null;
+      // Trust the formatter's layout here too, so the admin PDF matches the respondent's exactly
+      // (the admin never sets narrativeOnly, so the report layout is the only thing to keep in sync).
+      const insightsFormatted = ready?.formatted ?? false;
 
-      const model = await buildSessionExportPdfModel(loaded, insights);
+      const model = await buildSessionExportPdfModel(loaded, insights, false, insightsFormatted);
       const pdf = await renderSessionPdf(model);
 
       log.info('Admin session export PDF generated', {

@@ -74,6 +74,7 @@ describe('buildRespondentReportClientView', () => {
         {
           status: 'ready',
           content: { summary: 'Your story.', sections: [], actions: ['Do X'] },
+          formatted: true,
           generatedAt: new Date('2026-06-19T12:00:00Z'),
           error: null,
         }
@@ -87,6 +88,25 @@ describe('buildRespondentReportClientView', () => {
       sections: [],
       actions: ['Do X'],
     });
+    // The formatter flag is surfaced so the renderers know to trust the laid-out prose.
+    expect(view?.insights?.formatted).toBe(true);
+  });
+
+  it('defaults formatted to false when the row predates the formatter (null column)', async () => {
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      session(
+        { enabled: true, mode: 'raw_plus_insights' },
+        {
+          status: 'ready',
+          content: { summary: 'Legacy.', sections: [], actions: [] },
+          formatted: null,
+          generatedAt: new Date('2026-06-19T12:00:00Z'),
+          error: null,
+        }
+      )
+    );
+    const view = await buildRespondentReportClientView('s1');
+    expect(view?.insights?.formatted).toBe(false);
   });
 
   it('reports queued insights when enabled in mode 2 with no row yet', async () => {

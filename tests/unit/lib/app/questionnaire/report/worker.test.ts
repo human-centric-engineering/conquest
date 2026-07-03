@@ -58,17 +58,18 @@ describe('processQueuedRespondentReports', () => {
     expect(prisma.appRespondentReport.updateMany).not.toHaveBeenCalled();
   });
 
-  it('claims a report, generates it, and marks it ready with content + cost', async () => {
+  it('claims a report, generates it, and marks it ready with content + cost + formatted', async () => {
     (generateRespondentReport as Mock).mockResolvedValue({
       content: { summary: 'ok', sections: [], actions: [] },
       costUsd: 0.0123,
+      formatted: true,
     });
 
     const result = await processQueuedRespondentReports();
     expect(result).toEqual({ claimed: 1, succeeded: 1, failed: 0 });
     expect(generateRespondentReport).toHaveBeenCalledWith('sess-1');
 
-    // The terminal write: status ready + content + cost + cleared lease, guarded on processing.
+    // The terminal write: status ready + content + cost + formatted flag + cleared lease, guarded on processing.
     const readyWrite = (prisma.appRespondentReport.updateMany as Mock).mock.calls.find(
       (c) => c[0]?.data?.status === 'ready'
     );
@@ -77,6 +78,7 @@ describe('processQueuedRespondentReports', () => {
     expect(readyWrite[0].data).toMatchObject({
       status: 'ready',
       content: { summary: 'ok', sections: [], actions: [] },
+      formatted: true,
       costUsd: 0.0123,
       lockedBy: null,
       lockedAt: null,

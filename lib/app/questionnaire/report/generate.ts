@@ -14,6 +14,7 @@
 
 import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
+import { isFeatureEnabled } from '@/lib/feature-flags';
 import { resolveAgentProviderAndModel } from '@/lib/orchestration/llm/agent-resolver';
 import { getProvider } from '@/lib/orchestration/llm/provider-manager';
 import {
@@ -22,7 +23,11 @@ import {
 } from '@/lib/orchestration/evaluations/parse-structured';
 import { searchKnowledge } from '@/lib/orchestration/knowledge/search';
 import type { LlmMessage } from '@/lib/orchestration/llm/types';
-import { RESPONDENT_REPORT_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
+import {
+  APP_REPORT_FORMATTER_FLAG,
+  RESPONDENT_REPORT_AGENT_SLUG,
+} from '@/lib/app/questionnaire/constants';
+import { formatReportContent } from '@/lib/app/questionnaire/report/format';
 import type { RespondentReportSettings } from '@/lib/app/questionnaire/types';
 import { loadSessionExport } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-export';
 import { buildAnswerPanelView } from '@/lib/app/questionnaire/panel/answer-panel';
@@ -38,6 +43,12 @@ import {
 export interface GeneratedReport {
   content: RespondentReportContent;
   costUsd: number;
+  /**
+   * True when the Report Formatter second pass produced the returned prose (its paragraphs are
+   * trusted by the renderers). False when the formatter is disabled or fell back — the deterministic
+   * `splitReportParagraphs` split runs at render.
+   */
+  formatted: boolean;
 }
 
 /** Generation tuning — generous token budget for a multi-section narrative; 60s LLM ceiling. */
@@ -82,6 +93,23 @@ const PARAGRAPH_RULES =
   'short paragraphs (roughly 2–4 sentences each), separated by a blank line. Never emit one large ' +
   'block of text. Start a new paragraph for each distinct point.';
 
+/**
+ * Lighter paragraph guidance used when the Report Formatter second pass is enabled — layout is the
+ * formatter's job, so agent 1 focuses on well-organised substance rather than exact spacing.
+ */
+const PARAGRAPH_RULES_LIGHT =
+  'Write in natural paragraphs, one idea per paragraph. A separate formatting pass refines the final ' +
+  'layout, so focus on clear, well-organised, grounded substance rather than exact spacing.';
+
+/**
+ * When the formatter owns bullet conversion, the `structured` style keeps its scannable framing but
+ * drops the manual "one point per line starting with -" mechanic (the formatter bulletises).
+ */
+const STRUCTURED_STYLE_NO_BULLETS =
+  'Style: structured and scannable. Open each section with a one- or two-sentence framing, then keep ' +
+  'the prose short and organised, grouping any factors, consequences, or steps together so they read ' +
+  'as a clear list of points.';
+
 /** Style-preset guidance layered on top of the paragraph rules. */
 const NARRATIVE_STYLE_RULES: Record<
   RespondentReportSettings['generation']['narrativeStyle'],
@@ -105,8 +133,10 @@ function buildReportMessages(opts: {
   settings: RespondentReportSettings;
   transcript: string;
   knowledge: string;
+  /** When the Report Formatter second pass runs, agent 1 sheds its layout/bullet responsibilities. */
+  formatterEnabled: boolean;
 }): LlmMessage[] {
-  const { agentInstructions, settings, transcript, knowledge } = opts;
+  const { agentInstructions, settings, transcript, knowledge, formatterEnabled } = opts;
   const gen = settings.generation;
   const narrative = settings.mode === 'narrative';
 
@@ -123,8 +153,12 @@ function buildReportMessages(opts: {
           'Address the respondent directly (second person). ' +
           GROUNDING_RULES
   );
-  system.push(PARAGRAPH_RULES);
-  system.push(NARRATIVE_STYLE_RULES[gen.narrativeStyle]);
+  system.push(formatterEnabled ? PARAGRAPH_RULES_LIGHT : PARAGRAPH_RULES);
+  system.push(
+    formatterEnabled && gen.narrativeStyle === 'structured'
+      ? STRUCTURED_STYLE_NO_BULLETS
+      : NARRATIVE_STYLE_RULES[gen.narrativeStyle]
+  );
   if (gen.instructions.trim()) system.push(`Style and voice guidance:\n${gen.instructions.trim()}`);
   if (gen.structure.trim()) system.push(`Desired structure:\n${gen.structure.trim()}`);
   if (gen.backgroundContext.trim())
@@ -230,12 +264,17 @@ export async function generateRespondentReport(sessionId: string): Promise<Gener
   const { providerSlug, model } = await resolveAgentProviderAndModel(agent, 'reasoning');
   const provider = await getProvider(providerSlug);
 
+  // The optional second-pass formatter owns final layout when enabled, so agent 1 sheds its
+  // paragraph/bullet responsibilities (resolved once; gates both the prompt thinning and the pass).
+  const formatterEnabled = await isFeatureEnabled(APP_REPORT_FORMATTER_FLAG);
+
   // 5. Structured completion (parse → retry-once-at-temp-0 → cost sum).
   const messages = buildReportMessages({
     agentInstructions: agent.systemInstructions,
     settings,
     transcript,
     knowledge,
+    formatterEnabled,
   });
   const result = await runStructuredCompletion<RespondentReportContent>({
     provider,
@@ -250,5 +289,16 @@ export async function generateRespondentReport(sessionId: string): Promise<Gener
     onFinalFailure: () => new Error('Respondent report response was not valid JSON after retry'),
   });
 
-  return { content: result.value, costUsd: result.costUsd };
+  // 6. Optional second pass: reshape form (paragraphs, bullets, de-slop) without touching substance.
+  // Best-effort — `formatReportContent` never throws and falls back to the unformatted content on any
+  // drift or failure, so a formatter problem can never fail an otherwise-valid report.
+  if (!formatterEnabled) {
+    return { content: result.value, costUsd: result.costUsd, formatted: false };
+  }
+  const formatted = await formatReportContent(result.value, { format: 'plaintext' });
+  return {
+    content: formatted.content,
+    costUsd: result.costUsd + formatted.costUsd,
+    formatted: formatted.formatted,
+  };
 }

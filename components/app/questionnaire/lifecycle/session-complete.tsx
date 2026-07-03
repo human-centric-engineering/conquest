@@ -259,6 +259,7 @@ function ReportInsights({
     status: 'queued' | 'processing' | 'ready' | 'failed';
     started: boolean;
     content: RespondentReportContent | null;
+    formatted: boolean;
     generatedAt: string | null;
     error: string | null;
     notifyRequested: boolean;
@@ -306,13 +307,16 @@ function ReportInsights({
   }
 
   const { summary, sections, actions } = insights.content;
+  // Formatter-produced reports are pre-laid-out — honour their paragraphs verbatim (skip the
+  // deterministic sentence re-grouping, which would re-chop deliberate paragraphs).
+  const trust = { trustParagraphs: insights.formatted };
   // Stagger the report in as it lands so it resolves gracefully out of the preparing state.
   let step = 0;
   const delay = () => ({ animationDelay: `${step++ * 80}ms`, animationFillMode: 'both' as const });
   return (
     <div className="w-full space-y-4 text-left">
       <div className={cn('space-y-2', REVEAL)} style={delay()}>
-        {splitReportParagraphs(summary).map((paragraph, i) => (
+        {splitReportParagraphs(summary, trust).map((paragraph, i) => (
           // `whitespace-pre-line`: a preserved multi-line block (e.g. a bullet run the model wrote as
           // consecutive `- …` lines) keeps its newlines on screen, matching the PDF's <Text>.
           <p key={i} className="text-foreground text-sm leading-relaxed whitespace-pre-line">
@@ -323,7 +327,7 @@ function ReportInsights({
       {sections.map((section, i) => (
         <div key={i} className={cn('space-y-1.5', REVEAL)} style={delay()}>
           <h2 className="text-foreground text-sm font-semibold">{section.heading}</h2>
-          {splitReportParagraphs(section.body).map((paragraph, j) => (
+          {splitReportParagraphs(section.body, trust).map((paragraph, j) => (
             <p
               key={j}
               className="text-muted-foreground text-sm leading-relaxed whitespace-pre-line"

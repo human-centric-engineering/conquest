@@ -57,10 +57,18 @@ async function handleExportPdf(
     // Raw-only / not-yet-ready → null (answers only). For the woven `narrative` mode the report IS
     // the deliverable: render it alone and omit the raw answer listing (`narrativeOnly`).
     const reportView = await buildRespondentReportClientView(sessionId);
-    const insights = reportView?.insights?.status === 'ready' ? reportView.insights.content : null;
+    const ready = reportView?.insights?.status === 'ready' ? reportView.insights : null;
+    const insights = ready ? ready.content : null;
     const narrativeOnly = insights !== null && reportView?.mode === 'narrative';
+    // Trust the formatter's layout in the PDF too, so it matches the on-screen render.
+    const insightsFormatted = ready?.formatted ?? false;
 
-    const model = await buildSessionExportPdfModel(loaded, insights, narrativeOnly);
+    const model = await buildSessionExportPdfModel(
+      loaded,
+      insights,
+      narrativeOnly,
+      insightsFormatted
+    );
     const pdf = await renderSessionPdf(model);
 
     log.info('Session export PDF generated', {

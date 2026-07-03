@@ -105,7 +105,8 @@ attributed" notice instead of a link.
 ## Storage (AI modes)
 
 `AppRespondentReport` — one row per session (1:1, `onDelete: Cascade` so it follows the session and
-GDPR erasure). Status `queued → processing → ready | failed`, the generated `content`, `costUsd`,
+GDPR erasure). Status `queued → processing → ready | failed`, the generated `content`, `formatted` (whether the
+Report Formatter second pass laid out the stored prose — see below), `costUsd`,
 `notifyEmail` (respondent opt-in for a report-ready email; cleared once sent), and worker lease
 columns (`lockedBy`/`lockedAt`) for the maintenance-tick generation worker (mirrors the evaluations
 batch worker). Raw-only mode never creates a row.
@@ -154,9 +155,30 @@ batch worker). Raw-only mode never creates a row.
    (`SessionPdfDocument`) and the on-screen completion view. The seeded agent persona (045) carries the
    same grounding + short-paragraph guidance as its default voice.
 
+4. **Formatting (optional second pass, flag-gated)** — when `APP_REPORT_FORMATTER_ENABLED` is on,
+   generation runs a second agent (`REPORT_FORMATTER_AGENT_SLUG = 'app-report-formatter'`, seeded by
+   `061-report-formatter-agent.ts`) over the writer's output via `formatReportContent`
+   (`lib/app/questionnaire/report/format.ts`). It does **form only**: re-paragraphs at natural
+   boundaries, converts inline dash-runs into bullet lists, and strips AI-isms (em-dash overuse,
+   flowery filler) — the things the content agent self-polices poorly and the deterministic
+   `splitReportParagraphs` split can only approximate with a blunt sentence count. When the flag is on,
+   agent 1's prompt is **thinned** — it sheds the strict paragraph/bullet mechanics (layout is now the
+   formatter's job) so it focuses on grounded substance. **Fidelity is load-bearing**: a guard verifies
+   the formatter preserved structure (same sections, headings, and action count); on any drift, parse
+   failure, timeout, or provider error it returns the **original content unchanged** and the pass never
+   fails an otherwise-valid report. `actions` pass through verbatim. Success stores `formatted = true`
+   and sums the second call's cost; both renderers then honour the formatter's paragraphs/bullets
+   **verbatim** (`splitReportParagraphs(text, { trustParagraphs: true })` — skips the sentence
+   re-grouping). `formatted = false` (flag off, fallback, or legacy rows) keeps the deterministic split.
+   Report-kind-agnostic (operates on the shared `summary / sections[{heading,body}] / actions` core), so
+   the Cohort Report can adopt it later (passing `format: 'markdown'`) — see the seam note in
+   [`cohort-report.md`](./cohort-report.md).
+
 The agent (`RESPONDENT_REPORT_AGENT_SLUG = 'app-respondent-report'`) is seeded disabled-of-impact by
 `045-respondent-report-agent.ts` with an empty provider/model (resolved at runtime) and a monthly
-budget cap; `visibility: 'internal'`.
+budget cap; `visibility: 'internal'`. The formatter agent (`app-report-formatter`,
+`061-report-formatter-agent.ts`) is seeded the same way but resolves at the cheaper `chat` tier —
+formatting is largely mechanical.
 
 ## Respondent delivery
 
