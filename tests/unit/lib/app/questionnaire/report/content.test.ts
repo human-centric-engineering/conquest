@@ -8,8 +8,10 @@ import { describe, it, expect } from 'vitest';
 
 import {
   buildAnswerTranscript,
+  partialReportCaveat,
   splitReportParagraphs,
   validateRespondentReportContent,
+  PARTIAL_REPORT_THRESHOLD_PCT,
   REPORT_SUMMARY_MAX,
   REPORT_MAX_SECTIONS,
   REPORT_MAX_ACTIONS,
@@ -344,5 +346,62 @@ describe('splitReportParagraphs', () => {
       'Alpha four.',
       'Beta one. Beta two.',
     ]);
+  });
+
+  describe('trustParagraphs (formatter-produced prose)', () => {
+    it('honours authored blank-line breaks without re-chopping a long paragraph', () => {
+      // A deliberate 4-sentence paragraph the formatter chose to keep whole. Default mode would
+      // re-group it into ≤3-sentence chunks; trust mode leaves it exactly as authored.
+      const text = 'Alpha one. Alpha two. Alpha three. Alpha four.\n\nBeta one. Beta two.';
+      expect(splitReportParagraphs(text, { trustParagraphs: true })).toEqual([
+        'Alpha one. Alpha two. Alpha three. Alpha four.',
+        'Beta one. Beta two.',
+      ]);
+    });
+
+    it('does not sub-split a single wall-of-text block in trust mode', () => {
+      const wall = 'One. Two. Three. Four. Five. Six.';
+      // Default mode would chop this into groups of ~3 sentences; trust mode returns it whole.
+      expect(splitReportParagraphs(wall, { trustParagraphs: true })).toEqual([wall]);
+    });
+
+    it('still preserves multi-line bullet blocks verbatim in trust mode', () => {
+      const bullets = 'In practice:\n- one\n- two\n- three';
+      expect(splitReportParagraphs(bullets, { trustParagraphs: true })).toEqual([bullets]);
+    });
+
+    it('still normalises CRLF and drops empty paragraphs in trust mode', () => {
+      const result = splitReportParagraphs('Para one.\r\n\r\nPara two.\r\n\r\n', {
+        trustParagraphs: true,
+      });
+      expect(result).toEqual(['Para one.', 'Para two.']);
+    });
+  });
+});
+
+describe('partialReportCaveat', () => {
+  it('returns null at or above the threshold (a complete-enough questionnaire needs no caveat)', () => {
+    expect(partialReportCaveat(PARTIAL_REPORT_THRESHOLD_PCT)).toBeNull();
+    expect(partialReportCaveat(80)).toBeNull();
+    expect(partialReportCaveat(100)).toBeNull();
+  });
+
+  it('returns null when completion is unknown (null/undefined — legacy rows carry no caveat)', () => {
+    expect(partialReportCaveat(null)).toBeNull();
+    expect(partialReportCaveat(undefined)).toBeNull();
+  });
+
+  it('returns a caveat naming the exact percentage below the threshold', () => {
+    const caveat = partialReportCaveat(40);
+    expect(caveat).not.toBeNull();
+    // The exact figure is interpolated (deterministic — never entrusted to an LLM).
+    expect(caveat).toContain('(40% complete)');
+    expect(caveat).toMatch(/partially complete questionnaire/i);
+    expect(caveat).toMatch(/complete the full questionnaire/i);
+  });
+
+  it('treats the threshold as exclusive on the lower side (74 → caveat, 75 → none)', () => {
+    expect(partialReportCaveat(PARTIAL_REPORT_THRESHOLD_PCT - 1)).toContain('74% complete');
+    expect(partialReportCaveat(PARTIAL_REPORT_THRESHOLD_PCT)).toBeNull();
   });
 });

@@ -182,6 +182,16 @@ the `CohortReportSection.format` field marks `html` vs legacy `markdown`. HTML i
 render boundary** (`CohortSectionBody` → dompurify with an explicit tag allowlist), the standard XSS
 defence for stored rich text.
 
+**Formatter seam (not yet wired).** The Report Formatter second pass built for the Respondent Report
+(`formatReportContent`, `lib/app/questionnaire/report/format.ts` — re-paragraphing, bullet conversion,
+AI-ism removal) is report-kind-agnostic: it operates on the shared `summary / sections[{heading,body}]
+/ actions` core and takes a `format: 'markdown'` option precisely so the cohort report can adopt it
+**before** the `markdownToHtml` conversion (charts/`chartIds`/`recommendations` pass through untouched).
+It is deliberately **not** auto-wired here: cohort bodies are admin-authored/edited in Tiptap, streamed,
+and version-controlled, so auto-rewriting hand-authored prose is intrusive. The recommended adoption is
+an **opt-in "Polish formatting" action** in the editor (sibling to the per-section AI-assist), not a
+forced step in the streaming/publish path. See [`respondent-report.md`](./respondent-report.md).
+
 ## Deterministic scoring (F14.4)
 
 The "hard rules" path — scoring a questionnaire like a psychometric instrument (e.g. Big Five). A

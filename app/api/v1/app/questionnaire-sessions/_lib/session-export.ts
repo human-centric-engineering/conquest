@@ -223,14 +223,29 @@ export async function loadSessionExport(sessionId: string): Promise<LoadedSessio
 }
 
 /**
+ * The report-derived fields a caller embeds in the export PDF. Grouped into one options object (rather
+ * than trailing positional params) so the several booleans/values can't be silently transposed at a
+ * call site — all default to "no report" when omitted.
+ */
+export interface SessionReportEmbed {
+  /** The AI report content, or null/absent for raw-only / not-yet-ready. */
+  insights?: RespondentReportContent | null;
+  /** Render the woven report alone, omitting the raw answer listing (narrative deliverable). */
+  narrativeOnly?: boolean;
+  /** The report was laid out by the Report Formatter — trust its paragraphs verbatim. */
+  formatted?: boolean;
+  /** Questionnaire completion % at generation — drives the partial-report caveat. Null = no caveat. */
+  completionPct?: number | null;
+}
+
+/**
  * Assemble the export model from loaded rows — fetches the brand logo (best-effort) and
  * stamps the generation time, then delegates to the pure builder. Call after the route
  * authorises, so the logo fetch never runs for an unauthorised request.
  */
 export async function buildSessionExportPdfModel(
   loaded: LoadedSessionExport,
-  insights: RespondentReportContent | null = null,
-  narrativeOnly = false
+  report: SessionReportEmbed = {}
 ): Promise<SessionExportModel> {
   const logoDataUri = await fetchLogoDataUri(loaded.theme.logoUrl);
   if (loaded.theme.logoUrl && !logoDataUri) {
@@ -256,8 +271,10 @@ export async function buildSessionExportPdfModel(
     status: loaded.status,
     sections: loaded.sections,
     answers: loaded.answers,
-    insights,
-    narrativeOnly,
+    insights: report.insights ?? null,
+    insightsFormatted: report.formatted ?? false,
+    insightsCompletionPct: report.completionPct ?? null,
+    narrativeOnly: report.narrativeOnly ?? false,
   };
 
   return buildSessionExportModel(input);

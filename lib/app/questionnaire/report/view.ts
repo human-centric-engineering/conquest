@@ -42,6 +42,18 @@ export interface RespondentReportClientView {
      */
     started: boolean;
     content: RespondentReportContent | null;
+    /**
+     * Whether the stored prose was laid out by the Report Formatter second pass. When true the
+     * renderers honour its paragraphs/bullets verbatim; when false they apply the deterministic
+     * `splitReportParagraphs` split. Legacy rows (pre-formatter) and un-formatted rows read false.
+     */
+    formatted: boolean;
+    /**
+     * Questionnaire completion % at generation (answered / total slots). Below
+     * `PARTIAL_REPORT_THRESHOLD_PCT` the renderers show the partial-report caveat. Null for legacy
+     * rows generated before this was captured (no caveat).
+     */
+    completionPct: number | null;
     generatedAt: string | null;
     error: string | null;
     /** Whether the respondent has opted in to an email when the report is ready. */
@@ -67,7 +79,15 @@ export async function buildRespondentReportClientView(
         },
       },
       respondentReport: {
-        select: { status: true, content: true, generatedAt: true, error: true, notifyEmail: true },
+        select: {
+          status: true,
+          content: true,
+          formatted: true,
+          completionPct: true,
+          generatedAt: true,
+          error: true,
+          notifyEmail: true,
+        },
       },
     },
   });
@@ -100,6 +120,8 @@ export async function buildRespondentReportClientView(
       status: (row?.status as RespondentReportStatus | undefined) ?? 'queued',
       started: row != null,
       content: row?.content ? validateRespondentReportContent(row.content) : null,
+      formatted: Boolean(row?.formatted),
+      completionPct: row?.completionPct ?? null,
       generatedAt: row?.generatedAt ? row.generatedAt.toISOString() : null,
       error: row?.error ?? null,
       notifyRequested: Boolean(row?.notifyEmail),

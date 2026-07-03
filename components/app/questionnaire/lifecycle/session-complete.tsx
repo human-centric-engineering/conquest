@@ -38,6 +38,7 @@ import { useRespondentReport } from '@/lib/hooks/use-respondent-report';
 import { usePrefersReducedMotion } from '@/lib/hooks/use-prefers-reduced-motion';
 import { isAiRespondentReportMode } from '@/lib/app/questionnaire/types';
 import {
+  partialReportCaveat,
   splitReportParagraphs,
   type RespondentReportContent,
 } from '@/lib/app/questionnaire/report/content';
@@ -94,9 +95,18 @@ export function SessionComplete({
   // is `enabled: false` and the screen keeps its default responses-PDF download (F7.4 behaviour).
   const { view, loaded, timedOut, retry, notify } = useRespondentReport(sessionId, accessToken);
   const reportEnabled = view?.enabled ?? false;
+  // In an AI report mode the downloaded PDF's headline IS the generated report, so hold the button
+  // until the report is actually ready — offering a "download" mid-generation would hand the
+  // respondent a PDF with no report in it. Raw/disabled modes download the answers PDF immediately.
+  const reportIsAiMode = reportEnabled && isAiRespondentReportMode(view!.mode);
+  const reportReady = view?.insights?.status === 'ready';
   // Hold the download button until the view resolves so a `download: false` config never flashes a
   // clickable button in the gap before the first fetch settles. No report configured → default on.
-  const showDownload = loaded ? (reportEnabled ? view!.download : true) : false;
+  const showDownload = loaded
+    ? reportEnabled
+      ? view!.download && (!reportIsAiMode || reportReady)
+      : true
+    : false;
   // Both AI modes (raw_plus_insights, narrative) render their generated content here; the
   // completion screen never lists raw answers, so a narrative report already shows woven-only.
   const showInsights =
@@ -259,6 +269,8 @@ function ReportInsights({
     status: 'queued' | 'processing' | 'ready' | 'failed';
     started: boolean;
     content: RespondentReportContent | null;
+    formatted: boolean;
+    completionPct: number | null;
     generatedAt: string | null;
     error: string | null;
     notifyRequested: boolean;
@@ -306,13 +318,26 @@ function ReportInsights({
   }
 
   const { summary, sections, actions } = insights.content;
+  // Formatter-produced reports are pre-laid-out — honour their paragraphs verbatim (skip the
+  // deterministic sentence re-grouping, which would re-chop deliberate paragraphs).
+  const trust = { trustParagraphs: insights.formatted };
+  // Deterministic caveat for a report generated from a partially-complete questionnaire.
+  const caveat = partialReportCaveat(insights.completionPct);
   // Stagger the report in as it lands so it resolves gracefully out of the preparing state.
   let step = 0;
   const delay = () => ({ animationDelay: `${step++ * 80}ms`, animationFillMode: 'both' as const });
   return (
     <div className="w-full space-y-4 text-left">
+      {caveat && (
+        <p
+          className="text-muted-foreground border-l-2 pl-3 text-xs leading-relaxed italic"
+          role="note"
+        >
+          {caveat}
+        </p>
+      )}
       <div className={cn('space-y-2', REVEAL)} style={delay()}>
-        {splitReportParagraphs(summary).map((paragraph, i) => (
+        {splitReportParagraphs(summary, trust).map((paragraph, i) => (
           // `whitespace-pre-line`: a preserved multi-line block (e.g. a bullet run the model wrote as
           // consecutive `- …` lines) keeps its newlines on screen, matching the PDF's <Text>.
           <p key={i} className="text-foreground text-sm leading-relaxed whitespace-pre-line">
@@ -323,7 +348,7 @@ function ReportInsights({
       {sections.map((section, i) => (
         <div key={i} className={cn('space-y-1.5', REVEAL)} style={delay()}>
           <h2 className="text-foreground text-sm font-semibold">{section.heading}</h2>
-          {splitReportParagraphs(section.body).map((paragraph, j) => (
+          {splitReportParagraphs(section.body, trust).map((paragraph, j) => (
             <p
               key={j}
               className="text-muted-foreground text-sm leading-relaxed whitespace-pre-line"

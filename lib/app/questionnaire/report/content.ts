@@ -41,6 +41,28 @@ export interface RespondentReportContent {
   actions: string[];
 }
 
+/**
+ * Below this completion percentage a report is flagged as based on a partially-complete questionnaire
+ * and rendered with a caveat subtitle (see {@link partialReportCaveat}). A report generated at or above
+ * this threshold carries no caveat.
+ */
+export const PARTIAL_REPORT_THRESHOLD_PCT = 75;
+
+/**
+ * The caveat subtitle for a report generated from a partially-complete questionnaire, or `null` when
+ * completion is at/above {@link PARTIAL_REPORT_THRESHOLD_PCT} (or unknown — legacy rows store `null`).
+ * Deterministic and rendered identically on-screen and in the PDF — the exact percentage and wording
+ * must not be entrusted to an LLM, so this is computed, never generated.
+ */
+export function partialReportCaveat(completionPct: number | null | undefined): string | null {
+  if (completionPct == null || completionPct >= PARTIAL_REPORT_THRESHOLD_PCT) return null;
+  return (
+    `This is an AI-generated report based on a partially complete questionnaire (${completionPct}% ` +
+    `complete) and may therefore contain AI-generated inaccuracies. For a comprehensive and reliable ` +
+    `report, complete the full questionnaire.`
+  );
+}
+
 /** Bounds — keep a report readable and a runaway model in check. */
 export const REPORT_SUMMARY_MAX = 4000;
 export const REPORT_SECTION_HEADING_MAX = 200;
@@ -87,8 +109,16 @@ function splitSentences(block: string): string[] {
  *     line breaks (bullet lists) are left whole, never sentence-split.
  *
  * A short body returns a single-element array (its whole text). Pure — shared by both renderers.
+ *
+ * `trustParagraphs` (set for reports produced by the Report Formatter second pass) runs pass 1 only:
+ * the formatter has already laid the prose out at natural boundaries, so honour its blank-line breaks
+ * and bullet runs verbatim and skip the greedy sentence re-grouping that would otherwise re-chop a
+ * deliberate 4-sentence paragraph. Un-formatted / legacy content leaves it off and gets the full split.
  */
-export function splitReportParagraphs(text: string): string[] {
+export function splitReportParagraphs(
+  text: string,
+  opts: { trustParagraphs?: boolean } = {}
+): string[] {
   const blocks = text
     // Normalise CRLF/CR (Windows-authored answers the model may echo) to LF first, so a `\r\n\r\n`
     // blank line is recognised as a paragraph break and no stray `\r` leaks into the rendered output.
@@ -101,6 +131,11 @@ export function splitReportParagraphs(text: string): string[] {
   for (const block of blocks) {
     // Preserve multi-line blocks (bullet runs, deliberate line breaks) exactly as authored.
     if (/\n/.test(block)) {
+      out.push(block);
+      continue;
+    }
+    // Trusted (formatter-produced) prose: keep each authored paragraph whole, no sentence re-grouping.
+    if (opts.trustParagraphs) {
       out.push(block);
       continue;
     }

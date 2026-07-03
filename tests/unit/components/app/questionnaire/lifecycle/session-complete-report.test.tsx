@@ -176,6 +176,81 @@ describe('SessionComplete — respondent report', () => {
     expect(screen.getByText(/What you can do next/i)).toBeInTheDocument();
   });
 
+  it('hides Download PDF while an AI report is still generating', () => {
+    // In an AI report mode the PDF *is* the report, so the download must not appear mid-generation.
+    mockView({
+      enabled: true,
+      mode: 'raw_plus_insights',
+      onScreen: true,
+      download: true,
+      insights: {
+        status: 'processing',
+        started: true,
+        content: null,
+        generatedAt: null,
+        error: null,
+        notifyRequested: false,
+      },
+    });
+    render(<SessionComplete sessionId="s1" answeredCount={3} />);
+    expect(screen.queryByRole('button', { name: /Download PDF/i })).not.toBeInTheDocument();
+  });
+
+  it('shows Download PDF once the AI report is ready', () => {
+    mockView({
+      enabled: true,
+      mode: 'raw_plus_insights',
+      onScreen: true,
+      download: true,
+      insights: {
+        status: 'ready',
+        generatedAt: '2026-06-19T12:00:00.000Z',
+        error: null,
+        content: { summary: 'Ready.', sections: [], actions: [] },
+      },
+    });
+    render(<SessionComplete sessionId="s1" answeredCount={3} />);
+    expect(screen.getByRole('button', { name: /Download PDF/i })).toBeInTheDocument();
+  });
+
+  it('renders the partial-report caveat when completion is below the threshold', () => {
+    mockView({
+      enabled: true,
+      mode: 'raw_plus_insights',
+      onScreen: true,
+      download: true,
+      insights: {
+        status: 'ready',
+        generatedAt: '2026-06-19T12:00:00.000Z',
+        error: null,
+        completionPct: 40,
+        content: { summary: 'Partial report.', sections: [], actions: [] },
+      },
+    });
+    render(<SessionComplete sessionId="s1" answeredCount={3} />);
+    expect(
+      screen.getByText(/partially complete questionnaire \(40% complete\)/i)
+    ).toBeInTheDocument();
+  });
+
+  it('omits the caveat when completion is at or above the threshold', () => {
+    mockView({
+      enabled: true,
+      mode: 'raw_plus_insights',
+      onScreen: true,
+      download: true,
+      insights: {
+        status: 'ready',
+        generatedAt: '2026-06-19T12:00:00.000Z',
+        error: null,
+        completionPct: 90,
+        content: { summary: 'Full report.', sections: [], actions: [] },
+      },
+    });
+    render(<SessionComplete sessionId="s1" answeredCount={3} />);
+    expect(screen.queryByText(/partially complete questionnaire/i)).not.toBeInTheDocument();
+  });
+
   it('renders the woven report on-screen for narrative mode when ready', () => {
     mockView({
       enabled: true,

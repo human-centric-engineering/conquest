@@ -18,6 +18,8 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 vi.mock('@/lib/logging', () => ({ logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() } }));
+vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
+vi.mock('@/lib/app/questionnaire/report/format', () => ({ formatReportContent: vi.fn() }));
 vi.mock('@/lib/orchestration/llm/agent-resolver', () => ({
   resolveAgentProviderAndModel: vi.fn(),
 }));
@@ -31,6 +33,8 @@ vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/session-export', () => ({
 }));
 
 import { prisma } from '@/lib/db/client';
+import { isFeatureEnabled } from '@/lib/feature-flags';
+import { formatReportContent } from '@/lib/app/questionnaire/report/format';
 import { resolveAgentProviderAndModel } from '@/lib/orchestration/llm/agent-resolver';
 import { getProvider } from '@/lib/orchestration/llm/provider-manager';
 import { searchKnowledge } from '@/lib/orchestration/knowledge/search';
@@ -115,6 +119,13 @@ beforeEach(() => {
   });
   (searchKnowledge as Mock).mockResolvedValue([]);
   (resolveClientKnowledgeDocumentIds as Mock).mockResolvedValue([]);
+  // Formatter off by default — the existing suite asserts the un-thinned prompt + unformatted output.
+  (isFeatureEnabled as Mock).mockResolvedValue(false);
+  (formatReportContent as Mock).mockImplementation((content: unknown) => ({
+    content,
+    costUsd: 0,
+    formatted: false,
+  }));
 });
 
 describe('generateRespondentReport', () => {
@@ -403,5 +414,140 @@ describe('generateRespondentReport', () => {
       (m) => m.role === 'user'
     );
     expect(user?.content).toContain('Audience: Line managers');
+  });
+
+  it('does not run the formatter and returns formatted:false when the flag is off', async () => {
+    const { provider } = fakeProvider(VALID_RESPONSE);
+    (getProvider as Mock).mockResolvedValue(provider);
+
+    const result = await generateRespondentReport('sess-1');
+
+    expect(formatReportContent).not.toHaveBeenCalled();
+    expect(result.formatted).toBe(false);
+  });
+
+  it('reports 100% completion when every slot was answered', async () => {
+    const { provider } = fakeProvider(VALID_RESPONSE);
+    (getProvider as Mock).mockResolvedValue(provider);
+
+    const result = await generateRespondentReport('sess-1');
+    // The default export has one slot, answered → 1/1 = 100%.
+    expect(result.completionPct).toBe(100);
+  });
+
+  it('computes a partial completion % from answered/total slots (early submission)', async () => {
+    // Two slots, one answered → 50% — a session submitted before finishing.
+    (loadSessionExport as Mock).mockResolvedValue({
+      ...loadedExport(),
+      sections: [
+        {
+          sectionId: 's1',
+          title: 'Wellbeing',
+          slots: [
+            { slotKey: 'q1', prompt: 'Mood?', type: 'free_text', required: false },
+            { slotKey: 'q2', prompt: 'Sleep?', type: 'free_text', required: false },
+          ],
+        },
+      ],
+    });
+    const { provider } = fakeProvider(VALID_RESPONSE);
+    (getProvider as Mock).mockResolvedValue(provider);
+
+    const result = await generateRespondentReport('sess-1');
+    expect(result.completionPct).toBe(50);
+  });
+});
+
+describe('generateRespondentReport with the Report Formatter enabled', () => {
+  const FORMATTED = {
+    summary: 'You are engaged.\n\nYou answered positively.',
+    sections: [{ heading: 'Strengths', body: 'Consistent positivity.' }],
+    actions: ['Keep it up'],
+  };
+
+  beforeEach(() => {
+    (isFeatureEnabled as Mock).mockResolvedValue(true);
+  });
+
+  it('runs the formatter on the writer output and sums both costs', async () => {
+    const { provider } = fakeProvider(VALID_RESPONSE);
+    (getProvider as Mock).mockResolvedValue(provider);
+    (formatReportContent as Mock).mockResolvedValue({
+      content: FORMATTED,
+      costUsd: 0.02,
+      formatted: true,
+    });
+
+    const result = await generateRespondentReport('sess-1');
+
+    // The formatter received the validated writer output, plaintext mode.
+    expect(formatReportContent).toHaveBeenCalledWith(VALID_RESPONSE, { format: 'plaintext' });
+    expect(result.content).toEqual(FORMATTED);
+    expect(result.formatted).toBe(true);
+    // The formatter cost is summed into the total. The fake writer model has no pricing so it
+    // computes to exactly 0, pinning the sum to the formatter's 0.02 — a double-count or dropped
+    // term would fail this exact check (a loose >= bound would not).
+    expect(result.costUsd).toBeCloseTo(0.02, 5);
+  });
+
+  it('propagates a formatter fallback (formatted:false) without failing the report', async () => {
+    const { provider } = fakeProvider(VALID_RESPONSE);
+    (getProvider as Mock).mockResolvedValue(provider);
+    // Formatter fell back to the unformatted content (e.g. structural drift).
+    (formatReportContent as Mock).mockResolvedValue({
+      content: VALID_RESPONSE,
+      costUsd: 0.01,
+      formatted: false,
+    });
+
+    const result = await generateRespondentReport('sess-1');
+
+    expect(result.content).toEqual(VALID_RESPONSE);
+    expect(result.formatted).toBe(false);
+  });
+
+  it('thins agent 1s paragraph discipline (formatter owns final layout)', async () => {
+    const { provider, chat } = fakeProvider(VALID_RESPONSE);
+    (getProvider as Mock).mockResolvedValue(provider);
+    (formatReportContent as Mock).mockResolvedValue({
+      content: FORMATTED,
+      costUsd: 0,
+      formatted: true,
+    });
+
+    await generateRespondentReport('sess-1');
+    const system = (chat.mock.calls[0][0] as Array<{ role: string; content: string }>).find(
+      (m) => m.role === 'system'
+    );
+    // The lighter guidance is present; the strict mechanical rule is gone.
+    expect(system?.content).toMatch(/a separate formatting pass refines the final layout/i);
+    expect(system?.content).not.toMatch(/never emit one large block of text/i);
+  });
+
+  it('drops the manual bullet mechanic from the structured style (formatter bulletises)', async () => {
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionMeta({
+        respondentReport: {
+          enabled: true,
+          mode: 'narrative',
+          generation: { narrativeStyle: 'structured' },
+        },
+      })
+    );
+    const { provider, chat } = fakeProvider(VALID_RESPONSE);
+    (getProvider as Mock).mockResolvedValue(provider);
+    (formatReportContent as Mock).mockResolvedValue({
+      content: FORMATTED,
+      costUsd: 0,
+      formatted: true,
+    });
+
+    await generateRespondentReport('sess-1');
+    const system = (chat.mock.calls[0][0] as Array<{ role: string; content: string }>).find(
+      (m) => m.role === 'system'
+    );
+    // Still scannable/structured, but no "one point per line starting with -" instruction.
+    expect(system?.content).toContain('Style: structured and scannable');
+    expect(system?.content).not.toMatch(/each line starting with "- "/i);
   });
 });

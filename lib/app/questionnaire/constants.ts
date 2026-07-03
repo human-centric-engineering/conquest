@@ -955,6 +955,29 @@ export const RESPONDENT_REPORT_AGENT_SLUG = 'app-respondent-report';
 export const RESPONDENT_REPORT_ASSISTANT_AGENT_SLUG = 'app-respondent-report-assistant';
 
 /**
+ * Slug of the seeded **Report Formatter** `AiAgent` — the second-pass agent that takes a generated
+ * report's prose (from the Respondent Report writer, and later the Cohort Report) and does form-only
+ * work: re-paragraphs at natural boundaries, converts inline dash-runs into bullet lists, and strips
+ * AI-isms (em-dash overuse, flowery filler). It must not add, remove, or alter any fact, heading,
+ * section, or action — a strict fidelity guard in `report/format.ts` falls back to the unformatted
+ * content on any structural drift. Report-kind-agnostic (operates on the shared
+ * `summary / sections[{heading,body}] / actions` core). Empty `model`/`provider` (runtime-resolved at
+ * the cheaper `chat` tier — formatting is largely mechanical); seeded by `061-report-formatter-agent.ts`.
+ */
+export const REPORT_FORMATTER_AGENT_SLUG = 'app-report-formatter';
+
+/**
+ * Platform feature flag gating the **Report Formatter** second pass (see {@link REPORT_FORMATTER_AGENT_SLUG}).
+ * When on, respondent report generation runs the formatter over the writer's output and stores the
+ * result as pre-laid-out prose (`AppRespondentReport.formatted = true`), which the renderers honour
+ * verbatim instead of applying the deterministic sentence-regrouping fallback. When off (the default),
+ * generation is unchanged and the deterministic `splitReportParagraphs` split still runs at render.
+ * DB-backed, seeded disabled by `062-report-formatter-flag.ts`. Independent of
+ * {@link APP_QUESTIONNAIRES_FLAG}; ship-dark toggle so the two-agent output can be compared before rollout.
+ */
+export const APP_REPORT_FORMATTER_FLAG = 'APP_REPORT_FORMATTER_ENABLED';
+
+/**
  * Slug of the seeded composer `AiAgent` (generative authoring). A distinct agent
  * from the document extractor: composition and document extraction carry their
  * own budgets and personas. Ships with empty `model`/`provider` so it resolves
