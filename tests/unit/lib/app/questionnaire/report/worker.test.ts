@@ -63,6 +63,7 @@ describe('processQueuedRespondentReports', () => {
       content: { summary: 'ok', sections: [], actions: [] },
       costUsd: 0.0123,
       formatted: true,
+      completionPct: 60,
     });
 
     const result = await processQueuedRespondentReports();
@@ -79,6 +80,7 @@ describe('processQueuedRespondentReports', () => {
       status: 'ready',
       content: { summary: 'ok', sections: [], actions: [] },
       formatted: true,
+      completionPct: 60,
       costUsd: 0.0123,
       lockedBy: null,
       lockedAt: null,

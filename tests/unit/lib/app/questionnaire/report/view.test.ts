@@ -75,6 +75,7 @@ describe('buildRespondentReportClientView', () => {
           status: 'ready',
           content: { summary: 'Your story.', sections: [], actions: ['Do X'] },
           formatted: true,
+          completionPct: 45,
           generatedAt: new Date('2026-06-19T12:00:00Z'),
           error: null,
         }
@@ -90,9 +91,11 @@ describe('buildRespondentReportClientView', () => {
     });
     // The formatter flag is surfaced so the renderers know to trust the laid-out prose.
     expect(view?.insights?.formatted).toBe(true);
+    // Completion % is surfaced so the renderers can show the partial-report caveat.
+    expect(view?.insights?.completionPct).toBe(45);
   });
 
-  it('defaults formatted to false when the row predates the formatter (null column)', async () => {
+  it('defaults formatted/completionPct for a row that predates them (null columns)', async () => {
     (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
       session(
         { enabled: true, mode: 'raw_plus_insights' },
@@ -100,6 +103,7 @@ describe('buildRespondentReportClientView', () => {
           status: 'ready',
           content: { summary: 'Legacy.', sections: [], actions: [] },
           formatted: null,
+          completionPct: null,
           generatedAt: new Date('2026-06-19T12:00:00Z'),
           error: null,
         }
@@ -107,6 +111,8 @@ describe('buildRespondentReportClientView', () => {
     );
     const view = await buildRespondentReportClientView('s1');
     expect(view?.insights?.formatted).toBe(false);
+    // Null completion → null (no caveat), never coerced to 0 (which would read as "0% complete").
+    expect(view?.insights?.completionPct).toBeNull();
   });
 
   it('reports queued insights when enabled in mode 2 with no row yet', async () => {

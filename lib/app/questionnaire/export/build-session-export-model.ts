@@ -56,6 +56,8 @@ export interface SessionExportInput {
   insights?: RespondentReportContent | null;
   /** True when `insights` was laid out by the Report Formatter (renderers trust its paragraphs). */
   insightsFormatted?: boolean;
+  /** Questionnaire completion % at generation — drives the partial-report caveat. Null = no caveat. */
+  insightsCompletionPct?: number | null;
   /** Woven-narrative deliverable: render the report alone, omit the raw answer listing. */
   narrativeOnly?: boolean;
 }
@@ -106,6 +108,7 @@ export function buildSessionExportModel(input: SessionExportInput): SessionExpor
     totalCount: panel.totalCount,
     insights: input.insights ?? null,
     insightsFormatted: input.insightsFormatted ?? false,
+    insightsCompletionPct: input.insightsCompletionPct ?? null,
     narrativeOnly: input.narrativeOnly ?? false,
   };
 }

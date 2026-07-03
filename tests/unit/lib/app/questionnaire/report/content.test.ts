@@ -8,8 +8,10 @@ import { describe, it, expect } from 'vitest';
 
 import {
   buildAnswerTranscript,
+  partialReportCaveat,
   splitReportParagraphs,
   validateRespondentReportContent,
+  PARTIAL_REPORT_THRESHOLD_PCT,
   REPORT_SUMMARY_MAX,
   REPORT_MAX_SECTIONS,
   REPORT_MAX_ACTIONS,
@@ -374,5 +376,32 @@ describe('splitReportParagraphs', () => {
       });
       expect(result).toEqual(['Para one.', 'Para two.']);
     });
+  });
+});
+
+describe('partialReportCaveat', () => {
+  it('returns null at or above the threshold (a complete-enough questionnaire needs no caveat)', () => {
+    expect(partialReportCaveat(PARTIAL_REPORT_THRESHOLD_PCT)).toBeNull();
+    expect(partialReportCaveat(80)).toBeNull();
+    expect(partialReportCaveat(100)).toBeNull();
+  });
+
+  it('returns null when completion is unknown (null/undefined — legacy rows carry no caveat)', () => {
+    expect(partialReportCaveat(null)).toBeNull();
+    expect(partialReportCaveat(undefined)).toBeNull();
+  });
+
+  it('returns a caveat naming the exact percentage below the threshold', () => {
+    const caveat = partialReportCaveat(40);
+    expect(caveat).not.toBeNull();
+    // The exact figure is interpolated (deterministic — never entrusted to an LLM).
+    expect(caveat).toContain('(40% complete)');
+    expect(caveat).toMatch(/partially complete questionnaire/i);
+    expect(caveat).toMatch(/complete the full questionnaire/i);
+  });
+
+  it('treats the threshold as exclusive on the lower side (74 → caveat, 75 → none)', () => {
+    expect(partialReportCaveat(PARTIAL_REPORT_THRESHOLD_PCT - 1)).toContain('74% complete');
+    expect(partialReportCaveat(PARTIAL_REPORT_THRESHOLD_PCT)).toBeNull();
   });
 });

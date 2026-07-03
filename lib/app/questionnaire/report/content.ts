@@ -41,6 +41,28 @@ export interface RespondentReportContent {
   actions: string[];
 }
 
+/**
+ * Below this completion percentage a report is flagged as based on a partially-complete questionnaire
+ * and rendered with a caveat subtitle (see {@link partialReportCaveat}). A report generated at or above
+ * this threshold carries no caveat.
+ */
+export const PARTIAL_REPORT_THRESHOLD_PCT = 75;
+
+/**
+ * The caveat subtitle for a report generated from a partially-complete questionnaire, or `null` when
+ * completion is at/above {@link PARTIAL_REPORT_THRESHOLD_PCT} (or unknown — legacy rows store `null`).
+ * Deterministic and rendered identically on-screen and in the PDF — the exact percentage and wording
+ * must not be entrusted to an LLM, so this is computed, never generated.
+ */
+export function partialReportCaveat(completionPct: number | null | undefined): string | null {
+  if (completionPct == null || completionPct >= PARTIAL_REPORT_THRESHOLD_PCT) return null;
+  return (
+    `This is an AI-generated report based on a partially complete questionnaire (${completionPct}% ` +
+    `complete) and may therefore contain AI-generated inaccuracies. For a comprehensive and reliable ` +
+    `report, complete the full questionnaire.`
+  );
+}
+
 /** Bounds — keep a report readable and a runaway model in check. */
 export const REPORT_SUMMARY_MAX = 4000;
 export const REPORT_SECTION_HEADING_MAX = 200;

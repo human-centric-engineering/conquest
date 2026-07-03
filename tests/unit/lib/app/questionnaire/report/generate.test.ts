@@ -425,6 +425,37 @@ describe('generateRespondentReport', () => {
     expect(formatReportContent).not.toHaveBeenCalled();
     expect(result.formatted).toBe(false);
   });
+
+  it('reports 100% completion when every slot was answered', async () => {
+    const { provider } = fakeProvider(VALID_RESPONSE);
+    (getProvider as Mock).mockResolvedValue(provider);
+
+    const result = await generateRespondentReport('sess-1');
+    // The default export has one slot, answered → 1/1 = 100%.
+    expect(result.completionPct).toBe(100);
+  });
+
+  it('computes a partial completion % from answered/total slots (early submission)', async () => {
+    // Two slots, one answered → 50% — a session submitted before finishing.
+    (loadSessionExport as Mock).mockResolvedValue({
+      ...loadedExport(),
+      sections: [
+        {
+          sectionId: 's1',
+          title: 'Wellbeing',
+          slots: [
+            { slotKey: 'q1', prompt: 'Mood?', type: 'free_text', required: false },
+            { slotKey: 'q2', prompt: 'Sleep?', type: 'free_text', required: false },
+          ],
+        },
+      ],
+    });
+    const { provider } = fakeProvider(VALID_RESPONSE);
+    (getProvider as Mock).mockResolvedValue(provider);
+
+    const result = await generateRespondentReport('sess-1');
+    expect(result.completionPct).toBe(50);
+  });
 });
 
 describe('generateRespondentReport with the Report Formatter enabled', () => {

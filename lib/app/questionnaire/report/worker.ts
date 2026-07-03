@@ -92,7 +92,9 @@ async function claimNextReport(workerId: string): Promise<ClaimedReport | null> 
 /** Generate + persist one claimed report. Returns whether it succeeded. */
 async function driveReport(claimed: ClaimedReport): Promise<boolean> {
   try {
-    const { content, costUsd, formatted } = await generateRespondentReport(claimed.sessionId);
+    const { content, costUsd, formatted, completionPct } = await generateRespondentReport(
+      claimed.sessionId
+    );
     // Re-read notifyEmail: generation takes tens of seconds, during which the respondent may have
     // just opted in (the notify route matches `processing` rows). Using the claim-time value would
     // miss that late opt-in AND the ready-write below clears the column — so read the fresh value
@@ -109,6 +111,7 @@ async function driveReport(claimed: ClaimedReport): Promise<boolean> {
         status: 'ready',
         content,
         formatted,
+        completionPct,
         costUsd,
         generatedAt: new Date(),
         error: null,

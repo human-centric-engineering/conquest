@@ -81,6 +81,11 @@ export interface SessionExportModel {
    */
   insightsFormatted?: boolean;
   /**
+   * Questionnaire completion % at generation (answered / total slots). Below the partial-report
+   * threshold the PDF renders a caveat subtitle under the report title. Null = no caveat.
+   */
+  insightsCompletionPct?: number | null;
+  /**
    * When true, the woven `narrative` report **is** the deliverable: the PDF renders the report
    * content alone (titled "Your personalised report") and omits the raw section/slot listing. The
    * respondent's PDF route sets this for a ready narrative report; the admin audit PDF never does

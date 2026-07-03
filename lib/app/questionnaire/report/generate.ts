@@ -49,6 +49,12 @@ export interface GeneratedReport {
    * `splitReportParagraphs` split runs at render.
    */
   formatted: boolean;
+  /**
+   * Questionnaire completion % (answered / total slots) at generation. Drives the partial-report
+   * caveat when below `PARTIAL_REPORT_THRESHOLD_PCT` (a session can be submitted early). 100 when
+   * there are no slots to answer.
+   */
+  completionPct: number;
 }
 
 /** Generation tuning — generous token budget for a multi-section narrative; 60s LLM ceiling. */
@@ -226,6 +232,10 @@ export async function generateRespondentReport(sessionId: string): Promise<Gener
     audienceSummary: summariseAudience(loaded.audience),
     sections: panel.sections,
   });
+  // Completion at submission (frozen — a completed session takes no more answers). Drives the
+  // partial-report caveat when a session was submitted early. No slots → treat as fully complete.
+  const completionPct =
+    panel.totalCount > 0 ? Math.round((panel.answeredCount / panel.totalCount) * 100) : 100;
 
   // 3. Optional client-KB grounding — strictly scoped to the client's documents.
   let knowledge = '';
@@ -293,12 +303,13 @@ export async function generateRespondentReport(sessionId: string): Promise<Gener
   // Best-effort — `formatReportContent` never throws and falls back to the unformatted content on any
   // drift or failure, so a formatter problem can never fail an otherwise-valid report.
   if (!formatterEnabled) {
-    return { content: result.value, costUsd: result.costUsd, formatted: false };
+    return { content: result.value, costUsd: result.costUsd, formatted: false, completionPct };
   }
   const formatted = await formatReportContent(result.value, { format: 'plaintext' });
   return {
     content: formatted.content,
     costUsd: result.costUsd + formatted.costUsd,
     formatted: formatted.formatted,
+    completionPct,
   };
 }

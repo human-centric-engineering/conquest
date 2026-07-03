@@ -60,15 +60,14 @@ async function handleExportPdf(
     const ready = reportView?.insights?.status === 'ready' ? reportView.insights : null;
     const insights = ready ? ready.content : null;
     const narrativeOnly = insights !== null && reportView?.mode === 'narrative';
-    // Trust the formatter's layout in the PDF too, so it matches the on-screen render.
-    const insightsFormatted = ready?.formatted ?? false;
 
-    const model = await buildSessionExportPdfModel(
-      loaded,
+    const model = await buildSessionExportPdfModel(loaded, {
       insights,
       narrativeOnly,
-      insightsFormatted
-    );
+      // Trust the formatter's layout in the PDF too, so it matches the on-screen render.
+      formatted: ready?.formatted ?? false,
+      completionPct: ready?.completionPct ?? null,
+    });
     const pdf = await renderSessionPdf(model);
 
     log.info('Session export PDF generated', {

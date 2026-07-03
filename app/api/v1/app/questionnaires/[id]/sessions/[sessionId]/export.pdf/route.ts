@@ -52,11 +52,14 @@ const handleAdminExportPdf = withAdminAuth<{ id: string; sessionId: string }>(
       const reportView = await buildRespondentReportClientView(sessionId);
       const ready = reportView?.insights?.status === 'ready' ? reportView.insights : null;
       const insights = ready ? ready.content : null;
-      // Trust the formatter's layout here too, so the admin PDF matches the respondent's exactly
-      // (the admin never sets narrativeOnly, so the report layout is the only thing to keep in sync).
-      const insightsFormatted = ready?.formatted ?? false;
 
-      const model = await buildSessionExportPdfModel(loaded, insights, false, insightsFormatted);
+      // Trust the formatter's layout here too, so the admin PDF matches the respondent's exactly (the
+      // admin never sets narrativeOnly, so the report layout + caveat are the only things to keep in sync).
+      const model = await buildSessionExportPdfModel(loaded, {
+        insights,
+        formatted: ready?.formatted ?? false,
+        completionPct: ready?.completionPct ?? null,
+      });
       const pdf = await renderSessionPdf(model);
 
       log.info('Admin session export PDF generated', {

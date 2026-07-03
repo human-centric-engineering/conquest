@@ -162,7 +162,7 @@ export function TranscriptDownload({
             ) : (
               <Download className="h-3.5 w-3.5" aria-hidden="true" />
             )}
-            {downloading ? 'Preparing…' : copied ? 'Copied' : 'Transcript'}
+            {downloading ? 'Preparing…' : copied ? 'Copied' : 'Chat Transcript'}
             <ChevronDown className="h-3.5 w-3.5 opacity-60" aria-hidden="true" />
           </Button>
         </DropdownMenuTrigger>

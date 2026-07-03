@@ -168,22 +168,24 @@ describe('respondent report embedding', () => {
         status: 'ready',
         content: readyContent,
         formatted: true,
+        completionPct: 100,
         generatedAt: null,
         error: null,
       },
     });
     const res = await GET(req(), ctx);
     expect(res.status).toBe(200);
-    // 4th arg is the formatter flag, threaded from the ready report so the PDF trusts its layout.
-    expect(exportMock.buildSessionExportPdfModel).toHaveBeenCalledWith(
-      expect.anything(),
-      readyContent,
-      true,
-      true
-    );
+    // The report-embed options object carries the formatter flag + completion %, threaded from the
+    // ready report so the PDF trusts its layout and can render the partial caveat.
+    expect(exportMock.buildSessionExportPdfModel).toHaveBeenCalledWith(expect.anything(), {
+      insights: readyContent,
+      narrativeOnly: true,
+      formatted: true,
+      completionPct: 100,
+    });
   });
 
-  it('embeds a ready mode-2 report but keeps the raw answers (narrativeOnly false)', async () => {
+  it('threads a partial completion % so the PDF can render the caveat (mode-2, narrativeOnly false)', async () => {
     reportViewMock.buildRespondentReportClientView.mockResolvedValue({
       enabled: true,
       mode: 'raw_plus_insights',
@@ -193,23 +195,24 @@ describe('respondent report embedding', () => {
         status: 'ready',
         content: readyContent,
         formatted: false,
+        completionPct: 40, // below the caveat threshold — must reach the PDF builder
         generatedAt: null,
         error: null,
       },
     });
     const res = await GET(req(), ctx);
     expect(res.status).toBe(200);
-    expect(exportMock.buildSessionExportPdfModel).toHaveBeenCalledWith(
-      expect.anything(),
-      readyContent,
-      false,
-      false
-    );
+    expect(exportMock.buildSessionExportPdfModel).toHaveBeenCalledWith(expect.anything(), {
+      insights: readyContent,
+      narrativeOnly: false,
+      formatted: false,
+      completionPct: 40,
+    });
   });
 
   it('trusts the formatter layout for a formatted mode-2 report (narrativeOnly false, formatted true)', async () => {
-    // The two booleans DIVERGE here (narrativeOnly=false, insightsFormatted=true) — the only case
-    // that can catch a 3rd/4th positional-argument swap in the route's call to buildSessionExportPdfModel.
+    // narrativeOnly=false but formatted=true — an options object (not positional args) so a swap of
+    // the two flags is structurally impossible, but this still documents the divergent combination.
     reportViewMock.buildRespondentReportClientView.mockResolvedValue({
       enabled: true,
       mode: 'raw_plus_insights',
@@ -219,18 +222,19 @@ describe('respondent report embedding', () => {
         status: 'ready',
         content: readyContent,
         formatted: true,
+        completionPct: 100,
         generatedAt: null,
         error: null,
       },
     });
     const res = await GET(req(), ctx);
     expect(res.status).toBe(200);
-    expect(exportMock.buildSessionExportPdfModel).toHaveBeenCalledWith(
-      expect.anything(),
-      readyContent,
-      false,
-      true
-    );
+    expect(exportMock.buildSessionExportPdfModel).toHaveBeenCalledWith(expect.anything(), {
+      insights: readyContent,
+      narrativeOnly: false,
+      formatted: true,
+      completionPct: 100,
+    });
   });
 
   it('passes no insights and no narrative layout when the report is not ready', async () => {
@@ -242,23 +246,23 @@ describe('respondent report embedding', () => {
       insights: {
         status: 'processing',
         content: null,
-        // `formatted: true` in the (non-ready) row must NOT leak through — the route zeroes the flag
-        // unless the report is ready. Asserting `false` below proves the readiness gate, not a
-        // coincidental match with the mock value.
+        // `formatted: true` / `completionPct: 40` in the (non-ready) row must NOT leak through — the
+        // route zeroes both unless the report is ready. Asserting the defaults below proves the gate.
         formatted: true,
+        completionPct: 40,
         generatedAt: null,
         error: null,
       },
     });
     const res = await GET(req(), ctx);
     expect(res.status).toBe(200);
-    // Not ready → no insights, no narrative layout, and formatter flag defaults false.
-    expect(exportMock.buildSessionExportPdfModel).toHaveBeenCalledWith(
-      expect.anything(),
-      null,
-      false,
-      false
-    );
+    // Not ready → no insights, no narrative layout, formatter flag false, no completion % (no caveat).
+    expect(exportMock.buildSessionExportPdfModel).toHaveBeenCalledWith(expect.anything(), {
+      insights: null,
+      narrativeOnly: false,
+      formatted: false,
+      completionPct: null,
+    });
   });
 });
 

@@ -18,7 +18,7 @@
 import { Document, Page, Text, View, Image, StyleSheet } from '@react-pdf/renderer';
 
 import { formatSlotAnswer } from '@/lib/app/questionnaire/panel/format-slot-answer';
-import { splitReportParagraphs } from '@/lib/app/questionnaire/report/content';
+import { partialReportCaveat, splitReportParagraphs } from '@/lib/app/questionnaire/report/content';
 import { formatSessionRef } from '@/lib/app/questionnaire/session-ref';
 import type { PanelSlotView } from '@/lib/app/questionnaire/panel/types';
 import type { SessionExportModel } from '@/lib/app/questionnaire/export/types';
@@ -89,6 +89,15 @@ const styles = StyleSheet.create({
   // paragraph's margin is harmless (the next heading has its own top margin).
   insightsParagraph: {
     marginBottom: 6,
+    lineHeight: 1.4,
+  },
+  // Partial-report caveat — a muted, italic note under the report title when the questionnaire
+  // was only partially complete at generation.
+  insightsCaveat: {
+    marginBottom: 8,
+    fontSize: 8,
+    fontStyle: 'italic',
+    color: '#6b7280',
     lineHeight: 1.4,
   },
   insightsAction: {
@@ -242,15 +251,20 @@ function InsightsSection({
   insights,
   title,
   formatted,
+  completionPct,
 }: {
   insights: NonNullable<SessionExportModel['insights']>;
   title: string;
   /** True when the report was laid out by the Report Formatter — trust its paragraphs verbatim. */
   formatted?: boolean;
+  /** Questionnaire completion % at generation — drives the partial-report caveat. */
+  completionPct?: number | null;
 }) {
+  const caveat = partialReportCaveat(completionPct);
   return (
     <View>
       <Text style={styles.sectionTitle}>{title}</Text>
+      {caveat && <Text style={styles.insightsCaveat}>{caveat}</Text>}
       <Paragraphs text={insights.summary} trustParagraphs={formatted} />
       {insights.sections.map((section, i) => (
         <View key={i}>
@@ -344,6 +358,7 @@ export function SessionPdfDocument({ model }: SessionPdfDocumentProps) {
             insights={model.insights}
             title={narrativeOnly ? 'Your personalised report' : 'Your insights'}
             formatted={model.insightsFormatted}
+            completionPct={model.insightsCompletionPct}
           />
         )}
 
