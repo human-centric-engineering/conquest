@@ -35,6 +35,7 @@ import {
   AttachmentThumbnailStrip,
 } from '@/components/admin/orchestration/chat/attachment-picker-button';
 import { type AttachmentEntry } from '@/lib/hooks/use-attachments';
+import { useMediaQuery } from '@/lib/hooks/use-media-query';
 import type { ChatAttachment } from '@/lib/orchestration/chat/types';
 import type { UseQuestionnaireSessionStreamReturn } from '@/lib/hooks/use-questionnaire-session-stream';
 import type { SessionWarning } from '@/lib/app/questionnaire/chat/types';
@@ -418,6 +419,9 @@ export function QuestionnaireChat({
 
   const [input, setInput] = useState('');
   const [voiceError, setVoiceError] = useState<string | null>(null);
+  // Below Tailwind `sm` the full voice placeholder ("Speak your thoughts with the mic…")
+  // truncates mid-word, so fall back to the concise prompt on small screens.
+  const isMobile = useMediaQuery('(max-width: 639px)');
   // Attachment state is owned by the platform <AttachmentPickerButton> (the useAttachments
   // hook): base64 encoding, per-file + combined size caps, MIME gating, and object-URL
   // cleanup. We mirror its current payload + entries here for sending + the thumbnail strip,
@@ -669,7 +673,7 @@ export function QuestionnaireChat({
                 placeholder={
                   !composerReady
                     ? composerHint
-                    : voiceInputEnabled
+                    : voiceInputEnabled && !isMobile
                       ? 'Speak your thoughts with the mic, or type…'
                       : 'Share your thoughts…'
                 }

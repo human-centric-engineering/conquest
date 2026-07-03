@@ -22,21 +22,26 @@ interface AppHeaderProps {
   logoHref?: string;
   /** Optional caller override for the brand slot; defaults to `<BrandMark/>`. */
   logoText?: string;
-  /** Optional navigation component to display after logo */
+  /** Desktop (md+) inline navigation, shown beside the logo. */
   navigation?: React.ReactNode;
+  /** Mobile (below md) collapsed navigation (kebab menu), shown far-right with the actions. */
+  mobileMenu?: React.ReactNode;
 }
 
-export function AppHeader({ logoHref = '/', logoText, navigation }: AppHeaderProps) {
+export function AppHeader({ logoHref = '/', logoText, navigation, mobileMenu }: AppHeaderProps) {
   return (
     <header className="border-b">
       <div className="container mx-auto flex items-center justify-between px-4 py-4">
-        <div className="flex items-center gap-8">
+        <div className="flex items-center gap-3 md:gap-8">
           <Link href={logoHref} className="text-xl font-bold hover:opacity-80">
             {logoText ?? <BrandMark />}
           </Link>
           {navigation}
         </div>
-        <HeaderActions />
+        <div className="flex items-center gap-2">
+          <HeaderActions />
+          {mobileMenu}
+        </div>
       </div>
     </header>
   );
