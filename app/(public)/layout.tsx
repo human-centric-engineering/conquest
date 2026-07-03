@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { AppHeader } from '@/components/layouts/app-header';
-import { PublicNav } from '@/components/layouts/public-nav';
+import { PublicNav, PublicNavMenu } from '@/components/layouts/public-nav';
 import { PublicFooter } from '@/components/layouts/public-footer';
 import { MaintenanceWrapper } from '@/components/maintenance-wrapper';
 import { BRAND } from '@/lib/brand';
@@ -31,7 +31,7 @@ export default function PublicLayout({
   return (
     <MaintenanceWrapper>
       <div className="bg-background flex min-h-screen flex-col">
-        <AppHeader logoHref="/" navigation={<PublicNav />} />
+        <AppHeader logoHref="/" navigation={<PublicNav />} mobileMenu={<PublicNavMenu />} />
         <main className="flex-1">{children}</main>
         <PublicFooter />
       </div>

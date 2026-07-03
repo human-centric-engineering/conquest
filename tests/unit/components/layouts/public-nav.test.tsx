@@ -13,6 +13,7 @@
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { usePathname } from 'next/navigation';
 import * as React from 'react';
 
@@ -94,5 +95,26 @@ describe('PublicNav', () => {
 
     // Without `exact`, the parent highlights on the child path.
     expect(screen.getByRole('link', { name: /docs/i })).toHaveAttribute('aria-current', 'page');
+  });
+
+  it('PublicNavMenu renders a kebab trigger that reveals the nav items when opened', async () => {
+    vi.resetModules();
+    vi.doMock('@/lib/app/public-nav', () => ({
+      publicNavItems: [
+        { href: '/', label: 'Home', exact: true },
+        { href: '/pricing', label: 'Pricing' },
+      ],
+      footerNavItems: null,
+      footerLegalItems: null,
+    }));
+
+    const { PublicNavMenu } = await import('@/components/layouts/public-nav');
+    const user = userEvent.setup();
+    render(React.createElement(PublicNavMenu));
+
+    await user.click(screen.getByRole('button', { name: /open navigation menu/i }));
+
+    expect(await screen.findByRole('menuitem', { name: /home/i })).toHaveAttribute('href', '/');
+    expect(screen.getByRole('menuitem', { name: /pricing/i })).toHaveAttribute('href', '/pricing');
   });
 });

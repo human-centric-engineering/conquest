@@ -176,6 +176,84 @@ describe('SessionComplete — respondent report', () => {
     expect(screen.getByText(/What you can do next/i)).toBeInTheDocument();
   });
 
+  it('opens a branded A4 preview with the PDF-style masthead when Expand is clicked', async () => {
+    const user = userEvent.setup();
+    mockView({
+      enabled: true,
+      mode: 'narrative',
+      onScreen: true,
+      download: true,
+      questionnaireTitle: 'Time Audit Test',
+      header: {
+        logoUrl: 'https://cdn.example.com/logo.png',
+        accentColor: '#2563eb',
+        versionNumber: 1,
+        ref: 'EEQMC0ES',
+        goal: 'Help leaders reflect on their time.',
+        audienceSummary: 'Leaders self-auditing.',
+        respondentLabel: 'John Durrant',
+        completedAt: '2026-07-03T10:00:00.000Z',
+      },
+      insights: {
+        status: 'ready',
+        generatedAt: '2026-06-19T12:00:00.000Z',
+        error: null,
+        content: { summary: 'Woven report.', sections: [], actions: [] },
+      },
+    });
+    render(<SessionComplete sessionId="s1" answeredCount={9} />);
+
+    // The masthead only exists inside the preview dialog — not on the card — so nothing until Expand.
+    expect(screen.queryByRole('heading', { name: 'Time Audit Test' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Expand/i }));
+
+    // Masthead mirrors the PDF header: title, version, grouped ref, goal, audience, respondent, date.
+    expect(screen.getByRole('heading', { name: 'Time Audit Test' })).toBeInTheDocument();
+    expect(screen.getByText(/EEQM-C0ES/)).toBeInTheDocument();
+    expect(screen.getByText(/Help leaders reflect on their time\./)).toBeInTheDocument();
+    expect(screen.getByText(/Leaders self-auditing\./)).toBeInTheDocument();
+    expect(screen.getByText(/John Durrant/)).toBeInTheDocument();
+    expect(screen.getByText(/3 July 2026/)).toBeInTheDocument();
+    // The demo-client logo renders (decorative alt="", so query the DOM rather than the a11y tree).
+    expect(document.body.querySelector('img')).toHaveAttribute(
+      'src',
+      'https://cdn.example.com/logo.png'
+    );
+  });
+
+  it('omits the logo image in the preview when no brand logo is configured', async () => {
+    const user = userEvent.setup();
+    mockView({
+      enabled: true,
+      mode: 'narrative',
+      onScreen: true,
+      download: true,
+      questionnaireTitle: 'Time Audit Test',
+      header: {
+        logoUrl: null,
+        accentColor: '#2563eb',
+        versionNumber: 1,
+        ref: null,
+        goal: null,
+        audienceSummary: null,
+        respondentLabel: 'Anonymous respondent',
+        completedAt: null,
+      },
+      insights: {
+        status: 'ready',
+        generatedAt: '2026-06-19T12:00:00.000Z',
+        error: null,
+        content: { summary: 'Woven report.', sections: [], actions: [] },
+      },
+    });
+    render(<SessionComplete sessionId="s1" answeredCount={9} />);
+    await user.click(screen.getByRole('button', { name: /Expand/i }));
+    expect(screen.getByRole('heading', { name: 'Time Audit Test' })).toBeInTheDocument();
+    // No logoUrl → no image (the PDF behaves the same); the accent rule + title still render.
+    expect(document.body.querySelector('img')).toBeNull();
+    expect(screen.getByText(/Anonymous respondent/)).toBeInTheDocument();
+  });
+
   it('hides Download PDF while an AI report is still generating', () => {
     // In an AI report mode the PDF *is* the report, so the download must not appear mid-generation.
     mockView({

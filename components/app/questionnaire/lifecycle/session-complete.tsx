@@ -25,11 +25,19 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CheckCircle2, Download, Loader2 } from 'lucide-react';
+import { CheckCircle2, Download, Loader2, Maximize2 } from 'lucide-react';
 
 import { cn, slugify } from '@/lib/utils';
+import { formatSessionRef } from '@/lib/app/questionnaire/session-ref';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { SessionRefChip } from '@/components/app/questionnaire/lifecycle/session-ref-chip';
 import { TranscriptDownload } from '@/components/app/questionnaire/lifecycle/transcript-download';
 import { formatAnswerValue } from '@/components/app/questionnaire/panel/format-answer-value';
@@ -42,6 +50,7 @@ import {
   splitReportParagraphs,
   type RespondentReportContent,
 } from '@/lib/app/questionnaire/report/content';
+import type { RespondentReportHeader } from '@/lib/app/questionnaire/report/view';
 import type { AnswerPanelView } from '@/lib/app/questionnaire/panel/types';
 
 const ACCENT = 'var(--app-accent-color, var(--color-primary))';
@@ -88,6 +97,8 @@ export function SessionComplete({
 }: SessionCompleteProps) {
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState(false);
+  // Full-page ("A4") preview of the finished report, opened from the report toolbar's expand control.
+  const [previewOpen, setPreviewOpen] = useState(false);
   // Guard against a double-click kicking off two concurrent renders.
   const inFlightRef = useRef(false);
 
@@ -160,25 +171,37 @@ export function SessionComplete({
         className={cn(
           'bg-card m-auto flex max-h-full min-h-0 flex-col rounded-2xl border text-center',
           REVEAL,
-          showInsights ? 'w-full max-w-2xl' : 'max-w-md'
+          // When the report is present, commit real vertical estate to it: widen the card and give it
+          // a tall floor (capped by `max-h-full`, then the report region scrolls) so the generation
+          // updates and the finished text aren't squeezed into a two-line sliver.
+          showInsights ? 'min-h-[min(42rem,100%)] w-full max-w-2xl' : 'max-w-md'
         )}
       >
-        {/* Celebratory header — pinned, so it stays the "moment" while a long report scrolls below. */}
+        {/* Celebratory header — pinned, so it stays the "moment" while a long report scrolls below.
+            Trimmed tighter when a report follows, so the header stays a greeting, not the whole card. */}
         <div
           className={cn(
-            'flex shrink-0 flex-col items-center gap-4 px-8 pt-10',
-            showInsights ? 'border-b pb-6' : 'pb-4'
+            'relative flex shrink-0 flex-col items-center px-8',
+            showInsights ? 'gap-3 border-b pt-7 pb-5' : 'gap-4 pt-10 pb-4'
           )}
         >
+          {/* With a report present the footer is reserved for downloads, so the support reference rides
+              in the header's top corner instead — quiet, out of the way, still one tap to copy. */}
+          {showInsights && refRaw && (
+            <SessionRefChip refRaw={refRaw} className="absolute top-4 right-4 text-[11px]" />
+          )}
           <span
-            className="flex h-14 w-14 items-center justify-center rounded-full"
+            className={cn(
+              'flex items-center justify-center rounded-full',
+              showInsights ? 'h-11 w-11' : 'h-14 w-14'
+            )}
             style={{
               backgroundColor:
                 'color-mix(in srgb, var(--app-accent-color, var(--color-primary)) 14%, transparent)',
               color: 'var(--app-accent-color, var(--color-primary))',
             }}
           >
-            <CheckCircle2 className="h-7 w-7" aria-hidden="true" />
+            <CheckCircle2 className={cn(showInsights ? 'h-6 w-6' : 'h-7 w-7')} aria-hidden="true" />
           </span>
           <div className="space-y-1.5">
             <h1 className="text-foreground text-xl font-semibold text-balance">
@@ -193,34 +216,58 @@ export function SessionComplete({
         </div>
 
         {showInsights && view?.insights && (
-          // The one region that scrolls. `flex-auto` sizes it to its content when the card fits and
-          // lets it shrink-and-scroll once the card hits `max-h-full`; the mask softens both edges so
-          // clipped text reads as "more below/above" rather than an abrupt cut. Padded ≥ the mask
-          // width so resting text is never faded — only text scrolling under the edge is.
-          <div
-            className="min-h-0 flex-auto [scrollbar-width:thin] overflow-y-auto overscroll-contain px-8 py-4 text-left"
-            style={{
-              maskImage:
-                'linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%)',
-              WebkitMaskImage:
-                'linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%)',
-            }}
-          >
-            <ReportInsights
-              insights={view.insights}
-              snippets={sharedSnippets}
-              timedOut={timedOut}
-              onRetry={retry}
-              onNotify={notify}
-            />
+          <div className="flex min-h-0 flex-auto flex-col">
+            {/* Report toolbar — pinned above the scroll (clear of its fade mask) once the report lands,
+                giving the section a title and the expand-to-full-page control. Hidden while the report
+                is still preparing/failed, where there's nothing yet to expand. */}
+            {reportReady && (
+              <div className="flex shrink-0 items-center justify-between gap-3 px-8 pt-4 pb-1">
+                <p className="text-muted-foreground/70 text-[11px] font-semibold tracking-wide uppercase">
+                  Your personalised report
+                </p>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground hover:text-foreground -mr-2 h-7 gap-1.5 px-2 text-xs"
+                  onClick={() => setPreviewOpen(true)}
+                >
+                  <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  Expand
+                </Button>
+              </div>
+            )}
+            {/* The one region that scrolls. `flex-auto` sizes it to its content when the card fits and
+                lets it shrink-and-scroll once the card hits `max-h-full`; the mask softens both edges so
+                clipped text reads as "more below/above" rather than an abrupt cut. Padded ≥ the mask
+                width so resting text is never faded — only text scrolling under the edge is. */}
+            <div
+              className="min-h-0 flex-auto [scrollbar-width:thin] overflow-y-auto overscroll-contain px-8 py-4 text-left"
+              style={{
+                maskImage:
+                  'linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%)',
+                WebkitMaskImage:
+                  'linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%)',
+              }}
+            >
+              <ReportInsights
+                insights={view.insights}
+                snippets={sharedSnippets}
+                timedOut={timedOut}
+                onRetry={retry}
+                onNotify={notify}
+              />
+            </div>
           </div>
         )}
 
-        {/* Actions + reference — pinned footer, so the primary download stays reachable past a long report. */}
+        {/* Actions — pinned footer, so the primary download stays reachable past a long report. Kept
+            lean when a report is present (the reference has moved to the header), so it doesn't steal
+            vertical space from the report itself. */}
         <div
           className={cn(
-            'flex shrink-0 flex-col items-center gap-4 px-8 pb-10',
-            showInsights ? 'border-t pt-6' : 'pt-0'
+            'flex shrink-0 flex-col items-center px-8',
+            showInsights ? 'gap-3 border-t pt-4 pb-6' : 'gap-4 pt-0 pb-10'
           )}
         >
           <div className="flex flex-wrap items-center justify-center gap-2">
@@ -246,14 +293,141 @@ export function SessionComplete({
             </p>
           )}
 
-          {refRaw && (
+          {/* Without a report the header stays compact, so the reference keeps its calm footer spot. */}
+          {!showInsights && refRaw && (
             <div className="mt-1 border-t pt-3">
               <SessionRefChip refRaw={refRaw} />
             </div>
           )}
         </div>
       </div>
+
+      {reportReady && view?.insights?.content && (
+        <ReportPreviewDialog
+          open={previewOpen}
+          onOpenChange={setPreviewOpen}
+          title={view.questionnaireTitle}
+          header={view.header}
+          content={view.insights.content}
+          formatted={view.insights.formatted}
+          completionPct={view.insights.completionPct}
+        />
+      )}
     </div>
+  );
+}
+
+/**
+ * Full-page ("A4") preview of the finished report, opened from the completion screen's expand control.
+ * Lifts the report out of the cramped completion card onto a paper-styled sheet — the on-screen
+ * approximation of the downloadable PDF — so the respondent can read it comfortably before saving it.
+ * The dialog fills most of the viewport; the sheet scrolls within a muted "desk" backdrop.
+ */
+function ReportPreviewDialog({
+  open,
+  onOpenChange,
+  title,
+  header,
+  content,
+  formatted,
+  completionPct,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title?: string;
+  header?: RespondentReportHeader | null;
+  content: RespondentReportContent;
+  formatted: boolean;
+  completionPct: number | null;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="bg-muted/40 flex h-[calc(100dvh-3rem)] w-[calc(100vw-2rem)] max-w-[920px] flex-col gap-0 overflow-hidden p-0 sm:rounded-xl">
+        <DialogHeader className="bg-background flex-row items-center justify-between space-y-0 border-b px-5 py-3 text-left">
+          <DialogTitle className="text-sm font-semibold">Report preview</DialogTitle>
+          <DialogDescription className="sr-only">
+            A full-page preview of your personalised report, laid out as it appears in the PDF.
+          </DialogDescription>
+        </DialogHeader>
+        {/* Muted "desk" that the paper sits on; the sheet scrolls within it. */}
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 sm:p-8">
+          <div className="mx-auto w-full max-w-[210mm] rounded-sm bg-white px-[9%] py-[8%] text-neutral-900 shadow-xl ring-1 ring-black/5 sm:px-[12%] sm:py-[10%]">
+            <ReportPaperHeader title={title} header={header ?? null} />
+            <ReportBody
+              content={content}
+              formatted={formatted}
+              completionPct={completionPct}
+              variant="paper"
+              animate={false}
+            />
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** Format an ISO timestamp as a readable date, or null when absent/unparseable (matches the PDF). */
+function formatHeaderDate(iso: string | null): string | null {
+  if (!iso) return null;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+/**
+ * The paper masthead for the A4 preview — the on-screen twin of the PDF's branded header: the demo
+ * client's logo (when configured), the questionnaire title, the same Version/Ref/Goal/Audience/
+ * Respondent/Completed metadata rows, and the accent-coloured rule beneath. Falls back gracefully:
+ * no `header` → just the title; no logo → no image (as the PDF does).
+ */
+function ReportPaperHeader({
+  title,
+  header,
+}: {
+  title?: string;
+  header: RespondentReportHeader | null;
+}) {
+  const completed = formatHeaderDate(header?.completedAt ?? null);
+  return (
+    <div
+      className="mb-7 border-b-2 pb-5"
+      style={{ borderBottomColor: header?.accentColor ?? '#e5e7eb' }}
+    >
+      {header?.logoUrl && (
+        // eslint-disable-next-line @next/next/no-img-element -- external brand logo (arbitrary host); not a Next-optimisable asset.
+        <img
+          src={header.logoUrl}
+          alt=""
+          className="mb-4 h-8 max-w-[55%] object-contain object-left"
+        />
+      )}
+      {title && (
+        <h1 className="mb-3 text-2xl font-semibold tracking-tight text-balance text-neutral-900">
+          {title}
+        </h1>
+      )}
+      {header && (
+        <div className="space-y-0.5">
+          <MetaRow label="Version">{header.versionNumber}</MetaRow>
+          {header.ref && <MetaRow label="Ref:">{formatSessionRef(header.ref)}</MetaRow>}
+          {header.goal && <MetaRow label="Goal:">{header.goal}</MetaRow>}
+          {header.audienceSummary && <MetaRow label="Audience:">{header.audienceSummary}</MetaRow>}
+          <MetaRow label="Respondent:">{header.respondentLabel}</MetaRow>
+          {completed && <MetaRow label="Completed:">{completed}</MetaRow>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** One label + value line in the paper masthead's metadata block. */
+function MetaRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <p className="text-[13px] leading-relaxed text-neutral-500">
+      <span className="font-semibold text-neutral-600">{label} </span>
+      {children}
+    </p>
   );
 }
 
@@ -317,51 +491,108 @@ function ReportInsights({
     return <PreparingReport snippets={snippets} starting={!insights.started} />;
   }
 
-  const { summary, sections, actions } = insights.content;
+  return (
+    <ReportBody
+      content={insights.content}
+      formatted={insights.formatted}
+      completionPct={insights.completionPct}
+    />
+  );
+}
+
+/**
+ * The report itself — caveat, summary, titled sections, and next actions — shared by the on-screen
+ * completion card (`variant="screen"`) and the full-page A4 preview (`variant="paper"`). Only the
+ * typographic scale and colour differ between the two: `screen` inherits theme tokens (works on the
+ * card in light/dark); `paper` fixes dark-on-white print colours and a larger, more readable scale.
+ */
+function ReportBody({
+  content,
+  formatted,
+  completionPct,
+  variant = 'screen',
+  animate = true,
+}: {
+  content: RespondentReportContent;
+  formatted: boolean;
+  completionPct: number | null;
+  variant?: 'screen' | 'paper';
+  animate?: boolean;
+}) {
+  const { summary, sections, actions } = content;
+  const paper = variant === 'paper';
   // Formatter-produced reports are pre-laid-out — honour their paragraphs verbatim (skip the
   // deterministic sentence re-grouping, which would re-chop deliberate paragraphs).
-  const trust = { trustParagraphs: insights.formatted };
+  const trust = { trustParagraphs: formatted };
   // Deterministic caveat for a report generated from a partially-complete questionnaire.
-  const caveat = partialReportCaveat(insights.completionPct);
-  // Stagger the report in as it lands so it resolves gracefully out of the preparing state.
+  const caveat = partialReportCaveat(completionPct);
+  // Stagger the report in as it lands so it resolves gracefully out of the preparing state. The paper
+  // preview is already-settled content, so it opts out (`animate={false}`) — no re-stagger on open.
   let step = 0;
-  const delay = () => ({ animationDelay: `${step++ * 80}ms`, animationFillMode: 'both' as const });
+  const reveal = animate ? REVEAL : '';
+  const delay = () =>
+    animate
+      ? { animationDelay: `${step++ * 80}ms`, animationFillMode: 'both' as const }
+      : undefined;
+
+  const bodyText = paper
+    ? 'text-[15px] leading-7 whitespace-pre-line text-neutral-700'
+    : 'text-muted-foreground text-sm leading-relaxed whitespace-pre-line';
+  const heading = paper
+    ? 'text-base font-semibold text-neutral-900'
+    : 'text-foreground text-sm font-semibold';
+
   return (
-    <div className="w-full space-y-4 text-left">
+    <div className={cn('text-left', paper ? 'space-y-6' : 'w-full space-y-4')}>
       {caveat && (
         <p
-          className="text-muted-foreground border-l-2 pl-3 text-xs leading-relaxed italic"
+          className={cn(
+            'border-l-2 pl-3 italic',
+            paper
+              ? 'border-neutral-300 text-[13px] leading-relaxed text-neutral-500'
+              : 'text-muted-foreground text-xs leading-relaxed'
+          )}
           role="note"
         >
           {caveat}
         </p>
       )}
-      <div className={cn('space-y-2', REVEAL)} style={delay()}>
+      <div className={cn(paper ? 'space-y-3' : 'space-y-2', reveal)} style={delay()}>
         {splitReportParagraphs(summary, trust).map((paragraph, i) => (
           // `whitespace-pre-line`: a preserved multi-line block (e.g. a bullet run the model wrote as
           // consecutive `- …` lines) keeps its newlines on screen, matching the PDF's <Text>.
-          <p key={i} className="text-foreground text-sm leading-relaxed whitespace-pre-line">
+          <p
+            key={i}
+            className={cn(
+              'whitespace-pre-line',
+              paper
+                ? 'text-[15px] leading-7 text-neutral-800'
+                : 'text-foreground text-sm leading-relaxed'
+            )}
+          >
             {paragraph}
           </p>
         ))}
       </div>
       {sections.map((section, i) => (
-        <div key={i} className={cn('space-y-1.5', REVEAL)} style={delay()}>
-          <h2 className="text-foreground text-sm font-semibold">{section.heading}</h2>
+        <div key={i} className={cn(paper ? 'space-y-2' : 'space-y-1.5', reveal)} style={delay()}>
+          <h2 className={heading}>{section.heading}</h2>
           {splitReportParagraphs(section.body, trust).map((paragraph, j) => (
-            <p
-              key={j}
-              className="text-muted-foreground text-sm leading-relaxed whitespace-pre-line"
-            >
+            <p key={j} className={bodyText}>
               {paragraph}
             </p>
           ))}
         </div>
       ))}
       {actions.length > 0 && (
-        <div className={cn('space-y-1', REVEAL)} style={delay()}>
-          <h2 className="text-foreground text-sm font-semibold">What you can do next</h2>
-          <ul className="text-muted-foreground list-disc space-y-1 pl-5 text-sm">
+        <div className={cn(paper ? 'space-y-2' : 'space-y-1', reveal)} style={delay()}>
+          <h2 className={heading}>What you can do next</h2>
+          <ul
+            className={cn(
+              'list-disc space-y-1 pl-5',
+              paper ? 'text-[15px] leading-7 text-neutral-700' : 'text-muted-foreground text-sm'
+            )}
+          >
             {actions.map((action, i) => (
               <li key={i}>{action}</li>
             ))}

@@ -91,10 +91,12 @@
   font-size: 0.46rem;
 }
 
-/* Page / header signature — a touch larger; lives in the admin header bar
-   beside the theme toggle (portaled there by the questionnaires layout). */
+/* Page / header signature — a touch larger; lives in the app/admin header bar
+   beside the theme toggle. The size scales fluidly with the viewport so the
+   wordmark compresses progressively on narrow phones (down to ~1.1rem) rather
+   than crowding the header actions, and settles at its full 1.55rem on tablet+. */
 .page .brand {
-  font-size: 1.55rem;
+  font-size: clamp(1.1rem, 0.9rem + 2.6vw, 1.55rem);
 }
 .page .tagline {
   font-size: 0.5rem;

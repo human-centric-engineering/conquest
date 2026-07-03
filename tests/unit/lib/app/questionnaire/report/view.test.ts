@@ -8,7 +8,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/db/client', () => ({
-  prisma: { appQuestionnaireSession: { findUnique: vi.fn() } },
+  prisma: {
+    appQuestionnaireSession: { findUnique: vi.fn() },
+    user: { findUnique: vi.fn() },
+  },
 }));
 
 import { isFeatureEnabled } from '@/lib/feature-flags';
@@ -17,10 +20,35 @@ import { buildRespondentReportClientView } from '@/lib/app/questionnaire/report/
 
 type Mock = ReturnType<typeof vi.fn>;
 
-function session(respondentReport: unknown, report?: unknown, title = 'Pulse') {
+/**
+ * A session row shaped like the report view's `findUnique` select. `overrides` patches the
+ * header-source fields (status/publicRef/version/demoClient/events/…) for the header tests;
+ * the defaults describe a completed, anonymous-off session with no attributed logo.
+ */
+function session(
+  respondentReport: unknown,
+  report?: unknown,
+  title = 'Pulse',
+  overrides: Record<string, unknown> = {}
+) {
   return {
-    version: { config: { respondentReport }, questionnaire: { title } },
+    status: 'completed',
+    respondentUserId: null,
+    publicRef: 'EEQMC0ES',
+    updatedAt: new Date('2026-07-03T10:00:00Z'),
+    version: {
+      versionNumber: 1,
+      goal: 'Help leaders reflect on their time.',
+      audience: { description: 'Leaders conducting a self-audit.' },
+      config: { respondentReport, anonymousMode: false },
+      questionnaire: {
+        title,
+        demoClient: { ctaColor: null, accentColor: '#2563eb', logoUrl: null, welcomeCopy: null },
+      },
+    },
     respondentReport: report ?? null,
+    events: [{ createdAt: new Date('2026-07-03T10:00:00Z') }],
+    ...overrides,
   };
 }
 
@@ -217,5 +245,97 @@ describe('buildRespondentReportClientView', () => {
     const view = await buildRespondentReportClientView('s1');
     expect(view?.onScreen).toBe(false);
     expect(view?.download).toBe(true);
+  });
+
+  // --- Branded header (drives the on-screen A4 preview's masthead; mirrors the PDF) ---
+
+  it('carries no header for a raw / non-AI mode (no preview to brand)', async () => {
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      session({ enabled: true, mode: 'raw' })
+    );
+    const view = await buildRespondentReportClientView('s1');
+    expect(view?.header).toBeNull();
+  });
+
+  it('assembles the branded header (version, ref, goal, audience, accent, completed) for an AI mode', async () => {
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      session({ enabled: true, mode: 'narrative' }, { status: 'ready', content: null, error: null })
+    );
+    const view = await buildRespondentReportClientView('s1');
+    expect(view?.header).toEqual({
+      logoUrl: null,
+      accentColor: '#2563eb',
+      versionNumber: 1,
+      ref: 'EEQMC0ES',
+      goal: 'Help leaders reflect on their time.',
+      audienceSummary: 'Leaders conducting a self-audit.',
+      // No respondent identity (respondentUserId null) → anonymous label.
+      respondentLabel: 'Anonymous respondent',
+      completedAt: '2026-07-03T10:00:00.000Z',
+    });
+  });
+
+  it('surfaces the demo-client logo in the header when one is configured', async () => {
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      session({ enabled: true, mode: 'narrative' }, { status: 'ready', content: null }, 'Pulse', {
+        version: {
+          versionNumber: 2,
+          goal: null,
+          audience: null,
+          config: { respondentReport: { enabled: true, mode: 'narrative' }, anonymousMode: false },
+          questionnaire: {
+            title: 'Pulse',
+            demoClient: {
+              ctaColor: null,
+              accentColor: '#111827',
+              logoUrl: 'https://cdn.example.com/logo.png',
+              welcomeCopy: null,
+            },
+          },
+        },
+      })
+    );
+    const view = await buildRespondentReportClientView('s1');
+    expect(view?.header?.logoUrl).toBe('https://cdn.example.com/logo.png');
+    expect(view?.header?.accentColor).toBe('#111827');
+  });
+
+  it('resolves the respondent name for a non-anonymous session (identity looked up)', async () => {
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      session({ enabled: true, mode: 'narrative' }, { status: 'ready', content: null }, 'Pulse', {
+        respondentUserId: 'u1',
+      })
+    );
+    (prisma.user.findUnique as Mock).mockResolvedValue({ name: 'John Durrant' });
+    const view = await buildRespondentReportClientView('s1');
+    expect(view?.header?.respondentLabel).toBe('John Durrant');
+    expect(prisma.user.findUnique).toHaveBeenCalledOnce();
+  });
+
+  it('never queries identity in anonymous mode — labels "Anonymous respondent"', async () => {
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      session({ enabled: true, mode: 'narrative' }, { status: 'ready', content: null }, 'Pulse', {
+        respondentUserId: 'u1',
+        version: {
+          versionNumber: 1,
+          goal: null,
+          audience: null,
+          config: { respondentReport: { enabled: true, mode: 'narrative' }, anonymousMode: true },
+          questionnaire: {
+            title: 'Pulse',
+            demoClient: {
+              ctaColor: null,
+              accentColor: '#2563eb',
+              logoUrl: null,
+              welcomeCopy: null,
+            },
+          },
+        },
+      })
+    );
+    const view = await buildRespondentReportClientView('s1');
+    expect(view?.header?.respondentLabel).toBe('Anonymous respondent');
+    // Anonymous mode must not touch the identity table.
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
   });
 });

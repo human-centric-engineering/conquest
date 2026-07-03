@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { AppHeader } from '@/components/layouts/app-header';
-import { ProtectedNav } from '@/components/layouts/protected-nav';
+import { ProtectedNav, ProtectedNavMenu } from '@/components/layouts/protected-nav';
 import { ProtectedFooter } from '@/components/layouts/protected-footer';
 import { MaintenanceWrapperWithAdminNotice } from '@/components/maintenance-wrapper';
 import { BRAND } from '@/lib/brand';
@@ -30,7 +30,11 @@ export default function ProtectedLayout({
   return (
     <MaintenanceWrapperWithAdminNotice>
       <div className="bg-background flex min-h-screen flex-col">
-        <AppHeader logoHref="/dashboard" navigation={<ProtectedNav />} />
+        <AppHeader
+          logoHref="/dashboard"
+          navigation={<ProtectedNav />}
+          mobileMenu={<ProtectedNavMenu />}
+        />
         <main className="container mx-auto flex-1 px-4 py-8">{children}</main>
         <ProtectedFooter />
       </div>
