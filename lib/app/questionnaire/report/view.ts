@@ -15,6 +15,7 @@ import {
 } from '@/lib/app/questionnaire/constants';
 import {
   isAiRespondentReportMode,
+  type AudienceShape,
   type RespondentReportMode,
   type RespondentReportStatus,
 } from '@/lib/app/questionnaire/types';
@@ -23,6 +24,29 @@ import {
   validateRespondentReportContent,
   type RespondentReportContent,
 } from '@/lib/app/questionnaire/report/content';
+import { resolveTheme } from '@/lib/app/questionnaire/theming';
+import { summariseAudience } from '@/lib/app/questionnaire/export/build-session-export-model';
+
+/**
+ * The branded header for the on-screen full-page ("A4") report preview — the same masthead the
+ * downloadable PDF renders (logo + accent rule + metadata), so the preview reads as a true twin of the
+ * PDF rather than a bare title. Only assembled for the AI report modes (the only ones with a preview);
+ * `null` otherwise. Anonymous sessions surface "Anonymous respondent" and never query identity.
+ */
+export interface RespondentReportHeader {
+  /** Brand logo URL from the attributed demo client, or null when none is configured. */
+  logoUrl: string | null;
+  /** Resolved accent colour (demo-client value or the Sunrise default) for the header rule. */
+  accentColor: string;
+  versionNumber: number;
+  /** Raw support reference (`publicRef`); the UI groups it for display. */
+  ref: string | null;
+  goal: string | null;
+  audienceSummary: string | null;
+  /** Display label for the respondent — their name, or "Anonymous respondent". */
+  respondentLabel: string;
+  completedAt: string | null;
+}
 
 /** The respondent-facing report state for one session. */
 export interface RespondentReportClientView {
@@ -32,6 +56,8 @@ export interface RespondentReportClientView {
   download: boolean;
   /** The questionnaire's title — so the completion screen can name the PDF download after it. */
   questionnaireTitle: string;
+  /** Branded header for the on-screen preview (AI modes only); `null` for raw / disabled. */
+  header: RespondentReportHeader | null;
   /** Insights state for the AI modes (`raw_plus_insights`, `narrative`); `null` for raw / disabled. */
   insights: {
     status: RespondentReportStatus;
@@ -61,6 +87,11 @@ export interface RespondentReportClientView {
   } | null;
 }
 
+/** Cast a stored `audience` Json column to the structured shape (null when absent). */
+function asAudience(value: unknown): AudienceShape | null {
+  return value && typeof value === 'object' ? value : null;
+}
+
 /**
  * Build the respondent-facing report view for a session. Returns `null` when the session doesn't
  * exist. `enabled` reflects both the per-version config AND the platform flag, so a respondent never
@@ -72,10 +103,25 @@ export async function buildRespondentReportClientView(
   const session = await prisma.appQuestionnaireSession.findUnique({
     where: { id: sessionId },
     select: {
+      status: true,
+      respondentUserId: true,
+      publicRef: true,
+      updatedAt: true,
       version: {
         select: {
-          config: { select: { respondentReport: true } },
-          questionnaire: { select: { title: true } },
+          versionNumber: true,
+          goal: true,
+          audience: true,
+          config: { select: { respondentReport: true, anonymousMode: true } },
+          questionnaire: {
+            select: {
+              title: true,
+              // The four required theme columns; `resolveTheme` fills accent/logo defaults.
+              demoClient: {
+                select: { ctaColor: true, accentColor: true, logoUrl: true, welcomeCopy: true },
+              },
+            },
+          },
         },
       },
       respondentReport: {
@@ -88,6 +134,13 @@ export async function buildRespondentReportClientView(
           error: true,
           notifyEmail: true,
         },
+      },
+      // Latest completion event → the header's "Completed" date (mirrors the PDF builder).
+      events: {
+        where: { toStatus: 'completed' },
+        orderBy: { createdAt: 'desc' },
+        take: 1,
+        select: { createdAt: true },
       },
     },
   });
@@ -109,12 +162,39 @@ export async function buildRespondentReportClientView(
   };
 
   if (!enabled || !isAiRespondentReportMode(settings.mode)) {
-    return { ...base, insights: null };
+    return { ...base, header: null, insights: null };
   }
+
+  // Branded header — the on-screen preview's masthead, matching the downloadable PDF. Identity is
+  // only ever looked up when the session is NOT anonymous (mirrors the export builder's redaction).
+  const anonymous = session.version?.config?.anonymousMode ?? false;
+  let respondentName: string | null = null;
+  if (!anonymous && session.respondentUserId) {
+    const user = await prisma.user.findUnique({
+      where: { id: session.respondentUserId },
+      select: { name: true },
+    });
+    respondentName = user?.name ?? null;
+  }
+  const theme = resolveTheme(session.version?.questionnaire?.demoClient ?? null);
+  const completedAt =
+    session.events[0]?.createdAt.toISOString() ??
+    (session.status === 'completed' ? session.updatedAt.toISOString() : null);
+  const header: RespondentReportHeader = {
+    logoUrl: theme.logoUrl,
+    accentColor: theme.accentColor,
+    versionNumber: session.version?.versionNumber ?? 1,
+    ref: session.publicRef ?? null,
+    goal: session.version?.goal ?? null,
+    audienceSummary: summariseAudience(asAudience(session.version?.audience)),
+    respondentLabel: anonymous || !respondentName ? 'Anonymous respondent' : respondentName,
+    completedAt,
+  };
 
   const row = session.respondentReport;
   return {
     ...base,
+    header,
     insights: {
       // No row yet (submitted, worker hasn't claimed it) reads as still-queued.
       status: (row?.status as RespondentReportStatus | undefined) ?? 'queued',
