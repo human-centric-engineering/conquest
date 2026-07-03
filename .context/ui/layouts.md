@@ -42,11 +42,12 @@ Shared header component that provides consistent branding and user actions acros
 
 ### Props
 
-| Prop         | Type              | Default     | Description                     |
-| ------------ | ----------------- | ----------- | ------------------------------- |
-| `logoHref`   | `string`          | `"/"`       | URL for logo click              |
-| `logoText`   | `string`          | `"Sunrise"` | Text displayed as logo          |
-| `navigation` | `React.ReactNode` | `undefined` | Navigation component to display |
+| Prop         | Type              | Default     | Description                                                   |
+| ------------ | ----------------- | ----------- | ------------------------------------------------------------- |
+| `logoHref`   | `string`          | `"/"`       | URL for logo click                                            |
+| `logoText`   | `string`          | `"Sunrise"` | Text displayed as logo                                        |
+| `navigation` | `React.ReactNode` | `undefined` | Desktop (`md+`) inline navigation, shown beside the logo      |
+| `mobileMenu` | `React.ReactNode` | `undefined` | Mobile (`< md`) collapsed navigation (kebab), shown far-right |
 
 ### Usage
 
@@ -54,31 +55,34 @@ Shared header component that provides consistent branding and user actions acros
 import { AppHeader } from '@/components/layouts/app-header';
 import { PublicNav } from '@/components/layouts/public-nav';
 
-// With navigation
-<AppHeader logoHref="/" navigation={<PublicNav />} />
+// With navigation (desktop inline links + mobile kebab menu)
+<AppHeader logoHref="/" navigation={<PublicNav />} mobileMenu={<PublicNavMenu />} />
 
 // Without navigation (auth pages)
 <AppHeader logoHref="/" />
 
 // Custom logo destination
-<AppHeader logoHref="/dashboard" navigation={<ProtectedNav />} />
+<AppHeader logoHref="/dashboard" navigation={<ProtectedNav />} mobileMenu={<ProtectedNavMenu />} />
 ```
 
 ### Structure
 
 The header uses a flex layout with:
 
-- **Left section:** Logo link + optional navigation (gap-8 between them)
-- **Right section:** HeaderActions (theme toggle + user button)
+- **Left section:** Logo link + `navigation` (desktop inline nav, `gap-3` on mobile → `gap-8` at `md+`)
+- **Right section:** HeaderActions (theme toggle + user button) + `mobileMenu` (far-right kebab, `< md`)
 
 ```tsx
 <header className="border-b">
   <div className="container mx-auto flex items-center justify-between px-4 py-4">
-    <div className="flex items-center gap-8">
+    <div className="flex items-center gap-3 md:gap-8">
       <Link href={logoHref}>{logoText}</Link>
       {navigation}
     </div>
-    <HeaderActions />
+    <div className="flex items-center gap-2">
+      <HeaderActions />
+      {mobileMenu}
+    </div>
   </div>
 </header>
 ```
@@ -132,16 +136,16 @@ None. Navigation items are hardcoded.
 ### Features
 
 - **Active state highlighting:** Uses `bg-accent text-accent-foreground` for current page
-- **Responsive:** Labels hidden on small screens, icons always visible
+- **Responsive:** Inline icon + label links at `md+`; below `md` the links collapse into a far-right kebab (⋮) dropdown. `PublicNav` renders the desktop links; `PublicNavMenu` renders the mobile kebab. Both share item resolution via the internal `usePublicNavItems` hook.
 - **Accessibility:** Sets `aria-current="page"` on active links
 
 ### Usage
 
 ```tsx
 import { AppHeader } from '@/components/layouts/app-header';
-import { PublicNav } from '@/components/layouts/public-nav';
+import { PublicNav, PublicNavMenu } from '@/components/layouts/public-nav';
 
-<AppHeader logoHref="/" navigation={<PublicNav />} />;
+<AppHeader logoHref="/" navigation={<PublicNav />} mobileMenu={<PublicNavMenu />} />;
 ```
 
 ## ProtectedNav
@@ -170,16 +174,16 @@ None. Navigation items are hardcoded.
 - **Role-based visibility:** Admin link only shown to users with `role === 'ADMIN'`
 - **Active state highlighting:** Uses `bg-accent text-accent-foreground` for current page
 - **Prefix matching:** Active state for nested routes (e.g., `/settings/security`)
-- **Responsive:** Labels hidden on small screens, icons always visible
+- **Responsive:** Inline icon + label links at `md+`; below `md` the links collapse into a far-right kebab (⋮) dropdown. `ProtectedNav` renders the desktop links; `ProtectedNavMenu` renders the mobile kebab. Both share item resolution via the internal `useProtectedNavItems` hook.
 - **Accessibility:** Sets `aria-current="page"` on active links
 
 ### Usage
 
 ```tsx
 import { AppHeader } from '@/components/layouts/app-header';
-import { ProtectedNav } from '@/components/layouts/protected-nav';
+import { ProtectedNav, ProtectedNavMenu } from '@/components/layouts/protected-nav';
 
-<AppHeader logoHref="/dashboard" navigation={<ProtectedNav />} />;
+<AppHeader logoHref="/dashboard" navigation={<ProtectedNav />} mobileMenu={<ProtectedNavMenu />} />;
 ```
 
 ## Route Group Layout Patterns
