@@ -197,6 +197,8 @@ function makeConfigView(overrides: Partial<ConfigView> = {}): ConfigView {
       humour: { enabled: false, level: 3 },
       persona: { enabled: false, text: '' },
     },
+    personas: [],
+    personaSelection: { enabled: false, defaultPersonaKey: 'neutral-coach' },
     respondentReport: {
       enabled: false,
       mode: 'raw',

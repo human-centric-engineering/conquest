@@ -459,6 +459,47 @@ export const DEFAULT_TONE_SETTINGS: ToneSettings = {
 };
 
 /**
+ * Selectable interviewer persona (F-persona): one named voice in the version's persona *library*.
+ * Each option is a self-contained {@link ToneSettings} — its prose lives in `tone.persona.text` and
+ * its character comes from preset tone dimensions — so a chosen persona plugs straight into the
+ * existing `buildToneInstructions` pipeline with no new prompt machinery. When the admin enables
+ * respondent selection ({@link PersonaSelectionSettings}), the respondent picks one of these and it
+ * REPLACES the version's `tone` for their session.
+ */
+export type PersonaOption = {
+  /** Stable slug, unique within the library — persisted as the session's choice. */
+  key: string;
+  /** Display name (admin + respondent facing), e.g. "The Straight-Talking Curmudgeon". */
+  label: string;
+  /** One-line respondent-facing description shown on the selection card. */
+  description: string;
+  /** The full voice for this persona — reuses the tone block wholesale. */
+  tone: ToneSettings;
+};
+
+/** Whether respondents may choose their interviewer, and which persona is the default. */
+export type PersonaSelectionSettings = {
+  /** Off ⇒ the version's own `tone` prevails and no persona step/switcher shows. */
+  enabled: boolean;
+  /** Key of the persona used when the respondent hasn't chosen (and the card pre-selected). */
+  defaultPersonaKey: string;
+};
+
+/** Max lengths for the editable persona fields (match the Zod bounds). */
+export const PERSONA_LABEL_MAX_LENGTH = 60;
+export const PERSONA_DESCRIPTION_MAX_LENGTH = 160;
+export const PERSONA_KEY_MAX_LENGTH = 40;
+
+/** Stable key of the neutral default persona (objective coach/consultant). */
+export const DEFAULT_PERSONA_KEY = 'neutral-coach';
+
+/** Selection off, default = the neutral coach — today's behaviour (version tone prevails). */
+export const DEFAULT_PERSONA_SELECTION: PersonaSelectionSettings = {
+  enabled: false,
+  defaultPersonaKey: DEFAULT_PERSONA_KEY,
+};
+
+/**
  * Interviewer strategy (questioning approach). When `enabled`, these OVERRIDE the default
  * questioning-approach prompt: a session-level openness `approach` (one of {@link
  * INTERVIEWER_APPROACHES}) plus additive tactics that combine with it. Disabled = today's default
@@ -904,6 +945,15 @@ export type QuestionnaireConfigShape = {
    * `APP_QUESTIONNAIRES_TONE_ENABLED` is on. Threaded to the phraser via `buildToneInstructions`.
    */
   tone: ToneSettings;
+  /**
+   * Selectable interviewer persona library — the menu of named voices a respondent may choose from.
+   * See {@link PersonaOption}. Empty ⇒ the read path fills in the built-in library. Only surfaced
+   * when the platform flag `APP_QUESTIONNAIRES_PERSONA_SELECTION_ENABLED` and `personaSelection.enabled`
+   * are both on.
+   */
+  personas: PersonaOption[];
+  /** Whether respondents may choose their interviewer + the default. See {@link PersonaSelectionSettings}. */
+  personaSelection: PersonaSelectionSettings;
   /** Interviewer questioning approach (off ⇒ default prompts). See {@link InterviewerStrategySettings}. */
   interviewerStrategy: InterviewerStrategySettings;
   /**
@@ -990,6 +1040,9 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   // Admin-only debugging surface — off by default; an operator turns it on per version.
   previewInspectorEnabled: false,
   tone: DEFAULT_TONE_SETTINGS,
+  // Empty library ⇒ the read-path narrower fills in BUILT_IN_PERSONAS (keeps the DB default small).
+  personas: [],
+  personaSelection: DEFAULT_PERSONA_SELECTION,
   interviewerStrategy: DEFAULT_INTERVIEWER_STRATEGY,
   respondentReport: DEFAULT_RESPONDENT_REPORT_SETTINGS,
   cohortReport: DEFAULT_COHORT_REPORT_SETTINGS,

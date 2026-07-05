@@ -136,6 +136,8 @@ function makeGraph(over: Partial<VersionGraphView> = {}): VersionGraphView {
       reasoningStreamPersist: true,
       previewInspectorEnabled: false,
       tone: DEFAULT_TONE_SETTINGS,
+      personas: [],
+      personaSelection: { enabled: false, defaultPersonaKey: 'neutral-coach' },
       respondentReport: DEFAULT_RESPONDENT_REPORT_SETTINGS,
       cohortReport: DEFAULT_COHORT_REPORT_SETTINGS,
       intro: DEFAULT_INTRO_SETTINGS,

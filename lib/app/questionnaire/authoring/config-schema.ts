@@ -32,6 +32,9 @@ import {
   INTRO_BUTTON_LABEL_MAX_LENGTH,
   INTRO_VIDEO_URL_MAX_LENGTH,
   INVITEE_FIELD_KEYS,
+  PERSONA_DESCRIPTION_MAX_LENGTH,
+  PERSONA_KEY_MAX_LENGTH,
+  PERSONA_LABEL_MAX_LENGTH,
   PRESENTATION_MODES,
   PROFILE_FIELD_TYPES,
   REASONING_PLACEMENTS,
@@ -45,6 +48,7 @@ import {
   TONE_PERSONA_MAX_LENGTH,
 } from '@/lib/app/questionnaire/types';
 import { resolveIntroVideo } from '@/lib/app/questionnaire/intro/video';
+import { BUILT_IN_PERSONA_KEYS } from '@/lib/app/questionnaire/persona/presets';
 
 /** One invitee-field visibility entry (email's forced shown+required is applied server-side). */
 const inviteeFieldConfigSchema = z.object({
@@ -138,6 +142,33 @@ const toneSettingsSchema = z
     readingComplexity: toneDimensionSchema,
     humour: toneDimensionSchema,
     persona: tonePersonaSchema,
+  })
+  .strict();
+
+/**
+ * One selectable interviewer persona (F-persona) — a named voice in the version's library. `key` is
+ * a bounded slug; the voice reuses the whole {@link toneSettingsSchema} block. Sent whole (the whole
+ * library is replaced on save); `strict()` rejects unknown keys.
+ */
+const personaOptionSchema = z
+  .object({
+    key: z
+      .string()
+      .trim()
+      .min(1)
+      .max(PERSONA_KEY_MAX_LENGTH)
+      .regex(/^[a-z0-9-]+$/, 'Persona key must be lowercase letters, numbers, or hyphens'),
+    label: z.string().trim().min(1).max(PERSONA_LABEL_MAX_LENGTH),
+    description: z.string().trim().max(PERSONA_DESCRIPTION_MAX_LENGTH),
+    tone: toneSettingsSchema,
+  })
+  .strict();
+
+/** Whether respondents may choose their interviewer + which persona is the default. */
+const personaSelectionSchema = z
+  .object({
+    enabled: z.boolean(),
+    defaultPersonaKey: z.string().trim().min(1).max(PERSONA_KEY_MAX_LENGTH),
   })
   .strict();
 
@@ -288,6 +319,10 @@ export const updateConfigSchema = z
     // Interviewer tone & persona (F-tone). Sent whole when present; gated additionally by the
     // platform flag APP_QUESTIONNAIRES_TONE_ENABLED.
     tone: toneSettingsSchema.optional(),
+    // Selectable interviewer persona library + the respondent-selection toggle (F-persona). Sent
+    // whole when present; gated additionally by APP_QUESTIONNAIRES_PERSONA_SELECTION_ENABLED.
+    personas: z.array(personaOptionSchema).optional(),
+    personaSelection: personaSelectionSchema.optional(),
     interviewerStrategy: interviewerStrategySchema.optional(),
     // Respondent Report. Sent whole when present; gated additionally by the platform flag
     // APP_QUESTIONNAIRES_RESPONDENT_REPORT_ENABLED.
@@ -354,6 +389,32 @@ export const updateConfigSchema = z
           code: 'custom',
           message: 'Profile field keys must be unique',
           path: ['profileFields'],
+        });
+      }
+    }
+
+    // Persona keys unique across the library.
+    if (cfg.personas) {
+      const keys = cfg.personas.map((p) => p.key);
+      if (new Set(keys).size !== keys.length) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Persona keys must be unique',
+          path: ['personas'],
+        });
+      }
+    }
+
+    // The default persona must resolve to an existing persona — one in this save's library, or (when
+    // the library is omitted/empty and the read path will fill in the built-ins) a built-in key.
+    if (cfg.personaSelection !== undefined) {
+      const libraryKeys = cfg.personas?.map((p) => p.key) ?? [];
+      const resolvableKeys = libraryKeys.length > 0 ? libraryKeys : [...BUILT_IN_PERSONA_KEYS];
+      if (!resolvableKeys.includes(cfg.personaSelection.defaultPersonaKey)) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Default persona must be one of the configured personas',
+          path: ['personaSelection', 'defaultPersonaKey'],
         });
       }
     }
