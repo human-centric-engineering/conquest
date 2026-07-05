@@ -46,8 +46,10 @@ import {
   isSeriousnessGateEnabled,
   isSensitivityAwarenessEnabled,
   isToneEnabled,
+  isPersonaSelectionEnabled,
   withLiveSessionsEnabled,
 } from '@/lib/app/questionnaire/feature-flag';
+import { resolveEffectiveTone } from '@/lib/app/questionnaire/persona/settings';
 import { selectBriefingLines } from '@/lib/app/questionnaire/rounds/briefing';
 import { loadRoundPeerDigest } from '@/lib/app/questionnaire/learning/digest';
 import { recordLearningApplied } from '@/lib/app/questionnaire/learning/events';
@@ -267,6 +269,7 @@ async function handleMessage(
       sensitivityAwarenessFlag,
       reasoningStreamFlag,
       toneFlag,
+      personaSelectionFlag,
       dataSlotAdaptive,
       roundContextFlag,
       learningModeFlag,
@@ -283,6 +286,7 @@ async function handleMessage(
       isSensitivityAwarenessEnabled(),
       isReasoningStreamEnabled(),
       isToneEnabled(),
+      isPersonaSelectionEnabled(),
       isAdaptiveDataSlotSelectionEnabled(),
       isRoundContextEnabled(),
       isLearningModeEnabled(),
@@ -415,12 +419,27 @@ async function handleMessage(
       inspectorCalls.push(trace);
     };
 
-    // Interviewer tone & persona (F-tone): the platform flag AND at least one configured dimension
-    // (or the persona) being on. When neither holds the phraser keeps its default voice, so we omit
-    // `tone` from its input entirely. Resolved once and threaded into both phrasing call sites below.
-    const toneConfig = loaded.base.config.tone;
+    // Selectable interviewer persona (F-persona): when respondent selection is enabled (platform flag
+    // AND the per-version toggle), the persona the respondent chose REPLACES the version's tone for
+    // this session. Off ⇒ resolveEffectiveTone returns the version tone unchanged (byte-for-byte the
+    // F-tone behaviour below). Resolved before the tone-active check so the chosen persona's own
+    // dimensions/prose drive it.
+    const personaSelectionActive =
+      personaSelectionFlag && loaded.base.config.personaSelection.enabled;
+    const toneConfig = resolveEffectiveTone({
+      toneConfig: loaded.base.config.tone,
+      personas: loaded.base.config.personas,
+      personaSelection: loaded.base.config.personaSelection,
+      selectedPersonaKey: personaSelectionActive ? loaded.session.selectedPersonaKey : null,
+    });
+
+    // Interviewer tone & persona (F-tone): tone shapes the turn when EITHER the F-tone flag is on
+    // (the version's own sliders/persona) OR respondent persona selection is on (a chosen persona's
+    // voice, already folded into `toneConfig` above). It's only actually applied when the resolved
+    // tone has the persona or at least one dimension enabled — so the neutral all-off default (incl.
+    // the neutral-coach persona) keeps today's voice and we omit `tone` from the phraser input.
     const toneActive =
-      toneFlag &&
+      (toneFlag || personaSelectionActive) &&
       (toneConfig.persona.enabled || TONE_DIMENSION_KEYS.some((key) => toneConfig[key].enabled));
     const tonePhraserInput = toneActive ? { tone: toneConfig } : {};
 

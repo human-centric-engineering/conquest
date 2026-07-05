@@ -88,6 +88,7 @@ function ctx(
       status: over.status ?? 'active',
       versionId: 'ver-1',
       respondentUserId: over.respondentUserId === undefined ? 'user-1' : over.respondentUserId,
+      selectedPersonaKey: null,
       isPreview: false,
       roundId: null,
       cohortMemberId: null,
