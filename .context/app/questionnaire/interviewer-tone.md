@@ -10,6 +10,9 @@ dark-launched behind a platform flag.
 > Sits beside [presentation-mode](./presentation-mode.md), [reasoning-stream](./reasoning-stream.md)
 > and [sensitivity-awareness](./sensitivity-awareness.md) as a respondent-experience feature. Like
 > them it's a **config block + platform flag**, both required to take effect.
+>
+> **Built on by [interviewer-personas](./interviewer-personas.md) (F-persona):** a respondent-selectable
+> library where each persona _is_ a `ToneSettings`, swapped in via `resolveEffectiveTone` at turn time.
 
 ## The settings (`ToneSettings`)
 

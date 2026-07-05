@@ -328,6 +328,91 @@ describe('updateConfigSchema — tone (F-tone)', () => {
   });
 });
 
+describe('updateConfigSchema — personas & selection (F-persona)', () => {
+  /** A complete tone block reused as each persona's voice. */
+  const tone = {
+    empathy: { enabled: false, level: 3 },
+    mirroring: { enabled: false, level: 3 },
+    formality: { enabled: false, level: 3 },
+    mimicry: { enabled: false, level: 3 },
+    verbosity: { enabled: false, level: 3 },
+    warmth: { enabled: false, level: 3 },
+    curiosity: { enabled: false, level: 3 },
+    readingComplexity: { enabled: false, level: 3 },
+    humour: { enabled: true, level: 5 },
+    persona: { enabled: true, text: 'You are a warm comedian.' },
+  };
+  const p = (key: string) => ({ key, label: `Label ${key}`, description: 'A voice.', tone });
+
+  it('accepts a valid persona library', () => {
+    expect(updateConfigSchema.safeParse({ personas: [p('a'), p('b')] }).success).toBe(true);
+  });
+
+  it('rejects a non-slug persona key', () => {
+    expect(updateConfigSchema.safeParse({ personas: [p('Bad Key')] }).success).toBe(false);
+  });
+
+  it('rejects an empty label or over-long description', () => {
+    expect(updateConfigSchema.safeParse({ personas: [{ ...p('a'), label: '' }] }).success).toBe(
+      false
+    );
+    expect(
+      updateConfigSchema.safeParse({ personas: [{ ...p('a'), description: 'x'.repeat(200) }] })
+        .success
+    ).toBe(false);
+  });
+
+  it('rejects a persona with an unknown tone key (strict) or missing tone', () => {
+    expect(
+      updateConfigSchema.safeParse({
+        personas: [{ ...p('a'), tone: { ...tone, bogus: { enabled: true, level: 3 } } }],
+      }).success
+    ).toBe(false);
+    expect(
+      updateConfigSchema.safeParse({ personas: [{ key: 'a', label: 'A', description: '' }] })
+        .success
+    ).toBe(false);
+  });
+
+  it('rejects duplicate persona keys', () => {
+    const res = updateConfigSchema.safeParse({ personas: [p('a'), p('a')] });
+    expect(res.success).toBe(false);
+  });
+
+  it('accepts a personaSelection whose default is in the sent library', () => {
+    expect(
+      updateConfigSchema.safeParse({
+        personas: [p('a'), p('b')],
+        personaSelection: { enabled: true, defaultPersonaKey: 'b' },
+      }).success
+    ).toBe(true);
+  });
+
+  it('rejects a default persona key absent from the sent library', () => {
+    const res = updateConfigSchema.safeParse({
+      personas: [p('a'), p('b')],
+      personaSelection: { enabled: true, defaultPersonaKey: 'zzz' },
+    });
+    expect(res.success).toBe(false);
+  });
+
+  it('accepts a built-in default key when the library is omitted (read path fills built-ins)', () => {
+    expect(
+      updateConfigSchema.safeParse({
+        personaSelection: { enabled: true, defaultPersonaKey: 'neutral-coach' },
+      }).success
+    ).toBe(true);
+  });
+
+  it('rejects an unknown default key when the library is omitted', () => {
+    expect(
+      updateConfigSchema.safeParse({
+        personaSelection: { enabled: true, defaultPersonaKey: 'not-a-builtin' },
+      }).success
+    ).toBe(false);
+  });
+});
+
 describe('updateConfigSchema — respondentReport (Respondent Report)', () => {
   /** A complete report block — the editor always sends the whole thing. */
   const fullReport = {

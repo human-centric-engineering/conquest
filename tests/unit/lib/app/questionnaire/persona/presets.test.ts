@@ -1,0 +1,63 @@
+/**
+ * Built-in persona library (F-persona) — `lib/app/questionnaire/persona/presets.ts`.
+ *
+ * The seeded menu must be internally consistent: unique keys, the neutral default present and
+ * behaving like today's baseline (all-off tone, no overlay), and every character a valid, bounded,
+ * self-contained persona. These invariants back the read-path fallback (`narrowPersonas` returns
+ * this set) and the schema (which accepts a built-in `defaultPersonaKey`).
+ */
+
+import { describe, it, expect } from 'vitest';
+
+import { BUILT_IN_PERSONAS, BUILT_IN_PERSONA_KEYS } from '@/lib/app/questionnaire/persona/presets';
+import { narrowPersonas } from '@/lib/app/questionnaire/persona/settings';
+import {
+  DEFAULT_PERSONA_KEY,
+  DEFAULT_TONE_SETTINGS,
+  PERSONA_DESCRIPTION_MAX_LENGTH,
+  PERSONA_LABEL_MAX_LENGTH,
+  TONE_PERSONA_MAX_LENGTH,
+} from '@/lib/app/questionnaire/types';
+
+describe('BUILT_IN_PERSONAS', () => {
+  it('ships seven personas with unique keys', () => {
+    expect(BUILT_IN_PERSONAS).toHaveLength(7);
+    const keys = BUILT_IN_PERSONAS.map((p) => p.key);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it('leads with the neutral default, which behaves like the all-off baseline', () => {
+    const first = BUILT_IN_PERSONAS[0];
+    expect(first.key).toBe(DEFAULT_PERSONA_KEY);
+    expect(first.tone).toEqual(DEFAULT_TONE_SETTINGS);
+    expect(first.tone.persona.enabled).toBe(false);
+  });
+
+  it('gives every persona a bounded, non-empty label + description and slug key', () => {
+    for (const p of BUILT_IN_PERSONAS) {
+      expect(p.key).toMatch(/^[a-z0-9-]+$/);
+      expect(p.label.trim().length).toBeGreaterThan(0);
+      expect(p.label.length).toBeLessThanOrEqual(PERSONA_LABEL_MAX_LENGTH);
+      expect(p.description.trim().length).toBeGreaterThan(0);
+      expect(p.description.length).toBeLessThanOrEqual(PERSONA_DESCRIPTION_MAX_LENGTH);
+      expect(p.tone.persona.text.length).toBeLessThanOrEqual(TONE_PERSONA_MAX_LENGTH);
+    }
+  });
+
+  it('enables the persona overlay for every character (only the neutral coach leaves it off)', () => {
+    for (const p of BUILT_IN_PERSONAS.slice(1)) {
+      expect(p.tone.persona.enabled).toBe(true);
+      expect(p.tone.persona.text.trim().length).toBeGreaterThan(0);
+    }
+  });
+
+  it('survives a round-trip through narrowPersonas unchanged (already valid)', () => {
+    const out = narrowPersonas(BUILT_IN_PERSONAS.map((p) => ({ ...p })));
+    expect(out.map((p) => p.key)).toEqual(BUILT_IN_PERSONAS.map((p) => p.key));
+  });
+
+  it('exposes its keys via BUILT_IN_PERSONA_KEYS for the schema', () => {
+    expect(BUILT_IN_PERSONA_KEYS).toEqual(BUILT_IN_PERSONAS.map((p) => p.key));
+    expect(BUILT_IN_PERSONA_KEYS).toContain(DEFAULT_PERSONA_KEY);
+  });
+});
