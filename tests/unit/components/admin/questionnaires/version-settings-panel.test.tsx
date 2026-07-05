@@ -91,6 +91,7 @@ function renderPanel(over: Partial<VersionGraphView> = {}) {
       adaptiveEnabled={false}
       adaptiveDataSlotsEnabled={false}
       introScreenEnabled={false}
+      personaSelectionEnabled={false}
     />
   );
 }
@@ -109,6 +110,7 @@ describe('VersionSettingsPanel', () => {
         adaptiveEnabled
         adaptiveDataSlotsEnabled={false}
         introScreenEnabled={false}
+        personaSelectionEnabled={false}
       />
     );
     expect(screen.getByText('Configuration')).toBeInTheDocument();
