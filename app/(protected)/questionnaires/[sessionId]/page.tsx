@@ -6,6 +6,7 @@ import { clearInvalidSession } from '@/lib/auth/clear-session';
 import {
   isAttachmentInputEnabled,
   isIntroScreenEnabled,
+  isPersonaSelectionEnabled,
   isLiveSessionsEnabled,
   isReasoningStreamEnabled,
   isVoiceInputEnabled,
@@ -19,6 +20,7 @@ import {
   resolveOwnedSessionTitle,
 } from '@/lib/app/questionnaire/header/resolve';
 import { resolveSessionIntro } from '@/lib/app/questionnaire/intro/resolve';
+import { resolveSessionPersonas } from '@/lib/app/questionnaire/persona/resolve';
 import { loadAnswerPanelState } from '@/app/api/v1/app/questionnaire-sessions/_lib/answer-panel';
 import { loadSessionStatus } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-status';
 import { loadSessionSurfaceConfig } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-surface-config';
@@ -160,6 +162,13 @@ export default async function QuestionnaireSessionPage({
   // per-version `intro.enabled` (and a fresh session) are the second gate, applied in SessionEntry.
   const intro = (await isIntroScreenEnabled()) ? await resolveSessionIntro(sessionId) : null;
 
+  // Selectable interviewer personas (F-persona). Resolve only when the platform flag is on; the
+  // per-version `personaSelection.enabled` (and ≥2 personas) are the second gate, applied in the
+  // workspace via the resolved payload's `enabled`.
+  const personas = (await isPersonaSelectionEnabled())
+    ? await resolveSessionPersonas(sessionId)
+    : null;
+
   // Resumed = the session already has turns. Replay them (transcript-only — the conversation is
   // its own context); a fresh session shows the branded welcome + guidance and auto-opens. Keyed
   // on turn count, not answers: a session can have turns with no captured answer yet (e.g. an
@@ -179,6 +188,7 @@ export default async function QuestionnaireSessionPage({
       <BrandThemeProvider theme={theme} header={bandHeader}>
         <SessionEntry
           intro={intro}
+          personas={personas}
           sessionId={sessionId}
           initialTurns={initialTurns}
           autoStart={!resumed}

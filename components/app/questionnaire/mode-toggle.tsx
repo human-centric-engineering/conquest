@@ -9,9 +9,9 @@
  * escape-hatch, and (when present) the Intro recap — is one tap away. Honours
  * `prefers-reduced-motion`.
  *
- * Generic over its `items`: two segments for plain chat ↔ form, three when an Intro recap rides
- * alongside. The indicator width and offset are computed from the item count, so any 2–3 segment
- * set lands pixel-aligned without bespoke classes.
+ * Generic over its `items`: two segments for plain chat ↔ form, more when an Intro recap and/or the
+ * "Choose your interviewer" persona picker ride alongside. The indicator width and offset are
+ * computed from the item count, so any N-segment set lands pixel-aligned without bespoke classes.
  */
 
 import { MessageSquare, ListChecks, type LucideIcon } from 'lucide-react';

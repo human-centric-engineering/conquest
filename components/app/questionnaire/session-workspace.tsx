@@ -22,7 +22,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BookOpen, ClipboardList, ListChecks, MessageSquare } from 'lucide-react';
+import { BookOpen, ClipboardList, Drama, ListChecks, MessageSquare } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { useHorizontalSwipe } from '@/lib/hooks/use-horizontal-swipe';
@@ -42,6 +42,7 @@ import {
 import { buildCorrectionTargets } from '@/lib/app/questionnaire/panel/correction-targets';
 import { ModeToggle, type ToggleItem } from '@/components/app/questionnaire/mode-toggle';
 import { QuestionnaireSplash } from '@/components/app/questionnaire/intro/questionnaire-splash';
+import { PersonaPicker } from '@/components/app/questionnaire/persona/persona-picker';
 import { SessionLifecycleBar } from '@/components/app/questionnaire/lifecycle/session-lifecycle-bar';
 import { CompletionOffer } from '@/components/app/questionnaire/lifecycle/completion-offer';
 import { EarlyFinishControl } from '@/components/app/questionnaire/lifecycle/early-finish-control';
@@ -61,9 +62,14 @@ import type {
 import type { PresentationMode, ReasoningPlacement } from '@/lib/app/questionnaire/types';
 import type { SessionStatusView } from '@/lib/app/questionnaire/session/status-view';
 import type { ResolvedSessionIntro } from '@/lib/app/questionnaire/intro/resolve';
+import type { ResolvedSessionPersonas } from '@/lib/app/questionnaire/persona/resolve';
+import { API } from '@/lib/api/endpoints';
 
-/** Which surface the carousel is showing. `intro` only exists on a fresh, intro-enabled session. */
-type WorkspaceView = 'intro' | 'chat' | 'form';
+/**
+ * Which surface the carousel is showing. `intro` and `persona` are pre-chat "gates" that only exist
+ * when their feature is on; both defer the opening LLM turn until the respondent moves past them.
+ */
+type WorkspaceView = 'intro' | 'persona' | 'chat' | 'form';
 
 export interface SessionWorkspaceProps {
   sessionId: string;
@@ -136,12 +142,21 @@ export interface SessionWorkspaceProps {
    * omit the surface entirely.
    */
   intro?: ResolvedSessionIntro | null;
+  /**
+   * Selectable interviewer personas (F-persona). When enabled, a "Choose your interviewer" surface
+   * rides the carousel just before the chat, and a switcher in the lifecycle bar reopens it mid-run.
+   * Like the intro, it's a pre-chat gate on a fresh session: the workspace opens on it (after any
+   * intro) and defers the opening LLM turn until the respondent moves through to the conversation, so
+   * their chosen persona is in place before the first question streams. Disabled / read-only omit it.
+   */
+  personas?: ResolvedSessionPersonas | null;
 }
 
 // Static label/icon lookup for the carousel toggle — module-scoped so it isn't
 // reallocated on every render (the workspace re-renders on each streaming token).
 const VIEW_META: Record<WorkspaceView, { label: string; Icon: typeof BookOpen }> = {
   intro: { label: 'Intro', Icon: BookOpen },
+  persona: { label: 'Interviewer', Icon: Drama },
   chat: { label: 'Chat', Icon: MessageSquare },
   form: { label: 'Form', Icon: ListChecks },
 };
@@ -165,6 +180,7 @@ export function SessionWorkspace({
   inlineCorrectionEnabled = false,
   readOnly = false,
   intro = null,
+  personas = null,
 }: SessionWorkspaceProps) {
   const showChat = presentationMode === 'chat' || presentationMode === 'both';
   const showForm = presentationMode === 'form' || presentationMode === 'both';
@@ -172,29 +188,36 @@ export function SessionWorkspace({
   // resume, so a returning respondent can still slide back to re-read it. (`autoStart` only governs
   // whether we LAND on it and defer the kickoff; see below.) Never in the read-only admin viewer.
   const showIntro = Boolean(intro?.enabled && !readOnly);
-  // A fresh, intro-enabled session opens ON the intro and holds the opening turn until the
-  // respondent leaves it. A resume drops straight into the conversation with the intro a tap away.
-  const openOnIntro = showIntro && autoStart;
+  // The persona picker rides the carousel just before the chat whenever selection is enabled (and the
+  // chat exists to steer). Like the intro it's a pre-chat gate on a fresh session. Never read-only.
+  const showPersona = Boolean(personas?.enabled && showChat && !readOnly);
+
+  // The pre-chat gates, in carousel order: intro first (read the brief), then persona (pick a voice).
+  // The workspace lands on the FIRST present gate on a fresh session and defers the kickoff until the
+  // respondent moves past every gate to the conversation. A resume lands on the conversation instead.
+  const firstGate: WorkspaceView | null = showIntro ? 'intro' : showPersona ? 'persona' : null;
+  const openOnGate = firstGate !== null && autoStart;
 
   // The carousel surfaces, left→right, present-only. At least one of chat/form always exists
   // (presentationMode is chat | form | both), so this is never empty.
   const views = useMemo<WorkspaceView[]>(() => {
     const list: WorkspaceView[] = [];
     if (showIntro) list.push('intro');
+    if (showPersona) list.push('persona');
     if (showChat) list.push('chat');
     if (showForm) list.push('form');
     return list;
-  }, [showIntro, showChat, showForm]);
+  }, [showIntro, showPersona, showChat, showForm]);
 
-  // Active surface. A fresh intro session opens on the intro; everything else opens on the primary
-  // surface (a resume keeps the intro reachable via the toggle, but lands on the conversation).
+  // Active surface. A fresh session opens on the first gate (intro, else persona); everything else
+  // opens on the primary surface (a resume keeps the gates reachable via the toggle).
   const [activeView, setActiveView] = useState<WorkspaceView>(
-    openOnIntro ? 'intro' : presentationMode === 'form' ? 'form' : 'chat'
+    openOnGate && firstGate ? firstGate : presentationMode === 'form' ? 'form' : 'chat'
   );
-  // Has the respondent left the intro at least once? Gates the LLM kickoff so no turn is spent while
-  // they're still reading. Initialises `true` whenever we don't open on the intro (resume, or no
-  // intro at all), preserving the "open immediately" behaviour for every non-fresh-intro path.
-  const [started, setStarted] = useState(!openOnIntro);
+  // Has the respondent moved past the pre-chat gates at least once? Gates the LLM kickoff so no turn
+  // is spent while they're still reading the intro or choosing a persona. Initialises `true` whenever
+  // we don't open on a gate (resume, or no gates), preserving "open immediately" for those paths.
+  const [started, setStarted] = useState(!openOnGate);
   // Data-slot mode: the slot keys the latest turn filled, fed to the panel so it can scroll to them
   // and step through. Computed by diffing the previous panel snapshot against each new one (the
   // stream never tells the client a turn ordinal, so a diff is the reliable signal). `prevPanelRef`
@@ -381,11 +404,36 @@ export function SessionWorkspace({
   const goToView = useCallback(
     (view: WorkspaceView) => {
       setActiveView(view);
-      if (view !== 'intro') setStarted(true);
+      // Reaching a real surface (past the intro/persona gates) releases the deferred kickoff.
+      if (view !== 'intro' && view !== 'persona') setStarted(true);
       if (view === 'form') form.refresh();
       else if (view === 'chat') panel.refetch();
     },
     [form, panel]
+  );
+
+  // Selectable interviewer persona: the respondent's current choice, seeded from the resolved menu.
+  // Persisted on pick so the turn loop reads it (`resolveEffectiveTone`). Fails soft — a persona is an
+  // enhancement, never a blocker: a failed write leaves the local highlight and the server default
+  // still applies. The picker rides the carousel, so the ModeToggle's "Interviewer" segment is also
+  // the mid-run switcher — no separate control needed.
+  const [selectedPersonaKey, setSelectedPersonaKey] = useState<string | null>(
+    personas?.selectedPersonaKey ?? null
+  );
+  const choosePersona = useCallback(
+    (key: string) => {
+      setSelectedPersonaKey(key);
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (accessToken) headers['X-Session-Token'] = accessToken;
+      void fetch(API.APP.QUESTIONNAIRE_SESSIONS.persona(sessionId), {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({ personaKey: key }),
+      }).catch(() => {
+        /* fail soft — local highlight stays; the server default applies if the write didn't land */
+      });
+    },
+    [accessToken, sessionId]
   );
 
   // Step one surface along the carousel (clamped at the ends), the shared move behind the toggle,
@@ -527,7 +575,7 @@ export function SessionWorkspace({
   // Right-cluster controls: the surface toggle and the mobile answer-review trigger. Kept
   // `undefined` when neither applies so the lifecycle strip still collapses to nothing on a plain
   // form-only session (the bar renders the strip whenever `trailing` is present).
-  const showReviewTrigger = showChat && activeView !== 'intro'; // the answer panel only rides the chat surface
+  const showReviewTrigger = showChat && activeView !== 'intro' && activeView !== 'persona'; // the answer panel only rides the chat surface
   const trailingControls =
     showToggle || showReviewTrigger ? (
       <>
@@ -646,6 +694,19 @@ export function SessionWorkspace({
       />
     ) : null;
 
+  // The "Choose your interviewer" surface. Picking persists the choice; Continue slides to the chat
+  // (which releases the deferred kickoff, now with the chosen persona already in place server-side).
+  const personaSurface =
+    showPersona && personas ? (
+      <PersonaPicker
+        personas={personas.personas}
+        selectedKey={selectedPersonaKey}
+        defaultKey={personas.defaultPersonaKey}
+        onChoose={choosePersona}
+        onContinue={() => goToView('chat')}
+      />
+    ) : null;
+
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
       {/* Final completion sweep (F7.3): the early-finish path surfaces the held probe in a modal over
@@ -741,7 +802,13 @@ export function SessionWorkspace({
                 style={{ transform: `translateX(calc(${offset}% + ${swipe.dragPx}px))` }}
                 inert={activeView !== view}
               >
-                {view === 'intro' ? introSurface : view === 'form' ? formSurface : chatSurface}
+                {view === 'intro'
+                  ? introSurface
+                  : view === 'persona'
+                    ? personaSurface
+                    : view === 'form'
+                      ? formSurface
+                      : chatSurface}
               </div>
             );
           })}

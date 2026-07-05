@@ -13,15 +13,25 @@
  */
 
 import { prisma } from '@/lib/db/client';
-import type { PersonaOption } from '@/lib/app/questionnaire/types';
 import { narrowPersonas, narrowPersonaSelection } from '@/lib/app/questionnaire/persona/settings';
 
-/** The fully-resolved persona menu a respondent surface renders. */
+/**
+ * One persona as the respondent sees it — name + description only. The `tone` block (which holds the
+ * system-prompt prose) is deliberately stripped: it drives the interviewer server-side and is never
+ * shipped to the respondent client.
+ */
+export interface PersonaMenuOption {
+  key: string;
+  label: string;
+  description: string;
+}
+
+/** The client-safe persona menu a respondent surface renders (no tone / prompt prose). */
 export interface ResolvedSessionPersonas {
   /** Whether the picker should be shown: per-version toggle on AND at least two personas. */
   enabled: boolean;
-  /** The persona library (cards to choose from). Always populated (built-ins when unconfigured). */
-  personas: PersonaOption[];
+  /** The persona cards to choose from. Always populated (built-ins when unconfigured). */
+  personas: PersonaMenuOption[];
   /** The persona this respondent has chosen, or `null` when they haven't (⇒ the default applies). */
   selectedPersonaKey: string | null;
   /** The default persona key (pre-selected card; applied when nothing is chosen). */
@@ -56,7 +66,8 @@ export async function resolveSessionPersonas(
 
   return {
     enabled: selection.enabled && personas.length >= 2,
-    personas,
+    // Strip the tone/prompt prose — the respondent only ever sees name + description.
+    personas: personas.map((p) => ({ key: p.key, label: p.label, description: p.description })),
     selectedPersonaKey: session.selectedPersonaKey,
     defaultPersonaKey: selection.defaultPersonaKey,
   };

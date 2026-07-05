@@ -29,6 +29,7 @@ import { Button } from '@/components/ui/button';
 import { SessionEntry } from '@/components/app/questionnaire/intro/session-entry';
 import { buildWelcomeTurns } from '@/lib/app/questionnaire/chat/greeting';
 import type { ResolvedSessionIntro } from '@/lib/app/questionnaire/intro/resolve';
+import type { ResolvedSessionPersonas } from '@/lib/app/questionnaire/persona/resolve';
 import type { PresentationMode, ReasoningPlacement } from '@/lib/app/questionnaire/types';
 import { ANSWER_PROVENANCES } from '@/lib/app/questionnaire/types';
 import type { QuestionnaireTurn } from '@/lib/app/questionnaire/chat/types';
@@ -86,6 +87,12 @@ interface AnonymousSessionBootProps {
    * `intro.enabled` inside the payload is the second gate. Off → no fetch, straight into the surface.
    */
   introScreenEnabled?: boolean;
+  /**
+   * Selectable-persona platform flag (resolved server-side). When on, the session fetches its
+   * resolved persona menu on boot so the "Choose your interviewer" step can ride the carousel; the
+   * per-version `personaSelection.enabled` inside the payload is the second gate. Off → no fetch.
+   */
+  personaSelectionEnabled?: boolean;
 }
 
 interface StoredAnonSession {
@@ -118,6 +125,8 @@ type BootState =
       autoStart: boolean;
       /** Resolved intro for the splash gate; null when off, on resume, or when the fetch fails soft. */
       intro: ResolvedSessionIntro | null;
+      /** Resolved persona menu; null when off or when the fetch fails soft. */
+      personas: ResolvedSessionPersonas | null;
     }
   | { phase: 'error'; message: string };
 
@@ -228,6 +237,40 @@ async function fetchIntro(
   }
 }
 
+/** Persona-menu response shape — validated at the fetch boundary (no `as` on the wire). */
+const personaMenuSchema = z.object({
+  enabled: z.boolean(),
+  personas: z.array(z.object({ key: z.string(), label: z.string(), description: z.string() })),
+  selectedPersonaKey: z.string().nullable(),
+  defaultPersonaKey: z.string(),
+});
+const personaResponseSchema = z.object({
+  success: z.boolean(),
+  data: z.object({ persona: personaMenuSchema.nullable() }).optional(),
+});
+
+/**
+ * Fetch the session's resolved persona menu (token-authed). Fails soft to `null` on any error — the
+ * picker is an enhancement, never a blocker; the worst case is no persona step and the default voice.
+ * Only called when the platform flag is on.
+ */
+async function fetchPersonas(
+  sessionId: string,
+  accessToken: string
+): Promise<ResolvedSessionPersonas | null> {
+  try {
+    const res = await fetch(API.APP.QUESTIONNAIRE_SESSIONS.persona(sessionId), {
+      headers: { 'X-Session-Token': accessToken },
+    });
+    if (!res.ok) return null;
+    const parsed = personaResponseSchema.safeParse(await res.json());
+    if (!parsed.success) return null;
+    return parsed.data.data?.persona ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function storageKey(versionId: string, preview: boolean, inviteToken?: string): string {
   // Invite sessions key on the token (truncated) — a shared device must not cross two invitees.
   if (inviteToken) return `qn.invite.${inviteToken.slice(0, 16)}`;
@@ -271,6 +314,7 @@ export function AnonymousSessionBoot({
   reasoningPerItemMs,
   inlineCorrectionEnabled = false,
   introScreenEnabled = false,
+  personaSelectionEnabled = false,
 }: AnonymousSessionBootProps) {
   const [state, setState] = useState<BootState>({ phase: 'creating' });
   // Dedup the create across React 19 StrictMode's double-invoke (which would otherwise mint two
@@ -354,12 +398,16 @@ export function AnonymousSessionBoot({
       // whenever the platform flag is on (skipping only that round-trip when off); `autoStart` alone
       // is resume-gated below, so a resumed session simply doesn't land on the intro. This mirrors
       // the authenticated page, which passes `intro` unconditionally.
-      const intro = introScreenEnabled ? await fetchIntro(sessionId, accessToken) : null;
+      const [intro, personas] = await Promise.all([
+        introScreenEnabled ? fetchIntro(sessionId, accessToken) : Promise.resolve(null),
+        personaSelectionEnabled ? fetchPersonas(sessionId, accessToken) : Promise.resolve(null),
+      ]);
       setState({
         phase: 'ready',
         sessionId,
         accessToken,
         intro,
+        personas,
         initialTurns: resumed
           ? turns
           : buildWelcomeTurns({ welcomeCopy, voiceInputEnabled, anonymous }),
@@ -379,6 +427,7 @@ export function AnonymousSessionBoot({
     voiceInputEnabled,
     anonymous,
     introScreenEnabled,
+    personaSelectionEnabled,
   ]);
 
   if (state.phase === 'creating') {
@@ -407,6 +456,7 @@ export function AnonymousSessionBoot({
   return (
     <SessionEntry
       intro={state.intro}
+      personas={state.personas}
       sessionId={state.sessionId}
       accessToken={state.accessToken}
       // A fresh session seeds the welcome turn and auto-opens the first question; a resumed one
