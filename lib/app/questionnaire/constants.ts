@@ -855,6 +855,16 @@ export const APP_QUESTIONNAIRES_REASONING_STREAM_FLAG =
 export const APP_QUESTIONNAIRES_TONE_FLAG = 'APP_QUESTIONNAIRES_TONE_ENABLED';
 
 /**
+ * Platform feature flag gating **selectable interviewer personas** (F-persona) — the per-version
+ * persona *library* and the respondent-facing picker that lets a respondent choose which interviewer
+ * they engage with. DB-backed, seeded disabled by `063-persona-selection-flag.ts`. ANDs with the
+ * per-version `personaSelection.enabled` toggle; when off, the persona step/switcher never render and
+ * the version's own tone prevails (`resolveEffectiveTone` returns it unchanged).
+ */
+export const APP_QUESTIONNAIRES_PERSONA_SELECTION_FLAG =
+  'APP_QUESTIONNAIRES_PERSONA_SELECTION_ENABLED';
+
+/**
  * Platform feature flag gating the **Respondent Report** (report kind `respondent`) — the
  * per-respondent summary delivered after a respondent completes the questionnaire, configured from
  * its own workspace tab. The first of two report kinds; the later cross-respondent **Cohort Report**
