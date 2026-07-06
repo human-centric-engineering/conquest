@@ -14,6 +14,7 @@
 
 import { prisma } from '@/lib/db/client';
 import { narrowPersonas, narrowPersonaSelection } from '@/lib/app/questionnaire/persona/settings';
+import type { PersonaSwitcher } from '@/lib/app/questionnaire/types';
 
 /**
  * One persona as the respondent sees it — name + description only. The `tone` block (which holds the
@@ -36,6 +37,8 @@ export interface ResolvedSessionPersonas {
   selectedPersonaKey: string | null;
   /** The default persona key (pre-selected card; applied when nothing is chosen). */
   defaultPersonaKey: string;
+  /** How the respondent switches interviewer: pre-chat page, in-chat chip+modal, or both. */
+  switcher: PersonaSwitcher;
 }
 
 /**
@@ -70,5 +73,6 @@ export async function resolveSessionPersonas(
     personas: personas.map((p) => ({ key: p.key, label: p.label, description: p.description })),
     selectedPersonaKey: session.selectedPersonaKey,
     defaultPersonaKey: selection.defaultPersonaKey,
+    switcher: selection.switcher,
   };
 }

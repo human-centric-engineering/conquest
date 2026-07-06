@@ -55,6 +55,17 @@ describe('PersonaPicker', () => {
     );
   });
 
+  it('leads with the default persona (first card) and badges it "Default"', () => {
+    // Default is the second entry in the source order; it should be pulled to the front.
+    renderPicker({ defaultKey: 'comedian' });
+    const cards = screen.getAllByRole('button', { name: /The (Coach|Comedian)/ });
+    expect(cards[0]).toHaveAccessibleName(/The Comedian/);
+    // The "Default" badge sits on the default card only.
+    const badges = screen.getAllByText('Default');
+    expect(badges).toHaveLength(1);
+    expect(cards[0]).toContainElement(badges[0]);
+  });
+
   it('highlights the explicit choice over the default', () => {
     renderPicker({ selectedKey: 'comedian', defaultKey: 'neutral-coach' });
     expect(screen.getByRole('button', { name: /The Comedian/ })).toHaveAttribute(

@@ -31,7 +31,7 @@ import { buildWelcomeTurns } from '@/lib/app/questionnaire/chat/greeting';
 import type { ResolvedSessionIntro } from '@/lib/app/questionnaire/intro/resolve';
 import type { ResolvedSessionPersonas } from '@/lib/app/questionnaire/persona/resolve';
 import type { PresentationMode, ReasoningPlacement } from '@/lib/app/questionnaire/types';
-import { ANSWER_PROVENANCES } from '@/lib/app/questionnaire/types';
+import { ANSWER_PROVENANCES, PERSONA_SWITCHERS } from '@/lib/app/questionnaire/types';
 import type { QuestionnaireTurn } from '@/lib/app/questionnaire/chat/types';
 import { REASONING_STEP_KINDS, REASONING_TONES } from '@/lib/app/questionnaire/reasoning';
 import { inspectorTurnSchema } from '@/lib/app/questionnaire/inspector/schema';
@@ -243,6 +243,8 @@ const personaMenuSchema = z.object({
   personas: z.array(z.object({ key: z.string(), label: z.string(), description: z.string() })),
   selectedPersonaKey: z.string().nullable(),
   defaultPersonaKey: z.string(),
+  // Fail-soft: an unknown/missing switcher falls back to the pre-chat page (original behaviour).
+  switcher: z.enum(PERSONA_SWITCHERS).catch('page'),
 });
 const personaResponseSchema = z.object({
   success: z.boolean(),

@@ -264,11 +264,11 @@ model AppQuestionnaireConfig {
   // Fed into the phraser system prompt by buildToneInstructions (lib/.../chat/tone.ts). (types.ts)
   tone Json @default("{}")
 
-  // Selectable interviewer persona library (F-persona): PersonaOption[] — named voices a respondent
-  // may choose from, each a self-contained ToneSettings. Empty ⇒ the read path fills in the built-in
+  // Selectable interviewer personas (F-persona). The persona library is FIXED (BUILT_IN_PERSONAS);
+  // `personas` is a legacy column, always [] and ignored — the read path always returns the built-in
   // library (narrowPersonas, lib/.../persona/settings.ts). personaSelection = { enabled,
-  // defaultPersonaKey }: whether respondents may pick + the default. Only surfaced when the platform
-  // flag APP_QUESTIONNAIRES_PERSONA_SELECTION_ENABLED and personaSelection.enabled are both on. (types.ts)
+  // defaultPersonaKey }: whether respondents may pick + which built-in persona is the default. Only
+  // surfaced when APP_QUESTIONNAIRES_PERSONA_SELECTION_ENABLED and personaSelection.enabled are on. (types.ts)
   personas         Json @default("[]")
   personaSelection Json @default("{}")
 

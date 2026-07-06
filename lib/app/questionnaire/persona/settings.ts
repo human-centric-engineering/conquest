@@ -4,9 +4,8 @@
  * Pure helpers, no I/O — unit-tested in isolation (mirrors `lib/app/questionnaire/chat/tone.ts`):
  *   - {@link narrowPersonaSelection} coerces the opaque `personaSelection` Json into a complete,
  *     clamped {@link PersonaSelectionSettings}.
- *   - {@link narrowPersonas} coerces the opaque `personas` Json into a valid {@link PersonaOption}[].
- *     An empty/malformed library falls back to {@link BUILT_IN_PERSONAS}; admin edits are merged over
- *     the built-ins by key so a partially-edited library still resolves the untouched built-ins.
+ *   - {@link narrowPersonas} returns the fixed {@link BUILT_IN_PERSONAS} set. The persona library is
+ *     hard-coded (not per-version config); the legacy `personas` Json is ignored.
  *   - {@link resolveEffectiveTone} picks the {@link ToneSettings} that governs a session: the chosen
  *     persona's tone when selection is on and a valid key is picked (falling back to the default
  *     persona), otherwise the version's own `tone`. This is the single seam the runtime uses to make
@@ -16,14 +15,13 @@
 import {
   DEFAULT_PERSONA_KEY,
   DEFAULT_PERSONA_SELECTION,
-  PERSONA_DESCRIPTION_MAX_LENGTH,
   PERSONA_KEY_MAX_LENGTH,
-  PERSONA_LABEL_MAX_LENGTH,
+  PERSONA_SWITCHERS,
   type PersonaOption,
   type PersonaSelectionSettings,
+  type PersonaSwitcher,
   type ToneSettings,
 } from '@/lib/app/questionnaire/types';
-import { narrowToneSettings } from '@/lib/app/questionnaire/chat/tone';
 import { BUILT_IN_PERSONAS } from '@/lib/app/questionnaire/persona/presets';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -38,45 +36,24 @@ function narrowString(value: unknown, maxLength: number): string {
 export function narrowPersonaSelection(value: unknown): PersonaSelectionSettings {
   const obj = isRecord(value) ? value : {};
   const defaultPersonaKey = narrowString(obj.defaultPersonaKey, PERSONA_KEY_MAX_LENGTH);
+  const switcher: PersonaSwitcher = PERSONA_SWITCHERS.includes(obj.switcher as PersonaSwitcher)
+    ? (obj.switcher as PersonaSwitcher)
+    : 'page';
   return {
     enabled: obj.enabled === true,
     defaultPersonaKey: defaultPersonaKey.length > 0 ? defaultPersonaKey : DEFAULT_PERSONA_KEY,
-  };
-}
-
-/** Coerce one (possibly garbage) library entry into a valid {@link PersonaOption}, or `null`. */
-function narrowPersonaOption(value: unknown): PersonaOption | null {
-  if (!isRecord(value)) return null;
-  const key = narrowString(value.key, PERSONA_KEY_MAX_LENGTH);
-  if (key.length === 0) return null;
-  return {
-    key,
-    label: narrowString(value.label, PERSONA_LABEL_MAX_LENGTH),
-    description: narrowString(value.description, PERSONA_DESCRIPTION_MAX_LENGTH),
-    tone: narrowToneSettings(value.tone),
+    switcher,
   };
 }
 
 /**
- * Project the stored `personas` Json onto a valid library. Empty/malformed input yields the full
- * {@link BUILT_IN_PERSONAS} set. When rows exist, each is narrowed and de-duplicated by key (first
- * wins), then any built-in persona the admin hasn't overridden is appended — so the default persona
- * is always present even if the admin only edited a subset.
+ * The selectable persona library is fixed — always the full {@link BUILT_IN_PERSONAS} set. The
+ * personas are hard-coded, not per-version config: any admin wanting a bespoke voice uses the
+ * version's own interviewer tone & persona block instead. The stored `personas` Json (a legacy
+ * column, always `[]` now) is ignored. Returns fresh copies so callers can't mutate the presets.
  */
-export function narrowPersonas(value: unknown): PersonaOption[] {
-  const rows = Array.isArray(value) ? value : [];
-  const narrowed = rows.map(narrowPersonaOption).filter((p): p is PersonaOption => p !== null);
-
-  if (narrowed.length === 0) return BUILT_IN_PERSONAS.map((p) => ({ ...p }));
-
-  const byKey = new Map<string, PersonaOption>();
-  for (const p of narrowed) {
-    if (!byKey.has(p.key)) byKey.set(p.key, p);
-  }
-  for (const builtIn of BUILT_IN_PERSONAS) {
-    if (!byKey.has(builtIn.key)) byKey.set(builtIn.key, { ...builtIn });
-  }
-  return [...byKey.values()];
+export function narrowPersonas(_value?: unknown): PersonaOption[] {
+  return BUILT_IN_PERSONAS.map((p) => ({ ...p }));
 }
 
 /** Find the persona to apply: the chosen key, else the configured default, else the first entry. */

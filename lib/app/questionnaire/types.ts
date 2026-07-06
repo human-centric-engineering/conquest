@@ -477,12 +477,25 @@ export type PersonaOption = {
   tone: ToneSettings;
 };
 
+/**
+ * How the respondent switches interviewer (F-persona), when selection is on:
+ *   - `page`      — a pre-chat "Choose your interviewer" step + the Interviewer segment in the
+ *                   carousel toggle (the original behaviour). No in-chat chip.
+ *   - `indicator` — no pre-chat page; the session opens on the default persona and an in-chat
+ *                   "Interviewer: {name} · Change" chip opens a modal picker to switch anytime.
+ *   - `both`      — the pre-chat page AND the in-chat chip; the chip's "Change" returns to the page.
+ */
+export const PERSONA_SWITCHERS = ['page', 'indicator', 'both'] as const;
+export type PersonaSwitcher = (typeof PERSONA_SWITCHERS)[number];
+
 /** Whether respondents may choose their interviewer, and which persona is the default. */
 export type PersonaSelectionSettings = {
   /** Off ⇒ the version's own `tone` prevails and no persona step/switcher shows. */
   enabled: boolean;
   /** Key of the persona used when the respondent hasn't chosen (and the card pre-selected). */
   defaultPersonaKey: string;
+  /** How the respondent picks/switches interviewer. See {@link PersonaSwitcher}. */
+  switcher: PersonaSwitcher;
 };
 
 /** Max lengths for the editable persona fields (match the Zod bounds). */
@@ -497,6 +510,7 @@ export const DEFAULT_PERSONA_KEY = 'neutral-coach';
 export const DEFAULT_PERSONA_SELECTION: PersonaSelectionSettings = {
   enabled: false,
   defaultPersonaKey: DEFAULT_PERSONA_KEY,
+  switcher: 'page',
 };
 
 /**
@@ -947,9 +961,9 @@ export type QuestionnaireConfigShape = {
   tone: ToneSettings;
   /**
    * Selectable interviewer persona library — the menu of named voices a respondent may choose from.
-   * See {@link PersonaOption}. Empty ⇒ the read path fills in the built-in library. Only surfaced
-   * when the platform flag `APP_QUESTIONNAIRES_PERSONA_SELECTION_ENABLED` and `personaSelection.enabled`
-   * are both on.
+   * See {@link PersonaOption}. Fixed: the read path always fills this with the built-in library
+   * ({@link narrowPersonas}); the legacy `personas` column is ignored. Only surfaced when the platform
+   * flag `APP_QUESTIONNAIRES_PERSONA_SELECTION_ENABLED` and `personaSelection.enabled` are both on.
    */
   personas: PersonaOption[];
   /** Whether respondents may choose their interviewer + the default. See {@link PersonaSelectionSettings}. */
@@ -1040,7 +1054,7 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   // Admin-only debugging surface — off by default; an operator turns it on per version.
   previewInspectorEnabled: false,
   tone: DEFAULT_TONE_SETTINGS,
-  // Empty library ⇒ the read-path narrower fills in BUILT_IN_PERSONAS (keeps the DB default small).
+  // Fixed library: the read-path narrower always returns BUILT_IN_PERSONAS regardless of this value.
   personas: [],
   personaSelection: DEFAULT_PERSONA_SELECTION,
   interviewerStrategy: DEFAULT_INTERVIEWER_STRATEGY,

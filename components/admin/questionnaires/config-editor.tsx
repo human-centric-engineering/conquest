@@ -96,7 +96,6 @@ import {
   type ToneDimension,
   type ToneDimensionKey,
   type ToneSettings,
-  type PersonaOption,
   type PersonaSelectionSettings,
   INTERVIEWER_APPROACHES,
   INTERVIEWER_APPROACH_LABELS,
@@ -415,12 +414,9 @@ export function ConfigEditor({
   // Interviewer tone & persona (F-tone): the whole block edited as one object. Helpers below patch
   // a single dimension / the persona immutably.
   const [tone, setTone] = useState<ToneSettings>(config.tone);
-  // Selectable interviewer personas (F-persona): the persona library + the respondent-selection
-  // toggle. Empty library (never-saved) seeds from the built-ins so the admin always starts from the
-  // full set; a saved-but-empty row is already narrowed to the built-ins on read.
-  const [personas, setPersonas] = useState<PersonaOption[]>(
-    config.personas.length > 0 ? config.personas : [...BUILT_IN_PERSONAS]
-  );
+  // Selectable interviewer personas (F-persona): only the respondent-selection toggle + default key
+  // are editable. The persona library itself is fixed (BUILT_IN_PERSONAS), so there's no editable
+  // persona state — the panel reads the built-ins for its dropdown + read-only preview.
   const [personaSelection, setPersonaSelection] = useState<PersonaSelectionSettings>(
     config.personaSelection
   );
@@ -470,7 +466,6 @@ export function ConfigEditor({
     setPreviewInspectorEnabled(config.previewInspectorEnabled);
     setProfileFields(config.profileFields.map(toRow));
     setTone(config.tone);
-    setPersonas(config.personas.length > 0 ? config.personas : [...BUILT_IN_PERSONAS]);
     setPersonaSelection(config.personaSelection);
     setInterviewerStrategy(config.interviewerStrategy);
     setIntro(config.intro);
@@ -605,20 +600,9 @@ export function ConfigEditor({
         // Interviewer tone & persona (F-tone). Sent whole; trim the persona text. Requires the
         // platform tone flag to take effect.
         tone: { ...tone, persona: { ...tone.persona, text: tone.persona.text.trim() } },
-        // Selectable interviewer personas (F-persona). Sent whole; drop unfilled (blank-name) rows,
-        // trim copy, trim each persona's prose. Requires the platform persona-selection flag AND
-        // `personaSelection.enabled` to surface to a respondent.
-        personas: personas
-          .filter((p) => p.label.trim().length > 0)
-          .map((p) => ({
-            key: p.key,
-            label: p.label.trim(),
-            description: p.description.trim(),
-            tone: {
-              ...p.tone,
-              persona: { ...p.tone.persona, text: p.tone.persona.text.trim() },
-            },
-          })),
+        // Respondent persona selection (F-persona). Only the on/off toggle + default key are stored;
+        // the persona library is fixed (BUILT_IN_PERSONAS), never sent. Requires the platform
+        // persona-selection flag AND `personaSelection.enabled` to surface to a respondent.
         personaSelection,
         // Interviewer strategy (questioning approach). Sent whole; off ⇒ default prompts unchanged.
         interviewerStrategy,
@@ -1336,20 +1320,19 @@ export function ConfigEditor({
             ))}
           </SettingsGroup>
 
-          {/* ── Interviewer personas — a library of named voices a respondent can choose from. ── */}
+          {/* ── Interviewer personas — a fixed set of named voices a respondent can choose from. ── */}
           {personaSelectionEnabled && (
             <SettingsGroup
               icon={PersonaLibraryIcon}
               accent="bg-violet-500/10 text-violet-600 dark:text-violet-400"
               id="persona-library"
               title="Interviewer personas"
-              description="Offer respondents a choice of interviewer — a library of named voices (a curmudgeon, an empath, a comedian…). When you let respondents choose, the persona they pick replaces this version’s tone & persona for their session. Also requires the platform persona-selection flag."
+              description="Offer respondents a choice of interviewer — a fixed library of named voices (a curmudgeon, an empath, a comedian…). When you let respondents choose, the persona they pick replaces this version’s tone & persona for their session. Also requires the platform persona-selection flag."
             >
               <PersonaLibraryPanel
-                personas={personas}
+                personas={BUILT_IN_PERSONAS}
                 selection={personaSelection}
                 busy={busy}
-                onPersonasChange={setPersonas}
                 onSelectionChange={setPersonaSelectionPatch}
               />
             </SettingsGroup>

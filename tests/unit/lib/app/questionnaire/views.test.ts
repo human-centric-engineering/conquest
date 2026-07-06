@@ -198,7 +198,7 @@ function makeConfigView(overrides: Partial<ConfigView> = {}): ConfigView {
       persona: { enabled: false, text: '' },
     },
     personas: [],
-    personaSelection: { enabled: false, defaultPersonaKey: 'neutral-coach' },
+    personaSelection: { enabled: false, defaultPersonaKey: 'neutral-coach', switcher: 'page' },
     respondentReport: {
       enabled: false,
       mode: 'raw',

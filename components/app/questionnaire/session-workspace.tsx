@@ -43,6 +43,10 @@ import { buildCorrectionTargets } from '@/lib/app/questionnaire/panel/correction
 import { ModeToggle, type ToggleItem } from '@/components/app/questionnaire/mode-toggle';
 import { QuestionnaireSplash } from '@/components/app/questionnaire/intro/questionnaire-splash';
 import { PersonaPicker } from '@/components/app/questionnaire/persona/persona-picker';
+import {
+  CurrentInterviewerChip,
+  PersonaSwitcherModal,
+} from '@/components/app/questionnaire/persona/interviewer-switcher';
 import { SessionLifecycleBar } from '@/components/app/questionnaire/lifecycle/session-lifecycle-bar';
 import { CompletionOffer } from '@/components/app/questionnaire/lifecycle/completion-offer';
 import { EarlyFinishControl } from '@/components/app/questionnaire/lifecycle/early-finish-control';
@@ -190,7 +194,18 @@ export function SessionWorkspace({
   const showIntro = Boolean(intro?.enabled && !readOnly);
   // The persona picker rides the carousel just before the chat whenever selection is enabled (and the
   // chat exists to steer). Like the intro it's a pre-chat gate on a fresh session. Never read-only.
-  const showPersona = Boolean(personas?.enabled && showChat && !readOnly);
+  // The `indicator` switcher drops the carousel page entirely — the respondent picks via the in-chat
+  // chip + modal instead — so only `page` / `both` put the picker on the carousel.
+  const showPersona = Boolean(
+    personas?.enabled && showChat && !readOnly && personas.switcher !== 'indicator'
+  );
+  // The in-chat "Interviewer: {name} · Change" chip — shown for the `indicator` and `both` switchers.
+  const showInterviewerChip = Boolean(
+    personas?.enabled &&
+    showChat &&
+    !readOnly &&
+    (personas.switcher === 'indicator' || personas.switcher === 'both')
+  );
 
   // The pre-chat gates, in carousel order: intro first (read the brief), then persona (pick a voice).
   // The workspace lands on the FIRST present gate on a fresh session and defers the kickoff until the
@@ -231,6 +246,8 @@ export function SessionWorkspace({
   const [lastTurnFilledKeys, setLastTurnFilledKeys] = useState<readonly string[]>([]);
   // Mobile "Review answers" bottom-sheet (below `lg`, where the side panel is hidden).
   const [reviewOpen, setReviewOpen] = useState(false);
+  // The `indicator`-mode "change your interviewer" modal (no carousel persona page in that switcher).
+  const [personaModalOpen, setPersonaModalOpen] = useState(false);
   // Both reads refetch on each clean turn-settle. The stream reads its `onTurnSettled`
   // through a ref, so routing the refetches through refs here breaks the declaration
   // cycle (stream needs the settle handler; the hooks below need the stream's applyStatus).
@@ -436,6 +453,18 @@ export function SessionWorkspace({
     [accessToken, sessionId]
   );
 
+  // The interviewer currently governing the session: the respondent's explicit choice, else the
+  // configured default. Drives the in-chat chip's label (`indicator` / `both` switchers).
+  const currentPersonaKey = selectedPersonaKey ?? personas?.defaultPersonaKey ?? null;
+  const currentPersonaLabel =
+    personas?.personas.find((p) => p.key === currentPersonaKey)?.label ?? 'Interviewer';
+  // Pressing the chip: `both` slides the carousel back to the picker page; `indicator` (no page) opens
+  // the modal picker instead.
+  const onChangeInterviewer = useCallback(() => {
+    if (personas?.switcher === 'both') goToView('persona');
+    else setPersonaModalOpen(true);
+  }, [personas?.switcher, goToView]);
+
   // Step one surface along the carousel (clamped at the ends), the shared move behind the toggle,
   // the swipe gesture and the arrow keys. `delta` is +1 (toward the next surface) or -1 (previous).
   const activeIndex = Math.max(0, views.indexOf(activeView));
@@ -576,9 +605,19 @@ export function SessionWorkspace({
   // `undefined` when neither applies so the lifecycle strip still collapses to nothing on a plain
   // form-only session (the bar renders the strip whenever `trailing` is present).
   const showReviewTrigger = showChat && activeView !== 'intro' && activeView !== 'persona'; // the answer panel only rides the chat surface
+  // The interviewer chip only makes sense on the chat surface (not while reading the intro / on the
+  // form / on the picker page itself).
+  const showChipHere = showInterviewerChip && activeView === 'chat';
   const trailingControls =
-    showToggle || showReviewTrigger ? (
+    showToggle || showReviewTrigger || showChipHere ? (
       <>
+        {showChipHere && (
+          <CurrentInterviewerChip
+            label={currentPersonaLabel}
+            onChange={onChangeInterviewer}
+            busy={stream.status === 'streaming'}
+          />
+        )}
         {showToggle && (
           <ModeToggle
             value={activeView}
@@ -722,6 +761,20 @@ export function SessionWorkspace({
         onFinishAnyway={() => void lifecycle.finishAnyway(heldProbe?.early ?? true)}
         busy={lifecycle.busy}
       />
+      {/* Interviewer switcher modal — the `indicator` switcher's "Change" opens this (there's no
+          carousel persona page in that mode). `both` uses the carousel page instead, so this stays
+          shut there. Picking persists immediately (fail-soft) and applies from the next turn. */}
+      {personas && showInterviewerChip && personas.switcher === 'indicator' && (
+        <PersonaSwitcherModal
+          open={personaModalOpen}
+          onOpenChange={setPersonaModalOpen}
+          personas={personas.personas}
+          selectedKey={selectedPersonaKey}
+          defaultKey={personas.defaultPersonaKey}
+          onChoose={choosePersona}
+          busy={stream.status === 'streaming'}
+        />
+      )}
       {/* The chat ↔ form toggle rides the lifecycle strip (no dedicated row) and is always
           visible in "both" mode, so the form escape-hatch reads as ever-present. */}
       <SessionLifecycleBar

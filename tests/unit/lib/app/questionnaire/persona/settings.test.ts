@@ -1,10 +1,10 @@
 /**
  * Selectable interviewer persona helpers (F-persona) — `lib/app/questionnaire/persona/settings.ts`.
  *
- * All pure. `narrowPersonaSelection` / `narrowPersonas` are read-path coercers (opaque Json → typed);
+ * All pure. `narrowPersonaSelection` is a read-path coercer (opaque Json → typed); `narrowPersonas`
+ * returns the fixed built-in library (the persona set is hard-coded, not per-version config);
  * `selectPersona` / `resolveEffectiveTone` decide which voice governs a session. The key invariants:
- *   - an empty/garbage library falls back to the full built-in set;
- *   - admin edits merge over built-ins by key, and every built-in stays reachable;
+ *   - `narrowPersonas` always yields the full built-in set, ignoring any stored/legacy value;
  *   - with selection OFF, `resolveEffectiveTone` returns the version tone byte-for-byte (the
  *     "nothing changes when the feature is off" guarantee);
  *   - with selection ON, the chosen persona's tone replaces it, falling back to the default key.
@@ -40,61 +40,61 @@ function persona(key: string, text = `voice-${key}`): PersonaOption {
 }
 
 describe('narrowPersonaSelection', () => {
-  it('coerces null/garbage to selection off with the neutral default key', () => {
+  it('coerces null/garbage to selection off with the neutral default key + page switcher', () => {
     for (const bad of [null, undefined, 7, 'nope', []]) {
       expect(narrowPersonaSelection(bad)).toEqual({
         enabled: false,
         defaultPersonaKey: DEFAULT_PERSONA_KEY,
+        switcher: 'page',
       });
     }
   });
 
   it('reads a valid selection through, trimming the default key', () => {
-    expect(narrowPersonaSelection({ enabled: true, defaultPersonaKey: '  comedian  ' })).toEqual({
+    expect(
+      narrowPersonaSelection({
+        enabled: true,
+        defaultPersonaKey: '  comedian  ',
+        switcher: 'indicator',
+      })
+    ).toEqual({
       enabled: true,
       defaultPersonaKey: 'comedian',
+      switcher: 'indicator',
     });
   });
 
-  it('treats a non-boolean enabled as false and a blank key as the neutral default', () => {
-    expect(narrowPersonaSelection({ enabled: 'yes', defaultPersonaKey: '' })).toEqual({
+  it('treats a non-boolean enabled as false, a blank key as the default, a bad switcher as page', () => {
+    expect(
+      narrowPersonaSelection({ enabled: 'yes', defaultPersonaKey: '', switcher: 'nonsense' })
+    ).toEqual({
       enabled: false,
       defaultPersonaKey: DEFAULT_PERSONA_KEY,
+      switcher: 'page',
     });
   });
 });
 
 describe('narrowPersonas', () => {
-  it('falls back to the full built-in library for an empty or garbage value', () => {
-    for (const bad of [null, undefined, [], 'nope', {}]) {
-      const out = narrowPersonas(bad);
+  it('always yields the full built-in library, ignoring any stored/legacy value', () => {
+    // The persona library is fixed — a stored custom library (or garbage) never changes the result.
+    for (const value of [null, undefined, [], 'nope', {}, [persona('a'), persona('b')]]) {
+      const out = narrowPersonas(value);
       expect(out.map((p) => p.key)).toEqual(BUILT_IN_PERSONAS.map((p) => p.key));
     }
   });
 
-  it('drops malformed entries (no key) but keeps valid ones', () => {
-    const out = narrowPersonas([persona('a'), { label: 'no key' }, null, persona('b')]);
-    // Valid customs first, then every built-in the admin didn't override is appended.
-    expect(out.slice(0, 2).map((p) => p.key)).toEqual(['a', 'b']);
-    expect(out.some((p) => p.key === DEFAULT_PERSONA_KEY)).toBe(true);
+  it('returns a fresh array of fresh option objects (not the preset instances)', () => {
+    const out = narrowPersonas();
+    expect(out).not.toBe(BUILT_IN_PERSONAS);
+    out.forEach((p, i) => expect(p).not.toBe(BUILT_IN_PERSONAS[i]));
+    // Reassigning a top-level field on a returned option doesn't leak into the presets.
+    out[0].label = 'mutated';
+    expect(BUILT_IN_PERSONAS[0].label).not.toBe('mutated');
   });
 
-  it('merges an admin override over the built-in of the same key (first wins), no duplicates', () => {
-    const overridden = persona(DEFAULT_PERSONA_KEY, 'my-own-coach');
-    const out = narrowPersonas([overridden]);
-    const keys = out.map((p) => p.key);
-    expect(keys.filter((k) => k === DEFAULT_PERSONA_KEY)).toHaveLength(1);
-    const coach = out.find((p) => p.key === DEFAULT_PERSONA_KEY);
-    expect(coach?.tone.persona.text).toBe('my-own-coach');
-    // Every built-in remains reachable.
-    for (const b of BUILT_IN_PERSONAS) expect(keys).toContain(b.key);
-  });
-
-  it('narrows each entry tone through narrowToneSettings (clamps a bad level)', () => {
-    const out = narrowPersonas([
-      { key: 'x', label: 'X', description: '', tone: { humour: { enabled: true, level: 99 } } },
-    ]);
-    expect(out[0].tone.humour).toEqual({ enabled: true, level: 5 });
+  it('includes the neutral default persona', () => {
+    expect(narrowPersonas().some((p) => p.key === DEFAULT_PERSONA_KEY)).toBe(true);
   });
 });
 
@@ -126,7 +126,7 @@ describe('resolveEffectiveTone', () => {
     const out = resolveEffectiveTone({
       toneConfig: versionTone,
       personas,
-      personaSelection: { enabled: false, defaultPersonaKey: 'a' },
+      personaSelection: { enabled: false, defaultPersonaKey: 'a', switcher: 'page' },
       selectedPersonaKey: 'b',
     });
     expect(out).toBe(versionTone);
@@ -136,7 +136,7 @@ describe('resolveEffectiveTone', () => {
     const out = resolveEffectiveTone({
       toneConfig: versionTone,
       personas,
-      personaSelection: { enabled: true, defaultPersonaKey: 'a' },
+      personaSelection: { enabled: true, defaultPersonaKey: 'a', switcher: 'page' },
       selectedPersonaKey: 'b',
     });
     expect(out.persona.text).toBe('voice-b');
@@ -146,7 +146,7 @@ describe('resolveEffectiveTone', () => {
     const out = resolveEffectiveTone({
       toneConfig: versionTone,
       personas,
-      personaSelection: { enabled: true, defaultPersonaKey: 'a' },
+      personaSelection: { enabled: true, defaultPersonaKey: 'a', switcher: 'page' },
       selectedPersonaKey: null,
     });
     expect(out.persona.text).toBe('voice-a');
@@ -156,7 +156,7 @@ describe('resolveEffectiveTone', () => {
     const out = resolveEffectiveTone({
       toneConfig: versionTone,
       personas: [],
-      personaSelection: { enabled: true, defaultPersonaKey: 'a' },
+      personaSelection: { enabled: true, defaultPersonaKey: 'a', switcher: 'page' },
       selectedPersonaKey: 'a',
     });
     expect(out).toBe(versionTone);

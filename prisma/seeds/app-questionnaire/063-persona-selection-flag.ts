@@ -23,10 +23,10 @@ const unit: SeedUnit = {
       create: {
         name: APP_QUESTIONNAIRES_PERSONA_SELECTION_FLAG,
         description:
-          'Enables ConQuest selectable interviewer personas — a per-version persona library plus a ' +
-          'respondent-facing picker (carousel step + in-chat switcher) that lets a respondent choose ' +
-          'which interviewer they engage with. Opt-in on top of APP_QUESTIONNAIRES_ENABLED. Disabled ' +
-          'by default.',
+          'Enables ConQuest selectable interviewer personas — a fixed library of built-in personas ' +
+          'plus a respondent-facing picker (carousel step + in-chat switcher) that lets a respondent ' +
+          'choose which interviewer they engage with. Opt-in on top of APP_QUESTIONNAIRES_ENABLED. ' +
+          'Disabled by default.',
         enabled: false,
       },
     });

@@ -61,6 +61,12 @@ export function PersonaPicker({
 }: PersonaPickerProps) {
   // What's visibly selected: the respondent's explicit choice, else the configured default.
   const activeKey = selectedKey ?? defaultKey;
+  // The admin's default interviewer leads the grid (badged "Default"), then the rest in their
+  // canonical order — so the recommended voice is the first card the respondent sees.
+  const orderedPersonas = [
+    ...personas.filter((p) => p.key === defaultKey),
+    ...personas.filter((p) => p.key !== defaultKey),
+  ];
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -77,8 +83,9 @@ export function PersonaPicker({
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4">
         <div className="mx-auto grid w-full max-w-3xl gap-3 pb-4 sm:grid-cols-2">
-          {personas.map((persona) => {
+          {orderedPersonas.map((persona) => {
             const active = persona.key === activeKey;
+            const isDefault = persona.key === defaultKey;
             return (
               <button
                 key={persona.key}
@@ -99,8 +106,18 @@ export function PersonaPicker({
                 }
               >
                 <span className="flex w-full items-center justify-between gap-2">
-                  <span className="text-foreground text-sm font-semibold">
-                    {persona.label.trim() || 'Interviewer'}
+                  <span className="flex items-center gap-2">
+                    <span className="text-foreground text-sm font-semibold">
+                      {persona.label.trim() || 'Interviewer'}
+                    </span>
+                    {isDefault && (
+                      <span
+                        className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold tracking-wide uppercase"
+                        style={{ backgroundColor: ACCENT_SOFT, color: ACCENT }}
+                      >
+                        Default
+                      </span>
+                    )}
                   </span>
                   <span
                     className={cn(

@@ -1,24 +1,24 @@
 'use client';
 
 /**
- * Persona library panel (F-persona) — the admin editor for selectable interviewer personas.
+ * Persona library panel (F-persona) — the admin control for respondent interviewer selection.
  *
- * Rendered inside the "Interviewer personas" SettingsGroup in `config-editor.tsx`. Owns no state of
- * its own: the parent holds `personas` + `personaSelection` and passes setters, exactly like the tone
- * block, so the single "Save configuration" PATCH sends everything. Each persona is a name +
- * respondent-facing description + persona prose + the same nine tone sliders as the version tone
- * (reused via `ToneDimensionRow`); a chosen persona's whole tone block replaces the version tone for
- * a respondent's session at turn time.
+ * Rendered inside the "Interviewer personas" SettingsGroup in `config-editor.tsx`. The persona
+ * library is FIXED ({@link BUILT_IN_PERSONAS}) — a curated set of named voices, not editable config.
+ * This panel therefore owns no persona editing: it toggles respondent selection on/off, lets the
+ * admin pick which built-in persona is the default, and previews that persona read-only (name +
+ * description + prose) so they can see what respondents will get. An admin who wants a bespoke voice
+ * uses the version's own Interviewer tone & persona block instead.
+ *
+ * Owns no state of its own: the parent holds `personaSelection` and passes the setter, exactly like
+ * the tone block, so the single "Save configuration" PATCH sends it. `personas` is passed in for the
+ * dropdown + preview only and is never mutated here.
  */
 
-import type { Dispatch, SetStateAction } from 'react';
-import { Drama, Plus, X } from 'lucide-react';
+import { Drama } from 'lucide-react';
 
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { Textarea } from '@/components/ui/textarea';
 import {
   Select,
   SelectContent,
@@ -27,104 +27,62 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { FieldHelp } from '@/components/ui/field-help';
-import {
-  TONE_DIMENSION_META,
-  ToneDimensionRow,
-} from '@/components/admin/questionnaires/tone-dimensions';
-import {
-  DEFAULT_PERSONA_KEY,
-  DEFAULT_TONE_SETTINGS,
-  PERSONA_DESCRIPTION_MAX_LENGTH,
-  PERSONA_LABEL_MAX_LENGTH,
-  TONE_PERSONA_MAX_LENGTH,
-  type PersonaOption,
-  type PersonaSelectionSettings,
-  type ToneDimension,
-  type ToneDimensionKey,
+import { TONE_DIMENSION_META } from '@/components/admin/questionnaires/tone-dimensions';
+import { DEFAULT_PERSONA_KEY } from '@/lib/app/questionnaire/types';
+import type {
+  PersonaOption,
+  PersonaSelectionSettings,
+  PersonaSwitcher,
 } from '@/lib/app/questionnaire/types';
 
-/** Next free `custom-<n>` key, skipping any already taken (keys are stable once assigned). */
-function freshPersonaKey(existing: PersonaOption[]): string {
-  const taken = new Set(existing.map((p) => p.key));
-  let n = existing.length + 1;
-  while (taken.has(`custom-${n}`)) n += 1;
-  return `custom-${n}`;
-}
-
-/** A blank new persona: neutral tone, empty prose — the admin fills it in. */
-function newPersona(existing: PersonaOption[]): PersonaOption {
-  return {
-    key: freshPersonaKey(existing),
-    label: '',
-    description: '',
-    tone: DEFAULT_TONE_SETTINGS,
-  };
+/** The persona's active tone dials (enabled dimensions + level), in the canonical dimension order. */
+function activeToneDials(persona: PersonaOption): { label: string; level: number }[] {
+  return TONE_DIMENSION_META.filter((meta) => persona.tone[meta.key].enabled).map((meta) => ({
+    label: meta.label,
+    level: persona.tone[meta.key].level,
+  }));
 }
 
 export function PersonaLibraryPanel({
   personas,
   selection,
   busy,
-  onPersonasChange,
   onSelectionChange,
 }: {
-  personas: PersonaOption[];
+  /** The fixed built-in persona library — for the dropdown + read-only preview. Never mutated. */
+  personas: readonly PersonaOption[];
   selection: PersonaSelectionSettings;
   busy: boolean;
-  onPersonasChange: Dispatch<SetStateAction<PersonaOption[]>>;
   onSelectionChange: (patch: Partial<PersonaSelectionSettings>) => void;
 }) {
-  const setPersonaField = (index: number, patch: Partial<Omit<PersonaOption, 'tone'>>) =>
-    onPersonasChange((prev) => prev.map((p, i) => (i === index ? { ...p, ...patch } : p)));
-
-  const setPersonaProse = (index: number, text: string) =>
-    onPersonasChange((prev) =>
-      prev.map((p, i) =>
-        i === index
-          ? { ...p, tone: { ...p.tone, persona: { enabled: text.trim().length > 0, text } } }
-          : p
-      )
-    );
-
-  const setPersonaTone = (index: number, key: ToneDimensionKey, patch: Partial<ToneDimension>) =>
-    onPersonasChange((prev) =>
-      prev.map((p, i) =>
-        i === index ? { ...p, tone: { ...p.tone, [key]: { ...p.tone[key], ...patch } } } : p
-      )
-    );
-
-  const addPersona = () => onPersonasChange((prev) => [...prev, newPersona(prev)]);
-
-  const removePersona = (index: number) => {
-    const removedKey = personas[index]?.key;
-    onPersonasChange((prev) => prev.filter((_, i) => i !== index));
-    // Keep the default coherent: if we removed the default persona, fall back to the first remaining.
-    if (removedKey && selection.defaultPersonaKey === removedKey) {
-      const fallback = personas.find((_, i) => i !== index);
-      onSelectionChange({ defaultPersonaKey: fallback?.key ?? DEFAULT_PERSONA_KEY });
-    }
-  };
+  const selectedKey = personas.some((p) => p.key === selection.defaultPersonaKey)
+    ? selection.defaultPersonaKey
+    : (personas[0]?.key ?? DEFAULT_PERSONA_KEY);
+  const selected = personas.find((p) => p.key === selectedKey) ?? personas[0] ?? null;
+  // Show the current default first in the dropdown, then the rest in their canonical order.
+  const orderedPersonas = [
+    ...personas.filter((p) => p.key === selectedKey),
+    ...personas.filter((p) => p.key !== selectedKey),
+  ];
 
   return (
     <div className="space-y-5">
-      <div className="space-y-2">
-        <div className="flex items-center gap-2">
-          <Switch
-            checked={selection.enabled}
-            onCheckedChange={(enabled) => onSelectionChange({ enabled })}
-            disabled={busy}
-          />
-          <Label className="text-sm font-medium">
-            Let respondents choose their interviewer{' '}
-            <FieldHelp title="Respondent-selected persona">
-              When on, respondents pick one of the personas below — on a “Choose your interviewer”
-              step before the conversation, and via a switcher during it. The chosen persona’s voice
-              replaces this version’s tone &amp; persona for that respondent’s session. When off,
-              the personas are ignored and your tone &amp; persona settings apply as usual. Also
-              requires the platform persona-selection flag.
-            </FieldHelp>
-          </Label>
-        </div>
+      <div className="flex items-center gap-2">
+        <Switch
+          checked={selection.enabled}
+          onCheckedChange={(enabled) => onSelectionChange({ enabled })}
+          disabled={busy}
+        />
+        <Label className="text-sm font-medium">
+          Let respondents choose their interviewer{' '}
+          <FieldHelp title="Respondent-selected persona">
+            When on, respondents pick one of the built-in personas — on a “Choose your interviewer”
+            step before the conversation, and via a switcher during it. The chosen persona’s voice
+            replaces this version’s tone &amp; persona for that respondent’s session. When off, the
+            personas are ignored and your tone &amp; persona settings apply as usual. Also requires
+            the platform persona-selection flag.
+          </FieldHelp>
+        </Label>
       </div>
 
       {selection.enabled && (
@@ -134,11 +92,12 @@ export function PersonaLibraryPanel({
               Default persona{' '}
               <FieldHelp title="Default persona">
                 The interviewer a respondent gets if they don’t choose one — and the option
-                pre-selected on the picker.
+                pre-selected on the picker. The personas themselves are fixed; to hand-tune a voice,
+                use this version’s Interviewer tone &amp; persona settings instead.
               </FieldHelp>
             </Label>
             <Select
-              value={selection.defaultPersonaKey}
+              value={selectedKey}
               onValueChange={(v) => onSelectionChange({ defaultPersonaKey: v })}
               disabled={busy}
             >
@@ -146,108 +105,104 @@ export function PersonaLibraryPanel({
                 <SelectValue placeholder="Select a default persona" />
               </SelectTrigger>
               <SelectContent>
-                {personas.map((p) => (
+                {orderedPersonas.map((p) => (
                   <SelectItem key={p.key} value={p.key}>
-                    {p.label.trim() || p.key}
+                    <span className="flex items-center gap-2">
+                      {p.label.trim() || p.key}
+                      {p.key === selectedKey && (
+                        <span className="text-muted-foreground text-xs">· Default</span>
+                      )}
+                    </span>
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            {personas.length < 2 && (
-              <p className="text-muted-foreground text-xs">
-                Add at least two personas so respondents have a meaningful choice.
-              </p>
-            )}
           </div>
 
-          <div className="space-y-4">
-            {personas.map((persona, index) => (
-              <div
-                key={persona.key}
-                className="border-border/70 bg-muted/20 space-y-3 rounded-lg border p-4"
-              >
-                <div className="flex items-start gap-2">
-                  <div className="grid flex-1 gap-3 sm:grid-cols-2">
-                    <div className="space-y-1">
-                      <Label className="text-xs font-medium">Name</Label>
-                      <Input
-                        value={persona.label}
-                        onChange={(e) => setPersonaField(index, { label: e.target.value })}
-                        maxLength={PERSONA_LABEL_MAX_LENGTH}
-                        disabled={busy}
-                        placeholder="e.g. The Coach"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs font-medium">
-                        Description (shown to respondent)
-                      </Label>
-                      <Input
-                        value={persona.description}
-                        onChange={(e) => setPersonaField(index, { description: e.target.value })}
-                        maxLength={PERSONA_DESCRIPTION_MAX_LENGTH}
-                        disabled={busy}
-                        placeholder="e.g. Calm, objective and balanced."
-                      />
-                    </div>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => removePersona(index)}
-                    disabled={busy}
-                    aria-label={`Remove ${persona.label.trim() || 'persona'}`}
-                    className="text-muted-foreground hover:text-destructive mt-5 shrink-0"
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
+          <div className="space-y-1.5">
+            <Label className="text-sm font-medium">
+              How respondents switch interviewer{' '}
+              <FieldHelp title="Switcher style">
+                <strong>Interviewer page</strong> — a pre-chat “Choose your interviewer” step, and
+                an Interviewer segment in the in-conversation switcher (today’s behaviour).{' '}
+                <strong>Current-interviewer chip</strong> — no pre-chat step; the conversation opens
+                on the default persona and an “Interviewer: {'{name}'} · Change” chip opens a modal
+                to switch anytime. <strong>Both</strong> — the pre-chat page plus the chip (whose
+                Change returns to the page).
+              </FieldHelp>
+            </Label>
+            <Select
+              value={selection.switcher}
+              onValueChange={(v) => onSelectionChange({ switcher: v as PersonaSwitcher })}
+              disabled={busy}
+            >
+              <SelectTrigger className="max-w-xs">
+                <SelectValue placeholder="Select a switcher style" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="page">Interviewer page (pre-chat step)</SelectItem>
+                <SelectItem value="indicator">Current-interviewer chip (opens a modal)</SelectItem>
+                <SelectItem value="both">Both — page + chip</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
 
-                <div className="space-y-1">
-                  <Label className="text-xs font-medium">
-                    Persona prompt{' '}
-                    <FieldHelp title="Persona prompt">
-                      Cast the interviewer in this character — it speaks from that perspective. Free
-                      text, a sentence or two. Leave blank to define the persona through the tone
-                      sliders alone.
-                    </FieldHelp>
-                  </Label>
-                  <Textarea
-                    value={persona.tone.persona.text}
-                    onChange={(e) => setPersonaProse(index, e.target.value)}
-                    maxLength={TONE_PERSONA_MAX_LENGTH}
-                    rows={2}
-                    disabled={busy}
-                    placeholder="e.g. You are a warm stand-up comedian at heart, keeping things light."
-                  />
+          {selected && (
+            <div className="border-border/70 bg-muted/20 space-y-3 rounded-lg border p-4">
+              <div>
+                <p className="text-muted-foreground text-xs font-medium">Name</p>
+                <p className="flex items-center gap-2 text-sm font-medium">
+                  {selected.label.trim() || selected.key}
+                  {selected.key === selectedKey && (
+                    <span className="inline-flex items-center rounded-full bg-violet-500/10 px-2 py-0.5 text-xs font-medium text-violet-600 dark:text-violet-400">
+                      Default
+                    </span>
+                  )}
+                </p>
+              </div>
+              {selected.description.trim() && (
+                <div>
+                  <p className="text-muted-foreground text-xs font-medium">
+                    Description (shown to respondent)
+                  </p>
+                  <p className="text-sm">{selected.description}</p>
                 </div>
-
-                <details className="group">
-                  <summary className="text-muted-foreground hover:text-foreground cursor-pointer text-xs font-medium">
-                    Tone dials
-                  </summary>
-                  <div className="mt-3 space-y-3">
-                    {TONE_DIMENSION_META.map((meta) => (
-                      <ToneDimensionRow
-                        key={meta.key}
-                        meta={meta}
-                        value={persona.tone[meta.key]}
-                        busy={busy}
-                        onToggle={(enabled) => setPersonaTone(index, meta.key, { enabled })}
-                        onLevel={(level) => setPersonaTone(index, meta.key, { level })}
-                      />
+              )}
+              {selected.tone.persona.text.trim() && (
+                <div>
+                  <p className="text-muted-foreground text-xs font-medium">Persona prompt</p>
+                  <p className="text-muted-foreground text-sm whitespace-pre-line">
+                    {selected.tone.persona.text}
+                  </p>
+                </div>
+              )}
+              <div>
+                <p className="text-muted-foreground text-xs font-medium">
+                  Tone{' '}
+                  <FieldHelp title="Persona tone">
+                    The tone dials this persona applies on top of its prompt — the same nine
+                    dimensions as this version’s Interviewer tone &amp; persona. These are fixed per
+                    persona; only the dimensions shown are active (each 1–5).
+                  </FieldHelp>
+                </p>
+                {activeToneDials(selected).length > 0 ? (
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {activeToneDials(selected).map((dial) => (
+                      <span
+                        key={dial.label}
+                        className="border-border/70 bg-background text-foreground inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs"
+                      >
+                        {dial.label}
+                        <span className="text-muted-foreground font-medium">{dial.level}/5</span>
+                      </span>
                     ))}
                   </div>
-                </details>
+                ) : (
+                  <p className="text-muted-foreground text-sm">Neutral — no tone dials applied.</p>
+                )}
               </div>
-            ))}
-          </div>
-
-          <Button type="button" variant="outline" size="sm" onClick={addPersona} disabled={busy}>
-            <Plus className="mr-1.5 h-4 w-4" />
-            Add persona
-          </Button>
+            </div>
+          )}
         </>
       )}
     </div>

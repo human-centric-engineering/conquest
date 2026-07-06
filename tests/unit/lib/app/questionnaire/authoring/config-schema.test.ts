@@ -328,88 +328,56 @@ describe('updateConfigSchema — tone (F-tone)', () => {
   });
 });
 
-describe('updateConfigSchema — personas & selection (F-persona)', () => {
-  /** A complete tone block reused as each persona's voice. */
-  const tone = {
-    empathy: { enabled: false, level: 3 },
-    mirroring: { enabled: false, level: 3 },
-    formality: { enabled: false, level: 3 },
-    mimicry: { enabled: false, level: 3 },
-    verbosity: { enabled: false, level: 3 },
-    warmth: { enabled: false, level: 3 },
-    curiosity: { enabled: false, level: 3 },
-    readingComplexity: { enabled: false, level: 3 },
-    humour: { enabled: true, level: 5 },
-    persona: { enabled: true, text: 'You are a warm comedian.' },
-  };
-  const p = (key: string) => ({ key, label: `Label ${key}`, description: 'A voice.', tone });
-
-  it('accepts a valid persona library', () => {
-    expect(updateConfigSchema.safeParse({ personas: [p('a'), p('b')] }).success).toBe(true);
-  });
-
-  it('rejects a non-slug persona key', () => {
-    expect(updateConfigSchema.safeParse({ personas: [p('Bad Key')] }).success).toBe(false);
-  });
-
-  it('rejects an empty label or over-long description', () => {
-    expect(updateConfigSchema.safeParse({ personas: [{ ...p('a'), label: '' }] }).success).toBe(
-      false
-    );
-    expect(
-      updateConfigSchema.safeParse({ personas: [{ ...p('a'), description: 'x'.repeat(200) }] })
-        .success
-    ).toBe(false);
-  });
-
-  it('rejects a persona with an unknown tone key (strict) or missing tone', () => {
+describe('updateConfigSchema — persona selection (F-persona)', () => {
+  // The persona library is fixed (BUILT_IN_PERSONAS) — no custom library is accepted; only the
+  // on/off toggle and a built-in default key are stored.
+  it('accepts a personaSelection whose default is a built-in persona key', () => {
     expect(
       updateConfigSchema.safeParse({
-        personas: [{ ...p('a'), tone: { ...tone, bogus: { enabled: true, level: 3 } } }],
-      }).success
-    ).toBe(false);
-    expect(
-      updateConfigSchema.safeParse({ personas: [{ key: 'a', label: 'A', description: '' }] })
-        .success
-    ).toBe(false);
-  });
-
-  it('rejects duplicate persona keys', () => {
-    const res = updateConfigSchema.safeParse({ personas: [p('a'), p('a')] });
-    expect(res.success).toBe(false);
-  });
-
-  it('accepts a personaSelection whose default is in the sent library', () => {
-    expect(
-      updateConfigSchema.safeParse({
-        personas: [p('a'), p('b')],
-        personaSelection: { enabled: true, defaultPersonaKey: 'b' },
+        personaSelection: { enabled: true, defaultPersonaKey: 'neutral-coach', switcher: 'page' },
       }).success
     ).toBe(true);
   });
 
-  it('rejects a default persona key absent from the sent library', () => {
+  it('rejects a default persona key that is not a built-in persona', () => {
+    expect(
+      updateConfigSchema.safeParse({
+        personaSelection: { enabled: true, defaultPersonaKey: 'not-a-builtin', switcher: 'page' },
+      }).success
+    ).toBe(false);
+  });
+
+  it('accepts each valid switcher style and rejects an unknown one', () => {
+    for (const switcher of ['page', 'indicator', 'both']) {
+      expect(
+        updateConfigSchema.safeParse({
+          personaSelection: { enabled: true, defaultPersonaKey: 'director', switcher },
+        }).success
+      ).toBe(true);
+    }
+    expect(
+      updateConfigSchema.safeParse({
+        personaSelection: { enabled: true, defaultPersonaKey: 'director', switcher: 'modal' },
+      }).success
+    ).toBe(false);
+  });
+
+  it('ignores a custom persona library — a stray `personas` field is not stored', () => {
+    const custom = [{ key: 'a', label: 'A', description: 'A voice.' }];
+    // Sent alongside a valid selection: parses, but `personas` is stripped (not a known field).
     const res = updateConfigSchema.safeParse({
-      personas: [p('a'), p('b')],
-      personaSelection: { enabled: true, defaultPersonaKey: 'zzz' },
+      personas: custom,
+      personaSelection: { enabled: true, defaultPersonaKey: 'director', switcher: 'both' },
     });
-    expect(res.success).toBe(false);
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.data).not.toHaveProperty('personas');
+    }
   });
 
-  it('accepts a built-in default key when the library is omitted (read path fills built-ins)', () => {
-    expect(
-      updateConfigSchema.safeParse({
-        personaSelection: { enabled: true, defaultPersonaKey: 'neutral-coach' },
-      }).success
-    ).toBe(true);
-  });
-
-  it('rejects an unknown default key when the library is omitted', () => {
-    expect(
-      updateConfigSchema.safeParse({
-        personaSelection: { enabled: true, defaultPersonaKey: 'not-a-builtin' },
-      }).success
-    ).toBe(false);
+  it('rejects a payload whose only field is a (now-ignored) persona library', () => {
+    // `personas` is stripped, leaving no field to update.
+    expect(updateConfigSchema.safeParse({ personas: [{ key: 'a' }] }).success).toBe(false);
   });
 });
 
