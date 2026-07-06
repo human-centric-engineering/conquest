@@ -13,9 +13,9 @@ import { BUILT_IN_PERSONAS, BUILT_IN_PERSONA_KEYS } from '@/lib/app/questionnair
 import { narrowPersonas } from '@/lib/app/questionnaire/persona/settings';
 import {
   DEFAULT_PERSONA_KEY,
-  DEFAULT_TONE_SETTINGS,
   PERSONA_DESCRIPTION_MAX_LENGTH,
   PERSONA_LABEL_MAX_LENGTH,
+  TONE_DIMENSION_KEYS,
   TONE_PERSONA_MAX_LENGTH,
 } from '@/lib/app/questionnaire/types';
 
@@ -26,11 +26,13 @@ describe('BUILT_IN_PERSONAS', () => {
     expect(new Set(keys).size).toBe(keys.length);
   });
 
-  it('leads with the neutral default, which behaves like the all-off baseline', () => {
+  it('leads with the neutral default, seeded as an objective coach (prompt + dials)', () => {
     const first = BUILT_IN_PERSONAS[0];
     expect(first.key).toBe(DEFAULT_PERSONA_KEY);
-    expect(first.tone).toEqual(DEFAULT_TONE_SETTINGS);
-    expect(first.tone.persona.enabled).toBe(false);
+    // The default is a fully-seeded persona, not an empty baseline.
+    expect(first.tone.persona.enabled).toBe(true);
+    expect(first.tone.persona.text.trim().length).toBeGreaterThan(0);
+    expect(first.tone.curiosity.enabled).toBe(true);
   });
 
   it('gives every persona a bounded, non-empty label + description and slug key', () => {
@@ -44,10 +46,12 @@ describe('BUILT_IN_PERSONAS', () => {
     }
   });
 
-  it('enables the persona overlay for every character (only the neutral coach leaves it off)', () => {
-    for (const p of BUILT_IN_PERSONAS.slice(1)) {
+  it('ships every persona fully seeded — a persona prompt and at least one enabled tone dial', () => {
+    for (const p of BUILT_IN_PERSONAS) {
       expect(p.tone.persona.enabled).toBe(true);
       expect(p.tone.persona.text.trim().length).toBeGreaterThan(0);
+      const anyDialOn = TONE_DIMENSION_KEYS.some((k) => p.tone[k].enabled);
+      expect(anyDialOn).toBe(true);
     }
   });
 

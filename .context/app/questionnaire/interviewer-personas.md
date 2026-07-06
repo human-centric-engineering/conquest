@@ -24,9 +24,11 @@ Two new JSON columns on `AppQuestionnaireConfig`, plus one column on the session
 - **`AppQuestionnaireSession.selectedPersonaKey`** — the respondent's choice (null ⇒ default applies).
 
 The **built-in library** is seeded, not stored: `BUILT_IN_PERSONAS`
-(`lib/app/questionnaire/persona/presets.ts`) — the neutral `neutral-coach` default (all-off tone +
-empty prose, i.e. today's baseline voice) plus six characters. The admin may edit/extend the list per
-questionnaire; an unconfigured questionnaire shows the built-ins.
+(`lib/app/questionnaire/persona/presets.ts`) — the `neutral-coach` default (a calm, objective
+coach/consultant grounded in human & organisational psychology) plus six characters. **Every persona
+ships fully seeded** — a persona prompt _and_ tone dials — so an admin opening the library sees each
+one pre-filled. The admin may edit/extend the list per questionnaire; an unconfigured questionnaire
+shows the built-ins.
 
 ## How a choice takes effect
 
@@ -56,8 +58,8 @@ session.selectedPersonaKey ─┘   (falls back to config.tone when selection is
 ## Precedence — a chosen persona fully governs
 
 When selection is on, the persona **replaces** the version's tone/persona (one clear source of voice);
-it does not layer on top. The `neutral-coach` default is deliberately all-off with empty prose, so
-choosing it reproduces the baseline interviewer exactly.
+it does not layer on top. Even the `neutral-coach` default is a seeded persona (objective coach
+prompt + gentle dials), so choosing it applies that voice — it is not the bare baseline.
 
 ## Client safety
 

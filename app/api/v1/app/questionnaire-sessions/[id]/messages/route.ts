@@ -436,8 +436,8 @@ async function handleMessage(
     // Interviewer tone & persona (F-tone): tone shapes the turn when EITHER the F-tone flag is on
     // (the version's own sliders/persona) OR respondent persona selection is on (a chosen persona's
     // voice, already folded into `toneConfig` above). It's only actually applied when the resolved
-    // tone has the persona or at least one dimension enabled — so the neutral all-off default (incl.
-    // the neutral-coach persona) keeps today's voice and we omit `tone` from the phraser input.
+    // tone has the persona or at least one dimension enabled — so a tone with nothing enabled (the
+    // all-off default) keeps today's voice and we omit `tone` from the phraser input.
     const toneActive =
       (toneFlag || personaSelectionActive) &&
       (toneConfig.persona.enabled || TONE_DIMENSION_KEYS.some((key) => toneConfig[key].enabled));

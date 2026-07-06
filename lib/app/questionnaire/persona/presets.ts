@@ -8,8 +8,9 @@
  * machinery. The read path fills these in when a version's `personas` config is empty
  * ({@link narrowPersonas}); admins may edit or extend the list per questionnaire.
  *
- * `neutral-coach` is the default ({@link DEFAULT_PERSONA_KEY}): all-off tone + empty prose, so
- * choosing it reproduces today's baseline interviewer voice exactly.
+ * `neutral-coach` is the default ({@link DEFAULT_PERSONA_KEY}): a calm, objective coach/consultant
+ * grounded in human & organisational psychology — the balanced choice. Like every persona it ships
+ * fully seeded (prompt + tone dials), so an admin opening the library sees each one pre-filled.
  */
 
 import {
@@ -24,7 +25,7 @@ import {
 /**
  * Build a persona's {@link ToneSettings} from prose + a sparse map of dimension levels. Named
  * dimensions are enabled at the given level; the rest stay disabled at neutral. Empty prose leaves
- * the persona overlay off (the neutral default), so the interviewer keeps its baseline framing.
+ * the persona overlay off; a non-empty prompt enables it.
  */
 function personaTone(
   personaText: string,
@@ -63,8 +64,12 @@ export const BUILT_IN_PERSONAS: readonly PersonaOption[] = [
     label: 'The Coach',
     description:
       'Calm, objective and grounded in human and organisational psychology. The balanced default.',
-    // All-off tone + no overlay ⇒ identical to today's baseline interviewer voice.
-    tone: DEFAULT_TONE_SETTINGS,
+    tone: personaTone(
+      'You are a calm, objective coach and consultant who understands human and organisational ' +
+        'psychology. You walk the respondent through their experiences — not to give advice or ' +
+        'validation, but to help them explore and clearly articulate what is really going on.',
+      { curiosity: 4, warmth: 2 }
+    ),
   },
   {
     key: 'empath',
