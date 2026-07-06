@@ -638,10 +638,11 @@ export function SessionWorkspace({
             aria-expanded={reviewOpen}
             aria-label={`Review answers${reviewCountLabel ? `, ${reviewCountLabel}` : ''}`}
           >
-            <ClipboardList className="h-3.5 w-3.5" aria-hidden="true" />
-            Review answers
-            {/* The count is redundant with the top progress bar's percent; show it only where
-                there's room (≥sm), so phones get a compact icon + label that won't squash. */}
+            <ClipboardList className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            {/* Keep the word on normal mobile; only ≤360px collapse to the icon alone. The count is
+                redundant with the top progress bar, so it stays a ≥sm nicety. `aria-label` keeps the
+                control named when it's icon-only. */}
+            <span className="max-[360px]:hidden">Review answers</span>
             {reviewCountLabel && (
               <span className="text-muted-foreground ml-1.5 hidden sm:inline">
                 · {reviewCountLabel}
@@ -729,12 +730,18 @@ export function SessionWorkspace({
         // "Continue" only once a real answer exists — a merely-opened/resumed session at 0% still
         // reads "Begin" (the workspace's `started` flag governs the kickoff, not this label).
         inProgress={(lifecycle.view?.completion.answeredCount ?? 0) > 0}
+        // When the interviewer picker rides between the intro and the chat, the intro CTA leads to it,
+        // not straight into the conversation — so it reads "Select your interviewer". The configured
+        // begin label then lands on the picker's own CTA (below).
+        proceedLabel={showPersona ? 'Select your interviewer' : undefined}
         onProceed={() => goToView(views.find((v) => v !== 'intro') ?? 'chat')}
       />
     ) : null;
 
   // The "Choose your interviewer" surface. Picking persists the choice; Continue slides to the chat
   // (which releases the deferred kickoff, now with the chosen persona already in place server-side).
+  // As the last gate before the conversation, its CTA carries the configured begin label ("Begin your
+  // conversation"), right-aligned so it reads as the final step of the pre-chat flow.
   const personaSurface =
     showPersona && personas ? (
       <PersonaPicker
@@ -743,6 +750,8 @@ export function SessionWorkspace({
         defaultKey={personas.defaultPersonaKey}
         onChoose={choosePersona}
         onContinue={() => goToView('chat')}
+        continueLabel={intro?.copy.buttonLabel ?? 'Begin your conversation'}
+        alignEnd
       />
     ) : null;
 

@@ -46,6 +46,8 @@ export interface PersonaPickerProps {
   /** Heading — differs slightly between the pre-chat step and the mid-chat switcher. */
   heading?: string;
   subheading?: string;
+  /** Right-align the Continue CTA (the pre-chat step). Defaults to left-aligned (the modal switcher). */
+  alignEnd?: boolean;
 }
 
 export function PersonaPicker({
@@ -58,6 +60,7 @@ export function PersonaPicker({
   continueLabel = 'Start the conversation',
   heading = 'Choose your interviewer',
   subheading = 'Each interviewer asks in their own style. Pick whoever you’d most like to talk with — you can change your mind at any time.',
+  alignEnd = false,
 }: PersonaPickerProps) {
   // What's visibly selected: the respondent's explicit choice, else the configured default.
   const activeKey = selectedKey ?? defaultKey;
@@ -141,7 +144,12 @@ export function PersonaPicker({
         </div>
       </div>
 
-      <div className="border-border/60 mx-auto w-full max-w-3xl shrink-0 border-t px-4 py-4">
+      <div
+        className={cn(
+          'border-border/60 mx-auto flex w-full max-w-3xl shrink-0 border-t px-4 py-4',
+          alignEnd && 'sm:justify-end'
+        )}
+      >
         <button
           type="button"
           onClick={onContinue}

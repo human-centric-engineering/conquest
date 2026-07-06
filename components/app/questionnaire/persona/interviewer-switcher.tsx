@@ -49,9 +49,9 @@ export function CurrentInterviewerChip({
       type="button"
       onClick={onChange}
       disabled={busy}
-      aria-haspopup="dialog"
+      aria-label={`Change interviewer — currently ${label}`}
       className={cn(
-        'inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition',
+        'inline-flex max-w-[60vw] min-w-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition sm:max-w-none sm:px-3',
         'hover:border-transparent focus-visible:ring-2 focus-visible:outline-none',
         'disabled:cursor-not-allowed disabled:opacity-60',
         className
@@ -59,17 +59,21 @@ export function CurrentInterviewerChip({
       style={{ borderColor: 'var(--border)' }}
     >
       <span
-        className="flex h-4 w-4 items-center justify-center rounded-full"
+        className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full"
         style={{ backgroundColor: ACCENT_SOFT, color: ACCENT }}
       >
         <Drama className="h-2.5 w-2.5" aria-hidden="true" />
       </span>
-      <span className="text-muted-foreground">Interviewer:</span>
-      <span className="text-foreground">{label}</span>
-      <span aria-hidden="true" className="text-muted-foreground">
+      {/* Keep the "Interviewer:" prefix on normal mobile; drop it only ≤360px so the name keeps its
+          room. The name truncates as a backstop for very long persona labels. */}
+      <span className="text-muted-foreground shrink-0 max-[360px]:hidden">Interviewer:</span>
+      <span className="text-foreground truncate">{label}</span>
+      <span aria-hidden="true" className="text-muted-foreground shrink-0">
         ·
       </span>
-      <span style={{ color: ACCENT }}>Change</span>
+      <span className="shrink-0" style={{ color: ACCENT }}>
+        Change
+      </span>
     </button>
   );
 }
