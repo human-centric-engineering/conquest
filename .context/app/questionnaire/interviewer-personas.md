@@ -1,8 +1,8 @@
 # Selectable interviewer personas (F-persona)
 
 Lets a **respondent choose which interviewer they talk with** — a cynical curmudgeon, a warm
-encourager, a stand-up comedian, a reflective philosopher, a get-to-the-point director, a sceptical
-realist, or the neutral coach — when the admin opts a questionnaire in. It builds directly on
+encourager, a casual confidant, a stand-up comedian, a reflective philosopher, a get-to-the-point
+director, a sceptical realist, or the neutral coach — when the admin opts a questionnaire in. It builds directly on
 [interviewer-tone](./interviewer-tone.md): a persona _is_ a named `ToneSettings`, so a chosen persona
 flows through the exact same phraser pipeline (`buildToneInstructions`) with no new prompt machinery.
 
@@ -29,10 +29,10 @@ One stored setting on `AppQuestionnaireConfig`, plus one column on the session:
 
 The **library is fixed and hard-coded**: `BUILT_IN_PERSONAS`
 (`lib/app/questionnaire/persona/presets.ts`) — the `neutral-coach` default (a calm, objective
-coach/consultant grounded in human & organisational psychology) plus six characters. Each is a
+coach/consultant grounded in human & organisational psychology) plus seven characters. Each is a
 `PersonaOption` (`{ key, label, description, tone: ToneSettings }`) whose `tone` block holds the whole
 voice (prose in `tone.persona.text`, character in the dimension levels). The admin cannot edit or
-extend the set — every questionnaire uses the same seven.
+extend the set — every questionnaire uses the same eight.
 
 ## How a choice takes effect
 

@@ -59,7 +59,7 @@ describe('resolveSessionPersonas', () => {
     dbMock.findUnique.mockResolvedValue(
       row({ personaSelection: { enabled: true, defaultPersonaKey: 'neutral-coach' } })
     );
-    expect((await resolveSessionPersonas('s'))?.enabled).toBe(true); // built-ins → 7 personas
+    expect((await resolveSessionPersonas('s'))?.enabled).toBe(true); // built-ins → 8 personas
 
     dbMock.findUnique.mockResolvedValue(
       row({ personaSelection: { enabled: false, defaultPersonaKey: 'neutral-coach' } })

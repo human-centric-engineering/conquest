@@ -20,8 +20,8 @@ import {
 } from '@/lib/app/questionnaire/types';
 
 describe('BUILT_IN_PERSONAS', () => {
-  it('ships seven personas with unique keys', () => {
-    expect(BUILT_IN_PERSONAS).toHaveLength(7);
+  it('ships eight personas with unique keys', () => {
+    expect(BUILT_IN_PERSONAS).toHaveLength(8);
     const keys = BUILT_IN_PERSONAS.map((p) => p.key);
     expect(new Set(keys).size).toBe(keys.length);
   });

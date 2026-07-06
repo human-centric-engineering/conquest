@@ -5,8 +5,8 @@
  * a self-contained {@link ToneSettings}: its prose lives in `tone.persona.text` and its character
  * comes from a hand-tuned set of tone dimensions — so a chosen persona flows straight through the
  * existing `buildToneInstructions` pipeline (`lib/app/questionnaire/chat/tone.ts`) with no new prompt
- * machinery. The read path fills these in when a version's `personas` config is empty
- * ({@link narrowPersonas}); admins may edit or extend the list per questionnaire.
+ * machinery. This library is FIXED — {@link narrowPersonas} always returns it; admins cannot edit or
+ * extend it (they choose whether respondents may pick, the default, and the switcher style only).
  *
  * `neutral-coach` is the default ({@link DEFAULT_PERSONA_KEY}): a calm, objective coach/consultant
  * grounded in human & organisational psychology — the balanced choice. Like every persona it ships
@@ -54,7 +54,7 @@ function personaTone(
 }
 
 /**
- * The seven built-in personas: the neutral default plus six distinctive characters. Order is the
+ * The eight built-in personas: the neutral default plus seven distinctive characters. Order is the
  * order shown in the picker (default first). Keys are stable — they are persisted as the session's
  * choice and referenced by `personaSelection.defaultPersonaKey`.
  */
@@ -80,6 +80,17 @@ export const BUILT_IN_PERSONAS: readonly PersonaOption[] = [
       'You are a deeply empathetic, encouraging interviewer. You lead with warmth, make people feel ' +
         'genuinely heard, and gently validate what they share before continuing.',
       { empathy: 5, warmth: 5, mirroring: 4, curiosity: 4 }
+    ),
+  },
+  {
+    key: 'confidant',
+    label: 'The Confidant',
+    description: 'Warm, casual and easy — like talking something through with a trusted friend.',
+    tone: personaTone(
+      'You are a warm, easy-going confidant — the kind of friend someone talks things through with. ' +
+        'You keep it relaxed and informal, never judge, and make it feel like a genuine ' +
+        'off-the-record chat rather than an interview.',
+      { warmth: 4, formality: 1, empathy: 4, mirroring: 4, humour: 2 }
     ),
   },
   {
