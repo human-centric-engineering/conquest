@@ -10,7 +10,9 @@
  * PATCH /api/v1/app/questionnaire-sessions/:id/persona   body: { personaKey: string | null }
  *   → { success: true, data: { selectedPersonaKey: string | null } }
  *   Persists the respondent's chosen interviewer on the session. 404 when the platform flag is off;
- *   422 when the key isn't one of the version's personas. `null` clears the choice (⇒ default applies).
+ *   422 when respondent switching isn't enabled for the version (no picker ⇒ a crafted request can't
+ *   override the pinned persona) or when the key isn't one of the version's personas. `null` clears
+ *   the choice (⇒ default applies), but only while switching is enabled.
  *
  * Both respondent kinds (authenticated owner OR a valid anonymous/preview `X-Session-Token`) via
  * `resolveTurnAccess`, exactly like the turn/transcript/intro routes. Inherits the standard 100/min
@@ -96,10 +98,20 @@ async function handleSetPersona(
 
     const { personaKey } = await validateRequestBody(request, setPersonaSchema);
 
+    // Respondent switching must be allowed for this version (built-in mode on AND `allowRespondentSwitch`
+    // AND ≥2 personas — all folded into `resolved.enabled`). When it isn't, there's no picker, so a
+    // crafted request can't override the pinned persona or clear a choice.
+    const resolved = await resolveSessionPersonas(sessionId);
+    if (!resolved?.enabled) {
+      return errorResponse('Persona switching is not enabled for this questionnaire', {
+        code: 'VALIDATION_ERROR',
+        status: 422,
+      });
+    }
+
     // Validate against the resolved library so a crafted request can't pin a non-existent persona.
     if (personaKey !== null) {
-      const resolved = await resolveSessionPersonas(sessionId);
-      const known = resolved?.personas.some((p) => p.key === personaKey) ?? false;
+      const known = resolved.personas.some((p) => p.key === personaKey);
       if (!known) {
         return errorResponse('Unknown persona', {
           code: 'VALIDATION_ERROR',

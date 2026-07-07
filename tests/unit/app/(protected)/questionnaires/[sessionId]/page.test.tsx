@@ -77,6 +77,7 @@ vi.mock('@/lib/app/questionnaire/feature-flag', () => ({
   isAttachmentInputEnabled: vi.fn(),
   isReasoningStreamEnabled: vi.fn(),
   isIntroScreenEnabled: vi.fn(),
+  isPersonaSelectionEnabled: vi.fn(),
 }));
 
 /**
@@ -165,6 +166,7 @@ import {
   isAttachmentInputEnabled,
   isIntroScreenEnabled,
   isLiveSessionsEnabled,
+  isPersonaSelectionEnabled,
   isReasoningStreamEnabled,
   isVoiceInputEnabled,
 } from '@/lib/app/questionnaire/feature-flag';
@@ -285,6 +287,7 @@ describe('QuestionnaireSessionPage', () => {
     vi.mocked(isAttachmentInputEnabled).mockResolvedValue(false);
     vi.mocked(isReasoningStreamEnabled).mockResolvedValue(false);
     vi.mocked(isIntroScreenEnabled).mockResolvedValue(false);
+    vi.mocked(isPersonaSelectionEnabled).mockResolvedValue(false);
     vi.mocked(resolveThemeForSession).mockResolvedValue(MOCK_THEME);
     vi.mocked(getServerSession).mockResolvedValue(MOCK_SESSION);
     vi.mocked(prisma.appQuestionnaireSession.findUnique).mockResolvedValue(makeRow() as never);

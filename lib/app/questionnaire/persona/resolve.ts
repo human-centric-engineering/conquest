@@ -8,8 +8,9 @@
  * narrowers are pure and shared with the read/write paths.
  *
  * `enabled` here means "show the picker": it does NOT consult the platform flag — the caller (route /
- * page) gates on `isPersonaSelectionEnabled()` first, exactly as the intro surface does. A library
- * with fewer than two personas can't offer a meaningful choice, so `enabled` is false then.
+ * page) gates on `isPersonaSelectionEnabled()` first, exactly as the intro surface does. It requires
+ * built-in persona mode on AND respondent switching allowed AND at least two personas — when
+ * switching is off the pinned persona still governs the interviewer, there's just no picker.
  */
 
 import { prisma } from '@/lib/db/client';
@@ -68,7 +69,10 @@ export async function resolveSessionPersonas(
   const selection = narrowPersonaSelection(config?.personaSelection);
 
   return {
-    enabled: selection.enabled && personas.length >= 2,
+    // Show the picker only when built-in mode is on, respondents are allowed to switch, and there
+    // are at least two personas to choose between. When switching is off the pinned default persona
+    // still governs the interviewer (via `resolveEffectiveTone`) — there's just nothing to pick.
+    enabled: selection.enabled && selection.allowRespondentSwitch && personas.length >= 2,
     // Strip the tone/prompt prose — the respondent only ever sees name + description.
     personas: personas.map((p) => ({ key: p.key, label: p.label, description: p.description })),
     selectedPersonaKey: session.selectedPersonaKey,

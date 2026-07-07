@@ -185,6 +185,20 @@ describe('listTurnEvaluations', () => {
   });
 });
 
+/** A valid persisted `AgentCallTrace` (the ref-lookup validates stored calls against the schema). */
+function makeCall(overrides: Record<string, unknown> = {}) {
+  return {
+    label: 'Interviewer phrasing',
+    model: 'gpt-5.4',
+    provider: 'openai',
+    latencyMs: 120,
+    costUsd: 0.001,
+    prompt: [{ role: 'system', content: 'You are an interviewer.' }],
+    response: 'Whereabouts?',
+    ...overrides,
+  };
+}
+
 describe('lookupSessionByRef', () => {
   beforeEach(() => {
     (prismaMock.appQuestionnaireSession.findUnique as Mock).mockResolvedValue({
@@ -200,7 +214,7 @@ describe('lookupSessionByRef', () => {
         ordinal: 1,
         userMessage: 'I rent a flat',
         agentResponse: 'Whereabouts?',
-        inspectorCalls: [{ label: 'a' }, { label: 'b' }],
+        inspectorCalls: [makeCall({ label: 'a' }), makeCall({ label: 'b' })],
         createdAt: new Date('2026-06-17T00:00:00Z'),
       },
       {
@@ -251,6 +265,47 @@ describe('lookupSessionByRef', () => {
       callCount: 0,
       evaluationCount: 0,
     });
+  });
+
+  it('carries the full (untruncated) messages and the validated call traces', async () => {
+    const longAnswer = 'x'.repeat(5000);
+    (prismaMock.appQuestionnaireTurn.findMany as Mock).mockResolvedValue([
+      {
+        ordinal: 1,
+        userMessage: longAnswer,
+        agentResponse: 'Whereabouts?',
+        inspectorCalls: [makeCall({ label: 'Answer extraction', response: 'central london' })],
+        createdAt: new Date('2026-06-17T00:00:00Z'),
+      },
+    ]);
+
+    const result = await lookupSessionByRef('7F3K9M2P');
+    const turn = result?.turns[0];
+    // Full text, not truncated to a 200-char preview.
+    expect(turn?.userMessage).toBe(longAnswer);
+    expect(turn?.userMessage).not.toContain('…');
+    // The raw call trace (prompt + response) is passed through, typed.
+    expect(turn?.calls).toHaveLength(1);
+    expect(turn?.calls[0].label).toBe('Answer extraction');
+    expect(turn?.calls[0].prompt[0].content).toBe('You are an interviewer.');
+    expect(turn?.calls[0].response).toBe('central london');
+  });
+
+  it('drops malformed call entries (fails validation) so the turn still lists without traces', async () => {
+    (prismaMock.appQuestionnaireTurn.findMany as Mock).mockResolvedValue([
+      {
+        ordinal: 1,
+        userMessage: 'Hi',
+        agentResponse: 'Hello',
+        // Structurally invalid: missing required trace fields — must not surface as real calls.
+        inspectorCalls: [{ label: 'a' }, { label: 'b' }],
+        createdAt: new Date('2026-06-17T00:00:00Z'),
+      },
+    ]);
+
+    const result = await lookupSessionByRef('7F3K9M2P');
+    expect(result?.turns[0]).toMatchObject({ callCount: 0, hasTraces: false });
+    expect(result?.turns[0].calls).toEqual([]);
   });
 
   it('returns null when normalizeSessionRef returns a falsy value for an invalid ref', async () => {

@@ -855,11 +855,12 @@ export const APP_QUESTIONNAIRES_REASONING_STREAM_FLAG =
 export const APP_QUESTIONNAIRES_TONE_FLAG = 'APP_QUESTIONNAIRES_TONE_ENABLED';
 
 /**
- * Platform feature flag gating **selectable interviewer personas** (F-persona) — the per-version
- * persona *library* and the respondent-facing picker that lets a respondent choose which interviewer
- * they engage with. DB-backed, seeded disabled by `063-persona-selection-flag.ts`. ANDs with the
- * per-version `personaSelection.enabled` toggle; when off, the persona step/switcher never render and
- * the version's own tone prevails (`resolveEffectiveTone` returns it unchanged).
+ * Platform feature flag gating **built-in interviewer personas** (F-persona) — the fixed persona
+ * library and the respondent-facing picker/switcher. DB-backed, seeded disabled by
+ * `063-persona-selection-flag.ts`. ANDs with the per-version `personaSelection.enabled` toggle (which
+ * side of the tone-vs-persona either/or the version is on); when off, the version's own tone prevails
+ * (`resolveEffectiveTone` returns it unchanged). The picker/switcher additionally require the
+ * per-version `personaSelection.allowRespondentSwitch` opt-in.
  */
 export const APP_QUESTIONNAIRES_PERSONA_SELECTION_FLAG =
   'APP_QUESTIONNAIRES_PERSONA_SELECTION_ENABLED';

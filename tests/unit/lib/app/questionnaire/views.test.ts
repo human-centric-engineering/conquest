@@ -198,7 +198,12 @@ function makeConfigView(overrides: Partial<ConfigView> = {}): ConfigView {
       persona: { enabled: false, text: '' },
     },
     personas: [],
-    personaSelection: { enabled: false, defaultPersonaKey: 'neutral-coach', switcher: 'page' },
+    personaSelection: {
+      enabled: false,
+      defaultPersonaKey: 'neutral-coach',
+      allowRespondentSwitch: false,
+      switcher: 'page',
+    },
     respondentReport: {
       enabled: false,
       mode: 'raw',
@@ -380,8 +385,9 @@ function makeTurnEvaluationDetail(
 function makeRefLookupTurn(overrides: Partial<RefLookupTurn> = {}): RefLookupTurn {
   return {
     ordinal: 1,
-    userMessagePreview: 'I rent a flat in Central London',
-    agentResponsePreview: 'Whereabouts in Central London?',
+    userMessage: 'I rent a flat in Central London',
+    agentResponse: 'Whereabouts in Central London?',
+    calls: [],
     callCount: 2,
     hasTraces: true,
     evaluationCount: 1,
@@ -967,13 +973,32 @@ describe('RefLookupTurn', () => {
     expect(turn.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
-  it('carries truncated message previews', () => {
+  it('carries the full (untruncated) respondent and interviewer messages', () => {
+    const longAnswer = 'a'.repeat(5000);
+    const turn = makeRefLookupTurn({ userMessage: longAnswer, agentResponse: 'Tell me more.' });
+    expect(turn.userMessage).toBe(longAnswer);
+    expect(turn.userMessage).not.toContain('…');
+    expect(turn.agentResponse).toBe('Tell me more.');
+  });
+
+  it('carries the full inspector call trace (raw prompt + response per call)', () => {
     const turn = makeRefLookupTurn({
-      userMessagePreview: 'a'.repeat(200) + '…',
-      agentResponsePreview: 'b'.repeat(200) + '…',
+      calls: [
+        {
+          label: 'Interviewer phrasing',
+          model: 'gpt-5.4',
+          provider: 'openai',
+          latencyMs: 120,
+          costUsd: 0.001,
+          prompt: [{ role: 'system', content: 'You are an interviewer.' }],
+          response: 'Whereabouts in Central London?',
+        },
+      ],
+      callCount: 1,
     });
-    expect(turn.userMessagePreview).toHaveLength(201);
-    expect(turn.agentResponsePreview.endsWith('…')).toBe(true);
+    expect(turn.calls).toHaveLength(1);
+    expect(turn.calls[0].prompt[0].content).toBe('You are an interviewer.');
+    expect(turn.calls[0].response).toBe('Whereabouts in Central London?');
   });
 });
 

@@ -130,9 +130,27 @@ describe('GET — access', () => {
   it('returns the menu for a valid anonymous session token', async () => {
     dbMock.findUnique.mockResolvedValue(session({ respondentUserId: null }));
     setAuth(null);
-    tokenMock.verifySessionToken.mockReturnValue({ ok: true, sessionId: 'sess-1' });
+    // mockReturnValueOnce so the stubbed "valid token" verdict can't leak into later tests
+    // (vi.clearAllMocks() clears call history but not a persisted mockReturnValue).
+    tokenMock.verifySessionToken.mockReturnValueOnce({ ok: true, sessionId: 'sess-1' });
     const res = await GET(req('GET', undefined, { 'x-session-token': 'tok' }), ctx);
     expect(res.status).toBe(200);
+  });
+
+  it('401s an unauthenticated request on an owned session, before resolving', async () => {
+    setAuth(null);
+    const res = await GET(req('GET'), ctx);
+    expect(res.status).toBe(401);
+    expect(personaMock.resolveSessionPersonas).not.toHaveBeenCalled();
+  });
+
+  it('401s an anonymous session when the session token is invalid', async () => {
+    dbMock.findUnique.mockResolvedValue(session({ respondentUserId: null }));
+    setAuth(null);
+    tokenMock.verifySessionToken.mockReturnValueOnce({ ok: false, reason: 'bad_signature' });
+    const res = await GET(req('GET', undefined, { 'x-session-token': 'bad' }), ctx);
+    expect(res.status).toBe(401);
+    expect(personaMock.resolveSessionPersonas).not.toHaveBeenCalled();
   });
 });
 
@@ -159,6 +177,14 @@ describe('PATCH — set the chosen persona', () => {
 
   it('422s an unknown persona key without writing', async () => {
     const res = await PATCH(req('PATCH', { personaKey: 'ghost' }), ctx);
+    expect(res.status).toBe(422);
+    expect(dbMock.update).not.toHaveBeenCalled();
+  });
+
+  it('422s when respondent switching is disabled, without writing', async () => {
+    // The pinned persona governs, but there's no picker — a crafted PATCH can't override it.
+    personaMock.resolveSessionPersonas.mockResolvedValue({ ...MENU, enabled: false });
+    const res = await PATCH(req('PATCH', { personaKey: 'comedian' }), ctx);
     expect(res.status).toBe(422);
     expect(dbMock.update).not.toHaveBeenCalled();
   });

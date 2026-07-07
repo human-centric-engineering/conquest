@@ -42,6 +42,7 @@ export function narrowPersonaSelection(value: unknown): PersonaSelectionSettings
   return {
     enabled: obj.enabled === true,
     defaultPersonaKey: defaultPersonaKey.length > 0 ? defaultPersonaKey : DEFAULT_PERSONA_KEY,
+    allowRespondentSwitch: obj.allowRespondentSwitch === true,
     switcher,
   };
 }
@@ -87,6 +88,37 @@ export function resolveEffectiveTone(input: {
   if (!personaSelection.enabled) return toneConfig;
   const persona = selectPersona(personas, selectedPersonaKey, personaSelection.defaultPersonaKey);
   return persona ? persona.tone : toneConfig;
+}
+
+/**
+ * The tone that governs a live session's turns, applying the FULL persona gate — the single seam the
+ * turn loop should use so the gate can't be re-derived inconsistently at the call site. On top of
+ * {@link resolveEffectiveTone} it folds in the two gates that live outside the version config:
+ *   - `personaFlagEnabled` — the platform persona-selection flag(s) (`isPersonaSelectionEnabled()`).
+ *     It's a kill-switch: built-in persona mode governs only when it AND the version toggle are on, so
+ *     when the flag is off the version's own tone prevails (returned unchanged) even if a version was
+ *     left with `personaSelection.enabled` true.
+ *   - `allowRespondentSwitch` — a respondent's own stored `selectedPersonaKey` is honoured only when
+ *     switching is allowed; otherwise the pinned default persona governs everyone (a stale key chosen
+ *     while switching was on is ignored).
+ */
+export function resolveSessionTone(input: {
+  toneConfig: ToneSettings;
+  personas: PersonaOption[];
+  personaSelection: PersonaSelectionSettings;
+  selectedPersonaKey: string | null;
+  personaFlagEnabled: boolean;
+}): ToneSettings {
+  const { toneConfig, personas, personaSelection, selectedPersonaKey, personaFlagEnabled } = input;
+  const modeActive = personaFlagEnabled && personaSelection.enabled;
+  const honorChoice = modeActive && personaSelection.allowRespondentSwitch;
+  return resolveEffectiveTone({
+    toneConfig,
+    personas,
+    // `enabled` carries the full platform-AND-version gate so the kill-switch genuinely disables mode.
+    personaSelection: { ...personaSelection, enabled: modeActive },
+    selectedPersonaKey: honorChoice ? selectedPersonaKey : null,
+  });
 }
 
 export { DEFAULT_PERSONA_SELECTION };

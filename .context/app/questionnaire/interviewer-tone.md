@@ -11,15 +11,19 @@ dark-launched behind a platform flag.
 > and [sensitivity-awareness](./sensitivity-awareness.md) as a respondent-experience feature. Like
 > them it's a **config block + platform flag**, both required to take effect.
 >
-> **Built on by [interviewer-personas](./interviewer-personas.md) (F-persona):** a respondent-selectable
-> library where each persona _is_ a `ToneSettings`, swapped in via `resolveEffectiveTone` at turn time.
+> **Either/or with [interviewer-personas](./interviewer-personas.md) (F-persona):** when the
+> persona-selection flag is on, this custom tone block and the built-in persona library are the two
+> sides of one **mutually-exclusive** choice — the Settings "Interviewer tone & persona" group shows a
+> mode toggle, and a built-in persona (each _is_ a `ToneSettings`) is swapped in via
+> `resolveEffectiveTone` at turn time, **replacing** this block. With the flag off, this is the only
+> voice control.
 
 ## The settings (`ToneSettings`)
 
 One JSON column `tone` on `AppQuestionnaireConfig`, shaped as `ToneSettings`
 (`lib/app/questionnaire/types.ts` — the single source of truth, `TONE_DIMENSION_KEYS` +
 `DEFAULT_TONE_SETTINGS`). Each dimension is `{ enabled: boolean; level: 1–5 }`; `persona` is
-`{ enabled: boolean; text: string }` (≤ 400 chars).
+`{ enabled: boolean; text: string }` (≤ 600 chars).
 
 | Key                 | Kind     | `1` ⟷ `5`                                          |
 | ------------------- | -------- | -------------------------------------------------- |
@@ -37,6 +41,14 @@ One JSON column `tone` on `AppQuestionnaireConfig`, shaped as `ToneSettings`
 **Bipolar** dimensions treat `3` as neutral (no instruction emitted even when enabled); **unipolar**
 intensity dimensions always emit when enabled (`1` = minimal is still a directive). The per-dimension
 toggle is the real off switch — a disabled dimension contributes nothing.
+
+**Display scale (−2…+2).** Levels are **stored 1–5** but **shown to admins on a signed −2…+2 scale
+centred on 0** (display = stored − 3), which reads more naturally: 0 is the balanced midpoint, − and +
+move toward the two poles. The converters `toDisplayLevel` / `fromDisplayLevel`
+(`lib/app/questionnaire/types.ts`) are the only boundary — storage, `DIMENSION_PHRASES`, the schema
+bounds, and the prompt all stay on 1–5, so there is **no migration** (mirrors the coverage
+fraction↔percent split). Preset personas (`persona/presets.ts`) author their dials on the −2…+2 scale
+too. For a bipolar dial, 0 is neutral (adds nothing); for a unipolar dial the scale is just low→high.
 
 ## How it reaches the prompt
 
@@ -81,7 +93,14 @@ only matters inside the `/messages` turn loop). See [feature-flags.md](./feature
 ## UI
 
 The **Interviewer tone & persona** group in `ConfigEditor` (`components/admin/questionnaires/config-editor.tsx`):
-a persona toggle + textarea, then nine dimension rows (enable `Switch`, and when on a 1–5 `Slider`
-with pole captions). The group always renders; a note flags that the platform tone flag is also
-required. The whole block is sent on save and validated by `toneSettingsSchema`
+a persona toggle + textarea, then nine dimension rows (enable `Switch`, and when on a signed −2…+2
+`Slider` centred on 0, with pole captions and a scale legend explaining the balanced-vs-intensity
+split). The group always renders; a note flags that the platform tone flag is also required. The whole block is sent on save and validated by `toneSettingsSchema`
 (`authoring/config-schema.ts`, `.strict()` — unknown keys and out-of-range levels are rejected).
+
+**Live "what's added" preview.** Each dimension row (and the persona textarea) shows the _exact_
+clause the current position injects, so an author sees precisely what the dial does to the prompt.
+This reads straight from the prompt source — `ToneDimensionRow` imports the exported
+`DIMENSION_PHRASES` map, and the persona box calls the exported `personaToneClause(text)` — so the
+preview can never drift from what `buildToneInstructions` actually sends. A neutral-midpoint bipolar
+dial shows "no tone clause is added".

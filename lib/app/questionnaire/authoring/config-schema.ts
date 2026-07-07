@@ -145,15 +145,19 @@ const toneSettingsSchema = z
   .strict();
 
 /**
- * Whether respondents may choose their interviewer + which persona is the default. The persona
- * library itself is fixed ({@link BUILT_IN_PERSONAS}) — not per-version config — so only the
- * on/off toggle and the chosen default key are stored. `defaultPersonaKey` is validated against
- * the built-in keys in the refinement below.
+ * Built-in persona mode (F-persona) — the either/or partner of the custom `tone` block. `enabled`
+ * on ⇒ a built-in library persona governs the interviewer; `defaultPersonaKey` pins which one
+ * (validated against the built-in keys in the refinement below); `allowRespondentSwitch` opts into
+ * letting respondents change it via `switcher` and **defaults to `false`** when omitted (so a
+ * hand-authored or older import file without it still parses — matching the read-path narrower). The
+ * library itself is fixed ({@link BUILT_IN_PERSONAS}) — not per-version config — so no custom personas
+ * are accepted here.
  */
 const personaSelectionSchema = z
   .object({
     enabled: z.boolean(),
     defaultPersonaKey: z.string().trim().min(1).max(PERSONA_KEY_MAX_LENGTH),
+    allowRespondentSwitch: z.boolean().default(false),
     switcher: z.enum(PERSONA_SWITCHERS),
   })
   .strict();

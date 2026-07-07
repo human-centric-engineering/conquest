@@ -70,8 +70,13 @@ export function narrowToneSettings(value: unknown): ToneSettings {
   };
 }
 
-/** Per-dimension level→clause map. An empty string at a level means "emit nothing" (neutral). */
-const DIMENSION_PHRASES: Record<ToneDimensionKey, Record<number, string>> = {
+/**
+ * Per-dimension level→clause map — the single source of truth for the imperative clause each 1–5
+ * slider position injects. An empty string at a level means "emit nothing" (neutral). Exported so the
+ * admin tone editor can preview the exact clause a position adds (`tone-dimensions.tsx`), guaranteed
+ * in sync with what the phraser actually sends.
+ */
+export const DIMENSION_PHRASES: Record<ToneDimensionKey, Record<number, string>> = {
   empathy: {
     1: 'Keep your manner matter-of-fact and neutral; do not dwell on feelings.',
     2: 'Lean factual — acknowledge any feelings only lightly.',
@@ -148,6 +153,17 @@ function ensureSentence(text: string): string {
 }
 
 /**
+ * The exact persona clause {@link buildToneInstructions} injects for a given free-text persona — the
+ * leading "Adopt this persona…" wrapper around the admin's prose. Empty for blank text. Exported so
+ * the tone editor can preview the precise clause the persona adds, without duplicating the wrapper.
+ */
+export function personaToneClause(personaText: string): string {
+  const text = personaText.trim();
+  if (text.length === 0) return '';
+  return `Adopt this persona throughout — let it shape your voice and the perspective you bring: ${ensureSentence(text)}`;
+}
+
+/**
  * Render the enabled tone dimensions (+ persona) into a compact clause block for the phraser's
  * system prompt. Persona leads (it frames who is speaking), then the dimensions in declared order.
  * Returns `''` when nothing is enabled — the caller then emits no tone guidance at all.
@@ -156,12 +172,8 @@ export function buildToneInstructions(tone: ToneSettings): string {
   const clauses: string[] = [];
 
   if (tone.persona.enabled) {
-    const text = tone.persona.text.trim();
-    if (text.length > 0) {
-      clauses.push(
-        `Adopt this persona throughout — let it shape your voice and the perspective you bring: ${ensureSentence(text)}`
-      );
-    }
+    const clause = personaToneClause(tone.persona.text);
+    if (clause) clauses.push(clause);
   }
 
   for (const key of TONE_DIMENSION_KEYS) {

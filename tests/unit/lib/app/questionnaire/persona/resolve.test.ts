@@ -2,9 +2,10 @@
  * resolveSessionPersonas (F-persona) — `lib/app/questionnaire/persona/resolve.ts`.
  *
  * The DB seam for the respondent persona menu. Pins: `null` on a missing session; the client menu
- * strips the tone/prompt prose (only key/label/description ship); `enabled` requires the per-version
- * toggle AND at least two personas; an unconfigured library resolves to the built-ins; and the
- * session's `selectedPersonaKey` + the config default flow through.
+ * strips the tone/prompt prose (only key/label/description ship); `enabled` (show the picker)
+ * requires built-in mode on AND respondent switching allowed AND at least two personas; an
+ * unconfigured library resolves to the built-ins; and the session's `selectedPersonaKey` + the
+ * config default flow through.
  *
  * @see lib/app/questionnaire/persona/resolve.ts
  */
@@ -45,7 +46,14 @@ describe('resolveSessionPersonas', () => {
 
   it('fills an unconfigured library with the built-ins, tone stripped', async () => {
     dbMock.findUnique.mockResolvedValue(
-      row({ personas: [], personaSelection: { enabled: true, defaultPersonaKey: 'neutral-coach' } })
+      row({
+        personas: [],
+        personaSelection: {
+          enabled: true,
+          defaultPersonaKey: 'neutral-coach',
+          allowRespondentSwitch: true,
+        },
+      })
     );
     const out = await resolveSessionPersonas('sess-1');
     expect(out?.personas.map((p) => p.key)).toEqual(BUILT_IN_PERSONAS.map((p) => p.key));
@@ -55,14 +63,34 @@ describe('resolveSessionPersonas', () => {
     }
   });
 
-  it('is enabled only when the toggle is on AND there are ≥2 personas', async () => {
+  it('shows the picker only when built-in mode is on, switching is allowed, and there are ≥2 personas', async () => {
+    // Built-in mode on + switching on → the picker (8 built-ins).
     dbMock.findUnique.mockResolvedValue(
-      row({ personaSelection: { enabled: true, defaultPersonaKey: 'neutral-coach' } })
+      row({
+        personaSelection: {
+          enabled: true,
+          defaultPersonaKey: 'neutral-coach',
+          allowRespondentSwitch: true,
+        },
+      })
     );
-    expect((await resolveSessionPersonas('s'))?.enabled).toBe(true); // built-ins → 8 personas
+    expect((await resolveSessionPersonas('s'))?.enabled).toBe(true);
 
+    // Built-in mode off → no picker (the version's custom tone governs).
     dbMock.findUnique.mockResolvedValue(
       row({ personaSelection: { enabled: false, defaultPersonaKey: 'neutral-coach' } })
+    );
+    expect((await resolveSessionPersonas('s'))?.enabled).toBe(false);
+
+    // Built-in mode on but switching off → the pinned persona governs, but there's no picker.
+    dbMock.findUnique.mockResolvedValue(
+      row({
+        personaSelection: {
+          enabled: true,
+          defaultPersonaKey: 'neutral-coach',
+          allowRespondentSwitch: false,
+        },
+      })
     );
     expect((await resolveSessionPersonas('s'))?.enabled).toBe(false);
   });
@@ -71,7 +99,11 @@ describe('resolveSessionPersonas', () => {
     dbMock.findUnique.mockResolvedValue(
       row({
         selectedPersonaKey: 'comedian',
-        personaSelection: { enabled: true, defaultPersonaKey: 'philosopher' },
+        personaSelection: {
+          enabled: true,
+          defaultPersonaKey: 'philosopher',
+          allowRespondentSwitch: true,
+        },
       })
     );
     const out = await resolveSessionPersonas('sess-1');

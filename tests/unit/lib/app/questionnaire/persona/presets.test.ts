@@ -16,6 +16,8 @@ import {
   PERSONA_DESCRIPTION_MAX_LENGTH,
   PERSONA_LABEL_MAX_LENGTH,
   TONE_DIMENSION_KEYS,
+  TONE_LEVEL_MAX,
+  TONE_LEVEL_MIN,
   TONE_PERSONA_MAX_LENGTH,
 } from '@/lib/app/questionnaire/types';
 
@@ -63,5 +65,27 @@ describe('BUILT_IN_PERSONAS', () => {
   it('exposes its keys via BUILT_IN_PERSONA_KEYS for the schema', () => {
     expect(BUILT_IN_PERSONA_KEYS).toEqual(BUILT_IN_PERSONAS.map((p) => p.key));
     expect(BUILT_IN_PERSONA_KEYS).toContain(DEFAULT_PERSONA_KEY);
+  });
+
+  it('authors dials on the −2…+2 display scale but STORES valid 1–5 levels', () => {
+    // Guards against double-conversion / an un-offset preset: every enabled dial must land in 1–5.
+    for (const p of BUILT_IN_PERSONAS) {
+      for (const key of TONE_DIMENSION_KEYS) {
+        const dim = p.tone[key];
+        if (!dim.enabled) continue;
+        expect(dim.level).toBeGreaterThanOrEqual(TONE_LEVEL_MIN);
+        expect(dim.level).toBeLessThanOrEqual(TONE_LEVEL_MAX);
+      }
+    }
+  });
+
+  it('maps the display scale to the expected stored levels (Coach: curiosity +1→4, warmth −1→2)', () => {
+    // Pins the −2…+2 → 1–5 conversion for a known persona, so the seeded voice can't shift silently.
+    const coach = BUILT_IN_PERSONAS[0];
+    expect(coach.tone.curiosity).toEqual({ enabled: true, level: 4 });
+    expect(coach.tone.warmth).toEqual({ enabled: true, level: 2 });
+    const director = BUILT_IN_PERSONAS.find((p) => p.key === 'director')!;
+    expect(director.tone.verbosity).toEqual({ enabled: true, level: 1 }); // −2 → 1
+    expect(director.tone.formality).toEqual({ enabled: true, level: 4 }); // +1 → 4
   });
 });

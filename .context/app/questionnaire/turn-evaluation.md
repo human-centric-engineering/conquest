@@ -188,9 +188,14 @@ Every session carries a short **support reference** (`AppQuestionnaireSession.pu
 experience and quotes it:
 
 1. **Look it up** — `GET /api/v1/app/turn-evaluations/by-ref/:ref` (admin) resolves the
-   forgivingly-normalised reference to the session and its turns, each annotated with `hasTraces`
-   (is a saved inspector dump present?) and how many verdicts it already has. The admin surface
-   (`/admin/questionnaires/turn-evaluations`) renders this as a lookup panel.
+   forgivingly-normalised reference to the session and its turns, each carrying the **full**
+   respondent/interviewer messages (not truncated previews), the complete saved **call trace**
+   (`RefLookupTurn.calls: AgentCallTrace[]` — validated at the read seam against
+   `inspector/schema.ts`), `hasTraces` (is a dump present?), and how many verdicts it already has.
+   The admin surface (`/admin/questionnaires/turn-evaluations`) renders this as a lookup panel; each
+   turn has a **Show raw calls** toggle that expands the shared `DiagnosticsInspectorCalls` renderer
+   (`components/admin/questionnaires/diagnostics/inspector-calls.tsx`) to reveal every call's raw
+   prompt + response — the same view the Diagnostics deep-dive and the preview drawer show.
 2. **Re-evaluate a turn** — `POST …/questionnaire-sessions/:id/turns/:ordinal/evaluate-saved`
    (admin, **not** preview-gated) loads that turn's saved `inspectorCalls`, validates them, rebuilds
    the context from the saved respondent/interviewer messages + prior turns, runs the evaluator, and

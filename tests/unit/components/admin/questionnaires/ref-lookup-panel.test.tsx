@@ -72,8 +72,9 @@ function makeTurn(
 ): RefLookupResult['turns'][number] {
   return {
     ordinal: 1,
-    userMessagePreview: 'Hello, how does this work?',
-    agentResponsePreview: 'Great question! Let me explain.',
+    userMessage: 'Hello, how does this work?',
+    agentResponse: 'Great question! Let me explain.',
+    calls: [],
     callCount: 3,
     hasTraces: true,
     evaluationCount: 0,
@@ -257,20 +258,20 @@ describe('RefLookupPanel', () => {
       expect(screen.queryByText('preview')).not.toBeInTheDocument();
     });
 
-    it('renders each turn with its ordinal and message previews', async () => {
+    it('renders each turn with its ordinal and full message text', async () => {
       const user = userEvent.setup();
       mockApiGet.mockResolvedValue(
         makeResult({
           turns: [
             makeTurn({
               ordinal: 1,
-              userMessagePreview: 'First user message',
-              agentResponsePreview: 'First agent reply',
+              userMessage: 'First user message',
+              agentResponse: 'First agent reply',
             }),
             makeTurn({
               ordinal: 2,
-              userMessagePreview: 'Second user message',
-              agentResponsePreview: 'Second agent reply',
+              userMessage: 'Second user message',
+              agentResponse: 'Second agent reply',
             }),
           ],
         })
@@ -282,7 +283,7 @@ describe('RefLookupPanel', () => {
 
       await waitFor(() => expect(screen.getByText('Turn 1')).toBeInTheDocument());
       expect(screen.getByText('Turn 2')).toBeInTheDocument();
-      // Respondent/Interviewer label + preview text
+      // Respondent/Interviewer label + full (untruncated) message text
       expect(screen.getByText('First user message')).toBeInTheDocument();
       expect(screen.getByText('Second agent reply')).toBeInTheDocument();
 
@@ -304,13 +305,13 @@ describe('RefLookupPanel', () => {
             // Turn 1: the interviewer opens; the respondent has not spoken yet.
             makeTurn({
               ordinal: 1,
-              userMessagePreview: '',
-              agentResponsePreview: 'Opening question?',
+              userMessage: '',
+              agentResponse: 'Opening question?',
             }),
             makeTurn({
               ordinal: 2,
-              userMessagePreview: 'My answer',
-              agentResponsePreview: 'Follow-up question?',
+              userMessage: 'My answer',
+              agentResponse: 'Follow-up question?',
             }),
           ],
         })
@@ -356,6 +357,51 @@ describe('RefLookupPanel', () => {
       await user.click(screen.getByRole('button', { name: /look up/i }));
 
       await waitFor(() => expect(screen.getByText('no saved traces')).toBeInTheDocument());
+    });
+
+    it('expands "Show raw calls" to reveal every call and its raw prompt + response', async () => {
+      const user = userEvent.setup();
+      const calls = [
+        {
+          label: 'Answer extraction',
+          model: 'gpt-5.4',
+          provider: 'openai',
+          latencyMs: 100,
+          costUsd: 0.001,
+          prompt: [{ role: 'system', content: 'RAW-PROMPT-MARKER extract the answer.' }],
+          response: 'central london',
+        },
+        {
+          label: 'Interviewer phrasing',
+          model: 'gpt-5.4',
+          provider: 'openai',
+          latencyMs: 200,
+          costUsd: 0.002,
+          prompt: [{ role: 'user', content: 'Phrase the next question.' }],
+          response: 'Whereabouts?',
+        },
+      ];
+      mockApiGet.mockResolvedValue(
+        makeResult({ turns: [makeTurn({ calls, callCount: 2, hasTraces: true })] })
+      );
+
+      render(<RefLookupPanel />);
+      await user.type(screen.getByLabelText('Support reference'), '7F3K-9M2P');
+      await user.click(screen.getByRole('button', { name: /look up/i }));
+
+      // Collapsed by default: the toggle is present but the calls are not yet rendered.
+      const toggle = await screen.findByRole('button', { name: /show raw calls \(2\)/i });
+      expect(screen.queryByText('Answer extraction')).not.toBeInTheDocument();
+
+      // Expand → both calls render (all 2, not a count).
+      await user.click(toggle);
+      expect(screen.getByText('Answer extraction')).toBeInTheDocument();
+      expect(screen.getByText('Interviewer phrasing')).toBeInTheDocument();
+
+      // Drill into a call → its raw prompt + response become visible.
+      await user.click(screen.getByRole('button', { name: /Answer extraction/i }));
+      expect(screen.getByText(/RAW-PROMPT-MARKER extract the answer\./)).toBeInTheDocument();
+      expect(screen.getByText('central london')).toBeInTheDocument();
     });
 
     it('shows prior evaluation count when evaluationCount > 0', async () => {

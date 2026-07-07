@@ -766,11 +766,11 @@ export function withIntroScreenEnabled<C>(
 }
 
 /**
- * Whether **selectable interviewer personas** (F-persona) may be shown. Requires BOTH the master app
+ * Whether **built-in interviewer personas** (F-persona) may be used. Requires BOTH the master app
  * flag and the persona-selection sub-flag — a master-only child (like intro/cohorts), NOT
- * live-dependent: the admin authors the persona library and the picker renders ahead of the turn
- * loop. The per-version `config.personaSelection.enabled` toggle is the second gate (the respondent
- * surface + resolver AND them), so the picker stays off until the flag AND the version opt-in are on.
+ * live-dependent: the admin picks a persona and it governs ahead of the turn loop. The per-version
+ * `config.personaSelection.enabled` toggle (built-in mode on) is the second gate; the respondent
+ * picker/switcher additionally needs `personaSelection.allowRespondentSwitch`.
  *
  * Server-only (resolves both flags from the database).
  */

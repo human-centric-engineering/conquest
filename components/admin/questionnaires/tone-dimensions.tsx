@@ -4,7 +4,8 @@
  * Shared interviewer tone-dimension UI (F-tone / F-persona).
  *
  * `TONE_DIMENSION_META` (display copy for the nine sliders) and `ToneDimensionRow` (one enable
- * toggle + 1–5 slider) are used both by the version-level tone panel in `config-editor.tsx` and by
+ * toggle + a signed −2…+2 slider — stored 1–5, shown centred on 0) are used both by the version-level
+ * tone panel in `config-editor.tsx` and by
  * each persona card in `persona-library-panel.tsx`. Extracted here so a persona's tone preset is
  * edited with the exact same control as the version tone — one definition, no drift.
  */
@@ -13,12 +14,22 @@ import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
 import { Label } from '@/components/ui/label';
 import { FieldHelp } from '@/components/ui/field-help';
+import { DIMENSION_PHRASES } from '@/lib/app/questionnaire/chat/tone';
 import {
-  TONE_LEVEL_MAX,
-  TONE_LEVEL_MIN,
+  TONE_DISPLAY_MAX,
+  TONE_DISPLAY_MIN,
+  TONE_DISPLAY_NEUTRAL,
+  TONE_LEVEL_NEUTRAL,
+  toDisplayLevel,
+  fromDisplayLevel,
   type ToneDimension,
   type ToneDimensionKey,
 } from '@/lib/app/questionnaire/types';
+
+/** Signed label for a display level: "+2", "0", "-1". */
+function signedLevel(display: number): string {
+  return display > 0 ? `+${display}` : `${display}`;
+}
 
 /**
  * Tone dimensions (F-tone) — display metadata for the nine sliders. `left`/`right` label the 1 and
@@ -97,7 +108,8 @@ export const TONE_DIMENSION_META: {
 ];
 
 /**
- * One tone dimension row: an enable toggle + (when on) a 1–5 slider with pole labels. Shared by the
+ * One tone dimension row: an enable toggle + (when on) a signed −2…+2 slider (stored 1–5, shown
+ * centred on 0) with pole labels, plus a live preview of the exact clause the position injects. Shared by the
  * version tone panel and the per-persona tone preset editor.
  */
 export function ToneDimensionRow({
@@ -113,31 +125,68 @@ export function ToneDimensionRow({
   onToggle: (enabled: boolean) => void;
   onLevel: (level: number) => void;
 }) {
+  // The exact clause this dimension injects into the interviewer's tone block at the current slider
+  // position (pulled from the real prompt source, so it can't drift). '' ⇒ this position adds nothing.
+  const clause = DIMENSION_PHRASES[meta.key][value.level] ?? '';
+  // Bipolar dials (empathy, formality, verbosity, readingComplexity, humour) are neutral-empty at the
+  // midpoint; unipolar dials always emit. Drives whether the help mentions the "midpoint adds nothing".
+  const hasNeutralMidpoint = DIMENSION_PHRASES[meta.key][TONE_LEVEL_NEUTRAL] === '';
+  // Dials are STORED 1–5 but SHOWN on the signed −2…+2 scale (0 = neutral). Convert at the boundary.
+  const displayLevel = toDisplayLevel(value.level);
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2">
         <Switch checked={value.enabled} onCheckedChange={onToggle} disabled={busy} />
         <Label className="text-sm font-medium">
-          {meta.label} <FieldHelp title={meta.label}>{meta.help}</FieldHelp>
+          {meta.label}{' '}
+          <FieldHelp title={meta.label}>
+            <p>{meta.help}</p>
+            <p className="mt-2">
+              The slider runs <strong>−2 to +2</strong> with <strong>0</strong> in the middle.{' '}
+              {hasNeutralMidpoint
+                ? 'This is a balanced dial: 0 is neutral and adds nothing — negative and positive push toward the two opposite styles labelled under the slider.'
+                : 'This is an intensity dial: the scale runs low → high, so every position (including 0) adds a clause — turn the dial off for none.'}
+            </p>
+            <p className="mt-2">
+              When enabled, the position adds one tone clause to the interviewer’s prompt (via{' '}
+              <code className="text-xs">buildToneInstructions</code>) — the exact clause for the
+              current position is shown beneath the slider.
+            </p>
+          </FieldHelp>
         </Label>
       </div>
       {value.enabled && (
         <div className="border-border/60 ml-1 space-y-1.5 border-l pl-4">
           <Slider
-            value={[value.level]}
-            min={TONE_LEVEL_MIN}
-            max={TONE_LEVEL_MAX}
+            value={[displayLevel]}
+            min={TONE_DISPLAY_MIN}
+            max={TONE_DISPLAY_MAX}
             step={1}
-            onValueChange={([v]) => onLevel(v)}
+            onValueChange={([v]) => onLevel(fromDisplayLevel(v))}
             disabled={busy}
             className="max-w-xs"
             aria-label={`${meta.label} level`}
           />
           <div className="text-muted-foreground flex max-w-xs justify-between text-xs">
             <span>{meta.left}</span>
-            <span className="text-foreground font-medium">{value.level}/5</span>
+            <span className="text-foreground font-medium">
+              {signedLevel(displayLevel)}
+              {displayLevel === TONE_DISPLAY_NEUTRAL && hasNeutralMidpoint ? ' · neutral' : ''}
+            </span>
             <span>{meta.right}</span>
           </div>
+          {/* Live "what's added" preview: the precise clause this position injects (or nothing at the
+              neutral midpoint), so an author sees exactly what the tone dial does to the prompt. */}
+          <p className="text-muted-foreground max-w-xs text-xs leading-relaxed">
+            {clause ? (
+              <>
+                <span className="font-medium">Adds to the prompt:</span>{' '}
+                <span className="text-foreground/80 italic">“{clause}”</span>
+              </>
+            ) : (
+              'Neutral at this position — no tone clause is added.'
+            )}
+          </p>
         </div>
       )}
     </div>

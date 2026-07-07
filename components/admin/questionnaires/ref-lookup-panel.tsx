@@ -13,7 +13,7 @@
  */
 
 import { useState } from 'react';
-import { Loader2, Search, Gauge, ChevronDown, ChevronRight } from 'lucide-react';
+import { Loader2, Search, Gauge, ChevronDown, ChevronRight, ScanSearch } from 'lucide-react';
 
 import { apiClient } from '@/lib/api/client';
 import { API } from '@/lib/api/endpoints';
@@ -22,6 +22,7 @@ import type { RefLookupResult } from '@/lib/app/questionnaire/views';
 import type { TurnEvaluation } from '@/lib/app/questionnaire/turn-evaluation/schema';
 import { TurnEvaluationVerdict } from '@/components/app/questionnaire/turn-evaluation/turn-evaluation-verdict';
 import { TurnEvaluationReview } from '@/components/app/questionnaire/turn-evaluation/turn-evaluation-review';
+import { DiagnosticsInspectorCalls } from '@/components/admin/questionnaires/diagnostics/inspector-calls';
 
 /** Per-turn evaluation state keyed by ordinal. */
 type TurnEvalState =
@@ -44,6 +45,8 @@ export function RefLookupPanel() {
   const [evalState, setEvalState] = useState<Record<number, TurnEvalState>>({});
   // Which evaluated turns have their full verdict expanded (keyed by ordinal).
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
+  // Which turns have their raw agent calls (prompts + responses) expanded (keyed by ordinal).
+  const [callsExpanded, setCallsExpanded] = useState<Record<number, boolean>>({});
 
   async function lookup() {
     const ref = refInput.trim();
@@ -53,6 +56,7 @@ export function RefLookupPanel() {
     setResult(null);
     setEvalState({});
     setExpanded({});
+    setCallsExpanded({});
     try {
       const data = await apiClient.get<RefLookupResult>(API.APP.TURN_EVALUATIONS.byRef(ref));
       setResult(data);
@@ -171,21 +175,22 @@ export function RefLookupPanel() {
                     </div>
                     {/* Interviewer first: the conversation opens with the interviewer, so the
                         first turn has no respondent line. Each line is omitted when its side
-                        said nothing this turn (rather than rendering a bare dash). */}
-                    {turn.agentResponsePreview && (
-                      <p className="text-muted-foreground">
+                        said nothing this turn (rather than rendering a bare dash). The full text
+                        is shown (not truncated) with newlines preserved. */}
+                    {turn.agentResponse && (
+                      <p className="text-muted-foreground whitespace-pre-wrap">
                         <span className="text-foreground font-medium">Interviewer:</span>{' '}
-                        {turn.agentResponsePreview}
+                        {turn.agentResponse}
                       </p>
                     )}
-                    {turn.userMessagePreview && (
-                      <p className="text-muted-foreground">
+                    {turn.userMessage && (
+                      <p className="text-muted-foreground whitespace-pre-wrap">
                         <span className="text-foreground font-medium">Respondent:</span>{' '}
-                        {turn.userMessagePreview}
+                        {turn.userMessage}
                       </p>
                     )}
 
-                    <div className="mt-2 flex items-center gap-2">
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
                       <button
                         type="button"
                         onClick={() => void evaluateTurn(turn.ordinal)}
@@ -202,6 +207,25 @@ export function RefLookupPanel() {
                         )}
                         Evaluate
                       </button>
+                      {turn.hasTraces && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setCallsExpanded((c) => ({ ...c, [turn.ordinal]: !c[turn.ordinal] }))
+                          }
+                          aria-expanded={callsExpanded[turn.ordinal] ?? false}
+                          className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs font-medium"
+                        >
+                          {callsExpanded[turn.ordinal] ? (
+                            <ChevronDown className="h-3 w-3" />
+                          ) : (
+                            <ChevronRight className="h-3 w-3" />
+                          )}
+                          <ScanSearch className="h-3 w-3" />
+                          {callsExpanded[turn.ordinal] ? 'Hide' : 'Show'} raw calls (
+                          {turn.callCount})
+                        </button>
+                      )}
                       {state.status === 'done' && (
                         <button
                           type="button"
@@ -224,6 +248,12 @@ export function RefLookupPanel() {
                         <span className="text-xs text-red-700">{state.message}</span>
                       )}
                     </div>
+
+                    {turn.hasTraces && callsExpanded[turn.ordinal] && (
+                      <div className="mt-3 border-t pt-3">
+                        <DiagnosticsInspectorCalls calls={turn.calls} />
+                      </div>
+                    )}
 
                     {state.status === 'done' && expanded[turn.ordinal] && (
                       <div className="mt-3 space-y-3 border-t pt-3">
