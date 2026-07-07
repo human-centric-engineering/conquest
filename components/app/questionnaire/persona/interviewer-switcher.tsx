@@ -4,14 +4,15 @@
  * In-chat interviewer switcher (F-persona) — the `indicator` / `both` presentation of persona
  * selection, controlled by the admin's `personaSelection.switcher` setting.
  *
- * {@link CurrentInterviewerChip} is a compact "Interviewer: {name} · Change" pill that rides the
+ * {@link CurrentInterviewerChip} is a compact "Interviewer: {name}" pill (with a dropdown-style
+ * affordance) that rides the
  * session lifecycle strip; pressing it runs the workspace's change action. In `both` mode that action
  * slides the carousel back to the "Choose your interviewer" page; in `indicator` mode there is no such
  * page, so it opens {@link PersonaSwitcherModal} — the same {@link PersonaPicker} grid inside a Dialog.
  * The workspace owns the state (current key, choice handler, open state); these are presentational.
  */
 
-import { Drama } from 'lucide-react';
+import { ChevronsUpDown, Drama } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import {
@@ -29,8 +30,10 @@ import {
 const ACCENT = 'var(--app-accent-color, var(--color-primary))';
 const ACCENT_SOFT =
   'color-mix(in srgb, var(--app-accent-color, var(--color-primary)) 9%, transparent)';
+const ACCENT_HAIRLINE =
+  'color-mix(in srgb, var(--app-accent-color, var(--color-primary)) 30%, transparent)';
 
-/** The "Interviewer: {name} · Change" pill. Pressing it runs the workspace's change action. */
+/** The "Interviewer: {name}" pill + dropdown affordance. Pressing it runs the workspace's change action. */
 export function CurrentInterviewerChip({
   label,
   onChange,
@@ -51,12 +54,13 @@ export function CurrentInterviewerChip({
       disabled={busy}
       aria-label={`Change interviewer — currently ${label}`}
       className={cn(
-        'inline-flex max-w-[60vw] min-w-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition sm:max-w-none sm:px-3',
-        'hover:border-transparent focus-visible:ring-2 focus-visible:outline-none',
+        'group inline-flex max-w-[60vw] min-w-0 cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium shadow-sm transition sm:max-w-none sm:px-3',
+        'hover:brightness-[0.97] focus-visible:ring-2 focus-visible:outline-none',
         'disabled:cursor-not-allowed disabled:opacity-60',
         className
       )}
-      style={{ borderColor: 'var(--border)' }}
+      // Accent-tinted fill + hairline so the pill reads as a tappable control, not a static label.
+      style={{ backgroundColor: ACCENT_SOFT, borderColor: ACCENT_HAIRLINE }}
     >
       <span
         className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full"
@@ -68,12 +72,13 @@ export function CurrentInterviewerChip({
           room. The name truncates as a backstop for very long persona labels. */}
       <span className="text-muted-foreground shrink-0 max-[360px]:hidden">Interviewer:</span>
       <span className="text-foreground truncate">{label}</span>
-      <span aria-hidden="true" className="text-muted-foreground shrink-0">
-        ·
-      </span>
-      <span className="shrink-0" style={{ color: ACCENT }}>
-        Change
-      </span>
+      {/* Dropdown-style affordance: signals the pill opens the interviewer picker (replaces the old
+          "· Change" text). */}
+      <ChevronsUpDown
+        className="h-3.5 w-3.5 shrink-0 opacity-70 transition group-hover:opacity-100"
+        style={{ color: ACCENT }}
+        aria-hidden="true"
+      />
     </button>
   );
 }

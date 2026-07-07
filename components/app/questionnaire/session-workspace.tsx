@@ -741,7 +741,8 @@ export function SessionWorkspace({
   // The "Choose your interviewer" surface. Picking persists the choice; Continue slides to the chat
   // (which releases the deferred kickoff, now with the chosen persona already in place server-side).
   // As the last gate before the conversation, its CTA carries the configured begin label ("Begin your
-  // conversation"), right-aligned so it reads as the final step of the pre-chat flow.
+  // conversation") — or "Continue" once the session already has an answer — right-aligned so it reads
+  // as the final step of the pre-chat flow.
   const personaSurface =
     showPersona && personas ? (
       <PersonaPicker
@@ -750,7 +751,13 @@ export function SessionWorkspace({
         defaultKey={personas.defaultPersonaKey}
         onChoose={choosePersona}
         onContinue={() => goToView('chat')}
-        continueLabel={intro?.copy.buttonLabel ?? 'Begin your conversation'}
+        // Mirror the intro splash: once a real answer exists the conversation is under way, so the
+        // CTA reads "Continue" rather than the configured begin label ("Begin your conversation").
+        continueLabel={
+          (lifecycle.view?.completion.answeredCount ?? 0) > 0
+            ? 'Continue'
+            : (intro?.copy.buttonLabel ?? 'Begin your conversation')
+        }
         alignEnd
       />
     ) : null;

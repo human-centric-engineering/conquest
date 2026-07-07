@@ -14,7 +14,7 @@ either the hand-tuned custom [interviewer-tone](./interviewer-tone.md) block **o
 ("Custom voice" vs "Built-in persona"); only the chosen mode's editor is shown, so an admin can't
 configure both at once.
 
-The persona set is **fixed** — the eight built-in personas, hard-coded in code, not editable config.
+The persona set is **fixed** — the ten built-in personas, hard-coded in code, not editable config.
 In built-in mode the admin pins _which_ persona governs and _whether_ respondents may switch. An admin
 who wants a bespoke voice picks "Custom voice" and tunes the
 [interviewer-tone](./interviewer-tone.md) block instead.
@@ -45,7 +45,7 @@ The **library is fixed and hard-coded**: `BUILT_IN_PERSONAS`
 coach/consultant grounded in human & organisational psychology) plus seven characters. Each is a
 `PersonaOption` (`{ key, label, description, tone: ToneSettings }`) whose `tone` block holds the whole
 voice (prose in `tone.persona.text`, character in the dimension levels). The admin cannot edit or
-extend the set — every questionnaire uses the same eight.
+extend the set — every questionnaire uses the same ten.
 
 ## How a choice takes effect
 

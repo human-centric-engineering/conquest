@@ -1,9 +1,9 @@
 /**
  * Interviewer switcher (F-persona) — the `indicator` / `both` in-chat presentation.
  *
- * Pins the two presentational pieces the workspace composes: the "Interviewer: {name} · Change" chip
- * (shows the current interviewer, runs the change action) and the modal (renders the persona picker,
- * closes on Done). The workspace owns the state; these just render + delegate.
+ * Pins the two presentational pieces the workspace composes: the "Interviewer: {name}" chip (shows
+ * the current interviewer + a dropdown affordance, runs the change action) and the modal (renders the
+ * persona picker, closes on Done). The workspace owns the state; these just render + delegate.
  *
  * @see components/app/questionnaire/persona/interviewer-switcher.tsx
  */
@@ -22,10 +22,12 @@ const PERSONAS = [
 ];
 
 describe('CurrentInterviewerChip', () => {
-  it('shows the current interviewer name and a Change affordance', () => {
+  it('shows the current interviewer name and a labelled change affordance', () => {
     render(<CurrentInterviewerChip label="The Comedian" onChange={vi.fn()} />);
     expect(screen.getByText('The Comedian')).toBeInTheDocument();
-    expect(screen.getByText('Change')).toBeInTheDocument();
+    // The visible "Change" text was replaced by a dropdown-style icon; the action stays accessible
+    // via the button's aria-label.
+    expect(screen.getByRole('button', { name: /change interviewer/i })).toBeInTheDocument();
   });
 
   it('runs the change action when pressed', () => {
